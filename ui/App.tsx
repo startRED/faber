@@ -27,11 +27,13 @@ import { LookStep } from './FirstRun.tsx';
 import { keepFocusIn } from './focus.ts';
 import { Icon } from './Glyphs.tsx';
 import { failureText, lang, t, templates, useLanguage } from './i18n.ts';
-import { createWidth } from './layout.ts';
+import { createFileDrop } from './drop.ts';
+import { Grip } from './Grip.tsx';
+import { createWindowWidth, type Edge, fit, limitsOf, RUN, savedWidths, SIDE, widthClass } from './layout.ts';
 import { Lockup } from './Mark.tsx';
 import { isFirstInstall, newestId, NOTES, type Note, whatsNew } from './notes.ts';
 import { modelOptions, vendorName } from './models.ts';
-import { animateDetails, animateList, watchMotion } from './motion.ts';
+import { animateDetails, animateList, keepForExit, watchMotion } from './motion.ts';
 import { Palette } from './Palette.tsx';
 import { Projects } from './Projects.tsx';
 import { createOpening, upsert } from './opening.ts';
@@ -139,7 +141,8 @@ export function App(props: { initial: AppState; update?: UpdateStatus; inbox: { 
   // conversation then, so nothing may be sent or warmed for either.
   const [loading, setLoading] = createSignal(false);
   const opening = createOpening();
-  const width = createWidth();
+  const win = createWindowWidth();
+  const width = createMemo(() => widthClass(win()));
   let thread: HTMLDivElement | undefined;
   let work: HTMLElement | undefined;
   let restore: ((draft: Draft) => boolean) | undefined;
@@ -201,6 +204,17 @@ export function App(props: { initial: AppState; update?: UpdateStatus; inbox: { 
   const items = () => store.list().items;
   const needing = () => items().filter((i) => i.state === 'needsYou').length;
 
+  // ---- The widths the person gave the sidebar and the running column by dragging their edges (ui/Grip.tsx), kept per window like the
+  // other small conveniences, and focus mode (Ctrl+B): the sidebar and the column step aside to give the stage the whole window.
+  const [widths, setWidths] = createSignal(savedWidths(recall('faber.layout', null)));
+  const setWidth = (edge: Edge, px: number) => {
+    setWidths((w) => ({ ...w, [edge]: px }));
+    remember('faber.layout', widths());
+  };
+  const [focus, setFocus] = createSignal(false);
+  const dropping = createFileDrop();
+  const dropShown = keepForExit(dropping);
+
   // ---- The sidebar: beside the stage from 900 px, behind a button below that. Opened, it is modal.
   const [sideOpen, setSideOpen] = createSignal(false);
   const narrow = () => width() === 'narrow';
@@ -227,7 +241,12 @@ export function App(props: { initial: AppState; update?: UpdateStatus; inbox: { 
   const [columnOpen, setColumnOpen] = createSignal(false);
   const [byUser, setByUser] = createSignal(false);
   const docked = () => width() === 'wide';
-  const trapped = () => columnOpen() && byUser() && !docked();
+  // The column is on screen when it is open and focus mode is off.
+  const colShown = () => columnOpen() && !focus();
+  const runLimits = createMemo(() => limitsOf('run', win(), widths().side, docked()));
+  // What the column really measures: the stored width, inside what the window leaves it.
+  const runWidth = () => fit(widths().run, runLimits());
+  const trapped = () => colShown() && byUser() && !docked();
   let column: HTMLElement | undefined;
   let runButton: HTMLButtonElement | undefined;
   const autoOpen = createAutoOpen();
@@ -235,7 +254,13 @@ export function App(props: { initial: AppState; update?: UpdateStatus; inbox: { 
   // An input method is composing text: the column waits for it to end.
   let composing = false;
   const openColumn = (user: boolean) => {
-    if (columnOpen()) return;
+    // Something that opens the column shows it: focus mode steps aside.
+    const hidden = focus();
+    setFocus(false);
+    if (columnOpen()) {
+      if (hidden) autoOpen.seen(waitingKeys(items()));
+      return;
+    }
     // Every question waiting now is on screen, so none of them opens the column again.
     autoOpen.seen(waitingKeys(items()));
     // Two modal dialogs never stack: one the user opens closes the sidebar overlay.
@@ -255,7 +280,16 @@ export function App(props: { initial: AppState; update?: UpdateStatus; inbox: { 
     setByUser(false);
     runButton?.focus();
   };
-  const toggleColumn = () => (columnOpen() ? closeColumn() : openColumn(true));
+  const toggleColumn = () => (colShown() ? closeColumn() : openColumn(true));
+  const toggleFocus = () => {
+    if (focus()) return setFocus(false);
+    // Focus inside what is about to leave the screen goes to the box that stays (asked before they go: removing the column drops focus).
+    const at = document.activeElement;
+    const leaving = !!at && !!(sideEl?.contains(at) || column?.contains(at));
+    closeSide(false);
+    setFocus(true);
+    if (leaving) queueMicrotask(() => (document.querySelector<HTMLTextAreaElement>('.composer textarea') ?? runButton)?.focus());
+  };
   // A subagent the person opened (R161 step 3) is the column's content until "back"; it belongs to the conversation on
   // screen, so opening another one goes back to the list.
   const sideAgent = createMemo(() => {
@@ -280,7 +314,7 @@ export function App(props: { initial: AppState; update?: UpdateStatus; inbox: { 
     if (!open) return;
     // One of another conversation is never shown (`sideAgent`); it goes when the conversation on screen changes.
     if (current()?.id !== open.conversationId) return;
-    if (!columnOpen()) return openColumn(true);
+    if (!columnOpen() || focus()) return openColumn(true);
     // A column that opened by itself becomes the person's: over the stage it is now a modal dialog, like one they opened.
     if (!byUser()) {
       closeSide(false);
@@ -410,7 +444,7 @@ export function App(props: { initial: AppState; update?: UpdateStatus; inbox: { 
       // A first-run step and a tutorial card are modal: their own buttons are the only way on, so Esc, Ctrl N, Ctrl , and
       // Ctrl . do nothing (the card handles its own keys, ui/Tutorial.tsx).
       if (step() || tourOpen()) {
-        if (ctrl && ['n', ',', '.'].includes(e.key.toLowerCase())) e.preventDefault();
+        if (ctrl && ['n', ',', '.', 'b'].includes(e.key.toLowerCase())) e.preventDefault();
         if (step() && e.key === 'Tab' && !ctrl && !e.altKey) keepFocusIn(e, document.querySelector<HTMLElement>('.fr-stage'));
         return;
       }
@@ -435,6 +469,10 @@ export function App(props: { initial: AppState; update?: UpdateStatus; inbox: { 
         void fresh(place()).then(focusComposer);
       }
       if (ctrl && e.key === ',') openSettings();
+      if (ctrl && !e.shiftKey && !e.altKey && e.key.toLowerCase() === 'b') {
+        e.preventDefault();
+        if (inShell) toggleFocus();
+      }
       if (ctrl && e.key === '.') {
         e.preventDefault();
         // Settings and the account cards replace the shell: the column is not on screen to toggle.
@@ -443,7 +481,7 @@ export function App(props: { initial: AppState; update?: UpdateStatus; inbox: { 
       if (e.key === 'Escape') {
         if (sideOverlay() && inShell) return closeSide();
         // A column the user opened over the stage is modal; one that opened itself answers Esc only while focus is in it.
-        if (inShell && columnOpen() && (trapped() || column?.contains(document.activeElement))) return closeColumn();
+        if (inShell && colShown() && (trapped() || column?.contains(document.activeElement))) return closeColumn();
         if (setupOpen()) closeSetup();
         else closeSettings();
         setSaveError(undefined);
@@ -747,6 +785,7 @@ export function App(props: { initial: AppState; update?: UpdateStatus; inbox: { 
         if (trapped()) closeColumn();
         queueMicrotask(() => startMessage(text));
       }}
+      resize={{ value: runWidth(), limits: runLimits(), fallback: RUN.fallback, onChange: (px) => setWidth('run', px) }}
       ref={(el) => (column = el)}
     />
   );
@@ -850,7 +889,8 @@ export function App(props: { initial: AppState; update?: UpdateStatus; inbox: { 
           <div
             class="shell"
             data-screen={`${area() === 'chat' ? 'chat' : 'project'}.${newChat() ? 'new' : 'thread'}`}
-            classList={{ docked: columnOpen() && docked() }}
+            classList={{ docked: colShown() && docked(), focus: focus() }}
+            style={{ '--side-w': `${widths().side}px`, '--run-w': `${widths().run}px` }}
             inert={tourOpen() || notesOpen() || startScreen()}
             ref={animateList}
           >
@@ -862,8 +902,8 @@ export function App(props: { initial: AppState; update?: UpdateStatus; inbox: { 
               aria-label={t('side.label')}
               role={sideOverlay() ? 'dialog' : undefined}
               aria-modal={sideOverlay() ? 'true' : undefined}
-              inert={trapped() || (narrow() && !sideOverlay())}
-              aria-hidden={narrow() && !sideOverlay() ? 'true' : undefined}
+              inert={trapped() || (narrow() && !sideOverlay()) || (focus() && !narrow())}
+              aria-hidden={(narrow() && !sideOverlay()) || (focus() && !narrow()) ? 'true' : undefined}
             >
               <Sidebar
                 conversations={state().conversations}
@@ -889,6 +929,9 @@ export function App(props: { initial: AppState; update?: UpdateStatus; inbox: { 
                 onSettings={(at) => (closeSide(false), openSettings(at))}
                 onError={(err) => setSaveError(failureText(err))}
               />
+              <Show when={!narrow()}>
+                <Grip edge="side" label={t('side.resize')} value={widths().side} limits={SIDE} fallback={SIDE.fallback} onChange={(px) => setWidth('side', px)} />
+              </Show>
             </aside>
             <Show when={sideOverlay()}>
               <button class="scrim" tabindex="-1" aria-label={t('side.hide')} onClick={() => closeSide()} />
@@ -900,6 +943,18 @@ export function App(props: { initial: AppState; update?: UpdateStatus; inbox: { 
                     <Icon name="menu" />
                   </button>
                 </Show>
+                {/* Focus mode hid the sidebar: this brings it back (and the column). It is always here from 900 px, shut, so it grows in
+                    instead of appearing; below that the menu button is the way to the sidebar. */}
+                <button
+                  class="iconbtn focus-exit"
+                  classList={{ off: !focus() || narrow() }}
+                  aria-label={t('focus.exit')}
+                  title={t('focus.exit')}
+                  inert={!focus() || narrow()}
+                  onClick={() => setFocus(false)}
+                >
+                  <Icon name="menu" />
+                </button>
                 <div class="crumb">
                   <Switch>
                     <Match when={place().id}>
@@ -942,7 +997,7 @@ ${copy().path}`}>
                     data-tour="run"
                     classList={{ need: needing() > 0 }}
                     ref={(el) => (runButton = el)}
-                    aria-expanded={columnOpen()}
+                    aria-expanded={colShown()}
                     aria-controls="running"
                     title={t('run.toggle')}
                     onClick={toggleColumn}
@@ -962,7 +1017,7 @@ ${copy().path}`}>
                   </button>
                 </div>
               </div>
-              <div class="work" classList={{ under: columnOpen() && !docked() }} ref={(el) => { work = el; animateList(el); }}>
+              <div class="work" classList={{ under: colShown() && !docked() }} ref={(el) => { work = el; animateList(el); }}>
                 <Show
                   when={needsProject()}
                   fallback={
@@ -1057,11 +1112,11 @@ ${copy().path}`}>
                     onError={fail}
                   />
                 </Show>
-                <Show when={columnOpen() && !docked()}>{runningColumn()}</Show>
+                <Show when={colShown() && !docked()}>{runningColumn()}</Show>
               </div>
               <Find enabled={!newChat() && !needsProject() && !loading() && !!current()?.messages.length} root={() => thread} />
             </main>
-            <Show when={columnOpen() && docked()}>{runningColumn()}</Show>
+            <Show when={colShown() && docked()}>{runningColumn()}</Show>
           </div>
         </Show>
       </Show>
@@ -1070,6 +1125,15 @@ ${copy().path}`}>
       </Show>
       <Show when={startScreen()}>
         <UpdateStage status={update()} />
+      </Show>
+      <Show when={dropShown()}>
+        {/* A file over the window: where it will go, said calmly. It never takes a click; the drop is heard by the window. */}
+        <div class="dropveil" classList={{ leaving: !dropping() }} aria-hidden="true">
+          <div class="dv-card">
+            <Icon name="clip" />
+            <span>{t('drop.attach')}</span>
+          </div>
+        </div>
       </Show>
       <Show when={notesOpen()}>
         <WhatsNew version={state().version} notes={notes()} onClose={closeNotes} />

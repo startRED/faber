@@ -18,6 +18,31 @@ so the layout changes with its width:
 Text size up to 18 px must not push the page past the window width at any of these widths: content wraps or scrolls
 inside its own area.
 
+### Arranging the shell
+
+The numbers above are the usual widths. The person can change them, and the shell keeps what they choose (R211).
+
+- **Edges.** The sidebar's right edge and the running column's left edge are separators (`role="separator"`, focusable).
+  A drag moves them between 200 and 360 px (sidebar) and 300 and 560 px (column). A docked column also leaves the stage 440 px:
+  the stylesheet clamps it with the same numbers, so a window that shrinks after a drag is right before any script runs.
+  A thin accent line and a small grip appear on hover (after 120 ms, so crossing the edge flashes nothing), and the grip is
+  accent while dragging or focused. The arrow keys move an edge 16 px (48 with Shift), Home and End go to its limits, a double
+  click or Enter glides it back to the usual width. The sidebar has no edge below 900 px, where it is an overlay.
+- **How a drag stays light.** The pointer events of the window (listened to only while dragging) set `--side-w` and `--run-w` on the
+  shell once per frame; nothing is measured and no state changes until the drag ends, when the width is stored (`faber.layout`)
+  once and the lists that animate layout measure again. `html.sizing` sets the cursor and stops text selection meanwhile.
+- **Focus mode (Ctrl+B).** The sidebar and the running column step aside: the sidebar fades and slides out (under the stage, which
+  slides over to the window's edge as it does when the column opens), the column closes the way it does from its own button.
+  Ctrl+B again, the button that appears at the left of the topbar (`Leave focus mode`, grown in from nothing, never popped in),
+  the run button, Ctrl+. or anything that opens the column brings them back; a column that was open comes back open. Focus mode is
+  not stored: a window always opens with its sidebar. With reduced motion or none, all of it is instant. It is a shortcut, not
+  a setting, so no work screen has a switch for it.
+- **A file over the window.** Anywhere in the window, a dragged file covers it with a calm veil (78% of the stage colour, a dashed
+  accent line 12 px inside the edge) and a pill, "Drop to attach". It fades in and out, takes no click, and shows only where a
+  composer is on screen and not behind a modal layer. Letting go hands the files to the composer's own drop, so the box's add path is
+  the only one. The window listens to one `dragenter` between drags; the rest only from the first one until the drag ends (a drop,
+  leaving the window, or a second without movement).
+
 ### Titlebar and topbar
 
 - The titlebar has the lockup and the window controls. Dragging and double-click maximize keep working, and macOS keeps
@@ -130,25 +155,6 @@ inside its own area.
   same ink, in tabular figures, from when the engine saw it start. A long command cuts its own words, never its time.
   The clock ticks every 15 s only while such a step runs and the window shows; the time is hidden from a screen reader,
   since a live region that changed that often would keep talking.
-
-### Pages in Faber's browser
-
-A page a project's agent opened in Faber's browser (R161 step 7) is a card among the reply's files, in the file card's
-surface: the picture the browser took of the page's top (a 16:10 crop at most 480 px wide, the page loaded at 1280 by 800
-and drawn at 0.375), then the page's title over its site in the third ink, both ellipsized, and "See the page". The
-title and address come from Faber's own first lines of the answer, never from the page's words. "See the page" opens it
-in the running column, the subagent's place: the same head (back arrow, the title, close; once a link or redirect
-leaves the card's site, the title is the site the page is on now), a meta line with the site it is on now,
-and under it a box that fills the rest of the column, in the third surface with the hairline edge, over which the page
-itself is drawn by a second webview of the same window. The box is measured and the page placed again when it changes
-size, when the window does and once the column has slid in; when the box goes, the page moves out of the window, where
-it keeps drawing, and it closes after five minutes nobody used it. Opening a subagent closes the page and the other way
-round. Known limit: the page is a native view over the screen, so a menu or toast that would cover the column passes
-under it. While it is on screen the page is the person's: they click and type in it, and the agent's call waits for them
-to go back. A page clicked through several times is one card, its latest. Where the page asks for a login, a captcha or a
-payment the card has one line in the conversation's other amber, with the 2 px edge of a stuck subagent's line: "Your
-turn: log in on this page", and no picture, since one could hold what the person typed; the agent cannot click or type
-there.
 
 ### Recent folders and environments
 

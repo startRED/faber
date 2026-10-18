@@ -1244,6 +1244,9 @@ fn create_window(app: &AppHandle, hidden: bool, data_dir: &Path) -> tauri::Resul
         .visible(hidden)
         // The "Paste" of the right-click menu reads the clipboard; without this WebView2 asks the person every time.
         .enable_clipboard_access()
+        // A file dragged over the window reaches the page as an ordinary drop (the composer's box, and the whole window's "Drop to attach"),
+        // as it does on macOS and Linux. With Tauri's own drag and drop handler on, Windows keeps those events to itself.
+        .disable_drag_drop_handler()
         // The page never leaves Faber; a web link that slips through opens in the browser instead.
         .on_navigation(move |url| {
             let inside = url.scheme() == "tauri"

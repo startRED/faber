@@ -55,8 +55,9 @@ input, textarea { caret-color: var(--accent); }
 
 /* Sidebar and the shell around the stage. From 1,100 px an open running column sits beside the stage (.docked); from 900 px
    the sidebar does; below that the sidebar is behind a button. ui/layout.ts holds the same two numbers. */
-.shell { position: relative; display: grid; grid-template-columns: 248px minmax(0, 1fr) 0px; min-height: 0; overflow: clip; }
-.shell.docked { grid-template-columns: 248px minmax(0, 1fr) 352px; }
+.shell { --side-w: 248px; --run-w: 352px; position: relative; display: grid; grid-template-columns: var(--side-w) minmax(0, 1fr) 0px; min-height: 0; overflow: clip; }
+/* The docked column keeps the stage 440 px (STAGE_MIN, ui/layout.ts) and is never under 300 px, whatever width was dragged. */
+.shell.docked { grid-template-columns: var(--side-w) minmax(0, 1fr) clamp(300px, var(--run-w), calc(100vw - var(--side-w) - 440px)); }
 .settings { display: grid; grid-template-columns: 248px 1fr; min-height: 0; }
 .side { display: flex; flex-direction: column; gap: 14px; padding: 8px 12px 40px; min-height: 0; min-width: 0; }
 .s-nav { padding: 8px 12px; align-content: start; }
@@ -178,7 +179,7 @@ input, textarea { caret-color: var(--accent); }
 
 /* The column over the stage must not cover the greeting's composer: the greeting makes room for it on its left, at once:
    padding is layout, so it is never animated (the column itself slides in over it). */
-.work.under :is(.thread.welcome, .projects-stage.home) { padding-right: calc(min(352px, 100%) + 20px); }
+.work.under :is(.thread.welcome, .projects-stage.home) { padding-right: calc(min(var(--run-w), 100%) + 20px); }
 
 /* The new conversation, one column in both areas: the greeting, the composer, the suggestions (Chat only) and the
    conversations to pick up under them. */
@@ -235,9 +236,9 @@ svg.i.sm { width: 14px; height: 14px; }
 .run-btn.need .seg.ask .i { animation: pulse var(--dur-pulse) var(--ease-io) infinite; }
 
 /* The running column: beside the stage from 1,100 px, over it (above the composer) below that. */
-.runcol { display: flex; flex-direction: column; min-width: 0; min-height: 0; background: var(--s1); }
-.shell > .runcol { justify-self: end; width: calc(352px - var(--stage-inset)); margin: 0 var(--stage-inset) var(--stage-inset) 0; border-radius: 0 var(--r-stage) var(--r-stage) 0; box-shadow: var(--stage-shadow); border-left: 1px solid var(--line); overflow: hidden; }
-.work > .runcol { grid-column: 1; grid-row: 1; justify-self: end; z-index: 6; width: min(352px, 100%); border-left: 1px solid var(--line-2); box-shadow: -18px 0 40px -22px rgba(0, 0, 0, 0.7); }
+.runcol { position: relative; display: flex; flex-direction: column; min-width: 0; min-height: 0; background: var(--s1); }
+.shell > .runcol { margin: 0 var(--stage-inset) var(--stage-inset) 0; border-radius: 0 var(--r-stage) var(--r-stage) 0; box-shadow: var(--stage-shadow); border-left: 1px solid var(--line); overflow: hidden; }
+.work > .runcol { grid-column: 1; grid-row: 1; justify-self: end; z-index: 6; width: min(var(--run-w), 100%); border-left: 1px solid var(--line-2); box-shadow: -18px 0 40px -22px rgba(0, 0, 0, 0.7); }
 .rc-head { display: flex; align-items: center; gap: 8px; padding: 14px 12px 10px 18px; }
 .rc-head h2 { font-size: var(--fs-lead); }
 .rc-head .n { color: var(--ink-3); font-size: var(--fs-sm); }
@@ -295,6 +296,39 @@ svg.i.sm { width: 14px; height: 14px; }
   .side.shown { visibility: visible; opacity: 1; transform: translateX(0); transition: transform var(--dur-ui) var(--ease), opacity var(--dur-ui) var(--ease), visibility 0s; }
   .scrim { display: block; position: absolute; inset: 0; z-index: 25; background: rgba(0, 0, 0, 0.5); cursor: default; }
 }
+
+/* Arranging the shell by hand (R211): the sidebar and the column are as wide as the person dragged them (ui/Grip.tsx moves --side-w
+   and --run-w), Ctrl+B steps both aside, and a file over the window says where it will go. Reduced and no motion are covered by the rules
+   at the end that switch every transition and animation off. */
+@media (min-width: 900px) {
+  .side { position: relative; z-index: 4; width: var(--side-w); justify-self: start; transition: transform var(--dur-ui) var(--ease), opacity var(--dur-ui) var(--ease), visibility 0s; }
+  /* Focus mode: the tracks close at once and the stage's own move (ui/motion.ts) carries it across; the sidebar keeps its width,
+     fades and slides out underneath it. */
+  .shell.focus { grid-template-columns: 0px minmax(0, 1fr) 0px; }
+  .shell.focus > .main { margin-left: var(--stage-inset); }
+  .shell.focus > .side { opacity: 0; visibility: hidden; pointer-events: none; transform: translateX(calc(-1 * var(--motion-slide))); transition: transform var(--dur-exit) var(--ease-in), opacity var(--dur-exit) var(--ease-in), visibility 0s linear var(--dur-exit); }
+}
+.topbar .focus-exit { flex: none; margin: 0 0 0 -8px; overflow: hidden; transition: width var(--dur-ui) var(--ease), margin var(--dur-ui) var(--ease), opacity var(--dur-ui) var(--ease), visibility 0s, background-color var(--dur-fast) var(--ease), color var(--dur-fast) var(--ease); }
+.topbar .focus-exit.off { width: 0; margin: 0 -10px 0 0; opacity: 0; visibility: hidden; transition: width var(--dur-exit) var(--ease-in), margin var(--dur-exit) var(--ease-in), opacity var(--dur-exit) var(--ease-in), visibility 0s linear var(--dur-exit); }
+.grip { position: absolute; top: 0; bottom: 0; z-index: 5; width: 9px; cursor: col-resize; touch-action: none; outline: none; }
+.grip.side { right: -4px; }
+.grip.run { left: 0; }
+.grip::before { content: ''; position: absolute; top: 0; bottom: 0; left: 4px; width: 1px; background: var(--accent); opacity: 0; transition: opacity var(--dur-fast) var(--ease); }
+.grip::after { content: ''; position: absolute; top: 50%; left: 3px; width: 3px; height: 40px; margin-top: -20px; border-radius: var(--r-pill); background: var(--ink-3); opacity: 0; transition: opacity var(--dur-fast) var(--ease), background-color var(--dur-fast) var(--ease); }
+.grip:hover::after, .grip:hover::before { opacity: 1; transition-delay: var(--dur-fast); }
+.grip:focus-visible::after, .grip.drag::after { opacity: 1; background: var(--accent); }
+.grip.drag::before { opacity: 0.6; }
+html.sizing, html.sizing * { cursor: col-resize !important; user-select: none !important; }
+@media (forced-colors: active) {
+  .grip::after { background: ButtonText; }
+  .grip:focus-visible::after, .grip.drag::after { background: Highlight; }
+}
+.dropveil { position: fixed; inset: 0; z-index: 70; display: grid; place-items: center; pointer-events: none; background: color-mix(in srgb, var(--bg) 78%, transparent); animation: veil-in var(--dur-ui) var(--ease) both; }
+.dropveil.leaving { animation: veil-out var(--dur-exit) var(--ease-in) both; }
+.dropveil::before { content: ''; position: absolute; inset: 12px; border: 1.5px dashed var(--accent); border-radius: var(--r-stage); opacity: 0.7; }
+.dv-card { display: inline-flex; align-items: center; gap: 10px; padding: 12px 20px; border-radius: var(--r-pill); background: var(--s2); color: var(--ink); font-size: var(--fs-lead); box-shadow: var(--lift-shadow), inset 0 0 0 1px var(--line-2); animation: arrive var(--dur-arrive) var(--ease) both; }
+@keyframes veil-in { from { opacity: 0; } }
+@keyframes veil-out { to { opacity: 0; } }
 
 /* Messages */
 .you { position: relative; justify-self: end; max-width: min(80%, 500px); padding: 11px 15px; background: var(--s2); border-radius: var(--r-lg) var(--r-lg) var(--r-xs) var(--r-lg); box-shadow: var(--card-shadow); font-size: var(--fs-read); white-space: pre-wrap; overflow-wrap: anywhere; line-height: 1.5; }

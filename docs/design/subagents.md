@@ -1,6 +1,7 @@
 # Subagent steps
 
-How a reply shows the subagents and helpers its agent hands work to: the rows, the running column, the stuck signs.
+How a reply shows the subagents and helpers its agent hands work to: the rows, the running column, the stuck signs, and the pages
+the agent opens in Faber's browser, which open in the same place.
 The work log they sit under is in [layout.md](layout.md).
 
 ## Subagent steps
@@ -52,3 +53,22 @@ ran it, so a Claude Code reply reads "Codex". Its commands show under it and its
 never sees its approval cards: in a mode that asks, what the helper needed approval for is refused and named in its
 report, and the agent does that step itself, where the card shows. Known limit: a conversation resumed from before the
 helper tool existed keeps its Codex thread without it, since Codex takes dynamic tools only when a thread starts.
+
+### Pages in Faber's browser
+
+A page a project's agent opened in Faber's browser (R161 step 7) is a card among the reply's files, in the file card's
+surface: the picture the browser took of the page's top (a 16:10 crop at most 480 px wide, the page loaded at 1280 by 800
+and drawn at 0.375), then the page's title over its site in the third ink, both ellipsized, and "See the page". The
+title and address come from Faber's own first lines of the answer, never from the page's words. "See the page" opens it
+in the running column, the subagent's place: the same head (back arrow, the title, close; once a link or redirect
+leaves the card's site, the title is the site the page is on now), a meta line with the site it is on now,
+and under it a box that fills the rest of the column, in the third surface with the hairline edge, over which the page
+itself is drawn by a second webview of the same window. The box is measured and the page placed again when it changes
+size, when the window does and once the column has slid in; when the box goes, the page moves out of the window, where
+it keeps drawing, and it closes after five minutes nobody used it. Opening a subagent closes the page and the other way
+round. Known limit: the page is a native view over the screen, so a menu or toast that would cover the column passes
+under it. While it is on screen the page is the person's: they click and type in it, and the agent's call waits for them
+to go back. A page clicked through several times is one card, its latest. Where the page asks for a login, a captcha or a
+payment the card has one line in the conversation's other amber, with the 2 px edge of a stuck subagent's line: "Your
+turn: log in on this page", and no picture, since one could hold what the person typed; the agent cannot click or type
+there.

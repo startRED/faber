@@ -28,7 +28,7 @@ points nowhere; a page that grows past the limit splits by topic, and its row he
 | [design/looks.md](design/looks.md) | Themes, presets, colour, type, motion, the one grammar, idle cost, effects |
 | [design/brand.md](design/brand.md) | The mark, the app icon, empty states, brand rules |
 | [design/layout.md](design/layout.md) | Window widths, titlebar, sidebar, the homes, answers, the work log, the running column |
-| [design/subagents.md](design/subagents.md) | A reply's subagent and helper rows, their running-column view and the stuck signs |
+| [design/subagents.md](design/subagents.md) | A reply's subagent and helper rows, their running-column view, the stuck signs and the pages opened in Faber's browser |
 | [design/settings.md](design/settings.md) | The Settings screen, the first run and the tutorial |
 | [design/projects.md](design/projects.md) | The mission engine's published contract: records, worker envelope, kits, proof isolation, commands |
 | [dev/testing.md](dev/testing.md) | Tests: `cargo t`, screen tests, build folder and slots, what a run prints |

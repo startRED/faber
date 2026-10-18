@@ -122,6 +122,9 @@ export function watchMotion(): void {
 // Every animated list needs to hear the window resize. They share one listener, which exists while any list does.
 const resizers = new Set<() => void>();
 const onWindowResize = () => { for (const resize of resizers) resize(); };
+/** A list measures where its rows sit again, with no animation: after the person moved an edge by hand, so the next change
+ * moves from where things are now. */
+export const remeasure = onWindowResize;
 function watchResize(resize: () => void): () => void {
   if (!resizers.size) window.addEventListener('resize', onWindowResize);
   resizers.add(resize);

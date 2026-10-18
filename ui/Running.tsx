@@ -3,6 +3,8 @@ import type { Project, RunningItem } from './api.ts';
 import { AgentChat } from './AgentChat.tsx';
 import { Asks, Parkeds } from './Ask.tsx';
 import { Icon, VendorMark } from './Glyphs.tsx';
+import { Grip } from './Grip.tsx';
+import type { Limits } from './layout.ts';
 import { everyWhileShown } from './idle.ts';
 import { t } from './i18n.ts';
 import { Peek } from './Mark.tsx';
@@ -29,6 +31,8 @@ export function Running(props: {
   onBack?: () => void;
   /** "Tell it…" from the open subagent: the conversation's box, reached through the column. */
   onTell?: (text: string) => void;
+  /** The column's width and the limits of its left edge, which the person drags: omitted, the column has no grip. */
+  resize?: { value: number; limits: Limits; fallback: number; onChange: (px: number) => void };
   ref: (el: HTMLElement) => void;
 }) {
   // The times move while the column is open and stop with it.
@@ -125,6 +129,7 @@ export function Running(props: {
       >
         {(agent) => <AgentChat step={agent().step} streaming={agent().streaming} helpable={agent().helpable} onBack={() => props.onBack?.()} onTell={(text) => props.onTell?.(text)} onClose={props.onClose} />}
       </Show>
+      <Show when={props.resize}>{(r) => <Grip edge="run" label={t('run.resize')} value={r().value} limits={r().limits} fallback={r().fallback} onChange={r().onChange} />}</Show>
     </aside>
   );
 }
