@@ -10,6 +10,8 @@ ev_d4199a30eec4a781614efd0b9b7e3149be893cb6695beaaff888a90dc29c4085; relay broke
 ev_21a1cf3f43b7dc6b70ea90dae817a072080e3c643346096219203a817c1ee01f; command wrapper environment scrub
 ev_bf7703fac9555e6c66f8327b5e18ff1ff737916fe12e447fa4bbc0efaacfa564. The browser bridge and the native addon are
 inferred from strings and from headless decompiler output plus the app's own scripts (REA sessions timed out on those two).
+A later headless decompile of the bridge host, the three SSH helpers and the Chromium launcher confirmed the numbers below
+(marked "observed: decompiled").
 
 ## 1. Inventory
 
@@ -36,17 +38,21 @@ How it is wired (observed: static + inferred from strings):
 - The browser starts the host through its native-messaging registration (written per browser in the user registry, for Chrome,
   Edge and several enterprise or alternative Chromium browsers). The registration file lives in the app's data folder.
   Detection of "extension installed" reads the browsers' profile folders (Default and numbered profiles).
-- Browser side framing: a 4-byte little-endian length, then one JSON message. The host refuses oversize inbound frames
-  (cap around 64 MiB, inferred) and drops any outbound frame over 1 MiB with a log line instead of crashing. The app keeps its own
+- Browser side framing: a 4-byte little-endian length, then one JSON message. The host refuses inbound frames larger than
+  64 MiB (67,108,864 bytes) with a log line, and drops any outbound frame over 1 MiB (1,048,576 bytes) with a log line instead
+  of crashing (observed: decompiled). The app keeps its own
   requests under roughly 1 MB and cuts larger sealed requests into slices of about 750 KB.
 - Local side: one named pipe per Windows user (name ends with the user name). Access control lists only the current user and
-  SYSTEM. Any number of local clients can connect (the desktop app, the Claude Code CLI). Same 4-byte-length JSON framing.
+  SYSTEM. The pipe is two-way, byte oriented, with 64 KiB buffers each way, no instance limit and remote clients rejected
+  (observed: decompiled). Any number of local clients can connect (the desktop app, the Claude Code CLI). Same 4-byte-length JSON framing.
   The app dials it only through a native check that the pipe's server process belongs to the same user; if that check is missing
   it refuses to connect ("refusing to dial ... unverified").
-- Messages from the browser extension to the host: a liveness ping (answered with a pong carrying a timestamp), a status request
-  (answered with the host version and the computer name, used to tell machines apart), tool responses (sent back to the client
+- Messages from the browser extension to the host: a liveness ping (answered with a small message of type "pong" carrying one timestamp field), a status request
+  (answered with a message of type "status_response" holding exactly two fields, the host version and the computer name,
+  used to tell machines apart; observed: decompiled), tool responses (sent back to the client
   that asked) and notifications (copied to every connected client). Messages from clients: tool requests with a method, params and
-  a tool-use id. The host tells the extension when a client connects or disconnects and how many remain. If the browser closes the
+  a tool-use id. The host tells the extension when a client connects or disconnects and how many remain. A client request without a method
+  is rejected with a log line naming the client. Anything else from the browser logs "unknown message type". If the browser closes the
   pipe (end of input) the host exits; the app then keeps polling for the host with growing back-off (x1.5 up to 30 s) and says
   "still polling" in logs every 10 attempts.
 - Pairing and secrecy between app and extension (observed: static, in the app): before any tool call, both sides prove who they
@@ -121,7 +127,7 @@ Sign-in prompts (the part that needs a UI) (observed: static):
   type the password or unlock the agent); local-network permission on macOS.
 
 How the helpers cooperate (observed: static):
-- The relay broker is started by the app with a minimal environment. The app tells it a random pipe name; it creates the pipe so only the
+- The relay broker is started by the app with a minimal environment (only the program search path and the system root). The app tells it a random pipe name; it creates the pipe so only the
   current user can use it, then reports its own process id and start time. The app gives the sign-in helper that identity.
 - The sign-in helper, started by ssh, finds a small file in the connection's control folder (readable only by the user) that holds the pipe
   name and a random token. It connects with a 10 s limit, checks that the process at the other end is the broker the app announced (id plus
@@ -129,12 +135,25 @@ How the helpers cooperate (observed: static):
   program paths, a hint (notice, confirm or normal prompt) and the prompt text base64-encoded. It waits for one line back: ok plus answer, or not
   ok. It prints the answer for ssh. For a notice it prints nothing and exits successfully.
 - The broker holds each connection open until the app answers (so the person can take minutes), and for each request reports the real client
-  process id from the operating system and the chain of ancestors with program paths. The app accepts only requests whose token matches, whose
+  process id from the operating system and the chain of ancestors with program paths. Inside the broker (observed: decompiled):
+  every accepted connection gets a number and goes into a table keyed by that number; one line per request goes to the app
+  (standard output) and each reply is written to the held connection followed by a line break, after which the connection and its
+  table entry are removed; "close" from the app drops one entry; on shutdown all held connections are closed. Client lines are
+  read through a 64 KiB buffer, and a client gets 15 minutes to send its line. The line writer to the app serialises each
+  message as one JSON line, one at a time. The sign-in helper itself allows 10 s to connect, 10 s to write its request and
+  10 minutes to wait for the answer (observed: decompiled), so the broker's 15 minutes always outlasts it. When the helper
+  cannot reach the relay for a real password or passphrase prompt (not a notice), it also ends the parent ssh process, so ssh
+  does not keep retrying; for notices it just exits. The app accepts only requests whose token matches, whose
   claimed id equals the real one, and whose first program is the staged sign-in helper.
 - The command wrapper is put on ssh's command line when the person's own config already uses a proxy command or jump host. It reads the user's
   real command from a file, removes every sign-in variable (including a display value that marks the helper) so the user's command cannot
   reach or confuse the relay, probably forces "never use askpass" for it (inferred), starts it inside a job that dies when the wrapper dies, and
-  pipes standard input and output through.
+  pipes standard input and output through. Decompiled detail: the wrapper adds exactly one environment entry, ssh's own setting
+  that says never to use an askpass program (25 characters, confirmed), after removing the others. The user's command is created
+  suspended, put into a job with the "kill everything when the last handle closes" limit, and only then resumed, so it can never
+  run outside the job. If the job cannot be made or joined, it logs a warning and runs the command outside the job rather than
+  failing. Handles are inherited so standard input and output pass straight through; the wrapper waits without a time limit and
+  returns the command's exit code.
 - ssh options set by the app: no stdin, batch mode off only when a relay is possible, strict host-key checking chosen per situation (ask, yes, or
   accept-new for first contact the person confirmed), multiplexing options, an explicit known-hosts list. If the broker dies mid-session the
   connection continues without prompts (batch mode) and later prompts fail visibly.
@@ -170,7 +189,11 @@ Describe-only list, grouped by what the person experiences (inferred from string
 - Chromium launcher (observed: static): a stock Chromium executable stub for the app runtime. It reads a machine or user policy value (under the vendor's
   policy key, product "Codex") that can override the user-data folder, loads the browser library and runs it, hosts the crash reporter, and carries the
   integrity digest of the packaged app archive. A second launch of the app finds the running one through a hidden window message and hands over its
-  command line; on top of that the app code takes the single-instance lock and queues the second instance's arguments (deep links). The app name
+  command line (observed: decompiled: it posts a "START" text with the working folder and the arguments, plus the id of the
+  launching shortcut or app when known, and waits up to 20 seconds, giving up early if the first copy is hung; a timeout or an
+  unavailable window is logged as such). The launcher can also be started as its own crash-reporter process (the same program
+  with a crash-handler switch, a per-process pipe and a database folder), so a crash of the app is recorded by a sibling and
+  not by the dying process; it loads the browser library with an optional pre-read of the file that a switch turns off; on top of that the app code takes the single-instance lock and queues the second instance's arguments (deep links). The app name
   and profile folder are "Codex" even though the executable is named "ChatGPT". The runtime marks its user agent with a "CodexBrowser" prefix for the vendor's
   own domains, enables WebMCP and a few WebRTC experiments, and has one switch to turn off background networking.
 - Update trampoline (observed: static, REA): takes no arguments. It finds the single app entry of its own package and asks Windows to activate it, giving
@@ -207,11 +230,9 @@ never read CLI credentials; memory budget matters.
 
 ## 4. Unknowns and bounds
 
-- REA/Ghidra timed out (330 s, twice each) on the browser bridge host and the native addon while the shared headless batch was running; both are
-  described from strings, the headless dump of the bridge host (monomorphised, unnamed) and the app's scripts. Exact inbound size cap, the pong
-  payload beyond a timestamp and the status payload beyond version and computer name are inferred.
-- The relay broker's and command wrapper's other functions (connection table, line writer, job placement) were not decompiled; their contract is taken
-  from the app's scripts and strings. The appended environment entry in the wrapper is inferred from its length.
+- The native addon is still described only from strings and the app's scripts; its decompile was not part of this pass.
+- Not recovered: the type and unit of the pong timestamp, the crash reporter's upload address and whether uploads are on by default,
+  and whether the launcher registers any link scheme (no registration code was seen in it; the app or installer most likely does).
 - Nothing was observed at runtime: no pipe traffic, no real ssh prompts, no real browser session. The vendor account endpoints used for pairing were not contacted.
 - The remote server program (downloaded by the app) and the browser extension itself were not in scope or not present; their behavior is only what the
   app side expects.
