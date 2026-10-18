@@ -107,6 +107,10 @@ inside its own area.
   same ink, in tabular figures, from when the engine saw it start. A long command cuts its own words, never its time.
   The clock ticks every 15 s only while such a step runs and the window shows; the time is hidden from a screen reader,
   since a live region that changed that often would keep talking.
+- While a reply streams, a pulse line sits above the status line: the mark at 10 px inside a 18 px ring whose top arc turns (0.9 s,
+  `transform` only), one word for what it does now (thinking, working, writing) and the seconds since the reply began, in
+  tabular figures. One 1 s clock runs only while the reply streams and the window shows. It is hidden from a screen reader
+  (the status line speaks), and under reduced or no motion the ring stands still: the word and the seconds still carry it.
 
 ### Subagent steps
 

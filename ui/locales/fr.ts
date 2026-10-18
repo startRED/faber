@@ -218,6 +218,9 @@ export const fr: Messages = {
   'answer.cost': '{cost} au tarif de l’API',
   'money.usd': '{amount} $ US',
   'answer.tokens': '{input} en entrée · {output} en sortie',
+  'answer.live.thinking': 'Réfléchit',
+  'answer.live.working': 'Travaille',
+  'answer.live.writing': 'Écrit',
   // Handwritten wording; native-speaker review pending (English is the source).
   'answer.cacheWarm': 'cache chaud jusqu’à {time}',
   'files.label': 'Fichiers',

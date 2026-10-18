@@ -218,6 +218,9 @@ export const es: Messages = {
   'answer.cost': '{cost} a precio de API',
   'money.usd': '{amount} US$',
   'answer.tokens': '{input} de entrada · {output} de salida',
+  'answer.live.thinking': 'Pensando',
+  'answer.live.working': 'Trabajando',
+  'answer.live.writing': 'Escribiendo',
   // Handwritten wording; native-speaker review pending (English is the source).
   'answer.cacheWarm': 'caché caliente hasta las {time}',
   'files.label': 'Archivos',
