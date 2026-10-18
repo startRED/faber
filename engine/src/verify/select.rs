@@ -82,33 +82,37 @@ impl Watch {
     }
 }
 
-/// The Rust packages a change touches: for each changed `.rs` or `Cargo.toml`, the nearest folder at or above it, inside
-/// `folder`, whose `Cargo.toml` has a `[package]` with a plain name. Sorted, each once; none outside a Rust project.
-pub fn rust_packages(folder: &std::path::Path, changed: &[(String, Option<String>)]) -> Vec<String> {
-    let mut names = std::collections::BTreeSet::new();
+/// The manifests of the Rust packages a change touches, relative to `folder` with `/`: for each changed `.rs` or
+/// `Cargo.toml` inside `folder`, the nearest folder at or above the file, and not above `folder`, whose `Cargo.toml` has
+/// a `[package]`. Git's paths are from the repository's top, which may be above `folder` (a project opened in a
+/// subfolder). A package is named by its manifest, never by its name, which a nested workspace may share. Sorted, each
+/// once; a path a command line could misread is left out.
+pub fn rust_manifests(folder: &std::path::Path, changed: &[(String, Option<String>)]) -> Vec<String> {
+    let top = folder.ancestors().find(|d| d.join(".git").exists()).unwrap_or(folder);
+    let Ok(below) = folder.strip_prefix(top) else { return vec![] };
+    let prefix: Vec<String> = below.components().map(|c| c.as_os_str().to_string_lossy().into_owned()).collect();
+    let mut manifests = std::collections::BTreeSet::new();
     for (path, _) in changed.iter().filter(|(p, _)| p.ends_with(".rs") || p.rsplit('/').next() == Some("Cargo.toml")) {
-        let mut parts: Vec<&str> = path.split('/').collect();
-        parts.pop();
+        let parts: Vec<&str> = path.split('/').collect();
+        if parts.len() <= prefix.len() || parts.contains(&"..") || parts.iter().zip(&prefix).any(|(part, own)| part != own) {
+            continue;
+        }
+        let mut dirs = parts[prefix.len()..parts.len() - 1].to_vec();
         loop {
-            let dir = parts.iter().fold(folder.to_path_buf(), |d, p| d.join(p));
-            if let Some(name) = std::fs::read_to_string(dir.join("Cargo.toml")).ok().as_deref().and_then(package_name) {
-                names.insert(name);
+            let manifest = dirs.iter().map(|d| format!("{d}/")).collect::<String>() + "Cargo.toml";
+            let text = std::fs::read_to_string(folder.join(&manifest)).unwrap_or_default();
+            if text.lines().any(|l| l.trim() == "[package]") {
+                if manifest.chars().all(|c| c.is_ascii_alphanumeric() || "-_./".contains(c)) {
+                    manifests.insert(manifest);
+                }
                 break;
             }
-            if parts.pop().is_none() {
+            if dirs.pop().is_none() {
                 break;
             }
         }
     }
-    names.into_iter().collect()
-}
-
-/// The `name` of a manifest's `[package]`, when it is plain words (no quote or space a command line could misread).
-fn package_name(manifest: &str) -> Option<String> {
-    let section = manifest.split("\n[").find(|s| s.trim_start_matches('[').starts_with("package]"))?;
-    let line = section.lines().find(|l| l.trim_start().starts_with("name") && l.contains('='))?;
-    let name = line.split_once('=')?.1.trim().trim_matches('"');
-    (!name.is_empty() && name.chars().all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_')).then(|| name.to_string())
+    manifests.into_iter().collect()
 }
 
 /// Whether a check is heavy: a Cargo build, of which one runs at a time across every folder.
@@ -175,25 +179,55 @@ mod tests {
     }
 
     #[test]
-    fn a_rust_change_names_the_package_that_holds_it() {
+    fn a_rust_change_names_the_manifest_of_the_package_that_holds_it() {
         let dir = tempfile::tempdir().unwrap();
-        let root = dir.path();
-        std::fs::write(root.join("Cargo.toml"), "[workspace]\nmembers = [\"engine\", \"testkit\"]\n").unwrap();
-        std::fs::create_dir_all(root.join("engine/src/verify")).unwrap();
-        std::fs::write(
-            root.join("engine/Cargo.toml"),
-            "[package]\nname = \"faber-engine\"\nversion = \"0.1.0\"\n\n[dependencies]\nname = \"x\"\n",
-        )
-        .unwrap();
-        std::fs::create_dir_all(root.join("testkit/src")).unwrap();
-        std::fs::write(root.join("testkit/Cargo.toml"), "[package]\nname = \"bad name\"\n").unwrap();
+        let top = dir.path();
+        std::fs::create_dir_all(top.join(".git")).unwrap();
+        // The project is opened in a subfolder of the repository: git's paths start with `app/`.
+        let root = top.join("app");
+        let write = |path: &str, text: &str| {
+            let file = root.join(path);
+            std::fs::create_dir_all(file.parent().unwrap()).unwrap();
+            std::fs::write(file, text).unwrap();
+        };
+        write(
+            "Cargo.toml",
+            "[workspace]
+members = [\"engine\"]
+",
+        );
+        write(
+            "engine/Cargo.toml",
+            "[dependencies]
+name = 'x'
+
+[package]
+name = 'engine' # a comment
+",
+        );
+        write("engine/src/verify/select.rs", "");
+        // A nested workspace of its own, with a package of the same name.
+        write(
+            "vendor/engine/Cargo.toml",
+            "[package]
+name = \"engine\"
+",
+        );
+        write(
+            "odd dir/Cargo.toml",
+            "[package]
+name = \"odd\"
+",
+        );
         let changed = |paths: &[&str]| paths.iter().map(|p| (p.to_string(), None)).collect::<Vec<_>>();
         assert_eq!(
-            rust_packages(root, &changed(&["engine/src/verify/select.rs", "engine/Cargo.toml", "engine/src/lib.rs"])),
-            ["faber-engine"]
+            rust_manifests(&root, &changed(&["app/engine/src/verify/select.rs", "app/engine/Cargo.toml", "app/engine/src/lib.rs"])),
+            ["engine/Cargo.toml"]
         );
-        assert!(rust_packages(root, &changed(&["ui/App.tsx", "docs/a.md"])).is_empty(), "no Rust file, no package");
-        assert!(rust_packages(root, &changed(&["testkit/src/main.rs"])).is_empty(), "a name a command line could misread");
-        assert!(rust_packages(root, &changed(&["build.rs"])).is_empty(), "a workspace with no package of its own");
+        assert_eq!(rust_manifests(&root, &changed(&["app/vendor/engine/src/lib.rs"])), ["vendor/engine/Cargo.toml"], "by path, not name");
+        assert!(rust_manifests(&root, &changed(&["app/ui/App.tsx", "app/docs/a.md"])).is_empty(), "no Rust file, no package");
+        assert!(rust_manifests(&root, &changed(&["app/build.rs"])).is_empty(), "a workspace with no package of its own");
+        assert!(rust_manifests(&root, &changed(&["other/src/lib.rs", "app/../x/src/lib.rs"])).is_empty(), "outside the folder");
+        assert!(rust_manifests(&root, &changed(&["app/odd dir/src/lib.rs"])).is_empty(), "a path a command line could misread");
     }
 }

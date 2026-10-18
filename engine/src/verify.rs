@@ -534,14 +534,14 @@ impl Verifier {
     }
 }
 
-/// What fast adds for a Rust change: Clippy on each package it touches (`select::rust_packages`), which catches a compile
+/// What fast adds for a Rust change: Clippy on each package it touches, named by its manifest (`select::rust_manifests`), which catches a compile
 /// error in seconds on a warm folder where the project's own list may compile nothing. Never in full, never in the
 /// project's list; a package the list already checks that way is not checked twice.
 // ponytail: Clippy only; the package's unit tests could join it once a run measures them at a few seconds.
 fn rust_checks(folder: &Path, changed: &Changed, declared: &[String]) -> Vec<Planned> {
-    select::rust_packages(folder, &changed.files)
+    select::rust_manifests(folder, &changed.files)
         .into_iter()
-        .map(|name| format!("cargo clippy -p {name} --all-targets -- -D warnings"))
+        .map(|manifest| format!("cargo clippy --manifest-path {manifest} --all-targets -- -D warnings"))
         .filter(|command| !declared.contains(command))
         .map(|command| {
             let tokens: Vec<String> = command.split_whitespace().map(String::from).collect();
@@ -692,8 +692,9 @@ mod tests {
     fn fast_compiles_the_rust_package_a_change_touches_and_names_the_error_s_place() {
         let dir = tempfile::tempdir().unwrap();
         std::fs::create_dir_all(dir.path().join("engine/src")).unwrap();
+        std::fs::create_dir_all(dir.path().join(".git")).unwrap();
         std::fs::write(dir.path().join("engine/Cargo.toml"), "[package]\nname = \"faber-engine\"\n").unwrap();
-        let clippy = "cargo clippy -p faber-engine --all-targets -- -D warnings";
+        let clippy = "cargo clippy --manifest-path engine/Cargo.toml --all-targets -- -D warnings";
         let error = "error[E0308]: mismatched types\n --> engine/src/a.rs:3:7\n  |\n3 |     x\n  |     ^ expected `u32`, found `&str`\n\n\
                      error: could not compile `faber-engine` (lib) due to 1 previous error\n";
         let mut runner = passing();
