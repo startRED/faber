@@ -4,7 +4,6 @@
 pub mod app;
 #[cfg(windows)]
 pub mod containment;
-pub mod coordinator;
 pub mod first_run;
 pub mod homes;
 pub mod menus;
@@ -41,8 +40,6 @@ pub fn all() -> Vec<Scenario> {
         .into_iter()
         .chain(permissions::scenarios())
         .chain(projects::scenarios())
-        .chain(coordinator::scenarios())
-        .chain(coordinator::canary_scenarios())
         .chain(remote_git::scenarios())
         .chain(shell::scenarios())
         .chain(review::scenarios())

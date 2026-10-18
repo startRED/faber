@@ -322,9 +322,6 @@ pub fn mission_grant(cap_micros: u64) -> Budgeted {
 
 /// The caps one real mission is admitted under (after `read_accounts`).
 pub fn caps(engine: &Engine, mission: &str, cap_micros: u64) -> Result<(), String> {
-    // R132/R136 (harness builds only): these allocations are made for this mission, the only one a waiver can cover.
-    #[cfg(feature = "r132-harness")]
-    let _for = super::budget::r132::for_mission(mission);
     for (vendor, model) in [WRITER_MODEL, REVIEWER_MODEL] {
         engine.mission_budget(Change::AllocateModel { vendor, model: model.into(), cap_micros })?;
     }
@@ -368,12 +365,7 @@ pub async fn run(engine: &Engine, engine_data: &Path, work: &Path, mode: Mode) -
     };
     if mode == Mode::Real {
         read_accounts(engine).await;
-        // R136: only a build with the qualification harness feature has this code; a product build never waives.
-        #[cfg(feature = "r132-harness")]
-        arm_waiver(engine_data, &mid);
         caps(engine, &mid, REAL_CAP_MICROS)?;
-        #[cfg(feature = "r132-harness")]
-        keep_waivers(engine, engine_data)?;
     }
     let journal = Journal::open(Path::new(&repository.identity.root), engine_data, &mid).map_err(|e| e.key().to_string())?;
     // A replay has no provider to qualify, so only a real run goes through the admission of a live mission.
@@ -405,12 +397,6 @@ pub async fn run(engine: &Engine, engine_data: &Path, work: &Path, mode: Mode) -
         }
         Mode::Real => Coordinator::new(engine.clone(), journal, broker, setup)?.drive().await,
     };
-    #[cfg(feature = "r132-harness")]
-    super::budget::r132::close();
-    #[cfg(feature = "r132-harness")]
-    if mode == Mode::Real {
-        keep_waivers(engine, engine_data)?;
-    }
     match outcome {
         Outcome::Done { .. } => Ok(Evidence {
             mode,
@@ -421,45 +407,6 @@ pub async fn run(engine: &Engine, engine_data: &Path, work: &Path, mode: Mode) -
         Outcome::Stopped(Stop::Wait(k) | Stop::Park(k) | Stop::Block(k)) => Err(k),
         Outcome::Stopped(Stop::Crash) => Err("reason.canary.crash".into()),
     }
-}
-
-/// R136: the real canary mission of a harness-built candidate may be admitted once without the two-point margin. Each
-/// run deletes the canary's data folder, so the marker and the waiver records live one folder up, in the canary folder
-/// that survives: the marker has its one fixed path there and is created once (a later run finds it and is refused),
-/// the waiver is bound to this mission id and its allocations, the ledger records are kept there after every budget step,
-/// and the waiver closes when the mission ends. A product build has no such code and reads no variable for it.
-#[cfg(feature = "r132-harness")]
-fn arm_waiver(engine_data: &Path, mission: &str) {
-    use super::budget::r132::{Exception, waive};
-    let evidence = serde_json::json!({"exception": "R136", "for": "canary mission of a harness-built candidate"});
-    let _ = waive(Exception::R136, kept_root(engine_data), mission, &evidence);
-}
-
-/// The canary folder that survives the deletion of its data folder.
-#[cfg(feature = "r132-harness")]
-fn kept_root(engine_data: &Path) -> &Path {
-    engine_data.parent().unwrap_or(engine_data)
-}
-
-#[cfg(feature = "r132-harness")]
-const KEPT: &str = "waiver-ledger.json";
-
-/// Copies the engine ledger's waiver records out of the data folder; a failure stops the mission (fail closed).
-#[cfg(feature = "r132-harness")]
-fn keep_waivers(engine: &Engine, engine_data: &Path) -> Result<(), String> {
-    super::budget::r132::save_records(&engine.ledger(), &kept_root(engine_data).join(KEPT)).map_err(key)
-}
-
-/// Prepares the canary's data folder before its engine starts. R136 (harness builds only): a real canary starts from a
-/// ledger of its own, keeping only the waiver records (the seeded ones and those kept outside the folder). A product
-/// build changes nothing.
-pub fn prepare_data(engine_data: &Path, mode: Mode) -> Result<(), String> {
-    #[cfg(feature = "r132-harness")]
-    if mode == Mode::Real {
-        super::budget::r132::fresh_ledger(engine_data, &kept_root(engine_data).join(KEPT)).map_err(key)?;
-    }
-    let _ = (engine_data, mode);
-    Ok(())
 }
 
 /// Read the mission's journal and ledger and say what really happened. The Landing must be a Done mission with a

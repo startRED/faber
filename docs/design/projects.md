@@ -170,9 +170,7 @@ Two more launch checks: every qualification receipt binds the launch-policy revi
 parameters), so a changed flag or setting asks for a new qualification run; and a role CLI is created suspended, the file
 its image came from is pinned (opened with a share mode that denies write and delete) and hashed through that handle before
 `--version` runs and again before resume; the handle stays open until the process has started, so the file cannot be
-swapped in between, and a hash other than the receipt's kills it before it runs. Waiver markers and their ledger records
-live next to the canary data folder, not inside it, so deleting that folder does not revive a spent waiver, and a waiver
-is recorded as spent before the mission that uses it runs.
+swapped in between, and a hash other than the receipt's kills it before it runs.
 
 Follow-up: a crash after a proof ran but before its progress mark was written replays the proof on resume. Proofs are
 idempotent tests, so v0 accepts the replay.

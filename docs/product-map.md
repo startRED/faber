@@ -272,7 +272,7 @@ checks in `tests/ui/index.ts`, real-app scenarios in `testkit/src/screen/mod.rs`
 | Nothing teleports: sections, folds, menus, lists and swaps ease in and out (R209) | Done | `tests/ui/appear.check.ts`, `settings.check.ts`, `update.check.ts`, `motion.check.ts` |
 | Homes and idle motion | Done | `tests/ui/idle.check.ts`, `hole.check.ts`, `motion.check.ts`, `homes.check.ts`; `testkit/src/screen/homes.rs` |
 | Separate copies (R201) | Done; the copy is made behind the first message (shown at once), so a project conversation's CLI starts only when it is there (no warm-up) | `engine/tests/conversation_copy.rs`, tests inside `engine/src/project/copy.rs`; `tests/ui/contextmenu.check.ts` |
-| Missions | v0 (see Words); engine only, no screen | `engine/tests/project_*.rs`; `tests/fixtures/projects/`; `testkit/src/screen/coordinator.rs`, `projects.rs`, `projects_ui.rs` |
+| Missions | v0 (see Words); engine only, no screen | `engine/tests/project_*.rs`; `tests/fixtures/projects/`; `testkit/src/screen/projects.rs` (the git broker) |
 | UX sentinel and memory budget | Done; composition (art under text, a name in three places, uneven columns) since R172 | `testkit/src/sentinel.rs`, `testkit/src/screen/sentinel.rs`, `tests/ux/baseline.json`, `testkit/src/screen/app.rs` (400 MB) |
 | Visual critique (R172) | Done, a step of the process: `node scripts/shots.mjs before` and `after`, scored by a fresh session | `scripts/shots.test.mjs`; the sentinel's composition scenario in `testkit/src/screen/sentinel.rs` |
 | This map | Done | `engine/tests/product_map.rs`; the trap tasks and the weekly coherence pass in `testkit/coherence/` (R151) |
