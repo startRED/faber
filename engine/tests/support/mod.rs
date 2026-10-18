@@ -143,12 +143,19 @@ pub struct Wire {
     torn: Arc<std::sync::atomic::AtomicBool>,
     /// The next flushes fail.
     refuse_flush: Arc<AtomicUsize>,
+    /// The next write holding these words fails, as if the process had closed its input for it.
+    refuse_words: Arc<Mutex<Option<String>>>,
 }
 
 impl Wire {
     /// The next `n` writes fail; the ones after them pass through again.
     pub fn refuse_next(&self, n: usize) {
         self.refuse.store(n, Ordering::SeqCst);
+    }
+
+    /// The next write holding `words` fails; the ones after it pass through again.
+    pub fn refuse_words(&self, words: &str) {
+        *self.refuse_words.lock().unwrap() = Some(words.to_string());
     }
 
     /// The next write lets only its first `n` bytes through and succeeds; the write after it fails, as a pipe does that
@@ -176,7 +183,7 @@ impl Wire {
         String::from_utf8_lossy(&self.written.lock().unwrap()).lines().map(|line| serde_json::from_str(line).unwrap()).collect()
     }
 
-    fn wrap(&self, p: Proc) -> Proc {
+    pub fn wrap(&self, p: Proc) -> Proc {
         Proc { stdin: Box::new(Tap { inner: p.stdin, wire: self.clone() }), ..p }
     }
 }
@@ -192,6 +199,12 @@ impl AsyncWrite for Tap {
             self.wire.refuse.fetch_sub(1, Ordering::SeqCst);
             return Poll::Ready(Err(io::Error::other("the process closed its input")));
         }
+        let mut words = self.wire.refuse_words.lock().unwrap();
+        if words.as_ref().is_some_and(|w| String::from_utf8_lossy(buf).contains(w.as_str())) {
+            *words = None;
+            return Poll::Ready(Err(io::Error::other("the process closed its input")));
+        }
+        drop(words);
         if self.wire.torn.load(Ordering::SeqCst) {
             return Poll::Ready(Err(io::Error::other("the process closed its input")));
         }

@@ -93,6 +93,12 @@ async fn answers(pipe: &mut Pipe, text: &str, ok: bool) {
         .await;
 }
 
+/// The CLI takes in the user line `n` it was given (`--replay-user-messages`).
+async fn echo(pipe: &mut Pipe, n: usize) {
+    let content = pipe.lines.lock().unwrap().iter().filter(|m| m["type"] == "user").nth(n).unwrap()["message"]["content"].clone();
+    pipe.say(json!({ "type": "user", "message": { "role": "user", "content": content }, "isReplay": true })).await;
+}
+
 /// The turns the CLI was given so far, as the text of each user line.
 fn turns(pipe: &Pipe) -> Vec<String> {
     pipe.lines.lock().unwrap().iter().filter(|m| m["type"] == "user").map(|m| text_of(&m["message"]["content"])).collect()
@@ -304,6 +310,7 @@ async fn a_message_the_person_queued_goes_first_and_the_stop_line_still_counts()
     assert_eq!(reply.halt.as_deref(), Some("reason.keepGoing.done"));
     until_turns(&pipe, 2).await;
     assert!(turns(&pipe)[1].contains("How is it going?"), "the person's message still goes: {:?}", turns(&pipe));
+    echo(&mut pipe, 1).await;
     answers_at(&mut pipe, "Fine.", true, 0.1).await;
     until(&engine, &id, |c| idle(c) && c.messages.len() == 4).await;
     tokio::time::sleep(Duration::from_millis(60)).await;
@@ -345,9 +352,10 @@ async fn after_a_failed_turn_the_message_the_person_left_is_the_next_one() {
     };
     engine.send(left).unwrap();
     answers_at(&mut pipe, "", false, 0.1).await;
-    // A failed turn does not send the queue by itself; with keep going on, the person's own words are the retry.
+    // The person's words went into the turn, and the CLI answers them after the failure: they are the retry.
     until_turns(&pipe, 2).await;
     assert!(turns(&pipe)[1].contains("Then update the docs"), "{:?}", turns(&pipe));
+    echo(&mut pipe, 1).await;
     answers_at(&mut pipe, "Docs updated.", true, 0.1).await;
     until_turns(&pipe, 3).await;
     assert!(turns(&pipe)[2].contains("keep going on your own"), "then Faber goes on: {:?}", turns(&pipe));

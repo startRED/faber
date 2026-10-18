@@ -33,6 +33,8 @@ import './motion.check.ts';
 import './nudge.check.ts';
 import './notes.check.ts';
 import './opening.check.ts';
+import './palette.check.ts';
+import './find.check.ts';
 import './review-answer.check.ts';
 import './review-motion.check.ts';
 import './running.check.ts';

@@ -22,6 +22,7 @@ import { inOrder, refreshed, saveAndApply, watchSystem } from './appearance.ts';
 import { useClock } from './clock.ts';
 import { Composer, type Draft } from './Composer.tsx';
 import { Empty } from './Empty.tsx';
+import { Find } from './Find.tsx';
 import { LookStep } from './FirstRun.tsx';
 import { keepFocusIn } from './focus.ts';
 import { Icon } from './Glyphs.tsx';
@@ -31,6 +32,7 @@ import { Lockup } from './Mark.tsx';
 import { isFirstInstall, newestId, NOTES, type Note, whatsNew } from './notes.ts';
 import { modelOptions, vendorName } from './models.ts';
 import { animateDetails, animateList, watchMotion } from './motion.ts';
+import { Palette } from './Palette.tsx';
 import { Projects } from './Projects.tsx';
 import { createOpening, upsert } from './opening.ts';
 import { Running } from './Running.tsx';
@@ -1054,6 +1056,7 @@ ${copy().path}`}>
                 </Show>
                 <Show when={columnOpen() && !docked()}>{runningColumn()}</Show>
               </div>
+              <Find enabled={!newChat() && !needsProject() && !loading() && !!current()?.messages.length} root={() => thread} />
             </main>
             <Show when={columnOpen() && docked()}>{runningColumn()}</Show>
           </div>
@@ -1068,6 +1071,18 @@ ${copy().path}`}>
       <Show when={notesOpen()}>
         <WhatsNew version={state().version} notes={notes()} onClose={closeNotes} />
       </Show>
+      <Palette
+        enabled={!step() && !setupOpen() && !tourOpen() && !notesOpen() && !startScreen()}
+        conversations={state().conversations}
+        projects={state().projects}
+        onOpen={openSummary}
+        onProject={(id) => (closeSettings(), closeSide(false), void fresh({ area: 'project', projectId: id }))}
+        onNew={() => (closeSettings(), closeSide(false), void fresh(place()).then(() => document.querySelector<HTMLElement>('.composer textarea')?.focus()))}
+        onArea={switchArea}
+        onSettings={(at) => (settingsOpen() ? (closeSettings(), queueMicrotask(() => openSettings(at))) : openSettings(at))}
+        onRunning={() => (closeSettings(), toggleColumn())}
+        onAddProject={() => (closeSettings(), void addProject().catch(fail))}
+      />
     </div>
   );
 }

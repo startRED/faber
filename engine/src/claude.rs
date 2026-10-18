@@ -294,14 +294,15 @@ pub fn claude_args(launch: &ClaudeLaunch) -> Vec<String> {
     if launch.instructions.is_none() {
         args.push("--append-system-prompt".into());
         args.push(persona(&PersonaInput { name: launch.user_name.as_deref() }));
-        // R161: Faber's own MCP server, answered by this driver over stdio, holds the helper tool and the browser. A helper
-        // keeps no history, and echoes each line it is given when it takes it in, so a line the person wrote while it works is
-        // known to be read.
+        // R161: Faber's own MCP server, answered by this driver over stdio, holds the helper tool and the browser.
         if mcp_tools(launch).any() {
             args.extend(["--mcp-config".into(), crate::helper::CLAUDE_MCP_CONFIG.into()]);
         }
+        // The CLI echoes each line it is given when it takes it in, so a line the person wrote while it works is known to be
+        // read, and by which turn. A helper keeps no history.
+        args.push("--replay-user-messages".into());
         if launch.helper == crate::helper::Helper::Is {
-            args.extend(["--no-session-persistence".into(), "--replay-user-messages".into()]);
+            args.push("--no-session-persistence".into());
         }
     }
     // Side questions keep the CLI default, and an older CLI that does not list the flag would refuse to start with it.
@@ -607,10 +608,11 @@ fn start_with_policy(opts: ClaudeOptions, on_event: EventSink, args: Vec<String>
         let mut control_id = 0u32;
         let mut quota_seen = false;
         let mut watch = proc::TurnWatch::default();
-        let mut queued = vec![];
-        // A helper's lines not yet echoed back, in order: the tag of one the person wrote while it worked, none for a turn's own.
-        let replay = opts.launch.helper == crate::helper::Helper::Is;
-        let mut unread: VecDeque<Option<String>> = VecDeque::new();
+        let mut queued: Vec<UserTurn> = vec![];
+        // Lines not yet echoed back, in order, with their words: the tag of one the person wrote while a turn ran, none for a
+        // turn's own. An echo is matched by its words, so a recording made before the echo existed reads the same.
+        let replay = opts.launch.instructions.is_none();
+        let mut unread: VecDeque<(Option<String>, String)> = VecDeque::new();
         // When the latest request of the running turn began: the cache lifetime counts from it, not from the result.
         let mut request_began: Option<u64> = None;
         // When the running turn was handed to the CLI: its request goes out at that moment. Set once per turn and never moved by
@@ -664,7 +666,8 @@ fn start_with_policy(opts: ClaudeOptions, on_event: EventSink, args: Vec<String>
                             watch.activity();
                             if finished { watch.finish(); }
                             if replay && msg["type"] == "user" && msg["isReplay"] == true {
-                                if let Some(Some(tag)) = unread.pop_front() {
+                                let said = words(&msg["message"]["content"]);
+                                if let Some((Some(tag), _)) = unread.iter().position(|(_, w)| *w == said).and_then(|at| unread.remove(at)) {
                                     on_event(EngineEvent::Injected { tag: Some(tag) });
                                 }
                                 continue;
@@ -758,13 +761,15 @@ fn start_with_policy(opts: ClaudeOptions, on_event: EventSink, args: Vec<String>
                                 break;
                             }
                             if finished {
-                                // A line still unread after the result is a turn of its own, and it starts now.
+                                // A turn's own line is echoed before its result. A line the person wrote that is still unread is
+                                // a turn of its own, and it starts now, after a stop too (fixtures `steer*`, `helper-told-later`).
+                                unread.retain(|(tag, _)| tag.is_some());
                                 if !unread.is_empty() { watch.begin(project); }
                                 for turn in std::mem::take(&mut queued) {
                                     quota_seen = false;
                                     watch.begin(project);
                                     turn_sent_ms = unix_ms();
-                                    if replay { unread.push_back(None); }
+                                    if replay { unread.push_back((None, turn.text.clone())); }
                                     let _ = proc::write_line(&mut *stdin, &user_message(&turn)).await;
                                 }
                             }
@@ -779,16 +784,15 @@ fn start_with_policy(opts: ClaudeOptions, on_event: EventSink, args: Vec<String>
                         watch.begin(project);
                         request_began = None;
                         turn_sent_ms = unix_ms();
-                        if replay { unread.push_back(None); }
+                        if replay { unread.push_back((None, turn.text.clone())); }
                         let _ = proc::write_line(&mut *stdin, &user_message(&turn)).await;
                     }
-                    // A line written mid-turn is folded into a turn that uses tools (one result for both) and becomes a turn of
-                    // its own after a plain reply (see tests/fixtures/claude/queued*.jsonl). Faber cannot tell which ahead of
-                    // time, so it holds the message itself and never steers this CLI; if asked anyway, it was not delivered.
-                    // A helper is the exception (R161 step 5): its echo says which turn took the line (fixtures `helper-told*`).
+                    // A line written mid-turn is folded into a turn that uses tools at its next step, and becomes a turn of its
+                    // own after a plain reply or a stop (fixtures `steer*`, `queued*`, `helper-told*`). Its echo says which turn
+                    // took it in.
                     Some(SessionCommand::Steer { turn, tag }) => {
                         if replay && watch.active() && !watch.stopping() && proc::write_line(&mut *stdin, &user_message(&turn)).await.is_ok() {
-                            unread.push_back(Some(tag));
+                            unread.push_back((Some(tag), turn.text.clone()));
                         } else {
                             on_event(EngineEvent::SteerFailed { tag });
                         }
@@ -852,6 +856,15 @@ fn start_with_policy(opts: ClaudeOptions, on_event: EventSink, args: Vec<String>
         }
     });
     Session::new(tx).with_tree(tree)
+}
+
+/// The words of a user line's content, plain or in blocks: what an echo is matched by.
+fn words(content: &Value) -> String {
+    match content {
+        Value::String(text) => text.clone(),
+        Value::Array(blocks) => blocks.iter().filter_map(|b| b["text"].as_str()).collect(),
+        _ => String::new(),
+    }
 }
 
 fn user_message(turn: &UserTurn) -> Value {
