@@ -68,7 +68,12 @@ size, when the window does and once the column has slid in; when the box goes, t
 it keeps drawing, and it closes after five minutes nobody used it. Opening a subagent closes the page and the other way
 round. Known limit: the page is a native view over the screen, so a menu or toast that would cover the column passes
 under it. While it is on screen the page is the person's: they click and type in it, and the agent's call waits for them
-to go back. A page clicked through several times is one card, its latest. Where the page asks for a login, a captcha or a
+to go back. A page clicked through several times is one card, its latest. Under the box, once the agent did more than one thing in the
+browser during the reply, the log of its steps fills at most a third of the column, oldest first, one quiet row each in the
+third ink (a number in the data face, then the step's words; what the agent typed never shows, only the field), the step
+on view in the first ink on the second surface. Picking a step puts the picture taken after it in the box, from the page's
+top, and moves the live page out of the window; the latest step, or "Back to the live page" above the log, brings it back.
+Arrow keys, Home and End walk the log. Nothing in it moves. Where the page asks for a login, a captcha or a
 payment the card has one line in the conversation's other amber, with the 2 px edge of a stuck subagent's line: "Your
 turn: log in on this page", and no picture, since one could hold what the person typed; the agent cannot click or type
 there.

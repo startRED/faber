@@ -1,4 +1,4 @@
-import { createResource, createSignal, onCleanup, onMount, Show } from 'solid-js';
+import { type Accessor, createEffect, createResource, createSignal, Index, on, onCleanup, onMount, Show } from 'solid-js';
 import { api, type ToolUse } from './api.ts';
 import { Icon } from './Glyphs.tsx';
 import { t } from './i18n.ts';
@@ -8,7 +8,40 @@ export interface OpenSite {
   conversationId: string;
   url: string;
   title: string;
+  /** What the agent did in the browser during the reply, oldest first, kept up to date while it works (step 8, "recorded"). */
+  steps?: Accessor<SiteStep[]>;
 }
+
+/** One thing the agent did in Faber's browser, and the picture the browser took after it. */
+export interface SiteStep {
+  call: string;
+  words: string;
+}
+
+const quoted = (text: unknown) => (typeof text === 'string' ? text.replace(/\s+/g, ' ').trim() : '');
+
+/** A browser call in plain words. What the agent typed never shows, only where: it can be a search, a name or a secret. */
+export function stepWords(tool: ToolUse): string {
+  const input = (tool.input ?? {}) as { url?: unknown; action?: unknown; target?: unknown; up?: unknown };
+  if (typeof input.url === 'string') return t('site.step.open', { host: hostOf(siteOf(tool)?.url ?? input.url) });
+  const target = quoted(input.target);
+  switch (input.action) {
+    case 'click':
+      return t('site.step.click', { target });
+    case 'type':
+      return target ? t('site.step.type', { target }) : t('site.step.typeHere');
+    case 'scroll':
+      return t(input.up === true ? 'site.step.up' : 'site.step.down');
+    case 'back':
+      return t('site.step.back');
+    default:
+      return t('site.step.read');
+  }
+}
+
+/** Every call of a reply that the browser did, in order: the log the page view steps through. */
+export const stepsOf = (tools: ToolUse[]): SiteStep[] =>
+  tools.filter((tool) => tool.name === 'Browser' && tool.ok === true).map((tool) => ({ call: tool.id, words: stepWords(tool) }));
 
 const [opened, setOpened] = createSignal<OpenSite>();
 // Each box the page is placed over is named by a number that only grows while the screen lives (the shell forgets them all
@@ -60,11 +93,11 @@ export const hostOf = (url: string) => {
 };
 
 /** A page the agent opened, in its reply: the picture it took, the title and the site, and a button to look at it. */
-export function SiteCard(props: { conversationId: string; tool: ToolUse; site: { url: string; title: string; turn?: SiteTurn } }) {
+export function SiteCard(props: { conversationId: string; tool: ToolUse; site: { url: string; title: string; turn?: SiteTurn }; steps?: Accessor<SiteStep[]> }) {
   const [picture] = createResource(() => props.tool.id, (call) => api.sitePicture(props.conversationId, call).catch(() => null));
   const open = async () => {
     const { url, title } = props.site;
-    if (await api.siteOpen(props.conversationId, url).catch(() => false)) showSite({ conversationId: props.conversationId, url, title });
+    if (await api.siteOpen(props.conversationId, url).catch(() => false)) showSite({ conversationId: props.conversationId, url, title, steps: props.steps });
   };
   return (
     <div class="file site" data-turn={props.site.turn ? 'person' : undefined}>
@@ -89,12 +122,15 @@ export function SiteCard(props: { conversationId: string; tool: ToolUse; site: {
  * move of the box moves it, and it is placed again whenever the window changes size. */
 export function SitePane(props: { site: OpenSite; onBack: () => void; onClose: () => void }) {
   let box: HTMLDivElement | undefined;
-  const id = boxId();
+  // The shell never places a box again once it let the page go, so coming back from a step of the log takes a new one.
+  let id = boxId();
   // Where the page is now: a link or a redirect moves it off the card's site, and the head then names the new one.
   const [live, setLive] = createSignal(props.site.url);
   const stop = api.onSite(setLive);
   onCleanup(() => void stop.then((unlisten) => unlisten()).catch(() => {}));
   const place = () => {
+    // While a step of the log shows, its picture holds the box and the page stays out of the window.
+    if (picked()) return;
     const r = box?.getBoundingClientRect();
     if (!r) return;
     if (r.width >= 1 && r.height >= 1) void api.sitePlace(id, r.left, r.top, r.width, r.height);
@@ -113,6 +149,38 @@ export function SitePane(props: { site: OpenSite; onBack: () => void; onClose: (
       void api.sitePark(id);
     });
   });
+  // A step picked in the log shows the picture taken after it, in the page's place; none picked is the live page.
+  const steps = () => props.site.steps?.() ?? [];
+  const [picked, setPicked] = createSignal<string>();
+  const pickedAt = () => steps().findIndex((s) => s.call === picked());
+  const [still] = createResource(picked, (call) => api.sitePicture(props.site.conversationId, call).catch(() => null));
+  // The live page goes out of the window while a picture stands in for it, and comes back when the log lets go.
+  createEffect(
+    on(
+      picked,
+      (call) => {
+        if (call) return void api.sitePark(id);
+        id = boxId();
+        place();
+      },
+      { defer: true },
+    ),
+  );
+  // Another card opened in the same pane starts on its live page.
+  createEffect(on(() => props.site, () => setPicked(undefined), { defer: true }));
+  const pick = (call?: string) => setPicked(call === steps().at(-1)?.call ? undefined : call);
+  const keys = (e: KeyboardEvent) => {
+    const list = steps();
+    // From the row that has the focus: the agent may have added steps since it got it.
+    const buttons = [...(e.currentTarget as HTMLElement).querySelectorAll<HTMLElement>('button')];
+    const focused = buttons.indexOf(document.activeElement as HTMLElement);
+    const at = focused >= 0 ? focused : picked() === undefined ? list.length - 1 : pickedAt();
+    const to = e.key === 'ArrowUp' || e.key === 'ArrowLeft' ? at - 1 : e.key === 'ArrowDown' || e.key === 'ArrowRight' ? at + 1 : e.key === 'Home' ? 0 : e.key === 'End' ? list.length - 1 : -2;
+    if (to === -2 || to < 0 || to >= list.length) return;
+    e.preventDefault();
+    pick(list[to]!.call);
+    buttons[to]?.focus();
+  };
   const moved = () => hostOf(live()) !== hostOf(props.site.url);
   const title = () => (moved() ? hostOf(live()) : props.site.title || hostOf(props.site.url));
   return (
@@ -130,7 +198,38 @@ export function SitePane(props: { site: OpenSite; onBack: () => void; onClose: (
       </div>
       <div class="rc-body side-body site-body">
         <p class="side-meta">{t('site.meta', { host: hostOf(live()) })}</p>
-        <div class="site-view" ref={(el) => (box = el)} role="img" aria-label={t('site.view', { title: title() })} />
+        <div class="site-view" ref={(el) => (box = el)} role="img" aria-label={t('site.view', { title: title() })}>
+          <Show when={picked()}>
+            <Show when={still()} fallback={<Show when={!still.loading}><p class="site-none">{t('site.step.noPicture')}</p></Show>}>
+              {(src) => <img src={src()} alt="" />}
+            </Show>
+          </Show>
+        </div>
+        <Show when={steps().length > 1}>
+          <div class="site-log">
+            <Show when={picked()}>
+              <button class="btn" onClick={() => setPicked(undefined)}>
+                {t('site.live')}
+              </button>
+            </Show>
+            <ol aria-label={t('site.steps')} onKeyDown={keys}>
+              <Index each={steps()}>
+                {(step, i) => {
+                  // By place, not by object: a new step of the agent keeps the rows, and the focus, that are there.
+                  const on = () => (picked() === undefined ? i === steps().length - 1 : picked() === step().call);
+                  return (
+                    <li>
+                      <button aria-current={on() ? 'step' : undefined} tabIndex={on() ? 0 : -1} title={step().words} onClick={() => pick(step().call)}>
+                        <span>{i + 1}</span>
+                        {step().words}
+                      </button>
+                    </li>
+                  );
+                }}
+              </Index>
+            </ol>
+          </div>
+        </Show>
       </div>
     </>
   );

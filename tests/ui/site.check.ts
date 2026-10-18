@@ -3,7 +3,7 @@ import { render } from 'solid-js/web';
 import { api, type Message, type ToolUse } from '../../ui/api.ts';
 import { useLanguage } from '../../ui/i18n.ts';
 import { Running } from '../../ui/Running.tsx';
-import { openedSite, showSite, siteOf, sitesOf, type OpenSite } from '../../ui/Site.tsx';
+import { openedSite, showSite, siteOf, sitesOf, stepsOf, type OpenSite } from '../../ui/Site.tsx';
 import { Thread } from '../../ui/Thread.tsx';
 import { check, deepEqual, equal, ok } from './check.ts';
 import act from '../../src-tauri/src/pane/act.js';
@@ -54,7 +54,9 @@ check('page in the browser: the reply shows a card for it, and its button opens 
     await Promise.resolve();
     await Promise.resolve();
     deepEqual(opened, ['c1 https://docs.example.org/guide'], 'the page is the conversation’s');
-    deepEqual(openedSite(), { conversationId: 'c1', url: 'https://docs.example.org/guide', title: 'The guide' });
+    const { steps, ...shown } = openedSite()!;
+    deepEqual(shown, { conversationId: 'c1', url: 'https://docs.example.org/guide', title: 'The guide' });
+    deepEqual(steps!().map((s) => s.words), ['Opened docs.example.org'], 'with what the agent did on its pages, for the log');
   } finally {
     showSite(undefined);
     api.siteOpen = siteOpen;
@@ -126,6 +128,119 @@ check('page in the browser: the column places Faber’s browser over its box, an
     setSite(undefined);
     api.sitePlace = sitePlace;
     api.sitePark = sitePark;
+    api.onSite = onSite;
+    dispose();
+    root.remove();
+  }
+});
+
+check('page in the browser: each step reads as what the agent did, and what it typed never shows', () => {
+  useLanguage('en');
+  const call = (id: string, input: unknown, ok: boolean | undefined = true): ToolUse => ({ id, name: 'Browser', input, ok, output: OPENED });
+  const tools = [
+    call('a', { url: 'https://example.org/start' }),
+    { id: 'r', name: 'Read', input: { file_path: 'x' }, ok: true },
+    call('b', { action: 'type', target: 'Password', text: 'hunter2', submit: true }),
+    call('c', { action: 'click', target: '  Sign\nin ' }),
+    call('d', { action: 'scroll', up: true }),
+    call('e', { action: 'back' }),
+    call('f', {}),
+    call('g', { action: 'type', text: 'secret words' }),
+    call('h', { action: 'click', target: 'Pay' }, false),
+  ];
+  deepEqual(stepsOf(tools), [
+    { call: 'a', words: 'Opened docs.example.org' },
+    { call: 'b', words: 'Typed into “Password”' },
+    { call: 'c', words: 'Clicked “Sign in”' },
+    { call: 'd', words: 'Scrolled up' },
+    { call: 'e', words: 'Went back' },
+    { call: 'f', words: 'Read the page' },
+    { call: 'g', words: 'Typed into the page' },
+  ], 'the browser’s own calls, in order, where the page ended up; a refused one is no step');
+  ok(!JSON.stringify(stepsOf(tools)).includes('hunter2') && !JSON.stringify(stepsOf(tools)).includes('secret'), 'typed text stays out');
+});
+
+check('page in the browser: a step of the log shows its picture in the page’s place, and the live page comes back', async () => {
+  useLanguage('en');
+  const [sitePlace, sitePark, sitePicture, onSite] = [api.sitePlace, api.sitePark, api.sitePicture, api.onSite];
+  // The shell's own rule (`Boxes` in src-tauri/src/pane/mod.rs): a box it let go never places the page again.
+  let places = 0;
+  let parks = 0;
+  let parkedBox = 0;
+  api.sitePlace = async (box) => (box > parkedBox ? (places++, true) : false);
+  api.sitePark = async (box) => void (parks++, (parkedBox = Math.max(parkedBox, box)));
+  api.sitePicture = async (_id, call) => (call === 'b' ? null : `data:image/gif;base64,R0lGODlhAQABAAAAACw=#${call}`);
+  api.onSite = async () => () => {};
+  const root = document.createElement('div');
+  root.style.cssText = 'position: fixed; left: 0; top: 0; width: 360px; height: 600px; display: flex;';
+  document.body.append(root);
+  const [steps, setSteps] = createSignal([
+    { call: 'a', words: 'Opened example.org' },
+    { call: 'b', words: 'Typed into “Password”' },
+  ]);
+  const [site, setSite] = createSignal<OpenSite>({ conversationId: 'c1', url: 'https://example.org/', title: 'Example', steps });
+  const dispose = render(
+    () =>
+      createComponent(Running, {
+        items: [],
+        projects: [],
+        modal: false,
+        onOpen: () => {},
+        onClose: () => {},
+        ref: () => {},
+        get site() {
+          return site();
+        },
+      }),
+    root,
+  );
+  const frames = () => new Promise((done) => requestAnimationFrame(() => requestAnimationFrame(done)));
+  const rows = () => [...root.querySelectorAll<HTMLButtonElement>('.site-log li button')];
+  try {
+    await frames();
+    deepEqual(rows().map((b) => b.textContent), ['1Opened example.org', '2Typed into “Password”']);
+    equal(rows()[1]!.getAttribute('aria-current'), 'step', 'the live page is the latest step');
+    equal(root.querySelector('.site-log .btn'), null, 'no way back while the page is live');
+    const placedLive = places;
+    ok(placedLive > 0);
+    rows()[0]!.click();
+    await frames();
+    equal(parks, 1, 'the live page leaves the window while a picture stands in for it');
+    ok(root.querySelector<HTMLImageElement>('.site-view img')!.src.endsWith('#a'), 'the picture taken after the first step');
+    equal(rows()[0]!.getAttribute('aria-current'), 'step');
+    window.dispatchEvent(new Event('resize'));
+    equal(places, placedLive, 'and is not placed back over it when the window changes');
+    // Arrow keys walk the log; the latest step is the live page again.
+    rows()[0]!.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true }));
+    await frames();
+    equal(root.querySelector('.site-view img'), null);
+    ok(places > placedLive, 'the live page comes back over a box the shell takes');
+    // A step without a picture says so, and the agent's next step joins the log while it is open, keeping the rows and focus.
+    rows()[1]!.focus();
+    const focused = document.activeElement;
+    setSteps([...steps().map((step) => ({ ...step })), { call: 'c', words: 'Clicked “Next”' }]);
+    await frames();
+    equal(document.activeElement, focused, 'the focused row stays as the agent goes on');
+    focused!.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true }));
+    equal(document.activeElement, rows()[2], 'the keys go on from the focused row');
+    rows()[1]!.click();
+    await frames();
+    equal(root.querySelector('.site-none')!.textContent, 'No picture was kept of this step.');
+    root.querySelector<HTMLButtonElement>('.site-log .btn')!.click();
+    await frames();
+    equal(root.querySelector('.site-none'), null, '"Back to the live page" lets the log go');
+    equal(rows()[2]!.getAttribute('aria-current'), 'step');
+    // Another page's card opened in the same pane starts on its live page.
+    rows()[0]!.click();
+    await frames();
+    setSite({ conversationId: 'c1', url: 'https://other.example/', title: 'Other', steps });
+    await frames();
+    equal(root.querySelector('.site-view img'), null, 'no picture of the other page’s log');
+    equal(rows()[2]!.getAttribute('aria-current'), 'step');
+  } finally {
+    api.sitePlace = sitePlace;
+    api.sitePark = sitePark;
+    api.sitePicture = sitePicture;
     api.onSite = onSite;
     dispose();
     root.remove();

@@ -8,7 +8,7 @@ import { QuotaCard } from './QuotaCard.tsx';
 import { html, Markdown, openLinks } from './markdown.tsx';
 import { agentMeta, ChangedLines, openedAgent, SourceList, showAgent, tellAbout, ToolChip } from './AgentChat.tsx';
 import { untilReset } from './Sidebar.tsx';
-import { SiteCard, sitesOf } from './Site.tsx';
+import { SiteCard, sitesOf, stepsOf } from './Site.tsx';
 import { bytes, compact, fromEngine, money, t } from './i18n.ts';
 import { prettyModel, vendorName, type Option } from './models.ts';
 import { animateList } from './motion.ts';
@@ -157,6 +157,7 @@ function Answer(props: Shared & { m: Accessor<Message>; prompt?: Message; last?:
   const steps = createMemo(() => narration().length + own().length + (thinking().length ? 1 : 0));
   // The pages the agent opened in Faber's browser, each a card beside the files.
   const sites = createMemo(() => sitesOf(own()));
+  const pageSteps = createMemo(() => stepsOf(own()));
   const commands = createMemo(() => own().filter((tool) => /bash|command|exec|shell/i.test(tool.name)).length);
   // The answer on screen is never repeated here: once it has text, the status line steps aside.
   // The checks this reply ran, ticking up as each one ends (R161 step 9). The engine marks a check when it starts, so the
@@ -323,7 +324,7 @@ function Answer(props: Shared & { m: Accessor<Message>; prompt?: Message; last?:
       </Show>
       <Show when={sites().length}>
         <div class="files" aria-label={t('site.label')} ref={animateList}>
-          <For each={sites()}>{(s) => <SiteCard conversationId={props.conversationId} tool={s.tool} site={s.site} />}</For>
+          <For each={sites()}>{(s) => <SiteCard conversationId={props.conversationId} tool={s.tool} site={s.site} steps={pageSteps} />}</For>
         </div>
       </Show>
       <Show when={m().checks}>{(c) => <ChecksLine c={c()} />}</Show>
