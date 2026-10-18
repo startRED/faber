@@ -19,7 +19,10 @@ reads it and writes a page like these. The session that builds Faber works from 
 | [openai-desktop-rendering.md](openai-desktop-rendering.md) | ChatGPT + Codex desktop 26.1007.2314.0 and the chatgpt.com frontend it bundles | shipped bundles, static |
 | [openai-resources-inventory.md](openai-resources-inventory.md) | the same package: bundled skills and plugins (visualize, template picker, research, computer use) | shipped files, static |
 | [chatgpt-web-intelligent-ui.md](chatgpt-web-intelligent-ui.md) | GPT-6 Intelligent UI, Apps SDK | public docs and press |
-| [native-helpers.md](native-helpers.md) | the eight native helper programs of both apps | strings and imports only (no decompiler on this PC) |
+| [native-helpers.md](native-helpers.md) | the eight native helper programs of both apps, first pass | strings and imports only |
+| [claude-cowork-sandbox.md](claude-cowork-sandbox.md) | Claude desktop's Cowork sandbox: the Windows service, the VM image and its four Linux programs | Ghidra, recovered Go symbols, strings, desktop bundle |
+| [native-bridge-ssh-shells.md](native-bridge-ssh-shells.md) | Claude's browser-extension bridge, native addon and SSH helpers; the ChatGPT and Codex launchers | Ghidra through REA, strings, desktop bundle |
+| [codex-helpers-from-source.md](codex-helpers-from-source.md) | Codex's Windows sandbox, code mode and app-server protocol | the public Apache-2.0 Codex source of the bundled version |
 
 Nothing was seen running: no app was launched, no account was used, no prompt was sent. Timings, animation feel and
 server-side prompts are unknown. The widget-authoring prompt of Intelligent UI lives on OpenAI's servers and is not in
@@ -83,12 +86,33 @@ Before building any of these: read the product map (Faber already has a question
 one work-log style), check the taste cards, and measure memory. A sandboxed frame keeps a process and a DOM alive, so
 R125 applies.
 
+## What the native parts teach
+
+- **Sandboxing.** Cowork runs the agent in a Hyper-V Linux VM (4 GB of memory, an 8 GB disk and a privileged
+  service), so Faber's memory limit rules out the machinery. Faber can still take the policy without it:
+  - a small local egress proxy with a per-task domain allowlist, which refuses private and loopback targets and has a
+    read-only mode;
+  - folder grants in three modes (read only, write without delete, write with delete), with a card that asks before a
+    delete;
+  - extra tool credentials added by Faber per call, never handed to the agent;
+  - honest failure cards that never loop repairs;
+  - startup shown as named steps.
+
+  Codex's Windows sandbox, studied from its public source, shows a native tier with sandbox accounts and deny rules that
+  needs no VM.
+- **Remote projects.** Claude's SSH support runs the system OpenSSH and turns its prompts into cards: trust the
+  server first, then the password or passphrase. It reattaches to sessions left running.
+- **Small interactive touches.** A "preview :5173" chip appears under the reply when the agent starts a dev server
+  (Faber finds it from the session's listening ports). Faber's browser pane can be offered to the CLIs as a local MCP
+  server over a pipe only the same user can open. Every child process closes when Faber closes.
+
 ## Log
 
 | Date | Tools | Target | SHA-256 of app.asar |
 |---|---|---|---|
 | 2026-10-18 | REA (JavaScript application analysis, native strings and imports), @electron/asar, prettier; lead Claude Opus 5.5, workers Claude Sonnet 5.5 and Haiku 5.5 | Claude desktop 2.37337.1.0 (Windows, MSIX) | 6290a54e1472e26e3cd6324a2ba23fccb7a5bb1cc9329eeb841a405d377634cc |
 | 2026-10-18 | same | OpenAI desktop (ChatGPT + Codex) 26.1007.2314.0 (Windows, MSIX) | c5fdef328cfa2ad9095786f9c3a7aaa447e68834d31299d6ef2592da02029038 |
+| 2026-10-18 | Ghidra 12.1.4 headless and through REA, GoReSym 3.4.1, 7-Zip | native helpers of both apps and the Cowork VM image; per-file hashes are in the private corpus | see corpus `native/bin/SHA256SUMS` |
 
 Legal: lawful copies owned by the owner, studied for behavior (17 U.S.C. 102(b); EU 2009/24/EC arts. 5(3) and 6;
 Lei 9.609/98 art. 6). A clean room avoids copyright copying only, so check patents and license terms before shipping
