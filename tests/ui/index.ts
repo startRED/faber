@@ -23,6 +23,7 @@ import './first-frame.check.ts';
 import './follow.check.ts';
 import './checks.check.ts';
 import './idle.check.ts';
+import './hints.check.ts';
 import './i18n.check.ts';
 import './inbox.check.ts';
 import './keepgoing.check.ts';

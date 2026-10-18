@@ -28,6 +28,7 @@ import { LookStep } from './FirstRun.tsx';
 import { keepFocusIn } from './focus.ts';
 import { Icon } from './Glyphs.tsx';
 import { failureText, lang, t, templates, useLanguage } from './i18n.ts';
+import { homeHints } from './idle.ts';
 import { createFileDrop } from './drop.ts';
 import { Grip } from './Grip.tsx';
 import { autoRun, createWindowWidth, type Edge, fit, limitsOf, savedWidths, SIDE, widthClass } from './layout.ts';
@@ -767,7 +768,7 @@ export function App(props: { initial: AppState; update?: UpdateStatus; inbox: { 
         busy={busy() && !loading()}
         locked={loading()}
         placeholder={area() === 'project' ? t('composer.projectPlaceholder') : newChat() ? t('composer.chatPlaceholder') : t('composer.replyPlaceholder')}
-        hints={newChat() ? [t('composer.chatPlaceholder'), t('hint.chat.2'), t('hint.chat.3')] : undefined}
+        hints={newChat() ? homeHints(area() === 'project' ? 'project' : 'chat') : undefined}
         onSend={(d) => void send(d)}
         onStop={() => current() && void api.interrupt(current()!.id)}
         keepGoing={keepGoing()}
