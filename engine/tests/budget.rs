@@ -304,3 +304,23 @@ fn the_daily_line_and_twice_its_rate_have_distinct_prices() {
     near(m(&ahead), 50.0, 1e-9);
     assert!(m(&ahead) > m(&on_line));
 }
+
+#[test]
+fn fresh_readings_with_room_overrule_a_limit_reported_without_a_reset() {
+    let now = 1_000_000.0;
+    let w = |used: f64, read_at: f64| faber_engine::budget::Window { used, resets_at: now + 3600.0, read_at, length: 0.0 };
+    let snap = |windows: Vec<(&str, faber_engine::budget::Window)>| faber_engine::budget::Snap {
+        windows: windows.into_iter().map(|(n, w)| (n.to_string(), w)).collect(),
+        ..Default::default()
+    };
+    assert!(snap(vec![("five_hour", w(0.1, now - 60.0)), ("seven_day", w(0.5, now - 60.0))]).windows_show_room(now));
+    assert!(
+        !snap(vec![("five_hour", w(0.1, now - 60.0)), ("seven_day", w(0.99, now - 60.0))]).windows_show_room(now),
+        "one full window keeps it out"
+    );
+    assert!(
+        !snap(vec![("five_hour", w(0.1, now - 60.0)), ("seven_day", w(0.5, now - 3600.0))]).windows_show_room(now),
+        "an old reading proves nothing"
+    );
+    assert!(!snap(vec![]).windows_show_room(now), "no reading, no proof");
+}

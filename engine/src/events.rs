@@ -71,6 +71,22 @@ pub enum EngineEvent {
         id: String,
         input: Value,
     },
+    /// The agent called Faber's conversation tool (`crate::sibling`): it starts a conversation or reads one it started. The
+    /// engine answers at once with `Session::helper_reply`.
+    ConversationCall {
+        id: String,
+        input: Value,
+    },
+    /// The agent called Faber's checks (`crate::verify`). The engine answers with `Session::helper_reply` once they ended.
+    VerifyCall {
+        id: String,
+        input: Value,
+    },
+    /// The agent asked for the project's map (`crate::map`). The engine answers with `Session::helper_reply`.
+    MapCall {
+        id: String,
+        input: Value,
+    },
     /// The agent called Faber's helper tool (R161, `crate::helper`): `id` is that tool call. The CLI waits for the answer,
     /// which the engine sends with `Session::helper_reply` once the helper is done.
     HelperCall {
@@ -123,6 +139,18 @@ pub enum EngineEvent {
         /// True when the token numbers cover only part of the turn: Claude's sub-model work is not in `usage`, and a Codex
         /// turn with no usage update to measure from reports none.
         incomplete: bool,
+    },
+    /// What the conversation's own agent (never a subagent or helper) holds in its context now, as the CLI said it: `used`
+    /// tokens after a request (Claude: the latest main-thread response's prompt; Codex: `last.totalTokens`), and the model's
+    /// `window` when the CLI names it. Either may be absent in one report; the engine keeps the last of each.
+    Context {
+        used: Option<u64>,
+        window: Option<u64>,
+    },
+    /// The CLI compacted the conversation, whoever asked (Faber, the agent, the CLI's own limit). `after` is the size it
+    /// reports for the summary when it does (Claude Code's `post_tokens`).
+    Compacted {
+        after: Option<u64>,
     },
     /// The running turn took in a message sent to it with `Session::steer`. `tag` is the one that call carried when the CLI
     /// echoes it back; without one, the oldest message still on its way is the one.
@@ -188,6 +216,9 @@ pub enum SessionCommand {
         ok: bool,
         text: String,
     },
+    /// Compact the conversation's context now (Claude Code: the `/compact` command as the next line; Codex: the thread's
+    /// compaction request). It ends like a turn, with a `Done`.
+    Compact,
     Interrupt,
     Close,
 }
@@ -196,8 +227,6 @@ pub enum SessionCommand {
 #[derive(Clone)]
 pub struct Session {
     send: std::sync::Arc<dyn Fn(SessionCommand) + Send + Sync>,
-    project_role: Option<crate::project::Role>,
-    tree: Option<crate::proc::OwnedTree>,
 }
 
 impl std::fmt::Debug for Session {
@@ -212,23 +241,7 @@ impl Session {
     }
     /// A session whose commands go wherever `send` puts them, such as a thread in a shared process.
     pub(crate) fn from_fn(send: impl Fn(SessionCommand) + Send + Sync + 'static) -> Self {
-        Session { send: std::sync::Arc::new(send), project_role: None, tree: None }
-    }
-    pub(crate) fn for_project(mut self, role: crate::project::Role) -> Self {
-        self.project_role = Some(role);
-        self
-    }
-    pub(crate) fn project_role(&self) -> Option<crate::project::Role> {
-        self.project_role
-    }
-    pub(crate) fn with_tree(mut self, tree: Option<crate::proc::OwnedTree>) -> Self {
-        self.tree = tree;
-        self
-    }
-    /// The owned process tree behind this session, if the engine started one: the source of a lease's process
-    /// identity and of its termination proof. A replayed recording has none.
-    pub fn tree(&self) -> Option<crate::proc::OwnedTree> {
-        self.tree.clone()
+        Session { send: std::sync::Arc::new(send) }
     }
     pub fn send(&self, turn: UserTurn) {
         (self.send)(SessionCommand::Send(turn));
@@ -249,6 +262,9 @@ impl Session {
     }
     pub fn helper_reply(&self, id: &str, ok: bool, text: String) {
         (self.send)(SessionCommand::HelperReply { id: id.to_string(), ok, text });
+    }
+    pub fn compact(&self) {
+        (self.send)(SessionCommand::Compact);
     }
     pub fn interrupt(&self) {
         (self.send)(SessionCommand::Interrupt);

@@ -2,29 +2,12 @@
 //!
 //! Registers Faber for the current user only in `HKCU\Software\Microsoft\Windows\CurrentVersion\Run`.
 //! Never touches HKLM, never requires admin privileges.
-//! Installed builds start in the tray; development builds enter through the trusted headless launcher.
+//! Faber starts in the tray.
 #![allow(unsafe_code)]
 
-use crate::local_update::{Development, NativeCommand};
 use std::sync::atomic::{AtomicBool, Ordering};
 
 pub const AUTOSTART_FLAG: &str = "--autostart";
-
-pub fn launch_command(
-    executable: &std::path::Path,
-    development: Option<&Development>,
-) -> Result<NativeCommand, faber_engine::project::update::UpdateError> {
-    let (program, flag) = if let Some(dev) = development {
-        // Login does not inherit enrollment variables, and must recover before executing an unproven slot.
-        Development::from_launcher(&dev.helper())?;
-        (dev.helper(), "--launch")
-    } else {
-        (executable.to_path_buf(), AUTOSTART_FLAG)
-    };
-    let mut command = NativeCommand::new(program.clone(), program.parent().unwrap_or(&program).into());
-    command.args.push(flag.into());
-    Ok(command)
-}
 
 pub trait AutostartKeeper: Send + Sync {
     fn register(&self) -> Result<(), String>;
@@ -84,31 +67,13 @@ impl AutostartKeeper for NoopAutostart {
 }
 
 #[cfg(windows)]
-pub struct WindowsAutostart {
-    development: Option<Development>,
-}
-
-#[cfg(windows)]
-impl WindowsAutostart {
-    pub fn new(development: Option<Development>) -> Self {
-        Self { development }
-    }
-}
-
-#[cfg(windows)]
-impl Default for WindowsAutostart {
-    fn default() -> Self {
-        Self::new(None)
-    }
-}
+pub struct WindowsAutostart;
 
 #[cfg(windows)]
 impl AutostartKeeper for WindowsAutostart {
     fn register(&self) -> Result<(), String> {
         let exe = std::env::current_exe().map_err(|e| format!("cannot determine current executable path: {e}"))?;
-        let command = launch_command(&exe, self.development.as_ref()).map_err(|e| e.key().to_owned())?;
-        let cmd = format!("\"{}\" {}", command.program.display(), command.args.join(" "));
-        set_run_value(&cmd)
+        set_run_value(&format!("\"{}\" {AUTOSTART_FLAG}", exe.display()))
     }
 
     fn unregister(&self) -> Result<(), String> {

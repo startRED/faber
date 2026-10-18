@@ -89,7 +89,6 @@ pub struct CountedAwake {
     stopped: bool,
     enabled: bool,
     active_runs: HashSet<String>,
-    active_missions: HashSet<String>,
     is_awake: bool,
 }
 
@@ -102,7 +101,6 @@ impl CountedAwake {
             stopped: false,
             enabled,
             active_runs: HashSet::new(),
-            active_missions: HashSet::new(),
             is_awake: false,
         };
         guard.start_worker()?;
@@ -161,29 +159,9 @@ impl CountedAwake {
         self.apply();
     }
 
-    pub fn start_mission(&mut self, mission_id: impl Into<String>) {
-        self.active_missions.insert(mission_id.into());
-        self.apply();
-    }
-
-    pub fn end_mission(&mut self, mission_id: &str) {
-        self.active_missions.remove(mission_id);
-        self.apply();
-    }
-
-    pub fn set_mission_awake(&mut self, mission_id: impl Into<String>, awake: bool) {
-        if awake {
-            self.start_mission(mission_id);
-        } else {
-            let id = mission_id.into();
-            self.end_mission(&id);
-        }
-    }
-
     pub fn shutdown(&mut self) {
         self.stopped = true;
         self.active_runs.clear();
-        self.active_missions.clear();
         self.apply();
     }
 
@@ -193,7 +171,7 @@ impl CountedAwake {
     }
 
     fn apply(&mut self) {
-        let should_be_awake = !self.stopped && self.enabled && (!self.active_runs.is_empty() || !self.active_missions.is_empty());
+        let should_be_awake = !self.stopped && self.enabled && !self.active_runs.is_empty();
         if should_be_awake != self.is_awake {
             if self.commands.is_none()
                 && let Err(error) = self.start_worker()
@@ -223,136 +201,10 @@ impl Drop for CountedAwake {
     }
 }
 
-pub fn restore_mission(
-    awake: &std::sync::Mutex<CountedAwake>,
-    journal: &faber_engine::project::store::Journal,
-) -> Result<faber_engine::project::run::Runner, String> {
-    let mut runner = faber_engine::project::run::Runner::open(journal).map_err(str::to_string)?;
-    if matches!(runner.mission.state, faber_engine::project::MissionState::Running | faber_engine::project::MissionState::Planning) {
-        runner.mission.reason = Some("reason.interrupted".into());
-        runner.pause(journal).map_err(str::to_string)?;
-    }
-    awake.lock().unwrap_or_else(|e| e.into_inner()).set_mission_awake(&runner.mission.id, false);
-    Ok(runner)
-}
-
-pub async fn stop_mission(
-    awake: &std::sync::Mutex<CountedAwake>,
-    runner: &mut faber_engine::project::run::Runner,
-    journal: &faber_engine::project::store::Journal,
-    engine: &faber_engine::Engine,
-) -> Result<(), String> {
-    let result = runner.stop(journal, engine).await;
-    awake.lock().unwrap_or_else(|e| e.into_inner()).set_mission_awake(&runner.mission.id, false);
-    result
-}
-
-/// RAII guard that holds keep-awake for a mission while held, releasing on drop.
-pub struct MissionAwakeGuard {
-    awake: std::sync::Arc<std::sync::Mutex<CountedAwake>>,
-    mission_id: String,
-}
-
-impl MissionAwakeGuard {
-    pub fn new(awake: std::sync::Arc<std::sync::Mutex<CountedAwake>>, mission_id: impl Into<String>) -> Self {
-        let id = mission_id.into();
-        awake.lock().unwrap_or_else(|e| e.into_inner()).start_mission(&id);
-        Self { awake, mission_id: id }
-    }
-
-    #[cfg(test)]
-    pub fn mission_id(&self) -> &str {
-        &self.mission_id
-    }
-}
-
-impl Drop for MissionAwakeGuard {
-    fn drop(&mut self) {
-        self.awake.lock().unwrap_or_else(|e| e.into_inner()).end_mission(&self.mission_id);
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::sync::{Arc, Mutex};
-
-    fn saved_mission() -> (tempfile::TempDir, tempfile::TempDir, faber_engine::project::store::Journal, faber_engine::project::run::Runner)
-    {
-        let root = std::env::temp_dir().canonicalize().unwrap();
-        let repo = tempfile::tempdir_in(&root).unwrap();
-        let data = tempfile::tempdir_in(&root).unwrap();
-        let j = faber_engine::project::store::Journal::open(repo.path(), data.path(), "m1").unwrap();
-        let mut r = faber_engine::project::run::Runner::create(
-            &j,
-            faber_engine::project::Mission::new("m1", "p1", "repo", "Fix", &"1".repeat(40), 1, 1),
-        )
-        .unwrap();
-        r.mission.state = faber_engine::project::MissionState::Running;
-        r.save(&j).unwrap();
-        (repo, data, j, r)
-    }
-
-    #[test]
-    fn restart_pauses_a_saved_running_mission_without_reacquiring_power() {
-        let (_repo, _data, j, _r) = saved_mission();
-        let awake = Mutex::new(CountedAwake::new(Box::new(NoopPower), true).unwrap());
-        let r = restore_mission(&awake, &j).unwrap();
-        assert_eq!(r.mission.state, faber_engine::project::MissionState::Paused);
-        assert!(!awake.lock().unwrap().is_awake());
-    }
-
-    #[test]
-    fn private_checkpoints_release_mission_power_on_done_disk_pause_and_blocked() {
-        use faber_engine::project::MissionState;
-        let (_repo, data, j, mut r) = saved_mission();
-        let awake = Arc::new(Mutex::new(CountedAwake::new(Box::new(NoopPower), true).unwrap()));
-        let owner = awake.clone();
-        let _events = faber_engine::project::store::observe_missions(
-            data.path(),
-            Arc::new(move |mission| {
-                owner
-                    .lock()
-                    .unwrap()
-                    .set_mission_awake(&mission.id, matches!(mission.state, MissionState::Running | MissionState::Planning));
-            }),
-        )
-        .unwrap();
-        for state in [MissionState::Done, MissionState::Paused, MissionState::Blocked] {
-            r.mission.state = MissionState::Running;
-            r.save(&j).unwrap();
-            assert!(awake.lock().unwrap().is_awake());
-            r.mission.state = state;
-            r.save(&j).unwrap();
-            assert!(!awake.lock().unwrap().is_awake(), "{state:?} leaked power");
-        }
-    }
-
-    #[tokio::test]
-    async fn stop_releases_power_when_budget_fails_after_paused_checkpoint() {
-        let (_repo, data, j, mut r) = saved_mission();
-        let engine = faber_engine::Engine::new(
-            faber_engine::EngineOptions {
-                data_dir: data.path().into(),
-                clis: Default::default(),
-                spawn: Arc::new(|_, _, _| Err(std::io::Error::other("no process in power tests"))),
-                windows: false,
-                claude_env_billed: false,
-                max_warm: 0,
-                idle: std::time::Duration::from_secs(30),
-                runtime: tokio::runtime::Handle::current(),
-                ask: None,
-            },
-            Arc::new(|_| {}),
-        );
-        let awake = Mutex::new(CountedAwake::new(Box::new(NoopPower), true).unwrap());
-        awake.lock().unwrap().start_mission("m1");
-        std::fs::write(data.path().join("budget.json"), b"broken").unwrap();
-        assert!(stop_mission(&awake, &mut r, &j, &engine).await.is_err());
-        assert_eq!(faber_engine::project::run::Runner::load(&j).unwrap().mission.state, faber_engine::project::MissionState::Paused);
-        assert!(!awake.lock().unwrap().is_awake());
-        engine.shutdown();
-    }
+    use std::sync::Arc;
 
     #[test]
     fn acquisition_and_release_use_the_same_thread_across_callers() {
@@ -543,114 +395,5 @@ mod tests {
         assert!(fake.is_awake());
         guard.end_run("project");
         assert!(!fake.is_awake());
-    }
-
-    #[test]
-    fn mission_run_acquires_and_releases_awake() {
-        let fake = Arc::new(FakePower::new());
-        let mut guard = CountedAwake::new(Box::new(SharedFake(fake.clone())), true).unwrap();
-        assert!(!guard.is_awake());
-        assert!(!fake.is_awake());
-
-        guard.start_mission("mission-1");
-        assert!(guard.is_awake());
-        assert!(fake.is_awake());
-        assert_eq!(fake.call_count(), 1);
-
-        guard.end_mission("mission-1");
-        assert!(!guard.is_awake());
-        assert!(!fake.is_awake());
-        assert_eq!(fake.call_count(), 2);
-    }
-
-    #[test]
-    fn overlapping_mission_and_chat_runs_keep_system_awake_until_all_end() {
-        let fake = Arc::new(FakePower::new());
-        let mut guard = CountedAwake::new(Box::new(SharedFake(fake.clone())), true).unwrap();
-
-        guard.start_mission("mission-1");
-        assert!(fake.is_awake());
-        assert_eq!(fake.call_count(), 1);
-
-        // Chat turn starts
-        guard.start_run("turn-1");
-        assert!(fake.is_awake());
-        assert_eq!(fake.call_count(), 1);
-
-        // Chat turn ends via sync_runs (clearing active chat runs)
-        guard.sync_runs(HashSet::new());
-        assert!(guard.is_awake(), "remains awake while mission is still active");
-        assert!(fake.is_awake(), "remains awake while mission is still active");
-        assert_eq!(fake.call_count(), 1);
-
-        // Mission pauses/stops
-        guard.end_mission("mission-1");
-        assert!(!guard.is_awake());
-        assert!(!fake.is_awake());
-        assert_eq!(fake.call_count(), 2);
-    }
-
-    #[test]
-    fn mission_guard_releases_awake_on_drop_or_panic() {
-        let fake = Arc::new(FakePower::new());
-        let guard = Arc::new(Mutex::new(CountedAwake::new(Box::new(SharedFake(fake.clone())), true).unwrap()));
-
-        {
-            let mission_guard = MissionAwakeGuard::new(guard.clone(), "mission-1");
-            assert_eq!(mission_guard.mission_id(), "mission-1");
-            assert!(fake.is_awake());
-        }
-        assert!(!fake.is_awake(), "dropping mission guard must release awake");
-
-        let guard_clone = guard.clone();
-        let _ = std::panic::catch_unwind(move || {
-            let _mission_guard = MissionAwakeGuard::new(guard_clone, "mission-crash");
-            panic!("mission crashed");
-        });
-        assert!(!fake.is_awake(), "crashing thread must drop mission guard and release awake");
-    }
-
-    #[test]
-    fn mission_state_transitions_handle_awake_appropriately() {
-        let fake = Arc::new(FakePower::new());
-        let mut guard = CountedAwake::new(Box::new(SharedFake(fake.clone())), true).unwrap();
-
-        // Planning does not hold awake
-        guard.set_mission_awake("m1", false);
-        assert!(!fake.is_awake());
-
-        // Running holds awake
-        guard.set_mission_awake("m1", true);
-        assert!(fake.is_awake());
-
-        // Paused releases awake
-        guard.set_mission_awake("m1", false);
-        assert!(!fake.is_awake());
-
-        // Resumed holds awake
-        guard.set_mission_awake("m1", true);
-        assert!(fake.is_awake());
-
-        // Finished/Done releases awake
-        guard.set_mission_awake("m1", false);
-        assert!(!fake.is_awake());
-    }
-
-    #[test]
-    fn turning_off_setting_releases_awake_even_with_active_mission() {
-        let fake = Arc::new(FakePower::new());
-        let mut guard = CountedAwake::new(Box::new(SharedFake(fake.clone())), true).unwrap();
-
-        guard.start_mission("mission-1");
-        assert!(fake.is_awake());
-
-        // User turns off toggle in Settings
-        guard.set_enabled(false);
-        assert!(!guard.is_awake());
-        assert!(!fake.is_awake());
-
-        // User turns toggle back on while mission is active
-        guard.set_enabled(true);
-        assert!(fake.is_awake());
     }
 }

@@ -1,7 +1,9 @@
-import { onMount, Show } from 'solid-js';
+import { createEffect, createSignal, onMount, Show } from 'solid-js';
 import type { UpdateStatus } from './api.ts';
+import { Collapse } from './controls.tsx';
 import { t } from './i18n.ts';
 import { Mark } from './Mark.tsx';
+import { animateList } from './motion.ts';
 
 /** The words for where the install is: the download adds how far it is, a whole percent or, with no size, the megabytes. */
 export function updateText(status: UpdateStatus): string {
@@ -21,12 +23,18 @@ export function updateText(status: UpdateStatus): string {
 
 /** The sidebar's calm line while an update downloads or installs. Looking for one says nothing: it is over in a moment. */
 export function UpdateLine(props: { status: UpdateStatus }) {
+  const visible = () => props.status.phase === 'downloading' || props.status.phase === 'installing';
+  // The line grows in and shrinks away, so the rows under it never jump; it keeps its last words while it leaves.
+  const [held, setHeld] = createSignal('');
+  createEffect(() => {
+    if (visible()) setHeld(updateText(props.status));
+  });
   return (
-    <Show when={props.status.phase === 'downloading' || props.status.phase === 'installing'}>
+    <Collapse open={visible()}>
       <div class="upd" role="status">
-        {updateText(props.status)}
+        {held()}
       </div>
-    </Show>
+    </Collapse>
   );
 }
 
@@ -43,10 +51,13 @@ export function UpdateStage(props: { status: UpdateStatus }) {
   const percent = () => (props.status.phase === 'downloading' ? props.status.percent : undefined);
   return (
     <div class="ustage" data-surface="update">
-      <div class="ustage-col">
+      <div class="ustage-col" ref={animateList}>
         <Mark size={36} />
-        <p class="ustage-text num" role="status">
-          {updateText(props.status)}
+        {/* Each phase fades in over the one before it; the percent inside a phase just counts. */}
+        <p class="ustage-text num" role="status" ref={animateList}>
+          <Show when={props.status.phase} keyed>
+            {(_phase) => <span>{updateText(props.status)}</span>}
+          </Show>
         </p>
         <Show when={percent() !== undefined}>
           <div class="ubar" role="progressbar" aria-label={t('update.downloading')} aria-valuemin={0} aria-valuemax={100} aria-valuenow={percent()}>

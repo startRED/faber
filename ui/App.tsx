@@ -3,6 +3,7 @@ import { Ambient } from './Ambient.tsx';
 import { Hole } from './Hole.tsx';
 import {
   api,
+  errorText,
   type Appearance,
   type AppState,
   type Choice,
@@ -15,24 +16,30 @@ import {
   type Summary,
   type UpdateStatus,
   type Vendor,
+  STOPS,
 } from './api.ts';
 import { inOrder, refreshed, saveAndApply, watchSystem } from './appearance.ts';
 import { useClock } from './clock.ts';
 import { Composer, type Draft } from './Composer.tsx';
+import { ContextMeter } from './Context.tsx';
 import { Empty } from './Empty.tsx';
+import { Find } from './Find.tsx';
 import { LookStep } from './FirstRun.tsx';
 import { keepFocusIn } from './focus.ts';
 import { Icon } from './Glyphs.tsx';
 import { failureText, lang, t, templates, useLanguage } from './i18n.ts';
-import { createWidth } from './layout.ts';
+import { createFileDrop } from './drop.ts';
+import { Grip } from './Grip.tsx';
+import { autoRun, createWindowWidth, type Edge, fit, limitsOf, savedWidths, SIDE, widthClass } from './layout.ts';
 import { Lockup } from './Mark.tsx';
 import { isFirstInstall, newestId, NOTES, type Note, whatsNew } from './notes.ts';
 import { modelOptions, vendorName } from './models.ts';
-import { animateDetails, animateList, watchMotion } from './motion.ts';
+import { animateDetails, animateList, keepForExit, watchMotion } from './motion.ts';
+import { Palette } from './Palette.tsx';
 import { Projects } from './Projects.tsx';
 import { createOpening, upsert } from './opening.ts';
 import { Running } from './Running.tsx';
-import { openedAgent, showAgent, startMessage } from './AgentChat.tsx';
+import { agentWide, openedAgent, showAgent, startMessage, toggleAgentWide } from './AgentChat.tsx';
 import { openedSite, showSite } from './Site.tsx';
 import { agentSteps } from './worklog.ts';
 import { createAutoOpen, openPlace, type Place, placeOfRunning, store, waitingKeys } from './running.ts';
@@ -48,6 +55,8 @@ import { Welcome } from './Welcome.tsx';
 import { UpdateStage } from './UpdateStage.tsx';
 import { WhatsNew } from './WhatsNew.tsx';
 import { mac, WindowControls } from './WindowControls.tsx';
+import { keepGoingWarning } from './keep-going.ts';
+import { KeepGoingNote } from './KeepGoingNote.tsx';
 
 // Small per-window conveniences; storage can be missing, and the app works without it.
 function recall<T>(key: string, fallback: T): T {
@@ -135,7 +144,8 @@ export function App(props: { initial: AppState; update?: UpdateStatus; inbox: { 
   // conversation then, so nothing may be sent or warmed for either.
   const [loading, setLoading] = createSignal(false);
   const opening = createOpening();
-  const width = createWidth();
+  const win = createWindowWidth();
+  const width = createMemo(() => widthClass(win()));
   let thread: HTMLDivElement | undefined;
   let work: HTMLElement | undefined;
   let restore: ((draft: Draft) => boolean) | undefined;
@@ -151,7 +161,7 @@ export function App(props: { initial: AppState; update?: UpdateStatus; inbox: { 
       saved.restored = false;
       return;
     }
-    if (["error.quotaWait", "error.moveFailed", "error.quotaOut"].includes(m.error ?? "")) {
+    if (["error.quotaWait", "error.moveFailed", "error.quotaOut", "error.copy.failed"].includes(m.error ?? "")) {
       if (place().id !== id) return;
       saved.restored = restore?.(saved.draft) || saved.restored;
       if (m.error !== 'error.moveFailed') return;
@@ -197,6 +207,17 @@ export function App(props: { initial: AppState; update?: UpdateStatus; inbox: { 
   const items = () => store.list().items;
   const needing = () => items().filter((i) => i.state === 'needsYou').length;
 
+  // ---- The widths the person gave the sidebar and the running column by dragging their edges (ui/Grip.tsx), kept per window like the
+  // other small conveniences, and focus mode (Ctrl+B): the sidebar and the column step aside to give the stage the whole window.
+  const [widths, setWidths] = createSignal(savedWidths(recall('faber.layout', null)));
+  const setWidth = (edge: Edge, px: number | undefined) => {
+    setWidths((w) => ({ ...w, [edge]: px }));
+    remember('faber.layout', widths());
+  };
+  const [focus, setFocus] = createSignal(false);
+  const dropping = createFileDrop();
+  const dropShown = keepForExit(dropping);
+
   // ---- The sidebar: beside the stage from 900 px, behind a button below that. Opened, it is modal.
   const [sideOpen, setSideOpen] = createSignal(false);
   const narrow = () => width() === 'narrow';
@@ -223,7 +244,16 @@ export function App(props: { initial: AppState; update?: UpdateStatus; inbox: { 
   const [columnOpen, setColumnOpen] = createSignal(false);
   const [byUser, setByUser] = createSignal(false);
   const docked = () => width() === 'wide';
-  const trapped = () => columnOpen() && byUser() && !docked();
+  // The column is on screen when it is open and focus mode is off.
+  const colShown = () => columnOpen() && !focus();
+  const runLimits = createMemo(() => limitsOf('run', win(), widths().side, docked()));
+  // What the column really measures: the width the person dragged it to, or until then the room the window leaves beside the
+  // reading column, inside what the window leaves it. A drag that ends on the usual width goes back to following the window.
+  const autoWidth = () => fit(autoRun(win(), widths().side), runLimits());
+  const runWidth = () => fit(widths().run ?? autoRun(win(), widths().side), runLimits());
+  // An opened subagent can fill the stage as a full thread (R161 step 3): the column then sits over the work area, not beside it.
+  const wide = () => !!sideAgent() && agentWide();
+  const trapped = () => colShown() && byUser() && !docked() && !wide();
   let column: HTMLElement | undefined;
   let runButton: HTMLButtonElement | undefined;
   const autoOpen = createAutoOpen();
@@ -231,7 +261,13 @@ export function App(props: { initial: AppState; update?: UpdateStatus; inbox: { 
   // An input method is composing text: the column waits for it to end.
   let composing = false;
   const openColumn = (user: boolean) => {
-    if (columnOpen()) return;
+    // Something that opens the column shows it: focus mode steps aside.
+    const hidden = focus();
+    setFocus(false);
+    if (columnOpen()) {
+      if (hidden) autoOpen.seen(waitingKeys(items()));
+      return;
+    }
     // Every question waiting now is on screen, so none of them opens the column again.
     autoOpen.seen(waitingKeys(items()));
     // Two modal dialogs never stack: one the user opens closes the sidebar overlay.
@@ -251,7 +287,16 @@ export function App(props: { initial: AppState; update?: UpdateStatus; inbox: { 
     setByUser(false);
     runButton?.focus();
   };
-  const toggleColumn = () => (columnOpen() ? closeColumn() : openColumn(true));
+  const toggleColumn = () => (colShown() ? closeColumn() : openColumn(true));
+  const toggleFocus = () => {
+    if (focus()) return setFocus(false);
+    // Focus inside what is about to leave the screen goes to the box that stays (asked before they go: removing the column drops focus).
+    const at = document.activeElement;
+    const leaving = !!at && !!(sideEl?.contains(at) || column?.contains(at));
+    closeSide(false);
+    setFocus(true);
+    if (leaving) queueMicrotask(() => (document.querySelector<HTMLTextAreaElement>('.composer textarea') ?? runButton)?.focus());
+  };
   // A subagent the person opened (R161 step 3) is the column's content until "back"; it belongs to the conversation on
   // screen, so opening another one goes back to the list.
   const sideAgent = createMemo(() => {
@@ -276,7 +321,7 @@ export function App(props: { initial: AppState; update?: UpdateStatus; inbox: { 
     if (!open) return;
     // One of another conversation is never shown (`sideAgent`); it goes when the conversation on screen changes.
     if (current()?.id !== open.conversationId) return;
-    if (!columnOpen()) return openColumn(true);
+    if (!columnOpen() || focus()) return openColumn(true);
     // A column that opened by itself becomes the person's: over the stage it is now a modal dialog, like one they opened.
     if (!byUser()) {
       closeSide(false);
@@ -391,6 +436,9 @@ export function App(props: { initial: AppState; update?: UpdateStatus; inbox: { 
       if (e.type === 'queue') {
         setCurrent((c) => (c?.id === e.conversationId ? { ...c, queued: e.queued } : c));
       }
+      if (e.type === 'context') {
+        setCurrent((c) => (c?.id === e.conversationId ? { ...c, context: e.context ?? undefined } : c));
+      }
     });
     // Any key in a text field holds the running column back for a moment, whether or not the text changed (the arrows
     // move the caret), and so does an input method that is composing.
@@ -406,7 +454,7 @@ export function App(props: { initial: AppState; update?: UpdateStatus; inbox: { 
       // A first-run step and a tutorial card are modal: their own buttons are the only way on, so Esc, Ctrl N, Ctrl , and
       // Ctrl . do nothing (the card handles its own keys, ui/Tutorial.tsx).
       if (step() || tourOpen()) {
-        if (ctrl && ['n', ',', '.'].includes(e.key.toLowerCase())) e.preventDefault();
+        if (ctrl && ['n', ',', '.', 'b'].includes(e.key.toLowerCase())) e.preventDefault();
         if (step() && e.key === 'Tab' && !ctrl && !e.altKey) keepFocusIn(e, document.querySelector<HTMLElement>('.fr-stage'));
         return;
       }
@@ -431,6 +479,10 @@ export function App(props: { initial: AppState; update?: UpdateStatus; inbox: { 
         void fresh(place()).then(focusComposer);
       }
       if (ctrl && e.key === ',') openSettings();
+      if (ctrl && !e.shiftKey && !e.altKey && e.key.toLowerCase() === 'b') {
+        e.preventDefault();
+        if (inShell) toggleFocus();
+      }
       if (ctrl && e.key === '.') {
         e.preventDefault();
         // Settings and the account cards replace the shell: the column is not on screen to toggle.
@@ -439,7 +491,7 @@ export function App(props: { initial: AppState; update?: UpdateStatus; inbox: { 
       if (e.key === 'Escape') {
         if (sideOverlay() && inShell) return closeSide();
         // A column the user opened over the stage is modal; one that opened itself answers Esc only while focus is in it.
-        if (inShell && columnOpen() && (trapped() || column?.contains(document.activeElement))) return closeColumn();
+        if (inShell && colShown() && (trapped() || column?.contains(document.activeElement))) return closeColumn();
         if (setupOpen()) closeSetup();
         else closeSettings();
         setSaveError(undefined);
@@ -476,6 +528,7 @@ export function App(props: { initial: AppState; update?: UpdateStatus; inbox: { 
             needsYou: templates('tray.needsYou'),
             notify: templates('tray.notify').other,
             notifyMany: templates('tray.notifyMany').other,
+            stopped: Object.fromEntries(STOPS.map((why) => [why, templates(`tray.stopped.${why}`).other])),
           })
           .catch(() => undefined),
     ),
@@ -603,15 +656,55 @@ export function App(props: { initial: AppState; update?: UpdateStatus; inbox: { 
     closeSide(false);
     void fresh({ area: 'project', projectId: projects[0].id });
   };
-  const remove = async (id: string) => {
-    await api.remove(id);
+  /** Deletes a conversation; `'unsaved'` when its copy holds work found nowhere else and the person must say so first. */
+  const remove = async (id: string, discard = false): Promise<'unsaved' | undefined> => {
+    try {
+      await api.remove(id, discard);
+    } catch (err) {
+      if (errorText(err) === 'error.copy.unsaved') return 'unsaved';
+      setSaveError(failureText(err));
+      return;
+    }
     try { localStorage.removeItem(`faber.choice.${id}`); } catch { /* Storage can be unavailable. */ }
     if (opening.id === id) void fresh(place());
   };
 
   const options = createMemo(() => (lang(), modelOptions(state().vendors, state().models)));
   const project = () => state().projects.find((p) => p.id === projectId());
-  const busy = () => current()?.messages.at(-1)?.status === 'streaming';
+  // Faber's checks of the last reply (R146), and a compaction, keep the conversation at work: what is written waits for them, and Stop ends them.
+  const busy = () => {
+    const last = current()?.messages.at(-1);
+    // A working row in the running list that waits for no quota is the engine saying it is at work: an answer, Faber's checks, or a compaction.
+    return last?.status === 'streaming' || last?.checks?.state === 'running' || items().some((i) => i.conversationId === current()?.id && i.state === 'working' && !i.waitUntil);
+  };
+  // "Send now" works while an answer streams (the engine hands the message to its turn, or puts it first); Faber's own checks
+  // keep it hidden, as Stop is what ends them.
+  const checking = () => busy() && current()?.messages.at(-1)?.status !== 'streaming';
+  // "Keep going" (R199): a project conversation under way can go on by itself. The engine keeps the switch; the list says it.
+  const keepGoing = () => {
+    const c = current();
+    if (area() !== 'project' || !c?.messages.length) return undefined;
+    return state().conversations.some((s) => s.id === c.id && s.keepGoing);
+  };
+  // Poor quota is asked about before keep going turns on, and said on screen while it is on (ui/keep-going.ts).
+  const keepGoingWarn = createMemo(() => {
+    const c = current();
+    if (keepGoing() === undefined || !c) return undefined;
+    return keepGoingWarning(state().usage ?? [], items().find((r) => r.conversationId === c.id));
+  });
+  const [askKeepGoing, setAskKeepGoing] = createSignal(false);
+  createEffect(on(() => current()?.id, () => setAskKeepGoing(false)));
+  const setKeepGoing = (value: boolean) => {
+    setAskKeepGoing(false);
+    const id = current()?.id;
+    if (id) void api.keepGoing(id, value).then(refresh, (err) => setSaveError(failureText(err)));
+  };
+  // An archived conversation, by the person or its own agent: once its reply ends, one line in place of the composer brings it back.
+  const archived = () => !!place().id && state().conversations.some((s) => s.id === place().id && s.archived);
+  const unarchive = () => {
+    const id = place().id;
+    if (id) void api.archive(id, false).then(refresh, (err) => setSaveError(failureText(err)));
+  };
   const needsProject = () => area() === 'project' && !project();
   // The new conversation of a chat with a connected AI is the one place the effects of a look appear.
   const newChat = () => (area() === 'chat' || !!project()) && state().vendors.length > 0 && !current()?.messages.length;
@@ -677,6 +770,12 @@ export function App(props: { initial: AppState; update?: UpdateStatus; inbox: { 
         hints={newChat() ? [t('composer.chatPlaceholder'), t('hint.chat.2'), t('hint.chat.3')] : undefined}
         onSend={(d) => void send(d)}
         onStop={() => current() && void api.interrupt(current()!.id)}
+        keepGoing={keepGoing()}
+        onKeepGoing={(on) => {
+          // Turning it on while the quota is poor asks first (the chip again closes the question); off never asks.
+          if (on && keepGoingWarn()) return setAskKeepGoing(!askKeepGoing());
+          setKeepGoing(on);
+        }}
         onWarm={() => void api.warm({ conversationId: current()?.id, ...target(), choice: picked() })}
         onPause={(text) => {
           if (!loading() && picked().vendor === 'auto') void api.routeDraft({ conversationId: current()?.id, ...target(), choice: picked() }, text);
@@ -717,6 +816,13 @@ export function App(props: { initial: AppState; update?: UpdateStatus; inbox: { 
         if (trapped()) closeColumn();
         queueMicrotask(() => startMessage(text));
       }}
+      wide={wide()}
+      onWide={() => {
+        toggleAgentWide();
+        // The column is drawn again where it now sits: focus goes back to the button that was pressed.
+        queueMicrotask(() => column?.querySelector<HTMLElement>('.agent-wide')?.focus());
+      }}
+      resize={wide() ? undefined : { value: runWidth(), limits: runLimits(), fallback: autoWidth(), onChange: (px) => setWidth('run', px === autoWidth() ? undefined : px) }}
       ref={(el) => (column = el)}
     />
   );
@@ -820,7 +926,8 @@ export function App(props: { initial: AppState; update?: UpdateStatus; inbox: { 
           <div
             class="shell"
             data-screen={`${area() === 'chat' ? 'chat' : 'project'}.${newChat() ? 'new' : 'thread'}`}
-            classList={{ docked: columnOpen() && docked() }}
+            classList={{ docked: colShown() && docked() && !wide(), focus: focus() }}
+            style={{ '--side-w': `${widths().side}px`, '--run-w': `${runWidth()}px` }}
             inert={tourOpen() || notesOpen() || startScreen()}
             ref={animateList}
           >
@@ -832,8 +939,8 @@ export function App(props: { initial: AppState; update?: UpdateStatus; inbox: { 
               aria-label={t('side.label')}
               role={sideOverlay() ? 'dialog' : undefined}
               aria-modal={sideOverlay() ? 'true' : undefined}
-              inert={trapped() || (narrow() && !sideOverlay())}
-              aria-hidden={narrow() && !sideOverlay() ? 'true' : undefined}
+              inert={trapped() || (narrow() && !sideOverlay()) || (focus() && !narrow())}
+              aria-hidden={(narrow() && !sideOverlay()) || (focus() && !narrow()) ? 'true' : undefined}
             >
               <Sidebar
                 conversations={state().conversations}
@@ -855,10 +962,13 @@ export function App(props: { initial: AppState; update?: UpdateStatus; inbox: { 
                 onNewIn={(id) => (closeSide(false), void fresh({ area: 'project', projectId: id }))}
                 onAddProject={() => void addProject().catch(fail)}
                 onOpen={openSummary}
-                onRemove={(id) => void remove(id)}
+                onRemove={remove}
                 onSettings={(at) => (closeSide(false), openSettings(at))}
                 onError={(err) => setSaveError(failureText(err))}
               />
+              <Show when={!narrow()}>
+                <Grip edge="side" label={t('side.resize')} value={widths().side} limits={SIDE} fallback={SIDE.fallback} onChange={(px) => setWidth('side', px)} />
+              </Show>
             </aside>
             <Show when={sideOverlay()}>
               <button class="scrim" tabindex="-1" aria-label={t('side.hide')} onClick={() => closeSide()} />
@@ -870,6 +980,18 @@ export function App(props: { initial: AppState; update?: UpdateStatus; inbox: { 
                     <Icon name="menu" />
                   </button>
                 </Show>
+                {/* Focus mode hid the sidebar: this brings it back (and the column). It is always here from 900 px, shut, so it grows in
+                    instead of appearing; below that the menu button is the way to the sidebar. */}
+                <button
+                  class="iconbtn focus-exit"
+                  classList={{ off: !focus() || narrow() }}
+                  aria-label={t('focus.exit')}
+                  title={t('focus.exit')}
+                  inert={!focus() || narrow()}
+                  onClick={() => setFocus(false)}
+                >
+                  <Icon name="menu" />
+                </button>
                 <div class="crumb">
                   <Switch>
                     <Match when={place().id}>
@@ -878,6 +1000,20 @@ export function App(props: { initial: AppState; update?: UpdateStatus; inbox: { 
                         {t('crumb.separator')}
                       </span>
                       <b>{title() ?? ''}</b>
+                      {/* A project conversation in a copy of its own says which branch, quietly; the path is the tooltip. */}
+                      <Show when={current()?.id === place().id && current()?.copy}>
+                        {(copy) => (
+                          <>
+                            <span class="sep" aria-hidden="true">
+                              {t('crumb.separator')}
+                            </span>
+                            <span class="copy" data-testid="crumb-copy" title={`${t('crumb.copy')}
+${copy().path}`}>
+                              {copy().branch}
+                            </span>
+                          </>
+                        )}
+                      </Show>
                     </Match>
                     <Match when={area() === 'project' && project()}>
                       {t('crumb.project')}
@@ -893,12 +1029,13 @@ export function App(props: { initial: AppState; update?: UpdateStatus; inbox: { 
                   </Switch>
                 </div>
                 <div class="right">
+                  <Show when={current()?.id === place().id ? current()?.context : undefined}>{(fill) => <ContextMeter fill={fill()} />}</Show>
                   <button
                     class="run-btn"
                     data-tour="run"
                     classList={{ need: needing() > 0 }}
                     ref={(el) => (runButton = el)}
-                    aria-expanded={columnOpen()}
+                    aria-expanded={colShown()}
                     aria-controls="running"
                     title={t('run.toggle')}
                     onClick={toggleColumn}
@@ -918,7 +1055,7 @@ export function App(props: { initial: AppState; update?: UpdateStatus; inbox: { 
                   </button>
                 </div>
               </div>
-              <div class="work" classList={{ under: columnOpen() && !docked() }} ref={(el) => { work = el; animateList(el); }}>
+              <div class="work" classList={{ under: colShown() && !docked() }} ref={(el) => { work = el; animateList(el); }}>
                 <Show
                   when={needsProject()}
                   fallback={
@@ -938,7 +1075,7 @@ export function App(props: { initial: AppState; update?: UpdateStatus; inbox: { 
                           tailWatch().observe(el);
                           onCleanup(() => tailWatch().unobserve(el));
                         });
-                      }} onScroll={(e) => onScroll(e.currentTarget)} inert={trapped()}>
+                      }} onScroll={(e) => onScroll(e.currentTarget)} inert={trapped() || (colShown() && wide())}>
                         <Show
                           when={newChat()}
                           fallback={
@@ -957,7 +1094,7 @@ export function App(props: { initial: AppState; update?: UpdateStatus; inbox: { 
                                   <Thread
                                     messages={c().messages}
                                     queued={c().queued}
-                                    busy={busy()}
+                                    busy={checking()}
                                     onError={fail}
                                     usage={state().usage ?? []}
                                     from={from()}
@@ -996,7 +1133,21 @@ export function App(props: { initial: AppState; update?: UpdateStatus; inbox: { 
                       </div>
                       <Show when={!newChat() && !needsProject() && state().vendors.length > 0}>
                         <div class="dock" inert={trapped()}>
-                          {composer()}
+                          <KeepGoingNote
+                            warning={keepGoingWarn()}
+                            on={!!keepGoing()}
+                            asking={askKeepGoing()}
+                            onYes={() => setKeepGoing(true)}
+                            onNo={() => setAskKeepGoing(false)}
+                          />
+                          <Show when={archived() && !busy()} fallback={composer()}>
+                            <div class="archived-bar" role="status">
+                              <span>{t('archive.line')}</span>
+                              <button type="button" class="btn" onClick={unarchive}>
+                                {t('menu.unarchive')}
+                              </button>
+                            </div>
+                          </Show>
                         </div>
                       </Show>
                     </>
@@ -1013,10 +1164,11 @@ export function App(props: { initial: AppState; update?: UpdateStatus; inbox: { 
                     onError={fail}
                   />
                 </Show>
-                <Show when={columnOpen() && !docked()}>{runningColumn()}</Show>
+                <Show when={colShown() && (!docked() || wide())}>{runningColumn()}</Show>
               </div>
+              <Find enabled={!newChat() && !needsProject() && !loading() && !!current()?.messages.length && !(colShown() && wide())} root={() => thread} />
             </main>
-            <Show when={columnOpen() && docked()}>{runningColumn()}</Show>
+            <Show when={colShown() && docked() && !wide()}>{runningColumn()}</Show>
           </div>
         </Show>
       </Show>
@@ -1026,9 +1178,30 @@ export function App(props: { initial: AppState; update?: UpdateStatus; inbox: { 
       <Show when={startScreen()}>
         <UpdateStage status={update()} />
       </Show>
+      <Show when={dropShown()}>
+        {/* A file over the window: where it will go, said calmly. It never takes a click; the drop is heard by the window. */}
+        <div class="dropveil" classList={{ leaving: !dropping() }} aria-hidden="true">
+          <div class="dv-card">
+            <Icon name="clip" />
+            <span>{t('drop.attach')}</span>
+          </div>
+        </div>
+      </Show>
       <Show when={notesOpen()}>
         <WhatsNew version={state().version} notes={notes()} onClose={closeNotes} />
       </Show>
+      <Palette
+        enabled={!step() && !setupOpen() && !tourOpen() && !notesOpen() && !startScreen()}
+        conversations={state().conversations}
+        projects={state().projects}
+        onOpen={openSummary}
+        onProject={(id) => (closeSettings(), closeSide(false), void fresh({ area: 'project', projectId: id }))}
+        onNew={() => (closeSettings(), closeSide(false), void fresh(place()).then(() => document.querySelector<HTMLElement>('.composer textarea')?.focus()))}
+        onArea={switchArea}
+        onSettings={(at) => (settingsOpen() ? (closeSettings(), queueMicrotask(() => openSettings(at))) : openSettings(at))}
+        onRunning={() => (closeSettings(), toggleColumn())}
+        onAddProject={() => (closeSettings(), void addProject().catch(fail))}
+      />
     </div>
   );
 }

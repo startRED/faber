@@ -31,11 +31,11 @@ fn right_click(ctx: &mut Ctx) -> Result {
     // What the page decided about every right-click after Faber's own handlers: the browser's menu is stopped in all of them.
     page.eval("window.__rc = []; window.addEventListener('contextmenu', (e) => window.__rc.push(e.defaultPrevented)); true")?;
 
-    // A chat in the sidebar: Rename, Delete.
+    // A chat in the sidebar: Rename, Archive, Delete.
     page.right_click(&css(".list .crow"))?;
     page.wait_visible(&css(".cmenu"))?;
-    let (rename, delete) = (page.text_of("menu.rename")?, page.text_of("menu.delete")?);
-    same(menu_words(page)?, vec![rename.clone(), delete], "the menu of a chat")?;
+    let (rename, archive, delete) = (page.text_of("menu.rename")?, page.text_of("menu.archive")?, page.text_of("menu.delete")?);
+    same(menu_words(page)?, vec![rename.clone(), archive.clone(), delete], "the menu of a chat")?;
     // The animation has settled when the shot is taken.
     std::thread::sleep(Duration::from_millis(400));
     ctx.shot(&mut app, "chat-menu")?;
@@ -52,6 +52,21 @@ fn right_click(ctx: &mut Ctx) -> Result {
     page.fill(&box_, "The blue sky")?;
     page.press("Enter")?;
     page.wait_visible(&css(".list .crow .item").has_text("The blue sky"))?;
+
+    // Archive takes the open chat off the list, and one line with Unarchive takes the composer's place until it comes back.
+    page.right_click(&css(".list .crow"))?;
+    page.wait_visible(&css(".cmenu"))?;
+    page.click(&css(".cmenu [role=menuitem]").has_text(&archive))?;
+    page.wait_visible(&css(".archived-bar"))?;
+    page.wait_gone(&css(".list .crow"))?;
+    same(page.count(&css(".dock .composer"))?, 0, "composers of an archived chat")?;
+    wait_menu_gone(page)?;
+    ctx.shot(&mut app, "archived")?;
+    let page = &mut app.page;
+    let unarchive = page.text_of("menu.unarchive")?;
+    page.click(&css(".archived-bar button").has_text(&unarchive))?;
+    page.wait_visible(&css(".list .crow .item").has_text("The blue sky"))?;
+    page.wait_visible(&css(".dock .composer"))?;
 
     // The title bar, the sidebar footer and the greeting area show nothing at all.
     for place in ["header.top", ".side-foot", ".main"] {

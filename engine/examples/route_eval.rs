@@ -91,6 +91,8 @@ impl Router {
                     CodexThread {
                         helper: Default::default(),
                         browse: false,
+                        conversations: false,
+                        verify: false,
                         cwd: self.dir.clone(),
                         model,
                         effort,
@@ -108,6 +110,8 @@ impl Router {
                 let launch = ClaudeLaunch {
                     helper: Default::default(),
                     browse: false,
+                    conversations: false,
+                    verify: false,
                     area: Area::Chat,
                     model,
                     effort,

@@ -55,6 +55,10 @@ fn start(ctx: &mut Ctx) -> Result<Opened> {
         if let Some(project) = project {
             conversation["projectId"] = json!(project);
         }
+        // The second was started by the first one's agent, so the sidebar shows it under it.
+        if i == 1 {
+            conversation["startedBy"] = json!("c0");
+        }
         std::fs::write(folder.join(format!("c{i}.json")), conversation.to_string()).map_err(|e| e.to_string())?;
     }
     let mut launch = claude_chat(ctx);
@@ -137,6 +141,10 @@ fn looks(ctx: &mut Ctx) -> Result {
     let quiet = life(&mut app)?;
     ensure(still(&quiet), || format!("the Projects home moves with reduced motion: {quiet}"))?;
     ctx.shot(&mut app, "homes-project-reduced")?;
+    // Iridium's second conversation was started by its first one's agent, so it sits under it.
+    app.page.click(&css(".prow .item").has_text("Iridium"))?;
+    app.page.wait_visible(&css(".crow.child .item").has_text("Configure o projeto"))?;
+    ctx.shot(&mut app, "homes-nested")?;
     // Exact: the rows to pick up name their area, and a chat row says "Chat" too.
     let chat = app.page.named("button", "area.chat")?.exact();
     app.page.click(&chat)?;

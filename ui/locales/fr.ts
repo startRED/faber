@@ -35,6 +35,13 @@ export const fr: Messages = {
   'tray.notify': '{title} a besoin de vous',
   // Handwritten wording; native-speaker review pending (English is the source).
   'tray.notifyMany': '{title} : {n} demandes ont besoin de vous',
+  'tray.stopped.done': '{title} : a continué jusqu’à ce qu’il ne reste rien',
+  'tray.stopped.asked': '{title} : a cessé de continuer pour vous poser une question',
+  'tray.stopped.failed': '{title} : a cessé de continuer après deux tours échoués',
+  'tray.stopped.cap': '{title} : a cessé de continuer après un long moment seul',
+  'tray.stopped.pace': '{title} : a cessé de continuer pour que {ai} garde son rythme',
+  'tray.stopped.quota': '{title} : a cessé de continuer jusqu’à ce que {ai} ait du quota',
+  'tray.stopped.billed': '{title} : a cessé de continuer, {ai} est peut-être facturé à l’usage',
   'toast.dismiss': 'Ignorer',
   'side.addProject': 'Ajouter un dossier de projet',
   'side.noAi': 'Aucune IA connectée',
@@ -48,11 +55,28 @@ export const fr: Messages = {
   'side.label': 'Barre latérale',
   'side.hide': 'Fermer la barre latérale',
   'side.show': 'Ouvrir la barre latérale',
+  'side.resize': 'Changer la largeur de la barre latérale',
+  'focus.exit': 'Quitter le mode concentration',
   'side.projects': 'Projets',
   'side.newIn': 'Nouvelle conversation dans {name}',
   'side.noProjects': "Aucun projet pour l'instant",
   'side.search': 'Rechercher',
   'side.noMatch': 'Aucun résultat',
+  'palette.label': 'Recherche et commandes',
+  'palette.placeholder': 'Cherchez une conversation, un projet ou une action',
+  'palette.recent': 'Récents',
+  'palette.actions': 'Actions',
+  'palette.none': 'Aucun résultat',
+  'palette.goArea': 'Aller à {area}',
+  'palette.settings': 'Réglages : {section}',
+  'palette.count': { one: '{n} résultat', other: '{n} résultats' },
+  'find.label': 'Rechercher dans la conversation',
+  'find.placeholder': 'Rechercher',
+  'find.count': '{current} sur {total}',
+  'find.none': 'Aucune occurrence',
+  'find.prev': 'Occurrence précédente',
+  'find.next': 'Occurrence suivante',
+  'find.close': 'Fermer la recherche',
   'side.running': 'En cours',
   'side.today': "Aujourd'hui",
   'side.week': 'Cette semaine',
@@ -69,12 +93,21 @@ export const fr: Messages = {
   'suggest.3': 'Comparer deux options',
   'run.title': 'En cours',
   'run.toggle': 'Afficher ou masquer ce qui tourne',
+  'run.resize': 'Changer la largeur de la liste de ce qui tourne',
   'run.close': 'Fermer la liste de ce qui tourne',
   'run.none': 'Rien en cours',
   'run.running': { one: '{n} en cours', other: '{n} en cours' },
   'run.needs': { one: '{n} a besoin de vous', other: '{n} ont besoin de vous' },
   'run.needsYou': 'A besoin de vous',
+  'run.held': 'Des vérifications de la pull request {pr} ont échoué ; le quota est serré, la correction vous revient.',
   'run.working': 'travaille',
+  'run.keepGoing': 'travaille de lui-même',
+  'run.kg.turns': { one: '{n} tour fait', other: '{n} tours faits' },
+  'run.kg.since': 'au travail depuis {time}',
+  'run.kg.wait.retry': 'fait une pause après une erreur',
+  'run.kg.wait.rest': 'fait une pause avant le tour suivant',
+  'run.kg.wait.busy': 'attend la fin d’une mise à jour',
+  'run.kg.wait.start': 'reprend',
   'run.routing': 'choisit un modèle',
   'run.untitled': 'Sans titre',
   'time.seconds': '{n} s',
@@ -92,6 +125,7 @@ export const fr: Messages = {
   'composer.projectPlaceholder': 'Demandez à Faber de travailler ici',
   'composer.message': 'Message',
   'composer.attach': 'Joindre',
+  'drop.attach': 'Déposez pour joindre',
   'composer.attachedFile': 'Fichier joint {name} :',
   'composer.removeAttachments': 'Retirer les pièces jointes',
   'composer.model': 'Modèle',
@@ -99,8 +133,33 @@ export const fr: Messages = {
   'effort.low': 'Faible',
   'effort.medium': 'Moyen',
   'effort.high': 'Élevé',
+  'answer.effort.low': 'effort faible',
+  'answer.effort.medium': 'effort moyen',
+  'answer.effort.high': 'effort élevé',
   'composer.send': 'Envoyer',
   'composer.stop': 'Arrêter',
+  'composer.keepGoing': 'Continuer seul',
+  'composer.keepGoing.line': 'Faber envoie le tour suivant de lui-même jusqu’à la fin du travail.',
+  'composer.keepGoing.on': 'Continue de lui-même. Arrêter y met fin.',
+  'wake.keepGoing': 'Faber lui a demandé de continuer',
+  'keepGoing.warn.waiting': 'Aucune IA n’a de quota. Continuer seul attend et reprend de lui-même dans {when}.',
+  'keepGoing.warn.out': 'Aucune IA n’a de quota pour l’instant. Continuer seul attendra et reprendra de lui-même dans {when}.',
+  'keepGoing.warn.outUnknown': 'Aucune IA n’a de quota et on ne sait pas quand il revient. Continuer seul attend et réessaie toutes les dix minutes.',
+  'away.summary': '{title} : {parts}.',
+  'away.title': 'Pendant votre absence ({time})',
+  'away.turns': { one: '{n} tour de travail', other: '{n} tours de travail' },
+  'away.switches': { one: '{n} passage à l’autre IA', other: '{n} passages à l’autre IA' },
+  'away.answered': { one: '{n} réponse donnée par Faber à votre place', other: '{n} réponses données par Faber à votre place' },
+  'away.chose': 'Vous étiez absent, Faber a donc répondu « {question} » par « {answer} ».',
+  'keepGoing.warn.billed': 'Il ne reste qu’une IA peut-être facturée à l’usage, et Faber n’y dépense rien de lui-même : Continuer seul s’arrêterait.',
+  'keepGoing.warn.low': 'Le quota est presque épuisé sur chaque IA. Continuer seul continue quand même et attend le renouvellement s’il s’épuise.',
+  'keepGoing.warn.fast': 'Le quota part plus vite que prévu cette semaine sur chaque IA. Continuer seul continue quand même.',
+  'keepGoing.warn.anyway': 'Continuer quand même',
+  'keepGoing.warn.cancel': 'Pas maintenant',
+  'wake.asked': 'L’agent d’une autre conversation a posé une question à celle-ci',
+  'wake.childDone': "Une conversation lancée par cet agent est terminée, et Faber lui a transmis sa réponse",
+  'wake.compacted': 'Faber a compacté la conversation',
+  'wake.compactFailed': 'Faber n’a pas pu compacter la conversation',
   'model.auto': 'Auto',
   'model.autoChoose': 'IA : choisir pour moi',
   'model.default': 'Modèle par défaut',
@@ -128,7 +187,14 @@ export const fr: Messages = {
   'ask.always': 'Toujours autoriser dans cette conversation',
   'ask.deny': 'Refuser',
   'ask.question.label': 'Une question de l’assistant',
-  'ask.question.other': 'Autre chose…',
+  'ask.question.write': 'Écrire une autre réponse',
+  'ask.question.recommended': 'Conseillée',
+  'ask.question.progress': '{done} sur {total} répondues',
+  'ask.question.step': 'Question {n}',
+  'ask.question.steps': 'Questions',
+  'ask.question.done': 'répondue',
+  'ask.question.preview': 'Aperçu de {name}',
+  'ask.question.noPreview': 'Cette option n’a pas d’aperçu.',
   'ask.question.otherPlaceholder': 'Écris ta réponse',
   'ask.question.send': 'Envoyer les réponses',
   'ask.question.skip': 'Passer',
@@ -164,6 +230,8 @@ export const fr: Messages = {
   'agent.look': 'Voir',
   'agent.tell': 'Lui dire…',
   'agent.back': 'Revenir à ce qui tourne',
+  'agent.widen': 'Ouvrir en pleine conversation',
+  'agent.narrow': 'Revenir à la colonne latérale',
   'agent.brief': 'Ce qu’on lui a demandé',
   'agent.steps': 'Ses étapes',
   'agent.side.note': 'On ne peut pas écrire à un sous-agent pendant qu’il travaille ; ce que vous dites va à l’agent principal.',
@@ -201,13 +269,41 @@ export const fr: Messages = {
   'tool.grep': 'Recherche',
   'tool.webFetch': 'Lecture',
   'tool.browse': 'Navigue',
+  'tool.conversation': 'Travaille en parallèle',
+  'tool.compact': 'Compacte la conversation',
+  'tool.context': 'Vérifie son contexte',
+  'tool.verify': 'Lance les vérifications rapides',
+  'tool.verifyFull': 'Lance toutes les vérifications',
+  'tool.map': 'Lit la carte du projet',
   'tool.agent': 'Sous-agent',
   'tool.plan': 'Mise à jour du plan',
+  'ctx.share': '{pct} %',
+  'ctx.tip': 'Contexte : {used} sur {window} jetons. L’IA le compacte d’elle-même près de la fin.',
   'tool.ask': 'Question pour toi',
   'tool.skill': 'Utilisation d’une compétence',
   'tool.toolSearch': 'Chargement des outils',
   'tool.shell': 'Shell',
   'answer.stopped': 'Interrompue.',
+  'follow.pending': 'Suivi de la pull request {pr} : vérifications en cours.',
+  'follow.failing': 'Suivi de la pull request {pr} : des vérifications ont échoué ({checks}).',
+  'follow.held': 'Des vérifications de la pull request {pr} ont échoué ({checks}). Le quota est serré, alors Faber vous laisse la correction.',
+  'follow.conflict': 'Suivi de la pull request {pr} : elle est en conflit avec sa branche de base.',
+  'follow.passing': 'Les vérifications de la pull request {pr} ont réussi.',
+  'follow.merged': 'La pull request {pr} a été fusionnée.',
+  'follow.closed': 'La pull request {pr} a été fermée.',
+  'follow.stopped': 'Faber ne suit plus la pull request {pr}.',
+  'follow.noChecks': 'La pull request {pr} n’a aucune vérification à suivre.',
+  'follow.quiet': 'Faber ne suit plus la pull request {pr} : rien n’a changé en six heures.',
+  'follow.gh': 'Faber ne suit plus la pull request {pr} : la CLI GitHub (gh) n’a pas pu la lire.',
+  'follow.stop': 'Ne plus suivre',
+  'wake.checksFailed': 'Des vérifications de la pull request {pr} ont échoué ({checks}). Faber a demandé à l’agent de les corriger.',
+  'wake.conflict': 'La pull request {pr} est en conflit avec sa branche de base. Faber a demandé à l’agent de le résoudre.',
+  'wake.checksFixing': 'Les vérifications de Faber ont échoué ({checks}). Faber a demandé à l’agent de les corriger.',
+  'checks.running': 'Faber lance les vérifications de ces changements…',
+  'checks.passed': { one: 'Les vérifications de Faber sont passées ({n} vérification).', other: 'Les vérifications de Faber sont passées ({n} vérifications).' },
+  'checks.failed': 'Les vérifications de Faber ont échoué : {checks}.',
+  'checks.needsYou': 'Les vérifications de Faber ont échoué : {checks}. Cela demande votre intervention.',
+  'checks.why': 'Ce qui a échoué',
   'answer.copy': 'Copier',
   'answer.terminal': 'Ouvrir dans le terminal',
   'answer.terminalHint': 'Continuer cette conversation dans le terminal de la CLI',
@@ -244,8 +340,16 @@ export const fr: Messages = {
   'queue.sendNow': 'Envoyer maintenant',
   'queue.sendNowLabel': 'Envoyer le message en attente maintenant',
   'error.noSubscription': 'Aucun abonnement connecté ne peut répondre. Connectez-en un dans les Réglages.',
-  'error.busy': 'Attendez la fin de la réponse en cours ou arrêtez-la d’abord.',
   'error.queueFull': 'Trop de messages sont en attente. Attendez la réponse en cours ou retirez-en un.',
+  'error.keepGoing': 'Continuer seul fonctionne dans les conversations d’un projet.',
+  'reason.keepGoing.done': 'A continué jusqu’à ce qu’il ne reste rien.',
+  'reason.keepGoing.asked': 'A cessé de continuer : il vous a posé une question.',
+  'reason.keepGoing.failed': 'A cessé de continuer : six tours de suite ont échoué.',
+  'reason.keepGoing.cap': 'A cessé de continuer après un long moment seul.',
+  'reason.keepGoing.pace': 'A cessé de continuer pour que {ai} garde son rythme de la semaine.',
+  'reason.keepGoing.quota': 'A cessé de continuer jusqu’à ce que {ai} ait de nouveau du quota.',
+  'reason.keepGoing.billed': 'A cessé de continuer : {ai} est peut-être facturé à l’usage, et Faber n’y dépense rien de lui-même.',
+  'reason.keepGoing.checks': 'A cessé de continuer : les vérifications de Faber échouent encore.',
   'error.helperEmpty': 'Écrivez d’abord quelque chose.',
   'error.helperDone': 'Cet assistant a fini : on ne peut plus lui écrire.',
   'error.projectGone': 'Ce projet n’est plus dans Faber.',
@@ -453,9 +557,6 @@ export const fr: Messages = {
   'hint.chat.3': 'Décrivez un problème et demandez trois pistes',
   'projects.home.title': 'Que faisons-nous ?',
   'projects.chat.lead': 'Demande ce que tu veux dans ce dossier. L’assistant travaille ici même et te pose la question quand il en a besoin.',
-  'projects.gitMode.seguroTech': "Mode sûr : worktree séparé, commits locaux uniquement et avance rapide seulement sur la branche de la mission.",
-  'projects.selfUpdate.trustTech': "Une nouvelle version passe à l'emplacement local suivant seulement après un essai canari et les contrôles de quarantaine.",
-  'projects.proofs.isolationTech': "Les vérifications qui exécutent du code écrit par un rôle tournent en intégrité basse sous Windows : elles ne peuvent écrire que dans la copie de la mission, son dossier de compilation et ses dossiers temporaires. Elles peuvent encore lire vos fichiers et utiliser le réseau ; un bac à sable plus strict (AppContainer) est la prochaine étape prévue. Sous macOS, elles ne peuvent pas non plus écrire hors de ces dossiers ; sous Linux, rien ne les limite encore.",
   'setup.title': 'Connectez vos abonnements',
   'setup.body': 'Choisissez les outils d’IA officiels que vous souhaitez utiliser avec vos propres abonnements.',
   'setup.claude': 'Claude',
@@ -580,32 +681,6 @@ export const fr: Messages = {
   // Native speaker must translate (needs native review).
   // Native speaker must translate (needs native review).
   // Native speaker must translate (needs native review).
-  "projects.repo": "Dossier",
-  // Native speaker must translate (needs native review).
-  "projects.base": "Révision de base",
-  // Native speaker must translate (needs native review).
-  "projects.author": "Auteur",
-  // Native speaker must translate (needs native review).
-  // Native speaker must translate (needs native review).
-  "projects.presence.continueWithout": "Continuer sans lui",
-  // Native speaker must translate (needs native review).
-  // Native speaker must translate (needs native review).
-  "reason.kit.continueWithout": "Faber utilise les outils qu'il a déjà.",
-  // Native speaker must translate (needs native review).
-  "reason.kit.findToolsInstallParked": "L'installation d'outils n'est pas encore prête. Pour l'instant, Faber utilise ceux qu'il a déjà.",
-  // Native speaker must translate (needs native review).
-  // Native speaker must translate (needs native review).
-  "projects.gitMode.seguro": "Sûr : une copie séparée seulement",
-  // Native speaker must translate (needs native review).
-  "projects.gitMode.seguroDesc": "Faber travaille sur une copie séparée de votre projet. Il ne touche ni à GitHub ni à rien en ligne.",
-  // Native speaker must translate (needs native review).
-  // Native speaker must translate (needs native review).
-  "projects.gitMode.equilibrado": "Équilibré : commits locaux + draft PR",
-  "projects.gitMode.equilibradoDesc": "Sûr, avec envoi de la branche de la mission et création d’une draft PR.",
-  // Native speaker must translate (needs native review).
-  "projects.selfUpdate.trust": "Autoriser Faber à se mettre à jour lui-même",
-  // Native speaker must translate (needs native review).
-  "projects.selfUpdate.trustDesc": "Installe une nouvelle version de Faber seulement après avoir vérifié qu'elle fonctionne.",
   // Native speaker must translate (needs native review).
   // Native speaker must translate (needs native review).
   // Native speaker must translate (needs native review).
@@ -627,7 +702,6 @@ export const fr: Messages = {
   // Native speaker must translate (needs native review).
   // Native speaker must translate (needs native review).
   // Native speaker must translate (needs native review).
-  "projects.task.review": "Revue",
   // Native speaker must translate (needs native review).
   // Native speaker must translate (needs native review).
   // Native speaker must translate (needs native review).
@@ -647,25 +721,30 @@ export const fr: Messages = {
   // Native speaker must translate (needs native review).
   // Native speaker must translate (needs native review).
   // Native speaker must translate (needs native review).
-  "reason.task.waiting": "En attente des dépendances",
+  // Native speaker must translate (needs native review).
+  // Native speaker must translate (needs native review).
+  // Native speaker must translate (needs native review).
+  // Native speaker must translate (needs native review).
+  // Native speaker must translate (needs native review).
+  // Native speaker must translate (needs native review).
+  // Native speaker must translate (needs native review).
+  // Native speaker must translate (needs native review).
+  // Native speaker must translate (needs native review).
+  // Native speaker must translate (needs native review).
+  // Native speaker must translate (needs native review).
+  // Native speaker must translate (needs native review).
   // Native speaker must translate (needs native review).
   "error.project.notFound": "Projet introuvable",
   // Native speaker must translate (needs native review).
-  "error.journal.mismatch": "Incohérence dans le journal",
-  // Native speaker must translate (needs native review).
-  "reason.grant.none": "Le projet n'a aucune autorisation Git active",
   // Native speaker must translate (needs native review).
   // Native speaker must translate (needs native review).
   // Native speaker must translate (needs native review).
-  "projects.state.running": "En cours",
   // Native speaker must translate (needs native review).
-  "projects.state.paused": "En pause",
   // Native speaker must translate (needs native review).
-  "projects.state.blocked": "Bloqué",
   // Native speaker must translate (needs native review).
   // Native speaker must review these (needs native review).
   "projects.proof.title": "Vérifications de ce projet",
-  "projects.proof.desc": "Une mission prouve son travail en lançant ces commandes dans une copie propre du projet. Confirmez-les une fois ; Faber redemande si le projet les change.",
+  "projects.proof.desc": "Faber lance ces commandes sur le travail de l'agent, dans le dossier du projet (dans sa copie s'il en a une), et dit à l'agent ce qui a échoué. Confirmez-les une fois ; Faber redemande si le projet les change.",
   "projects.proof.confirm": "Confirmer les vérifications",
   "projects.proof.confirmed": "Confirmées",
   "projects.proof.edit": "Modifier",
@@ -673,47 +752,16 @@ export const fr: Messages = {
   "projects.proof.save": "Enregistrer et confirmer",
   "projects.proof.cancel": "Annuler",
   "projects.proof.changed": "Les vérifications du projet ont changé depuis votre confirmation. Confirmez-les à nouveau.",
-  "error.wire.path": "Un rôle a demandé de modifier un fichier hors des dossiers autorisés.",
-  "error.wire.role": "Un rôle a répondu avec le mauvais type de réponse.",
-  "error.project.invocation": "L'exécution de l'assistant a échoué.",
-  "reason.budget.cap": "Cette mission a atteint son plafond de coût.",
-  "reason.budget.daily": "Le budget de missions d'aujourd'hui est épuisé. Elle reprend quand la fenêtre se renouvelle.",
-  "reason.quota.weekly": "Le quota hebdomadaire de l'abonnement est épuisé pour l'instant.",
-  "reason.lease.live": "Une autre exécution détient encore la copie de travail de ce projet. Reprenez quand elle sera finie.",
-  "reason.mission.driving": "Cette mission est déjà en cours.",
-  "reason.project.empty": "Une mission ne peut modifier aucun fichier de ce projet.",
   "reason.proof.command": "Une commande de vérification doit être du texte simple : un nom de programme et ses arguments, sans tubes, guillemets ni chemins.",
-  "reason.proof.definition": "Le plan a nommé une vérification que le projet n'a pas.",
-  "reason.proof.failed": "Les vérifications ont échoué sur le changement terminé, donc rien n'a été sauvegardé.",
-  "reason.proof.unconfirmed": "Confirmez les vérifications du projet avant de lancer une mission.",
-  "reason.proof.notRed": "Les vérifications passaient déjà avant le changement, elles ne prouvent donc rien.",
-  "reason.proof.busy": "Les vérifications tournent encore depuis un essai précédent. Reprenez dans un instant.",
-  "reason.queue.review": "La relecture n'a pas laissé ce changement continuer.",
-  "reason.project.reconcile": "Faber n'a pas pu faire concorder les registres de ce projet avec son dépôt. Vérifiez puis reprenez.",
-  "reason.project.processTreeUnproven": "Faber n'a pas pu prouver que tout ce qu'il a lancé est terminé. Vérifiez les programmes en cours puis reprenez.",
-  "reason.disk.needed": "Il n'y a pas assez d'espace disque libre pour une copie propre.",
-  "reason.qualify.failed": "Les agents n'ont pas pu être vérifiés. Aucune mission n'a été lancée.",
   "reason.proof.setupChanged": "Les installations du projet ont changé depuis l'affichage de cette liste. Relisez la liste, puis confirmez.",
   "reason.proof.declaredChanged": "Les vérifications du projet ont changé depuis l'affichage de cette liste. La liste ci-dessous est la nouvelle ; relisez-la, puis confirmez.",
-  "reason.workspace.busy": "Une vérification d'une exécution précédente tourne encore, donc la copie de travail du projet n'a pas été touchée. Réessayez dans un instant.",
-  "reason.qualify.probe": "Une vérification de l'un des agents n'a pas réussi.",
-  "reason.qualify.timeout": "Une vérification de l'un des agents a pris trop de temps.",
-  "reason.qualify.start": "Une vérification de l'un des agents n'a pas pu démarrer.",
-  "reason.qualify.data": "Faber n'a pas pu préparer son propre dossier pour les vérifications.",
-  "reason.qualify.proof": "Les vérifications ont tourné, mais elles n'ont pas prouvé que les agents sont sûrs à utiliser.",
-  "reason.qualify.os": "La vérification des agents nécessite Windows.",
   "projects.proof.setup": "D'abord, dans la copie propre :",
-  "reason.setup.failed": "L'installation des dépendances du projet a échoué dans la copie propre, donc les vérifications n'ont pas tourné.",
-  "reason.setup.program": "Le programme qui installe les dépendances du projet est introuvable sur cet ordinateur.",
-  "reason.workspace.git": "Faber n'a pas pu préparer la copie de travail du projet. Vérifiez que git fonctionne dans le projet, puis reprenez.",
-  "reason.workspace.unsafe": "Un fichier modifié n'a pas pu être copié en toute sécurité dans la copie de travail du projet.",
   // Native speaker must translate (needs native review).
   // Native speaker must translate (needs native review).
   // Native speaker must translate (needs native review).
   // Native speaker must translate (needs native review).
   // Native speaker must translate (needs native review).
   // Native speaker must translate (needs native review).
-  'reason.budget.calibration': 'Faber apprend encore quelle part de votre quota une mission utilise. Il attend quelques relevés de plus, puis continue.',
   'reason.budget.other': 'Faber attend que votre quota permette l’étape suivante.',
   'reason.other': 'Faber s’est arrêté ici pour une raison qu’il ne sait pas encore décrire. Les détails sont dans le journal.',
   // Native speaker must translate (needs native review).
@@ -723,17 +771,9 @@ export const fr: Messages = {
   // Native speaker must translate (needs native review).
   "error.wire.tooBig": "La requête est trop volumineuse.",
   // Native speaker must translate (needs native review).
-  "error.wire.stale": "Cette mission a changé. Rechargez-la avant de répondre.",
+  "error.project.changed": "Le projet a changé entre-temps. Réessayez.",
   // Native speaker must translate (needs native review).
-  "reason.grant.stale": "L'autorisation Git a changé. Consultez à nouveau la carte de départ.",
-  // Native speaker must translate (needs native review).
-  "reason.grant.mode": "La publication distante est mise de côté dans le MVP d'auto-développement.",
-  // Native speaker must translate (needs native review).
-  "reason.grant.otherRepo": "Le dossier appartient désormais à un autre dépôt. Ajoutez-le à nouveau avant d'accorder l'autorisation.",
-  // Native speaker must translate (needs native review).
-  "reason.grant.revoked": "L'autorisation du projet a été révoquée.",
-  // Native speaker must translate (needs native review).
-  "error.journal.badId": "L'identifiant de la mission ou de la décision n'est pas valide.",
+  "error.journal.badId": "L'identifiant du projet n'est pas valide.",
   // Native speaker must translate (needs native review).
   "error.store.write": "Les modifications n'ont pas pu être enregistrées. Rien n'a été approuvé.",
   // Native speaker must translate (needs native review).
@@ -741,20 +781,10 @@ export const fr: Messages = {
   // Native speaker must translate (needs native review).
   "error.store.corrupt": "Les enregistrements sauvegardés sont endommagés.",
   // Native speaker must translate (needs native review).
-  "error.decision.option": "Saisissez une réponse valide pour cette décision.",
-  // Native speaker must translate (needs native review).
-  "error.decision.answered": "Une réponse a déjà été donnée à cette décision.",
-  // Native speaker must translate (needs native review).
-  "error.decision.person": "Cette décision nécessite votre réponse.",
   // Native speaker must translate (needs native review).
   // Native speaker must translate (needs native review).
-  "reason.update.quiescence": "La promotion attend la fin des opérations actives et la fermeture de la fenêtre.",
   // Native speaker must translate (needs native review).
-  "reason.git.repository": "Choisissez un dossier appartenant à un dépôt Git.",
   // Native speaker must translate (needs native review).
-  "reason.git.base": "La révision Git initiale n'a pas pu être résolue.",
-  // Native speaker must translate (needs native review).
-  "reason.git.ref": "La référence de branche de la mission n'est pas valide.",
   // Native speaker must translate (needs native review).
   "reason.git.command": "L'opération Git a échoué.",
   // Native speaker must translate (needs native review).
@@ -762,57 +792,21 @@ export const fr: Messages = {
   "reason.remote.ghMissing": "La CLI GitHub (gh) n'est pas installée. Votre travail reste local tant qu'elle ne l'est pas.",
   "reason.remote.ghLoggedOut": "La CLI GitHub n'est pas connectée. Lancez gh auth login, puis réessayez.",
   "reason.remote.target": "La branche, le dépôt distant ou le texte à publier n'est pas valide.",
-  "reason.remote.pending": "Une étape de publication précédente n'est pas encore réglée. Faber vérifie le dépôt distant avant d'envoyer autre chose.",
-  "reason.remote.config": "Ce dépôt contient des réglages Git que Faber n'autorise pas pour un envoi (seuls ceux de base du dépôt distant, de la branche et de l'auteur sont admis). Rien n'a été envoyé.",
-  "reason.remote.layout": "Ce dépôt réécrit l'historique ou emprunte des objets ailleurs (greffes, clone superficiel ou alternates), donc Faber ne peut pas prouver ce qui partirait. Rien n'a été envoyé.",
-  "reason.remote.otherRemote": "Ce dépôt a un second dépôt distant. Faber n'envoie que vers celui que vous avez autorisé, donc il n'envoie rien tant qu'un autre est configuré. Rien n'a été envoyé.",
-  "reason.remote.url": "Le dépôt distant ne pointe plus là où vous l'avez autorisé. Rien n'a été envoyé.",
-  "reason.remote.secret": "Un secret possible a été trouvé dans ce qui allait être envoyé. Rien n'a été envoyé.",
   "reason.remote.unreachable": "Le dépôt distant est injoignable. Votre travail reste local.",
-  "reason.remote.diverged": "La branche distante contient des changements que Faber n'a pas. Faber ne la force ni ne la réécrit jamais.",
-  "reason.remote.rejected": "Le dépôt distant a refusé l'envoi. Votre travail reste local.",
-  "reason.remote.maybe": "Faber ne sait pas si cela est arrivé sur le dépôt distant. Il vérifie avant de faire quoi que ce soit d'autre.",
-  "reason.remote.notPushed": "Le commit validé n'est pas encore sur le dépôt distant.",
-  "reason.remote.headMoved": "La pull request a changé depuis que vous l'avez vue. Relisez-la.",
-  "reason.remote.needsYes": "La fusion demande votre accord pour cette pull request.",
-  "reason.remote.ci": "Les vérifications n'ont pas encore réussi, donc Faber ne fusionnera pas.",
-  "reason.remote.notOpen": "Cette pull request n'est pas ouverte.",
-  "reason.remote.prFailed": "La pull request n'a pas pu être ouverte.",
-  "reason.remote.mergeFailed": "La fusion n'a pas eu lieu.",
-  "reason.remote.oversized": "Ce qui serait envoyé est trop volumineux pour y chercher des secrets. Rien n'a été envoyé.",
-  "reason.remote.foreign": "Cette pull request ne vient pas de la branche de cette mission dans ce dépôt.",
-  "reason.remote.account": "Le GitHub CLI est connecté avec un autre compte que celui que vous avez autorisé. Rien n'a été fait.",
-  "reason.grant.noRemote": "Le dépôt distant n'est pas celui que vous avez autorisé.",
-  "reason.grant.noAccount": "L'autorisation n'indique aucun compte GitHub. Revoyez la carte de démarrage.",
-  "decision.remote.merge": "Marquer cette pull request comme prête et la fusionner ?",
   // Native speaker must translate (needs native review).
-  "reason.grant.noAuthor": "Définissez un auteur Git avant d'accorder l'autorisation de commit.",
-  // Native speaker must translate (needs native review).
-  "reason.grant.newer": "Cette autorisation Git nécessite une version plus récente de Faber.",
-  // Native speaker must translate (needs native review).
-  "error.journal.newer": "Ces enregistrements de mission nécessitent une version plus récente de Faber.",
   // Native speaker must translate (needs native review).
   "error.store.full": "Le disque est plein. Rien n'a été approuvé.",
   // Native speaker must translate (needs native review).
   "reason.interrupted": "En pause au dernier point de contrôle sauvegardé.",
   // Native speaker must translate (needs native review).
-  "error.plan.tooBig": "Le plan de mission dépasse la limite de tâches.",
   // Native speaker must translate (needs native review).
-  "error.plan.badId": "Le plan de mission contient un identifiant de tâche non valide.",
   // Native speaker must translate (needs native review).
-  "error.plan.duplicateTask": "Le plan de mission répète un identifiant de tâche.",
   // Native speaker must translate (needs native review).
-  "error.plan.missingTask": "Une tâche dépend d'une tâche manquante.",
   // Native speaker must translate (needs native review).
-  "error.plan.cycle": "Le plan de mission présente des dépendances circulaires.",
   // Native speaker must translate (needs native review).
-  "error.plan.duplicateDeliverable": "Deux tâches revendiquent le même livrable.",
   // Native speaker must translate (needs native review).
-  "error.plan.badPath": "Le plan de mission indique un chemin en dehors de son périmètre.",
   // Native speaker must translate (needs native review).
-  "error.plan.readOnlyWrites": "Une tâche en lecture seule revendique l'autorisation d'écrire des fichiers.",
   // Native speaker must translate (needs native review).
-  "error.plan.overlap": "Des écritures non ordonnées se chevauchent sur les mêmes fichiers source.",
   // Native speaker must translate (needs native review).
   "crumb.separator": "\u203a",
   // Right-click menus (ui/ContextMenu.tsx).
@@ -824,6 +818,10 @@ export const fr: Messages = {
   "menu.renameLabel": "Nom de la conversation",
   // Native speaker must translate (needs native review).
   "menu.delete": "Supprimer",
+  "menu.archive": "Archiver",
+  "menu.unarchive": "Désarchiver",
+  "archive.line": "Cette conversation est archivée. Désarchivez-la pour continuer à y travailler.",
+  "archive.tag": "archivée",
   // Native speaker must translate (needs native review).
   "menu.newHere": "Nouvelle conversation dans ce projet",
   // Native speaker must translate (needs native review).
@@ -879,53 +877,89 @@ export const fr: Messages = {
   "set.projects": "Projets",
   "set.projects.none": "Aucun projet pour l’instant. Ouvrez-en un dans Projets.",
   "set.projects.checks": "Vérifications",
-  "set.projects.tools": "Outils manquants",
-  "set.projects.code": "Votre code",
   "set.projects.noChecks": "Aucune vérification pour l’instant. À ajouter avec Modifier.",
+  "set.projects.copies": "Une copie à part pour chaque conversation",
+  "set.projects.copiesDesc": "Chaque nouvelle conversation travaille sur sa propre branche, faber/…, dans une copie du dépôt : deux conversations et votre propre dossier ne modifient jamais les mêmes fichiers. L’agent rapporte son travail par un commit, un push ou une pull request ; Faber ne fusionne jamais de lui-même.",
+  "set.projects.copiesTech": "Un git worktree dans le dossier de données de Faber, créé depuis la branche que vous avez ouverte au moment du premier message, seulement dans un dépôt qui a au moins un commit. Il part avec sa conversation, ou à l’ouverture de Faber une fois son travail fusionné et sans rien de non commité ; un travail qui n’existe nulle part ailleurs n’est jamais supprimé sans vous demander. Désactiver ceci garde les copies que les conversations ont déjà.",
+  "crumb.copy": "Travaille dans une copie à part du projet, sur sa propre branche",
+  "side.confirmDiscard": "Abandonner les changements ?",
+  "side.unsavedCopy": "Sa copie a des changements enregistrés nulle part ailleurs. Les supprimer avec la conversation ?",
+  "error.copy.failed": "Faber n’a pas pu faire une copie du projet pour cette conversation. Réessayez, ou désactivez les copies à part de ce projet dans les Réglages.",
+  "error.copy.unsaved": "La copie de cette conversation a des changements enregistrés nulle part ailleurs.",
   'notes.title': 'Nouveautés',
   'notes.version': 'Faber {version}',
   'notes.kind.new': 'Nouveau',
   'notes.kind.better': 'Amélioré',
   'notes.kind.fixed': 'Corrigé',
   'notes.continue': 'Continuer',
-  'notes.1.new': 'Faber peut travailler sur tes propres projets sous forme de mission : confirme les vérifications, puis lance-toi.',
-  'notes.2.better': 'Le quota s’affiche en direct, et le lire ne consomme aucun jeton.',
-  'notes.3.better': 'Les mises à jour s’installent dès que Faber s’ouvre.',
-  'notes.4.new': 'Après chaque mise à jour, une courte liste montre ce qui a changé.',
-  'notes.5.fixed': 'Les réponses se rétablissent toutes seules quand la CLI perd une session.',
-  'notes.6.better': "L’écran du projet est plus calme, et ses réglages se trouvent désormais dans Réglages > Projets.",
-  'notes.7.new': "Le Chat a désormais des modes d’autorisation (Demander, Accepter les modifications, Plan, Auto, Accès total) et un réglage de recherche web.",
-  'notes.8.better': 'La progression de la mise à jour s’affiche à l’écran, et Faber ne s’ouvre jamais en fenêtre vide.',
-  'notes.9.better': 'L’écran des projets n’a plus de faisceau de lumière, et le trou noir s’affiche en entier et se fond doucement derrière le texte.',
-  'notes.10.better': "L’écran du projet ne demande plus de confirmer les vérifications quand votre mode d’autorisation est Auto ou Accès total.",
-  'notes.12.better': 'Le tableau de mission est plus calme : l’objectif, son étape et ce qu’il attend passent en premier, les colonnes vides ont disparu et Nouvelle mission en lance une autre.',
-  'notes.13.new': 'Dans les réglages, tu peux recevoir les nouvelles versions quelques jours à l’avance.',
-  'notes.14.new': 'Dans un projet, tu discutes désormais avec l’assistant comme ailleurs, et ses questions arrivent sous forme de cartes à toucher.',
-  'notes.15.fixed': 'Sur le premier écran d’un projet, les mots restent sur la partie sombre du trou noir quand une liste s’ouvre en dessous.',
-  'notes.16.new': 'Les aides que l’assistant lance apparaissent maintenant comme des étapes de sa réponse.',
-  'notes.17.fixed': 'Quand l’assistant laisse des sous-agents travailler en arrière-plan, sa réponse les attend maintenant et arrive entière, au lieu de s’arrêter à « je vais attendre ».',
-  'notes.18.better': 'Chaque étape du travail dit maintenant ce qu’elle fait en mots simples, comme Lecture, Recherche ou Modification, avec le fichier ou la commande concernés.',
-  'notes.19.new': 'Dans un projet, l’assistant peut demander à l’autre IA une partie du travail ou une relecture.',
-  'notes.20.fixed': 'Sur Mac, Faber se met maintenant à jour tout seul comme sous Windows et Linux, et les préversions arrivent à ceux qui les ont activées.',
-  'notes.21.fixed': 'Une liste de projets abîmée ne vide plus vos projets, et retirer un projet supprime maintenant aussi la copie que Faber en gardait.',
-  'notes.22.new': 'Quand Codex confie une partie du travail à un sous-agent, celui-ci apparaît comme une étape de sa réponse, et ses demandes d’accord vous parviennent.',
-  'notes.23.better': 'Les conversations sont plus calmes : moins de lignes autour de chaque réponse, et le modèle se choisit à un seul endroit.',
-  'notes.24.better': "Les Réglages se lisent mieux : une ligne par option, et vos comptes et leurs limites sont réunis.",
+  'notes.2.better': 'Vous suivez votre quota en direct, et le consulter ne consomme aucun de vos jetons.',
+  'notes.4.new': 'Après chaque mise à jour, une courte liste comme celle-ci vous dit ce qui a changé.',
+  'notes.5.fixed': 'Quand une IA perd le fil d’une conversation, la réponse reprend maintenant d’elle-même.',
+  'notes.6.better': 'Les réglages de projet sont passés dans Réglages > Projets, et l’écran du projet ne montre plus que votre travail.',
+  'notes.7.new': 'Dans le Chat, vous choisissez ce que l’IA peut faire seule (Demander, Accepter les modifications, Plan, Auto, Accès total) et si elle cherche sur le web.',
+  'notes.8.better': 'Les mises à jour s’installent dès que Faber s’ouvre, vous voyez leur progression, et Faber ne s’ouvre plus en fenêtre vide.',
+  'notes.13.new': 'Dans les Réglages, vous pouvez recevoir les nouvelles versions quelques jours plus tôt, en préversion.',
+  'notes.14.new': 'Dans un projet, vous parlez à l’agent comme dans le Chat, et vous répondez à ses questions en touchant une carte.',
+  'notes.17.fixed': 'Les réponses ne s’arrêtent plus à « je vais attendre » quand l’agent laisse des aides travailler en arrière-plan : la réponse les attend et arrive entière.',
+  'notes.18.better': 'Chaque étape du travail dit en mots simples ce qu’elle fait, comme Lecture, Recherche ou Modification, et quel fichier ou quelle commande elle touche.',
+  'notes.19.new': 'Dans un projet, l’agent peut demander à l’autre IA de prendre en charge une tâche ou de relire son travail.',
+  'notes.20.fixed': 'Sur Mac, Faber se met maintenant à jour tout seul comme sous Windows et Linux, et les préversions arrivent à tous ceux qui les ont activées.',
+  'notes.21.fixed': 'Une liste de projets abîmée n’efface plus vos projets, et retirer un projet supprime aussi la copie que Faber en gardait.',
+  'notes.22.new': 'Quand l’agent confie une tâche à une aide, celle-ci apparaît comme une étape de sa réponse, et avec Codex ses demandes d’accord vous parviennent aussi.',
+  'notes.23.better': 'Les conversations ont moins de lignes autour de chaque réponse, et le modèle se choisit à un seul endroit.',
+  'notes.24.better': 'Les Réglages se lisent mieux : une ligne par option, avec vos comptes et leurs limites côte à côte.',
   'notes.25.better': 'Les écrans vides, le tutoriel et cette liste sont plus courts et disent chaque chose une fois.',
-  'notes.26.better': 'Faber se met au repos quand sa fenêtre est cachée, et les boutons et les champs ont le même aspect sur tous les écrans.',
-  'notes.27.better': 'Le premier écran d’un projet est plus calme : une seule colonne avec les conversations de ce projet, et un trou noir plus petit qui reste loin du texte.',
-  'notes.28.new': 'Quand un sous-agent semble bloqué, son étape passe en ambre et Faber vous prévient ; s’il attend votre réponse, l’étape le dit.',
-  'notes.29.better': 'L’accueil du Chat est lui aussi une colonne calme : trois suggestions courtes, et ce qu’il faut reprendre sous la zone de message.',
-  'notes.30.new': 'Un sous-agent s’ouvre à droite, avec ce qu’on lui a demandé, les étapes qu’il a faites et son rapport.',
-  'notes.31.new': 'Un sous-agent montre à droite ce qu’il a fait : les fichiers modifiés, les vérifications lancées et tout fichier absent de sa demande.',
-  'notes.32.better': 'Une modification de fichier montre combien de lignes elle ajoute et retire et, pendant qu’elle a lieu, les lignes elles-mêmes.',
-  'notes.33.new': 'Faber reste immobile quand un jeu est au premier plan : rien ne bouge ni ne se redessine, et ce qui s’est passé entre-temps apparaît à votre retour.',
-  'notes.34.better': 'Pendant qu’une réponse travaille, les vérifications qu’elle a lancées se comptent sous la ligne d’état, avec combien ont échoué.',
-  'notes.35.better': 'Pendant qu’une réponse lit le web, les sites qu’elle a ouverts s’affichent sous la ligne d’état, avec celui qu’elle lit maintenant.',
-  'notes.36.better': 'Une étape longue indique sur la ligne d’état depuis combien de temps elle tourne.',
-  'notes.37.new': 'Dans un projet, l’agent peut ouvrir des pages dans le navigateur de Faber, et chaque page ouverte apparaît dans sa réponse.',
-  'notes.38.new': 'Vous pouvez écrire à un assistant de l’autre IA pendant qu’il travaille, et un sous-agent qui a fini propose de continuer avec un assistant.',
-  'notes.39.new': 'Dans un projet, l’agent peut cliquer et écrire dans les pages qu’il ouvre, et une connexion ou un paiement vous attend.',
+  'notes.26.better': 'Quand sa fenêtre est cachée, Faber cesse d’animer et de redessiner, et les boutons et les champs ont le même aspect sur tous les écrans.',
+  'notes.27.better': 'Le premier écran d’un projet est une colonne calme avec les conversations de ce projet, et le trou noir derrière est plus petit et reste loin du texte.',
+  'notes.28.new': 'Quand une aide semble bloquée, son étape passe en ambre et Faber vous prévient ; quand elle attend votre réponse, l’étape le dit.',
+  'notes.29.better': 'L’accueil du Chat est lui aussi une colonne calme : trois suggestions courtes, et ce que vous pouvez reprendre sous la zone de message.',
+  'notes.31.new': 'Cliquez sur une aide pour voir à droite ce qu’on lui a demandé, ses étapes et son rapport, ainsi que les fichiers modifiés, les vérifications lancées et tout fichier hors de sa tâche.',
+  'notes.32.better': 'Quand un fichier change, vous voyez combien de lignes ont été ajoutées et retirées et, pendant que ça se passe, les lignes elles-mêmes.',
+  'notes.33.new': 'Sous Windows, quand un jeu est au premier plan, l’agent continue de travailler mais la fenêtre de Faber cesse de bouger et de se redessiner ; ce qui s’est passé s’affiche à votre retour.',
+  'notes.36.better': 'Pendant que l’agent travaille, la ligne d’état en montre plus : les vérifications lancées et combien ont échoué, le site qu’il lit, et depuis combien de temps dure une étape lente.',
+  'notes.38.new': 'Vous pouvez écrire à une aide de l’autre IA pendant qu’elle travaille et, quand une aide a fini, demander à l’autre IA de continuer à partir de là.',
+  'notes.39.new': 'Dans un projet, l’agent peut ouvrir des pages dans le navigateur de Faber, y cliquer et y écrire, et lister chaque page dans sa réponse. Devant une connexion ou un paiement, il s’arrête et vous attend.',
+  'notes.40.new': 'Dans un projet, l’agent peut ouvrir une conversation à part pour un autre morceau du travail ; elle avance à côté et s’affiche dans la barre latérale.',
+  'notes.41.new': 'Avec Continuer seul, une conversation de projet continue d’elle-même pendant votre absence, et Faber vous dit pourquoi elle s’arrête.',
+  'notes.42.new': 'Quand l’agent ouvre une pull request, la conversation la suit : si ses vérifications échouent, Faber demande à l’agent de les corriger.',
+  'notes.43.new': 'Chaque conversation de projet travaille maintenant dans une copie à part de votre dépôt, sur sa propre branche : deux conversations ne modifient jamais les mêmes fichiers.',
+  'notes.44.fixed': "Une conversation que l'agent ouvre de lui-même a désormais elle aussi sa propre copie séparée, au lieu de travailler dans le dossier de votre projet.",
+  'notes.45.new': 'Dans un projet, l’agent lance maintenant les vérifications du projet sur votre ordinateur et corrige ce qui échoue avant d’envoyer quoi que ce soit.',
+  'notes.46.new': 'Dans un projet, quand l’agent modifie des fichiers, Faber lance maintenant les vérifications lui-même et demande à l’agent de corriger ce qui échoue avant que le travail compte comme terminé.',
+  'notes.47.better': "Vous voyez l'effort de chaque réponse à côté du modèle, par exemple « effort élevé », sans survoler.",
+  'notes.48.fixed': 'Les paragraphes d’une réponse ne disparaissent plus dans « En cours » pendant qu’elle s’écrit encore ; ils ne s’y replient qu’à la fin.',
+  'notes.49.fixed': "Faber vérifie désormais aussi une réponse où l'agent a modifié des fichiers par une commande, et dans une copie séparée il lance toutes les vérifications que vous avez confirmées.",
+  'notes.50.new': 'Ctrl K ouvre une recherche : quelques lettres suffisent pour aller à une conversation, un projet ou une action. Ctrl F cherche un mot dans la conversation ouverte.',
+  'notes.51.better': "Un message écrit pendant que Claude travaille lui parvient maintenant à l'étape suivante, comme avec Codex, sans attendre la fin.",
+  'notes.52.better': "Tant qu'un jeu est au premier plan, les vérifications de Faber attendent pour démarrer, et une vérification déjà lancée n'utilise qu'un dixième du processeur jusqu'à ce que vous quittiez le jeu.",
+  'notes.53.better': "Quand l'agent modifie du code Rust, les vérifications rapides de Faber le compilent aussi, et une erreur de compilation apparaît avec son fichier et sa ligne en quelques secondes.",
+  'notes.54.better': "Les listes, les menus et les sections des Réglages apparaissent et disparaissent en douceur au lieu de sauter. Avec le mouvement réduit, ils changent toujours d'un coup.",
+  'notes.55.better': "« Envoyer maintenant » sur un message en attente marche aussi pendant une réponse : le message lui parvient à l'étape suivante.",
+  'notes.56.better': "Les vérifications de Faber lancent désormais d'abord ce qui a échoué la dernière fois, et préviennent l'agent quand une vérification échoue sur un contenu où elle avait déjà réussi.",
+  'notes.59.better': 'Tu réponds aux questions de l’assistant étape par étape, sur des tuiles à toucher, avec un aperçu quand il en a dessiné un.',
+  'notes.60.new': 'Vous pouvez faire glisser les bords de la barre latérale et de la liste de ce qui tourne pour changer leur largeur, et Ctrl+B masque les deux.',
+  'notes.61.better': 'Déposer un fichier marche partout dans la fenêtre, pas seulement sur la zone de message, et un avis dit où il ira.',
+  'notes.62.fixed': "Continuer seul ne s'arrête plus de lui-même quand Auto use vite un quota, ni quand une réponse arrive sans avis d'usage. Il attend le retour du quota, puis reprend.",
+  'notes.63.better': "Les vérifications rapides de Faber compilent aussi les paquets Rust qui dépendent de celui qu'un changement a touché.",
+  'notes.64.better': "Les vérifications de Faber lancent deux compilations Cargo à la fois quand la mémoire qu'elles ont prise avant tient, et une à la fois sinon.",
+  'notes.65.new': "Dans un projet, l'agent peut demander à Faber une carte de ce que le code a déjà, pour s'appuyer dessus au lieu d'ajouter une deuxième façon de faire la même chose.",
+  'notes.66.fixed': "Le premier message d'une nouvelle conversation dans un projet s'affiche aussitôt. Avant, Faber restait figé pendant la copie à part.",
+  'notes.67.better': 'Quand une vérification que Faber sait instable échoue, Faber la relance une fois avant de dire que le travail est cassé.',
+  'notes.68.better': 'Continuer seul n’attend plus une IA : sans quota, il passe à l’autre, et prévient avant quand le quota est bas.',
+  'notes.69.new': 'Vous pouvez ouvrir un assistant en pleine conversation au centre, et revenir à la colonne latérale avec le même bouton.',
+  'notes.70.better': "La colonne latérale est plus large sur une grande fenêtre, et la tâche et les commandes d'un assistant passent à la ligne au lieu d'être coupées.",
+  'notes.71.new': 'Vous pouvez archiver une conversation depuis son menu du clic droit, et l’agent d’un projet archive la sienne une fois votre demande terminée. Elle quitte la barre latérale ; la recherche la retrouve, et Désarchiver la ramène.',
+  'notes.72.better': 'Les agents d’un projet voient maintenant les conversations des autres : quand un fichier change sans qu’il l’ait touché, un agent interroge la conversation qui y travaille, et vous voyez qui a demandé.',
+  'notes.73.better': 'Dans la barre latérale, une conversation lancée par l’agent se place maintenant sous celle qui l’a lancée : vous voyez quel travail va ensemble.',
+  'notes.74.better': 'Réglages > Projets est plus court : les lignes git et de mise à jour automatique laissées par les anciennes missions ont disparu, et Faber installe un programme de moins.',
+  'notes.75.new': 'Dans un projet, l’agent peut compacter son propre contexte à la fin d’un sujet, puis poursuit seul à partir de la note qu’il s’est laissée ; une ligne discrète vous prévient.',
+  'notes.76.better': 'Un petit anneau dans la barre du haut montre à quel point le contexte de l’IA est plein, et ne devient ambre que près du moment où elle se compacte d’elle-même.',
+  'notes.77.better': 'Faber archive désormais tout seul une conversation de projet quand sa pull request est fusionnée ou fermée, ou après 7 jours sans activité. Une conversation en cours, qui vous attend ou qui a du travail non enregistré reste.',
+  'notes.78.new': 'Continuer seul survit maintenant à un redémarrage de Faber, et une question sans réponse pendant dix minutes reçoit son premier choix, noté sur la réponse.',
+  'notes.79.fixed': "Continuer seul ne s'arrête plus aux premières erreurs : il se repose et réessaie, et n'abandonne qu'après six de suite.",
+  'notes.80.new': 'Un projet qui a continué seul pendant votre absence montre maintenant où il en est, sur sa ligne de la liste en cours et sur la dernière réponse.',
+  'notes.81.better': 'Quand Continuer seul répond à une question à votre place après dix minutes, la réponse indique maintenant laquelle et quel choix.',
+  'notes.82.fixed': "L'agent répond maintenant dans la langue où vous écrivez, même dans un projet dont les fichiers sont dans une autre langue.",
   'update.checking': 'Recherche d’une mise à jour…',
   'update.downloading': 'Téléchargement de la mise à jour…',
   'update.downloadingPercent': 'Téléchargement de la mise à jour… {percent} %',

@@ -4,9 +4,9 @@ How a person follows and watches the agent work, visual answers, and learning an
 
 ## Following the work
 
-**Progress view.** The self-development MVP uses Ready, Running, Review, Done and Blocked. Ready tasks can wait only
-for an explicit resource brake; Blocked tasks name their missing dependency or decision. The remaining Projects
-detail view follows the later full implementation.
+**Progress view.** Planned for missions (Ready, Running, Review, Done and Blocked), which have no screen since R171.
+Running work shows today in the running column and in each reply (subagent steps, helpers, conversations the agent
+started); a board needs the owner first (R161).
 
 - **Rows** show the AI's name and a verb, such as "Claude drawing".
 - **Top:** one plain sentence, the overall bar, the time left, the share of the plan's limit used, and who is working

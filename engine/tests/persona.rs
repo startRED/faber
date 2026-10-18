@@ -1,5 +1,4 @@
-use faber_engine::persona::{PersonaInput, persona, worker_contract};
-use faber_engine::project::Role;
+use faber_engine::persona::{PersonaInput, persona};
 #[test]
 fn persona_is_static_bounded_and_has_no_scar_rules() {
     for name in [None, Some("Erick"), Some("日本語")] {
@@ -13,18 +12,12 @@ fn persona_is_static_bounded_and_has_no_scar_rules() {
     }
 }
 #[test]
-fn worker_contract_keeps_role_restrictions_and_receipts_without_the_chat_persona() {
-    for role in [Role::Lead, Role::Research, Role::Writer, Role::TestProposal, Role::Reviewer] {
-        let text = worker_contract(role);
-        assert!(text.contains("envelope"));
-        assert!(text.contains("receipt"));
-        assert!(text.contains("Never"));
-        for ping in ["Order", "Found", "Blocked", "NeedEyes", "DoneReady", "Disagree"] {
-            // A model that is not told the values guesses one (an integer was seen from a real worker turn).
-            assert!(text.contains(ping));
-            serde_json::from_str::<faber_engine::project::wire::Ping>(&format!("\"{ping}\"")).unwrap();
-        }
-        assert!(!text.contains("You are Faber"));
-        assert!(text.chars().count() <= 1800);
-    }
+fn persona_puts_the_reply_language_first_and_above_the_project() {
+    // A Portuguese prompt in a project whose AGENTS.md says "write in English" got English replies while the rule was a
+    // half sentence in the middle.
+    let text = persona(&PersonaInput { name: Some("Erick") });
+    let rule = text.find("in the language of their latest message").unwrap();
+    assert!(rule < text.find("You are Faber").unwrap());
+    assert!(text.contains("even when the project, its instructions, files or tools use another"));
+    assert!(text.contains("progress notes"));
 }

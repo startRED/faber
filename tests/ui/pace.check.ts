@@ -25,8 +25,8 @@ check('pace: quota reasons, manual effort and grouped activity coexist without h
       ok(normal!.title.includes('Auto') && pace, 'the route is in the tooltip and the pace line shows');
       ok(normal!.compareDocumentPosition(pace!) & Node.DOCUMENT_POSITION_FOLLOWING);
       ok(pace!.textContent!.toLowerCase().includes({ step: 'one step up', fast: 'being used fast', low: 'close to its limit' }[kind]));
-      ok(host.querySelector<HTMLElement>('.model')!.title.includes('Effort: High'), 'effort is in the header tooltip');
-      ok(!host.querySelector('.model')!.textContent!.includes('Effort'), 'and not in the header');
+      ok(host.querySelector('.model .effort')!.textContent!.includes('high effort'), 'the effort shows beside the model');
+      ok(!host.querySelector<HTMLElement>('.model')!.title.includes('ffort'), 'and not again in the tooltip');
       equal(host.querySelectorAll('details.activity').length, 1);
       equal(host.querySelector<HTMLDetailsElement>('details.activity')!.open, false);
       equal(host.querySelector('.ai > .md')!.textContent!.trim(), 'Answer');

@@ -169,10 +169,32 @@ impl Store {
             .flatten()
             .filter(|e| e.path().extension().is_some_and(|x| x == "json"))
             .filter_map(|e| read::<Conversation>(&e.path()))
-            .map(|c| Summary { id: c.id, title: c.title, area: c.area, project_id: c.project_id, updated_at: c.updated_at })
+            .map(|c| Summary {
+                keep_going: c.keep_going.is_some(),
+                archived: c.archived_at.is_some(),
+                started_by: c.started_by,
+                id: c.id,
+                title: c.title,
+                area: c.area,
+                project_id: c.project_id,
+                updated_at: c.updated_at,
+            })
             .collect();
         list.sort_by_key(|c| std::cmp::Reverse(c.updated_at));
         list
+    }
+
+    /// The ids of conversations saved with "keep going" on. A file that does not mention it is not parsed, so looking at every
+    /// conversation once at start stays a read of the files and nothing more.
+    pub fn keep_going_ids(&self) -> Vec<String> {
+        fs::read_dir(&self.conversations)
+            .into_iter()
+            .flatten()
+            .flatten()
+            .filter(|e| e.path().extension().is_some_and(|x| x == "json"))
+            .filter(|e| fs::read_to_string(e.path()).is_ok_and(|text| text.contains("\"keepGoing\"")))
+            .filter_map(|e| e.path().file_stem().map(|id| id.to_string_lossy().into_owned()))
+            .collect()
     }
 
     pub fn get(&self, id: &str) -> Option<Conversation> {

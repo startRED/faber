@@ -55,9 +55,15 @@ fn check(ctx: &Ctx, helper: &std::path::Path, stranger: &mut std::process::Child
     })?;
     owned.terminate();
     ensure(owned.members().is_none(), || "the job is still open after it was ended".to_string())?;
-    // `terminate` returns only once the system has ended everything in the job, so nothing is left to wait for.
-    let left: Vec<ProcRow> = snapshot()?.into_iter().filter(|r| same_process(r, &tree)).collect();
-    ensure(left.is_empty(), || format!("the job was ended but these are still running: {left:?}"))?;
+    // `terminate` returns once the job counts no running process, but the system lists a process a little longer, while
+    // its last thread finishes going: on a loaded CI runner a child of the app was still listed right after (2026-10-17).
+    // So the list is given the same few seconds the cleanup gives it; anything listed after that was not ended.
+    let mut left: Vec<ProcRow> = Vec::new();
+    let gone = eventually("the ended programs to leave the process list", Duration::from_secs(5), || {
+        left = snapshot().map(|rows| rows.into_iter().filter(|r| same_process(r, &tree)).collect()).unwrap_or_else(|_| tree.clone());
+        left.is_empty()
+    });
+    ensure(gone.is_ok(), || format!("the job was ended but these are still running: {left:?}"))?;
     ensure(stranger.try_wait().map_err(|e| e.to_string())?.is_none(), || "ending the job ended a program that is not the app's".to_string())
 }
 

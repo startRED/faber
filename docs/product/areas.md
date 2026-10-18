@@ -11,9 +11,11 @@ Chat and Projects, the lead agent that picks its own path, its modes, its toolbo
   ask", the default, gives full access (R121); "Ask before commands" asks before file changes and commands, except plain
   reads and what the person already allowed in the tool's own settings. The user picks any connected
   model or Auto, and every answer shows the model and, in Auto, the reason in one line.
-- **Projects** holds many git folders. The person gives a project a goal and the lead agent's mission does it in a
-  separate copy; today that is the self-development slice of R96 (one task per mission), and no direct conversation
-  starts inside a project. Moving a Chat conversation to a project with its full context is planned.
+- **Projects** holds many git folders. Inside a project the person talks to one AI agent that works in the folder or in
+  a separate copy of it (R160, R201); the agent splits the work itself, with the CLI's subagents, a helper from the
+  other AI and conversations of its own (R161, R198). Faber builds itself this way (R96;
+  [self-development](../dev/self-development.md)). Moving a Chat conversation to a project with its full context is
+  planned.
 
 The user always sees what is happening: the model behind each answer, the remaining quota of each subscription and
 when it renews, and, for running work, who is building and who is reviewing.

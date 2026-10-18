@@ -2,6 +2,7 @@ import { createSignal, Show } from 'solid-js';
 import { api, type Message, type VendorUsage } from './api.ts';
 import { fromEngine, t } from './i18n.ts';
 import { vendorName } from './models.ts';
+import { animateList, keepForExit } from './motion.ts';
 import { untilReset } from './Sidebar.tsx';
 
 /** Whether the reply waits for quota: the card under the answer then says so, and nothing else on the screen repeats it. */
@@ -22,8 +23,10 @@ export function QuotaCard(props: { id: string; m: Message; usage: VendorUsage[] 
     try { await request(); setConfirming(false); } catch (e) { setError(fromEngine(String(e))); }
     finally { setSending(false); }
   };
-  return <Show when={pending()}>
-    <div class="quota-card" aria-live="polite">
+  // The card eases in and, once the reply no longer waits, out; what is inside it fades and slides as it changes.
+  const shown = keepForExit(pending);
+  return <Show when={shown()}>
+    <div class="quota-card" classList={{ leaving: !pending() }} inert={!pending()} aria-live="polite" ref={animateList}>
       <Show when={props.m.error !== 'error.quotaOut'}>
         <p>{fromEngine('reason.waiting', { when: props.m.waitUntil ? untilReset(props.m.waitUntil) : t('quota.unknown') })}</p>
       </Show>

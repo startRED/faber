@@ -709,6 +709,10 @@ fn seed_owner(ctx: &mut Ctx) -> Result<Launch> {
         if let Some(project) = project {
             body["projectId"] = json!(project);
         }
+        // The conversation the critique opens has an agent that reported its context, so the topbar's meter is in the photo.
+        if i == 3 {
+            body["context"] = json!({ "used": 150_000, "window": 300_000 });
+        }
         std::fs::write(folder.join(format!("o{i}.json")), body.to_string()).map_err(|e| e.to_string())?;
     }
     let mut launch = claude_chat(ctx);

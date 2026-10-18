@@ -4,6 +4,7 @@ import { Fold } from './controls.tsx';
 import { VendorMark } from './Glyphs.tsx';
 import { fromEngine, lang, money, percent, t } from './i18n.ts';
 import { vendorName } from './models.ts';
+import { animateList } from './motion.ts';
 import { accountLine, freshness, type Quotas, usageRows } from './sidebar.ts';
 import { ageWords, untilReset, windowName } from './Sidebar.tsx';
 
@@ -74,8 +75,8 @@ function Card(props: { vendor: Vendor; check: CheckResult | 'failed' | undefined
   const word = () => (line() === 'connected' && u() ? t(`usage.pill.${billing() ?? u()!.state}`) : t(WORDS[line()]));
   const warn = () => line() === 'connected' && !!u() && !billing() && WARN.has(u()!.state);
   return (
-    <section class="st-card acct" data-vendor={v()} data-state={line()} aria-labelledby={`acct-${v()}-name`}>
-      <header class="acct-head">
+    <section class="st-card acct" data-vendor={v()} data-state={line()} aria-labelledby={`acct-${v()}-name`} ref={animateList}>
+      <header class="acct-head" ref={animateList}>
         <h3 class="vm" id={`acct-${v()}-name`}>
           <VendorMark vendor={v()} />
           {vendorName(v())}
@@ -93,7 +94,7 @@ function Card(props: { vendor: Vendor; check: CheckResult | 'failed' | undefined
                 <PlanAsk vendor={v()} />
               </div>
             </Show>
-            <div class="acct-rows">
+            <div class="acct-rows" ref={animateList}>
               <For each={rows()}>
                 {(row) => {
                   const w = () => x().windows.find((win) => win.name === row.window);

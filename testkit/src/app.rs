@@ -13,13 +13,10 @@ use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
-/// How long the hidden app gets to open its window (or to write its checks report).
+/// How long the hidden app gets to open its window (or to write its checks report). The same on CI and on the PC, where
+/// land.mjs runs the suites while other work builds (R190 V2).
 pub fn startup() -> Duration {
-    startup_timeout(std::env::var("GITHUB_ACTIONS").ok().as_deref())
-}
-
-fn startup_timeout(actions: Option<&str>) -> Duration {
-    Duration::from_secs(if actions == Some("true") { 90 } else { 30 })
+    Duration::from_secs(90)
 }
 
 /// Where everything the runner needs lives.
@@ -695,14 +692,6 @@ mod tests {
         assert_eq!(test_target(root, Some(absolute.as_os_str())), absolute.join("faber-test"));
     }
     use serde_json::json;
-
-    #[test]
-    fn only_github_actions_gets_a_longer_startup_timeout() {
-        assert_eq!(startup_timeout(Some("true")), Duration::from_secs(90));
-        for value in [None, Some("false"), Some("1"), Some("TRUE")] {
-            assert_eq!(startup_timeout(value), Duration::from_secs(30));
-        }
-    }
 
     #[test]
     fn diagnostic_capture_keeps_bounded_output() {

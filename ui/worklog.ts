@@ -45,6 +45,7 @@ const KINDS: Record<string, Key> = {
   WebSearch: 'tool.webSearch',
   WebFetch: 'tool.webFetch',
   Browser: 'tool.browse',
+  Conversation: 'tool.conversation',
   Agent: 'tool.agent',
   Task: 'tool.agent',
   TodoWrite: 'tool.plan',
@@ -69,7 +70,16 @@ function detailOf(input: unknown): string {
 }
 
 export function toolRow(tool: ToolUse): ToolRow {
-  const named = SUBAGENT.has(tool.name) && (tool.input as { description?: unknown } | undefined)?.description;
+  const input = tool.input as { description?: unknown; title?: unknown; id?: unknown; level?: unknown; kind?: unknown; query?: unknown } | undefined;
+  // Faber's checks (R190) read as what they run, with nothing after: the folder is the conversation's own.
+  if (tool.name === 'Verify') return { label: t(input?.level === 'full' ? 'tool.verifyFull' : 'tool.verify'), detail: '' };
+  // The project map (R146) reads as reading it, with what was looked up.
+  if (tool.name === 'Map') return { label: t('tool.map'), detail: [input?.kind, input?.query].filter((v) => typeof v === 'string' && v).join(' ') };
+  // Its own context, and compacting it, read as what they are, with nothing after.
+  const action = tool.name === 'Conversation' ? (tool.input as { action?: unknown } | undefined)?.action : undefined;
+  if (action === 'compact' || action === 'context') return { label: t(`tool.${action}`), detail: '' };
+  // A conversation the agent starts reads as its title; one it reads back, as its id.
+  const named = SUBAGENT.has(tool.name) ? input?.description : tool.name === 'Conversation' ? (input?.title ?? input?.id) : undefined;
   const raw = typeof named === 'string' ? named : detailOf(tool.input);
   const camel = /^[a-z]+[A-Z]/.test(tool.name);
   // An MCP tool (`mcp__server__tool`) reads as using a tool, with the server's name when the call names nothing else.

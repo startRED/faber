@@ -34,7 +34,7 @@ export function Projects(props: Props) {
     <div class="projects-root" ref={(el) => (root = el)}>
       <Ambient variant="project" vendors={props.vendors} avoid={avoid} />
       <div class="projects-stage home" ref={(el) => animateList(el)}>
-        <div class="welcome-grid">
+        <div class="welcome-grid" ref={animateList}>
           <Empty
             class="w-main"
             title={t('empty.openProjectTitle')}
@@ -51,7 +51,7 @@ export function Projects(props: Props) {
           <Show when={conversations().length > 0}>
             <div class="p-side">
               {/* At most three: the sidebar already lists every project, so this screen does not list them again. */}
-              <section class="p-resume" aria-labelledby="pickup-title">
+              <section class="p-resume" aria-labelledby="pickup-title" ref={animateList}>
                 <h3 id="pickup-title">{t('s1.pickUp')}</h3>
                 <For each={conversations()}>
                   {(c) => <ResumeRow conversation={c} item={props.running.find((i) => i.conversationId === c.id)} where={projectName(c)} onOpen={props.onOpen} />}

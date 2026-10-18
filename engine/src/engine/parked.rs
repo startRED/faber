@@ -127,6 +127,7 @@ mod tests {
                     served: false,
                     unsaved_session: None,
                     steering: vec![],
+                    held: None,
                 },
             );
             c.refresh_running();

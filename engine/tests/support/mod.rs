@@ -19,6 +19,22 @@ pub fn canonical_tempdir() -> io::Result<tempfile::TempDir> {
     tempfile::Builder::new().tempdir_in(std::env::temp_dir().canonicalize()?)
 }
 
+/// A project folder Faber works in, also unattended: one under the build's own `target`, or the system's temporary one
+/// where the build sits in a folder Faber refuses (a worktree under `.claude` or a copy under AppData), so a run on the PC
+/// agrees with CI wherever the checkout lives.
+pub fn work_folder() -> tempfile::TempDir {
+    let build = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../target/test-workspaces");
+    std::fs::create_dir_all(&build).unwrap();
+    [build, std::env::temp_dir()]
+        .into_iter()
+        .map(|root| tempfile::tempdir_in(root).unwrap())
+        .find(|dir| {
+            faber_engine::permissions::checked_folder(dir.path()).is_some()
+                && faber_engine::permissions::unattended_root(dir.path()).is_some()
+        })
+        .expect("a folder Faber works in")
+}
+
 #[derive(Debug, Clone)]
 pub struct Entry {
     pub input: bool,
@@ -143,12 +159,19 @@ pub struct Wire {
     torn: Arc<std::sync::atomic::AtomicBool>,
     /// The next flushes fail.
     refuse_flush: Arc<AtomicUsize>,
+    /// The next write holding these words fails, as if the process had closed its input for it.
+    refuse_words: Arc<Mutex<Option<String>>>,
 }
 
 impl Wire {
     /// The next `n` writes fail; the ones after them pass through again.
     pub fn refuse_next(&self, n: usize) {
         self.refuse.store(n, Ordering::SeqCst);
+    }
+
+    /// The next write holding `words` fails; the ones after it pass through again.
+    pub fn refuse_words(&self, words: &str) {
+        *self.refuse_words.lock().unwrap() = Some(words.to_string());
     }
 
     /// The next write lets only its first `n` bytes through and succeeds; the write after it fails, as a pipe does that
@@ -176,7 +199,7 @@ impl Wire {
         String::from_utf8_lossy(&self.written.lock().unwrap()).lines().map(|line| serde_json::from_str(line).unwrap()).collect()
     }
 
-    fn wrap(&self, p: Proc) -> Proc {
+    pub fn wrap(&self, p: Proc) -> Proc {
         Proc { stdin: Box::new(Tap { inner: p.stdin, wire: self.clone() }), ..p }
     }
 }
@@ -192,6 +215,12 @@ impl AsyncWrite for Tap {
             self.wire.refuse.fetch_sub(1, Ordering::SeqCst);
             return Poll::Ready(Err(io::Error::other("the process closed its input")));
         }
+        let mut words = self.wire.refuse_words.lock().unwrap();
+        if words.as_ref().is_some_and(|w| String::from_utf8_lossy(buf).contains(w.as_str())) {
+            *words = None;
+            return Poll::Ready(Err(io::Error::other("the process closed its input")));
+        }
+        drop(words);
         if self.wire.torn.load(Ordering::SeqCst) {
             return Poll::Ready(Err(io::Error::other("the process closed its input")));
         }

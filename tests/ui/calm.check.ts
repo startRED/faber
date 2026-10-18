@@ -89,14 +89,14 @@ check('calm: a retry says which model it goes to, the one the composer has, in i
   }
 });
 
-check('calm: the answer header is the mark and the model; a wait for quota is said once, by the card', () => {
+check('calm: the answer header is the mark, the model and its effort; a wait for quota is said once, by the card', () => {
   useLanguage('en');
   const waiting = answer({ status: 'streaming', text: '', reason: 'reason.waiting', error: 'error.quotaWait', waitUntil: Date.now() / 1000 + 7200 });
   const view = thread([question, waiting]);
   try {
     const said = view.root.textContent!.match(/Waiting for included quota/g) ?? [];
     equal(said.length, 1, 'the card says it, the header and the red note do not');
-    equal(view.root.querySelector('.model')!.textContent, 'Sonnet 5.5');
+    equal(view.root.querySelector('.model')!.textContent, 'Sonnet 5.5· high effort');
     equal(view.root.querySelector('.note.err'), null);
     ok(view.root.querySelector('.quota-card')!.textContent!.includes('Waiting for included quota'));
   } finally {

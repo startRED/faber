@@ -375,6 +375,7 @@ fn seed(dir: &Path, long: bool) -> Conversation {
     answer.reason = Some("reason.route.chat.hard".into());
     let c = Conversation {
         working_folder: None,
+        copy: None,
         choice: None,
         id: "seeded".into(),
         title: "Existing chat".into(),
@@ -387,15 +388,22 @@ fn seed(dir: &Path, long: bool) -> Conversation {
         allow_always: None,
         allow_always_epochs: Default::default(),
         branch_of: None,
+        started_by: None,
         user_name: None,
         persona_version: None,
         created_at: 1,
         updated_at: 2,
         queued: vec![],
+        keep_going: None,
+        archived_at: None,
+        context: None,
+        reported: (None, None),
+        compacting: false,
         messages: vec![
             Message::new("first".into(), Role::User, if long { "x".repeat(30_000) } else { "Original question".into() }, 1),
             answer,
         ],
+        weighing: None,
     };
     Store::new(dir).save(&c);
     c

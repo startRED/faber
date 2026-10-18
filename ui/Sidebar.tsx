@@ -11,7 +11,7 @@ import { vendorName } from './models.ts';
 import { forgetProject } from './projects.ts';
 import type { Place } from './running.ts';
 import { mac } from './WindowControls.tsx';
-import { ageOf, freshness, groupChats, matches, type Quotas, showsChats, tailOf, tightest } from './sidebar.ts';
+import { ageOf, freshness, groupChats, matches, nest, type Quotas, showsChats, tailOf, tightest } from './sidebar.ts';
 
 /** The name of a conversation while it is being renamed: Enter keeps it, Esc and leaving the box too when nothing changed. */
 function RenameBox(props: { title: string; onDone: (title?: string) => void }) {
@@ -89,7 +89,8 @@ interface Props {
   onNewIn: (id: string) => void;
   onAddProject: () => void;
   onOpen: (conversation: Summary) => void;
-  onRemove: (id: string) => void;
+  /** Deletes a conversation; `'unsaved'` when its copy holds work found nowhere else, which needs `discard`. */
+  onRemove: (id: string, discard?: boolean) => Promise<'unsaved' | undefined> | void;
   /** Opens Settings; the quota of a vendor opens it at the usage limits. */
   onSettings: (section?: 'usage') => void;
   /** Something a menu asked for was refused (a folder that is gone, a project still working). */
@@ -100,6 +101,8 @@ interface Props {
  * bottom Settings and the quota of each connected vendor. */
 export function Sidebar(props: Props) {
   const [confirming, setConfirming] = createSignal<string>();
+  // A delete refused because the conversation's copy holds work found nowhere else: the same row asks once more.
+  const [losing, setLosing] = createSignal<string>();
   const [renaming, setRenaming] = createSignal<string>();
   // The search box filters the titles on screen; it never leaves the window and nothing is asked of the engine.
   const [query, setQuery] = createSignal('');
@@ -122,30 +125,43 @@ export function Sidebar(props: Props) {
       },
     ),
   );
-  const inProject = (p: Project) => props.conversations.filter((c) => c.area === 'project' && c.projectId === p.id && matches(c.title, query()));
+  // An archived conversation leaves the list; a search still finds it.
+  const listed = (c: Summary) => (!c.archived || searching()) && matches(c.title, query());
+  const inProject = (p: Project) => props.conversations.filter((c) => c.area === 'project' && c.projectId === p.id && listed(c));
   // A project shows when its name or one of its conversations holds the search, and then opens on those conversations.
   const projects = () => props.projects.filter((p) => !searching() || matches(p.name, query()) || inProject(p).length > 0);
-  const chats = createMemo(() => groupChats(props.conversations.filter((c) => c.area === 'chat' && matches(c.title, query())), props.now));
+  const chats = createMemo(() => groupChats(props.conversations.filter((c) => c.area === 'chat' && listed(c)), props.now));
   // The one rule for a project showing its conversations: the user opened it, or the search found something in it. The
   // list and aria-expanded both read it, so they never disagree.
   const expanded = (p: Project) => showsChats(open().has(p.id), searching(), inProject(p).length);
   // Each area lists only its own: Chat its conversations, Projects its projects with theirs.
   const inChat = () => props.place.area === 'chat';
   const nothing = () => searching() && (inChat() ? chats().length === 0 : projects().length === 0);
-  // The first click asks, the second deletes.
+  // The first click asks, the second deletes. When the copy holds unsaved work the row asks a third time, saying so.
   const remove = (id: string) => {
+    if (losing() === id) {
+      setLosing(undefined);
+      return void props.onRemove(id, true);
+    }
     if (confirming() !== id) return setConfirming(id);
     setConfirming(undefined);
-    props.onRemove(id);
+    void ask(id);
+  };
+  const ask = async (id: string) => {
+    if ((await props.onRemove(id)) === 'unsaved') setLosing(id);
   };
 
-  const Row = (row: { c: Summary }) => (
+  const Row = (row: { c: Summary; child?: boolean }) => (
     <div
       class="crow"
+      classList={{ child: row.child }}
       onContextMenu={(e) =>
         openMenu(e, [
           { id: 'rename', label: t('menu.rename'), run: () => setRenaming(row.c.id) },
-          { id: 'delete', label: t('menu.delete'), danger: true, confirm: t('side.confirmDelete'), run: () => props.onRemove(row.c.id) },
+          row.c.archived
+            ? { id: 'unarchive', label: t('menu.unarchive'), run: () => void api.archive(row.c.id, false).catch((err) => props.onError?.(err)) }
+            : { id: 'archive', label: t('menu.archive'), run: () => void api.archive(row.c.id, true).catch((err) => props.onError?.(err)) },
+          { id: 'delete', label: t('menu.delete'), danger: true, confirm: t('side.confirmDelete'), run: () => void ask(row.c.id) },
         ])
       }
     >
@@ -163,11 +179,20 @@ export function Sidebar(props: Props) {
       >
         <button class="item" aria-current={row.c.id === props.place.id} onClick={() => props.onOpen(row.c)}>
           <span>{row.c.title}</span>
+          <Show when={row.c.archived}>
+            <span class="tag-quiet">{t('archive.tag')}</span>
+          </Show>
           <Show when={props.running.find((r) => r.conversationId === row.c.id)?.waitUntil}>{(at) => <span class="waiting-label" title={t('run.waiting', { when: untilReset(at()) })}>{t('run.waiting', { when: untilReset(at()) })}</span>}</Show>
         </button>
       </Show>
-      <button class="x" classList={{ confirm: confirming() === row.c.id }} aria-label={t('side.delete', { title: row.c.title })} onClick={() => remove(row.c.id)}>
-        {confirming() === row.c.id ? t('side.confirmDelete') : <Icon name="close" small />}
+      <button
+        class="x"
+        classList={{ confirm: confirming() === row.c.id || losing() === row.c.id }}
+        aria-label={losing() === row.c.id ? t('side.unsavedCopy') : t('side.delete', { title: row.c.title })}
+        title={losing() === row.c.id ? t('side.unsavedCopy') : undefined}
+        onClick={() => remove(row.c.id)}
+      >
+        {losing() === row.c.id ? t('side.confirmDiscard') : confirming() === row.c.id ? t('side.confirmDelete') : <Icon name="close" small />}
       </button>
     </div>
   );
@@ -194,7 +219,7 @@ export function Sidebar(props: Props) {
         <Icon name="search" small />
         <input type="search" placeholder={t('side.search')} aria-label={t('side.search')} value={query()} onInput={(e) => setQuery(e.currentTarget.value)} />
       </label>
-      <div class="side-scroll" onMouseLeave={() => setConfirming(undefined)} ref={(el) => animateList(el, true)}>
+      <div class="side-scroll" onMouseLeave={() => (setConfirming(undefined), setLosing(undefined))} ref={(el) => animateList(el, true)}>
         <Show when={!inChat()}>
         <section class="projects" aria-labelledby="side-projects" ref={(el) => animateList(el, true)}>
           <div class="group-h">
@@ -260,7 +285,10 @@ export function Sidebar(props: Props) {
                       <div class="fold-inner">
                         <Show when={shown()}>
                           <div class="proj-chats" ref={animateList}>
-                            <For each={inProject(p)}>{(c) => <Row c={c} />}</For>
+                            {/* A conversation an agent started sits under the one that started it. */}
+                            <For each={nest(inProject(p))}>
+                              {(c) => <Row c={c} child={!!c.startedBy && inProject(p).some((o) => o.id === c.startedBy)} />}
+                            </For>
                           </div>
                         </Show>
                       </div>
