@@ -525,6 +525,13 @@ select.pill option { background: var(--s2); color: var(--ink); }
 .chip.keep:focus-visible { outline: 2px solid var(--accent-text); outline-offset: 2px; }
 .chip.keep[aria-pressed='true'] { color: var(--accent-text); background: var(--accent-soft); box-shadow: inset 0 0 0 1px transparent; }
 .chip.keep[aria-pressed='true'] .i { color: var(--accent-text); }
+/* Keep going and poor quota (ui/KeepGoingNote.tsx): the question before it turns on, and the line while it is on, above the composer at its width. */
+.kg-note { box-sizing: border-box; width: min(calc(100% - 48px), 660px); display: flex; flex-wrap: wrap; align-items: center; gap: 6px 8px; margin: 0 auto 6px; padding: 6px 12px; border-radius: var(--r-sm); color: var(--amber-ink); background: var(--amber-soft); font-size: var(--fs-xs); }
+.kg-note > span { flex: 1 1 220px; min-width: 0; }
+.kg-note button { padding: 3px 10px; border: 0; border-radius: var(--r-pill); color: inherit; background: transparent; font: inherit; font-weight: 500; cursor: pointer; transition: box-shadow var(--dur-fast); }
+.kg-note .kg-yes { box-shadow: inset 0 0 0 1px var(--amber-line); }
+.kg-note button:hover { box-shadow: inset 0 0 0 1px var(--amber-ink); }
+.kg-note button:focus-visible { outline: 2px solid var(--accent-text); outline-offset: 2px; }
 /* A message Faber sent by itself, and a stop of "keep going": one quiet line each, never the person's bubble. */
 .woke { display: flex; align-items: center; gap: 6px; color: var(--ink-3); font-size: var(--fs-sm); }
 .woke .i { flex: none; }

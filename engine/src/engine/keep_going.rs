@@ -1,7 +1,9 @@
 //! "Keep going" (R199): the person tells a project conversation to go on while they are away, and each time a turn ends
 //! Faber sends the next one by itself (`by_itself.rs`), until the agent asks something or says nothing is left, two turns
-//! in a row fail, Auto's quota pacing says that AI's room is used up, or the cap of turns is reached. Then it stops and
-//! says why on the reply, and the tray tells the person (R92). It reacts to the end of a turn and never polls.
+//! in a row fail, only an AI billed per use is left, or the cap of turns is reached. Then it stops and says why on the
+//! reply, and the tray tells the person (R92). Quota never stops it: when the AI it runs on is out it moves to another
+//! one, picked by hand or not, and only when every AI is out it waits for the first reset (or tries again every hour
+//! when no reset is known), which the running list shows. It reacts to the end of a turn and to quota readings.
 
 use super::*;
 use crate::budget::Why;
@@ -25,8 +27,12 @@ pub const MAX_TURNS: u32 = 40;
 /// Turns in a row that may end in an error before it stops.
 pub const MAX_FAILED: u32 = 2;
 
-/// The longest it waits for quota to come back (a week and a day), so a reset it reads wrongly never holds it forever.
+/// The longest it waits for a reset it knows (a week and a day), so a reset it reads wrongly never holds it forever.
 pub const MAX_WAIT_SECS: f64 = 8.0 * 24.0 * 3600.0;
+
+/// Without a known reset (or one past `MAX_WAIT_SECS`) it looks again this often. A quota reading that shows room wakes it
+/// sooner (`keep_going_recheck`).
+pub const RETRY_SECS: f64 = 3600.0;
 
 /// What follows the end of a turn while "keep going" is on.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -135,7 +141,10 @@ impl Core {
     pub(super) fn keep_going_ended(&mut self, conv: &str, turn_id: Option<&str>) -> Option<String> {
         let reply_id = turn_id?;
         let c = self.convs.get_mut(conv)?;
-        let kg = c.keep_going.clone()?;
+        let kg = c.keep_going.as_mut()?;
+        // A turn ended: whatever wait was set before it is over, and this end decides again.
+        kg.wait_until = None;
+        let kg = kg.clone();
         let m = c.messages.last_mut().filter(|m| m.id == reply_id && m.role == Role::Assistant)?;
         let ok = m.status == Some(Status::Done);
         let asked = m.tools.iter().flatten().any(|t| t.parent.is_none() && t.name == "AskUserQuestion");
@@ -199,7 +208,15 @@ impl Core {
     /// person left goes first.
     pub(super) fn go_on(&mut self, conv: &str, reply_id: &str) {
         match self.room_next(conv) {
-            Ok(()) => self.keep_going_after(conv, Some(reply_id.into())),
+            Ok(()) => {
+                if let Some(kg) = self.convs.get_mut(conv).and_then(|c| c.keep_going.as_mut())
+                    && kg.wait_until.take().is_some()
+                {
+                    self.save(conv);
+                    self.refresh_running();
+                }
+                self.keep_going_after(conv, Some(reply_id.into()))
+            }
             Err(why) => self.wait_for_room(conv, reply_id, why),
         }
     }
@@ -215,25 +232,25 @@ impl Core {
         }
     }
 
-    /// The room of the AI the next turn goes to: the one picked by hand when the conversation has one, otherwise any AI
-    /// Auto's router may use (it picks among those with room, so one that is out never stops it while the other has some).
+    /// Whether any AI may take the next turn. One picked by hand counts like the rest: a turn Faber sends that finds it out
+    /// of quota or billed per use moves to another AI (`recovery.rs`), so only every AI being out holds it back. Quota out
+    /// comes first, as it is the one that comes back by itself.
     pub(super) fn room_next(&self, conv: &str) -> Result<(), &'static str> {
-        let Some(c) = self.convs.get(conv) else { return Ok(()) };
-        let vendors = self.vendors();
-        if let Some(choice) = c.choice.as_ref().filter(|ch| ch.vendor != "auto") {
-            return pick_model(choice, &vendors, self.codex_recommended.as_deref())
-                .map_or(Ok(()), |p| self.room(p.vendor, p.model.as_deref()));
+        if !self.convs.contains_key(conv) {
+            return Ok(());
         }
-        let mut first = None;
-        for vendor in vendors {
+        let mut why = None;
+        for vendor in self.vendors() {
             match self.room(vendor, None) {
                 Ok(()) => return Ok(()),
-                Err(why) => {
-                    first.get_or_insert(why);
+                Err(w) => {
+                    if why.is_none() || w == "reason.keepGoing.quota" {
+                        why = Some(w);
+                    }
                 }
             }
         }
-        first.map_or(Ok(()), Err)
+        why.map_or(Ok(()), Err)
     }
 
     /// Whether unattended work may go on this AI: the same door as the rest of the engine, with nothing picked by hand, so
@@ -247,38 +264,82 @@ impl Core {
         }
     }
 
-    /// When an AI the next turn may go to has quota again (the earliest of them, or the one picked by hand), if that is
-    /// known and within a week and a day.
-    fn room_back_at(&self, conv: &str) -> Option<f64> {
+    /// When the first AI that is only out of quota (not billed per use) has it again: the ledger's recovery, or else the
+    /// reset of the window that is full (a turn cut at the limit leaves the recovery unknown while the window still says
+    /// it), if that is within a week and a day.
+    fn room_back_at(&self) -> Option<f64> {
         let now = self.secs();
-        let vendors = self.vendors();
-        let hand = self.convs.get(conv)?.choice.clone().filter(|ch| ch.vendor != "auto");
-        let at = match hand.and_then(|ch| pick_model(&ch, &vendors, self.codex_recommended.as_deref())) {
-            Some(p) => self.ledger.of(p.vendor).snap(now).recovery_for(p.model.as_deref().and_then(family_of), now),
-            None => crate::route::candidates(&vendors, &self.codex_models)
-                .iter()
-                .filter_map(|p| self.ledger.of(p.vendor).snap(now).recovery_for(family_of(p.model), now))
-                .reduce(f64::min),
-        }?;
+        let vendors: Vec<Vendor> = self.vendors().into_iter().filter(|v| self.room(*v, None) == Err("reason.keepGoing.quota")).collect();
+        let at = crate::route::candidates(&vendors, &self.codex_models)
+            .iter()
+            .filter_map(|p| {
+                let snap = self.ledger.of(p.vendor).snap(now);
+                snap.recovery_for(family_of(p.model), now).or_else(|| snap.full_until(now))
+            })
+            .reduce(f64::min)?;
         (at - now <= MAX_WAIT_SECS).then_some(at)
     }
 
-    /// Out of quota is a wait, not an end: when the reset is known the conversation goes on by itself then, as long as
-    /// keep going is still on and nothing newer happened in it. Without a known reset it stops, as nothing would wake it.
+    /// A quota reading came in: a conversation that waits for quota goes on now when an AI has room again.
+    pub(super) fn keep_going_recheck(&mut self) {
+        let due: Vec<(String, String)> = self
+            .convs
+            .iter()
+            .filter(|(id, c)| {
+                c.keep_going.as_ref().is_some_and(|k| k.wait_until.is_some()) && !self.live.get(*id).is_some_and(|l| l.turn.is_some())
+            })
+            .filter_map(|(id, c)| {
+                let m = c.messages.last().filter(|m| m.role == Role::Assistant && m.status != Some(Status::Streaming))?;
+                Some((id.clone(), m.id.clone()))
+            })
+            .collect();
+        for (id, reply) in due {
+            if self.room_next(&id).is_ok() {
+                self.go_on(&id, &reply);
+            }
+        }
+    }
+
+    /// Every AI out of quota is a wait, never an end: the conversation goes on by itself at the first known reset, or looks
+    /// again every hour, as long as keep going is still on and nothing newer happened in it, and the running list shows
+    /// until when. Any other reason stops it.
     fn wait_for_room(&mut self, conv: &str, reply_id: &str, why: &'static str) {
-        let Some(at) = (why == "reason.keepGoing.quota").then(|| self.room_back_at(conv)).flatten() else {
+        if why != "reason.keepGoing.quota" {
             return self.halt(conv, reply_id, why);
-        };
-        let wait = (at - self.secs()).max(1.0) + 5.0;
+        }
+        // Another AI has room (a turn picked by hand that hit its limit is not moved by itself): it goes on now. Each such
+        // try counts as a failed turn, so a door that says yes while the turn keeps failing ends after two, never loops.
+        if self.room_next(conv).is_ok() {
+            let Some(kg) = self.convs.get_mut(conv).and_then(|c| c.keep_going.as_mut()) else { return };
+            kg.failed += 1;
+            if kg.failed >= MAX_FAILED {
+                return self.halt(conv, reply_id, "reason.keepGoing.failed");
+            }
+            kg.wait_until = None;
+            self.save(conv);
+            return self.keep_going_after(conv, Some(reply_id.into()));
+        }
+        let at = self.room_back_at().unwrap_or_else(|| self.secs() + RETRY_SECS);
+        // Never sooner than half a minute, so a reset the ledger has not caught up with yet is not asked about in a loop.
+        let at = at.max(self.secs() + 30.0);
+        let Some(kg) = self.convs.get_mut(conv).and_then(|c| c.keep_going.as_mut()) else { return };
+        kg.wait_until = Some(at);
+        self.save(conv);
+        self.refresh_running();
+        let wait = at - self.secs() + 5.0;
         let (me, conv, reply) = (self.me.clone(), conv.to_string(), reply_id.to_string());
         self.opts.runtime.spawn(async move {
             tokio::time::sleep(Duration::from_secs_f64(wait)).await;
             if let Some(core) = me.upgrade() {
                 let mut core = core.lock().unwrap_or_else(|e| e.into_inner());
+                // Only the latest wait wakes it: turning keep going off and on, or a newer turn, leaves this one behind.
                 let waiting = core.convs.get(&conv).is_some_and(|c| {
-                    c.keep_going.is_some() && c.messages.last().is_some_and(|m| m.id == reply && m.status != Some(Status::Streaming))
+                    c.keep_going.as_ref().is_some_and(|k| k.wait_until == Some(at))
+                        && c.messages.last().is_some_and(|m| m.id == reply && m.status != Some(Status::Streaming))
                 });
                 if waiting && !core.live.get(&conv).is_some_and(|l| l.turn.is_some()) {
+                    // A fresh reading may show room the ledger does not know yet; when it comes, it wakes it again.
+                    core.quota_event();
                     core.go_on(&conv, &reply);
                 }
             }

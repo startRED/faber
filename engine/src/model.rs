@@ -379,6 +379,9 @@ pub struct KeepGoing {
     pub turns: u32,
     /// Turns in a row that ended with an error.
     pub failed: u32,
+    /// Every AI it may use is out of quota: it goes on by itself at this time (Unix seconds), and the screen says so.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub wait_until: Option<f64>,
 }
 
 impl Message {

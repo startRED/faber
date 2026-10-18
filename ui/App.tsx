@@ -54,6 +54,8 @@ import { Welcome } from './Welcome.tsx';
 import { UpdateStage } from './UpdateStage.tsx';
 import { WhatsNew } from './WhatsNew.tsx';
 import { mac, WindowControls } from './WindowControls.tsx';
+import { keepGoingWarning } from './keep-going.ts';
+import { KeepGoingNote } from './KeepGoingNote.tsx';
 
 // Small per-window conveniences; storage can be missing, and the app works without it.
 function recall<T>(key: string, fallback: T): T {
@@ -675,6 +677,19 @@ export function App(props: { initial: AppState; update?: UpdateStatus; inbox: { 
     if (area() !== 'project' || !c?.messages.length) return undefined;
     return state().conversations.some((s) => s.id === c.id && s.keepGoing);
   };
+  // Poor quota is asked about before keep going turns on, and said on screen while it is on (ui/keep-going.ts).
+  const keepGoingWarn = createMemo(() => {
+    const c = current();
+    if (keepGoing() === undefined || !c) return undefined;
+    return keepGoingWarning(state().usage ?? [], items().find((r) => r.conversationId === c.id));
+  });
+  const [askKeepGoing, setAskKeepGoing] = createSignal(false);
+  createEffect(on(() => current()?.id, () => setAskKeepGoing(false)));
+  const setKeepGoing = (value: boolean) => {
+    setAskKeepGoing(false);
+    const id = current()?.id;
+    if (id) void api.keepGoing(id, value).then(refresh, (err) => setSaveError(failureText(err)));
+  };
   const needsProject = () => area() === 'project' && !project();
   // The new conversation of a chat with a connected AI is the one place the effects of a look appear.
   const newChat = () => (area() === 'chat' || !!project()) && state().vendors.length > 0 && !current()?.messages.length;
@@ -742,8 +757,9 @@ export function App(props: { initial: AppState; update?: UpdateStatus; inbox: { 
         onStop={() => current() && void api.interrupt(current()!.id)}
         keepGoing={keepGoing()}
         onKeepGoing={(on) => {
-          const id = current()?.id;
-          if (id) void api.keepGoing(id, on).then(refresh, (err) => setSaveError(failureText(err)));
+          // Turning it on while the quota is poor asks first (the chip again closes the question); off never asks.
+          if (on && keepGoingWarn()) return setAskKeepGoing(!askKeepGoing());
+          setKeepGoing(on);
         }}
         onWarm={() => void api.warm({ conversationId: current()?.id, ...target(), choice: picked() })}
         onPause={(text) => {
@@ -1095,6 +1111,13 @@ ${copy().path}`}>
                       </div>
                       <Show when={!newChat() && !needsProject() && state().vendors.length > 0}>
                         <div class="dock" inert={trapped()}>
+                          <KeepGoingNote
+                            warning={keepGoingWarn()}
+                            on={!!keepGoing()}
+                            asking={askKeepGoing()}
+                            onYes={() => setKeepGoing(true)}
+                            onNo={() => setAskKeepGoing(false)}
+                          />
                           {composer()}
                         </div>
                       </Show>

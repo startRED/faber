@@ -320,18 +320,26 @@ async fn a_message_the_person_queued_goes_first_and_the_stop_line_still_counts()
 }
 
 #[tokio::test]
-async fn a_turn_out_of_quota_stops_keep_going_and_says_so() {
+async fn a_turn_cut_at_the_limit_waits_for_quota_and_a_reading_with_room_sends_the_next_turn() {
     let (dir, project) = (tempfile::tempdir().unwrap(), folder());
     let (engine, mut rx, mut pipe, id) = started(dir.path(), project.path()).await;
     engine.keep_going(&id, true).unwrap();
-    // The model the person picked ran out of its plan: no turn ends normally, and nothing would end it again.
+    // The model the person picked ran out of its plan, and the CLI did not say when it comes back: keep going does not
+    // stop, it looks again within the hour.
     pipe.say(json!({ "type": "result", "subtype": "error_during_execution", "is_error": true,
         "errors": ["You've hit your usage limit"], "total_cost_usd": 0.0, "usage": {} }))
         .await;
-    let c = until(&engine, &id, |c| c.keep_going.is_none()).await;
-    let last = c.messages.last().unwrap();
-    assert_eq!(last.halt.as_deref(), Some("reason.keepGoing.quota"), "{:?} {:?}", last.status, last.error);
-    assert_eq!(halts(&mut rx), vec!["reason.keepGoing.quota".to_string()], "the tray is told");
+    let c = until(&engine, &id, |c| c.keep_going.as_ref().is_some_and(|k| k.wait_until.is_some())).await;
+    let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_secs_f64();
+    let at = c.keep_going.unwrap().wait_until.unwrap();
+    assert!(at > now + 3000.0 && at < now + 3700.0, "it looks again in an hour: {at} vs {now}");
+    assert!(c.messages.last().unwrap().halt.is_none());
+    assert!(halts(&mut rx).is_empty(), "nothing stopped, so the tray says nothing");
+    // A reading says the limit is gone: the next turn goes now, without waiting for the hour.
+    let clear = faber_engine::signals::Signals { reach: Some(faber_engine::budget::Reach::Clear), ..Default::default() };
+    engine.note_account_events(Vendor::Claude, vec![faber_engine::events::EngineEvent::Signals(clear)]);
+    let c = until(&engine, &id, |c| c.messages.iter().any(|m| m.wake.as_ref().is_some_and(|w| w.why == "wake.keepGoing"))).await;
+    assert!(c.keep_going.as_ref().is_some_and(|k| k.wait_until.is_none()), "the wait is over: {:?}", c.keep_going);
     engine.shutdown();
 }
 
@@ -365,5 +373,29 @@ async fn after_a_failed_turn_the_message_the_person_left_is_the_next_one() {
     tokio::time::sleep(Duration::from_millis(60)).await;
     assert_eq!(turns(&pipe).len(), 3, "turned off, nothing more goes");
     assert_eq!(halts(&mut rx), Vec::<String>::new());
+    engine.shutdown();
+}
+
+#[tokio::test]
+async fn every_ai_out_of_quota_with_a_known_reset_waits_on_screen_instead_of_stopping() {
+    let (dir, project) = (tempfile::tempdir().unwrap(), folder());
+    let (engine, mut rx, mut pipe, id) = started(dir.path(), project.path()).await;
+    engine.keep_going(&id, true).unwrap();
+    // The week is all but used up (past the share Faber still sends at) and resets in six days: the only AI is out, so
+    // Faber waits for it rather than ending.
+    answers_at(&mut pipe, "One done.", true, 0.985).await;
+    let c = until(&engine, &id, |c| idle(c) && c.keep_going.as_ref().is_some_and(|k| k.wait_until.is_some())).await;
+    let at = c.keep_going.unwrap().wait_until.unwrap();
+    let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_secs_f64();
+    assert!(at > now + 5.0 * 86_400.0 && at < now + 7.0 * 86_400.0, "it waits for the reset: {at} vs {now}");
+    let row = engine.state().running.items.into_iter().find(|r| r.conversation_id == id).expect("the running list keeps it");
+    assert_eq!(row.wait_until, Some(at), "and says until when");
+    assert!(row.keep_going);
+    assert!(engine.is_working(), "so no idle update restarts Faber under it");
+    assert!(halts(&mut rx).is_empty(), "nothing stopped");
+    assert_eq!(turns(&pipe).len(), 1, "and no turn went to an AI with no quota");
+    // Turned off while it waits, the list lets it go.
+    engine.keep_going(&id, false).unwrap();
+    assert!(engine.state().running.items.iter().all(|r| r.conversation_id != id));
     engine.shutdown();
 }

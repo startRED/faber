@@ -970,6 +970,20 @@ impl Core {
         (self.emit)(AppEvent::Quota { vendor, window: window.to_string(), used, resets_at });
         self.stop_unapproved_paid(vendor, false);
         self.emit_usage();
+        self.keep_going_recheck();
+    }
+
+    /// A whole reading of the account (every window of it noted just now) with room in every vendor-wide window overrules a
+    /// limit the CLI reported without a reset, which before only a turn could clear; keep going waiting on it goes on.
+    pub(super) fn reading_done(&mut self, vendor: Vendor) {
+        let now = self.secs();
+        let v = self.ledger.of_mut(vendor);
+        if v.reach == Reach::Out(None) && v.snap(now).windows_show_room(now) {
+            v.reach = Reach::Clear;
+            self.save_ledger(true);
+            self.emit_usage();
+            self.keep_going_recheck();
+        }
     }
 
     /// What a CLI said about the account: merged into what the ledger knows, field by field.
@@ -998,6 +1012,7 @@ impl Core {
         }
         self.stop_unapproved_paid(vendor, spent);
         self.emit_usage();
+        self.keep_going_recheck();
     }
 
     fn stop_unapproved_paid(&mut self, vendor: Vendor, spent: bool) {
@@ -2186,6 +2201,10 @@ impl Core {
         let by_hand = !auto && item.wake.is_none();
         let route = if auto { self.next_route(id) } else { None };
         let c = self.convs.get_mut(id).expect("checked above");
+        // A turn that starts ends any wait of keep going: its end decides again, and no timer or reading sends a second one.
+        if let Some(kg) = c.keep_going.as_mut() {
+            kg.wait_until = None;
+        }
         c.choice = Some(Choice { effort: (!auto).then(|| item.choice.effort.unwrap_or_default()), ..item.choice.clone() });
         let routing = route.is_some();
         let pick = match &route {
@@ -2996,7 +3015,10 @@ fn running_item(c: &Conversation) -> Option<RunningItem> {
     let held = reply.follow.as_ref().filter(|f| f.held && f.state.open()).map(|f| (f.number, f.head.clone().unwrap_or_default()));
     let checks = reply.checks.as_ref().map(|k| k.state);
     let checks_need = checks == Some(ChecksState::NeedsYou);
+    // Keep going that waits for quota is still at work: the list says until when, and no idle update restarts Faber under it.
+    let kg_wait = c.keep_going.as_ref().and_then(|k| k.wait_until).filter(|_| reply.status != Some(Status::Streaming));
     if reply.status != Some(Status::Streaming)
+        && kg_wait.is_none()
         && permissions.is_empty()
         && parked.is_empty()
         && parked_more == 0
@@ -3024,7 +3046,7 @@ fn running_item(c: &Conversation) -> Option<RunningItem> {
         parked,
         parked_more,
         stuck,
-        wait_until: reply.wait_until.filter(|_| reply.status == Some(Status::Streaming)),
+        wait_until: reply.wait_until.filter(|_| reply.status == Some(Status::Streaming)).or(kg_wait),
         held,
         keep_going: c.keep_going.is_some(),
     })

@@ -110,6 +110,11 @@ The numbers above are the usual widths. The person can change them, and the shel
   says the composer's Stop ends it. A message Faber sent by itself is one quiet line with the same icon where the
   person's bubble would be ("Faber asked it to keep going"; what the agent was told is its tooltip), and a reply after
   which it stopped by itself ends with one calm line that says why, in the same style (C001). Nothing moves.
+  When every AI it may use is near its limit, spent faster than its daily line, out, or billed per use (R216), one
+  amber line sits right above the composer, at its width, with the loop icon: before it turns on, the chip's first click shows it with
+  "Keep going anyway" and "Not now" (turning it off never asks); while it is on, the same line stays without buttons and
+  says until when it waits once every AI is out. The sidebar and the running column say "Waiting for quota until …".
+  It wraps at 720 px and does not move.
 - A project reply that opened, queued or pushed a pull request ends with one pace-style line (R200): its words ("Following
   pull request #93: checks running.") link to the page, and "Stop following" sits beside them while it is open. Only checks
   that wait for the person turn it amber. When the checks fail, Faber's own message is Keep

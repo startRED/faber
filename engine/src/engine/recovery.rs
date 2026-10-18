@@ -215,8 +215,19 @@ impl Core {
         }
         match self.start(id, reply, pick, text, images, by_hand) {
             Err(e) if e == "error.quotaOut" => self.recover(id, false),
+            // A turn nobody picked by hand (Auto, or one Faber sends by itself) never stops on an AI it may not spend on
+            // while another one has room: it moves there, as it would when out of quota.
+            Err(e)
+                if !by_hand && matches!(e.as_str(), "error.billedPerUse" | "error.billingUnknown") && self.other_has_room(pick.vendor) =>
+            {
+                self.recover(id, false)
+            }
             other => other,
         }
+    }
+
+    fn other_has_room(&self, vendor: Vendor) -> bool {
+        self.vendors().into_iter().any(|v| v != vendor && self.allows(v, None, Purpose::UserTurn { by_hand: false }, false).is_ok())
     }
 
     // The reason key does not keep the router's `check`, so the transfer carries it.
