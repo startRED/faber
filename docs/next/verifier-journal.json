@@ -1,0 +1,11 @@
+{
+  "notes": {
+    "better": {
+      "en": "Faber's checks now run first what failed last time, and tell the agent when a check failed on content it once passed on.",
+      "pt-BR": "As verificações do Faber agora rodam primeiro o que falhou da última vez, e avisam o agente quando uma verificação falhou num conteúdo em que já tinha passado.",
+      "es": "Las comprobaciones de Faber ahora ejecutan primero lo que falló la última vez, y avisan al agente cuando una comprobación falla en un contenido con el que ya había pasado.",
+      "fr": "Les vérifications de Faber lancent désormais d'abord ce qui a échoué la dernière fois, et préviennent l'agent quand une vérification échoue sur un contenu où elle avait déjà réussi.",
+      "de": "Fabers Prüfungen führen jetzt zuerst aus, was beim letzten Mal fehlschlug, und sagen dem Agenten, wenn eine Prüfung bei einem Inhalt fehlschlägt, bei dem sie schon einmal bestanden hat."
+    }
+  }
+}
