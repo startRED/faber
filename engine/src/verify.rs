@@ -534,19 +534,23 @@ impl Verifier {
     }
 }
 
-/// What fast adds for a Rust change: Clippy on each package it touches, named by its manifest (`select::rust_manifests`), which catches a compile
-/// error in seconds on a warm folder where the project's own list may compile nothing. Never in full, never in the
-/// project's list; a package the list already checks that way is not checked twice.
+/// What fast adds for a Rust change: Clippy on each package it touches, named by its manifest (`select::rust_manifests`,
+/// with `--workspace` when that manifest is a workspace too), which catches a compile error in seconds on a warm folder
+/// where the project's own list may compile nothing. Never in full, never in the project's list; a package the list
+/// already checks that way is not checked twice. The manifest is one argument, spaces and all: no shell reads it.
 // ponytail: Clippy only; the package's unit tests could join it once a run measures them at a few seconds.
 fn rust_checks(folder: &Path, changed: &Changed, declared: &[String]) -> Vec<Planned> {
     select::rust_manifests(folder, &changed.files)
         .into_iter()
-        .map(|manifest| format!("cargo clippy --manifest-path {manifest} --all-targets -- -D warnings"))
-        .filter(|command| !declared.contains(command))
-        .map(|command| {
-            let tokens: Vec<String> = command.split_whitespace().map(String::from).collect();
-            Planned { command, tokens, watch: Watch::All, heavy: true }
+        .map(|(manifest, workspace)| {
+            let mut tokens: Vec<String> = ["cargo", "clippy", "--manifest-path"].map(String::from).to_vec();
+            tokens.push(manifest);
+            tokens.extend(workspace.then(|| "--workspace".to_string()));
+            tokens.extend(["--all-targets", "--", "-D", "warnings"].map(String::from));
+            tokens
         })
+        .map(|tokens| Planned { command: tokens.join(" "), tokens, watch: Watch::All, heavy: true })
+        .filter(|check| !declared.contains(&check.command))
         .collect()
 }
 
