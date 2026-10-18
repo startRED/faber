@@ -968,6 +968,10 @@ export function App(props: { initial: AppState; update?: UpdateStatus; inbox: { 
                 updateBlocked={every().length > 0}
                 onRestart={restartForUpdate}
                 userName={state().settings.userName}
+                // A Skip on the account cards means "later": with one AI connected, the sidebar offers the other until the cards
+                // are opened and closed (which saves `done`) or both are in. With none, the No AI screen already says it.
+                remindConnect={state().settings.setup === 'skipped' && state().vendors.length === 1}
+                onConnect={openSetup}
                 place={place()}
                 running={items()}
                 quotas={quotas()}

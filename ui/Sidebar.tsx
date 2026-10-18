@@ -95,6 +95,9 @@ interface Props {
   onSettings: (section?: 'usage') => void;
   /** Something a menu asked for was refused (a folder that is gone, a project still working). */
   onError?: (err: unknown) => void;
+  /** The person skipped the account cards and one AI is still not connected: a quiet line offers it until the cards close. */
+  remindConnect?: boolean;
+  onConnect?: () => void;
 }
 
 /** The sidebar: new conversation, the two areas, the projects with their conversations, the chats by day, and at the
@@ -364,6 +367,12 @@ export function Sidebar(props: Props) {
           </For>
           <Show when={props.vendors.length === 0}>
             <span class="note">{t('side.noAi')}</span>
+          </Show>
+          <Show when={props.remindConnect}>
+            <button type="button" class="vendor more" data-restore="connect-more" onClick={() => props.onConnect?.()}>
+              <Icon name="plus" small />
+              <span>{t('side.connectMore')}</span>
+            </button>
           </Show>
         </div>
         {/* The update: a calm line while one downloads at open, a quiet control once one waits for a restart. */}
