@@ -956,6 +956,7 @@ export const es: Messages = {
   'notes.79.fixed': 'Seguir solo ya no se detiene en los primeros errores: descansa y vuelve a intentarlo, y solo se rinde tras seis seguidos.',
   'notes.80.new': 'Un proyecto que siguió solo mientras estabas fuera ahora muestra hasta dónde llegó, en su fila de la lista en curso y en la respuesta más reciente.',
   'notes.81.better': 'Cuando Seguir solo responde una pregunta por ti tras diez minutos, la respuesta ahora dice qué pregunta y qué opción.',
+  'notes.82.fixed': 'El agente ahora responde en el idioma en que escribes, incluso en un proyecto con archivos en otro idioma.',
   'update.checking': 'Buscando una actualización…',
   'update.downloading': 'Descargando actualización…',
   'update.downloadingPercent': 'Descargando actualización… {percent} %',

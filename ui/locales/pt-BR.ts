@@ -943,6 +943,7 @@ export const ptBR: Messages = {
   'notes.79.fixed': 'O Continuar sozinho não para mais nos primeiros erros: descansa e tenta de novo, e só desiste depois de seis seguidos.',
   'notes.80.new': 'Um projeto que continuou sozinho enquanto você estava fora agora mostra até onde foi, na linha da lista em andamento e na resposta mais recente.',
   'notes.81.better': 'Quando o Continuar sozinho responde uma pergunta por você depois de dez minutos, a resposta agora diz qual pergunta e qual opção.',
+  'notes.82.fixed': 'O agente agora responde no idioma em que você escreve, mesmo num projeto com arquivos em outro idioma.',
   'update.checking': 'Procurando atualização…',
   'update.downloading': 'Baixando atualização…',
   'update.downloadingPercent': 'Baixando atualização… {percent}%',

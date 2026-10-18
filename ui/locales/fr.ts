@@ -956,6 +956,7 @@ export const fr: Messages = {
   'notes.79.fixed': "Continuer seul ne s'arrête plus aux premières erreurs : il se repose et réessaie, et n'abandonne qu'après six de suite.",
   'notes.80.new': 'Un projet qui a continué seul pendant votre absence montre maintenant où il en est, sur sa ligne de la liste en cours et sur la dernière réponse.',
   'notes.81.better': 'Quand Continuer seul répond à une question à votre place après dix minutes, la réponse indique maintenant laquelle et quel choix.',
+  'notes.82.fixed': "L'agent répond maintenant dans la langue où vous écrivez, même dans un projet dont les fichiers sont dans une autre langue.",
   'update.checking': 'Recherche d’une mise à jour…',
   'update.downloading': 'Téléchargement de la mise à jour…',
   'update.downloadingPercent': 'Téléchargement de la mise à jour… {percent} %',

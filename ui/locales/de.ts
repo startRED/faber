@@ -956,6 +956,7 @@ export const de: Messages = {
   'notes.79.fixed': 'Selbst weitermachen hält bei den ersten Fehlern nicht mehr an: Es ruht sich aus und versucht es erneut und gibt erst nach sechs in Folge auf.',
   'notes.80.new': 'Ein Projekt, das während deiner Abwesenheit allein weitermachte, zeigt jetzt, wie weit es kam: in seiner Zeile der laufenden Liste und in der neuesten Antwort.',
   'notes.81.better': 'Wenn Selbst weitermachen nach zehn Minuten eine Frage für dich beantwortet, nennt die Antwort jetzt die Frage und die Wahl.',
+  'notes.82.fixed': 'Der Agent antwortet jetzt in der Sprache, in der du schreibst, auch in einem Projekt, dessen Dateien in einer anderen Sprache sind.',
   'update.checking': 'Suche nach einem Update…',
   'update.downloading': 'Update wird heruntergeladen…',
   'update.downloadingPercent': 'Update wird heruntergeladen… {percent} %',

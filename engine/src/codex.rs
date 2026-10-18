@@ -18,8 +18,8 @@ use tokio::io::{AsyncBufReadExt, BufReader};
 use tokio::sync::mpsc::error::SendError;
 use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender, unbounded_channel};
 
-const CHAT_INSTRUCTIONS: &str = "You are a helpful, precise assistant in a chat app. Answer in the language of the user. \
-Use Markdown when it helps. Your working folder belongs to this conversation: run code and create files \
+const CHAT_INSTRUCTIONS: &str = "You are a helpful, precise assistant in a chat app. Answer in the language of the user's \
+latest message, even when files or tools use another. Use Markdown when it helps. Your working folder belongs to this conversation: run code and create files \
 there when it helps, and mention the files you create.";
 
 /// Every guarded mode (Ask, Accept edits, Plan, Auto) preserves the existing Ask setup. Isolated servers disable integrations

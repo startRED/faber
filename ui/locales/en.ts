@@ -836,6 +836,7 @@ export const en = {
   'notes.79.fixed': 'Keep going no longer stops at the first errors: it rests and tries again, and only gives up after six in a row.',
   'notes.80.new': 'A project that kept going while you were away now shows how far it got, on its row in the running list and on the newest reply.',
   'notes.81.better': 'When Keep going answers a question for you after ten minutes, the reply now says which question and which choice.',
+  'notes.82.fixed': 'The agent now answers in the language you write in, even in a project whose files are in another language.',
   'update.checking': 'Looking for an update…',
   'update.downloading': 'Downloading update…',
   'update.downloadingPercent': 'Downloading update… {percent}%',
