@@ -483,6 +483,7 @@ pub fn parse_codex_notification(msg: &Value, state: &mut CodexTurnState) -> Vec<
                 ("dynamicToolCall", Some(crate::browser::NAME)) => crate::browser::TOOL,
                 ("dynamicToolCall", Some(crate::sibling::NAME)) => crate::sibling::TOOL,
                 ("dynamicToolCall", Some(crate::verify::NAME)) => crate::verify::TOOL,
+                ("dynamicToolCall", Some(crate::map::NAME)) => crate::map::TOOL,
                 _ => kind,
             };
             vec![EngineEvent::Tool { id: s(&item["id"]), name: name.into(), input, parent: None }]
@@ -792,6 +793,7 @@ pub fn thread_params(area: Area, t: &CodexThread) -> (&'static str, Value) {
             let tools = params.entry("dynamicTools").or_insert_with(|| json!([]));
             if let Some(tools) = tools.as_array_mut() {
                 tools.push(crate::verify::codex_tool());
+                tools.push(crate::map::codex_tool());
             }
         }
     }
@@ -1251,6 +1253,21 @@ async fn serve(
                                 }
                                 None => {
                                     let _ = proc::write_line(&mut *stdin, &json!({"id":id,"result":{"success":false,"contentItems":[{"type":"inputText","text":"Starting a conversation is not available here."}]}})).await;
+                                }
+                            }
+                            continue;
+                        }
+                        if method == "item/tool/call" && params["tool"] == crate::map::NAME {
+                            // The agent reads the project's map; the engine answers once it has read the folder.
+                            match thread.filter(|t| t.params.verify && !t.blocked && !t.closing) {
+                                Some(t) => {
+                                    let call = s(&params["callId"]);
+                                    t.helpers.insert(call.clone(), id.clone());
+                                    t.watch.pause();
+                                    (t.sink)(EngineEvent::MapCall { id: call, input: params["arguments"].clone() });
+                                }
+                                None => {
+                                    let _ = proc::write_line(&mut *stdin, &json!({"id":id,"result":{"success":false,"contentItems":[{"type":"inputText","text":"Faber's project map is not available here."}]}})).await;
                                 }
                             }
                             continue;

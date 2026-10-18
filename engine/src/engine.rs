@@ -1578,6 +1578,7 @@ impl Core {
             EngineEvent::BrowseCall { id, input } => return self.browse(conv, id, input),
             EngineEvent::ConversationCall { id, input } => return self.conversation_call(conv, id, input),
             EngineEvent::VerifyCall { id, input } => return self.verify_call(conv, id, input),
+            EngineEvent::MapCall { id, input } => return self.map_call(conv, id, input),
             EngineEvent::Permission { request_id, tool, input } => {
                 // A request that touches a credential folder is refused in both modes, with no card (best effort for a command
                 // line: see `touches_credentials`). Full access never shows a card. The answer is decided here, under the lock

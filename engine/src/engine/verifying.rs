@@ -166,6 +166,27 @@ impl Core {
         });
     }
 
+    /// The agent asked for the project's map: its folder is read away from the lock, and the answer goes back to the
+    /// process that asked. It is offered where the checks are.
+    pub(super) fn map_call(&mut self, conv: &str, call: String, input: serde_json::Value) {
+        let Some(l) = self.live.get(conv) else { return };
+        let (sid, permissions) = (l.sid, l.permissions);
+        let Some(c) = self.convs.get(conv) else { return };
+        if !self.offers_verify(c.area, permissions) {
+            return self.answer_verify(conv, sid, &call, false, "Faber's project map is offered only in full access.".into());
+        }
+        let Ok(folder) = self.cwd_of(c) else {
+            return self.answer_verify(conv, sid, &call, false, "The conversation's folder cannot be read.".into());
+        };
+        let (me, conv) = (self.me.clone(), conv.to_string());
+        let read = self.opts.runtime.spawn_blocking(move || crate::map::answer(&crate::map::scan(&folder), &input));
+        self.opts.runtime.spawn(async move {
+            let (ok, text) = read.await.unwrap_or_else(|_| (false, "Faber could not read the folder.".into()));
+            let Some(core) = me.upgrade() else { return };
+            core.lock().unwrap_or_else(|e| e.into_inner()).answer_verify(&conv, sid, &call, ok, text);
+        });
+    }
+
     /// The agent's turn stopped or ended: the checks it started stop with it, and their processes end with their jobs.
     /// Another conversation's checks of the same folder (one without a copy of its own) go on.
     pub(super) fn stop_verify(&self, conv: &str) {

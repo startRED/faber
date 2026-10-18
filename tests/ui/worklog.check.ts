@@ -20,6 +20,8 @@ check('worklog: every Claude Code tool reads as what it does, in words', () => {
   // Faber's checks (R190) read as the level they run, with nothing after.
   deepEqual(toolRow({ id: '9', name: 'Verify', input: {} }), { label: t('tool.verify'), detail: '' });
   deepEqual(toolRow({ id: '10', name: 'Verify', input: { level: 'full' } }), { label: t('tool.verifyFull'), detail: '' });
+  deepEqual(toolRow({ id: '11', name: 'Map', input: {} }), { label: t('tool.map'), detail: '' });
+  deepEqual(toolRow({ id: '12', name: 'Map', input: { kind: 'setting', query: 'theme' } }), { label: t('tool.map'), detail: 'setting theme' });
 });
 
 // R161 step 9: while a reply runs, the checks it ran tick up under the status line, marked by the engine, never guessed here.

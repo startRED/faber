@@ -17,6 +17,7 @@ pub mod helper;
 pub mod install;
 pub mod learn;
 pub mod ledger;
+pub mod map;
 pub mod model;
 pub mod nudge;
 pub mod permissions;

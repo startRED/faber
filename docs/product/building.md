@@ -114,8 +114,10 @@ to GitHub so CI only confirms, and later serves every project
 
 A mission keeps a project as coherent as the agents that build Faber keep Faber (R145). Planned, not built:
 
-- **A project map built from the code.** Extractors list what the project has (settings, routes, commands, texts,
-  exports) and stay tied to the files they came from; no AI-written overview. Roles get the index and look details up.
+- **A project map built from the code (built for the project's agent).** Extractors list what the project has
+  (settings, commands, texts, browser storage keys, screen files, package scripts, exports) and stay tied to the files
+  they came from; no AI-written overview. The agent gets the index through Faber's `map` tool and looks details up.
+  Routes and other languages come with the first project that needs them.
 - **A contract before writing.** The Lead names what the change touches, the closest thing that already exists, and
   `Extends:` it or `New:` with why it does not fit; the Writer starts only once the contract exists.
 - **Faber decides "done".** After the Writer's turn Faber runs the project's checks and the map check itself; a Writer

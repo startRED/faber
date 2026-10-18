@@ -82,6 +82,11 @@ pub enum EngineEvent {
         id: String,
         input: Value,
     },
+    /// The agent asked for the project's map (`crate::map`). The engine answers with `Session::helper_reply`.
+    MapCall {
+        id: String,
+        input: Value,
+    },
     /// The agent called Faber's helper tool (R161, `crate::helper`): `id` is that tool call. The CLI waits for the answer,
     /// which the engine sends with `Session::helper_reply` once the helper is done.
     HelperCall {
