@@ -2,6 +2,7 @@
 //! the machine has free, so two builds run together only when both fit. A build whose peak is not known yet runs alone,
 //! the way every build did before. Idle it holds nothing: a waiting build reads the free memory every `EVERY`.
 
+use std::collections::VecDeque;
 use std::sync::Mutex;
 use std::time::Duration;
 use tokio::sync::Notify;
@@ -28,6 +29,9 @@ struct Held {
     /// Builds running with no known peak: while one runs, no other starts.
     unknown: usize,
     reserved: u64,
+    /// The builds waiting, in the order they came: only the first may start, so a big one is never passed for ever.
+    line: VecDeque<u64>,
+    tickets: u64,
 }
 
 #[derive(Default)]
@@ -42,9 +46,31 @@ pub struct Admitted<'a> {
     need: Option<u64>,
 }
 
+/// A waiting build's place in line, left when its run is stopped before it starts.
+struct InLine<'a> {
+    admission: &'a Admission,
+    ticket: u64,
+}
+
+impl Drop for InLine<'_> {
+    fn drop(&mut self) {
+        let mut held = self.admission.held.lock().unwrap_or_else(|e| e.into_inner());
+        held.line.retain(|&t| t != self.ticket);
+        self.admission.ended.notify_waiters();
+    }
+}
+
 impl Admission {
-    /// Waits until a build expected to take `need` bytes at most fits.
+    /// Waits until a build expected to take `need` bytes at most fits, after every build that came before it.
     pub async fn admit(&self, need: Option<u64>, free: &Free) -> Admitted<'_> {
+        let ticket = {
+            let mut held = self.held.lock().unwrap_or_else(|e| e.into_inner());
+            held.tickets += 1;
+            let ticket = held.tickets;
+            held.line.push_back(ticket);
+            ticket
+        };
+        let _in_line = InLine { admission: self, ticket };
         loop {
             let ended = self.ended.notified();
             {
@@ -52,13 +78,15 @@ impl Admission {
                 // ponytail: the free memory already counts what the running builds use now, so their reserve is counted
                 // twice while they run; conservative (less overlap, never more). A per-build reading would refine it.
                 let fits = held.builds == 0
-                    || held.unknown == 0 && need.zip(free()).is_some_and(|(need, free)| held.reserved + need + RESERVE <= free);
-                if fits {
+                    || held.unknown == 0
+                        && need.zip(free()).is_some_and(|(need, free)| held.reserved.saturating_add(need).saturating_add(RESERVE) <= free);
+                if held.line.front() == Some(&ticket) && fits {
                     held.builds += 1;
                     match need {
-                        Some(need) => held.reserved += need,
+                        Some(need) => held.reserved = held.reserved.saturating_add(need),
                         None => held.unknown += 1,
                     }
+                    // Leaving the line (`_in_line`) wakes the next, which may fit too.
                     return Admitted { admission: self, need };
                 }
             }
@@ -75,7 +103,7 @@ impl Drop for Admitted<'_> {
         let mut held = self.admission.held.lock().unwrap_or_else(|e| e.into_inner());
         held.builds -= 1;
         match self.need {
-            Some(need) => held.reserved -= need,
+            Some(need) => held.reserved = held.reserved.saturating_sub(need),
             None => held.unknown -= 1,
         }
         self.admission.ended.notify_waiters();
@@ -112,6 +140,28 @@ mod tests {
             let blind: Free = Arc::new(|| None);
             let _one = soon(Some(GB), blind.clone()).await.unwrap();
             assert!(soon(Some(GB), blind).await.is_none(), "with no reading, one at a time");
+        });
+    }
+
+    #[test]
+    fn a_build_that_waits_is_not_passed_by_smaller_ones_and_a_huge_peak_does_not_overflow() {
+        rt().block_on(async {
+            let a = Arc::new(Admission::default());
+            let free: Free = Arc::new(|| Some(10 * GB));
+            let small = a.admit(Some(GB), &free).await;
+            let big = {
+                let (a, free) = (a.clone(), free.clone());
+                tokio::spawn(async move { drop(a.admit(None, &free).await) })
+            };
+            tokio::task::yield_now().await;
+            let late = tokio::time::timeout(Duration::from_secs(10), a.admit(Some(GB), &free)).await;
+            assert!(late.is_err(), "a small build that would fit waits behind the big one that came first");
+            drop(small);
+            tokio::time::timeout(Duration::from_secs(10), big).await.expect("the big one starts once alone").unwrap();
+            let huge = a.admit(Some(u64::MAX), &free).await;
+            assert!(tokio::time::timeout(Duration::from_secs(10), a.admit(Some(1), &free)).await.is_err());
+            drop(huge);
+            drop(a.admit(Some(1), &free).await);
         });
     }
 

@@ -601,6 +601,18 @@ mod processes {
         assert_eq!(started.exit.await, Some(0));
         let peak = peak.load(std::sync::atomic::Ordering::Relaxed);
         assert!(peak >= 200 << 20, "the 200 MB it touched: {peak}");
+        // A check ended at its deadline (its exit dropped) tells its peak too.
+        use tokio::io::AsyncReadExt;
+        let spec = faber_engine::verify::Spec {
+            args: vec!["-e".into(), "globalThis.b=Buffer.alloc(200*1024*1024, 1);console.log('ready');setTimeout(()=>{},60000)".into()],
+            ..spec
+        };
+        let mut started = faber_engine::verify::Runner::start(&faber_engine::verify::Real, &spec).unwrap();
+        let mut ready = [0u8; 5];
+        started.stdout.read_exact(&mut ready).await.unwrap();
+        let peak = started.peak.clone().unwrap();
+        drop(started);
+        assert!(peak.load(std::sync::atomic::Ordering::Relaxed) >= 200 << 20, "the peak of a check ended early");
     }
 
     #[tokio::test]

@@ -83,22 +83,33 @@ impl Runner for Real {
             Box::new(move |game: bool| cap(game.then_some(GAME_CPU))) as Box<dyn Fn(bool) -> bool + Send + Sync>
         });
         let peak = job.as_ref().map(|_| std::sync::Arc::new(std::sync::atomic::AtomicU64::new(0)));
-        let slot = peak.clone();
+        let measured = Measured { job, slot: peak.clone() };
         let exit = Box::pin(async move {
-            // The job lives as long as this future: once the check exited, or when the future is dropped before, closing
-            // it ends whatever the check left running (on Windows), so its pipes close and nothing outlives it.
-            let job = job;
+            // The job lives as long as this future: once the check exited, or when the future is dropped before (its
+            // deadline), closing it ends whatever the check left running (on Windows), so its pipes close and nothing
+            // outlives it. Its peak is read just before, either way.
+            let _measured = measured;
             let mut child = child;
-            let code = match child.as_mut() {
+            match child.as_mut() {
                 Some(child) => child.wait().await.ok().and_then(|s| s.code()),
                 None => None,
-            };
-            if let (Some(job), Some(slot)) = (job.as_ref(), slot) {
-                slot.store(job.peak_memory().unwrap_or(0), std::sync::atomic::Ordering::Relaxed);
             }
-            code
         });
         Ok(Started { stdout: p.stdout, stderr: p.stderr.unwrap_or_else(|| Box::new(tokio::io::empty())), exit, throttle, peak })
+    }
+}
+
+/// A check's job, whose peak memory goes to `slot` as it closes.
+struct Measured {
+    job: Option<crate::proc::Containment>,
+    slot: Option<std::sync::Arc<std::sync::atomic::AtomicU64>>,
+}
+
+impl Drop for Measured {
+    fn drop(&mut self) {
+        if let (Some(job), Some(slot)) = (&self.job, &self.slot) {
+            slot.store(job.peak_memory().unwrap_or(0), std::sync::atomic::Ordering::Relaxed);
+        }
     }
 }
 
