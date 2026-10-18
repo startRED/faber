@@ -841,6 +841,7 @@ mod tests {
                     approved: false,
                     started: NOW,
                     steering: vec![],
+                    held: None,
                     cwd: ".".into(),
                     permissions: crate::model::Permissions::Ask,
                     tuning: Default::default(),

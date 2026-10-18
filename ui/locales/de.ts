@@ -994,6 +994,7 @@ export const de: Messages = {
   'notes.48.fixed': 'Absätze einer Antwort verschwinden nicht mehr in „In Arbeit“, solange sie noch geschrieben wird; sie klappen erst ein, wenn sie fertig ist.',
   'notes.49.fixed': 'Faber prüft jetzt auch eine Antwort, in der der Agent Dateien mit einem Befehl geändert hat, und in einer getrennten Kopie laufen alle Prüfungen, die du bestätigt hast.',
   'notes.50.new': 'Mit Strg K springst du nach ein paar Buchstaben zu einer Unterhaltung, einem Projekt oder einer Aktion. Mit Strg F suchst du ein Wort in der offenen Unterhaltung.',
+  'notes.51.better': 'Eine Nachricht, die du schreibst, während Claude arbeitet, erreicht es jetzt beim nächsten Schritt, wie bei Codex, statt am Ende.',
   'update.checking': 'Suche nach einem Update…',
   'update.downloading': 'Update wird heruntergeladen…',
   'update.downloadingPercent': 'Update wird heruntergeladen… {percent} %',

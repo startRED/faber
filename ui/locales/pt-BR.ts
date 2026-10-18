@@ -981,6 +981,7 @@ export const ptBR: Messages = {
   'notes.48.fixed': 'Parágrafos de uma resposta não somem mais para dentro de “Trabalhando” enquanto ela ainda é escrita; só se recolhem quando ela termina.',
   'notes.49.fixed': 'O Faber agora também verifica a resposta em que o agente mudou arquivos com um comando, e numa cópia separada roda todas as verificações que você confirmou.',
   'notes.50.new': 'Ctrl K abre uma busca: digite algumas letras e vá direto a uma conversa, um projeto ou uma ação. Ctrl F procura uma palavra na conversa aberta.',
+  'notes.51.better': 'Uma mensagem que você escreve enquanto o Claude trabalha agora chega a ele no próximo passo, como no Codex, sem esperar o fim.',
   'update.checking': 'Procurando atualização…',
   'update.downloading': 'Baixando atualização…',
   'update.downloadingPercent': 'Baixando atualização… {percent}%',

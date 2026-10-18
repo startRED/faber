@@ -294,6 +294,7 @@ mod tests {
                 served: false,
                 unsaved_session: None,
                 steering: vec![],
+                held: None,
             };
             c.live.insert(id.clone(), live);
             c.refresh_running();

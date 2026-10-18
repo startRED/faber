@@ -468,10 +468,10 @@ async fn another_conversation_of_the_same_folder_never_stops_these_checks() {
     let dir = support::canonical_tempdir().unwrap();
     let runner = Gated::new(false);
     let (engine, mut pipe, id, made, project) = decided_in(dir.path(), runner.clone()).await;
-    // The person leaves a message while the reply runs; it goes out once the reply is done, after its checks.
-    engine.send(ask(Some(id.clone()), None, "then the footer")).unwrap();
     replies(&mut pipe, 1, true).await;
     until(&engine, &id, |m| m.get(1).and_then(state) == Some(ChecksState::Running)).await;
+    // The person leaves a message while the checks run; it goes out once they pass.
+    engine.send(ask(Some(id.clone()), None, "then the footer")).unwrap();
     // A second conversation of the project, in the same folder, ends a turn of its own while those checks run.
     let other = engine.send(ask(None, Some(project), "look around")).unwrap();
     let mut second = next_pipe(&made).await;

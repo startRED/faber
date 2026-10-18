@@ -994,6 +994,7 @@ export const fr: Messages = {
   'notes.48.fixed': 'Les paragraphes d’une réponse ne disparaissent plus dans « En cours » pendant qu’elle s’écrit encore ; ils ne s’y replient qu’à la fin.',
   'notes.49.fixed': "Faber vérifie désormais aussi une réponse où l'agent a modifié des fichiers par une commande, et dans une copie séparée il lance toutes les vérifications que vous avez confirmées.",
   'notes.50.new': 'Ctrl K ouvre une recherche : quelques lettres suffisent pour aller à une conversation, un projet ou une action. Ctrl F cherche un mot dans la conversation ouverte.',
+  'notes.51.better': "Un message écrit pendant que Claude travaille lui parvient maintenant à l'étape suivante, comme avec Codex, sans attendre la fin.",
   'update.checking': 'Recherche d’une mise à jour…',
   'update.downloading': 'Téléchargement de la mise à jour…',
   'update.downloadingPercent': 'Téléchargement de la mise à jour… {percent} %',

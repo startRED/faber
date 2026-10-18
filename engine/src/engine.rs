@@ -200,8 +200,11 @@ struct Live {
     started: f64,
     /// A turn has finished on this process, so the next one finds the CLI's cache warm.
     served: bool,
-    /// Queued messages handed to the running turn (Codex) and not yet taken in, oldest first.
+    /// Queued messages handed to the running turn and not yet taken in, oldest first.
     steering: Vec<String>,
+    /// A Claude turn ended while a line handed to it was still unread (`finish`): its keep-going reading, kept until that
+    /// line's own turn takes over or the line fails.
+    held: Option<Option<String>>,
     /// The session id the CLI reported at start, kept out of the conversation until a turn really ran on it: a CLI saves a
     /// session only once it has had a turn, so an id from a warm-up that never ran must not be resumed by a later launch.
     unsaved_session: Option<String>,
@@ -1758,6 +1761,11 @@ impl Core {
                     if let Some(l) = self.live.remove(conv) {
                         l.session.close();
                     }
+                    // What was handed to the turn and never taken in died with the process: it waits in the queue again.
+                    if let Some(c) = self.convs.get_mut(conv).filter(|c| c.queued.iter().any(|q| q.sending)) {
+                        c.queued.iter_mut().for_each(|q| q.sending = false);
+                        self.emit_queue(conv);
+                    }
                     if self.transfers.get(conv).is_some_and(|t| t.moving) {
                         if let Some(reply) = turn_id {
                             self.move_failed(conv, &reply);
@@ -1783,10 +1791,35 @@ impl Core {
 
     fn finish(&mut self, conv: &str, turn_id: Option<String>) {
         self.unwatch(conv);
-        self.transfers.remove(conv);
         self.stop_helpers(conv, true);
+        // Claude Code takes a line handed to its turn at the turn's next step; one still unread when the turn ends is the next
+        // turn by itself, after a stop too (fixture `steer-stopped`). The conversation stays busy until that turn takes it in, so
+        // nothing starts before it: not the queue, Faber's checks or keep going, and a plan limit there still continues it. The
+        // reply is read for keep going now (its stop line leaves it, a stop is said on it); if the line fails after all, the turn
+        // ends from that reading (`steer_failed`). The checks of the reply that follows cover this one's changes too.
+        if self.live.get(conv).is_some_and(|l| l.vendor == Vendor::Claude && !l.steering.is_empty()) {
+            let read = self.keep_going_ended(conv, turn_id.as_deref());
+            if let Some(l) = self.live.get_mut(conv) {
+                l.held = Some(read);
+            }
+            if let Some(c) = self.convs.get_mut(conv) {
+                c.updated_at = now();
+            }
+            self.save(conv);
+            self.save_ledger(false);
+            self.push(conv, turn_id.as_deref(), true);
+            self.list_changed();
+            return;
+        }
+        self.end_turn(conv, turn_id, None);
+    }
+
+    /// The rest of a turn's end, with the keep-going reading `finish` already made when it held the turn.
+    fn end_turn(&mut self, conv: &str, turn_id: Option<String>, read: Option<Option<String>>) {
+        self.transfers.remove(conv);
         if let Some(l) = self.live.get_mut(conv) {
             l.turn = None;
+            l.held = None;
             // Whatever was handed to the turn and not taken in stays in the queue, and goes out like the rest of it.
             l.steering.clear();
         }
@@ -1813,7 +1846,10 @@ impl Core {
         } else {
             return;
         };
-        let keep_going = self.keep_going_ended(conv, turn_id.as_deref());
+        let keep_going = match read {
+            Some(read) => read,
+            None => self.keep_going_ended(conv, turn_id.as_deref()),
+        };
         // A project reply that changed files is done once Faber's checks say so (R146): the queue and keep going wait.
         let checking = completed_ok && turn_id.as_deref().is_some_and(|reply| self.check_done(conv, reply, keep_going.clone()));
         self.save(conv);
@@ -1907,9 +1943,9 @@ impl Core {
         }
     }
 
-    /// A message written while a turn runs. Codex takes it into that turn (`turn/steer`) and the message becomes part of
-    /// the conversation when Codex says it has; every other case waits here and goes out as the next turn. Either way it
-    /// is saved with the conversation first, so a crash or a refusal cannot lose it.
+    /// A message written while a turn runs. The running CLI takes it into that turn (Codex `turn/steer`, Claude Code a line on
+    /// its input) and the message becomes part of the conversation when the CLI says it has; every other case waits here and
+    /// goes out as the next turn. Either way it is saved with the conversation first, so a crash or a refusal cannot lose it.
     fn enqueue(&mut self, id: &str, req: SendRequest) -> Result<String, String> {
         let c = self.convs.get(id).ok_or("error.conversationGone")?;
         if c.queued.len() >= MAX_QUEUED {
@@ -1937,8 +1973,7 @@ impl Core {
         let c = self.convs.get(id).ok_or("error.conversationGone")?;
         // Steering waits behind nothing: a message that is already queued would be passed by one sent straight in.
         let steer = c.queued.iter().all(|q| q.sending)
-            && matches!(item.choice.vendor.as_str(), "auto" | "codex")
-            && self.live.get(id).is_some_and(|l| l.vendor == Vendor::Codex && l.turn.is_some());
+            && self.live.get(id).is_some_and(|l| l.turn.is_some() && [l.vendor.name(), "auto"].contains(&item.choice.vendor.as_str()));
         if steer {
             item.sending = true;
             let turn = UserTurn { text: self.model_text(id, &item), images: item.images.clone().unwrap_or_default() };
@@ -1974,18 +2009,24 @@ impl Core {
         recovery::with_attachments(&item.text, area, &shown)
     }
 
-    /// Codex took the oldest message handed to the running turn in (or the one named): it joins the conversation, and the
+    /// The CLI took the oldest message handed to the running turn in (or the one named): it joins the conversation, and the
     /// answer goes on in a new reply under it, because that is what answers it.
     fn taken_in(&mut self, conv: &str, tag: Option<String>) {
+        let secs = self.secs();
         let Some(l) = self.live.get_mut(conv) else { return };
         let Some(at) = tag.and_then(|t| l.steering.iter().position(|s| *s == t)).or((!l.steering.is_empty()).then_some(0)) else { return };
         let queued_id = l.steering.remove(at);
         let before = l.turn.clone();
-        let model = l.running.clone().or_else(|| l.model.clone());
+        let (vendor, model) = (l.vendor, l.running.clone().or_else(|| l.model.clone()));
+        // A line taken in after its turn ended (`finish` held it) is a turn of the CLI's own: it is counted from now.
+        if l.held.take().is_some() && l.started == 0.0 {
+            l.started = secs;
+        }
         let Some(c) = self.convs.get_mut(conv) else { return };
         let Some(pos) = c.queued.iter().position(|q| q.id == queued_id) else { return };
         let item = c.queued.remove(pos);
-        if let Some(m) = before.as_ref().and_then(|b| c.messages.iter_mut().find(|m| &m.id == b)) {
+        // A reply the person stopped keeps saying so; Claude Code still answers the line it was handed (fixture `steer-stopped`).
+        if let Some(m) = before.as_ref().and_then(|b| c.messages.iter_mut().find(|m| &m.id == b && m.status == Some(Status::Streaming))) {
             m.status = Some(Status::Done);
         }
         let now = now();
@@ -1994,7 +2035,7 @@ impl Core {
         question.attachments = item.attachments.clone();
         question.wake = item.wake.clone();
         let mut reply = Message::new(new_id(), Role::Assistant, String::new(), now);
-        reply.vendor = Some(Vendor::Codex);
+        reply.vendor = Some(vendor);
         reply.model = model;
         reply.tools = Some(vec![]);
         reply.status = Some(Status::Streaming);
@@ -2025,8 +2066,18 @@ impl Core {
 
     /// Codex did not take the message in: it stays in the queue and goes out as the next turn.
     fn steer_failed(&mut self, conv: &str, tag: &str) {
+        let mut ended = None;
         if let Some(l) = self.live.get_mut(conv) {
             l.steering.retain(|s| s != tag);
+            // The turn was held for this line (`finish`), and the CLI never got it: the turn ends now.
+            if l.steering.is_empty()
+                && let Some(read) = l.held.take()
+            {
+                ended = Some((l.turn.clone(), read));
+            }
+        }
+        if let Some((turn, read)) = ended {
+            return self.end_turn(conv, turn, Some(read));
         }
         if let Some(q) = self.convs.get_mut(conv).and_then(|c| c.queued.iter_mut().find(|q| q.id == tag)) {
             q.sending = false;
@@ -2458,6 +2509,7 @@ impl Core {
                 started: 0.0,
                 served: false,
                 steering: vec![],
+                held: None,
                 unsaved_session: None,
             },
         );

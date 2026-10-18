@@ -862,6 +862,7 @@ export const en = {
   'notes.48.fixed': 'Paragraphs of an answer no longer vanish into the “Working” line while it is still being written; they fold in only when it ends.',
   'notes.49.fixed': 'Faber now also checks a reply whose agent changed files with a command, and in a separate copy it runs every check you confirmed.',
   'notes.50.new': 'Ctrl K jumps to any conversation, project or action from a few letters. Ctrl F finds a word in the open conversation.',
+  'notes.51.better': 'A message you write while Claude works now reaches it at its next step, as with Codex, instead of waiting for the end.',
   'update.checking': 'Looking for an update…',
   'update.downloading': 'Downloading update…',
   'update.downloadingPercent': 'Downloading update… {percent}%',

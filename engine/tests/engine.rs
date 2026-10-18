@@ -10,7 +10,7 @@ use std::collections::{BTreeMap, HashMap};
 use std::path::Path;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
-use support::{Entry, Mismatches, fake, fixture, next_pipe, pipes, replay};
+use support::{Entry, Mismatches, Wire, fake, fixture, next_pipe, pipes, replay};
 use tokio::sync::mpsc::UnboundedReceiver;
 
 const SKY: &str = "In one sentence: why is the sky blue?";
@@ -1149,7 +1149,7 @@ async fn a_branched_resend_sends_the_images_and_files_of_the_selected_message_ag
     }
 }
 
-/// A Claude session of several turns: each one is a user line, a short answer (or a failure) and a result.
+/// A Claude session of several turns: each one is a user line, its echo, a short answer (or a failure) and a result.
 fn claude_turns(turns: &[(&str, bool)]) -> Vec<Entry> {
     let mut entries = vec![];
     for (i, (text, ok)) in turns.iter().enumerate() {
@@ -1159,6 +1159,9 @@ fn claude_turns(turns: &[(&str, bool)]) -> Vec<Entry> {
             let init = json!({ "type": "system", "subtype": "init", "session_id": "queued", "model": "claude-haiku-5-5" });
             entries.push(Entry { input: false, msg: init });
         }
+        // The CLI echoes the line when the turn takes it in (`--replay-user-messages`).
+        let echo = json!({ "type": "user", "message": { "role": "user", "content": text }, "isReplay": true, "session_id": "queued" });
+        entries.push(Entry { input: false, msg: echo });
         if *ok {
             let said = json!({ "type": "assistant", "message": { "role": "assistant", "content": [{ "type": "text", "text": format!("answer {i}") }] } });
             entries.push(Entry { input: false, msg: said });
@@ -1198,7 +1201,7 @@ fn say(engine: &Engine, id: &str, vendor: &str, text: &str) -> Result<String, St
 }
 
 #[tokio::test]
-async fn two_quick_messages_while_claude_answers_wait_in_order_and_each_goes_out_once() {
+async fn two_quick_messages_while_claude_answers_go_into_its_turn_in_order_and_each_goes_out_once() {
     let dir = tempfile::tempdir().unwrap();
     let f = fake(claude_turns(&[("first", true), ("second", true), ("third", true)]));
     let (engine, _rx) = engine(dir.path(), Vendor::Claude, f.spawn.clone());
@@ -1207,7 +1210,7 @@ async fn two_quick_messages_while_claude_answers_wait_in_order_and_each_goes_out
     say(&engine, &id, "claude", "third").unwrap();
     let waiting = engine.open(&id).unwrap();
     assert_eq!(waiting.queued.iter().map(|q| q.text.as_str()).collect::<Vec<_>>(), ["second", "third"]);
-    assert!(waiting.queued.iter().all(|q| !q.sending), "Faber queues for Claude Code; nothing is on its way into the turn");
+    assert!(waiting.queued.iter().all(|q| q.sending), "both go into the running turn, in order");
 
     let c = until(&engine, &id, |c| settled(c, 6)).await;
     engine.shutdown();
@@ -1226,6 +1229,8 @@ async fn a_stopped_or_failed_turn_keeps_the_queue_and_the_person_sends_it() {
     let f = fake(claude_turns(&[("first", false), ("second", true)]));
     let (engine, _rx) = engine(dir.path(), Vendor::Claude, f.spawn.clone());
     let id = engine.send(ask(Area::Chat, "first", choice("claude", Some("haiku")))).unwrap();
+    // The CLI cannot take the message into the turn, so it waits in the queue.
+    f.wire.refuse_words("second");
     say(&engine, &id, "claude", "second").unwrap();
     let c = until(&engine, &id, |c| settled(c, 2)).await;
     assert_eq!(c.messages[1].status, Some(Status::Stopped));
@@ -1370,6 +1375,53 @@ async fn codex_takes_a_message_into_the_running_turn_and_the_answer_continues_be
     assert_eq!(f.wire.lines_with("turn/start"), 1, "the steered message did not also start a turn");
 }
 
+const SLEEP: &str = "Run the shell command: sleep 6   then reply with only the word done.";
+const PONG: &str = "Also say the word pong.";
+
+#[tokio::test]
+async fn claude_takes_a_message_into_the_running_turn_at_its_next_step_and_the_answer_continues_below_it() {
+    let dir = tempfile::tempdir().unwrap();
+    let f = fake(fixture("claude", "steer"));
+    let (engine, _rx) = engine(dir.path(), Vendor::Claude, f.spawn.clone());
+    let id = engine.send(ask(Area::Chat, SLEEP, choice("claude", Some("haiku")))).unwrap();
+    until(&engine, &id, |c| c.messages.len() == 2).await;
+    say(&engine, &id, "claude", PONG).unwrap();
+    assert!(engine.open(&id).unwrap().queued[0].sending, "the line goes to the running turn, not to the back of a queue");
+
+    let c = until(&engine, &id, |c| settled(c, 4)).await;
+    engine.shutdown();
+    assert_eq!(f.mismatches.lock().unwrap().clone(), Vec::<String>::new());
+    assert_eq!(texts(&c), [SLEEP, PONG]);
+    assert_eq!(c.messages[1].tools.as_ref().map(Vec::len), Some(1), "the command ran in the first reply");
+    assert_eq!(c.messages[3].text.trim(), "done\npong", "the words after the message answer it, below it");
+    assert_eq!((c.messages[1].status, c.messages[3].status), (Some(Status::Done), Some(Status::Done)));
+    assert_eq!(c.messages[3].vendor, Some(Vendor::Claude));
+    assert!(c.queued.is_empty());
+    assert_eq!(f.wire.lines_with(PONG), 1, "the message went to the CLI once");
+}
+
+#[tokio::test]
+async fn a_message_handed_to_claude_before_a_stop_is_answered_below_the_stopped_reply() {
+    let dir = tempfile::tempdir().unwrap();
+    let f = fake(fixture("claude", "steer-stopped"));
+    let (engine, _rx) = engine(dir.path(), Vendor::Claude, f.spawn.clone());
+    let id = engine.send(ask(Area::Chat, SLEEP, choice("claude", Some("haiku")))).unwrap();
+    until(&engine, &id, |c| c.messages.len() == 2).await;
+    say(&engine, &id, "claude", PONG).unwrap();
+    until(&engine, &id, |c| c.messages[1].tools.as_ref().is_some_and(|t| !t.is_empty())).await;
+    engine.interrupt(&id);
+
+    let c = until(&engine, &id, |c| settled(c, 4)).await;
+    engine.shutdown();
+    assert_eq!(f.mismatches.lock().unwrap().clone(), Vec::<String>::new());
+    assert_eq!(texts(&c), [SLEEP, PONG]);
+    assert_eq!(c.messages[1].status, Some(Status::Stopped), "the stopped reply keeps saying so");
+    assert!(c.messages[3].text.contains("Pong"), "{:?}", c.messages[3].text);
+    assert_eq!(c.messages[3].status, Some(Status::Done));
+    assert!(c.queued.is_empty());
+    assert_eq!(f.wire.lines_with(PONG), 1);
+}
+
 #[tokio::test]
 async fn a_steer_codex_refuses_is_sent_again_as_the_next_turn_exactly_once() {
     for name in ["steer-rejected", "steer-late"] {
@@ -1482,15 +1534,18 @@ async fn a_message_waiting_for_the_turn_to_end_runs_on_the_cli_reconnected_in_th
     let scripts = Arc::new(Mutex::new(vec![claude_turns(&[("second", true)]), claude_turns(&[("first", true)])]));
     let started: Arc<Mutex<Vec<String>>> = Arc::default();
     let mismatches: Mismatches = Arc::default();
+    let wire = Wire::default();
     let spawn: Spawner = {
-        let (scripts, started, mismatches) = (scripts.clone(), started.clone(), mismatches.clone());
+        let (scripts, started, mismatches, wire) = (scripts.clone(), started.clone(), mismatches.clone(), wire.clone());
         Arc::new(move |bin, _args, _cwd| {
             started.lock().unwrap().push(bin.to_string());
-            Ok(replay(scripts.lock().unwrap().pop().expect("no third process was expected"), mismatches.clone()))
+            Ok(wire.wrap(replay(scripts.lock().unwrap().pop().expect("no third process was expected"), mismatches.clone())))
         })
     };
     let (engine, _rx) = engine(dir.path(), Vendor::Claude, spawn);
     let id = engine.send(ask(Area::Chat, "first", choice("claude", Some("haiku")))).unwrap();
+    // The CLI cannot take the message into the turn, so it waits for the turn to end.
+    wire.refuse_words("second");
     say(&engine, &id, "claude", "second").unwrap();
     // The person reconnects the CLI in Settings while the first turn runs and a message waits behind it.
     engine.replace_clis(BTreeMap::from([(Vendor::Claude, Cli { command: "claude-new".into(), prefix: vec![] })]));
