@@ -43,7 +43,7 @@ check('thread: ten tool steps and narration fold into one activity row above the
   }
 });
 
-check('thread: with Auto the model name shows as soon as it is chosen, while the answer streams, and stays the same at the end; effort sits in the tooltip', () => {
+check('thread: with Auto the model name shows as soon as it is chosen, while the answer streams, and stays the same at the end; its effort shows beside it', () => {
   const root = document.createElement('div');
   document.body.append(root);
   const [message, setMessage] = createSignal<Message>({ id: 'auto-name', role: 'assistant', at: 0, status: 'streaming', text: '', reason: 'reason.routing' });
@@ -60,8 +60,8 @@ check('thread: with Auto the model name shows as soon as it is chosen, while the
     setMessage({ ...message(), vendor: 'claude', model: 'claude-haiku-5-5', effort: 'medium' });
     equal(name(), 'Haiku 5.5', 'the name shows before the first word');
     equal(header().querySelector('em'), null, 'the reason is said while Auto chooses, and after that it is the tooltip');
-    equal(header().textContent, 'Haiku 5.5', 'the header is the mark and the model, nothing else');
-    ok(header().title.includes(`${t('effort.label')}: ${t('effort.medium')}`) && header().title.includes(t('reason.routing')), `effort and the reason are in the tooltip: ${header().title}`);
+    equal(header().textContent, `Haiku 5.5· ${t('answer.effort.medium')}`, 'the header is the mark, the model and its effort');
+    ok(header().title.includes(t('reason.routing')), `the reason is in the tooltip: ${header().title}`);
     equal(header().getBoundingClientRect().height, choosing, 'and the header keeps its height');
     setMessage({ ...message(), text: 'Sunlight cont' });
     equal(name(), 'Haiku 5.5', 'and stays while the words arrive');

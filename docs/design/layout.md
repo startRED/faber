@@ -62,7 +62,7 @@ inside its own area.
 - The composer keeps its model picker, "AI: choose for me".
 - Auto chooses both the model and its effort. A manual model adds an adjacent low, medium or high effort choice,
   defaulting to medium (R102). Each conversation remembers its choice. Changes apply to the next message only (the
-  composer does not repeat it), and each answer keeps the effort actually used, in its header's tooltip. Both CLI drivers always receive that effort.
+  composer does not repeat it), and each answer keeps the effort actually used and shows it in its header. Both CLI drivers always receive that effort.
 - The ambient effect of the theme runs here, and the empty composer idles with a typing bar and rotating hints.
 - With no AI connected, the greeting, the suggestions and the list give way to the empty state (Curioso, "No AI connected",
   one line and the button "Connect", which opens account management). The composer stays on screen but cannot send. An open conversation with no AI connected
@@ -70,8 +70,9 @@ inside its own area.
 
 ### Answers
 
-- The header is the vendor's mark and the model's name, nothing else (Auto shows its reason beside the name only while it is
-  still choosing). The effort and Auto's reason are its tooltip. The pace line stays (C002). A wait for quota is told once,
+- The header is the vendor's mark, the model's name and its effort in the quiet header ink ("· high effort"; the owner,
+  2026-10-17), nothing else (Auto shows its reason beside the name only while it is still choosing). Auto's reason is its
+  tooltip. The pace line stays (C002). A wait for quota is told once,
   by the quota card, never also in the header or the red note.
 - Under the answer, one line that never wraps, at a 660 px column or a 720 px window: three icon buttons from
   `ui/Glyphs.tsx` (copy, retry, open in terminal, each with a tooltip and an accessible name), a short "Retry stronger"

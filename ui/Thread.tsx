@@ -203,9 +203,9 @@ function Answer(props: Shared & { m: Accessor<Message>; prompt?: Message; last?:
     const tool = tools().at(-1);
     return streaming() && tool && (tool.ok === undefined || !answering()) ? changeOf(tool) : undefined;
   });
-  // The header says which model answers, and nothing more: the vendor's mark and the model's name from the moment it is known
-  // to the end and after reopening (a model the CLI never named reads as the vendor's name). Effort and Auto's reason sit in
-  // its tooltip; the reason shows only while Auto is still choosing and when the answer moved to the other AI. A wait for
+  // The header says which model answers and how hard it thinks: the vendor's mark, the model's name from the moment it is
+  // known to the end and after reopening (a model the CLI never named reads as the vendor's name), and its effort when the
+  // answer has one (the owner, 2026-10-17). Auto's reason sits in its tooltip; the reason shows only while Auto is still choosing and when the answer moved to the other AI. A wait for
   // quota is said once, by the card under it.
   const standIn = () => !m().model || m().model === 'codex';
   const shown = () => (m().vendor ? (standIn() ? vendorName(m().vendor!) : prettyModel(m().model)) : t('model.auto'));
@@ -213,7 +213,7 @@ function Answer(props: Shared & { m: Accessor<Message>; prompt?: Message; last?:
     m().reason ? fromEngine(m().reason, { when: m().waitUntil ? untilReset(m().waitUntil!) : t('quota.unknown'), from: m().movedFrom ? vendorName(m().movedFrom!) : '', to: m().vendor ? vendorName(m().vendor!) : '' }) : '';
   const showsReason = () => !!m().reason && m().reason !== 'reason.waiting' && (!m().vendor || m().reason!.startsWith('reason.moved'));
   const headerTitle = () =>
-    [m().vendor ? vendorName(m().vendor!) : '', m().vendor && !standIn() ? prettyModel(m().model) : '', m().effort ? `${t('effort.label')}: ${t(`effort.${m().effort!}`)}` : '', reason()]
+    [m().vendor ? vendorName(m().vendor!) : '', m().vendor && !standIn() ? prettyModel(m().model) : '', reason()]
       .filter(Boolean)
       .join(' · ');
   // A retry goes to the model the composer has now: the one place the model is chosen.
@@ -236,6 +236,7 @@ function Answer(props: Shared & { m: Accessor<Message>; prompt?: Message; last?:
           <VendorMark vendor={m().vendor} />
           <b>{shown()}</b>
         </span>
+        <Show when={m().vendor && m().effort}><span class="effort">· {t(`answer.effort.${m().effort!}`)}</span></Show>
         <Show when={showsReason()}><em>· {reason()}</em></Show>
       </div>
       <Show when={m().pace}>{(pace) => <p class="pace">{t(`reason.pace.${pace().kind}`, { vendor: vendorName(pace().vendor), other: m().vendor ? vendorName(m().vendor!) : t('model.auto') })}</p>}</Show>
