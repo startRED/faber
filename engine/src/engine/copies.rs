@@ -12,6 +12,20 @@ pub type GitRunner = Arc<dyn Fn() -> Option<Box<dyn Executor + Send>> + Send + S
 /// A copy made for conversation `.0`, not yet recorded on it.
 type Made = Option<(String, WorkCopy)>;
 
+/// A first message waiting for its copy: its reply, and what starts the answer once the copy is attached.
+pub(super) struct Held {
+    pub(super) reply: String,
+    pub(super) tail: Option<Tail>,
+}
+
+/// The turn `Core::dispatch` was asked to start while the copy was pending.
+pub(super) struct Tail {
+    pub(super) pick: Pick,
+    pub(super) text: String,
+    pub(super) images: Vec<Image>,
+    pub(super) by_hand: bool,
+}
+
 /// What making a copy needs, read under the lock.
 pub(super) struct Plan {
     run: GitRunner,
@@ -35,28 +49,10 @@ impl Engine {
             .map_err(str::to_string)
     }
 
-    /// Sends a message; a project conversation gets its copy first, when it is due one.
-    pub fn send(&self, mut req: SendRequest) -> Result<String, String> {
-        let made = Self::make_copy(self.with(|c| c.copy_plan(&req)))?;
-        let (sent, stray) = self.with(|c| {
-            if let Some((id, _)) = &made
-                && req.conversation_id.is_none()
-            {
-                // The new conversation the copy was made for may have been thrown away while git worked (a warm-up for
-                // another project): the message still goes to it, so it never runs in the project folder.
-                if !c.convs.contains_key(id) {
-                    c.blank_as(id.clone(), req.area, req.project_id.clone());
-                }
-                if c.draft.as_deref() == Some(id.as_str()) {
-                    c.draft = None;
-                }
-                req.conversation_id = Some(id.clone());
-            }
-            let stray = made.and_then(|(id, copy)| c.attach_copy(&id, copy));
-            (c.send(req), stray)
-        });
-        self.drop_copy(stray);
-        sent
+    /// Sends a message. A project conversation's copy is made after the message is recorded, away from the lock, and the
+    /// answer starts once it is there (`Core::hold_for_copy`), so the screen never waits for git.
+    pub fn send(&self, req: SendRequest) -> Result<String, String> {
+        self.with(|c| c.send(req))
     }
 
     /// Edits a message or redoes an answer as a new conversation; in a project it gets a copy of its own, from the
@@ -161,12 +157,87 @@ impl Core {
     /// folder only to move it a moment later.
     pub(super) fn copy_due(&self, id: &str) -> bool {
         self.git.is_some()
-            && self.convs.get(id).is_some_and(|c| {
-                c.area == Area::Project
-                    && c.copy.is_none()
-                    && c.messages.is_empty()
-                    && self.project_of(c.project_id.as_deref()).is_some_and(|p| p.separate_copies)
-            })
+            && (self.copying.contains_key(id)
+                || self.convs.get(id).is_some_and(|c| {
+                    c.area == Area::Project
+                        && c.copy.is_none()
+                        && c.messages.is_empty()
+                        && self.project_of(c.project_id.as_deref()).is_some_and(|p| p.separate_copies)
+                }))
+    }
+
+    /// The copy is named on the conversation before its first message is saved: whatever happens meanwhile, a restart
+    /// included, the conversation's next message makes this copy and nothing runs in the project folder. A record without a
+    /// repository (`root`) is only that name, until `attach_copy` replaces it.
+    pub(super) fn name_copy(&mut self, id: &str, plan: &Plan) {
+        if let Some(c) = self.convs.get_mut(id)
+            && c.copy.is_none()
+        {
+            let path = copy::home(&plan.data).join(id).to_string_lossy().into_owned();
+            c.copy = Some(WorkCopy { path, branch: plan.branch.clone(), root: String::new(), sub: String::new(), base: None });
+        }
+    }
+
+    /// The message is recorded and its copy is made on a blocking thread; `tail` is what starts the answer, filled in as
+    /// soon as it is known (at once for a chosen model, when the route is back for Auto).
+    pub(super) fn hold_for_copy(&mut self, id: &str, reply: &str, plan: Plan) {
+        self.copying.insert(id.to_string(), Held { reply: reply.to_string(), tail: None });
+        let (me, runtime, id) = (self.me.clone(), self.opts.runtime.clone(), id.to_string());
+        self.opts.runtime.spawn_blocking(move || {
+            let made = Engine::make_copy(Some(plan));
+            let Some(core) = me.upgrade() else { return };
+            let engine = Engine { core, runtime };
+            let stray = engine.with(|c| c.copy_made(&id, made));
+            engine.drop_copy(stray);
+        });
+    }
+
+    /// The copy is ready, or git could not make it: attach it, then start what waited for it. An answer stopped or
+    /// removed meanwhile starts nothing, and a copy that no longer fits comes back to be removed.
+    fn copy_made(&mut self, id: &str, made: Result<Made, String>) -> Made {
+        let failed = made.is_err();
+        let mut stray = None;
+        match made {
+            Ok(Some((made_for, copy))) => {
+                stray = self.attach_copy(&made_for, copy);
+                // Saved now: an answer stopped meanwhile writes nothing else, and the next message must find its copy.
+                if stray.is_none() {
+                    self.save(&made_for);
+                }
+            }
+            // Not a repository with a commit after all: the conversation works in the folder, and its placeholder goes.
+            Ok(None) => {
+                if let Some(c) = self.convs.get_mut(id)
+                    && c.copy.as_ref().is_some_and(|copy| copy.root.is_empty())
+                {
+                    c.copy = None;
+                    self.save(id);
+                }
+            }
+            // The placeholder stays, so the next message tries this copy again.
+            Err(_) => {}
+        }
+        let Some(Held { reply, tail }) = self.copying.remove(id) else { return stray };
+        let streaming = !self.closing
+            && self
+                .convs
+                .get(id)
+                .and_then(|c| c.messages.iter().find(|m| m.id == reply))
+                .is_some_and(|m| m.status == Some(Status::Streaming));
+        if !streaming {
+            return stray;
+        }
+        match tail {
+            _ if failed => self.fail_reply(id, &reply, "error.copy.failed".into()),
+            Some(Tail { pick, text, images, by_hand }) => {
+                if let Err(error) = self.dispatch(id, &reply, &pick, text, images, by_hand) {
+                    self.fail_reply(id, &reply, error);
+                }
+            }
+            // Auto's route is not back yet: it starts the answer when it is, and nothing waits for the copy any more.
+            None => {}
+        }
+        stray
     }
 
     /// What a send needs made first: a copy for a project conversation's first message, while the project keeps separate
@@ -189,7 +260,8 @@ impl Core {
         let c = self.convs.get(&id)?;
         let project = self.project_of(c.project_id.as_deref())?;
         let branch = match &c.copy {
-            Some(copy) if Path::new(&copy.path).is_dir() => return None,
+            // A placeholder (no `root`) is a copy not finished: it is made again.
+            Some(copy) if !copy.root.is_empty() && Path::new(&copy.path).is_dir() => return None,
             Some(copy) => copy.branch.clone(),
             // A conversation an agent started has its title already: a better name than the brief.
             None if c.messages.is_empty() && project.separate_copies => {
@@ -221,7 +293,8 @@ impl Core {
         let conv = self.load(id)?;
         let open = conv.messages.last().is_some_and(|m| m.status == Some(Status::Streaming));
         let busy = turn || open || !conv.queued.is_empty();
-        Some((conv.copy.clone()?, busy, (conv.messages.len(), conv.updated_at)))
+        // A placeholder has no repository to ask git about: nothing there is the person's work yet.
+        Some((conv.copy.clone().filter(|copy| !copy.root.is_empty())?, busy, (conv.messages.len(), conv.updated_at)))
     }
 
     /// Records a copy on its conversation; one that no longer fits (another send got there first) comes back to be removed.

@@ -1018,6 +1018,7 @@ export const fr: Messages = {
   'notes.63.better': "Les vérifications rapides de Faber compilent aussi les paquets Rust qui dépendent de celui qu'un changement a touché.",
   'notes.64.better': "Les vérifications de Faber lancent deux compilations Cargo à la fois quand la mémoire qu'elles ont prise avant tient, et une à la fois sinon.",
   'notes.65.new': "Dans un projet, l'agent peut demander à Faber une carte de ce que le code a déjà, pour s'appuyer dessus au lieu d'ajouter une deuxième façon de faire la même chose.",
+  'notes.66.fixed': "Le premier message d'une nouvelle conversation dans un projet s'affiche aussitôt. Avant, Faber restait figé pendant la copie à part.",
   'update.checking': 'Recherche d’une mise à jour…',
   'update.downloading': 'Téléchargement de la mise à jour…',
   'update.downloadingPercent': 'Téléchargement de la mise à jour… {percent} %',

@@ -886,6 +886,7 @@ export const en = {
   'notes.63.better': "Faber's fast checks now also compile the Rust packages that depend on the one a change touched.",
   'notes.64.better': "Faber's checks run two Cargo builds at once when the memory they took before fits, and one at a time when it does not.",
   'notes.65.new': 'In a project, the agent can ask Faber for a map of what the code already has, so it builds on it instead of adding a second way to do the same thing.',
+  'notes.66.fixed': 'The first message of a new project conversation shows at once. Faber used to stand still while it made the separate copy.',
   'update.checking': 'Looking for an update…',
   'update.downloading': 'Downloading update…',
   'update.downloadingPercent': 'Downloading update… {percent}%',

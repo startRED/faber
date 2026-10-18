@@ -138,7 +138,8 @@ async fn open(faber: State<'_, Faber>, id: String) -> Res<Option<Conversation>> 
 
 #[tauri::command]
 async fn send(faber: State<'_, Faber>, req: SendRequest) -> Res<String> {
-    // A project conversation's first message may make its copy first (R201): a checkout, away from the async workers.
+    // A project conversation's first message makes its copy after the message is recorded (R201), on the engine's own
+    // blocking thread; this call waits only for the engine's lock, away from the async workers.
     let engine = faber.engine.clone();
     tauri::async_runtime::spawn_blocking(move || engine.send(req)).await.map_err(|_| "error.copy.failed".to_string())?
 }

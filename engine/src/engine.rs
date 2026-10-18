@@ -370,6 +370,8 @@ struct Core {
     watch_requested: bool,
     clock: Option<Clock>,
     transfers: HashMap<String, recovery::Transfer>,
+    /// First messages whose separate copy is still being made, by conversation.
+    copying: HashMap<String, copies::Held>,
     credit: Option<(String, String, Vendor)>,
     /// Helpers at work (R161), by the agent's tool call that started each.
     helpers: HashMap<String, helpers::Run>,
@@ -475,6 +477,7 @@ impl Engine {
                 watch_requested: false,
                 clock: None,
                 transfers: HashMap::new(),
+                copying: HashMap::new(),
                 credit: None,
                 helpers: HashMap::new(),
                 watched: HashMap::new(),
@@ -2340,6 +2343,14 @@ impl Core {
 
     /// Hands a turn to the conversation's CLI, starting the CLI if needed.
     fn start(&mut self, id: &str, reply_id: &str, pick: &Pick, text: String, images: Vec<Image>, by_hand: bool) -> Result<(), String> {
+        // The conversation's copy is still being made: nothing starts before it, wherever the turn comes from (a first
+        // message, Auto's route, a queued message sent now). The latest turn is the one that starts once it is attached.
+        if let Some(held) = self.copying.get_mut(id) {
+            held.reply = reply_id.to_string();
+            held.tail = Some(copies::Tail { pick: pick.clone(), text, images, by_hand });
+            self.push(id, Some(reply_id), true);
+            return Ok(());
+        }
         let approved = self.credit.as_ref().is_some_and(|(c, r, v)| c == id && r == reply_id && *v == pick.vendor);
         self.gate_turn_approved(pick, by_hand, approved)?;
         self.launch(id, pick)?;
@@ -2617,6 +2628,8 @@ impl Core {
         {
             return self.enqueue(id, req);
         }
+        // Decided under the lock that takes the draft, so the copy is made for the conversation the message goes to.
+        let plan = self.copy_plan(&req);
         let draft = self.draft.clone().filter(|d| self.convs.get(d).is_some_and(|c| c.area == req.area && c.project_id == req.project_id));
         let id = match existing {
             Some(id) => id,
@@ -2644,6 +2657,10 @@ impl Core {
             }
             files
         };
+        // Named on the conversation before its first message is saved, so a restart can never find the message without it.
+        if let Some(plan) = &plan {
+            self.name_copy(&id, plan);
+        }
         let at = now();
         let auto = req.choice.vendor == "auto";
         let route = if auto { self.next_route(&id) } else { None };
@@ -2708,6 +2725,19 @@ impl Core {
             },
         );
         let text = if joining_late { with_history(&history, &text, &|n| attachment_place(area, &data_dir, &id, n)) } else { text };
+        // Git can take seconds: the message shows now, the copy is made away from the lock, and what starts the answer waits.
+        match self.copying.get_mut(&id) {
+            // The copy of an answer stopped meanwhile is still being made: this message takes its place and waits for it.
+            Some(held) => {
+                held.reply = reply_id.clone();
+                held.tail = None;
+            }
+            None => {
+                if let Some(plan) = plan {
+                    self.hold_for_copy(&id, &reply_id, plan);
+                }
+            }
+        }
         if let Some(before) = route {
             let only = before.as_ref().map(|p| p.vendor);
             let route = self.route_for(&req.text, req.images.len() + req.files.len(), only);

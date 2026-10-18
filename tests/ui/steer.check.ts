@@ -222,3 +222,44 @@ check('steer: the screen shows why Remove failed, and a message written during a
     if (storage === null) localStorage.removeItem('faber.place'); else localStorage.setItem('faber.place', storage);
   }
 });
+
+check('steer: a first message whose copy could not be made goes back in the box', async () => {
+  const settle = () => new Promise((resolve) => setTimeout(resolve, 30));
+  const host = document.createElement('div');
+  document.body.append(host);
+  const before = { open: api.open, send: api.send, state: api.state, warm: api.warm, routeDraft: api.routeDraft, setClock: api.setClock, setShellTexts: api.setShellTexts };
+  const storage = localStorage.getItem('faber.place');
+  const answer: Message = { id: 'answer', role: 'assistant', text: '', at: 1, status: 'streaming', vendor: 'claude' };
+  const c: Conversation = { id: 'copy-app', title: 'Test', area: 'chat', createdAt: 1, updatedAt: 1, sessions: {}, messages: [], queued: [] };
+  const initial = { conversations: [{ id: c.id, title: c.title, area: c.area, updatedAt: 1 }], projects: [], vendors: ['claude'],
+    settings: { setup: 'done', tutorialDone: true, language: 'en', appearance: { base: 'sala' } }, running: { revision: 0, items: [] }, quotas: [], usage: [], models: [], version: 'test',
+    look: { vars: {}, scheme: 'dark', motion: 'none', checks: [], notices: [], effects: { ambient: false, texture: false, glow: false },
+      appearance: { base: 'sala', ground: 'sala', accent: '#ffffff', textFont: 'archivo', headingFont: 'narrow', textSize: 14, density: 1, corners: 1, motion: 'none', effects: { ambient: false, texture: false, glow: false } } }
+  } as AppState;
+  // The engine answers at once with the message recorded and its reply typing; the copy is made behind it.
+  api.open = async () => c;
+  api.send = async () => { c.messages = [{ id: 'question', role: 'user', text: 'Fix it', at: 0 }, answer]; return c.id; };
+  api.state = async () => initial;
+  api.warm = async () => {}; api.routeDraft = async () => {};
+  api.setClock = async () => {}; api.setShellTexts = async () => {};
+  localStorage.setItem('faber.place', JSON.stringify({ area: 'chat', id: c.id }));
+  let hear!: (event: AppEvent) => void;
+  const dispose = render(() => createComponent(App, { initial, inbox: { take: (listener?: (event: AppEvent) => void) => { if (listener) hear = listener; } } }), host);
+  try {
+    await settle();
+    const field = host.querySelector<HTMLTextAreaElement>('.composer textarea')!;
+    field.value = 'Fix it';
+    field.dispatchEvent(new InputEvent('input', { bubbles: true }));
+    host.querySelector('form.composer')!.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
+    await settle();
+    equal(field.value, '', 'the message left the box');
+    hear({ type: 'message', conversationId: c.id, message: { ...answer, status: 'error', error: 'error.copy.failed' } });
+    await settle();
+    equal(field.value, 'Fix it', 'the copy failed after send had answered: the message is back in the box');
+  } finally {
+    dispose();
+    host.remove();
+    Object.assign(api, before);
+    if (storage === null) localStorage.removeItem('faber.place'); else localStorage.setItem('faber.place', storage);
+  }
+});

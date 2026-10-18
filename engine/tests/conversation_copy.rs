@@ -4,7 +4,7 @@
 use crate::support;
 
 use faber_engine::cli::Cli;
-use faber_engine::model::{Area, Vendor};
+use faber_engine::model::{Area, Status, Vendor};
 use faber_engine::proc::Spawner;
 use faber_engine::project::git::{Executor, GitError, Invocation, Output};
 use faber_engine::router::Choice;
@@ -124,13 +124,22 @@ struct Setup {
 
 /// An engine on `data`, as the app starts one: the CLI is a silent fake that notes where it starts, git is `runner`.
 fn start(data: &Path, cwds: &Arc<Mutex<Vec<PathBuf>>>, runner: impl Executor + Clone + Send + Sync + 'static) -> Engine {
+    start_seen(data, cwds, runner, Arc::new(|_| {}))
+}
+
+/// The same, with every event the engine emits handed to `events`.
+fn start_seen(
+    data: &Path,
+    cwds: &Arc<Mutex<Vec<PathBuf>>>,
+    runner: impl Executor + Clone + Send + Sync + 'static,
+    events: Arc<dyn Fn(AppEvent) + Send + Sync>,
+) -> Engine {
     let inner = support::fake(vec![]).spawn;
     let seen = cwds.clone();
     let spawn: Spawner = Arc::new(move |bin, argv, cwd| {
         seen.lock().unwrap().push(cwd.to_path_buf());
         inner(bin, argv, cwd)
     });
-    let (tx, _rx) = tokio::sync::mpsc::unbounded_channel::<AppEvent>();
     let opts = EngineOptions {
         data_dir: data.into(),
         clis: BTreeMap::from([(Vendor::Claude, Cli { command: "claude".into(), prefix: vec![] })]),
@@ -142,7 +151,7 @@ fn start(data: &Path, cwds: &Arc<Mutex<Vec<PathBuf>>>, runner: impl Executor + C
         runtime: tokio::runtime::Handle::current(),
         ask: None,
     };
-    let engine = Engine::new(opts, Arc::new(move |e| drop(tx.send(e))));
+    let engine = Engine::new(opts, events);
     engine.set_git(Arc::new(move || Some(Box::new(runner.clone()) as Box<dyn Executor + Send>)));
     engine
 }
@@ -169,6 +178,25 @@ fn ask(project: &str, text: &str) -> SendRequest {
     }
 }
 
+/// Sends and waits for the copy: the message is recorded at once, but the copy is made away from the engine's lock and the
+/// agent starts only in it.
+async fn sent(engine: &Engine, req: SendRequest) -> String {
+    let id = engine.send(req).unwrap();
+    ready(engine, &id).await;
+    id
+}
+
+async fn ready(engine: &Engine, id: &str) {
+    for _ in 0..200 {
+        // A copy named on the conversation but not attached yet has no repository (`root`).
+        if engine.open(id).and_then(|c| c.copy).is_some_and(|c| !c.root.is_empty() && Path::new(&c.path).is_dir()) {
+            return;
+        }
+        tokio::time::sleep(Duration::from_millis(25)).await;
+    }
+    panic!("the copy of {id} was never made");
+}
+
 /// A copy is removed away from the engine's lock; give it a moment.
 async fn gone(path: &Path) -> bool {
     for _ in 0..40 {
@@ -183,8 +211,8 @@ async fn gone(path: &Path) -> bool {
 #[tokio::test]
 async fn r_next_each_project_conversation_works_in_a_copy_of_its_own_on_a_faber_branch() {
     let s = setup();
-    let first = s.engine.send(ask(&s.project, "Fix the login page")).unwrap();
-    let second = s.engine.send(ask(&s.project, "Fix the login page")).unwrap();
+    let first = sent(&s.engine, ask(&s.project, "Fix the login page")).await;
+    let second = sent(&s.engine, ask(&s.project, "Fix the login page")).await;
     let (a, b) = (s.engine.open(&first).unwrap().copy.unwrap(), s.engine.open(&second).unwrap().copy.unwrap());
     assert!(a.branch.starts_with("faber/fix-the-login-page-") && a.branch != b.branch, "{a:?} {b:?}");
     assert_eq!(PathBuf::from(&a.path), faber_engine::project::copy::home(s.data.path()).join(&first));
@@ -230,7 +258,7 @@ async fn r_next_with_separate_copies_off_a_new_conversation_works_in_the_project
 #[tokio::test]
 async fn r_next_a_copy_with_unsaved_work_is_deleted_only_when_the_person_says_so() {
     let s = setup();
-    let id = s.engine.send(ask(&s.project, "Change things")).unwrap();
+    let id = sent(&s.engine, ask(&s.project, "Change things")).await;
     let copy = s.engine.open(&id).unwrap().copy.unwrap();
     // Uncommitted changes: refused, and the conversation and its copy stay.
     s.git.lock().unwrap().dirty = true;
@@ -248,7 +276,7 @@ async fn r_next_a_copy_with_unsaved_work_is_deleted_only_when_the_person_says_so
     assert!(calls.contains(&vec!["branch".into(), "-D".into(), copy.branch.clone()]), "{calls:?}");
 
     // Work held by another branch is saved, but the agent is still at work there and may write more: it asks.
-    let id = s.engine.send(ask(&s.project, "Small fix")).unwrap();
+    let id = sent(&s.engine, ask(&s.project, "Small fix")).await;
     let copy = s.engine.open(&id).unwrap().copy.unwrap();
     s.git.lock().unwrap().held = true;
     assert_eq!(s.engine.remove_with(&id, false), Err("error.copy.unsaved".into()));
@@ -267,7 +295,7 @@ async fn r_next_a_copy_with_unsaved_work_is_deleted_only_when_the_person_says_so
     assert!(gone(Path::new(&copy.path)).await);
 
     // The agent left its branch and committed on a detached HEAD: that commit is on no branch, so it asks.
-    let id = engine.send(ask(&s.project, "Detach")).unwrap();
+    let id = sent(&engine, ask(&s.project, "Detach")).await;
     engine.shutdown();
     let engine = start(s.data.path(), &s.cwds, Git(s.git.clone()));
     s.git.lock().unwrap().detached = true;
@@ -290,7 +318,7 @@ async fn r_next_a_new_conversation_keeps_its_copy_when_another_project_is_opened
         let choice = Choice { vendor: "claude".into(), model: Some("haiku".into()), effort: None };
         engine.warm(WarmRequest { conversation_id: None, area: Area::Project, project_id: Some(other), choice });
     }));
-    let id = s.engine.send(ask(&s.project, "Start here")).unwrap();
+    let id = sent(&s.engine, ask(&s.project, "Start here")).await;
     let copy = s.engine.open(&id).unwrap().copy.expect("the message went to the conversation its copy was made for");
     let cwd = s.cwds.lock().unwrap().last().cloned().unwrap();
     assert_eq!(cwd.canonicalize().unwrap(), PathBuf::from(&copy.path).canonicalize().unwrap(), "never in the project folder");
@@ -300,8 +328,8 @@ async fn r_next_a_new_conversation_keeps_its_copy_when_another_project_is_opened
 #[tokio::test]
 async fn r_next_at_start_merged_copies_and_those_of_deleted_conversations_go() {
     let s = setup();
-    let kept = s.engine.send(ask(&s.project, "Keep working")).unwrap();
-    let merged = s.engine.send(ask(&s.project, "Finished work")).unwrap();
+    let kept = sent(&s.engine, ask(&s.project, "Keep working")).await;
+    let merged = sent(&s.engine, ask(&s.project, "Finished work")).await;
     let (kept_copy, merged_copy) = (s.engine.open(&kept).unwrap().copy.unwrap(), s.engine.open(&merged).unwrap().copy.unwrap());
     s.engine.shutdown();
     // A folder no conversation names any more (its delete could not remove it then).
@@ -318,7 +346,7 @@ async fn r_next_at_start_merged_copies_and_those_of_deleted_conversations_go() {
     // The merged conversation keeps its record, and its next message makes the copy again in the same folder.
     assert_eq!(engine.open(&merged).unwrap().copy.as_ref(), Some(&merged_copy));
     let again = SendRequest { conversation_id: Some(merged.clone()), ..ask(&s.project, "One more thing") };
-    engine.send(again).unwrap();
+    sent(&engine, again).await;
     assert!(Path::new(&merged_copy.path).is_dir(), "made again at the same place, so the CLI session resumes");
     engine.shutdown();
 }
@@ -390,5 +418,210 @@ async fn r_next_a_conversation_the_agent_starts_works_in_a_copy_of_its_own() {
     assert_eq!(cwds.len(), 2, "{cwds:?}");
     assert_eq!(cwds[1].canonicalize().unwrap(), PathBuf::from(&theirs.path).canonicalize().unwrap(), "never the project folder");
     sibling.say(serde_json::json!({"type":"system","subtype":"init","session_id":"s2","model":"claude-haiku-5-5"})).await;
+    engine.shutdown();
+}
+
+/// What the screen sees of a first message while the copy is still being made: the scripted `worktree add` waits for
+/// `release` (at most ten seconds, so a send that waits for it still ends).
+struct Slow {
+    setup: Setup,
+    release: std::sync::mpsc::Sender<()>,
+    /// Whether the copy's folder already existed when each message event went out.
+    early: Arc<Mutex<Vec<bool>>>,
+}
+
+fn slow() -> Slow {
+    let data = support::canonical_tempdir().unwrap();
+    let folder = support::canonical_tempdir().unwrap();
+    let cwds: Arc<Mutex<Vec<PathBuf>>> = Arc::default();
+    let git = Arc::new(Mutex::new(Repo { root: folder.path().into(), ..Repo::default() }));
+    let (release, gate) = std::sync::mpsc::channel::<()>();
+    git.lock().unwrap().on_add = Some(Box::new(move || {
+        let _ = gate.recv_timeout(Duration::from_secs(10));
+    }));
+    let early: Arc<Mutex<Vec<bool>>> = Arc::default();
+    let home = faber_engine::project::copy::home(data.path());
+    let note = early.clone();
+    let events: Arc<dyn Fn(AppEvent) + Send + Sync> = Arc::new(move |e| {
+        if let AppEvent::Message { conversation_id, .. } = e {
+            note.lock().unwrap().push(home.join(conversation_id).exists());
+        }
+    });
+    let engine = start_seen(data.path(), &cwds, Git(git.clone()), events);
+    let project = engine.add_project(&folder.path().to_string_lossy()).unwrap().id;
+    Slow { setup: Setup { engine, git, cwds, project, folder, data }, release, early }
+}
+
+#[tokio::test]
+async fn r_next_a_first_message_shows_at_once_and_its_agent_starts_in_the_copy_when_the_copy_is_made() {
+    let Slow { setup: s, release, early } = slow();
+    let started = std::time::Instant::now();
+    let id = s.engine.send(ask(&s.project, "Fix the login page")).unwrap();
+    assert!(started.elapsed() < Duration::from_secs(1), "send waited for the copy: {:?}", started.elapsed());
+    // The question and the reply that is typing are on screen, and nothing runs yet: no copy, no agent, nothing in the folder.
+    let shown = s.engine.open(&id).unwrap();
+    assert_eq!(shown.messages.len(), 2, "{:?}", shown.messages);
+    assert_eq!(shown.messages[1].status, Some(Status::Streaming));
+    assert!(shown.copy.as_ref().is_some_and(|c| c.root.is_empty()), "the copy is named on the conversation, not made: {:?}", shown.copy);
+    assert!(s.cwds.lock().unwrap().is_empty(), "the agent must not start before its copy is there");
+    assert_eq!(early.lock().unwrap().clone(), [false, false], "the question and the typing reply go out before the copy exists");
+    // The copy is made: it is attached and the agent starts in it, never in the project folder.
+    let _ = release.send(());
+    ready(&s.engine, &id).await;
+    let copy = s.engine.open(&id).unwrap().copy.unwrap();
+    let cwds = s.cwds.lock().unwrap().clone();
+    assert_eq!(cwds.len(), 1, "{cwds:?}");
+    assert_eq!(cwds[0].canonicalize().unwrap(), PathBuf::from(&copy.path).canonicalize().unwrap());
+    s.engine.shutdown();
+}
+
+#[tokio::test]
+async fn r_next_a_stopped_first_message_does_not_start_its_agent_when_the_copy_comes() {
+    let Slow { setup: s, release, .. } = slow();
+    let id = s.engine.send(ask(&s.project, "Fix the login page")).unwrap();
+    s.engine.interrupt(&id);
+    assert_eq!(s.engine.open(&id).unwrap().messages[1].status, Some(Status::Stopped));
+    let _ = release.send(());
+    ready(&s.engine, &id).await;
+    assert!(s.cwds.lock().unwrap().is_empty(), "stopped before its copy: no agent");
+    // The copy is kept on the conversation's record, so after a restart the next message still goes on in it.
+    s.engine.shutdown();
+    let engine = start(s.data.path(), &s.cwds, Git(s.git.clone()));
+    assert!(engine.open(&id).unwrap().copy.is_some_and(|c| !c.root.is_empty()), "the made copy was saved");
+    let again = SendRequest { conversation_id: Some(id.clone()), ..ask(&s.project, "Go on") };
+    engine.send(again).unwrap();
+    assert_eq!(s.cwds.lock().unwrap().len(), 1);
+    engine.shutdown();
+}
+
+#[tokio::test]
+async fn r_next_a_message_written_after_stopping_a_first_message_waits_for_the_same_copy() {
+    let Slow { setup: s, release, .. } = slow();
+    let id = s.engine.send(ask(&s.project, "Fix the login page")).unwrap();
+    s.engine.interrupt(&id);
+    let again = SendRequest { conversation_id: Some(id.clone()), ..ask(&s.project, "Go on") };
+    assert_eq!(s.engine.send(again).unwrap(), id);
+    assert!(s.cwds.lock().unwrap().is_empty(), "the copy is not there yet: nothing may start in the project folder");
+    let _ = release.send(());
+    ready(&s.engine, &id).await;
+    let copy = s.engine.open(&id).unwrap().copy.unwrap();
+    for _ in 0..200 {
+        if !s.cwds.lock().unwrap().is_empty() {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(25)).await;
+    }
+    let cwds = s.cwds.lock().unwrap().clone();
+    assert_eq!(cwds.len(), 1, "{cwds:?}");
+    assert_eq!(cwds[0].canonicalize().unwrap(), PathBuf::from(&copy.path).canonicalize().unwrap());
+    let adds = s.git.lock().unwrap().calls.iter().filter(|c| c.starts_with(&["worktree".into(), "add".into()])).count();
+    assert_eq!(adds, 1, "one copy for both messages");
+    s.engine.shutdown();
+}
+
+/// A repository that refuses to add a work tree.
+#[derive(Clone)]
+struct NoAdd(Git, Arc<std::sync::atomic::AtomicUsize>);
+impl Executor for NoAdd {
+    fn execute(&mut self, call: &Invocation) -> Result<Output, GitError> {
+        if call.args.iter().any(|a| a == "worktree") && call.args.iter().any(|a| a == "add") {
+            self.1.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            return Ok(Output { success: false, stdout: vec![] });
+        }
+        self.0.execute(call)
+    }
+}
+
+#[tokio::test]
+async fn r_next_a_copy_that_cannot_be_made_ends_the_reply_and_the_next_message_tries_again() {
+    let data = support::canonical_tempdir().unwrap();
+    let folder = support::canonical_tempdir().unwrap();
+    let cwds: Arc<Mutex<Vec<PathBuf>>> = Arc::default();
+    let repo = Arc::new(Mutex::new(Repo { root: folder.path().into(), ..Repo::default() }));
+    let adds: Arc<std::sync::atomic::AtomicUsize> = Arc::default();
+    let engine = start(data.path(), &cwds, NoAdd(Git(repo.clone()), adds.clone()));
+    let project = engine.add_project(&folder.path().to_string_lossy()).unwrap().id;
+    let id = engine.send(ask(&project, "Fix the login page")).unwrap();
+    let mut reply = engine.open(&id).unwrap().messages[1].clone();
+    for _ in 0..200 {
+        if reply.status != Some(Status::Streaming) {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(25)).await;
+        reply = engine.open(&id).unwrap().messages[1].clone();
+    }
+    assert_eq!((reply.status, reply.error.as_deref()), (Some(Status::Error), Some("error.copy.failed")));
+    assert!(cwds.lock().unwrap().is_empty(), "no agent without its copy");
+    // The person writes again in the same conversation: it asks for a copy again instead of working in the folder.
+    let tries = || adds.load(std::sync::atomic::Ordering::SeqCst);
+    let before = tries();
+    let again = SendRequest { conversation_id: Some(id.clone()), ..ask(&project, "Try again") };
+    engine.send(again).unwrap();
+    for _ in 0..200 {
+        if tries() > before {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(25)).await;
+    }
+    assert!(tries() > before, "the copy was tried again");
+    assert!(cwds.lock().unwrap().is_empty(), "still never in the project folder");
+    engine.shutdown();
+}
+
+/// Where an agent may start while a copy is pending: only inside its conversation's copy folder, never the project folder.
+fn only_in_copy(cwds: &[PathBuf], data: &Path, id: &str) -> bool {
+    // A folder git has not made yet cannot be resolved: it is compared as it is named.
+    let real = |path: &Path| path.canonicalize().unwrap_or_else(|_| path.to_path_buf());
+    let copy = real(&faber_engine::project::copy::home(data).join(id));
+    cwds.iter().all(|cwd| real(cwd).starts_with(&copy))
+}
+
+#[tokio::test]
+async fn r_next_a_queued_message_sent_now_after_stopping_never_starts_in_the_project_folder() {
+    let Slow { setup: s, release, .. } = slow();
+    let id = s.engine.send(ask(&s.project, "Fix the login page")).unwrap();
+    // Written while the first answer waits for its copy: queued. Then the first answer is stopped, and "Send now" is pressed.
+    let queued = SendRequest { conversation_id: Some(id.clone()), ..ask(&s.project, "And the footer") };
+    s.engine.send(queued).unwrap();
+    let item = s.engine.open(&id).unwrap().queued[0].id.clone();
+    s.engine.interrupt(&id);
+    let _ = s.engine.send_queued(&id, &item);
+    assert!(s.cwds.lock().unwrap().is_empty(), "nothing starts before the copy is there");
+    // The copy comes: the queued message is the one that starts, in the copy.
+    let _ = release.send(());
+    ready(&s.engine, &id).await;
+    for _ in 0..200 {
+        if !s.cwds.lock().unwrap().is_empty() {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(25)).await;
+    }
+    let cwds = s.cwds.lock().unwrap().clone();
+    assert_eq!(cwds.len(), 1, "{cwds:?}");
+    assert!(only_in_copy(&cwds, s.data.path(), &id), "started outside the copy: {cwds:?}");
+    s.engine.shutdown();
+}
+
+#[tokio::test]
+async fn r_next_a_restart_before_the_copy_is_attached_still_works_in_the_copy_afterwards() {
+    let Slow { setup: s, release, .. } = slow();
+    let id = s.engine.send(ask(&s.project, "Fix the login page")).unwrap();
+    // Faber closes while git is still making the copy; the next start finds the conversation with its copy named only.
+    s.engine.shutdown();
+    let engine = start(s.data.path(), &s.cwds, Git(s.git.clone()));
+    let named = engine.open(&id).unwrap().copy.expect("the copy was named before git started");
+    assert!(named.root.is_empty(), "{named:?}");
+    // Typing in it, or a message, never starts the agent in the project folder; the message makes the copy and runs there.
+    let choice = Choice { vendor: "claude".into(), model: Some("haiku".into()), effort: None };
+    engine.warm(WarmRequest { conversation_id: Some(id.clone()), area: Area::Project, project_id: Some(s.project.clone()), choice });
+    assert!(only_in_copy(&s.cwds.lock().unwrap(), s.data.path(), &id));
+    let again = SendRequest { conversation_id: Some(id.clone()), ..ask(&s.project, "Go on") };
+    engine.send(again).unwrap();
+    ready(&engine, &id).await;
+    let copy = engine.open(&id).unwrap().copy.unwrap();
+    assert_eq!(copy.branch, named.branch, "the same branch, so nothing is left behind");
+    assert!(only_in_copy(&s.cwds.lock().unwrap(), s.data.path(), &id));
+    let _ = release.send(());
+    tokio::time::sleep(Duration::from_millis(200)).await;
     engine.shutdown();
 }

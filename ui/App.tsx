@@ -158,7 +158,7 @@ export function App(props: { initial: AppState; update?: UpdateStatus; inbox: { 
       saved.restored = false;
       return;
     }
-    if (["error.quotaWait", "error.moveFailed", "error.quotaOut"].includes(m.error ?? "")) {
+    if (["error.quotaWait", "error.moveFailed", "error.quotaOut", "error.copy.failed"].includes(m.error ?? "")) {
       if (place().id !== id) return;
       saved.restored = restore?.(saved.draft) || saved.restored;
       if (m.error !== 'error.moveFailed') return;
