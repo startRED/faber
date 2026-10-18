@@ -28,7 +28,7 @@ async fn main() {
     let project = Project::new("probe".into(), "probe".into(), folder.to_string_lossy().into_owned());
     let view = faber_engine::project::mission::view(&project);
     println!("checks ({}): {:?}", view.source, view.commands);
-    let verifier = Verifier::real();
+    let verifier = Verifier::real(None);
     for level in levels {
         let changed = Process::find().ok().and_then(|mut git| {
             let exec: &mut dyn Executor = &mut git;

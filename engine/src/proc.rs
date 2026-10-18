@@ -403,6 +403,25 @@ impl Containment {
 }
 
 impl Containment {
+    /// What caps the processor share of the job's processes (`Some(percent)`) or lifts the cap (`None`): the game guard of
+    /// a check (`crate::verify`), saying whether Windows took it. Nothing elsewhere than Windows, which has no job.
+    pub fn cpu_cap(&self) -> Box<dyn Fn(Option<u32>) -> bool + Send + Sync> {
+        #[cfg(windows)]
+        {
+            let job = self.job.clone();
+            Box::new(move |percent| {
+                job.lock()
+                    .unwrap_or_else(|e| e.into_inner())
+                    .as_ref()
+                    .is_some_and(|job| faber_winproc::job_cpu_cap(job.handle(), percent).is_ok())
+            })
+        }
+        #[cfg(not(windows))]
+        {
+            Box::new(|_| true)
+        }
+    }
+
     /// Ends every process of the job now. Closing the job does the same, but only asks: this is followed by `active`.
     fn end(&self) {
         #[cfg(windows)]

@@ -982,6 +982,8 @@ export const ptBR: Messages = {
   'notes.49.fixed': 'O Faber agora também verifica a resposta em que o agente mudou arquivos com um comando, e numa cópia separada roda todas as verificações que você confirmou.',
   'notes.50.new': 'Ctrl K abre uma busca: digite algumas letras e vá direto a uma conversa, um projeto ou uma ação. Ctrl F procura uma palavra na conversa aberta.',
   'notes.51.better': 'Uma mensagem que você escreve enquanto o Claude trabalha agora chega a ele no próximo passo, como no Codex, sem esperar o fim.',
+  'notes.52.better': 'Enquanto um jogo está na frente, as verificações do Faber esperam para começar, e uma que já está rodando usa só um décimo do processador até você sair do jogo.',
+  'notes.53.better': 'Quando o agente muda código Rust, as verificações rápidas do Faber agora também o compilam, e um erro de compilação aparece com arquivo e linha em segundos.',
   'update.checking': 'Procurando atualização…',
   'update.downloading': 'Baixando atualização…',
   'update.downloadingPercent': 'Baixando atualização… {percent}%',

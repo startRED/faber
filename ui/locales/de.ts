@@ -995,6 +995,8 @@ export const de: Messages = {
   'notes.49.fixed': 'Faber prüft jetzt auch eine Antwort, in der der Agent Dateien mit einem Befehl geändert hat, und in einer getrennten Kopie laufen alle Prüfungen, die du bestätigt hast.',
   'notes.50.new': 'Mit Strg K springst du nach ein paar Buchstaben zu einer Unterhaltung, einem Projekt oder einer Aktion. Mit Strg F suchst du ein Wort in der offenen Unterhaltung.',
   'notes.51.better': 'Eine Nachricht, die du schreibst, während Claude arbeitet, erreicht es jetzt beim nächsten Schritt, wie bei Codex, statt am Ende.',
+  'notes.52.better': 'Solange ein Spiel im Vordergrund ist, warten Fabers Prüfungen mit dem Start, und eine schon laufende nutzt nur ein Zehntel des Prozessors, bis du das Spiel verlässt.',
+  'notes.53.better': 'Wenn der Agent Rust-Code ändert, kompilieren Fabers schnelle Prüfungen ihn jetzt mit, und ein Kompilierfehler erscheint in Sekunden mit Datei und Zeile.',
   'update.checking': 'Suche nach einem Update…',
   'update.downloading': 'Update wird heruntergeladen…',
   'update.downloadingPercent': 'Update wird heruntergeladen… {percent} %',

@@ -10,7 +10,8 @@
 
 #[cfg(windows)]
 pub use imp::{
-    image_path, job_active_processes, job_terminate, label_desktop_low, label_low, lower_to_low_integrity, process_ended, resume_process,
+    image_path, job_active_processes, job_cpu_cap, job_terminate, label_desktop_low, label_low, lower_to_low_integrity, process_ended,
+    resume_process,
 };
 
 #[cfg(windows)]
@@ -302,6 +303,32 @@ mod imp {
             );
             if ok == 0 { Err(io::Error::last_os_error()) } else { Ok(info.ActiveProcesses) }
         }
+    }
+
+    /// Caps the processor the job object `job` (a handle) may use at `percent` of the whole machine, as a hard cap, or lifts
+    /// the cap with `None`.
+    pub fn job_cpu_cap(job: isize, percent: Option<u32>) -> io::Result<()> {
+        use windows_sys::Win32::System::JobObjects::{
+            JOB_OBJECT_CPU_RATE_CONTROL_ENABLE, JOB_OBJECT_CPU_RATE_CONTROL_HARD_CAP, JOBOBJECT_CPU_RATE_CONTROL_INFORMATION,
+            JobObjectCpuRateControlInformation, SetInformationJobObject,
+        };
+        let mut info = JOBOBJECT_CPU_RATE_CONTROL_INFORMATION::default();
+        if let Some(percent) = percent {
+            info.ControlFlags = JOB_OBJECT_CPU_RATE_CONTROL_ENABLE | JOB_OBJECT_CPU_RATE_CONTROL_HARD_CAP;
+            // The rate is in hundredths of a percent, from 1 to 10 000.
+            info.Anonymous.CpuRate = (percent.clamp(1, 100)) * 100;
+        }
+        // SAFETY: `info` is a plain-data struct that lives across the call, and the size passed is its size; the handle is
+        // one the caller holds open.
+        let ok = unsafe {
+            SetInformationJobObject(
+                job as _,
+                JobObjectCpuRateControlInformation,
+                (&info as *const JOBOBJECT_CPU_RATE_CONTROL_INFORMATION).cast(),
+                std::mem::size_of::<JOBOBJECT_CPU_RATE_CONTROL_INFORMATION>() as u32,
+            )
+        };
+        if ok == 0 { Err(io::Error::last_os_error()) } else { Ok(()) }
     }
 
     /// Ends every process in the job object `job` (a handle) at once.

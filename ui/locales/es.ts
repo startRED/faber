@@ -995,6 +995,8 @@ export const es: Messages = {
   'notes.49.fixed': 'Faber ahora también comprueba la respuesta en la que el agente cambió archivos con un comando, y en una copia separada ejecuta todas las comprobaciones que confirmaste.',
   'notes.50.new': 'Con Ctrl K escribes unas letras y vas directo a una conversación, un proyecto o una acción. Con Ctrl F buscas una palabra en la conversación abierta.',
   'notes.51.better': 'Un mensaje que escribes mientras Claude trabaja ahora le llega en su siguiente paso, como con Codex, sin esperar al final.',
+  'notes.52.better': 'Mientras un juego está delante, las comprobaciones de Faber esperan para empezar, y una que ya está en marcha usa solo una décima parte del procesador hasta que sales del juego.',
+  'notes.53.better': 'Cuando el agente cambia código Rust, las comprobaciones rápidas de Faber ahora también lo compilan, y un error de compilación aparece con su archivo y línea en segundos.',
   'update.checking': 'Buscando una actualización…',
   'update.downloading': 'Descargando actualización…',
   'update.downloadingPercent': 'Descargando actualización… {percent} %',
