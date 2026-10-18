@@ -897,6 +897,7 @@ export const en = {
   'notes.74.better': 'Settings > Projects is shorter: the leftover git and self-update rows of the old missions are gone, and Faber installs one program fewer.',
   'notes.75.new': 'In a project, the agent can compact its own context when a topic ends, then goes on by itself from the note it left; a quiet line tells you.',
   'notes.76.better': "A small ring in the top bar shows how full the AI's context is, amber only near the point where it compacts itself.",
+  'notes.77.better': 'Faber now archives a project conversation by itself once its pull request is merged or closed, or after 7 quiet days. One at work, waiting for you or with unsaved work stays.',
   'update.checking': 'Looking for an update…',
   'update.downloading': 'Downloading update…',
   'update.downloadingPercent': 'Downloading update… {percent}%',

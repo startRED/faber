@@ -109,7 +109,7 @@ impl Core {
         let follow = match earlier {
             Some((at, mut f)) if f.repo == found.repo && f.number == found.number => {
                 from = Some(at);
-                (f.state, f.problem, f.held, f.since) = (FollowState::Pending, None, false, now);
+                (f.state, f.problem, f.held, f.kept, f.since) = (FollowState::Pending, None, false, false, now);
                 f
             }
             Some((at, mut f)) => {
@@ -133,7 +133,7 @@ impl Core {
             .is_some_and(|f| f.state.open() || f.state == FollowState::Passing);
         let Some(reply) = self.latest_reply(conv).filter(|_| resumes) else { return };
         let Some((from, mut f)) = self.take_follow(conv) else { return };
-        (f.state, f.since) = (FollowState::Pending, self.now_ms());
+        (f.state, f.kept, f.since) = (FollowState::Pending, false, self.now_ms());
         self.place_follow(conv, Some(from), &reply, f);
         self.look_later(conv, follow::FIRST);
     }
@@ -210,6 +210,8 @@ impl Core {
         let wait = match next {
             Next::Keep => follow::delay(previous, changed),
             Next::End => {
+                // A reply since the line was placed means someone wrote while gh ran: that conversation goes on (`auto_archive`).
+                f.kept |= place != from;
                 self.follows.remove(conv);
                 return self.place_follow(conv, Some(from), &place, f);
             }
@@ -279,7 +281,12 @@ impl Engine {
             if c.to_read(conv, ticker).is_some_and(|(_, n)| n == number) {
                 c.read_pr(conv, read);
             }
-        })
+        });
+        // Merged or closed: the conversation is put away if nothing keeps it (git runs away from the lock).
+        if self.with(|c| c.pr_over(conv)) {
+            let (engine, conv) = (self.clone(), conv.to_string());
+            let _ = tokio::task::spawn_blocking(move || engine.archive_finished(Some(&conv))).await;
+        }
     }
 
     /// Looks at every followed pull request now, as the timers do; tests call it in place of waiting.

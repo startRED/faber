@@ -956,6 +956,7 @@ fn main() {
             }
             app.state::<Faber>().engine.watch_accounts();
             app.state::<Faber>().engine.follow_open_prs();
+            app.state::<Faber>().engine.watch_archive();
             app.state::<Faber>().engine.detect_claude_flags();
             if let Some(codex) = clis.get(&Vendor::Codex) {
                 load_models(app.handle(), codex.clone(), data_dir.clone());

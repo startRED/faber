@@ -1029,6 +1029,7 @@ export const fr: Messages = {
   'notes.74.better': 'Réglages > Projets est plus court : les lignes git et de mise à jour automatique laissées par les anciennes missions ont disparu, et Faber installe un programme de moins.',
   'notes.75.new': 'Dans un projet, l’agent peut compacter son propre contexte à la fin d’un sujet, puis poursuit seul à partir de la note qu’il s’est laissée ; une ligne discrète vous prévient.',
   'notes.76.better': 'Un petit anneau dans la barre du haut montre à quel point le contexte de l’IA est plein, et ne devient ambre que près du moment où elle se compacte d’elle-même.',
+  'notes.77.better': 'Faber archive désormais tout seul une conversation de projet quand sa pull request est fusionnée ou fermée, ou après 7 jours sans activité. Une conversation en cours, qui vous attend ou qui a du travail non enregistré reste.',
   'update.checking': 'Recherche d’une mise à jour…',
   'update.downloading': 'Téléchargement de la mise à jour…',
   'update.downloadingPercent': 'Téléchargement de la mise à jour… {percent} %',

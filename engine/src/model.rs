@@ -326,6 +326,10 @@ pub struct Follow {
     /// The checks failed while the quota was tight: the person is told instead of the agent.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub held: bool,
+    /// The person took the conversation back after it was archived, or wrote to it while Faber read the end of the pull
+    /// request: Faber does not put it away for this pull request (`engine/src/engine/auto_archive.rs`).
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub kept: bool,
     /// Why following ended early, as an i18n key.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub problem: Option<String>,

@@ -1029,6 +1029,7 @@ export const de: Messages = {
   'notes.74.better': 'Einstellungen > Projekte ist kürzer: Die übrig gebliebenen Git- und Selbstaktualisierungszeilen der alten Missionen sind weg, und Faber installiert ein Programm weniger.',
   'notes.75.new': 'In einem Projekt kann der Agent seinen eigenen Kontext verdichten, wenn ein Thema endet, und macht mit der Notiz, die er sich hinterlassen hat, von selbst weiter; eine ruhige Zeile sagt es dir.',
   'notes.76.better': 'Ein kleiner Ring in der oberen Leiste zeigt, wie voll der Kontext der KI ist, und wird nur kurz vor dem Punkt bernsteinfarben, an dem sie ihn selbst verdichtet.',
+  'notes.77.better': 'Faber archiviert jetzt eine Projekt-Unterhaltung von selbst, sobald ihr Pull Request gemergt oder geschlossen ist oder 7 Tage nichts passiert ist. Eine, die arbeitet, auf dich wartet oder ungesicherte Arbeit hat, bleibt.',
   'update.checking': 'Suche nach einem Update…',
   'update.downloading': 'Update wird heruntergeladen…',
   'update.downloadingPercent': 'Update wird heruntergeladen… {percent} %',

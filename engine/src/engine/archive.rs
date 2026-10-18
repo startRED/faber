@@ -17,6 +17,14 @@ impl Core {
             return Ok(());
         }
         c.archived_at = on.then(now);
+        if !on {
+            // Brought back, it is as new as a message: Faber does not put it away again for the week it was quiet, nor for
+            // the pull request that ended (`auto_archive`).
+            c.updated_at = now();
+            if let Some(f) = c.messages.iter_mut().rev().find_map(|m| m.follow.as_mut()) {
+                f.kept = true;
+            }
+        }
         if on {
             // What Faber queued by itself (a report, a question, Keep going) never wakes an archived conversation.
             c.queued.retain(|q| q.sending || q.wake.is_none());

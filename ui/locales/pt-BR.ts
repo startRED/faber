@@ -1016,6 +1016,7 @@ export const ptBR: Messages = {
   'notes.74.better': 'Configurações > Projetos ficou mais curto: as linhas de git e de autoatualização que sobraram das antigas missões saíram, e o Faber instala um programa a menos.',
   'notes.75.new': 'Num projeto, o agente pode compactar o próprio contexto quando um assunto termina e segue sozinho a partir da nota que deixou; uma linha discreta avisa você.',
   'notes.76.better': 'Um anel no topo mostra quanto do contexto da IA já está cheio, e só fica âmbar perto do ponto em que ela compacta sozinha.',
+  'notes.77.better': 'O Faber agora arquiva sozinho uma conversa de projeto quando o pull request dela é aceito ou fechado, ou depois de 7 dias parada. Uma que está trabalhando, esperando você ou com trabalho não salvo fica.',
   'update.checking': 'Procurando atualização…',
   'update.downloading': 'Baixando atualização…',
   'update.downloadingPercent': 'Baixando atualização… {percent}%',

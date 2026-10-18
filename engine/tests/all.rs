@@ -11,6 +11,8 @@ mod support;
 mod account;
 #[path = "auto.rs"]
 mod auto;
+#[path = "auto_archive.rs"]
+mod auto_archive;
 #[path = "book.rs"]
 mod book;
 #[path = "budget.rs"]

@@ -32,6 +32,7 @@ use uuid::Uuid;
 mod answer;
 mod archive;
 mod auto;
+mod auto_archive;
 mod browse;
 mod by_itself;
 mod compact;

@@ -161,6 +161,7 @@ pub fn start(found: Found, now_ms: u64) -> Follow {
         head: None,
         woke: None,
         held: false,
+        kept: false,
         problem: None,
         since: now_ms,
     }
