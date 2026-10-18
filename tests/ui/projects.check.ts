@@ -142,22 +142,6 @@ check('settings projects: a refusal for invalid commands that comes with a moved
   });
 });
 
-check('settings projects: the self-update switch saves the grant with a fresh revision', () => {
-  let granted: unknown[] = [];
-  return withProjectSettings(() => {
-    api.projectProof = async () => proofView(true);
-    api.projectEnroll = async (id) => ({ projectId: id, repo: demo.path, base: 'base', mode: 'seguro', revision: 5, selfUpdate: false });
-    api.projectGrant = async (...args) => { granted = args; return { repo: demo.path, mode: 'seguro', revision: 5, grantedAt: 1, selfUpdate: true }; };
-  }, async (root) => {
-    await click(root.querySelector('.pset-head'));
-    const box = root.querySelector<HTMLInputElement>(`#pset-${demo.id}-faber-switch`)!;
-    box.click();
-    await settle();
-    equal(JSON.stringify(granted), JSON.stringify([demo.id, 'seguro', true, 5]));
-    ok(box.checked, 'the switch stays on');
-  });
-});
-
 check('settings projects: the separate copies switch is on by default and turns off for this project (R201)', () => {
   let saved: unknown[] = [];
   return withProjectSettings(() => {

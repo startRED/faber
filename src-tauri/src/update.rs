@@ -6,7 +6,7 @@
 //! before the download ends gets the idle install below instead, and a running turn is never ended.
 //!
 //! Later, every six hours, a newer release is downloaded and kept. It installs at the first idle moment: no answer
-//! running, no mission driven, no CLI install from the setup screen, and the window closed to the tray or minimized; or
+//! running, no CLI install from the setup screen, and the window closed to the tray or minimized; or
 //! at once when the person presses "Update ready, restart" (`restart_now`). It never shows a window on its own.
 //!
 //! On Windows the plugin's `install` starts the NSIS installer with `/S /UPDATE /R /ARGS <args>` (`updater.rs`
@@ -171,7 +171,7 @@ fn was_tried(data_dir: &Path, version: &str) -> bool {
     std::fs::read_to_string(data_dir.join(TRIED_FILE)).is_ok_and(|text| tried_recently(&text, version, now_secs()))
 }
 
-/// A downloaded update installs only when it is ready, no answer or mission is running, and the window is not visible.
+/// A downloaded update installs only when it is ready, no answer is running, and the window is not visible.
 pub(crate) fn may_install(ready: bool, busy: bool, window_visible: bool) -> bool {
     ready && !busy && !window_visible
 }
@@ -196,7 +196,7 @@ impl Gate {
     }
 
     /// The install is decided unless a setup runs or `other_work` says something else does. From then on nothing new may
-    /// start: the shell's own admission points read `installing`, and `other_work` is where the engine's are closed.
+    /// start: a CLI install is refused (`begin_setup`), and `other_work` is where the engine's admission is closed.
     fn reserve(&mut self, other_work: impl FnOnce() -> bool) -> bool {
         if self.installing || self.setups > 0 || other_work() {
             return false;
@@ -229,11 +229,6 @@ impl Drop for SetupRunning {
         let mut gate = gate();
         gate.setups = gate.setups.saturating_sub(1);
     }
-}
-
-/// An update install has been decided: the shell's missions and CLI installs start nothing from here on.
-pub(crate) fn installing() -> bool {
-    gate().installing
 }
 
 /// Who asks for the install.
@@ -451,7 +446,7 @@ trait Release {
     async fn download(&self) -> Result<(), String>;
     /// What the screen shows of the install at open (`Phase::None` when it ends).
     fn stage(&self, phase: Phase);
-    /// Decides the install, all at once (`admit`): nothing is running (an answer, a mission, a check of the agents, a CLI
+    /// Decides the install, all at once (`admit`): nothing is running (an answer, a CLI
     /// install), no unsent draft is on the screen, the tried marker is on the disk, and from here on nothing new may start.
     /// False when anything stops it.
     fn reserve(&self, who: Who) -> bool;
@@ -590,10 +585,8 @@ impl Release for Live {
             &mut gate(),
             who,
             || {
-                // The engine's own admission closes first (it refuses when an answer or a mission worker runs, and refuses
-                // every new one after), then a mission being driven is read (the engine's drive registry). A check of the
-                // agents is a `SetupRunning` and is read by the gate itself. A mission that starts after this finds the engine
-                // closed.
+                // The engine's own admission closes first (it refuses when an answer runs, and every new one after), then
+                // whether it is still working is read. A CLI install is a `SetupRunning` and is read by the gate itself.
                 let closed = faber.engine.local_build_admission().ok()?;
                 (!faber.engine.is_working()).then_some(closed)
             },
@@ -1052,13 +1045,13 @@ mod tests {
     }
 
     #[test]
-    fn a_check_of_the_agents_holds_the_admission_to_its_end_and_nothing_qualifies_after_the_decision() {
+    fn a_cli_install_holds_the_admission_to_its_end_and_none_begins_after_the_decision() {
         let (mut gate, seen) = (Gate::default(), RefCell::new(vec![]));
-        assert!(gate.begin_setup(), "the check of the agents begins");
+        assert!(gate.begin_setup(), "a CLI install begins");
         assert!(!admission(&mut gate, Who::Owner, true, false, true, &seen), "even the owner's restart waits for it");
         gate.setups -= 1;
         assert!(admission(&mut gate, Who::Later, true, false, true, &seen));
-        assert!(!gate.begin_setup(), "a mission that asks for a check after the decision is refused");
+        assert!(!gate.begin_setup(), "a CLI install asked for after the decision is refused");
     }
 
     /// The install in order, with `reserve` answering as given.
@@ -1123,7 +1116,7 @@ mod tests {
         /// The download never ends.
         stalls: bool,
         download: Result<(), String>,
-        /// A turn or a mission begins while the download runs.
+        /// A turn begins while the download runs.
         work_during_download: bool,
         /// The person types while the download runs.
         typing_during_download: bool,
@@ -1245,7 +1238,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn a_turn_or_a_mission_started_during_the_download_is_never_ended() {
+    async fn a_turn_started_during_the_download_is_never_ended() {
         let release = Fake { work_during_download: true, ..Fake::found() };
         assert_eq!(start(&release).await, Start::Waits);
         assert_eq!(

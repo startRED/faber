@@ -524,9 +524,6 @@ export const de: Messages = {
   'hint.chat.3': 'Beschreibe ein Problem und bitte um drei Auswege',
   'projects.home.title': 'Was packen wir an?',
   'projects.chat.lead': 'Bitte um alles in diesem Ordner. Der Assistent arbeitet direkt hier und fragt dich, wenn er etwas braucht.',
-  'projects.gitMode.seguroTech': "Sicherer Modus: getrennter Worktree, nur lokale Commits und Vorspulen nur auf dem Missions-Branch.",
-  'projects.selfUpdate.trustTech': "Ein neuer Build rückt erst nach einem Canary-Lauf und den Quarantäneprüfungen in den nächsten lokalen Slot vor.",
-  'projects.proofs.isolationTech': "Prüfungen, die von einer Rolle geschriebenen Code ausführen, laufen unter Windows mit niedriger Integrität: Sie dürfen nur in die Kopie der Mission, ihren Build-Ordner und ihre temporären Ordner schreiben. Sie können aber weiterhin deine Dateien lesen und das Netzwerk nutzen; eine stärkere Sandbox (AppContainer) ist der geplante nächste Schritt. Unter macOS können sie ebenfalls nicht außerhalb dieser Ordner schreiben; unter Linux begrenzt sie noch nichts.",
   'setup.title': 'Abonnements verbinden',
   'setup.body': 'Wähle die offiziellen KI-Tools, die du mit deinen eigenen Abonnements nutzen möchtest.',
   'setup.claude': 'Claude',
@@ -651,14 +648,10 @@ export const de: Messages = {
   // Native speaker must translate (needs native review).
   // Native speaker must translate (needs native review).
   // Native speaker must translate (needs native review).
-  "projects.repo": "Ordner",
-  // Native speaker must translate (needs native review).
-  "projects.base": "Basis-Revision",
-  // Native speaker must translate (needs native review).
-  "projects.author": "Autor",
   // Native speaker must translate (needs native review).
   // Native speaker must translate (needs native review).
-  "projects.presence.continueWithout": "Ohne es weitermachen",
+  // Native speaker must translate (needs native review).
+  // Native speaker must translate (needs native review).
   // Native speaker must translate (needs native review).
   // Native speaker must translate (needs native review).
   "reason.kit.continueWithout": "Faber nutzt die Werkzeuge, die es schon hat.",
@@ -666,17 +659,6 @@ export const de: Messages = {
   "reason.kit.findToolsInstallParked": "Werkzeuge zu installieren ist noch nicht fertig. Vorerst nutzt Faber die, die es schon hat.",
   // Native speaker must translate (needs native review).
   // Native speaker must translate (needs native review).
-  "projects.gitMode.seguro": "Sicher: nur eine getrennte Kopie",
-  // Native speaker must translate (needs native review).
-  "projects.gitMode.seguroDesc": "Faber arbeitet an einer getrennten Kopie deines Projekts. Es rührt weder GitHub noch etwas im Internet an.",
-  // Native speaker must translate (needs native review).
-  // Native speaker must translate (needs native review).
-  "projects.gitMode.equilibrado": "Ausgewogen: lokale Commits + Draft-PR",
-  "projects.gitMode.equilibradoDesc": "Sicher, plus Übertragen des Missions-Branches und Erstellen eines Draft-PRs.",
-  // Native speaker must translate (needs native review).
-  "projects.selfUpdate.trust": "Faber erlauben, sich selbst zu aktualisieren",
-  // Native speaker must translate (needs native review).
-  "projects.selfUpdate.trustDesc": "Installiert eine neue Faber-Version erst, nachdem getestet wurde, dass sie funktioniert.",
   // Native speaker must translate (needs native review).
   // Native speaker must translate (needs native review).
   // Native speaker must translate (needs native review).
@@ -698,7 +680,11 @@ export const de: Messages = {
   // Native speaker must translate (needs native review).
   // Native speaker must translate (needs native review).
   // Native speaker must translate (needs native review).
-  "projects.task.review": "Review",
+  // Native speaker must translate (needs native review).
+  // Native speaker must translate (needs native review).
+  // Native speaker must translate (needs native review).
+  // Native speaker must translate (needs native review).
+  // Native speaker must translate (needs native review).
   // Native speaker must translate (needs native review).
   // Native speaker must translate (needs native review).
   // Native speaker must translate (needs native review).
@@ -728,15 +714,12 @@ export const de: Messages = {
   // Native speaker must translate (needs native review).
   // Native speaker must translate (needs native review).
   // Native speaker must translate (needs native review).
-  "projects.state.running": "Läuft",
   // Native speaker must translate (needs native review).
-  "projects.state.paused": "Pausiert",
   // Native speaker must translate (needs native review).
-  "projects.state.blocked": "Blockiert",
   // Native speaker must translate (needs native review).
   // Native speaker must review these (needs native review).
   "projects.proof.title": "Prüfungen für dieses Projekt",
-  "projects.proof.desc": "Eine Mission belegt ihre Arbeit, indem sie diese Befehle in einer sauberen Kopie des Projekts ausführt. Bestätige sie einmal; Faber fragt erneut, wenn das Projekt sie ändert.",
+  "projects.proof.desc": "Faber führt diese Befehle über die Arbeit des Agenten aus, im Projektordner (in seiner Kopie, wenn es eine gibt), und sagt dem Agenten, was fehlgeschlagen ist. Bestätige sie einmal; Faber fragt erneut, wenn das Projekt sie ändert.",
   "projects.proof.confirm": "Prüfungen bestätigen",
   "projects.proof.confirmed": "Bestätigt",
   "projects.proof.edit": "Bearbeiten",
@@ -751,7 +734,6 @@ export const de: Messages = {
   "reason.budget.daily": "Das Missionsbudget für heute ist aufgebraucht. Es geht weiter, wenn das Fenster zurückgesetzt wird.",
   "reason.quota.weekly": "Das Wochenkontingent des Abonnements ist vorerst aufgebraucht.",
   "reason.lease.live": "Ein anderer Lauf hält noch die Arbeitskopie dieses Projekts. Setze fort, wenn er fertig ist.",
-  "reason.mission.driving": "Diese Mission läuft bereits.",
   "reason.project.empty": "Eine Mission kann keine Datei dieses Projekts ändern.",
   "reason.proof.command": "Ein Prüfbefehl muss einfacher Text sein: ein Programmname und seine Argumente, ohne Pipes, Anführungszeichen oder Pfade.",
   "reason.proof.definition": "Der Plan nannte eine Prüfung, die das Projekt nicht hat.",
@@ -763,7 +745,6 @@ export const de: Messages = {
   "reason.project.reconcile": "Faber konnte die Aufzeichnungen dieses Projekts nicht mit seinem Repository abgleichen. Prüfe es und setze dann fort.",
   "reason.project.processTreeUnproven": "Faber konnte nicht belegen, dass alles Gestartete beendet ist. Prüfe die laufenden Programme und setze dann fort.",
   "reason.disk.needed": "Für eine saubere Kopie ist nicht genug freier Speicherplatz da.",
-  "reason.qualify.failed": "Die Agenten ließen sich nicht prüfen. Es wurde keine Mission gestartet.",
   "reason.proof.setupChanged": "Die Installationen des Projekts haben sich geändert, seit diese Liste gezeigt wurde. Sieh dir die Liste noch einmal an und bestätige dann.",
   "reason.proof.declaredChanged": "Die Prüfungen des Projekts haben sich geändert, seit diese Liste gezeigt wurde. Die Liste unten ist die neue; sieh sie dir an und bestätige dann.",
   "reason.workspace.busy": "Eine Prüfung eines früheren Laufs läuft noch, deshalb wurde die Arbeitskopie des Projekts nicht angefasst. Versuche es gleich noch einmal.",
@@ -819,7 +800,6 @@ export const de: Messages = {
   "error.decision.person": "Diese Entscheidung erfordert deine Antwort.",
   // Native speaker must translate (needs native review).
   // Native speaker must translate (needs native review).
-  "reason.update.quiescence": "Die Aktualisierung wartet auf den Abschluss aktiver Vorgänge und das Schließen des Fensters.",
   // Native speaker must translate (needs native review).
   "reason.git.repository": "Wähle einen Ordner, der zu einem Git-Repository gehört.",
   // Native speaker must translate (needs native review).
@@ -950,8 +930,6 @@ export const de: Messages = {
   "set.projects": "Projekte",
   "set.projects.none": "Noch keine Projekte. Öffne eines unter Projekte.",
   "set.projects.checks": "Prüfungen",
-  "set.projects.tools": "Fehlende Werkzeuge",
-  "set.projects.code": "Dein Code",
   "set.projects.noChecks": "Noch keine Prüfungen. Füge sie mit Bearbeiten hinzu.",
   "set.projects.copies": "Eine eigene Kopie für jedes Gespräch",
   "set.projects.copiesDesc": "Jedes neue Gespräch arbeitet auf einem eigenen Branch, faber/…, in einer Kopie des Repositorys, damit zwei Gespräche und dein eigener Ordner nie dieselben Dateien ändern. Der Agent bringt seine Arbeit mit einem Commit, einem Push oder einem Pull Request zurück; Faber merged nie von selbst.",

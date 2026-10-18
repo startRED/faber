@@ -62,8 +62,7 @@ jobs:
         include:
           - os: windows-latest
             args: ''
-          # One build per chip: a universal build joins only the main binary, so bundling the second one (faber-local)
-          # fails.
+          # One build per chip.
           - os: macos-latest
             args: --target aarch64-apple-darwin
           - os: macos-latest

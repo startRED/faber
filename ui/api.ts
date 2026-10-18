@@ -181,38 +181,7 @@ export interface Project {
   separateCopies?: boolean;
 }
 
-export type GitMode = 'seguro' | 'equilibrado';
-
-export interface Author {
-  name: string;
-  email: string;
-}
-
-export interface Grant {
-  repo: string;
-  mode: GitMode;
-  revision: number;
-  grantedAt: number;
-  revokedAt?: number;
-  author?: Author;
-  selfUpdate: boolean;
-  remote?: string;
-  remoteAccount?: string;
-}
-
-export interface EnrollView {
-  projectId: string;
-  repo: string;
-  base: string;
-  author?: Author;
-  mode: GitMode;
-  revision: number;
-  selfUpdate: boolean;
-  remote?: string;
-  remoteAccount?: string;
-}
-
-/** What a project mission proves its work with (R137): the commands, where they were declared, and whether the owner confirmed them. */
+/** The checks Faber runs on a project's work (R137): the commands, where they were declared, and whether the owner confirmed them. */
 export interface ProofView {
   commands: string[];
   declared: string[];
@@ -517,7 +486,6 @@ export const api = {
   setupCheck: (vendor: Vendor) => invoke<CheckResult>('setup_check', { vendor }),
   setupInstall: (vendor: Vendor) => invoke<void>('setup_install', { vendor }),
   setupSignIn: (vendor: Vendor) => invoke<void>('setup_sign_in', { vendor }),
-  projectEnroll: (projectId: string) => invoke<EnrollView>('project_enroll', { projectId }),
   updateStatus: () => invoke<UpdateStatus>('update_status'),
   /** The first frame is painted: the shell may show the window (it stays hidden until then). */
   screenReady: () => invoke<void>('screen_ready'),
@@ -531,8 +499,6 @@ export const api = {
   notesSeen: () => invoke<number | null>('notes_seen').then((id) => id ?? undefined),
   saveNotesSeen: (id: number) => invoke<void>('save_notes_seen', { id }),
   projectCopies: (projectId: string, on: boolean) => invoke<void>('project_copies', { projectId, on }),
-  projectGrant: (projectId: string, mode: GitMode, selfUpdate: boolean, revision: number) =>
-    invoke<Grant>('project_grant', { projectId, mode, selfUpdate, revision }),
   projectProof: (projectId: string) => invoke<ProofView>('project_proof', { projectId }),
   projectProofConfirm: (projectId: string, commands: string[], setup: string[], declared: string[]) =>
     invoke<ProofView>('project_proof_confirm', { projectId, commands, setup, declared }),

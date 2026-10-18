@@ -524,9 +524,6 @@ export const fr: Messages = {
   'hint.chat.3': 'Décrivez un problème et demandez trois pistes',
   'projects.home.title': 'Que faisons-nous ?',
   'projects.chat.lead': 'Demande ce que tu veux dans ce dossier. L’assistant travaille ici même et te pose la question quand il en a besoin.',
-  'projects.gitMode.seguroTech': "Mode sûr : worktree séparé, commits locaux uniquement et avance rapide seulement sur la branche de la mission.",
-  'projects.selfUpdate.trustTech': "Une nouvelle version passe à l'emplacement local suivant seulement après un essai canari et les contrôles de quarantaine.",
-  'projects.proofs.isolationTech': "Les vérifications qui exécutent du code écrit par un rôle tournent en intégrité basse sous Windows : elles ne peuvent écrire que dans la copie de la mission, son dossier de compilation et ses dossiers temporaires. Elles peuvent encore lire vos fichiers et utiliser le réseau ; un bac à sable plus strict (AppContainer) est la prochaine étape prévue. Sous macOS, elles ne peuvent pas non plus écrire hors de ces dossiers ; sous Linux, rien ne les limite encore.",
   'setup.title': 'Connectez vos abonnements',
   'setup.body': 'Choisissez les outils d’IA officiels que vous souhaitez utiliser avec vos propres abonnements.',
   'setup.claude': 'Claude',
@@ -651,14 +648,10 @@ export const fr: Messages = {
   // Native speaker must translate (needs native review).
   // Native speaker must translate (needs native review).
   // Native speaker must translate (needs native review).
-  "projects.repo": "Dossier",
-  // Native speaker must translate (needs native review).
-  "projects.base": "Révision de base",
-  // Native speaker must translate (needs native review).
-  "projects.author": "Auteur",
   // Native speaker must translate (needs native review).
   // Native speaker must translate (needs native review).
-  "projects.presence.continueWithout": "Continuer sans lui",
+  // Native speaker must translate (needs native review).
+  // Native speaker must translate (needs native review).
   // Native speaker must translate (needs native review).
   // Native speaker must translate (needs native review).
   "reason.kit.continueWithout": "Faber utilise les outils qu'il a déjà.",
@@ -666,17 +659,6 @@ export const fr: Messages = {
   "reason.kit.findToolsInstallParked": "L'installation d'outils n'est pas encore prête. Pour l'instant, Faber utilise ceux qu'il a déjà.",
   // Native speaker must translate (needs native review).
   // Native speaker must translate (needs native review).
-  "projects.gitMode.seguro": "Sûr : une copie séparée seulement",
-  // Native speaker must translate (needs native review).
-  "projects.gitMode.seguroDesc": "Faber travaille sur une copie séparée de votre projet. Il ne touche ni à GitHub ni à rien en ligne.",
-  // Native speaker must translate (needs native review).
-  // Native speaker must translate (needs native review).
-  "projects.gitMode.equilibrado": "Équilibré : commits locaux + draft PR",
-  "projects.gitMode.equilibradoDesc": "Sûr, avec envoi de la branche de la mission et création d’une draft PR.",
-  // Native speaker must translate (needs native review).
-  "projects.selfUpdate.trust": "Autoriser Faber à se mettre à jour lui-même",
-  // Native speaker must translate (needs native review).
-  "projects.selfUpdate.trustDesc": "Installe une nouvelle version de Faber seulement après avoir vérifié qu'elle fonctionne.",
   // Native speaker must translate (needs native review).
   // Native speaker must translate (needs native review).
   // Native speaker must translate (needs native review).
@@ -698,7 +680,11 @@ export const fr: Messages = {
   // Native speaker must translate (needs native review).
   // Native speaker must translate (needs native review).
   // Native speaker must translate (needs native review).
-  "projects.task.review": "Revue",
+  // Native speaker must translate (needs native review).
+  // Native speaker must translate (needs native review).
+  // Native speaker must translate (needs native review).
+  // Native speaker must translate (needs native review).
+  // Native speaker must translate (needs native review).
   // Native speaker must translate (needs native review).
   // Native speaker must translate (needs native review).
   // Native speaker must translate (needs native review).
@@ -728,15 +714,12 @@ export const fr: Messages = {
   // Native speaker must translate (needs native review).
   // Native speaker must translate (needs native review).
   // Native speaker must translate (needs native review).
-  "projects.state.running": "En cours",
   // Native speaker must translate (needs native review).
-  "projects.state.paused": "En pause",
   // Native speaker must translate (needs native review).
-  "projects.state.blocked": "Bloqué",
   // Native speaker must translate (needs native review).
   // Native speaker must review these (needs native review).
   "projects.proof.title": "Vérifications de ce projet",
-  "projects.proof.desc": "Une mission prouve son travail en lançant ces commandes dans une copie propre du projet. Confirmez-les une fois ; Faber redemande si le projet les change.",
+  "projects.proof.desc": "Faber lance ces commandes sur le travail de l'agent, dans le dossier du projet (dans sa copie s'il en a une), et dit à l'agent ce qui a échoué. Confirmez-les une fois ; Faber redemande si le projet les change.",
   "projects.proof.confirm": "Confirmer les vérifications",
   "projects.proof.confirmed": "Confirmées",
   "projects.proof.edit": "Modifier",
@@ -751,7 +734,6 @@ export const fr: Messages = {
   "reason.budget.daily": "Le budget de missions d'aujourd'hui est épuisé. Elle reprend quand la fenêtre se renouvelle.",
   "reason.quota.weekly": "Le quota hebdomadaire de l'abonnement est épuisé pour l'instant.",
   "reason.lease.live": "Une autre exécution détient encore la copie de travail de ce projet. Reprenez quand elle sera finie.",
-  "reason.mission.driving": "Cette mission est déjà en cours.",
   "reason.project.empty": "Une mission ne peut modifier aucun fichier de ce projet.",
   "reason.proof.command": "Une commande de vérification doit être du texte simple : un nom de programme et ses arguments, sans tubes, guillemets ni chemins.",
   "reason.proof.definition": "Le plan a nommé une vérification que le projet n'a pas.",
@@ -763,7 +745,6 @@ export const fr: Messages = {
   "reason.project.reconcile": "Faber n'a pas pu faire concorder les registres de ce projet avec son dépôt. Vérifiez puis reprenez.",
   "reason.project.processTreeUnproven": "Faber n'a pas pu prouver que tout ce qu'il a lancé est terminé. Vérifiez les programmes en cours puis reprenez.",
   "reason.disk.needed": "Il n'y a pas assez d'espace disque libre pour une copie propre.",
-  "reason.qualify.failed": "Les agents n'ont pas pu être vérifiés. Aucune mission n'a été lancée.",
   "reason.proof.setupChanged": "Les installations du projet ont changé depuis l'affichage de cette liste. Relisez la liste, puis confirmez.",
   "reason.proof.declaredChanged": "Les vérifications du projet ont changé depuis l'affichage de cette liste. La liste ci-dessous est la nouvelle ; relisez-la, puis confirmez.",
   "reason.workspace.busy": "Une vérification d'une exécution précédente tourne encore, donc la copie de travail du projet n'a pas été touchée. Réessayez dans un instant.",
@@ -819,7 +800,6 @@ export const fr: Messages = {
   "error.decision.person": "Cette décision nécessite votre réponse.",
   // Native speaker must translate (needs native review).
   // Native speaker must translate (needs native review).
-  "reason.update.quiescence": "La promotion attend la fin des opérations actives et la fermeture de la fenêtre.",
   // Native speaker must translate (needs native review).
   "reason.git.repository": "Choisissez un dossier appartenant à un dépôt Git.",
   // Native speaker must translate (needs native review).
@@ -950,8 +930,6 @@ export const fr: Messages = {
   "set.projects": "Projets",
   "set.projects.none": "Aucun projet pour l’instant. Ouvrez-en un dans Projets.",
   "set.projects.checks": "Vérifications",
-  "set.projects.tools": "Outils manquants",
-  "set.projects.code": "Votre code",
   "set.projects.noChecks": "Aucune vérification pour l’instant. À ajouter avec Modifier.",
   "set.projects.copies": "Une copie à part pour chaque conversation",
   "set.projects.copiesDesc": "Chaque nouvelle conversation travaille sur sa propre branche, faber/…, dans une copie du dépôt : deux conversations et votre propre dossier ne modifient jamais les mêmes fichiers. L’agent rapporte son travail par un commit, un push ou une pull request ; Faber ne fusionne jamais de lui-même.",

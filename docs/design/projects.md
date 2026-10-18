@@ -11,8 +11,8 @@ screen work may start against it with mock data before the engine runs missions.
 ### Screens
 
 A mission has no screen: a project is worked in by talking to its agent (R160), and the start card, the checks sheet, the
-mission board and the local build card left the bundle with their 30 s poll (R171). The engine keeps the mission
-machinery and the shell its commands (product-map.md, Shell commands). The Projects area shows one of two things:
+mission board and the local build card left the bundle with their 30 s poll (R171). The engine still keeps the mission
+machinery, which no command reaches (task 060). The Projects area shows one of two things:
 
 - With no project open, the small "Open a project" screen (`ui/Projects.tsx`): the empty state with its one button, the
   recent folders and saved environments, and at most three project conversations to pick up.
@@ -22,7 +22,7 @@ machinery and the shell its commands (product-map.md, Shell commands). The Proje
   composer, and under it at most three of this project's own conversations to pick up, each saying only when. No
   suggestions (the composer's hints show what to ask) and no second column. No beam of light: a project screen is a place
   to work; in Dark Room the black hole keeps to the room on the right, so no words sit on its bright part. The sidebar
-  lists the projects, and every setting of a project (the tool policy, the code access, the self-update switch, the
+  lists the projects, and every setting of a project (the
   separate-copies switch and the checks) is in Settings, Projects (C011), one closed entry per project with one row per option with one short line and
   the rest behind the "?" of the row.
 
@@ -176,52 +176,3 @@ is recorded as spent before the mission that uses it runs.
 
 Follow-up: a crash after a proof ran but before its progress mark was written replays the proof on resume. Proofs are
 idempotent tests, so v0 accepts the replay.
-
-### Screen commands and event
-
-The commands fail with a key string, like the other shell commands, and never report a success they did not have.
-
-| Command | Request | Returns |
-| :--- | :--- | :--- |
-| `project_enroll` | `{projectId}` | Settings, Projects: repository, base, author, selected mode, revision, self-update, remote |
-| `project_grant` | `{projectId, mode, selfUpdate, revision}` | the grant |
-| `project_revoke` | `{projectId}` | nothing |
-| `mission_start` | `{projectId, goal}` | the mission id |
-| `mission_state` | `{missionId}` | the mission view |
-| `mission_mode` | `{missionId, mode}`, mode `normal` or `autonomous` | the mission view |
-| `mission_stop`, `mission_resume` | `{missionId}` | the mission view |
-| `mission_answer` | `{missionId, decisionId, answer}` | the mission view |
-
-The `mission` event carries the same view whenever it changes. Its `revision` grows with every view and the screen
-ignores an older one. Cost is in millionths of an API-equivalent dollar; `null` is unknown, never zero.
-
-Implementation status on `selfdev-t9`: the screen and fixed command adapter can display durable mission snapshots,
-but the approved T5 runner is not in this branch. Start and Resume return `reason.mission.runnerUnavailable`; an old
-`running` journal is displayed as blocked. Direct project send, warm, draft routing and branching are refused at the
-shell boundary, including quota/paid-credit recovery, while saved conversations remain readable. Equilibrado
-publication stays deferred (R103).
-
-The board restores the selected mission, rejects other mission identities and older revisions, and keeps task evidence
-behind a keyboard-reachable disclosure. `TaskView.detail` is an optional additive field containing scope, required
-proof IDs and durable artifacts; absence never means verified. Build slots without a T11 snapshot remain visibly
-unknown. The cap, measured spend, daily room and reading time come from the existing admission ledger, with unknown
-values preserved. Stages narrower
-than 760 px use one scrolling list. Mission notification receipts use the existing atomic store and R92 policy;
-hidden test builds inspect that policy without submitting OS notifications or playing audio.
-
-New non-English keys are English draft fallbacks marked `Native speaker must translate (needs native review)`.
-They require native review and are not accepted translations. These implementation limits do not release T9/T10's
-live-runner integration gate.
-
-```json
-{"missionId": "m1", "revision": 7, "state": "running", "mode": "normal", "gitMode": "seguro",
- "goal": "Fix the failing normalization test", "plan": "One writer fixes clean_path; the other vendor reviews.",
- "tasks": [{"id": "fix", "title": "Fix clean_path", "state": "running", "reason": null, "builder": "codex", "reviewer": "claude"}],
- "cost": {"ownMicros": null, "capMicros": 2000000, "complete": false},
- "pace": [{"vendor": "claude", "window": "seven_day", "used": 0.31, "room": 0.04, "readAt": 1791000000.0}],
- "decisions": [], "build": null, "reason": null}
-```
-
-The keys these return (`error.store.*`, `error.journal.*`, `error.plan.*`, `error.wire.*`, `error.decision.*`,
-`reason.grant.*`, `reason.contract.revised`) get their hand-written texts in every locale together with the Projects
-screen, which owns the locale files.

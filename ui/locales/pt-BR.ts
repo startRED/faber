@@ -521,9 +521,6 @@ export const ptBR: Messages = {
   'hint.chat.3': 'Descreva um problema e peça três saídas',
   'projects.home.title': 'O que vamos resolver?',
   'projects.chat.lead': 'Peça o que quiser nesta pasta. O assistente trabalha aqui mesmo e pergunta quando precisar.',
-  'projects.gitMode.seguroTech': "Modo seguro: worktree separado, commits só locais e avanço rápido só na branch da missão.",
-  'projects.selfUpdate.trustTech': "Uma versão nova só passa para o próximo espaço local depois de um teste canário e das checagens de quarentena.",
-  'projects.proofs.isolationTech': "As checagens que rodam código escrito por um papel rodam com integridade baixa no Windows: só conseguem gravar na cópia da missão, na pasta de build dela e nas pastas temporárias dela. Ainda conseguem ler seus arquivos e usar a rede; uma caixa de areia mais forte (AppContainer) é o próximo passo previsto. No macOS elas também não gravam fora dessas pastas; no Linux ainda não há limite.",
   'setup.title': 'Conecte as suas assinaturas',
   'setup.body': 'Escolha quais ferramentas oficiais de IA você quer usar com as suas próprias assinaturas.',
   'setup.claude': 'Claude',
@@ -648,14 +645,10 @@ export const ptBR: Messages = {
   // Native speaker must translate (needs native review).
   // Native speaker must translate (needs native review).
   // Native speaker must translate (needs native review).
-  "projects.repo": "Pasta",
-  // Native speaker must translate (needs native review).
-  "projects.base": "Revisão base",
-  // Native speaker must translate (needs native review).
-  "projects.author": "Autor",
   // Native speaker must translate (needs native review).
   // Native speaker must translate (needs native review).
-  "projects.presence.continueWithout": "Seguir sem ela",
+  // Native speaker must translate (needs native review).
+  // Native speaker must translate (needs native review).
   // Native speaker must translate (needs native review).
   // Native speaker must translate (needs native review).
   "reason.kit.continueWithout": "O Faber usa as ferramentas que já tem.",
@@ -663,17 +656,6 @@ export const ptBR: Messages = {
   "reason.kit.findToolsInstallParked": "Instalar ferramentas ainda não está pronto. Por enquanto o Faber usa as que já tem.",
   // Native speaker must translate (needs native review).
   // Native speaker must translate (needs native review).
-  "projects.gitMode.seguro": "Seguro: só numa cópia separada",
-  // Native speaker must translate (needs native review).
-  "projects.gitMode.seguroDesc": "O Faber trabalha numa cópia separada do projeto. Não mexe no GitHub nem em nada na internet.",
-  // Native speaker must translate (needs native review).
-  // Native speaker must translate (needs native review).
-  "projects.gitMode.equilibrado": "Equilibrado (Commits locais + draft PR)",
-  "projects.gitMode.equilibradoDesc": "Seguro mais o envio da branch da missão e a criação de um draft PR.",
-  // Native speaker must translate (needs native review).
-  "projects.selfUpdate.trust": "Permitir que o Faber atualize a si mesmo",
-  // Native speaker must translate (needs native review).
-  "projects.selfUpdate.trustDesc": "Instala uma versão nova do Faber só depois de testar que ela funciona.",
   // Native speaker must translate (needs native review).
   // Native speaker must translate (needs native review).
   // Native speaker must translate (needs native review).
@@ -695,7 +677,11 @@ export const ptBR: Messages = {
   // Native speaker must translate (needs native review).
   // Native speaker must translate (needs native review).
   // Native speaker must translate (needs native review).
-  "projects.task.review": "Revisão",
+  // Native speaker must translate (needs native review).
+  // Native speaker must translate (needs native review).
+  // Native speaker must translate (needs native review).
+  // Native speaker must translate (needs native review).
+  // Native speaker must translate (needs native review).
   // Native speaker must translate (needs native review).
   // Native speaker must translate (needs native review).
   // Native speaker must translate (needs native review).
@@ -725,15 +711,12 @@ export const ptBR: Messages = {
   // Native speaker must translate (needs native review).
   // Native speaker must translate (needs native review).
   // Native speaker must translate (needs native review).
-  "projects.state.running": "Executando",
   // Native speaker must translate (needs native review).
-  "projects.state.paused": "Pausado",
   // Native speaker must translate (needs native review).
-  "projects.state.blocked": "Bloqueado",
   // Native speaker must translate (needs native review).
   // Native speaker must review these (needs native review).
   "projects.proof.title": "Verificações deste projeto",
-  "projects.proof.desc": "Uma missão prova o que fez rodando estes comandos numa cópia limpa do projeto. Confirme uma vez; o Faber pergunta de novo se o projeto os mudar.",
+  "projects.proof.desc": "O Faber roda estes comandos no trabalho do agente, na pasta do projeto (na cópia dela quando houver), e diz ao agente o que falhou. Confirme uma vez; o Faber pergunta de novo se o projeto os mudar.",
   "projects.proof.confirm": "Confirmar verificações",
   "projects.proof.confirmed": "Confirmadas",
   "projects.proof.edit": "Editar",
@@ -748,7 +731,6 @@ export const ptBR: Messages = {
   "reason.budget.daily": "O orçamento de missões de hoje acabou. Segue quando a janela reiniciar.",
   "reason.quota.weekly": "A cota semanal da assinatura acabou por enquanto.",
   "reason.lease.live": "Outra execução ainda segura a cópia de trabalho deste projeto. Retome quando ela terminar.",
-  "reason.mission.driving": "Esta missão já está rodando.",
   "reason.project.empty": "Uma missão não pode mudar nenhum arquivo deste projeto.",
   "reason.proof.command": "Um comando de verificação deve ser texto simples: o nome de um programa e seus argumentos, sem pipes, aspas nem caminhos.",
   "reason.proof.definition": "O plano citou uma verificação que o projeto não tem.",
@@ -760,7 +742,6 @@ export const ptBR: Messages = {
   "reason.project.reconcile": "O Faber não conseguiu casar os registros deste projeto com o repositório. Confira e retome.",
   "reason.project.processTreeUnproven": "O Faber não conseguiu provar que tudo o que ele iniciou terminou. Confira os programas em execução e retome.",
   "reason.disk.needed": "Não há espaço livre em disco para uma cópia limpa.",
-  "reason.qualify.failed": "Não foi possível verificar os agentes. Nenhuma missão foi iniciada.",
   "reason.proof.setupChanged": "As instalações do projeto mudaram desde que esta lista foi mostrada. Veja a lista de novo e confirme.",
   "reason.proof.declaredChanged": "As verificações do projeto mudaram desde que esta lista foi mostrada. A lista abaixo é a nova; confira e confirme.",
   "reason.workspace.busy": "Uma verificação de uma execução anterior ainda está rodando, então a cópia de trabalho do projeto não foi mexida. Tente de novo em instantes.",
@@ -816,7 +797,6 @@ export const ptBR: Messages = {
   "error.decision.person": "Esta decisão precisa da sua resposta.",
   // Native speaker must translate (needs native review).
   // Native speaker must translate (needs native review).
-  "reason.update.quiescence": "A promoção aguarda o término das operações ativas e o fechamento da janela.",
   // Native speaker must translate (needs native review).
   "reason.git.repository": "Escolha uma pasta que pertença a um repositório Git.",
   // Native speaker must translate (needs native review).
@@ -937,8 +917,6 @@ export const ptBR: Messages = {
   "set.projects": "Projetos",
   "set.projects.none": "Nenhum projeto ainda. Abra um em Projetos.",
   "set.projects.checks": "Verificações",
-  "set.projects.tools": "Ferramenta faltando",
-  "set.projects.code": "Seu código",
   "set.projects.noChecks": "Nenhuma verificação ainda. Adicione com Editar.",
   "set.projects.copies": "Uma cópia separada para cada conversa",
   "set.projects.copiesDesc": "Cada conversa nova trabalha num branch próprio, faber/…, numa cópia do repositório, então duas conversas e a sua própria pasta nunca mexem nos mesmos arquivos. O agente traz o trabalho de volta com um commit, um push ou um pull request; o Faber nunca faz merge sozinho.",

@@ -1,13 +1,13 @@
 import { createSignal, For, type JSX, onCleanup, onMount, Show } from 'solid-js';
-import { api, errorText, type EnrollView, type Project, type ProofView } from './api.ts';
+import { api, errorText, type Project, type ProofView } from './api.ts';
 import { Collapse, Opt, Toggle } from './controls.tsx';
 import { Icon } from './Glyphs.tsx';
 import { fromEngine, t } from './i18n.ts';
 import { animateList } from './motion.ts';
 import { keep, kept, release, useDraft } from './unsent.ts';
 
-// Settings, Projects: what Faber may do in each project and the checks it proves its work with. The project screen itself
-// shows none of it; it asks for the checks only once, the first time a mission starts (ui/Projects.tsx).
+// Settings, Projects: whether each project's conversations work in separate copies, and the checks Faber runs on their
+// work. The project screen itself shows none of it.
 
 /** The last two parts of a folder path: enough to tell two projects apart without the whole drive. */
 export const tail = (path: string) => path.split(/[\\/]/).filter(Boolean).slice(-2).join(' / ');
@@ -29,7 +29,7 @@ export function More(props: { label: string; open?: string; class?: string; chil
   );
 }
 
-/** The commands a mission runs, the setup first. */
+/** The project's checks, the setup first. */
 export function ProofList(props: { proof: ProofView; setupOnly?: boolean }) {
   return (
     <div class="proof-cmds">
@@ -58,7 +58,7 @@ export function ProjectsSection(props: { projects: Project[] }) {
   );
 }
 
-/** One project, closed until it is opened; it reads its checks and its grant only then. It is a card of rows like the rest of
+/** One project, closed until it is opened; it reads its checks only then. It is a card of rows like the rest of
  * Settings. */
 function Entry(props: { project: Project }) {
   const [open, setOpen] = createSignal(false);
@@ -78,7 +78,6 @@ function Entry(props: { project: Project }) {
 
 function Body(props: { project: Project }) {
   const [proof, setProof] = createSignal<ProofView>();
-  const [enroll, setEnroll] = createSignal<EnrollView>();
   // Unsent text in the proof editor is kept per project and blocks an unattended install, like the goal on the start screen.
   const proofKey = () => `proof.${props.project.id}`;
   const unsent = kept(proofKey());
@@ -94,7 +93,6 @@ function Body(props: { project: Project }) {
 
   onMount(() => {
     api.projectProof(id()).then((p) => !gone && setProof(p), (err) => !gone && setError(errorText(err)));
-    api.projectEnroll(id()).then((e) => !gone && setEnroll(e), (err) => !gone && setError(errorText(err)));
   });
 
   const run = async (work: () => Promise<void>) => {
@@ -121,7 +119,10 @@ function Body(props: { project: Project }) {
             const seen = proof();
             const moved = JSON.stringify([seen?.declared, seen?.setup]) !== JSON.stringify([latest.declared, latest.setup]);
             setProof(latest);
-            if (moved) (setEditing(false), keep(proofKey(), ''));
+            if (moved) {
+              setEditing(false);
+              keep(proofKey(), '');
+            }
           }
           throw err;
         });
@@ -130,18 +131,6 @@ function Body(props: { project: Project }) {
       setEditing(false);
       keep(proofKey(), '');
     });
-  // The grant keeps the mode and the self-update trust; it is written again with the new choice and a fresh revision.
-  const trust = async (on: boolean) => {
-    let saved = false;
-    await run(async () => {
-      const fresh = await api.projectEnroll(id());
-      await api.projectGrant(id(), fresh.mode, on, fresh.revision);
-      if (!gone) setEnroll({ ...fresh, selfUpdate: on, revision: fresh.revision });
-      saved = true;
-    });
-    return saved;
-  };
-
   // Whether each new conversation works in a separate copy; the conversations that already have one keep it.
   const [separate, setSeparate] = createSignal(props.project.separateCopies !== false);
   const copies = async (on: boolean) => {
@@ -175,7 +164,7 @@ function Body(props: { project: Project }) {
         onChange={copies}
       />
       <div class="pset-checks" data-testid="pset-checks" ref={animateList}>
-        <Opt id={row('checks')} label={t('set.projects.checks')} hint={checksHint()} more={[t('projects.proof.desc'), t('projects.proofs.isolationTech')]}>
+        <Opt id={row('checks')} label={t('set.projects.checks')} hint={checksHint()} more={[t('projects.proof.desc')]}>
           <Show when={proof()}>
             {(p) => (
               <span class="pset-acts">
@@ -235,33 +224,6 @@ function Body(props: { project: Project }) {
           )}
         </Show>
       </div>
-      <Opt id={row('tools')} label={t('set.projects.tools')} more={[t('reason.kit.continueWithout'), t('reason.kit.findToolsInstallParked')]}>
-        <span class="st-val">{t('projects.presence.continueWithout')}</span>
-      </Opt>
-      <Opt
-        id={row('code')}
-        label={t('set.projects.code')}
-        more={[
-          enroll()?.mode === 'equilibrado' ? t('projects.gitMode.equilibradoDesc') : t('projects.gitMode.seguroDesc'),
-          t('projects.gitMode.seguroTech'),
-          `${t('projects.repo')}: ${enroll()?.repo ?? props.project.path}`,
-          ...(enroll()?.base ? [`${t('projects.base')}: ${enroll()!.base}`] : []),
-          ...(enroll()?.author ? [`${t('projects.author')}: ${enroll()!.author!.name} <${enroll()!.author!.email}>`] : []),
-        ]}
-      >
-        <span class="st-val">{enroll()?.mode === 'equilibrado' ? t('projects.gitMode.equilibrado') : t('projects.gitMode.seguro')}</span>
-      </Opt>
-      <Show when={enroll()} fallback={<Opt id={row('faber')} label={t('projects.selfUpdate.trust')} hint={t('projects.status.reading')} />}>
-        {(e) => (
-          <Toggle
-            id={row('faber')}
-            label={t('projects.selfUpdate.trust')}
-            more={[t('projects.selfUpdate.trustDesc'), t('projects.selfUpdate.trustTech')]}
-            checked={e().selfUpdate}
-            onChange={trust}
-          />
-        )}
-      </Show>
     </div>
   );
 }

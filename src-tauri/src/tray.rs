@@ -10,10 +10,8 @@ mod sound;
 
 use badge::{glyph, tray_png, tray_side, with_badge};
 pub(crate) use decide::ShellTexts;
-use decide::{Counts, Shown, Watch, decode_seen, delivery, notice_text, parked_notice_text, stopped_text, tooltip};
+use decide::{Counts, Shown, Watch, delivery, notice_text, parked_notice_text, stopped_text, tooltip};
 use faber_engine::model::{RunningItem, Vendor};
-use faber_engine::project::wire::MissionView;
-use std::collections::HashSet;
 use std::path::Path;
 use std::sync::Mutex;
 use tauri::image::Image;
@@ -35,8 +33,6 @@ struct State {
     watch: Watch,
     counts: Counts,
     shown: Shown,
-    /// Corrupt notification receipts suppress mission delivery, rather than notifying old choices again.
-    mission_notices: bool,
 }
 
 /// The tray's state. Managed by Tauri from the start of `setup`, so the engine's first event finds it.
@@ -98,21 +94,6 @@ fn show_counts(app: &AppHandle, s: &State, side: u32) {
     }
 }
 
-fn load_seen_decisions(data_dir: &Path) -> Result<HashSet<(String, String)>, String> {
-    let path = data_dir.join("seen_decisions.json");
-    match std::fs::read(path) {
-        Ok(bytes) => decode_seen(&bytes).map_err(str::to_string),
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(HashSet::new()),
-        Err(_) => Err("error.store.read".into()),
-    }
-}
-
-fn save_seen_decisions(data_dir: &Path, seen: &HashSet<(String, String)>) -> Result<(), String> {
-    let path = data_dir.join("seen_decisions.json");
-    let json = serde_json::to_vec(seen).map_err(|_| "error.store.write")?;
-    faber_engine::store::replace(&faber_engine::store::RealDisk, &path, &json).map_err(|e| e.key().into())
-}
-
 /// The words the screen sent last, so a Faber started hidden (with Windows) speaks the person's language; English until
 /// a window has opened once.
 fn load_texts(data_dir: &Path) -> ShellTexts {
@@ -134,13 +115,6 @@ pub(crate) fn create(app: &tauri::App) -> tauri::Result<()> {
     let tray = handle.state::<Tray>();
     let mut s = lock(&tray);
     s.texts = load_texts(&data_dir);
-    match load_seen_decisions(&data_dir) {
-        Ok(seen) => {
-            s.watch = Watch::with_seen_decisions(seen);
-            s.mission_notices = true;
-        }
-        Err(error) => eprintln!("faber: mission notification receipts could not load ({error})"),
-    }
     let open = MenuItem::with_id(app, "open", &s.texts.open, true, None::<&str>)?;
     let quit = MenuItem::with_id(app, "quit", &s.texts.quit, true, None::<&str>)?;
     let status = if cfg!(target_os = "linux") {
@@ -170,13 +144,6 @@ pub(crate) fn create(app: &tauri::App) -> tauri::Result<()> {
     s.icon = Some(builder.build(app)?);
     s.menu = Some([open, quit]);
     s.status = status;
-    drop(s);
-    let app = handle.clone();
-    tauri::async_runtime::spawn_blocking(move || {
-        if let Err(error) = crate::restore_mission_notices(&app) {
-            eprintln!("faber: saved mission attention could not restore ({error})");
-        }
-    });
     Ok(())
 }
 
@@ -304,62 +271,6 @@ pub(crate) fn on_halted(app: &AppHandle, title: &str, why: &str, ai: Option<Vend
     let text = stopped_text(&s.texts, title, why, ai);
     drop(s);
     deliver_notices(app, &settings, &[text]);
-}
-
-/// A mission view update from the engine: non-technical decisions become needs-you items.
-pub(crate) fn on_mission(app: &AppHandle, view: &MissionView) {
-    let faber = app.state::<crate::Faber>();
-    if faber.hidden {
-        return;
-    }
-    let settings = faber.engine.settings();
-    let tray = app.state::<Tray>();
-    let mut s = lock(&tray);
-    if s.icon.is_none() {
-        return;
-    }
-    let focused = crate::main_window(app).is_some_and(|w| w.is_focused().unwrap_or(false));
-    let before = s.watch.seen_decisions().len();
-    let Some(update) = s.watch.take_mission(view, focused) else { return };
-    let saved = s.mission_notices
-        && (before == s.watch.seen_decisions().len()
-            || match save_seen_decisions(&faber.data_dir, s.watch.seen_decisions()) {
-                Ok(()) => true,
-                Err(error) => {
-                    eprintln!("faber: mission notification receipts could not save ({error})");
-                    false
-                }
-            });
-    let side = side(app);
-    if s.shown.changed(update.counts, side) {
-        s.counts = update.counts;
-        show_counts(app, &s, side);
-    }
-    if saved {
-        deliver_notices(app, &settings, &words(&s.texts, &update));
-    }
-}
-
-/// Exercise the same receipt store and policy in a hidden build, without playing a sound or submitting a popup.
-#[cfg(feature = "test-hooks")]
-pub(crate) fn probe_mission(app: &AppHandle, view: &MissionView, focused: bool, attention: &str) -> Result<serde_json::Value, String> {
-    let faber = app.state::<crate::Faber>();
-    if !faber.hidden {
-        return Err("error.wire.malformed".into());
-    }
-    let attention = match attention {
-        "normal" => decide::Attention::Normal,
-        "soundOnly" => decide::Attention::SoundOnly,
-        "uncertain" => decide::windows_attention(None, false),
-        _ => return Err("error.wire.malformed".into()),
-    };
-    let mut watch = Watch::with_seen_decisions(load_seen_decisions(&faber.data_dir)?);
-    let update = watch.take_mission(view, focused).ok_or("error.wire.stale")?;
-    save_seen_decisions(&faber.data_dir, watch.seen_decisions())?;
-    let policy = delivery(focused, attention, &faber.engine.settings());
-    Ok(
-        serde_json::json!({"toast": policy.toast && !update.notices.is_empty(), "sound":policy.sound && !update.notices.is_empty(), "needsYou":update.counts.needs_you}),
-    )
 }
 
 #[cfg(test)]

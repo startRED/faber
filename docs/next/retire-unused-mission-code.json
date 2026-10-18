@@ -1,0 +1,11 @@
+{
+  "notes": {
+    "better": {
+      "en": "Settings > Projects is shorter: the leftover git and self-update rows of the old missions are gone, and Faber installs one program fewer.",
+      "pt-BR": "Configurações > Projetos ficou mais curto: as linhas de git e de autoatualização que sobraram das antigas missões saíram, e o Faber instala um programa a menos.",
+      "es": "Ajustes > Proyectos es más corto: las filas de git y de autoactualización que quedaban de las antiguas misiones ya no están, y Faber instala un programa menos.",
+      "fr": "Réglages > Projets est plus court : les lignes git et de mise à jour automatique laissées par les anciennes missions ont disparu, et Faber installe un programme de moins.",
+      "de": "Einstellungen > Projekte ist kürzer: Die übrig gebliebenen Git- und Selbstaktualisierungszeilen der alten Missionen sind weg, und Faber installiert ein Programm weniger."
+    }
+  }
+}

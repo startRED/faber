@@ -13,3 +13,9 @@ never deleted.
 Done when: the engine and shell build without the removed modules, every remaining test passes, the product map's
 mission and local build rows and the "Known incoherences" about them are gone or updated, R93 is marked retired in
 decisions.md, and the commit body gives the lines removed and the memory and binary-size change.
+
+Progress: wave 1 (the shell, the screen, the `faber-local` program and its testkit scenarios) is done. Left for the
+engine wave: `testkit/examples/project-qualification` (its `--live-promote` mode starts the removed `faber-local`), the
+`projects.rs` screen scenarios and their fixture probe, `reason.kit.*` keys (still emitted by `project/kit`), the unused
+`projects.task.review` and `projects.state.*` keys, the `mission_start` trap in `testkit/coherence/traps.json`, and
+renaming `Engine::local_build_admission` (the updater's install gate) once the mission term is gone.

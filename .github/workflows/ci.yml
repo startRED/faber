@@ -223,7 +223,6 @@ jobs:
             target/debug/fake-cli.exe
             target/debug/examples/cache_probe.exe
             target/faber-test/debug/faber.exe
-            target/faber-test/debug/faber-local.exe
           if-no-files-found: error
 
   # How long each screen scenario took in the newest green runs, so the parts are dealt by today's seconds and not by a
