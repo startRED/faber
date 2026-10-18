@@ -141,8 +141,8 @@ How the Settings screen, the first-run steps and the tutorial look and behave.
   Settings, the same cards have no stepper and only a Close button. They save `setup` and nothing else, so reconnecting an
   account never restarts the first run or the tutorial.
 - Step 2 shows the three themes side by side, each a small live render drawn with its own tokens. A choice changes the whole
-  screen at once and saves nothing. Under the cards: text size (three "Aa" sizes), density, motion, "Do you already use
-  AI?" (Never, A lot) and an optional name. Continue saves the appearance, the answer, the name and, unless the tutorial
+  screen at once and saves nothing. Under the cards: text size (the same 13 to 18 px slider as Appearance), density, motion, "Do you already use
+  AI?" (Never, A lot) and "Your name" (optional), in the words Settings uses. Continue saves the appearance, the answer, the name and, unless the tutorial
   was already done, `tutorialDone: false`, in one call. Back keeps the
   choices. An install saved by an older version, whose appearance has no `base`, sees step 2 once.
 - The tutorial starts at the new conversation, with an AI connected, while `tutorialDone` is false. A beginner gets three

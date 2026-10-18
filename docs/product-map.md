@@ -52,7 +52,7 @@ replaces the shell; otherwise the shell shows the sidebar, the topbar, the work 
 | :--- | :--- | :--- | :--- |
 | Titlebar | Always | Drag; minimize, maximize, close (close hides to the tray) | `ui/WindowControls.tsx`, `ui/Mark.tsx` |
 | First run: accounts | `setup` unset and no conversation yet | Pick Claude, Codex or "None for now"; install, sign in (the CLI's own login, in a console), check again; Skip or Continue | `ui/FirstRun.tsx`, `ui/Setup.tsx`, `ui/setup.ts` |
-| First run: look | After accounts, or once on an older install with no look | Three looks with a live preview, text size, spacing, motion, "Do you already use AI?", an optional name; Back, Continue | `ui/FirstRun.tsx` |
+| First run: look | After accounts, or once on an older install with no look | Three looks with a live preview, text size (the slider of Settings > Appearance), spacing, motion, "Do you already use AI?", "Your name" (optional), in the words Settings uses; Back, Continue | `ui/FirstRun.tsx` |
 | Tutorial | First fresh chat with a signed-in AI while `tutorialDone` is false | Three cards for a beginner, two for an experienced person; Next, Skip; the card for the running button always sits under it with its pointer, at every width from 720 px | `ui/Tutorial.tsx`, `ui/tour.ts` |
 | Account cards, later | "Connect" (no AI), or "Manage accounts" in Settings > Accounts and limits | The same cards; Close returns where it came from | `ui/Setup.tsx` |
 | Sidebar | The shell | New conversation (Ctrl+N); Chat or Projects; search over titles and project names (it also finds archived conversations, marked "archived"); it lists only the open area, archived conversations left out (Chat: chats grouped by day with × delete, which asks first and, when a separate copy holds work found nowhere else, asks once more "Discard changes?"; no Projects block; Projects: the project rows with their conversations, one an agent started indented under the one that started it, and the add-folder control); footer of one row (the name when there is one, Settings, whose tooltip holds the version) and one thin line per connected AI (mark, bar, share; the window, reset, age and "still counting" are its tooltip, amber only near the limit), and after a Skip on the account cards with one AI connected, a quiet "Connect another AI" that opens the cards, until they close or both are in; rows keep their DOM when the list refreshes (`keepRows`); its right edge is a separator the person drags (200 to 360 px, a grip shows on hover), moves with the arrow keys or puts back to 248 px with a double click, and its width is kept (`faber.layout`); Ctrl+B steps it aside (focus mode) | `ui/Sidebar.tsx`, `ui/sidebar.ts`, `ui/Grip.tsx`, `ui/layout.ts` |
@@ -297,9 +297,6 @@ lines and the removal of fixed ones.
 12. Money and quota in four vocabularies ("Own cost", "Cost so far", "Faber today … API-equivalent", "… at API prices";
     "Account pace", "Accounts and limits"); which words stay is the owner's call (Owner). Amounts are written the language's way
     (`money` and `amount` in `ui/i18n.ts`).
-14. The same option in two places with different words: the name ("How should Faber call you?" in the first run, "Your
-    name" in Settings) and text size (three buttons in the first run saving 13, the theme's own or 16; a slider up to 18
-    in Settings). Which words and which range stay is the owner's call (Owner).
 18. The hooks switch is always enabled but acts only in the guarded modes (all but "Full access"). Whether the switch
     hides or locks there, and the words, are the owner's call (Owner).
 

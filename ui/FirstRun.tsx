@@ -7,7 +7,6 @@ import { Icon, VendorMark } from './Glyphs.tsx';
 import { t } from './i18n.ts';
 import type { Key } from './locales/en.ts';
 import { Mark } from './Mark.tsx';
-import { type SizeChoice, sizeOf, withSize } from './setup.ts';
 
 // The first run: a stage with no sidebar, a stepper on top, and the step below it. Step 1 is `Setup` (ui/Setup.tsx) and
 // step 2 is `LookStep`; step 3 is the new conversation itself. The stage is a modal dialog: nothing else is on screen.
@@ -183,7 +182,6 @@ export function LookCard(props: { id: string; prefix: string; size: 'sm' | 'lg';
   );
 }
 
-const SIZE_PX: Record<SizeChoice, number> = { small: 13, normal: 15, large: 18 };
 
 /** Step 2: the three looks side by side, the first settings, and the question that decides how much the tutorial says. */
 export function LookStep(props: {
@@ -211,6 +209,7 @@ export function LookStep(props: {
     void preview(next);
   };
   const density = () => draft().density ?? appliedLook()?.appearance.density ?? 1;
+  const textSize = () => draft().textSize ?? appliedLook()?.appearance.textSize ?? 15;
   // Nothing chosen yet means the look's own level, held down by a system that asks for less motion.
   const shownMotion = () => draft().motion ?? motionNow();
   const go = async () => {
@@ -236,25 +235,25 @@ export function LookStep(props: {
         </For>
       </div>
       <div class="first-ctl" inert={busy()}>
+        {/* The same control as Settings > Appearance, so the first choice and a later one are one thing. */}
         <div class="ctl">
-          <span class="lbl" id="fr-size">
+          <label class="lbl" for="fr-size">
             {t('set.textSize')}
-          </span>
-          <div class="sizes" role="group" aria-labelledby="fr-size">
-            <For each={['small', 'normal', 'large'] as const}>
-              {(size) => (
-                <button
-                  type="button"
-                  aria-pressed={sizeOf(draft()) === size}
-                  aria-label={t(`first.size.${size}` as Key)}
-                  style={{ 'font-size': `${SIZE_PX[size]}px` }}
-                  onClick={() => change(withSize(draft(), size))}
-                >
-                  {t('first.size.sample')}
-                </button>
-              )}
-            </For>
-          </div>
+          </label>
+          <input
+            id="fr-size"
+            class="range"
+            type="range"
+            min={themes['user-controls']['text-size'].min}
+            max={themes['user-controls']['text-size'].max}
+            step={themes['user-controls']['text-size'].step}
+            value={textSize()}
+            aria-describedby="fr-size-value"
+            onInput={(e) => change({ ...draft(), textSize: e.currentTarget.valueAsNumber })}
+          />
+          <p class="hint" id="fr-size-value">
+            {t('set.textSizeValue', { n: textSize() })}
+          </p>
         </div>
         <Segmented
           id="fr-density"
@@ -293,7 +292,7 @@ export function LookStep(props: {
         </div>
         <div class="ctl">
           <label class="lbl" for="fr-name">
-            {t('first.name.title')}
+            {t('set.name')}
           </label>
           <input
             id="fr-name"

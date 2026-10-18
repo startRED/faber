@@ -830,10 +830,6 @@ textarea.field { height: auto; max-width: none; padding: 8px 10px; resize: verti
 .m-in { flex: 1; min-width: 0; height: 22px; padding: 0 8px; display: flex; align-items: center; overflow: hidden; border-radius: var(--r-pill); box-shadow: inset 0 0 0 1px var(--line-2), var(--focus-light); color: var(--ink-3); font-size: 0.75em; white-space: nowrap; }
 .m-btn { display: inline-flex; align-items: center; height: 22px; padding: 0 9px; border-radius: var(--r-pill); background: var(--accent); color: var(--accent-ink); font-size: 0.75em; font-weight: 600; }
 .first-ctl { display: grid; grid-template-columns: 1fr 1fr 1.2fr 1.5fr; gap: 22px; margin-top: 24px; padding-top: 20px; border-top: 1px solid var(--line); }
-.sizes { display: flex; align-items: flex-end; gap: 6px; }
-.sizes button { flex: 1; display: grid; place-items: center; height: var(--h-lg); border-radius: var(--r-sm); box-shadow: inset 0 0 0 1px var(--line-2); color: var(--ink-2); font-weight: 500; }
-.sizes button:hover { color: var(--ink); }
-.sizes button[aria-pressed='true'] { background: var(--accent-soft); box-shadow: inset 0 0 0 1.5px var(--accent); color: var(--ink); }
 .choice2 { display: grid; gap: 6px; }
 .choice2 button { display: grid; padding: 8px 12px; border-radius: var(--r-sm); box-shadow: inset 0 0 0 1px var(--line-2); font-size: var(--fs-sm); font-weight: 500; text-align: left; }
 .choice2 button small { font-weight: 400; color: var(--ink-3); font-size: var(--fs-xs); }
