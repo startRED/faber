@@ -70,6 +70,8 @@ interface Props {
   onClose: () => void;
   /** Opens the account cards; Settings comes back as it was, from `keep`. */
   onOpenSetup: (keep: Keep) => void;
+  /** Closes Settings and plays the tutorial again on a new conversation. */
+  onTour?: () => void;
 }
 
 /** A select for a setting that saves at once: it goes back to the saved value when the save is refused. */
@@ -163,6 +165,27 @@ export function Settings(props: Props) {
                   }}
                 />
               </Opt>
+              {/* The first run's question, here to change (the owner, 2026-10-18): no answer counts as a beginner. */}
+              <Opt id="set-xp" label={t('first.xp.title')} hint={t('set.xpHint')}>
+                <Segmented
+                  bare
+                  id="set-xp-pick"
+                  label={t('first.xp.title')}
+                  value={props.saved.experience ?? 'beginner'}
+                  options={[
+                    ['beginner', t('first.xp.beginner')],
+                    ['experienced', t('first.xp.experienced')],
+                  ]}
+                  onPick={(experience) => void save({ experience })}
+                />
+              </Opt>
+              <Show when={props.onTour}>
+                <Opt id="set-tour" label={t('set.tour')} hint={t('set.tourHint')}>
+                  <button type="button" class="btn" onClick={() => props.onTour?.()}>
+                    {t('set.tourAgain')}
+                  </button>
+                </Opt>
+              </Show>
             </Group>
             <Group title={t('set.group.ai')}>
               <Opt id="set-permissions" label={t('set.permissions')} hint={t(`set.permissions.${mode()}.line`)} more={t(MORE[mode()])}>

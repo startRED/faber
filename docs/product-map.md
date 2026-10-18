@@ -128,7 +128,8 @@ group is a card, an option is one row (its name and one short line at the left, 
 text unfolds under the row from a small "?" beside the name (keyboard reachable, closed by default, not in the page while
 closed). There is no "Learn more" link. The version ("Faber 1.2.3") closes the list of sections, once.
 
-- **General**, in groups. *You*: Language (follow the system, or one of five), Your name. *How the AI works*: Permissions
+- **General**, in groups. *You*: Language (follow the system, or one of five), Your name, "Do you already use AI?" (the first run's
+  answer), "Watch again" for the tutorial (opens a fresh chat and plays it again). *How the AI works*: Permissions
   for Chat and Projects (a menu of five modes, each with its one line; "Full access" by default), Web search, Your CLI
   hooks (only acts in the guarded modes, not "Full access"), Chat working folder (with Recents; acts on the open chat
   while it has no message; the row exists only when Settings was opened from Chat, where its control does), and a folded
@@ -182,8 +183,8 @@ choice a person makes anywhere else (a work screen, a banner) is an incoherence.
 | `keepAwake` | true, false (true) | Settings > General (Notifications and system) | `src-tauri/src/awake.rs` |
 | `autostart` | true, false (false) | Settings > General (Notifications and system) | `src-tauri/src/autostart.rs`, which also writes the Windows Run key; the switch shows the key as it is (`autostart::shown`), so a key removed outside Faber reads as off |
 | `setup` | `done`, `skipped` (none: the first run is due) | The first run (the account cards' Close also writes it) | `ui/setup.ts` only |
-| `experience` | `beginner`, `experienced` (none counts as beginner) | The first run only | The tutorial |
-| `tutorialDone` | true, false (none before the first run) | The first run and the tutorial's end | The tutorial |
+| `experience` | `beginner`, `experienced` (none counts as beginner) | The first run; Settings > General (You) | The tutorial |
+| `tutorialDone` | true, false (none before the first run) | The first run, the tutorial's end; "Watch again" in Settings sets false | The tutorial |
 
 ## Other stored state
 
@@ -299,9 +300,6 @@ lines and the removal of fixed ones.
 14. The same option in two places with different words: the name ("How should Faber call you?" in the first run, "Your
     name" in Settings) and text size (three buttons in the first run saving 13, the theme's own or 16; a slider up to 18
     in Settings). Which words and which range stay is the owner's call (Owner).
-15. First-run answers that cannot change later: "Do you already use AI?" has no control and the tutorial cannot be
-    replayed, yet the first run's footer says everything can be changed in Settings > Appearance. Adding the controls or
-    changing the footer is the owner's call (Owner).
 16. Skip and Continue on the account cards save different values nothing reads differently; Close writes `done`
     even after a Skip. Whether Skip should mean something is the owner's call (Owner).
 18. The hooks switch is always enabled but acts only in the guarded modes (all but "Full access"). Whether the switch

@@ -921,6 +921,16 @@ export function App(props: { initial: AppState; update?: UpdateStatus; inbox: { 
               } : undefined}
               onError={(err) => setSaveError(failureText(err))}
               onClose={closeSettings}
+              onTour={() => {
+                // The tutorial plays again where it starts, a new conversation, once Settings has gone.
+                void saveSettings({ tutorialDone: false }).then((saved) => {
+                  if (!saved) return;
+                  setTourEnded(false);
+                  closeSettings();
+                  closeSide(false);
+                  void fresh(place());
+                });
+              }}
               onOpenSetup={(keep) => {
                 setBack(keep);
                 // The cards remember the focused control before Settings is taken off the screen with it.
