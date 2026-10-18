@@ -262,6 +262,9 @@ pub struct Message {
     /// On a reply: "keep going" stopped after it, and why (a `reason.keepGoing.*` key).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub halt: Option<String>,
+    /// On a reply: questions Faber answered with their first choice because "keep going" was on and nobody answered.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub auto_answers: Option<Vec<AutoAnswer>>,
     /// On a project reply that changed files: Faber's own run of the fast checks once it ended (R146, "Faber decides done").
     /// A run that was going on when Faber closed is not read back: nothing would end it.
     #[serde(default, skip_serializing_if = "Option::is_none", deserialize_with = "settled_checks")]
@@ -381,11 +384,59 @@ impl Wake {
 pub struct KeepGoing {
     /// Turns Faber sent by itself since it was turned on.
     pub turns: u32,
-    /// Turns in a row that ended with an error.
+    /// Turns that did real work (not a quick answer with no tool); only these count toward the cap.
+    #[serde(default)]
+    pub work: u32,
+    /// Failures in a row (an error, or an AI Faber could not reach); a turn that ends well sets it to zero.
     pub failed: u32,
     /// Every AI it may use is out of quota: it goes on by itself at this time (Unix seconds), and the screen says so.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub wait_until: Option<f64>,
+    /// Turns in a row that ended in under a minute with no tool: Faber lets a longer rest pass before the next.
+    #[serde(default)]
+    pub idle: u32,
+    /// The error of the last failure, so one that cannot mend by waiting stops it when it comes again.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub last_error: Option<String>,
+    /// The agent said nothing is left and Faber asked it once to check against the original request: a second stop is taken.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub checked: bool,
+    /// When it was turned on, in milliseconds since the Unix epoch.
+    #[serde(default)]
+    pub since: u64,
+    /// Times Faber moved the work to another AI because the first had no quota left.
+    #[serde(default)]
+    pub switches: u32,
+    /// Questions Faber answered with the first choice because the person was away.
+    #[serde(default)]
+    pub answered: u32,
+    /// Moves to another AI inside the turn that runs (a plan limit hit again after a move); zero at the end of each turn.
+    #[serde(default, skip)]
+    pub moves: u8,
+    /// Faber waits to send the next turn, and why. Saved, so a restart waits out the rest.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub waiting: Option<KeepWait>,
+    /// The reply whose failure was already counted, so a reply reported twice counts once.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub failed_on: Option<String>,
+}
+
+/// Why "keep going" is waiting to send the next turn, and until when.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct KeepWait {
+    /// `retry` (after an error), `rest` (the last turn only waited), `busy` (Faber was busy with an update) or `start`
+    /// (Faber just opened). A wait for quota is `wait_until` instead.
+    pub why: String,
+    /// Seconds since the Unix epoch.
+    pub until: f64,
+}
+
+/// A question the agent asked that Faber answered with the first choice while the person was away.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct AutoAnswer {
+    pub question: String,
+    pub answer: String,
 }
 
 impl Message {
@@ -429,6 +480,7 @@ impl Message {
             follow: None,
             wake: None,
             halt: None,
+            auto_answers: None,
             checks: None,
         }
     }
@@ -651,6 +703,9 @@ pub struct RunningItem {
     /// "Keep going" is on: the conversation runs on its own.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub keep_going: bool,
+    /// "Keep going" waits to send the next turn: the row stays between turns, and says until when.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub keep_wait: Option<KeepWait>,
 }
 
 /// The running list as the engine last sent it. The revision grows by one with every list the engine emits, so a

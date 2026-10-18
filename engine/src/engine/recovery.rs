@@ -251,11 +251,14 @@ impl Core {
         // The reply moves on or fails: helpers of the stopped turn stop with it, wherever recovery was called from.
         self.stop_helpers(id, true);
         let Some(t) = self.transfers.get(id).cloned() else { return Err("error.quotaOut".into()) };
-        if t.by_hand && !explicit {
+        // While "keep going" is on nobody clicks "move": the work goes to an AI with room by itself, also when the person picked
+        // the first by hand, and more than once in one turn (up to `MAX_MOVES`).
+        let unattended = self.convs.get(id).is_some_and(|c| c.keep_going.is_some());
+        if t.by_hand && !explicit && !unattended {
             self.fail_reply(id, &t.reply, "error.quotaOut".into());
             return Ok(());
         }
-        if t.retried {
+        if t.retried && !(unattended && self.another_move(id)) {
             self.move_failed(id, &t.reply);
             return Ok(());
         }
@@ -265,6 +268,9 @@ impl Core {
         let Some(routed) = own.or(other) else { return self.queue(id) };
         let pick = routed.pick();
         let moved = pick.vendor != t.pick.vendor;
+        if moved && let Some(kg) = self.convs.get_mut(id).and_then(|c| c.keep_going.as_mut()) {
+            kg.switches += 1;
+        }
         if let Some(t) = self.transfers.get_mut(id) {
             t.retried = true;
             t.moving = moved;
@@ -376,14 +382,15 @@ impl Core {
 
     fn queue(&mut self, id: &str) -> Result<(), String> {
         let t = self.transfers.get(id).cloned().ok_or("error.permission.stale")?;
+        let unattended = self.convs.get(id).is_some_and(|c| c.keep_going.is_some());
         let now = self.secs();
         let vendors: Vec<_> = self
             .vendors()
             .into_iter()
-            .filter(|v| !t.by_hand || *v == t.pick.vendor)
+            .filter(|v| !t.by_hand || unattended || *v == t.pick.vendor)
             .filter(|v| self.ledger.of(*v).billing == Billing::Subscription && !(*v == Vendor::Claude && self.opts.claude_env_billed))
             .collect();
-        let earliest = if t.by_hand {
+        let earliest = if t.by_hand && !unattended {
             self.ledger.of(t.pick.vendor).snap(now).recovery_for(t.pick.model.as_deref().and_then(family_of), now)
         } else {
             crate::route::candidates(&vendors, &self.codex_models)

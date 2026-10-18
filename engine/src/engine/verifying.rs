@@ -329,13 +329,19 @@ impl Core {
         if m.checks.as_ref().is_none_or(|k| k.state != ChecksState::Running) {
             return;
         }
-        let asked = m.tools.iter().flatten().any(|t| t.parent.is_none() && t.name == "AskUserQuestion");
+        // The person answered a question in this reply, so the fix is theirs to ask; with "keep going" on they are away, and
+        // only a question nobody answered is theirs.
+        let asked = if c.keep_going.is_some() {
+            keep_going::unanswered_question(m)
+        } else {
+            m.tools.iter().flatten().any(|t| t.parent.is_none() && t.name == "AskUserQuestion")
+        };
         let halted = m.halt.is_some();
         let busy = self.live.get(conv).is_some_and(|l| l.turn.is_some());
         let mut checks = settled(&outcome, rounds);
         let refused = match checks.as_ref().map(|k| k.state) {
             Some(ChecksState::Failed) if !last || busy || asked || halted => Some("reason.keepGoing.checks"),
-            Some(ChecksState::Failed) => self.room_next(conv).err(),
+            Some(ChecksState::Failed) => self.room_refusal(conv),
             Some(ChecksState::NeedsYou) => Some("reason.keepGoing.checks"),
             _ => None,
         };
@@ -355,8 +361,11 @@ impl Core {
                 let names = outcome.checks.iter().filter(|c| failed(c.verdict)).map(|c| c.command.clone()).collect();
                 let wake = Wake { why: "wake.checksFixing".into(), pr: None, checks: names };
                 // A message the person left goes out first; the fix waits behind it.
-                if self.send_by_itself(conv, format!("{FIX}\n\n{}", outcome.text()), wake).is_err() {
-                    // Faber could not ask (a full queue, a plan it does not spend on by itself): the person decides.
+                if let Err(error) = self.send_by_itself(conv, format!("{FIX}\n\n{}", outcome.text()), wake)
+                    && !self.keeps_trying(conv, reply_id, &error)
+                {
+                    // Faber could not ask (a full queue, a plan it does not spend on by itself): the person decides. Keep going
+                    // tries again instead when Faber was busy with an update or the failure already set its own retry.
                     let mut row = checks_of(self, conv, reply_id);
                     if let Some(k) = row.as_mut() {
                         k.state = ChecksState::NeedsYou;

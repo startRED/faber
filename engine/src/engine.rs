@@ -365,6 +365,8 @@ struct Core {
     offset_known: bool,
     watch_requested: bool,
     clock: Option<Clock>,
+    /// Scales the fixed waits of "keep going" (retries, rests, the question timer); 1 outside tests.
+    keep_pace: f64,
     transfers: HashMap<String, recovery::Transfer>,
     /// First messages whose separate copy is still being made, by conversation.
     copying: HashMap<String, copies::Held>,
@@ -451,6 +453,7 @@ impl Engine {
                 offset_known: false,
                 watch_requested: false,
                 clock: None,
+                keep_pace: 1.0,
                 transfers: HashMap::new(),
                 copying: HashMap::new(),
                 credit: None,
@@ -858,7 +861,21 @@ impl Engine {
     /// Whether any answer is streaming or waits for the user (the running list is not empty).
     /// The shell uses it to hold back anything that would end the process (installing an update).
     pub fn is_working(&self) -> bool {
-        self.with(|c| !c.running.items.is_empty())
+        self.with(|c| {
+            !c.running.items.is_empty()
+                // A conversation that goes on by itself works between turns and while it waits too (R199).
+                || c.convs.values().any(|conv| conv.keep_going.is_some())
+        })
+    }
+    /// Takes up the conversations "keep going" was on in when Faber last closed, once the shell has its CLIs and accounts: each
+    /// goes on after a short wait, or when its saved wait ends. Call it once at start.
+    pub fn resume_keep_going(&self) {
+        self.with(|c| c.resume_keep_going())
+    }
+    /// Scales the fixed waits of "keep going" (a retry after an error, a rest, the question timer); only tests change it.
+    #[doc(hidden)]
+    pub fn set_keep_going_pace(&self, scale: f64) {
+        self.with(|c| c.keep_pace = scale)
     }
     pub fn shutdown(&self) {
         self.with(|c| {
@@ -994,7 +1011,9 @@ impl Core {
             if let Some(l) = self.retire(&id) {
                 l.session.close();
             }
-            if paid && !unknown && !billed && self.transfers.get(&id).is_some_and(|t| !t.by_hand) {
+            // With "keep going" on, a turn the person picked by hand moves too: nobody is there to click it.
+            let unattended = self.convs.get(&id).is_some_and(|c| c.keep_going.is_some());
+            if paid && !unknown && !billed && self.transfers.get(&id).is_some_and(|t| !t.by_hand || unattended) {
                 if let Err(error) = self.recover(&id, false)
                     && let Some(reply) = self.transfers.get(&id).map(|t| t.reply.clone())
                 {
@@ -1164,15 +1183,7 @@ impl Core {
             c.messages.iter_mut().for_each(settle);
             c.queued.iter_mut().for_each(|q| q.sending = false);
             self.restore_recovery(&mut c);
-            // Keep going ends with the run that started it: after a restart the person turns it on again.
-            let stale = c.keep_going.take().is_some();
-            if stale {
-                self.store.save(&c);
-            }
             self.convs.insert(id.to_string(), c);
-            if stale {
-                self.list_changed();
-            }
         }
         let c = self.convs.get_mut(id)?;
         // A Codex session saved before R121 carries the isolated host command tool, which no mode the person can pick uses
@@ -1598,10 +1609,14 @@ impl Core {
                     return self.auto_answer(conv, vec![Permission { request_id, tool, input, epoch: None }]);
                 }
                 let epoch = self.store.settings().grants_epoch;
+                let asked = question.then(|| request_id.clone());
                 if let Some(m) = self.turn(conv) {
                     m.permissions.get_or_insert_default().push(Permission { request_id, tool, input, epoch });
                 }
                 self.weigh(conv);
+                if let (Some(request), Some(turn)) = (asked, turn_id.as_deref()) {
+                    self.watch_question(conv, turn, &request);
+                }
                 return self.push(conv, turn_id.as_deref(), true);
             }
             EngineEvent::CacheWarm { secs, started_ms } => {
@@ -1681,7 +1696,9 @@ impl Core {
                     m.permissions = None;
                     m.nudge = nudge::of(m, area, &can_run);
                 }
-                if !ok && self.transfers.get(conv).is_some_and(|t| t.moving) {
+                // A limit hit again after a move goes to recovery when keep going is on, which moves again (up to `MAX_MOVES`).
+                let unattended = self.convs.get(conv).is_some_and(|c| c.keep_going.is_some());
+                if !ok && self.transfers.get(conv).is_some_and(|t| t.moving) && !(unattended && recovery::plan_limit(&reason)) {
                     self.stop_helpers(conv, true);
                     if let Some(reply) = turn_id {
                         self.move_failed(conv, &reply);
@@ -1749,7 +1766,8 @@ impl Core {
                         c.queued.iter_mut().for_each(|q| q.sending = false);
                         self.emit_queue(conv);
                     }
-                    if self.transfers.get(conv).is_some_and(|t| t.moving) {
+                    let unattended = self.convs.get(conv).is_some_and(|c| c.keep_going.is_some());
+                    if self.transfers.get(conv).is_some_and(|t| t.moving) && !(unattended && limited) {
                         if let Some(reply) = turn_id {
                             self.move_failed(conv, &reply);
                         }
@@ -2348,6 +2366,9 @@ impl Core {
             held.tail = Some(copies::Tail { pick: pick.clone(), text, images, by_hand });
             self.push(id, Some(reply_id), true);
             return Ok(());
+        }
+        if let Some(kg) = self.convs.get_mut(id).and_then(|c| c.keep_going.as_mut()) {
+            kg.waiting = None;
         }
         let approved = self.credit.as_ref().is_some_and(|(c, r, v)| c == id && r == reply_id && *v == pick.vendor);
         self.gate_turn_approved(pick, by_hand, approved)?;
@@ -3004,11 +3025,14 @@ fn running_item(c: &Conversation) -> Option<RunningItem> {
     let held = reply.follow.as_ref().filter(|f| f.held && f.state.open()).map(|f| (f.number, f.head.clone().unwrap_or_default()));
     let checks = reply.checks.as_ref().map(|k| k.state);
     let checks_need = checks == Some(ChecksState::NeedsYou);
-    // Keep going that waits for quota is still at work: the list says until when, and no idle update restarts Faber under it.
+    // Keep going between two turns (waiting for a reset, an error to pass, a rest) is still at work: the list says until when,
+    // and no idle update restarts Faber under it.
     let kg_wait = c.keep_going.as_ref().and_then(|k| k.wait_until).filter(|_| reply.status != Some(Status::Streaming));
+    let keep_wait = c.keep_going.as_ref().and_then(|k| k.waiting.clone());
     if reply.status != Some(Status::Streaming)
         && !c.compacting
         && kg_wait.is_none()
+        && keep_wait.is_none()
         && permissions.is_empty()
         && parked.is_empty()
         && parked_more == 0
@@ -3039,6 +3063,7 @@ fn running_item(c: &Conversation) -> Option<RunningItem> {
         wait_until: reply.wait_until.filter(|_| reply.status == Some(Status::Streaming)).or(kg_wait),
         held,
         keep_going: c.keep_going.is_some(),
+        keep_wait,
     })
 }
 

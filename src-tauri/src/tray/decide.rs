@@ -526,6 +526,7 @@ mod tests {
             stuck: vec![],
             held: None,
             keep_going: false,
+            keep_wait: None,
         }
     }
 

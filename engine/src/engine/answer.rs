@@ -153,6 +153,39 @@ impl Core {
 }
 
 impl Core {
+    /// Answers a question the agent asked for the person, who is away ("keep going"): the same hand-over as their own answer,
+    /// and once the CLI has it the choice is written on the reply, so the screen can say what Faber chose. Nothing is remembered.
+    pub(super) fn answer_unattended(
+        &mut self,
+        conv: &str,
+        turn_id: &str,
+        request_id: &str,
+        answers: serde_json::Value,
+        chosen: Vec<AutoAnswer>,
+    ) {
+        let Ok(Handed { requests, tool, sid, .. }) = self.prepare_answer(conv, turn_id, request_id, true, false, Some(answers)) else {
+            return;
+        };
+        let (me, conv, turn, request) = (self.me.clone(), conv.to_string(), turn_id.to_string(), request_id.to_string());
+        tokio::spawn(async move {
+            let deadline = Instant::now() + ACK_WAIT;
+            let mut results = Vec::new();
+            for (id, ack) in requests {
+                results.push((id, timeout_at(deadline, ack).await.ok().and_then(|r| r.ok())));
+            }
+            let Some(core) = me.upgrade() else { return };
+            let mut core = core.lock().unwrap_or_else(|e| e.into_inner());
+            // The CLI took it: the choice is told even when the turn ended before this was settled.
+            let delivered = matches!(results.first(), Some((_, Some(Delivery::Delivered))));
+            if core.settle_answer(&conv, &turn, sid, &tool, None, &results).is_ok() || delivered {
+                core.note_answered_for_person(&conv, &turn, chosen);
+            } else {
+                // The CLI did not take it: the question is on the list again, and gets another try after the same wait.
+                core.watch_question(&conv, &turn, &request);
+            }
+        });
+    }
+
     /// Allows the questions without asking the user. The answers are watched without the lock: one the CLI did not
     /// take, or did not confirm in time, becomes a question on the list again, so the turn is never left blocked behind
     /// a row that says it is working.

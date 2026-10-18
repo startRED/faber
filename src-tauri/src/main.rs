@@ -958,6 +958,8 @@ fn main() {
             app.state::<Faber>().engine.follow_open_prs();
             app.state::<Faber>().engine.watch_archive();
             app.state::<Faber>().engine.detect_claude_flags();
+            // Work that went on by itself when Faber last closed goes on again, once the accounts have had a moment to be read.
+            app.state::<Faber>().engine.resume_keep_going();
             if let Some(codex) = clis.get(&Vendor::Codex) {
                 load_models(app.handle(), codex.clone(), data_dir.clone());
             }
