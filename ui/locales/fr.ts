@@ -1010,8 +1010,6 @@ export const fr: Messages = {
   'notes.54.better': "Les listes, les menus et les sections des Réglages apparaissent et disparaissent en douceur au lieu de sauter. Avec le mouvement réduit, ils changent toujours d'un coup.",
   'notes.55.better': "« Envoyer maintenant » sur un message en attente marche aussi pendant une réponse : le message lui parvient à l'étape suivante.",
   'notes.56.better': "Les vérifications de Faber lancent désormais d'abord ce qui a échoué la dernière fois, et préviennent l'agent quand une vérification échoue sur un contenu où elle avait déjà réussi.",
-  'notes.57.better': "Tant qu'un jeu est au premier plan, les vérifications de Faber attendent pour démarrer, et une vérification déjà lancée n'utilise qu'un dixième du processeur jusqu'à ce que vous quittiez le jeu.",
-  'notes.58.better': "Quand l'agent modifie du code Rust, les vérifications rapides de Faber le compilent aussi, et une erreur de compilation apparaît avec son fichier et sa ligne en quelques secondes.",
   'notes.59.better': 'Tu réponds aux questions de l’assistant étape par étape, sur des tuiles à toucher, avec un aperçu quand il en a dessiné un.',
   'notes.60.new': 'Vous pouvez faire glisser les bords de la barre latérale et de la liste de ce qui tourne pour changer leur largeur, et Ctrl+B masque les deux.',
   'notes.61.better': 'Déposer un fichier marche partout dans la fenêtre, pas seulement sur la zone de message, et un avis dit où il ira.',

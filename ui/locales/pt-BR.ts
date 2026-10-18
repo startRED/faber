@@ -997,8 +997,6 @@ export const ptBR: Messages = {
   'notes.54.better': 'Listas, menus e seções das Configurações agora entram e saem com um movimento suave, em vez de pular. Com movimento reduzido, continuam mudando na hora.',
   'notes.55.better': '"Enviar agora" numa mensagem na fila também funciona enquanto uma resposta roda: a mensagem chega a ela no próximo passo.',
   'notes.56.better': 'As verificações do Faber agora rodam primeiro o que falhou da última vez, e avisam o agente quando uma verificação falhou num conteúdo em que já tinha passado.',
-  'notes.57.better': 'Enquanto um jogo está na frente, as verificações do Faber esperam para começar, e uma que já está rodando usa só um décimo do processador até você sair do jogo.',
-  'notes.58.better': 'Quando o agente muda código Rust, as verificações rápidas do Faber agora também o compilam, e um erro de compilação aparece com arquivo e linha em segundos.',
   'notes.59.better': 'Você responde às perguntas do assistente passo a passo, em blocos para tocar, com uma prévia quando ele desenhou uma.',
   'notes.60.new': 'Você pode arrastar as bordas da barra lateral e da lista do que está rodando para mudar a largura, e Ctrl+B esconde as duas.',
   'notes.61.better': 'Soltar um arquivo funciona em qualquer parte da janela, não só na caixa de mensagem, e um aviso mostra para onde ele vai.',

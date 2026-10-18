@@ -1010,8 +1010,6 @@ export const es: Messages = {
   'notes.54.better': 'Las listas, los menús y las secciones de Ajustes ahora aparecen y se van con un movimiento suave, sin saltos. Con movimiento reducido siguen cambiando al instante.',
   'notes.55.better': '"Enviar ahora" en un mensaje en cola también funciona mientras corre una respuesta: el mensaje le llega en su siguiente paso.',
   'notes.56.better': 'Las comprobaciones de Faber ahora ejecutan primero lo que falló la última vez, y avisan al agente cuando una comprobación falla en un contenido con el que ya había pasado.',
-  'notes.57.better': 'Mientras un juego está delante, las comprobaciones de Faber esperan para empezar, y una que ya está en marcha usa solo una décima parte del procesador hasta que sales del juego.',
-  'notes.58.better': 'Cuando el agente cambia código Rust, las comprobaciones rápidas de Faber ahora también lo compilan, y un error de compilación aparece con su archivo y línea en segundos.',
   'notes.59.better': 'Respondes a las preguntas del asistente paso a paso, con fichas para tocar y una vista previa cuando hizo un dibujo.',
   'notes.60.new': 'Puedes arrastrar los bordes de la barra lateral y de la lista de lo que está en marcha para cambiar su ancho, y Ctrl+B oculta las dos.',
   'notes.61.better': 'Soltar un archivo funciona en cualquier parte de la ventana, no solo en la caja de mensaje, y un aviso dice adónde va.',

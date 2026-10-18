@@ -878,8 +878,6 @@ export const en = {
   'notes.54.better': 'Lists, menus and Settings sections now fade and slide into place instead of jumping. With reduced motion they still change at once.',
   'notes.55.better': '"Send now" on a waiting message also works while an answer runs: the message reaches it at its next step.',
   'notes.56.better': "Faber's checks now run first what failed last time, and tell the agent when a check failed on content it once passed on.",
-  'notes.57.better': "While a game is in front, Faber's checks wait to start, and one already running uses only a tenth of the processor until you leave the game.",
-  'notes.58.better': "When the agent changes Rust code, Faber's quick checks now compile it too, so a compile error shows with its file and line within seconds.",
   'notes.59.better': "You answer the assistant's questions step by step, on tiles you tap, with a preview when it drew one.",
   'notes.60.new': 'You can drag the edges of the sidebar and the running list to change their width, and Ctrl+B hides both.',
   'notes.61.better': 'Dropping a file works anywhere in the window, not only on the message box, and a notice says where it goes.',

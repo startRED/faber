@@ -89,6 +89,16 @@ test('a fragment folds after the last entry of each locale and the last row, eac
   assert.match(landed.decisions, /\| R161 \| 2026-10-16 \| B\. \|\n\| R162 \| 2026-10-17 \| C\. \| AI \|\n$/);
 });
 
+test('a fragment that already landed, carried again by a stacked branch, adds no entry and no row twice', () => {
+  const fragment = { notes: { new: texts('It’s new.', 'É novo.'), fixed: texts("Don't stop.", 'Não para.') }, decisions: ['| R-next | 2026-10-17 | C. | AI |'] };
+  const landed = land(tree, fragment);
+  const again = fold([fragment, { notes: { better: texts('Other.', 'Outro.') } }], landed);
+  const count = (text) => text.match(/^ {2}'notes\./gm).length;
+  assert.equal(count(again.locales.en), count(landed.locales.en) + 1, 'only the new fragment adds an entry');
+  assert.match(again.locales.en, /'notes\.next\.better': 'Other\.'/);
+  assert.equal(again.decisions, landed.decisions);
+});
+
 test('a fragment beside an entry written straight into the locales takes the next placeholder id', () => {
   const old = enLocale.replace("'other.key'", "'notes.next.better': 'Old way.',\n  'other.key'");
   const folded = fold([{ notes: { new: texts('N.', 'N pt.') } }], { ...tree, locales: { en: old, 'pt-BR': ptLocale } });

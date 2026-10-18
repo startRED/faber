@@ -133,8 +133,14 @@ export function fold(fragments, { locales, decisions }) {
   const taken = Object.values(locales).flatMap((t) => [...t.matchAll(NOTE)].map((m) => Number(m[1] ?? 1)));
   let suffix = Math.max(0, ...taken);
   const next = { locales: { ...locales }, decisions };
+  // A fragment that already landed (a branch stacked on another carries its file) adds nothing twice: an entry whose
+  // English text is an entry already, or a row the table holds under a number, is left out.
+  const lines = (text) => (text ?? '').split('\n');
+  const noted = (text) => lines(next.locales.en).some((line) => ENTRY.test(line) && line.trimEnd().endsWith(`: ${quoted(text)},`));
+  const rest = (row) => row.replace(/^\| R(?:\d+|-next(?:-\d+)?) /, '');
+  const decided = (row) => lines(next.decisions).some((line) => TABLE_ROW.test(line) && rest(line) === rest(row));
   for (const fragment of fragments) {
-    const kinds = KINDS.filter((k) => fragment.notes?.[k]);
+    const kinds = KINDS.filter((k) => fragment.notes?.[k] && !noted(fragment.notes[k].en));
     if (kinds.length) {
       // Each kind is an entry of its own: the screen and the release body use an id once (tests/ui/notes.check.ts).
       const ids = kinds.map(() => {
@@ -146,7 +152,8 @@ export function fold(fragments, { locales, decisions }) {
         next.locales[lang] = after(next.locales[lang], ENTRY, lines, `what's-new entry in ${lang}`);
       }
     }
-    if (fragment.decisions?.length) next.decisions = after(next.decisions, TABLE_ROW, fragment.decisions, 'decision row');
+    const rows = (fragment.decisions ?? []).filter((row) => !decided(row));
+    if (rows.length) next.decisions = after(next.decisions, TABLE_ROW, rows, 'decision row');
   }
   return next;
 }

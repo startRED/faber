@@ -1010,8 +1010,6 @@ export const de: Messages = {
   'notes.54.better': 'Listen, Menüs und Bereiche der Einstellungen blenden jetzt sanft ein und aus, statt zu springen. Bei reduzierter Bewegung wechseln sie weiterhin sofort.',
   'notes.55.better': '„Jetzt senden“ bei einer wartenden Nachricht geht auch, während eine Antwort läuft: Die Nachricht erreicht sie beim nächsten Schritt.',
   'notes.56.better': 'Fabers Prüfungen führen jetzt zuerst aus, was beim letzten Mal fehlschlug, und sagen dem Agenten, wenn eine Prüfung bei einem Inhalt fehlschlägt, bei dem sie schon einmal bestanden hat.',
-  'notes.57.better': 'Solange ein Spiel im Vordergrund ist, warten Fabers Prüfungen mit dem Start, und eine schon laufende nutzt nur ein Zehntel des Prozessors, bis du das Spiel verlässt.',
-  'notes.58.better': 'Wenn der Agent Rust-Code ändert, kompilieren Fabers schnelle Prüfungen ihn jetzt mit, und ein Kompilierfehler erscheint in Sekunden mit Datei und Zeile.',
   'notes.59.better': 'Du beantwortest die Fragen des Assistenten Schritt für Schritt auf antippbaren Kacheln, mit Vorschau, wenn er eine gezeichnet hat.',
   'notes.60.new': 'Du kannst die Ränder der Seitenleiste und der Liste „Läuft gerade“ ziehen, um ihre Breite zu ändern, und Strg+B blendet beide aus.',
   'notes.61.better': 'Eine Datei ablegen geht überall im Fenster, nicht nur im Nachrichtenfeld, und ein Hinweis zeigt, wohin sie kommt.',
