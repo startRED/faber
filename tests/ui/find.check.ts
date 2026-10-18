@@ -68,6 +68,9 @@ check('find: the matches are the readable text only, ignoring case and accents, 
 
 check('find: Ctrl+F opens the bar, counts and paints the matches, Enter and Shift+Enter go round, Esc closes it and the page is as it was', async () => {
   const { host, thread } = stage();
+  // The page itself may run in full motion: the thread's own level (none here) decides, so the scroll below is instant.
+  const page = document.documentElement.dataset.motion;
+  document.documentElement.dataset.motion = 'full';
   const opener = document.createElement('button');
   host.append(opener);
   const dispose = render(() => createComponent(Find, { enabled: true, root: () => thread }), host);
@@ -88,7 +91,7 @@ check('find: Ctrl+F opens the bar, counts and paints the matches, Enter and Shif
     press({ key: 'Enter', shiftKey: true }, input()!);
     press({ key: 'Enter', shiftKey: true }, input()!);
     equal(count(), t('find.count', { current: 4, total: 4 }), 'Shift+Enter goes back, and from the first to the last');
-    await until(() => thread.scrollTop > 0);
+    ok(thread.scrollTop > 0, 'the last match is brought into view at once, with no smooth scroll in a thread without motion');
     equal(thread.innerHTML, before, 'finding rewrote no message');
     press({ key: 'Enter' }, input()!);
     equal(count(), t('find.count', { current: 1, total: 4 }), 'and Enter goes from the last to the first');
@@ -107,6 +110,8 @@ check('find: Ctrl+F opens the bar, counts and paints the matches, Enter and Shif
     equal(marks('find') + marks('find-now'), 0, 'and the paint');
     equal(document.activeElement, opener, 'focus goes back to where it was');
   } finally {
+    if (page === undefined) delete document.documentElement.dataset.motion;
+    else document.documentElement.dataset.motion = page;
     dispose();
     host.remove();
   }

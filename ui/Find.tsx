@@ -8,7 +8,9 @@ import { keepForExit } from './motion.ts';
 const SETTLE = 250;
 
 const none = { ranges: [] as Range[], capped: false };
-const smooth = () => document.documentElement.dataset.motion === 'full' && !matchMedia('(prefers-reduced-motion: reduce)').matches;
+// The thread's own motion level, as every other motion reads it (`motion.ts`): the nearest `data-motion` above it.
+const smooth = (root: HTMLElement) =>
+  root.closest<HTMLElement>('[data-motion]')?.dataset.motion === 'full' && !matchMedia('(prefers-reduced-motion: reduce)').matches;
 // Another layer on top of the shell owns the keys until it closes.
 const covered = () => !!document.querySelector('.pal-scrim:not(.leaving), .cmenu:not(.leaving)');
 
@@ -32,14 +34,14 @@ export function Find(props: { enabled: boolean; root: () => HTMLElement | undefi
     setFound(next);
     setAt((i) => (restart ? 0 : Math.min(i, Math.max(0, next.ranges.length - 1))));
     const first = next.ranges[at()];
-    if (restart && first && root) bringIntoView(root, first, smooth());
+    if (restart && first && root) bringIntoView(root, first, smooth(root));
   };
   const go = (step: number) => {
     const n = total();
     const root = props.root();
     if (!n || !root) return;
     setAt((i) => (i + step + n) % n);
-    bringIntoView(root, found().ranges[at()]!, smooth());
+    bringIntoView(root, found().ranges[at()]!, smooth(root));
   };
   createEffect(() => paint(found().ranges, found().ranges[at()]));
   const hide = (back: boolean) => {
