@@ -1015,6 +1015,7 @@ export const fr: Messages = {
   'notes.59.better': 'Tu réponds aux questions de l’assistant étape par étape, sur des tuiles à toucher, avec un aperçu quand il en a dessiné un.',
   'notes.60.new': 'Vous pouvez faire glisser les bords de la barre latérale et de la liste de ce qui tourne pour changer leur largeur, et Ctrl+B masque les deux.',
   'notes.61.better': 'Déposer un fichier marche partout dans la fenêtre, pas seulement sur la zone de message, et un avis dit où il ira.',
+  'notes.62.fixed': "Continuer seul ne s'arrête plus de lui-même quand Auto use vite un quota, ni quand une réponse arrive sans avis d'usage. Il attend le retour du quota, puis reprend.",
   'update.checking': 'Recherche d’une mise à jour…',
   'update.downloading': 'Téléchargement de la mise à jour…',
   'update.downloadingPercent': 'Téléchargement de la mise à jour… {percent} %',

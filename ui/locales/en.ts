@@ -883,6 +883,7 @@ export const en = {
   'notes.59.better': "You answer the assistant's questions step by step, on tiles you tap, with a preview when it drew one.",
   'notes.60.new': 'You can drag the edges of the sidebar and the running list to change their width, and Ctrl+B hides both.',
   'notes.61.better': 'Dropping a file works anywhere in the window, not only on the message box, and a notice says where it goes.',
+  'notes.62.fixed': 'Keep going no longer stops by itself when Auto is spending a quota fast, or when a reply came without a usage notice. It waits for the quota to return and then goes on.',
   'update.checking': 'Looking for an update…',
   'update.downloading': 'Downloading update…',
   'update.downloadingPercent': 'Downloading update… {percent}%',

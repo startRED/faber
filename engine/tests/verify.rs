@@ -540,8 +540,9 @@ async fn keep_going_turned_on_while_the_checks_run_goes_on_once_they_pass() {
 }
 
 #[tokio::test]
-async fn no_fix_is_asked_after_a_question_to_the_person_or_past_the_pace() {
-    for (asks, week) in [(true, 0.1), (false, 0.8)] {
+async fn no_fix_is_asked_after_a_question_to_the_person() {
+    {
+        let (asks, week) = (true, 0.1);
         let dir = support::canonical_tempdir().unwrap();
         let runner = Flaky::new(usize::MAX);
         let (engine, mut pipe, id) = decided(dir.path(), runner.clone()).await;

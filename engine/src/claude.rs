@@ -606,7 +606,6 @@ fn start_with_policy(opts: ClaudeOptions, on_event: EventSink, args: Vec<String>
         let mut helpers: HashMap<String, (String, Value)> = HashMap::new();
         let mut closed = false;
         let mut control_id = 0u32;
-        let mut quota_seen = false;
         let mut watch = proc::TurnWatch::default();
         let mut queued: Vec<UserTurn> = vec![];
         // Lines not yet echoed back, in order, with their words: the tag of one the person wrote while a turn ran, none for a
@@ -647,7 +646,6 @@ fn start_with_policy(opts: ClaudeOptions, on_event: EventSink, args: Vec<String>
                     }
                     match serde_json::from_str::<Value>(&line) {
                         Ok(msg) => {
-                            quota_seen |= msg["type"] == "rate_limit_event";
                             if msg["type"] == "stream_event" && msg["event"]["type"] == "message_start" && msg["parent_tool_use_id"].is_null() {
                                 request_began = Some(turn_sent_ms);
                             }
@@ -753,9 +751,6 @@ fn start_with_policy(opts: ClaudeOptions, on_event: EventSink, args: Vec<String>
                                 }
                                 on_event(event);
                             }
-                            if finished && !quota_seen {
-                                on_event(EngineEvent::Signals(crate::signals::Signals { billing: Some(crate::budget::Billing::Unknown), ..Default::default() }));
-                            }
                             if closed && !watch.active() {
                                 proc::stop(&mut *stdin, &mut child, &mut job).await;
                                 break;
@@ -766,7 +761,6 @@ fn start_with_policy(opts: ClaudeOptions, on_event: EventSink, args: Vec<String>
                                 unread.retain(|(tag, _)| tag.is_some());
                                 if !unread.is_empty() { watch.begin(project); }
                                 for turn in std::mem::take(&mut queued) {
-                                    quota_seen = false;
                                     watch.begin(project);
                                     turn_sent_ms = unix_ms();
                                     if replay { unread.push_back((None, turn.text.clone())); }
@@ -780,7 +774,6 @@ fn start_with_policy(opts: ClaudeOptions, on_event: EventSink, args: Vec<String>
                 cmd = rx.recv(), if !closed => match cmd {
                     Some(SessionCommand::Send(turn)) => {
                         if watch.stopping() { queued.push(turn); continue; }
-                        quota_seen = false;
                         watch.begin(project);
                         request_began = None;
                         turn_sent_ms = unix_ms();

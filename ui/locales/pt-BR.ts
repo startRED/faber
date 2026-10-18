@@ -1002,6 +1002,7 @@ export const ptBR: Messages = {
   'notes.59.better': 'Você responde às perguntas do assistente passo a passo, em blocos para tocar, com uma prévia quando ele desenhou uma.',
   'notes.60.new': 'Você pode arrastar as bordas da barra lateral e da lista do que está rodando para mudar a largura, e Ctrl+B esconde as duas.',
   'notes.61.better': 'Soltar um arquivo funciona em qualquer parte da janela, não só na caixa de mensagem, e um aviso mostra para onde ele vai.',
+  'notes.62.fixed': 'O Continuar sozinho não para mais por conta própria quando o Automático gasta rápido a cota, nem quando uma resposta chega sem aviso de uso. Ele espera a cota voltar e segue.',
   'update.checking': 'Procurando atualização…',
   'update.downloading': 'Baixando atualização…',
   'update.downloadingPercent': 'Baixando atualização… {percent}%',

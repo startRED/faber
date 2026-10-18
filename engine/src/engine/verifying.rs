@@ -313,7 +313,7 @@ impl Core {
         let mut checks = settled(&outcome, rounds);
         let refused = match checks.as_ref().map(|k| k.state) {
             Some(ChecksState::Failed) if !last || busy || asked || halted => Some("reason.keepGoing.checks"),
-            Some(ChecksState::Failed) => self.room_next(conv, reply_id).err(),
+            Some(ChecksState::Failed) => self.room_next(conv).err(),
             Some(ChecksState::NeedsYou) => Some("reason.keepGoing.checks"),
             _ => None,
         };

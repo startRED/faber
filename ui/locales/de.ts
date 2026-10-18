@@ -1015,6 +1015,7 @@ export const de: Messages = {
   'notes.59.better': 'Du beantwortest die Fragen des Assistenten Schritt für Schritt auf antippbaren Kacheln, mit Vorschau, wenn er eine gezeichnet hat.',
   'notes.60.new': 'Du kannst die Ränder der Seitenleiste und der Liste „Läuft gerade“ ziehen, um ihre Breite zu ändern, und Strg+B blendet beide aus.',
   'notes.61.better': 'Eine Datei ablegen geht überall im Fenster, nicht nur im Nachrichtenfeld, und ein Hinweis zeigt, wohin sie kommt.',
+  'notes.62.fixed': 'Selbst weitermachen hält nicht mehr von selbst an, wenn Auto ein Kontingent schnell verbraucht oder eine Antwort ohne Nutzungshinweis kommt. Es wartet, bis das Kontingent zurück ist, und macht dann weiter.',
   'update.checking': 'Suche nach einem Update…',
   'update.downloading': 'Update wird heruntergeladen…',
   'update.downloadingPercent': 'Update wird heruntergeladen… {percent} %',

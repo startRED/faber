@@ -255,16 +255,16 @@ async fn keep_going_is_for_project_conversations() {
 }
 
 #[tokio::test]
-async fn keep_going_stops_when_auto_s_pacing_says_that_ai_spends_too_fast() {
+async fn keep_going_goes_on_when_auto_s_pacing_says_that_ai_spends_too_fast() {
     let (dir, project) = (tempfile::tempdir().unwrap(), folder());
     let (engine, mut rx, mut pipe, id) = started(dir.path(), project.path()).await;
     engine.keep_going(&id, true).unwrap();
-    // Most of the week spent with six of its seven days still ahead: Auto calls that spending fast.
+    // Most of the week spent with six of its seven days still ahead: Auto calls that spending fast, and still the person
+    // who turned it on is trusting Faber to go on (R212).
     answers_at(&mut pipe, "One done.", true, 0.8).await;
-    let c = until(&engine, &id, |c| idle(c) && c.keep_going.is_none()).await;
-    assert_eq!(c.messages.last().unwrap().halt.as_deref(), Some("reason.keepGoing.pace"));
-    assert_eq!(turns(&pipe).len(), 1);
-    assert_eq!(halts(&mut rx), vec!["reason.keepGoing.pace".to_string()]);
+    until_turns(&pipe, 2).await;
+    assert!(engine.open(&id).unwrap().keep_going.is_some());
+    assert!(halts(&mut rx).is_empty());
     engine.shutdown();
 }
 

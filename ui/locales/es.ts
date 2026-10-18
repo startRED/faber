@@ -1015,6 +1015,7 @@ export const es: Messages = {
   'notes.59.better': 'Respondes a las preguntas del asistente paso a paso, con fichas para tocar y una vista previa cuando hizo un dibujo.',
   'notes.60.new': 'Puedes arrastrar los bordes de la barra lateral y de la lista de lo que está en marcha para cambiar su ancho, y Ctrl+B oculta las dos.',
   'notes.61.better': 'Soltar un archivo funciona en cualquier parte de la ventana, no solo en la caja de mensaje, y un aviso dice adónde va.',
+  'notes.62.fixed': 'Seguir solo ya no se detiene por su cuenta cuando Auto gasta rápido una cuota, ni cuando una respuesta llega sin aviso de uso. Espera a que vuelva la cuota y continúa.',
   'update.checking': 'Buscando una actualización…',
   'update.downloading': 'Descargando actualización…',
   'update.downloadingPercent': 'Descargando actualización… {percent} %',

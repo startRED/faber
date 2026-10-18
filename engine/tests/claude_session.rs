@@ -60,17 +60,11 @@ async fn opus_4_interrupt_after_completion_keeps_the_warm_session() {
     support::read_message(&mut input).await;
     support::emit(&mut output, serde_json::json!({"type":"result","subtype":"success"})).await;
     assert!(matches!(rx.recv().await, Some(EngineEvent::Done { .. })));
-    assert!(matches!(rx.recv().await, Some(EngineEvent::Signals(s)) if s.billing == Some(faber_engine::budget::Billing::Unknown)));
     session.interrupt();
     tokio::task::yield_now().await;
     tokio::time::advance(Duration::from_secs(6)).await;
     tokio::task::yield_now().await;
-    while let Ok(event) = rx.try_recv() {
-        assert!(
-            matches!(event, EngineEvent::Signals(s) if s.billing == Some(faber_engine::budget::Billing::Unknown)),
-            "idle interrupt produced a lifecycle event"
-        );
-    }
+    assert!(rx.try_recv().is_err(), "idle interrupt produced a lifecycle event");
     session.send(UserTurn::text("second"));
     assert_eq!(support::read_message(&mut input).await["message"]["content"], "second");
     session.close();
@@ -664,21 +658,13 @@ fn the_name_is_appended_to_the_default_prompt_of_a_conversation_but_never_to_a_s
 }
 
 #[tokio::test]
-async fn a_turn_without_a_quota_notice_clears_subscription_confirmation_after_settlement() {
+async fn a_turn_without_a_quota_notice_clears_nothing() {
+    // Claude Code sends the notice only when something changed, so its absence says nothing about how the login is billed.
     let entries = fixture("claude", "chat").into_iter().filter(|e| e.msg["type"] != "rate_limit_event").collect();
-    let (events, mismatches) = run(
-        entries,
-        "In one sentence: why is the sky blue?",
-        |e, _| matches!(e, EngineEvent::Signals(s) if s.billing == Some(faber_engine::budget::Billing::Unknown)),
-    )
-    .await;
+    let (events, mismatches) = run(entries, "In one sentence: why is the sky blue?", |e, _| matches!(e, EngineEvent::Done { .. })).await;
     assert!(mismatches.is_empty());
-    let done = events.iter().position(|e| matches!(e, EngineEvent::Done { .. })).unwrap();
-    let cleared = events
-        .iter()
-        .position(|e| matches!(e, EngineEvent::Signals(s) if s.billing == Some(faber_engine::budget::Billing::Unknown)))
-        .unwrap();
-    assert!(done < cleared, "settle the own cost before clearing the billing verdict");
+    assert!(events.iter().any(|e| matches!(e, EngineEvent::Done { .. })));
+    assert!(!events.iter().any(|e| matches!(e, EngineEvent::Signals(s) if s.billing.is_some())));
 }
 
 // Live captures (claude 2.1.296, the flags Faber uses), a second user line written while the first answer streams:

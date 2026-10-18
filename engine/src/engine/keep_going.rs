@@ -4,7 +4,7 @@
 //! says why on the reply, and the tray tells the person (R92). It reacts to the end of a turn and never polls.
 
 use super::*;
-use crate::budget::{State, Why};
+use crate::budget::Why;
 use crate::model::{KeepGoing, Wake};
 
 /// What the agent is told at each turn Faber sends. It is for the model, so it is English like every prompt of the engine;
@@ -24,6 +24,9 @@ pub const MAX_TURNS: u32 = 40;
 
 /// Turns in a row that may end in an error before it stops.
 pub const MAX_FAILED: u32 = 2;
+
+/// The longest it waits for quota to come back (a week and a day), so a reset it reads wrongly never holds it forever.
+pub const MAX_WAIT_SECS: f64 = 8.0 * 24.0 * 3600.0;
 
 /// What follows the end of a turn while "keep going" is on.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -146,9 +149,9 @@ impl Core {
                 }
                 true
             });
-        match next(&kg, Ended { ok, asked, said_stop }, self.room_next(conv, reply_id)) {
+        match next(&kg, Ended { ok, asked, said_stop }, self.room_next(conv)) {
             Next::Halt(why) => {
-                self.halt(conv, reply_id, why);
+                self.wait_for_room(conv, reply_id, why);
                 None
             }
             Next::Continue => {
@@ -180,7 +183,7 @@ impl Core {
         // A refusal with a reply fails it (`fail_reply`), which says why it stopped there; one before any reply (the message
         // waits in the queue again) stops on the reply before it.
         if let Err(error) = self.dispatch_queued(conv, waiting) {
-            self.halt(conv, &reply_id, stop_for(&error));
+            self.wait_for_room(conv, &reply_id, stop_for(&error));
         }
     }
 
@@ -188,16 +191,16 @@ impl Core {
     /// nothing will end it again, so it stops here.
     pub(super) fn keep_going_failed(&mut self, conv: &str, reply_id: &str, error: &str) {
         if self.convs.get(conv).is_some_and(|c| c.keep_going.is_some()) {
-            self.halt(conv, reply_id, stop_for(error));
+            self.wait_for_room(conv, reply_id, stop_for(error));
         }
     }
 
     /// Turned on after a reply that ended (done, failed or stopped): only the pacing can hold it back, and a message the
     /// person left goes first.
     pub(super) fn go_on(&mut self, conv: &str, reply_id: &str) {
-        match self.room_next(conv, reply_id) {
+        match self.room_next(conv) {
             Ok(()) => self.keep_going_after(conv, Some(reply_id.into())),
-            Err(why) => self.halt(conv, reply_id, why),
+            Err(why) => self.wait_for_room(conv, reply_id, why),
         }
     }
 
@@ -208,34 +211,78 @@ impl Core {
         self.save(conv);
         if let Err(error) = self.send_by_itself(conv, CONTINUE.into(), Wake::of("wake.keepGoing")) {
             // A reply that failed already stopped it (`keep_going_failed`); this is a turn that never became one.
-            self.halt(conv, reply_id, stop_for(&error));
+            self.wait_for_room(conv, reply_id, stop_for(&error));
         }
     }
 
-    /// The room of the AI the next turn goes to: the one picked by hand when the conversation has one, otherwise the one
-    /// that answered last (Auto's router then picks among those it lets in).
-    pub(super) fn room_next(&self, conv: &str, reply_id: &str) -> Result<(), &'static str> {
+    /// The room of the AI the next turn goes to: the one picked by hand when the conversation has one, otherwise any AI
+    /// Auto's router may use (it picks among those with room, so one that is out never stops it while the other has some).
+    pub(super) fn room_next(&self, conv: &str) -> Result<(), &'static str> {
         let Some(c) = self.convs.get(conv) else { return Ok(()) };
-        let to = match c.choice.as_ref().filter(|ch| ch.vendor != "auto") {
-            Some(choice) => pick_model(choice, &self.vendors(), self.codex_recommended.as_deref()).map(|p| (p.vendor, p.model)),
-            None => c.messages.iter().find(|m| m.id == reply_id).and_then(|m| Some((m.vendor?, m.model.clone()))),
-        };
-        to.map_or(Ok(()), |(vendor, model)| self.room(vendor, model.as_deref()))
+        let vendors = self.vendors();
+        if let Some(choice) = c.choice.as_ref().filter(|ch| ch.vendor != "auto") {
+            return pick_model(choice, &vendors, self.codex_recommended.as_deref())
+                .map_or(Ok(()), |p| self.room(p.vendor, p.model.as_deref()));
+        }
+        let mut first = None;
+        for vendor in vendors {
+            match self.room(vendor, None) {
+                Ok(()) => return Ok(()),
+                Err(why) => {
+                    first.get_or_insert(why);
+                }
+            }
+        }
+        first.map_or(Ok(()), Err)
     }
 
-    /// Auto's pacing for unattended work on this AI: the same door and the same pace words as the rest of the engine, with
-    /// nothing picked by hand, so an AI billed per use is never spent on by itself.
+    /// Whether unattended work may go on this AI: the same door as the rest of the engine, with nothing picked by hand, so
+    /// an AI billed per use is never spent on by itself. How fast the week's quota is spent never holds it back (R212):
+    /// whoever started it trusts Faber to keep going, and Auto's pace only picks which AI answers.
     fn room(&self, vendor: Vendor, model: Option<&str>) -> Result<(), &'static str> {
         match self.allows(vendor, model.and_then(family_of), Purpose::UserTurn { by_hand: false }, false) {
-            Err(Why::Billing) => return Err("reason.keepGoing.billed"),
-            Err(_) => return Err("reason.keepGoing.quota"),
-            Ok(()) => {}
+            Err(Why::Billing) => Err("reason.keepGoing.billed"),
+            Err(_) => Err("reason.keepGoing.quota"),
+            Ok(()) => Ok(()),
         }
+    }
+
+    /// When an AI the next turn may go to has quota again (the earliest of them, or the one picked by hand), if that is
+    /// known and within a week and a day.
+    fn room_back_at(&self, conv: &str) -> Option<f64> {
         let now = self.secs();
-        match self.snap(vendor, now).state(&self.ledger.of(vendor).shape(), self.utc_offset, now) {
-            State::Fast | State::Tight => Err("reason.keepGoing.pace"),
-            State::Spare | State::Normal => Ok(()),
-        }
+        let vendors = self.vendors();
+        let hand = self.convs.get(conv)?.choice.clone().filter(|ch| ch.vendor != "auto");
+        let at = match hand.and_then(|ch| pick_model(&ch, &vendors, self.codex_recommended.as_deref())) {
+            Some(p) => self.ledger.of(p.vendor).snap(now).recovery_for(p.model.as_deref().and_then(family_of), now),
+            None => crate::route::candidates(&vendors, &self.codex_models)
+                .iter()
+                .filter_map(|p| self.ledger.of(p.vendor).snap(now).recovery_for(family_of(p.model), now))
+                .reduce(f64::min),
+        }?;
+        (at - now <= MAX_WAIT_SECS).then_some(at)
+    }
+
+    /// Out of quota is a wait, not an end: when the reset is known the conversation goes on by itself then, as long as
+    /// keep going is still on and nothing newer happened in it. Without a known reset it stops, as nothing would wake it.
+    fn wait_for_room(&mut self, conv: &str, reply_id: &str, why: &'static str) {
+        let Some(at) = (why == "reason.keepGoing.quota").then(|| self.room_back_at(conv)).flatten() else {
+            return self.halt(conv, reply_id, why);
+        };
+        let wait = (at - self.secs()).max(1.0) + 5.0;
+        let (me, conv, reply) = (self.me.clone(), conv.to_string(), reply_id.to_string());
+        self.opts.runtime.spawn(async move {
+            tokio::time::sleep(Duration::from_secs_f64(wait)).await;
+            if let Some(core) = me.upgrade() {
+                let mut core = core.lock().unwrap_or_else(|e| e.into_inner());
+                let waiting = core.convs.get(&conv).is_some_and(|c| {
+                    c.keep_going.is_some() && c.messages.last().is_some_and(|m| m.id == reply && m.status != Some(Status::Streaming))
+                });
+                if waiting && !core.live.get(&conv).is_some_and(|l| l.turn.is_some()) {
+                    core.go_on(&conv, &reply);
+                }
+            }
+        });
     }
 
     /// It stops by itself: the reply says why, and the shell tells the person.
