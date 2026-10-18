@@ -207,7 +207,8 @@ export function Settings(props: Props) {
                   onPick={(webSearch) => void save({ webSearch })}
                 />
               </Opt>
-              <Toggle id="set-hooks" label={t('set.hooksBody')} hint={t('set.hooksHint')} more={t('set.hooksMore')} checked={props.saved.userHooks === true} onChange={(on) => save({ userHooks: on })} />
+              {/* In Full access the person's hooks always run (the CLI's own way), so the switch shows that and cannot change it. */}
+              <Toggle id="set-hooks" label={t('set.hooksBody')} hint={t(mode() === 'dontAsk' ? 'set.hooksLocked' : 'set.hooksHint')} more={t('set.hooksMore')} checked={mode() === 'dontAsk' || props.saved.userHooks === true} disabled={mode() === 'dontAsk'} onChange={(on) => save({ userHooks: on })} />
               <Show when={props.onChatFolder}>
                 <ChatFolder {...props} />
               </Show>

@@ -131,7 +131,7 @@ closed). There is no "Learn more" link. The version ("Faber 1.2.3") closes the l
 - **General**, in groups. *You*: Language (follow the system, or one of five), Your name, "Do you already use AI?" (the first run's
   answer), "Watch again" for the tutorial (opens a fresh chat and plays it again). *How the AI works*: Permissions
   for Chat and Projects (a menu of five modes, each with its one line; "Full access" by default), Web search, Your CLI
-  hooks (only acts in the guarded modes, not "Full access"), Chat working folder (with Recents; acts on the open chat
+  hooks (only acts in the guarded modes; in "Full access" it shows on and locked, with "In Full access your own hooks always run."), Chat working folder (with Recents; acts on the open chat
   while it has no message; the row exists only when Settings was opened from Chat, where its control does), and a folded
   "Codex" group (reasoning summary, answer length; Codex only, closed by default). *Notifications and system*: Notify me,
   Play a sound, and on Windows keep the computer awake while Faber works and start with Windows. *Updates*: Receive
@@ -297,8 +297,6 @@ lines and the removal of fixed ones.
 12. Money and quota in four vocabularies ("Own cost", "Cost so far", "Faber today … API-equivalent", "… at API prices";
     "Account pace", "Accounts and limits"); which words stay is the owner's call (Owner). Amounts are written the language's way
     (`money` and `amount` in `ui/i18n.ts`).
-18. The hooks switch is always enabled but acts only in the guarded modes (all but "Full access"). Whether the switch
-    hides or locks there, and the words, are the owner's call (Owner).
 
 ## Worked example: adding a setting
 

@@ -479,6 +479,7 @@ export const ptBR: Messages = {
   'set.hooksBody': 'Os projetos rodam os meus próprios hooks da CLI',
   // R107 security review: handwritten wording; native-speaker review pending.
   "set.hooksHint": "Só vale quando o Faber pergunta antes.",
+  "set.hooksLocked": "Em Acesso total seus hooks sempre rodam.",
   "set.hooksMore": "Desativados por padrão. Valem nos modos que perguntam; no Acesso total, seus hooks sempre rodam, como na CLI.",
   'set.name': 'Seu nome',
   "set.nameHint": "Usado na saudação e pela IA.",
@@ -973,6 +974,7 @@ export const ptBR: Messages = {
   'notes.89.better': 'Logo depois de uma resposta, o Faber agora avisa quando está vendo se algum arquivo mudou, e o Parar fica até ele saber.',
   'notes.90.better': 'Se você pulou a conexão das IAs, a barra lateral agora oferece conectar a que ainda falta.',
   'notes.91.better': 'A primeira execução agora usa as mesmas palavras e o mesmo controle de tamanho do texto das Configurações.',
+  'notes.92.better': 'Em Acesso total, a chave de hooks em Configurações agora mostra que seus hooks sempre rodam, em vez de uma escolha que não fazia nada.',
   'update.checking': 'Procurando atualização…',
   'update.downloading': 'Baixando atualização…',
   'update.downloadingPercent': 'Baixando atualização… {percent}%',

@@ -62,7 +62,7 @@ fn do_not_ask_text(ctx: &mut Ctx) -> Result {
 const PICKED: &str = "document.querySelector('#set-permissions-pick').textContent.trim()";
 
 /// Opens the permissions menu and picks the mode at that place in its list (1 = Ask, 5 = Full access).
-fn pick_mode(page: &mut Page, place: usize) -> Result {
+pub(super) fn pick_mode(page: &mut Page, place: usize) -> Result {
     page.click(&css("#set-permissions-pick"))?;
     page.click(&css(&format!("#set-permissions-pick-list [role=option]:nth-child({place})")))
 }

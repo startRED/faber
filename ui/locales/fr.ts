@@ -482,6 +482,7 @@ export const fr: Messages = {
   'set.hooksBody': 'Les projets exécutent mes propres hooks de la CLI',
   // R107 security review: handwritten wording; native-speaker review pending.
   "set.hooksHint": "Ne compte que lorsque Faber demande d’abord.",
+  "set.hooksLocked": "En Accès total, vos hooks s’exécutent toujours.",
   "set.hooksMore": "Désactivés par défaut. Ils comptent dans les modes qui demandent ; en Accès total, vos hooks s’exécutent toujours, comme dans la CLI.",
   'set.name': 'Votre nom',
   "set.nameHint": "Utilisé dans l’accueil et par l’IA.",
@@ -986,6 +987,7 @@ export const fr: Messages = {
   'notes.89.better': 'Juste après une réponse, Faber indique maintenant quand il regarde si des fichiers ont changé, et Arrêter reste là jusqu’à ce qu’il le sache.',
   'notes.90.better': 'Si vous avez passé la connexion de vos IA, la barre latérale propose désormais de connecter celle qui manque encore.',
   'notes.91.better': 'Le premier lancement utilise désormais les mêmes mots et le même curseur de taille du texte que les Réglages.',
+  'notes.92.better': "En Accès total, l'interrupteur des hooks dans les Réglages montre désormais que vos hooks s'exécutent toujours, au lieu d'un choix sans effet.",
   'update.checking': 'Recherche d’une mise à jour…',
   'update.downloading': 'Téléchargement de la mise à jour…',
   'update.downloadingPercent': 'Téléchargement de la mise à jour… {percent} %',

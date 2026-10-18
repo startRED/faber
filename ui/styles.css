@@ -683,6 +683,7 @@ textarea.field { height: auto; max-width: none; padding: 8px 10px; resize: verti
 .sw2::after { content: ''; position: absolute; left: 3px; top: 3px; width: 12px; height: 12px; border-radius: 50%; background: var(--ink-2); transition: transform var(--dur-ui) var(--ease), background var(--dur-fast); }
 .sw2:checked { background: var(--accent); box-shadow: none; }
 .sw2:checked::after { transform: translateX(14px); background: var(--accent-ink); }
+.sw2:disabled { cursor: default; opacity: 0.5; }
 /* Locked colours: a read-only row, each with its shape and its words. */
 .locked { display: flex; flex-wrap: wrap; gap: 8px; }
 .lt { display: inline-flex; align-items: center; gap: 7px; height: var(--h-sm); padding: 0 10px; border-radius: var(--r-xs); font-size: var(--fs-sm); font-weight: 500; }

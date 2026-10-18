@@ -791,6 +791,24 @@ check('settings: a billed-per-use or unconfirmed account says so calmly and is n
   }
 }));
 
+check('settings: in Full access the hooks switch shows that hooks always run and is locked; in a mode that asks it is the saved choice', async () => {
+  const [saved, setSaved] = createSignal<Saved>({ permissions: 'dontAsk' });
+  const view = mount(() => createComponent(Settings, {
+    look: look(), get saved() { return saved(); }, vendors: [], quotas: {}, now: 0,
+    onClose: () => {}, onOpenSetup: () => {}, onSave: async () => true,
+  }));
+  try {
+    const sw = () => view.host.querySelector<HTMLInputElement>('#set-hooks-switch')!;
+    const hint = () => view.host.querySelector('[data-opt="set-hooks"]')!.textContent!;
+    ok(sw().disabled && sw().checked, 'locked and on');
+    ok(hint().includes(en['set.hooksLocked']));
+    setSaved({ permissions: 'ask' });
+    await tick();
+    ok(!sw().disabled && !sw().checked, 'its own choice, off by default');
+    ok(hint().includes(en['set.hooksHint']));
+  } finally { view.stop(); }
+});
+
 check('settings: the first-run answers change later in General: experience saves on its own and the tutorial can play again', async () => {
   const [saved, setSaved] = createSignal<Saved>({});
   const patches: Saved[] = [];

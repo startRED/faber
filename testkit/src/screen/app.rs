@@ -454,6 +454,8 @@ fn keeps_appearance(ctx: &mut Ctx) -> Result {
     let page = &mut app.page;
     let general = page.named("button", "set.general")?;
     page.click(&general)?;
+    // In Full access, the default, the person's hooks always run and the switch is locked; it is a choice in the modes that ask.
+    super::permissions::pick_mode(page, 1)?;
     let hooks = page.named("switch", "set.hooksBody")?;
     page.check(&hooks)?;
     // The look applies once it is saved, but the switch does not wait for the screen; closing earlier could lose it.
@@ -664,13 +666,15 @@ fn refused_save(ctx: &mut Ctx) -> Result {
     // A switch moves before its save is answered; a refused save puts it back.
     let general = page.named("button", "set.general")?;
     page.click(&general)?;
-    let hooks = page.named("switch", "set.hooksBody")?;
-    let before = page.is_checked(&hooks)?;
-    page.click(&hooks)?;
-    page.wait_for("the switch to be put back", &format!("document.querySelector('.sw2').checked === {before}"))?;
+    let notify = page.named("switch", "set.notifyMe")?;
+    let before = page.is_checked(&notify)?;
+    page.click(&notify)?;
+    page.wait_for("the switch to be put back", &format!("document.querySelector('#set-notify-switch').checked === {before}"))?;
     let file = ctx.sb.data.join("settings.json");
     let text = std::fs::read_to_string(&file).map_err(|e| e.to_string())?;
-    ensure(!text.contains("manha") && !text.contains("\"userHooks\": true"), || format!("settings.json should be as it was: {text}"))?;
+    ensure(!text.contains("manha") && !text.contains(&format!("\"notifications\": {}", !before)), || {
+        format!("settings.json should be as it was: {text}")
+    })?;
 
     // Once the disk works again the same draft saves, and the alert goes away.
     std::fs::remove_dir(&blocker).map_err(|e| e.to_string())?;

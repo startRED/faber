@@ -482,6 +482,7 @@ export const de: Messages = {
   'set.hooksBody': 'Projekte führen meine eigenen CLI-Hooks aus',
   // R107 security review: handwritten wording; native-speaker review pending.
   "set.hooksHint": "Zählt nur, wenn Faber vorher nachfragt.",
+  "set.hooksLocked": "Bei Vollzugriff laufen deine Hooks immer.",
   "set.hooksMore": "Standardmäßig aus. Sie zählen in den Modi, die nachfragen; im Vollzugriff laufen deine Hooks immer, wie in der CLI.",
   'set.name': 'Dein Name',
   "set.nameHint": "Steht in der Begrüßung und wird der KI genannt.",
@@ -986,6 +987,7 @@ export const de: Messages = {
   'notes.89.better': 'Direkt nach einer Antwort sagt Faber jetzt, wenn er prüft, ob sich Dateien geändert haben, und Stoppen bleibt, bis er es weiß.',
   'notes.90.better': 'Wenn du das Verbinden der KIs übersprungen hast, bietet die Seitenleiste jetzt an, die noch fehlende zu verbinden.',
   'notes.91.better': 'Der erste Start nutzt jetzt dieselben Wörter und denselben Regler für die Textgröße wie die Einstellungen.',
+  'notes.92.better': 'Bei Vollzugriff zeigt der Hooks-Schalter in den Einstellungen jetzt, dass deine Hooks immer laufen, statt einer Wahl ohne Wirkung.',
   'update.checking': 'Suche nach einem Update…',
   'update.downloading': 'Update wird heruntergeladen…',
   'update.downloadingPercent': 'Update wird heruntergeladen… {percent} %',
