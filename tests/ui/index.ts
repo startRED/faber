@@ -30,6 +30,7 @@ import './interactions.check.ts';
 import './models.check.ts';
 import './mojibake.check.ts';
 import './motion.check.ts';
+import './appear.check.ts';
 import './nudge.check.ts';
 import './notes.check.ts';
 import './opening.check.ts';

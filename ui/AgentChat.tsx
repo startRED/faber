@@ -3,6 +3,7 @@ import { api, errorText, type ToolUse } from './api.ts';
 import { Icon } from './Glyphs.tsx';
 import { fromEngine, t } from './i18n.ts';
 import { Markdown, openLinks } from './markdown.tsx';
+import { animateList } from './motion.ts';
 import { useDraft } from './unsent.ts';
 import { agentKind, agentState, changeOf, middle, toolRow, type AgentStep, type Change, type Sources } from './worklog.ts';
 
@@ -108,7 +109,7 @@ function Facts(props: { facts: NonNullable<ToolUse['facts']> }) {
       ? `${t('agent.facts.checks', { n: props.facts.checks })} · ${props.facts.failed ? t('agent.facts.failed', { n: props.facts.failed }) : t('agent.facts.passed')}`
       : t('agent.facts.none');
   return (
-    <section class="side-facts" aria-label={t('agent.facts')}>
+    <section class="side-facts" aria-label={t('agent.facts')} ref={animateList}>
       <h3>{t('agent.facts')}</h3>
       <Show when={edited().length}>
         <p>{t('agent.facts.edited', { n: edited().length })}</p>
@@ -177,6 +178,7 @@ function HelperBox(props: { callId: string }) {
   return (
     <form
       class="side-write"
+      ref={animateList}
       onSubmit={(e) => {
         e.preventDefault();
         void send();
@@ -236,7 +238,7 @@ export function AgentChat(props: {
           <Icon name="close" />
         </button>
       </div>
-      <div class="rc-body side-body" data-state={state()}>
+      <div class="rc-body side-body" data-state={state()} ref={animateList}>
         <p class="side-meta">{agentMeta(props.step, props.streaming)}</p>
         <Show when={state() === 'stuck' && props.step.call.sign}>
           {(sign) => (
@@ -253,7 +255,7 @@ export function AgentChat(props: {
           </section>
         </Show>
         <Show when={props.step.tools.length}>
-          <div class="tools" aria-label={t('agent.steps')}>
+          <div class="tools" aria-label={t('agent.steps')} ref={animateList}>
             <For each={props.step.tools}>{(tool) => <ToolChip tool={tool} />}</For>
           </div>
         </Show>

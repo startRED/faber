@@ -865,6 +865,7 @@ export const en = {
   'notes.51.better': 'A message you write while Claude works now reaches it at its next step, as with Codex, instead of waiting for the end.',
   'notes.52.better': "While a game is in front, Faber's checks wait to start, and one already running uses only a tenth of the processor until you leave the game.",
   'notes.53.better': "When the agent changes Rust code, Faber's quick checks now compile it too, so a compile error shows with its file and line within seconds.",
+  'notes.54.better': 'Lists, menus and Settings sections now fade and slide into place instead of jumping. With reduced motion they still change at once.',
   'update.checking': 'Looking for an update…',
   'update.downloading': 'Downloading update…',
   'update.downloadingPercent': 'Downloading update… {percent}%',

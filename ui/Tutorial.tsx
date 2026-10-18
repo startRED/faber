@@ -1,10 +1,10 @@
-import { createSignal, onCleanup, onMount, Show } from 'solid-js';
+import { createEffect, createSignal, onCleanup, onMount, Show } from 'solid-js';
 import type { Experience } from './api.ts';
 import { keepFocusIn } from './focus.ts';
 import { t } from './i18n.ts';
 import type { Key } from './locales/en.ts';
 import { Mark } from './Mark.tsx';
-import { animateList } from './motion.ts';
+import { animateList, keepForExit } from './motion.ts';
 import { type Box, type Placement, placeStep, type TourStep, tourFor } from './tour.ts';
 
 /** Where the element a card points at is on screen now, or none when it is missing or hidden (the Projects button below
@@ -92,6 +92,12 @@ export function Tutorial(props: { experience?: Experience; onEnd: () => void }) 
   const steps = tourFor(props.experience);
   const [index, setIndex] = createSignal(0);
   const [hole, setHole] = createSignal<Box>();
+  const ring = keepForExit(() => !!hole());
+  const [lastHole, setLastHole] = createSignal<Box>();
+  createEffect(() => {
+    const box = hole();
+    if (box) setLastHole(box);
+  });
   let ended = false;
   const end = () => {
     if (ended) return;
@@ -123,10 +129,12 @@ export function Tutorial(props: { experience?: Experience; onEnd: () => void }) 
   return (
     <div class="tour" ref={animateList}>
       <div class="tour-dim" classList={{ clear: !!hole() }} />
-      <Show when={hole()}>
+      {/* The ring fades in where it first points and fades out where it was, while the dim fades back in under it. */}
+      <Show when={ring() ? lastHole() : undefined}>
         {(box) => (
           <div
             class="tour-ring"
+            classList={{ leaving: !hole() }}
             style={{ transform: `translate(${box().x - RING}px, ${box().y - RING}px)`, width: `${box().w + RING * 2}px`, height: `${box().h + RING * 2}px` }}
           />
         )}

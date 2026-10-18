@@ -96,7 +96,8 @@ check('motion: a tutorial ring keeps its own position when it appears', async ()
     await new Promise((resolve) => setTimeout(resolve, 30));
     equal(ring.getBoundingClientRect().x, 180, 'arrival must not replace the anchor transform');
     equal(ring.getBoundingClientRect().y, 90);
-    equal(ring.getAnimations().length, 0);
+    // The ring fades in with its own opacity animation (styles.css); the list never animates its transform.
+    equal(ring.getAnimations().filter((a) => (a.effect as KeyframeEffect).getKeyframes().some((k) => 'transform' in k)).length, 0);
   } finally {
     dispose();
     root.remove();

@@ -997,6 +997,7 @@ export const de: Messages = {
   'notes.51.better': 'Eine Nachricht, die du schreibst, während Claude arbeitet, erreicht es jetzt beim nächsten Schritt, wie bei Codex, statt am Ende.',
   'notes.52.better': 'Solange ein Spiel im Vordergrund ist, warten Fabers Prüfungen mit dem Start, und eine schon laufende nutzt nur ein Zehntel des Prozessors, bis du das Spiel verlässt.',
   'notes.53.better': 'Wenn der Agent Rust-Code ändert, kompilieren Fabers schnelle Prüfungen ihn jetzt mit, und ein Kompilierfehler erscheint in Sekunden mit Datei und Zeile.',
+  'notes.54.better': 'Listen, Menüs und Bereiche der Einstellungen blenden jetzt sanft ein und aus, statt zu springen. Bei reduzierter Bewegung wechseln sie weiterhin sofort.',
   'update.checking': 'Suche nach einem Update…',
   'update.downloading': 'Update wird heruntergeladen…',
   'update.downloadingPercent': 'Update wird heruntergeladen… {percent} %',

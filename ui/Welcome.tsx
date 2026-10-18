@@ -1,4 +1,4 @@
-import { For, type JSX, Show } from 'solid-js';
+import { createMemo, For, type JSX, Show } from 'solid-js';
 import type { Project, RunningItem, Summary } from './api.ts';
 import { Icon, VendorMark } from './Glyphs.tsx';
 import { greetingParts } from './greeting.ts';
@@ -43,13 +43,15 @@ export function Welcome(props: {
     if (props.project) return greetingParts(t('projects.home.title'));
     return props.name ? greetingParts(t('empty.chatTitleNamed', { name: props.name }), props.name) : greetingParts(t('empty.chatTitle'));
   };
+  const heading = createMemo(() => title().join('\n'));
   const rows = () => pickUp(props.project ? props.recent.filter((c) => c.projectId === props.project!.id) : props.recent, props.running, 3);
   const live = (id: string) => props.running.find((i) => i.conversationId === id);
   // In a project every row is the project's own, so its row says only when.
   const where = (c: Summary) => (c.area === 'chat' ? t('area.chat') : (props.projects.find((p) => p.id === c.projectId)?.name ?? t('area.projects')));
   return (
     <div class="welcome-grid" classList={{ project: !!props.project }} ref={animateList}>
-      <div class="w-main">
+      {/* Going between the project home and the chat home swaps the header, the lead and the suggestions: each one fades out where it was and the rest slide into place. */}
+      <div class="w-main" ref={animateList}>
         <Show when={props.project}>
           {(p) => (
             <>
@@ -63,13 +65,18 @@ export function Welcome(props: {
             </>
           )}
         </Show>
-        <h1 class="display hello">
-          {title()[0]}
-          <Show when={title()[1]}>
-            {' '}
-            <em>{title()[1]}</em>
-          </Show>
-        </h1>
+        {/* Keyed by its words, so a new greeting (the other area, a new name or language) replaces the heading and cross-fades. */}
+        <Show when={heading()} keyed>
+          {(_heading) => (
+            <h1 class="display hello">
+              {title()[0]}
+              <Show when={title()[1]}>
+                {' '}
+                <em>{title()[1]}</em>
+              </Show>
+            </h1>
+          )}
+        </Show>
         <Show when={props.project}>
           <p class="lead">{t('projects.chat.lead')}</p>
         </Show>

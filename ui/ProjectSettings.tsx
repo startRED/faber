@@ -1,8 +1,9 @@
 import { createSignal, For, type JSX, onCleanup, onMount, Show } from 'solid-js';
 import { api, errorText, type EnrollView, type Project, type ProofView } from './api.ts';
-import { Opt, Toggle } from './controls.tsx';
+import { Collapse, Opt, Toggle } from './controls.tsx';
 import { Icon } from './Glyphs.tsx';
 import { fromEngine, t } from './i18n.ts';
+import { animateList } from './motion.ts';
 import { keep, kept, release, useDraft } from './unsent.ts';
 
 // Settings, Projects: what Faber may do in each project and the checks it proves its work with. The project screen itself
@@ -23,7 +24,7 @@ export function More(props: { label: string; open?: string; class?: string; chil
       <button type="button" class={props.class ?? 'more'} aria-expanded={open()} onClick={() => setOpen(!open())}>
         {open() && props.open ? props.open : props.label}
       </button>
-      <Show when={open()}>{props.children}</Show>
+      <Collapse open={open()}>{props.children}</Collapse>
     </>
   );
 }
@@ -50,7 +51,7 @@ export function ProofList(props: { proof: ProofView; setupOnly?: boolean }) {
 export function ProjectsSection(props: { projects: Project[] }) {
   return (
     <Show when={props.projects.length > 0} fallback={<p class="hint">{t('set.projects.none')}</p>}>
-      <div class="psets">
+      <div class="psets" ref={animateList}>
         <For each={props.projects}>{(p) => <Entry project={p} />}</For>
       </div>
     </Show>
@@ -68,9 +69,9 @@ function Entry(props: { project: Project }) {
         <span class="s" title={props.project.path}>{tail(props.project.path)}</span>
         <Icon name={open() ? 'down' : 'right'} small />
       </button>
-      <Show when={open()}>
+      <Collapse open={open()}>
         <Body project={props.project} />
-      </Show>
+      </Collapse>
     </section>
   );
 }
@@ -162,7 +163,7 @@ function Body(props: { project: Project }) {
   const row = (name: string) => `pset-${props.project.id}-${name}`;
 
   return (
-    <div class="pset-body">
+    <div class="pset-body" ref={animateList}>
       <Show when={error()}>
         <p class="note err" role="alert">{fromEngine(error())}</p>
       </Show>
@@ -173,7 +174,7 @@ function Body(props: { project: Project }) {
         checked={separate()}
         onChange={copies}
       />
-      <div class="pset-checks" data-testid="pset-checks">
+      <div class="pset-checks" data-testid="pset-checks" ref={animateList}>
         <Opt id={row('checks')} label={t('set.projects.checks')} hint={checksHint()} more={[t('projects.proof.desc'), t('projects.proofs.isolationTech')]}>
           <Show when={proof()}>
             {(p) => (
@@ -194,7 +195,7 @@ function Body(props: { project: Project }) {
         </Opt>
         <Show when={proof()}>
           {(p) => (
-            <div class="st-extra">
+            <div class="st-extra" ref={animateList}>
               <Show when={p().changed}>
                 <p class="hint" role="status">{t('projects.proof.changed')}</p>
               </Show>

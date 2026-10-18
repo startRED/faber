@@ -89,7 +89,7 @@ replaces the shell; otherwise the shell shows the sidebar, the topbar, the work 
 
 Shared parts to reuse before writing a new one: `Segmented` and `Toggle` in `ui/controls.tsx`, `Icon` and `VendorMark` in
 `ui/Glyphs.tsx`, `Mark`, `Lockup` and `Peek` in `ui/Mark.tsx`, the menu in `ui/contextmenu.ts`, idle motion gates in
-`ui/idle.ts`, list and details motion in `ui/motion.ts`, focus traps in `ui/focus.ts`. `ui/main.tsx` is the entry: it
+`ui/idle.ts`, list and details motion in `ui/motion.ts` (and `Collapse`, the folding wrapper, in `ui/controls.tsx`), focus traps in `ui/focus.ts`. `ui/main.tsx` is the entry: it
 listens for events, applies the look and installs the right-click menu before it draws `App`.
 
 Right-click menus:
@@ -271,6 +271,7 @@ checks in `tests/ui/index.ts`, real-app scenarios in `testkit/src/screen/mod.rs`
 | Five languages | Done; names (Faber, Claude, Codex, the JSON file type) stay the same in every language; part of de, es, fr and pt-BR still awaits a native speaker's review | `tests/ui/i18n.check.ts`, `mojibake.check.ts`; `engine/tests/locales.rs` (no unused text) |
 | Right-click menus, rename, remove a project | Done | `tests/ui/contextmenu.check.ts`; `testkit/src/screen/menus.rs` |
 | Recents and environments | Done | `engine/tests/recents.rs`; `tests/ui/recents.check.ts` |
+| Nothing teleports: sections, folds, menus, lists and swaps ease in and out (R209) | Done | `tests/ui/appear.check.ts`, `settings.check.ts`, `update.check.ts`, `motion.check.ts` |
 | Homes and idle motion | Done | `tests/ui/idle.check.ts`, `hole.check.ts`, `motion.check.ts`, `homes.check.ts`; `testkit/src/screen/homes.rs` |
 | Separate copies (R201) | Done; the copy is made at the first message, so a project conversation's CLI starts only then (no warm-up) | `engine/tests/conversation_copy.rs`, tests inside `engine/src/project/copy.rs`; `tests/ui/contextmenu.check.ts` |
 | Missions | v0 (see Words); engine only, no screen | `engine/tests/project_*.rs`; `tests/fixtures/projects/`; `testkit/src/screen/coordinator.rs`, `projects.rs`, `projects_ui.rs` |

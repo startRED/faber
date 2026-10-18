@@ -1,9 +1,10 @@
-import { createResource, createSignal, For, Show } from 'solid-js';
+import { createMemo, createResource, createSignal, For, Show } from 'solid-js';
 import { api, type FolderView, type Project } from './api.ts';
 import { openMenu } from './contextmenu.ts';
 import { Icon } from './Glyphs.tsx';
 import { t } from './i18n.ts';
 import type { Key } from './locales/en.ts';
+import { animateList } from './motion.ts';
 
 /** A long folder path with its middle cut out: the drive (or root) and the last two folders stay, the full path goes in the tooltip. */
 export function shortPath(path: string): string {
@@ -14,6 +15,22 @@ export function shortPath(path: string): string {
 }
 
 type Section = 'rec' | 'env';
+
+/** Reads the list again without remaking the rows that did not change, so forgetting one entry moves only that row. */
+function steady<T>(key: (item: T) => string) {
+  let kept = new Map<string, T>();
+  return (list: T[] | undefined): T[] => {
+    const next = new Map<string, T>();
+    const out = (list ?? []).map((item) => {
+      const old = kept.get(key(item));
+      const same = old !== undefined && JSON.stringify(old) === JSON.stringify(item);
+      next.set(key(item), same ? old : item);
+      return same ? old : item;
+    });
+    kept = next;
+    return out;
+  };
+}
 
 /** The last five folders (one click each) and, in the project area, the saved environments and the tray that builds a new one.
  * The engine judges each folder when the list is read: one that is gone or refused arrives with a reason and cannot be picked. */
@@ -27,6 +44,10 @@ export function Recents(props: {
   disabled?: boolean;
 }) {
   const [data, { refetch }] = createResource(() => api.recents());
+  const sameFolders = steady<FolderView>((f) => f.path);
+  const sameEnvironments = steady<NonNullable<ReturnType<typeof data>>['environments'][number]>((e) => e.id);
+  const folders = createMemo(() => sameFolders(data()?.folders));
+  const environments = createMemo(() => sameEnvironments(data()?.environments));
   const [selected, setSelected] = createSignal<FolderView[]>([]);
   const [name, setName] = createSignal('');
   let box: HTMLDivElement | undefined;
@@ -63,12 +84,12 @@ export function Recents(props: {
       setSelected([]);
     });
   return (
-    <div class="recents" ref={(el) => (box = el)} tabindex="-1">
+    <div class="recents" ref={(el) => { box = el; animateList(el); }} tabindex="-1">
       <Show when={(data()?.folders.length ?? 0) > 0}>
         <section aria-labelledby="rec-title" data-section="rec">
           <h2 id="rec-title">{t('recents.title')}</h2>
-          <ul>
-            <For each={data()?.folders}>
+          <ul ref={animateList}>
+            <For each={folders()}>
               {(f, i) => (
                 <li class="rec" classList={{ gone: !!f.reason, on: chosen(f) }} onContextMenu={(e) => menuAt(e, 'recents.forget', () => api.forgetRecent(f.path), 'rec', i())}>
                   <button type="button" class="rec-main" disabled={!!f.reason || props.disabled} title={f.path} onClick={() => props.onPick(f.path)}>
@@ -110,8 +131,8 @@ export function Recents(props: {
       <Show when={props.mode === 'project' && (data()?.environments.length ?? 0) > 0}>
         <section aria-labelledby="env-title" data-section="env">
           <h2 id="env-title">{t('env.title')}</h2>
-          <ul>
-            <For each={data()?.environments}>
+          <ul ref={animateList}>
+            <For each={environments()}>
               {(env, index) => {
                 const none = () => env.folders.every((f) => f.reason);
                 return (

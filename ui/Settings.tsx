@@ -7,6 +7,7 @@ import { factory } from './draft.ts';
 import { Icon } from './Glyphs.tsx';
 import { LANGUAGES, t } from './i18n.ts';
 import { vendorName } from './models.ts';
+import { animateList } from './motion.ts';
 import { ProjectsSection } from './ProjectSettings.tsx';
 import { Recents } from './Recents.tsx';
 import type { Quotas } from './sidebar.ts';
@@ -126,11 +127,14 @@ export function Settings(props: Props) {
           <p class="s-version">{t('notes.version', { version: props.version! })}</p>
         </Show>
       </nav>
-      {/* Switching sections is instant: no exit copies, no arrival. */}
-      <div class="s-main" classList={{ wide: section() === 'appearance' }} ref={(el) => (main = el)}>
-        <header class="s-head">
-          <h2 class="display">{title()}</h2>
-        </header>
+      {/* Switching sections is a short cross-fade (the owner, 2026-10-17): the old section leaves as an inert copy while
+          the new one arrives; nothing runs under reduced or no motion. */}
+      <div class="s-main" classList={{ wide: section() === 'appearance' }} ref={(el) => { main = el; animateList(el); }}>
+        <Show when={section()} keyed>
+          <header class="s-head">
+            <h2 class="display">{title()}</h2>
+          </header>
+        </Show>
         <Switch>
           <Match when={section() === 'general'}>
             <Group title={t('set.group.you')}>

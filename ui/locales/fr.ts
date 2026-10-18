@@ -997,6 +997,7 @@ export const fr: Messages = {
   'notes.51.better': "Un message écrit pendant que Claude travaille lui parvient maintenant à l'étape suivante, comme avec Codex, sans attendre la fin.",
   'notes.52.better': "Tant qu'un jeu est au premier plan, les vérifications de Faber attendent pour démarrer, et une vérification déjà lancée n'utilise qu'un dixième du processeur jusqu'à ce que vous quittiez le jeu.",
   'notes.53.better': "Quand l'agent modifie du code Rust, les vérifications rapides de Faber le compilent aussi, et une erreur de compilation apparaît avec son fichier et sa ligne en quelques secondes.",
+  'notes.54.better': "Les listes, les menus et les sections des Réglages apparaissent et disparaissent en douceur au lieu de sauter. Avec le mouvement réduit, ils changent toujours d'un coup.",
   'update.checking': 'Recherche d’une mise à jour…',
   'update.downloading': 'Téléchargement de la mise à jour…',
   'update.downloadingPercent': 'Téléchargement de la mise à jour… {percent} %',

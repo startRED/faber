@@ -997,6 +997,7 @@ export const es: Messages = {
   'notes.51.better': 'Un mensaje que escribes mientras Claude trabaja ahora le llega en su siguiente paso, como con Codex, sin esperar al final.',
   'notes.52.better': 'Mientras un juego está delante, las comprobaciones de Faber esperan para empezar, y una que ya está en marcha usa solo una décima parte del procesador hasta que sales del juego.',
   'notes.53.better': 'Cuando el agente cambia código Rust, las comprobaciones rápidas de Faber ahora también lo compilan, y un error de compilación aparece con su archivo y línea en segundos.',
+  'notes.54.better': 'Las listas, los menús y las secciones de Ajustes ahora aparecen y se van con un movimiento suave, sin saltos. Con movimiento reducido siguen cambiando al instante.',
   'update.checking': 'Buscando una actualización…',
   'update.downloading': 'Descargando actualización…',
   'update.downloadingPercent': 'Descargando actualización… {percent} %',

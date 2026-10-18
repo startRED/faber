@@ -1049,3 +1049,36 @@ html.away-win :is(.amb, .amb *) { animation-play-state: paused !important; }
   ::highlight(find) { background-color: Mark; color: MarkText; }
   ::highlight(find-now) { background-color: Highlight; color: HighlightText; }
 }
+/* Motion for the parts that used to jump (R209): what opens, closes, swaps or arrives eases in and out instead of
+   appearing or vanishing. The lists use animateList (ui/motion.ts); this block holds only what CSS can do alone. Every
+   rule is cancelled by the reduced and none levels above, and nothing here writes a duration or a curve of its own. */
+@keyframes settle-out { to { opacity: 0; transform: translateY(var(--arrive-y)); } }
+@keyframes fade-in { from { opacity: 0; } }
+@keyframes fade-out { to { opacity: 0; } }
+@keyframes pop-in { from { opacity: 0; transform: scale(var(--motion-scale)); } }
+/* Collapse (ui/controls.tsx) reuses the sidebar's fold. It is clipped while it moves and free once it rests, so a focus ring or a menu inside is never cut. */
+.collapse > .fold-inner { transition: overflow 0s allow-discrete; }
+.collapse.open > .fold-inner { overflow: visible; transition: overflow 0s var(--dur-ui) allow-discrete; }
+@starting-style { .collapse.open { grid-template-rows: 0fr; } .collapse.open > .fold-inner { overflow: hidden; } }
+/* The gap and the separator that a closed Collapse would leave behind belong inside its clip, so nothing jumps when it leaves. */
+.st-opt > .collapse { grid-column: 1 / -1; margin-top: -4px; }
+.st-opt > .collapse > .fold-inner { padding-top: 4px; }
+.st-extra > .collapse { margin-top: -8px; }
+.st-extra > .collapse > .fold-inner { padding-top: 8px; }
+:is(.st-card, .st-fold) > .collapse { border-top: 0; }
+:is(.st-card, .st-fold) > .collapse > .fold-inner { box-shadow: inset 0 1px 0 var(--line); }
+/* The permission menu leaves from the corner it opened from, like the right-click menu. */
+.st-menu { transform-origin: 100% 0; animation: cmenu-in var(--dur-ui) var(--ease-spring) both; }
+.st-menu.leaving { pointer-events: none; animation: cmenu-out var(--dur-exit) var(--ease-in) both; }
+@media (max-width: 960px) { .st-menu { transform-origin: 0 0; } }
+.quota-card { animation: arrive var(--dur-ui) var(--ease) both; }
+.quota-card.leaving { pointer-events: none; animation: settle-out var(--dur-exit) var(--ease-in) both; }
+.pick .tick { animation: pop-in var(--dur-ui) var(--ease-spring) both; }
+.stepper li { transition: color var(--dur-ui) var(--ease), font-weight var(--dur-ui) var(--ease); }
+.stepper svg { animation: fade-in var(--dur-ui) var(--ease) both; }
+:is(.setup-badge, .acct-pill) { transition: color var(--dur-ui) var(--ease), background-color var(--dur-ui) var(--ease), box-shadow var(--dur-ui) var(--ease); }
+/* The update screen's words are a block, so an arriving phase can rise; the ghost of the old phase fades under it. */
+.ustage-text > span { display: block; }
+.tour-dim { transition: background-color var(--dur-ui) var(--ease); }
+.tour-ring { animation: fade-in var(--dur-ui) var(--ease) both; }
+.tour-ring.leaving { animation: fade-out var(--dur-exit) var(--ease-in) both; }
