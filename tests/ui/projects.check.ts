@@ -43,7 +43,7 @@ check('settings projects: entries and every Learn more start closed, and closed 
     ok(body.querySelector('[data-testid="pset-checks"]')?.textContent?.includes('2 checks read from AGENTS.md · not confirmed yet'), 'the checks in one line');
     ok(body.querySelector('[data-testid="proof-commands"]'), 'unconfirmed checks show their commands: Confirm never acts on a hidden list');
     const marks = [...body.querySelectorAll<HTMLButtonElement>('.st-q')];
-    ok(marks.length >= 3, 'every option keeps its long text behind its "?"');
+    ok(marks.length >= 2, 'every option keeps its long text behind its "?"');
     ok(marks.every((b) => b.getAttribute('aria-expanded') === 'false'), 'all closed');
     equal(body.querySelector('.st-more'), null, 'no long text shows until asked');
     equal([...body.querySelectorAll<HTMLButtonElement>('button.more')].some((b) => b.textContent === 'View commands'), false, 'no View while the list is pending: it is already shown');
@@ -139,22 +139,6 @@ check('settings projects: a refusal for invalid commands that comes with a moved
     equal(root.querySelector('[data-testid="proof-draft"]'), null, 'the draft is gone, whatever the error was');
     ok(root.querySelector('[data-testid="proof-commands"]')?.textContent?.includes('npm run evil'), 'the new list is on screen');
     equal(kept('proof.' + demo.id), '', 'and the stale draft is not kept for a reopen');
-  });
-});
-
-check('settings projects: the self-update switch saves the grant with a fresh revision', () => {
-  let granted: unknown[] = [];
-  return withProjectSettings(() => {
-    api.projectProof = async () => proofView(true);
-    api.projectEnroll = async (id) => ({ projectId: id, repo: demo.path, base: 'base', mode: 'seguro', revision: 5, selfUpdate: false });
-    api.projectGrant = async (...args) => { granted = args; return { repo: demo.path, mode: 'seguro', revision: 5, grantedAt: 1, selfUpdate: true }; };
-  }, async (root) => {
-    await click(root.querySelector('.pset-head'));
-    const box = root.querySelector<HTMLInputElement>(`#pset-${demo.id}-faber-switch`)!;
-    box.click();
-    await settle();
-    equal(JSON.stringify(granted), JSON.stringify([demo.id, 'seguro', true, 5]));
-    ok(box.checked, 'the switch stays on');
   });
 });
 

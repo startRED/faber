@@ -7,8 +7,6 @@ pub mod containment;
 pub mod coordinator;
 pub mod first_run;
 pub mod homes;
-#[cfg(windows)]
-pub mod local_update;
 pub mod menus;
 pub mod permissions;
 pub mod projects;
@@ -45,7 +43,6 @@ pub fn all() -> Vec<Scenario> {
         .chain(projects::scenarios())
         .chain(coordinator::scenarios())
         .chain(coordinator::canary_scenarios())
-        .chain(projects_ui::scenarios())
         .chain(remote_git::scenarios())
         .chain(shell::scenarios())
         .chain(review::scenarios())
@@ -59,8 +56,6 @@ pub fn all() -> Vec<Scenario> {
     let all = all.chain(containment::scenarios());
     #[cfg(windows)]
     let all = all.chain(project_drivers::scenarios());
-    #[cfg(windows)]
-    let all = all.chain(local_update::scenarios());
     all.collect()
 }
 

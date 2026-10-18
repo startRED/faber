@@ -41,5 +41,4 @@ add a follow-up it found after the owner's tasks.
 ## Not built yet
 
 The open steps are tasks in `docs/tasks/`, so the first conversation can take them: a quick Rust check for the verifier's fast level, the rest of verifier V1, its GitHub confirmation
-and conflict-aware queue (R190 V2 to V4), the project map built from the code (R146), and a local build promoted from
-landed commits instead of missions (R93).
+and conflict-aware queue (R190 V2 to V4), and the project map built from the code (R146).

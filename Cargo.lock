@@ -1100,7 +1100,6 @@ dependencies = [
  "semver",
  "serde",
  "serde_json",
- "sysinfo",
  "tauri",
  "tauri-build",
  "tauri-plugin-dialog",
@@ -1111,7 +1110,6 @@ dependencies = [
  "tempfile",
  "tokio",
  "webview2-com",
- "win32job",
  "windows-core 0.62.2",
  "winsafe",
 ]

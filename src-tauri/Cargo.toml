@@ -31,14 +31,12 @@ tauri-plugin-opener = "2"
 tauri-plugin-single-instance = "2"
 tauri-plugin-updater = "2"
 tokio = { version = "1", features = ["io-util", "macros", "process", "rt-multi-thread", "time"] }
-sysinfo = { version = "0.39.6", default-features = false, features = ["disk"] }
 
 [target.'cfg(target_os = "linux")'.dependencies]
 # Already used by the notification plugin; its Linux builder cannot suppress the desktop's own sound.
 notify-rust = "4"
 
 [target.'cfg(windows)'.dependencies]
-win32job = "2"
 winsafe = { version = "0.0.29", features = ["gui"] }
 # The browser pane drives its page through WebView2's own DevTools call (pane/native.rs); the same versions Tauri uses.
 webview2-com = "0.39"
