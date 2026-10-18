@@ -14,10 +14,12 @@
 //! The agent calls it as Faber's `verify` tool, like the helper and the browser (`crate::helper::mcp`).
 
 mod changes;
+mod journal;
 mod run;
 mod select;
 
 pub use changes::{Changed, changed, own_log};
+pub use journal::{Entry, Journal, Known};
 pub use run::{GAME_CPU, GUARD_EVERY, Guard, KEPT_LOGS, Real, Runner, Spec, Started};
 pub use select::{Scripts, Watch, heavy, scripts, watch};
 
@@ -106,6 +108,8 @@ pub struct Request {
     pub local: Local,
     /// The changed files; `None` outside git, where fast runs every check.
     pub changed: Option<Changed>,
+    /// The person's project folder, which the journal files a copy's results under; `None` is `folder` itself.
+    pub project: Option<PathBuf>,
 }
 
 /// What one PC adds to the checks' environment, from the untracked `.faber/verify.local.json` of the project folder:
@@ -341,6 +345,8 @@ pub struct Verifier {
     clock: fn() -> u64,
     /// The game guard (`run::Guard`): none where the shell cannot tell.
     guard: Option<Guard>,
+    /// Past results: failed first, cheapest first, flaky told (`journal`).
+    journal: Journal,
 }
 
 struct Running {
@@ -369,12 +375,13 @@ impl Verifier {
             next: AtomicU64::new(0),
             clock: now_millis,
             guard: None,
+            journal: Journal::new(None),
         }
     }
 
-    /// The real verifier the shell gives the engine, with its game guard.
-    pub fn real(guard: Option<Guard>) -> Arc<Verifier> {
-        Arc::new(Verifier { guard, ..Verifier::new(Arc::new(Real)) })
+    /// The real verifier the shell gives the engine, with its game guard and its journal (a file in the data folder).
+    pub fn real(guard: Option<Guard>, journal: Option<PathBuf>) -> Arc<Verifier> {
+        Arc::new(Verifier { guard, journal: Journal::new(journal), ..Verifier::new(Arc::new(Real)) })
     }
 
     /// The same verifier with a game guard (tests).
@@ -463,6 +470,7 @@ impl Verifier {
             planned.extend(rust_checks(&request.folder, changed, &request.commands));
         }
         let folder_key = request.folder.clone();
+        let project = request.project.as_ref().unwrap_or(&request.folder).to_string_lossy().into_owned();
         let mut results: Vec<CheckResult> = refused;
         let mut todo: Vec<(&Planned, Option<String>)> = vec![];
         for check in &planned {
@@ -496,7 +504,13 @@ impl Verifier {
             todo.push((check, key));
         }
         // Quick checks first, so the agent hears of a type error before a build ends; a Cargo build waits for its turn.
-        todo.sort_by_key(|(check, _)| check.heavy);
+        // Among each, what failed last time first, then the cheapest by the journal.
+        let known: HashMap<String, Known> =
+            todo.iter().map(|(c, _)| (c.command.clone(), self.journal.known(&project, &c.command))).collect();
+        todo.sort_by_key(|(check, _)| {
+            let known = known[&check.command];
+            (check.heavy, !known.failed, known.cost.unwrap_or(u64::MAX))
+        });
         let vars = request.local.vars();
         let (mut log, log_path) = if todo.is_empty() {
             (run::Log::none(), None)
@@ -536,7 +550,21 @@ impl Verifier {
                 Spec { program: check.tokens[0].clone(), args: check.tokens[1..].to_vec(), cwd: request.folder.clone(), env: vars.clone() };
             let ran = run::check(&*self.runner, &spec, &mut log, self.deadline, self.guard.as_ref()).await;
             log.line(&format!("== {}: exit {:?} after {} ms ==", check.command, ran.exit, ran.took.as_millis()));
-            let out = result(&check.command, &ran, &root);
+            let mut out = result(&check.command, &ran, &root);
+            if ran.refused.is_none() {
+                let ok = out.verdict == Verdict::Passed;
+                let entry = Entry {
+                    project: project.clone(),
+                    command: check.command.clone(),
+                    key: key.clone(),
+                    ok,
+                    millis: out.millis,
+                    at: (self.clock)(),
+                };
+                if self.journal.add(entry) && !ok {
+                    out.summary.push_str("; flaky: it passed and failed before on the same content");
+                }
+            }
             if out.verdict == Verdict::Passed
                 && let Some(key) = key
             {
@@ -752,6 +780,41 @@ mod tests {
         runner.started.lock().unwrap().clear();
         rt().block_on(v.verify(request(dir.path(), Level::Fast, &[("ui/App.tsx", "h2")])));
         assert!(!runner.started.lock().unwrap().iter().any(|c| c.contains("clippy")), "no Rust change, no Rust check added");
+    }
+
+    #[test]
+    fn what_failed_last_time_runs_first_and_a_flaky_failure_says_so() {
+        let dir = tempfile::tempdir().unwrap();
+        let runner = Arc::new(fake(&[("npm run lint", "", Some(0)), ("npm run docs", "docs: a broken link\n", Some(1))]));
+        let v = Arc::new(Verifier::new(runner.clone()));
+        let run = |hash: &str| {
+            let mut request = request(dir.path(), Level::Full, &[("docs/a.md", hash)]);
+            request.commands = vec!["npm run lint".into(), "npm run docs".into()];
+            rt().block_on(v.verify(request))
+        };
+        run("h1");
+        assert_eq!(*runner.started.lock().unwrap(), ["npm run lint", "npm run docs"], "the declared order at first");
+        runner.started.lock().unwrap().clear();
+        let second = run("h2");
+        assert_eq!(*runner.started.lock().unwrap(), ["npm run docs", "npm run lint"], "the check that failed goes first");
+        assert_eq!(second.checks[0].command, "npm run lint", "the screen still reads the declared order");
+        // The same content passed once (a journal entry the fake cannot make): its next failure there reads as flaky.
+        let key = v.journal.with_last_key(&dir.path().to_string_lossy(), "npm run docs");
+        assert!(key.is_some(), "the failure was journaled with its content");
+        v.journal.add(Entry {
+            project: dir.path().to_string_lossy().into_owned(),
+            command: "npm run docs".into(),
+            key,
+            ok: true,
+            millis: 5,
+            at: 0,
+        });
+        let third = run("h2");
+        let docs = third.checks.iter().find(|c| c.command == "npm run docs").unwrap();
+        assert!(docs.summary.contains("flaky"), "{}", docs.summary);
+        let fourth = run("h3");
+        let docs = fourth.checks.iter().find(|c| c.command == "npm run docs").unwrap();
+        assert!(!docs.summary.contains("flaky"), "a failure on other content is not flaky: {}", docs.summary);
     }
 
     #[test]

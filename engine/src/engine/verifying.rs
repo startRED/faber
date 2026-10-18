@@ -135,6 +135,7 @@ impl Core {
             setup: view.setup,
             local: Local::read(Path::new(&project.path)),
             changed: None,
+            project: Some(PathBuf::from(&project.path)),
         };
         let base = c.copy.as_ref().and_then(|copy| copy.base.clone());
         Ok(Prepared { verifier, owner: conv.to_string(), request, git: self.git.clone(), base })

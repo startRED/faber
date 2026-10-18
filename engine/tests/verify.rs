@@ -579,7 +579,7 @@ mod processes {
         let dir = tempfile::tempdir().unwrap();
         // The check starts a child that holds hold.txt open for a minute, and ends at once.
         let script = "require('child_process').spawn('ping',['-n','60','127.0.0.1'],{windowsHide:true,stdio:['ignore',require('fs').openSync('hold.txt','w'),'ignore']}).unref()";
-        let v = Verifier::real(None);
+        let v = Verifier::real(None, None);
         let started = std::time::Instant::now();
         let out = v.verify(request(dir.path(), node(dir.path(), script), Level::Full)).await;
         assert!(started.elapsed() < Duration::from_secs(30), "the verify waited for the child's whole run");
