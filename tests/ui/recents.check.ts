@@ -10,6 +10,15 @@ import { shortPath } from '../../ui/Recents.tsx';
 import { check, deepEqual, equal, ok } from './check.ts';
 
 const settle = (ms = 40) => new Promise((resolve) => setTimeout(resolve, ms));
+/** Removes a row the one way there is: its menu, opened as the menu key does, chosen and then confirmed. */
+const removeVia = async (row: HTMLElement) => {
+  (document.activeElement && row.contains(document.activeElement) ? document.activeElement : row).dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true }));
+  await settle();
+  document.querySelector<HTMLButtonElement>('.cmenu:not(.leaving) [role="menuitem"]')!.click();
+  await settle(560);
+  document.querySelector<HTMLButtonElement>('.cmenu:not(.leaving) [role="menuitem"]')!.click();
+  await settle();
+};
 
 const folder = (name: string, reason?: string): FolderView => ({ path: `X:/work/${name}`, name, parent: 'X:/work', reason });
 
@@ -88,7 +97,10 @@ check('recents: a recent folder opens as a project in one click, a saved environ
       deepEqual(rows.map((r) => r.querySelector('.n')?.textContent), ['alpha', 'beta', 'gamma', 'delta', 'epsilon']);
       equal(rows[0].querySelector('.d')?.textContent, 'X:/work');
       const gone = rows[2].querySelector<HTMLButtonElement>('.rec-main')!;
-      ok(gone.disabled, 'a folder that is gone cannot be picked');
+      equal(gone.getAttribute('aria-disabled'), 'true', 'a folder that is gone cannot be picked');
+      const before = calls.length;
+      gone.click();
+      equal(calls.length, before, 'clicking it does nothing');
       equal(rows[2].querySelector('.d')?.textContent, t('reason.recents.gone'));
       equal(rows[2].querySelector('.rec-sel'), null);
       rows[0].querySelector<HTMLButtonElement>('.rec-main')!.click();
@@ -123,29 +135,27 @@ check('recents: a recent folder opens as a project in one click, a saved environ
     } finally {
       screen.done();
     }
-    // A keyboard user reaches removal without the menu, also on a folder that is gone, and focus stays in the list.
+    // Removal is the row's menu only (no × on the rows), reached by the menu key from the keyboard too, also on a folder that
+    // is gone; it asks once more, and focus stays in the list.
     calls.length = 0;
     screen = await mount();
     try {
-      const buttons = [...screen.root.querySelectorAll<HTMLButtonElement>('.recents section:first-child .rec-x')];
-      equal(buttons.length, 5);
-      ok(buttons.every((b) => !b.disabled && b.getAttribute('aria-label')?.length), 'every row has a named, enabled remove button');
-      buttons[2].click();
-      await settle();
-      deepEqual(calls.at(-1), ['forget', 'X:/work/gamma']);
+      equal(screen.root.querySelectorAll('.recents .rec-x, .recents .rec [aria-label*="Remove"]').length, 0, 'no remove button on the rows');
+      const mains = () => [...screen.root.querySelectorAll<HTMLButtonElement>('.recents section:first-child .rec-main')];
+      equal(mains().length, 5);
+      ok(mains().every((b) => !b.disabled), 'every row keeps its focus, a gone folder too');
       const names = () => [...screen.root.querySelectorAll('.recents section:first-child .rec .n')].map((n) => n.textContent);
-      const focused = () => {
-        const el = document.activeElement as HTMLElement | null;
-        return el?.classList.contains('rec-x') ? el.closest('.rec')?.querySelector('.n')?.textContent : el?.className;
-      };
+      const focused = () => (document.activeElement as HTMLElement | null)?.closest('.rec')?.querySelector('.n')?.textContent ?? (document.activeElement as HTMLElement | null)?.className;
+      mains()[2]!.focus();
+      await removeVia(mains()[2]!.closest<HTMLElement>('.rec')!);
+      deepEqual(calls.at(-1), ['forget', 'X:/work/gamma']);
       deepEqual(names(), ['alpha', 'beta', 'delta', 'epsilon'], 'the entry is gone from the list');
-      equal(focused(), 'delta', 'focus lands on the entry that took the removed one\'s place');
-      screen.root.querySelectorAll<HTMLButtonElement>('.recents section:first-child .rec-x')[3].click();
-      await settle();
+      equal(focused(), 'delta', 'focus lands on the entry that took the removed one’s place');
+      mains()[3]!.focus();
+      await removeVia(mains()[3]!.closest<HTMLElement>('.rec')!);
       deepEqual(names(), ['alpha', 'beta', 'delta']);
       equal(focused(), 'delta', 'removing the last entry moves focus to the new last one');
-      screen.root.querySelector<HTMLButtonElement>('section[aria-labelledby="env-title"] .rec-x')!.click();
-      await settle();
+      await removeVia(screen.root.querySelector<HTMLElement>('section[aria-labelledby="env-title"] .rec')!);
       deepEqual(calls.at(-1), ['forgetEnvironment', 'env-1']);
       equal(screen.root.querySelector('section[aria-labelledby="env-title"]'), null, 'the environment is gone');
       equal(document.activeElement, screen.root.querySelector('.recents'), 'with no entry left in its list, focus stays in the block');
@@ -157,7 +167,7 @@ check('recents: a recent folder opens as a project in one click, a saved environ
     calls.length = 0;
     screen = await mount();
     try {
-      const opener = screen.root.querySelector<HTMLButtonElement>('.recents .rec-x')!;
+      const opener = screen.root.querySelector<HTMLButtonElement>('.recents .rec-main')!;
       opener.focus();
       screen.root.querySelector<HTMLElement>('.recents .rec')!.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true }));
       await settle();
@@ -174,7 +184,7 @@ check('recents: a recent folder opens as a project in one click, a saved environ
     try {
       document.body.dispatchEvent(new KeyboardEvent('keydown', { key: ',', ctrlKey: true, bubbles: true }));
       await settle();
-      const opener = screen.root.querySelector<HTMLButtonElement>('.recents .rec-x')!;
+      const opener = screen.root.querySelector<HTMLButtonElement>('.recents .rec-main')!;
       ok(opener, 'Settings lists the recent folders');
       opener.focus();
       // Focusing a button in the scrolling panel scrolls it a frame later, and any scroll closes a menu: let that settle first.
@@ -187,8 +197,7 @@ check('recents: a recent folder opens as a project in one click, a saved environ
       ok(screen.root.querySelector('.recents'), 'Settings is still open');
       equal(document.activeElement, opener, 'focus is back where the menu opened');
       failRemoval = true;
-      opener.click();
-      await settle();
+      await removeVia(opener.closest<HTMLElement>('.rec')!);
       ok(screen.root.querySelector('.toast')?.textContent?.includes(t('error.recents.saveFailed')), 'the failed removal is shown');
       (document.activeElement ?? document.body).dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }));
       await settle();

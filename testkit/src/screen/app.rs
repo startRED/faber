@@ -217,7 +217,8 @@ fn recent_folders(ctx: &mut Ctx) -> Result {
     page.wait_count(&rows, 5)?;
     let gone = css(".recents .rec.gone .rec-main");
     same(page.count(&gone)?, 1, "folders shown as gone")?;
-    ensure(page.is_disabled(&gone)?, || "a folder that is gone can be picked".into())?;
+    // It keeps its focus (the menu key reaches its removal), so it is marked, not disabled (the UI check clicks it and nothing opens).
+    same(page.attr(&gone, "aria-disabled")?.as_deref(), Some("true"), "a folder that is gone is marked so")?;
     ctx.shot(&mut app, "recents-open-project")?;
     let page = &mut app.page;
     let first = rows.clone().css(".rec-main").has_text("alpha");
