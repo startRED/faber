@@ -1,0 +1,11 @@
+{
+  "notes": {
+    "better": {
+      "en": "When the agent changes Rust code, Faber's quick checks now compile it too, so a compile error shows with its file and line within seconds.",
+      "pt-BR": "Quando o agente muda código Rust, as verificações rápidas do Faber agora também o compilam, e um erro de compilação aparece com arquivo e linha em segundos.",
+      "es": "Cuando el agente cambia código Rust, las comprobaciones rápidas de Faber ahora también lo compilan, y un error de compilación aparece con su archivo y línea en segundos.",
+      "fr": "Quand l'agent modifie du code Rust, les vérifications rapides de Faber le compilent aussi, et une erreur de compilation apparaît avec son fichier et sa ligne en quelques secondes.",
+      "de": "Wenn der Agent Rust-Code ändert, kompilieren Fabers schnelle Prüfungen ihn jetzt mit, und ein Kompilierfehler erscheint in Sekunden mit Datei und Zeile."
+    }
+  }
+}

@@ -82,6 +82,35 @@ impl Watch {
     }
 }
 
+/// The Rust packages a change touches: for each changed `.rs` or `Cargo.toml`, the nearest folder at or above it, inside
+/// `folder`, whose `Cargo.toml` has a `[package]` with a plain name. Sorted, each once; none outside a Rust project.
+pub fn rust_packages(folder: &std::path::Path, changed: &[(String, Option<String>)]) -> Vec<String> {
+    let mut names = std::collections::BTreeSet::new();
+    for (path, _) in changed.iter().filter(|(p, _)| p.ends_with(".rs") || p.rsplit('/').next() == Some("Cargo.toml")) {
+        let mut parts: Vec<&str> = path.split('/').collect();
+        parts.pop();
+        loop {
+            let dir = parts.iter().fold(folder.to_path_buf(), |d, p| d.join(p));
+            if let Some(name) = std::fs::read_to_string(dir.join("Cargo.toml")).ok().as_deref().and_then(package_name) {
+                names.insert(name);
+                break;
+            }
+            if parts.pop().is_none() {
+                break;
+            }
+        }
+    }
+    names.into_iter().collect()
+}
+
+/// The `name` of a manifest's `[package]`, when it is plain words (no quote or space a command line could misread).
+fn package_name(manifest: &str) -> Option<String> {
+    let section = manifest.split("\n[").find(|s| s.trim_start_matches('[').starts_with("package]"))?;
+    let line = section.lines().find(|l| l.trim_start().starts_with("name") && l.contains('='))?;
+    let name = line.split_once('=')?.1.trim().trim_matches('"');
+    (!name.is_empty() && name.chars().all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_')).then(|| name.to_string())
+}
+
 /// Whether a check is heavy: a Cargo build, of which one runs at a time across every folder.
 pub fn heavy(tokens: &[String]) -> bool {
     tokens.first().is_some_and(|p| p.trim_end_matches(".exe").eq_ignore_ascii_case("cargo"))
@@ -143,5 +172,28 @@ mod tests {
     fn only_a_cargo_build_is_heavy() {
         assert!(heavy(&words("cargo clippy --workspace")) && heavy(&words("cargo t --claims")));
         assert!(!heavy(&words("cargo fmt --all --check")) && !heavy(&words("npm run build")));
+    }
+
+    #[test]
+    fn a_rust_change_names_the_package_that_holds_it() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        std::fs::write(root.join("Cargo.toml"), "[workspace]\nmembers = [\"engine\", \"testkit\"]\n").unwrap();
+        std::fs::create_dir_all(root.join("engine/src/verify")).unwrap();
+        std::fs::write(
+            root.join("engine/Cargo.toml"),
+            "[package]\nname = \"faber-engine\"\nversion = \"0.1.0\"\n\n[dependencies]\nname = \"x\"\n",
+        )
+        .unwrap();
+        std::fs::create_dir_all(root.join("testkit/src")).unwrap();
+        std::fs::write(root.join("testkit/Cargo.toml"), "[package]\nname = \"bad name\"\n").unwrap();
+        let changed = |paths: &[&str]| paths.iter().map(|p| (p.to_string(), None)).collect::<Vec<_>>();
+        assert_eq!(
+            rust_packages(root, &changed(&["engine/src/verify/select.rs", "engine/Cargo.toml", "engine/src/lib.rs"])),
+            ["faber-engine"]
+        );
+        assert!(rust_packages(root, &changed(&["ui/App.tsx", "docs/a.md"])).is_empty(), "no Rust file, no package");
+        assert!(rust_packages(root, &changed(&["testkit/src/main.rs"])).is_empty(), "a name a command line could misread");
+        assert!(rust_packages(root, &changed(&["build.rs"])).is_empty(), "a workspace with no package of its own");
     }
 }

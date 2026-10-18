@@ -434,12 +434,17 @@ impl Verifier {
     async fn run(&self, request: Request) -> Outcome {
         let level = request.level.unwrap_or(Level::Fast);
         let began = std::time::Instant::now();
-        let (planned, refused) = plan(&request.commands, &request.folder);
+        let (mut planned, refused) = plan(&request.commands, &request.folder);
         if planned.is_empty() && refused.is_empty() {
             return Outcome::nothing(level, "reason.verify.noChecks");
         }
         if level == Level::Fast && request.changed.as_ref().is_some_and(|c| c.files.is_empty()) {
             return Outcome::nothing(level, "reason.verify.nothingChanged");
+        }
+        if level == Level::Fast
+            && let Some(changed) = &request.changed
+        {
+            planned.extend(rust_checks(&request.folder, changed, &request.commands));
         }
         let folder_key = request.folder.clone();
         let mut results: Vec<CheckResult> = refused;
@@ -527,6 +532,22 @@ impl Verifier {
         results.sort_by_key(|c| order(&c.command));
         Outcome { level, checks: results, millis: began.elapsed().as_millis() as u64, log: log_path, reason: None }
     }
+}
+
+/// What fast adds for a Rust change: Clippy on each package it touches (`select::rust_packages`), which catches a compile
+/// error in seconds on a warm folder where the project's own list may compile nothing. Never in full, never in the
+/// project's list; a package the list already checks that way is not checked twice.
+// ponytail: Clippy only; the package's unit tests could join it once a run measures them at a few seconds.
+fn rust_checks(folder: &Path, changed: &Changed, declared: &[String]) -> Vec<Planned> {
+    select::rust_packages(folder, &changed.files)
+        .into_iter()
+        .map(|name| format!("cargo clippy -p {name} --all-targets -- -D warnings"))
+        .filter(|command| !declared.contains(command))
+        .map(|command| {
+            let tokens: Vec<String> = command.split_whitespace().map(String::from).collect();
+            Planned { command, tokens, watch: Watch::All, heavy: true }
+        })
+        .collect()
 }
 
 /// Whether a check may run on Node, so it needs the folder's `node_modules`: any program but the ones known not to.
@@ -665,6 +686,31 @@ mod tests {
         let full = rt().block_on(v.verify(request(dir.path(), Level::Full, &[("engine/src/a.rs", "h1")])));
         assert!(full.checks.iter().all(|c| c.verdict == Verdict::Passed), "{full:?}");
         assert_eq!(runner.started.lock().unwrap().len(), 4, "full never selects and never cuts off");
+    }
+
+    #[test]
+    fn fast_compiles_the_rust_package_a_change_touches_and_names_the_error_s_place() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join("engine/src")).unwrap();
+        std::fs::write(dir.path().join("engine/Cargo.toml"), "[package]\nname = \"faber-engine\"\n").unwrap();
+        let clippy = "cargo clippy -p faber-engine --all-targets -- -D warnings";
+        let error = "error[E0308]: mismatched types\n --> engine/src/a.rs:3:7\n  |\n3 |     x\n  |     ^ expected `u32`, found `&str`\n\n\
+                     error: could not compile `faber-engine` (lib) due to 1 previous error\n";
+        let mut runner = passing();
+        runner.script.insert(clippy.into(), (error.into(), Some(101)));
+        let runner = Arc::new(runner);
+        let v = Arc::new(Verifier::new(runner.clone()));
+        let fast = rt().block_on(v.verify(request(dir.path(), Level::Fast, &[("engine/src/a.rs", "h1")])));
+        let last = fast.checks.last().unwrap();
+        assert_eq!((last.command.as_str(), last.verdict), (clippy, Verdict::Failed), "{fast:?}");
+        assert!(last.failures.concat().contains("engine/src/a.rs:3:7"), "{:?}", last.failures);
+        assert!(fast.text().contains(&format!("FAILED {clippy}")), "{}", fast.text());
+        runner.started.lock().unwrap().clear();
+        rt().block_on(v.verify(request(dir.path(), Level::Full, &[("engine/src/a.rs", "h1")])));
+        assert!(!runner.started.lock().unwrap().iter().any(|c| c.contains("clippy")), "full runs only the project's list");
+        runner.started.lock().unwrap().clear();
+        rt().block_on(v.verify(request(dir.path(), Level::Fast, &[("ui/App.tsx", "h2")])));
+        assert!(!runner.started.lock().unwrap().iter().any(|c| c.contains("clippy")), "no Rust change, no Rust check added");
     }
 
     #[test]
