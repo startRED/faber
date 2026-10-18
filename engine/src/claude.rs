@@ -356,6 +356,9 @@ pub fn parse_claude_message(msg: &Value) -> Vec<EngineEvent> {
         "stream_event" if !msg["parent_tool_use_id"].is_null() => vec![],
         "stream_event" => {
             let event = &msg["event"];
+            if event["type"] == "message_delta" && event["delta"]["stop_reason"] == "end_turn" {
+                return vec![EngineEvent::Settled];
+            }
             if event["type"] == "content_block_start" && event["content_block"]["type"] == "text" {
                 return vec![EngineEvent::Break { final_answer: false }];
             }
@@ -634,6 +637,9 @@ pub fn start_claude(opts: ClaudeOptions, on_event: EventSink) -> Session {
                                 continue;
                             }
                             for mut event in parse_claude_message(&msg) {
+                                if matches!(event, EngineEvent::Settled) && background.owes() {
+                                    continue;
+                                }
                                 if matches!(event, EngineEvent::Done { .. }) {
                                     if !finished {
                                         background.hold(event);
@@ -821,6 +827,17 @@ fn user_message(turn: &UserTurn) -> Value {
 #[cfg(test)]
 mod allow_tests {
     use super::*;
+
+    #[test]
+    fn the_main_threads_end_turn_settles_the_reply_before_the_result_comes() {
+        let delta = |parent: Value, reason: Value| {
+            parse_claude_message(&json!({ "type": "stream_event", "parent_tool_use_id": parent,
+                "event": { "type": "message_delta", "delta": { "stop_reason": reason } } }))
+        };
+        assert!(matches!(delta(Value::Null, json!("end_turn")).as_slice(), [EngineEvent::Settled]));
+        assert!(delta(Value::Null, json!("tool_use")).is_empty(), "a message that calls a tool is not the last one");
+        assert!(delta(json!("agent1"), json!("end_turn")).is_empty(), "a subagent ending says nothing of the main thread");
+    }
 
     #[test]
     fn a_subagents_tool_calls_name_the_agent_call_and_its_words_never_join_the_answer() {

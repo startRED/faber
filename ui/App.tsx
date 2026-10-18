@@ -43,7 +43,7 @@ import { Running } from './Running.tsx';
 import { agentWide, openedAgent, showAgent, startMessage, toggleAgentWide } from './AgentChat.tsx';
 import { openedSite, showSite } from './Site.tsx';
 import { agentSteps } from './worklog.ts';
-import { createAutoOpen, openPlace, type Place, placeOfRunning, store, waitingKeys } from './running.ts';
+import { createAutoOpen, openPlace, type Place, placeOfRunning, shownRunning, stopOffered, store, waitingKeys } from './running.ts';
 import { type Keep, type Section, Settings } from './Settings.tsx';
 import { Setup } from './Setup.tsx';
 import { continuePatch, type FirstStep, firstRunStep, lookDue, setupPatch } from './setup.ts';
@@ -205,7 +205,10 @@ export function App(props: { initial: AppState; update?: UpdateStatus; inbox: { 
     setSetupOpen(false);
     if (back()) setSettingsOpen(true);
   };
-  const items = () => store.list().items;
+  // A reply whose agent finished while the CLI still closes its turn is done for the person: its row is left out of what the screen
+  // shows as running (the engine keeps it, so an update or the awake lock still waits for the process).
+  const every = () => store.list().items;
+  const items = createMemo(() => shownRunning(every()));
   const needing = () => items().filter((i) => i.state === 'needsYou').length;
 
   // ---- The widths the person gave the sidebar and the running column by dragging their edges (ui/Grip.tsx), kept per window like the
@@ -575,7 +578,7 @@ export function App(props: { initial: AppState; update?: UpdateStatus; inbox: { 
     const ticket = ++sendTicket;
     // Written while an answer runs, the message is queued or handed to that answer: it is the engine's to keep, so a
     // rejected answer must not put it back in the box.
-    const alongside = busy();
+    const alongside = engineBusy();
     let accepted = false;
     setError(undefined);
     stick = true;
@@ -673,14 +676,17 @@ export function App(props: { initial: AppState; update?: UpdateStatus; inbox: { 
   const options = createMemo(() => (lang(), modelOptions(state().vendors, state().models)));
   const project = () => state().projects.find((p) => p.id === projectId());
   // Faber's checks of the last reply (R146), and a compaction, keep the conversation at work: what is written waits for them, and Stop ends them.
-  const busy = () => {
+  const engineBusy = () => {
     const last = current()?.messages.at(-1);
     // A working row in the running list that waits for no quota is the engine saying it is at work: an answer, Faber's checks, or a compaction.
     return last?.status === 'streaming' || last?.checks?.state === 'running' || items().some((i) => i.conversationId === current()?.id && i.state === 'working' && !i.waitUntil);
   };
+  // What the composer shows: Stop ends the work; once the agent finished (only the CLI's turn is closing) it reads Send, and what is
+  // written then waits in the queue like any message written while the engine is busy.
+  const busy = () => stopOffered(engineBusy(), every(), current()?.id);
   // "Send now" works while an answer streams (the engine hands the message to its turn, or puts it first); Faber's own checks
   // keep it hidden, as Stop is what ends them.
-  const checking = () => busy() && current()?.messages.at(-1)?.status !== 'streaming';
+  const checking = () => engineBusy() && current()?.messages.at(-1)?.status !== 'streaming';
   // "Keep going" (R199): a project conversation under way can go on by itself. The engine keeps the switch; the list says it.
   const keepGoing = () => {
     const c = current();
@@ -949,7 +955,7 @@ export function App(props: { initial: AppState; update?: UpdateStatus; inbox: { 
                 vendors={state().vendors}
                 version={state().version}
                 update={update()}
-                updateBlocked={items().length > 0}
+                updateBlocked={every().length > 0}
                 onRestart={restartForUpdate}
                 userName={state().settings.userName}
                 place={place()}

@@ -14,6 +14,7 @@ import { prettyModel, vendorName, type Option } from './models.ts';
 import { animateList } from './motion.ts';
 import { windowHidden } from './appearance.ts';
 import { elapsed, warmLeft } from './running.ts';
+import { agePending, ageNow, footText, tickWhile } from './foot.ts';
 import { quotaPending } from './QuotaCard.tsx';
 import { agentState, agentSteps, changeOf, isAgentCall, middle, sameTools, sourcesOf, thinkingParts, toolLine, type AgentStep } from './worklog.ts';
 
@@ -127,13 +128,21 @@ function Answer(props: Shared & { m: Accessor<Message>; prompt?: Message; last?:
     return t('answer.cacheWarm', { time: new Date(until!).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' }) });
   };
   const streaming = () => m().status === 'streaming';
+  // Streaming and not yet finished: the agent still writes or works. Once it said all it will say, the reply reads as done while the
+  // CLI closes its turn (its Stop hooks, say), and more words after that would undo it.
+  const working = () => streaming() && m().finishedAt === undefined;
+  // The foot line says which of the two it is, how long the work took, and on the newest reply how long ago it last changed. One
+  // timer, only for the newest reply, only while its age can change and the window is shown; a memo, so it is made again only
+  // when that flips, never on the 33 ms ticks of the stream. It reads the ticking clock, so past a day the timer stops.
+  tickWhile(createMemo(() => agePending(m(), !!props.last, ageNow())));
+  const foot = () => footText(m(), !!props.last, ageNow());
   const waiting = () => m().permissions ?? [];
   // Unknown legacy boundaries and tool-terminated turns keep the entire answer visible. So does a reply that is still
   // streaming: the boundary moves with every step, and what the agent said between steps would fold away and come back
   // as the stream goes on. It folds into the activity once, when the answer ends.
   const boundary = createMemo(() => {
     const end = m().activityEnd;
-    return !streaming() && tools().length && Number.isInteger(end) && end! > 0 && end! < text().length && text().slice(end).trim() ? end! : 0;
+    return !working() && tools().length && Number.isInteger(end) && end! > 0 && end! < text().length && text().slice(end).trim() ? end! : 0;
   });
   // The answer is always kept whole. A status sentence that is exactly the answer's opening paragraph is dropped from the
   // activity instead, so it shows once.
@@ -182,7 +191,7 @@ function Answer(props: Shared & { m: Accessor<Message>; prompt?: Message; last?:
   // A memo, so the timer is made again only when another step starts, not on every tick of the stream.
   const runningSince = createMemo(() => {
     const tool = tools().at(-1);
-    return streaming() && tool && tool.ok === undefined ? tool.started : undefined;
+    return working() && tool && tool.ok === undefined ? tool.started : undefined;
   });
   createEffect(() => {
     if (runningSince() === undefined || windowHidden()) return;
@@ -204,7 +213,7 @@ function Answer(props: Shared & { m: Accessor<Message>; prompt?: Message; last?:
   };
   const changing = createMemo(() => {
     const tool = tools().at(-1);
-    return streaming() && tool && (tool.ok === undefined || !answering()) ? changeOf(tool) : undefined;
+    return working() && tool && (tool.ok === undefined || !answering()) ? changeOf(tool) : undefined;
   });
   // The header says which model answers and how hard it thinks: the vendor's mark, the model's name from the moment it is
   // known to the end and after reopening (a model the CLI never named reads as the vendor's name), and its effort when the
@@ -231,7 +240,7 @@ function Answer(props: Shared & { m: Accessor<Message>; prompt?: Message; last?:
       class="ai"
       aria-label={t('answer.label')}
       onContextMenu={(e) =>
-        openMenu(e, [copyItem(m().text), ...(!streaming() && props.prompt ? [{ id: 'redo', label: retry(), run: () => props.onBranch(props.prompt!.id, props.prompt!.text) }] : [])])
+        openMenu(e, [copyItem(m().text), ...(!working() && props.prompt ? [{ id: 'redo', label: retry(), run: () => props.onBranch(props.prompt!.id, props.prompt!.text) }] : [])])
       }
     >
       <div class="model" title={headerTitle() || undefined}>
@@ -262,7 +271,7 @@ function Answer(props: Shared & { m: Accessor<Message>; prompt?: Message; last?:
       <QuotaCard id={props.conversationId} m={m()} usage={props.usage ?? []} />
       <Show when={steps()}>
         <details class="activity disclosure">
-          <summary>{t(streaming() ? 'activity.working' : 'activity.done', { steps: t('activity.steps', { n: steps() }), commands: t('activity.commands', { n: commands() }) })}</summary>
+          <summary>{t(working() ? 'activity.working' : 'activity.done', { steps: t('activity.steps', { n: steps() }), commands: t('activity.commands', { n: commands() }) })}</summary>
           <div class="activity-body">
             <Show when={thinking().length}>
               <div class="activity-thinking">
@@ -280,10 +289,10 @@ function Answer(props: Shared & { m: Accessor<Message>; prompt?: Message; last?:
       </Show>
       <Show when={agents().length}>
         <div class="agents" role="list" aria-label={t('agent.label')}>
-          <Index each={agents()}>{(step) => <AgentRow step={step} streaming={streaming()} conversationId={props.conversationId} messageId={m().id} />}</Index>
+          <Index each={agents()}>{(step) => <AgentRow step={step} streaming={working()} conversationId={props.conversationId} messageId={m().id} />}</Index>
         </div>
       </Show>
-      <Show when={(steps() || agents().length) && streaming() && latest()}>
+      <Show when={(steps() || agents().length) && working() && latest()}>
         <div class="activity-latest" role="status" aria-live="polite" aria-atomic="true" title={latest()}>
           <span class="step">{latest()}</span>
           {/* The time is for the eye: a live region that changed every few seconds would keep talking. */}
@@ -293,7 +302,7 @@ function Answer(props: Shared & { m: Accessor<Message>; prompt?: Message; last?:
         </div>
       </Show>
       {/* One polite region for the whole reply, so a screen reader hears each check end and the first failure. */}
-      <Show when={streaming()}>
+      <Show when={working()}>
         <div class="tally-live" role="status" aria-live="polite" aria-atomic="true">
           <Show when={tally().ran}>
             <p class="tally" classList={{ bad: tally().failed > 0 }}>
@@ -305,15 +314,15 @@ function Answer(props: Shared & { m: Accessor<Message>; prompt?: Message; last?:
           </Show>
         </div>
       </Show>
-      <Show when={streaming() && sources().hosts.length}>
+      <Show when={working() && sources().hosts.length}>
         <SourceList sources={sources()} />
       </Show>
       <Show when={changing()}>{(change) => <ChangedLines change={change()} />}</Show>
       <Asks conversationId={props.conversationId} turnId={m().id} permissions={waiting()} surface="ask" />
       <Parkeds parked={m().parked ?? []} more={m().parkedMore} surface="ask" />
-      <div class="md" aria-busy={streaming()} onClick={openLinks}>
+      <div class="md" aria-busy={working()} onClick={openLinks}>
         <Markdown text={finalText()} />
-        <Show when={streaming() && !waiting().length && !m().waitUntil}>
+        <Show when={working() && !waiting().length && !m().waitUntil}>
           <span class="cursor" aria-hidden="true" />
         </Show>
       </div>
@@ -343,8 +352,10 @@ function Answer(props: Shared & { m: Accessor<Message>; prompt?: Message; last?:
           {fromEngine(m().halt, { ai: m().vendor ? vendorName(m().vendor!) : t('model.auto') })}
         </p>
       </Show>
-      <Show when={!streaming()}>
-        <div class="actions">
+      <Show when={!working() || foot()}>
+        {/* While the agent works the row holds only the foot line; `.actions` is the finished reply's row, which screen tests wait for. */}
+        <div class={working() ? 'live-foot' : 'actions'}>
+          <Show when={!working()}>
           <button type="button" class="iconbtn" title={t('answer.copy')} aria-label={t('answer.copy')} onClick={() => void navigator.clipboard.writeText(m().text)}>
             <Icon name="copy" small />
           </button>
@@ -370,7 +381,9 @@ function Answer(props: Shared & { m: Accessor<Message>; prompt?: Message; last?:
               </button>
             )}
           </Show>
-          <Show when={costOf(m())}>{(cost) => <span class="cost num" title={costTitle(m(), warm())}>{cost()}</span>}</Show>
+          </Show>
+          <Show when={foot()}>{(line) => <span class="foot" title={line()}>{line()}</span>}</Show>
+          <Show when={!working() && costOf(m())}>{(cost) => <span class="cost num" title={costTitle(m(), warm())}>{cost()}</span>}</Show>
         </div>
       </Show>
     </article>

@@ -112,6 +112,16 @@ The numbers above are the usual widths. The person can change them, and the shel
   when a step up is offered, then the cost in the faint data style. The tokens and how long the cache stays warm are the
   cost's tooltip. There is no model select under an answer: a retry (and the right-click Redo, which names the model)
   uses the composer's current choice.
+- The same line carries the reply's state (the owner, 2026-10-18: "you should have said you finished"), after the buttons, in the
+  quiet ink and the small size, cut with an ellipsis before it pushes a button: "Working" while the agent writes or works,
+  then "Done", "Done · 12 min of work" once the work took a minute or more, and on the newest reply "· updated 3 min ago"
+  ("just now" under a minute, none past a day). A reply that works shows only this text in the row, the buttons join it when
+  it is done, so the row does not grow. The agent is done when its last message ended and no tool call of the reply is open,
+  though the CLI may close its turn up to a minute later (its Stop hooks): from then the cursor stops, the work folds into
+  its activity, the buttons appear, the running column and the topbar's count leave it out, and the composer reads Send,
+  where a message waits in the queue. More words after that undo it. The age ticks once a minute on the newest reply only,
+  never while the window is hidden; older replies run no timer. A reply from before the times were kept, a stop and an error
+  say nothing here. Nothing animates.
 - There is no permission sentence over a conversation: the mode is a Settings matter.
 - Keep going (R199): the chip, its quiet lines, its quota warning and what it shows on coming back are in
   [keep-going.md](keep-going.md).
@@ -197,4 +207,6 @@ projects. Faber has no worktree creation for projects, so an environment has no 
   while questions are waiting, those questions never reopen it. Only the button stays amber.
 - Items are grouped by project. Projects that have something needing the user come first, and inside a project the
   amber item comes first. The order is stable, so rows do not jump.
+- A reply whose agent has finished, with only the CLI's turn still closing, is not a row: it is done for the person. Keep going,
+  Faber's checks, a compaction and a queued message keep the row. The topbar's count follows the column.
 - With no items it shows an empty state with Curioso.

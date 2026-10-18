@@ -512,6 +512,11 @@ details.thinking div { white-space: pre-wrap; padding: 6px 0 0 12px; border-left
 .ai .actions .iconbtn { padding: 0; }
 .ai .actions .nudge { flex: none; margin-left: 8px; white-space: nowrap; color: var(--ink-2); text-decoration: underline; text-underline-offset: 3px; text-decoration-color: var(--line-3); }
 .ai .actions .cost { flex: 0 1 auto; min-width: 0; margin-left: auto; padding-left: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font: 400 var(--fs-xs) var(--font-data); color: var(--ink-3); }
+/* The foot line: working or done, how long it took, and on the newest reply how long ago it last changed. It gives way before the buttons. */
+/* The foot line alone while the agent works, as tall as the finished row so nothing jumps when its buttons come. */
+.ai .live-foot { display: flex; align-items: center; min-height: var(--h-md); min-width: 0; font-size: var(--fs-xs); color: var(--ink-3); }
+.ai .actions .foot, .ai .live-foot .foot { flex: 0 1 auto; min-width: 0; margin-left: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--ink-3); }
+.ai .actions .foot:first-child, .ai .live-foot .foot { margin-left: 0; }
 
 /* Buttons and small parts */
 .btn { display: inline-flex; align-items: center; justify-content: center; gap: 7px; height: var(--h-md); padding: 0 12px; border-radius: var(--r-sm); color: var(--ink-2); font-size: var(--fs-sm); font-weight: 500; white-space: nowrap; box-shadow: inset 0 0 0 1px var(--line-2); transition: background var(--dur-fast), color var(--dur-fast), transform var(--dur-fast) var(--ease); }

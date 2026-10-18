@@ -111,6 +111,11 @@ export interface Message {
   autoAnswers?: { question: string; answer: string }[];
   /** On a project reply that changed files: Faber's own run of the fast checks once it ended (R146). */
   checks?: Checks;
+  /** On a reply: when its words, thinking or tools last changed, in milliseconds. "Updated 3 min ago" counts from it. */
+  movedAt?: number;
+  /** On a reply: when the agent said all it will say, in milliseconds. Set while the reply still streams, it is finished for the
+   * person while the CLI closes its turn. */
+  finishedAt?: number;
 }
 export type ChecksState = 'running' | 'passed' | 'failed' | 'needsYou';
 export interface Checks {
@@ -325,6 +330,8 @@ export interface RunningItem {
   keepWait?: { why: 'retry' | 'rest' | 'busy' | 'start'; until: number };
   /** How far a conversation that goes on by itself has come: turns of work, when it began (ms, 0 unknown), the last line it wrote. */
   keepProgress?: { turns: number; since: number; last?: string };
+  /** The agent finished and only the CLI's turn is closing, with nothing else running: the screen leaves the row out. */
+  settled?: boolean;
 }
 /** The running list in the engine's order, with a revision that grows by one with every list the engine sends. */
 export interface RunningList {

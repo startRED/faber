@@ -528,6 +528,7 @@ mod tests {
             keep_going: false,
             keep_wait: None,
             keep_progress: None,
+            settled: false,
         }
     }
 

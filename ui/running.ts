@@ -39,6 +39,15 @@ export function blocksOf(items: RunningItem[]): Block[] {
   return [...blocks.values()];
 }
 
+/** What the screen shows as running: a reply whose agent finished, with only the CLI's turn still closing, is done for the person. The
+ * engine keeps its row (an update and the awake lock still wait for the process), so the whole list is for those. */
+export const shownRunning = (items: RunningItem[]): RunningItem[] => items.filter((i) => !i.settled);
+
+/** Whether the composer offers Stop: the engine is at work in the conversation and its agent has not finished. Once it has, the
+ * composer reads Send, and a message written then waits in the queue like any written while the engine is busy. */
+export const stopOffered = (engineBusy: boolean, items: RunningItem[], conversationId?: string): boolean =>
+  engineBusy && !items.some((i) => i.conversationId === conversationId && i.settled);
+
 /** The conversations the new-conversation screen offers to pick up: those that wait for the user first, then the latest, at
  * most `limit`. `recent` is every conversation, newest first: it is ordered whole, so a waiting one is found however old it is. */
 export function pickUp<T extends { id: string; archived?: boolean }>(all: T[], items: RunningItem[], limit = 4): T[] {

@@ -1450,6 +1450,15 @@ impl Core {
         if self.convs.get(conv).is_some_and(|c| c.compacting) && self.compaction_event(conv, &event) {
             return;
         }
+        // What the reply says or does moves it: its age counts from here, and more words after the agent finished mean it was not done.
+        if let Some(main) = event.moves_reply()
+            && let Some(m) = self.turn(conv)
+        {
+            m.moved_at = Some(now());
+            if main {
+                m.finished_at = None;
+            }
+        }
         match event {
             EngineEvent::Context { used, window } => return self.note_context(conv, vendor, used, window),
             EngineEvent::Compacted { after } => return self.note_compacted(conv, vendor, after),
@@ -1497,6 +1506,14 @@ impl Core {
                     l.break_pending = true;
                 }
                 return;
+            }
+            // The main thread said all it will say; a tool call still open (a helper in the background) means it is not done.
+            EngineEvent::Settled => {
+                if let Some(m) = self.turn(conv)
+                    && m.tools.iter().flatten().all(|t| t.ok.is_some() || t.parent.is_some())
+                {
+                    m.finished_at = Some(now());
+                }
             }
             EngineEvent::Text(delta) => {
                 let pending = self.live.get(conv).is_some_and(|l| l.break_pending);
@@ -1686,6 +1703,12 @@ impl Core {
                 let can_run = crate::route::candidates(&self.vendors(), &self.codex_models);
                 if let Some(m) = self.turn(conv) {
                     m.status = Some(if ok { Status::Done } else { Status::Stopped });
+                    // Only a turn that ended well is done: a failed one may still be waited on or moved, and works again then.
+                    if ok {
+                        m.finished_at.get_or_insert_with(now);
+                    } else {
+                        m.finished_at = None;
+                    }
                     m.cost_usd = cost.map(|cost| m.cost_usd.unwrap_or(0.0) + cost).or(m.cost_usd);
                     m.input_tokens = Some(input_tokens);
                     m.output_tokens = Some(output_tokens);
@@ -1953,6 +1976,8 @@ impl Core {
         if let Some(c) = self.convs.get(conv) {
             (self.emit)(AppEvent::Queue { conversation_id: conv.to_string(), queued: c.queued.clone() });
         }
+        // A message waiting keeps a finished reply's row at work (`settled`).
+        self.refresh_running();
     }
 
     /// A message written while a turn runs. The running CLI takes it into that turn (Codex `turn/steer`, Claude Code a line on
@@ -1983,8 +2008,11 @@ impl Core {
             wake: None,
         };
         let c = self.convs.get(id).ok_or("error.conversationGone")?;
-        // Steering waits behind nothing: a message that is already queued would be passed by one sent straight in.
-        let steer = c.queued.iter().all(|q| q.sending)
+        // Steering waits behind nothing: a message that is already queued would be passed by one sent straight in. A reply whose
+        // agent already finished takes nothing in: the message waits for the CLI to close the turn and goes out as the next one.
+        let finished = c.messages.last().is_some_and(|m| m.role == Role::Assistant && m.finished_at.is_some());
+        let steer = !finished
+            && c.queued.iter().all(|q| q.sending)
             && self.live.get(id).is_some_and(|l| l.turn.is_some() && [l.vendor.name(), "auto"].contains(&item.choice.vendor.as_str()));
         if steer {
             self.steer(id, &mut item);
@@ -2056,6 +2084,7 @@ impl Core {
         reply.model = model;
         reply.tools = Some(vec![]);
         reply.status = Some(Status::Streaming);
+        reply.finished_at = None;
         let (question_id, reply_id) = (question.id.clone(), reply.id.clone());
         c.messages.push(question);
         c.messages.push(reply);
@@ -2231,6 +2260,7 @@ impl Core {
         reply.note = resent.then(|| "note.historyResent".to_string());
         reply.tools = Some(vec![]);
         reply.status = Some(Status::Streaming);
+        reply.finished_at = None;
         let reply_id = reply.id.clone();
         let question_id = question.id.clone();
         c.messages.push(question);
@@ -2385,6 +2415,7 @@ impl Core {
             }
             m.error = None;
             m.status = Some(Status::Streaming);
+            m.finished_at = None;
             m.permissions = None;
             m.mode = self.live.get(id).and_then(|l| l.permissions.fallback_note(l.runs));
         }
@@ -2732,6 +2763,7 @@ impl Core {
         reply.note = resent.then(|| "note.historyResent".to_string());
         reply.tools = Some(vec![]);
         reply.status = Some(Status::Streaming);
+        reply.finished_at = None;
         let reply_id = reply.id.clone();
         let question_id = question.id.clone();
         c.messages.push(question);
@@ -3043,6 +3075,21 @@ fn running_item(c: &Conversation) -> Option<RunningItem> {
     {
         return None;
     }
+    let state = if permissions.is_empty() && parked.is_empty() && parked_more == 0 && stuck.is_empty() && held.is_none() && !checks_need {
+        RunState::Working
+    } else {
+        RunState::NeedsYou
+    };
+    // Only the CLI's turn is still closing: nothing else keeps the conversation at work (not Keep going, its checks, a compaction, a
+    // message waiting), so the screen reads it as done.
+    let settled = state == RunState::Working
+        && reply.status == Some(Status::Streaming)
+        && reply.finished_at.is_some()
+        && reply.wait_until.is_none()
+        && !c.compacting
+        && c.keep_going.is_none()
+        && c.queued.is_empty()
+        && checks != Some(ChecksState::Running);
     Some(RunningItem {
         conversation_id: c.id.clone(),
         turn_id: reply.id.clone(),
@@ -3051,11 +3098,7 @@ fn running_item(c: &Conversation) -> Option<RunningItem> {
         project_id: c.project_id.clone(),
         vendor: reply.vendor,
         model: reply.model.clone(),
-        state: if permissions.is_empty() && parked.is_empty() && parked_more == 0 && stuck.is_empty() && held.is_none() && !checks_need {
-            RunState::Working
-        } else {
-            RunState::NeedsYou
-        },
+        state,
         since: reply.at,
         permissions,
         parked,
@@ -3070,6 +3113,7 @@ fn running_item(c: &Conversation) -> Option<RunningItem> {
             since: k.since,
             last: keep_going::progress_line(&c.messages),
         }),
+        settled,
     })
 }
 

@@ -181,9 +181,42 @@ async fn an_answer_emits_only_the_lists_that_differ_from_the_one_before() {
     // Every message event re-reads the list, and the list is told only when it differs.
     assert!(messages >= 2, "the question and the answer both reached the screen");
     assert_consecutive(&lists);
-    // The turn began, the CLI named its model, the turn ended: three lists at most.
-    assert!(lists.len() <= 3, "{} lists: {lists:?}", lists.len());
+    // The turn began, the CLI named its model, the agent finished, the turn ended: four lists at most.
+    assert!(lists.len() <= 4, "{} lists: {lists:?}", lists.len());
     assert!(lists.windows(2).all(|w| w[0].1 != w[1].1), "two equal lists in a row");
+}
+
+#[tokio::test]
+async fn a_reply_reads_as_finished_when_the_agent_stops_writing_not_when_the_cli_closes_its_turn() {
+    let dir = tempfile::tempdir().unwrap();
+    // The recording holds back the CLI's `result` for 400 ms after the last message ended with `end_turn`, as a Stop hook does.
+    let (engine, mut rx) = engine(dir.path(), &[Vendor::Claude], fake(fixture("claude", "chat-settled")).spawn, None);
+    let id = engine.send(request(Area::Chat, None, SKY, "claude")).unwrap();
+    let mut finished_at = None;
+    let mut settled_row = None;
+    let mut ended = false;
+    while !ended {
+        match tokio::time::timeout(WAIT, rx.recv()).await.expect("the answer never ended").expect("engine gone") {
+            AppEvent::Message { message, .. } if message.role == faber_engine::model::Role::Assistant => {
+                if message.status == Some(Status::Streaming) && message.finished_at.is_some() && finished_at.is_none() {
+                    finished_at = Some(std::time::Instant::now());
+                }
+                ended = message.status == Some(Status::Done);
+                if ended {
+                    assert!(message.finished_at.is_some() && message.moved_at.is_some());
+                }
+            }
+            AppEvent::Running { items, .. } if items.iter().any(|i| i.settled) && settled_row.is_none() => {
+                settled_row = Some(std::time::Instant::now());
+            }
+            _ => {}
+        }
+    }
+    engine.shutdown();
+    let _ = id;
+    let (finished, row) = (finished_at.expect("the reply never read as finished while streaming"), settled_row.expect("no settled row"));
+    assert!(finished.elapsed() >= Duration::from_millis(250), "it read as finished long before the result: {:?}", finished.elapsed());
+    assert!(row.elapsed() >= Duration::from_millis(250), "its row was left out long before the result: {:?}", row.elapsed());
 }
 
 #[tokio::test]

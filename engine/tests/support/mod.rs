@@ -260,6 +260,13 @@ pub fn replay(entries: Vec<Entry>, mismatches: Mismatches) -> Proc {
         let mut lines = BufReader::new(&mut fake_in).lines();
         loop {
             while at < entries.len() && !entries[at].input {
+                // A recorded faber_hold with a number of milliseconds is a pause between two lines (the screen checks' fake CLI waits for
+                // a release instead); it is never sent.
+                if let Some(ms) = entries[at].msg["faber_hold"].as_u64() {
+                    tokio::time::sleep(Duration::from_millis(ms)).await;
+                    at += 1;
+                    continue;
+                }
                 let line = format!("{}\n", entries[at].msg);
                 if fake_out.write_all(line.as_bytes()).await.is_err() {
                     return;

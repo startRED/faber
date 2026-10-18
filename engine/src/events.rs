@@ -45,6 +45,10 @@ pub enum EngineEvent {
         final_answer: bool,
     },
     Thinking(String),
+    /// The main thread's message ended with `end_turn` (Claude Code's `message_delta`): the agent has said all it will say
+    /// unless a tool call is still open. The CLI's own `result` may come much later (whatever runs after the answer, such as
+    /// the person's Stop hooks), so the screen reads the reply as done now while the engine still waits for `Done`.
+    Settled,
     Tool {
         id: String,
         name: String,
@@ -167,6 +171,19 @@ pub enum EngineEvent {
         message: String,
         fatal: bool,
     },
+}
+
+impl EngineEvent {
+    /// Whether the event is the reply's own words or work, which move it: `Some(true)` from the main thread (it also undoes a
+    /// finish), `Some(false)` from a subagent's tool call or a tool's result.
+    pub fn moves_reply(&self) -> Option<bool> {
+        match self {
+            EngineEvent::Text(_) | EngineEvent::Thinking(_) => Some(true),
+            EngineEvent::Tool { parent, .. } => Some(parent.is_none()),
+            EngineEvent::ToolResult { .. } | EngineEvent::HelperDone { .. } => Some(false),
+            _ => None,
+        }
+    }
 }
 
 /// A user turn: plain text plus optional images.

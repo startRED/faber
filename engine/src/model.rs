@@ -272,6 +272,14 @@ pub struct Message {
     /// A run that was going on when Faber closed is not read back: nothing would end it.
     #[serde(default, skip_serializing_if = "Option::is_none", deserialize_with = "settled_checks")]
     pub checks: Option<Checks>,
+    /// On a reply: when its words, thinking or tools last changed, in milliseconds. The screen's "updated 3 min ago" counts from it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub moved_at: Option<u64>,
+    /// On a reply: when the agent said all it will say (its last message ended with `end_turn` and no tool call was open, or
+    /// the turn ended), in milliseconds. A reply that still streams with this set is finished for the person while the CLI
+    /// closes its turn; more words or tools clear it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub finished_at: Option<u64>,
 }
 
 /// Faber's checks of a reply (`engine/src/engine/verifying.rs`): running, passed, or what failed.
@@ -513,6 +521,8 @@ impl Message {
             auto_answers: None,
             away: None,
             checks: None,
+            moved_at: None,
+            finished_at: None,
         }
     }
 }
@@ -740,6 +750,11 @@ pub struct RunningItem {
     /// "Keep going" is on: how far it has come.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub keep_progress: Option<KeepProgress>,
+    /// The agent said all it will say and only the CLI's turn is still closing (its Stop hooks, say), with nothing else running
+    /// for the conversation: the screen reads it as done and leaves it out of what it shows as running. Updates, the tray and
+    /// the awake lock still count it, since a process is still at work.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub settled: bool,
 }
 
 /// The running list as the engine last sent it. The revision grows by one with every list the engine emits, so a
