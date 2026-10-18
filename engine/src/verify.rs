@@ -13,6 +13,7 @@
 //!
 //! The agent calls it as Faber's `verify` tool, like the helper and the browser (`crate::helper::mcp`).
 
+mod admit;
 mod changes;
 mod journal;
 mod run;
@@ -336,8 +337,10 @@ const MAX_REMEMBERED: usize = 512;
 pub struct Verifier {
     runner: Arc<dyn Runner>,
     deadline: Duration,
-    /// One Cargo build at a time, across every folder.
-    heavy: Arc<tokio::sync::Semaphore>,
+    /// Cargo builds across every folder, admitted by free memory (`admit`).
+    heavy: admit::Admission,
+    /// The free memory a build is admitted against.
+    free: admit::Free,
     passed: Mutex<Passed>,
     /// The run of each folder, which a newer one stops, with who started it (a conversation's id).
     running: Mutex<HashMap<PathBuf, Running>>,
@@ -369,7 +372,9 @@ impl Verifier {
         Verifier {
             runner,
             deadline,
-            heavy: Arc::new(tokio::sync::Semaphore::new(1)),
+            heavy: admit::Admission::default(),
+            // No reading: one build at a time, unless a test gives one.
+            free: Arc::new(|| None),
             passed: Mutex::new(Passed::default()),
             running: Mutex::new(HashMap::new()),
             next: AtomicU64::new(0),
@@ -381,7 +386,7 @@ impl Verifier {
 
     /// The real verifier the shell gives the engine, with its game guard and its journal (a file in the data folder).
     pub fn real(guard: Option<Guard>, journal: Option<PathBuf>) -> Arc<Verifier> {
-        Arc::new(Verifier { guard, journal: Journal::new(journal), ..Verifier::new(Arc::new(Real)) })
+        Arc::new(Verifier { guard, journal: Journal::new(journal), free: Arc::new(admit::free_memory), ..Verifier::new(Arc::new(Real)) })
     }
 
     /// The same verifier with a game guard (tests).
@@ -540,7 +545,7 @@ impl Verifier {
             // The guard is read again once the Cargo build's turn comes: a game may have started while it waited.
             let _turn = loop {
                 self.game_over().await;
-                let turn = if check.heavy { self.heavy.clone().acquire_owned().await.ok() } else { None };
+                let turn = if check.heavy { Some(self.heavy.admit(known[&check.command].peak, &self.free).await) } else { None };
                 if !self.guard.as_ref().is_some_and(|in_front| in_front()) {
                     break turn;
                 }
@@ -560,6 +565,7 @@ impl Verifier {
                     ok,
                     millis: out.millis,
                     at: (self.clock)(),
+                    peak: ran.peak,
                 };
                 if self.journal.add(entry) && !ok {
                     out.summary.push_str("; flaky: it passed and failed before on the same content");
@@ -689,6 +695,7 @@ mod tests {
                 stderr: Box::new(tokio::io::empty()),
                 exit,
                 throttle: Some(throttle),
+                peak: None,
             })
         }
     }
@@ -808,6 +815,7 @@ mod tests {
             ok: true,
             millis: 5,
             at: 0,
+            peak: None,
         });
         let third = run("h2");
         let docs = third.checks.iter().find(|c| c.command == "npm run docs").unwrap();

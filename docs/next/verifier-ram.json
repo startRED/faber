@@ -1,0 +1,11 @@
+{
+  "notes": {
+    "better": {
+      "en": "Faber's checks run two Cargo builds at once when the memory they took before fits, and one at a time when it does not.",
+      "pt-BR": "As verificações do Faber rodam dois builds do Cargo ao mesmo tempo quando a memória que usaram antes cabe, e um de cada vez quando não cabe.",
+      "es": "Las comprobaciones de Faber ejecutan dos compilaciones de Cargo a la vez cuando la memoria que usaron antes cabe, y una a una cuando no.",
+      "fr": "Les vérifications de Faber lancent deux compilations Cargo à la fois quand la mémoire qu'elles ont prise avant tient, et une à la fois sinon.",
+      "de": "Fabers Prüfungen lassen zwei Cargo-Builds gleichzeitig laufen, wenn der Speicher, den sie vorher brauchten, passt, und sonst einen nach dem anderen."
+    }
+  }
+}

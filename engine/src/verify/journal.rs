@@ -27,6 +27,9 @@ pub struct Entry {
     pub ok: bool,
     pub millis: u64,
     pub at: u64,
+    /// The most memory it held at once, in bytes, when the runner could tell.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub peak: Option<u64>,
 }
 
 /// What the journal knows of one check.
@@ -36,6 +39,8 @@ pub struct Known {
     pub failed: bool,
     /// The median time of its passes, in milliseconds.
     pub cost: Option<u64>,
+    /// The most memory any of its kept runs held at once, in bytes: what a build is admitted against.
+    pub peak: Option<u64>,
 }
 
 type Key = (String, String);
@@ -86,7 +91,11 @@ impl Journal {
             let Some(entries) = state.checks.get(&(project.to_string(), command.to_string())) else { return Known::default() };
             let mut passes: Vec<u64> = entries.iter().filter(|e| e.ok).map(|e| e.millis).collect();
             passes.sort_unstable();
-            Known { failed: entries.back().is_some_and(|e| !e.ok), cost: passes.get(passes.len() / 2).copied() }
+            Known {
+                failed: entries.back().is_some_and(|e| !e.ok),
+                cost: passes.get(passes.len() / 2).copied(),
+                peak: entries.iter().filter_map(|e| e.peak).max(),
+            }
         })
     }
 
@@ -155,7 +164,7 @@ mod tests {
     use super::*;
 
     fn entry(command: &str, key: &str, ok: bool, millis: u64, at: u64) -> Entry {
-        Entry { project: "p".into(), command: command.into(), key: Some(key.into()), ok, millis, at }
+        Entry { project: "p".into(), command: command.into(), key: Some(key.into()), ok, millis, at, peak: None }
     }
 
     #[test]
@@ -165,7 +174,7 @@ mod tests {
         for (n, millis) in [300, 100, 200].into_iter().enumerate() {
             journal.add(entry("lint", &format!("k{n}"), true, millis, n as u64));
         }
-        assert_eq!(journal.known("p", "lint"), Known { failed: false, cost: Some(200) });
+        assert_eq!(journal.known("p", "lint"), Known { failed: false, cost: Some(200), peak: None });
         assert!(!journal.add(entry("lint", "k9", false, 50, 10)), "a failure on new content");
         assert!(journal.known("p", "lint").failed);
         assert!(!journal.add(entry("lint", "k8", false, 50, 11)), "still not flaky on other content");
@@ -174,6 +183,9 @@ mod tests {
         none.key = None;
         assert!(!journal.add(none.clone()) && !journal.add(Entry { ok: false, ..none }), "no content, never flaky");
         assert_eq!(journal.known("q", "lint"), Known::default(), "another project");
+        journal.add(Entry { peak: Some(7), ..entry("lint", "k2", true, 1, 14) });
+        journal.add(Entry { peak: Some(5), ..entry("lint", "k3", true, 1, 15) });
+        assert_eq!(journal.known("p", "lint").peak, Some(7), "the highest kept peak");
     }
 
     #[test]
