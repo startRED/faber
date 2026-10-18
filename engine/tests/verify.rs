@@ -504,6 +504,13 @@ async fn while_the_checks_run_the_conversation_is_at_work_and_stop_ends_them_wit
     engine.send(ask(Some(id.clone()), None, "and the header")).unwrap();
     tokio::time::sleep(Duration::from_millis(60)).await;
     assert_eq!(turns(&pipe).len(), 1, "nothing went out while the checks run: {:?}", turns(&pipe));
+    // "Send now" on a later one has no turn to hand it to: it goes first, still waiting.
+    engine.send(ask(Some(id.clone()), None, "and the footer")).unwrap();
+    let later = engine.open(&id).unwrap().queued[1].id.clone();
+    engine.send_queued(&id, &later).unwrap();
+    let order: Vec<String> = engine.open(&id).unwrap().queued.iter().map(|q| q.text.clone()).collect();
+    assert_eq!(order, ["and the footer", "and the header"]);
+    assert_eq!(turns(&pipe).len(), 1);
     // The person stops: the checks end, the reply keeps no row, and no fix is asked even once the check would answer.
     engine.interrupt(&id);
     runner.open();

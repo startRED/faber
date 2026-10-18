@@ -628,6 +628,9 @@ export function App(props: { initial: AppState; update?: UpdateStatus; inbox: { 
     const last = current()?.messages.at(-1);
     return last?.status === 'streaming' || last?.checks?.state === 'running';
   };
+  // "Send now" works while an answer streams (the engine hands the message to its turn, or puts it first); Faber's own checks
+  // keep it hidden, as Stop is what ends them.
+  const checking = () => busy() && current()?.messages.at(-1)?.status !== 'streaming';
   // "Keep going" (R199): a project conversation under way can go on by itself. The engine keeps the switch; the list says it.
   const keepGoing = () => {
     const c = current();
@@ -998,7 +1001,7 @@ ${copy().path}`}>
                                   <Thread
                                     messages={c().messages}
                                     queued={c().queued}
-                                    busy={busy()}
+                                    busy={checking()}
                                     onError={fail}
                                     usage={state().usage ?? []}
                                     from={from()}

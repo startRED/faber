@@ -1975,12 +1975,7 @@ impl Core {
         let steer = c.queued.iter().all(|q| q.sending)
             && self.live.get(id).is_some_and(|l| l.turn.is_some() && [l.vendor.name(), "auto"].contains(&item.choice.vendor.as_str()));
         if steer {
-            item.sending = true;
-            let turn = UserTurn { text: self.model_text(id, &item), images: item.images.clone().unwrap_or_default() };
-            if let Some(l) = self.live.get_mut(id) {
-                l.steering.push(item.id.clone());
-                l.session.steer(turn, &item.id);
-            }
+            self.steer(id, &mut item);
         }
         if let Some(c) = self.convs.get_mut(id) {
             c.queued.push(item);
@@ -1989,6 +1984,16 @@ impl Core {
         self.save(id);
         self.emit_queue(id);
         Ok(id.to_string())
+    }
+
+    /// Hands a message to the running turn; the CLI takes it in at its next step (`taken_in`) or refuses it (`steer_failed`).
+    fn steer(&mut self, id: &str, item: &mut QueuedTurn) {
+        item.sending = true;
+        let turn = UserTurn { text: self.model_text(id, item), images: item.images.clone().unwrap_or_default() };
+        if let Some(l) = self.live.get_mut(id) {
+            l.steering.push(item.id.clone());
+            l.session.steer(turn, &item.id);
+        }
     }
 
     /// What the CLI is told for a message: what the person wrote, with the note about the files they attached.
@@ -2114,17 +2119,43 @@ impl Core {
     }
 
     fn send_queued(&mut self, id: &str, turn_id: &str) -> Result<(), String> {
+        // While an answer runs, the message goes into its turn, ahead of the ones still waiting: the person chose it.
+        let running = self.live.get(id).filter(|l| l.turn.is_some()).map(|l| l.vendor.name());
+        if let Some(vendor) = running {
+            let c = self.convs.get_mut(id).ok_or("error.conversationGone")?;
+            let pos = c.queued.iter().position(|q| q.id == turn_id).ok_or("error.messageGone")?;
+            if c.queued[pos].sending {
+                return Ok(());
+            }
+            let mut item = c.queued.remove(pos);
+            let at = c.queued.iter().rposition(|q| q.sending).map_or(0, |p| p + 1);
+            // One for the other AI cannot go into this turn: it goes first among those that wait.
+            if [vendor, "auto"].contains(&item.choice.vendor.as_str()) {
+                self.steer(id, &mut item);
+            }
+            if let Some(c) = self.convs.get_mut(id) {
+                c.queued.insert(at, item);
+            }
+            self.save(id);
+            self.emit_queue(id);
+            return Ok(());
+        }
         let busy = self.live.get(id).is_some_and(|l| l.turn.is_some())
             || self
                 .convs
                 .get(id)
                 .is_some_and(|c| verifying::checking(c) || c.messages.last().is_some_and(|m| m.status == Some(Status::Streaming)));
-        if busy {
-            return Err("error.busy".into());
-        }
         let Some(c) = self.convs.get_mut(id) else { return Err("error.conversationGone".into()) };
         let pos = c.queued.iter().position(|q| q.id == turn_id).ok_or("error.messageGone")?;
         let item = c.queued.remove(pos);
+        // Something with no turn to take it runs (Faber's checks, a wait for quota, the pick of an AI): it goes first.
+        if busy {
+            let at = c.queued.iter().rposition(|q| q.sending).map_or(0, |p| p + 1);
+            c.queued.insert(at, item);
+            self.save(id);
+            self.emit_queue(id);
+            return Ok(());
+        }
         self.save(id);
         self.emit_queue(id);
         self.dispatch_queued(id, item)

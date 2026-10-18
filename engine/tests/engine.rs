@@ -1401,6 +1401,35 @@ async fn claude_takes_a_message_into_the_running_turn_at_its_next_step_and_the_a
 }
 
 #[tokio::test]
+async fn a_waiting_message_sent_now_goes_into_the_running_turn() {
+    let dir = tempfile::tempdir().unwrap();
+    let f = fake(fixture("claude", "steer"));
+    let (engine, _rx) = engine(dir.path(), Vendor::Claude, f.spawn.clone());
+    let id = engine.send(ask(Area::Chat, SLEEP, choice("claude", Some("haiku")))).unwrap();
+    until(&engine, &id, |c| c.messages.len() == 2).await;
+    // The CLI could not take the line, so it waits for the turn to end, until the person sends it now.
+    f.wire.refuse_words(PONG);
+    say(&engine, &id, "claude", PONG).unwrap();
+    let c = until(&engine, &id, |c| c.queued.first().is_some_and(|q| !q.sending)).await;
+    assert_eq!(c.messages[1].status, Some(Status::Streaming), "the turn still runs");
+
+    engine.send_queued(&id, &c.queued[0].id).unwrap();
+    assert!(engine.open(&id).unwrap().queued[0].sending, "it is on its way to the running turn");
+    let c = until(&engine, &id, |c| settled(c, 4)).await;
+    engine.shutdown();
+    assert_eq!(f.mismatches.lock().unwrap().clone(), Vec::<String>::new());
+    assert_eq!(texts(&c), [SLEEP, PONG]);
+    assert_eq!(
+        c.messages[3].text.trim(),
+        "done
+pong",
+        "the turn answered it below it"
+    );
+    assert!(c.queued.is_empty());
+    assert_eq!(f.wire.lines_with(PONG), 1);
+}
+
+#[tokio::test]
 async fn a_message_handed_to_claude_before_a_stop_is_answered_below_the_stopped_reply() {
     let dir = tempfile::tempdir().unwrap();
     let f = fake(fixture("claude", "steer-stopped"));
