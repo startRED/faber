@@ -29,6 +29,9 @@ export function Running(props: {
   /** A page of Faber's browser the person opened from a reply, shown the same way. */
   site?: OpenSite;
   onBack?: () => void;
+  /** The open subagent fills the stage as a full thread (the column sits over the work area), and the control in its head that swaps the two. */
+  wide?: boolean;
+  onWide?: () => void;
   /** "Tell it…" from the open subagent: the conversation's box, reached through the column. */
   onTell?: (text: string) => void;
   /** The column's width and the limits of its left edge, which the person drags: omitted, the column has no grip. */
@@ -47,7 +50,7 @@ export function Running(props: {
     return t(e.key, { n: e.n });
   };
   return (
-    <aside id="running" class="runcol" data-surface="running" aria-labelledby="running-title" role={props.modal ? 'dialog' : undefined} aria-modal={props.modal ? 'true' : undefined} ref={props.ref}>
+    <aside id="running" class="runcol" classList={{ wide: props.wide }} data-surface="running" aria-labelledby="running-title" role={props.modal ? 'dialog' : undefined} aria-modal={props.modal ? 'true' : undefined} ref={props.ref}>
       <Show
         when={props.agent}
         fallback={
@@ -127,7 +130,7 @@ export function Running(props: {
           </Show>
         }
       >
-        {(agent) => <AgentChat step={agent().step} streaming={agent().streaming} helpable={agent().helpable} onBack={() => props.onBack?.()} onTell={(text) => props.onTell?.(text)} onClose={props.onClose} />}
+        {(agent) => <AgentChat step={agent().step} streaming={agent().streaming} helpable={agent().helpable} onBack={() => props.onBack?.()} onTell={(text) => props.onTell?.(text)} onClose={props.onClose} wide={props.wide} onWide={props.onWide} />}
       </Show>
       <Show when={props.resize}>{(r) => <Grip edge="run" label={t('run.resize')} value={r().value} limits={r().limits} fallback={r().fallback} onChange={r().onChange} />}</Show>
     </aside>

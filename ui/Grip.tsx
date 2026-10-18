@@ -68,7 +68,7 @@ export function Grip(props: { edge: Edge; label: string; value: number; limits: 
     stop();
     const from = props.value;
     const to = fit(props.fallback, props.limits);
-    if (from === to) return;
+    if (from === to) return props.onChange(to);
     if (motion() !== 'full') return commit(to);
     // A reset is rare and travels a short way: the width glides there instead of jumping.
     const ms = millis(el!, '--dur-ui', 220);

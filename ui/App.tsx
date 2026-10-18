@@ -29,7 +29,7 @@ import { Icon } from './Glyphs.tsx';
 import { failureText, lang, t, templates, useLanguage } from './i18n.ts';
 import { createFileDrop } from './drop.ts';
 import { Grip } from './Grip.tsx';
-import { createWindowWidth, type Edge, fit, limitsOf, RUN, savedWidths, SIDE, widthClass } from './layout.ts';
+import { autoRun, createWindowWidth, type Edge, fit, limitsOf, savedWidths, SIDE, widthClass } from './layout.ts';
 import { Lockup } from './Mark.tsx';
 import { isFirstInstall, newestId, NOTES, type Note, whatsNew } from './notes.ts';
 import { modelOptions, vendorName } from './models.ts';
@@ -38,7 +38,7 @@ import { Palette } from './Palette.tsx';
 import { Projects } from './Projects.tsx';
 import { createOpening, upsert } from './opening.ts';
 import { Running } from './Running.tsx';
-import { openedAgent, showAgent, startMessage } from './AgentChat.tsx';
+import { agentWide, openedAgent, showAgent, startMessage, toggleAgentWide } from './AgentChat.tsx';
 import { openedSite, showSite } from './Site.tsx';
 import { agentSteps } from './worklog.ts';
 import { createAutoOpen, openPlace, type Place, placeOfRunning, store, waitingKeys } from './running.ts';
@@ -209,7 +209,7 @@ export function App(props: { initial: AppState; update?: UpdateStatus; inbox: { 
   // ---- The widths the person gave the sidebar and the running column by dragging their edges (ui/Grip.tsx), kept per window like the
   // other small conveniences, and focus mode (Ctrl+B): the sidebar and the column step aside to give the stage the whole window.
   const [widths, setWidths] = createSignal(savedWidths(recall('faber.layout', null)));
-  const setWidth = (edge: Edge, px: number) => {
+  const setWidth = (edge: Edge, px: number | undefined) => {
     setWidths((w) => ({ ...w, [edge]: px }));
     remember('faber.layout', widths());
   };
@@ -246,9 +246,13 @@ export function App(props: { initial: AppState; update?: UpdateStatus; inbox: { 
   // The column is on screen when it is open and focus mode is off.
   const colShown = () => columnOpen() && !focus();
   const runLimits = createMemo(() => limitsOf('run', win(), widths().side, docked()));
-  // What the column really measures: the stored width, inside what the window leaves it.
-  const runWidth = () => fit(widths().run, runLimits());
-  const trapped = () => colShown() && byUser() && !docked();
+  // What the column really measures: the width the person dragged it to, or until then the room the window leaves beside the
+  // reading column, inside what the window leaves it. A drag that ends on the usual width goes back to following the window.
+  const autoWidth = () => fit(autoRun(win(), widths().side), runLimits());
+  const runWidth = () => fit(widths().run ?? autoRun(win(), widths().side), runLimits());
+  // An opened subagent can fill the stage as a full thread (R161 step 3): the column then sits over the work area, not beside it.
+  const wide = () => !!sideAgent() && agentWide();
+  const trapped = () => colShown() && byUser() && !docked() && !wide();
   let column: HTMLElement | undefined;
   let runButton: HTMLButtonElement | undefined;
   const autoOpen = createAutoOpen();
@@ -801,7 +805,13 @@ export function App(props: { initial: AppState; update?: UpdateStatus; inbox: { 
         if (trapped()) closeColumn();
         queueMicrotask(() => startMessage(text));
       }}
-      resize={{ value: runWidth(), limits: runLimits(), fallback: RUN.fallback, onChange: (px) => setWidth('run', px) }}
+      wide={wide()}
+      onWide={() => {
+        toggleAgentWide();
+        // The column is drawn again where it now sits: focus goes back to the button that was pressed.
+        queueMicrotask(() => column?.querySelector<HTMLElement>('.agent-wide')?.focus());
+      }}
+      resize={wide() ? undefined : { value: runWidth(), limits: runLimits(), fallback: autoWidth(), onChange: (px) => setWidth('run', px === autoWidth() ? undefined : px) }}
       ref={(el) => (column = el)}
     />
   );
@@ -905,8 +915,8 @@ export function App(props: { initial: AppState; update?: UpdateStatus; inbox: { 
           <div
             class="shell"
             data-screen={`${area() === 'chat' ? 'chat' : 'project'}.${newChat() ? 'new' : 'thread'}`}
-            classList={{ docked: colShown() && docked(), focus: focus() }}
-            style={{ '--side-w': `${widths().side}px`, '--run-w': `${widths().run}px` }}
+            classList={{ docked: colShown() && docked() && !wide(), focus: focus() }}
+            style={{ '--side-w': `${widths().side}px`, '--run-w': `${runWidth()}px` }}
             inert={tourOpen() || notesOpen() || startScreen()}
             ref={animateList}
           >
@@ -1053,7 +1063,7 @@ ${copy().path}`}>
                           tailWatch().observe(el);
                           onCleanup(() => tailWatch().unobserve(el));
                         });
-                      }} onScroll={(e) => onScroll(e.currentTarget)} inert={trapped()}>
+                      }} onScroll={(e) => onScroll(e.currentTarget)} inert={trapped() || (colShown() && wide())}>
                         <Show
                           when={newChat()}
                           fallback={
@@ -1135,11 +1145,11 @@ ${copy().path}`}>
                     onError={fail}
                   />
                 </Show>
-                <Show when={colShown() && !docked()}>{runningColumn()}</Show>
+                <Show when={colShown() && (!docked() || wide())}>{runningColumn()}</Show>
               </div>
-              <Find enabled={!newChat() && !needsProject() && !loading() && !!current()?.messages.length} root={() => thread} />
+              <Find enabled={!newChat() && !needsProject() && !loading() && !!current()?.messages.length && !(colShown() && wide())} root={() => thread} />
             </main>
-            <Show when={colShown() && docked()}>{runningColumn()}</Show>
+            <Show when={colShown() && docked() && !wide()}>{runningColumn()}</Show>
           </div>
         </Show>
       </Show>

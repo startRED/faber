@@ -6,12 +6,12 @@ running column.
 ## Layout
 
 The window has a 36 px titlebar across the full width, a 248 px sidebar, a stage with a 52 px topbar, a reading column of
-at most 660 px centred in the stage, and a 352 px running column on the right. The window can be as narrow as 720 px,
+at most 660 px centred in the stage, and a running column on the right. The window can be as narrow as 720 px,
 so the layout changes with its width:
 
 | Window width | Sidebar | Running column | Reading column |
 | :--- | :--- | :--- | :--- |
-| 1,100 px and wider | 248 px, beside the stage | 352 px when open, beside the stage | Shrinks with the stage, 660 px at most. The stage is never narrower than 500 px |
+| 1,100 px and wider | 248 px, beside the stage | 360 to 560 px when open, beside the stage | Shrinks with the stage, 660 px at most. The stage is never narrower than 440 px |
 | 900 to 1,099 px | 248 px, beside the stage | When open, an overlay on the stage | Up to 660 px |
 | 720 to 899 px | Hidden. A button in the topbar opens it as an overlay | When open, an overlay on the stage | Up to 660 px |
 
@@ -28,6 +28,8 @@ The numbers above are the usual widths. The person can change them, and the shel
   A thin accent line and a small grip appear on hover (after 120 ms, so crossing the edge flashes nothing), and the grip is
   accent while dragging or focused. The arrow keys move an edge 16 px (48 with Shift), Home and End go to its limits, a double
   click or Enter glides it back to the usual width. The sidebar has no edge below 900 px, where it is an overlay.
+- **The column's usual width follows the window** (`autoRun`): the window less the sidebar less 700 px, 360 to 560 px. A
+  drag ending on it, a double click or Enter goes back to following. A subagent can fill the stage ([subagents.md](subagents.md)).
 - **How a drag stays light.** The pointer events of the window (listened to only while dragging) set `--side-w` and `--run-w` on the
   shell once per frame; nothing is measured and no state changes until the drag ends, when the width is stored (`faber.layout`)
   once and the lists that animate layout measure again. `html.sizing` sets the cursor and stops text selection meanwhile.

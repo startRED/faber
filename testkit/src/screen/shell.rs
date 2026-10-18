@@ -19,6 +19,14 @@ pub fn scenarios() -> Vec<Scenario> {
             name: "R161: a subagent the agent starts is one step in its reply, with what it ran and its report",
             run: subagent_step,
         },
+        Scenario {
+            name: "an opened subagent's side column takes the room beside the thread, cuts no line, and can fill the stage (English)",
+            run: subagent_column_en,
+        },
+        Scenario {
+            name: "an opened subagent's side column takes the room beside the thread, cuts no line, and can fill the stage (German)",
+            run: subagent_column_de,
+        },
         Scenario { name: "the layout follows the width, from 720 to 1440, and the running column fits each one", run: follows_the_width },
         Scenario { name: "a larger text size still fits every width", run: fits_large_text },
         Scenario {
@@ -219,9 +227,14 @@ fn follows_the_width(ctx: &mut Ctx) -> Result {
             same(peek["still"].as_bool(), Some(true), "Curioso is still")?;
         }
         if width >= 1100 {
-            // 352 px with the 8 px of frame that runs round the stage.
-            same(num(&open, &["docked", "w"]) + 8.0, 352.0, &format!("{at}: the docked column"))?;
-            ensure(num(&open, &["main", "w"]) >= 499.5, || format!("{at}: the stage is {} px", open["main"]["w"]))?;
+            // The room beside the 660 px reading column (the window less the sidebar and 700 px), 360 to 560 px, with the 8 px of
+            // frame that runs round the stage.
+            same(
+                num(&open, &["docked", "w"]) + 8.0,
+                (f64::from(width) - 248.0 - 700.0).clamp(360.0, 560.0),
+                &format!("{at}: the docked column"),
+            )?;
+            ensure(num(&open, &["main", "w"]) >= 439.5, || format!("{at}: the stage is {} px", open["main"]["w"]))?;
             ensure(open["modal"].is_null(), || format!("{at}: a docked column is not a dialog"))?;
         } else {
             ensure(!open["over"].is_null(), || format!("{at}: the column should lie over the stage"))?;
@@ -992,4 +1005,97 @@ fn subagent_step(ctx: &mut Ctx) -> Result {
     let spill = page.eval("(() => { const a = document.querySelector('article.ai').getBoundingClientRect(); const s = document.querySelector('.agents .agent'); return Math.max(s.getBoundingClientRect().right - a.right, s.scrollWidth - s.clientWidth); })()")?;
     ensure(spill.as_f64().is_some_and(|px| px <= 1.0), || format!("the opened step spills out of the column by {spill} px"))?;
     ctx.shot(&mut app, "subagent-step")
+}
+
+/// A finished reply whose subagent ran long commands and touched long paths, written to the data folder: what the side column
+/// must wrap instead of cutting.
+fn seed_long_subagent(ctx: &Ctx) -> Result {
+    let folder = ctx.sb.data.join("conversations");
+    std::fs::create_dir_all(&folder).map_err(|e| e.to_string())?;
+    let deep = "crates/engine/src/very/deeply/nested/folder/with_a_long_name/another_long_folder_name/module.rs";
+    let prompt = format!(
+        "Find where `load_config` is defined and report every caller. Start in {deep} and do not edit anything.\n\n```\ncargo test --workspace --all-targets -- --nocapture {deep} --test-threads=1\n```\n\nReport the file and the line of each one, with the words around it."
+    );
+    let tools = json!([
+        { "id": "a1", "name": "Agent", "ok": true, "output": "It is defined in config.rs, line 1, and called from main.rs.",
+          "input": { "description": "Find file defining load_config", "subagent_type": "Explore", "prompt": prompt },
+          "facts": { "edited": [deep, "build.rs"], "checks": 2, "failed": 1, "unnamed": [deep] } },
+        { "id": "b1", "name": "Bash", "parent": "a1", "ok": true, "input": { "command": format!("cargo test --workspace --all-targets -- --nocapture {deep} --test-threads=1") } },
+        { "id": "r1", "name": "Read", "parent": "a1", "ok": true, "input": { "file_path": deep } },
+        { "id": "g1", "name": "Grep", "parent": "a1", "ok": true, "input": { "pattern": "load_config" } },
+    ]);
+    let messages = json!([
+        { "id": "u", "role": "user", "text": "Find load_config", "at": 1_790_000_000_000u64 },
+        { "id": "a", "role": "assistant", "text": "Done.", "at": 1_790_000_000_001u64, "vendor": "claude", "model": "claude-haiku-5-5", "status": "done", "tools": tools },
+    ]);
+    let id = "5f1c0000-0000-4000-8000-0000000000e1";
+    let conversation = json!({ "id": id, "title": "Subagent sizes", "area": "chat", "sessions": {}, "createdAt": 1_790_000_000_000u64, "updatedAt": 1_790_000_000_001u64, "messages": messages });
+    std::fs::write(folder.join(format!("{id}.json")), conversation.to_string()).map_err(|e| e.to_string())
+}
+
+/// What the opened subagent's view cuts or spills: lines wider than the column, a sideways scroll, a tool line not at two lines.
+const SIDE_VIEW: &str = r#"(() => {
+  const body = document.querySelector('.runcol .side-body');
+  const edge = body.getBoundingClientRect().right;
+  const spill = [...body.querySelectorAll('*')].filter((e) => !e.closest('svg') && e.getBoundingClientRect().width > 0 && e.getBoundingClientRect().right > edge + 0.5).map((e) => String(e.className || e.tagName));
+  const lines = [...body.querySelectorAll('.tools span.full i')].map((i) => getComputedStyle(i).getPropertyValue('-webkit-line-clamp'));
+  const col = document.querySelector('.shell > .runcol, .work > .runcol').getBoundingClientRect();
+  return { spill, scrolls: body.scrollWidth > body.clientWidth, lines, col: col.width, chips: document.querySelectorAll('.runcol .tools span.full').length };
+})()"#;
+
+fn subagent_column_en(ctx: &mut Ctx) -> Result {
+    subagent_column(ctx, "en")
+}
+fn subagent_column_de(ctx: &mut Ctx) -> Result {
+    subagent_column(ctx, "de")
+}
+
+/// The opened subagent at 1920, 1280 and 720 px: the column is as wide as the window allows, nothing in it is cut, and it can
+/// fill the stage.
+fn subagent_column(ctx: &mut Ctx, language: &str) -> Result {
+    start_settings(ctx, language)?;
+    seed_long_subagent(ctx)?;
+    let launch = claude_chat(ctx);
+    let mut app = ctx.launch(launch)?;
+    app.page.click(&css(".side .crow .item"))?;
+    app.page.wait_visible(&css(".agents .agent"))?;
+    for (width, height, column) in [(1920, 1080, 560.0), (1280, 800, 360.0), (720, 480, 0.0)] {
+        set_size(&mut app.page, width, height)?;
+        if app.page.count(&css(".runcol"))? == 0 {
+            app.page.click(&css(".agents .agent"))?;
+        }
+        app.page.wait_visible(&css(".runcol .side-body .tools span.full"))?;
+        pause(0.5);
+        let seen = app.page.eval(SIDE_VIEW)?;
+        let at = format!("{language} {width}x{height}");
+        ensure(seen["spill"].as_array().is_some_and(Vec::is_empty) && seen["scrolls"] == false, || {
+            format!("{at}: the subagent's view is cut: {seen}")
+        })?;
+        ensure(seen["lines"].as_array().is_some_and(|l| !l.is_empty() && l.iter().all(|c| c == "2")), || {
+            format!("{at}: a tool line is not held to two lines: {seen}")
+        })?;
+        if column > 0.0 {
+            // The track includes the 8 px of frame that runs round the stage.
+            same(num(&seen, &["col"]) + 8.0, column, &format!("{at}: the column's width"))?;
+        }
+        ctx.shot(&mut app, &format!("subagent-column-{language}-{width}"))?;
+        if width == 1920 {
+            // The full thread: as wide as the stage, its text inside, the box below, and back.
+            app.page.click(&css(".runcol .agent-wide"))?;
+            app.page.wait_visible(&css(".work > .runcol.wide"))?;
+            pause(0.5);
+            let wide = app.page.eval(SIDE_VIEW)?;
+            ensure(wide["spill"].as_array().is_some_and(Vec::is_empty) && wide["scrolls"] == false, || {
+                format!("{at}, full thread: cut: {wide}")
+            })?;
+            ensure(num(&wide, &["col"]) > 1000.0, || format!("{at}: the full thread is {} px", wide["col"]))?;
+            ensure(app.page.is_visible(&css(".dock .composer"))?, || "the box is hidden under the full thread".to_string())?;
+            ctx.shot(&mut app, &format!("subagent-full-{language}-{width}"))?;
+            app.page.click(&css(".runcol .agent-wide"))?;
+            app.page.wait_visible(&css(".shell > .runcol"))?;
+            pause(0.5);
+        }
+    }
+    app.page.cdp.call("Emulation.clearDeviceMetricsOverride", json!({}))?;
+    Ok(())
 }

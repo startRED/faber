@@ -55,7 +55,7 @@ input, textarea { caret-color: var(--accent); }
 
 /* Sidebar and the shell around the stage. From 1,100 px an open running column sits beside the stage (.docked); from 900 px
    the sidebar does; below that the sidebar is behind a button. ui/layout.ts holds the same two numbers. */
-.shell { --side-w: 248px; --run-w: 352px; position: relative; display: grid; grid-template-columns: var(--side-w) minmax(0, 1fr) 0px; min-height: 0; overflow: clip; }
+.shell { --side-w: 248px; --run-w: 360px; position: relative; display: grid; grid-template-columns: var(--side-w) minmax(0, 1fr) 0px; min-height: 0; overflow: clip; }
 /* The docked column keeps the stage 440 px (STAGE_MIN, ui/layout.ts) and is never under 300 px, whatever width was dragged. */
 .shell.docked { grid-template-columns: var(--side-w) minmax(0, 1fr) clamp(300px, var(--run-w), calc(100vw - var(--side-w) - 440px)); }
 .settings { display: grid; grid-template-columns: 248px 1fr; min-height: 0; }
@@ -239,6 +239,9 @@ svg.i.sm { width: 14px; height: 14px; }
 .runcol { position: relative; display: flex; flex-direction: column; min-width: 0; min-height: 0; background: var(--s1); }
 .shell > .runcol { margin: 0 var(--stage-inset) var(--stage-inset) 0; border-radius: 0 var(--r-stage) var(--r-stage) 0; box-shadow: var(--stage-shadow); border-left: 1px solid var(--line); overflow: hidden; }
 .work > .runcol { grid-column: 1; grid-row: 1; justify-self: end; z-index: 6; width: min(var(--run-w), 100%); border-left: 1px solid var(--line-2); box-shadow: -18px 0 40px -22px rgba(0, 0, 0, 0.7); }
+/* An opened subagent as a full thread: the column covers the work area, its text keeps the reading column's width, and the composer stays below. */
+.work > .runcol.wide { width: 100%; border-left: 0; box-shadow: none; }
+.runcol.wide :is(.rc-head, .rc-body) { padding-inline: max(18px, calc((100% - 660px) / 2)); }
 .rc-head { display: flex; align-items: center; gap: 8px; padding: 14px 12px 10px 18px; }
 .rc-head h2 { font-size: var(--fs-lead); }
 .rc-head .n { color: var(--ink-3); font-size: var(--fs-sm); }
@@ -252,6 +255,12 @@ svg.i.sm { width: 14px; height: 14px; }
 .side-body[data-state='stuck'] .side-meta, .side-body .agent-why { color: var(--amber-ink); }
 .side-body .agent-why { margin: 0; }
 .side-brief .you { max-width: 100%; font-size: var(--fs-sm); }
+/* Nothing in a subagent's view is cut or scrolls sideways: the brief and its code wrap, a tool line wraps to two lines and a click shows the rest (the full text is also its title). */
+.rc-body.side-body pre { white-space: pre-wrap; overflow-wrap: anywhere; overflow-x: visible; }
+.side-body .md code { overflow-wrap: anywhere; }
+.side-body .tools span.full { cursor: pointer; align-items: baseline; }
+.side-body .tools span.full i { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; line-clamp: 2; white-space: normal; overflow-wrap: anywhere; text-overflow: clip; }
+.side-body .tools span.full.more i { -webkit-line-clamp: unset; line-clamp: unset; }
 /* What an ended subagent did: plain lines in the second ink, its files in the mono face, a failed check marked like an error note. */
 .side-facts { display: grid; gap: 4px; padding: 10px 12px; border-radius: var(--r-sm); background: var(--s1); color: var(--ink-2); }
 .side-facts h3 { margin: 0 0 2px; font-size: var(--fs-sm); font-weight: 600; color: var(--ink); }
@@ -259,7 +268,7 @@ svg.i.sm { width: 14px; height: 14px; }
 .side-facts p.bad { color: var(--ink); padding-left: 8px; box-shadow: inset 2px 0 0 var(--danger); }
 .side-facts .unnamed { margin-top: 4px; font-weight: 600; }
 .side-facts .paths { display: grid; gap: 2px; margin: 0 0 2px; padding: 0; list-style: none; font-family: var(--font-data); font-size: var(--fs-xs); color: var(--ink-3); }
-.side-facts .paths li { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.side-facts .paths li { overflow-wrap: anywhere; }
 .side-tell { display: grid; justify-items: start; gap: 8px; padding-top: 4px; color: var(--ink-3); }
 .side-tell p { margin: 0; }
 .side-tell .btn { height: var(--h-sm); }

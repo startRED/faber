@@ -2,9 +2,10 @@ import { createComponent } from 'solid-js';
 import { render } from 'solid-js/web';
 import themes from '../../src-tauri/src/themes.json';
 import { api, type AppState, type Conversation } from '../../ui/api.ts';
+import { agentWide, showAgent } from '../../ui/AgentChat.tsx';
 import { App } from '../../ui/App.tsx';
 import { t, useLanguage } from '../../ui/i18n.ts';
-import { fit, limitsOf, RUN, savedWidths, SIDE, STAGE_MIN, WIDE_FROM } from '../../ui/layout.ts';
+import { autoRun, fit, limitsOf, RUN, savedWidths, SIDE, STAGE_MIN, WIDE_FROM } from '../../ui/layout.ts';
 import { check, deepEqual, equal, ok } from './check.ts';
 
 // Arranging the shell by hand: the edges of the sidebar and the running column, focus mode (Ctrl+B) and a file over the window.
@@ -21,10 +22,23 @@ check('layout: a dragged width keeps the stage 440 px wide, and what storage hol
   equal(fit(5000, SIDE), 360);
   equal(fit(10, SIDE), 200);
   equal(fit(250.6, SIDE), 251);
-  deepEqual(savedWidths(null), { side: 248, run: 352 });
-  deepEqual(savedWidths({ side: 'wide', run: NaN }), { side: 248, run: 352 });
+  deepEqual(savedWidths(null), { side: 248, run: undefined });
+  deepEqual(savedWidths({ side: 'wide', run: NaN }), { side: 248, run: undefined });
   deepEqual(savedWidths({ side: 9999, run: 1 }), { side: 360, run: 300 });
   deepEqual(savedWidths({ side: 300, run: 400 }), { side: 300, run: 400 });
+});
+
+check('layout: the running column takes the room beside the reading column, 360 to 560 px, and never the thread’s own width', () => {
+  equal(autoRun(1920, 248), 560, 'a 1,920 px window gives it the most');
+  equal(autoRun(1600, 248), 560);
+  equal(autoRun(1440, 248), 492);
+  equal(autoRun(1280, 248), 360);
+  equal(autoRun(1100, 248), 360, 'a window that is nearly full keeps the least');
+  for (const win of [1100, 1280, 1366, 1440, 1600, 1920, 2560]) {
+    const run = Math.min(autoRun(win, 248), limitsOf('run', win, 248, true).max);
+    ok(win - 248 - run >= 440, `${win} px keeps the stage`);
+    if (win >= 1440) ok(win - 248 - run >= 660, `${win} px keeps the thread its 660 px`);
+  }
 });
 
 const talk: Conversation = {
@@ -34,7 +48,7 @@ const talk: Conversation = {
 
 /** The whole shell, mounted in a box that fills the window. `motion` is the level the page runs at; `stored` is the layout
  * that an earlier run of the window left in storage. */
-async function shell(vendors: AppState['vendors'], motion: 'full' | 'none', run: (root: HTMLElement) => Promise<void> | void, stored?: unknown) {
+async function shell(vendors: AppState['vendors'], motion: 'full' | 'none', run: (root: HTMLElement) => Promise<void> | void, stored?: unknown, convo: Conversation = talk) {
   const originalOpen = api.open;
   const originalClock = api.setClock;
   const place = localStorage.getItem('faber.place');
@@ -42,16 +56,16 @@ async function shell(vendors: AppState['vendors'], motion: 'full' | 'none', run:
   const effects = { ambient: false, texture: false, glow: false };
   const initial: AppState = {
     vendors, models: [], quotas: [], projects: [], version: '0.0.0', running: { revision: 0, items: [] },
-    conversations: [{ id: talk.id, title: talk.title, area: talk.area, updatedAt: 1 }],
+    conversations: [{ id: convo.id, title: convo.title, area: convo.area, updatedAt: 1 }],
     settings: { setup: 'done', tutorialDone: true, language: 'en', appearance: { base: 'sala' } },
     look: {
       vars: themes.css.base, scheme: 'dark', motion, effects, checks: [], notices: [],
       appearance: { base: 'sala', ground: 'sala', accent: '#f3f0e8', textFont: 'archivo', headingFont: 'narrow', textSize: 14, density: 1, corners: 1, motion, effects },
     },
   };
-  api.open = async () => talk;
+  api.open = async () => convo;
   api.setClock = async () => {};
-  localStorage.setItem('faber.place', JSON.stringify({ area: 'chat', id: talk.id }));
+  localStorage.setItem('faber.place', JSON.stringify({ area: 'chat', id: convo.id }));
   if (stored === undefined) localStorage.removeItem('faber.layout');
   else localStorage.setItem('faber.layout', JSON.stringify(stored));
   const root = document.createElement('div');
@@ -143,6 +157,134 @@ check('shell: the running column has an edge of its own, and a stored width is t
     equal(JSON.parse(localStorage.getItem('faber.layout')!).run, before + 16);
     ok(column.getBoundingClientRect().width > 0 && column.getBoundingClientRect().width <= before + 16, 'the column is drawn at that width, less the frame');
   }, { side: 300, run: 420 });
+});
+
+/** The window as `px` wide for what `run` does, put back after. The shell reads the width when it mounts and at every resize. */
+async function atWidth(px: number, run: () => Promise<void>) {
+  const original = Object.getOwnPropertyDescriptor(window, 'innerWidth')!;
+  Object.defineProperty(window, 'innerWidth', { configurable: true, value: px });
+  window.dispatchEvent(new Event('resize'));
+  try {
+    await run();
+  } finally {
+    Object.defineProperty(window, 'innerWidth', original);
+    window.dispatchEvent(new Event('resize'));
+  }
+}
+
+check('shell: until it is dragged the running column follows the window, and a double click gives that back', async () => {
+  useLanguage('en');
+  await atWidth(1920, () =>
+    shell(['claude'], 'none', async (root) => {
+      const frame = root.querySelector<HTMLElement>('.shell')!;
+      root.querySelector<HTMLButtonElement>('.run-btn')!.click();
+      await settle(60);
+      const grip = root.querySelector<HTMLElement>('.runcol .grip.run')!;
+      equal(grip.getAttribute('aria-valuenow'), '560', 'a 1,920 px window gives the column 560 px, not the old 352');
+      equal(frame.style.getPropertyValue('--run-w'), '560px');
+      equal(localStorage.getItem('faber.layout'), null, 'nothing is stored for a width nobody chose');
+      await atWidth(1280, async () => {
+        await settle(60);
+        equal(grip.getAttribute('aria-valuenow'), '360', 'a smaller window gives it less');
+        equal(frame.style.getPropertyValue('--run-w'), '360px');
+      });
+      await settle(60);
+      equal(grip.getAttribute('aria-valuenow'), '560', 'and a bigger one gives it more again');
+
+      grip.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowRight', bubbles: true, cancelable: true }));
+      equal(JSON.parse(localStorage.getItem('faber.layout')!).run, 544, 'a drag is the person’s width and is kept');
+      await atWidth(1280, async () => {
+        await settle(60);
+        equal(grip.getAttribute('aria-valuenow'), '544', 'a chosen width stays whatever the window does');
+      });
+      grip.dispatchEvent(new MouseEvent('dblclick', { bubbles: true, cancelable: true }));
+      await settle(450);
+      equal(grip.getAttribute('aria-valuenow'), '560');
+      equal(JSON.parse(localStorage.getItem('faber.layout')!).run, undefined, 'a double click goes back to following the window');
+    }),
+  );
+});
+
+check('shell: a stored width that happens to equal the usual one still goes back to following the window on a double click', async () => {
+  useLanguage('en');
+  await atWidth(1920, () =>
+    shell(['claude'], 'none', async (root) => {
+      root.querySelector<HTMLButtonElement>('.run-btn')!.click();
+      await settle(60);
+      const grip = root.querySelector<HTMLElement>('.runcol .grip.run')!;
+      grip.dispatchEvent(new MouseEvent('dblclick', { bubbles: true, cancelable: true }));
+      await settle(450);
+      equal(JSON.parse(localStorage.getItem('faber.layout')!).run, undefined, 'the stored 560 px is let go');
+    }, { side: 248, run: 560 }),
+  );
+});
+
+const agentCall = { id: 'a1', name: 'Agent', input: { description: 'Find file defining load_config', subagent_type: 'Explore', prompt: 'Search the folder.' }, ok: true, output: 'It is config.rs.' };
+const withAgent: Conversation = {
+  ...talk,
+  id: 'shell-agent',
+  messages: [talk.messages[0]!, { id: 'a', role: 'assistant', text: 'Done.', at: 1, status: 'done', vendor: 'claude', tools: [agentCall, { id: 'g1', name: 'Grep', input: { pattern: 'load_config' }, parent: 'a1', ok: true }] }],
+};
+
+check('shell: an opened subagent can fill the stage as a full thread, with the composer below, and the same button returns it to the column', async () => {
+  useLanguage('en');
+  await atWidth(1920, () =>
+    shell(['claude'], 'none', async (root) => {
+      const frame = root.querySelector<HTMLElement>('.shell')!;
+      showAgent({ conversationId: withAgent.id, messageId: 'a', callId: 'a1' });
+      await settle(80);
+      ok(root.querySelector('.shell > .runcol') && frame.classList.contains('docked'), 'the subagent opens beside the stage');
+      const button = () => root.querySelector<HTMLButtonElement>('.runcol .agent-wide')!;
+      equal(button().getAttribute('aria-label'), t('agent.widen'));
+      button().click();
+      await settle(60);
+      const over = root.querySelector<HTMLElement>('.work > .runcol');
+      ok(over && over.classList.contains('wide'), 'now it sits over the work area');
+      equal(root.querySelector('.shell > .runcol'), null);
+      ok(!frame.classList.contains('docked'), 'and the stage has the whole width');
+      equal(over.getBoundingClientRect().width, root.querySelector<HTMLElement>('.work')!.getBoundingClientRect().width, 'as wide as the stage');
+      ok(root.querySelector<HTMLElement>('.thread')!.inert, 'the conversation under it cannot be reached');
+      ok(root.querySelector('.dock .composer') && !root.querySelector<HTMLElement>('.dock')!.inert, 'the box stays for Tell it');
+      equal(root.querySelector('.runcol .grip'), null, 'a full thread has no edge to drag');
+      equal(button().getAttribute('aria-label'), t('agent.narrow'));
+      equal(document.activeElement, button(), 'focus stays on the button that was pressed');
+      button().click();
+      await settle(60);
+      ok(root.querySelector('.shell > .runcol') && frame.classList.contains('docked'), 'back in the column');
+      equal(root.querySelector('.work > .runcol'), null);
+      ok(!root.querySelector<HTMLElement>('.thread')!.inert);
+      equal(document.activeElement, button());
+
+      // Closing from the full thread leaves nothing wide behind: the next subagent opens in the column.
+      button().click();
+      await settle(60);
+      root.querySelector<HTMLButtonElement>('.runcol .rc-head button:last-child')!.click();
+      await settle(60);
+      equal(root.querySelector('.runcol'), null);
+      ok(!agentWide(), 'closing the column ends the full thread');
+      showAgent({ conversationId: withAgent.id, messageId: 'a', callId: 'a1' });
+      await settle(80);
+      ok(root.querySelector('.shell > .runcol'), 'a subagent opened again is in the column');
+      showAgent(undefined);
+    }, undefined, withAgent),
+  );
+});
+
+check('shell: over the stage, an opened subagent as a full thread is no dialog: the box and the topbar stay in reach', async () => {
+  useLanguage('en');
+  await atWidth(1000, () =>
+    shell(['claude'], 'none', async (root) => {
+      showAgent({ conversationId: withAgent.id, messageId: 'a', callId: 'a1' });
+      await settle(80);
+      equal(root.querySelector('.work > .runcol')!.getAttribute('aria-modal'), 'true', 'beside the thread it is a dialog over the stage');
+      root.querySelector<HTMLButtonElement>('.runcol .agent-wide')!.click();
+      await settle(60);
+      const column = root.querySelector('.work > .runcol.wide')!;
+      equal(column.getAttribute('aria-modal'), null, 'as a full thread it is not');
+      ok(!root.querySelector<HTMLElement>('.dock')!.inert && !root.querySelector<HTMLElement>('.topbar')!.inert, 'so the box and the topbar can be reached');
+      showAgent(undefined);
+    }, undefined, withAgent),
+  );
 });
 
 check('shell: Ctrl+B steps the sidebar and the column aside and brings them back, and a button says how', async () => {

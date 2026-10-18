@@ -21,6 +21,9 @@ const PATHS = {
   panel: ['M5 3h14a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2Z', 'M15 3v18'],
   sheet: ['M15 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7Z', 'M14 2v4a2 2 0 0 0 2 2h4', 'M8 13h2M14 13h2M8 17h2M14 17h2'],
   close: ['M18 6 6 18', 'm6 6 12 12'],
+  // An opened subagent: fill the stage as a full thread, and back to the column.
+  expand: ['m15 3 6 0 0 6', 'M21 3l-7 7', 'm9 21-6 0 0-6', 'M3 21l7-7'],
+  shrink: ['m4 14 6 0 0 6', 'M10 14l-7 7', 'm20 10-6 0 0-6', 'M14 10l7-7'],
   // The actions under an answer: copy, try again, and the terminal of the CLI.
   copy: ['M10 8h10a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2H10a2 2 0 0 1-2-2V10a2 2 0 0 1 2-2Z', 'M4 16V6a2 2 0 0 1 2-2h10'],
   loop: ['m17 2 4 4-4 4', 'M3 11v-1a4 4 0 0 1 4-4h14', 'm7 22-4-4 4-4', 'M21 13v1a4 4 0 0 1-4 4H3'],

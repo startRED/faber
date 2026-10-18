@@ -1,4 +1,4 @@
-import { createSignal, For, Show } from 'solid-js';
+import { createMemo, createSignal, For, Show } from 'solid-js';
 import { api, errorText, type ToolUse } from './api.ts';
 import { Icon } from './Glyphs.tsx';
 import { fromEngine, t } from './i18n.ts';
@@ -21,17 +21,50 @@ const [opened, setOpened] = createSignal<OpenAgent>();
 /** The subagent open in the running column, if any. */
 export const openedAgent = opened;
 /** Opens a subagent in the running column, or goes back to the running list. */
-export const showAgent = (agent?: OpenAgent) => setOpened(agent);
+export const showAgent = (agent?: OpenAgent) => {
+  setOpened(agent);
+  if (!agent) setWide(false);
+};
 
-/** One tool a turn or a subagent ran: its kind and what it ran on, struck through when it failed. */
-export function ToolChip(props: { tool: ToolUse }) {
+const [wide, setWide] = createSignal(false);
+/** The open subagent fills the stage as a full thread instead of sitting in the column. */
+export const agentWide = wide;
+export const toggleAgentWide = () => setWide((on) => !on);
+
+/** A path or command that may wrap after each slash, so a long one breaks between folders before it breaks inside a name. The
+ * text stays the same for a screen reader and for copying. */
+function Breakable(props: { text: string }) {
+  return <For each={props.text.split(/(?<=[/\\])/)}>{(part) => <>{part}<wbr /></>}</For>;
+}
+
+/** A subagent's tool in its own view, kept by the tool's id: the reply's progress replaces the tool objects, and a line the
+ * person opened stays open, with its focus, instead of being made again. */
+function StepChip(props: { id: string; tools: () => ToolUse[] }) {
+  const tool = createMemo<ToolUse>((last) => props.tools().find((t) => t.id === props.id) ?? last, props.tools().find((t) => t.id === props.id)!);
+  return <ToolChip tool={tool()} full />;
+}
+
+/** One tool a turn or a subagent ran: its kind and what it ran on, struck through when it failed. In the subagent's view
+ * (`full`) the line wraps to two lines at most and a click or Enter shows the rest, since there is room to read it; elsewhere
+ * it is one line with the middle cut. */
+export function ToolChip(props: { tool: ToolUse; full?: boolean }) {
+  const [more, setMore] = createSignal(false);
+  const toggle = () => setMore((on) => !on);
   return (
-    <span class={props.tool.ok === false ? 'bad' : ''} title={toolRow(props.tool).detail || props.tool.output}>
+    <span
+      classList={{ bad: props.tool.ok === false, full: props.full, more: more() }}
+      title={toolRow(props.tool).detail || props.tool.output}
+      tabindex={props.full ? 0 : undefined}
+      role={props.full ? 'button' : undefined}
+      aria-expanded={props.full ? more() : undefined}
+      onClick={() => props.full && toggle()}
+      onKeyDown={(e) => props.full && (e.key === 'Enter' || e.key === ' ') && (e.preventDefault(), toggle())}
+    >
       <Show when={props.tool.ok === true}>
         <Icon name="check" small />
       </Show>
       <b>{toolRow(props.tool).label}</b>
-      <Show when={toolRow(props.tool).detail}><i>{middle(toolRow(props.tool).detail)}</i></Show>
+      <Show when={toolRow(props.tool).detail}><i>{props.full ? <Breakable text={toolRow(props.tool).detail} /> : middle(toolRow(props.tool).detail)}</i></Show>
       <Show when={changeOf(props.tool)}>{(change) => <Delta change={change()} />}</Show>
     </span>
   );
@@ -114,14 +147,14 @@ function Facts(props: { facts: NonNullable<ToolUse['facts']> }) {
       <Show when={edited().length}>
         <p>{t('agent.facts.edited', { n: edited().length })}</p>
         <ul class="paths">
-          <For each={edited()}>{(path) => <li title={path}>{middle(path)}</li>}</For>
+          <For each={edited()}>{(path) => <li title={path}><Breakable text={path} /></li>}</For>
         </ul>
       </Show>
       <p classList={{ bad: props.facts.failed > 0 }}>{checks()}</p>
       <Show when={unnamed().length}>
         <p class="unnamed">{t('agent.facts.unnamed')}</p>
         <ul class="paths">
-          <For each={unnamed()}>{(path) => <li title={path}>{middle(path)}</li>}</For>
+          <For each={unnamed()}>{(path) => <li title={path}><Breakable text={path} /></li>}</For>
         </ul>
       </Show>
     </section>
@@ -220,10 +253,14 @@ export function AgentChat(props: {
   onBack: () => void;
   onTell?: (text: string) => void;
   onClose: () => void;
+  /** The subagent fills the stage as a full thread; `onWide` swaps between that and the column. */
+  wide?: boolean;
+  onWide?: () => void;
 }) {
   const state = () => agentState(props.step, props.streaming);
   const title = () => props.step.title || t('agent.untitled');
   const working = () => ['running', 'waiting', 'stuck'].includes(state());
+  const toolIds = createMemo(() => props.step.tools.map((tool) => tool.id), [], { equals: (a, b) => a.length === b.length && a.every((id, i) => id === b[i]) });
   const start = (text: string) => (props.onTell ? props.onTell(text) : startMessage(text));
   return (
     <>
@@ -234,6 +271,11 @@ export function AgentChat(props: {
         <h2 id="running-title" class="display" title={title()}>
           {title()}
         </h2>
+        <Show when={props.onWide}>
+          <button class="iconbtn agent-wide" aria-label={t(props.wide ? 'agent.narrow' : 'agent.widen')} title={t(props.wide ? 'agent.narrow' : 'agent.widen')} onClick={() => props.onWide!()}>
+            <Icon name={props.wide ? 'shrink' : 'expand'} />
+          </button>
+        </Show>
         <button class="iconbtn" aria-label={t('run.close')} title={t('run.close')} onClick={() => props.onClose()}>
           <Icon name="close" />
         </button>
@@ -256,7 +298,7 @@ export function AgentChat(props: {
         </Show>
         <Show when={props.step.tools.length}>
           <div class="tools" aria-label={t('agent.steps')} ref={animateList}>
-            <For each={props.step.tools}>{(tool) => <ToolChip tool={tool} />}</For>
+            <For each={toolIds()}>{(id) => <StepChip id={id} tools={() => props.step.tools} />}</For>
           </div>
         </Show>
         <Show when={props.step.call.told?.length}>
