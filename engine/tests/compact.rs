@@ -79,16 +79,6 @@ async fn started_with(
     (engine, rx, pipe, id, made)
 }
 
-fn folder() -> tempfile::TempDir {
-    let build = Path::new(env!("CARGO_MANIFEST_DIR")).join("../target/test-workspaces");
-    std::fs::create_dir_all(&build).unwrap();
-    [build, std::env::temp_dir()]
-        .into_iter()
-        .map(|root| tempfile::tempdir_in(root).unwrap())
-        .find(|dir| faber_engine::permissions::checked_folder(dir.path()).is_some())
-        .expect("a folder Faber works in")
-}
-
 async fn answers(pipe: &mut Pipe, text: &str, ok: bool) {
     if ok {
         let block = |event: Value| json!({ "type": "stream_event", "event": event, "parent_tool_use_id": null });
@@ -193,7 +183,7 @@ async fn compacts(agent: &mut Pipe, after: u64) {
 
 #[tokio::test]
 async fn the_meter_counts_the_main_agents_latest_prompt_against_its_models_window() {
-    let (dir, project) = (tempfile::tempdir().unwrap(), folder());
+    let (dir, project) = (tempfile::tempdir().unwrap(), crate::support::work_folder());
     let (engine, mut rx, mut agent, id) = started(dir.path(), project.path()).await;
     // Nothing is known before the CLI says it.
     assert_eq!(engine.open(&id).unwrap().context, None);
@@ -224,7 +214,7 @@ async fn the_meter_counts_the_main_agents_latest_prompt_against_its_models_windo
 
 #[tokio::test]
 async fn a_compaction_the_cli_reports_resets_the_meter_to_the_summary() {
-    let (dir, project) = (tempfile::tempdir().unwrap(), folder());
+    let (dir, project) = (tempfile::tempdir().unwrap(), crate::support::work_folder());
     let (engine, _rx, mut agent, id) = started(dir.path(), project.path()).await;
     agent.say(response(Value::Null, 2, 200_000, 5_000)).await;
     agent.say(result(1_000_000)).await;
@@ -236,7 +226,7 @@ async fn a_compaction_the_cli_reports_resets_the_meter_to_the_summary() {
 
 #[tokio::test]
 async fn the_agent_compacts_itself_when_its_turn_ends_and_gets_its_own_next_word_for_word() {
-    let (dir, project) = (tempfile::tempdir().unwrap(), folder());
+    let (dir, project) = (tempfile::tempdir().unwrap(), crate::support::work_folder());
     let (engine, _rx, mut agent, id) = started(dir.path(), project.path()).await;
     agent.say(response(Value::Null, 2, 150_000, 5_000)).await;
     let (ok, text) = tool(&mut agent, 1, json!({ "action": "context" })).await;
@@ -288,7 +278,7 @@ async fn the_agent_compacts_itself_when_its_turn_ends_and_gets_its_own_next_word
 
 #[tokio::test]
 async fn a_compaction_without_next_sends_no_turn_and_a_failed_turn_compacts_nothing() {
-    let (dir, project) = (tempfile::tempdir().unwrap(), folder());
+    let (dir, project) = (tempfile::tempdir().unwrap(), crate::support::work_folder());
     let (engine, _rx, mut agent, id) = started(dir.path(), project.path()).await;
     let (ok, _) = tool(&mut agent, 1, json!({ "action": "compact" })).await;
     assert!(ok);
@@ -327,7 +317,7 @@ async fn a_compaction_without_next_sends_no_turn_and_a_failed_turn_compacts_noth
 /// may take its process away: its end would never be heard and the conversation would wait on it for good.
 #[tokio::test]
 async fn a_process_that_compacts_is_neither_closed_as_idle_nor_evicted_for_a_newer_conversation() {
-    let (dir, project) = (tempfile::tempdir().unwrap(), folder());
+    let (dir, project) = (tempfile::tempdir().unwrap(), crate::support::work_folder());
     let (engine, _rx, mut agent, _id, made) = started_with(dir.path(), project.path(), Duration::from_millis(150), 1).await;
     let (ok, _) = tool(&mut agent, 1, json!({ "action": "compact", "next": "Go on with the footer." })).await;
     assert!(ok);
@@ -364,7 +354,7 @@ async fn a_process_that_compacts_is_neither_closed_as_idle_nor_evicted_for_a_new
 /// A compaction is work: the running list has it (so an update waits and the screen offers Stop) until the CLI ends it.
 #[tokio::test]
 async fn a_compaction_is_work_in_the_running_list_until_the_cli_ends_it() {
-    let (dir, project) = (tempfile::tempdir().unwrap(), folder());
+    let (dir, project) = (tempfile::tempdir().unwrap(), crate::support::work_folder());
     let (engine, _rx, mut agent, id) = started(dir.path(), project.path()).await;
     let (ok, _) = tool(&mut agent, 1, json!({ "action": "compact" })).await;
     assert!(ok);
@@ -384,7 +374,7 @@ async fn a_compaction_is_work_in_the_running_list_until_the_cli_ends_it() {
 /// after a Stop, as after a stopped turn.
 #[tokio::test]
 async fn stop_during_a_compaction_interrupts_it_and_nothing_goes_out_after_it() {
-    let (dir, project) = (tempfile::tempdir().unwrap(), folder());
+    let (dir, project) = (tempfile::tempdir().unwrap(), crate::support::work_folder());
     let (engine, _rx, mut agent, id) = started(dir.path(), project.path()).await;
     let (ok, _) = tool(&mut agent, 1, json!({ "action": "compact", "next": "Go on with the footer." })).await;
     assert!(ok);
@@ -496,7 +486,7 @@ fn codex(seen: Arc<Mutex<Vec<Value>>>) -> Spawner {
 
 #[tokio::test]
 async fn codex_reports_its_context_compacts_on_request_and_continues_with_next() {
-    let (dir, project) = (tempfile::tempdir().unwrap(), folder());
+    let (dir, project) = (tempfile::tempdir().unwrap(), crate::support::work_folder());
     let seen = Arc::new(Mutex::new(vec![]));
     let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
     let opts = EngineOptions {

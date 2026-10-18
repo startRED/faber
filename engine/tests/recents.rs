@@ -24,9 +24,7 @@ fn engine(dir: &Path) -> Engine {
 }
 
 fn folders(n: usize) -> (tempfile::TempDir, Vec<String>) {
-    let base = Path::new(env!("CARGO_MANIFEST_DIR")).join("../target/test-workspaces");
-    std::fs::create_dir_all(&base).unwrap();
-    let root = tempfile::tempdir_in(base).unwrap();
+    let root = crate::support::work_folder();
     let paths = (0..n)
         .map(|i| {
             let d = root.path().join(format!("f{i}"));

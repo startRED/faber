@@ -358,9 +358,7 @@ async fn the_fresh_launch_runs_at_most_once() {
 #[tokio::test]
 async fn a_fresh_launch_that_fails_at_once_fails_the_reply() {
     let (dir, disk) = (tempfile::tempdir().unwrap(), Shared::default());
-    let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../target/test-workspaces");
-    std::fs::create_dir_all(&root).unwrap();
-    let folder = tempfile::tempdir_in(root).unwrap();
+    let folder = crate::support::work_folder();
     let (engine, mut rx) = start(dir.path(), &disk);
     let project = engine.add_project(&folder.path().to_string_lossy()).unwrap().id;
     let ask = |text: &str, id: Option<&str>| SendRequest {

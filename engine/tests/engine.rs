@@ -42,12 +42,7 @@ fn choice(vendor: &str, model: Option<&str>) -> Choice {
 }
 
 fn project_folder() -> tempfile::TempDir {
-    // System temp can be under AppData, which is intentionally refused as a chosen working folder.
-    let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../target/test-workspaces");
-    std::fs::create_dir_all(&root).unwrap();
-    let folder = tempfile::tempdir_in(root).unwrap();
-    assert!(faber_engine::permissions::unattended_root(folder.path()).is_some());
-    folder
+    support::work_folder()
 }
 
 fn ask(area: Area, text: &str, choice: Choice) -> SendRequest {

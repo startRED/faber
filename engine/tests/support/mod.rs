@@ -19,6 +19,22 @@ pub fn canonical_tempdir() -> io::Result<tempfile::TempDir> {
     tempfile::Builder::new().tempdir_in(std::env::temp_dir().canonicalize()?)
 }
 
+/// A project folder Faber works in, also unattended: one under the build's own `target`, or the system's temporary one
+/// where the build sits in a folder Faber refuses (a worktree under `.claude` or a copy under AppData), so a run on the PC
+/// agrees with CI wherever the checkout lives.
+pub fn work_folder() -> tempfile::TempDir {
+    let build = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../target/test-workspaces");
+    std::fs::create_dir_all(&build).unwrap();
+    [build, std::env::temp_dir()]
+        .into_iter()
+        .map(|root| tempfile::tempdir_in(root).unwrap())
+        .find(|dir| {
+            faber_engine::permissions::checked_folder(dir.path()).is_some()
+                && faber_engine::permissions::unattended_root(dir.path()).is_some()
+        })
+        .expect("a folder Faber works in")
+}
+
 #[derive(Debug, Clone)]
 pub struct Entry {
     pub input: bool,

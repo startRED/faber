@@ -96,18 +96,6 @@ async fn started_with(
     (engine, rx, pipe, id, bins)
 }
 
-/// A project folder Faber accepts: the build's own folder, or the system's temporary one where the build sits in a folder
-/// Faber refuses (a worktree under `.claude`).
-fn folder() -> tempfile::TempDir {
-    let build = Path::new(env!("CARGO_MANIFEST_DIR")).join("../target/test-workspaces");
-    std::fs::create_dir_all(&build).unwrap();
-    [build, std::env::temp_dir()]
-        .into_iter()
-        .map(|root| tempfile::tempdir_in(root).unwrap())
-        .find(|dir| faber_engine::permissions::checked_folder(dir.path()).is_some())
-        .expect("a folder Faber works in")
-}
-
 /// The end of a turn on a subscription whose weekly window is `week` used, with six of its seven days still ahead.
 async fn answers_at(pipe: &mut Pipe, text: &str, ok: bool, week: f64) {
     let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_secs();
@@ -187,7 +175,7 @@ fn halts(rx: &mut UnboundedReceiver<AppEvent>) -> Vec<String> {
 
 #[tokio::test]
 async fn keep_going_sends_the_next_turn_by_itself_until_the_agent_says_nothing_is_left() {
-    let (dir, project) = (tempfile::tempdir().unwrap(), folder());
+    let (dir, project) = (tempfile::tempdir().unwrap(), support::work_folder());
     let (engine, mut rx, mut pipe, id) = started(dir.path(), project.path()).await;
     // Turned on while the person's own turn runs: it acts when that turn ends.
     engine.keep_going(&id, true).unwrap();
@@ -228,7 +216,7 @@ async fn keep_going_sends_the_next_turn_by_itself_until_the_agent_says_nothing_i
 
 #[tokio::test]
 async fn keep_going_rests_after_a_failed_turn_and_stops_only_after_six_in_a_row() {
-    let (dir, project) = (tempfile::tempdir().unwrap(), folder());
+    let (dir, project) = (tempfile::tempdir().unwrap(), support::work_folder());
     let (engine, mut rx, mut pipe, id) = started(dir.path(), project.path()).await;
     // Its rests (one, five, then fifteen minutes) run faster here: the first lasts 600 ms, so it can be seen.
     engine.set_keep_going_pace(0.01);
@@ -265,7 +253,7 @@ async fn keep_going_rests_after_a_failed_turn_and_stops_only_after_six_in_a_row(
 
 #[tokio::test]
 async fn a_turn_that_ends_well_after_failures_starts_the_count_again() {
-    let (dir, project) = (tempfile::tempdir().unwrap(), folder());
+    let (dir, project) = (tempfile::tempdir().unwrap(), support::work_folder());
     let (engine, _rx, mut pipe, id) = started(dir.path(), project.path()).await;
     engine.set_keep_going_pace(0.0005);
     answers_at(&mut pipe, "Started.", true, 0.1).await;
@@ -285,7 +273,7 @@ async fn a_turn_that_ends_well_after_failures_starts_the_count_again() {
 
 #[tokio::test]
 async fn the_persons_stop_ends_keep_going_without_a_notice() {
-    let (dir, project) = (tempfile::tempdir().unwrap(), folder());
+    let (dir, project) = (tempfile::tempdir().unwrap(), support::work_folder());
     let (engine, mut rx, mut pipe, id) = started(dir.path(), project.path()).await;
     engine.keep_going(&id, true).unwrap();
     answers_at(&mut pipe, "One done.", true, 0.1).await;
@@ -303,7 +291,7 @@ async fn the_persons_stop_ends_keep_going_without_a_notice() {
 
 #[tokio::test]
 async fn keep_going_stops_when_the_agent_asked_the_person_something() {
-    let (dir, project) = (tempfile::tempdir().unwrap(), folder());
+    let (dir, project) = (tempfile::tempdir().unwrap(), support::work_folder());
     let (engine, mut rx, mut pipe, id) = started(dir.path(), project.path()).await;
     engine.keep_going(&id, true).unwrap();
     answers_at(&mut pipe, "One done.", true, 0.1).await;
@@ -344,7 +332,7 @@ async fn keep_going_is_for_project_conversations() {
 
 #[tokio::test]
 async fn keep_going_goes_on_when_auto_s_pacing_says_that_ai_spends_too_fast() {
-    let (dir, project) = (tempfile::tempdir().unwrap(), folder());
+    let (dir, project) = (tempfile::tempdir().unwrap(), support::work_folder());
     let (engine, mut rx, mut pipe, id) = started(dir.path(), project.path()).await;
     engine.keep_going(&id, true).unwrap();
     // Most of the week spent with six of its seven days still ahead: Auto calls that spending fast, and still the person
@@ -358,7 +346,7 @@ async fn keep_going_goes_on_when_auto_s_pacing_says_that_ai_spends_too_fast() {
 
 #[tokio::test]
 async fn keep_going_survives_a_restart_and_goes_on_by_itself() {
-    let (dir, project) = (tempfile::tempdir().unwrap(), folder());
+    let (dir, project) = (tempfile::tempdir().unwrap(), support::work_folder());
     let (first, _rx, mut pipe, id) = started(dir.path(), project.path()).await;
     first.keep_going(&id, true).unwrap();
     answers_at(&mut pipe, "One done.", true, 0.1).await;
@@ -381,7 +369,7 @@ async fn keep_going_survives_a_restart_and_goes_on_by_itself() {
 
 #[tokio::test]
 async fn an_account_not_read_yet_rests_again_each_time_and_goes_on_once_it_is_read() {
-    let (dir, project) = (tempfile::tempdir().unwrap(), folder());
+    let (dir, project) = (tempfile::tempdir().unwrap(), support::work_folder());
     let (engine, mut rx, mut pipe, id) = started(dir.path(), project.path()).await;
     answers_at(&mut pipe, "One done.", true, 0.1).await;
     until(&engine, &id, idle).await;
@@ -402,7 +390,7 @@ async fn an_account_not_read_yet_rests_again_each_time_and_goes_on_once_it_is_re
 
 #[tokio::test]
 async fn a_rest_after_an_error_is_not_cut_short_by_a_restart() {
-    let (dir, project) = (tempfile::tempdir().unwrap(), folder());
+    let (dir, project) = (tempfile::tempdir().unwrap(), support::work_folder());
     let (first, _rx, mut pipe, id) = started(dir.path(), project.path()).await;
     first.keep_going(&id, true).unwrap();
     // The turn fails and Faber rests a quarter of an hour (the scale is the real one here); then Faber closes and opens again.
@@ -423,7 +411,7 @@ async fn a_rest_after_an_error_is_not_cut_short_by_a_restart() {
 
 #[tokio::test]
 async fn a_rest_after_an_error_keeps_its_row_in_the_running_list_and_faber_working() {
-    let (dir, project) = (tempfile::tempdir().unwrap(), folder());
+    let (dir, project) = (tempfile::tempdir().unwrap(), support::work_folder());
     let (engine, _rx, mut pipe, id) = started(dir.path(), project.path()).await;
     engine.keep_going(&id, true).unwrap();
     // The turn fails and Faber rests before it tries again (here half as long), and the update must not install under it.
@@ -451,7 +439,7 @@ fn unix_now() -> f64 {
 
 #[tokio::test]
 async fn a_message_the_person_queued_goes_first_and_the_stop_line_still_counts() {
-    let (dir, project) = (tempfile::tempdir().unwrap(), folder());
+    let (dir, project) = (tempfile::tempdir().unwrap(), support::work_folder());
     let (engine, mut rx, mut pipe, id) = started(dir.path(), project.path()).await;
     engine.keep_going(&id, true).unwrap();
     let choice = Choice { vendor: "claude".into(), model: Some("haiku".into()), effort: None };
@@ -487,7 +475,7 @@ async fn a_message_the_person_queued_goes_first_and_the_stop_line_still_counts()
 
 #[tokio::test]
 async fn a_turn_cut_at_the_limit_waits_for_quota_and_a_reading_with_room_sends_the_next_turn() {
-    let (dir, project) = (tempfile::tempdir().unwrap(), folder());
+    let (dir, project) = (tempfile::tempdir().unwrap(), support::work_folder());
     let (engine, mut rx, mut pipe, id) = started(dir.path(), project.path()).await;
     engine.set_keep_going_pace(1.0);
     engine.keep_going(&id, true).unwrap();
@@ -511,7 +499,7 @@ async fn a_turn_cut_at_the_limit_waits_for_quota_and_a_reading_with_room_sends_t
 
 #[tokio::test]
 async fn with_no_reset_known_it_tries_the_cli_again_after_the_wait_and_never_stops_by_itself() {
-    let (dir, project) = (tempfile::tempdir().unwrap(), folder());
+    let (dir, project) = (tempfile::tempdir().unwrap(), support::work_folder());
     let (engine, mut rx, mut pipe, id, bins) = started_on(dir.path(), project.path(), &[Vendor::Claude]).await;
     engine.keep_going(&id, true).unwrap();
     pipe.say(json!({ "type": "result", "subtype": "error_during_execution", "is_error": true,
@@ -534,7 +522,7 @@ async fn with_no_reset_known_it_tries_the_cli_again_after_the_wait_and_never_sto
 
 #[tokio::test]
 async fn with_every_ai_out_it_waits_for_the_reset_and_then_goes_on() {
-    let (dir, project) = (tempfile::tempdir().unwrap(), folder());
+    let (dir, project) = (tempfile::tempdir().unwrap(), support::work_folder());
     let (engine, mut rx, mut pipe, id) = started(dir.path(), project.path()).await;
     answers(&mut pipe, "One done.", true).await;
     until(&engine, &id, idle).await;
@@ -555,7 +543,7 @@ async fn with_every_ai_out_it_waits_for_the_reset_and_then_goes_on() {
 
 #[tokio::test]
 async fn with_the_picked_ai_out_the_next_turn_goes_to_another_ai_that_has_room() {
-    let (dir, project) = (tempfile::tempdir().unwrap(), folder());
+    let (dir, project) = (tempfile::tempdir().unwrap(), support::work_folder());
     let (engine, mut rx, mut pipe, id, bins) = started_on(dir.path(), project.path(), &[Vendor::Claude, Vendor::Codex]).await;
     answers(&mut pipe, "One done.", true).await;
     until(&engine, &id, idle).await;
@@ -581,7 +569,7 @@ async fn with_the_picked_ai_out_the_next_turn_goes_to_another_ai_that_has_room()
 
 #[tokio::test]
 async fn an_ai_billed_per_use_is_never_the_one_it_moves_to() {
-    let (dir, project) = (tempfile::tempdir().unwrap(), folder());
+    let (dir, project) = (tempfile::tempdir().unwrap(), support::work_folder());
     let (engine, mut rx, mut pipe, id, bins) = started_on(dir.path(), project.path(), &[Vendor::Claude, Vendor::Codex]).await;
     // Codex is billed per use here: unattended work is never spent on it.
     let billed = faber_engine::signals::Signals { billing: Some(faber_engine::budget::Billing::UsageBilled), ..Default::default() };
@@ -603,7 +591,7 @@ async fn an_ai_billed_per_use_is_never_the_one_it_moves_to() {
 
 #[tokio::test]
 async fn a_first_turn_picked_by_hand_moves_to_the_other_ai_when_keep_going_is_on() {
-    let (dir, project) = (tempfile::tempdir().unwrap(), folder());
+    let (dir, project) = (tempfile::tempdir().unwrap(), support::work_folder());
     let (engine, _rx, mut pipe, id, bins) = started_on(dir.path(), project.path(), &[Vendor::Claude, Vendor::Codex]).await;
     engine.keep_going(&id, true).unwrap();
     // The first turn, picked by hand, hits the plan limit in the middle of its work.
@@ -623,7 +611,7 @@ async fn a_first_turn_picked_by_hand_moves_to_the_other_ai_when_keep_going_is_on
 
 #[tokio::test]
 async fn a_busy_faber_tries_the_turn_again_soon() {
-    let (dir, project) = (tempfile::tempdir().unwrap(), folder());
+    let (dir, project) = (tempfile::tempdir().unwrap(), support::work_folder());
     let (engine, mut rx, mut pipe, id) = started(dir.path(), project.path()).await;
     answers_at(&mut pipe, "Started.", true, 0.1).await;
     until(&engine, &id, idle).await;
@@ -642,7 +630,7 @@ async fn a_busy_faber_tries_the_turn_again_soon() {
 
 #[tokio::test]
 async fn a_turn_that_only_waited_rests_before_the_next_and_does_not_count_toward_the_cap() {
-    let (dir, project) = (tempfile::tempdir().unwrap(), folder());
+    let (dir, project) = (tempfile::tempdir().unwrap(), support::work_folder());
     let (engine, _rx, mut pipe, id) = started(dir.path(), project.path()).await;
     engine.set_keep_going_pace(0.02);
     engine.keep_going(&id, true).unwrap();
@@ -670,7 +658,7 @@ async fn a_turn_that_only_waited_rests_before_the_next_and_does_not_count_toward
 
 #[tokio::test]
 async fn a_question_already_answered_does_not_stop_it() {
-    let (dir, project) = (tempfile::tempdir().unwrap(), folder());
+    let (dir, project) = (tempfile::tempdir().unwrap(), support::work_folder());
     let (engine, mut rx, mut pipe, id) = started(dir.path(), project.path()).await;
     engine.keep_going(&id, true).unwrap();
     let question = json!({ "questions": [{ "question": "Which stack?", "header": "Stack", "multiSelect": false, "options": [] }] });
@@ -690,7 +678,7 @@ async fn a_question_already_answered_does_not_stop_it() {
 
 #[tokio::test]
 async fn a_question_nobody_answers_gets_its_first_choice_and_the_reply_says_so() {
-    let (dir, project) = (tempfile::tempdir().unwrap(), folder());
+    let (dir, project) = (tempfile::tempdir().unwrap(), support::work_folder());
     let (engine, mut rx, mut pipe, id) = started(dir.path(), project.path()).await;
     engine.keep_going(&id, true).unwrap();
     let question = json!({ "questions": [{ "question": "Which stack?", "header": "Stack", "multiSelect": false,
@@ -719,7 +707,7 @@ async fn a_question_nobody_answers_gets_its_first_choice_and_the_reply_says_so()
 
 #[tokio::test]
 async fn a_permission_card_is_never_answered_by_keep_going() {
-    let (dir, project) = (tempfile::tempdir().unwrap(), folder());
+    let (dir, project) = (tempfile::tempdir().unwrap(), support::work_folder());
     let ask = |engine: &Engine| {
         let settings = faber_engine::model::Settings { permissions: Some(faber_engine::model::Permissions::Ask), ..Default::default() };
         engine.save_settings(settings).unwrap();
@@ -737,7 +725,7 @@ async fn a_permission_card_is_never_answered_by_keep_going() {
 
 #[tokio::test]
 async fn after_a_failed_turn_the_message_the_person_left_is_the_next_one() {
-    let (dir, project) = (tempfile::tempdir().unwrap(), folder());
+    let (dir, project) = (tempfile::tempdir().unwrap(), support::work_folder());
     let (engine, mut rx, mut pipe, id) = started(dir.path(), project.path()).await;
     engine.keep_going(&id, true).unwrap();
     let choice = Choice { vendor: "claude".into(), model: Some("haiku".into()), effort: None };
@@ -770,7 +758,7 @@ async fn after_a_failed_turn_the_message_the_person_left_is_the_next_one() {
 
 #[tokio::test]
 async fn every_ai_out_of_quota_with_a_known_reset_waits_on_screen_instead_of_stopping() {
-    let (dir, project) = (tempfile::tempdir().unwrap(), folder());
+    let (dir, project) = (tempfile::tempdir().unwrap(), support::work_folder());
     let (engine, mut rx, mut pipe, id) = started(dir.path(), project.path()).await;
     engine.keep_going(&id, true).unwrap();
     // The week is all but used up (past the share Faber still sends at) and resets in six days: the only AI is out, so
