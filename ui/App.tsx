@@ -21,6 +21,7 @@ import {
 import { inOrder, refreshed, saveAndApply, watchSystem } from './appearance.ts';
 import { useClock } from './clock.ts';
 import { Composer, type Draft } from './Composer.tsx';
+import { ContextMeter } from './Context.tsx';
 import { Empty } from './Empty.tsx';
 import { Find } from './Find.tsx';
 import { LookStep } from './FirstRun.tsx';
@@ -435,6 +436,9 @@ export function App(props: { initial: AppState; update?: UpdateStatus; inbox: { 
       if (e.type === 'queue') {
         setCurrent((c) => (c?.id === e.conversationId ? { ...c, queued: e.queued } : c));
       }
+      if (e.type === 'context') {
+        setCurrent((c) => (c?.id === e.conversationId ? { ...c, context: e.context ?? undefined } : c));
+      }
     });
     // Any key in a text field holds the running column back for a moment, whether or not the text changed (the arrows
     // move the caret), and so does an input method that is composing.
@@ -667,10 +671,11 @@ export function App(props: { initial: AppState; update?: UpdateStatus; inbox: { 
 
   const options = createMemo(() => (lang(), modelOptions(state().vendors, state().models)));
   const project = () => state().projects.find((p) => p.id === projectId());
-  // Faber's checks of the last reply (R146) keep the conversation at work: what is written waits for them, and Stop ends them.
+  // Faber's checks of the last reply (R146), and a compaction, keep the conversation at work: what is written waits for them, and Stop ends them.
   const busy = () => {
     const last = current()?.messages.at(-1);
-    return last?.status === 'streaming' || last?.checks?.state === 'running';
+    // A working row in the running list that waits for no quota is the engine saying it is at work: an answer, Faber's checks, or a compaction.
+    return last?.status === 'streaming' || last?.checks?.state === 'running' || items().some((i) => i.conversationId === current()?.id && i.state === 'working' && !i.waitUntil);
   };
   // "Send now" works while an answer streams (the engine hands the message to its turn, or puts it first); Faber's own checks
   // keep it hidden, as Stop is what ends them.
@@ -1024,6 +1029,7 @@ ${copy().path}`}>
                   </Switch>
                 </div>
                 <div class="right">
+                  <Show when={current()?.id === place().id ? current()?.context : undefined}>{(fill) => <ContextMeter fill={fill()} />}</Show>
                   <button
                     class="run-btn"
                     data-tour="run"

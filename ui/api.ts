@@ -157,9 +157,16 @@ export interface Conversation {
   queued?: QueuedTurn[];
   /** "Keep going" is on: Faber sends the next turn by itself. */
   keepGoing?: { turns: number; failed: number };
+  /** How full its own agent's context is, once the CLI has said so (the topbar's meter). */
+  context?: ContextFill;
   /** When it was archived: it is off the sidebar and its composer gives way to a line that brings it back. */
   archivedAt?: number;
   messages: Message[];
+}
+/** The tokens a conversation's own agent holds, and the window they are counted against. */
+export interface ContextFill {
+  used: number;
+  window: number;
 }
 export interface Summary {
   id: string;
@@ -377,6 +384,7 @@ export type AppEvent =
   | ({ type: 'running' } & RunningList)
   | { type: 'usage'; vendors: VendorUsage[] }
   | { type: 'list' }
+  | { type: 'context'; conversationId: string; context?: ContextFill }
   | { type: 'halted'; conversationId: string; title: string; why: string; vendor?: Vendor }
   | SetupProgressEvent;
 

@@ -140,6 +140,18 @@ pub enum EngineEvent {
         /// turn with no usage update to measure from reports none.
         incomplete: bool,
     },
+    /// What the conversation's own agent (never a subagent or helper) holds in its context now, as the CLI said it: `used`
+    /// tokens after a request (Claude: the latest main-thread response's prompt; Codex: `last.totalTokens`), and the model's
+    /// `window` when the CLI names it. Either may be absent in one report; the engine keeps the last of each.
+    Context {
+        used: Option<u64>,
+        window: Option<u64>,
+    },
+    /// The CLI compacted the conversation, whoever asked (Faber, the agent, the CLI's own limit). `after` is the size it
+    /// reports for the summary when it does (Claude Code's `post_tokens`).
+    Compacted {
+        after: Option<u64>,
+    },
     /// The running turn took in a message sent to it with `Session::steer`. `tag` is the one that call carried when the CLI
     /// echoes it back; without one, the oldest message still on its way is the one.
     Injected {
@@ -204,6 +216,9 @@ pub enum SessionCommand {
         ok: bool,
         text: String,
     },
+    /// Compact the conversation's context now (Claude Code: the `/compact` command as the next line; Codex: the thread's
+    /// compaction request). It ends like a turn, with a `Done`.
+    Compact,
     Interrupt,
     Close,
 }
@@ -265,6 +280,9 @@ impl Session {
     }
     pub fn helper_reply(&self, id: &str, ok: bool, text: String) {
         (self.send)(SessionCommand::HelperReply { id: id.to_string(), ok, text });
+    }
+    pub fn compact(&self) {
+        (self.send)(SessionCommand::Compact);
     }
     pub fn interrupt(&self) {
         (self.send)(SessionCommand::Interrupt);

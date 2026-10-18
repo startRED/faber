@@ -195,9 +195,17 @@ fn allow_response(tool: &str, input: &Value, reply: Option<&Value>) -> Value {
 /// How full a conversation gets before Claude Code compacts it. All three models hold 1M and the CLI compacts near 967K,
 /// deep into context rot. Haiku thrashes at 100K (the base context eats the room, measured), so it compacts at 150K (R158);
 /// Opus and Sonnet are starting points to measure, not proven optima. Unknown models keep the CLI's own.
-fn autocompact_window(model: &str) -> Option<&'static str> {
+fn autocompact_window(model: &str) -> Option<String> {
+    autocompact_tokens(model).map(|tokens| format!("{}k", tokens / 1000))
+}
+
+/// The same point in tokens: the size Faber's context meter counts the conversation against when it passes `--autocompact`.
+pub fn autocompact_tokens(model: &str) -> Option<u64> {
     let model = model.to_ascii_lowercase();
-    [("haiku", "150k"), ("sonnet", "300k"), ("opus", "400k")].into_iter().find(|(name, _)| model.contains(name)).map(|(_, w)| w)
+    [("haiku", 150_000), ("sonnet", 300_000), ("opus", 400_000)]
+        .into_iter()
+        .find(|(name, _)| model.contains(name))
+        .map(|(_, tokens)| tokens)
 }
 
 /// Arguments for one long-lived Claude Code process that takes many turns over stdin.
@@ -310,7 +318,7 @@ pub fn claude_args(launch: &ClaudeLaunch) -> Vec<String> {
     // Side questions keep the CLI default, and an older CLI that does not list the flag would refuse to start with it.
     let compacts = launch.flags.autocompact && launch.instructions.is_none();
     if let Some(window) = compacts.then(|| launch.model.as_deref().and_then(autocompact_window)).flatten() {
-        args.extend(["--autocompact".into(), window.into()]);
+        args.extend(["--autocompact".into(), window]);
     }
     for (flag, value) in [("--model", &launch.model), ("--effort", &launch.effort), ("--resume", &launch.resume)] {
         if let Some(v) = value {
@@ -452,9 +460,22 @@ pub fn parse_claude_message(msg: &Value) -> Vec<EngineEvent> {
         // started it.
         "assistant" => {
             let parent = msg["parent_tool_use_id"].as_str().map(String::from);
-            items(&msg["message"]["content"])
-                .filter(|c| c["type"] == "tool_use")
-                .map(|c| {
+            // What the main thread holds in its context: the prompt of its latest response (a subagent's own never counts). A
+            // response with no prompt is a synthetic one, not a reading.
+            let context = parent
+                .is_none()
+                .then(|| {
+                    let u = &msg["message"]["usage"];
+                    ["input_tokens", "cache_read_input_tokens", "cache_creation_input_tokens"]
+                        .iter()
+                        .map(|k| u[*k].as_u64().unwrap_or(0))
+                        .sum::<u64>()
+                })
+                .filter(|used| *used > 0)
+                .map(|used| EngineEvent::Context { used: Some(used), window: None });
+            context
+                .into_iter()
+                .chain(items(&msg["message"]["content"]).filter(|c| c["type"] == "tool_use").map(|c| {
                     let name = match c["name"].as_str() {
                         Some(crate::helper::CLAUDE_NAME) => crate::helper::TOOL.to_string(),
                         Some(crate::browser::CLAUDE_NAME) => crate::browser::TOOL.to_string(),
@@ -464,8 +485,12 @@ pub fn parse_claude_message(msg: &Value) -> Vec<EngineEvent> {
                         _ => s(&c["name"]),
                     };
                     EngineEvent::Tool { id: s(&c["id"]), name, input: c["input"].clone(), parent: parent.clone() }
-                })
+                }))
                 .collect()
+        }
+        // The conversation was compacted (by Faber, by the agent or by the CLI's own limit); the summary's size is reported.
+        "system" if msg["subtype"] == "compact_boundary" && msg["parent_tool_use_id"].is_null() => {
+            vec![EngineEvent::Compacted { after: msg["compact_metadata"]["post_tokens"].as_u64() }]
         }
         "user" => items(&msg["message"]["content"])
             .filter(|c| c["type"] == "tool_result")
@@ -530,7 +555,19 @@ fn result_events(msg: &Value) -> Vec<EngineEvent> {
         tool: s(&d["tool_name"]),
         input: d["tool_input"].clone(),
     });
-    warm.into_iter()
+    // The window of the model that did most of the turn's work: the main thread's, not a sub-model's.
+    let window = msg["modelUsage"]
+        .as_object()
+        .into_iter()
+        .flat_map(|models| models.values())
+        .max_by_key(|m| {
+            ["inputTokens", "cacheReadInputTokens", "cacheCreationInputTokens"].iter().map(|k| m[*k].as_u64().unwrap_or(0)).sum::<u64>()
+        })
+        .and_then(|m| m["contextWindow"].as_u64())
+        .map(|window| EngineEvent::Context { used: None, window: Some(window) });
+    window
+        .into_iter()
+        .chain(warm)
         .chain(parked)
         .chain([EngineEvent::Done {
             ok: msg["subtype"] == "success" && msg["is_error"] != true,
@@ -784,6 +821,16 @@ fn start_with_policy(opts: ClaudeOptions, on_event: EventSink, args: Vec<String>
                         if replay { unread.push_back((None, turn.text.clone())); }
                         let _ = proc::write_line(&mut *stdin, &user_message(&turn)).await;
                     }
+                    // The CLI's own command, as a line of its own: it compacts and answers with a result like any turn.
+                    Some(SessionCommand::Compact) => {
+                        if watch.stopping() { continue; }
+                        let turn = UserTurn::text("/compact");
+                        watch.begin(project);
+                        request_began = None;
+                        turn_sent_ms = unix_ms();
+                        if replay { unread.push_back((None, turn.text.clone())); }
+                        let _ = proc::write_line(&mut *stdin, &user_message(&turn)).await;
+                    }
                     // A line written mid-turn is folded into a turn that uses tools at its next step, and becomes a turn of its
                     // own after a plain reply or a stop (fixtures `steer*`, `queued*`, `helper-told*`). Its echo says which turn
                     // took it in.
@@ -1017,5 +1064,38 @@ mod role_tests {
         let interrupt: Value = serde_json::from_str(&lines.next_line().await.unwrap().unwrap()).unwrap();
         assert_eq!(interrupt["request"]["subtype"], "interrupt");
         assert!(matches!(rx.recv().await,Some(EngineEvent::Error { message,fatal:true }) if message == "error.cli.interruptTimeout"));
+    }
+}
+
+#[cfg(test)]
+mod context_tests {
+    use super::*;
+
+    #[test]
+    fn only_the_main_threads_prompt_is_the_context_and_the_window_is_the_busiest_models() {
+        let response = |parent: Value, fresh: u64| {
+            parse_claude_message(&json!({ "type": "assistant", "parent_tool_use_id": parent, "message": { "content": [],
+                "usage": { "input_tokens": fresh, "cache_read_input_tokens": 100, "cache_creation_input_tokens": 10 } } }))
+        };
+        assert_eq!(response(Value::Null, 5), [EngineEvent::Context { used: Some(115), window: None }]);
+        assert!(response(json!("agent1"), 5).is_empty(), "a subagent's prompt is not the conversation's");
+        let synthetic = parse_claude_message(
+            &json!({ "type": "assistant", "parent_tool_use_id": null, "message": { "content": [], "usage": { "input_tokens": 0 } } }),
+        );
+        assert!(synthetic.is_empty(), "a response with no prompt reads nothing");
+        let done = parse_claude_message(&json!({ "type": "result", "subtype": "success", "is_error": false, "usage": {},
+            "modelUsage": { "a": { "inputTokens": 5, "contextWindow": 200_000 }, "b": { "inputTokens": 900, "cacheReadInputTokens": 9, "contextWindow": 1_000_000 } } }));
+        assert_eq!(done[0], EngineEvent::Context { used: None, window: Some(1_000_000) });
+        let boundary = parse_claude_message(
+            &json!({ "type": "system", "subtype": "compact_boundary", "compact_metadata": { "trigger": "manual", "pre_tokens": 23212, "post_tokens": 1166 } }),
+        );
+        assert_eq!(boundary, [EngineEvent::Compacted { after: Some(1166) }]);
+    }
+
+    #[test]
+    fn the_point_the_cli_compacts_at_is_known_in_tokens_and_as_the_flag() {
+        assert_eq!(autocompact_tokens("claude-sonnet-5-5"), Some(300_000));
+        assert_eq!(autocompact_window("opus").as_deref(), Some("400k"));
+        assert_eq!(autocompact_tokens("something-else"), None);
     }
 }

@@ -221,6 +221,12 @@ svg.i.sm { width: 14px; height: 14px; }
 .iconbtn:hover { background: var(--s3); color: var(--ink); }
 
 /* The run button: how much runs, and in amber with the words when something needs the user. */
+.ctx { display: inline-flex; align-items: center; gap: 6px; flex: none; color: var(--ink-3); font-size: var(--fs-xs); font-variant-numeric: tabular-nums; white-space: nowrap; cursor: default; }
+.ctx-ring { width: 16px; height: 16px; }
+.ctx-ring circle { fill: none; stroke-width: 2; }
+.ctx-ring .trk { stroke: var(--line-2); }
+.ctx-ring .arc { stroke: currentColor; stroke-linecap: round; }
+.ctx.near { color: var(--amber-ink); }
 .run-btn { display: inline-flex; align-items: center; height: var(--h-md); border-radius: var(--r-pill); background: var(--s1); box-shadow: inset 0 0 0 1px var(--line-2); font-size: var(--fs-sm); font-weight: 500; color: var(--ink); white-space: nowrap; }
 .run-btn .seg { display: inline-flex; align-items: center; gap: 8px; padding: 0 12px; height: 100%; }
 .run-btn .seg + .seg { border-left: 1px solid var(--line-2); }

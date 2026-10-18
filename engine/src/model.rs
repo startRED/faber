@@ -357,7 +357,7 @@ impl FollowState {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Wake {
-    /// An i18n key (`wake.keepGoing`, `wake.checksFailed`, `wake.conflict`, `wake.asked`).
+    /// An i18n key (`wake.keepGoing`, `wake.checksFailed`, `wake.conflict`, `wake.asked`, `wake.compacted`).
     pub why: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub pr: Option<u64>,
@@ -521,11 +521,29 @@ pub struct Conversation {
     /// until the person brings it back or writes to it.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub archived_at: Option<u64>,
+    /// How full the context of the conversation's own agent is, as its CLI last said (`engine/src/engine/compact.rs`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub context: Option<ContextFill>,
     pub messages: Vec<Message>,
+    /// What its CLI last reported, each on its own (a report may name only one): the prompt's size and the model's window,
+    /// before the point where Faber's CLI flags make it compact. Never saved.
+    #[serde(skip)]
+    pub reported: (Option<u64>, Option<u64>),
+    /// The context is being compacted: the conversation is at work meanwhile, like during Faber's checks. Never saved.
+    #[serde(skip)]
+    pub compacting: bool,
     /// Faber is asking git whether the last reply changed files with a command, before its checks would start
     /// (`engine/src/engine/verifying.rs`), the reply's id: the conversation is at work meanwhile. Never shown or saved.
     #[serde(skip)]
     pub weighing: Option<String>,
+}
+
+/// The context of a conversation's own agent: `used` tokens of a `window`, the point where its CLI compacts by itself.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ContextFill {
+    pub used: u64,
+    pub window: u64,
 }
 
 /// The longest name Faber keeps, in characters.

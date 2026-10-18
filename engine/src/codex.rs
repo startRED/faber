@@ -435,6 +435,17 @@ fn s(v: &Value) -> String {
 
 /// Turns one `codex app-server` notification into engine events.
 pub fn parse_codex_notification(msg: &Value, state: &mut CodexTurnState) -> Vec<EngineEvent> {
+    // The thread's context after a request: what the last request held (`last.totalTokens`, which after a compaction is the
+    // size of what is left), against the model's window.
+    let usage = &msg["params"]["tokenUsage"];
+    let context = (msg["method"] == "thread/tokenUsage/updated")
+        .then(|| usage["last"]["totalTokens"].as_u64().or(usage["last"]["inputTokens"].as_u64()))
+        .flatten()
+        .map(|used| EngineEvent::Context { used: Some(used), window: usage["modelContextWindow"].as_u64() });
+    context.into_iter().chain(parse_notification(msg, state)).collect()
+}
+
+fn parse_notification(msg: &Value, state: &mut CodexTurnState) -> Vec<EngineEvent> {
     let p = &msg["params"];
     match msg["method"].as_str().unwrap_or_default() {
         "item/agentMessage/delta" => {
@@ -450,6 +461,9 @@ pub fn parse_codex_notification(msg: &Value, state: &mut CodexTurnState) -> Vec<
             let kind = item["type"].as_str().unwrap_or_default();
             if kind == "agentMessage" {
                 return vec![EngineEvent::Break { final_answer: item["phase"] == "final_answer" }];
+            }
+            if kind == "contextCompaction" {
+                return vec![];
             }
             if kind == "userMessage" {
                 state.users += 1;
@@ -492,6 +506,10 @@ pub fn parse_codex_notification(msg: &Value, state: &mut CodexTurnState) -> Vec<
             let item = &p["item"];
             let kind = item["type"].as_str().unwrap_or_default();
             let id = s(&item["id"]);
+            // Codex compacted the thread, whoever asked (a `thread/compact/start` of Faber's or its own limit).
+            if kind == "contextCompaction" {
+                return vec![EngineEvent::Compacted { after: None }];
+            }
             if kind == "agentMessage" {
                 let text = s(&item["text"]);
                 return if !text.is_empty() && !state.streamed.contains(&id) { vec![EngineEvent::Text(text)] } else { vec![] };
@@ -1172,7 +1190,7 @@ async fn serve(
                             for t in keys.iter().filter_map(|k| threads.get(k)) {
                                 (t.sink)(EngineEvent::Error { message: format!("Codex {what} failed: {detail}"), fatal });
                             }
-                            if let Waiting::Other(key,"turn/start") = kind && let Some(t) = threads.get_mut(&key) {
+                            if let Waiting::Other(key,"turn/start" | "thread/compact/start") = kind && let Some(t) = threads.get_mut(&key) {
                                 t.watch.finish();
                                 t.turn = None;
                                 t.early_completion.clear();
@@ -1473,6 +1491,16 @@ async fn serve(
                                 request!("turn/start", turn_params(&id, t.params.effort.as_deref(), &turn), Waiting::Other(key, "turn/start"));
                             }
                             None => t.queued.push(turn),
+                        }
+                    }
+                    // Compaction runs as a turn of its own (`turn/started` ... `turn/completed`), so the turn machinery follows it.
+                    SessionCommand::Compact => {
+                        let Some(t) = threads.get_mut(&key) else { continue };
+                        if t.blocked || t.closing || t.watch.stopping() { continue; }
+                        if let Some(id) = t.id.clone() {
+                            t.watch.begin(role.is_some());
+                            t.state.base = t.state.total;
+                            request!("thread/compact/start", json!({ "threadId": id }), Waiting::Other(key, "thread/compact/start"));
                         }
                     }
                     SessionCommand::Steer { turn, tag } => {
@@ -1945,5 +1973,23 @@ mod role_tests {
         );
         session.close();
         server.retire();
+    }
+}
+
+#[cfg(test)]
+mod context_tests {
+    use super::*;
+
+    #[test]
+    fn a_usage_update_is_the_last_requests_size_against_the_window_and_a_compaction_item_is_no_tool() {
+        let mut state = CodexTurnState::new(false);
+        let update = json!({ "method": "thread/tokenUsage/updated", "params": { "tokenUsage": {
+            "total": { "totalTokens": 22186, "inputTokens": 22181, "cachedInputTokens": 12672, "outputTokens": 5 },
+            "last": { "totalTokens": 13808, "inputTokens": 0, "cachedInputTokens": 0, "outputTokens": 0 }, "modelContextWindow": 258_400 } } });
+        let events = parse_codex_notification(&update, &mut state);
+        assert_eq!(events[0], EngineEvent::Context { used: Some(13_808), window: Some(258_400) });
+        let item = |method: &str| json!({ "method": method, "params": { "item": { "type": "contextCompaction", "id": "k" } } });
+        assert!(parse_codex_notification(&item("item/started"), &mut state).is_empty(), "not a tool row");
+        assert_eq!(parse_codex_notification(&item("item/completed"), &mut state), [EngineEvent::Compacted { after: None }]);
     }
 }

@@ -396,6 +396,9 @@ fn seed(dir: &Path, long: bool) -> Conversation {
         queued: vec![],
         keep_going: None,
         archived_at: None,
+        context: None,
+        reported: (None, None),
+        compacting: false,
         messages: vec![
             Message::new("first".into(), Role::User, if long { "x".repeat(30_000) } else { "Original question".into() }, 1),
             answer,

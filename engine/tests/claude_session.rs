@@ -963,7 +963,14 @@ fn the_cache_buckets_of_a_result_say_how_long_the_cache_stays_warm() {
         .collect();
     assert_eq!(results.len(), 1);
     let events = parse_claude_message(&results[0]);
-    assert!(matches!(events.as_slice(), [EngineEvent::CacheWarm { secs: 3600, .. }, EngineEvent::Done { .. }]), "{events:?}");
+    // The result also names the model's window, which the context meter counts against.
+    assert!(
+        matches!(
+            events.as_slice(),
+            [EngineEvent::Context { used: None, window: Some(_) }, EngineEvent::CacheWarm { secs: 3600, .. }, EngineEvent::Done { .. }]
+        ),
+        "{events:?}"
+    );
 }
 
 #[test]

@@ -1,0 +1,544 @@
+//! The context meter and the agent compacting itself (conversation tool: `context`, `compact`). Claude Code is driven by hand
+//! (`pipes`), Codex by a small app-server that speaks the notifications recorded from Codex 0.162.1 and Claude Code 2.1.302.
+
+use crate::support::{Pipe, next_pipe, pipes};
+use faber_engine::cli::Cli;
+use faber_engine::model::{Area, ContextFill, Conversation, Role, RunState, Settings, Status, Vendor};
+use faber_engine::proc::{Proc, Spawner};
+use faber_engine::router::{Choice, Effort};
+use faber_engine::{AppEvent, Engine, EngineOptions, SendRequest};
+use serde_json::{Value, json};
+use std::collections::BTreeMap;
+use std::path::Path;
+use std::sync::{Arc, Mutex};
+use std::time::Duration;
+use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
+use tokio::sync::mpsc::UnboundedReceiver;
+
+// The hand-driven Claude project conversation of keep_going.rs, written again here so the two lanes touch different files.
+fn new_engine(dir: &Path, spawn: faber_engine::proc::Spawner) -> (Engine, UnboundedReceiver<AppEvent>) {
+    new_engine_with(dir, spawn, Duration::from_secs(120), 3)
+}
+
+fn new_engine_with(
+    dir: &Path,
+    spawn: faber_engine::proc::Spawner,
+    idle: Duration,
+    max_warm: usize,
+) -> (Engine, UnboundedReceiver<AppEvent>) {
+    let (tx, rx) = tokio::sync::mpsc::unbounded_channel();
+    let opts = EngineOptions {
+        data_dir: dir.into(),
+        clis: BTreeMap::from([(Vendor::Claude, Cli { command: "claude".into(), prefix: vec![] })]),
+        spawn,
+        windows: false,
+        claude_env_billed: false,
+        max_warm,
+        idle,
+        runtime: tokio::runtime::Handle::current(),
+        ask: None,
+    };
+    let engine = Engine::new(opts, Arc::new(move |e| drop(tx.send(e))));
+    // Faber goes on by itself only on a known subscription.
+    let plan = faber_engine::signals::Signals { billing: Some(faber_engine::budget::Billing::Subscription), ..Default::default() };
+    engine.note_account_events(Vendor::Claude, vec![faber_engine::events::EngineEvent::Signals(plan)]);
+    (engine, rx)
+}
+
+async fn started(dir: &Path, folder: &Path) -> (Engine, UnboundedReceiver<AppEvent>, Pipe, String) {
+    let (engine, rx, pipe, id, _made) = started_with(dir, folder, Duration::from_secs(120), 3).await;
+    (engine, rx, pipe, id)
+}
+
+type Made = Arc<Mutex<Vec<Pipe>>>;
+
+async fn started_with(
+    dir: &Path,
+    folder: &Path,
+    idle: Duration,
+    max_warm: usize,
+) -> (Engine, UnboundedReceiver<AppEvent>, Pipe, String, Made) {
+    let (spawn, made) = pipes();
+    let (engine, rx) = new_engine_with(dir, spawn, idle, max_warm);
+    let project = engine.add_project(&folder.to_string_lossy()).unwrap();
+    let choice = Choice { vendor: "claude".into(), model: Some("haiku".into()), effort: None };
+    let request = SendRequest {
+        conversation_id: None,
+        area: Area::Project,
+        project_id: Some(project.id),
+        text: "Fix the login page, then the rest of the list".into(),
+        images: vec![],
+        files: vec![],
+        choice,
+    };
+    let id = engine.send(request).unwrap();
+    let mut pipe = next_pipe(&made).await;
+    // A real CLI says nothing before it has the turn; a line before it would be read as the end of an earlier turn.
+    until_turns(&pipe, 1).await;
+    pipe.say(json!({ "type": "system", "subtype": "init", "session_id": "s", "model": "claude-haiku-5-5" })).await;
+    (engine, rx, pipe, id, made)
+}
+
+fn folder() -> tempfile::TempDir {
+    let build = Path::new(env!("CARGO_MANIFEST_DIR")).join("../target/test-workspaces");
+    std::fs::create_dir_all(&build).unwrap();
+    [build, std::env::temp_dir()]
+        .into_iter()
+        .map(|root| tempfile::tempdir_in(root).unwrap())
+        .find(|dir| faber_engine::permissions::checked_folder(dir.path()).is_some())
+        .expect("a folder Faber works in")
+}
+
+async fn answers(pipe: &mut Pipe, text: &str, ok: bool) {
+    if ok {
+        let block = |event: Value| json!({ "type": "stream_event", "event": event, "parent_tool_use_id": null });
+        pipe.say(block(json!({ "type": "content_block_start", "index": 0, "content_block": { "type": "text", "text": "" } }))).await;
+        pipe.say(block(json!({ "type": "content_block_delta", "index": 0, "delta": { "type": "text_delta", "text": text } }))).await;
+        pipe.say(json!({ "type": "assistant", "message": { "role": "assistant", "content": [{ "type": "text", "text": text }] } })).await;
+    }
+    pipe.say(json!({ "type": "result", "subtype": if ok { "success" } else { "error_during_execution" }, "is_error": !ok,
+        "total_cost_usd": 0.0, "usage": {} }))
+        .await;
+}
+
+fn turns(pipe: &Pipe) -> Vec<String> {
+    pipe.lines.lock().unwrap().iter().filter(|m| m["type"] == "user").map(|m| text_of(&m["message"]["content"])).collect()
+}
+
+fn text_of(content: &Value) -> String {
+    match content {
+        Value::String(s) => s.clone(),
+        Value::Array(parts) => parts.iter().filter_map(|p| p["text"].as_str()).collect::<Vec<_>>().join(""),
+        _ => String::new(),
+    }
+}
+
+async fn until_turns(pipe: &Pipe, n: usize) {
+    for _ in 0..300 {
+        if turns(pipe).len() >= n {
+            return;
+        }
+        tokio::time::sleep(Duration::from_millis(10)).await;
+    }
+    panic!("the CLI got {} turns, not {n}: {:?}", turns(pipe).len(), turns(pipe));
+}
+
+async fn until(engine: &Engine, id: &str, done: impl Fn(&Conversation) -> bool) -> Conversation {
+    for _ in 0..300 {
+        let c = engine.open(id).unwrap();
+        if done(&c) {
+            return c;
+        }
+        tokio::time::sleep(Duration::from_millis(10)).await;
+    }
+    panic!("the conversation never got there: {:?}", engine.open(id).unwrap());
+}
+
+fn idle(c: &Conversation) -> bool {
+    c.messages.last().is_some_and(|m| m.role == Role::Assistant && m.status != Some(Status::Streaming))
+}
+
+/// The main thread's response, with the prompt it was given.
+fn response(parent: Value, fresh: u64, read: u64, wrote: u64) -> Value {
+    json!({ "type": "assistant", "parent_tool_use_id": parent, "message": { "role": "assistant", "content": [{ "type": "text", "text": "ok" }],
+        "usage": { "input_tokens": fresh, "cache_read_input_tokens": read, "cache_creation_input_tokens": wrote, "output_tokens": 4 } } })
+}
+
+/// The end of a turn, naming the model's window as the CLI does.
+fn result(window: u64) -> Value {
+    json!({ "type": "result", "subtype": "success", "is_error": false, "total_cost_usd": 0.0, "usage": {},
+        "modelUsage": { "claude-haiku-5-5": { "inputTokens": 2, "cacheReadInputTokens": 9000, "cacheCreationInputTokens": 100, "contextWindow": window },
+                        "claude-other": { "inputTokens": 1, "contextWindow": 200_000 } } })
+}
+
+fn context_events(rx: &mut UnboundedReceiver<AppEvent>) -> Vec<Option<ContextFill>> {
+    let mut seen = vec![];
+    while let Ok(e) = rx.try_recv() {
+        if let AppEvent::Context { context, .. } = e {
+            seen.push(context);
+        }
+    }
+    seen
+}
+
+/// The agent's call of Faber's conversation tool, as Claude Code sends it, and the text Faber answers with.
+async fn tool(agent: &mut Pipe, n: u64, args: Value) -> (bool, String) {
+    let request = format!("r{n}");
+    let message = json!({ "jsonrpc": "2.0", "id": n, "method": "tools/call",
+        "params": { "name": "conversation", "arguments": args, "_meta": { "claudecode/toolUseId": format!("toolu_{n}") } } });
+    agent.say(json!({ "type": "assistant", "parent_tool_use_id": null, "message": { "content": [{ "type": "tool_use", "id": format!("toolu_{n}"),
+        "name": "mcp__faber__conversation", "input": args }] } })).await;
+    agent.say(json!({ "type": "control_request", "request_id": request, "request": { "subtype": "mcp_message", "server_name": "faber", "message": message } })).await;
+    for _ in 0..300 {
+        let found = agent.lines.lock().unwrap().iter().find(|m| m["response"]["request_id"] == request.as_str()).cloned();
+        if let Some(m) = found {
+            let r = &m["response"]["response"]["mcp_response"]["result"];
+            return (r["isError"] == false, r["content"][0]["text"].as_str().unwrap_or_default().to_string());
+        }
+        tokio::time::sleep(Duration::from_millis(10)).await;
+    }
+    panic!("{request} was never answered");
+}
+
+/// What Claude Code says when the conversation was compacted on request (`/compact`), recorded from 2.1.302.
+async fn compacts(agent: &mut Pipe, after: u64) {
+    agent.say(json!({ "type": "system", "subtype": "status", "status": "compacting" })).await;
+    agent.say(json!({ "type": "system", "subtype": "init", "session_id": "s", "model": "claude-haiku-5-5" })).await;
+    agent.say(json!({ "type": "system", "subtype": "compact_boundary", "compact_metadata": { "trigger": "manual", "pre_tokens": 23212, "post_tokens": after } })).await;
+    agent
+        .say(json!({ "type": "result", "subtype": "success", "is_error": false, "num_turns": 0, "result": "", "local_command": "compact",
+        "total_cost_usd": 0.0, "usage": { "input_tokens": 0 } }))
+        .await;
+}
+
+#[tokio::test]
+async fn the_meter_counts_the_main_agents_latest_prompt_against_its_models_window() {
+    let (dir, project) = (tempfile::tempdir().unwrap(), folder());
+    let (engine, mut rx, mut agent, id) = started(dir.path(), project.path()).await;
+    // Nothing is known before the CLI says it.
+    assert_eq!(engine.open(&id).unwrap().context, None);
+    agent.say(response(Value::Null, 2, 10_000, 5_000)).await;
+    // A subagent's own prompt is never the conversation's.
+    agent.say(response(json!("agent1"), 900_000, 0, 0)).await;
+    agent.say(result(1_000_000)).await;
+    let c = until(&engine, &id, |c| idle(c) && c.context.is_some()).await;
+    assert_eq!(
+        c.context,
+        Some(ContextFill { used: 15_002, window: 1_000_000 }),
+        "the main thread's prompt, against the main model's window"
+    );
+    let seen = context_events(&mut rx);
+    assert_eq!(seen.last(), Some(&c.context), "the screen is told: {seen:?}");
+    assert!(!seen.iter().flatten().any(|c| c.used == 900_000), "{seen:?}");
+
+    // It was kept with the conversation, so a reopened one shows it before anything runs.
+    // The agent can ask for it too, as words.
+    let (ok, text) = tool(&mut agent, 1, json!({ "action": "context" })).await;
+    assert!(ok && text == "Your context holds 15002 of 1000000 tokens (1%).", "{text}");
+    engine.shutdown();
+    let (again, _rx) = new_engine(dir.path(), pipes().0);
+    assert_eq!(again.open(&id).unwrap().context, Some(ContextFill { used: 15_002, window: 1_000_000 }));
+
+    again.shutdown();
+}
+
+#[tokio::test]
+async fn a_compaction_the_cli_reports_resets_the_meter_to_the_summary() {
+    let (dir, project) = (tempfile::tempdir().unwrap(), folder());
+    let (engine, _rx, mut agent, id) = started(dir.path(), project.path()).await;
+    agent.say(response(Value::Null, 2, 200_000, 5_000)).await;
+    agent.say(result(1_000_000)).await;
+    until(&engine, &id, |c| idle(c) && c.context.is_some_and(|c| c.used == 205_002)).await;
+    agent.say(json!({ "type": "system", "subtype": "compact_boundary", "compact_metadata": { "trigger": "auto", "pre_tokens": 205_002, "post_tokens": 1_200 } })).await;
+    until(&engine, &id, |c| c.context == Some(ContextFill { used: 1_200, window: 1_000_000 })).await;
+    engine.shutdown();
+}
+
+#[tokio::test]
+async fn the_agent_compacts_itself_when_its_turn_ends_and_gets_its_own_next_word_for_word() {
+    let (dir, project) = (tempfile::tempdir().unwrap(), folder());
+    let (engine, _rx, mut agent, id) = started(dir.path(), project.path()).await;
+    agent.say(response(Value::Null, 2, 150_000, 5_000)).await;
+    let (ok, text) = tool(&mut agent, 1, json!({ "action": "context" })).await;
+    assert!(ok && text.contains("not known yet"), "the window comes with the first result: {text}");
+
+    let next = "Finish the docs page: the parser section is written, the lexer section is left (the notes are in the page itself).";
+    let (ok, text) = tool(&mut agent, 2, json!({ "action": "compact", "next": next })).await;
+    assert!(ok && text.contains("end your current turn"), "{text}");
+    // The turn is not cut: nothing is sent while it runs.
+    tokio::time::sleep(Duration::from_millis(80)).await;
+    assert_eq!(turns(&agent), vec!["Fix the login page, then the rest of the list".to_string()]);
+
+    agent.say(response(Value::Null, 2, 150_000, 5_000)).await;
+    agent.say(result(1_000_000)).await;
+    until_turns(&agent, 2).await;
+    assert_eq!(turns(&agent)[1], "/compact", "the CLI is asked once the turn ended");
+    // While it compacts, the conversation is at work: the person's message waits behind it.
+    let queued = SendRequest {
+        conversation_id: Some(id.clone()),
+        area: Area::Project,
+        project_id: None,
+        text: "Also the footer".into(),
+        images: vec![],
+        files: vec![],
+        choice: Choice { vendor: "claude".into(), model: Some("haiku".into()), effort: None },
+    };
+    engine.send(queued).unwrap();
+    tokio::time::sleep(Duration::from_millis(60)).await;
+    assert_eq!(turns(&agent).len(), 2, "nothing goes out before the compaction ended");
+
+    compacts(&mut agent, 1_166).await;
+    until_turns(&agent, 3).await;
+    assert_eq!(
+        turns(&agent)[2],
+        format!("The conversation was compacted. Continue: {next}"),
+        "its own words, first, ahead of the person's message"
+    );
+    let c = engine.open(&id).unwrap();
+    let woke = c
+        .messages
+        .iter()
+        .find(|m| m.wake.as_ref().is_some_and(|w| w.why == "wake.compacted"))
+        .expect("a quiet line says Faber compacted it");
+    assert!(woke.text.ends_with(next));
+    assert_eq!(c.queued.len(), 1, "the person's message still waits for the next turn: {:?}", c.queued);
+    assert_eq!(c.context.map(|c| c.used), Some(1_166), "the meter shows what is left");
+    engine.shutdown();
+}
+
+#[tokio::test]
+async fn a_compaction_without_next_sends_no_turn_and_a_failed_turn_compacts_nothing() {
+    let (dir, project) = (tempfile::tempdir().unwrap(), folder());
+    let (engine, _rx, mut agent, id) = started(dir.path(), project.path()).await;
+    let (ok, _) = tool(&mut agent, 1, json!({ "action": "compact" })).await;
+    assert!(ok);
+    answers(&mut agent, "One topic is done.", true).await;
+    until_turns(&agent, 2).await;
+    assert_eq!(turns(&agent)[1], "/compact");
+    compacts(&mut agent, 900).await;
+    until(&engine, &id, |c| !c.compacting).await;
+    tokio::time::sleep(Duration::from_millis(100)).await;
+    assert_eq!(turns(&agent).len(), 2, "with no next, the conversation waits for the person");
+    assert!(engine.open(&id).unwrap().messages.iter().all(|m| m.wake.is_none()));
+
+    // A turn that fails after the request compacts nothing: the request ended with it.
+    engine
+        .send(SendRequest {
+            conversation_id: Some(id.clone()),
+            area: Area::Project,
+            project_id: None,
+            text: "again".into(),
+            images: vec![],
+            files: vec![],
+            choice: Choice { vendor: "claude".into(), model: Some("haiku".into()), effort: None },
+        })
+        .unwrap();
+    until_turns(&agent, 3).await;
+    let (ok, _) = tool(&mut agent, 2, json!({ "action": "compact", "next": "x" })).await;
+    assert!(ok);
+    answers(&mut agent, "", false).await;
+    until(&engine, &id, idle).await;
+    tokio::time::sleep(Duration::from_millis(100)).await;
+    assert_eq!(turns(&agent).len(), 3, "no /compact after a failed turn");
+    engine.shutdown();
+}
+
+/// A compaction is the CLI at work without a turn of Faber's, so neither the idle timer nor the limit of warm processes
+/// may take its process away: its end would never be heard and the conversation would wait on it for good.
+#[tokio::test]
+async fn a_process_that_compacts_is_neither_closed_as_idle_nor_evicted_for_a_newer_conversation() {
+    let (dir, project) = (tempfile::tempdir().unwrap(), folder());
+    let (engine, _rx, mut agent, _id, made) = started_with(dir.path(), project.path(), Duration::from_millis(150), 1).await;
+    let (ok, _) = tool(&mut agent, 1, json!({ "action": "compact", "next": "Go on with the footer." })).await;
+    assert!(ok);
+    answers(&mut agent, "The header is done.", true).await;
+    until_turns(&agent, 2).await;
+    // The idle time passes while the CLI compacts.
+    tokio::time::sleep(Duration::from_millis(450)).await;
+    assert!(!agent.closed.load(std::sync::atomic::Ordering::SeqCst), "the idle timer closed the process that was compacting");
+    // A newer conversation takes a process beyond the limit of one.
+    engine
+        .send(SendRequest {
+            conversation_id: None,
+            area: Area::Chat,
+            project_id: None,
+            text: "Something else".into(),
+            images: vec![],
+            files: vec![],
+            choice: Choice { vendor: "claude".into(), model: Some("haiku".into()), effort: None },
+        })
+        .unwrap();
+    let _other = next_pipe(&made).await;
+    tokio::time::sleep(Duration::from_millis(100)).await;
+    assert!(!agent.closed.load(std::sync::atomic::Ordering::SeqCst), "the newer conversation evicted the process that was compacting");
+    // A change of settings that retires idle project processes leaves this one be.
+    engine.save_settings(Settings { user_hooks: Some(true), ..Settings::default() }).unwrap();
+    tokio::time::sleep(Duration::from_millis(100)).await;
+    assert!(!agent.closed.load(std::sync::atomic::Ordering::SeqCst), "a change of settings closed the process that was compacting");
+    compacts(&mut agent, 900).await;
+    until_turns(&agent, 3).await;
+    assert_eq!(turns(&agent)[2], "The conversation was compacted. Continue: Go on with the footer.");
+    engine.shutdown();
+}
+
+/// A compaction is work: the running list has it (so an update waits and the screen offers Stop) until the CLI ends it.
+#[tokio::test]
+async fn a_compaction_is_work_in_the_running_list_until_the_cli_ends_it() {
+    let (dir, project) = (tempfile::tempdir().unwrap(), folder());
+    let (engine, _rx, mut agent, id) = started(dir.path(), project.path()).await;
+    let (ok, _) = tool(&mut agent, 1, json!({ "action": "compact" })).await;
+    assert!(ok);
+    answers(&mut agent, "The header is done.", true).await;
+    until_turns(&agent, 2).await;
+    until(&engine, &id, |c| c.compacting).await;
+    assert!(engine.is_working(), "nothing says the engine is at work while the CLI compacts");
+    let item = engine.state().running.items.into_iter().find(|i| i.conversation_id == id).expect("a row in the running list");
+    assert_eq!(item.state, RunState::Working);
+    compacts(&mut agent, 900).await;
+    until(&engine, &id, |c| !c.compacting).await;
+    assert!(!engine.is_working(), "and nothing keeps saying it after the compaction ended");
+    engine.shutdown();
+}
+
+/// Stop during a compaction reaches the CLI, and what the person had written stays in the queue: nothing goes on by itself
+/// after a Stop, as after a stopped turn.
+#[tokio::test]
+async fn stop_during_a_compaction_interrupts_it_and_nothing_goes_out_after_it() {
+    let (dir, project) = (tempfile::tempdir().unwrap(), folder());
+    let (engine, _rx, mut agent, id) = started(dir.path(), project.path()).await;
+    let (ok, _) = tool(&mut agent, 1, json!({ "action": "compact", "next": "Go on with the footer." })).await;
+    assert!(ok);
+    answers(&mut agent, "The header is done.", true).await;
+    until_turns(&agent, 2).await;
+    engine
+        .send(SendRequest {
+            conversation_id: Some(id.clone()),
+            area: Area::Project,
+            project_id: None,
+            text: "Also the sidebar".into(),
+            images: vec![],
+            files: vec![],
+            choice: Choice { vendor: "claude".into(), model: Some("haiku".into()), effort: None },
+        })
+        .unwrap();
+    engine.interrupt(&id);
+    for _ in 0..300 {
+        if agent.lines.lock().unwrap().iter().any(|m| m["request"]["subtype"] == "interrupt") {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(10)).await;
+    }
+    assert!(agent.lines.lock().unwrap().iter().any(|m| m["request"]["subtype"] == "interrupt"), "the CLI was never told to stop");
+    compacts(&mut agent, 900).await;
+    until(&engine, &id, |c| !c.compacting).await;
+    tokio::time::sleep(Duration::from_millis(150)).await;
+    assert_eq!(turns(&agent).len(), 2, "nothing is sent after Stop: {:?}", turns(&agent));
+    let c = engine.open(&id).unwrap();
+    assert_eq!(c.queued.len(), 1, "the person's message still waits: {:?}", c.queued);
+    assert!(c.messages.iter().all(|m| m.wake.is_none()), "and the agent's own words are not sent either");
+    engine.shutdown();
+}
+
+/// A Codex app-server that answers like the recorded one: a turn that calls the conversation tool once, a compaction that runs
+/// as a turn of its own, and a context update after every request.
+fn codex(seen: Arc<Mutex<Vec<Value>>>) -> Spawner {
+    Arc::new(move |_bin, _argv, _cwd| {
+        let (driver_in, fake_in) = tokio::io::duplex(1 << 20);
+        let (mut out, driver_out) = tokio::io::duplex(1 << 20);
+        let seen = seen.clone();
+        tokio::spawn(async move {
+            let mut lines = BufReader::new(fake_in).lines();
+            let mut turns = 0;
+            while let Ok(Some(line)) = lines.next_line().await {
+                let Ok(msg) = serde_json::from_str::<Value>(&line) else { continue };
+                seen.lock().unwrap().push(msg.clone());
+                let (id, params) = (msg["id"].clone(), &msg["params"]);
+                let thread = params["threadId"].as_str().unwrap_or("thread-1").to_string();
+                let usage = |last: u64| {
+                    json!({ "method": "thread/tokenUsage/updated", "params": { "threadId": thread, "turnId": "t", "tokenUsage": {
+                        "total": { "totalTokens": last, "inputTokens": last, "cachedInputTokens": 0, "outputTokens": 0, "reasoningOutputTokens": 0 },
+                        "last": { "totalTokens": last, "inputTokens": last - 5, "cachedInputTokens": 0, "outputTokens": 5, "reasoningOutputTokens": 0 },
+                        "modelContextWindow": 258_400 } } })
+                };
+                let finish = |turn: &str, item: Value| {
+                    let done = json!({ "id": turn, "items": [], "status": "completed" });
+                    vec![
+                        json!({ "method": "item/completed", "params": { "threadId": thread, "turnId": turn, "item": item } }),
+                        json!({ "method": "turn/completed", "params": { "threadId": thread, "turn": done } }),
+                    ]
+                };
+                let started = |turn: &str| {
+                    let t = json!({ "id": turn, "items": [], "status": "inProgress" });
+                    json!({ "method": "turn/started", "params": { "threadId": thread, "turn": t } })
+                };
+                let message = json!({ "type": "agentMessage", "id": "m", "text": "done", "phase": "final_answer" });
+                let mut say = vec![];
+                match msg["method"].as_str() {
+                    Some("initialize") => say.push(json!({ "id": id, "result": {} })),
+                    Some("config/read") => say.push(json!({ "id": id, "result": { "config": {} } })),
+                    Some("thread/start") => {
+                        say.push(json!({ "id": id, "result": { "thread": { "id": "thread-1", "model": "gpt-6-luna" } } }))
+                    }
+                    Some("turn/start") => {
+                        turns += 1;
+                        let turn = format!("turn-{turns}");
+                        say.push(json!({ "id": id, "result": { "turn": { "id": turn, "items": [], "status": "inProgress" } } }));
+                        say.push(started(&turn));
+                        if turns == 1 {
+                            // The agent asks to be compacted; the turn goes on when Faber answers the call.
+                            say.push(usage(40_000));
+                            say.push(json!({ "id": 900, "method": "item/tool/call", "params": { "threadId": thread, "turnId": turn, "callId": "c1", "tool": "conversation",
+                                "arguments": { "action": "compact", "next": "Write the lexer section." } } }));
+                        } else {
+                            say.extend(finish(&turn, message.clone()));
+                        }
+                    }
+                    Some("thread/compact/start") => {
+                        say.push(json!({ "id": id, "result": {} }));
+                        say.push(started("turn-compact"));
+                        say.push(json!({ "method": "item/started", "params": { "threadId": thread, "turnId": "turn-compact", "item": { "type": "contextCompaction", "id": "k" } } }));
+                        say.push(usage(13_808));
+                        say.extend(finish("turn-compact", json!({ "type": "contextCompaction", "id": "k" })));
+                    }
+                    None if id == 900 => say.extend(finish("turn-1", message.clone())),
+                    _ => {}
+                }
+                for m in say {
+                    if out.write_all(format!("{m}\n").as_bytes()).await.is_err() {
+                        return;
+                    }
+                }
+            }
+        });
+        Ok(Proc { stdin: Box::new(driver_in), stdout: Box::new(driver_out), stderr: None, child: None, contained: None })
+    })
+}
+
+#[tokio::test]
+async fn codex_reports_its_context_compacts_on_request_and_continues_with_next() {
+    let (dir, project) = (tempfile::tempdir().unwrap(), folder());
+    let seen = Arc::new(Mutex::new(vec![]));
+    let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
+    let opts = EngineOptions {
+        data_dir: dir.path().into(),
+        clis: BTreeMap::from([(Vendor::Codex, Cli { command: "codex".into(), prefix: vec![] })]),
+        spawn: codex(seen.clone()),
+        windows: false,
+        claude_env_billed: false,
+        max_warm: 3,
+        idle: Duration::from_secs(120),
+        runtime: tokio::runtime::Handle::current(),
+        ask: None,
+    };
+    let engine = Engine::new(opts, Arc::new(move |e| drop(tx.send(e))));
+    let plan = faber_engine::signals::Signals { billing: Some(faber_engine::budget::Billing::Subscription), ..Default::default() };
+    engine.note_account_events(Vendor::Codex, vec![faber_engine::events::EngineEvent::Signals(plan)]);
+    let p = engine.add_project(&project.path().to_string_lossy()).unwrap();
+    let id = engine
+        .send(SendRequest {
+            conversation_id: None,
+            area: Area::Project,
+            project_id: Some(p.id),
+            text: "Write the docs".into(),
+            images: vec![],
+            files: vec![],
+            choice: Choice { vendor: "codex".into(), model: None, effort: Some(Effort::High) },
+        })
+        .unwrap();
+    // The follow-up is Faber's own message, which Codex receives as the second turn.
+    let c = until(&engine, &id, |c| c.messages.len() >= 4 && idle(c)).await;
+    let methods: Vec<String> = seen.lock().unwrap().iter().filter_map(|m| m["method"].as_str().map(String::from)).collect();
+    let at = |name: &str| methods.iter().position(|m| m == name).unwrap_or_else(|| panic!("{name} missing in {methods:?}"));
+    assert!(at("turn/start") < at("thread/compact/start"), "the compaction waits for the turn: {methods:?}");
+    let compact = seen.lock().unwrap().iter().find(|m| m["method"] == "thread/compact/start").cloned().unwrap();
+    assert_eq!(compact["params"]["threadId"], "thread-1");
+    let second = seen.lock().unwrap().iter().filter(|m| m["method"] == "turn/start").nth(1).cloned().expect("a turn after the compaction");
+    assert_eq!(second["params"]["input"][0]["text"], "The conversation was compacted. Continue: Write the lexer section.");
+    assert_eq!(c.messages[2].wake.as_ref().map(|w| w.why.as_str()), Some("wake.compacted"));
+    // The meter followed: 40000 before, what was left after, against the window Codex names.
+    let seen = context_events(&mut rx);
+    assert!(seen.contains(&Some(ContextFill { used: 40_000, window: 258_400 })), "{seen:?}");
+    assert!(seen.contains(&Some(ContextFill { used: 13_808, window: 258_400 })), "{seen:?}");
+    assert_eq!(c.context, Some(ContextFill { used: 13_808, window: 258_400 }));
+    engine.shutdown();
+}

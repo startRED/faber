@@ -293,7 +293,7 @@ impl Core {
         self.drain(conv);
         let on = self.convs.get(conv).is_some_and(|c| c.keep_going.is_some());
         match keep_going {
-            Some(reply) => self.keep_going_after(conv, Some(reply)),
+            Some(reply) => self.keep_going_unless_compacting(conv, Some(reply)),
             // Turned on while git was asked (`set_keep_going` waited for it).
             None if on && idle && last => self.go_on(conv, reply_id),
             None => {}
@@ -370,7 +370,7 @@ impl Core {
                 self.drain(conv);
                 let on = self.convs.get(conv).is_some_and(|c| c.keep_going.is_some());
                 match keep_going {
-                    Some(reply) => self.keep_going_after(conv, Some(reply)),
+                    Some(reply) => self.keep_going_unless_compacting(conv, Some(reply)),
                     // Turned on while the checks ran (`set_keep_going` waited for them).
                     None if on => self.go_on(conv, reply_id),
                     None => {}
@@ -394,10 +394,12 @@ fn checks_of(core: &Core, conv: &str, reply_id: &str) -> Option<Checks> {
     core.convs.get(conv)?.messages.iter().find(|m| m.id == reply_id)?.checks.clone()
 }
 
-/// The checks of the conversation's last reply still run: it is at work, so what the person writes, the queue and
+/// The checks of the conversation's last reply still run, or its context is being compacted (`compact.rs`): it is at work, so what the person writes, the queue and
 /// "keep going" wait for them, and Stop ends them.
 pub(super) fn checking(c: &Conversation) -> bool {
-    c.weighing.is_some() || c.messages.last().and_then(|m| m.checks.as_ref()).is_some_and(|k| k.state == ChecksState::Running)
+    c.compacting
+        || c.weighing.is_some()
+        || c.messages.last().and_then(|m| m.checks.as_ref()).is_some_and(|k| k.state == ChecksState::Running)
 }
 
 fn failed(verdict: Verdict) -> bool {

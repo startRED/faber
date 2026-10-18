@@ -24,7 +24,7 @@ fn state_of(busy: bool, c: &Conversation) -> State {
         // Its copy is still being made: the brief follows it.
         _ if c.messages.is_empty() => State::Working,
         Some(Status::Streaming) => State::Working,
-        _ if busy || !c.queued.is_empty() => State::Working,
+        _ if busy || c.compacting || !c.queued.is_empty() => State::Working,
         Some(Status::Error) => State::Failed,
         Some(Status::Stopped) => State::Stopped,
         _ => State::Finished,
@@ -53,6 +53,11 @@ impl Core {
             Ok(Request::Ask { id, message }) => match self.ask_sibling(conv, &id, &message) {
                 Ok(text) => (true, text),
                 Err(why) => (false, format!("Nothing was sent: {why}.")),
+            },
+            Ok(Request::Context) => (true, self.context_answer(conv)),
+            Ok(Request::Compact { next }) => match self.plan_compaction(conv, next) {
+                Ok(text) => (true, text),
+                Err(why) => (false, format!("Nothing was scheduled: {why}.")),
             },
             Ok(Request::Archive) => match self.set_archived(conv, true) {
                 Ok(()) => (true, sibling::ARCHIVED.to_string()),

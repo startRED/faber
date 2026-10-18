@@ -34,6 +34,7 @@ mod archive;
 mod auto;
 mod browse;
 mod by_itself;
+mod compact;
 mod copies;
 pub use copies::GitRunner;
 pub mod facts;
@@ -78,6 +79,11 @@ pub enum AppEvent {
         items: Vec<RunningItem>,
     },
     List,
+    /// How full a conversation's own agent's context is now (None: not known).
+    Context {
+        conversation_id: String,
+        context: Option<ContextFill>,
+    },
     /// "Keep going" stopped by itself in a conversation, and why (a `reason.keepGoing.*` key): the tray tells the person.
     Halted {
         conversation_id: String,
@@ -305,6 +311,8 @@ struct Core {
     /// What each conversation's folder held when its reply began, for Faber's checks (`verifying::Before`).
     before: HashMap<String, verifying::Before>,
     live: HashMap<String, Live>,
+    /// Compactions the agents asked for, done once their turn ends (`compact.rs`).
+    compacts: HashMap<String, compact::Plan>,
     mission_sessions: HashMap<String, Vec<Session>>,
     /// Owned process trees of writer roles by invocation id, and the terminal event each role reported.
     worker_trees: HashMap<String, crate::proc::OwnedTree>,
@@ -439,6 +447,7 @@ impl Engine {
                 me: me.clone(),
                 convs: HashMap::new(),
                 live: HashMap::new(),
+                compacts: HashMap::new(),
                 mission_sessions: HashMap::new(),
                 worker_trees: HashMap::new(),
                 worker_terminals: HashMap::new(),
@@ -668,7 +677,9 @@ impl Engine {
         // One lock for all of it: the end of Faber's checks waits for it, and never sends a turn in between.
         self.with(|c| {
             c.keep_going_off(id);
-            match c.live.get(id).filter(|l| l.turn.is_some()) {
+            c.compacts.remove(id);
+            let compacting = c.convs.get(id).is_some_and(|c| c.compacting);
+            match c.live.get(id).filter(|l| l.turn.is_some() || compacting) {
                 Some(l) => {
                     l.session.interrupt();
                     c.stop_helpers(id, false);
@@ -711,7 +722,7 @@ impl Engine {
                     c.blank(Area::Chat, None)
                 }
             };
-            if let Some(live) = c.live.remove(&id) {
+            if let Some(live) = c.retire(&id) {
                 live.session.close();
             }
             if let Some(f) = &folder {
@@ -1040,7 +1051,7 @@ impl Core {
         for id in stopped {
             self.note_turn(&id, None, true);
             self.stop_helpers(&id, true);
-            if let Some(l) = self.live.remove(&id) {
+            if let Some(l) = self.retire(&id) {
                 l.session.close();
             }
             if paid && !unknown && !billed && self.transfers.get(&id).is_some_and(|t| !t.by_hand) {
@@ -1154,15 +1165,19 @@ impl Core {
 
     fn replace_clis(&mut self, clis: BTreeMap<Vendor, Cli>) {
         let changed = |v: Vendor| self.opts.clis.get(&v) != clis.get(&v);
-        let stale: Vec<String> =
-            self.live.iter().filter(|(_, l)| l.turn.is_none() && changed(l.vendor)).map(|(id, _)| id.clone()).collect();
+        let stale: Vec<String> = self
+            .live
+            .iter()
+            .filter(|(id, l)| l.turn.is_none() && !self.compacting(id) && changed(l.vendor))
+            .map(|(id, _)| id.clone())
+            .collect();
         if changed(Vendor::Codex) {
             for (_, server) in self.codex.drain() {
                 server.retire();
             }
         }
         for id in stale {
-            if let Some(l) = self.live.remove(&id) {
+            if let Some(l) = self.retire(&id) {
                 l.session.close();
             }
         }
@@ -1334,7 +1349,7 @@ impl Core {
         if stricter {
             let active: Vec<String> = self.live.iter().filter(|(_, live)| live.turn.is_some()).map(|(id, _)| id.clone()).collect();
             for id in active {
-                if let Some(live) = self.live.remove(&id) {
+                if let Some(live) = self.retire(&id) {
                     live.session.interrupt();
                     live.session.close();
                     if let Some(message) =
@@ -1358,6 +1373,7 @@ impl Core {
                 .iter()
                 .filter(|(id, l)| {
                     l.turn.is_none()
+                        && !self.compacting(id)
                         && (settings.permissions != before.permissions
                             || tuned
                             || self.convs.get(*id).is_some_and(|c| c.area == Area::Project))
@@ -1365,7 +1381,7 @@ impl Core {
                 .map(|(id, _)| id.clone())
                 .collect();
             for id in idle {
-                if let Some(l) = self.live.remove(&id) {
+                if let Some(l) = self.retire(&id) {
                     l.session.close();
                 }
             }
@@ -1464,6 +1480,7 @@ impl Core {
                 | EngineEvent::TurnStarted
                 | EngineEvent::Quota { .. }
                 | EngineEvent::Signals(_)
+                | EngineEvent::Context { .. }
                 | EngineEvent::Error { .. }
         ) && let Some(id) = self.live.get_mut(conv).and_then(|l| l.unsaved_session.take())
             && let Some(c) = self.convs.get_mut(conv)
@@ -1478,7 +1495,13 @@ impl Core {
                 self.save(conv);
             }
         }
+        // While the context is compacted only its end matters (`compact.rs`).
+        if self.convs.get(conv).is_some_and(|c| c.compacting) && self.compaction_event(conv, &event) {
+            return;
+        }
         match event {
+            EngineEvent::Context { used, window } => return self.note_context(conv, vendor, used, window),
+            EngineEvent::Compacted { after } => return self.note_compacted(conv, vendor, after),
             // Codex accepted the turn: if Faber dies now, the next launch resumes this session instead of starting one that never
             // heard of the turn.
             EngineEvent::TurnStarted => {
@@ -1729,7 +1752,7 @@ impl Core {
                     self.ledger.of_mut(vendor).reach = Reach::Out(None);
                     self.save_ledger(true);
                     self.stop_helpers(conv, true);
-                    if let Some(l) = self.live.remove(conv) {
+                    if let Some(l) = self.retire(conv) {
                         l.session.close();
                     }
                     if let Err(e) = self.recover(conv, false)
@@ -1778,7 +1801,7 @@ impl Core {
                     self.unwatch(conv);
                     self.note_turn(conv, None, true);
                     self.stop_helpers(conv, true);
-                    if let Some(l) = self.live.remove(conv) {
+                    if let Some(l) = self.retire(conv) {
                         l.session.close();
                     }
                     // What was handed to the turn and never taken in died with the process: it waits in the queue again.
@@ -1866,6 +1889,10 @@ impl Core {
         } else {
             return;
         };
+        // A turn that failed or was stopped compacts nothing: the agent's request ended with it.
+        if !completed_ok {
+            self.compacts.remove(conv);
+        }
         let keep_going = match read {
             Some(read) => read,
             None => self.keep_going_ended(conv, turn_id.as_deref()),
@@ -1880,7 +1907,7 @@ impl Core {
             self.emit_queue(conv);
         }
         if self.live.get(conv).is_some_and(|l| self.opts.clis.get(&l.vendor) != Some(&l.cli))
-            && let Some(l) = self.live.remove(conv)
+            && let Some(l) = self.retire(conv)
         {
             l.session.close();
         }
@@ -1889,7 +1916,7 @@ impl Core {
             self.drain(conv);
         }
         if !checking {
-            self.keep_going_after(conv, keep_going);
+            self.keep_going_unless_compacting(conv, keep_going);
             // Faber's checks end the turn later (`verifying.rs`), and the report waits for them. An idle process that
             // exits ends no reply, so it reports nothing twice.
             if turn_id.is_some() {
@@ -1909,8 +1936,10 @@ impl Core {
             tokio::time::sleep(idle).await;
             let Some(core) = me.upgrade() else { return };
             let mut core = core.lock().unwrap_or_else(|e| e.into_inner());
+            // A compaction is the CLI at work with no turn of Faber's: its end closes the process when it is idle (`compaction_ended`).
             if core.live.get(&conv).is_some_and(|l| l.sid == sid && l.used == used && l.turn.is_none())
-                && let Some(l) = core.live.remove(&conv)
+                && !core.compacting(&conv)
+                && let Some(l) = core.retire(&conv)
             {
                 l.session.close();
             }
@@ -2120,6 +2149,10 @@ impl Core {
     /// After an answer that finished well, the next message in the queue goes out. Anything else (a stop, a failure) leaves
     /// the queue for the person to decide.
     fn drain(&mut self, conv: &str) {
+        // A compaction the agent asked for comes first; the queue goes out when it ended (`compact.rs`).
+        if self.compact_due(conv) {
+            return;
+        }
         let idle = !self.live.get(conv).is_some_and(|l| l.turn.is_some());
         let Some(c) = self.convs.get_mut(conv) else { return };
         if !idle || c.messages.last().is_none_or(|m| m.status != Some(Status::Done)) || c.queued.is_empty() || verifying::checking(c) {
@@ -2439,7 +2472,7 @@ impl Core {
         let cwd = match self.convs.get(conv).ok_or_else(|| "error.conversationGone".to_string()).and_then(|c| self.cwd_of(c)) {
             Ok(cwd) => cwd,
             Err(error) => {
-                if let Some(l) = self.live.remove(conv) {
+                if let Some(l) = self.retire(conv) {
                     l.session.close();
                 }
                 return Err(error);
@@ -2459,7 +2492,7 @@ impl Core {
                 return Ok(());
             }
             l.session.close();
-            self.live.remove(conv);
+            self.retire(conv);
         }
         let c = self.convs.get(conv).ok_or("error.conversationGone")?;
         let cwd_used = cwd.clone();
@@ -2587,13 +2620,13 @@ impl Core {
             let Some(oldest) = self
                 .live
                 .iter()
-                .filter(|(_, l)| claude(l) && l.turn.is_none() && l.sid != sid)
+                .filter(|(id, l)| claude(l) && l.turn.is_none() && l.sid != sid && !self.compacting(id))
                 .min_by_key(|(_, l)| l.used)
                 .map(|(id, _)| id.clone())
             else {
                 break;
             };
-            if let Some(l) = self.live.remove(&oldest) {
+            if let Some(l) = self.retire(&oldest) {
                 l.session.close();
             }
         }
@@ -2631,7 +2664,10 @@ impl Core {
             queued: Vec::new(),
             keep_going: None,
             archived_at: None,
+            context: None,
             messages: vec![],
+            reported: (None, None),
+            compacting: false,
             weighing: None,
         };
         let id = c.id.clone();
@@ -2891,7 +2927,7 @@ impl Core {
     /// Throws away the blank conversation being typed, with the CLI that was started for it.
     fn drop_draft(&mut self) {
         if let Some(old) = self.draft.take() {
-            if let Some(l) = self.live.remove(&old) {
+            if let Some(l) = self.retire(&old) {
                 l.session.close();
             }
             self.convs.remove(&old);
@@ -2934,7 +2970,7 @@ impl Core {
         self.stop_helpers(id, true);
         self.follows.remove(id);
         self.before.remove(id);
-        if let Some(l) = self.live.remove(id) {
+        if let Some(l) = self.retire(id) {
             l.session.close();
         }
         if self.store.get(id).is_some() || self.convs.contains_key(id) {
@@ -3031,6 +3067,7 @@ fn running_item(c: &Conversation) -> Option<RunningItem> {
     // Keep going that waits for quota is still at work: the list says until when, and no idle update restarts Faber under it.
     let kg_wait = c.keep_going.as_ref().and_then(|k| k.wait_until).filter(|_| reply.status != Some(Status::Streaming));
     if reply.status != Some(Status::Streaming)
+        && !c.compacting
         && kg_wait.is_none()
         && permissions.is_empty()
         && parked.is_empty()
