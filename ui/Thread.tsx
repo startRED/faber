@@ -8,7 +8,7 @@ import { QuotaCard } from './QuotaCard.tsx';
 import { html, Markdown, openLinks } from './markdown.tsx';
 import { agentMeta, ChangedLines, openedAgent, SourceList, showAgent, tellAbout, ToolChip } from './AgentChat.tsx';
 import { untilReset } from './Sidebar.tsx';
-import { SiteCard, sitesOf, stepsOf } from './Site.tsx';
+import { AwayPage, awaySites, SiteCard, sitesOf, stepsOf } from './Site.tsx';
 import { bytes, compact, fromEngine, money, t } from './i18n.ts';
 import { prettyModel, vendorName, type Option } from './models.ts';
 import { animateList } from './motion.ts';
@@ -107,7 +107,7 @@ interface Shared {
   usage?: VendorUsage[];
 }
 
-function Answer(props: Shared & { m: Accessor<Message>; prompt?: Message; last?: boolean }) {
+function Answer(props: Shared & { m: Accessor<Message>; messages?: Message[]; prompt?: Message; last?: boolean }) {
   const m = () => props.m();
   // While an answer streams the engine sends the whole message every 33 ms. Each memo below compares by value, so a tick that
   // changed only the tools never touches the text, and one that changed only the text never touches the tools.
@@ -167,6 +167,11 @@ function Answer(props: Shared & { m: Accessor<Message>; prompt?: Message; last?:
   // The pages the agent opened in Faber's browser, each a card beside the files.
   const sites = createMemo(() => sitesOf(own()));
   const pageSteps = createMemo(() => stepsOf(own()));
+  // Read only on a reply that says what happened while the person was away.
+  const awayPages = createMemo(() => {
+    const away = m().away;
+    return away ? awaySites(props.messages ?? [], away.turns) : [];
+  });
   const commands = createMemo(() => own().filter((tool) => /bash|command|exec|shell/i.test(tool.name)).length);
   // The answer on screen is never repeated here: once it has text, the status line steps aside.
   // The checks this reply ran, ticking up as each one ends (R161 step 9). The engine marks a check when it starts, so the
@@ -255,6 +260,11 @@ function Answer(props: Shared & { m: Accessor<Message>; prompt?: Message; last?:
       <Show when={m().away || m().autoAnswers?.length}>
         <div class="away-lines">
           <Show when={m().away}>{(away) => <AwayLine away={away()} />}</Show>
+          <Show when={awayPages().length}>
+            <ul class="away-pages" aria-label={t('away.pages')}>
+              <For each={awayPages()}>{(step) => <AwayPage conversationId={props.conversationId} step={step} />}</For>
+            </ul>
+          </Show>
           <For each={m().autoAnswers}>
             {(a) => (
               <p class="woke">

@@ -116,8 +116,9 @@ frames) and checked against today's code. It fills the steps of R161 and never b
 8. **Recorded, not streamed.** Built (R225): the page view in the running column lists every step the agent took in the
    browser during the reply, in plain words with what it typed left out, and picking one shows the picture taken after it
    in the live page's place; the latest step, or "Back to the live page", is the page itself again (taking over from
-   there). The pictures of one conversation take at most 20 MB on disk, the oldest going first. Still to come:
-   pictures of the person's own page changes and "While you were away". The plan:
+   there). The pictures of one conversation take at most 20 MB on disk, the oldest going first. "While you were away" shows
+   the pages the run left open, a picture each with what the agent last did there. Still to come: pictures of the person's
+   own page changes. The plan:
    Each pane keeps a log: a small picture at each page change or agent action, with the
    action that caused it, typed secrets masked and password fields blurred. Watching live is playing the end of that
    log, coming back later is scrubbing it, and "Take over from here" starts from the latest picture. Only the pane the

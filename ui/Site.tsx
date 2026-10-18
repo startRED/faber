@@ -1,5 +1,5 @@
 import { type Accessor, createEffect, createResource, createSignal, Index, on, onCleanup, onMount, Show } from 'solid-js';
-import { api, type ToolUse } from './api.ts';
+import { api, type Message, type ToolUse } from './api.ts';
 import { Icon } from './Glyphs.tsx';
 import { t } from './i18n.ts';
 
@@ -42,6 +42,27 @@ export function stepWords(tool: ToolUse): string {
 /** Every call of a reply that the browser did, in order: the log the page view steps through. */
 export const stepsOf = (tools: ToolUse[]): SiteStep[] =>
   tools.filter((tool) => tool.name === 'Browser' && tool.ok === true).map((tool) => ({ call: tool.id, words: stepWords(tool) }));
+
+/** What "While you were away" shows of the browser (step 8): the latest step on each page the run left over its last `turns`
+ * replies, the newest four, each with the picture taken after it. */
+export function awaySites(messages: Message[], turns: number): SiteStep[] {
+  const replies = messages.filter((m) => m.role === 'assistant').slice(-Math.max(1, turns));
+  const tools = replies.flatMap((m) => (m.tools ?? []).filter((tool) => !tool.parent));
+  return sitesOf(tools).slice(-4).map(({ tool }) => ({ call: tool.id, words: stepWords(tool) }));
+}
+
+/** One page of "While you were away": its picture, when one was kept, and what the agent last did there. */
+export function AwayPage(props: { conversationId: string; step: SiteStep }) {
+  const [picture] = createResource(() => props.step.call, (call) => api.sitePicture(props.conversationId, call).catch(() => null));
+  return (
+    <li>
+      <Show when={picture()} fallback={<span class="away-none" />}>
+        {(src) => <img src={src()} alt="" />}
+      </Show>
+      <span title={props.step.words}>{props.step.words}</span>
+    </li>
+  );
+}
 
 const [opened, setOpened] = createSignal<OpenSite>();
 // Each box the page is placed over is named by a number that only grows while the screen lives (the shell forgets them all

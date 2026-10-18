@@ -3,7 +3,7 @@ import { render } from 'solid-js/web';
 import { api, type Message, type ToolUse } from '../../ui/api.ts';
 import { useLanguage } from '../../ui/i18n.ts';
 import { Running } from '../../ui/Running.tsx';
-import { openedSite, showSite, siteOf, sitesOf, stepsOf, type OpenSite } from '../../ui/Site.tsx';
+import { awaySites, openedSite, showSite, siteOf, sitesOf, stepsOf, type OpenSite } from '../../ui/Site.tsx';
 import { Thread } from '../../ui/Thread.tsx';
 import { check, deepEqual, equal, ok } from './check.ts';
 import act from '../../src-tauri/src/pane/act.js';
@@ -505,3 +505,32 @@ check('page in the browser: a picture is kept only when the page did not change,
     }
   }),
 );
+
+check('page in the browser: "While you were away" shows the pages the run left, one picture each, from its own turns only', async () => {
+  useLanguage('en');
+  const sitePicture = api.sitePicture;
+  api.sitePicture = async (_id, call) => (call === 'w2' ? 'data:image/jpeg;base64,AA==' : null);
+  const page = (id: string, url: string): ToolUse => ({ id, name: 'Browser', input: { url }, ok: true, output: `Opened ${url} in Faber's browser; the person can see it there.\nTitle: T\n` });
+  const before: Message = { id: 'm0', role: 'assistant', at: 0, status: 'done', text: 'x', tools: [page('w0', 'https://old.example/')] };
+  const first: Message = { id: 'm1', role: 'assistant', at: 1, status: 'done', text: 'x', tools: [page('w1', 'https://a.example/')] };
+  const click: ToolUse = { id: 'w2', name: 'Browser', input: { action: 'click', target: 'Next' }, ok: true, output: page('', 'https://a.example/2').output };
+  const last: Message = { id: 'm2', role: 'assistant', at: 2, status: 'done', text: 'x', tools: [page('w3', 'https://b.example/'), click], away: { minutes: 40, turns: 2, switches: 0, answered: 0 } };
+  deepEqual(awaySites([before, first, last], 2).map((s) => s.call), ['w1', 'w3', 'w2'], 'the latest call on each page of the last two replies');
+  const root = document.createElement('div');
+  document.body.append(root);
+  const dispose = render(() => createComponent(Thread, { messages: [before, first, last], from: 0, conversationId: 'c1', options: [], onBranch: () => {} }), root);
+  try {
+    await Promise.resolve();
+    await Promise.resolve();
+    const list = root.querySelector('.away-pages')!;
+    ok(list, 'the away line has its pages');
+    equal(list.getAttribute('aria-label'), 'Pages it left open');
+    deepEqual([...list.querySelectorAll('li span[title]')].map((s) => s.textContent), ['Opened a.example', 'Opened b.example', 'Clicked “Next”']);
+    equal(list.querySelectorAll('img').length, 1, 'only a kept picture shows; the others keep their place');
+    equal(root.querySelectorAll('.away-pages').length, 1, 'only on the reply that says what happened');
+  } finally {
+    dispose();
+    root.remove();
+    api.sitePicture = sitePicture;
+  }
+});
