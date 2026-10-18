@@ -6,9 +6,29 @@
 use super::*;
 use crate::sibling::{self, Request, State};
 
-/// Whether a conversation's agent gets the tool: a project's own agent that no other agent started, so one level only.
-pub(super) fn offers(area: Area, started_by_agent: bool) -> bool {
-    area == Area::Project && !started_by_agent
+/// Whether a conversation's agent gets the tool: every project conversation's. Only one no other agent started may start
+/// conversations, so one level only.
+pub(super) fn offers(area: Area) -> bool {
+    area == Area::Project
+}
+
+/// The conversations a list names at most.
+const MAX_LISTED: usize = 12;
+
+/// Where a conversation stands; `busy` is whether its CLI runs a turn now.
+fn state_of(busy: bool, c: &Conversation) -> State {
+    let last = c.messages.iter().rev().find(|m| m.role == Role::Assistant);
+    let asking = last.is_some_and(|m| m.permissions.as_ref().is_some_and(|p| !p.is_empty()));
+    match last.and_then(|m| m.status.as_ref()) {
+        _ if asking => State::Waiting,
+        // Its copy is still being made: the brief follows it.
+        _ if c.messages.is_empty() => State::Working,
+        Some(Status::Streaming) => State::Working,
+        _ if busy || !c.queued.is_empty() => State::Working,
+        Some(Status::Error) => State::Failed,
+        Some(Status::Stopped) => State::Stopped,
+        _ => State::Finished,
+    }
 }
 
 impl Core {
@@ -26,6 +46,18 @@ impl Core {
                 Ok(text) => (true, text),
                 Err(why) => (false, format!("Nothing to read: {why}.")),
             },
+            Ok(Request::List) => match self.list_siblings(conv) {
+                Ok(text) => (true, text),
+                Err(why) => (false, format!("Nothing to list: {why}.")),
+            },
+            Ok(Request::Ask { id, message }) => match self.ask_sibling(conv, &id, &message) {
+                Ok(text) => (true, text),
+                Err(why) => (false, format!("Nothing was sent: {why}.")),
+            },
+            Ok(Request::Archive) => match self.set_archived(conv, true) {
+                Ok(()) => (true, sibling::ARCHIVED.to_string()),
+                Err(_) => (false, "Nothing was archived: the conversation is gone.".to_string()),
+            },
         };
         // The answer goes back only to the process that asked.
         if let Some(l) = self.live.get(conv).filter(|l| l.sid == sid) {
@@ -35,7 +67,7 @@ impl Core {
 
     fn start_sibling(&mut self, conv: &str, title: &str, brief: &str) -> Result<(String, bool), &'static str> {
         let parent = self.convs.get(conv).ok_or("the conversation is gone")?;
-        if !offers(parent.area, parent.started_by.is_some()) {
+        if !offers(parent.area) || parent.started_by.is_some() {
             return Err("only a project's own agent can start conversations");
         }
         let project = parent.project_id.clone().ok_or("this conversation has no project")?;
@@ -153,21 +185,90 @@ impl Core {
         }
     }
 
+    /// The project of the conversation that called, and the other conversation it names when that one is in the same project.
+    fn same_project(&mut self, conv: &str, id: &str) -> Result<String, &'static str> {
+        let project = self.convs.get(conv).and_then(|c| c.project_id.clone()).ok_or("this conversation has no project")?;
+        if id == conv {
+            return Err("that id is this conversation");
+        }
+        self.load(id)
+            .filter(|c| c.project_id.as_deref() == Some(project.as_str()))
+            .ok_or("no conversation with that id is in this project")?;
+        Ok(project)
+    }
+
     fn read_sibling(&mut self, conv: &str, id: &str) -> Result<String, &'static str> {
+        self.same_project(conv, id)?;
         let busy = self.live.get(id).is_some_and(|l| l.turn.is_some());
-        let c = self.load(id).filter(|c| c.started_by.as_deref() == Some(conv)).ok_or("no conversation with that id was started here")?;
+        let c = self.convs.get(id).ok_or("the conversation is gone")?;
         let last = c.messages.iter().rev().find(|m| m.role == Role::Assistant);
-        let asking = last.is_some_and(|m| m.permissions.as_ref().is_some_and(|p| !p.is_empty()));
-        let state = match last.and_then(|m| m.status.as_ref()) {
-            _ if asking => State::Waiting,
-            // Its copy is still being made: the brief follows it.
-            _ if c.messages.is_empty() => State::Working,
-            Some(Status::Streaming) => State::Working,
-            _ if busy || !c.queued.is_empty() => State::Working,
-            Some(Status::Error) => State::Failed,
-            Some(Status::Stopped) => State::Stopped,
-            _ => State::Finished,
-        };
-        Ok(sibling::read(&c.title, state, last.map(|m| m.text.as_str()).unwrap_or_default()))
+        Ok(sibling::read(&c.title, state_of(busy, c), last.map(|m| m.text.as_str()).unwrap_or_default()))
+    }
+
+    /// The project's other conversations the person has not archived, the newest first. One never loaded since Faber
+    /// started is idle, so its state comes from its file only when it is open.
+    fn list_siblings(&mut self, conv: &str) -> Result<String, &'static str> {
+        let project = self.convs.get(conv).and_then(|c| c.project_id.clone()).ok_or("this conversation has no project")?;
+        let folder = self.store.projects().into_iter().find(|p| p.id == project).map(|p| p.path).unwrap_or_default();
+        // ponytail: the store reads every conversation file, as the screen's list does; a kept index when lists grow large.
+        let at = now();
+        let copies = crate::project::copy::home(&self.opts.data_dir);
+        let rows: Vec<sibling::Listed> = self
+            .store
+            .list()
+            .into_iter()
+            .filter(|s| s.id != conv && !s.archived && !s.title.is_empty() && s.project_id.as_deref() == Some(project.as_str()))
+            .take(MAX_LISTED)
+            .map(|s| {
+                let busy = self.live.get(&s.id).is_some_and(|l| l.turn.is_some());
+                let open = self.convs.get(&s.id);
+                sibling::Listed {
+                    state: open.map_or(if busy { State::Working } else { State::Finished }, |c| state_of(busy, c)),
+                    folder: match open {
+                        Some(c) => c.copy.as_ref().map(|copy| copy.path.clone()),
+                        None => Some(copies.join(&s.id)).filter(|p| p.is_dir()).map(|p| p.to_string_lossy().into_owned()),
+                    },
+                    minutes: at.saturating_sub(s.updated_at) / 60_000,
+                    id: s.id,
+                    title: s.title,
+                }
+            })
+            .collect();
+        Ok(sibling::list(&folder, &rows))
+    }
+
+    /// A conversation an agent started stopped working (its turn ended, nothing is queued, Keep going is off): its report
+    /// goes to the agent that started it by itself, so no agent waits or polls. An archived or gone parent hears nothing.
+    pub(super) fn tell_parent(&mut self, conv: &str) {
+        let busy = self.live.get(conv).is_some_and(|l| l.turn.is_some());
+        let Some(c) = self.convs.get(conv) else { return };
+        let Some(parent) = c.started_by.clone() else { return };
+        let state = state_of(busy, c);
+        if c.keep_going.is_some() || state == State::Working || state == State::Waiting {
+            return;
+        }
+        let last = c.messages.iter().rev().find(|m| m.role == Role::Assistant).map(|m| m.text.clone()).unwrap_or_default();
+        let text = sibling::finished(&c.title, conv, state, &last);
+        if self.load(&parent).is_none_or(|p| p.archived_at.is_some()) {
+            return;
+        }
+        let _ = self.send_by_itself(&parent, text, Wake::of("wake.childDone"));
+    }
+
+    /// Sends one agent's question to another conversation of its project, as a turn Faber writes (never the person's).
+    fn ask_sibling(&mut self, conv: &str, id: &str, message: &str) -> Result<String, &'static str> {
+        self.same_project(conv, id)?;
+        let target = self.convs.get(id).ok_or("the conversation is gone")?;
+        if target.archived_at.is_some() {
+            return Err("the person archived that conversation");
+        }
+        let title = target.title.clone();
+        let from = self.convs.get(conv).map(|c| c.title.clone()).unwrap_or_default();
+        let ai = self.live.get(conv).map(|l| (l.vendor, l.model.as_deref().and_then(family_of).map(str::to_string)));
+        self.sibling_allowed(&ai)?;
+        let busy = self.live.get(id).is_some_and(|l| l.turn.is_some()) || state_of(false, target) == State::Working;
+        let wake = Wake::of("wake.asked");
+        self.send_by_itself(id, sibling::ask_prompt(&from, conv, message), wake).map_err(|_| "it could not take the message now")?;
+        Ok(sibling::asked(&title, id, busy))
     }
 }

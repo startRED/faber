@@ -144,6 +144,8 @@ export const fr: Messages = {
   'keepGoing.warn.fast': 'Le quota part plus vite que prévu cette semaine sur chaque IA. Continuer seul continue quand même.',
   'keepGoing.warn.anyway': 'Continuer quand même',
   'keepGoing.warn.cancel': 'Pas maintenant',
+  'wake.asked': 'L’agent d’une autre conversation a posé une question à celle-ci',
+  'wake.childDone': "Une conversation lancée par cet agent est terminée, et Faber lui a transmis sa réponse",
   'model.auto': 'Auto',
   'model.autoChoose': 'IA : choisir pour moi',
   'model.default': 'Modèle par défaut',
@@ -905,6 +907,10 @@ export const fr: Messages = {
   "menu.renameLabel": "Nom de la conversation",
   // Native speaker must translate (needs native review).
   "menu.delete": "Supprimer",
+  "menu.archive": "Archiver",
+  "menu.unarchive": "Désarchiver",
+  "archive.line": "Cette conversation est archivée. Désarchivez-la pour continuer à y travailler.",
+  "archive.tag": "archivée",
   // Native speaker must translate (needs native review).
   "menu.newHere": "Nouvelle conversation dans ce projet",
   // Native speaker must translate (needs native review).
@@ -1033,6 +1039,8 @@ export const fr: Messages = {
   'notes.68.better': 'Continuer seul n’attend plus une IA : sans quota, il passe à l’autre, et prévient avant quand le quota est bas.',
   'notes.69.new': 'Vous pouvez ouvrir un assistant en pleine conversation au centre, et revenir à la colonne latérale avec le même bouton.',
   'notes.70.better': "La colonne latérale est plus large sur une grande fenêtre, et la tâche et les commandes d'un assistant passent à la ligne au lieu d'être coupées.",
+  'notes.71.new': 'Vous pouvez archiver une conversation depuis son menu du clic droit, et l’agent d’un projet archive la sienne une fois votre demande terminée. Elle quitte la barre latérale ; la recherche la retrouve, et Désarchiver la ramène.',
+  'notes.72.better': 'Les agents d’un projet voient maintenant les conversations des autres : quand un fichier change sans qu’il l’ait touché, un agent interroge la conversation qui y travaille, et vous voyez qui a demandé.',
   'update.checking': 'Recherche d’une mise à jour…',
   'update.downloading': 'Téléchargement de la mise à jour…',
   'update.downloadingPercent': 'Téléchargement de la mise à jour… {percent} %',

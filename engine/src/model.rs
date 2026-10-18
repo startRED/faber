@@ -357,7 +357,7 @@ impl FollowState {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Wake {
-    /// An i18n key (`wake.keepGoing`, `wake.checksFailed`, `wake.conflict`).
+    /// An i18n key (`wake.keepGoing`, `wake.checksFailed`, `wake.conflict`, `wake.asked`).
     pub why: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub pr: Option<u64>,
@@ -517,6 +517,10 @@ pub struct Conversation {
     /// "Keep going" is on (`engine/src/engine/keep_going.rs`).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub keep_going: Option<KeepGoing>,
+    /// When it was archived, by the person or by its own agent (`engine/src/engine/archive.rs`): it leaves the sidebar
+    /// until the person brings it back or writes to it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub archived_at: Option<u64>,
     pub messages: Vec<Message>,
     /// Faber is asking git whether the last reply changed files with a command, before its checks would start
     /// (`engine/src/engine/verifying.rs`), the reply's id: the conversation is at work meanwhile. Never shown or saved.
@@ -619,6 +623,8 @@ pub struct Summary {
     /// "Keep going" is on.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub keep_going: bool,
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub archived: bool,
 }
 
 /// Where a running conversation stands: answering, or waiting for the user.

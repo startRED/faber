@@ -30,6 +30,7 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use uuid::Uuid;
 
 mod answer;
+mod archive;
 mod auto;
 mod browse;
 mod by_itself;
@@ -1889,6 +1890,11 @@ impl Core {
         }
         if !checking {
             self.keep_going_after(conv, keep_going);
+            // Faber's checks end the turn later (`verifying.rs`), and the report waits for them. An idle process that
+            // exits ends no reply, so it reports nothing twice.
+            if turn_id.is_some() {
+                self.tell_parent(conv);
+            }
         }
         self.close_when_idle(conv);
     }
@@ -2501,7 +2507,7 @@ impl Core {
         let (model, effort) = (pick.model.clone(), Some(pick.effort.clone()));
         let helper = self.offers_helper(area, pick.vendor);
         let browse = self.offers_browser(area, permissions);
-        let conversations = siblings::offers(area, c.started_by.is_some());
+        let conversations = siblings::offers(area);
         let verify = self.offers_verify(area, permissions);
         let session = match pick.vendor {
             Vendor::Claude => start_claude(
@@ -2624,6 +2630,7 @@ impl Core {
             updated_at: at,
             queued: Vec::new(),
             keep_going: None,
+            archived_at: None,
             messages: vec![],
             weighing: None,
         };
@@ -2638,6 +2645,12 @@ impl Core {
         }
         let fallback = pick_model(&req.choice, &self.vendors(), self.codex_recommended.as_deref()).ok_or("error.noSubscription")?;
         let existing = req.conversation_id.as_deref().and_then(|id| self.load(id).map(|c| c.id.clone()));
+        // Writing to an archived conversation brings it back.
+        if let Some(id) = &existing
+            && self.convs.get(id).is_some_and(|c| c.archived_at.is_some())
+        {
+            self.set_archived(id, false)?;
+        }
         if let Some(id) = &existing
             && (self.live.get(id).is_some_and(|l| l.turn.is_some())
                 || self

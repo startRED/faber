@@ -298,6 +298,7 @@ impl Core {
             None if on && idle && last => self.go_on(conv, reply_id),
             None => {}
         }
+        self.tell_parent(conv);
         self.close_when_idle(conv);
     }
 
@@ -376,6 +377,7 @@ impl Core {
                 }
             }
         }
+        self.tell_parent(conv);
         self.close_when_idle(conv);
     }
 

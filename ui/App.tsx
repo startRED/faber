@@ -694,6 +694,12 @@ export function App(props: { initial: AppState; update?: UpdateStatus; inbox: { 
     const id = current()?.id;
     if (id) void api.keepGoing(id, value).then(refresh, (err) => setSaveError(failureText(err)));
   };
+  // An archived conversation, by the person or its own agent: once its reply ends, one line in place of the composer brings it back.
+  const archived = () => !!place().id && state().conversations.some((s) => s.id === place().id && s.archived);
+  const unarchive = () => {
+    const id = place().id;
+    if (id) void api.archive(id, false).then(refresh, (err) => setSaveError(failureText(err)));
+  };
   const needsProject = () => area() === 'project' && !project();
   // The new conversation of a chat with a connected AI is the one place the effects of a look appear.
   const newChat = () => (area() === 'chat' || !!project()) && state().vendors.length > 0 && !current()?.messages.length;
@@ -1128,7 +1134,14 @@ ${copy().path}`}>
                             onYes={() => setKeepGoing(true)}
                             onNo={() => setAskKeepGoing(false)}
                           />
-                          {composer()}
+                          <Show when={archived() && !busy()} fallback={composer()}>
+                            <div class="archived-bar" role="status">
+                              <span>{t('archive.line')}</span>
+                              <button type="button" class="btn" onClick={unarchive}>
+                                {t('menu.unarchive')}
+                              </button>
+                            </div>
+                          </Show>
                         </div>
                       </Show>
                     </>

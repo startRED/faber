@@ -222,6 +222,12 @@ async fn remove(faber: State<'_, Faber>, id: String, discard: Option<bool>) -> R
         .map_err(|_| "error.copy.failed".to_string())?
 }
 
+/// Archives a conversation, or brings an archived one back.
+#[tauri::command]
+async fn archive(faber: State<'_, Faber>, id: String, on: bool) -> Res<()> {
+    faber.engine.archive(&id, on)
+}
+
 #[tauri::command]
 async fn keep_going(faber: State<'_, Faber>, id: String, on: bool) -> Res<()> {
     faber.engine.keep_going(&id, on)
@@ -1444,6 +1450,7 @@ fn main() {
                 route_draft,
                 interrupt,
                 keep_going,
+                archive,
                 answer,
                 answer_question,
                 rename,

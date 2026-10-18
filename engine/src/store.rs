@@ -171,6 +171,7 @@ impl Store {
             .filter_map(|e| read::<Conversation>(&e.path()))
             .map(|c| Summary {
                 keep_going: c.keep_going.is_some(),
+                archived: c.archived_at.is_some(),
                 id: c.id,
                 title: c.title,
                 area: c.area,

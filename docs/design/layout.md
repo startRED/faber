@@ -1,7 +1,7 @@
 # Layout
 
 The window's widths, titlebar, sidebar, the homes, answers, the work log, pages in Faber's browser and the
-running column.
+running column. Search, the command box and find are in [search.md](search.md).
 
 ## Layout
 
@@ -66,6 +66,9 @@ The numbers above are the usual widths. The person can change them, and the shel
   the amber speech bubble and "{m} needs you". Amber always comes with these words, never with a number alone. When
   something only runs, the tail shows a pulsing dot.
 - Chats are grouped as Today, This week and Earlier. Deleting a conversation asks for confirmation.
+- An archived conversation leaves the list. A search still shows it, its title followed by a quiet "archived" in the
+  smallest size and the third ink. Opened, once its reply ends, the composer's place holds one card of the composer's
+  width: the line "This conversation is archived…" in the second ink and a small Unarchive button at its right.
 - The footer is one row, the person's name when they gave one and Settings, then one thin line per connected vendor: its
   shape, a 3 px bar and the used share of its tightest quota window, in the small size. Nothing on the line wraps. The
   window, the reset, how old the reading is, the not-yet-counted estimate and the vendor's name are its tooltip. While
@@ -200,20 +203,3 @@ projects. Faber has no worktree creation for projects, so an environment has no 
 - Items are grouped by project. Projects that have something needing the user come first, and inside a project the
   amber item comes first. The order is stable, so rows do not jump.
 - With no items it shows an empty state with Curioso.
-
-### Search and commands, and find
-
-- **Ctrl+K** opens one box over everything, centred sideways and set in the upper third so it does not jump as the results
-  change. It scales from 0.97 and fades in with `--dur-ui` and leaves faster with `--dur-exit`; behind it the screen dims
-  with a veil of its own colour, never a blur (only the sidebar scrim blurs). It is a modal dialog: focus goes to its box,
-  Tab stays inside (`ui/focus.ts`), Esc or a click outside closes it and gives focus back, and the shortcuts of the screen
-  underneath wait. The box is the shared search field (`.field.search`), taller (`--h-lg`), with no ring of its own; rows use
-  `--h-md`, the chosen one on `--s3`, and the project or area of a conversation sits quiet at the right. Empty, it lists
-  "Recent" (five conversations) then "Actions"; typing gives one list ranked across everything, eight rows at most.
-  Moving the choice by arrow changes its colour only (`--dur-fast`), no travel. It exists in the page only while open.
-- **Ctrl+F** in an open conversation slides a bar down from the top right of the thread (12 px and a fade, `--dur-ui`; it
-  leaves with `--dur-exit`) with the shared search field, "3 of 12", previous, next and close. Matches are painted with the
-  CSS Custom Highlight API: all in the accent at 42 %, the current one in the full accent, so no message is rewritten and
-  nothing is wrapped. Enter and Shift+Enter move with a smooth scroll that centres the match unless it is already in plain
-  view (instant in reduced and no motion); Esc closes the bar before the sidebar or the running column. When the running
-  column covers the thread, the bar slides left of it. Both are instant in reduced and no motion.

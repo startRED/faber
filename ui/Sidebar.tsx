@@ -125,10 +125,12 @@ export function Sidebar(props: Props) {
       },
     ),
   );
-  const inProject = (p: Project) => props.conversations.filter((c) => c.area === 'project' && c.projectId === p.id && matches(c.title, query()));
+  // An archived conversation leaves the list; a search still finds it.
+  const listed = (c: Summary) => (!c.archived || searching()) && matches(c.title, query());
+  const inProject = (p: Project) => props.conversations.filter((c) => c.area === 'project' && c.projectId === p.id && listed(c));
   // A project shows when its name or one of its conversations holds the search, and then opens on those conversations.
   const projects = () => props.projects.filter((p) => !searching() || matches(p.name, query()) || inProject(p).length > 0);
-  const chats = createMemo(() => groupChats(props.conversations.filter((c) => c.area === 'chat' && matches(c.title, query())), props.now));
+  const chats = createMemo(() => groupChats(props.conversations.filter((c) => c.area === 'chat' && listed(c)), props.now));
   // The one rule for a project showing its conversations: the user opened it, or the search found something in it. The
   // list and aria-expanded both read it, so they never disagree.
   const expanded = (p: Project) => showsChats(open().has(p.id), searching(), inProject(p).length);
@@ -155,6 +157,9 @@ export function Sidebar(props: Props) {
       onContextMenu={(e) =>
         openMenu(e, [
           { id: 'rename', label: t('menu.rename'), run: () => setRenaming(row.c.id) },
+          row.c.archived
+            ? { id: 'unarchive', label: t('menu.unarchive'), run: () => void api.archive(row.c.id, false).catch((err) => props.onError?.(err)) }
+            : { id: 'archive', label: t('menu.archive'), run: () => void api.archive(row.c.id, true).catch((err) => props.onError?.(err)) },
           { id: 'delete', label: t('menu.delete'), danger: true, confirm: t('side.confirmDelete'), run: () => void ask(row.c.id) },
         ])
       }
@@ -173,6 +178,9 @@ export function Sidebar(props: Props) {
       >
         <button class="item" aria-current={row.c.id === props.place.id} onClick={() => props.onOpen(row.c)}>
           <span>{row.c.title}</span>
+          <Show when={row.c.archived}>
+            <span class="tag-quiet">{t('archive.tag')}</span>
+          </Show>
           <Show when={props.running.find((r) => r.conversationId === row.c.id)?.waitUntil}>{(at) => <span class="waiting-label" title={t('run.waiting', { when: untilReset(at()) })}>{t('run.waiting', { when: untilReset(at()) })}</span>}</Show>
         </button>
       </Show>

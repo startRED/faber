@@ -107,6 +107,7 @@ input, textarea { caret-color: var(--accent); }
 .fold.open { grid-template-rows: 1fr; transition-duration: var(--dur-ui); transition-timing-function: var(--ease); }
 .fold-inner { min-height: 0; overflow: hidden; }
 .crow { position: relative; }
+.item .tag-quiet { flex: none; margin-left: auto; font-size: var(--fs-xs); color: var(--ink-3); }
 
 .crow:hover .item, .crow:focus-within .item, .prow:hover .item, .prow:focus-within .item { padding-right: 30px; }
 .crow .x { position: absolute; right: 2px; top: 0; bottom: 0; display: grid; place-items: center; padding: 0 6px; color: var(--ink-3); border-radius: var(--r-xs); opacity: 0; }
@@ -510,6 +511,10 @@ select.pill option { background: var(--s2); color: var(--ink); }
 .composer { position: relative; z-index: 1; width: min(calc(100% - 48px), 660px); margin: 0 auto calc(18px * var(--dens)); display: grid; background: var(--card-bg); border-radius: var(--r-lg); box-shadow: var(--lift-shadow), var(--focus-light); transition: box-shadow var(--dur-ui) var(--ease); }
 .composer:focus-within { box-shadow: inset 0 0 0 1px var(--accent-line), var(--lift-shadow), var(--focus-light); }
 .composer textarea { resize: none; border: 0; outline: none; background: none; height: 60px; min-height: 60px; max-height: 40vh; overflow-y: auto; scrollbar-width: thin; scrollbar-color: var(--line-3) transparent; font-size: var(--fs-read); line-height: 1.5; padding: 16px 18px 4px; }
+/* An archived conversation (ui/App.tsx): one quiet line where the composer was, and the button that brings it back. */
+.archived-bar { width: min(calc(100% - 48px), 660px); margin: 0 auto calc(18px * var(--dens)); display: flex; align-items: center; gap: 12px; padding: 10px 10px 10px 16px; background: var(--card-bg); border-radius: var(--r-lg); box-shadow: var(--lift-shadow); color: var(--ink-2); font-size: var(--fs-sm); }
+.archived-bar span { flex: 1; min-width: 0; overflow-wrap: anywhere; }
+.archived-bar .btn { flex: none; height: var(--h-sm); }
 .dock .composer textarea { height: 40px; min-height: 40px; padding: 13px 16px 0; }
 .composer .chips { padding: 12px 14px 0; }
 .composer textarea::placeholder { color: var(--ink-3); }

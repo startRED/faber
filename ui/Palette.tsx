@@ -65,7 +65,7 @@ export function Palette(props: Props) {
         id: c.id,
         kind: 'conversation',
         label: c.title,
-        hint: c.area === 'chat' ? t('area.chat') : (names.get(c.projectId ?? '') ?? t('area.projects')),
+        hint: [c.area === 'chat' ? t('area.chat') : (names.get(c.projectId ?? '') ?? t('area.projects')), c.archived ? t('archive.tag') : ''].filter(Boolean).join(' · '),
         icon: 'chat',
         run: () => props.onOpen(c),
       }));

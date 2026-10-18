@@ -4,6 +4,7 @@ import themes from '../../src-tauri/src/themes.json';
 import { api, type Area, type Message, type Project, type RunningItem, type Summary } from '../../ui/api.ts';
 import { ContextMenuHost } from '../../ui/ContextMenu.tsx';
 import { installContextMenu } from '../../ui/contextmenu.ts';
+import { pickUp } from '../../ui/running.ts';
 import { Sidebar } from '../../ui/Sidebar.tsx';
 import { t } from '../../ui/i18n.ts';
 import { Thread } from '../../ui/Thread.tsx';
@@ -109,7 +110,7 @@ check('right-click: a chat offers Rename and Delete, Delete asks twice, Rename e
     const row = [...root.querySelectorAll('.crow')].find((r) => r.textContent?.includes('Plan the trip'))!;
     equal(rightClick(row), false);
     await settle();
-    deepEqual(labels(), [t('menu.rename'), t('menu.delete')]);
+    deepEqual(labels(), [t('menu.rename'), t('menu.archive'), t('menu.delete')]);
     ok(entry(t('menu.delete')).classList.contains('danger'), 'Delete is last and in the danger colour');
     entry(t('menu.delete')).click();
     await settle();
@@ -152,6 +153,53 @@ check('right-click: a chat offers Rename and Delete, Delete asks twice, Rename e
     dispose();
     root.remove();
   }
+});
+
+check('archive: an archived chat leaves the sidebar, a search finds it marked, and the menu archives and brings back', async () => {
+  const root = stage();
+  const archived: Array<[string, boolean]> = [];
+  const original = api.archive;
+  api.archive = async (id, on) => void archived.push([id, on]);
+  const conversations: Summary[] = [...chats, { id: 'c2', title: 'Old trip notes', area: 'chat', updatedAt: Date.now(), archived: true }];
+  const dispose = render(
+    () => [
+      createComponent(Sidebar, {
+        conversations, projects, vendors: [], version: '0', place: { area: 'chat' }, running: [], quotas: {}, now: Date.now(),
+        onNew: () => {}, onArea: () => {}, onProject: () => {}, onNewIn: () => {}, onAddProject: () => {}, onOpen: () => {}, onRemove: () => {}, onSettings: () => {},
+      }),
+      createComponent(ContextMenuHost, {}),
+    ],
+    root,
+  );
+  const titles = () => [...root.querySelectorAll('.crow .item')].map((el) => el.textContent);
+  try {
+    await settle();
+    deepEqual(titles(), ['Plan the trip'], 'the archived chat is not listed');
+    rightClick(root.querySelector('.crow')!);
+    await settle();
+    entry(t('menu.archive')).click();
+    await settle();
+    const search = root.querySelector<HTMLInputElement>('input[type=search]')!;
+    search.value = 'trip';
+    search.dispatchEvent(new InputEvent('input', { bubbles: true }));
+    await settle();
+    deepEqual(titles(), ['Plan the trip', `Old trip notes${t('archive.tag')}`], 'a search finds it, marked');
+    rightClick([...root.querySelectorAll('.crow')].find((r) => r.textContent?.includes('Old trip notes'))!);
+    await settle();
+    deepEqual(labels(), [t('menu.rename'), t('menu.unarchive'), t('menu.delete')]);
+    entry(t('menu.unarchive')).click();
+    await settle();
+    deepEqual(archived, [['c1', true], ['c2', false]]);
+  } finally {
+    api.archive = original;
+    dispose();
+    root.remove();
+  }
+});
+
+check('archive: the pick-up lists leave out an archived conversation', () => {
+  const recent = [{ id: 'a', archived: true }, { id: 'b' }, { id: 'c' }];
+  deepEqual(pickUp(recent, [], 3).map((c) => c.id), ['b', 'c']);
 });
 
 check('right-click: a project offers a new conversation, its folder and removal, which asks twice', async () => {
@@ -218,8 +266,10 @@ check('right-click: the keyboard opens the menu on a focused row, arrows move, E
     item.focus();
     key(item, { key: 'F10', shiftKey: true });
     await settle();
-    deepEqual(labels(), [t('menu.rename'), t('menu.delete')]);
+    deepEqual(labels(), [t('menu.rename'), t('menu.archive'), t('menu.delete')]);
     equal(document.activeElement, entry(t('menu.rename')), 'the first item takes focus');
+    key(document.activeElement!, { key: 'ArrowDown' });
+    equal(document.activeElement, entry(t('menu.archive')));
     key(document.activeElement!, { key: 'ArrowDown' });
     equal(document.activeElement, entry(t('menu.delete')));
     key(document.activeElement!, { key: 'ArrowDown' });

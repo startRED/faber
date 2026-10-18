@@ -157,6 +157,8 @@ export interface Conversation {
   queued?: QueuedTurn[];
   /** "Keep going" is on: Faber sends the next turn by itself. */
   keepGoing?: { turns: number; failed: number };
+  /** When it was archived: it is off the sidebar and its composer gives way to a line that brings it back. */
+  archivedAt?: number;
   messages: Message[];
 }
 export interface Summary {
@@ -167,6 +169,7 @@ export interface Summary {
   updatedAt: number;
   /** "Keep going" is on. */
   keepGoing?: boolean;
+  archived?: boolean;
 }
 export interface WorkCopy {
   path: string;
@@ -467,6 +470,8 @@ export const api = {
     invoke<void>('route_draft', { req, text }),
   interrupt: (id: string) => invoke<void>('interrupt', { id }),
   keepGoing: (id: string, on: boolean) => invoke<void>('keep_going', { id, on }),
+  /** Archives a conversation, or brings an archived one back. */
+  archive: (id: string, on: boolean) => invoke<void>('archive', { id, on }),
   answer: (id: string, turnId: string, requestId: string, allow: boolean, always = false) =>
     invoke<void>('answer', { id, turnId, requestId, allow, always }),
   /** The choices for a question the assistant asked: each question's text to the label picked (several joined by a comma). */

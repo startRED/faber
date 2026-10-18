@@ -144,6 +144,8 @@ export const es: Messages = {
   'keepGoing.warn.fast': 'La cuota se gasta más rápido de lo previsto esta semana en todas las IA. Seguir solo continúa igual.',
   'keepGoing.warn.anyway': 'Seguir de todos modos',
   'keepGoing.warn.cancel': 'Ahora no',
+  'wake.asked': 'El agente de otra conversación le preguntó algo a esta',
+  'wake.childDone': "Una conversación que este agente empezó terminó, y Faber le pasó su respuesta",
   'model.auto': 'Automático',
   'model.autoChoose': 'IA: elegir por mí',
   'model.default': 'Modelo predeterminado',
@@ -905,6 +907,10 @@ export const es: Messages = {
   "menu.renameLabel": "Nombre de la conversación",
   // Native speaker must translate (needs native review).
   "menu.delete": "Borrar",
+  "menu.archive": "Archivar",
+  "menu.unarchive": "Desarchivar",
+  "archive.line": "Esta conversación está archivada. Desarchívala para seguir trabajando en ella.",
+  "archive.tag": "archivada",
   // Native speaker must translate (needs native review).
   "menu.newHere": "Conversación nueva en este proyecto",
   // Native speaker must translate (needs native review).
@@ -1033,6 +1039,8 @@ export const es: Messages = {
   'notes.68.better': 'Seguir solo ya no espera a una IA: sin cuota pasa a la otra, y te avisa antes cuando queda poca cuota.',
   'notes.69.new': 'Puedes abrir un ayudante como conversación completa en el centro y volver a la columna lateral con el mismo botón.',
   'notes.70.better': 'La columna lateral es más ancha en ventanas grandes, y la tarea y los comandos de un ayudante se parten en líneas en vez de cortarse.',
+  'notes.71.new': 'Puedes archivar una conversación desde su menú del botón derecho, y el agente de un proyecto archiva la suya cuando termina tu pedido. Sale de la barra lateral; la búsqueda la encuentra y Desarchivar la recupera.',
+  'notes.72.better': 'Los agentes de un proyecto ahora ven las conversaciones de los demás: cuando cambia un archivo que no tocó, un agente le pregunta a la conversación que trabaja ahí, y ves quién preguntó.',
   'update.checking': 'Buscando una actualización…',
   'update.downloading': 'Descargando actualización…',
   'update.downloadingPercent': 'Descargando actualización… {percent} %',

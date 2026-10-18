@@ -144,6 +144,8 @@ export const de: Messages = {
   'keepGoing.warn.fast': 'Das Kontingent geht diese Woche bei jeder KI schneller weg als geplant. Selbst weitermachen läuft trotzdem weiter.',
   'keepGoing.warn.anyway': 'Trotzdem weitermachen',
   'keepGoing.warn.cancel': 'Jetzt nicht',
+  'wake.asked': 'Der Agent einer anderen Unterhaltung hat dieser eine Frage gestellt',
+  'wake.childDone': "Eine Unterhaltung, die dieser Agent begonnen hat, ist fertig, und Faber hat ihre Antwort weitergegeben",
   'model.auto': 'Automatisch',
   'model.autoChoose': 'KI: für mich wählen',
   'model.default': 'Standardmodell',
@@ -905,6 +907,10 @@ export const de: Messages = {
   "menu.renameLabel": "Name der Unterhaltung",
   // Native speaker must translate (needs native review).
   "menu.delete": "Löschen",
+  "menu.archive": "Archivieren",
+  "menu.unarchive": "Zurückholen",
+  "archive.line": "Diese Unterhaltung ist archiviert. Hol sie zurück, um darin weiterzuarbeiten.",
+  "archive.tag": "archiviert",
   // Native speaker must translate (needs native review).
   "menu.newHere": "Neue Unterhaltung in diesem Projekt",
   // Native speaker must translate (needs native review).
@@ -1033,6 +1039,8 @@ export const de: Messages = {
   'notes.68.better': 'Selbst weitermachen wartet nicht mehr auf eine KI: Ohne Kontingent wechselt es zur anderen und fragt vorher, wenn es knapp wird.',
   'notes.69.new': 'Du kannst einen Helfer als ganzen Verlauf in der Mitte öffnen und mit demselben Knopf zur Seitenspalte zurückkehren.',
   'notes.70.better': 'Die Seitenspalte ist in einem großen Fenster breiter, und Aufgabe und Befehle eines Helfers brechen um, statt abgeschnitten zu werden.',
+  'notes.71.new': 'Du kannst eine Unterhaltung über ihr Rechtsklickmenü archivieren, und der Agent eines Projekts archiviert seine eigene, sobald deine Bitte erledigt ist. Sie verschwindet aus der Seitenleiste; die Suche findet sie, und Zurückholen bringt sie wieder.',
+  'notes.72.better': 'Die Agenten eines Projekts sehen jetzt die Unterhaltungen der anderen: Ändert sich eine Datei, die ein Agent nicht angefasst hat, fragt er die Unterhaltung, die dort arbeitet, und du siehst, wer gefragt hat.',
   'update.checking': 'Suche nach einem Update…',
   'update.downloading': 'Update wird heruntergeladen…',
   'update.downloadingPercent': 'Update wird heruntergeladen… {percent} %',

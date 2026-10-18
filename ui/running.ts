@@ -41,7 +41,9 @@ export function blocksOf(items: RunningItem[]): Block[] {
 
 /** The conversations the new-conversation screen offers to pick up: those that wait for the user first, then the latest, at
  * most `limit`. `recent` is every conversation, newest first: it is ordered whole, so a waiting one is found however old it is. */
-export function pickUp<T extends { id: string }>(recent: T[], items: RunningItem[], limit = 4): T[] {
+export function pickUp<T extends { id: string; archived?: boolean }>(all: T[], items: RunningItem[], limit = 4): T[] {
+  // An archived conversation is put away: it is picked up only from search.
+  const recent = all.filter((c) => !c.archived);
   const needs = (c: T) => items.some((i) => i.conversationId === c.id && i.state === 'needsYou');
   return [...recent.filter(needs), ...recent.filter((c) => !needs(c))].slice(0, limit);
 }
