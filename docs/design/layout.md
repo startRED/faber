@@ -66,6 +66,8 @@ The numbers above are the usual widths. The person can change them, and the shel
   the amber speech bubble and "{m} needs you". Amber always comes with these words, never with a number alone. When
   something only runs, the tail shows a pulsing dot.
 - Chats are grouped as Today, This week and Earlier. Deleting a conversation asks for confirmation.
+- A conversation an agent started sits right under the one that started it, indented 14 px with a hairline guide at
+  its left; one whose starter is not listed stays in its own place.
 - An archived conversation leaves the list. A search still shows it, its title followed by a quiet "archived" in the
   smallest size and the third ink. Opened, once its reply ends, the composer's place holds one card of the composer's
   width: the line "This conversation is archived…" in the second ink and a small Unarchive button at its right.

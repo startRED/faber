@@ -5,6 +5,7 @@ import { api, type Area, type Message, type Project, type RunningItem, type Summ
 import { ContextMenuHost } from '../../ui/ContextMenu.tsx';
 import { installContextMenu } from '../../ui/contextmenu.ts';
 import { pickUp } from '../../ui/running.ts';
+import { nest } from '../../ui/sidebar.ts';
 import { Sidebar } from '../../ui/Sidebar.tsx';
 import { t } from '../../ui/i18n.ts';
 import { Thread } from '../../ui/Thread.tsx';
@@ -192,6 +193,36 @@ check('archive: an archived chat leaves the sidebar, a search finds it marked, a
     deepEqual(archived, [['c1', true], ['c2', false]]);
   } finally {
     api.archive = original;
+    dispose();
+    root.remove();
+  }
+});
+
+check('nested: a conversation an agent started sits under the one that started it, in the order given', () => {
+  const rows = [{ id: 'c' }, { id: 'a' }, { id: 'b', startedBy: 'a' }, { id: 'd', startedBy: 'gone' }, { id: 'e', startedBy: 'b' }, { id: 'f', startedBy: 'c' }];
+  deepEqual(nest(rows).map((r) => r.id), ['c', 'f', 'a', 'b', 'e', 'd']);
+  ok(nest(rows).every((r) => rows.includes(r)), 'the same rows, so the sidebar keeps their nodes');
+});
+
+check('nested: the sidebar indents a conversation an agent started under its starter', async () => {
+  const root = stage();
+  setArea('project');
+  const now = Date.now();
+  const conversations: Summary[] = [
+    { id: 'k1', title: 'Docs page', area: 'project', projectId: 'p1', updatedAt: now, startedBy: 'm1' },
+    { id: 'm1', title: 'Main work', area: 'project', projectId: 'p1', updatedAt: now - 1 },
+  ];
+  const dispose = render(() => createComponent(Sidebar, {
+    conversations, projects, vendors: [], version: '0', place: { area: 'project', projectId: 'p1' }, running: [], quotas: {}, now,
+    onNew: () => {}, onArea: () => {}, onProject: () => {}, onNewIn: () => {}, onAddProject: () => {}, onOpen: () => {}, onRemove: () => {}, onSettings: () => {},
+  }), root);
+  try {
+    await settle();
+    const rows = [...root.querySelectorAll('.proj-chats .crow')];
+    deepEqual(rows.map((r) => r.textContent?.trim()), ['Main work', 'Docs page']);
+    deepEqual(rows.map((r) => r.classList.contains('child')), [false, true]);
+  } finally {
+    setArea('chat');
     dispose();
     root.remove();
   }

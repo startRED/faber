@@ -909,6 +909,7 @@ export const en = {
   'notes.70.better': "The side column is wider on a wide window, and a helper's task and commands wrap instead of being cut off.",
   'notes.71.new': "You can archive a conversation from its right-click menu, and a project's agent archives its own once your request is done. It leaves the sidebar; search finds it, and Unarchive brings it back.",
   'notes.72.better': "A project's agents now see each other's conversations: when a file changes that it did not change, an agent asks the conversation working there, and you see who asked.",
+  'notes.73.better': 'In the sidebar, a conversation the agent started now sits under the conversation that started it, so you see which work belongs together.',
   'update.checking': 'Looking for an update…',
   'update.downloading': 'Downloading update…',
   'update.downloadingPercent': 'Downloading update… {percent}%',

@@ -1041,6 +1041,7 @@ export const de: Messages = {
   'notes.70.better': 'Die Seitenspalte ist in einem großen Fenster breiter, und Aufgabe und Befehle eines Helfers brechen um, statt abgeschnitten zu werden.',
   'notes.71.new': 'Du kannst eine Unterhaltung über ihr Rechtsklickmenü archivieren, und der Agent eines Projekts archiviert seine eigene, sobald deine Bitte erledigt ist. Sie verschwindet aus der Seitenleiste; die Suche findet sie, und Zurückholen bringt sie wieder.',
   'notes.72.better': 'Die Agenten eines Projekts sehen jetzt die Unterhaltungen der anderen: Ändert sich eine Datei, die ein Agent nicht angefasst hat, fragt er die Unterhaltung, die dort arbeitet, und du siehst, wer gefragt hat.',
+  'notes.73.better': 'In der Seitenleiste steht eine Unterhaltung, die der Agent begonnen hat, jetzt unter der Unterhaltung, die sie begonnen hat, damit du siehst, welche Arbeit zusammengehört.',
   'update.checking': 'Suche nach einem Update…',
   'update.downloading': 'Update wird heruntergeladen…',
   'update.downloadingPercent': 'Update wird heruntergeladen… {percent} %',

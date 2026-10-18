@@ -170,6 +170,8 @@ export interface Summary {
   /** "Keep going" is on. */
   keepGoing?: boolean;
   archived?: boolean;
+  /** The conversation whose agent started this one, which the sidebar shows it under. */
+  startedBy?: string;
 }
 export interface WorkCopy {
   path: string;

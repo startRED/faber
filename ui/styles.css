@@ -107,6 +107,9 @@ input, textarea { caret-color: var(--accent); }
 .fold.open { grid-template-rows: 1fr; transition-duration: var(--dur-ui); transition-timing-function: var(--ease); }
 .fold-inner { min-height: 0; overflow: hidden; }
 .crow { position: relative; }
+/* A conversation an agent started, under the one that started it: indented, with a hairline guide on its left. */
+.crow.child { padding-left: 14px; }
+.crow.child::before { content: ''; position: absolute; left: 6px; top: 6px; bottom: 6px; width: 1px; background: var(--line-2); }
 .item .tag-quiet { flex: none; margin-left: auto; font-size: var(--fs-xs); color: var(--ink-3); }
 
 .crow:hover .item, .crow:focus-within .item, .prow:hover .item, .prow:focus-within .item { padding-right: 30px; }

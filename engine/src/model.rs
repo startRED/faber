@@ -625,6 +625,9 @@ pub struct Summary {
     pub keep_going: bool,
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub archived: bool,
+    /// The conversation whose agent started this one: the sidebar shows it under that one.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub started_by: Option<String>,
 }
 
 /// Where a running conversation stands: answering, or waiting for the user.

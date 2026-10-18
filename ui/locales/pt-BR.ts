@@ -1028,6 +1028,7 @@ export const ptBR: Messages = {
   'notes.70.better': 'A coluna ao lado fica mais larga em janelas grandes, e a tarefa e os comandos de um ajudante quebram de linha em vez de serem cortados.',
   'notes.71.new': 'Você pode arquivar uma conversa pelo menu do botão direito, e o agente de um projeto arquiva a dele quando termina o seu pedido. Ela sai da barra lateral; a busca encontra, e Desarquivar traz de volta.',
   'notes.72.better': 'Os agentes de um projeto agora enxergam as conversas uns dos outros: quando um arquivo muda sem ter sido ele, o agente pergunta à conversa que trabalha ali, e você vê quem perguntou.',
+  'notes.73.better': 'Na barra lateral, uma conversa que o agente começou agora fica embaixo da conversa que a começou, então você vê qual trabalho anda junto.',
   'update.checking': 'Procurando atualização…',
   'update.downloading': 'Baixando atualização…',
   'update.downloadingPercent': 'Baixando atualização… {percent}%',

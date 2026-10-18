@@ -11,7 +11,7 @@ import { vendorName } from './models.ts';
 import { forgetProject } from './projects.ts';
 import type { Place } from './running.ts';
 import { mac } from './WindowControls.tsx';
-import { ageOf, freshness, groupChats, matches, type Quotas, showsChats, tailOf, tightest } from './sidebar.ts';
+import { ageOf, freshness, groupChats, matches, nest, type Quotas, showsChats, tailOf, tightest } from './sidebar.ts';
 
 /** The name of a conversation while it is being renamed: Enter keeps it, Esc and leaving the box too when nothing changed. */
 function RenameBox(props: { title: string; onDone: (title?: string) => void }) {
@@ -151,9 +151,10 @@ export function Sidebar(props: Props) {
     if ((await props.onRemove(id)) === 'unsaved') setLosing(id);
   };
 
-  const Row = (row: { c: Summary }) => (
+  const Row = (row: { c: Summary; child?: boolean }) => (
     <div
       class="crow"
+      classList={{ child: row.child }}
       onContextMenu={(e) =>
         openMenu(e, [
           { id: 'rename', label: t('menu.rename'), run: () => setRenaming(row.c.id) },
@@ -284,7 +285,10 @@ export function Sidebar(props: Props) {
                       <div class="fold-inner">
                         <Show when={shown()}>
                           <div class="proj-chats" ref={animateList}>
-                            <For each={inProject(p)}>{(c) => <Row c={c} />}</For>
+                            {/* A conversation an agent started sits under the one that started it. */}
+                            <For each={nest(inProject(p))}>
+                              {(c) => <Row c={c} child={!!c.startedBy && inProject(p).some((o) => o.id === c.startedBy)} />}
+                            </For>
                           </div>
                         </Show>
                       </div>

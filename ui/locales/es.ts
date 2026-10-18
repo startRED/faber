@@ -1041,6 +1041,7 @@ export const es: Messages = {
   'notes.70.better': 'La columna lateral es más ancha en ventanas grandes, y la tarea y los comandos de un ayudante se parten en líneas en vez de cortarse.',
   'notes.71.new': 'Puedes archivar una conversación desde su menú del botón derecho, y el agente de un proyecto archiva la suya cuando termina tu pedido. Sale de la barra lateral; la búsqueda la encuentra y Desarchivar la recupera.',
   'notes.72.better': 'Los agentes de un proyecto ahora ven las conversaciones de los demás: cuando cambia un archivo que no tocó, un agente le pregunta a la conversación que trabaja ahí, y ves quién preguntó.',
+  'notes.73.better': 'En la barra lateral, una conversación que empezó el agente ahora aparece debajo de la conversación que la empezó, así ves qué trabajo va junto.',
   'update.checking': 'Buscando una actualización…',
   'update.downloading': 'Descargando actualización…',
   'update.downloadingPercent': 'Descargando actualización… {percent} %',

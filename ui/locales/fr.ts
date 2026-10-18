@@ -1041,6 +1041,7 @@ export const fr: Messages = {
   'notes.70.better': "La colonne latérale est plus large sur une grande fenêtre, et la tâche et les commandes d'un assistant passent à la ligne au lieu d'être coupées.",
   'notes.71.new': 'Vous pouvez archiver une conversation depuis son menu du clic droit, et l’agent d’un projet archive la sienne une fois votre demande terminée. Elle quitte la barre latérale ; la recherche la retrouve, et Désarchiver la ramène.',
   'notes.72.better': 'Les agents d’un projet voient maintenant les conversations des autres : quand un fichier change sans qu’il l’ait touché, un agent interroge la conversation qui y travaille, et vous voyez qui a demandé.',
+  'notes.73.better': 'Dans la barre latérale, une conversation lancée par l’agent se place maintenant sous celle qui l’a lancée : vous voyez quel travail va ensemble.',
   'update.checking': 'Recherche d’une mise à jour…',
   'update.downloading': 'Téléchargement de la mise à jour…',
   'update.downloadingPercent': 'Téléchargement de la mise à jour… {percent} %',

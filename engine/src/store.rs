@@ -172,6 +172,7 @@ impl Store {
             .map(|c| Summary {
                 keep_going: c.keep_going.is_some(),
                 archived: c.archived_at.is_some(),
+                started_by: c.started_by,
                 id: c.id,
                 title: c.title,
                 area: c.area,
