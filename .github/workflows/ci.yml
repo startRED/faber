@@ -440,31 +440,18 @@ jobs:
         run: |
           set -euo pipefail
           branch=${GITHUB_REF#refs/heads/}
-          pr=""; oid=""
-          if [[ "$branch" =~ ^queue/pr-([0-9]+)$ ]]; then
-            pr=${BASH_REMATCH[1]}
-            oid=$(git log -1 --format='%(trailers:key=Pull-request-head,valueonly)' "$GITHUB_SHA" | tr -d '[:space:]')
-          fi
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
-          git fetch --quiet origin phase-1-base main "$branch"
-          # A newer push to the queue branch has its own run.
-          if [ "$(git rev-parse "origin/$branch")" != "$GITHUB_SHA" ]; then echo "A newer commit is queued."; exit 0; fi
+          git fetch --quiet origin phase-1-base main
+          # Landed already, by itself or under a batch on top of it (R190 V3), whose landing deleted this branch.
           if git merge-base --is-ancestor "$GITHUB_SHA" origin/phase-1-base; then
-            git push origin --delete "$branch"; echo "Already on phase-1-base."; exit 0
+            git push --force-with-lease="refs/heads/$branch:$GITHUB_SHA" origin --delete "$branch" 2>/dev/null || true; echo "Already on phase-1-base."; exit 0
           fi
-          # A pull request lands only while it is open on phase-1-base and still at the head that was squashed: a close or
-          # a later push stops it here, and its author queues it again.
-          head=""
-          if [ -n "$pr" ] && [ -n "$oid" ]; then
-            head=$(gh pr view "$pr" --json state,isCrossRepository,baseRefName,headRefName,headRefOid --jq \
-              "select(.state == \"OPEN\" and (.isCrossRepository | not) and .baseRefName == \"phase-1-base\" and .headRefOid == \"$oid\") | .headRefName")
-            if [ -z "$head" ]; then
-              git push origin --delete "$branch"
-              echo "::warning::#$pr was closed, retargeted or pushed again after it was queued. Queue it again: node scripts/land.mjs $pr"
-              exit 0
-            fi
-          fi
+          # A newer push to the queue branch has its own run.
+          if [ "$(git ls-remote origin "refs/heads/$branch" | cut -f1)" != "$GITHUB_SHA" ]; then echo "A newer commit is queued, or none."; exit 0; fi
+          git fetch --quiet origin "$branch"
+          pr=""
+          if [[ "$branch" =~ ^queue/pr-([0-9]+)$ ]]; then pr=${BASH_REMATCH[1]}; fi
           # GitHub refuses this run's token any push of a commit that changes a workflow file, so such a landing ends on
           # the PC that queued it: `land.mjs --finish` there, once this gate is green (docs/dev/workflow.md#numbers).
           if git diff --name-only origin/phase-1-base "$GITHUB_SHA" -- .github/workflows | grep -q .; then
@@ -475,24 +462,20 @@ jobs:
             fi
             exit 1
           fi
+          if [ -n "$pr" ]; then
+            # A pull request lands with every one batched under it, each branch moved to its own commit so GitHub shows it
+            # merged; one under it that no longer stands, a close, a later push or a base that moved sends it back to be
+            # squashed and numbered again alone (scripts/land.mjs --land). The base's land.mjs, not the queued one: a pull
+            # request cut before a fix to the landing still gets it.
+            git show origin/phase-1-base:scripts/land.mjs > "$RUNNER_TEMP/land.mjs"
+            # An older land.mjs would read --land as a plain queueing: it never lands then.
+            grep -q "'--land'" "$RUNNER_TEMP/land.mjs" || { echo "::error::phase-1-base's land.mjs cannot land a queued commit (--land)."; exit 1; }
+            node "$RUNNER_TEMP/land.mjs" "$pr" --land "$GITHUB_SHA"
+            exit
+          fi
           if git merge-base --is-ancestor origin/phase-1-base "$GITHUB_SHA"; then
-            # The pull request's branch moves first, then phase-1-base: GitHub marks a pull request merged only when the base
-            # takes the head it already has (one atomic push of both closed #64 instead). A base that refuses, because it
-            # moved meanwhile, puts the branch back, and the landing below starts again.
-            landed=false; before=$(git rev-parse origin/phase-1-base)
-            if [ -n "$head" ]; then
-              if git push --force-with-lease="refs/heads/$head:$oid" origin "$GITHUB_SHA:refs/heads/$head"; then
-                sleep 5
-                if git push origin "$GITHUB_SHA:refs/heads/phase-1-base"; then
-                  landed=true
-                else
-                  git push --force-with-lease="refs/heads/$head:$GITHUB_SHA" origin "$oid:refs/heads/$head" || true
-                fi
-              fi
-            else
-              git push origin "$GITHUB_SHA:refs/heads/phase-1-base" && landed=true
-            fi
-            if [ "$landed" = true ]; then
+            before=$(git rev-parse origin/phase-1-base)
+            if git push origin "$GITHUB_SHA:refs/heads/phase-1-base"; then
               # Green on top of the whole phase-1-base, so main follows at once (R127).
               if git merge-base --is-ancestor origin/main "$GITHUB_SHA"; then
                 git push origin "$GITHUB_SHA:refs/heads/main"
@@ -510,13 +493,6 @@ jobs:
               echo "::error::The push was refused although phase-1-base did not move; the push error is above."; exit 1
             fi
           fi
-          if [ -n "$head" ]; then
-            # The base's land.mjs, not the queued one: a pull request cut before a fix to the landing still gets it.
-            git show origin/phase-1-base:scripts/land.mjs > "$RUNNER_TEMP/land.mjs"
-            node "$RUNNER_TEMP/land.mjs" "$pr" --head "$oid"
-            gh workflow run ci.yml --ref "$branch"
-            echo "phase-1-base moved; #$pr was squashed and numbered again on it and is checked again."; exit 0
-          fi
           if ! git rebase --quiet origin/phase-1-base; then
             echo "::error::$branch conflicts with phase-1-base. Rebase it by hand and push it again."; exit 1
           fi
@@ -526,19 +502,29 @@ jobs:
 
   # A queued pull request (queue/pr-<n>) whose checks or landing failed says so on the pull request itself: a red `queue`
   # status on the head that was queued and a comment, which wake the session that opened it, so nobody watches the queue
-  # (R182). The fix is pushed to the pull request and queued again with scripts/land.mjs.
+  # (R182). The fix is pushed to the pull request and queued again with scripts/land.mjs. A red batch blames nobody yet:
+  # the top one is queued again alone (land.mjs --split), and each side answers for itself (R190 V3).
   report:
     needs: [gate, land]
     if: >-
       always() && startsWith(github.ref, 'refs/heads/queue/pr-') && github.event_name != 'pull_request' &&
       (needs.gate.result == 'failure' || needs.land.result == 'failure')
     runs-on: ubuntu-latest
+    # Its own group per branch: in the land group a waiting report would replace a waiting landing, or be replaced.
+    concurrency:
+      group: report-${{ github.ref }}
     permissions:
-      contents: read
+      contents: write
+      actions: write
       statuses: write
       pull-requests: write
     steps:
       - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 24
       - env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           RUN: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
@@ -548,6 +534,13 @@ jobs:
           pr=${GITHUB_REF#refs/heads/queue/pr-}
           oid=$(git log -1 --format='%(trailers:key=Pull-request-head,valueonly)' "$GITHUB_SHA" | tr -d '[:space:]')
           if [ -z "$oid" ]; then echo "No Pull-request-head line: nothing to report."; exit 0; fi
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git show origin/phase-1-base:scripts/land.mjs > "$RUNNER_TEMP/land.mjs"
+          code=0
+          # An older land.mjs would read --split as a plain queueing: then the red is reported as before.
+          if grep -q "'--split'" "$RUNNER_TEMP/land.mjs"; then node "$RUNNER_TEMP/land.mjs" "$pr" --split "$GITHUB_SHA" || code=$?; fi
+          if [ "$code" = 3 ]; then echo "Checked again alone, or landed already: nobody is blamed yet."; exit 0; fi
           gh api "repos/$GITHUB_REPOSITORY/statuses/$oid" -f state=failure -f context=queue -f target_url="$RUN" \
             -f description="Queued, but $FAILED. Fix, push, then: node scripts/land.mjs $pr"
           gh pr comment "$pr" --body "Queued as \`$GITHUB_SHA\`, but $FAILED: $RUN. Push the fix, then queue it again with \`node scripts/land.mjs $pr\`."

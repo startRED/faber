@@ -219,7 +219,7 @@ Each step lands on its own, proves itself with the checks above, and reports its
 - **V2 as planned:** `land.mjs` asks the verifier for a full check on the squashed tree and posts
   `faber/verify`. The `changes` job leaves out the suites the status covers. The daily run reports misses.
   - Result: most queued runs shrink from about 18 jobs to the lints.
-- [ ] **V3. A queue that knows conflicts.**
+- [x] **V3. A queue that knows conflicts.** Built in `land.mjs` and the queue jobs of ci.yml, not in the engine (R220).
   - Changes that touch disjoint crates are checked together.
   - A failed batch is bisected.
   - Flaky tests are found from the journal, quarantined and rerun alone. Built for whole checks: a check the journal

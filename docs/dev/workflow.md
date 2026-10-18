@@ -42,6 +42,16 @@ So a pull request is never merged with the button or `gh pr merge`: its green sa
 Dependabot pull request still runs every suite on its own, until it lands through `land.mjs` too. Each push to a queue
 branch cancels the run before it, so a lane queues once, with its fix complete.
 
+Batches (R190 V3, R220). A pull request that touches other parts of the repository than one queued and not landed
+yet (its first folders, leaving out the words, the locales and `docs/`, which every landing writes) is squashed and
+numbered on top of that queue commit instead of the base, up to three deep and never with a workflow change. One run
+then checks them together, and when it is green the land job (`land.mjs --land`) moves every branch of the batch to
+its own commit and phase-1-base to the top one, so all of them show merged; the runs under it find themselves landed.
+One under it that was queued again, closed, pushed again or turned red, or a base that moved, sends the top one back to
+be squashed alone. A red batch blames nobody yet: the report job (`land.mjs --split`) queues the top one again alone,
+and each side then answers for itself, so the one whose own run is red is the culprit and gets the red `queue` status.
+`--alone` queues without batching.
+
 The PC checks before it queues (R190 V2). `land.mjs` runs, on the very commit it is about to queue, the suites CI would
 run for the change (`cargo t --suite <name>`, each whole), in one worktree it keeps for that
 (`faber-wt-landing` beside the main checkout, marked as its own and building into `target/landing`, one landing at a

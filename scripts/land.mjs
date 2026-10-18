@@ -2,7 +2,7 @@
 // there, so its numbers are given only when it lands and two pull requests never wait on each other's
 // (docs/dev/workflow.md#numbers).
 //
-//   node scripts/land.mjs <pull request> [--dry-run] [--no-verify] [--head <commit>]
+//   node scripts/land.mjs <pull request> [--dry-run] [--no-verify] [--alone] [--head <commit>]
 //
 // It squashes the pull request onto origin/phase-1-base without touching the working tree (`git merge-tree`), names the
 // commit after the pull request's title and number, numbers it in a throwaway worktree (`node scripts/numbers.mjs assign
@@ -12,6 +12,11 @@
 // the land job runs this again with --head, the head it squashed before, so the numbers are given again on the new base
 // instead of a rebase that would collide. A conflict with today's base stops here, with its files. --dry-run shows the
 // commit it would queue and pushes nothing.
+//
+// Batches (R190 V3): a pull request that touches other parts of the repository than one queued and not landed yet is
+// squashed on top of that one instead of the base (at most `BATCH` deep), so one run checks them together and the land
+// job (`--land`) lands them together. A red batch is split: the report job (`--split`) queues the top one again alone,
+// and each side then answers for itself, so the culprit is the one whose own check is red. `--alone` never batches.
 //
 // Before it queues, it runs on this PC the suites CI would run for the change (`cargo t --suite <name>`, each whole) on
 // the very commit it queues, in one worktree kept for that (R190 V2). When they pass, it posts the commit status
@@ -132,6 +137,50 @@ export function noCheck(env, args, platform) {
   return '';
 }
 
+/** At most this many pull requests are checked together in one batch (R190 V3): a red batch costs a run per member. */
+export const BATCH = 3;
+
+/**
+ * The parts of the repository `files` touch: the first folder of each file, with what every landing writes left out (the
+ * words, the locales the numbering folds into, the fragments), since two batched changes meet there without conflict.
+ */
+export function areas(files) {
+  const words = (f) => WORDS.test(f) || f.startsWith('ui/locales/') || f.startsWith('docs/');
+  return new Set(files.filter((f) => !words(f)).map((f) => (f.includes('/') ? f.slice(0, f.indexOf('/')) : f)));
+}
+
+/** A change to a workflow lands only from a PC (`--finish`), so it is never batched. */
+export const workflow = (files) => files.some((f) => f.startsWith('.github/workflows/'));
+
+/**
+ * The queued commit a change with `files` is checked on top of, or none: `queued` are the queue commits that sit on top
+ * of today's base, each `{ commit, files, depth, red }` (`files` what it and the ones under it change, `depth` how many
+ * pull requests that is, `red` whether its gate failed). The deepest one that touches other parts, changes no workflow,
+ * is not red and has room left wins, so the batch grows instead of starting a second one.
+ */
+export function stackOn(queued, files) {
+  if (workflow(files)) return null;
+  const mine = areas(files);
+  const fits = queued.filter((q) => !q.red && q.depth < BATCH && !workflow(q.files) && ![...areas(q.files)].some((a) => mine.has(a)));
+  return fits.sort((a, b) => b.depth - a.depth)[0] ?? null;
+}
+
+/**
+ * The pull requests a queue commit carries on top of the base, oldest first, read from `git log --reverse
+ * --format=%H%x00%s%x00%(trailers:key=Pull-request-head,valueonly)%x1e base..commit`; null when one commit is not a
+ * landed pull request's squash (no number in its title or no head line).
+ */
+export function stacked(log) {
+  const out = [];
+  for (const record of log.split('\x1e').map((r) => r.trim()).filter(Boolean)) {
+    const [commit, subject, oid] = record.split('\0').map((s) => s.trim());
+    const pr = /\(#(\d+)\)$/.exec(subject ?? '')?.[1];
+    if (!commit || !pr || !oid) return null;
+    out.push({ commit, pr, oid });
+  }
+  return out;
+}
+
 const run = (cmd, args, options = {}) => execFileSync(cmd, args, { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], windowsHide: true, ...options });
 const git = (...args) => run('git', args);
 
@@ -167,7 +216,23 @@ async function land(number, dry, given, args) {
     tree = settled.tree;
     console.log(`Lines both sides added at one place in ${conflicts(String(error.stdout).split('\n\n')[0]).join(', ')} are kept, the base's first.`);
   }
-  const squashed = run('git', ['commit-tree', tree, '-p', base, '-F', '-'], { input: message(pr.title, pr.number, pr.body, head), stdio: ['pipe', 'pipe', 'pipe'] }).trim();
+  // A change that touches other parts than a pull request queued and not landed yet is checked on top of it, so one run
+  // checks both and lands both (R190 V3). The land job's run again (--head) and --alone never batch.
+  let parent = base;
+  if (!given && !args.includes('--alone') && batches(base)) {
+    const on = stackOn(queuedOn(base, pr.number), names(base, tree));
+    if (on) {
+      try {
+        tree = git('merge-tree', '--write-tree', '--name-only', on.commit, head).split('\n')[0].trim();
+        parent = on.commit;
+        console.log(`Checked together with the ${on.depth} queued under it (${on.commit.slice(0, 9)}): it touches other parts.`);
+      } catch (error) {
+        if (error.status !== 1) throw error;
+        console.log(`It does not apply cleanly on ${on.commit.slice(0, 9)}: it is checked alone.`);
+      }
+    }
+  }
+  const squashed = run('git', ['commit-tree', tree, '-p', parent, '-F', '-'], { input: message(pr.title, pr.number, pr.body, head), stdio: ['pipe', 'pipe', 'pipe'] }).trim();
   const commit = numberedCommit(squashed);
   if (!commit) return 1;
   if (dry) {
@@ -357,6 +422,155 @@ function alive(pid) {
   }
 }
 
+/** Whether `base`'s queue jobs land batches: before they do, a batch would land with only its top one marked merged. */
+const batches = (base) => git('show', `${base}:.github/workflows/ci.yml`).includes('--land "$GITHUB_SHA"');
+
+/** Deletes queue/pr-<number> only while it still holds `commit`: a newer queueing stands. */
+function drop(number, commit) {
+  try {
+    git('push', '--quiet', `--force-with-lease=refs/heads/queue/pr-${number}:${commit}`, 'origin', `:refs/heads/queue/pr-${number}`);
+  } catch {
+    // Gone already, or queued again meanwhile.
+  }
+}
+
+/** The files that differ between two commits or trees. */
+const names = (from, to) =>
+  git('diff', '--name-only', from, to)
+    .split('\n')
+    .map((l) => l.trim())
+    .filter(Boolean);
+
+const LOG = '--format=%H%x00%s%x00%(trailers:key=Pull-request-head,valueonly)%x1e';
+
+/** Whether `older` is `newer` or one of its ancestors. */
+function ancestor(older, newer) {
+  try {
+    git('merge-base', '--is-ancestor', older, newer);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/** The commit queue/pr-<number> holds on GitHub now, or ''. */
+const queuedAt = (number) => git('ls-remote', 'origin', `refs/heads/queue/pr-${number}`).split(/\s/)[0];
+
+/** How `commit`'s `gate` ended: 'success', 'failure', or '' while it runs or never ran. */
+function gate(commit) {
+  const ends = run('gh', ['api', `repos/{owner}/{repo}/commits/${commit}/check-runs?check_name=gate`, '--jq', '[.check_runs[].conclusion // ""] | join(" ")']);
+  return ends.includes('success') ? 'success' : ends.includes('failure') ? 'failure' : '';
+}
+
+/** The other pull requests' queue commits that sit on top of `base` now, as `stackOn` reads them. */
+function queuedOn(base, number) {
+  const refs = git('ls-remote', 'origin', 'refs/heads/queue/pr-*')
+    .split('\n')
+    .map((l) => l.trim().split(/\s+/))
+    .filter(([sha, ref]) => sha && ref && ref !== `refs/heads/queue/pr-${number}`);
+  if (!refs.length) return [];
+  git('fetch', '--quiet', 'origin', ...refs.map(([, ref]) => `+${ref}:refs/remotes/origin/${ref.slice('refs/heads/'.length)}`));
+  return refs.flatMap(([commit]) => {
+    if (!ancestor(base, commit)) return [];
+    const batch = stacked(git('log', '--reverse', LOG, `${base}..${commit}`));
+    if (!batch?.length) return [];
+    return [{ commit, files: names(base, commit), depth: batch.length, red: gate(commit) === 'failure' }];
+  });
+}
+
+/** Queues #`number` again alone on today's base, from the head `oid` it was squashed from, and starts its run. */
+async function alone(number, oid, why) {
+  console.log(`${why}: #${number} is squashed again alone on ${BASE} and checked again.`);
+  const code = await land(number, false, oid, ['--alone']);
+  if (code === 0) run('gh', ['workflow', 'run', 'ci.yml', '--ref', `queue/pr-${number}`]);
+  return code;
+}
+
+/**
+ * The land job's landing of queue/pr-<number> at `sha`, whose gate passed (ci.yml). It carries every pull request
+ * batched under it: each branch moves to its own commit, then phase-1-base to `sha` in one push, so GitHub shows each
+ * merged. One under it that was queued again, closed, pushed again or whose own gate failed sends this one back alone;
+ * so does a base that moved.
+ */
+async function landQueued(number, sha) {
+  git('fetch', '--quiet', 'origin', `+refs/heads/${BASE}:refs/remotes/origin/${BASE}`, '+refs/heads/main:refs/remotes/origin/main');
+  const base = git('rev-parse', `origin/${BASE}`).trim();
+  const batch = stacked(git('log', '--reverse', LOG, `${base}..${sha}`));
+  const mine = batch?.at(-1);
+  if (!mine || mine.pr !== String(number) || mine.commit !== sha) {
+    console.error(`${sha.slice(0, 9)} is not #${number}'s squash on top of ${BASE}.`);
+    return 1;
+  }
+  if (!ancestor(base, sha)) return alone(number, mine.oid, `${BASE} moved`);
+  const under = batch.slice(0, -1);
+  for (const m of under) {
+    if (queuedAt(m.pr) !== m.commit || gate(m.commit) === 'failure') return alone(number, mine.oid, `#${m.pr} under it no longer stands as queued`);
+  }
+  const views = batch.map((m) => ({ ...m, view: JSON.parse(run('gh', ['pr', 'view', m.pr, '--json', 'state,isCrossRepository,baseRefName,headRefName,headRefOid'])) }));
+  for (const m of views) {
+    if (!refusal({ ...m.view, isDraft: false }) && m.view.headRefOid === m.oid) continue;
+    if (m !== views.at(-1)) return alone(number, mine.oid, `#${m.pr} under it was closed, retargeted or pushed again`);
+    drop(number, sha);
+    console.log(`::warning::#${number} was closed, retargeted or pushed again after it was queued. Queue it again: node scripts/land.mjs ${number}`);
+    return 0;
+  }
+  // The branches first, then the base: GitHub marks a pull request merged only when the base takes the head it already has
+  // (one atomic push of both closed #64 instead). A refusal puts every branch moved back.
+  const moved = [];
+  const back = () => {
+    for (const m of moved) {
+      try {
+        git('push', '--quiet', `--force-with-lease=refs/heads/${m.view.headRefName}:${m.commit}`, 'origin', `${m.oid}:refs/heads/${m.view.headRefName}`);
+      } catch (error) {
+        // Pushed again meanwhile: that newer head stands. The others are still put back.
+        console.error(String(error.stderr || error.message).trim());
+      }
+    }
+  };
+  try {
+    for (const m of views) {
+      git('push', '--quiet', `--force-with-lease=refs/heads/${m.view.headRefName}:${m.oid}`, 'origin', `${m.commit}:refs/heads/${m.view.headRefName}`);
+      moved.push(m);
+    }
+    execFileSync(process.execPath, ['-e', 'setTimeout(() => {}, 5000)'], { windowsHide: true });
+    git('push', '--quiet', 'origin', `${sha}:refs/heads/${BASE}`);
+  } catch (error) {
+    back();
+    console.error(String(error.stderr || error.message).trim());
+    git('fetch', '--quiet', 'origin', `+refs/heads/${BASE}:refs/remotes/origin/${BASE}`);
+    if (git('rev-parse', `origin/${BASE}`).trim() === base) {
+      console.error('::error::The push was refused although phase-1-base did not move; the push error is above.');
+      return 1;
+    }
+    return alone(number, mine.oid, `${BASE} moved`);
+  }
+  // Green on top of the whole phase-1-base, so main follows at once (R127). Pushes made with this token start no
+  // workflow, so main's warm run (R165) and the preview release (R130, R156) are started by hand.
+  if (ancestor('origin/main', sha)) {
+    git('push', '--quiet', 'origin', `${sha}:refs/heads/main`);
+    run('gh', ['workflow', 'run', 'ci.yml', '--ref', 'main', '-f', 'warm=true']);
+  }
+  for (const m of views) drop(m.pr, m.commit);
+  run('gh', ['workflow', 'run', 'auto-release.yml', '--ref', BASE, '-f', `sha=${sha}`]);
+  console.log(`Landed ${sha}${under.length ? `, with ${under.map((m) => `#${m.pr}`).join(', ')} under it` : ''}.`);
+  return 0;
+}
+
+/**
+ * The report job's reading of a red queue/pr-<number> at `sha` (ci.yml): batched on others that have not landed, the red
+ * may be theirs, so it is queued again alone and the batch is split in two (bisection); each side then answers for itself.
+ * True when it went back alone, false when the red is its own.
+ */
+async function split(number, sha) {
+  git('fetch', '--quiet', 'origin', `+refs/heads/${BASE}:refs/remotes/origin/${BASE}`);
+  const base = git('rev-parse', `origin/${BASE}`).trim();
+  // Landed under a batch meanwhile, or queued again since: nothing to blame here.
+  if (ancestor(sha, base) || queuedAt(number) !== sha) return true;
+  const batch = stacked(git('log', '--reverse', LOG, `${base}..${sha}`));
+  if (!batch || batch.length < 2 || batch.at(-1).pr !== String(number)) return false;
+  return (await alone(number, batch.at(-1).oid, `The batch under #${number} was red`)) === 0;
+}
+
 /** `commit` with its fragments folded in and its placeholders numbered, made in a throwaway worktree; none when it cannot. */
 function numberedCommit(commit) {
   const dir = mkdtempSync(join(tmpdir(), 'faber-land-'));
@@ -430,10 +644,15 @@ if (process.argv[1] && realpathSync(process.argv[1]) === realpathSync(import.met
   const args = process.argv.slice(2);
   const number = args.find((a) => /^\d+$/.test(a));
   if (!number) {
-    console.error('usage: node scripts/land.mjs <pull request> [--dry-run] [--no-verify] [--head <commit>] | <pull request> --finish');
+    console.error('usage: node scripts/land.mjs <pull request> [--dry-run] [--no-verify] [--alone] [--head <commit>] | <pull request> --finish');
     process.exitCode = 2;
   } else if (args.includes('--finish')) {
     process.exitCode = finish(number);
+  } else if (args.includes('--land')) {
+    process.exitCode = await landQueued(number, args[args.indexOf('--land') + 1]);
+  } else if (args.includes('--split')) {
+    // Exit 3: queued again alone, so the report job blames nobody yet.
+    process.exitCode = (await split(number, args[args.indexOf('--split') + 1])) ? 3 : 0;
   } else {
     const at = args.indexOf('--head');
     process.exitCode = await land(number, args.includes('--dry-run'), at >= 0 ? args[at + 1] : undefined, args);

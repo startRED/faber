@@ -8,7 +8,7 @@ import { join } from 'node:path';
 import test from 'node:test';
 import { fileURLToPath } from 'node:url';
 import { covered, statusText, toCheck } from './ci-scope.mjs';
-import { conflicts, insertions, message, noCheck, refusal, settle, WORDS } from './land.mjs';
+import { areas, BATCH, conflicts, insertions, message, noCheck, refusal, settle, stacked, stackOn, WORDS, workflow } from './land.mjs';
 
 test('the commit is the title with its number, then the body without the template comments', () => {
   const body = '## What changed\n\n<!-- One or two sentences. -->\nFragments.   \n\n\n\n## Cost\n\n<!-- Memory.\n     More. -->\nNone.\n';
@@ -105,4 +105,29 @@ test("CI's own run of land.mjs, copied alone, loads without the files beside it"
     rmSync(`${dir}-link`, { force: true });
     rmSync(dir, { recursive: true, force: true });
   }
+});
+
+test('the parts a change touches leave out the words, the locales and the docs every landing writes', () => {
+  assert.deepEqual([...areas(['engine/src/a.rs', 'engine/tests/b.rs', 'ui/Thread.tsx', 'ui/locales/en.ts', 'docs/next/x.json', 'AGENTS.md', 'Cargo.lock'])], ['engine', 'ui', 'Cargo.lock']);
+  assert.ok(workflow(['.github/workflows/ci.yml']) && !workflow(['.github/pull_request_template.md']));
+});
+
+test('a change is checked on top of the deepest queued batch that touches other parts, is not red and has room', () => {
+  const q = (commit, files, depth, red = false) => ({ commit, files, depth, red });
+  const queued = [q('a', ['engine/src/x.rs'], 1), q('b', ['engine/src/x.rs', 'ui/A.tsx'], 2), q('c', ['testkit/src/y.rs'], 1, true)];
+  assert.equal(stackOn(queued, ['scripts/land.mjs'])?.commit, 'b', 'the deepest that fits');
+  assert.equal(stackOn(queued, ['ui/B.tsx'])?.commit, 'a', 'one that shares a part is passed over');
+  assert.equal(stackOn(queued, ['engine/src/z.rs', 'ui/B.tsx']), null, 'nothing fits: alone on the base');
+  assert.equal(stackOn([q('d', ['ui/A.tsx'], 1, true)], ['engine/src/z.rs']), null, 'a red one is never built on');
+  assert.equal(stackOn([q('e', ['ui/A.tsx'], BATCH)], ['engine/src/z.rs']), null, 'a full batch takes no more');
+  assert.equal(stackOn([q('f', ['ui/A.tsx'], 1)], ['.github/workflows/ci.yml']), null, 'a workflow change lands from a PC, alone');
+  assert.equal(stackOn([q('g', ['.github/workflows/ci.yml'], 1)], ['ui/B.tsx']), null, 'and nothing is built on one');
+  assert.equal(stackOn([q('h', ['docs/a.md', 'ui/locales/en.ts'], 1)], ['ui/locales/en.ts', 'engine/src/a.rs'])?.commit, 'h', 'shared words do not keep two apart');
+});
+
+test('a batch is read oldest first from the log, and a commit that is not a landed pull request stops it', () => {
+  const log = 'aaa\0fix: one (#7)\0h7\n\x1ebbb\0feat: two (#9)\0h9\n\x1e';
+  assert.deepEqual(stacked(log), [{ commit: 'aaa', pr: '7', oid: 'h7' }, { commit: 'bbb', pr: '9', oid: 'h9' }]);
+  assert.equal(stacked('ccc\0chore: by hand\0\n\x1e'), null);
+  assert.deepEqual(stacked(''), []);
 });
