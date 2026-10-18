@@ -422,6 +422,20 @@ impl Containment {
         }
     }
 
+    /// The most memory the job's processes held together so far, in bytes: what a check's RAM admission learns from
+    /// (`crate::verify`). None elsewhere than Windows, or when Windows does not say.
+    pub fn peak_memory(&self) -> Option<u64> {
+        #[cfg(windows)]
+        {
+            let job = self.job.lock().unwrap_or_else(|e| e.into_inner());
+            job.as_ref().and_then(|job| faber_winproc::job_peak_memory(job.handle()).ok())
+        }
+        #[cfg(not(windows))]
+        {
+            None
+        }
+    }
+
     /// Ends every process of the job now. Closing the job does the same, but only asks: this is followed by `active`.
     fn end(&self) {
         #[cfg(windows)]

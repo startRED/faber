@@ -375,7 +375,7 @@ async fn attempt(scenario: Scenario, model: &str, options: &Options, base: &Path
     engine.set_git(Arc::new(|| {
         faber_engine::project::git::Process::find().ok().map(|git| Box::new(git) as Box<dyn faber_engine::project::git::Executor + Send>)
     }));
-    engine.set_verifier(faber_engine::verify::Verifier::real(None));
+    engine.set_verifier(faber_engine::verify::Verifier::real(None, None));
     // Full access, and separate copies on (the default; the probe does not touch that setting).
     engine.save_settings(Settings { permissions: Some(Permissions::FullAccess), ..Default::default() })?;
     let mut project = engine.add_project(&repo.to_string_lossy())?;

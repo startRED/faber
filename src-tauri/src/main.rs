@@ -1602,7 +1602,9 @@ fn main() {
             // game is in front (R191) no new check starts and a running one is held to a tenth of the processor.
             // The test build never waits for one, as the screen's own reading (`game_in_front` above) never changes there.
             let guard: faber_engine::verify::Guard = Arc::new(|| !cfg!(feature = "test-hooks") && crate::tray::game_in_front());
-            engine.set_verifier(faber_engine::verify::Verifier::real(Some(guard)));
+            // Its results journal (failed first, flaky told) lives in the data folder.
+            let journal = data_dir.join("verify").join("journal.jsonl");
+            engine.set_verifier(faber_engine::verify::Verifier::real(Some(guard), Some(journal)));
             {
                 // Once, at start: copies of deleted conversations, and merged clean ones, go.
                 let engine = engine.clone();

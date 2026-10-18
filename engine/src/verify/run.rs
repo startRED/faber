@@ -29,6 +29,8 @@ pub struct Started {
     /// Caps the check's processor share while a game is in front (true) or lifts the cap (false), saying whether it took;
     /// none where nothing can.
     pub throttle: Option<Box<dyn Fn(bool) -> bool + Send + Sync>>,
+    /// Where `exit` leaves the most memory the check and what it started held at once, in bytes, when it can tell.
+    pub peak: Option<std::sync::Arc<std::sync::atomic::AtomicU64>>,
 }
 
 /// Whether a game or another full-screen app is in front of the person (the shell's R191 reading), so no new check starts
@@ -80,17 +82,34 @@ impl Runner for Real {
             let cap = job.cpu_cap();
             Box::new(move |game: bool| cap(game.then_some(GAME_CPU))) as Box<dyn Fn(bool) -> bool + Send + Sync>
         });
+        let peak = job.as_ref().map(|_| std::sync::Arc::new(std::sync::atomic::AtomicU64::new(0)));
+        let measured = Measured { job, slot: peak.clone() };
         let exit = Box::pin(async move {
-            // The job lives as long as this future: once the check exited, or when the future is dropped before, closing
-            // it ends whatever the check left running (on Windows), so its pipes close and nothing outlives it.
-            let _job = job;
+            // The job lives as long as this future: once the check exited, or when the future is dropped before (its
+            // deadline), closing it ends whatever the check left running (on Windows), so its pipes close and nothing
+            // outlives it. Its peak is read just before, either way.
+            let _measured = measured;
             let mut child = child;
             match child.as_mut() {
                 Some(child) => child.wait().await.ok().and_then(|s| s.code()),
                 None => None,
             }
         });
-        Ok(Started { stdout: p.stdout, stderr: p.stderr.unwrap_or_else(|| Box::new(tokio::io::empty())), exit, throttle })
+        Ok(Started { stdout: p.stdout, stderr: p.stderr.unwrap_or_else(|| Box::new(tokio::io::empty())), exit, throttle, peak })
+    }
+}
+
+/// A check's job, whose peak memory goes to `slot` as it closes.
+struct Measured {
+    job: Option<crate::proc::Containment>,
+    slot: Option<std::sync::Arc<std::sync::atomic::AtomicU64>>,
+}
+
+impl Drop for Measured {
+    fn drop(&mut self) {
+        if let (Some(job), Some(slot)) = (&self.job, &self.slot) {
+            slot.store(job.peak_memory().unwrap_or(0), std::sync::atomic::Ordering::Relaxed);
+        }
     }
 }
 
@@ -236,6 +255,8 @@ pub struct Ran {
     /// Why it could not start, when it did not.
     pub refused: Option<String>,
     pub timed_out: bool,
+    /// The most memory it held at once, in bytes, when the runner could tell.
+    pub peak: Option<u64>,
 }
 
 /// Chunks in flight between the pipes and the log: a slow disk holds the pipes back instead of growing memory.
@@ -266,10 +287,17 @@ pub async fn check(runner: &dyn Runner, spec: &Spec, log: &mut Log, deadline: Du
         Ok(started) => started,
         Err(e) => {
             log.line(&format!("could not start: {e}"));
-            return Ran { exit: None, output: String::new(), took: began.elapsed(), refused: Some(e.to_string()), timed_out: false };
+            return Ran {
+                exit: None,
+                output: String::new(),
+                took: began.elapsed(),
+                refused: Some(e.to_string()),
+                timed_out: false,
+                peak: None,
+            };
         }
     };
-    let Started { stdout, stderr, exit, throttle } = started;
+    let Started { stdout, stderr, exit, throttle, peak } = started;
     let (tx, mut rx) = tokio::sync::mpsc::channel::<Vec<u8>>(CHANNEL);
     let mut capture = Capture::default();
     let code = {
@@ -332,7 +360,8 @@ pub async fn check(runner: &dyn Runner, spec: &Spec, log: &mut Log, deadline: Du
         None => (None, true),
     };
     log.flush();
-    Ran { exit, output: capture.text(), took: began.elapsed(), refused: None, timed_out }
+    let peak = peak.map(|p| p.load(std::sync::atomic::Ordering::Relaxed)).filter(|&p| p > 0);
+    Ran { exit, output: capture.text(), took: began.elapsed(), refused: None, timed_out, peak }
 }
 
 #[cfg(test)]
@@ -353,6 +382,7 @@ mod tests {
                 stderr: Box::new(tokio::io::empty()),
                 exit: Box::pin(async move { Some(code) }),
                 throttle: None,
+                peak: None,
             })
         }
     }
