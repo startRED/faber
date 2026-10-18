@@ -4,8 +4,7 @@ Scope: what a person and an administrator observe, what limits exist, what the m
 each other in words. No code, no internal names. Evidence tags: (observed: static) read from the shipped app, helper
 programs and VM image contents without running them; (observed: decompiled) read in decompiler output of the Windows
 service and the three helper programs; (inferred from strings) names and messages seen in binaries. No REA Evidence IDs
-were used for this spec; the underlying private notes are in the owner's corpus. The in-VM daemon itself was not
-decompiled yet, which is stated under Unknowns.
+were used for this spec; the underlying private notes are in the owner's corpus. The in-VM daemon was decompiled in a second pass (section 2.13).
 
 ## 1. Inventory
 
@@ -196,6 +195,42 @@ Run as "helper uid gid [flags] command"; flags: skip the network sandbox runtime
 Service log, daemon console log (read from the VM's serial console, rotated, with a notice when output was dropped), startup
 step timeline, and an optional "share debug logs" action. Support bundles include tails of these logs. (observed: static)
 
+### 2.13 The in-VM daemon: mounts, environment, limits (observed: decompiled)
+- Mount modes: every grant is read-only, read-write, or read-write-without-delete (the last is the default for user folders), each
+  optionally with a hide list (exact names or name patterns). Grants are bind views made with a user-space bind filesystem that
+  forces the session user and group, shows files to the owner only (others get no access), and for the no-delete mode refuses
+  deletes. The hide list is a second user-space layer that answers "not found" for hidden items and for anything below them.
+  Remounting a grant that has a hide filter is refused if it would drop the filter. A mount whose target sits inside another
+  bind mount skips the owner and permission changes. Optional grants that fail to mount are logged and skipped; required ones fail
+  the spawn. The raw host shares are mounted once at a root only (no link following; re-flagged if found without it) and are
+  later detached inside each sandbox (2.10).
+- Fixed mounts by purpose: the per-user session disk (a second virtual disk, found by label or size, checked and repaired with a
+  file-system check, formatted if blank) holds all session homes under one sessions folder and is writable; a small
+  image of daemon binaries is checked at boot and after reconnect and a newer daemon is installed from it (skipped when the
+  image's id is unchanged); the Claude Code build and the plugin stand-in live in a fixed system folder; plugin tool binaries are
+  staged per session. Inside the sandbox the runtime's policy allows writing anywhere the Linux user may write, and denies
+  reading two system runtime folders; isolation is by user, namespaces and the network proxy rather than by a read-only root.
+- Environment for the agent process: the host's entries are passed through, then the daemon sets home, user and login names to the
+  session user, three temp-folder settings (two Claude ones and the standard one) to a "tmp" folder inside the session home, and
+  puts the Claude Code folder first on the search path plus the global node modules folder. The model credential entry is handled
+  separately: it is not left in the environment; the daemon stages a snapshot file and gives the process only its path, and the
+  host separately registers which credentials are approved for the proxy. The helper then passes this environment on unchanged.
+- Limits: each session gets its own resource group. The memory controller is switched on only for measuring: no memory cap, no
+  process-count cap and no CPU cap is written, so one session can use all of the VM's RAM; the daemon reads peak usage and the
+  count of out-of-memory kills at exit and reports them. Killing a session uses the group's kill-all switch, with a direct
+  signal fallback; it then waits up to 30 seconds (polling every 0.1 s) for the group to empty before removing it. Output from a
+  process is read in 64 KiB pieces and sent as events (host messages are capped at 100 MiB). A free-memory reading is sampled every
+  10 seconds. If a group cannot be made, the process runs without tracking and a warning is logged.
+- Timeouts: the guest checks the model API's reachability with a 5 second limit per try, retrying every 2 seconds; it waits up to
+  10 seconds for the host to deliver the company root certificates before refreshing the trust store itself; the host-share check
+  is limited to 5 seconds, and if an earlier check is stuck new spawns for that session are refused with a "try again in a moment"
+  message. Each spawn step has a deadline supplied by the host; a step that passes it is abandoned, the user, home and mounts are
+  kept and new spawns of the same name are refused until it returns. Full-egress sessions (wildcard allowlist) skip the network
+  runtime altogether.
+- Is 4 GB a hard ceiling? The VM is created with a fixed RAM size from the setting, so the guest cannot use more. The size is
+  allowed to be over-committed by Windows (not reserved up front), and no balloon or dynamic-memory setting was found. Inside the
+  guest nothing else caps it.
+
 ## 3. Ideas for Faber (Windows, Claude Code/Codex CLIs, low memory, R125 < 400 MB idle)
 
 Faber's budget rules out a resident VM: Cowork's VM asks for 4 GB, an 8 GB image and a privileged service. What is worth
@@ -238,11 +273,11 @@ Memory note for Faber: none of the above needs a resident process beyond the eng
 under R125 and reported with the change.
 
 ## 4. Unknowns and bounds
-- The in-VM daemon was not decompiled yet. Still unknown: the exact folders it binds into a session and which are read-only
-  (only the helper's own mounts above are known), the per-process environment it builds, its per-session memory limit, and its
-  concurrency and time limits for the "claude" stand-in and plugin runs.
-- Not recovered: whether the 4 GB memory is a hard ceiling, and any host-side retry policy beyond the 0.5 second polling and
-  the service restart back-off.
+- The list of grants is decided by the host app per session (mode and hide list arrive in the spawn request); the daemon has no
+  fixed list of user folders, so the names in 2.4 come from the app, not from the daemon.
+- Not recovered: concurrency and time limits of the "claude" stand-in and plugin runs inside the daemon (not found in the dump),
+  the exact spawn step deadlines (set by the host), and any host-side retry policy beyond the 0.5 second polling and the
+  service restart back-off.
 - Nothing was run; no network capture; no VM bundle disk was opened (only the helper executables extracted from it).
 - The macOS and Linux variants use different native layers; only Windows behavior is described here.
 - Credentials were not read or recorded; token-related items are described by purpose only.
