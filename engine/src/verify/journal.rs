@@ -34,8 +34,6 @@ pub struct Entry {
 pub struct Known {
     /// Its last result failed.
     pub failed: bool,
-    /// It passed and failed on the same content.
-    pub flaky: bool,
     /// The median time of its passes, in milliseconds.
     pub cost: Option<u64>,
 }
@@ -67,6 +65,13 @@ impl Journal {
             state.loaded = true;
             // A line that cannot be read (a torn last write) is skipped: the rest still counts.
             let text = self.file.as_ref().and_then(|f| std::fs::read_to_string(f).ok()).unwrap_or_default();
+            if !text.is_empty()
+                && !text.ends_with('\n')
+                && let Some(file) = &self.file
+            {
+                // Ends the torn line, so the next result starts a line of its own.
+                drop(std::fs::OpenOptions::new().append(true).open(file).and_then(|mut f| f.write_all(b"\n")));
+            }
             for entry in text.lines().filter_map(|l| serde_json::from_str::<Entry>(l).ok()) {
                 state.lines += 1;
                 keep(&mut state.checks, entry);
@@ -81,11 +86,7 @@ impl Journal {
             let Some(entries) = state.checks.get(&(project.to_string(), command.to_string())) else { return Known::default() };
             let mut passes: Vec<u64> = entries.iter().filter(|e| e.ok).map(|e| e.millis).collect();
             passes.sort_unstable();
-            let flaky = entries
-                .iter()
-                .filter(|e| e.ok)
-                .any(|pass| pass.key.is_some() && entries.iter().any(|other| !other.ok && other.key == pass.key));
-            Known { failed: entries.back().is_some_and(|e| !e.ok), flaky, cost: passes.get(passes.len() / 2).copied() }
+            Known { failed: entries.back().is_some_and(|e| !e.ok), cost: passes.get(passes.len() / 2).copied() }
         })
     }
 
@@ -95,11 +96,17 @@ impl Journal {
         self.with(|state| state.checks.get(&(project.to_string(), command.to_string()))?.back()?.key.clone())
     }
 
-    /// Adds a result, in memory and on disk.
-    pub fn add(&self, entry: Entry) {
+    /// Adds a result, in memory and on disk, and tells whether the check is flaky: it both passed and failed on this
+    /// result's content.
+    pub fn add(&self, entry: Entry) -> bool {
         self.with(|state| {
+            let key = (entry.project.clone(), entry.command.clone());
             keep(&mut state.checks, entry.clone());
-            let Some(file) = &self.file else { return };
+            let flaky = entry.key.is_some() && {
+                let same = || state.checks[&key].iter().filter(|e| e.key == entry.key);
+                same().any(|e| e.ok) && same().any(|e| !e.ok)
+            };
+            let Some(file) = &self.file else { return flaky };
             state.lines += 1;
             let kept: usize = state.checks.values().map(VecDeque::len).sum();
             let written = if state.lines > 2 * kept.max(KEPT) {
@@ -115,7 +122,8 @@ impl Journal {
             };
             // A journal that cannot be written loses history, never a check.
             drop(written);
-        });
+            flaky
+        })
     }
 }
 
@@ -157,11 +165,14 @@ mod tests {
         for (n, millis) in [300, 100, 200].into_iter().enumerate() {
             journal.add(entry("lint", &format!("k{n}"), true, millis, n as u64));
         }
-        assert_eq!(journal.known("p", "lint"), Known { failed: false, flaky: false, cost: Some(200) });
-        journal.add(entry("lint", "k9", false, 50, 10));
-        assert!(journal.known("p", "lint").failed && !journal.known("p", "lint").flaky, "a failure on new content");
-        journal.add(entry("lint", "k1", false, 50, 11));
-        assert!(journal.known("p", "lint").flaky, "it passed and failed on the same content");
+        assert_eq!(journal.known("p", "lint"), Known { failed: false, cost: Some(200) });
+        assert!(!journal.add(entry("lint", "k9", false, 50, 10)), "a failure on new content");
+        assert!(journal.known("p", "lint").failed);
+        assert!(!journal.add(entry("lint", "k8", false, 50, 11)), "still not flaky on other content");
+        assert!(journal.add(entry("lint", "k1", false, 50, 12)), "it passed and failed on the same content");
+        let mut none = entry("lint", "", true, 1, 13);
+        none.key = None;
+        assert!(!journal.add(none.clone()) && !journal.add(Entry { ok: false, ..none }), "no content, never flaky");
         assert_eq!(journal.known("q", "lint"), Known::default(), "another project");
     }
 
@@ -176,8 +187,10 @@ mod tests {
         let lines = std::fs::read_to_string(&file).unwrap().lines().count();
         assert!(lines <= 2 * KEPT + 1, "the file is rewritten from memory: {lines} lines");
         std::fs::OpenOptions::new().append(true).open(&file).unwrap().write_all(b"{\"project\":\"p\",\"comm").unwrap();
-        let again = Journal::new(Some(file));
+        let again = Journal::new(Some(file.clone()));
         assert_eq!(again.known("p", "test").failed, journal.known("p", "test").failed);
+        again.add(entry("test", "after", false, 1, 1000));
+        assert!(Journal::new(Some(file)).known("p", "test").failed, "the result after a torn line survives a restart");
         assert_eq!(again.with(|s| s.checks[&("p".to_string(), "test".to_string())].len()), KEPT);
     }
 }

@@ -561,8 +561,7 @@ impl Verifier {
                     millis: out.millis,
                     at: (self.clock)(),
                 };
-                self.journal.add(entry);
-                if !ok && known[&check.command].flaky {
+                if self.journal.add(entry) && !ok {
                     out.summary.push_str("; flaky: it passed and failed before on the same content");
                 }
             }
@@ -813,6 +812,9 @@ mod tests {
         let third = run("h2");
         let docs = third.checks.iter().find(|c| c.command == "npm run docs").unwrap();
         assert!(docs.summary.contains("flaky"), "{}", docs.summary);
+        let fourth = run("h3");
+        let docs = fourth.checks.iter().find(|c| c.command == "npm run docs").unwrap();
+        assert!(!docs.summary.contains("flaky"), "a failure on other content is not flaky: {}", docs.summary);
     }
 
     #[test]
