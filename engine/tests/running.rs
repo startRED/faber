@@ -510,19 +510,6 @@ async fn the_engine_is_working_from_the_first_row_until_the_last_one_leaves() {
     engine.shutdown();
 }
 
-/// An update waits for `is_working`; a mission's roles and proofs run inside its drive, with no row in the running list.
-#[tokio::test]
-async fn a_driven_mission_counts_as_work_until_its_drive_ends() {
-    let dir = tempfile::tempdir().unwrap();
-    let (engine, _rx) = engine(dir.path(), &[], fake(vec![]).spawn, None);
-    let drive = engine.drive("m1", "p1").expect("the first drive starts");
-    assert!(engine.is_working() && engine.is_driving("m1"));
-    assert!(engine.drive("m1", "p1").is_none(), "a mission never has two drivers");
-    drop(drive);
-    assert!(!engine.is_working() && !engine.is_driving("m1"));
-    engine.shutdown();
-}
-
 #[tokio::test]
 async fn removing_a_running_conversation_drops_its_row() {
     let dir = tempfile::tempdir().unwrap();
@@ -582,34 +569,23 @@ async fn a_driver_panic_removes_only_its_run_from_overlapping_chat_and_project_w
     }
 }
 
-/// A project with one mission record in the given state, under the folder and the data directory the engine uses.
-fn mission_in(engine: &Engine, data: &Path, repo: &Path, state: faber_engine::project::MissionState) -> String {
-    use faber_engine::project::{Mission, run::Runner, store::Journal};
-    let project = engine.add_project(&repo.to_string_lossy()).unwrap();
-    let journal = Journal::open(repo, data, "m1").unwrap();
-    let mut runner = Runner::create(&journal, Mission::new("m1", &project.id, "repo", "Fix", &"1".repeat(40), 3, 1)).unwrap();
-    runner.mission.state = state;
-    runner.save(&journal).unwrap();
-    project.id
-}
-
+/// Older versions kept missions in the project (`.faber/missions`) and in the data folder (`missions`). Nothing reads them any
+/// more: a project is removed whatever they hold, and neither is touched.
 #[tokio::test]
-async fn a_project_with_a_planning_or_running_mission_cannot_be_removed_until_it_stops() {
-    use faber_engine::project::MissionState::{Done, Paused, Planning, Running};
-    for (state, removable) in [(Planning, false), (Running, false), (Paused, true), (Done, true)] {
-        let (data, repo) = (tempfile::tempdir().unwrap(), tempfile::tempdir().unwrap());
-        let (engine, _rx) = engine(data.path(), &[Vendor::Codex], fake(fixture("codex", "chat")).spawn, None);
-        let id = mission_in(&engine, data.path(), repo.path(), state);
-        let result = engine.remove_project(&id);
-        if removable {
-            assert_eq!(result, Ok(()), "{state:?}");
-            assert!(engine.state().projects.is_empty(), "{state:?}");
-        } else {
-            assert_eq!(result, Err("error.project.busy".to_string()), "{state:?}");
-            assert_eq!(engine.state().projects.len(), 1, "{state:?} stays in the list");
-        }
-        engine.shutdown();
-    }
+async fn what_older_versions_left_for_missions_never_keeps_a_project_from_being_removed() {
+    let (data, repo) = (tempfile::tempdir().unwrap(), tempfile::tempdir().unwrap());
+    let (engine, _rx) = engine(data.path(), &[Vendor::Codex], fake(fixture("codex", "chat")).spawn, None);
+    let project = engine.add_project(&repo.path().to_string_lossy()).unwrap();
+    let journal = repo.path().join(".faber").join("missions").join("m1");
+    std::fs::create_dir_all(&journal).unwrap();
+    std::fs::write(journal.join("mission.json"), r#"{"state":"running"}"#).unwrap();
+    let checkpoint = data.path().join("missions").join("m1");
+    std::fs::create_dir_all(&checkpoint).unwrap();
+    std::fs::write(checkpoint.join("run.json"), "{ not json").unwrap();
+    assert_eq!(engine.remove_project(&project.id), Ok(()));
+    assert!(engine.state().projects.is_empty());
+    assert!(journal.join("mission.json").is_file() && checkpoint.join("run.json").is_file(), "older records are left as they were");
+    engine.shutdown();
 }
 
 #[tokio::test]
@@ -631,32 +607,5 @@ async fn a_renamed_conversation_never_keeps_control_or_invisible_characters() {
     let family = "\u{1f468}\u{200d}\u{1f469}\u{200d}\u{1f467}";
     engine.rename(&id, family);
     assert_eq!(engine.open(&id).unwrap().title, family);
-    engine.shutdown();
-}
-
-#[tokio::test]
-async fn a_mission_record_that_cannot_be_read_keeps_its_project_from_being_removed() {
-    use faber_engine::project::MissionState::Paused;
-    let (data, repo) = (tempfile::tempdir().unwrap(), tempfile::tempdir().unwrap());
-    let (engine, _rx) = engine(data.path(), &[Vendor::Codex], fake(fixture("codex", "chat")).spawn, None);
-    let id = mission_in(&engine, data.path(), repo.path(), Paused);
-    // The checkpoint is damaged: nothing says whether the mission works, so the project stays.
-    std::fs::write(data.path().join("missions").join("m1").join("run.json"), "{ not json").unwrap();
-    assert_eq!(engine.remove_project(&id), Err("error.project.busy".to_string()));
-    assert_eq!(engine.state().projects.len(), 1);
-    engine.shutdown();
-}
-
-#[tokio::test]
-async fn a_missions_folder_that_cannot_be_listed_keeps_the_project_but_a_missing_one_does_not() {
-    let (data, repo) = (tempfile::tempdir().unwrap(), tempfile::tempdir().unwrap());
-    let (engine, _rx) = engine(data.path(), &[Vendor::Codex], fake(fixture("codex", "chat")).spawn, None);
-    let project = engine.add_project(&repo.path().to_string_lossy()).unwrap();
-    // `.faber/missions` is a file, so it cannot be listed: that is not "no missions".
-    std::fs::create_dir_all(repo.path().join(".faber")).unwrap();
-    std::fs::write(repo.path().join(".faber").join("missions"), "x").unwrap();
-    assert_eq!(engine.remove_project(&project.id), Err("error.project.busy".to_string()));
-    std::fs::remove_file(repo.path().join(".faber").join("missions")).unwrap();
-    assert_eq!(engine.remove_project(&project.id), Ok(()));
     engine.shutdown();
 }

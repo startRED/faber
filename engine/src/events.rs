@@ -212,7 +212,6 @@ pub enum SessionCommand {
 #[derive(Clone)]
 pub struct Session {
     send: std::sync::Arc<dyn Fn(SessionCommand) + Send + Sync>,
-    project_role: Option<crate::project::Role>,
     tree: Option<crate::proc::OwnedTree>,
 }
 
@@ -228,14 +227,7 @@ impl Session {
     }
     /// A session whose commands go wherever `send` puts them, such as a thread in a shared process.
     pub(crate) fn from_fn(send: impl Fn(SessionCommand) + Send + Sync + 'static) -> Self {
-        Session { send: std::sync::Arc::new(send), project_role: None, tree: None }
-    }
-    pub(crate) fn for_project(mut self, role: crate::project::Role) -> Self {
-        self.project_role = Some(role);
-        self
-    }
-    pub(crate) fn project_role(&self) -> Option<crate::project::Role> {
-        self.project_role
+        Session { send: std::sync::Arc::new(send), tree: None }
     }
     pub(crate) fn with_tree(mut self, tree: Option<crate::proc::OwnedTree>) -> Self {
         self.tree = tree;
