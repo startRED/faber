@@ -189,7 +189,7 @@ async fn an_answer_emits_only_the_lists_that_differ_from_the_one_before() {
 #[tokio::test]
 async fn a_reply_reads_as_finished_when_the_agent_stops_writing_not_when_the_cli_closes_its_turn() {
     let dir = tempfile::tempdir().unwrap();
-    // The recording holds back the CLI's `result` for 400 ms after the last message ended with `end_turn`, as a Stop hook does.
+    // The recording holds back the CLI's `result` for 1.5 s (a loaded machine must not swallow the gap) after the last message ended with `end_turn`, as a Stop hook does.
     let (engine, mut rx) = engine(dir.path(), &[Vendor::Claude], fake(fixture("claude", "chat-settled")).spawn, None);
     let id = engine.send(request(Area::Chat, None, SKY, "claude")).unwrap();
     let mut finished_at = None;
