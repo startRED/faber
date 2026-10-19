@@ -902,6 +902,7 @@ export const en = {
   'notes.104.fixed': 'A helper that finished after you had written several messages no longer looks like it is still working.',
   'notes.105.new': 'The agent can now check your app at the screen sizes where it runs, like a PC, a MacBook or a phone, and you see each picture.',
   'notes.106.better': 'A picture you attach now shows as a small preview in the message box, with its own button to take it out.',
+  'notes.107.better': 'Lists hold still: recent conversations on the home no longer slide under the mouse, and the sidebar no longer moves as you search.',
   'update.checking': 'Looking for an update…',
   'update.downloading': 'Downloading update…',
   'update.downloadingPercent': 'Downloading update… {percent}%',

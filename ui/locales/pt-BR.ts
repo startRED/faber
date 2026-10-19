@@ -1009,6 +1009,7 @@ export const ptBR: Messages = {
   'notes.104.fixed': 'Um ajudante que terminou depois de você mandar várias mensagens não parece mais que continua trabalhando.',
   'notes.105.new': 'O agente agora confere seu app nos tamanhos de tela onde ele vai rodar, como PC, MacBook ou celular, e você vê a foto de cada um.',
   'notes.106.better': 'A imagem que você anexa agora aparece como miniatura na caixa de mensagem, com um botão só dela para tirar.',
+  'notes.107.better': 'As listas ficam paradas: as conversas recentes do início não deslizam mais sob o mouse e a barra lateral não se mexe mais enquanto você busca.',
   'update.checking': 'Procurando atualização…',
   'update.downloading': 'Baixando atualização…',
   'update.downloadingPercent': 'Baixando atualização… {percent}%',

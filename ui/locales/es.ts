@@ -1022,6 +1022,7 @@ export const es: Messages = {
   'notes.104.fixed': 'Un ayudante que terminó después de que enviaras varios mensajes ya no parece seguir trabajando.',
   'notes.105.new': 'El agente ahora revisa tu app en los tamaños de pantalla donde va a funcionar, como un PC, un MacBook o un móvil, y ves la imagen de cada uno.',
   'notes.106.better': 'La imagen que adjuntas ahora se ve como miniatura en el cuadro del mensaje, con su propio botón para quitarla.',
+  'notes.107.better': 'Las listas se quedan quietas: las conversaciones recientes del inicio ya no se deslizan bajo el ratón y la barra lateral ya no se mueve mientras buscas.',
   'update.checking': 'Buscando una actualización…',
   'update.downloading': 'Descargando actualización…',
   'update.downloadingPercent': 'Descargando actualización… {percent} %',

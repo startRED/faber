@@ -225,7 +225,8 @@ export function Sidebar(props: Props) {
         <Icon name="search" small />
         <input type="search" placeholder={t('side.search')} aria-label={t('side.search')} value={query()} onInput={(e) => setQuery(e.currentTarget.value)} />
       </label>
-      <div class="side-scroll" onMouseLeave={() => (setConfirming(undefined), setLosing(undefined))} ref={(el) => animateList(el, true)}>
+      {/* Each keystroke of a search filters the list: rows change at once instead of sliding on every letter. */}
+      <div class="side-scroll" data-motion={query() ? 'none' : undefined} onMouseLeave={() => (setConfirming(undefined), setLosing(undefined))} ref={(el) => animateList(el, true)}>
         <Show when={!inChat()}>
         <section class="projects" aria-labelledby="side-projects" ref={(el) => animateList(el, true)}>
           <div class="group-h">

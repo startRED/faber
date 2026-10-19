@@ -1022,6 +1022,7 @@ export const fr: Messages = {
   'notes.104.fixed': 'Une aide qui a fini après que vous avez envoyé plusieurs messages ne semble plus toujours au travail.',
   'notes.105.new': 'L’agent vérifie maintenant votre app aux tailles d’écran où elle tournera, comme un PC, un MacBook ou un téléphone, et vous voyez l’image de chacune.',
   'notes.106.better': 'L’image que tu joins s’affiche maintenant en miniature dans la zone du message, avec son propre bouton pour la retirer.',
+  'notes.107.better': "Les listes restent calmes : les conversations récentes de l'accueil ne glissent plus sous la souris et la barre latérale ne bouge plus pendant que vous cherchez.",
   'update.checking': 'Recherche d’une mise à jour…',
   'update.downloading': 'Téléchargement de la mise à jour…',
   'update.downloadingPercent': 'Téléchargement de la mise à jour… {percent} %',

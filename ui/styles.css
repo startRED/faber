@@ -201,8 +201,8 @@ input, textarea { caret-color: var(--accent); }
 .resume { margin-top: 32px; }
 .resume h2 { margin: 0; padding-bottom: 10px; border-bottom: 1px solid var(--line); font: 600 var(--fs-sm) var(--font-ui); color: var(--ink-2); }
 .rrow { display: grid; gap: 4px; width: 100%; padding: calc(12px * var(--dens)) 0; border-bottom: 1px solid var(--line); text-align: left; }
-.rrow > * { transition: transform var(--dur-ui) var(--ease); }
-.rrow:hover > * { transform: translateX(6px); }
+.rrow .t { transition: color var(--dur-fast) var(--ease); }
+.rrow:hover .t { color: var(--accent); }
 .rrow .t { font-weight: 500; font-size: var(--fs-ui); overflow-wrap: anywhere; }
 .rrow .s { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; font-size: var(--fs-sm); color: var(--ink-2); }
 .rrow.ask .t { color: var(--amber-ink); }
@@ -900,7 +900,7 @@ textarea.field { height: auto; max-width: none; padding: 8px 10px; resize: verti
 .notes-group ul { margin: 0; padding: 0; list-style: none; }
 .notes-group li { padding: 12px 0; border-top: 1px solid var(--line); color: var(--ink); font-size: var(--fs-read); line-height: 1.5; text-wrap: pretty; }
 .notes-act { display: flex; margin-top: 36px; }
-:is(.notes-group h2, .notes-group li) { animation: arrive var(--dur-arrive) var(--ease) both; animation-delay: calc((3 + var(--i, 0)) * var(--motion-stagger)); }
+:is(.notes-group h2, .notes-group li) { animation: arrive var(--dur-arrive) var(--ease) both; animation-delay: calc(min(3 + var(--i, 0), 4) * var(--motion-stagger)); }
 
 /* The effects of the new conversation (ui/Ambient.tsx). The tokens --amb-beam, --amb-loom and --amb-flow are `none`
    for a look that does not have the effect, and for every look when the ambient switch is off. */
@@ -966,9 +966,10 @@ html[data-ambient='on'] .ambient.bare .amb-drift { display: block; }
 @keyframes theme-in { from { opacity: 0; } }
 /* Short feedback shares the theme's curve; exits finish sooner. Native selects keep their keyboard behavior. */
 :is(button, select, .plus, .x) { transition: background-color var(--dur-fast) var(--ease), color var(--dur-fast) var(--ease), box-shadow var(--dur-fast) var(--ease), opacity var(--dur-fast) var(--ease), transform var(--dur-fast) var(--ease); }
-button:active:not(:disabled) { transform: translateY(1px) scale(.98); }
-[data-base='oficina'] button:active { transform: scale(.98); }
-:is(.ask, .toast, .ri.need, .coach, .agent-stuck) { animation-duration: var(--dur-ui); }
+/* A press gives way on buttons, never on rows a person runs down (R246): a list that shrinks under each click flickers. */
+button:active:not(:disabled, .item, .rrow) { transform: translateY(1px) scale(.98); }
+[data-base='oficina'] button:active:not(:disabled, .item, .rrow) { transform: scale(.98); }
+:is(.ask, .toast, .ri.need, .coach, .agent-stuck, .dv-card, .notes, .notes-group h2, .notes-group li, .ask .note.err, .ask-more) { animation-duration: var(--dur-ui); }
 .tour-ring { transition-duration: var(--dur-ui); }
 [data-motion-list] > :is(.ask, .toast, .ri.need, .coach) { animation: none; }
 .motion-exit { animation: none !important; }
@@ -986,7 +987,8 @@ html.resizing :is(.shell, .main, .side, .fold, .tour-ring) { transition: none !i
 :is([data-motion='reduced'], [data-motion='none']) :is(.loom-shuttle, .flow-trace) { opacity: 0; }
 [data-motion='reduced'] { --arrive-y: 0px; }
 /* Reduced and none are instant, including native pickers and theme snapshots. */
-:is([data-motion='reduced'], [data-motion='none']) :is(.btn:active, button:active, .rrow:hover > *, .tcard:hover, .preset:hover .thumb) { transform: none; }
+:is([data-motion='reduced'], [data-motion='none']) :is(.btn:active, button:active, .tcard:hover, .preset:hover .thumb) { transform: none; }
+:is([data-motion='reduced'], [data-motion='none']) .dust i { will-change: auto; }
 :is([data-motion='reduced'], [data-motion='none']) *,
 :is([data-motion='reduced'], [data-motion='none']) *::before,
 :is([data-motion='reduced'], [data-motion='none']) *::after { animation: none !important; transition: none !important; }
@@ -1002,7 +1004,8 @@ html.away-win :is(.amb, .amb *) { animation-play-state: paused !important; }
   *, *::before, *::after { animation: none !important; transition: none !important; }
   select::picker(select) { transition: none !important; transform: none !important; }
   ::view-transition-old(root), ::view-transition-new(root) { animation: none !important; }
-  :is(.btn:active, button:active, .rrow:hover > *, .tcard:hover, .preset:hover .thumb) { transform: none; }
+  :is(.btn:active, button:active, .tcard:hover, .preset:hover .thumb) { transform: none; }
+  .dust i { will-change: auto; }
   .loom-shuttle, .flow-trace { opacity: 0; }
 }
 /* A short window: smaller pictures and tighter gaps, so the first settings, the name field and the buttons fit without scrolling. */
@@ -1146,7 +1149,7 @@ html.away-win :is(.amb, .amb *) { animation-play-state: paused !important; }
 .ask .q-opt.on { background: var(--amber-soft); color: var(--ink); box-shadow: inset 0 0 0 1.5px var(--amber); }
 .q-mark { flex: none; display: grid; place-items: center; width: 16px; height: 16px; margin-top: 1px; border-radius: var(--r-pill); color: var(--amber-on); box-shadow: inset 0 0 0 1.5px var(--ink-3); transition: background var(--dur-fast) var(--ease), box-shadow var(--dur-fast) var(--ease); }
 .q-opt[role='checkbox'] .q-mark { border-radius: var(--r-xs); }
-.q-mark svg.i { width: 11px; height: 11px; stroke-width: 3; opacity: 0; transform: scale(.5); transition: opacity var(--dur-fast) var(--ease), transform var(--dur-ui) var(--ease-spring); }
+.q-mark svg.i { width: 11px; height: 11px; stroke-width: 3; opacity: 0; transform: scale(.8); transition: opacity var(--dur-fast) var(--ease), transform var(--dur-fast) var(--ease); }
 .q-opt.on .q-mark { background: var(--amber); box-shadow: inset 0 0 0 1.5px var(--amber); }
 .q-opt.on .q-mark svg.i { opacity: 1; transform: none; }
 .q-txt { display: grid; gap: 2px; min-width: 0; }

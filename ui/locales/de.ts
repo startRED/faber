@@ -1022,6 +1022,7 @@ export const de: Messages = {
   'notes.104.fixed': 'Ein Helfer, der fertig wurde, nachdem du mehrere Nachrichten geschrieben hattest, sieht nicht mehr so aus, als würde er noch arbeiten.',
   'notes.105.new': 'Der Agent prüft deine App jetzt in den Bildschirmgrößen, auf denen sie läuft, etwa PC, MacBook oder Smartphone, und du siehst von jeder ein Bild.',
   'notes.106.better': 'Ein angehängtes Bild erscheint jetzt als kleine Vorschau im Nachrichtenfeld, mit eigener Schaltfläche zum Entfernen.',
+  'notes.107.better': 'Listen bleiben ruhig: Die letzten Unterhaltungen auf der Startseite gleiten nicht mehr unter der Maus, und die Seitenleiste bewegt sich nicht mehr, während du suchst.',
   'update.checking': 'Suche nach einem Update…',
   'update.downloading': 'Update wird heruntergeladen…',
   'update.downloadingPercent': 'Update wird heruntergeladen… {percent} %',
