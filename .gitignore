@@ -27,3 +27,6 @@ src-tauri/gen/
 /.faber/*.local.json
 .faber/verify/
 .faber/verify.local.json
+
+# The direction check's report and proposed tasks: local drafts until someone picks one (docs/dev/workflow.md#direction-check).
+/docs/tasks/proposed/
