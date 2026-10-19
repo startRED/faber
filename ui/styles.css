@@ -561,6 +561,11 @@ select.pill option { background: var(--s2); color: var(--ink); }
 .archived-bar .btn { flex: none; height: var(--h-sm); }
 .dock .composer textarea { height: 40px; min-height: 40px; padding: 13px 16px 0; }
 .composer .chips { padding: 12px 14px 0; }
+.attach-thumb { position: relative; display: block; width: 64px; height: 64px; border-radius: var(--r-sm); overflow: hidden; box-shadow: inset 0 0 0 1px var(--line-2); }
+.attach-thumb img { display: block; width: 100%; height: 100%; object-fit: cover; }
+.attach-thumb button { position: absolute; top: 3px; right: 3px; display: grid; place-items: center; padding: 4px; border-radius: 50%; background: var(--s3); color: var(--ink-2); }
+.attach-thumb button:hover { color: var(--ink); }
+.attach-thumb button:focus-visible { outline: 2px solid var(--accent-text); outline-offset: 1px; }
 .composer textarea::placeholder { color: var(--ink-3); }
 /* The idle composer (ui/Ghost.tsx): a typing bar and a hint drawn over the empty field, where its placeholder would be. The
    field keeps its own placeholder for readers of the screen and shows it again whenever the hints are not drawn. */

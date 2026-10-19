@@ -71,6 +71,7 @@ async function attach(list: Iterable<File>, draft: Draft): Promise<{ draft: Draf
     if (file.type.startsWith('image/')) {
       const url = await readAs(file, 'dataUrl');
       images = [...images, { mediaType: file.type, base64: url.slice(url.indexOf(',') + 1) }];
+      continue; // an image shows as its own thumbnail, not as a name
     } else if ((file.type.startsWith('text/') || TEXT.test(file.name)) && file.size <= INLINE_TEXT) {
       text = `${text}${text ? '\n\n' : ''}${t('composer.attachedFile', { name: file.name })}\n\`\`\`\n${await readAs(file, 'text')}\n\`\`\``;
     } else {
@@ -212,14 +213,26 @@ export function Composer(props: Props) {
         if (e.dataTransfer) void add(e.dataTransfer.files);
       }}
     >
-      <Show when={names().length > 0}>
+      <Show when={names().length > 0 || draft().images.length > 0}>
         <div class="chips">
+          <For each={draft().images}>
+            {(img, i) => (
+              <span class="attach-thumb">
+                <img alt={t('mine.image')} src={`data:${img.mediaType};base64,${img.base64}`} />
+                <button type="button" onClick={() => setDraft((d) => ({ ...d, images: d.images.filter((_, j) => j !== i()) }))} aria-label={t('composer.removeImage')} title={t('composer.removeImage')}>
+                  <Icon name="close" small />
+                </button>
+              </span>
+            )}
+          </For>
           <For each={names()}>{(name) => <span class="chip">{name}</span>}</For>
-          <span class="chip">
-            <button type="button" onClick={() => (setDraft((d) => ({ ...d, images: [], files: [] })), setNames([]))} aria-label={t('composer.removeAttachments')} title={t('composer.removeAttachments')}>
-              <Icon name="close" small />
-            </button>
-          </span>
+          <Show when={names().length > 0}>
+            <span class="chip">
+              <button type="button" onClick={() => (setDraft((d) => ({ ...d, files: [] })), setNames([]))} aria-label={t('composer.removeAttachments')} title={t('composer.removeAttachments')}>
+                <Icon name="close" small />
+              </button>
+            </span>
+          </Show>
         </div>
       </Show>
       <textarea

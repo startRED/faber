@@ -82,3 +82,37 @@ check('composer: typed text survives a reload and is forgotten once sent', async
     localStorage.removeItem('faber.unsent.check-reload');
   }
 });
+
+check('composer: a dropped image shows as a thumbnail with its own remove button, not as a name', async () => {
+  const root = document.createElement('div');
+  root.dataset.motion = 'none';
+  document.body.append(root);
+  let sent = 0;
+  const dispose = render(() => createComponent(Composer, {
+    vendors: ['codex'], options: [], choice: { vendor: 'auto' }, busy: false, placeholder: 'Ask',
+    onChoice: () => {}, onStop: () => {}, onWarm: () => {}, onPause: () => {},
+    onSend: (draft) => { sent = draft.images.length; },
+  }), root);
+  const settle = () => new Promise((resolve) => setTimeout(resolve, 60));
+  try {
+    const form = root.querySelector('form')!;
+    const drop = new Event('drop', { bubbles: true, cancelable: true });
+    const files = new DataTransfer();
+    for (const name of ['one.png', 'two.png']) files.items.add(new File([new Uint8Array([137, 80, 78, 71])], name, { type: 'image/png' }));
+    Object.defineProperty(drop, 'dataTransfer', { value: files });
+    form.dispatchEvent(drop);
+    await settle();
+    equal(root.querySelectorAll('.attach-thumb img').length, 2, 'each image is drawn');
+    ok(!root.textContent!.includes('one.png'), 'an image is not named in a chip');
+    root.querySelector<HTMLButtonElement>('.attach-thumb button')!.click();
+    await settle();
+    equal(root.querySelectorAll('.attach-thumb img').length, 1, 'its button takes out only that image');
+    form.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
+    await settle();
+    equal(sent, 1, 'only the image left goes out');
+    equal(root.querySelectorAll('.attach-thumb').length, 0, 'sending clears the thumbnails');
+  } finally {
+    dispose();
+    root.remove();
+  }
+});
