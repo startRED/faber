@@ -122,6 +122,7 @@ impl Router {
                     flags: Default::default(),
                     permissions: Permissions::Ask,
                     tuning: Default::default(),
+                    tools: Default::default(),
                 };
                 start_claude(
                     ClaudeOptions { bin: cli.command.clone(), cwd: self.dir.clone(), launch, spawn: spawner(cli), sandbox: None },
@@ -158,6 +159,7 @@ async fn main() {
             user_hooks: false,
             windows: cfg!(windows),
             spawn: spawner(&cli),
+            skills: None,
         });
         (cli, server)
     });

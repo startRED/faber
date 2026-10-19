@@ -1,0 +1,12 @@
+{
+  "skills": [
+    { "id": "systematic-debugging", "job": "debugging", "license": "MIT", "repo": "obra/superpowers", "commit": "bb92a77741419a4ab5f06e711a283343f1ada0c3", "path": "skills/systematic-debugging", "digest": "ceb6a7a4cb02402360846cd466df67a8c6eaa3c5b1e97d1b419b5ba2ceeb734c" },
+    { "id": "test-driven-development", "job": "testing", "license": "MIT", "repo": "obra/superpowers", "commit": "bb92a77741419a4ab5f06e711a283343f1ada0c3", "path": "skills/test-driven-development", "digest": "2782702b2cf69ace085ed30d067b6f8bfd2d777ad51770fc5bdae9cb5c1b5c04" },
+    { "id": "ponytail", "job": "lean", "license": "MIT", "repo": "DietrichGebert/ponytail", "commit": "09c434ab73ca43761c5d8b0c5d341926c2fba710", "path": "skills/ponytail", "digest": "56d72677aca02689ac89bd48734e8c19b40ab86716d1257eaf5f1238b43cda6b" },
+    { "id": "design-taste-frontend", "job": "design", "license": "MIT", "repo": "Leonxlnx/taste-skill", "commit": "63aba5f43b5056758b15bbe7d683da8c86a7a7ad", "path": "skills/taste-skill", "digest": "57f64afe2268436831f00327c3986ead24661324a022024d76665d84ee455537" },
+    { "id": "improve-codebase-architecture", "job": "architecture", "license": "MIT", "repo": "mattpocock/skills", "commit": "5beb35b040e3de97e54fa9e386d7e42d15c295c2", "path": "skills/engineering/improve-codebase-architecture", "digest": "5334eba3370c6124922f8819447b42fabd8df8d11008a242083b8527589a8686" },
+    { "id": "grill-me", "job": "plan", "license": "MIT", "repo": "mattpocock/skills", "commit": "5beb35b040e3de97e54fa9e386d7e42d15c295c2", "path": "skills/productivity/grill-me", "digest": "ab1acb9fbd9eaee03da254abb8a8de228d1e7a07475fe959da4a5eefa34ea4b9" },
+    { "id": "mcp-builder", "job": "mcp", "license": "Apache-2.0", "repo": "anthropics/skills", "commit": "dbd4588f9e1033efb41dad4bef2f7947c8993d44", "path": "skills/mcp-builder", "digest": "890b91d77934d6d19d12a85a878d3502ea3dca2a5d3ede10bbaa0dd2761120dc" },
+    { "id": "skill-creator", "job": "skills", "license": "Apache-2.0", "repo": "anthropics/skills", "commit": "dbd4588f9e1033efb41dad4bef2f7947c8993d44", "path": "skills/skill-creator", "digest": "2d7f889e6ae93c6c27d699856942c336b5b8644537496987d5571043d059b1dc" }
+  ]
+}

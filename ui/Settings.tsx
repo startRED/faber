@@ -10,6 +10,7 @@ import { vendorName } from './models.ts';
 import { animateList } from './motion.ts';
 import { ProjectsSection } from './ProjectSettings.tsx';
 import { Recents } from './Recents.tsx';
+import { SkillsCard } from './Skills.tsx';
 import type { Quotas } from './sidebar.ts';
 
 // Settings: five sections, one grammar. A group is a card, an option is one row (its name and one line at the left, its
@@ -253,7 +254,10 @@ export function Settings(props: Props) {
             <AccountsSection vendors={props.vendors} quotas={props.quotas} usage={props.usage} now={props.now} onManage={() => props.onOpenSetup({ section: section(), draft: draft() })} />
           </Match>
           <Match when={section() === 'projects'}>
-            <ProjectsSection projects={props.projects ?? []} />
+            <div class="psets">
+              <SkillsCard onError={props.onError} />
+              <ProjectsSection projects={props.projects ?? []} />
+            </div>
           </Match>
           <Match when={section() === 'privacy'}>
             <div class="st-card">

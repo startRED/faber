@@ -319,6 +319,7 @@ impl Core {
                         user_name: None,
                         flags: self.claude_flags_for(&cli),
                         tuning: Default::default(),
+                        tools: Default::default(),
                     },
                     spawn: spawner(&self.opts.spawn, &cli),
                     sandbox: None,

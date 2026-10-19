@@ -19,6 +19,7 @@ fn launch(area: Area, permissions: Permissions) -> ClaudeLaunch {
         user_name: None,
         flags: Default::default(),
         tuning: faber_engine::model::Tuning { web: faber_engine::model::WebSearch::Live, ..Default::default() },
+        tools: Default::default(),
     }
 }
 

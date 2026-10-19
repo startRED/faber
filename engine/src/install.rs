@@ -15,8 +15,14 @@ pub type Download<'a> = dyn Fn(&str, &Path) -> io::Result<String> + Send + Sync 
 pub type Register<'a> = dyn Fn(&Path) -> io::Result<()> + Send + Sync + 'a;
 pub type Progress<'a> = dyn Fn(Value) + Send + Sync + 'a;
 
-const OFFICIAL_HOSTS: &[&str] =
-    &["downloads.claude.ai", "api.github.com", "github.com", "release-assets.githubusercontent.com", "objects.githubusercontent.com"];
+const OFFICIAL_HOSTS: &[&str] = &[
+    "downloads.claude.ai",
+    "api.github.com",
+    "github.com",
+    "codeload.github.com",
+    "release-assets.githubusercontent.com",
+    "objects.githubusercontent.com",
+];
 
 /// Verifies that a network URL uses HTTPS and points to an approved official host.
 pub fn validate_url(url: &str, allowed_hosts: &[String]) -> Result<(), String> {
@@ -110,7 +116,7 @@ fn notify(progress: &Progress<'_>, stage: &str, err: Option<(&str, &str)>) {
     }));
 }
 
-fn sanitize_archive_path(path: &Path) -> Result<PathBuf, String> {
+pub(crate) fn sanitize_archive_path(path: &Path) -> Result<PathBuf, String> {
     let mut clean = PathBuf::new();
     for comp in path.components() {
         match comp {

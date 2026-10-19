@@ -392,6 +392,16 @@ export interface Attachment {
   base64: string;
 }
 export type AccountStatus = 'signedIn' | 'signedOut' | 'unknown';
+/** One skill of Faber's catalog (src-tauri/src/tools.rs). */
+export interface ToolRow {
+  id: string;
+  job: string;
+  license: string;
+  repo: string;
+  home: string;
+  installed: boolean;
+}
+
 export interface CheckResult {
   vendor: Vendor;
   installed: boolean;
@@ -531,6 +541,10 @@ export const api = {
   setupCheck: (vendor: Vendor) => invoke<CheckResult>('setup_check', { vendor }),
   setupInstall: (vendor: Vendor) => invoke<void>('setup_install', { vendor }),
   setupSignIn: (vendor: Vendor) => invoke<void>('setup_sign_in', { vendor }),
+  /** The catalog's skills (R247) and whether each is installed; installing downloads it from its own repository. */
+  toolsList: () => invoke<ToolRow[]>('tools_list'),
+  toolsInstall: (id: string) => invoke<void>('tools_install', { id }),
+  toolsRemove: (id: string) => invoke<void>('tools_remove', { id }),
   updateStatus: () => invoke<UpdateStatus>('update_status'),
   /** The first frame is painted: the shell may show the window (it stays hidden until then). */
   screenReady: () => invoke<void>('screen_ready'),

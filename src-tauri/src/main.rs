@@ -13,6 +13,7 @@ mod pane;
 mod project_commands;
 mod setup;
 mod terminal;
+mod tools;
 mod tray;
 mod update;
 
@@ -846,6 +847,9 @@ fn main() {
                 setup::setup_check,
                 setup::setup_install,
                 setup::setup_sign_in,
+                tools::tools_list,
+                tools::tools_install,
+                tools::tools_remove,
                 #[cfg(feature = "test-hooks")]
                 report_checks
             ];

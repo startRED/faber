@@ -2365,10 +2365,16 @@ impl Core {
             user_hooks,
             windows: self.opts.windows,
             spawn: spawner(&self.opts.spawn, cli),
+            // The store's skill root while it holds a checked skill; a running server hears each change (`CodexServer::skills`).
+            skills: crate::claude::offers_tools(area, permissions)
+                .then(|| crate::tools::Store::new(&self.opts.data_dir).delivery().skills)
+                .flatten(),
         };
         let server = self.codex.entry((area, user_hooks, permissions)).or_insert_with(|| CodexServer::start(opts.clone()));
         if !server.is_alive() {
             *server = CodexServer::start(opts);
+        } else {
+            server.skills(opts.skills);
         }
         server
     }
@@ -2558,6 +2564,7 @@ impl Core {
                         user_name,
                         flags,
                         tuning,
+                        tools: crate::tools::Store::new(&self.opts.data_dir).delivery(),
                     },
                     spawn,
                     sandbox: self.opts.clis.get(&Vendor::Codex).cloned(),

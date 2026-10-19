@@ -1,0 +1,57 @@
+//! The catalog's skills on screen (`faber_engine::tools`): what ships, what is installed, and installing or removing one.
+
+use crate::Faber;
+use faber_engine::tools::{Store, catalog, find};
+use serde::Serialize;
+use tauri::State;
+
+type Res<T> = Result<T, String>;
+
+/// One row of the list: the catalog's entry and whether this computer has it.
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ToolRow {
+    id: String,
+    job: String,
+    license: String,
+    repo: String,
+    home: String,
+    installed: bool,
+}
+
+#[tauri::command]
+pub fn tools_list(faber: State<'_, Faber>) -> Vec<ToolRow> {
+    let installed = Store::new(&faber.data_dir).installed();
+    catalog()
+        .iter()
+        .map(|i| ToolRow {
+            id: i.id.clone(),
+            job: i.job.clone(),
+            license: i.license.clone(),
+            repo: i.repo.clone(),
+            home: i.home(),
+            installed: installed.contains_key(&i.id),
+        })
+        .collect()
+}
+
+/// Downloads a skill from its own repository and installs it. A new session gets it; one under way keeps what it started with.
+#[tauri::command]
+pub async fn tools_install(faber: State<'_, Faber>, id: String) -> Res<()> {
+    // An update never ends the process in the middle of an install (update.rs).
+    let _running = crate::update::SetupRunning::begin()?;
+    let item = find(&id).ok_or("error.tools.unknown")?.clone();
+    let store = Store::new(&faber.data_dir);
+    // FABER_SETUP_SOURCE (tests): the archive comes from that loopback server, as the CLI installs do.
+    let source = std::env::var("FABER_SETUP_SOURCE").ok().map(|s| s.trim_end_matches('/').to_string());
+    faber_engine::tools::install(&store, &item, source.as_deref()).await.map_err(|detail| {
+        eprintln!("tools: install of {id} failed: {detail}");
+        "error.tools.install".to_string()
+    })
+}
+
+#[tauri::command]
+pub fn tools_remove(faber: State<'_, Faber>, id: String) -> Res<()> {
+    find(&id).ok_or("error.tools.unknown")?;
+    Store::new(&faber.data_dir).remove(&id).map_err(|_| "error.tools.remove".to_string())
+}

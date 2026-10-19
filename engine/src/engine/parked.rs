@@ -317,7 +317,7 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let engine = engine(dir.path());
         let (id, _) = seed(&engine);
-        let known = crate::claude::ClaudeFlags { autocompact: true, permission_prompts: true, auto_mode: true };
+        let known = crate::claude::ClaudeFlags { autocompact: true, permission_prompts: true, auto_mode: true, plugin_dir: false };
         engine.with(|c| c.claude_flags = known);
         engine.with(|c| {
             c.handle(&id, 1, EngineEvent::Error { message: "Claude Code stopped (exit 1). error: something else".into(), fatal: true })

@@ -38,6 +38,8 @@ pub struct ClaudeLaunch {
     pub conversations: bool,
     /// Faber's checks (`crate::verify`): a project's agent in full access, where the shell gives a runner.
     pub verify: bool,
+    /// The skills installed from Faber's catalog (`crate::tools`), for a project's agent outside Isolated.
+    pub tools: crate::tools::Delivery,
 }
 
 /// The tools Faber's MCP server holds for a launch: the helper for a project's own agent, the browser where it is offered.
@@ -52,6 +54,12 @@ fn mcp_tools(launch: &ClaudeLaunch) -> crate::helper::Tools {
     }
 }
 
+/// Where the catalog's skills go (`crate::tools`): a project's own agent, in every mode but Isolated, which turns every
+/// customization off. Chat keeps its lean tool list, which has no skill tool.
+pub fn offers_tools(area: Area, permissions: Permissions) -> bool {
+    area == Area::Project && permissions != Permissions::Isolated
+}
+
 /// Flags that only newer CLIs take, read once from `claude --help` (`from_help`). A flag the CLI does not list is never
 /// passed, so an older CLI starts exactly as before: the default (nothing known) is the safe one.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
@@ -62,6 +70,8 @@ pub struct ClaudeFlags {
     pub permission_prompts: bool,
     /// `auto` among the `--permission-mode` choices: the CLI's own reviewer approves the safe actions (R140).
     pub auto_mode: bool,
+    /// `--plugin-dir <path>`: a plugin loaded from a folder for this session only (2.1.302), how the catalog's skills arrive.
+    pub plugin_dir: bool,
 }
 
 impl ClaudeFlags {
@@ -92,6 +102,7 @@ impl ClaudeFlags {
             autocompact: declares("--autocompact"),
             permission_prompts: declares("--permission-prompts"),
             auto_mode: modes.contains("\"auto\""),
+            plugin_dir: declares("--plugin-dir"),
         }
     }
 }
@@ -306,6 +317,12 @@ pub fn claude_args(launch: &ClaudeLaunch) -> Vec<String> {
         // R161: Faber's own MCP server, answered by this driver over stdio, holds the helper tool and the browser.
         if mcp_tools(launch).any() {
             args.extend(["--mcp-config".into(), crate::helper::CLAUDE_MCP_CONFIG.into()]);
+        }
+        // The catalog's skills, as one plugin from Faber's store, where Faber offers them.
+        if let Some(plugin) =
+            launch.tools.plugin.as_ref().filter(|_| offers_tools(launch.area, launch.permissions) && launch.flags.plugin_dir)
+        {
+            args.extend(["--plugin-dir".into(), plugin.to_string_lossy().into_owned()]);
         }
         // The CLI echoes each line it is given when it takes it in, so a line the person wrote while it works is known to be
         // read, and by which turn. A helper keeps no history.

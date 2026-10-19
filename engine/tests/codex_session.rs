@@ -23,6 +23,7 @@ async fn opus_1_codex_manual_turns_stay_available_after_long_silence_or_start_er
             user_hooks: false,
             windows: false,
             spawn,
+            skills: None,
         });
         let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
         let session = server.open(
@@ -136,6 +137,7 @@ async fn review_7_codex_preserves_a_turn_sent_before_interrupt_acknowledgement()
         user_hooks: false,
         windows: false,
         spawn,
+        skills: None,
     });
     let session = server.open(
         CodexThread {
@@ -186,6 +188,7 @@ async fn an_ignored_interrupt_quarantines_only_that_thread_and_preserves_a_runni
         user_hooks: false,
         windows: false,
         spawn: f.spawn.clone(),
+        skills: None,
     };
     let server = CodexServer::start(opts);
     let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
@@ -266,6 +269,7 @@ async fn run(
                 user_hooks: false,
                 windows: false,
                 spawn,
+                skills: None,
             };
             CodexServer::start(opts).open(thread, sink)
         },
@@ -454,6 +458,7 @@ async fn r161_a_codex_subagent_approval_outside_its_turn_is_refused() {
             user_hooks: false,
             windows: false,
             spawn: f.spawn.clone(),
+            skills: None,
         };
         let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
         let thread = CodexThread {
@@ -513,6 +518,7 @@ async fn codex_an_answer_that_fails_to_write_keeps_the_approval_and_the_retry_is
         user_hooks: false,
         windows: false,
         spawn: f.spawn.clone(),
+        skills: None,
     };
     let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
     let thread = CodexThread {
@@ -560,6 +566,7 @@ async fn codex_an_answer_that_may_be_half_written_is_never_written_again() {
         user_hooks: false,
         windows: false,
         spawn: f.spawn.clone(),
+        skills: None,
     };
     let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
     let thread = CodexThread {
@@ -694,6 +701,7 @@ async fn review3_user_mcp_servers_are_disabled_before_start_and_resume_without_c
                 user_hooks: false,
                 windows: true,
                 spawn: f.spawn.clone(),
+                skills: None,
             });
             let session = server.open(
                 CodexThread {
@@ -753,6 +761,7 @@ async fn one_process_serves_two_conversations_at_once_and_keeps_their_answers_ap
         user_hooks: false,
         windows: false,
         spawn: f.spawn.clone(),
+        skills: None,
     };
     let server = CodexServer::start(opts);
     let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
@@ -881,6 +890,7 @@ async fn l2_serialized_start_and_resume_carry_the_no_approval_offline_policy() {
                 user_hooks: false,
                 windows: false,
                 spawn: f.spawn.clone(),
+                skills: None,
             });
             let session = server.open(
                 CodexThread {
@@ -943,6 +953,7 @@ async fn a_project_with_no_approvals_declines_a_residual_request_without_emittin
                     user_hooks: false,
                     windows: false,
                     spawn,
+                    skills: None,
                 });
                 server.open(
                     CodexThread {
@@ -1072,6 +1083,7 @@ async fn a_steer_before_the_turn_has_an_id_is_not_delivered() {
         user_hooks: false,
         windows: false,
         spawn: f.spawn.clone(),
+        skills: None,
     };
     let session = CodexServer::start(opts).open(thread, Arc::new(move |e| drop(tx.send(e))));
     session.steer(UserTurn::text("early"), "q9");
@@ -1139,6 +1151,7 @@ async fn review3_command_gate_declines_git_mutations_and_runs_builds_only_in_the
             windows: true,
             permissions: Permissions::Isolated,
             spawn,
+            skills: None,
         });
         let session = server.open(
             CodexThread {
@@ -1307,6 +1320,7 @@ async fn r121_a_full_access_thread_keeps_the_persons_mcp_servers_and_starts_with
             user_hooks: false,
             windows: true,
             spawn: f.spawn.clone(),
+            skills: None,
         });
         let session = server.open(
             CodexThread {
@@ -1363,6 +1377,7 @@ async fn r124_a_full_access_thread_hands_a_residual_approval_to_the_engine_and_n
                     user_hooks: false,
                     windows: false,
                     spawn,
+                    skills: None,
                 });
                 server.open(
                     CodexThread {
@@ -1608,6 +1623,7 @@ async fn r161_codex_calling_the_helper_waits_for_its_report_and_gets_it_as_the_t
                 user_hooks: false,
                 windows: false,
                 spawn,
+                skills: None,
             };
             CodexServer::start(opts).open(thread, sink)
         },
@@ -1627,4 +1643,61 @@ async fn r161_codex_calling_the_helper_waits_for_its_report_and_gets_it_as_the_t
     let tool = events.iter().find_map(|e| if let EngineEvent::Tool { id, name, .. } = e { Some((id, name)) } else { None });
     assert_eq!(tool, Some((&id, &"Helper".to_string())), "the call is one step, named by its tool call id");
     assert!(text_of(&events).contains("timeout = 30"), "{}", text_of(&events));
+}
+
+#[tokio::test]
+async fn the_catalog_s_skill_root_is_set_once_before_the_first_thread_opens() {
+    let entries = vec![
+        Entry { input: true, msg: json!({"id":1,"method":"initialize"}) },
+        Entry { input: false, msg: json!({"id":1,"result":{}}) },
+        Entry { input: true, msg: json!({"method":"initialized"}) },
+        Entry {
+            input: true,
+            msg: json!({"id":"faber-skills","method":"skills/extraRoots/set","params":{"extraRoots":["C:/data/tools/plugin/skills"]}}),
+        },
+        Entry { input: false, msg: json!({"id":"faber-skills","result":{}}) },
+        Entry { input: true, msg: json!({"id":2,"method":"thread/start"}) },
+        Entry { input: false, msg: json!({"id":2,"result":{"thread":{"id":"thread","model":"model"}}}) },
+        // A store that could not be made clean takes the root away from the running server.
+        Entry { input: true, msg: json!({"id":"faber-skills","method":"skills/extraRoots/set","params":{"extraRoots":[]}}) },
+        Entry { input: false, msg: json!({"id":"faber-skills","result":{}}) },
+    ];
+    let f = fake(entries);
+    let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
+    let server = CodexServer::start(CodexServerOptions {
+        permissions: Permissions::FullAccess,
+        cli: faber_engine::cli::Cli { command: "codex".into(), prefix: vec![] },
+        cwd: ".".into(),
+        area: Area::Project,
+        user_hooks: false,
+        windows: true,
+        spawn: f.spawn.clone(),
+        skills: Some("C:/data/tools/plugin/skills".into()),
+    });
+    let session = server.open(mode_thread(Permissions::FullAccess, Default::default()), Arc::new(move |e| drop(tx.send(e))));
+    tokio::time::timeout(Duration::from_secs(3), async { while !matches!(rx.recv().await, Some(EngineEvent::Started { .. })) {} })
+        .await
+        .unwrap();
+    let messages = f.wire.messages();
+    let at = |method: &str| messages.iter().position(|m| m["method"] == method).unwrap();
+    assert!(at("initialized") < at("skills/extraRoots/set") && at("skills/extraRoots/set") < at("thread/start"));
+    assert_eq!(messages.iter().filter(|m| m["method"] == "skills/extraRoots/set").count(), 1);
+    server.skills(Some("C:/data/tools/plugin/skills".into()));
+    server.skills(None);
+    server.skills(None);
+    let sets = || f.wire.messages().into_iter().filter(|m| m["method"] == "skills/extraRoots/set").collect::<Vec<_>>();
+    tokio::time::timeout(Duration::from_secs(3), async {
+        while sets().len() < 2 {
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+    })
+    .await
+    .unwrap();
+    tokio::time::sleep(Duration::from_millis(50)).await;
+    let sets = sets();
+    assert_eq!(sets.len(), 2, "the same root is never sent twice: {sets:?}");
+    assert_eq!(sets[1]["params"]["extraRoots"], json!([]));
+    assert!(f.mismatches.lock().unwrap().is_empty(), "{:?}", f.mismatches.lock().unwrap());
+    session.close();
+    server.retire();
 }

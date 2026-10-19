@@ -1848,6 +1848,7 @@ async fn stop_leaves_no_worker(parent_script: &str, why: &str) {
                 user_name: None,
                 flags: Default::default(),
                 tuning: Default::default(),
+                tools: Default::default(),
             },
             spawn,
             sandbox: None,

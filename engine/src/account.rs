@@ -101,7 +101,7 @@ mod flags_tests {
     use crate::claude::ClaudeFlags;
 
     const HELP: &str = "Usage: claude\n  --autocompact <auto|tokens>   Window\n  --permission-prompts <target>   Who answers\n";
-    const BOTH: ClaudeFlags = ClaudeFlags { autocompact: true, permission_prompts: true, auto_mode: false };
+    const BOTH: ClaudeFlags = ClaudeFlags { autocompact: true, permission_prompts: true, auto_mode: false, plugin_dir: false };
 
     #[test]
     fn only_a_help_that_finished_successfully_declares_flags() {

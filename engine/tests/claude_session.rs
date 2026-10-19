@@ -25,6 +25,7 @@ fn launch(area: Area) -> ClaudeLaunch {
         flags: Default::default(),
         // The credential tests below are about the deny rules, not the web: the web is on, as the person's settings default.
         tuning: faber_engine::model::Tuning { web: faber_engine::model::WebSearch::Live, ..Default::default() },
+        tools: Default::default(),
     }
 }
 
@@ -833,7 +834,7 @@ fn r124_a_moved_sign_in_folder_is_denied_where_it_now_is() {
 
 // ---- no blocking prompts in full access, cache warmth, autocompact windows (checked on Claude Code 2.1.296) ----
 
-const NEWER: ClaudeFlags = ClaudeFlags { autocompact: true, permission_prompts: true, auto_mode: true };
+const NEWER: ClaudeFlags = ClaudeFlags { autocompact: true, permission_prompts: true, auto_mode: true, plugin_dir: false };
 
 fn full(area: Area, flags: ClaudeFlags) -> Vec<String> {
     claude_args(&ClaudeLaunch { permissions: Permissions::FullAccess, flags, ..launch(area) })
@@ -866,7 +867,7 @@ fn full_access_lets_the_host_answer_so_questions_reach_the_person_and_every_cred
 #[test]
 fn full_access_starts_the_same_with_or_without_the_newer_flags() {
     for area in [Area::Chat, Area::Project] {
-        let args = full(area, ClaudeFlags { autocompact: true, permission_prompts: false, auto_mode: false });
+        let args = full(area, ClaudeFlags { autocompact: true, permission_prompts: false, auto_mode: false, plugin_dir: false });
         assert!(args.windows(2).any(|a| a == ["--permission-prompt-tool", "stdio"]));
         assert!(!args.contains(&"--permission-prompts".into()));
         assert_eq!(args, full(area, ClaudeFlags::default()));
@@ -924,7 +925,10 @@ fn each_model_compacts_at_its_own_window_once_and_only_where_the_cli_has_the_fla
 #[test]
 fn the_flags_are_read_from_the_help_text_word_by_word() {
     let help = "  --autocompact <auto|tokens>           Auto-compact window size\n  --permission-prompt-tool <tool>  MCP tool\n";
-    assert_eq!(ClaudeFlags::from_help(help), ClaudeFlags { autocompact: true, permission_prompts: false, auto_mode: false });
+    assert_eq!(
+        ClaudeFlags::from_help(help),
+        ClaudeFlags { autocompact: true, permission_prompts: false, auto_mode: false, plugin_dir: false }
+    );
     let both = format!("{help}  --permission-prompts <target>         Who answers permission prompts\n");
     assert_eq!(ClaudeFlags::from_help(&both), ClaudeFlags { auto_mode: false, ..NEWER });
     // A mention in a description is not the flag.
@@ -1319,4 +1323,25 @@ async fn r161_claude_calling_the_helper_waits_for_its_report_and_gets_it_as_the_
         _ => None,
     });
     assert_eq!(tool, Some(&id), "the tool call and the MCP call are the same step");
+}
+
+#[test]
+fn the_catalog_s_skills_reach_a_project_s_agent_as_one_plugin_and_nowhere_else() {
+    assert!(ClaudeFlags::from_help("  --plugin-dir <path>   Load a plugin from a directory").plugin_dir);
+    assert!(!ClaudeFlags::from_help("Use --plugin-dir to load a plugin").plugin_dir, "a flag named in a sentence is no support");
+    let tools =
+        faber_engine::tools::Delivery { plugin: Some("C:/data/tools/plugin".into()), skills: Some("C:/data/tools/plugin/skills".into()) };
+    let flags = ClaudeFlags { plugin_dir: true, ..NEWER };
+    let args = |area: Area, permissions: Permissions, flags: ClaudeFlags, tools: &faber_engine::tools::Delivery| {
+        claude_args(&ClaudeLaunch { permissions, flags, tools: tools.clone(), ..launch(area) })
+    };
+    let loads = |args: &[String]| args.windows(2).any(|a| a[0] == "--plugin-dir" && a[1] == "C:/data/tools/plugin");
+    for permissions in [Permissions::FullAccess, Permissions::Ask, Permissions::Auto] {
+        assert!(loads(&args(Area::Project, permissions, flags, &tools)), "{permissions:?}");
+    }
+    assert!(!loads(&args(Area::Project, Permissions::Isolated, flags, &tools)), "Isolated turns every customization off");
+    assert!(!loads(&args(Area::Chat, Permissions::FullAccess, flags, &tools)), "Chat keeps its lean tools");
+    assert!(!loads(&args(Area::Project, Permissions::FullAccess, NEWER, &tools)), "an older CLI starts as before");
+    let none = args(Area::Project, Permissions::FullAccess, flags, &Default::default());
+    assert!(!none.iter().any(|a| a == "--plugin-dir"), "no skill installed, no plugin");
 }

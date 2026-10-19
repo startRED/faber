@@ -115,6 +115,7 @@ impl Core {
                             browse: false,
                             conversations: false,
                             verify: false,
+                            tools: Default::default(),
                         },
                         spawn: spawner(&self.opts.spawn, &cli),
                         sandbox: self.opts.clis.get(&Vendor::Codex).cloned(),

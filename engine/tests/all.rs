@@ -85,6 +85,8 @@ mod signals;
 mod simulation;
 #[path = "stuck.rs"]
 mod stuck;
+#[path = "tools.rs"]
+mod tools;
 #[path = "turn_usage.rs"]
 mod turn_usage;
 #[path = "usage_view.rs"]
