@@ -3,7 +3,7 @@ import { render } from 'solid-js/web';
 import { api, type Message, type ToolUse } from '../../ui/api.ts';
 import { useLanguage } from '../../ui/i18n.ts';
 import { Running } from '../../ui/Running.tsx';
-import { awaySites, openedSite, showSite, siteOf, sitesOf, stepsOf, type OpenSite } from '../../ui/Site.tsx';
+import { appsOf, awaySites, openedSite, showSite, siteOf, sitesOf, stepsOf, type OpenSite } from '../../ui/Site.tsx';
 import { Thread } from '../../ui/Thread.tsx';
 import { check, deepEqual, equal, ok } from './check.ts';
 import act from '../../src-tauri/src/pane/act.js';
@@ -29,6 +29,29 @@ check('page in the browser: a login, a captcha or a payment is the person’s tu
   const click: ToolUse = { id: 'w2', name: 'Browser', input: { action: 'click', target: 'Next' }, ok: true, output: OPENED };
   const other: ToolUse = { ...BROWSE, id: 'w3', output: login };
   deepEqual(sitesOf([BROWSE, other, click]).map((s) => s.tool.id), ['w3', 'w2'], 'a page clicked through is its latest call, after the others');
+});
+
+check('app pane: a local address a command printed is a card for the app, one per server, never twice with its page card', () => {
+  useLanguage('en');
+  const esc = String.fromCharCode(27);
+  const dev: ToolUse = { id: 'b1', name: 'Bash', input: { command: 'npm run dev' }, ok: true, output: `  VITE ready\n  ${esc}[32m➜${esc}[39m  Local:   ${esc}[36mhttp://localhost:${esc}[1m3000${esc}[22m/${esc}[39m\n  ➜  Network: http://192.168.0.4:3000/` };
+  deepEqual(appsOf([dev]).map((a) => a.site), [{ url: 'http://localhost:3000/', title: 'Your app, running here' }], 'through the colour codes, the network address left out');
+  const again: ToolUse = { ...dev, id: 'b2', output: 'Serving on http://127.0.0.1:8000/docs?key=1 and http://localhost:3000/.' };
+  deepEqual(appsOf([dev, again]).map((a) => [a.tool.id, a.site.url]), [['b2', 'http://127.0.0.1:8000/docs?key=1'], ['b2', 'http://localhost:3000/']], 'the latest command per server, the whole address without the sentence’s stop');
+  equal(appsOf([{ ...dev, name: 'Read' }]).length, 0, 'only what a command printed');
+  for (const said of [
+    'Local: https://localhost.example:3000/ or http://localhost/',
+    'Error: connect ECONNREFUSED, failed to reach http://localhost:3000/ (server not running)',
+    'See the docs at http://localhost:3000/ for the API.',
+    'Listening on http://localhost:300000/',
+    'See the docs at http://localhost:3000/ready for the API.',
+    'Server is not running at http://localhost:3000/',
+    'Waiting for http://localhost:3000/ to be available',
+  ]) equal(appsOf([{ ...dev, output: said }]).length, 0, `no app in: ${said}`);
+  const listed = 'Starting up http-server, serving ./\n\nAvailable on:\n  http://192.168.0.4:8080\n  http://127.0.0.1:8080\nHit CTRL-C to stop the server\nhttp://localhost:9000/';
+  deepEqual(appsOf([{ ...dev, output: listed }]).map((a) => a.site.url), ['http://127.0.0.1:8080/'], 'the addresses listed under "Available on:", and nothing after the list');
+  const seen: ToolUse = { ...BROWSE, id: 'w9', output: "Opened http://localhost:3000/ in Faber's browser; the person can see it there.\nTitle: My app" };
+  equal(appsOf([dev, seen]).length, 0, 'a server the agent opened has its page card');
 });
 
 check('page in the browser: the reply shows a card for it, and its button opens the page in the running column', async () => {

@@ -106,7 +106,9 @@ frames) and checked against today's code. It fills the steps of R161 and never b
    it, and "See the page" puts the page over the running column. Built (R197): the agent reads the page again, clicks,
    types, scrolls and goes back by the words a person sees; a page with a password, card or captcha field is the person's
    turn ("Your turn" on the card), where the agent reads and scrolls but never clicks or types; while the person looks at
-   the pane it is theirs, and the agent's call waits for them and then hears they used it. Still to come: the app pane,
+   the pane it is theirs, and the agent's call waits for them and then hears they used it. Built (R238): the app pane, as
+   Faber's browser on the app's own address: a local address a command of the reply printed is a card "Your app,
+   running here" with "See the page". Still to come:
    pointer-level actions for pages the words cannot reach, and the recorded log. The rest of the plan: The agent or a child opens websites in a pane that belongs to Faber and runs the app it builds beside the
    chat, through a Faber tool the CLI calls. A card in the reply ("Site open in the browser", with a picture and Open)
    is the way in, next to the file and question cards that already exist. The pane has one owner at a time: "Take over"

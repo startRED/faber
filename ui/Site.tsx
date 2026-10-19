@@ -105,9 +105,69 @@ export function sitesOf(tools: ToolUse[]): { tool: ToolUse; site: NonNullable<Re
   return [...out.values()];
 }
 
+// The colour codes a dev server wraps its lines in (ESC [ … m), an address on this computer up to the next space or quote,
+// the prose that can close a sentence after it, and the words outside the addresses that say a server is up or is not.
+const COLOURS = new RegExp(String.raw`${String.fromCharCode(27)}\[[0-9;]*[A-Za-z]`, 'g');
+const LOCAL = /\bhttps?:\/\/(?:localhost|127\.0\.0\.1|\[::1\]):\d+[^\s'"`<>]*/gi;
+const CLOSING = /[.,;:!?)\]}]+$/;
+const STARTED = /\b(?:local|listening|running|ready|started|starting|serving|available)\b/i;
+const FAILED = /\b(?:fail\w*|error|refused|cannot|can't|unable|could not|not|no longer|waiting|ECONNREFUSED)\b/i;
+const ALONE = /^\s*(?:[-*•➜]\s*)?https?:\/\/\S+\s*$/;
+
+/** The local addresses with a port on one line. */
+function addresses(line: string): string[] {
+  return [...line.matchAll(LOCAL)].flatMap(([found]) => {
+    try {
+      const url = new URL(found.replace(CLOSING, ''));
+      return url.port ? [url.href] : [];
+    } catch {
+      return [];
+    }
+  });
+}
+
+/** The local addresses an output announces: on a line whose own words say a server is up there and name no failure, or
+ * listed one per line right under such a line that names none (http-server's "Available on:"). */
+function announced(output: string): string[] {
+  const out: string[] = [];
+  let listing = false;
+  for (const line of output.replace(COLOURS, '').split('\n')) {
+    const words = line.replace(LOCAL, ' ');
+    const found = addresses(line);
+    if (listing && ALONE.test(line)) {
+      out.push(...found);
+      continue;
+    }
+    const up = STARTED.test(words) && !FAILED.test(words);
+    if (up) out.push(...found);
+    listing = up && found.length === 0;
+  }
+  return out;
+}
+
+/** The apps the agent started on this computer (step 7, the app pane): a local address with its port that a command's
+ * output announces, such as a dev server's "Local: http://localhost:3000/", never one an error or a page of text only
+ * mentions; one card per server, the latest command's address. A server the agent already opened in Faber's browser has
+ * its page card instead. */
+export function appsOf(tools: ToolUse[]): { tool: ToolUse; site: { url: string; title: string } }[] {
+  const opened = new Set(sitesOf(tools).map(({ site }) => hostOf(site.url)));
+  const out = new Map<string, { tool: ToolUse; site: { url: string; title: string } }>();
+  for (const tool of tools) {
+    if (!/bash|command|exec|shell/i.test(tool.name) || !tool.output) continue;
+    for (const url of announced(tool.output)) {
+      const host = hostOf(url);
+      if (opened.has(host)) continue;
+      out.delete(host);
+      out.set(host, { tool, site: { url, title: t('site.app') } });
+    }
+  }
+  return [...out.values()];
+}
+
+/** Where a page lives, with its port when it has one: the person's own servers differ only by it. */
 export const hostOf = (url: string) => {
   try {
-    return new URL(url).hostname.replace(/^www\./, '');
+    return new URL(url).host.replace(/^www\./, '');
   } catch {
     return url;
   }

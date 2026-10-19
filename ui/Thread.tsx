@@ -8,7 +8,7 @@ import { QuotaCard } from './QuotaCard.tsx';
 import { html, Markdown, openLinks } from './markdown.tsx';
 import { agentMeta, ChangedLines, openedAgent, SourceList, showAgent, tellAbout, ToolChip } from './AgentChat.tsx';
 import { untilReset } from './Sidebar.tsx';
-import { AwayPage, awaySites, SiteCard, sitesOf, stepsOf } from './Site.tsx';
+import { appsOf, AwayPage, awaySites, SiteCard, sitesOf, stepsOf } from './Site.tsx';
 import { bytes, compact, fromEngine, money, t } from './i18n.ts';
 import { prettyModel, vendorName, type Option } from './models.ts';
 import { animateList } from './motion.ts';
@@ -166,8 +166,8 @@ function Answer(props: Shared & { m: Accessor<Message>; messages?: Message[]; pr
   const helperKind = () => (m().vendor ? vendorName(m().vendor === 'claude' ? 'codex' : 'claude') : '');
   const agents = createMemo(() => agentSteps(tools(), helperKind()));
   const steps = createMemo(() => narration().length + own().length + (thinking().length ? 1 : 0));
-  // The pages the agent opened in Faber's browser, each a card beside the files.
-  const sites = createMemo(() => sitesOf(own()));
+  // The pages the agent opened in Faber's browser and the apps it started on this computer, each a card beside the files.
+  const sites = createMemo(() => [...sitesOf(own()), ...appsOf(own())]);
   const pageSteps = createMemo(() => stepsOf(own()));
   // Read only on a reply that says what happened while the person was away.
   const awayPages = createMemo(() => {
