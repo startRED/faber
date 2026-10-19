@@ -58,6 +58,10 @@ pub fn fingerprint(dir: &Path) -> String {
     }
     let mut lines = Vec::new();
     walk(dir, dir, &mut lines);
+    // An empty folder holds no build: the Tauri build makes an empty `dist/` in a clean checkout (the landing's worktree).
+    if lines.is_empty() {
+        return "absent".into();
+    }
     lines.sort();
     faber_engine::hex(&Sha256::digest(lines.join("\n")))
 }
@@ -320,6 +324,17 @@ fn both(first: impl FnOnce() -> Result<(), String> + Send, second: impl FnOnce()
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn an_empty_dist_is_no_build_but_a_file_in_it_is() {
+        let tmp = tempfile::tempdir().unwrap();
+        let dist = tmp.path().join("dist");
+        assert_eq!(fingerprint(&dist), "absent");
+        std::fs::create_dir_all(dist.join("assets")).unwrap();
+        assert_eq!(fingerprint(&dist), "absent", "the Tauri build may leave empty folders in a clean checkout");
+        std::fs::write(dist.join("index.html"), "<html>").unwrap();
+        assert_ne!(fingerprint(&dist), "absent");
+    }
 
     #[test]
     fn the_two_builds_run_at_the_same_time_and_both_failures_are_told() {

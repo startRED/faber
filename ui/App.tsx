@@ -1260,7 +1260,7 @@ function NoAiOrProject(props: {
       <Match when={props.vendors === 0}>
         <Empty
           title={t('empty.noAiTitle')}
-          line={t('empty.noAiBody')}
+          line={t(props.area === 'project' ? 'empty.noAiProjectsBody' : 'empty.noAiBody')}
           button={{ label: t('empty.noAiButton'), onClick: props.onConnect, restore: 'connect' }}
         />
       </Match>
