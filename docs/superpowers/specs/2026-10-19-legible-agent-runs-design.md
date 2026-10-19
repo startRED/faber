@@ -7,7 +7,7 @@ and how far it got. In his words, today it is "muito texto bruto". Sources: the 
 and Faber's code at `origin/phase-1-base` on 2026-10-19.
 
 Status: approved by Erick on 2026-10-19 ("pode aprovar, ficou bem melhor assim"). The tasks in
-[../../tasks/](../../tasks/README.md) numbered 016 to 019 build it, in that order.
+[../../tasks/](../../tasks/README.md) numbered 016 to 020 build it, in that order.
 
 ## What went wrong in that conversation
 
@@ -75,7 +75,13 @@ row of its own: the messages Faber sends by itself, retries, meter gaps, hook ou
 resends live at most in a tooltip, in the work log or in the run header's count. A new row in the thread has to say
 which of the three it is.
 
-Ten parts, ranked by value over effort. Faber already has most of the parts these hang on:
+**Plain words in the thread, the technical side in its own tab** (Erick, 2026-10-19: "linguagem fácil de entender sem
+termos técnicos tipo CI ficou verde… merges, commit, testes e etc é bom ver em alguma outra aba"). The conversation
+speaks about what changed for the person, in everyday words. Commits, pull requests, checks, test runs, branches,
+reviews and file paths go to a "Technical details" tab of the conversation (part 11). The thread keeps at most one plain
+line that points there.
+
+Eleven parts, ranked by value over effort. Faber already has most of the parts these hang on:
 - the MCP server over stdio and Codex's dynamic tools (`engine/src/helper.rs`), with `helper`, `browse`,
   `conversation`, `verify` and `map`;
 - the work log (`.activity` in `ui/Thread.tsx`);
@@ -192,7 +198,8 @@ acknowledged, is not drawn either. Task 016 removes the rows first; this part ad
 
 ### 7. Background work as chips (task 019)
 
-Under the plan, one row of quiet chips for what the agent left running:
+In the "Technical details" tab (part 11), never in the thread, one list of what the agent left running. The thread
+shows at most one plain line under the plan ("2 things still running") that opens the tab:
 - a background shell (Claude's `run_in_background`, Codex's equivalent), named by its description;
 - a monitor;
 - a helper or subagent (already a row: it moves here while running);
@@ -224,10 +231,33 @@ the waiting narration of part 6 unnecessary.
 and the answer chosen. A row's "Change" sends the other choice as the person's message. It replaces the list of
 `away.chose` sentences.
 
-### 10. Links that show state (task 019)
+### 10. Links that show state (task 019, in the technical tab)
 
 A pull request number or commit hash that Faber follows, written in a reply, renders as a chip with its live state:
 queued, landed, red or merged. This reuses `FollowLine`'s data. An unknown number stays plain text.
+
+### 11. Plain words, and a technical tab (task 020)
+
+**In the thread.** The prompt rules of part 6 gain one more, for both CLIs: speak to the person in everyday words
+about what changed for them, as to someone who does not program. Do not write commit hashes, pull request numbers,
+branch names, test or check names, "CI", "merge", "land", "lint" or file paths in the reply. Say what they mean ("the
+change is saved and in the next version", "it was checked and works", "it still needs to be seen running in the
+app"). Technical words are fine only when the person used them first in this conversation or asks for them. The
+closing box's recap (part 4) follows the same rule, and so do the done card and the tray notice.
+
+**The tab.** Every project conversation gets a "Technical details" view in the running column, next to the
+conversation's own row. It holds, newest first:
+- what the agent left running (part 7);
+- each change saved, with its pull request and state (part 10);
+- the checks and tests Faber ran and their results;
+- the files changed (the existing diff);
+- the reviews other AIs gave.
+
+Faber fills it from what it already parses, so the agent never has to narrate it. A plain line in the thread ("3
+changes went in · details") opens it. The tab is a view of facts, not a second chat: no input, nothing that moves.
+
+A person who programs can ask for the technical words in the conversation itself ("show the commits"), and the agent
+then answers with them.
 
 ## Out of scope here
 
