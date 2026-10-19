@@ -82,15 +82,28 @@ Taken from Claude Code Projects and pushed further (AI proposal, not reviewed; r
 - **One question explains a stall:** for every worker, what it was asked, what it assumed, what it could not reach and
   what it waits on.
 
-## Self-development before Full Chat (R96)
+## Self-development (R96, through the project conversation)
 
-A minimal Projects slice comes after the new base and before Phase 2. Target: 2026-10-20 to 22.
-It includes a lead, contracts and ready dispatch, Seguro by default, worker worktrees and leases,
-a serial proof/review/fast-forward queue, Studio v0 read-only fan-out, daily own-cost grants,
-a minimal board and decisions, needs-you notifications (R92), and local next-build promotion/rollback (R93).
-Equilibrado adds only own-branch push and draft PR. Parallel writers need disjoint areas and measured qualification.
-Catalog, the remaining powers, Livre, and public release automation are deferred.
-The local development instance never touches the installed release in E:\Apps\Faber (R95).
+R96 put a minimal Projects slice for self-development before Full Chat. It was first planned as missions (a lead,
+roles, a board and a serial proof queue; [spec](../superpowers/specs/2026-10-12-self-development-mvp-design.md)), and
+R202 replaces that shape: self-development is the project conversation of R160 and R161, and the mission machinery
+stays in the engine only for what still uses it, with no way to start one. How to start it, step by step:
+[dev/self-development.md](../dev/self-development.md). The local development instance never touches the installed
+release in E:\Apps\Faber (R95).
+
+Since R160 the person reaches this through the project conversation, not a mission screen: Faber builds Faber the way
+the sessions that build it work. The project's agent starts conversations of its own for separate pieces (R198,
+"Conversation started by the agent" in the product map), each conversation can work in its own copy of the folder, a
+conversation can keep going while the person is away, and a red check on its pull request wakes it. A landed change
+reaches the installed app through the public updater (R156). A live probe on the real Claude Code CLI
+(`engine/examples/selfdev_probe.rs`, two small Haiku turns) checked it on 2026-10-17: the agent started a conversation,
+read it back, and the new conversation wrote its file in 16 s. A second probe (`engine/examples/selfdev_accept.rs`, by
+hand, never in CI) runs one whole task: the agent fixes a failing test in a throwaway crate in its own separate copy,
+checks its work with the `verify` tool and commits on its `faber/…` branch while the person's checkout stays untouched,
+and Faber's own checks under the reply end `passed`. A second scenario has the person confirm a check the agent cannot
+see (`cargo fmt --check`): Faber's check fails on the reply, Faber sends the fix turn by itself and the next ends
+`passed`. On 2026-10-17 both passed on Haiku (26 s and 44 s, about US$0.01 each), and with `--review` the helper from the
+other AI sent its report back.
 
 Approved, not built (R190): the serial proof queue, `cargo t`'s plan and R146's "Faber decides done" become one
 verifier in the engine. It checks each change in seconds on the PC with no extra process while idle, posts the result
@@ -101,8 +114,10 @@ to GitHub so CI only confirms, and later serves every project
 
 A mission keeps a project as coherent as the agents that build Faber keep Faber (R145). Planned, not built:
 
-- **A project map built from the code.** Extractors list what the project has (settings, routes, commands, texts,
-  exports) and stay tied to the files they came from; no AI-written overview. Roles get the index and look details up.
+- **A project map built from the code (built for the project's agent).** Extractors list what the project has
+  (settings, commands, texts, browser storage keys, screen files, package scripts, exports) and stay tied to the files
+  they came from; no AI-written overview. The agent gets the index through Faber's `map` tool and looks details up.
+  Routes and other languages come with the first project that needs them.
 - **A contract before writing.** The Lead names what the change touches, the closest thing that already exists, and
   `Extends:` it or `New:` with why it does not fit; the Writer starts only once the contract exists.
 - **Faber decides "done".** After the Writer's turn Faber runs the project's checks and the map check itself; a Writer

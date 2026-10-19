@@ -1,4 +1,4 @@
-import type { ToolUse } from './api.ts';
+import type { Message, ToolUse } from './api.ts';
 import { t } from './i18n.ts';
 import type { Key } from './locales/en.ts';
 
@@ -45,6 +45,7 @@ const KINDS: Record<string, Key> = {
   WebSearch: 'tool.webSearch',
   WebFetch: 'tool.webFetch',
   Browser: 'tool.browse',
+  Conversation: 'tool.conversation',
   Agent: 'tool.agent',
   Task: 'tool.agent',
   TodoWrite: 'tool.plan',
@@ -69,7 +70,16 @@ function detailOf(input: unknown): string {
 }
 
 export function toolRow(tool: ToolUse): ToolRow {
-  const named = SUBAGENT.has(tool.name) && (tool.input as { description?: unknown } | undefined)?.description;
+  const input = tool.input as { description?: unknown; title?: unknown; id?: unknown; level?: unknown; kind?: unknown; query?: unknown } | undefined;
+  // Faber's checks (R190) read as what they run, with nothing after: the folder is the conversation's own.
+  if (tool.name === 'Verify') return { label: t(input?.level === 'full' ? 'tool.verifyFull' : 'tool.verify'), detail: '' };
+  // The project map (R146) reads as reading it, with what was looked up.
+  if (tool.name === 'Map') return { label: t('tool.map'), detail: [input?.kind, input?.query].filter((v) => typeof v === 'string' && v).join(' ') };
+  // Its own context, and compacting it, read as what they are, with nothing after.
+  const action = tool.name === 'Conversation' ? (tool.input as { action?: unknown } | undefined)?.action : undefined;
+  if (action === 'compact' || action === 'context') return { label: t(`tool.${action}`), detail: '' };
+  // A conversation the agent starts reads as its title; one it reads back, as its id.
+  const named = SUBAGENT.has(tool.name) ? input?.description : tool.name === 'Conversation' ? (input?.title ?? input?.id) : undefined;
   const raw = typeof named === 'string' ? named : detailOf(tool.input);
   const camel = /^[a-z]+[A-Z]/.test(tool.name);
   // An MCP tool (`mcp__server__tool`) reads as using a tool, with the server's name when the call names nothing else.
@@ -162,6 +172,28 @@ export function agentState(step: AgentStep, streaming: boolean): AgentState {
   }
   if (declined) return 'declined';
   return ok ? 'done' : 'failed';
+}
+
+/** How many subagents and helpers are still at work, nested ones each counted: what a Stop would end with the turn. A reply
+ * that ended (a message taken into the turn ends the one before it) still holds the background ones it sent and theirs;
+ * the last Stop or error ended everything before it. */
+export function helpersAtWork(messages: Message[] = []): number {
+  const ended = messages.findLastIndex((m) => m.role === 'assistant' && (m.status === 'stopped' || m.status === 'error'));
+  const agent = (tool: ToolUse) => SUBAGENT.has(tool.name) || tool.name === 'Helper';
+  const replies = messages.slice(ended + 1).filter((m) => m.role === 'assistant');
+  // Only agent calls: a long conversation's other steps are never walked. A subagent's own steps land in the reply under
+  // way, so its parent may sit in an earlier one; a subagent's parent is an agent call.
+  const calls = replies.flatMap((m) => (m.tools ?? []).filter(agent).map((tool) => ({ tool, streaming: m.status === 'streaming' })));
+  const open = calls.filter((c) => c.tool.ok === undefined);
+  if (!open.length) return 0;
+  const byId = new Map(calls.map((c) => [c.tool.id, c.tool]));
+  const background = (tool: ToolUse) => {
+    for (let at: ToolUse | undefined = tool, hops = 0; at && hops <= byId.size; at = at.parent ? byId.get(at.parent) : undefined, hops++) {
+      if ((at.input as { run_in_background?: unknown } | undefined)?.run_in_background === true) return true;
+    }
+    return false;
+  };
+  return open.filter((c) => c.streaming || background(c.tool)).length;
 }
 
 /** Whether two lists hold the same tools in the same state, so a message that only grew in text leaves the rows of its tools

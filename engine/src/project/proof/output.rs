@@ -29,11 +29,11 @@ pub struct Report {
 }
 
 /// The most failures a role reads, the most lines of each, and the longest line; the log keeps everything.
-const SHOWN: usize = 20;
-const FAILURE_LINES: usize = 8;
+pub const SHOWN: usize = 20;
+pub const FAILURE_LINES: usize = 8;
 const LINE_CHARS: usize = 300;
 /// How many last lines an output in an unknown format leaves.
-const LAST_LINES: usize = 20;
+pub const LAST_LINES: usize = 20;
 
 /// What the parsers found in one output.
 #[derive(Default)]
@@ -106,28 +106,37 @@ pub fn withheld(output: &str) -> String {
     text
 }
 
+impl Failure {
+    /// One failure as a role reads it: its place and first line, at most `most` lines in all (each cut to a readable
+    /// length), and the tool's fix under them. Every line ends with a newline.
+    pub fn short(&self, most: usize) -> String {
+        let mut out = String::new();
+        let mut lines = self.message.lines().map(cut);
+        let first = lines.next().unwrap_or_default();
+        match &self.place {
+            Some(place) => out.push_str(&format!("{place}: {first}\n")),
+            None => out.push_str(&format!("{first}\n")),
+        }
+        for line in lines.by_ref().take(most.saturating_sub(1)) {
+            out.push_str(&format!("    {line}\n"));
+        }
+        let more = lines.count();
+        if more > 0 {
+            out.push_str(&format!("    ({more} more lines in the log)\n"));
+        }
+        if let Some(fix) = &self.fix {
+            out.push_str(&format!("    fix: {}\n", cut(fix)));
+        }
+        out
+    }
+}
+
 impl Report {
     /// The text a role reads: each failure with its place and the fix under it, then the measurements, then the summary.
     pub fn text(&self) -> String {
         let mut out = String::new();
         for failure in self.failures.iter().take(SHOWN) {
-            let mut lines = failure.message.lines().map(cut);
-            let first = lines.next().unwrap_or_default();
-            match &failure.place {
-                Some(place) => out.push_str(&format!("{place}: {first}\n")),
-                None => out.push_str(&format!("{first}\n")),
-            }
-            let most = if self.fallback { LAST_LINES } else { FAILURE_LINES };
-            for line in lines.by_ref().take(most - 1) {
-                out.push_str(&format!("    {line}\n"));
-            }
-            let more = lines.count();
-            if more > 0 {
-                out.push_str(&format!("    ({more} more lines in the log)\n"));
-            }
-            if let Some(fix) = &failure.fix {
-                out.push_str(&format!("    fix: {}\n", cut(fix)));
-            }
+            out.push_str(&failure.short(if self.fallback { LAST_LINES } else { FAILURE_LINES }));
         }
         if self.failures.len() > SHOWN {
             out.push_str(&format!("({} more failures in the log)\n", self.failures.len() - SHOWN));

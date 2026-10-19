@@ -1,22 +1,49 @@
 # Layout
 
-The window's widths, titlebar, sidebar, the homes, answers, the work log, subagent steps, pages in Faber's browser and the
-running column.
+The window's widths, titlebar, sidebar, the homes, answers, the work log, pages in Faber's browser and the
+running column. Search, the command box and find are in [search.md](search.md).
 
 ## Layout
 
 The window has a 36 px titlebar across the full width, a 248 px sidebar, a stage with a 52 px topbar, a reading column of
-at most 660 px centred in the stage, and a 352 px running column on the right. The window can be as narrow as 720 px,
+at most 660 px centred in the stage, and a running column on the right. The window can be as narrow as 720 px,
 so the layout changes with its width:
 
 | Window width | Sidebar | Running column | Reading column |
 | :--- | :--- | :--- | :--- |
-| 1,100 px and wider | 248 px, beside the stage | 352 px when open, beside the stage | Shrinks with the stage, 660 px at most. The stage is never narrower than 500 px |
+| 1,100 px and wider | 248 px, beside the stage | 360 to 560 px when open, beside the stage | Shrinks with the stage, 660 px at most. The stage is never narrower than 440 px |
 | 900 to 1,099 px | 248 px, beside the stage | When open, an overlay on the stage | Up to 660 px |
 | 720 to 899 px | Hidden. A button in the topbar opens it as an overlay | When open, an overlay on the stage | Up to 660 px |
 
 Text size up to 18 px must not push the page past the window width at any of these widths: content wraps or scrolls
 inside its own area.
+
+### Arranging the shell
+
+The numbers above are the usual widths. The person can change them, and the shell keeps what they choose (R211).
+
+- **Edges.** The sidebar's right edge and the running column's left edge are separators (`role="separator"`, focusable).
+  A drag moves them between 200 and 360 px (sidebar) and 300 and 560 px (column). A docked column also leaves the stage 440 px:
+  the stylesheet clamps it with the same numbers, so a window that shrinks after a drag is right before any script runs.
+  A thin accent line and a small grip appear on hover (after 120 ms, so crossing the edge flashes nothing), and the grip is
+  accent while dragging or focused. The arrow keys move an edge 16 px (48 with Shift), Home and End go to its limits, a double
+  click or Enter glides it back to the usual width. The sidebar has no edge below 900 px, where it is an overlay.
+- **The column's usual width follows the window** (`autoRun`): the window less the sidebar less 700 px, 360 to 560 px. A
+  drag ending on it, a double click or Enter goes back to following. A subagent can fill the stage ([subagents.md](subagents.md)).
+- **How a drag stays light.** The pointer events of the window (listened to only while dragging) set `--side-w` and `--run-w` on the
+  shell once per frame; nothing is measured and no state changes until the drag ends, when the width is stored (`faber.layout`)
+  once and the lists that animate layout measure again. `html.sizing` sets the cursor and stops text selection meanwhile.
+- **Focus mode (Ctrl+B).** The sidebar and the running column step aside: the sidebar fades and slides out (under the stage, which
+  slides over to the window's edge as it does when the column opens), the column closes the way it does from its own button.
+  Ctrl+B again, the button that appears at the left of the topbar (`Leave focus mode`, grown in from nothing, never popped in),
+  the run button, Ctrl+. or anything that opens the column brings them back; a column that was open comes back open. Focus mode is
+  not stored: a window always opens with its sidebar. With reduced motion or none, all of it is instant. It is a shortcut, not
+  a setting, so no work screen has a switch for it.
+- **A file over the window.** Anywhere in the window, a dragged file covers it with a calm veil (78% of the stage colour, a dashed
+  accent line 12 px inside the edge) and a pill, "Drop to attach". It fades in and out, takes no click, and shows only where a
+  composer is on screen and not behind a modal layer. Letting go hands the files to the composer's own drop, so the box's add path is
+  the only one. The window listens to one `dragenter` between drags; the rest only from the first one until the drag ends (a drop,
+  leaving the window, or a second without movement).
 
 ### Titlebar and topbar
 
@@ -28,6 +55,7 @@ inside its own area.
   keyboard focus and while the column is open. Otherwise it reads "{n} running". When an
   item needs the user it turns amber, shows the speech bubble and reads "{n} running · {m} needs you". The words are
   always visible.
+- Before the run button, the open conversation's Context meter (R221): a 16 px ring and "{pct}%" in the quiet second ink, with the tokens in its tooltip. It is status (C003): it shows once the CLI has said both numbers, with no click, motion or setting (C011). It turns amber only from 85% of the window, near where the CLI compacts by itself (C002), never sooner.
 
 ### Sidebar
 
@@ -39,6 +67,11 @@ inside its own area.
   the amber speech bubble and "{m} needs you". Amber always comes with these words, never with a number alone. When
   something only runs, the tail shows a pulsing dot.
 - Chats are grouped as Today, This week and Earlier. Deleting a conversation asks for confirmation.
+- A conversation an agent started sits right under the one that started it, indented 14 px with a hairline guide at
+  its left; one whose starter is not listed stays in its own place.
+- An archived conversation leaves the list. A search still shows it, its title followed by a quiet "archived" in the
+  smallest size and the third ink. Opened, once its reply ends, the composer's place holds one card of the composer's
+  width: the line "This conversation is archived…" in the second ink and a small Unarchive button at its right.
 - The footer is one row, the person's name when they gave one and Settings, then one thin line per connected vendor: its
   shape, a 3 px bar and the used share of its tightest quota window, in the small size. Nothing on the line wraps. The
   window, the reset, how old the reading is, the not-yet-counted estimate and the vendor's name are its tooltip. While
@@ -62,7 +95,7 @@ inside its own area.
 - The composer keeps its model picker, "AI: choose for me".
 - Auto chooses both the model and its effort. A manual model adds an adjacent low, medium or high effort choice,
   defaulting to medium (R102). Each conversation remembers its choice. Changes apply to the next message only (the
-  composer does not repeat it), and each answer keeps the effort actually used, in its header's tooltip. Both CLI drivers always receive that effort.
+  composer does not repeat it), and each answer keeps the effort actually used and shows it in its header. Both CLI drivers always receive that effort.
 - The ambient effect of the theme runs here, and the empty composer idles with a typing bar and rotating hints.
 - With no AI connected, the greeting, the suggestions and the list give way to the empty state (Curioso, "No AI connected",
   one line and the button "Connect", which opens account management). The composer stays on screen but cannot send. An open conversation with no AI connected
@@ -70,15 +103,43 @@ inside its own area.
 
 ### Answers
 
-- The header is the vendor's mark and the model's name, nothing else (Auto shows its reason beside the name only while it is
-  still choosing). The effort and Auto's reason are its tooltip. The pace line stays (C002). A wait for quota is told once,
+- The header is the vendor's mark, the model's name and its effort in the quiet header ink ("· high effort"; the owner,
+  2026-10-17), nothing else (Auto shows its reason beside the name only while it is still choosing). Auto's reason is its
+  tooltip. The pace line stays (C002). A wait for quota is told once,
   by the quota card, never also in the header or the red note.
 - Under the answer, one line that never wraps, at a 660 px column or a 720 px window: three icon buttons from
   `ui/Glyphs.tsx` (copy, retry, open in terminal, each with a tooltip and an accessible name), a short "Retry stronger"
   when a step up is offered, then the cost in the faint data style. The tokens and how long the cache stays warm are the
   cost's tooltip. There is no model select under an answer: a retry (and the right-click Redo, which names the model)
   uses the composer's current choice.
+- The same line carries the reply's state (the owner, 2026-10-18: "you should have said you finished"), after the buttons, in the
+  quiet ink and the small size, cut with an ellipsis before it pushes a button: "Working" while the agent writes or works,
+  then "Done", "Done · 12 min of work" once the work took a minute or more, and on the newest reply "· updated 3 min ago"
+  ("just now" under a minute, none past a day). A reply that works shows only this text in the row, the buttons join it when
+  it is done, so the row does not grow. The agent is done when its last message ended and no tool call of the reply is open,
+  though the CLI may close its turn up to a minute later (its Stop hooks): from then the work folds into
+  its activity, the buttons appear, the running column and the topbar's count leave it out, and the composer reads Send,
+  where a message waits in the queue. More words after that undo it. The age ticks once a minute on the newest reply only,
+  never while the window is hidden; older replies run no timer. A reply from before the times were kept, a stop and an error
+  say nothing here. Nothing animates.
+- The caret blinks only while words arrive; a reply at work after its words shows its step under them, in the status
+  line's style. Faber's plumbing takes no row: its own message is a loop mark after the next reply's model (R241; the
+  product map's Work log and Faber's own message say the rest).
 - There is no permission sentence over a conversation: the mode is a Settings matter.
+- Keep going (R199): the chip, its quiet lines, its quota warning and what it shows on coming back are in
+  [keep-going.md](keep-going.md).
+- A project reply that opened, queued or pushed a pull request ends with one pace-style line (R200): its words ("Following
+  pull request #93: checks running.") link to the page, and "Stop following" sits beside them while it is open. Only checks
+  that wait for the person turn it amber. When the checks fail, Faber's own message is the loop
+  mark on the next reply, its tooltip naming the pull request and its failed checks.
+- A project reply that changed files, in full access, ends with Faber's own checks (R146) in the same pace-style line,
+  above the pull request's: "Faber is running the checks on these changes…", then "Faber's checks passed (3 checks)." or
+  "Faber's checks failed: npm run lint." with "What failed" under it, the work log's disclosure holding each failed check's
+  first three short failures in the data face. Faber's fix turn is the loop mark on the next reply ("Faber's checks failed (npm run
+  lint). Faber asked the agent to fix them." in its tooltip); after two in a row, or where Faber does not ask (the reply asked the
+  person something, Keep going stopped on it, the pace is used up), the line turns amber and says it needs the person.
+  While the checks run the conversation reads as at work: the composer shows Stop, and a message written then waits in
+  the queue. Nothing moves, and no setting or first-run step comes with it.
 - While an answer streams the engine sends the whole message every 33 ms, so the text is drawn block by block
   (`ui/markdown.tsx`): a block whose source did not change keeps its DOM and only the open one is parsed and sanitised
   again. A tick that changed only the tools builds no text. Everything that reaches the page passes DOMPurify.
@@ -93,6 +154,11 @@ inside its own area.
 - The work log and a helper's row share one disclosure style (`.disclosure`: a quiet card, a chevron, the hover).
 - Each step is a quiet chip: a verb in the ink color ("Reading", "Running") and what it acts on in the mono face, cut
   in the middle. A tool Faber does not know keeps its own name; an MCP tool reads "Using a tool" with its server's name.
+- A conversation the agent starts by itself (R198) is one chip like any other, "Working in parallel" with its title (or
+  the id when the agent reads it back); the conversation itself is a normal row in the sidebar, never a step inside.
+- The agent running Faber's checks (the `verify` tool) is one chip with no detail: "Running the quick checks", or
+  "Running every check" for the full level. What failed is the agent's to read; the chip only says it ran.
+- Subagent and helper rows have their own page, [subagents.md](subagents.md).
 - While a reply runs and has ended at least one check, a quiet line under the status line counts them (R161 step 9):
   "Ran 3 checks · none failed" after a check mark in the accent's text ink, or "· 1 failed" with the error note's 2 px
   edge and no mark. The words are the subagent facts' own. It goes when the reply ends; nothing moves.
@@ -113,75 +179,6 @@ inside its own area.
   The clock ticks every 15 s only while such a step runs and the window shows; the time is hidden from a screen reader,
   since a live region that changed that often would keep talking.
 
-### Subagent steps
-
-When the agent hands part of the work to a subagent (R161), the reply shows one row per helper between the work log and
-the answer, in the work log's surface and type: a check, a cross or the live mark, the few words it was given in bold, and
-on the right its kind, its state and its step count in the third ink, and an arrow pointing right. A click opens the
-subagent in the running column (R161 step 3, R176), which is the one place on the right: its head has a back arrow to
-the running list, the subagent's title and the column's close; under it the meta line, the brief word for word in the
-person's own bubble (the agent wrote it to the subagent; Codex gives none, and then nothing shows), the tool chips it
-ran, then, once it ended, "What it did" (R161 step 4): a quiet block in the work log's surface with the files it changed
-in the data face, its checks and how many failed (a failed count gets the error note's 2 px edge), and the changed files
-its brief never named. These are counted by the engine from its steps (`engine/src/engine/facts.rs`), never taken from the
-main agent's word. Then its report as Markdown. While it works, a quiet line says a CLI subagent cannot be written to while it runs and
-"Tell it…" starts a message to the main agent. A helper from the other AI is a session of its own, so it gets a box
-instead (R196): a line saying the words go straight to it, a field and "Send" (Enter sends, Shift+Enter breaks the
-line). What the person wrote stays above the box in their own bubble, with a line in the third ink under it: sent, read,
-or never read because the helper had finished. Once a subagent ended, in a project with both AIs connected, a quiet line
-and "Continue with a helper" start the conversation's box asking the main agent to hand the rest to a helper. The row open there has the hover surface and a 2 px accent edge on its
-left (amber on a stuck row). The column opens the way it always does; the content swaps without motion, since it is a
-click the person just made. Opening another conversation goes back to the list. Rows sit in a `minmax(0, 1fr)` grid, so a long
-tool line ellipsizes instead of widening the reply. A helper that never finished reads "stopped" once the reply has
-ended; one sent to the background keeps the live mark until its task notice arrives (a ring, never the square of a stop button); a refused one reads "declined" in
-the third ink, never as a failure. Known limit: when a reply moves to another AI after a quota stop, its open tools,
-helpers included, read as working again with the new reply.
-
-A Codex subagent (`spawn_agent`, started only when the person asks for one) is the same row. Codex gives it a path instead of a description, so its title is the
-path's last part with spaces (`/root/read_docs` reads "read docs"), and it has no kind. Its approvals show on the
-conversation's own card, since the person cannot open the subagent; one that arrives after the reply ended is refused,
-and Stop and closing the conversation reach the subagent too. What a subagent still does after its reply ended reaches
-no reply, so its step reads "stopped". Codex counts each thread's usage on its own, so the
-engine adds the subagent's tokens and cost to the reply that started it, and marks the reply's usage incomplete when a
-subagent is still at work as it ends.
-
-A subagent waiting on the person's answer reads "waiting for you" with its live mark in amber; the card under the rows is
-that answer. One that seems stuck (R161 step 6, R174) is the conversation's other amber: the mark and the row's edge
-turn amber, its state reads "seems stuck", and one line under the row says in plain words what the engine saw, with
-"Look", which opens it in the running column, and "Tell it…", which focuses the conversation's box with "About “title”: " at
-its start (Codex takes it into the running turn; Claude Code after it, or at once with "Send now"). The line arrives with
-the normal entrance (`--dur-arrive`, none in reduced motion) and goes when the subagent moves again or the reply ends; the
-words carry the meaning, the amber only repeats it. The signs are counted by the engine (`engine/src/stuck.rs`): the
-same step six times in a row, the same step failing three times with no file changed between (twice and its retry), or
-no step for 10 minutes (30 while a command runs, since builds say nothing until they end). The time a question waits for
-the person never counts. Neither CLI lets Faber speak to the main agent while it waits for its subagent, so the main
-agent's own chance is the retry the numbers leave it. Background subagents are not followed.
-
-A helper from the other AI (Faber's helper tool, R161) is the same row: its title in bold and, as its kind, the AI that
-ran it, so a Claude Code reply reads "Codex". Its commands show under it and its report is its final words. The person
-never sees its approval cards: in a mode that asks, what the helper needed approval for is refused and named in its
-report, and the agent does that step itself, where the card shows. Known limit: a conversation resumed from before the
-helper tool existed keeps its Codex thread without it, since Codex takes dynamic tools only when a thread starts.
-
-### Pages in Faber's browser
-
-A page a project's agent opened in Faber's browser (R161 step 7) is a card among the reply's files, in the file card's
-surface: the picture the browser took of the page's top (a 16:10 crop at most 480 px wide, the page loaded at 1280 by 800
-and drawn at 0.375), then the page's title over its site in the third ink, both ellipsized, and "See the page". The
-title and address come from Faber's own first lines of the answer, never from the page's words. "See the page" opens it
-in the running column, the subagent's place: the same head (back arrow, the title, close; once a link or redirect
-leaves the card's site, the title is the site the page is on now), a meta line with the site it is on now,
-and under it a box that fills the rest of the column, in the third surface with the hairline edge, over which the page
-itself is drawn by a second webview of the same window. The box is measured and the page placed again when it changes
-size, when the window does and once the column has slid in; when the box goes, the page moves out of the window, where
-it keeps drawing, and it closes after five minutes nobody used it. Opening a subagent closes the page and the other way
-round. Known limit: the page is a native view over the screen, so a menu or toast that would cover the column passes
-under it. While it is on screen the page is the person's: they click and type in it, and the agent's call waits for them
-to go back. A page clicked through several times is one card, its latest. Where the page asks for a login, a captcha or a
-payment the card has one line in the conversation's other amber, with the 2 px edge of a stuck subagent's line: "Your
-turn: log in on this page", and no picture, since one could hold what the person typed; the agent cannot click or type
-there.
-
 ### Recent folders and environments
 
 The "Open a project" screen (Projects with none open) and the Chat folder setting list the last five folders used, newest
@@ -196,19 +193,4 @@ projects. Faber has no worktree creation for projects, so an environment has no 
 
 ### Running column
 
-- With nothing running it says "Nothing running" once and has no footer sentence.
-- One block per project, plus one "Chat" block. Each row shows the vendor's shape (a neutral dot while Auto is still
-  choosing the model), the conversation title, the state in words ("Working", "Needs you" or "Choosing the model") and
-  the time since the turn started.
-- An item that needs the user shows the permission card, and the user can answer in place with Allow, Always or Deny.
-  A question the agent asks (`AskUserQuestion`) shows instead as a question card, in the thread and in the column alike:
-  each question in bold with its short header chip, its options as full-width rows to tap (amber ring when chosen,
-  checkboxes when several are allowed), one line to write another answer, then Send answers (enabled once every
-  question has an answer) and Skip. No motion beyond the card's arrival; option hovers do not animate under reduced motion.
-- Clicking a row opens that conversation, setting the area, the project and the conversation together.
-- The column is closed when the window opens. It opens by itself once for each question it has not yet shown, 1.5 s
-  after the last keystroke in any text field, including questions already waiting at launch. If the user closes it
-  while questions are waiting, those questions never reopen it. Only the button stays amber.
-- Items are grouped by project. Projects that have something needing the user come first, and inside a project the
-  amber item comes first. The order is stable, so rows do not jump.
-- With no items it shows an empty state with Curioso.
+Its rows, cards and when it opens by itself: [running.md](running.md).

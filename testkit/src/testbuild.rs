@@ -253,7 +253,7 @@ pub fn ensure_fake_cli(paths: &Paths, jobs: usize) -> Result<(), String> {
 pub fn built_programs(paths: &Paths) -> Vec<std::path::PathBuf> {
     let suffix = std::env::consts::EXE_SUFFIX;
     let debug = paths.fake_cli.parent().map(Path::to_path_buf).unwrap_or_default();
-    let mut list = vec![paths.app.clone(), local_helper(paths), paths.fake_cli.clone(), debug.join(format!("faber-test{suffix}"))];
+    let mut list = vec![paths.app.clone(), paths.fake_cli.clone(), debug.join(format!("faber-test{suffix}"))];
     if cfg!(windows) {
         list.push(debug.join(format!("examples/cache_probe{suffix}")));
     }
@@ -267,8 +267,7 @@ pub fn prebuilt(paths: &Paths) -> Result<(), String> {
 }
 
 /// Builds the test app under Cargo's target directory, once per run, with `jobs` cores for Cargo. The Tauri build makes
-/// every program of the shell, the local rollback helper too, with the features and settings it ships with; a second
-/// plain `cargo build` of the helper rebuilt Tauri, its plugins, the engine and the shell without them.
+/// the shell with the features and settings it ships with.
 pub fn build_test_app(paths: &Paths, jobs: usize) -> Result<(), String> {
     let production = paths.root.join("dist");
     let before = fingerprint(&production);
@@ -287,19 +286,14 @@ pub fn build_for_run(paths: &Paths, jobs: usize) -> Result<(), String> {
 
 /// The Tauri build of the shell, which embeds the test screen Vite left in `dist-test`.
 fn build_shell(paths: &Paths, jobs: usize, production: &Path, before: &str) -> Result<(), String> {
-    // A helper left by an older build must not pass for this one.
-    let helper = local_helper(paths);
-    let _ = std::fs::remove_file(&helper);
     let mut tauri = build_priority(without_run_env(Command::new("node")));
     tauri.current_dir(&paths.root).args(tauri_args(&paths.target, jobs));
     run("Tauri build", tauri)?;
     if fingerprint(production) != before {
         return Err("the test build changed dist/, which only the production build may write".into());
     }
-    for program in [&paths.app, &helper] {
-        if !program.exists() {
-            return Err(format!("the test build did not produce {}", program.display()));
-        }
+    if !paths.app.exists() {
+        return Err(format!("the test build did not produce {}", paths.app.display()));
     }
     Ok(())
 }
@@ -321,11 +315,6 @@ fn both(first: impl FnOnce() -> Result<(), String> + Send, second: impl FnOnce()
         let failures: Vec<String> = [first, second].into_iter().filter_map(Result::err).collect();
         if failures.is_empty() { Ok(()) } else { Err(failures.join("\n")) }
     })
-}
-
-/// The local rollback helper the Tauri build makes next to the test app.
-fn local_helper(paths: &Paths) -> std::path::PathBuf {
-    paths.target.join(format!("debug/faber-local{}", std::env::consts::EXE_SUFFIX))
 }
 
 #[cfg(test)]

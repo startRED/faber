@@ -31,8 +31,9 @@ Faber is a desktop app that runs the official Claude Code and Codex CLIs on the 
   money, license, and anything that contradicts an earlier decision of the owner.
 - **Light.** Memory is a feature, with a hard budget (see Architecture).
 - **Nothing third-party ships with the app.** Telemetry is off by default.
-- **Faber builds itself.** Claude and Codex build Faber together, and whoever writes a part never reviews it. Once the
-  self-development MVP is ready, Faber builds the rest of Full Chat itself (R96).
+- **Faber builds itself.** Claude and Codex build Faber together, and whoever writes a part never reviews it. Faber's
+  own project conversation does it, and builds the rest of Full Chat (R96;
+  [self-development](../dev/self-development.md)).
 
 ## Goals
 
@@ -83,7 +84,7 @@ each version, the benchmark measures it, and the version ships only with the mai
 | Phase | Scope | What comes with it |
 | :-- | :--- | :--- |
 | 1 | New base | the FSL-1.1-ALv2 license and these documents, Faber's own Rust test runner, the design system and themes, the identity, the shell layout and running list, the tray number and notifications, the first run and tutorial, Settings, and the CLI download written straight to disk. Every user-facing change already ships as a patch release (R130) |
-| 1a (R96) | Self-development MVP | the minimal Projects slice above ([spec](../superpowers/specs/2026-10-12-self-development-mvp-design.md)); closes the project execution, handoff, stop and live-budget gaps needed to let Faber build Faber before Full Chat |
+| 1a (R96) | Self-development | the project conversation that builds Faber ([self-development](../dev/self-development.md)): separate copies, conversations the agent starts, Keep going, following its pull request, the built-in verifier and Faber's own checks; the missions plan it replaced is history |
 | 2 | Full Chat | the benchmark, visual answers, asking Faber about Faber, search, moving a chat to a project, Auto learning from approvals, the draft routed at most twice per message, reporting failed writes of conversation and project files, and closing the engine gaps of rules 2, 3, 5 and 6 |
 | 3 | Projects with the lead agent | the lead agent, toolbox, 15 powers, modes, guardrails and big-work rules, the rules for running many workers, the progress view, watching the agent work (living sentences, side chat, Faber's browser and app pane), the decision list, the catalog, learning and the `.faber/` folder, and rules 4 and 7 | |
 | 4 | Excellent software | generalize the self-development workflow; nightly CLI version tests and the live manifest, shared project MCP infrastructure, and qualified department writers |

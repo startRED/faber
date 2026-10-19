@@ -24,6 +24,11 @@ interface Props {
   mode?: PermissionMode;
   onMode?: (mode: PermissionMode) => void;
   busy: boolean;
+  /** Subagents and helpers at work in the reply under way: Stop asks first, since it ends them too. */
+  helpers?: number;
+  /** "Keep going" in a project conversation under way: on, off, or undefined where it is not offered. */
+  keepGoing?: boolean;
+  onKeepGoing?: (on: boolean) => void;
   /** A conversation is still opening: nothing can be sent or warmed until it is in. */
   locked?: boolean;
   placeholder: string;
@@ -66,6 +71,7 @@ async function attach(list: Iterable<File>, draft: Draft): Promise<{ draft: Draf
     if (file.type.startsWith('image/')) {
       const url = await readAs(file, 'dataUrl');
       images = [...images, { mediaType: file.type, base64: url.slice(url.indexOf(',') + 1) }];
+      continue; // an image shows as its own thumbnail, not as a name
     } else if ((file.type.startsWith('text/') || TEXT.test(file.name)) && file.size <= INLINE_TEXT) {
       text = `${text}${text ? '\n\n' : ''}${t('composer.attachedFile', { name: file.name })}\n\`\`\`\n${await readAs(file, 'text')}\n\`\`\``;
     } else {
@@ -75,6 +81,26 @@ async function attach(list: Iterable<File>, draft: Draft): Promise<{ draft: Draf
     names.push(file.name);
   }
   return { draft: { text, images, files }, names };
+}
+
+/** What Stop asks while helpers are at work: how many it ends too, "Stop all", and "Keep working", focused, which Escape
+ * picks too. The composer's Stop and the plan-limit card's ask the same way. When it goes, however it goes, focus that was in
+ * it lands on `back` instead of the page. */
+export function StopAsk(props: { helpers: number; onStop: () => void; onKeep: () => void; back?: () => HTMLElement | undefined }) {
+  let root: HTMLDivElement | undefined;
+  onCleanup(() => {
+    const had = !!root?.contains(document.activeElement);
+    queueMicrotask(() => {
+      if (had || !document.activeElement || document.activeElement === document.body) props.back?.()?.focus();
+    });
+  });
+  return (
+    <div ref={(el) => (root = el)} class="stop-ask" role="group" aria-label={t('composer.stop')} onKeyDown={(e) => e.key === 'Escape' && props.onKeep()}>
+      <span role="status">{t('composer.stopHelpers', { n: props.helpers })}</span>
+      <button type="button" class="send stop" onClick={() => props.onStop()}>{t('composer.stopAll')}</button>
+      <button type="button" class="send" ref={(el) => queueMicrotask(() => el.focus())} onClick={() => props.onKeep()}>{t('composer.keepWorking')}</button>
+    </div>
+  );
 }
 
 export function Composer(props: Props) {
@@ -166,6 +192,13 @@ export function Composer(props: Props) {
     setNames((n) => [...n, ...result.names]);
   };
 
+  // Stop with helpers at work says what it ends and offers to let them work; it closes by itself once they are done.
+  const [stopping, setStopping] = createSignal(false);
+  let stopButton: HTMLButtonElement | undefined;
+  createEffect(() => {
+    if (!props.busy || !props.helpers) setStopping(false);
+  });
+
   return (
     <form
       class="composer"
@@ -180,14 +213,26 @@ export function Composer(props: Props) {
         if (e.dataTransfer) void add(e.dataTransfer.files);
       }}
     >
-      <Show when={names().length > 0}>
+      <Show when={names().length > 0 || draft().images.length > 0}>
         <div class="chips">
+          <For each={draft().images}>
+            {(img, i) => (
+              <span class="attach-thumb">
+                <img alt={t('mine.image')} src={`data:${img.mediaType};base64,${img.base64}`} />
+                <button type="button" onClick={() => setDraft((d) => ({ ...d, images: d.images.filter((_, j) => j !== i()) }))} aria-label={t('composer.removeImage')} title={t('composer.removeImage')}>
+                  <Icon name="close" small />
+                </button>
+              </span>
+            )}
+          </For>
           <For each={names()}>{(name) => <span class="chip">{name}</span>}</For>
-          <span class="chip">
-            <button type="button" onClick={() => (setDraft((d) => ({ ...d, images: [], files: [] })), setNames([]))} aria-label={t('composer.removeAttachments')} title={t('composer.removeAttachments')}>
-              <Icon name="close" small />
-            </button>
-          </span>
+          <Show when={names().length > 0}>
+            <span class="chip">
+              <button type="button" onClick={() => (setDraft((d) => ({ ...d, files: [] })), setNames([]))} aria-label={t('composer.removeAttachments')} title={t('composer.removeAttachments')}>
+                <Icon name="close" small />
+              </button>
+            </span>
+          </Show>
         </div>
       </Show>
       <textarea
@@ -276,8 +321,26 @@ export function Composer(props: Props) {
             <Icon name="down" small />
           </label>
         </Show>
-        <Show when={props.busy}>
-          <button type="button" class="send stop" onClick={() => props.onStop()} aria-label={t('composer.stop')}>
+        <Show when={props.keepGoing !== undefined && props.onKeepGoing}>
+          <button
+            type="button"
+            class="chip choose keep"
+            aria-pressed={props.keepGoing}
+            title={t(props.keepGoing ? 'composer.keepGoing.on' : 'composer.keepGoing.line')}
+            onClick={() => props.onKeepGoing!(!props.keepGoing)}
+          >
+            <Icon name="loop" small />
+            <span>{t('composer.keepGoing')}</span>
+          </button>
+        </Show>
+        <Show when={props.busy && stopping()}>
+          <StopAsk helpers={props.helpers ?? 0} onStop={() => {
+            setStopping(false);
+            props.onStop();
+          }} onKeep={() => setStopping(false)} back={() => (stopButton?.isConnected ? stopButton : field)} />
+        </Show>
+        <Show when={props.busy && !stopping()}>
+          <button ref={(el) => (stopButton = el)} type="button" class="send stop" onClick={() => (props.helpers ? setStopping(true) : props.onStop())} aria-label={t('composer.stop')}>
             <svg class="i sm" viewBox="0 0 24 24" aria-hidden="true" style={{ fill: 'currentColor', stroke: 'none' }}>
               <rect width="12" height="12" x="6" y="6" rx="2" />
             </svg>

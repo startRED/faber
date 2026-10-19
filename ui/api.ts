@@ -99,6 +99,44 @@ export interface Message {
   movedFrom?: Vendor;
   /** The next rung up, offered when the turn's own tools show it stopped early. */
   nudge?: { reason: string; vendor: Vendor; model: string; effort: Effort };
+  /** The pull request this reply opened or pushed, followed until its checks pass or it closes. */
+  follow?: Follow;
+  /** A message Faber sent by itself, and why (`wake.keepGoing`, `wake.checksFailed`, `wake.conflict`): drawn as a quiet line, not as the person's words. */
+  wake?: { why: string; pr?: number; checks?: string[] };
+  /** On a reply: "keep going" stopped after it, and why (a `reason.keepGoing.*` key). */
+  halt?: string;
+  /** On the newest reply of a conversation that went on by itself for half an hour or more: what it did while the person was away. */
+  away?: { minutes: number; turns: number; switches: number; answered: number };
+  /** Questions Faber answered with their first choice because nobody answered them while "keep going" was on. */
+  autoAnswers?: { question: string; answer: string }[];
+  /** On a project reply that changed files: Faber's own run of the fast checks once it ended (R146). */
+  checks?: Checks;
+  /** On a reply: when its words, thinking or tools last changed, in milliseconds. "Updated 3 min ago" counts from it. */
+  movedAt?: number;
+  /** On a reply: when the agent said all it will say, in milliseconds. Set while the reply still streams, it is finished for the
+   * person while the CLI closes its turn. */
+  finishedAt?: number;
+}
+export type ChecksState = 'running' | 'passed' | 'failed' | 'needsYou';
+export interface Checks {
+  state: ChecksState;
+  passed: number;
+  /** The checks that failed, each with its first short failures. */
+  failed?: { command: string; lines?: string[] }[];
+}
+export type FollowState = 'pending' | 'failing' | 'conflict' | 'passing' | 'merged' | 'closed' | 'stopped';
+export interface Follow {
+  repo: string;
+  number: number;
+  url: string;
+  state: FollowState;
+  failed?: string[];
+  head?: string;
+  /** The checks failed while the quota was tight: the person was told instead of the agent. */
+  held?: boolean;
+  /** Why following ended early, as an engine key. */
+  problem?: string;
+  since: number;
 }
 export interface QueuedTurn {
   id: string;
@@ -109,6 +147,7 @@ export interface QueuedTurn {
   at: number;
   /** Handed to the running turn and not yet taken in: it can no longer be removed. */
   sending?: boolean;
+  wake?: Message['wake'];
 }
 export interface Conversation {
   id: string;
@@ -117,13 +156,26 @@ export interface Conversation {
   area: Area;
   projectId?: string;
   workingFolder?: string;
+  /** A project conversation's own copy (a git worktree on its own branch), made at its first message. */
+  copy?: WorkCopy;
   sessions: Partial<Record<Vendor, string>>;
   allowAlways?: string[];
   branchOf?: { conversationId: string; messageId: string };
   createdAt: number;
   updatedAt: number;
   queued?: QueuedTurn[];
+  /** "Keep going" is on: Faber sends the next turn by itself. */
+  keepGoing?: { turns: number; failed: number };
+  /** How full its own agent's context is, once the CLI has said so (the topbar's meter). */
+  context?: ContextFill;
+  /** When it was archived: it is off the sidebar and its composer gives way to a line that brings it back. */
+  archivedAt?: number;
   messages: Message[];
+}
+/** The tokens a conversation's own agent holds, and the window they are counted against. */
+export interface ContextFill {
+  used: number;
+  window: number;
 }
 export interface Summary {
   id: string;
@@ -131,45 +183,37 @@ export interface Summary {
   area: Area;
   projectId?: string;
   updatedAt: number;
+  /** "Keep going" is on. */
+  keepGoing?: boolean;
+  archived?: boolean;
+  /** The conversation whose agent started this one, which the sidebar shows it under. */
+  startedBy?: string;
+  /** Its last run ended and nobody has opened it since: the running column's done card and the sidebar's dot. */
+  ended?: Ended;
 }
+/** How a run ended that nobody saw end (engine `Ended`). */
+export interface Ended {
+  at: number;
+  kind: 'done' | 'needsYou' | 'failed';
+  /** From its first turn to its end, in milliseconds. */
+  workMs: number;
+  /** The last line the agent wrote. */
+  line?: string;
+}
+export interface WorkCopy {
+  path: string;
+  branch: string;
+}
+
 export interface Project {
   id: string;
   name: string;
   path: string;
+  /** Each new conversation works in a separate copy (Settings > Projects). The engine always sends it, default filled. */
+  separateCopies?: boolean;
 }
 
-export type GitMode = 'seguro' | 'equilibrado';
-
-export interface Author {
-  name: string;
-  email: string;
-}
-
-export interface Grant {
-  repo: string;
-  mode: GitMode;
-  revision: number;
-  grantedAt: number;
-  revokedAt?: number;
-  author?: Author;
-  selfUpdate: boolean;
-  remote?: string;
-  remoteAccount?: string;
-}
-
-export interface EnrollView {
-  projectId: string;
-  repo: string;
-  base: string;
-  author?: Author;
-  mode: GitMode;
-  revision: number;
-  selfUpdate: boolean;
-  remote?: string;
-  remoteAccount?: string;
-}
-
-/** What a project mission proves its work with (R137): the commands, where they were declared, and whether the owner confirmed them. */
+/** The checks Faber runs on a project's work (R137): the commands, where they were declared, and whether the owner confirmed them. */
 export interface ProofView {
   commands: string[];
   declared: string[];
@@ -289,6 +333,18 @@ export interface RunningItem {
   /** The subagent calls of the reply that seem stuck: each needs the person like a question. */
   stuck?: string[];
   waitUntil?: number;
+  /** A followed pull request whose checks failed while the quota was tight: its number and commit. */
+  held?: [number, string];
+  /** "Keep going" is on: it runs on its own. */
+  keepGoing?: boolean;
+  /** "Keep going" waits to send the next turn, for a reason of its own (a quota wait is `waitUntil`), until `until` (seconds). */
+  keepWait?: { why: 'retry' | 'rest' | 'busy' | 'start'; until: number };
+  /** How far a conversation that goes on by itself has come: turns of work, when it began (ms, 0 unknown), the last line it wrote. */
+  keepProgress?: { turns: number; since: number; last?: string };
+  /** Faber asks git whether the last reply changed files, before its checks would start. */
+  weighing?: boolean;
+  /** The agent finished and only the CLI's turn is closing, with nothing else running: the screen leaves the row out. */
+  settled?: boolean;
 }
 /** The running list in the engine's order, with a revision that grows by one with every list the engine sends. */
 export interface RunningList {
@@ -356,6 +412,8 @@ export type AppEvent =
   | ({ type: 'running' } & RunningList)
   | { type: 'usage'; vendors: VendorUsage[] }
   | { type: 'list' }
+  | { type: 'context'; conversationId: string; context?: ContextFill }
+  | { type: 'halted'; conversationId: string; title: string; why: string; vendor?: Vendor }
   | SetupProgressEvent;
 
 export interface SendRequest {
@@ -374,6 +432,9 @@ export interface Plural {
   other: string;
 }
 /** The words the shell shows by itself. Counts are `{n}` and the conversation is `{title}`; the shell fills them. */
+/** Why "keep going" stops by itself: the last part of the engine's `reason.keepGoing.*` keys. */
+export const STOPS = ['done', 'asked', 'failed', 'cap', 'pace', 'quota', 'billed'] as const;
+
 export interface ShellTexts {
   open: string;
   quit: string;
@@ -381,6 +442,8 @@ export interface ShellTexts {
   needsYou: Plural;
   notify: string;
   notifyMany: string;
+  /** When "keep going" stops by itself, by reason, with `{title}` and `{ai}`. */
+  stopped: Record<string, string>;
 }
 
 /** A recent folder as the engine judged it just now: `reason` is a translation key when it cannot be picked. */
@@ -413,16 +476,23 @@ export const api = {
   routeDraft: (req: { conversationId?: string; area: Area; projectId?: string; choice: Choice }, text: string) =>
     invoke<void>('route_draft', { req, text }),
   interrupt: (id: string) => invoke<void>('interrupt', { id }),
+  keepGoing: (id: string, on: boolean) => invoke<void>('keep_going', { id, on }),
+  /** The person has the conversation open on a visible window: the done card and the dot of its last run go. */
+  seen: (id: string) => invoke<void>('seen', { id }),
+  /** Archives a conversation, or brings an archived one back. */
+  archive: (id: string, on: boolean) => invoke<void>('archive', { id, on }),
   answer: (id: string, turnId: string, requestId: string, allow: boolean, always = false) =>
     invoke<void>('answer', { id, turnId, requestId, allow, always }),
   /** The choices for a question the assistant asked: each question's text to the label picked (several joined by a comma). */
   answerQuestion: (id: string, turnId: string, requestId: string, answers: Record<string, string>) =>
     invoke<void>('answer_question', { id, turnId, requestId, answers }),
   rename: (id: string, title: string) => invoke<void>('rename', { id, title }),
-  remove: (id: string) => invoke<void>('remove', { id }),
+  /** Refused with `error.copy.unsaved` while its copy holds work found nowhere else, unless `discard`. */
+  remove: (id: string, discard = false) => invoke<void>('remove', { id, discard }),
   removeQueued: (id: string, turnId: string) => invoke<void>('remove_queued', { id, turnId }),
   sendQueued: (id: string, turnId: string) => invoke<void>('send_queued', { id, turnId }),
   tellHelper: (id: string, callId: string, text: string) => invoke<void>('tell_helper', { id, callId, text }),
+  unfollowPr: (id: string) => invoke<void>('unfollow_pr', { id }),
   removeProject: (id: string) => invoke<void>('remove_project', { id }),
   showProject: (id: string) => invoke<void>('show_project', { id }),
   addProject: () => invoke<Project | null>('add_project'),
@@ -461,7 +531,6 @@ export const api = {
   setupCheck: (vendor: Vendor) => invoke<CheckResult>('setup_check', { vendor }),
   setupInstall: (vendor: Vendor) => invoke<void>('setup_install', { vendor }),
   setupSignIn: (vendor: Vendor) => invoke<void>('setup_sign_in', { vendor }),
-  projectEnroll: (projectId: string) => invoke<EnrollView>('project_enroll', { projectId }),
   updateStatus: () => invoke<UpdateStatus>('update_status'),
   /** The first frame is painted: the shell may show the window (it stays hidden until then). */
   screenReady: () => invoke<void>('screen_ready'),
@@ -474,8 +543,7 @@ export const api = {
   onUpdate: (listener: (status: UpdateStatus) => void) => listen<UpdateStatus>('faber:update', (e) => listener(e.payload)),
   notesSeen: () => invoke<number | null>('notes_seen').then((id) => id ?? undefined),
   saveNotesSeen: (id: number) => invoke<void>('save_notes_seen', { id }),
-  projectGrant: (projectId: string, mode: GitMode, selfUpdate: boolean, revision: number) =>
-    invoke<Grant>('project_grant', { projectId, mode, selfUpdate, revision }),
+  projectCopies: (projectId: string, on: boolean) => invoke<void>('project_copies', { projectId, on }),
   projectProof: (projectId: string) => invoke<ProofView>('project_proof', { projectId }),
   projectProofConfirm: (projectId: string, commands: string[], setup: string[], declared: string[]) =>
     invoke<ProofView>('project_proof_confirm', { projectId, commands, setup, declared }),

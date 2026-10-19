@@ -6,7 +6,7 @@ import { es } from '../../ui/locales/es.ts';
 import { fr } from '../../ui/locales/fr.ts';
 import { ptBR } from '../../ui/locales/pt-BR.ts';
 import { Setup } from '../../ui/Setup.tsx';
-import { continuePatch, firstRunStep, lookDue, setupCard, setupPatch, shouldOpenSetup, sizeOf, toggleSubscription, withSize, type Subscription } from '../../ui/setup.ts';
+import { continuePatch, firstRunStep, lookDue, setupCard, setupPatch, shouldOpenSetup, toggleSubscription, type Subscription } from '../../ui/setup.ts';
 import { check, deepEqual, doesNotMatch, equal, notEqual, ok } from './check.ts';
 
 const languages: Record<string, Record<string, string | { one: string; other: string }>> = { en, 'pt-BR': ptBR, es, fr, de };
@@ -135,20 +135,6 @@ check('setup first run: step 2 is due exactly when the saved appearance has no b
   equal(firstRunStep({}, saved), 'look');
   equal(firstRunStep({ setup: 'done', appearance: { base: 'sala' } }, saved), undefined);
   equal(firstRunStep({ appearance: { base: 'sala' } }, saved), undefined);
-});
-
-check('setup first run: normal text size clears the field, and the other two sizes are 13 and 16', () => {
-  const sized = withSize({ base: 'sala', density: 0.8 }, 'large');
-  deepEqual(sized, { base: 'sala', density: 0.8, textSize: 16 });
-  deepEqual(withSize(sized, 'small'), { base: 'sala', density: 0.8, textSize: 13 });
-  const normal = withSize(sized, 'normal');
-  deepEqual(normal, { base: 'sala', density: 0.8 });
-  equal('textSize' in normal, false, 'the field is gone, not undefined');
-  deepEqual(sized, { base: 'sala', density: 0.8, textSize: 16 }, 'the appearance it was given is not changed');
-  equal(sizeOf({ base: 'sala' }), 'normal');
-  equal(sizeOf({ base: 'sala', textSize: 13 }), 'small');
-  equal(sizeOf({ base: 'sala', textSize: 16 }), 'large');
-  equal(sizeOf({ base: 'sala', textSize: 14.5 }), undefined, 'a size set in Settings is none of the three');
 });
 
 check('setup first run: the optional name is saved only when something was typed', () => {

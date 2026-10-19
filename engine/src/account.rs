@@ -194,31 +194,81 @@ fn usage_events(report: &serde_json::Value, terminal: &serde_json::Value) -> Opt
     Some(events)
 }
 
+/// The system prompt the `/usage` session has always started with. It never reaches a model (the command is answered locally), and
+/// stays only because the session's arguments are pinned by a test.
+const LIMITS_INSTRUCTIONS: &str = concat!(
+    "Return one versioned project JSON envelope per turn. ",
+    "Request scoped reads, plan/amend, named proofs or decisions. ",
+    "Never execute tools or change source. ",
+    "The engine grants authority. ",
+    "The envelope is one bare JSON object, with no prose and no code fence, holding only the keys schema (2), task, attempt, base, contract (the digest string), lease, action, ping, requires, checks, quotes and note; any other key is refused. ",
+    "Ping is a string, never a number: Order, Found, Blocked, NeedEyes, DoneReady or Disagree; a complete action always has summary and next and carries DoneReady, and any other action leaves ping out unless it signals. ",
+    "The action is an object with exactly one key, one of read, plan, amend, patch, proof, decision or complete, whose value holds that action's fields; requires, checks and quotes are arrays of id strings from the brief, empty if unused. ",
+    "Finish the brief's check ids, keeping their states in a complete action. ",
+    "Use ids verbatim; do not restate requirements. ",
+    "Keep note at most 60 words and put assumptions and unconfirmed checks there. ",
+    "Cite engine receipt ids; a claim is not proof. ",
+    "Return DoneReady only with evidence, or Blocked with the missing input. ",
+    "Never offer to continue instead of finishing. ",
+    "Never spawn peers, enlarge grants, read credentials, install tools or open windows. ",
+    "Role restrictions remain binding; references grant no native authority.",
+);
+
+/// What the `/usage` session starts with: no tools, no MCP servers, no settings files and no hooks, the credential folders
+/// denied, and a budget of one tiny turn in case the CLI ever sends the command to a model. `env` is read for the sign-in
+/// folders a person moved (see `claude::tool_deny`).
+fn limits_args(env: &dyn Fn(&str) -> Option<String>) -> Vec<String> {
+    let settings = serde_json::json!({"disableAllHooks":true,"permissions":{"deny":crate::claude::tool_deny(env)},"env":{
+        "CLAUDE_CODE_MAX_OUTPUT_TOKENS":"8000", "DISABLE_PROMPT_CACHING":"1", "DISABLE_COMPACT":"1", "CLAUDE_CODE_MAX_RETRIES":"0",
+        "CLAUDE_CODE_NONSTREAMING_TIMEOUT_RETRIES":"0", "CLAUDE_CODE_DISABLE_NONSTREAMING_FALLBACK":"1"
+    }})
+    .to_string();
+    [
+        "-p",
+        "--input-format",
+        "stream-json",
+        "--output-format",
+        "stream-json",
+        "--verbose",
+        "--include-partial-messages",
+        "--exclude-dynamic-system-prompt-sections",
+        "--permission-prompt-tool",
+        "stdio",
+        "--system-prompt",
+        LIMITS_INSTRUCTIONS,
+        "--tools",
+        "",
+        "--strict-mcp-config",
+        "--mcp-config",
+        "{\"mcpServers\":{}}",
+        "--safe-mode",
+        "--setting-sources",
+        "",
+        "--settings",
+        &settings,
+        "--model",
+        "claude-haiku-5-5",
+        "--effort",
+        "low",
+        "--restricted",
+        "--max-budget-usd",
+        "0.005",
+        "--max-turns",
+        "1",
+        "--permission-mode",
+        "dontAsk",
+        "--disallowedTools",
+        "Bash,Write,Edit,NotebookEdit,Read,Glob,Grep,Agent,Task,WebSearch,WebFetch,Bash(git push *),Bash(git reset *),Bash(git update-ref *)",
+        "--no-session-persistence",
+    ]
+    .map(String::from)
+    .to_vec()
+}
+
 /// Stock `/usage` is a local command; its terminal receipt must prove that no model loop ran.
 pub(crate) async fn claude_limits(cli: &Cli, spawn: &Spawner, cwd: &Path, timeout: Duration) -> Vec<crate::events::EngineEvent> {
-    use crate::{
-        claude::{ClaudeLaunch, project_claude_args},
-        model::Area,
-        project::Role,
-    };
     use tokio::io::{AsyncBufReadExt, BufReader};
-    let launch = ClaudeLaunch {
-        helper: Default::default(),
-        browse: false,
-        area: Area::Project,
-        model: Some("claude-haiku-5-5".into()),
-        effort: Some("low".into()),
-        resume: None,
-        user_hooks: false,
-        permissions: crate::model::Permissions::Isolated,
-        instructions: None,
-        user_name: None,
-        flags: Default::default(),
-        tuning: Default::default(),
-    };
-    let Ok(mut args) = project_claude_args(&launch, Role::Lead) else { return vec![] };
-    args.retain(|arg| arg != "--disable-slash-commands");
-    args.push("--no-session-persistence".into());
+    let args = limits_args(&|name| std::env::var(name).ok());
     let args: Vec<_> = cli.prefix.iter().cloned().chain(args).collect();
     let Ok(mut p) = spawn(&cli.command, &args, cwd) else { return vec![] };
     let _tail = crate::proc::stderr_tail(p.stderr.take());
@@ -345,6 +395,53 @@ fn verdict(vendor: Vendor, output: &str, code: Option<i32>) -> AccountStatus {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The arguments of the `/usage` session are what they were when the project roles built them: this list was captured from
+    /// that code before it was retired.
+    #[test]
+    fn the_usage_session_starts_with_the_arguments_it_always_had() {
+        let args = limits_args(&|_| None);
+        const SETTINGS: &str = "{\"disableAllHooks\":true,\"env\":{\"CLAUDE_CODE_DISABLE_NONSTREAMING_FALLBACK\":\"1\",\"CLAUDE_CODE_MAX_OUTPUT_TOKENS\":\"8000\",\"CLAUDE_CODE_MAX_RETRIES\":\"0\",\"CLAUDE_CODE_NONSTREAMING_TIMEOUT_RETRIES\":\"0\",\"DISABLE_COMPACT\":\"1\",\"DISABLE_PROMPT_CACHING\":\"1\"},\"permissions\":{\"deny\":[\"Edit(//**/.git/**)\",\"Read(~/.claude/**)\",\"Edit(~/.claude/**)\",\"Read(~/.codex/**)\",\"Edit(~/.codex/**)\",\"Read(~/.gemini/**)\",\"Edit(~/.gemini/**)\",\"Read(~/.ssh/**)\",\"Edit(~/.ssh/**)\",\"Read(~/.aws/**)\",\"Edit(~/.aws/**)\",\"Read(~/.docker/**)\",\"Edit(~/.docker/**)\",\"Read(~/.azure/**)\",\"Edit(~/.azure/**)\",\"Read(~/.kube/**)\",\"Edit(~/.kube/**)\",\"Read(~/.config/gh/**)\",\"Edit(~/.config/gh/**)\",\"Read(~/AppData/Roaming/GitHub CLI/**)\",\"Edit(~/AppData/Roaming/GitHub CLI/**)\",\"Read(~/.claude.json*)\",\"Edit(~/.claude.json*)\",\"Read(~/.git-credentials)\",\"Edit(~/.git-credentials)\",\"Read(~/.npmrc)\",\"Edit(~/.npmrc)\",\"Read(//**/*updater.key*)\",\"Edit(//**/*updater.key*)\"]}}";
+        let expected: Vec<&str> = vec![
+            "-p",
+            "--input-format",
+            "stream-json",
+            "--output-format",
+            "stream-json",
+            "--verbose",
+            "--include-partial-messages",
+            "--exclude-dynamic-system-prompt-sections",
+            "--permission-prompt-tool",
+            "stdio",
+            "--system-prompt",
+            "Return one versioned project JSON envelope per turn. Request scoped reads, plan/amend, named proofs or decisions. Never execute tools or change source. The engine grants authority. The envelope is one bare JSON object, with no prose and no code fence, holding only the keys schema (2), task, attempt, base, contract (the digest string), lease, action, ping, requires, checks, quotes and note; any other key is refused. Ping is a string, never a number: Order, Found, Blocked, NeedEyes, DoneReady or Disagree; a complete action always has summary and next and carries DoneReady, and any other action leaves ping out unless it signals. The action is an object with exactly one key, one of read, plan, amend, patch, proof, decision or complete, whose value holds that action's fields; requires, checks and quotes are arrays of id strings from the brief, empty if unused. Finish the brief's check ids, keeping their states in a complete action. Use ids verbatim; do not restate requirements. Keep note at most 60 words and put assumptions and unconfirmed checks there. Cite engine receipt ids; a claim is not proof. Return DoneReady only with evidence, or Blocked with the missing input. Never offer to continue instead of finishing. Never spawn peers, enlarge grants, read credentials, install tools or open windows. Role restrictions remain binding; references grant no native authority.",
+            "--tools",
+            "",
+            "--strict-mcp-config",
+            "--mcp-config",
+            "{\"mcpServers\":{}}",
+            "--safe-mode",
+            "--setting-sources",
+            "",
+            "--settings",
+            SETTINGS,
+            "--model",
+            "claude-haiku-5-5",
+            "--effort",
+            "low",
+            "--restricted",
+            "--max-budget-usd",
+            "0.005",
+            "--max-turns",
+            "1",
+            "--permission-mode",
+            "dontAsk",
+            "--disallowedTools",
+            "Bash,Write,Edit,NotebookEdit,Read,Glob,Grep,Agent,Task,WebSearch,WebFetch,Bash(git push *),Bash(git reset *),Bash(git update-ref *)",
+            "--no-session-persistence",
+        ];
+        assert_eq!(args, expected);
+    }
 
     #[test]
     fn exit_codes_decide_when_the_output_says_nothing() {

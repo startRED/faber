@@ -4,7 +4,7 @@ use crate::support;
 
 use faber_engine::cli::Cli;
 use faber_engine::engine::Ask;
-use faber_engine::model::{Area, Permissions, RunState, RunningItem, Settings, Status, Vendor};
+use faber_engine::model::{Area, EndKind, Permissions, RunState, RunningItem, Settings, Status, Vendor};
 use faber_engine::proc::Spawner;
 use faber_engine::router::Choice;
 use faber_engine::{AppEvent, Engine, EngineOptions, SendRequest};
@@ -181,9 +181,42 @@ async fn an_answer_emits_only_the_lists_that_differ_from_the_one_before() {
     // Every message event re-reads the list, and the list is told only when it differs.
     assert!(messages >= 2, "the question and the answer both reached the screen");
     assert_consecutive(&lists);
-    // The turn began, the CLI named its model, the turn ended: three lists at most.
-    assert!(lists.len() <= 3, "{} lists: {lists:?}", lists.len());
+    // The turn began, the CLI named its model, the agent finished, the turn ended: four lists at most.
+    assert!(lists.len() <= 4, "{} lists: {lists:?}", lists.len());
     assert!(lists.windows(2).all(|w| w[0].1 != w[1].1), "two equal lists in a row");
+}
+
+#[tokio::test]
+async fn a_reply_reads_as_finished_when_the_agent_stops_writing_not_when_the_cli_closes_its_turn() {
+    let dir = tempfile::tempdir().unwrap();
+    // The recording holds back the CLI's `result` for 1.5 s (a loaded machine must not swallow the gap) after the last message ended with `end_turn`, as a Stop hook does.
+    let (engine, mut rx) = engine(dir.path(), &[Vendor::Claude], fake(fixture("claude", "chat-settled")).spawn, None);
+    let id = engine.send(request(Area::Chat, None, SKY, "claude")).unwrap();
+    let mut finished_at = None;
+    let mut settled_row = None;
+    let mut ended = false;
+    while !ended {
+        match tokio::time::timeout(WAIT, rx.recv()).await.expect("the answer never ended").expect("engine gone") {
+            AppEvent::Message { message, .. } if message.role == faber_engine::model::Role::Assistant => {
+                if message.status == Some(Status::Streaming) && message.finished_at.is_some() && finished_at.is_none() {
+                    finished_at = Some(std::time::Instant::now());
+                }
+                ended = message.status == Some(Status::Done);
+                if ended {
+                    assert!(message.finished_at.is_some() && message.moved_at.is_some());
+                }
+            }
+            AppEvent::Running { items, .. } if items.iter().any(|i| i.settled) && settled_row.is_none() => {
+                settled_row = Some(std::time::Instant::now());
+            }
+            _ => {}
+        }
+    }
+    engine.shutdown();
+    let _ = id;
+    let (finished, row) = (finished_at.expect("the reply never read as finished while streaming"), settled_row.expect("no settled row"));
+    assert!(finished.elapsed() >= Duration::from_millis(250), "it read as finished long before the result: {:?}", finished.elapsed());
+    assert!(row.elapsed() >= Duration::from_millis(250), "its row was left out long before the result: {:?}", row.elapsed());
 }
 
 #[tokio::test]
@@ -482,6 +515,40 @@ async fn an_answer_the_cli_cannot_take_is_undelivered_and_the_same_card_can_be_a
     engine.shutdown();
 }
 
+// Task 016: a run that ends leaves one mark on its conversation, the done card's and the sidebar dot's, until the person sees it.
+#[tokio::test]
+async fn a_run_that_ends_is_marked_until_the_person_sees_it() {
+    let dir = tempfile::tempdir().unwrap();
+    let (engine, mut rx) = engine(dir.path(), &[Vendor::Claude], fake(fixture("claude", "chat")).spawn, None);
+    let id = engine.send(request(Area::Chat, None, SKY, "claude")).unwrap();
+    lists_until(&mut rx, WAIT, |rows| !rows.is_empty()).await;
+    lists_until(&mut rx, WAIT, |rows| rows.is_empty()).await;
+    let summary = engine.state().conversations.into_iter().find(|c| c.id == id).unwrap();
+    let ended = summary.ended.expect("the end is marked");
+    assert_eq!(ended.kind, EndKind::Done);
+    assert!(ended.line.is_some(), "the card says the last line it wrote");
+    engine.seen(&id).unwrap();
+    assert_eq!(engine.state().conversations.into_iter().find(|c| c.id == id).unwrap().ended, None, "seen: the card and the dot go");
+    assert_eq!(engine.open(&id).unwrap().ended, None, "and it stays seen");
+    engine.shutdown();
+}
+
+#[tokio::test]
+async fn a_run_the_person_stopped_leaves_no_mark() {
+    let dir = tempfile::tempdir().unwrap();
+    let (engine, mut rx) = engine(dir.path(), &[Vendor::Claude], fake(fixture("claude", "interrupt")).spawn, None);
+    let id = engine.send(request(Area::Chat, None, "Write a 600-word essay about the history of bread.", "claude")).unwrap();
+    lists_until(&mut rx, WAIT, |rows| !rows.is_empty()).await;
+    engine.interrupt(&id);
+    lists_until(&mut rx, WAIT, |rows| rows.is_empty()).await;
+    assert_eq!(
+        engine.state().conversations.into_iter().find(|c| c.id == id).unwrap().ended,
+        None,
+        "the person stopped it: they were there"
+    );
+    engine.shutdown();
+}
+
 #[tokio::test]
 async fn interrupting_a_running_conversation_drops_its_row() {
     let dir = tempfile::tempdir().unwrap();
@@ -507,19 +574,6 @@ async fn the_engine_is_working_from_the_first_row_until_the_last_one_leaves() {
     engine.interrupt(&id);
     lists_until(&mut rx, WAIT, |rows| rows.is_empty()).await;
     assert!(!engine.is_working());
-    engine.shutdown();
-}
-
-/// An update waits for `is_working`; a mission's roles and proofs run inside its drive, with no row in the running list.
-#[tokio::test]
-async fn a_driven_mission_counts_as_work_until_its_drive_ends() {
-    let dir = tempfile::tempdir().unwrap();
-    let (engine, _rx) = engine(dir.path(), &[], fake(vec![]).spawn, None);
-    let drive = engine.drive("m1", "p1").expect("the first drive starts");
-    assert!(engine.is_working() && engine.is_driving("m1"));
-    assert!(engine.drive("m1", "p1").is_none(), "a mission never has two drivers");
-    drop(drive);
-    assert!(!engine.is_working() && !engine.is_driving("m1"));
     engine.shutdown();
 }
 
@@ -582,34 +636,23 @@ async fn a_driver_panic_removes_only_its_run_from_overlapping_chat_and_project_w
     }
 }
 
-/// A project with one mission record in the given state, under the folder and the data directory the engine uses.
-fn mission_in(engine: &Engine, data: &Path, repo: &Path, state: faber_engine::project::MissionState) -> String {
-    use faber_engine::project::{Mission, run::Runner, store::Journal};
-    let project = engine.add_project(&repo.to_string_lossy()).unwrap();
-    let journal = Journal::open(repo, data, "m1").unwrap();
-    let mut runner = Runner::create(&journal, Mission::new("m1", &project.id, "repo", "Fix", &"1".repeat(40), 3, 1)).unwrap();
-    runner.mission.state = state;
-    runner.save(&journal).unwrap();
-    project.id
-}
-
+/// Older versions kept missions in the project (`.faber/missions`) and in the data folder (`missions`). Nothing reads them any
+/// more: a project is removed whatever they hold, and neither is touched.
 #[tokio::test]
-async fn a_project_with_a_planning_or_running_mission_cannot_be_removed_until_it_stops() {
-    use faber_engine::project::MissionState::{Done, Paused, Planning, Running};
-    for (state, removable) in [(Planning, false), (Running, false), (Paused, true), (Done, true)] {
-        let (data, repo) = (tempfile::tempdir().unwrap(), tempfile::tempdir().unwrap());
-        let (engine, _rx) = engine(data.path(), &[Vendor::Codex], fake(fixture("codex", "chat")).spawn, None);
-        let id = mission_in(&engine, data.path(), repo.path(), state);
-        let result = engine.remove_project(&id);
-        if removable {
-            assert_eq!(result, Ok(()), "{state:?}");
-            assert!(engine.state().projects.is_empty(), "{state:?}");
-        } else {
-            assert_eq!(result, Err("error.project.busy".to_string()), "{state:?}");
-            assert_eq!(engine.state().projects.len(), 1, "{state:?} stays in the list");
-        }
-        engine.shutdown();
-    }
+async fn what_older_versions_left_for_missions_never_keeps_a_project_from_being_removed() {
+    let (data, repo) = (tempfile::tempdir().unwrap(), tempfile::tempdir().unwrap());
+    let (engine, _rx) = engine(data.path(), &[Vendor::Codex], fake(fixture("codex", "chat")).spawn, None);
+    let project = engine.add_project(&repo.path().to_string_lossy()).unwrap();
+    let journal = repo.path().join(".faber").join("missions").join("m1");
+    std::fs::create_dir_all(&journal).unwrap();
+    std::fs::write(journal.join("mission.json"), r#"{"state":"running"}"#).unwrap();
+    let checkpoint = data.path().join("missions").join("m1");
+    std::fs::create_dir_all(&checkpoint).unwrap();
+    std::fs::write(checkpoint.join("run.json"), "{ not json").unwrap();
+    assert_eq!(engine.remove_project(&project.id), Ok(()));
+    assert!(engine.state().projects.is_empty());
+    assert!(journal.join("mission.json").is_file() && checkpoint.join("run.json").is_file(), "older records are left as they were");
+    engine.shutdown();
 }
 
 #[tokio::test]
@@ -631,32 +674,5 @@ async fn a_renamed_conversation_never_keeps_control_or_invisible_characters() {
     let family = "\u{1f468}\u{200d}\u{1f469}\u{200d}\u{1f467}";
     engine.rename(&id, family);
     assert_eq!(engine.open(&id).unwrap().title, family);
-    engine.shutdown();
-}
-
-#[tokio::test]
-async fn a_mission_record_that_cannot_be_read_keeps_its_project_from_being_removed() {
-    use faber_engine::project::MissionState::Paused;
-    let (data, repo) = (tempfile::tempdir().unwrap(), tempfile::tempdir().unwrap());
-    let (engine, _rx) = engine(data.path(), &[Vendor::Codex], fake(fixture("codex", "chat")).spawn, None);
-    let id = mission_in(&engine, data.path(), repo.path(), Paused);
-    // The checkpoint is damaged: nothing says whether the mission works, so the project stays.
-    std::fs::write(data.path().join("missions").join("m1").join("run.json"), "{ not json").unwrap();
-    assert_eq!(engine.remove_project(&id), Err("error.project.busy".to_string()));
-    assert_eq!(engine.state().projects.len(), 1);
-    engine.shutdown();
-}
-
-#[tokio::test]
-async fn a_missions_folder_that_cannot_be_listed_keeps_the_project_but_a_missing_one_does_not() {
-    let (data, repo) = (tempfile::tempdir().unwrap(), tempfile::tempdir().unwrap());
-    let (engine, _rx) = engine(data.path(), &[Vendor::Codex], fake(fixture("codex", "chat")).spawn, None);
-    let project = engine.add_project(&repo.path().to_string_lossy()).unwrap();
-    // `.faber/missions` is a file, so it cannot be listed: that is not "no missions".
-    std::fs::create_dir_all(repo.path().join(".faber")).unwrap();
-    std::fs::write(repo.path().join(".faber").join("missions"), "x").unwrap();
-    assert_eq!(engine.remove_project(&project.id), Err("error.project.busy".to_string()));
-    std::fs::remove_file(repo.path().join(".faber").join("missions")).unwrap();
-    assert_eq!(engine.remove_project(&project.id), Ok(()));
     engine.shutdown();
 }

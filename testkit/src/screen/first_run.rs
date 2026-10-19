@@ -216,8 +216,8 @@ fn step_two(ctx: &mut Ctx) -> Result {
     page.press("Escape")?;
     page.wait_visible(&heading)?;
     // A choice shows on the whole screen at once, before anything is saved, and the text size outlives a change of theme.
-    let large = page.named("button", "first.size.large")?;
-    page.click(&large)?;
+    // The same slider as Settings > Appearance: moved to 16 px, as a person drags it.
+    page.eval("(() => { const r = document.getElementById('fr-size'); r.value = '16'; r.dispatchEvent(new Event('input', { bubbles: true })); })()")?;
     page.wait_for("the large text", "parseFloat(getComputedStyle(document.body).fontSize) === 16")?;
     let ground = root_var(page, "--bg")?;
     page.click(&tcards[1])?;

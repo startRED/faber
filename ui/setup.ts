@@ -75,24 +75,6 @@ export function setupPatch(result: 'done' | 'skipped'): Settings {
   return { setup: result };
 }
 
-export type SizeChoice = 'small' | 'normal' | 'large';
-/** "Normal" is the theme's own size, so it is no saved value at all. */
-const SIZES: Record<SizeChoice, number | undefined> = { small: 13, normal: undefined, large: 16 };
-
-/** The appearance with a text size chosen; normal clears the field. */
-export function withSize(appearance: Appearance, size: SizeChoice): Appearance {
-  const next = { ...appearance };
-  const px = SIZES[size];
-  if (px === undefined) delete next.textSize;
-  else next.textSize = px;
-  return next;
-}
-
-/** Which "Aa" is on: none when the size was set to something else, such as 14.5 in Settings. */
-export function sizeOf(appearance: Appearance): SizeChoice | undefined {
-  return (Object.keys(SIZES) as SizeChoice[]).find((k) => SIZES[k] === appearance.textSize);
-}
-
 /** What Continue on step 2 saves, in one call. `tutorialDone` is left out when it is already true, so an install that
  * finished the tutorial is not taught again; no answer to the question leaves `experience` out, and counts as a beginner.
  * `name` is how the person asked to be called; empty leaves it out. */

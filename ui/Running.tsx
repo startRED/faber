@@ -1,8 +1,10 @@
 import { createSignal, For, Show } from 'solid-js';
-import type { Project, RunningItem } from './api.ts';
+import type { Project, RunningItem, Summary } from './api.ts';
 import { AgentChat } from './AgentChat.tsx';
 import { Asks, Parkeds } from './Ask.tsx';
 import { Icon, VendorMark } from './Glyphs.tsx';
+import { Grip } from './Grip.tsx';
+import type { Limits } from './layout.ts';
 import { everyWhileShown } from './idle.ts';
 import { t } from './i18n.ts';
 import { Peek } from './Mark.tsx';
@@ -17,8 +19,13 @@ import type { AgentStep } from './worklog.ts';
  * that waits is answered here, in place; a click on a row opens its conversation. */
 export function Running(props: {
   items: RunningItem[];
+  /** Runs that ended while nobody looked (`doneCards`): a calm card each, until opened or dismissed. */
+  done?: Summary[];
   projects: Project[];
   onOpen: (item: RunningItem) => void;
+  /** A done card's click opens its conversation, which clears it; its × only clears it. */
+  onOpenDone?: (c: Summary) => void;
+  onDismiss?: (c: Summary) => void;
   onClose: () => void;
   /** Opened by the user over the stage: it is a modal dialog. Docked, or opened by itself, it is not. */
   modal: boolean;
@@ -27,22 +34,52 @@ export function Running(props: {
   /** A page of Faber's browser the person opened from a reply, shown the same way. */
   site?: OpenSite;
   onBack?: () => void;
+  /** The open subagent fills the stage as a full thread (the column sits over the work area), and the control in its head that swaps the two. */
+  wide?: boolean;
+  onWide?: () => void;
   /** "Tell it…" from the open subagent: the conversation's box, reached through the column. */
   onTell?: (text: string) => void;
+  /** The column's width and the limits of its left edge, which the person drags: omitted, the column has no grip. */
+  resize?: { value: number; limits: Limits; fallback: number; onChange: (px: number) => void };
   ref: (el: HTMLElement) => void;
 }) {
   // The times move while the column is open and stop with it.
   const [now, setNow] = createSignal(Date.now());
   everyWhileShown(15_000, () => setNow(Date.now()));
-  const blocks = () => blocksOf(props.items);
+  const blocks = () => blocksOf(props.items, props.done);
+  const rows = () => props.items.length + (props.done?.length ?? 0);
+  const ended = (c: Summary) => c.ended!;
+  const endWords = (c: Summary) => (ended(c).kind === 'done' ? t('run.done') : ended(c).kind === 'failed' ? t('run.doneFailed') : t('run.needsYou'));
+  const worked = (c: Summary) => {
+    const e = elapsed(0, ended(c).workMs);
+    return t('run.worked', { time: t(e.key, { n: e.n }) });
+  };
   const nameOf = (key: string) => (key === 'chat' ? t('area.chat') : (props.projects.find((p) => p.id === key)?.name ?? t('area.projects')));
-  const words = (item: RunningItem) => (item.waitUntil ? t('run.waiting', { when: untilReset(item.waitUntil) }) : item.state === 'needsYou' ? t('run.needsYou') : item.vendor ? t('run.working') : t('run.routing'));
+  const words = (item: RunningItem) =>
+    item.waitUntil
+      ? t('run.waiting', { when: untilReset(item.waitUntil) })
+      : item.state === 'needsYou'
+        ? t('run.needsYou')
+        : item.keepWait
+          ? t(`run.kg.wait.${item.keepWait.why}`)
+          : item.keepGoing
+            ? t('run.keepGoing')
+            : item.vendor
+              ? t('run.working')
+              : t('run.routing');
   const since = (item: RunningItem) => {
     const e = elapsed(item.since, now());
     return t(e.key, { n: e.n });
   };
+  // A conversation that goes on by itself: how far it has come, so a person who comes back sees it is still getting somewhere.
+  const progress = (p: NonNullable<RunningItem['keepProgress']>) => {
+    const turns = t('run.kg.turns', { n: p.turns });
+    if (!p.since) return turns;
+    const e = elapsed(p.since, now());
+    return `${turns} · ${t('run.kg.since', { time: t(e.key, { n: e.n }) })}`;
+  };
   return (
-    <aside id="running" class="runcol" data-surface="running" aria-labelledby="running-title" role={props.modal ? 'dialog' : undefined} aria-modal={props.modal ? 'true' : undefined} ref={props.ref}>
+    <aside id="running" class="runcol" classList={{ wide: props.wide }} data-surface="running" aria-labelledby="running-title" role={props.modal ? 'dialog' : undefined} aria-modal={props.modal ? 'true' : undefined} ref={props.ref}>
       <Show
         when={props.agent}
         fallback={
@@ -54,11 +91,11 @@ export function Running(props: {
               <h2 id="running-title" class="display">
                 {t('run.title')}
               </h2>
-              <span class="n num">{props.items.length}</span>
+              <span class="n num">{rows()}</span>
             </div>
             <div class="rc-body" ref={animateList}>
               <Show
-                when={props.items.length > 0}
+                when={rows() > 0}
                 fallback={
                   <div class="rc-empty">
                     <Peek />
@@ -101,12 +138,41 @@ export function Running(props: {
                               <button class="name" onClick={() => props.onOpen(item)}>
                                 {item.title || t('run.untitled')}
                               </button>
+                              <Show when={item.keepProgress}>
+                                {(p) => (
+                                  <p class="run-kg">
+                                    <span class="num">{progress(p())}</span>
+                                    <Show when={p().last}>{(last) => <span class="last" title={last()}>{last()}</span>}</Show>
+                                  </p>
+                                )}
+                              </Show>
                               <Show when={item.permissions.length > 0}>
                                 <Asks conversationId={item.conversationId} turnId={item.turnId} permissions={item.permissions} />
                               </Show>
                               <Show when={item.parked?.length || item.parkedMore}>
                                 <Parkeds parked={item.parked ?? []} more={item.parkedMore} />
                               </Show>
+                              <Show when={item.held}>{(held) => <p class="run-held">{t('run.held', { pr: `#${held()[0]}` })}</p>}</Show>
+                            </li>
+                          )}
+                        </For>
+                        <For each={block.done}>
+                          {(c) => (
+                            <li class="ri done" classList={{ need: ended(c).kind !== 'done' }} ref={animateList}>
+                              <div class="rhead">
+                                <span class="vm end">
+                                  <Icon name={ended(c).kind === 'done' ? 'check' : 'ask'} small />
+                                  <span class="verb">{endWords(c)}</span>
+                                </span>
+                                <span class="time num">{worked(c)}</span>
+                                <button class="iconbtn dismiss" aria-label={t('run.dismiss', { title: c.title || t('run.untitled') })} title={t('run.dismiss', { title: c.title || t('run.untitled') })} onClick={() => props.onDismiss?.(c)}>
+                                  <Icon name="close" small />
+                                </button>
+                              </div>
+                              <button class="name" onClick={() => props.onOpenDone?.(c)}>
+                                {c.title || t('run.untitled')}
+                              </button>
+                              <Show when={ended(c).line}>{(line) => <p class="run-kg"><span class="last" title={line()}>{line()}</span></p>}</Show>
                             </li>
                           )}
                         </For>
@@ -121,8 +187,9 @@ export function Running(props: {
           </Show>
         }
       >
-        {(agent) => <AgentChat step={agent().step} streaming={agent().streaming} helpable={agent().helpable} onBack={() => props.onBack?.()} onTell={(text) => props.onTell?.(text)} onClose={props.onClose} />}
+        {(agent) => <AgentChat step={agent().step} streaming={agent().streaming} helpable={agent().helpable} onBack={() => props.onBack?.()} onTell={(text) => props.onTell?.(text)} onClose={props.onClose} wide={props.wide} onWide={props.onWide} />}
       </Show>
+      <Show when={props.resize}>{(r) => <Grip edge="run" label={t('run.resize')} value={r().value} limits={r().limits} fallback={r().fallback} onChange={r().onChange} />}</Show>
     </aside>
   );
 }

@@ -45,7 +45,9 @@ only the jobs a change needs (R163). A first job reads the changed files and pic
 and the shell need only the `rust` suite, a manifest, the runner, CI or a file no rule knows needs every suite, and any
 file that is not words runs the lints. A push is compared with the commit before it, and a queue commit with
 `phase-1-base`, where it lands; either may skip a suite only when the commit it builds on is green, and anything the job
-cannot tell runs everything (R165). Every suite still runs once a day on `main`, and on a commit before it becomes
+cannot tell runs everything (R165). A queue commit whose very tree carries the PC's green `faber/verify` leaves out
+the suites it covers, which `land.mjs` ran on this PC before queueing ([workflow](workflow.md#merge-on-green), R190 V2).
+Every suite still runs once a day on `main`, and on a commit before it becomes
 stable (`promote-stable.yml` starts the run and waits for it). The lints and the `rust` suite run on Windows and on macOS
 (macOS adds the `ui` suite to its lints). One Windows job builds the test app once (`cargo t --build-only`, the fake
 CLI and the cache example at the same time in Cargo's own folder) and hands its programs (`built_programs` in
@@ -65,9 +67,6 @@ seconds of each scenario. A `costs` job reads them from the logs of the newest g
 hands every part the same table (`--costs`), so the dealing never ages; without those logs, and on a person's PC, the copy
 in `testkit/screen-costs.json` counts, and a scenario missing from it counts as 5 s. CI keeps the Windows screenshots as artifacts.
 Anything outside the page (tray, notifications, installer, updates) is checked through the operating system's accessibility layer and file versions.
-The update scenario (T13 4) runs the update flow's clock five times faster from one anchor all its processes share
-(`FABER_TEST_CLOCK`, read only by the test build; a release build with the test hooks does not compile), so it proves
-the whole 300-second probation and its 30-second health window in about 100 s instead of 335 (R163).
 
 Test launches also pass the browser engine switches that turn off crash reports and SmartScreen address lookups, and the
 sandbox removes every `WEBVIEW2_*` override from the environment. That limits what a test sends; it is not a firewall.

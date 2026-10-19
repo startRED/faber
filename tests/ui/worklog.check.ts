@@ -14,6 +14,16 @@ check('worklog: every Claude Code tool reads as what it does, in words', () => {
   // A helper started by a helper shows as a step inside the first one's row (R161), named by the words it was given.
   deepEqual(toolRow({ id: '5', name: 'Agent', input: { description: 'reader-a', prompt: 'Read a.txt' }, parent: 'x' }), { label: t('tool.agent'), detail: 'reader-a' });
   equal(toolRow({ id: '6', name: 'SomeNewTool', input: {} }).label, 'SomeNewTool', 'a tool Faber does not know keeps its name');
+  // A conversation the agent starts by itself reads as its title, and one it reads back as its id.
+  deepEqual(toolRow({ id: '7', name: 'Conversation', input: { title: 'Docs', brief: 'Write the page.' } }), { label: t('tool.conversation'), detail: 'Docs' });
+  equal(toolRow({ id: '8', name: 'Conversation', input: { id: 'c1' } }).detail, 'c1');
+  deepEqual(toolRow({ id: '9', name: 'Conversation', input: { action: 'compact', next: 'Go on with the docs.' } }), { label: t('tool.compact'), detail: '' });
+  deepEqual(toolRow({ id: '10', name: 'Conversation', input: { action: 'context' } }), { label: t('tool.context'), detail: '' });
+  // Faber's checks (R190) read as the level they run, with nothing after.
+  deepEqual(toolRow({ id: '9', name: 'Verify', input: {} }), { label: t('tool.verify'), detail: '' });
+  deepEqual(toolRow({ id: '10', name: 'Verify', input: { level: 'full' } }), { label: t('tool.verifyFull'), detail: '' });
+  deepEqual(toolRow({ id: '11', name: 'Map', input: {} }), { label: t('tool.map'), detail: '' });
+  deepEqual(toolRow({ id: '12', name: 'Map', input: { kind: 'setting', query: 'theme' } }), { label: t('tool.map'), detail: 'setting theme' });
 });
 
 // R161 step 9: while a reply runs, the checks it ran tick up under the status line, marked by the engine, never guessed here.

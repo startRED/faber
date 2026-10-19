@@ -253,6 +253,228 @@ pub struct Message {
     /// The next rung, offered when the turn's own tools show it stopped early (see `nudge`).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub nudge: Option<crate::nudge::Nudge>,
+    /// The pull request this reply opened or pushed, followed until its checks pass or it closes (`crate::follow`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub follow: Option<Follow>,
+    /// A message Faber sent into the conversation by itself, and why: drawn as a quiet line, not as the person's words.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub wake: Option<Wake>,
+    /// On a reply: "keep going" stopped after it, and why (a `reason.keepGoing.*` key).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub halt: Option<String>,
+    /// On a reply: questions Faber answered with their first choice because "keep going" was on and nobody answered.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub auto_answers: Option<Vec<AutoAnswer>>,
+    /// On the newest reply of a conversation "keep going" has run in for a while: what it did while the person was away.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub away: Option<Away>,
+    /// On a project reply that changed files: Faber's own run of the fast checks once it ended (R146, "Faber decides done").
+    /// A run that was going on when Faber closed is not read back: nothing would end it.
+    #[serde(default, skip_serializing_if = "Option::is_none", deserialize_with = "settled_checks")]
+    pub checks: Option<Checks>,
+    /// On a reply: when its words, thinking or tools last changed, in milliseconds. The screen's "updated 3 min ago" counts from it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub moved_at: Option<u64>,
+    /// On a reply: when the agent said all it will say (its last message ended with `end_turn` and no tool call was open, or
+    /// the turn ended), in milliseconds. A reply that still streams with this set is finished for the person while the CLI
+    /// closes its turn; more words or tools clear it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub finished_at: Option<u64>,
+}
+
+/// Faber's checks of a reply (`engine/src/engine/verifying.rs`): running, passed, or what failed.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Checks {
+    pub state: ChecksState,
+    /// How many checks passed or were unchanged since they passed.
+    #[serde(default)]
+    pub passed: u32,
+    /// The checks that failed or did not finish, in the order the project declares them.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub failed: Vec<FailedCheck>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum ChecksState {
+    Running,
+    Passed,
+    /// Failed, and Faber asked the agent to fix it.
+    Failed,
+    /// Still failed after the automatic fixes: the person decides.
+    NeedsYou,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct FailedCheck {
+    pub command: String,
+    /// Its first short failures (R155), for the screen; the agent reads them all.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub lines: Vec<String>,
+}
+
+fn settled_checks<'de, D: serde::Deserializer<'de>>(d: D) -> Result<Option<Checks>, D::Error> {
+    Ok(Option::<Checks>::deserialize(d)?.filter(|c| c.state != ChecksState::Running))
+}
+
+/// A pull request a project conversation follows (R200): one line under the reply that opened or last pushed it.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Follow {
+    /// `owner/name`.
+    pub repo: String,
+    pub number: u64,
+    pub url: String,
+    pub state: FollowState,
+    /// The checks that failed on the commit last read.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub failed: Vec<String>,
+    /// The commit last read; a new one is the agent's fix.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub head: Option<String>,
+    /// What Faber already woke the agent for (the commit and why), so the same failure never spends a second turn.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub woke: Option<String>,
+    /// The checks failed while the quota was tight: the person is told instead of the agent.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub held: bool,
+    /// The person took the conversation back after it was archived, or wrote to it while Faber read the end of the pull
+    /// request: Faber does not put it away for this pull request (`engine/src/engine/auto_archive.rs`).
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub kept: bool,
+    /// Why following ended early, as an i18n key.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub problem: Option<String>,
+    /// When something last changed, in milliseconds.
+    pub since: u64,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum FollowState {
+    Pending,
+    Failing,
+    Conflict,
+    Passing,
+    Merged,
+    Closed,
+    /// Ended by the person, by a problem, or after long quiet.
+    Stopped,
+}
+
+impl FollowState {
+    /// Whether Faber still looks at the pull request.
+    pub fn open(self) -> bool {
+        matches!(self, FollowState::Pending | FollowState::Failing | FollowState::Conflict)
+    }
+}
+
+/// Why Faber sent a message by itself (`engine/src/engine/by_itself.rs`).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Wake {
+    /// An i18n key (`wake.keepGoing`, `wake.checksFailed`, `wake.conflict`, `wake.asked`, `wake.compacted`).
+    pub why: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pr: Option<u64>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub checks: Vec<String>,
+}
+
+impl Wake {
+    pub fn of(why: &str) -> Wake {
+        Wake { why: why.into(), pr: None, checks: vec![] }
+    }
+}
+
+/// "Keep going" is on in a conversation (R199): Faber sends the next turn by itself whenever one ends, until a stop.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct KeepGoing {
+    /// Turns Faber sent by itself since it was turned on.
+    pub turns: u32,
+    /// Turns that did real work (not a quick answer with no tool); only these count toward the cap.
+    #[serde(default)]
+    pub work: u32,
+    /// Failures in a row (an error, or an AI Faber could not reach); a turn that ends well sets it to zero.
+    pub failed: u32,
+    /// Every AI it may use is out of quota: it goes on by itself at this time (Unix seconds), and the screen says so.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub wait_until: Option<f64>,
+    /// Turns in a row that ended in under a minute with no tool: Faber lets a longer rest pass before the next.
+    #[serde(default)]
+    pub idle: u32,
+    /// The error of the last failure, so one that cannot mend by waiting stops it when it comes again.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub last_error: Option<String>,
+    /// The agent said nothing is left and Faber asked it once to check against the original request: a second stop is taken.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub checked: bool,
+    /// When it was turned on, in milliseconds since the Unix epoch.
+    #[serde(default)]
+    pub since: u64,
+    /// Times Faber moved the work to another AI because the first had no quota left.
+    #[serde(default)]
+    pub switches: u32,
+    /// Questions Faber answered with the first choice because the person was away.
+    #[serde(default)]
+    pub answered: u32,
+    /// Moves to another AI inside the turn that runs (a plan limit hit again after a move); zero at the end of each turn.
+    #[serde(default, skip)]
+    pub moves: u8,
+    /// Faber waits to send the next turn, and why. Saved, so a restart waits out the rest.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub waiting: Option<KeepWait>,
+    /// The reply whose failure was already counted, so a reply reported twice counts once.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub failed_on: Option<String>,
+}
+
+/// Why "keep going" is waiting to send the next turn, and until when.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct KeepWait {
+    /// `retry` (after an error), `rest` (the last turn only waited), `busy` (Faber was busy with an update) or `start`
+    /// (Faber just opened). A wait for quota is `wait_until` instead.
+    pub why: String,
+    /// Seconds since the Unix epoch.
+    pub until: f64,
+}
+
+/// What "keep going" did since it was turned on, told on the newest reply once the person has been away a while.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Away {
+    /// How long it has been on, in whole minutes.
+    pub minutes: u32,
+    /// Turns that did real work.
+    pub turns: u32,
+    /// Moves of the work to another AI.
+    pub switches: u32,
+    /// Questions Faber answered with the first choice.
+    pub answered: u32,
+}
+
+/// How far a conversation that goes on by itself has come, for its row in the running list.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct KeepProgress {
+    /// Turns that did real work.
+    pub turns: u32,
+    /// When it was turned on, in milliseconds since the Unix epoch; 0 when not known.
+    pub since: u64,
+    /// The last line the agent wrote, without its markup.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub last: Option<String>,
+}
+
+/// A question the agent asked that Faber answered with the first choice while the person was away.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct AutoAnswer {
+    pub question: String,
+    pub answer: String,
 }
 
 impl Message {
@@ -293,6 +515,14 @@ impl Message {
             note: None,
             recovery: None,
             nudge: None,
+            follow: None,
+            wake: None,
+            halt: None,
+            auto_answers: None,
+            away: None,
+            checks: None,
+            moved_at: None,
+            finished_at: None,
         }
     }
 }
@@ -322,6 +552,9 @@ pub struct QueuedTurn {
     /// its way after a restart, so loading a conversation clears it.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub sending: bool,
+    /// Faber queued it by itself: the message it becomes carries this.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub wake: Option<Wake>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -338,6 +571,9 @@ pub struct Conversation {
     /// Chat's canonical folder, chosen before its first message. None uses Faber-owned scratch.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub working_folder: Option<String>,
+    /// A project conversation's own copy, made at its first message (R201). None works in the project folder.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub copy: Option<crate::project::copy::WorkCopy>,
     /// One CLI session per vendor, so switching models keeps each vendor's own history and cache.
     #[serde(default)]
     pub sessions: BTreeMap<Vendor, String>,
@@ -360,6 +596,10 @@ pub struct Conversation {
     pub allow_always_epochs: BTreeMap<String, String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub branch_of: Option<BranchOf>,
+    /// The conversation whose agent started this one with Faber's conversation tool (`crate::sibling`). Such a conversation
+    /// cannot start conversations of its own.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub started_by: Option<String>,
     /// What the user asked to be called when this conversation started. Kept here so the CLI gets the same instructions every
     /// time the conversation resumes, whatever Settings says by then; a conversation saved before this field has none.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -371,7 +611,43 @@ pub struct Conversation {
     pub updated_at: u64,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub queued: Vec<QueuedTurn>,
+    /// "Keep going" is on (`engine/src/engine/keep_going.rs`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub keep_going: Option<KeepGoing>,
+    /// When it was archived, by the person or by its own agent (`engine/src/engine/archive.rs`): it leaves the sidebar
+    /// until the person brings it back or writes to it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub archived_at: Option<u64>,
+    /// Its last run ended and the person has not opened it since (`engine/src/engine/ended.rs`): the running column's done card
+    /// and the sidebar's dot read it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub ended: Option<Ended>,
+    /// How full the context of the conversation's own agent is, as its CLI last said (`engine/src/engine/compact.rs`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub context: Option<ContextFill>,
     pub messages: Vec<Message>,
+    /// What its CLI last reported, each on its own (a report may name only one): the prompt's size and the model's window,
+    /// before the point where Faber's CLI flags make it compact. Never saved.
+    #[serde(skip)]
+    pub reported: (Option<u64>, Option<u64>),
+    /// The context is being compacted: the conversation is at work meanwhile, like during Faber's checks. Never saved.
+    #[serde(skip)]
+    pub compacting: bool,
+    /// Faber is asking git whether the last reply changed files with a command, before its checks would start
+    /// (`engine/src/engine/verifying.rs`), the reply's id: the conversation is at work meanwhile. Never shown or saved.
+    #[serde(skip)]
+    pub weighing: Option<String>,
+    /// The person pressed Stop on the run under way: its end leaves no done card (`engine/src/engine/ended.rs`). Never saved.
+    #[serde(skip)]
+    pub stopped: bool,
+}
+
+/// The context of a conversation's own agent: `used` tokens of a `window`, the point where its CLI compacts by itself.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ContextFill {
+    pub used: u64,
+    pub window: u64,
 }
 
 /// The longest name Faber keeps, in characters.
@@ -391,61 +667,22 @@ pub struct Project {
     pub id: String,
     pub name: String,
     pub path: String,
-    /// The repository this folder belongs to once it is enrolled for missions. A project saved before missions has none.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub repo: Option<crate::project::RepoIdentity>,
-    /// What the person granted at mission start. None grants no effect: planning stays read-only.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub grant: Option<crate::project::Grant>,
+    /// Each conversation works in a separate copy of its own (R201): on by default, switched in Settings > Projects. It
+    /// acts only in a git repository with a commit; elsewhere conversations work in the folder.
+    #[serde(rename = "separateCopies", default = "separate_by_default")]
+    pub separate_copies: bool,
     /// Fields written by a newer Faber, kept as they were so this version never drops them.
     #[serde(flatten)]
     pub extra: crate::project::Extra,
 }
 
+fn separate_by_default() -> bool {
+    true
+}
+
 impl Project {
     pub fn new(id: String, name: String, path: String) -> Self {
-        Project { id, name, path, repo: None, grant: None, extra: Default::default() }
-    }
-
-    /// Whether this project may take `effect` under the grant revision the work was admitted with. A key says why not.
-    pub fn allows(&self, effect: crate::project::Effect, revision: u64) -> Result<(), &'static str> {
-        match (&self.repo, &self.grant) {
-            (Some(repo), Some(grant)) => grant.allows(repo, revision, effect),
-            _ => Err("reason.grant.none"),
-        }
-    }
-
-    /// Accept the authority shown on the start card. The same authority again keeps the grant as it is: a new revision
-    /// would make every earlier mission stale for nothing.
-    pub fn accept_grant(&mut self, mut grant: crate::project::Grant) -> Result<(), &'static str> {
-        if grant.schema > crate::project::SCHEMA || self.grant.as_ref().is_some_and(|g| g.schema > crate::project::SCHEMA) {
-            return Err("reason.grant.newer");
-        }
-        let expected = self.grant.as_ref().map_or(Some(1), |g| g.revision.checked_add(1)).ok_or("reason.grant.stale")?;
-        if grant.revision != expected {
-            return Err("reason.grant.stale");
-        }
-        if self.repo.as_ref().is_none_or(|r| r.common_dir != grant.repo) {
-            return Err("reason.grant.otherRepo");
-        }
-        // Publication is deferred in the self-development MVP (R103).
-        if grant.mode != crate::project::GitMode::Seguro {
-            return Err("reason.grant.mode");
-        }
-        if self.grant.as_ref().is_some_and(|g| {
-            g.revoked_at.is_none()
-                && (&g.repo, g.mode, &g.author, &g.remote, &g.remote_account, g.self_update)
-                    == (&grant.repo, grant.mode, &grant.author, &grant.remote, &grant.remote_account, grant.self_update)
-        }) {
-            return Ok(());
-        }
-        if let Some(previous) = &self.grant {
-            for (key, value) in &previous.extra {
-                grant.extra.entry(key.clone()).or_insert_with(|| value.clone());
-            }
-        }
-        self.grant = Some(grant);
-        Ok(())
+        Project { id, name, path, separate_copies: separate_by_default(), extra: Default::default() }
     }
 }
 
@@ -458,6 +695,49 @@ pub struct Summary {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub project_id: Option<String>,
     pub updated_at: u64,
+    /// "Keep going" is on.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub keep_going: bool,
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub archived: bool,
+    /// The conversation whose agent started this one: the sidebar shows it under that one.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub started_by: Option<String>,
+    /// Its last run ended and nobody has opened it since, while that is recent (`Ended::current`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub ended: Option<Ended>,
+}
+
+/// How a run ended that nobody saw end (task 016): a done card in the running column and a dot on the sidebar row until the
+/// person opens the conversation.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Ended {
+    /// When, in milliseconds.
+    pub at: u64,
+    pub kind: EndKind,
+    /// How long the run worked, from its first turn to its end, in milliseconds.
+    pub work_ms: u64,
+    /// The last line the agent wrote, as the running row showed it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub line: Option<String>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum EndKind {
+    Done,
+    /// It stopped on something only the person can settle: a question, Keep going's cap, an AI billed per use.
+    NeedsYou,
+    Failed,
+}
+
+impl Ended {
+    /// A card nobody opens goes by itself: a failure after a day, the rest after a week (as the other apps' cards do).
+    pub fn current(&self, now: u64) -> bool {
+        let days = if self.kind == EndKind::Failed { 1 } else { 7 };
+        now.saturating_sub(self.at) < days * 86_400_000
+    }
 }
 
 /// Where a running conversation stands: answering, or waiting for the user.
@@ -500,6 +780,27 @@ pub struct RunningItem {
     pub stuck: Vec<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub wait_until: Option<f64>,
+    /// A followed pull request whose checks failed while the quota was tight: its number, and the commit, so each is told once.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub held: Option<(u64, String)>,
+    /// "Keep going" is on: the conversation runs on its own.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub keep_going: bool,
+    /// "Keep going" waits to send the next turn: the row stays between turns, and says until when.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub keep_wait: Option<KeepWait>,
+    /// "Keep going" is on: how far it has come.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub keep_progress: Option<KeepProgress>,
+    /// Faber is asking git whether the last reply changed files with a command (`Conversation::weighing`), usually under a
+    /// second: the reply says so and Stop ends it.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub weighing: bool,
+    /// The agent said all it will say and only the CLI's turn is still closing (its Stop hooks, say), with nothing else running
+    /// for the conversation: the screen reads it as done and leaves it out of what it shows as running. Updates, the tray and
+    /// the awake lock still count it, since a process is still at work.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub settled: bool,
 }
 
 /// The running list as the engine last sent it. The revision grows by one with every list the engine emits, so a

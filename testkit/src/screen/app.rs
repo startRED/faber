@@ -217,7 +217,8 @@ fn recent_folders(ctx: &mut Ctx) -> Result {
     page.wait_count(&rows, 5)?;
     let gone = css(".recents .rec.gone .rec-main");
     same(page.count(&gone)?, 1, "folders shown as gone")?;
-    ensure(page.is_disabled(&gone)?, || "a folder that is gone can be picked".into())?;
+    // It keeps its focus (the menu key reaches its removal), so it is marked, not disabled (the UI check clicks it and nothing opens).
+    same(page.attr(&gone, "aria-disabled")?.as_deref(), Some("true"), "a folder that is gone is marked so")?;
     ctx.shot(&mut app, "recents-open-project")?;
     let page = &mut app.page;
     let first = rows.clone().css(".rec-main").has_text("alpha");
@@ -247,10 +248,10 @@ fn streams_an_answer(ctx: &mut Ctx) -> Result {
     ensure(tips["header"].as_str().is_some_and(|t| t.contains(&reason)), || {
         format!("the header's tooltip should say why Auto chose it: {tips}")
     })?;
-    ensure(tips["cost"].as_str().is_some_and(|t| t.contains("at API prices")), || {
+    ensure(tips["cost"].as_str().is_some_and(|t| t.contains("in API value")), || {
         format!("the cost's tooltip should show the price note: {tips}")
     })?;
-    ensure(!text.contains(&reason) && !text.contains("at API prices"), || format!("neither sits on the page itself: {text}"))?;
+    ensure(!text.contains(&reason) && !text.contains("in API value"), || format!("neither sits on the page itself: {text}"))?;
     page.wait_visible(&css(".list .item").has_text(QUESTION))?;
     ctx.shot(&mut app, "chat")
 }
@@ -373,7 +374,13 @@ fn says_what_to_do(ctx: &mut Ctx) -> Result {
     let lower = body.to_lowercase();
     ensure(!["reopen", "restart", "relaunch"].iter().any(|w| lower.contains(w)), || format!("it should not ask to restart: {body}"))?;
     // There is nothing to type into: no composer, so no permission line or model choice either.
-    same(page.count(&css(".composer"))?, 0, "no composer with no AI")
+    same(page.count(&css(".composer"))?, 0, "no composer with no AI")?;
+    // Projects says the same, not "Add project folder" for a folder no AI could work in.
+    let projects = page.named("button", "area.projects")?;
+    page.click(&projects)?;
+    page.wait_visible(&title)?;
+    same(page.count(&css(".projects-root"))?, 0, "no project picker with no AI")?;
+    same(page.count(&css(".composer"))?, 0, "no composer in Projects with no AI")
 }
 
 fn switches_language(ctx: &mut Ctx) -> Result {
@@ -454,6 +461,8 @@ fn keeps_appearance(ctx: &mut Ctx) -> Result {
     let page = &mut app.page;
     let general = page.named("button", "set.general")?;
     page.click(&general)?;
+    // In Full access, the default, the person's hooks always run and the switch is locked; it is a choice in the modes that ask.
+    super::permissions::pick_mode(page, 1)?;
     let hooks = page.named("switch", "set.hooksBody")?;
     page.check(&hooks)?;
     // The look applies once it is saved, but the switch does not wait for the screen; closing earlier could lose it.
@@ -664,13 +673,15 @@ fn refused_save(ctx: &mut Ctx) -> Result {
     // A switch moves before its save is answered; a refused save puts it back.
     let general = page.named("button", "set.general")?;
     page.click(&general)?;
-    let hooks = page.named("switch", "set.hooksBody")?;
-    let before = page.is_checked(&hooks)?;
-    page.click(&hooks)?;
-    page.wait_for("the switch to be put back", &format!("document.querySelector('.sw2').checked === {before}"))?;
+    let notify = page.named("switch", "set.notifyMe")?;
+    let before = page.is_checked(&notify)?;
+    page.click(&notify)?;
+    page.wait_for("the switch to be put back", &format!("document.querySelector('#set-notify-switch').checked === {before}"))?;
     let file = ctx.sb.data.join("settings.json");
     let text = std::fs::read_to_string(&file).map_err(|e| e.to_string())?;
-    ensure(!text.contains("manha") && !text.contains("\"userHooks\": true"), || format!("settings.json should be as it was: {text}"))?;
+    ensure(!text.contains("manha") && !text.contains(&format!("\"notifications\": {}", !before)), || {
+        format!("settings.json should be as it was: {text}")
+    })?;
 
     // Once the disk works again the same draft saves, and the alert goes away.
     std::fs::remove_dir(&blocker).map_err(|e| e.to_string())?;

@@ -145,3 +145,22 @@ fn the_product_map_names_every_setting_screen_command_and_stored_key() {
     }
     assert!(problems.is_empty(), "docs/product-map.md is out of date:\n{}", problems.join("\n"));
 }
+
+/// The project map an agent asks for (`faber_engine::map`) finds in Faber's own code what this file checks the product
+/// map against: the same commands, settings, screen files and browser storage keys.
+#[test]
+fn the_project_map_read_from_faber_s_code_finds_what_the_product_map_is_checked_against() {
+    use faber_engine::map::{Kind, scan};
+    use std::collections::BTreeSet;
+    let items = scan(&repo(""));
+    let of = |kind: Kind, keep: &dyn Fn(&str) -> bool| -> BTreeSet<String> {
+        items.iter().filter(|i| i.kind == kind && keep(&i.file)).map(|i| i.name.clone()).collect()
+    };
+    let set = |names: Vec<String>| names.into_iter().collect::<BTreeSet<String>>();
+    let (files, keys) = screen_files_and_keys();
+    assert_eq!(of(Kind::Command, &|f| f == "src-tauri/src/main.rs"), set(commands()));
+    assert_eq!(of(Kind::Setting, &|f| f.starts_with("engine/")), set(settings_keys()));
+    assert_eq!(of(Kind::Screen, &|f| f.starts_with("ui/") && !f[3..].contains('/')), set(files));
+    assert_eq!(of(Kind::Stored, &|f| f.starts_with("ui/")), set(keys));
+    assert!(of(Kind::Text, &|f| f == "ui/locales/en.ts").contains("composer.send"));
+}

@@ -94,3 +94,15 @@ test('links skip addresses, code and code blocks; mentions skip string literals'
   assert.deepEqual(links('[a](b.md) [w](https://x.y) `[c](d.md)`\n```\n[e](f.md)\n```\n[g](#h)\n'), ['b.md', '#h']);
   assert.deepEqual(mentions('// see docs/dev/testing.md#screen-tests and "docs/x.md" or \'docs/y.md\''), ['docs/dev/testing.md#screen-tests']);
 });
+
+test('a task of the queue needs no row of its own in docs/README.md', () => {
+  assert.deepEqual(
+    tree({
+      'docs/README.md': index,
+      'docs/a.md': '# A\n',
+      'docs/design/b.md': '# B\n',
+      'docs/tasks/010-next.md': '# Next\n',
+    }),
+    [],
+  );
+});

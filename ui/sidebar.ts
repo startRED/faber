@@ -26,6 +26,16 @@ export function groupChats<T extends { updatedAt: number }>(chats: T[], now: num
   return (['today', 'week', 'earlier'] as const).filter((g) => groups[g].length > 0).map((g) => ({ group: g, chats: groups[g] }));
 }
 
+/** Conversations in the order given, except that each one an agent started follows the conversation that started it (in
+ * the order given too). One whose starter is not in the list stays where it was. The rows are the same objects, so the
+ * sidebar keeps their nodes. */
+export function nest<T extends { id: string; startedBy?: string }>(rows: T[]): T[] {
+  const present = new Set(rows.map((r) => r.id));
+  const under = (id: string) => rows.filter((r) => r.startedBy === id);
+  const placed = (r: T): T[] => [r, ...under(r.id).flatMap(placed)];
+  return rows.filter((r) => !r.startedBy || !present.has(r.startedBy)).flatMap(placed);
+}
+
 /** A refreshed list with every item that did not change replaced by the one already held, so the sidebar keeps the nodes of the
  * rows that are the same (a refresh while a rename or a hover is open leaves them alone, and no row is built and animated again). */
 export function keepRows<T extends { id: string }>(held: readonly T[], fresh: T[]): T[] {

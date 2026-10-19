@@ -7,8 +7,8 @@ How the Settings screen, the first-run steps and the tutorial look and behave.
 - Settings replaces the shell, as before, with a list of five sections on the left: General, Projects, Appearance,
   Accounts and limits and Privacy, and "Faber <version>" once at the bottom of the list. Ctrl comma opens it on General,
   the quota of a vendor in the sidebar opens it on Accounts and limits, and Esc or Back closes it. Switching sections is
-  instant: no exit copy of the old section is kept, nothing on the stage animates, and the new section opens scrolled to
-  its top. All sections share one content width, 720 px (`--st-w`).
+  a short cross-fade (the owner, 2026-10-17, reversing R169): the old section leaves as an inert copy while the new one
+  arrives, the new section opens scrolled to its top, and with reduced or no motion it is instant. All sections share one content width, 720 px (`--st-w`).
 - One grammar for every section (`ui/controls.tsx`). A group is a card (`--s1` with an inset `--line`, `--r-md`) under a
   small title; inside it every option is one row: the name and one short line (one line, 70 characters at most) at the left
   and the control at the right, rows divided by hairlines. The longer text of an option unfolds under its row from a small
@@ -126,7 +126,7 @@ How the Settings screen, the first-run steps and the tutorial look and behave.
   the plan with its first letter capital, and one status word in a pill that is amber only when a window is really near
   its limit (C002; fast use is said calmly). Then one row per quota window the vendor has reported (name, used share, a
   bar with the expected-pace mark, and the reset time written in full); an old reading, or none, shows "—". The card ends
-  with Faber's own spend today at API prices, written the language's way with two decimals. Every note about how the
+  with Faber's own spend today in API value, written the language's way with two decimals. Every note about how the
   figures are read (counting delay, shared account, incomplete meters, learning, foreign use, extra usage, each window's
   projection and age) is behind one "Details" fold per card. "Manage accounts" appears once in the section.
 - Privacy has three statements: telemetry is off, history stays on this PC, and Faber never reads the CLI logins.
@@ -141,8 +141,8 @@ How the Settings screen, the first-run steps and the tutorial look and behave.
   Settings, the same cards have no stepper and only a Close button. They save `setup` and nothing else, so reconnecting an
   account never restarts the first run or the tutorial.
 - Step 2 shows the three themes side by side, each a small live render drawn with its own tokens. A choice changes the whole
-  screen at once and saves nothing. Under the cards: text size (three "Aa" sizes), density, motion, "Do you already use
-  AI?" (Never, A lot) and an optional name. Continue saves the appearance, the answer, the name and, unless the tutorial
+  screen at once and saves nothing. Under the cards: text size (the same 13 to 18 px slider as Appearance), density, motion, "Do you already use
+  AI?" (Never, A lot) and "Your name" (optional), in the words Settings uses. Continue saves the appearance, the answer, the name and, unless the tutorial
   was already done, `tutorialDone: false`, in one call. Back keeps the
   choices. An install saved by an older version, whose appearance has no `base`, sees step 2 once.
 - The tutorial starts at the new conversation, with an AI connected, while `tutorialDone` is false. A beginner gets three

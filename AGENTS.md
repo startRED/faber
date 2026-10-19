@@ -39,7 +39,7 @@ mistake, and a rule a test enforces leaves it.
   commit by itself (never force, never a red commit), so `main` keeps close behind (R126, R127, R143). Lane work (a
   branch or worktree) enters `phase-1-base` as one squashed pull request that fills `.github/pull_request_template.md`
   and whose title is a commit title (`pr-title` checks it). Right after opening it, `node scripts/land.mjs <number>`
-  queues it: it squashes it onto `phase-1-base`, gives its numbers there, and CI lands it and marks it merged once every
+  (in the background: it runs the suites first) queues it: it squashes it onto `phase-1-base`, gives its numbers there, and CI lands it and marks it merged once every
   system is green. Then the lane goes on to its next task and never watches CI: a red queue run turns the pull
   request's `queue` check red, which wakes its session, and the fix is pushed and queued again with `land.mjs`
   (R182; [workflow](docs/dev/workflow.md#merge-on-green)). Queue once, with the fix complete: each push to a queue branch cancels the run before it. `land.mjs` is the
@@ -75,7 +75,8 @@ Read [docs/product-rules.md](docs/product-rules.md) and [docs/product-map.md](do
   reason no default covers.
 - Check the taste cards whose "Touches" match. The review says "cards checked: C00x ok" or names the line that breaks one.
 - Walk it as a newcomer and as a heavy user: first run, no AI connected, empty and waiting states, a 720 px window,
-  reduced motion, the longest language.
+  reduced motion, the longest language. `node scripts/first-user.mjs` has a fresh AI that sees only the screen take a
+  first newcomer pass.
 - Something that goes against a decision ([docs/decisions.md](docs/decisions.md): search it for the words of the change)
   or a card goes to the owner first.
 - How it looks and moves: [docs/design/](docs/design/README.md) (its README and the page of the part you change) and the
@@ -107,8 +108,7 @@ Read [docs/product-rules.md](docs/product-rules.md) and [docs/product-map.md](do
 - `engine/`: the engine in Rust (tokio). It drives the CLIs, keeps conversations as JSON files and knows nothing
   about windows.
 - `src-tauri/`: the Tauri 2 shell. One window, a tray icon, and the fixed list of commands the screen may call.
-- `winproc/`: the unsafe process calls (resuming a process created suspended, so it joins its job before it runs, and
-  lowering a mission proof to Low integrity before it runs).
+- `winproc/`: the unsafe process calls (resuming a process created suspended, so it joins its job before it runs).
   The shell denies unsafe code except in its four Windows API files (`awake.rs`, `autostart.rs`, `tray/native.rs`,
   `pane/native.rs`);
   everything else forbids it.
@@ -120,7 +120,8 @@ Read [docs/product-rules.md](docs/product-rules.md) and [docs/product-map.md](do
 
 ## Proof commands
 
-All exit 0 before any commit. None builds the app or waits for a build slot, so they take seconds to a minute:
+All exit 0 before any commit. None builds the app or waits for a build slot, so they take seconds to a minute. Inside
+Faber, run them with Faber's `verify` tool (fast while working, full before the commit), not one by one:
 
 ```bash
 npm run lint
@@ -133,7 +134,8 @@ cargo t --claims
 ```
 
 `cargo t --claims` checks the lane's claims and shows a red `phase-1-base`; it builds only the runner. The heavy proofs run
-in CI on the queued commit, never on the PC by habit: the `rust`, `ui` and `screen` suites (`cargo t --all`, the
+once per landing: `land.mjs` runs the suites a change needs on the PC on the exact commit it queues, and CI leaves out
+what that covered (R190 V2); otherwise CI runs them on the queued commit, and never on the PC by habit: the `rust`, `ui` and `screen` suites (`cargo t --all`, the
 memory limit of R125 included) and the Clippy proofs (`cargo t --suite lint`: `--workspace --all-targets` and `-p faber
 --features test-hooks`, each with `-D warnings`, plus macOS on Windows through zig,
 [testing](docs/dev/testing.md#what-a-run-prints)). A red one wakes the lane ([workflow](docs/dev/workflow.md#merge-on-green)).

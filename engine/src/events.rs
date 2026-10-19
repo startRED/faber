@@ -45,6 +45,10 @@ pub enum EngineEvent {
         final_answer: bool,
     },
     Thinking(String),
+    /// The main thread's message ended with `end_turn` (Claude Code's `message_delta`): the agent has said all it will say
+    /// unless a tool call is still open. The CLI's own `result` may come much later (whatever runs after the answer, such as
+    /// the person's Stop hooks), so the screen reads the reply as done now while the engine still waits for `Done`.
+    Settled,
     Tool {
         id: String,
         name: String,
@@ -68,6 +72,22 @@ pub enum EngineEvent {
     },
     /// The agent asked Faber's browser to open a page (R161 step 7); the engine answers with `Session::helper_reply`.
     BrowseCall {
+        id: String,
+        input: Value,
+    },
+    /// The agent called Faber's conversation tool (`crate::sibling`): it starts a conversation or reads one it started. The
+    /// engine answers at once with `Session::helper_reply`.
+    ConversationCall {
+        id: String,
+        input: Value,
+    },
+    /// The agent called Faber's checks (`crate::verify`). The engine answers with `Session::helper_reply` once they ended.
+    VerifyCall {
+        id: String,
+        input: Value,
+    },
+    /// The agent asked for the project's map (`crate::map`). The engine answers with `Session::helper_reply`.
+    MapCall {
         id: String,
         input: Value,
     },
@@ -124,6 +144,18 @@ pub enum EngineEvent {
         /// turn with no usage update to measure from reports none.
         incomplete: bool,
     },
+    /// What the conversation's own agent (never a subagent or helper) holds in its context now, as the CLI said it: `used`
+    /// tokens after a request (Claude: the latest main-thread response's prompt; Codex: `last.totalTokens`), and the model's
+    /// `window` when the CLI names it. Either may be absent in one report; the engine keeps the last of each.
+    Context {
+        used: Option<u64>,
+        window: Option<u64>,
+    },
+    /// The CLI compacted the conversation, whoever asked (Faber, the agent, the CLI's own limit). `after` is the size it
+    /// reports for the summary when it does (Claude Code's `post_tokens`).
+    Compacted {
+        after: Option<u64>,
+    },
     /// The running turn took in a message sent to it with `Session::steer`. `tag` is the one that call carried when the CLI
     /// echoes it back; without one, the oldest message still on its way is the one.
     Injected {
@@ -139,6 +171,19 @@ pub enum EngineEvent {
         message: String,
         fatal: bool,
     },
+}
+
+impl EngineEvent {
+    /// Whether the event is the reply's own words or work, which move it: `Some(true)` from the main thread (it also undoes a
+    /// finish), `Some(false)` from a subagent's tool call or a tool's result.
+    pub fn moves_reply(&self) -> Option<bool> {
+        match self {
+            EngineEvent::Text(_) | EngineEvent::Thinking(_) => Some(true),
+            EngineEvent::Tool { parent, .. } => Some(parent.is_none()),
+            EngineEvent::ToolResult { .. } | EngineEvent::HelperDone { .. } => Some(false),
+            _ => None,
+        }
+    }
 }
 
 /// A user turn: plain text plus optional images.
@@ -187,7 +232,12 @@ pub enum SessionCommand {
         id: String,
         ok: bool,
         text: String,
+        /// JPEG pictures that go with the text, base64, in order: the agent sees them (a check at several screen sizes).
+        pictures: Vec<String>,
     },
+    /// Compact the conversation's context now (Claude Code: the `/compact` command as the next line; Codex: the thread's
+    /// compaction request). It ends like a turn, with a `Done`.
+    Compact,
     Interrupt,
     Close,
 }
@@ -196,8 +246,6 @@ pub enum SessionCommand {
 #[derive(Clone)]
 pub struct Session {
     send: std::sync::Arc<dyn Fn(SessionCommand) + Send + Sync>,
-    project_role: Option<crate::project::Role>,
-    tree: Option<crate::proc::OwnedTree>,
 }
 
 impl std::fmt::Debug for Session {
@@ -212,23 +260,7 @@ impl Session {
     }
     /// A session whose commands go wherever `send` puts them, such as a thread in a shared process.
     pub(crate) fn from_fn(send: impl Fn(SessionCommand) + Send + Sync + 'static) -> Self {
-        Session { send: std::sync::Arc::new(send), project_role: None, tree: None }
-    }
-    pub(crate) fn for_project(mut self, role: crate::project::Role) -> Self {
-        self.project_role = Some(role);
-        self
-    }
-    pub(crate) fn project_role(&self) -> Option<crate::project::Role> {
-        self.project_role
-    }
-    pub(crate) fn with_tree(mut self, tree: Option<crate::proc::OwnedTree>) -> Self {
-        self.tree = tree;
-        self
-    }
-    /// The owned process tree behind this session, if the engine started one: the source of a lease's process
-    /// identity and of its termination proof. A replayed recording has none.
-    pub fn tree(&self) -> Option<crate::proc::OwnedTree> {
-        self.tree.clone()
+        Session { send: std::sync::Arc::new(send) }
     }
     pub fn send(&self, turn: UserTurn) {
         (self.send)(SessionCommand::Send(turn));
@@ -248,7 +280,14 @@ impl Session {
         delivered
     }
     pub fn helper_reply(&self, id: &str, ok: bool, text: String) {
-        (self.send)(SessionCommand::HelperReply { id: id.to_string(), ok, text });
+        self.helper_reply_with_pictures(id, ok, text, Vec::new());
+    }
+    /// Like `helper_reply`, with JPEG pictures (base64) the agent sees after the text.
+    pub fn helper_reply_with_pictures(&self, id: &str, ok: bool, text: String, pictures: Vec<String>) {
+        (self.send)(SessionCommand::HelperReply { id: id.to_string(), ok, text, pictures });
+    }
+    pub fn compact(&self) {
+        (self.send)(SessionCommand::Compact);
     }
     pub fn interrupt(&self) {
         (self.send)(SessionCommand::Interrupt);

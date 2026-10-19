@@ -132,9 +132,9 @@ check('homes: the Follow along card says it once and briefly, in every language'
 
 check('homes: the two helper entries of what is new each say only their own news, in every language', () => {
   for (const [code, messages] of Object.entries(languages)) {
-    const helpers = words(messages['notes.16.new']);
+    const helpers = words(messages['notes.22.new']);
     const other = words(messages['notes.19.new']);
-    ok(String(messages['notes.16.new']) !== String(messages['notes.19.new']), `${code}: the entries differ`);
+    ok(String(messages['notes.22.new']) !== String(messages['notes.19.new']), `${code}: the entries differ`);
     const runs = new Set<string>();
     for (let i = 0; i + 3 <= helpers.length; i++) runs.add(helpers.slice(i, i + 3).join(' '));
     const shared: string[] = [];
@@ -142,6 +142,6 @@ check('homes: the two helper entries of what is new each say only their own news
     equal(shared.length, 0, `${code}: no run of three words is said twice (${shared.join(', ')})`);
   }
   // Only the second is about a project and the other AI; only the first is about a step in the answer.
-  ok(!/project/i.test(en['notes.16.new']) && !/other AI/.test(en['notes.16.new']), 'the first is about helpers the AI starts');
+  ok(!/project/i.test(en['notes.22.new']) && !/other AI/.test(en['notes.22.new']), 'the first is about helpers the AI starts');
   ok(/project/.test(en['notes.19.new']) && /other AI/.test(en['notes.19.new']) && !/step/.test(en['notes.19.new']), 'the second is about asking the other AI');
 });

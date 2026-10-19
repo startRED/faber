@@ -153,6 +153,39 @@ impl Core {
 }
 
 impl Core {
+    /// Answers a question the agent asked for the person, who is away ("keep going"): the same hand-over as their own answer,
+    /// and once the CLI has it the choice is written on the reply, so the screen can say what Faber chose. Nothing is remembered.
+    pub(super) fn answer_unattended(
+        &mut self,
+        conv: &str,
+        turn_id: &str,
+        request_id: &str,
+        answers: serde_json::Value,
+        chosen: Vec<AutoAnswer>,
+    ) {
+        let Ok(Handed { requests, tool, sid, .. }) = self.prepare_answer(conv, turn_id, request_id, true, false, Some(answers)) else {
+            return;
+        };
+        let (me, conv, turn, request) = (self.me.clone(), conv.to_string(), turn_id.to_string(), request_id.to_string());
+        tokio::spawn(async move {
+            let deadline = Instant::now() + ACK_WAIT;
+            let mut results = Vec::new();
+            for (id, ack) in requests {
+                results.push((id, timeout_at(deadline, ack).await.ok().and_then(|r| r.ok())));
+            }
+            let Some(core) = me.upgrade() else { return };
+            let mut core = core.lock().unwrap_or_else(|e| e.into_inner());
+            // The CLI took it: the choice is told even when the turn ended before this was settled.
+            let delivered = matches!(results.first(), Some((_, Some(Delivery::Delivered))));
+            if core.settle_answer(&conv, &turn, sid, &tool, None, &results).is_ok() || delivered {
+                core.note_answered_for_person(&conv, &turn, chosen);
+            } else {
+                // The CLI did not take it: the question is on the list again, and gets another try after the same wait.
+                core.watch_question(&conv, &turn, &request);
+            }
+        });
+    }
+
     /// Allows the questions without asking the user. The answers are watched without the lock: one the CLI did not
     /// take, or did not confirm in time, becomes a question on the list again, so the turn is never left blocked behind
     /// a row that says it is working.
@@ -294,6 +327,7 @@ mod tests {
                 served: false,
                 unsaved_session: None,
                 steering: vec![],
+                held: None,
             };
             c.live.insert(id.clone(), live);
             c.refresh_running();
@@ -887,5 +921,158 @@ mod tests {
         assert_eq!(engine.answer(&id, "t1", "3", true, true).await, Ok(()));
         assert!(stands(&engine, &id, "Bash"));
         assert_eq!(*s.asked.lock().unwrap(), ["3", "2"]);
+    }
+
+    fn done() -> EngineEvent {
+        EngineEvent::Done {
+            ok: true,
+            reason: String::new(),
+            cost_total_usd: None,
+            input_tokens: 0,
+            output_tokens: 0,
+            cache_read_tokens: 0,
+            cache_write_tokens: 0,
+            cache_write_1h_tokens: 0,
+            incomplete: false,
+        }
+    }
+
+    fn failed() -> EngineEvent {
+        let EngineEvent::Done {
+            reason: _,
+            ok: _,
+            cost_total_usd,
+            input_tokens,
+            output_tokens,
+            cache_read_tokens,
+            cache_write_tokens,
+            cache_write_1h_tokens,
+            incomplete,
+        } = done()
+        else {
+            unreachable!()
+        };
+        EngineEvent::Done {
+            ok: false,
+            reason: "rate_limit".into(),
+            cost_total_usd,
+            input_tokens,
+            output_tokens,
+            cache_read_tokens,
+            cache_write_tokens,
+            cache_write_1h_tokens,
+            incomplete,
+        }
+    }
+
+    fn tool(id: &str, parent: Option<&str>) -> EngineEvent {
+        EngineEvent::Tool { id: id.into(), name: "Agent".into(), input: json!({}), parent: parent.map(String::from) }
+    }
+
+    /// The reply of the seeded conversation and its row in the running list, once the screen's next tick has passed.
+    async fn settled(engine: &Engine, id: &str) -> (Option<u64>, Option<bool>) {
+        tokio::time::sleep(Duration::from_millis(80)).await;
+        let reply = engine.open(id).unwrap().messages.pop().unwrap();
+        (reply.finished_at, engine.state().running.items.first().map(|i| i.settled))
+    }
+
+    #[tokio::test]
+    async fn a_reply_whose_last_message_ended_reads_as_finished_while_the_cli_still_closes_its_turn() {
+        let dir = tempfile::tempdir().unwrap();
+        let (engine, _) = engine(dir.path());
+        let id = seed(&engine, stub(vec![]).session, &[("t1", &[])]);
+        engine.with(|c| c.handle(&id, 1, EngineEvent::Text("All done.".into())));
+        assert_eq!(settled(&engine, &id).await, (None, Some(false)), "still writing");
+
+        engine.with(|c| c.handle(&id, 1, EngineEvent::Settled));
+        let (finished, row) = settled(&engine, &id).await;
+        assert!(finished.is_some(), "the reply says when the agent finished");
+        assert_eq!(row, Some(true), "the row stays for updates and the awake lock, marked settled for the screen");
+        assert_eq!(
+            engine.open(&id).unwrap().messages.last().unwrap().status,
+            Some(Status::Streaming),
+            "the engine still waits for the result"
+        );
+
+        // More words after it mean it was not done.
+        engine.with(|c| c.handle(&id, 1, EngineEvent::Text(" One more thing.".into())));
+        assert_eq!(settled(&engine, &id).await, (None, Some(false)));
+
+        engine.with(|c| c.handle(&id, 1, EngineEvent::Settled));
+        engine.with(|c| c.handle(&id, 1, done()));
+        let reply = engine.open(&id).unwrap().messages.pop().unwrap();
+        assert_eq!((reply.status, reply.finished_at.is_some(), reply.moved_at.is_some()), (Some(Status::Done), true, true));
+        assert!(engine.state().running.items.is_empty());
+    }
+
+    #[tokio::test]
+    async fn a_tool_call_still_open_keeps_the_reply_from_reading_as_finished() {
+        let dir = tempfile::tempdir().unwrap();
+        let (engine, _) = engine(dir.path());
+        let id = seed(&engine, stub(vec![]).session, &[("t1", &[])]);
+        engine.with(|c| c.handle(&id, 1, tool("bg", None)));
+        engine.with(|c| c.handle(&id, 1, EngineEvent::Settled));
+        assert_eq!(settled(&engine, &id).await, (None, Some(false)), "a helper is still at work for the agent");
+
+        engine.with(|c| c.handle(&id, 1, EngineEvent::ToolResult { id: "bg".into(), ok: true, declined: false, text: String::new() }));
+        engine.with(|c| c.handle(&id, 1, EngineEvent::Settled));
+        assert_eq!(settled(&engine, &id).await.1, Some(true));
+    }
+
+    #[tokio::test]
+    async fn a_queued_message_or_keep_going_keeps_the_row_at_work_after_the_agent_finished() {
+        let dir = tempfile::tempdir().unwrap();
+        let (engine, _) = engine(dir.path());
+        let id = seed(&engine, stub(vec![]).session, &[("t1", &[])]);
+        engine.with(|c| c.handle(&id, 1, EngineEvent::Settled));
+        assert_eq!(settled(&engine, &id).await.1, Some(true));
+        engine.with(|c| {
+            c.convs.get_mut(&id).unwrap().queued.push(crate::model::QueuedTurn {
+                id: "q".into(),
+                text: "next".into(),
+                images: None,
+                attachments: None,
+                choice: crate::router::Choice { vendor: "auto".into(), model: None, effort: None },
+                at: 3,
+                sending: false,
+                wake: None,
+            });
+            c.refresh_running();
+        });
+        assert_eq!(settled(&engine, &id).await.1, Some(false), "a message waits for the result: the conversation is not idle");
+    }
+
+    #[tokio::test]
+    async fn a_message_sent_after_the_agent_finished_waits_for_the_turn_to_close_instead_of_joining_it() {
+        let dir = tempfile::tempdir().unwrap();
+        let (engine, _) = engine(dir.path());
+        let id = seed(&engine, stub(vec![]).session, &[("t1", &[])]);
+        engine.with(|c| c.handle(&id, 1, EngineEvent::Settled));
+        assert_eq!(settled(&engine, &id).await.1, Some(true));
+        let req = SendRequest {
+            conversation_id: Some(id.clone()),
+            area: Area::Chat,
+            project_id: None,
+            text: "next".into(),
+            images: vec![],
+            files: vec![],
+            choice: crate::router::Choice { vendor: "auto".into(), model: None, effort: None },
+        };
+        engine.with(|c| c.enqueue(&id, req)).unwrap();
+        let (steering, sending) =
+            engine.with(|c| (c.live[&id].steering.clone(), c.convs[&id].queued.iter().map(|q| q.sending).collect::<Vec<_>>()));
+        assert!(steering.is_empty(), "nothing is written into a turn whose agent already finished");
+        assert_eq!(sending, [false], "the message waits for the next turn");
+        assert_eq!(settled(&engine, &id).await.1, Some(false), "and the row is at work again, with Stop, without another event");
+    }
+
+    #[tokio::test]
+    async fn a_turn_that_fails_after_the_agent_finished_is_not_done_so_a_wait_or_a_move_reads_as_work() {
+        let dir = tempfile::tempdir().unwrap();
+        let (engine, _) = engine(dir.path());
+        let id = seed(&engine, stub(vec![]).session, &[("t1", &[])]);
+        engine.with(|c| c.handle(&id, 1, EngineEvent::Settled));
+        engine.with(|c| c.handle(&id, 1, failed()));
+        assert_eq!(engine.open(&id).unwrap().messages.pop().unwrap().finished_at, None);
     }
 }

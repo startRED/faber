@@ -29,6 +29,8 @@ async fn opus_1_codex_manual_turns_stay_available_after_long_silence_or_start_er
             CodexThread {
                 helper: Default::default(),
                 browse: false,
+                conversations: false,
+                verify: false,
                 cwd: ".".into(),
                 model: None,
                 effort: None,
@@ -139,6 +141,8 @@ async fn review_7_codex_preserves_a_turn_sent_before_interrupt_acknowledgement()
         CodexThread {
             helper: Default::default(),
             browse: false,
+            conversations: false,
+            verify: false,
             cwd: ".".into(),
             model: None,
             effort: None,
@@ -191,6 +195,8 @@ async fn an_ignored_interrupt_quarantines_only_that_thread_and_preserves_a_runni
             CodexThread {
                 helper: Default::default(),
                 browse: false,
+                conversations: false,
+                verify: false,
                 cwd: ".".into(),
                 model: None,
                 effort: None,
@@ -238,6 +244,8 @@ async fn run(
     let thread = CodexThread {
         helper: Default::default(),
         browse: false,
+        conversations: false,
+        verify: false,
         cwd: ".".into(),
         model: None,
         effort: None,
@@ -451,6 +459,8 @@ async fn r161_a_codex_subagent_approval_outside_its_turn_is_refused() {
         let thread = CodexThread {
             helper: Default::default(),
             browse: false,
+            conversations: false,
+            verify: false,
             cwd: ".".into(),
             model: None,
             effort: None,
@@ -508,6 +518,8 @@ async fn codex_an_answer_that_fails_to_write_keeps_the_approval_and_the_retry_is
     let thread = CodexThread {
         helper: Default::default(),
         browse: false,
+        conversations: false,
+        verify: false,
         cwd: ".".into(),
         model: None,
         effort: None,
@@ -553,6 +565,8 @@ async fn codex_an_answer_that_may_be_half_written_is_never_written_again() {
     let thread = CodexThread {
         helper: Default::default(),
         browse: false,
+        conversations: false,
+        verify: false,
         cwd: ".".into(),
         model: None,
         effort: None,
@@ -685,6 +699,8 @@ async fn review3_user_mcp_servers_are_disabled_before_start_and_resume_without_c
                 CodexThread {
                     helper: Default::default(),
                     browse: false,
+                    conversations: false,
+                    verify: false,
                     cwd: ".".into(),
                     model: None,
                     effort: None,
@@ -745,6 +761,8 @@ async fn one_process_serves_two_conversations_at_once_and_keeps_their_answers_ap
         let thread = CodexThread {
             helper: Default::default(),
             browse: false,
+            conversations: false,
+            verify: false,
             cwd: ".".into(),
             model: None,
             effort: Some("medium".into()),
@@ -782,6 +800,8 @@ fn a_side_question_thread_has_its_own_instructions_restricted_reads_no_writes_an
     let thread = CodexThread {
         helper: Default::default(),
         browse: false,
+        conversations: false,
+        verify: false,
         cwd: ".".into(),
         model: Some("gpt-6-luna".into()),
         effort: None,
@@ -806,6 +826,8 @@ fn permissions_keep_the_workspace_sandbox_and_disable_project_network_without_ap
                 let t = CodexThread {
                     helper: Default::default(),
                     browse: false,
+                    conversations: false,
+                    verify: false,
                     cwd: "project".into(),
                     model: Some("model".into()),
                     effort: None,
@@ -864,6 +886,8 @@ async fn l2_serialized_start_and_resume_carry_the_no_approval_offline_policy() {
                 CodexThread {
                     helper: Default::default(),
                     browse: false,
+                    conversations: false,
+                    verify: false,
                     cwd: ".".into(),
                     model: None,
                     effort: None,
@@ -924,6 +948,8 @@ async fn a_project_with_no_approvals_declines_a_residual_request_without_emittin
                     CodexThread {
                         helper: Default::default(),
                         browse: false,
+                        conversations: false,
+                        verify: false,
                         cwd: ".".into(),
                         model: None,
                         effort: None,
@@ -950,6 +976,8 @@ fn the_name_is_a_developer_instruction_that_resume_repeats_and_a_side_question_n
     let thread = |resume: Option<&str>, instructions: Option<&str>, name: Option<&str>| CodexThread {
         helper: Default::default(),
         browse: false,
+        conversations: false,
+        verify: false,
         cwd: ".".into(),
         model: None,
         effort: None,
@@ -1025,6 +1053,8 @@ async fn a_steer_before_the_turn_has_an_id_is_not_delivered() {
     let thread = CodexThread {
         helper: Default::default(),
         browse: false,
+        conversations: false,
+        verify: false,
         cwd: ".".into(),
         model: None,
         effort: None,
@@ -1114,6 +1144,8 @@ async fn review3_command_gate_declines_git_mutations_and_runs_builds_only_in_the
             CodexThread {
                 helper: Default::default(),
                 browse: false,
+                conversations: false,
+                verify: false,
                 cwd: root.path().into(),
                 model: None,
                 effort: None,
@@ -1189,6 +1221,8 @@ fn r121_codex_full_access_has_no_sandbox_no_approvals_and_no_host_command_tool()
             let t = CodexThread {
                 helper: Default::default(),
                 browse: false,
+                conversations: false,
+                verify: false,
                 cwd: "project".into(),
                 model: None,
                 effort: None,
@@ -1215,6 +1249,8 @@ fn r121_a_side_question_stays_isolated_whatever_mode_the_person_chose() {
         let t = CodexThread {
             helper: Default::default(),
             browse: false,
+            conversations: false,
+            verify: false,
             cwd: ".".into(),
             model: None,
             effort: None,
@@ -1276,6 +1312,8 @@ async fn r121_a_full_access_thread_keeps_the_persons_mcp_servers_and_starts_with
             CodexThread {
                 helper: Default::default(),
                 browse: false,
+                conversations: false,
+                verify: false,
                 cwd: ".".into(),
                 model: None,
                 effort: None,
@@ -1330,6 +1368,8 @@ async fn r124_a_full_access_thread_hands_a_residual_approval_to_the_engine_and_n
                     CodexThread {
                         helper: Default::default(),
                         browse: false,
+                        conversations: false,
+                        verify: false,
                         cwd: ".".into(),
                         model: None,
                         effort: None,
@@ -1379,6 +1419,8 @@ fn mode_thread(permissions: Permissions, tuning: faber_engine::model::Tuning) ->
     CodexThread {
         helper: Default::default(),
         browse: false,
+        conversations: false,
+        verify: false,
         cwd: "project".into(),
         model: None,
         effort: None,
@@ -1546,6 +1588,8 @@ async fn r161_codex_calling_the_helper_waits_for_its_report_and_gets_it_as_the_t
     let thread = CodexThread {
         helper: faber_engine::helper::Helper::Offers,
         browse: false,
+        conversations: false,
+        verify: false,
         cwd: ".".into(),
         model: Some("gpt-6-luna".into()),
         ..mode_thread(Permissions::FullAccess, Default::default())

@@ -1,6 +1,6 @@
 # Workflow
 
-How work lands: lane claims, merge on green, the red base and the numbers given at landing.
+How work lands: lane claims, merge on green, the task queue, the direction check, the red base and the numbers given at landing.
 
 ## Lane claims
 
@@ -42,6 +42,30 @@ So a pull request is never merged with the button or `gh pr merge`: its green sa
 Dependabot pull request still runs every suite on its own, until it lands through `land.mjs` too. Each push to a queue
 branch cancels the run before it, so a lane queues once, with its fix complete.
 
+Batches (R190 V3, R220). A pull request that touches other parts of the repository than one queued and not landed
+yet (its first folders, leaving out the words, the locales and `docs/`, which every landing writes) is squashed and
+numbered on top of that queue commit instead of the base, up to three deep and never with a workflow change. One run
+then checks them together, and when it is green the land job (`land.mjs --land`) moves every branch of the batch to
+its own commit and phase-1-base to the top one, so all of them show merged; the runs under it find themselves landed.
+One under it that was queued again, closed, pushed again or turned red, or a base that moved, sends the top one back to
+be squashed alone. A red batch blames nobody yet: the report job (`land.mjs --split`) queues the top one again alone,
+and each side then answers for itself, so the one whose own run is red is the culprit and gets the red `queue` status.
+`--alone` queues without batching.
+
+The PC checks before it queues (R190 V2). `land.mjs` runs, on the very commit it is about to queue, the suites CI would
+run for the change (`cargo t --suite <name>`, each whole), in one worktree it keeps for that
+(`faber-wt-landing` beside the main checkout, marked as its own and building into `target/landing`, one landing at a
+time, on Windows only, where the screen suite runs). When they pass, it
+posts the commit status `faber/verify` with the owner's own `gh` sign-in, saying the tree and the suites
+(`tree <hash> covers rust ui screen`), and only then pushes the queue branch. The `changes` job takes that status only
+from the repository's owner, only on a queue branch and only for the tree it names, and leaves those suites out: the
+lints still run, and a tree without it runs as before. So a lane runs `land.mjs` in the background (the suites take
+minutes). A failure there queues nothing and prints the failing tests; `--no-verify`, a run on CI (the land job's
+run again on a new base), no `cargo` on the PATH or another landing checking at the time queue without the status,
+and CI runs every suite. The status is only as trusted as the owner's PC: any program there can post it with the
+owner's sign-in, as the spec accepts, and the daily run on `main` catches a false green within a day. Every suite still runs on `main` once a day and before a commit becomes stable, which is also
+where macOS runs its Rust suite now (Erick, 2026-10-17): the PC proves macOS through Clippy only (R166).
+
 ## Task queue
 
 A session that finished a task takes the next one by itself, without asking, the way it does when the owner says "I am
@@ -60,6 +84,23 @@ task back. CI never runs on `claim/` branches.
 
 A session asks the owner only what is the owner's to decide (direction, taste, money), in one short card, and takes the
 next task while the question waits. It stops when `next` says no task is free.
+
+## Direction check
+
+Rules become tests and the queue keeps sessions busy, but nothing else asks whether the work still heads where
+[docs/product/](../product/README.md) says (R243). `node scripts/direction.mjs` asks a fresh read-only Codex session
+(`gpt-6.1-sol`, `codex exec -s read-only`, nothing kept) to read the product pages, the product map with its "Known
+incoherences", the decisions and every queued task, and answer three questions: which goals have no feature yet, which
+features drift from their goal, and which queued tasks no longer serve one. Every finding names the page or decision it
+rests on, and the report says what it could not judge.
+
+It writes `docs/tasks/proposed/REPORT.md` and one proposed task per gap in the task format, each marked as a proposal;
+git ignores the folder, and the queue never reads it. It queues nothing: the owner or the lead session picks a proposal
+by giving it an order and moving it into `docs/tasks/`, and drops a task the report flags only after checking it. A new
+run replaces its own proposals and keeps any other draft there. `--prompt` prints the question without running Codex.
+
+The lead session runs it once a week, and any session runs it before stopping when `tasks.mjs next` says no task is
+free. A run reads about 300 KB of pages, so it costs one long Codex turn of quota and nothing on the PC.
 
 ## Red base
 

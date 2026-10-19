@@ -4,9 +4,9 @@ How a person follows and watches the agent work, visual answers, and learning an
 
 ## Following the work
 
-**Progress view.** The self-development MVP uses Ready, Running, Review, Done and Blocked. Ready tasks can wait only
-for an explicit resource brake; Blocked tasks name their missing dependency or decision. The remaining Projects
-detail view follows the later full implementation.
+**Progress view.** Planned for missions (Ready, Running, Review, Done and Blocked), which have no screen since R171.
+Running work shows today in the running column and in each reply (subagent steps, helpers, conversations the agent
+started); a board needs the owner first (R161).
 
 - **Rows** show the AI's name and a verb, such as "Claude drawing".
 - **Top:** one plain sentence, the overall bar, the time left, the share of the plan's limit used, and who is working
@@ -106,14 +106,24 @@ frames) and checked against today's code. It fills the steps of R161 and never b
    it, and "See the page" puts the page over the running column. Built (R197): the agent reads the page again, clicks,
    types, scrolls and goes back by the words a person sees; a page with a password, card or captcha field is the person's
    turn ("Your turn" on the card), where the agent reads and scrolls but never clicks or types; while the person looks at
-   the pane it is theirs, and the agent's call waits for them and then hears they used it. Still to come: the app pane,
+   the pane it is theirs, and the agent's call waits for them and then hears they used it. Built (R238): the app pane, as
+   Faber's browser on the app's own address: a local address a command of the reply printed is a card "Your app,
+   running here" with "See the page". Still to come:
    pointer-level actions for pages the words cannot reach, and the recorded log. The rest of the plan: The agent or a child opens websites in a pane that belongs to Faber and runs the app it builds beside the
    chat, through a Faber tool the CLI calls. A card in the reply ("Site open in the browser", with a picture and Open)
    is the way in, next to the file and question cards that already exist. The pane has one owner at a time: "Take over"
    stops the agent at its next action, the person clicks and types, and "Let it continue" hands it back with a short
    note of what the person changed. Logins, captchas and payments are always the person's turn ("Your turn" on the
    card), never the agent's (guardrails).
-8. **Recorded, not streamed.** Each pane keeps a log: a small picture at each page change or agent action, with the
+8. **Recorded, not streamed.** Built (R225): the page view in the running column lists every step the agent took in the
+   browser during the reply, in plain words with what it typed left out, and picking one shows the picture taken after it
+   in the live page's place; the latest step, or "Back to the live page", is the page itself again (taking over from
+   there). The pictures of one conversation take at most 20 MB on disk, the oldest going first. "While you were away" shows
+   the pages the run left open, a picture each with what the agent last did there. When the person hands the page back, the
+   agent hears the sites they went to by the last two labels of their name only (never an address or a subdomain). Pictures
+   of the person's own page changes are not kept: the owner chose so (2026-10-18), since they can show their logged-in
+   pages. The plan as first written:
+   Each pane keeps a log: a small picture at each page change or agent action, with the
    action that caused it, typed secrets masked and password fields blurred. Watching live is playing the end of that
    log, coming back later is scrubbing it, and "Take over from here" starts from the latest picture. Only the pane the
    person opened is a real live view; every other child is a still picture that steps forward. The log follows the
@@ -139,6 +149,10 @@ frames) and checked against today's code. It fills the steps of R161 and never b
    Built (R193): researching, as the sites the reply opened under the status line, the one it reads now in the first
    ink. Codex reports its searches only, so its replies list no site yet.
    Built (R194): long work, as the time a step has run at the end of the status line, past half a minute.
+   Built (R239): browsing, as a ring around what the agent clicked or typed in and a pointer at it, drawn over the page,
+   following it as the page scrolls, until its next action, so the picture of each step and the page the person takes show where it acted; nothing moves.
+   Pointer-level actions, and the outline of a changed part and a named pointer per subagent while a screen is built, stay
+   for later (Erick, 2026-10-18); the app card already opens the app, which its dev server reloads by itself.
 
 **Across all of them:**
 

@@ -1,5 +1,5 @@
 import { createSignal } from 'solid-js';
-import { type Area, errorText, type RunningItem, type RunningList } from './api.ts';
+import { type Area, errorText, type RunningItem, type RunningList, type Summary } from './api.ts';
 
 // The running list on the screen (docs/design/layout.md, "Running column"). The engine builds and orders the list; the screen
 // keeps the newest one it has seen, groups it into blocks and decides when the column opens by itself.
@@ -22,26 +22,52 @@ export interface Block {
   /** The project id, or `chat` for the conversations of the Chat area. */
   key: string;
   items: RunningItem[];
+  /** Its conversations whose run ended while nobody looked: a done card each, after what runs. */
+  done: Summary[];
   /** How many of its items wait for the user. */
   needs: number;
 }
 
-/** The engine's order, cut into one block per project plus one for Chat. A block keeps the place of its first item. */
-export function blocksOf(items: RunningItem[]): Block[] {
+/** The engine's order, cut into one block per project plus one for Chat. A block keeps the place of its first item; done
+ * cards join their project's block, or start one after the rest. */
+export function blocksOf(items: RunningItem[], done: Summary[] = []): Block[] {
   const blocks = new Map<string, Block>();
+  const of = (area: Area, projectId?: string) => {
+    const key = area === 'project' && projectId ? projectId : 'chat';
+    const block = blocks.get(key) ?? { key, items: [], done: [], needs: 0 };
+    blocks.set(key, block);
+    return block;
+  };
   for (const item of items) {
-    const key = item.area === 'project' && item.projectId ? item.projectId : 'chat';
-    const block = blocks.get(key) ?? { key, items: [], needs: 0 };
+    const block = of(item.area, item.projectId);
     block.items.push(item);
     if (item.state === 'needsYou') block.needs++;
-    blocks.set(key, block);
   }
+  for (const c of done) of(c.area, c.projectId).done.push(c);
   return [...blocks.values()];
 }
 
+/** The done cards (task 016): conversations whose last run ended while nobody looked, newest end first. Not one at work again,
+ * not one put away, and not the one on screen while the window shows it (the screen tells the engine it was seen). */
+export function doneCards(all: Summary[], items: RunningItem[], onScreen?: string): Summary[] {
+  const busy = new Set(items.filter((i) => !i.settled).map((i) => i.conversationId));
+  return all.filter((c) => c.ended && !c.archived && !busy.has(c.id) && c.id !== onScreen).sort((a, b) => b.ended!.at - a.ended!.at);
+}
+
+/** What the screen shows as running: a reply whose agent finished, with only the CLI's turn still closing, is done for the person. The
+ * engine keeps its row (an update and the awake lock still wait for the process), so the whole list is for those. */
+export const shownRunning = (items: RunningItem[]): RunningItem[] => items.filter((i) => !i.settled);
+
+/** Whether the composer offers Stop: the engine is at work in the conversation and its agent has not finished. Once it has, the
+ * composer reads Send, and a message written then waits in the queue like any written while the engine is busy. */
+export const stopOffered = (engineBusy: boolean, items: RunningItem[], conversationId?: string): boolean =>
+  engineBusy && !items.some((i) => i.conversationId === conversationId && i.settled);
+
 /** The conversations the new-conversation screen offers to pick up: those that wait for the user first, then the latest, at
  * most `limit`. `recent` is every conversation, newest first: it is ordered whole, so a waiting one is found however old it is. */
-export function pickUp<T extends { id: string }>(recent: T[], items: RunningItem[], limit = 4): T[] {
+export function pickUp<T extends { id: string; archived?: boolean }>(all: T[], items: RunningItem[], limit = 4): T[] {
+  // An archived conversation is put away: it is picked up only from search.
+  const recent = all.filter((c) => !c.archived);
   const needs = (c: T) => items.some((i) => i.conversationId === c.id && i.state === 'needsYou');
   return [...recent.filter(needs), ...recent.filter((c) => !needs(c))].slice(0, limit);
 }

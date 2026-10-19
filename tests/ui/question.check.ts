@@ -1,22 +1,23 @@
-import { createComponent } from 'solid-js';
+import { createComponent, createSignal } from 'solid-js';
 import { render } from 'solid-js/web';
-import { api } from '../../ui/api.ts';
+import { api, type Permission } from '../../ui/api.ts';
 import { askedQuestions, Asks } from '../../ui/Ask.tsx';
 import { useLanguage } from '../../ui/i18n.ts';
 import { check, deepEqual, equal, ok } from './check.ts';
 
-// The assistant's own questions: a card in its message, answered by tapping (docs/product-map.md, "Question card").
+// The assistant's own questions: a card in its message, one step per question, a tile per answer, answered by tapping
+// (docs/product-map.md, "Question card").
 
 const settle = (ms = 20) => new Promise((resolve) => setTimeout(resolve, ms));
 
 const INPUT = {
   questions: [
-    { question: 'Which stack?', header: 'Stack', multiSelect: false, options: [{ label: 'Rust', description: 'Fast' }, { label: 'Go', description: 'Simple' }] },
+    { question: 'Which stack?', header: 'Stack', multiSelect: false, options: [{ label: 'Rust (Recommended)', description: 'Fast' }, { label: 'Go', description: 'Simple' }] },
     { question: 'Which extras?', header: 'Extras', multiSelect: true, options: [{ label: 'Docs' }, { label: 'Tests' }, { label: 'CI' }] },
   ],
 };
 
-async function withCard(body: (root: HTMLElement, calls: unknown[][]) => Promise<void>, input: unknown = INPUT) {
+async function withCard(body: (root: HTMLElement, calls: unknown[][], waiting: (list: Permission[]) => void) => Promise<void>, input: unknown = INPUT) {
   const originals = { ...api };
   useLanguage('en');
   const calls: unknown[][] = [];
@@ -24,13 +25,11 @@ async function withCard(body: (root: HTMLElement, calls: unknown[][]) => Promise
   api.answer = async (...args) => void calls.push(['answer', ...args]);
   const root = document.createElement('div');
   document.body.append(root);
-  const dispose = render(
-    () => createComponent(Asks, { conversationId: 'c1', turnId: 't1', permissions: [{ requestId: 'r1', tool: 'AskUserQuestion', input }] }),
-    root,
-  );
+  const [list, setList] = createSignal<Permission[]>([{ requestId: 'r1', tool: 'AskUserQuestion', input }]);
+  const dispose = render(() => createComponent(Asks, { conversationId: 'c1', turnId: 't1', get permissions() { return list(); } }), root);
   try {
     await settle();
-    await body(root, calls);
+    await body(root, calls, setList);
   } finally {
     dispose();
     root.remove();
@@ -39,28 +38,44 @@ async function withCard(body: (root: HTMLElement, calls: unknown[][]) => Promise
 }
 
 const click = (el: Element | null | undefined) => (el as HTMLElement).click();
-const options = (root: HTMLElement, question: number) => [...root.querySelectorAll('fieldset.q')[question].querySelectorAll<HTMLElement>('.q-option')];
+const panel = (root: HTMLElement, question: number) => root.querySelectorAll<HTMLElement>('.q')[question];
+const options = (root: HTMLElement, question: number) => [...panel(root, question).querySelectorAll<HTMLElement>('.q-opt')];
+const label = (o: HTMLElement) => o.querySelector('.q-label')?.firstChild?.textContent;
+const button = (root: HTMLElement, text: string) => [...root.querySelectorAll<HTMLButtonElement>('.q-foot .btn')].find((b) => b.textContent?.trim() === text)!;
+const tabs = (root: HTMLElement) => [...root.querySelectorAll<HTMLElement>('[role="tab"]')];
+const write = (el: HTMLInputElement, text: string) => {
+  el.value = text;
+  el.dispatchEvent(new InputEvent('input', { bubbles: true }));
+};
 
 check('question card: a malformed question list shows nothing to answer', () => {
   deepEqual(askedQuestions(undefined), []);
   deepEqual(askedQuestions({ questions: 'no' }), []);
   deepEqual(askedQuestions({ questions: [{ options: [] }, { question: 'Ok?', options: [{ label: 'Yes' }, { nope: 1 }] }] }).map((q) => q.options.length), [1]);
+  deepEqual(askedQuestions({ questions: [{ question: 'Ok?', options: [{ label: 'A', preview: '  ' }, { label: 'B', preview: '[ ok ]' }, { label: 'C', preview: 4 }] }] })[0].options.map((o) => o.preview), [undefined, '[ ok ]', undefined]);
 });
 
-check('question card: the agent’s question is a card with options to tap, and Send waits for every answer', () => withCard(async (root, calls) => {
-  const card = root.querySelector('[data-testid="question-card"]')!;
-  ok(card, 'a question card, not a permission card');
-  equal(root.querySelectorAll('fieldset.q').length, 2);
-  equal(options(root, 0).map((o) => o.querySelector('span')?.textContent).join(), 'Rust,Go');
-  const send = [...root.querySelectorAll<HTMLButtonElement>('.btn.primary')].find((b) => b.textContent?.trim() === 'Send answers')!;
+check('question card: each question is a step, the open one shows and Send waits for every answer', () => withCard(async (root, calls) => {
+  ok(root.querySelector('[data-testid="question-card"]'), 'a question card, not a permission card');
+  equal(tabs(root).map((s) => s.querySelector('.q-t')?.textContent).join(), 'Stack,Extras');
+  equal(tabs(root).map((s) => s.getAttribute('aria-selected')).join(), 'true,false');
+  equal(panel(root, 0).hasAttribute('inert'), false);
+  ok(panel(root, 1).hasAttribute('inert'), 'the other step waits, out of reach');
+  equal(root.querySelector('.q-sum')?.textContent, '0 of 2 answered');
+  equal(options(root, 0).map(label).join(), 'Rust,Go');
+  const send = button(root, 'Send answers');
   ok(send.disabled, 'nothing chosen yet');
   click(options(root, 0)[1]);
   await settle();
   ok(send.disabled, 'the second question is still open');
+  ok(tabs(root)[0].classList.contains('done'), 'a done step is ticked');
+  equal(root.querySelector('.q-sum')?.textContent, '1 of 2 answered');
   click(options(root, 1)[0]);
   click(options(root, 1)[2]);
   await settle();
   equal(options(root, 0)[1].getAttribute('aria-checked'), 'true');
+  equal(options(root, 0)[1].getAttribute('role'), 'radio');
+  equal(panel(root, 0).querySelector('[role="radiogroup"]') !== null, true);
   equal(options(root, 1)[0].getAttribute('role'), 'checkbox', 'several can be chosen');
   equal(send.disabled, false);
   click(send);
@@ -68,47 +83,138 @@ check('question card: the agent’s question is a card with options to tap, and 
   deepEqual(calls, [['question', 'c1', 't1', 'r1', { 'Which stack?': 'Go', 'Which extras?': 'Docs, CI' }]]);
 }));
 
-check('question card: writing another answer replaces the chosen option of a single choice, and Skip declines', () => withCard(async (root, calls) => {
+check('question card: choosing a single answer moves on to the next open question, and the steps can be walked with the arrows', () => withCard(async (root) => {
   click(options(root, 0)[0]);
-  const other = root.querySelector<HTMLInputElement>('fieldset.q .q-other')!;
-  other.value = 'Zig';
-  other.dispatchEvent(new InputEvent('input', { bubbles: true }));
+  await settle(320);
+  equal(tabs(root)[1].getAttribute('aria-selected'), 'true', 'it moved to the next question by itself');
+  equal(panel(root, 1).hasAttribute('inert'), false);
+  ok(panel(root, 0).hasAttribute('inert'));
+  tabs(root)[1].dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowLeft', bubbles: true }));
   await settle();
-  equal(options(root, 0)[0].getAttribute('aria-checked'), 'false', 'the tapped option was replaced');
+  equal(tabs(root)[0].getAttribute('aria-selected'), 'true');
+  equal(tabs(root)[0].getAttribute('tabindex'), '0');
+  equal(tabs(root)[1].getAttribute('tabindex'), '-1');
+}));
+
+check('question card: the arrows move through the tiles of a single choice and take the one they land on', () => withCard(async (root) => {
+  const [rust, go] = options(root, 0);
+  equal(rust.getAttribute('tabindex'), '0', 'one tile is in the tab order');
+  equal(go.getAttribute('tabindex'), '-1');
+  rust.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true, cancelable: true }));
+  await settle();
+  equal(go.getAttribute('aria-checked'), 'true');
+  equal(go.getAttribute('tabindex'), '0');
+  equal(rust.getAttribute('tabindex'), '-1');
+}));
+
+check('question card: "(Recommended)" is a badge on the tile, and the label goes back as the assistant wrote it', () => withCard(async (root, calls) => {
+  const rust = options(root, 0)[0];
+  equal(label(rust), 'Rust');
+  equal(rust.querySelector('.q-rec')?.textContent, 'Recommended');
+  equal(options(root, 0)[1].querySelector('.q-rec'), null);
+  click(rust);
+  click(options(root, 1)[0]);
+  await settle();
+  click(button(root, 'Send answers'));
+  await settle();
+  deepEqual(calls[0], ['question', 'c1', 't1', 'r1', { 'Which stack?': 'Rust (Recommended)', 'Which extras?': 'Docs' }]);
+}));
+
+check('question card: another answer is one quiet button that opens the field, and it replaces the chosen tile of a single choice', () => withCard(async (root, calls) => {
+  const more = panel(root, 0).querySelector<HTMLButtonElement>('.q-more')!;
+  equal(more.getAttribute('aria-expanded'), 'false');
+  equal(more.textContent?.trim(), 'Write another answer');
+  const fold = panel(root, 0).querySelector<HTMLElement>('.fold')!;
+  ok(fold.hasAttribute('inert'), 'the field is closed until asked for');
+  click(options(root, 0)[0]);
+  click(more);
+  await settle();
+  equal(more.getAttribute('aria-expanded'), 'true');
+  equal(fold.hasAttribute('inert'), false);
+  const field = fold.querySelector<HTMLInputElement>('input')!;
+  equal(document.activeElement, field, 'the field takes the focus');
+  write(field, 'Zig');
+  await settle();
+  equal(options(root, 0)[0].getAttribute('aria-checked'), 'false', 'the tapped tile was replaced');
+  click(more);
+  await settle();
+  equal(more.textContent?.trim(), 'Zig', 'closed, the button shows what was written');
   click(options(root, 1)[1]);
   await settle();
-  const buttons = [...root.querySelectorAll<HTMLButtonElement>('.ask > div .btn')];
-  click(buttons.find((b) => b.textContent?.trim() === 'Send answers'));
+  click(button(root, 'Send answers'));
   await settle();
   deepEqual(calls[0], ['question', 'c1', 't1', 'r1', { 'Which stack?': 'Zig', 'Which extras?': 'Tests' }]);
 }));
 
 check('question card: Skip declines the question without sending answers', () => withCard(async (root, calls) => {
-  click([...root.querySelectorAll<HTMLButtonElement>('.ask > div .btn')].find((b) => b.textContent?.trim() === 'Skip'));
+  click(button(root, 'Skip'));
   await settle();
   deepEqual(calls, [['answer', 'c1', 't1', 'r1', false]]);
 }));
 
-check('question card: tapping an option of a single choice clears what was written, so only one answer goes back', () => withCard(async (root, calls) => {
-  const other = root.querySelector<HTMLInputElement>('fieldset.q .q-other')!;
-  other.value = 'Zig';
-  other.dispatchEvent(new InputEvent('input', { bubbles: true }));
+check('question card: tapping a tile of a single choice clears what was written, so only one answer goes back', () => withCard(async (root, calls) => {
+  click(panel(root, 0).querySelector('.q-more'));
+  write(panel(root, 0).querySelector<HTMLInputElement>('input')!, 'Zig');
   await settle();
   click(options(root, 0)[1]);
   click(options(root, 1)[0]);
   await settle();
-  equal(root.querySelector<HTMLInputElement>('fieldset.q .q-other')!.value, '', 'the written answer was cleared');
-  click([...root.querySelectorAll<HTMLButtonElement>('.ask > div .btn')].find((b) => b.textContent?.trim() === 'Send answers'));
+  equal(panel(root, 0).querySelector<HTMLInputElement>('input')!.value, '', 'the written answer was cleared');
+  click(button(root, 'Send answers'));
   await settle();
   deepEqual(calls[0], ['question', 'c1', 't1', 'r1', { 'Which stack?': 'Go', 'Which extras?': 'Docs' }]);
 }));
 
+check('question card: a single question has no steps, and a tile with a drawing shows it beside the tile in focus', () => withCard(async (root, calls) => {
+  equal(root.querySelector('[role="tablist"]'), null, 'one question needs no steps');
+  equal(root.querySelector('.q-sum'), null);
+  equal(root.querySelector('.q-head')?.textContent, 'Layout');
+  const preview = () => root.querySelector('.q-preview');
+  equal(preview()?.querySelector('pre')?.textContent, '[ side ]', 'the first drawing shows before anything is chosen, fences removed');
+  const [side, , plain] = options(root, 0);
+  options(root, 0)[1].dispatchEvent(new MouseEvent('mouseenter'));
+  await settle();
+  equal(preview()?.querySelector('pre')?.textContent, '[ top ]', 'the drawing follows the tile in focus');
+  equal(preview()?.getAttribute('aria-label'), 'Preview of Top');
+  plain.dispatchEvent(new FocusEvent('focus'));
+  await settle();
+  equal(preview()?.querySelector('pre'), null);
+  equal(preview()?.textContent, 'This option has no preview.');
+  click(side);
+  await settle();
+  click(button(root, 'Send answers'));
+  await settle();
+  deepEqual(calls[0], ['question', 'c1', 't1', 'r1', { 'Where?': 'Side' }]);
+}, {
+  questions: [{ question: 'Where?', header: 'Layout', options: [{ label: 'Side', preview: '```\n[ side ]\n```' }, { label: 'Top', preview: '[ top ]' }, { label: 'None' }] }],
+}));
+
+check('question card: questions without a drawing have no preview panel', () => withCard(async (root) => {
+  equal(root.querySelector('.q-preview'), null);
+  equal(root.querySelector('.with-preview'), null);
+}));
+
+check('question card: an answered card folds away before it leaves, and the other waiting questions are a note', () => withCard(async (root, _calls, waiting) => {
+  const other = { requestId: 'r2', tool: 'AskUserQuestion', input: INPUT };
+  waiting([{ requestId: 'r1', tool: 'AskUserQuestion', input: INPUT }, other]);
+  await settle();
+  equal(root.querySelector('.ask-more')?.textContent, '1 more waiting');
+  waiting([]);
+  await settle(20);
+  // A PC that asks for less motion (CI's machines do) gets no fold: the card leaves at once, which is all that can be proven there.
+  if (matchMedia('(prefers-reduced-motion: reduce)').matches) return equal(root.querySelector('.ask.question'), null, 'reduced motion: the card leaves at once');
+  ok(root.querySelector('.ask.question.gone'), 'the card folds while it still exists');
+  equal(root.querySelector('.ask.question.gone .q-inner')?.hasAttribute('inert'), true, 'and can no longer be used');
+  await settle(400);
+  equal(root.querySelector('.ask.question'), null, 'then it is gone');
+}));
+
 check('question card: a question whose text is a built-in name still renders and can be answered', () => withCard(async (root, calls) => {
-  equal(root.querySelectorAll('fieldset.q').length, 2);
+  equal(root.querySelectorAll('.q').length, 2);
   click(options(root, 0)[0]);
   click(options(root, 1)[0]);
   await settle();
-  click([...root.querySelectorAll<HTMLButtonElement>('.ask > div .btn')].find((b) => b.textContent?.trim() === 'Send answers'));
+  click(button(root, 'Send answers'));
   await settle();
   deepEqual(calls[0], ['question', 'c1', 't1', 'r1', { constructor: 'Yes', toString: 'No' }]);
 }, { questions: [{ question: 'constructor', options: [{ label: 'Yes' }] }, { question: 'toString', options: [{ label: 'No' }] }] }));

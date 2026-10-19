@@ -57,7 +57,8 @@ check('update: the sidebar line follows the download and the install, and is qui
     await settle();
     equal(host.querySelector('.upd')!.textContent, t('update.installing'));
     set({ phase: 'ready' });
-    await settle();
+    // The line shrinks away over --dur-exit (180 ms) before it leaves the page.
+    await new Promise((resolve) => setTimeout(resolve, 400));
     equal(host.querySelector('.upd'), null, 'a kept update has its own control, not this line');
   }));
 

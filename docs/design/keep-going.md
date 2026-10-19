@@ -1,0 +1,24 @@
+# Keep going on the screen
+
+How a project conversation that goes on by itself looks, in the composer, the thread, the running column and the sidebar
+(the engine's side is the Keep going row of [product-map.md](../product-map.md)). The rest of the conversation's layout is
+in [layout.md](layout.md).
+
+Keep going (R199): in a project conversation under way, the composer bar has a "Keep going" chip after the model's,
+with the loop icon; pressed (`aria-pressed`) it takes the accent's soft fill and ink, never the amber, and its tooltip
+says the composer's Stop ends it. A message Faber sent by itself takes no row (R241): the reply to it shows the same icon,
+small, after the model's name, with "Faber asked it to keep going" as its tooltip, and a reply to it with nothing in it
+is not drawn. A reply after which it stopped by itself ends with one calm line that says why (C001). Nothing moves.
+When every AI it may use is near its limit, spent faster than its daily line, out, or billed per use (R216), one
+amber line sits right above the composer, at its width, with the loop icon: before it turns on, the chip's first click shows it with
+"Keep going anyway" and "Not now" (turning it off never asks); while it is on, the same line stays without buttons and
+says until when it waits once every AI is out. The sidebar and the running column say "Waiting for quota until …".
+It wraps at 720 px and does not move.
+Coming back to it (R224): its row in the running column has, under the title, one quiet line in the data face with
+the turns of work done and how long it has run, and under that the last line the agent wrote on one line with an
+ellipsis (its full text is the tooltip); the verb beside the AI's name says the wait it is in ("resting after an
+error", "waiting for an update to finish"), and "Waiting for quota until …" for a quota wait. After half an hour on its
+own, the newest reply starts, right under the model's name, with one quiet line and the loop icon, in the same style
+as the stop line: "While you were away (3 h): 14 turns of work, 1 switch to the other AI, 2 questions answered for you."
+(a part that did not happen is left out), and each question Faber answered is one more such line ("You were away, so Faber
+answered “…” with “…”."). Nothing moves.

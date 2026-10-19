@@ -223,6 +223,8 @@ check('settings: the new sections are written in every language, and the file hi
 // ---- the sections on a real page ----
 
 const tick = () => new Promise((resolve) => setTimeout(resolve, 0));
+/** Room for the short exit of what closes: a menu, a folded group or a row's long text stays in the page for it. */
+const leave = () => new Promise((resolve) => setTimeout(resolve, 400));
 
 /** Draws a component into the page, where the stylesheet applies, and takes it away again. */
 function mount(view: () => ReturnType<typeof createComponent>) {
@@ -484,12 +486,13 @@ check('R140: the permission menu lists five modes with one plain line each, and 
     options()[3]!.click();
     await tick();
     deepEqual(patches, [{ permissions: 'auto' }]);
+    await leave();
     equal(view.host.querySelector('[role="listbox"]'), null, 'picking closes the menu');
     equal(pick().textContent, en['set.permissions.auto']);
     equal(view.host.querySelector('#set-permissions-hint')!.textContent, en['set.permissions.auto.line']);
     equal(body('set.permissions.auto.more'), true, 'the open text follows the mode');
     more.click();
-    await tick();
+    await leave();
     equal(body('set.permissions.auto.more'), false, 'closed, it leaves the page');
     // The keyboard opens the menu, and Esc closes it without reaching the page behind (which would leave Settings).
     let escapes = 0;
@@ -500,7 +503,7 @@ check('R140: the permission menu lists five modes with one plain line each, and 
       await tick();
       equal(options().length, 5, 'ArrowDown opens the menu');
       pick().dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
-      await tick();
+      await leave();
       equal(view.host.querySelector('[role="listbox"]'), null, 'Esc closes it');
       equal(escapes, 0, 'and stays inside the menu');
       pick().dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
@@ -623,7 +626,11 @@ check('settings: the chat working folder is one row, and only where its control 
   } finally { withFolder.stop(); without.stop(); }
 });
 
-check('settings: switching sections is instant (no exit copies, nothing animates) and the new section opens at its top', async () => {
+check('settings: switching sections is a short cross-fade (the old one leaves as a copy, the new one arrives), instant when reduced, and the new section opens at its top', async () => {
+  const preference = Object.getOwnPropertyDescriptor(MediaQueryList.prototype, 'matches')!;
+  Object.defineProperty(MediaQueryList.prototype, 'matches', { ...preference, get(this: MediaQueryList) {
+    return this.media === '(prefers-reduced-motion: reduce)' ? false : preference.get!.call(this);
+  } });
   const view = mount(() => createComponent(Settings, {
     look: look(), saved: {}, vendors: ['claude', 'codex'], quotas: {}, now: 0,
     onClose: () => {}, onOpenSetup: () => {}, onSave: async () => true,
@@ -634,21 +641,32 @@ check('settings: switching sections is instant (no exit copies, nothing animates
     const settings = view.host.querySelector<HTMLElement>('.settings')!;
     settings.style.cssText = 'position:fixed;left:0;top:0;width:1100px;height:240px';
     const main = view.host.querySelector<HTMLElement>('.s-main')!;
-    ok(!main.hasAttribute('data-motion-list'), '.s-main is not an animated list: it would keep exit copies of the old section');
+    ok(main.hasAttribute('data-motion-list'), '.s-main is an animated list: the old section keeps an inert copy while it fades');
     ok(main.scrollHeight > main.clientHeight, 'General is taller than the window here');
     main.scrollTop = 200;
     ok(main.scrollTop > 0, 'the section is scrolled down');
+    await new Promise((resolve) => setTimeout(resolve, 400));
     navButton(view.host, 'set.privacy').click();
     await tick();
     equal(main.scrollTop, 0, 'a section opens at its top');
-    equal(document.querySelector('.motion-exit'), null, 'no exit copy of the old section');
     equal(view.host.querySelectorAll('.facts').length, 1, 'only the new section is in the page');
     equal(view.host.querySelectorAll('.st-group').length, 0, 'and none of General');
+    ok(document.querySelector('.motion-exit')?.shadowRoot?.querySelector('.st-group'), 'the old section leaves as an inert copy');
+    ok(view.host.querySelector('.s-main > .st-card')!.getAnimations().length > 0, 'the new section arrives instead of appearing');
+    await new Promise((resolve) => setTimeout(resolve, 500));
+    equal(document.querySelector('.motion-exit'), null, 'the copy is removed once it has faded');
+    equal(main.getAnimations({ subtree: true }).length, 0, 'and the stage rests');
+    // Reduced motion: the same switch is instant.
+    document.documentElement.dataset.motion = 'reduced';
+    navButton(view.host, 'set.general').click();
+    await tick();
+    equal(document.querySelector('.motion-exit'), null, 'no copy of the old section');
     for (const frame of [0, 1, 2]) {
       await new Promise((resolve) => requestAnimationFrame(resolve));
       equal(main.getAnimations({ subtree: true }).length, 0, `nothing on the stage animates (frame ${frame})`);
     }
   } finally {
+    Object.defineProperty(MediaQueryList.prototype, 'matches', preference);
     if (was === undefined) delete document.documentElement.dataset.motion;
     else document.documentElement.dataset.motion = was;
     view.stop();
@@ -772,3 +790,48 @@ check('settings: a billed-per-use or unconfirmed account says so calmly and is n
     for (const [code, messages] of Object.entries(others)) ok(messages[key] !== undefined && messages[key] !== en[key], `${code} has its own ${key}`);
   }
 }));
+
+check('settings: in Full access the hooks switch shows that hooks always run and is locked; in a mode that asks it is the saved choice', async () => {
+  const [saved, setSaved] = createSignal<Saved>({ permissions: 'dontAsk' });
+  const view = mount(() => createComponent(Settings, {
+    look: look(), get saved() { return saved(); }, vendors: [], quotas: {}, now: 0,
+    onClose: () => {}, onOpenSetup: () => {}, onSave: async () => true,
+  }));
+  try {
+    const sw = () => view.host.querySelector<HTMLInputElement>('#set-hooks-switch')!;
+    const hint = () => view.host.querySelector('[data-opt="set-hooks"]')!.textContent!;
+    ok(sw().disabled && sw().checked, 'locked and on');
+    ok(hint().includes(en['set.hooksLocked']));
+    setSaved({ permissions: 'ask' });
+    await tick();
+    ok(!sw().disabled && !sw().checked, 'its own choice, off by default');
+    ok(hint().includes(en['set.hooksHint']));
+  } finally { view.stop(); }
+});
+
+check('settings: the first-run answers change later in General: experience saves on its own and the tutorial can play again', async () => {
+  const [saved, setSaved] = createSignal<Saved>({});
+  const patches: Saved[] = [];
+  let tours = 0;
+  const view = mount(() => createComponent(Settings, {
+    look: look(), get saved() { return saved(); }, vendors: [], quotas: {}, now: 0,
+    onClose: () => {}, onOpenSetup: () => {}, onTour: () => void tours++,
+    onSave: async (patch) => {
+      patches.push(patch);
+      setSaved({ ...saved(), ...patch });
+      return true;
+    },
+  }));
+  try {
+    const pick = view.host.querySelectorAll<HTMLButtonElement>('#set-xp-pick button');
+    equal(pick.length, 2);
+    equal(pick[0]!.getAttribute('aria-pressed'), 'true', 'a person who never answered is a beginner');
+    pick[1]!.click();
+    await tick();
+    equal(pick[1]!.getAttribute('aria-pressed'), 'true');
+    deepEqual(patches, [{ experience: 'experienced' }]);
+    view.host.querySelector<HTMLButtonElement>('[data-opt="set-tour"] button')!.click();
+    equal(tours, 1);
+    ok(en['first.foot'].includes('Settings'), 'the first run says where its answers change');
+  } finally { view.stop(); }
+});

@@ -43,7 +43,7 @@ check('settings projects: entries and every Learn more start closed, and closed 
     ok(body.querySelector('[data-testid="pset-checks"]')?.textContent?.includes('2 checks read from AGENTS.md · not confirmed yet'), 'the checks in one line');
     ok(body.querySelector('[data-testid="proof-commands"]'), 'unconfirmed checks show their commands: Confirm never acts on a hidden list');
     const marks = [...body.querySelectorAll<HTMLButtonElement>('.st-q')];
-    ok(marks.length >= 3, 'every option keeps its long text behind its "?"');
+    ok(marks.length >= 2, 'every option keeps its long text behind its "?"');
     ok(marks.every((b) => b.getAttribute('aria-expanded') === 'false'), 'all closed');
     equal(body.querySelector('.st-more'), null, 'no long text shows until asked');
     equal([...body.querySelectorAll<HTMLButtonElement>('button.more')].some((b) => b.textContent === 'View commands'), false, 'no View while the list is pending: it is already shown');
@@ -142,18 +142,18 @@ check('settings projects: a refusal for invalid commands that comes with a moved
   });
 });
 
-check('settings projects: the self-update switch saves the grant with a fresh revision', () => {
-  let granted: unknown[] = [];
+check('settings projects: the separate copies switch is on by default and turns off for this project (R201)', () => {
+  let saved: unknown[] = [];
   return withProjectSettings(() => {
     api.projectProof = async () => proofView(true);
-    api.projectEnroll = async (id) => ({ projectId: id, repo: demo.path, base: 'base', mode: 'seguro', revision: 5, selfUpdate: false });
-    api.projectGrant = async (...args) => { granted = args; return { repo: demo.path, mode: 'seguro', revision: 5, grantedAt: 1, selfUpdate: true }; };
+    api.projectCopies = async (...args) => { saved = args; };
   }, async (root) => {
     await click(root.querySelector('.pset-head'));
-    const box = root.querySelector<HTMLInputElement>('input[role="switch"]')!;
+    const box = root.querySelector<HTMLInputElement>(`#pset-${demo.id}-copies-switch`)!;
+    ok(box.checked, 'on by default');
     box.click();
     await settle();
-    equal(JSON.stringify(granted), JSON.stringify([demo.id, 'seguro', true, 5]));
-    ok(box.checked, 'the switch stays on');
+    equal(JSON.stringify(saved), JSON.stringify([demo.id, false]));
+    ok(!box.checked, 'the switch stays off');
   });
 });

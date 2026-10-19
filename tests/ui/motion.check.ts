@@ -96,19 +96,21 @@ check('motion: a tutorial ring keeps its own position when it appears', async ()
     await new Promise((resolve) => setTimeout(resolve, 30));
     equal(ring.getBoundingClientRect().x, 180, 'arrival must not replace the anchor transform');
     equal(ring.getBoundingClientRect().y, 90);
-    equal(ring.getAnimations().length, 0);
+    // The ring fades in with its own opacity animation (styles.css); the list never animates its transform.
+    equal(ring.getAnimations().filter((a) => (a.effect as KeyframeEffect).getKeyframes().some((k) => 'transform' in k)).length, 0);
   } finally {
     dispose();
     root.remove();
   }
 });
 
+// The stylesheet may move the sidebar by a transition of its own; this one stands without it, so what is left is the list.
 check('motion: sidebar CSS motion is not replaced by list reflow', async () => {
   const root = document.createElement('div');
   root.className = 'shell';
   root.style.cssText = 'position:fixed;left:0;top:0;width:1200px;height:600px';
   root.dataset.motion = 'full';
-  root.innerHTML = '<aside class="side" style="transform:translateX(-40px)"></aside><main class="main"></main>';
+  root.innerHTML = '<aside class="side" style="transition:none;transform:translateX(-40px)"></aside><main class="main"></main>';
   document.body.append(root);
   const dispose = render(() => { animateList(root); return [...root.children] as HTMLElement[]; }, root);
   try {

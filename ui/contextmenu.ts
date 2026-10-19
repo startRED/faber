@@ -144,8 +144,8 @@ export function installContextMenu(): void {
         e.preventDefault();
         e.stopPropagation();
         closeMenu(true);
-      } else if (e.key === 'F5' || e.key === 'F7' || (ctrl && !e.altKey && ['r', 'p', 's', 'u'].includes(e.key.toLowerCase()))) {
-        // The browser's own reload, caret browsing, print, save and view-source: Faber has no use for them.
+      } else if (e.key === 'F5' || e.key === 'F7' || (ctrl && !e.altKey && ['r', 'p', 's', 'u', 'f'].includes(e.key.toLowerCase()))) {
+        // The browser's own reload, caret browsing, print, save, view-source and find: Faber has no use for them (its own find is ui/Find.tsx).
         e.preventDefault();
       }
     },

@@ -7,6 +7,7 @@ import { factory } from './draft.ts';
 import { Icon } from './Glyphs.tsx';
 import { LANGUAGES, t } from './i18n.ts';
 import { vendorName } from './models.ts';
+import { animateList } from './motion.ts';
 import { ProjectsSection } from './ProjectSettings.tsx';
 import { Recents } from './Recents.tsx';
 import type { Quotas } from './sidebar.ts';
@@ -69,6 +70,8 @@ interface Props {
   onClose: () => void;
   /** Opens the account cards; Settings comes back as it was, from `keep`. */
   onOpenSetup: (keep: Keep) => void;
+  /** Closes Settings and plays the tutorial again on a new conversation. */
+  onTour?: () => void;
 }
 
 /** A select for a setting that saves at once: it goes back to the saved value when the save is refused. */
@@ -126,11 +129,14 @@ export function Settings(props: Props) {
           <p class="s-version">{t('notes.version', { version: props.version! })}</p>
         </Show>
       </nav>
-      {/* Switching sections is instant: no exit copies, no arrival. */}
-      <div class="s-main" classList={{ wide: section() === 'appearance' }} ref={(el) => (main = el)}>
-        <header class="s-head">
-          <h2 class="display">{title()}</h2>
-        </header>
+      {/* Switching sections is a short cross-fade (the owner, 2026-10-17): the old section leaves as an inert copy while
+          the new one arrives; nothing runs under reduced or no motion. */}
+      <div class="s-main" classList={{ wide: section() === 'appearance' }} ref={(el) => { main = el; animateList(el); }}>
+        <Show when={section()} keyed>
+          <header class="s-head">
+            <h2 class="display">{title()}</h2>
+          </header>
+        </Show>
         <Switch>
           <Match when={section() === 'general'}>
             <Group title={t('set.group.you')}>
@@ -159,6 +165,27 @@ export function Settings(props: Props) {
                   }}
                 />
               </Opt>
+              {/* The first run's question, here to change (the owner, 2026-10-18): no answer counts as a beginner. */}
+              <Opt id="set-xp" label={t('first.xp.title')} hint={t('set.xpHint')}>
+                <Segmented
+                  bare
+                  id="set-xp-pick"
+                  label={t('first.xp.title')}
+                  value={props.saved.experience ?? 'beginner'}
+                  options={[
+                    ['beginner', t('first.xp.beginner')],
+                    ['experienced', t('first.xp.experienced')],
+                  ]}
+                  onPick={(experience) => void save({ experience })}
+                />
+              </Opt>
+              <Show when={props.onTour}>
+                <Opt id="set-tour" label={t('set.tour')} hint={t('set.tourHint')}>
+                  <button type="button" class="btn" onClick={() => props.onTour?.()}>
+                    {t('set.tourAgain')}
+                  </button>
+                </Opt>
+              </Show>
             </Group>
             <Group title={t('set.group.ai')}>
               <Opt id="set-permissions" label={t('set.permissions')} hint={t(`set.permissions.${mode()}.line`)} more={t(MORE[mode()])}>
@@ -180,7 +207,8 @@ export function Settings(props: Props) {
                   onPick={(webSearch) => void save({ webSearch })}
                 />
               </Opt>
-              <Toggle id="set-hooks" label={t('set.hooksBody')} hint={t('set.hooksHint')} more={t('set.hooksMore')} checked={props.saved.userHooks === true} onChange={(on) => save({ userHooks: on })} />
+              {/* In Full access the person's hooks always run (the CLI's own way), so the switch shows that and cannot change it. */}
+              <Toggle id="set-hooks" label={t('set.hooksBody')} hint={t(mode() === 'dontAsk' ? 'set.hooksLocked' : 'set.hooksHint')} more={t('set.hooksMore')} checked={mode() === 'dontAsk' || props.saved.userHooks === true} disabled={mode() === 'dontAsk'} onChange={(on) => save({ userHooks: on })} />
               <Show when={props.onChatFolder}>
                 <ChatFolder {...props} />
               </Show>

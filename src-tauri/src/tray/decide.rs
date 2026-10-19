@@ -1,11 +1,9 @@
 //! What the tray says and when it notifies: plain functions of the running list, the window's focus and the words the
 //! screen sent. Nothing here touches Tauri, so all of it is tested without a tray.
 
-use faber_engine::model::{RunState, RunningItem, Settings};
-use faber_engine::project::wire::MissionView;
-use faber_engine::project::{DecisionKind, MissionState};
+use faber_engine::model::{RunState, RunningItem, Settings, Vendor};
 use serde::{Deserialize, Serialize};
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeMap, HashMap, HashSet};
 
 /// A text in two forms, as the screen sends it: `one` for a count of 1 and `other` for any other count. That is what
 /// `Intl.PluralRules` picks in all five languages for counts of 1 and more.
@@ -37,10 +35,29 @@ pub(crate) struct ShellTexts {
     /// The notification for several requests held back in one turn, with `{title}` and `{n}`: "{title}: {n} requests need you".
     #[serde(default = "default_notify_many")]
     notify_many: String,
+    /// The notification when "keep going" stops by itself, by reason (the last part of `reason.keepGoing.*`), with
+    /// `{title}` and `{ai}`: "{title}: kept going until nothing was left".
+    #[serde(default = "default_stopped")]
+    stopped: BTreeMap<String, String>,
 }
 
 fn default_notify_many() -> String {
     "{title}: {n} requests need you".into()
+}
+
+fn default_stopped() -> BTreeMap<String, String> {
+    [
+        ("done", "{title}: kept going until nothing was left"),
+        ("asked", "{title}: stopped keeping going to ask you something"),
+        ("failed", "{title}: stopped keeping going after two turns failed"),
+        ("cap", "{title}: stopped keeping going after a long run on its own"),
+        ("pace", "{title}: stopped keeping going so {ai} stays on pace"),
+        ("quota", "{title}: stopped keeping going until {ai} has quota again"),
+        ("billed", "{title}: stopped keeping going, {ai} may be billed per use"),
+    ]
+    .into_iter()
+    .map(|(k, v)| (k.to_string(), v.to_string()))
+    .collect()
 }
 
 impl Default for ShellTexts {
@@ -54,6 +71,7 @@ impl Default for ShellTexts {
             needs_you: Plural { one: ", {n} needs you".into(), other: ", {n} need you".into() },
             notify: "{title} needs you".into(),
             notify_many: default_notify_many(),
+            stopped: default_stopped(),
         }
     }
 }
@@ -90,14 +108,6 @@ pub(super) fn tooltip(texts: &ShellTexts, c: Counts) -> String {
 /// alone repeat (Codex numbers them from 0 in each server).
 type Question = (String, String, String);
 
-pub(super) fn decode_seen(bytes: &[u8]) -> Result<HashSet<(String, String)>, &'static str> {
-    let seen: HashSet<(String, String)> = serde_json::from_slice(bytes).map_err(|_| "error.store.corrupt")?;
-    if seen.iter().any(|(mission, decision)| !faber_engine::project::valid_id(mission) || !faber_engine::project::valid_id(decision)) {
-        return Err("error.store.corrupt");
-    }
-    Ok(seen)
-}
-
 #[derive(Debug, PartialEq, Eq)]
 pub(super) struct Delivery {
     pub(super) toast: bool,
@@ -107,13 +117,13 @@ pub(super) struct Delivery {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(super) enum Attention {
     Normal,
-    #[cfg(any(windows, test, feature = "test-hooks"))]
+    #[cfg(any(windows, test))]
     SoundOnly,
     Silent,
 }
 
 /// Windows enum values are pinned below against shellapi.h. Unknown states never permit a toast.
-#[cfg(any(windows, test, feature = "test-hooks"))]
+#[cfg(any(windows, test))]
 pub(super) fn windows_attention(state: Option<i32>, full_screen: bool) -> Attention {
     match state {
         Some(1 | 6) => Attention::Silent, // QUNS_NOT_PRESENT, QUNS_QUIET_TIME (initial login/upgrade, not DND).
@@ -167,17 +177,14 @@ pub(super) fn delivery(focused: bool, attention: Attention, settings: &Settings)
     Delivery { toast: active && attention == Attention::Normal && settings.notifications(), sound: active && settings.notification_sound() }
 }
 
-/// What the tray remembers between lists and mission views, to ignore old ones and to notify once per question or decision.
+/// What the tray remembers between lists, to ignore old ones and to notify once per question.
 #[derive(Default)]
 pub(super) struct Watch {
     revision: Option<u64>,
     /// Every question seen since Faber started, answered or not: a key is notified once, ever (the turn id keeps a reused
     /// request id apart). ponytail: one small tuple per question, never pruned; prune by turn if a session ever asks millions.
     seen: HashSet<Question>,
-    /// Every mission decision seen, across reloads/restarts: (mission_id, decision_id).
-    seen_decisions: HashSet<(String, String)>,
     last_running_counts: Counts,
-    missions: HashMap<String, (u64, Counts)>,
     /// How many requests beyond the kept ones were already counted for a turn (the engine only counts those).
     more_seen: HashMap<(String, String), usize>,
     /// When a notice about held-back requests was last sent, in seconds: the next one waits out `PARKED_COOLDOWN`.
@@ -197,14 +204,6 @@ pub(super) struct Update {
 }
 
 impl Watch {
-    pub(super) fn with_seen_decisions(seen_decisions: HashSet<(String, String)>) -> Self {
-        Watch { seen_decisions, ..Default::default() }
-    }
-
-    pub(super) fn seen_decisions(&self) -> &HashSet<(String, String)> {
-        &self.seen_decisions
-    }
-
     /// None for a list that is not newer than the last one taken in: it changes nothing. A question the user could
     /// already see (the window was focused when it came) is never notified later, and a question never notifies twice.
     pub(super) fn take(&mut self, revision: u64, items: &[RunningItem], window_focused: bool) -> Option<Update> {
@@ -234,6 +233,13 @@ impl Watch {
                     notices.push(item.title.clone());
                 }
             }
+            // A followed pull request whose checks failed while the quota was tight needs the person (R200): once per commit.
+            if let Some((pr, head)) = &item.held {
+                let key = (item.conversation_id.clone(), format!("pr:{pr}"), head.clone());
+                if self.seen.insert(key) && !window_focused {
+                    notices.push(item.title.clone());
+                }
+            }
             // Requests the CLI denied for want of anyone to answer them are blocked requests too (R92), named by their tool call.
             // A turn is one notice however many it had, and a notice waits out the cooldown after the last one: a flood of
             // denials is one line, not a hundred. The tray number still counts them all.
@@ -250,47 +256,7 @@ impl Watch {
         // A turn that left the list is over, so what was counted for it is not needed again: the map stays as small as the list.
         self.more_seen.retain(|(conversation, turn), _| items.iter().any(|i| &i.conversation_id == conversation && &i.turn_id == turn));
         self.last_running_counts = counts(items);
-        Some(Update { counts: self.combined_counts(), notices, parked_notices })
-    }
-
-    /// Evaluates a mission view: concrete choices and direction/taste/money/legal blockers become needs-you items
-    /// and notify when not focused. Completion, commits, proofs, quota waits, promotions and technical decisions emit nothing.
-    /// Stable decision identity deduplicates across reloads and restarts.
-    pub(super) fn take_mission(&mut self, view: &MissionView, window_focused: bool) -> Option<Update> {
-        if self.missions.get(&view.mission_id).is_some_and(|(revision, _)| view.revision <= *revision) {
-            return None;
-        }
-        let mut notices = Vec::new();
-        let mut mission_needs = 0;
-        for d in &view.decisions {
-            if d.kind != DecisionKind::Technical {
-                mission_needs += 1;
-                let key = (view.mission_id.clone(), d.id.clone());
-                if self.seen_decisions.insert(key) && !window_focused {
-                    notices.push(view.goal.clone());
-                }
-            }
-        }
-        // A mission the coordinator parked or blocked is waiting for the person too (R92): one notice per mission and reason.
-        if let Some(reason) = &view.needs {
-            mission_needs += 1;
-            // The receipt file only holds plain ids, so the reason's dots become dashes.
-            let id: String =
-                format!("needs-{}", reason.replace('.', "-")).chars().filter(|c| c.is_ascii_alphanumeric() || *c == '-').take(64).collect();
-            if self.seen_decisions.insert((view.mission_id.clone(), id)) && !window_focused {
-                notices.push(view.goal.clone());
-            }
-        }
-        let counts = Counts { running: usize::from(matches!(view.state, MissionState::Running)), needs_you: mission_needs };
-        self.missions.insert(view.mission_id.clone(), (view.revision, counts));
-        Some(Update { counts: self.combined_counts(), notices, parked_notices: vec![] })
-    }
-
-    fn combined_counts(&self) -> Counts {
-        self.missions.values().fold(self.last_running_counts, |sum, (_, c)| Counts {
-            running: sum.running + c.running,
-            needs_you: sum.needs_you + c.needs_you,
-        })
+        Some(Update { counts: self.last_running_counts, notices, parked_notices })
     }
 }
 
@@ -314,6 +280,18 @@ pub(super) fn parked_notice_text(texts: &ShellTexts, title: &str, n: usize) -> S
     fill(&fill(&texts.notify_many, "title", if title.is_empty() { "Faber" } else { title }), "n", &n.to_string())
 }
 
+/// The notification when "keep going" stopped by itself (R199), in the words the screen sent, English when it sent none.
+pub(super) fn stopped_text(texts: &ShellTexts, title: &str, why: &str, ai: Option<Vendor>) -> String {
+    let reason = why.strip_prefix("reason.keepGoing.").unwrap_or(why);
+    let template = texts.stopped.get(reason).cloned().or_else(|| default_stopped().remove(reason)).unwrap_or_else(|| texts.notify.clone());
+    let ai = match ai {
+        Some(Vendor::Claude) => "Claude",
+        Some(Vendor::Codex) => "Codex",
+        None => "AI",
+    };
+    fill(&fill(&template, "title", if title.is_empty() { "Faber" } else { title }), "ai", ai)
+}
+
 pub(super) fn notice_text(texts: &ShellTexts, title: &str) -> String {
     fill(&texts.notify, "title", if title.is_empty() { "Faber" } else { title })
 }
@@ -323,84 +301,6 @@ mod tests {
     use super::*;
     use faber_engine::model::{Area, Permission};
     use serde_json::json;
-
-    #[test]
-    fn mission_deduplication_reloads_real_serialized_state_and_refuses_corruption() {
-        let mut watch = Watch::default();
-        let mut view: MissionView = serde_json::from_str(faber_engine::project::wire::MISSION_EXAMPLE).unwrap();
-        view.decisions.push(faber_engine::project::wire::DecisionView {
-            id: "choice".into(),
-            question: "Direction?".into(),
-            kind: DecisionKind::Direction,
-            options: vec![],
-            default: None,
-            task: None,
-        });
-        assert_eq!(watch.take_mission(&view, false).unwrap().notices.len(), 1);
-        let bytes = serde_json::to_vec(watch.seen_decisions()).unwrap();
-        let mut restarted = Watch::with_seen_decisions(decode_seen(&bytes).unwrap());
-        assert!(restarted.take_mission(&view, false).unwrap().notices.is_empty());
-        assert_eq!(decode_seen(b"["), Err("error.store.corrupt"));
-        assert!(decode_seen(br#"[["../mission", "choice"]]"#).is_err());
-    }
-
-    #[test]
-    fn a_blocked_or_parked_mission_needs_you_once_per_reason() {
-        let mut watch = Watch::default();
-        let mut view: MissionView = serde_json::from_str(faber_engine::project::wire::MISSION_EXAMPLE).unwrap();
-        view.state = MissionState::Blocked;
-        view.needs = Some("reason.queue.review".into());
-        let first = watch.take_mission(&view, false).unwrap();
-        assert_eq!((first.counts.needs_you, first.notices.len()), (1, 1));
-        view.revision += 1;
-        let again = watch.take_mission(&view, false).unwrap();
-        assert_eq!((again.counts.needs_you, again.notices.len()), (1, 0), "the same reason does not notify twice");
-        view.revision += 1;
-        view.needs = Some("reason.proof.failed".into());
-        assert_eq!(watch.take_mission(&view, true).unwrap().notices.len(), 0, "a focused window gets no notice");
-        view.revision += 1;
-        view.needs = None;
-        view.state = MissionState::Paused;
-        assert_eq!(watch.take_mission(&view, false).unwrap().counts.needs_you, 0, "a plain wait is not a need");
-    }
-
-    #[test]
-    fn mission_updates_ignore_stale_views_and_aggregate_all_missions() {
-        let mut watch = Watch::default();
-        let mut a: MissionView = serde_json::from_str(faber_engine::project::wire::MISSION_EXAMPLE).unwrap();
-        a.decisions = vec![faber_engine::project::wire::DecisionView {
-            id: "choice".into(),
-            question: "Direction?".into(),
-            kind: DecisionKind::Direction,
-            options: vec![],
-            default: None,
-            task: None,
-        }];
-        assert_eq!(watch.take_mission(&a, false).unwrap().counts.needs_you, 1);
-        let mut b = a.clone();
-        b.mission_id = "m2".into();
-        assert_eq!(watch.take_mission(&b, false).unwrap().counts.needs_you, 2);
-        a.revision -= 1;
-        a.decisions[0].id = "old-choice".into();
-        assert!(watch.take_mission(&a, false).is_none(), "stale views do not notify");
-    }
-
-    #[test]
-    fn a_paused_mission_choice_keeps_words_in_the_tooltip() {
-        let mut watch = Watch::default();
-        let mut view: MissionView = serde_json::from_str(faber_engine::project::wire::MISSION_EXAMPLE).unwrap();
-        view.state = MissionState::Paused;
-        view.decisions = vec![faber_engine::project::wire::DecisionView {
-            id: "choice".into(),
-            question: "Direction?".into(),
-            kind: DecisionKind::Direction,
-            options: vec![],
-            default: None,
-            task: None,
-        }];
-        let counts = watch.take_mission(&view, false).unwrap().counts;
-        assert!(tooltip(&ShellTexts::default(), counts).contains("needs you"));
-    }
 
     #[test]
     fn a_store_app_does_not_allow_a_toast() {
@@ -526,6 +426,19 @@ mod tests {
         assert!(Watch::default().take_at(1, &[stuck], true, 0.0).unwrap().notices.is_empty(), "never while the window is focused");
     }
 
+    #[test]
+    fn a_held_pull_request_notifies_once_per_commit() {
+        let mut watch = Watch::default();
+        let mut held = item("a", "t1", "Ship the fix", &[]);
+        held.state = RunState::NeedsYou;
+        held.held = Some((93, "aaa".into()));
+        let first = watch.take_at(1, std::slice::from_ref(&held), false, 0.0).unwrap();
+        assert_eq!((first.notices, first.counts.needs_you), (vec!["Ship the fix".to_string()], 1));
+        assert!(watch.take_at(2, std::slice::from_ref(&held), false, 1.0).unwrap().notices.is_empty(), "the same commit is told once");
+        held.held = Some((93, "bbb".into()));
+        assert_eq!(watch.take_at(3, std::slice::from_ref(&held), false, 2.0).unwrap().notices.len(), 1, "a new commit that fails is news");
+    }
+
     fn parked_item(conversation: &str, turn: &str, title: &str, ids: &[&str], more: u32) -> RunningItem {
         let mut i = item(conversation, turn, title, &[]);
         i.state = RunState::NeedsYou;
@@ -611,7 +524,30 @@ mod tests {
             parked: vec![],
             parked_more: 0,
             stuck: vec![],
+            held: None,
+            keep_going: false,
+            keep_wait: None,
+            keep_progress: None,
+            weighing: false,
+            settled: false,
         }
+    }
+
+    #[test]
+    fn a_stop_of_keep_going_says_why_in_the_words_sent_and_in_english_before_any() {
+        let english = ShellTexts::default();
+        assert_eq!(stopped_text(&english, "Fix login", "reason.keepGoing.done", None), "Fix login: kept going until nothing was left");
+        assert_eq!(
+            stopped_text(&english, "", "reason.keepGoing.pace", Some(Vendor::Codex)),
+            "Faber: stopped keeping going so Codex stays on pace"
+        );
+        let mut sent = english.clone();
+        sent.stopped = BTreeMap::from([("quota".to_string(), "{title}: parou até {ai} ter cota de novo".to_string())]);
+        assert_eq!(
+            stopped_text(&sent, "Login", "reason.keepGoing.quota", Some(Vendor::Claude)),
+            "Login: parou até Claude ter cota de novo"
+        );
+        assert_eq!(stopped_text(&sent, "Login", "reason.keepGoing.cap", None), "Login: stopped keeping going after a long run on its own");
     }
 
     #[test]
@@ -760,110 +696,5 @@ mod tests {
         let list = [item("a", "t1", "A", &[]), item("b", "t1", "B", &["0"])];
         assert_eq!(w.take(1, &list, false).unwrap().counts, Counts { running: 2, needs_you: 1 });
         assert_eq!(w.take(2, &[], false).unwrap().counts, Counts::default());
-    }
-
-    #[test]
-    fn stable_mission_decision_deduplicates_across_restart() {
-        let mut seen = HashSet::new();
-        seen.insert(("m1".into(), "d1".into()));
-        let mut w = Watch::with_seen_decisions(seen);
-        let view: MissionView = serde_json::from_value(json!({
-            "missionId": "m1",
-            "revision": 1,
-            "state": "running",
-            "mode": "normal",
-            "gitMode": "seguro",
-            "goal": "Refactor parser",
-            "tasks": [],
-            "cost": { "complete": false },
-            "pace": [],
-            "decisions": [
-                { "id": "d1", "question": "Use AGPL or MIT?", "kind": "legal", "options": ["AGPL", "MIT"] },
-                { "id": "d2", "question": "Pick accent color", "kind": "taste", "options": ["Lime", "Blue"] }
-            ]
-        }))
-        .unwrap();
-        let update = w.take_mission(&view, false).unwrap();
-        // d1 was seen before restart; only d2 notifies!
-        assert_eq!(update.notices, ["Refactor parser"]);
-        assert_eq!(update.counts.needs_you, 2);
-        // A second view with the same decisions notifies nothing:
-        let mut next = view.clone();
-        next.revision += 1;
-        let update2 = w.take_mission(&next, false).unwrap();
-        assert!(update2.notices.is_empty());
-    }
-
-    #[test]
-    fn focused_mission_decision_means_silence() {
-        let mut w = Watch::default();
-        let view: MissionView = serde_json::from_value(json!({
-            "missionId": "m1",
-            "revision": 1,
-            "state": "running",
-            "mode": "normal",
-            "gitMode": "seguro",
-            "goal": "Goal",
-            "tasks": [],
-            "cost": { "complete": false },
-            "pace": [],
-            "decisions": [
-                { "id": "d1", "question": "Question", "kind": "direction", "options": [] }
-            ]
-        }))
-        .unwrap();
-        let update = w.take_mission(&view, true).unwrap();
-        assert!(update.notices.is_empty(), "focused means silence");
-        assert_eq!(update.counts.needs_you, 1, "badge still counts needs-you");
-        // Coming back while unfocused later does not notify because it was seen while focused:
-        let mut next = view.clone();
-        next.revision += 1;
-        let update2 = w.take_mission(&next, false).unwrap();
-        assert!(update2.notices.is_empty(), "seen while focused never notifies later");
-    }
-
-    #[test]
-    fn completion_proof_commit_quota_wait_and_promotion_emit_nothing() {
-        let mut w = Watch::default();
-        for (index, state) in ["done", "running", "planning"].into_iter().enumerate() {
-            let view: MissionView = serde_json::from_value(json!({
-                "missionId": "m1",
-                "revision": index + 2,
-                "state": state,
-                "mode": "normal",
-                "gitMode": "seguro",
-                "goal": "Completed goal",
-                "tasks": [{"id": "t1", "title": "Proof passed", "state": "done"}],
-                "cost": { "complete": true },
-                "pace": [],
-                "decisions": []
-            }))
-            .unwrap();
-            let update = w.take_mission(&view, false).unwrap();
-            assert!(update.notices.is_empty());
-        }
-    }
-
-    #[test]
-    fn technical_decisions_emit_nothing() {
-        let mut w = Watch::default();
-        let view: MissionView = serde_json::from_value(json!({
-            "missionId": "m1",
-            "revision": 1,
-            "state": "running",
-            "mode": "normal",
-            "gitMode": "seguro",
-            "goal": "Fix bug",
-            "tasks": [],
-            "cost": { "complete": false },
-            "pace": [],
-            "decisions": [
-                { "id": "d1", "question": "Use tokio or async-std?", "kind": "technical", "options": [] }
-            ]
-        }))
-        .unwrap();
-        let update = w.take_mission(&view, false).unwrap();
-        assert!(update.notices.is_empty());
-        assert_eq!(update.counts.needs_you, 0, "technical decision is not needs-you");
     }
 }

@@ -56,7 +56,7 @@ pub fn codex_tool() -> Value {
 pub enum Mcp {
     /// The answer goes back at once (`mcp_response`).
     Answer(Value),
-    /// A call of one of its tools (`NAME` or `crate::browser::NAME`): the answer waits for the work. `id` is the tool
+    /// A call of one of its tools (`NAME`, `crate::browser::NAME`, `crate::sibling::NAME`, `crate::verify::NAME` or `crate::map::NAME`): the answer waits for the work. `id` is the tool
     /// call's own id, which names the call on screen.
     Call { tool: &'static str, id: String, rpc: Value, input: Value },
 }
@@ -66,11 +66,17 @@ pub enum Mcp {
 pub struct Tools {
     pub helper: bool,
     pub browse: bool,
+    /// Conversations the agent starts by itself (`crate::sibling`).
+    pub conversation: bool,
+    /// The project's checks (`crate::verify`).
+    pub verify: bool,
+    /// The project's map (`crate::map`).
+    pub map: bool,
 }
 
 impl Tools {
     pub fn any(self) -> bool {
-        self.helper || self.browse
+        self.helper || self.browse || self.conversation || self.verify || self.map
     }
 }
 
@@ -93,6 +99,15 @@ pub fn mcp(message: &Value, tools: Tools) -> Mcp {
             if tools.browse {
                 list.push(crate::browser::mcp_tool());
             }
+            if tools.conversation {
+                list.push(crate::sibling::mcp_tool());
+            }
+            if tools.verify {
+                list.push(crate::verify::mcp_tool());
+            }
+            if tools.map {
+                list.push(crate::map::mcp_tool());
+            }
             answer(json!({ "tools": list }))
         }
         "tools/call" if let Some(tool) = called(&message["params"]["name"], tools) => {
@@ -113,13 +128,25 @@ fn called(name: &Value, tools: Tools) -> Option<&'static str> {
     match name.as_str()? {
         NAME if tools.helper => Some(NAME),
         crate::browser::NAME if tools.browse => Some(crate::browser::NAME),
+        crate::sibling::NAME if tools.conversation => Some(crate::sibling::NAME),
+        crate::verify::NAME if tools.verify => Some(crate::verify::NAME),
+        crate::map::NAME if tools.map => Some(crate::map::NAME),
         _ => None,
     }
 }
 
 /// The answer to a tool call, once the helper is done.
-pub fn mcp_result(rpc: &Value, ok: bool, text: &str) -> Value {
-    json!({ "jsonrpc": "2.0", "id": rpc, "result": { "content": [{ "type": "text", "text": text }], "isError": !ok } })
+pub fn mcp_result(rpc: &Value, ok: bool, text: &str, pictures: &[String]) -> Value {
+    let mut content = vec![json!({ "type": "text", "text": text })];
+    content.extend(pictures.iter().map(|p| json!({ "type": "image", "data": p, "mimeType": "image/jpeg" })));
+    json!({ "jsonrpc": "2.0", "id": rpc, "result": { "content": content, "isError": !ok } })
+}
+
+/// The same answer as a Codex dynamic tool's result: the text, then each JPEG picture (base64) as an image the model sees.
+pub fn dynamic_result(ok: bool, text: &str, pictures: &[String]) -> Value {
+    let mut items = vec![json!({ "type": "inputText", "text": text })];
+    items.extend(pictures.iter().map(|p| json!({ "type": "inputImage", "imageUrl": format!("data:image/jpeg;base64,{p}") })));
+    json!({ "success": ok, "contentItems": items })
 }
 
 /// The other vendor: a helper always comes from the one that is not running the conversation.
@@ -203,7 +230,7 @@ mod tests {
 
     #[test]
     fn the_mcp_server_lists_one_tool_and_hands_its_call_on_with_the_tool_call_id() {
-        let mcp = |m: &Value| mcp(m, Tools { helper: true, browse: false });
+        let mcp = |m: &Value| mcp(m, Tools { helper: true, browse: false, conversation: false, verify: false, map: false });
         let init = json!({"method":"initialize","params":{"protocolVersion":"2025-11-25"},"jsonrpc":"2.0","id":0});
         let Mcp::Answer(a) = mcp(&init) else { panic!() };
         assert_eq!((a["id"].clone(), a["result"]["protocolVersion"].clone()), (json!(0), json!("2025-11-25")));
@@ -225,6 +252,30 @@ mod tests {
 
     // R161 step 7: the browser sits beside the helper, and a session lists and answers only the tools it offers.
     #[test]
+    fn pictures_reach_the_agent_after_the_text_in_both_clis_and_none_is_only_text() {
+        let pictures = ["AQI=".to_string(), "Aw==".to_string()];
+        let claude = mcp_result(&json!(7), true, "Checked", &pictures);
+        assert_eq!(
+            claude["result"]["content"],
+            json!([
+                { "type": "text", "text": "Checked" },
+                { "type": "image", "data": "AQI=", "mimeType": "image/jpeg" },
+                { "type": "image", "data": "Aw==", "mimeType": "image/jpeg" }
+            ])
+        );
+        let codex = dynamic_result(true, "Checked", &pictures[..1]);
+        assert_eq!(
+            codex,
+            json!({ "success": true, "contentItems": [
+                { "type": "inputText", "text": "Checked" },
+                { "type": "inputImage", "imageUrl": "data:image/jpeg;base64,AQI=" }
+            ] })
+        );
+        assert_eq!(mcp_result(&json!(1), false, "No", &[])["result"]["content"], json!([{ "type": "text", "text": "No" }]));
+        assert_eq!(dynamic_result(false, "No", &[])["contentItems"], json!([{ "type": "inputText", "text": "No" }]));
+    }
+
+    #[test]
     fn the_mcp_server_holds_only_the_tools_the_session_offers() {
         let list = |tools| match mcp(&json!({"method":"tools/list","jsonrpc":"2.0","id":1}), tools) {
             Mcp::Answer(a) => {
@@ -232,15 +283,21 @@ mod tests {
             }
             Mcp::Call { .. } => panic!(),
         };
-        assert_eq!(list(Tools { helper: true, browse: true }), ["helper", "browse"]);
-        assert_eq!(list(Tools { helper: false, browse: true }), ["browse"]);
+        assert_eq!(list(Tools { helper: true, browse: true, conversation: false, verify: false, map: false }), ["helper", "browse"]);
+        assert_eq!(list(Tools { helper: false, browse: true, conversation: false, verify: false, map: false }), ["browse"]);
+        assert_eq!(list(Tools { helper: false, browse: false, conversation: false, verify: true, map: true }), ["verify", "map"]);
+        let map = json!({"method":"tools/call","params":{"name":"map","arguments":{}},"jsonrpc":"2.0","id":5});
+        assert!(matches!(mcp(&map, Tools { verify: true, map: true, ..Tools::default() }), Mcp::Call { tool: crate::map::NAME, .. }));
+        assert!(matches!(mcp(&map, Tools { verify: true, ..Tools::default() }), Mcp::Answer(_)), "a map that is not offered is refused");
         let call = json!({"method":"tools/call","params":{"name":"browse","arguments":{"url":"https://a.org"},
             "_meta":{"claudecode/toolUseId":"toolu_2"}},"jsonrpc":"2.0","id":4});
         assert_eq!(
-            mcp(&call, Tools { helper: false, browse: true }),
+            mcp(&call, Tools { helper: false, browse: true, conversation: false, verify: false, map: false }),
             Mcp::Call { tool: crate::browser::NAME, id: "toolu_2".into(), rpc: json!(4), input: json!({"url":"https://a.org"}) }
         );
-        let Mcp::Answer(refused) = mcp(&call, Tools { helper: true, browse: false }) else { panic!("a tool not offered is never called") };
+        let Mcp::Answer(refused) = mcp(&call, Tools { helper: true, browse: false, conversation: false, verify: false, map: false }) else {
+            panic!("a tool not offered is never called")
+        };
         assert_eq!(refused["error"]["code"], -32601);
     }
 

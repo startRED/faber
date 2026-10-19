@@ -22,3 +22,11 @@ src-tauri/gen/
 
 # A lane's claim of the areas and files it changes (docs/dev/workflow.md#lane-claims).
 /.faber-lane
+
+# What one PC adds to the checks Faber runs (RUSTUP_HOME, CARGO_HOME, PATH; R190), and their logs.
+/.faber/*.local.json
+.faber/verify/
+.faber/verify.local.json
+
+# The direction check's report and proposed tasks: local drafts until someone picks one (docs/dev/workflow.md#direction-check).
+/docs/tasks/proposed/

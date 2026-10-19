@@ -268,6 +268,20 @@ impl Snap {
         self.recovery_for(None, now)
     }
 
+    /// Every vendor-wide window was read in the last minute (one whole reading, taken after the limit was reported) and has
+    /// room: what overrules a limit the CLI reported without a reset (`Reach::Out(None)`), which only a turn would otherwise
+    /// clear.
+    pub fn windows_show_room(&self, now: f64) -> bool {
+        let mut wide = self.wide(now).peekable();
+        wide.peek().is_some() && wide.all(|w| w.used <= ADMIT_LIMIT && now - w.read_at <= 60.0)
+    }
+
+    /// The reset of the vendor-wide window that is full, whatever the CLI last said about reaching the limit: what is left
+    /// to go by when that said nothing about when.
+    pub fn full_until(&self, now: f64) -> Option<f64> {
+        self.wide(now).filter(|w| w.used > ADMIT_LIMIT && w.resets_at > now).map(|w| w.resets_at).reduce(f64::max)
+    }
+
     /// A pinned family also waits for its own blocking window; another family's earlier reset cannot admit it.
     pub fn recovery_for(&self, family: Option<&str>, now: f64) -> Option<f64> {
         let mut latest = self

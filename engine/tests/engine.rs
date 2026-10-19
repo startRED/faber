@@ -10,7 +10,7 @@ use std::collections::{BTreeMap, HashMap};
 use std::path::Path;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
-use support::{Entry, Mismatches, fake, fixture, next_pipe, pipes, replay};
+use support::{Entry, Mismatches, Wire, fake, fixture, next_pipe, pipes, replay};
 use tokio::sync::mpsc::UnboundedReceiver;
 
 const SKY: &str = "In one sentence: why is the sky blue?";
@@ -42,12 +42,7 @@ fn choice(vendor: &str, model: Option<&str>) -> Choice {
 }
 
 fn project_folder() -> tempfile::TempDir {
-    // System temp can be under AppData, which is intentionally refused as a chosen working folder.
-    let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../target/test-workspaces");
-    std::fs::create_dir_all(&root).unwrap();
-    let folder = tempfile::tempdir_in(root).unwrap();
-    assert!(faber_engine::permissions::unattended_root(folder.path()).is_some());
-    folder
+    support::work_folder()
 }
 
 fn ask(area: Area, text: &str, choice: Choice) -> SendRequest {
@@ -1149,7 +1144,7 @@ async fn a_branched_resend_sends_the_images_and_files_of_the_selected_message_ag
     }
 }
 
-/// A Claude session of several turns: each one is a user line, a short answer (or a failure) and a result.
+/// A Claude session of several turns: each one is a user line, its echo, a short answer (or a failure) and a result.
 fn claude_turns(turns: &[(&str, bool)]) -> Vec<Entry> {
     let mut entries = vec![];
     for (i, (text, ok)) in turns.iter().enumerate() {
@@ -1159,6 +1154,9 @@ fn claude_turns(turns: &[(&str, bool)]) -> Vec<Entry> {
             let init = json!({ "type": "system", "subtype": "init", "session_id": "queued", "model": "claude-haiku-5-5" });
             entries.push(Entry { input: false, msg: init });
         }
+        // The CLI echoes the line when the turn takes it in (`--replay-user-messages`).
+        let echo = json!({ "type": "user", "message": { "role": "user", "content": text }, "isReplay": true, "session_id": "queued" });
+        entries.push(Entry { input: false, msg: echo });
         if *ok {
             let said = json!({ "type": "assistant", "message": { "role": "assistant", "content": [{ "type": "text", "text": format!("answer {i}") }] } });
             entries.push(Entry { input: false, msg: said });
@@ -1198,7 +1196,7 @@ fn say(engine: &Engine, id: &str, vendor: &str, text: &str) -> Result<String, St
 }
 
 #[tokio::test]
-async fn two_quick_messages_while_claude_answers_wait_in_order_and_each_goes_out_once() {
+async fn two_quick_messages_while_claude_answers_go_into_its_turn_in_order_and_each_goes_out_once() {
     let dir = tempfile::tempdir().unwrap();
     let f = fake(claude_turns(&[("first", true), ("second", true), ("third", true)]));
     let (engine, _rx) = engine(dir.path(), Vendor::Claude, f.spawn.clone());
@@ -1207,7 +1205,7 @@ async fn two_quick_messages_while_claude_answers_wait_in_order_and_each_goes_out
     say(&engine, &id, "claude", "third").unwrap();
     let waiting = engine.open(&id).unwrap();
     assert_eq!(waiting.queued.iter().map(|q| q.text.as_str()).collect::<Vec<_>>(), ["second", "third"]);
-    assert!(waiting.queued.iter().all(|q| !q.sending), "Faber queues for Claude Code; nothing is on its way into the turn");
+    assert!(waiting.queued.iter().all(|q| q.sending), "both go into the running turn, in order");
 
     let c = until(&engine, &id, |c| settled(c, 6)).await;
     engine.shutdown();
@@ -1226,6 +1224,8 @@ async fn a_stopped_or_failed_turn_keeps_the_queue_and_the_person_sends_it() {
     let f = fake(claude_turns(&[("first", false), ("second", true)]));
     let (engine, _rx) = engine(dir.path(), Vendor::Claude, f.spawn.clone());
     let id = engine.send(ask(Area::Chat, "first", choice("claude", Some("haiku")))).unwrap();
+    // The CLI cannot take the message into the turn, so it waits in the queue.
+    f.wire.refuse_words("second");
     say(&engine, &id, "claude", "second").unwrap();
     let c = until(&engine, &id, |c| settled(c, 2)).await;
     assert_eq!(c.messages[1].status, Some(Status::Stopped));
@@ -1370,6 +1370,111 @@ async fn codex_takes_a_message_into_the_running_turn_and_the_answer_continues_be
     assert_eq!(f.wire.lines_with("turn/start"), 1, "the steered message did not also start a turn");
 }
 
+const SLEEP: &str = "Run the shell command: sleep 6   then reply with only the word done.";
+const PONG: &str = "Also say the word pong.";
+
+#[tokio::test]
+async fn claude_takes_a_message_into_the_running_turn_at_its_next_step_and_the_answer_continues_below_it() {
+    let dir = tempfile::tempdir().unwrap();
+    let f = fake(fixture("claude", "steer"));
+    let (engine, _rx) = engine(dir.path(), Vendor::Claude, f.spawn.clone());
+    let id = engine.send(ask(Area::Chat, SLEEP, choice("claude", Some("haiku")))).unwrap();
+    until(&engine, &id, |c| c.messages.len() == 2).await;
+    say(&engine, &id, "claude", PONG).unwrap();
+    assert!(engine.open(&id).unwrap().queued[0].sending, "the line goes to the running turn, not to the back of a queue");
+
+    let c = until(&engine, &id, |c| settled(c, 4)).await;
+    engine.shutdown();
+    assert_eq!(f.mismatches.lock().unwrap().clone(), Vec::<String>::new());
+    assert_eq!(texts(&c), [SLEEP, PONG]);
+    assert_eq!(c.messages[1].tools.as_ref().map(Vec::len), Some(1), "the command ran in the first reply");
+    assert_eq!(c.messages[3].text.trim(), "done\npong", "the words after the message answer it, below it");
+    assert_eq!((c.messages[1].status, c.messages[3].status), (Some(Status::Done), Some(Status::Done)));
+    assert_eq!(c.messages[3].vendor, Some(Vendor::Claude));
+    assert!(c.queued.is_empty());
+    assert_eq!(f.wire.lines_with(PONG), 1, "the message went to the CLI once");
+}
+
+// Live capture (claude, Haiku 5.5, the flags Faber uses): the agent left a subagent working in the background (a 30 s
+// command) and ended its turn; a line written while the subagent still worked became a turn of its own, and the subagent
+// went on to its own result. On 2026-10-17 a message written then was only queued, so the owner pressed Stop to get it
+// through, and Stop ended four helpers at work: no message ever needs that again.
+#[tokio::test]
+async fn a_message_written_while_helpers_work_in_the_background_reaches_claude_and_stops_none_of_them() {
+    const HELPER: &str = "Use the Agent tool once, with subagent_type general-purpose and run_in_background true, for this task: run the shell command `ping -n 31 127.0.0.1 > /dev/null` with the Bash tool in the foreground (never with run_in_background), wait for it to finish, and then reply with only the word kiwi. Right after starting it, end your turn with only the word started. Do not wait for it.";
+    let dir = tempfile::tempdir().unwrap();
+    let f = fake(fixture("claude", "background-steer"));
+    let (engine, _rx) = engine(dir.path(), Vendor::Claude, f.spawn.clone());
+    let id = engine.send(ask(Area::Chat, HELPER, choice("claude", Some("haiku")))).unwrap();
+    // The agent's own turn ended; the reply waits for the helper it left working.
+    until(&engine, &id, |c| c.messages[1].text.contains("started")).await;
+    let waiting = engine.open(&id).unwrap();
+    assert_eq!(waiting.messages[1].status, Some(Status::Streaming), "the reply still waits for its helper");
+    let agent = waiting.messages[1].tools.iter().flatten().find(|t| t.name == "Agent").unwrap();
+    assert_eq!(agent.ok, None, "the helper shows at work, so the screen counts it before a Stop");
+    say(&engine, &id, "claude", PONG).unwrap();
+
+    let c = until(&engine, &id, |c| settled(c, 4) && c.messages.iter().any(|m| m.text.contains("kiwi"))).await;
+    engine.shutdown();
+    assert_eq!(f.mismatches.lock().unwrap().clone(), Vec::<String>::new());
+    assert_eq!(f.wire.lines_with("\"interrupt\""), 0, "nothing written to the CLI stops the turn or its helpers");
+    assert_eq!(f.wire.lines_with(PONG), 1, "the message went to the CLI once");
+    assert_eq!(texts(&c), [HELPER, PONG]);
+    assert!(c.messages.iter().all(|m| m.status != Some(Status::Stopped)), "{:?}", c.messages.iter().map(|m| m.status).collect::<Vec<_>>());
+    assert!(c.queued.is_empty());
+}
+
+#[tokio::test]
+async fn a_waiting_message_sent_now_goes_into_the_running_turn() {
+    let dir = tempfile::tempdir().unwrap();
+    let f = fake(fixture("claude", "steer"));
+    let (engine, _rx) = engine(dir.path(), Vendor::Claude, f.spawn.clone());
+    let id = engine.send(ask(Area::Chat, SLEEP, choice("claude", Some("haiku")))).unwrap();
+    until(&engine, &id, |c| c.messages.len() == 2).await;
+    // The CLI could not take the line, so it waits for the turn to end, until the person sends it now.
+    f.wire.refuse_words(PONG);
+    say(&engine, &id, "claude", PONG).unwrap();
+    let c = until(&engine, &id, |c| c.queued.first().is_some_and(|q| !q.sending)).await;
+    assert_eq!(c.messages[1].status, Some(Status::Streaming), "the turn still runs");
+
+    engine.send_queued(&id, &c.queued[0].id).unwrap();
+    assert!(engine.open(&id).unwrap().queued[0].sending, "it is on its way to the running turn");
+    let c = until(&engine, &id, |c| settled(c, 4)).await;
+    engine.shutdown();
+    assert_eq!(f.mismatches.lock().unwrap().clone(), Vec::<String>::new());
+    assert_eq!(texts(&c), [SLEEP, PONG]);
+    assert_eq!(
+        c.messages[3].text.trim(),
+        "done
+pong",
+        "the turn answered it below it"
+    );
+    assert!(c.queued.is_empty());
+    assert_eq!(f.wire.lines_with(PONG), 1);
+}
+
+#[tokio::test]
+async fn a_message_handed_to_claude_before_a_stop_is_answered_below_the_stopped_reply() {
+    let dir = tempfile::tempdir().unwrap();
+    let f = fake(fixture("claude", "steer-stopped"));
+    let (engine, _rx) = engine(dir.path(), Vendor::Claude, f.spawn.clone());
+    let id = engine.send(ask(Area::Chat, SLEEP, choice("claude", Some("haiku")))).unwrap();
+    until(&engine, &id, |c| c.messages.len() == 2).await;
+    say(&engine, &id, "claude", PONG).unwrap();
+    until(&engine, &id, |c| c.messages[1].tools.as_ref().is_some_and(|t| !t.is_empty())).await;
+    engine.interrupt(&id);
+
+    let c = until(&engine, &id, |c| settled(c, 4)).await;
+    engine.shutdown();
+    assert_eq!(f.mismatches.lock().unwrap().clone(), Vec::<String>::new());
+    assert_eq!(texts(&c), [SLEEP, PONG]);
+    assert_eq!(c.messages[1].status, Some(Status::Stopped), "the stopped reply keeps saying so");
+    assert!(c.messages[3].text.contains("Pong"), "{:?}", c.messages[3].text);
+    assert_eq!(c.messages[3].status, Some(Status::Done));
+    assert!(c.queued.is_empty());
+    assert_eq!(f.wire.lines_with(PONG), 1);
+}
+
 #[tokio::test]
 async fn a_steer_codex_refuses_is_sent_again_as_the_next_turn_exactly_once() {
     for name in ["steer-rejected", "steer-late"] {
@@ -1482,15 +1587,18 @@ async fn a_message_waiting_for_the_turn_to_end_runs_on_the_cli_reconnected_in_th
     let scripts = Arc::new(Mutex::new(vec![claude_turns(&[("second", true)]), claude_turns(&[("first", true)])]));
     let started: Arc<Mutex<Vec<String>>> = Arc::default();
     let mismatches: Mismatches = Arc::default();
+    let wire = Wire::default();
     let spawn: Spawner = {
-        let (scripts, started, mismatches) = (scripts.clone(), started.clone(), mismatches.clone());
+        let (scripts, started, mismatches, wire) = (scripts.clone(), started.clone(), mismatches.clone(), wire.clone());
         Arc::new(move |bin, _args, _cwd| {
             started.lock().unwrap().push(bin.to_string());
-            Ok(replay(scripts.lock().unwrap().pop().expect("no third process was expected"), mismatches.clone()))
+            Ok(wire.wrap(replay(scripts.lock().unwrap().pop().expect("no third process was expected"), mismatches.clone())))
         })
     };
     let (engine, _rx) = engine(dir.path(), Vendor::Claude, spawn);
     let id = engine.send(ask(Area::Chat, "first", choice("claude", Some("haiku")))).unwrap();
+    // The CLI cannot take the message into the turn, so it waits for the turn to end.
+    wire.refuse_words("second");
     say(&engine, &id, "claude", "second").unwrap();
     // The person reconnects the CLI in Settings while the first turn runs and a message waits behind it.
     engine.replace_clis(BTreeMap::from([(Vendor::Claude, Cli { command: "claude-new".into(), prefix: vec![] })]));
@@ -1728,6 +1836,8 @@ async fn stop_leaves_no_worker(parent_script: &str, why: &str) {
             launch: ClaudeLaunch {
                 helper: Default::default(),
                 browse: false,
+                conversations: false,
+                verify: false,
                 area: Area::Project,
                 model: None,
                 effort: None,
@@ -2286,6 +2396,180 @@ async fn r161_a_running_helper_counts_on_its_quota_and_stops_when_its_vendor_wou
     engine.shutdown();
 }
 
+/// The answer Faber wrote to a driven Claude Code for one control request, once it is there.
+async fn mcp_answer(pipe: &support::Pipe, request: &str) -> serde_json::Value {
+    for _ in 0..300 {
+        if let Some(m) = pipe.lines.lock().unwrap().iter().find(|m| m["response"]["request_id"] == request) {
+            return m["response"]["response"]["mcp_response"].clone();
+        }
+        tokio::time::sleep(Duration::from_millis(10)).await;
+    }
+    panic!("{request} was never answered");
+}
+
+/// Self-development: a project's agent starts a conversation of its own for a separate piece of work. The call answers at
+/// once with the new id, the new conversation runs the brief beside it in the same project, a read says where it stands,
+/// and a conversation an agent started cannot start more.
+#[tokio::test]
+async fn the_agent_starts_a_conversation_of_its_own_and_reads_where_it_stands() {
+    let dir = tempfile::tempdir().unwrap();
+    let (spawn, made) = pipes();
+    let engine = two_vendors(dir.path(), spawn);
+    let project = engine.add_project(&dir.path().to_string_lossy()).unwrap();
+    let parent = engine
+        .send(SendRequest { project_id: Some(project.id.clone()), ..ask(Area::Project, "split it", choice("claude", Some("haiku"))) })
+        .unwrap();
+    let mut agent = next_pipe(&made).await;
+    agent.say(json!({"type":"system","subtype":"init","session_id":"s1","model":"claude-haiku-5-5"})).await;
+    let list = |id: u64| json!({"type":"control_request","request_id":format!("l{id}"),"request":{"subtype":"mcp_message","server_name":"faber","message":{"jsonrpc":"2.0","id":id,"method":"tools/list"}}});
+    let names = |answer: &serde_json::Value| {
+        answer["result"]["tools"].as_array().unwrap().iter().map(|t| t["name"].as_str().unwrap().to_string()).collect::<Vec<_>>()
+    };
+    agent.say(list(1)).await;
+    assert!(names(&mcp_answer(&agent, "l1").await).contains(&"conversation".to_string()), "a project's own agent gets the tool");
+
+    let input = json!({"title":"Docs","brief":"Write the docs page for the parser."});
+    agent.say(json!({"type":"assistant","parent_tool_use_id":null,"message":{"content":[{"type":"tool_use","id":"toolu_c","name":"mcp__faber__conversation","input":input}]}})).await;
+    let call = |rpc: u64, tool: &str, args: &serde_json::Value| {
+        json!({"type":"control_request","request_id":format!("r{rpc}"),"request":{"subtype":"mcp_message","server_name":"faber",
+        "message":{"jsonrpc":"2.0","id":rpc,"method":"tools/call","params":{"name":"conversation","arguments":args,"_meta":{"claudecode/toolUseId":tool}}}}})
+    };
+    agent.say(call(2, "toolu_c", &input)).await;
+    let started = mcp_answer(&agent, "r2").await;
+    let text = started["result"]["content"][0]["text"].as_str().unwrap().to_string();
+    assert_eq!(started["result"]["isError"], false, "{text}");
+    let child = engine.state().conversations.into_iter().find(|c| c.title == "Docs").expect("the new conversation is listed");
+    assert!(child.id != parent && child.project_id.as_deref() == Some(project.id.as_str()) && text.contains(&child.id), "{text}");
+
+    // The new conversation is its own process, sent the agent's brief.
+    let mut sibling = next_pipe(&made).await;
+    for _ in 0..300 {
+        if sibling.lines.lock().unwrap().iter().any(|m| m["type"] == "user") {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(10)).await;
+    }
+    let first = sibling.lines.lock().unwrap().iter().find(|m| m["type"] == "user").cloned().expect("the brief is sent");
+    assert!(first.to_string().contains("Write the docs page for the parser."), "{first}");
+    sibling.say(list(1)).await;
+    assert!(names(&mcp_answer(&sibling, "l1").await).contains(&"conversation".to_string()), "every project conversation gets the tool");
+    sibling.say(call(2, "toolu_s", &json!({"title":"More","brief":"Split it again."}))).await;
+    let refused = mcp_answer(&sibling, "r2").await;
+    assert!(refused["result"]["content"][0]["text"].as_str().unwrap().contains("only a project's own agent"), "one level only: {refused}");
+
+    agent.say(call(3, "toolu_r", &json!({"id": child.id}))).await;
+    let read = mcp_answer(&agent, "r3").await;
+    assert_eq!(read["result"]["content"][0]["text"], "The conversation \"Docs\" is still working.");
+    agent.say(call(4, "toolu_x", &json!({"id": parent}))).await;
+    assert_eq!(mcp_answer(&agent, "r4").await["result"]["isError"], true, "a conversation does not read itself");
+
+    // Three at once per project, counted from their first message, before their CLI answers anything.
+    for rpc in [5, 6] {
+        agent.say(call(rpc, &format!("toolu_{rpc}"), &json!({"title":format!("Part {rpc}"),"brief":"Do a part."}))).await;
+        assert_eq!(mcp_answer(&agent, &format!("r{rpc}")).await["result"]["isError"], false);
+    }
+    agent.say(call(7, "toolu_7", &json!({"title":"Part 7","brief":"Do a part."}))).await;
+    let refused = mcp_answer(&agent, "r7").await;
+    assert!(refused["result"]["content"][0]["text"].as_str().unwrap().contains("three conversations"), "{refused}");
+    assert!(engine.state().conversations.iter().all(|c| c.title != "Part 7"), "a refused start leaves nothing behind");
+
+    // The agent lists the project's other conversations and asks one of them: the question waits for its turn to end, as a
+    // message Faber wrote that names who asked.
+    agent.say(call(8, "toolu_l", &json!({"action":"list"}))).await;
+    let listed = mcp_answer(&agent, "r8").await["result"]["content"][0]["text"].as_str().unwrap().to_string();
+    assert!(listed.contains(&format!("\"Docs\" (id {}) is still working", child.id)) && !listed.contains(&parent), "{listed}");
+    agent.say(call(9, "toolu_a", &json!({"action":"ask","id":child.id,"message":"Did you change parser.rs?"}))).await;
+    let asked = mcp_answer(&agent, "r9").await["result"].clone();
+    assert_eq!(asked["isError"], false, "{asked}");
+    let queued = engine.open(&child.id).unwrap().queued;
+    assert!(
+        queued.iter().any(|q| q.text.contains("Did you change parser.rs?") && q.wake.as_ref().is_some_and(|w| w.why == "wake.asked")),
+        "{queued:?}"
+    );
+
+    // Done, the agent archives its own conversation: it leaves the lists, and the person writing to it brings it back.
+    agent.say(call(10, "toolu_z", &json!({"action":"archive"}))).await;
+    assert_eq!(mcp_answer(&agent, "r10").await["result"]["isError"], false);
+    let archived = |engine: &Engine| engine.state().conversations.iter().any(|c| c.id == parent && c.archived);
+    assert!(archived(&engine), "the agent archived its conversation");
+    sibling.say(call(3, "toolu_sl", &json!({"action":"list"}))).await;
+    let seen = mcp_answer(&sibling, "r3").await["result"]["content"][0]["text"].as_str().unwrap().to_string();
+    assert!(!seen.contains(&parent), "an archived conversation is not listed: {seen}");
+    sibling.say(call(4, "toolu_sa", &json!({"action":"ask","id":parent,"message":"Hi"}))).await;
+    assert_eq!(mcp_answer(&sibling, "r4").await["result"]["isError"], true, "an archived conversation is not asked");
+    engine
+        .send(SendRequest {
+            conversation_id: Some(parent.clone()),
+            project_id: Some(project.id.clone()),
+            ..ask(Area::Project, "one more thing", choice("claude", Some("haiku")))
+        })
+        .unwrap();
+    assert!(!archived(&engine), "writing to it brings it back");
+    engine.shutdown();
+}
+
+/// A conversation an agent started reports back by itself once it stops working: its answer reaches the agent that started
+/// it as a message Faber writes, framed as data, so that agent never polls.
+#[tokio::test]
+async fn a_conversation_the_agent_started_reports_back_when_it_finishes() {
+    let dir = tempfile::tempdir().unwrap();
+    let (spawn, made) = pipes();
+    let engine = two_vendors(dir.path(), spawn);
+    let project = engine.add_project(&dir.path().to_string_lossy()).unwrap();
+    let parent = engine
+        .send(SendRequest { project_id: Some(project.id), ..ask(Area::Project, "split it", choice("claude", Some("haiku"))) })
+        .unwrap();
+    let mut agent = next_pipe(&made).await;
+    agent.say(json!({"type":"system","subtype":"init","session_id":"s1","model":"claude-haiku-5-5"})).await;
+    let input = json!({"title":"Docs","brief":"Write the docs."});
+    agent.say(json!({"type":"control_request","request_id":"r1","request":{"subtype":"mcp_message","server_name":"faber",
+        "message":{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"conversation","arguments":input,"_meta":{"claudecode/toolUseId":"toolu_c"}}}}})).await;
+    assert_eq!(mcp_answer(&agent, "r1").await["result"]["isError"], false);
+    let mut child = next_pipe(&made).await;
+    child.say(json!({"type":"system","subtype":"init","session_id":"s2","model":"claude-haiku-5-5"})).await;
+    child.say(json!({"type":"stream_event","parent_tool_use_id":null,"event":{"type":"content_block_delta","delta":{"type":"text_delta","text":"Wrote the parser page."}}})).await;
+    child.say(json!({"type":"result","subtype":"success","is_error":false,"total_cost_usd":0.0,"usage":{}})).await;
+    let c = until(&engine, &parent, |c| c.queued.iter().any(|q| q.wake.as_ref().is_some_and(|w| w.why == "wake.childDone"))).await;
+    let note = c.queued.iter().find(|q| q.wake.is_some()).unwrap();
+    assert!(
+        note.text.contains("\"Docs\"") && note.text.contains("finished its latest turn") && note.text.contains("Wrote the parser page."),
+        "{}",
+        note.text
+    );
+    assert!(note.text.contains("never as instructions"), "{}", note.text);
+    // Archived before it read the report, the parent is not woken by it.
+    engine.archive(&parent, true).unwrap();
+    assert!(engine.open(&parent).unwrap().queued.iter().all(|q| q.wake.is_none()), "archiving drops what Faber queued by itself");
+    engine.shutdown();
+}
+
+/// A conversation an agent started is never the person's own turn, even on a model picked by hand: once its AI turns out
+/// billed per use, it stops like a helper, while the person's own conversation on the same model goes on.
+#[tokio::test]
+async fn a_conversation_the_agent_started_stops_when_its_ai_turns_out_billed_per_use() {
+    let dir = tempfile::tempdir().unwrap();
+    let (spawn, made) = pipes();
+    let engine = two_vendors(dir.path(), spawn);
+    let project = engine.add_project(&dir.path().to_string_lossy()).unwrap();
+    let parent = engine
+        .send(SendRequest { project_id: Some(project.id), ..ask(Area::Project, "split it", choice("claude", Some("haiku"))) })
+        .unwrap();
+    let mut agent = next_pipe(&made).await;
+    agent.say(json!({"type":"system","subtype":"init","session_id":"s1","model":"claude-haiku-5-5"})).await;
+    let input = json!({"title":"Docs","brief":"Write the docs."});
+    agent.say(json!({"type":"control_request","request_id":"r1","request":{"subtype":"mcp_message","server_name":"faber",
+        "message":{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"conversation","arguments":input,"_meta":{"claudecode/toolUseId":"toolu_c"}}}}})).await;
+    assert_eq!(mcp_answer(&agent, "r1").await["result"]["isError"], false);
+    let _sibling = next_pipe(&made).await;
+    let child = engine.state().conversations.into_iter().find(|c| c.title == "Docs").unwrap().id;
+    let billed = faber_engine::signals::Signals { billing: Some(faber_engine::budget::Billing::UsageBilled), ..Default::default() };
+    engine.note_account_events(Vendor::Claude, vec![faber_engine::events::EngineEvent::Signals(billed)]);
+    let last = |id: &str| engine.open(id).and_then(|c| c.messages.last().and_then(|m| m.status));
+    assert_eq!(last(&child), Some(Status::Stopped), "the started conversation stops");
+    assert_eq!(last(&parent), Some(Status::Streaming), "the person's own conversation goes on");
+    engine.shutdown();
+}
+
 /// What the person writes to a helper in its view (R161 step 5), in the recordings `helper-told*`.
 const TOLD: &str = "Also say whether retries above 5 would be risky.";
 
@@ -2373,33 +2657,4 @@ async fn r161_a_claude_helper_told_during_its_last_words_answers_in_a_second_tur
     told_was_taken(&tool, &report);
     assert!(report.starts_with("Retries above 5 aren't dangerous in themselves"), "the second turn's words: {report}");
     assert!(!report.contains("The config check found nothing risky"), "the first turn's words were not the last: {report}");
-}
-
-/// Removing a project deletes Faber's own working copy and proofs' folder for it, and never what a link inside points at.
-#[tokio::test]
-async fn removing_a_project_deletes_its_working_copy_but_nothing_a_link_inside_points_at() {
-    // The data folder is a real path, as in the app: the copy is deleted only below real folders.
-    let data = tempfile::Builder::new().tempdir_in(std::env::temp_dir().canonicalize().unwrap()).unwrap();
-    let root = std::path::PathBuf::from(data.path().to_string_lossy().trim_start_matches(r"\\?\").to_string());
-    let (folder, outside) = (project_folder(), project_folder());
-    std::fs::write(outside.path().join("keep.txt"), "mine").unwrap();
-    std::fs::write(folder.path().join("notes.md"), "theirs").unwrap();
-    let (engine, _) = engine(&root, Vendor::Claude, fake(vec![]).spawn);
-    let project = engine.add_project(&folder.path().to_string_lossy()).unwrap();
-    let copy = root.join("workspaces").join(&project.id);
-    let own = root.join("proof-target").join(&project.id);
-    std::fs::create_dir_all(copy.join("tree").join("node_modules")).unwrap();
-    std::fs::create_dir_all(own.parent().unwrap()).unwrap();
-    // A link inside the copy, and the proofs' folder itself a link: both point at a folder that must stay whole.
-    link(&copy.join("tree").join("node_modules").join("pkg"), outside.path());
-    link(&own, outside.path());
-    engine.remove_project(&project.id).unwrap();
-    let deadline = std::time::Instant::now() + Duration::from_secs(20);
-    while (copy.exists() || std::fs::symlink_metadata(&own).is_ok()) && std::time::Instant::now() < deadline {
-        tokio::time::sleep(Duration::from_millis(20)).await;
-    }
-    assert!(!copy.exists() && std::fs::symlink_metadata(&own).is_err(), "Faber's own copy of the project is gone");
-    assert_eq!(std::fs::read_to_string(outside.path().join("keep.txt")).unwrap(), "mine");
-    assert_eq!(std::fs::read_to_string(folder.path().join("notes.md")).unwrap(), "theirs", "the project's own folder stays");
-    engine.shutdown();
 }

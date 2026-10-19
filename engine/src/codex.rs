@@ -4,7 +4,7 @@
 use crate::claude::EventSink;
 use crate::events::{Delivery, EngineEvent, Session, SessionCommand, UserTurn};
 use crate::model::{Area, Permissions, ReasoningSummary, Tuning, Verbosity, WebSearch};
-use crate::persona::{PersonaInput, persona, worker_contract};
+use crate::persona::{PersonaInput, persona};
 use crate::proc::{self, Spawner};
 use crate::signals::{codex_account, codex_signals};
 use serde::{Deserialize, Serialize};
@@ -18,8 +18,8 @@ use tokio::io::{AsyncBufReadExt, BufReader};
 use tokio::sync::mpsc::error::SendError;
 use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender, unbounded_channel};
 
-const CHAT_INSTRUCTIONS: &str = "You are a helpful, precise assistant in a chat app. Answer in the language of the user. \
-Use Markdown when it helps. Your working folder belongs to this conversation: run code and create files \
+const CHAT_INSTRUCTIONS: &str = "You are a helpful, precise assistant in a chat app. Answer in the language of the user's \
+latest message, even when files or tools use another. Use Markdown when it helps. Your working folder belongs to this conversation: run code and create files \
 there when it helps, and mention the files you create.";
 
 /// Every guarded mode (Ask, Accept edits, Plan, Auto) preserves the existing Ask setup. Isolated servers disable integrations
@@ -48,122 +48,6 @@ pub fn codex_args(area: Area, windows: bool, user_hooks: bool, permissions: Perm
         push(&["--disable", "skill_mcp_dependency_install"]);
     }
     args
-}
-
-/// Retain names only: configuration values are ignored, never copied into requests or errors.
-pub fn thread_exposure(params: &mut Value, reply: &str) -> Result<(), crate::project::policy::Blocker> {
-    #[derive(serde::Deserialize)]
-    struct Reply {
-        result: Config,
-    }
-    #[derive(serde::Deserialize)]
-    struct Config {
-        config: Names,
-    }
-    #[derive(serde::Deserialize)]
-    struct Names {
-        #[serde(default)]
-        mcp_servers: HashMap<String, serde::de::IgnoredAny>,
-    }
-    let reply: Reply = serde_json::from_str(reply).map_err(|_| crate::project::policy::Blocker::Restrictions)?;
-    if reply.result.config.mcp_servers.len() > 1000
-        || reply.result.config.mcp_servers.keys().any(|name| name.is_empty() || name.len() > 256)
-    {
-        return Err(crate::project::policy::Blocker::Restrictions);
-    }
-    params["config"]["mcp_servers"] =
-        Value::Object(reply.result.config.mcp_servers.into_keys().map(|name| (name, json!({"enabled":false}))).collect());
-    Ok(())
-}
-
-/// Automatic roles always start isolated, whatever mode the person chose: no hooks, plugins, apps or MCP servers, Faber's own
-/// sandbox on Windows, and no native shell or subagents.
-pub fn project_codex_args(windows: bool) -> Vec<String> {
-    let mut args = codex_args(Area::Chat, windows, false, Permissions::Isolated);
-    args.extend(["-c".into(), "model_provider=\"openai\"".into()]);
-    args.extend(["-c".into(), format!("model_catalog_json={}", json!(project_catalog_path().to_string_lossy()))]);
-    for setting in [
-        "developer_instructions=\"\"",
-        "skills.include_instructions=false",
-        "skills.bundled.enabled=false",
-        "tools.update_plan.enabled=false",
-        "tools.experimental_request_user_input.enabled=false",
-    ] {
-        args.extend(["-c".into(), setting.into()]);
-    }
-    for feature in [
-        "shell_tool",
-        "multi_agent",
-        "multi_agent_v2",
-        "view_image",
-        "request_permissions_tool",
-        "code_mode",
-        "code_mode_only",
-        "code_mode_host",
-        "code_mode_tool_search",
-        "token_budget",
-        "deferred_executor",
-        "send_message_to_user_async",
-        "current_time_reminder",
-        "sleep_tool",
-        "image_generation",
-        "imagegenext",
-    ] {
-        args.extend(["--disable".into(), feature.into()]);
-    }
-    args
-}
-
-fn project_catalog_path() -> &'static Path {
-    static PATH: std::sync::OnceLock<PathBuf> = std::sync::OnceLock::new();
-    PATH.get_or_init(|| std::env::temp_dir().join(format!("faber-role-model-{}.json", uuid::Uuid::new_v4())))
-}
-
-/// Original client metadata for the qualified MVP model; it grants no native tool or model delegation.
-/// The installed startup-only model_catalog_json control consumes ModelInfo from the published protocol.
-pub fn project_codex_catalog() -> Value {
-    json!({"models":[{
-        "slug":"gpt-6-luna", "display_name":"Project worker", "description":null,
-        "default_reasoning_level":"medium",
-        "supported_reasoning_levels":[
-            {"effort":"low","description":"Low"}, {"effort":"medium","description":"Medium"},
-            {"effort":"high","description":"High"}, {"effort":"xhigh","description":"Extra high"},
-            {"effort":"max","description":"Maximum"}],
-        "shell_type":"disabled", "visibility":"list", "supported_in_api":true, "priority":0,
-        "support_verbosity":false, "apply_patch_tool_type":null,
-        "model_messages":{"instructions_template":""},
-        "truncation_policy":{"mode":"tokens","limit":10000},
-        "context_window":1050000, "max_context_window":1050000,
-        "experimental_supported_tools":[], "input_modalities":["text"],
-        "include_skills_usage_instructions":false, "include_apps_usage_instructions":false,
-        "include_plugin_usage_instructions":false, "node_repl_disabled":true,
-        "supports_search_tool":false, "supports_experimental_context":false,
-        "tool_mode":"direct", "multi_agent_version":null
-    }]})
-}
-
-/// Writes only a generated temporary control file, never the CLI's configuration or credentials.
-#[cfg(windows)]
-pub fn prepare_project_codex_catalog() -> std::io::Result<()> {
-    use std::io::Write;
-    use std::os::windows::fs::OpenOptionsExt;
-    static FILE: std::sync::OnceLock<std::io::Result<std::fs::File>> = std::sync::OnceLock::new();
-    FILE.get_or_init(|| {
-        // The held handle denies writes; Windows removes this exact created file on process exit.
-        let mut file = std::fs::OpenOptions::new()
-            .create_new(true)
-            .read(true)
-            .write(true)
-            .share_mode(0x0000_0001 | 0x0000_0004)
-            .custom_flags(0x0400_0000)
-            .open(project_catalog_path())?;
-        file.write_all(&serde_json::to_vec(&project_codex_catalog())?)?;
-        file.sync_all()?;
-        Ok(file)
-    })
-    .as_ref()
-    .map(|_| ())
-    .map_err(std::io::Error::other)
 }
 
 /// Parameters for thread/start and thread/resume. Ask keeps writes inside the working folder and asks before every command that
@@ -435,6 +319,17 @@ fn s(v: &Value) -> String {
 
 /// Turns one `codex app-server` notification into engine events.
 pub fn parse_codex_notification(msg: &Value, state: &mut CodexTurnState) -> Vec<EngineEvent> {
+    // The thread's context after a request: what the last request held (`last.totalTokens`, which after a compaction is the
+    // size of what is left), against the model's window.
+    let usage = &msg["params"]["tokenUsage"];
+    let context = (msg["method"] == "thread/tokenUsage/updated")
+        .then(|| usage["last"]["totalTokens"].as_u64().or(usage["last"]["inputTokens"].as_u64()))
+        .flatten()
+        .map(|used| EngineEvent::Context { used: Some(used), window: usage["modelContextWindow"].as_u64() });
+    context.into_iter().chain(parse_notification(msg, state)).collect()
+}
+
+fn parse_notification(msg: &Value, state: &mut CodexTurnState) -> Vec<EngineEvent> {
     let p = &msg["params"];
     match msg["method"].as_str().unwrap_or_default() {
         "item/agentMessage/delta" => {
@@ -450,6 +345,9 @@ pub fn parse_codex_notification(msg: &Value, state: &mut CodexTurnState) -> Vec<
             let kind = item["type"].as_str().unwrap_or_default();
             if kind == "agentMessage" {
                 return vec![EngineEvent::Break { final_answer: item["phase"] == "final_answer" }];
+            }
+            if kind == "contextCompaction" {
+                return vec![];
             }
             if kind == "userMessage" {
                 state.users += 1;
@@ -481,6 +379,9 @@ pub fn parse_codex_notification(msg: &Value, state: &mut CodexTurnState) -> Vec<
                 ("dynamicToolCall", Some("run_command")) => "Bash",
                 ("dynamicToolCall", Some(crate::helper::NAME)) => crate::helper::TOOL,
                 ("dynamicToolCall", Some(crate::browser::NAME)) => crate::browser::TOOL,
+                ("dynamicToolCall", Some(crate::sibling::NAME)) => crate::sibling::TOOL,
+                ("dynamicToolCall", Some(crate::verify::NAME)) => crate::verify::TOOL,
+                ("dynamicToolCall", Some(crate::map::NAME)) => crate::map::TOOL,
                 _ => kind,
             };
             vec![EngineEvent::Tool { id: s(&item["id"]), name: name.into(), input, parent: None }]
@@ -489,6 +390,10 @@ pub fn parse_codex_notification(msg: &Value, state: &mut CodexTurnState) -> Vec<
             let item = &p["item"];
             let kind = item["type"].as_str().unwrap_or_default();
             let id = s(&item["id"]);
+            // Codex compacted the thread, whoever asked (a `thread/compact/start` of Faber's or its own limit).
+            if kind == "contextCompaction" {
+                return vec![EngineEvent::Compacted { after: None }];
+            }
             if kind == "agentMessage" {
                 let text = s(&item["text"]);
                 return if !text.is_empty() && !state.streamed.contains(&id) { vec![EngineEvent::Text(text)] } else { vec![] };
@@ -625,7 +530,7 @@ pub struct CodexServerOptions {
 }
 
 /// The settings that go into the thread's `config` (R140): web search always, and the two Codex-only choices when the person
-/// made one. Only the person's own Chat and project sessions get them: an internal question and a role never do.
+/// made one. Only the person's own Chat and project sessions get them: an internal question never does.
 fn apply_tuning(params: &mut Map<String, Value>, tuning: Tuning) {
     let web = match tuning.web {
         WebSearch::Off => "disabled",
@@ -666,6 +571,10 @@ pub struct CodexThread {
     pub helper: crate::helper::Helper,
     /// Faber's own browser (R161 step 7), as for `ClaudeLaunch::browse`.
     pub browse: bool,
+    /// Faber's conversation tool, as for `ClaudeLaunch::conversations`.
+    pub conversations: bool,
+    /// Faber's checks, as for `ClaudeLaunch::verify`.
+    pub verify: bool,
 }
 
 enum ServerCommand {
@@ -776,6 +685,19 @@ pub fn thread_params(area: Area, t: &CodexThread) -> (&'static str, Value) {
                 tools.push(crate::browser::codex_tool());
             }
         }
+        if t.conversations {
+            let tools = params.entry("dynamicTools").or_insert_with(|| json!([]));
+            if let Some(tools) = tools.as_array_mut() {
+                tools.push(crate::sibling::codex_tool());
+            }
+        }
+        if t.verify {
+            let tools = params.entry("dynamicTools").or_insert_with(|| json!([]));
+            if let Some(tools) = tools.as_array_mut() {
+                tools.push(crate::verify::codex_tool());
+                tools.push(crate::map::codex_tool());
+            }
+        }
     }
     if t.permissions == Permissions::Isolated && t.instructions.is_none() {
         params.insert("config".into(), crate::permissions::sandbox_config(&t.cwd, true).into());
@@ -797,140 +719,22 @@ pub fn thread_params(area: Area, t: &CodexThread) -> (&'static str, Value) {
     (method, Value::Object(params))
 }
 
-/// The instruction files a started role thread declares against the stored receipt. A missing inventory, an
-/// unreadable receipt, an added file or a removed one all refuse.
-pub(crate) fn project_sources_match(result: &Value) -> Result<(), &'static str> {
-    let key = crate::project::policy::Blocker::Restrictions.key();
-    let declared: Vec<String> =
-        result["instructionSources"].as_array().and_then(|list| list.iter().map(|s| s.as_str().map(String::from)).collect()).ok_or(key)?;
-    let recorded = crate::project::qualification::recorded_sources(crate::model::Vendor::Codex).map_err(|_| key)?;
-    crate::project::qualification::session_sources(&declared, &recorded).map_err(|_| key)
-}
-
-/// Candidate controls, not a claim that native command/read tools are disabled by a sandbox.
-pub fn project_thread_params(
-    t: &CodexThread,
-    role: crate::project::Role,
-) -> Result<(&'static str, Value), crate::project::policy::Blocker> {
-    use crate::project::policy;
-    policy::invocation(crate::model::Vendor::Codex, t.model.as_deref(), t.effort.as_deref(), t.instructions.is_some())?;
-    // A role never inherits the person's mode: it always gets Faber's own permission profile (credential folders and
-    // temporary folders denied, no network), and only the writer may write in its working folder.
-    let isolated = CodexThread { permissions: Permissions::Isolated, tuning: Tuning::default(), ..t.clone() };
-    let (method, mut params) = thread_params(Area::Project, &isolated);
-    params["approvalPolicy"] = "never".into();
-    params["baseInstructions"] = worker_contract(role).into();
-    let config = params["config"].as_object_mut().expect("isolated thread config");
-    if role != crate::project::Role::Writer {
-        for (key, profile) in config.iter_mut() {
-            if key.starts_with("permissions.") {
-                profile["filesystem"][":workspace_roots"]["."] = "read".into();
-            }
-        }
-    }
-    config.insert("model_reasoning_effort".into(), t.effort.clone().into());
-    config.insert("web_search".into(), "disabled".into());
-    config.insert("service_tier".into(), "default".into());
-    config.insert("approvals_reviewer".into(), "user".into());
-    let fields = params.as_object_mut().expect("thread parameters");
-    // Roles never execute anything: no dynamic tools, and the profile above replaces Codex's own sandbox modes.
-    for key in ["developerInstructions", "dynamicTools", "sandbox"] {
-        fields.remove(key);
-    }
-    Ok((method, params))
-}
-
-/// What every project role is launched with: the server arguments (the per-process model catalog file by its content) and
-/// each role's thread parameters, with fixed stand-ins for the per-turn values (folder, model, effort). A receipt is bound
-/// to its hash (`qualification::launch_policy`), so a change to any of them asks for a new qualification run.
-pub(crate) fn project_launch_policy(roles: &[crate::project::Role]) -> Value {
-    let catalog = project_catalog_path().to_string_lossy().into_owned();
-    let server: Vec<String> =
-        project_codex_args(cfg!(windows)).into_iter().map(|a| a.replace(&json!(catalog).to_string(), "<catalog>")).collect();
-    let thread = CodexThread {
-        helper: Default::default(),
-        browse: false,
-        cwd: PathBuf::from(if cfg!(windows) { r"C:\faber-role" } else { "/faber-role" }),
-        model: Some("gpt-6-luna".into()),
-        effort: Some("medium".into()),
-        resume: None,
-        instructions: None,
-        user_name: None,
-        permissions: Permissions::Isolated,
-        tuning: Default::default(),
-    };
-    // Each thread names its permission profile with a fresh id; the profile's content is what counts.
-    let threads: Vec<Value> = roles
-        .iter()
-        .map(|role| {
-            let Ok((_, params)) = project_thread_params(&thread, *role) else { return Value::Null };
-            let text = params.to_string();
-            let text = match params["config"]["default_permissions"].as_str() {
-                Some(profile) => text.replace(profile, "<profile>"),
-                None => text,
-            };
-            serde_json::from_str(&text).unwrap_or(Value::Null)
-        })
-        .collect();
-    json!({"server": server, "catalog": project_codex_catalog(), "threads": threads})
-}
-
-/// The thread a conversation opens: a role's fixed policy, or the person's own settings.
-fn open_params(area: Area, role: Option<crate::project::Role>, t: &CodexThread) -> (&'static str, Value) {
-    match role {
-        Some(role) => project_thread_params(t, role).expect("validated role"),
-        None => thread_params(area, t),
-    }
-}
-
 /// One `codex app-server` serves every conversation with the same settings, each as a thread of its own, so open
 /// conversations cost one process instead of one each (measured: about 50 MB for three threads).
 #[derive(Clone)]
 pub struct CodexServer {
     tx: UnboundedSender<ServerCommand>,
     next: Arc<AtomicU64>,
-    tree: Option<proc::OwnedTree>,
 }
 
 impl CodexServer {
-    /// Dedicated role entry point: deny before starting a server, never share an automatic role with Chat threads.
-    pub fn start_project(
-        opts: CodexServerOptions,
-        thread: CodexThread,
-        role: crate::project::Role,
-        sink: EventSink,
-    ) -> Result<Session, crate::project::policy::Blocker> {
-        if opts.area != Area::Project {
-            return Err(crate::project::policy::Blocker::Invocation);
-        }
-        let opts = CodexServerOptions { permissions: Permissions::Isolated, ..opts };
-        let thread = CodexThread { permissions: Permissions::Isolated, ..thread };
-        project_thread_params(&thread, role)?;
-        // The pin is held until the started process was checked and resumed.
-        let pinned = crate::project::policy::admit_launch(crate::model::Vendor::Codex, &opts.cli.command)?;
-        #[cfg(windows)]
-        prepare_project_codex_catalog().map_err(|_| crate::project::policy::Blocker::Restrictions)?;
-        let server = proc::spawn_expecting(&pinned.sha256, || Self::start_with_policy(opts, Some(role)));
-        let session = server.open(thread, sink);
-        server.retire();
-        Ok(session.for_project(role))
-    }
     /// The process starts right away, so a warmed-up conversation is already booting while the user types.
     pub fn start(opts: CodexServerOptions) -> CodexServer {
-        Self::start_with_policy(opts, None)
-    }
-
-    fn start_with_policy(opts: CodexServerOptions, role: Option<crate::project::Role>) -> CodexServer {
         let (tx, rx) = unbounded_channel();
-        let args = if role.is_some() {
-            project_codex_args(opts.windows)
-        } else {
-            codex_args(opts.area, opts.windows, opts.user_hooks, opts.permissions)
-        };
+        let args = codex_args(opts.area, opts.windows, opts.user_hooks, opts.permissions);
         let started = (opts.spawn)(&opts.cli.command, &args, &opts.cwd);
-        let tree = started.as_ref().ok().and_then(|p| p.contained.as_ref()).and_then(proc::Containment::owned_tree);
-        tokio::spawn(serve(started, opts, rx, role));
-        CodexServer { tx, next: Arc::new(AtomicU64::new(1)), tree }
+        tokio::spawn(serve(started, opts, rx));
+        CodexServer { tx, next: Arc::new(AtomicU64::new(1)) }
     }
 
     /// False once the process has stopped; the engine then starts a new one.
@@ -946,7 +750,7 @@ impl CodexServer {
         }
         // Straight into the server's queue, so commands from all conversations keep the order they were given in.
         let server = self.tx.clone();
-        Session::from_fn(move |cmd| drop(server.send(ServerCommand::Session(key, cmd)))).with_tree(self.tree.clone())
+        Session::from_fn(move |cmd| drop(server.send(ServerCommand::Session(key, cmd))))
     }
 
     /// Stops the process once its last conversation closes; new conversations go to a server with the new settings.
@@ -955,12 +759,7 @@ impl CodexServer {
     }
 }
 
-async fn serve(
-    started: std::io::Result<proc::Proc>,
-    opts: CodexServerOptions,
-    mut rx: UnboundedReceiver<ServerCommand>,
-    role: Option<crate::project::Role>,
-) {
+async fn serve(started: std::io::Result<proc::Proc>, opts: CodexServerOptions, mut rx: UnboundedReceiver<ServerCommand>) {
     let area = opts.area;
     let mut p = match started {
         Ok(p) => p,
@@ -1014,7 +813,7 @@ async fn serve(
                     stop!();
                 }
             } else {
-                let (method, params) = open_params(area, role, &$t.params);
+                let (method, params) = thread_params(area, &$t.params);
                 request!(method, params, Waiting::Thread($key));
             }
         }};
@@ -1061,35 +860,7 @@ async fn serve(
                 if line.trim().is_empty() {
                     continue;
                 }
-                // Parse the identity before any config values; malformed role output never reaches raw diagnostics.
-                #[derive(serde::Deserialize)]
-                struct Header {
-                    id: Option<Value>,
-                    #[serde(flatten)]
-                    other: HashMap<String, serde::de::IgnoredAny>,
-                }
-                if let Some(role) = role {
-                    let header = serde_json::from_str::<Header>(&line);
-                    if line.len() > 4 * 1024 * 1024 || header.is_err() {
-                        for t in threads.values() { (t.sink)(EngineEvent::Error {message:crate::project::policy::Blocker::Restrictions.key().into(),fatal:true}); }
-                        stop!();
-                        continue;
-                    }
-                    if let Some(suffix) = header.ok().filter(|h| !h.other.contains_key("method")).and_then(|h| h.id).and_then(|id| id.as_str()
-                        .and_then(|id| id.strip_prefix("faber-config-")).map(String::from)) {
-                        let Ok(key) = suffix.parse::<u64>() else { continue; };
-                        if !exposure_pending.remove(&key) { continue; }
-                        let Some(t) = threads.get(&key) else { continue; };
-                        let (method, mut params) = project_thread_params(&t.params, role).expect("validated role");
-                        if let Err(blocker) = thread_exposure(&mut params, &line) {
-                            (t.sink)(EngineEvent::Error {message:blocker.key().into(),fatal:true});
-                            stop!();
-                            continue;
-                        }
-                        request!(method, params, Waiting::Thread(key));
-                        continue;
-                    }
-                } else if let Ok(reply) = serde_json::from_str::<ConfigReply>(&line)
+                if let Ok(reply) = serde_json::from_str::<ConfigReply>(&line)
                     && let Some(key) = reply.id.as_deref().and_then(|id| id.strip_prefix("faber-config-")).and_then(|key| key.parse::<u64>().ok())
                 {
                     if !exposure_pending.remove(&key) { continue; }
@@ -1098,7 +869,7 @@ async fn serve(
                         (t.sink)(EngineEvent::Error { message: "error.projectSandbox".into(), fatal: true });
                         continue;
                     };
-                    let (method, mut params) = open_params(area, role, &t.params);
+                    let (method, mut params) = thread_params(area, &t.params);
                     let disabled: Map<String, Value> = result.config.mcp_servers.into_keys().map(|name| (name, json!({"enabled":false}))).collect();
                     params["config"]["mcp_servers"] = disabled.into();
                     request!(method, params, Waiting::Thread(key));
@@ -1113,17 +884,6 @@ async fn serve(
                 };
                 let method = msg["method"].as_str();
                 let params = &msg["params"];
-                if role.is_some() {
-                    match crate::project::policy::reject_native(&mut *stdin, crate::model::Vendor::Codex, &msg).await {
-                        Ok(true) => continue,
-                        Err(_) => {
-                            for t in threads.values() { (t.sink)(EngineEvent::Error {message:crate::project::policy::Blocker::Restrictions.key().into(),fatal:true}); }
-                            proc::stop(&mut *stdin, &mut child, &mut job).await;
-                            break;
-                        }
-                        Ok(false) => {}
-                    }
-                }
                 match (method, msg.get("id")) {
                     // An answer to one of Faber's requests.
                     (None, Some(id)) => {
@@ -1150,7 +910,7 @@ async fn serve(
                             for t in keys.iter().filter_map(|k| threads.get(k)) {
                                 (t.sink)(EngineEvent::Error { message: format!("Codex {what} failed: {detail}"), fatal });
                             }
-                            if let Waiting::Other(key,"turn/start") = kind && let Some(t) = threads.get_mut(&key) {
+                            if let Waiting::Other(key,"turn/start" | "thread/compact/start") = kind && let Some(t) = threads.get_mut(&key) {
                                 t.watch.finish();
                                 t.turn = None;
                                 t.early_completion.clear();
@@ -1168,13 +928,6 @@ async fn serve(
                             }
                             Waiting::Thread(key) => {
                                 let Some(t) = threads.get_mut(&key) else { continue };
-                                // A role's own inventory of instruction files must be the very set its receipt recorded.
-                                if role.is_some() && let Err(key) = project_sources_match(&msg["result"]) {
-                                    (t.sink)(EngineEvent::Error { message: key.into(), fatal: true });
-                                    t.blocked = true;
-                                    t.queued.clear();
-                                    continue;
-                                }
                                 let thread = &msg["result"]["thread"];
                                 let id = s(&thread["id"]);
                                 let shown = thread["model"].as_str().map(String::from).or_else(|| t.params.model.clone()).unwrap_or_else(|| "codex".into());
@@ -1183,7 +936,7 @@ async fn serve(
                                 by_id.insert(id.clone(), key);
                                 t.id = Some(id.clone());
                                 for turn in std::mem::take(&mut t.queued) {
-                                    t.watch.begin(role.is_some());
+                                    t.watch.begin();
                                     t.state.base = t.state.total;
                                     let params = turn_params(&id, t.params.effort.as_deref(), &turn);
                                     request!("turn/start", params, Waiting::Other(key, "turn/start"));
@@ -1211,11 +964,52 @@ async fn serve(
                                 Some(t) => {
                                     let call = s(&params["callId"]);
                                     t.helpers.insert(call.clone(), id.clone());
-                                    t.watch.pause();
                                     (t.sink)(EngineEvent::HelperCall { id: call, input: params["arguments"].clone() });
                                 }
                                 None => {
                                     let _ = proc::write_line(&mut *stdin, &json!({"id":id,"result":{"success":false,"contentItems":[{"type":"inputText","text":"No helper is available here."}]}})).await;
+                                }
+                            }
+                            continue;
+                        }
+                        if method == "item/tool/call" && params["tool"] == crate::sibling::NAME {
+                            // The agent starts a conversation of its own or reads one; the engine answers at once.
+                            match thread.filter(|t| t.params.conversations && !t.blocked && !t.closing) {
+                                Some(t) => {
+                                    let call = s(&params["callId"]);
+                                    t.helpers.insert(call.clone(), id.clone());
+                                    (t.sink)(EngineEvent::ConversationCall { id: call, input: params["arguments"].clone() });
+                                }
+                                None => {
+                                    let _ = proc::write_line(&mut *stdin, &json!({"id":id,"result":{"success":false,"contentItems":[{"type":"inputText","text":"Starting a conversation is not available here."}]}})).await;
+                                }
+                            }
+                            continue;
+                        }
+                        if method == "item/tool/call" && params["tool"] == crate::map::NAME {
+                            // The agent reads the project's map; the engine answers once it has read the folder.
+                            match thread.filter(|t| t.params.verify && !t.blocked && !t.closing) {
+                                Some(t) => {
+                                    let call = s(&params["callId"]);
+                                    t.helpers.insert(call.clone(), id.clone());
+                                    (t.sink)(EngineEvent::MapCall { id: call, input: params["arguments"].clone() });
+                                }
+                                None => {
+                                    let _ = proc::write_line(&mut *stdin, &json!({"id":id,"result":{"success":false,"contentItems":[{"type":"inputText","text":"Faber's project map is not available here."}]}})).await;
+                                }
+                            }
+                            continue;
+                        }
+                        if method == "item/tool/call" && params["tool"] == crate::verify::NAME {
+                            // The agent asks Faber to run the project's checks; the engine answers once they ended.
+                            match thread.filter(|t| t.params.verify && !t.blocked && !t.closing) {
+                                Some(t) => {
+                                    let call = s(&params["callId"]);
+                                    t.helpers.insert(call.clone(), id.clone());
+                                    (t.sink)(EngineEvent::VerifyCall { id: call, input: params["arguments"].clone() });
+                                }
+                                None => {
+                                    let _ = proc::write_line(&mut *stdin, &json!({"id":id,"result":{"success":false,"contentItems":[{"type":"inputText","text":"Faber's checks are not available here."}]}})).await;
                                 }
                             }
                             continue;
@@ -1226,7 +1020,6 @@ async fn serve(
                                 Some(t) => {
                                     let call = s(&params["callId"]);
                                     t.helpers.insert(call.clone(), id.clone());
-                                    t.watch.pause();
                                     (t.sink)(EngineEvent::BrowseCall { id: call, input: params["arguments"].clone() });
                                 }
                                 None => {
@@ -1237,7 +1030,7 @@ async fn serve(
                         }
                         if method == "item/tool/call" {
                             let mut accepted = false;
-                            if let Some(t) = thread && role.is_none() && t.params.permissions == Permissions::Isolated && t.params.instructions.is_none() && params["tool"] == "run_command" {
+                            if let Some(t) = thread && t.params.permissions == Permissions::Isolated && t.params.instructions.is_none() && params["tool"] == "run_command" {
                                 let input = &params["arguments"];
                                 if let Some(argv) = crate::permissions::command_argv(&t.params.cwd, "Bash", input, Some(&opts.cli), &crate::cli::find_cli) {
                                     let (spawn, cwd, tx, id) = (opts.spawn.clone(), t.params.cwd.clone(), command_tx.clone(), id.clone());
@@ -1281,7 +1074,6 @@ async fn serve(
                                 }
                                 let key = match id { Value::String(s) => s.clone(), other => other.to_string() };
                                 t.approvals.insert(key.clone(), id.clone());
-                                t.watch.pause();
                                 let tool = params["kind"].as_str().unwrap_or(method).to_string();
                                 let input = [&params["command"], &params["changes"]].into_iter().find(|v| !v.is_null()).unwrap_or(params).clone();
                                 // The request carries the folder the command runs in; `auth.json` alone says nothing without it. A
@@ -1307,7 +1099,6 @@ async fn serve(
                         // A subagent's own thread speaks for the conversation that started it.
                         if let Some(ChildNews { key, turn, events, used }) = subagents.child(&msg) {
                             if let Some(t) = threads.get_mut(&key) {
-                                t.watch.activity();
                                 // A subagent belongs to the reply it serves: once that reply is over, what it still does or uses
                                 // reaches no other reply.
                                 let current = turn.is_some() && turn == t.turn;
@@ -1333,7 +1124,6 @@ async fn serve(
                                     }
                                     continue;
                                 }
-                                t.watch.activity();
                                 if method == Some("turn/started") {
                                     t.turn = params["turn"]["id"].as_str().map(String::from);
                                     if !t.blocked {
@@ -1358,7 +1148,7 @@ async fn serve(
                                 }
                                 if method == Some("turn/completed") && !t.blocked && !t.closing && let Some(id) = t.id.clone() {
                                     for turn in std::mem::take(&mut t.queued) {
-                                        t.watch.begin(role.is_some());
+                                        t.watch.begin();
                                         t.state.base = t.state.total;
                                         request!("turn/start", turn_params(&id, t.params.effort.as_deref(), &turn), Waiting::Other(*by_id.get(&id).expect("registered thread"), "turn/start"));
                                     }
@@ -1401,11 +1191,21 @@ async fn serve(
                         if t.watch.stopping() { t.queued.push(turn); continue; }
                         match t.id.clone() {
                             Some(id) => {
-                                t.watch.begin(role.is_some());
+                                t.watch.begin();
                                 t.state.base = t.state.total;
                                 request!("turn/start", turn_params(&id, t.params.effort.as_deref(), &turn), Waiting::Other(key, "turn/start"));
                             }
                             None => t.queued.push(turn),
+                        }
+                    }
+                    // Compaction runs as a turn of its own (`turn/started` ... `turn/completed`), so the turn machinery follows it.
+                    SessionCommand::Compact => {
+                        let Some(t) = threads.get_mut(&key) else { continue };
+                        if t.blocked || t.closing || t.watch.stopping() { continue; }
+                        if let Some(id) = t.id.clone() {
+                            t.watch.begin();
+                            t.state.base = t.state.total;
+                            request!("thread/compact/start", json!({ "threadId": id }), Waiting::Other(key, "thread/compact/start"));
                         }
                     }
                     SessionCommand::Steer { turn, tag } => {
@@ -1429,7 +1229,6 @@ async fn serve(
                                     Ok(()) => {
                                         if let Some(t) = threads.get_mut(&key) {
                                             t.approvals.remove(&request_id);
-                                            if t.approvals.is_empty() { t.watch.resume(); }
                                         }
                                         Delivery::Delivered
                                     }
@@ -1447,11 +1246,10 @@ async fn serve(
                         };
                         let _ = ack.send(delivery);
                     }
-                    SessionCommand::HelperReply { id, ok, text } => {
+                    SessionCommand::HelperReply { id, ok, text, pictures } => {
                         let Some(t) = threads.get_mut(&key) else { continue };
                         let Some(request) = t.helpers.remove(&id) else { continue };
-                        if t.helpers.is_empty() && t.approvals.is_empty() { t.watch.resume(); }
-                        let _ = proc::write_line(&mut *stdin, &json!({"id":request,"result":{"success":ok,"contentItems":[{"type":"inputText","text":text}]}})).await;
+                        let _ = proc::write_line(&mut *stdin, &json!({"id":request,"result":crate::helper::dynamic_result(ok, &text, &pictures)})).await;
                     }
                     SessionCommand::Interrupt => {
                         if let Some(t) = threads.get_mut(&key) { for job in t.commands.drain(..) { job.abort(); } }
@@ -1614,263 +1412,4 @@ pub async fn list_codex_models(bin: &str, cwd: &Path, windows: bool, spawn: Spaw
     let models = tokio::time::timeout(timeout, ask).await.unwrap_or_default();
     proc::stop(&mut *stdin, &mut child, &mut job).await;
     models
-}
-
-#[cfg(test)]
-mod role_tests {
-    use super::*;
-    use tokio::io::AsyncWriteExt;
-
-    #[tokio::test]
-    async fn t13_every_role_disables_inherited_mcp_before_start_and_resume() {
-        use crate::project::Role;
-        for role in [Role::Lead, Role::Research, Role::TestProposal, Role::Writer, Role::Reviewer] {
-            for resume in [None, Some("thread".into())] {
-                let (stdin, input) = tokio::io::duplex(65536);
-                let (mut output, stdout) = tokio::io::duplex(65536);
-                let fake = Arc::new(std::sync::Mutex::new(Some(proc::Proc {
-                    stdin: Box::new(stdin),
-                    stdout: Box::new(stdout),
-                    stderr: None,
-                    child: None,
-                    contained: None,
-                })));
-                let spawn: Spawner = Arc::new(move |_, _, _| Ok(fake.lock().unwrap().take().unwrap()));
-                let server = CodexServer::start_with_policy(
-                    CodexServerOptions {
-                        permissions: Permissions::Isolated,
-                        cli: crate::cli::Cli { command: "fake".into(), prefix: vec![] },
-                        cwd: ".".into(),
-                        area: Area::Project,
-                        user_hooks: false,
-                        windows: false,
-                        spawn,
-                    },
-                    Some(role),
-                );
-                let mut lines = BufReader::new(input).lines();
-                lines.next_line().await.unwrap().unwrap();
-                if resume.is_some() {
-                    output.write_all(b"{\"id\":1,\"result\":{}}\n").await.unwrap();
-                    lines.next_line().await.unwrap().unwrap();
-                }
-                let session = server.open(
-                    CodexThread {
-                        helper: Default::default(),
-                        browse: false,
-                        cwd: ".".into(),
-                        model: Some("gpt-6-luna".into()),
-                        effort: Some("low".into()),
-                        resume: resume.clone(),
-                        instructions: None,
-                        user_name: None,
-                        permissions: Permissions::Isolated,
-                        tuning: Default::default(),
-                    },
-                    Arc::new(|_| {}),
-                );
-                if resume.is_none() {
-                    output.write_all(b"{\"id\":1,\"result\":{}}\n").await.unwrap();
-                    lines.next_line().await.unwrap().unwrap();
-                }
-                let query: Value = serde_json::from_str(&lines.next_line().await.unwrap().unwrap()).unwrap();
-                assert_eq!(query["method"], "config/read");
-                assert_eq!(query["params"]["includeLayers"], false);
-                let fixture: Value =
-                    serde_json::from_str(include_str!("../../tests/fixtures/projects/inherited-mcp.jsonl").trim()).unwrap();
-                output.write_all(format!("{}\n", fixture["msg"]).as_bytes()).await.unwrap();
-                let start: Value = serde_json::from_str(&lines.next_line().await.unwrap().unwrap()).unwrap();
-                assert_eq!(start["method"], if resume.is_some() { "thread/resume" } else { "thread/start" });
-                for name in ["Roblox_Studio", "node_repl", "rea", "ytlab"] {
-                    assert_eq!(start["params"]["config"]["mcp_servers"][name], json!({"enabled":false}));
-                }
-                assert!(!start.to_string().contains("SYNTHETIC"));
-                assert_eq!(start["params"]["config"]["web_search"], "disabled");
-                assert!(start["params"].get("sandbox").is_none(), "{start}");
-                assert_eq!(start["params"]["approvalPolicy"], "never");
-                assert_eq!(start["params"]["config"]["approvals_reviewer"], "user");
-                session.close();
-                server.retire();
-            }
-        }
-    }
-
-    #[tokio::test(start_paused = true)]
-    async fn role_loop_declines_every_native_request_and_disarms_a_failed_start() {
-        role_loop_rejects(false, false).await;
-    }
-
-    #[tokio::test(start_paused = true)]
-    async fn role_loop_stops_an_unknown_permission_request_immediately() {
-        role_loop_rejects(true, false).await;
-    }
-
-    #[tokio::test(start_paused = true)]
-    async fn role_loop_does_not_confuse_an_unknown_request_with_a_configuration_response() {
-        role_loop_rejects(true, true).await;
-    }
-
-    /// A role thread whose own inventory differs from the receipt (a file added, or no inventory at all) never gets a turn.
-    #[tokio::test(start_paused = true)]
-    async fn a_role_thread_with_another_instruction_inventory_than_its_receipt_never_starts() {
-        for reply in [
-            r#"{"id":2,"result":{"instructionSources":["C:/Users/x/.codex/AGENTS.md"],"thread":{"id":"t"}}}"#,
-            r#"{"id":2,"result":{"thread":{"id":"t"}}}"#,
-            r#"{"id":2,"result":{"instructionSources":[7],"thread":{"id":"t"}}}"#,
-        ] {
-            *crate::project::qualification::TEST_RECORDED.lock().unwrap() = Some(vec![]);
-            let (stdin, input) = tokio::io::duplex(65536);
-            let (mut output, stdout) = tokio::io::duplex(65536);
-            let fake = Arc::new(std::sync::Mutex::new(Some(proc::Proc {
-                stdin: Box::new(stdin),
-                stdout: Box::new(stdout),
-                stderr: None,
-                child: None,
-                contained: None,
-            })));
-            let spawn: Spawner = Arc::new(move |_, _, _| Ok(fake.lock().unwrap().take().unwrap()));
-            let server = CodexServer::start_with_policy(
-                CodexServerOptions {
-                    permissions: Permissions::Isolated,
-                    cli: crate::cli::Cli { command: "fake".into(), prefix: vec![] },
-                    cwd: ".".into(),
-                    area: Area::Project,
-                    user_hooks: false,
-                    windows: false,
-                    spawn,
-                },
-                Some(crate::project::Role::Reviewer),
-            );
-            let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
-            let session = server.open(
-                CodexThread {
-                    helper: Default::default(),
-                    browse: false,
-                    cwd: ".".into(),
-                    model: Some("gpt-6-luna".into()),
-                    effort: Some("low".into()),
-                    resume: None,
-                    instructions: None,
-                    user_name: None,
-                    permissions: Permissions::Isolated,
-                    tuning: Default::default(),
-                },
-                Arc::new(move |e| drop(tx.send(e))),
-            );
-            session.send(UserTurn::text("review"));
-            let mut lines = BufReader::new(input).lines();
-            lines.next_line().await.unwrap().unwrap();
-            output.write_all(b"{\"id\":1,\"result\":{}}\n").await.unwrap();
-            lines.next_line().await.unwrap().unwrap();
-            lines.next_line().await.unwrap().unwrap();
-            output.write_all(b"{\"id\":\"faber-config-1\",\"result\":{\"config\":{\"mcp_servers\":{}}}}\n").await.unwrap();
-            lines.next_line().await.unwrap().unwrap();
-            output.write_all(format!("{reply}\n").as_bytes()).await.unwrap();
-            let event = tokio::time::timeout(std::time::Duration::from_secs(1), rx.recv()).await;
-            assert!(
-                matches!(event, Ok(Some(EngineEvent::Error { fatal: true, ref message })) if message == crate::project::policy::Blocker::Restrictions.key()),
-                "{reply}: {event:?}"
-            );
-            let turn = tokio::time::timeout(std::time::Duration::from_millis(200), lines.next_line()).await;
-            assert!(turn.is_err() || !matches!(turn, Ok(Ok(Some(ref l))) if l.contains("turn/start")), "{reply}: a turn was sent");
-            session.close();
-            server.retire();
-        }
-    }
-
-    async fn role_loop_rejects(unknown: bool, config_id: bool) {
-        *crate::project::qualification::TEST_RECORDED.lock().unwrap() = Some(vec![]);
-        let (stdin, input) = tokio::io::duplex(65536);
-        let (mut output, stdout) = tokio::io::duplex(65536);
-        let fake = Arc::new(std::sync::Mutex::new(Some(proc::Proc {
-            stdin: Box::new(stdin),
-            stdout: Box::new(stdout),
-            stderr: None,
-            child: None,
-            contained: None,
-        })));
-        let spawn: Spawner = Arc::new(move |_, _, _| Ok(fake.lock().unwrap().take().unwrap()));
-        let server = CodexServer::start_with_policy(
-            CodexServerOptions {
-                permissions: Permissions::Isolated,
-                cli: crate::cli::Cli { command: "fake".into(), prefix: vec![] },
-                cwd: ".".into(),
-                area: Area::Project,
-                user_hooks: false,
-                windows: false,
-                spawn,
-            },
-            Some(crate::project::Role::Writer),
-        );
-        let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
-        let session = server.open(
-            CodexThread {
-                helper: Default::default(),
-                browse: false,
-                cwd: ".".into(),
-                model: Some("gpt-6-luna".into()),
-                effort: Some("low".into()),
-                resume: None,
-                instructions: None,
-                user_name: None,
-                permissions: Permissions::Isolated,
-                tuning: Default::default(),
-            },
-            Arc::new(move |e| drop(tx.send(e))),
-        );
-        let mut lines = BufReader::new(input).lines();
-        lines.next_line().await.unwrap().unwrap();
-        output.write_all(b"{\"id\":1,\"result\":{}}\n").await.unwrap();
-        lines.next_line().await.unwrap().unwrap();
-        // An isolated thread reads the MCP server names first, to switch each one off.
-        let read: Value = serde_json::from_str(&lines.next_line().await.unwrap().unwrap()).unwrap();
-        assert_eq!(read["method"], "config/read");
-        output.write_all(format!("{}\n", json!({"id":read["id"],"result":{"config":{"mcp_servers":{}}}})).as_bytes()).await.unwrap();
-        let start: Value = serde_json::from_str(&lines.next_line().await.unwrap().unwrap()).unwrap();
-        assert_eq!(start["method"], "thread/start");
-        assert!(start["params"].get("dynamicTools").is_none() && start["params"].get("sandbox").is_none(), "{start}");
-        output.write_all(b"{\"id\":2,\"result\":{\"instructionSources\":[],\"thread\":{\"id\":\"t\"}}}\n").await.unwrap();
-        assert!(matches!(rx.recv().await, Some(EngineEvent::Started { .. })));
-        let mut denied = 0;
-        for line in include_str!("../../tests/fixtures/projects/policy-escapes.jsonl").lines() {
-            let entry: Value = serde_json::from_str(line).unwrap();
-            if entry["msg"]["type"] != "control_request" {
-                continue;
-            }
-            let request = json!({"id":entry["msg"]["request_id"],"method":"item/commandExecution/requestApproval","params":{"threadId":"t","input":entry["msg"]["request"]}});
-            output.write_all(format!("{request}\n").as_bytes()).await.unwrap();
-            let reply: Value = serde_json::from_str(&lines.next_line().await.unwrap().unwrap()).unwrap();
-            assert_eq!(reply["id"], request["id"]);
-            assert_eq!(reply["result"]["decision"], "decline");
-            denied += 1;
-        }
-        assert_eq!(denied, 9);
-        session.send(UserTurn::text("failed start"));
-        let start: Value = serde_json::from_str(&lines.next_line().await.unwrap().unwrap()).unwrap();
-        output.write_all(format!("{}\n", json!({"id":start["id"],"error":{"code":-1,"message":"rejected"}})).as_bytes()).await.unwrap();
-        assert!(matches!(rx.recv().await, Some(EngineEvent::Error { fatal: false, .. })));
-        tokio::time::advance(std::time::Duration::from_secs(130)).await;
-        tokio::task::yield_now().await;
-        assert!(rx.try_recv().is_err(), "failed start left a deadline");
-        session.send(UserTurn::text("next"));
-        let next: Value = serde_json::from_str(&lines.next_line().await.unwrap().unwrap()).unwrap();
-        assert_eq!(next["method"], "turn/start");
-        let line = if unknown {
-            include_str!("../../tests/fixtures/projects/unknown-permissions.jsonl").lines().next().unwrap()
-        } else {
-            include_str!("../../tests/fixtures/projects/native-file-change.jsonl").trim()
-        };
-        let mut escaped: Value = serde_json::from_str(line).unwrap();
-        if config_id {
-            escaped["msg"]["id"] = "faber-config-future".into();
-        }
-        output.write_all(format!("{}\n", escaped["msg"]).as_bytes()).await.unwrap();
-        let event = tokio::time::timeout(std::time::Duration::from_secs(1), rx.recv()).await;
-        assert!(
-            matches!(event, Ok(Some(EngineEvent::Error { fatal: true, ref message })) if message == crate::project::policy::Blocker::Restrictions.key()),
-            "completed native file change was accepted: {event:?}"
-        );
-        session.close();
-        server.retire();
-    }
 }

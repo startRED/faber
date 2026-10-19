@@ -214,6 +214,48 @@ check('subagent in the column: its brief, steps and report, back to the list, an
   }
 });
 
+// The column is narrow, so nothing in the subagent's view is cut: the brief and its long words wrap, a tool line wraps to two
+// lines, and a click shows the rest. Nothing scrolls sideways.
+check('subagent in the column: a long brief and a long command wrap instead of being cut, and a click shows the rest', () => {
+  useLanguage('en');
+  const box = document.createElement('aside');
+  box.className = 'runcol';
+  box.style.cssText = 'position:fixed;left:0;top:0;width:360px;height:640px';
+  document.body.append(box);
+  const path = 'crates/engine/src/very/deeply/nested/folder/with_a_long_name/'.repeat(5);
+  const command = `cargo test --workspace --all-targets -- --nocapture ${path}`;
+  const call: ToolUse = { ...AGENT, input: { description: 'Find file defining load_config', subagent_type: 'Explore', prompt: `Search ${path} and report.` } };
+  const [bash, setBash] = createSignal<ToolUse>({ id: 'b2', name: 'Bash', input: { command }, parent: 'a1', ok: true });
+  const dispose = render(() => createComponent(AgentChat, { get step() { return agentSteps([call, bash()])[0]!; }, streaming: false, onBack: () => {}, onClose: () => {} }), box);
+  try {
+    const body = box.querySelector<HTMLElement>('.side-body')!;
+    const chip = body.querySelector<HTMLElement>('.tools span.full')!;
+    const line = chip.querySelector<HTMLElement>('i')!;
+    equal(line.textContent, command, 'the whole command is in the line, not its middle');
+    equal(getComputedStyle(line).getPropertyValue('-webkit-line-clamp'), '2', 'and is cut at two lines');
+    const closed = line.getBoundingClientRect().height;
+    ok(closed > 0 && body.scrollWidth <= body.clientWidth, 'no sideways scroll');
+    ok(chip.getBoundingClientRect().right <= body.getBoundingClientRect().right + 1, 'the chip stays inside the column');
+    ok(body.querySelector<HTMLElement>('.side-brief .you')!.getBoundingClientRect().right <= body.getBoundingClientRect().right + 1, 'so does the brief');
+    equal(chip.getAttribute('role'), 'button');
+    equal(chip.getAttribute('aria-expanded'), 'false');
+    chip.click();
+    equal(chip.getAttribute('aria-expanded'), 'true');
+    ok(line.getBoundingClientRect().height > closed, 'a click shows the rest of the line');
+    ok(body.scrollWidth <= body.clientWidth, 'still no sideways scroll');
+    // The reply's progress replaces the tool objects: a line the person opened stays the same open element.
+    setBash({ ...bash(), output: 'done', ok: false });
+    equal(body.querySelector('.tools span.full'), chip, 'the chip is not made again');
+    equal(chip.getAttribute('aria-expanded'), 'true');
+    ok(['bad', 'full', 'more'].every((name) => chip.classList.contains(name)), 'a tool that failed keeps its wrapping and stays open');
+    chip.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true }));
+    equal(chip.getAttribute('aria-expanded'), 'false', 'Enter folds it back');
+  } finally {
+    dispose();
+    box.remove();
+  }
+});
+
 check('subagent in the column: a Codex subagent with no brief shows no empty bubble', () => {
   useLanguage('en');
   const root = document.createElement('div');

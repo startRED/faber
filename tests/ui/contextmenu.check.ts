@@ -4,6 +4,8 @@ import themes from '../../src-tauri/src/themes.json';
 import { api, type Area, type Message, type Project, type RunningItem, type Summary } from '../../ui/api.ts';
 import { ContextMenuHost } from '../../ui/ContextMenu.tsx';
 import { installContextMenu } from '../../ui/contextmenu.ts';
+import { pickUp } from '../../ui/running.ts';
+import { nest } from '../../ui/sidebar.ts';
 import { Sidebar } from '../../ui/Sidebar.tsx';
 import { t } from '../../ui/i18n.ts';
 import { Thread } from '../../ui/Thread.tsx';
@@ -53,13 +55,19 @@ const working = (projectId: string): RunningItem => ({
 
 // Each area lists only its own: chats in Chat, projects with their conversations in Projects.
 const [area, setArea] = createSignal<Area>('chat');
-function sidebar(root: HTMLElement, calls: string[], running: Accessor<RunningItem[]> = () => [], onError: (err: unknown) => void = () => {}) {
+function sidebar(
+  root: HTMLElement,
+  calls: string[],
+  running: Accessor<RunningItem[]> = () => [],
+  onError: (err: unknown) => void = () => {},
+  onRemove: (id: string, discard?: boolean) => Promise<'unsaved' | undefined> | void = (id) => void calls.push(`remove ${id}`),
+) {
   return render(
     () => [
       createComponent(Sidebar, {
         conversations: chats, projects, vendors: [], version: '0', get place() { return { area: area() }; }, get running() { return running(); }, quotas: {}, now: Date.now(), onError,
         onNew: () => {}, onArea: () => {}, onProject: () => {}, onNewIn: (id: string) => calls.push(`new ${id}`), onAddProject: () => {}, onOpen: () => {},
-        onRemove: (id: string) => calls.push(`remove ${id}`), onSettings: () => {},
+        onRemove, onSettings: () => {},
       }),
       createComponent(ContextMenuHost, {}),
     ],
@@ -103,7 +111,7 @@ check('right-click: a chat offers Rename and Delete, Delete asks twice, Rename e
     const row = [...root.querySelectorAll('.crow')].find((r) => r.textContent?.includes('Plan the trip'))!;
     equal(rightClick(row), false);
     await settle();
-    deepEqual(labels(), [t('menu.rename'), t('menu.delete')]);
+    deepEqual(labels(), [t('menu.rename'), t('menu.archive'), t('menu.delete')]);
     ok(entry(t('menu.delete')).classList.contains('danger'), 'Delete is last and in the danger colour');
     entry(t('menu.delete')).click();
     await settle();
@@ -146,6 +154,83 @@ check('right-click: a chat offers Rename and Delete, Delete asks twice, Rename e
     dispose();
     root.remove();
   }
+});
+
+check('archive: an archived chat leaves the sidebar, a search finds it marked, and the menu archives and brings back', async () => {
+  const root = stage();
+  const archived: Array<[string, boolean]> = [];
+  const original = api.archive;
+  api.archive = async (id, on) => void archived.push([id, on]);
+  const conversations: Summary[] = [...chats, { id: 'c2', title: 'Old trip notes', area: 'chat', updatedAt: Date.now(), archived: true }];
+  const dispose = render(
+    () => [
+      createComponent(Sidebar, {
+        conversations, projects, vendors: [], version: '0', place: { area: 'chat' }, running: [], quotas: {}, now: Date.now(),
+        onNew: () => {}, onArea: () => {}, onProject: () => {}, onNewIn: () => {}, onAddProject: () => {}, onOpen: () => {}, onRemove: () => {}, onSettings: () => {},
+      }),
+      createComponent(ContextMenuHost, {}),
+    ],
+    root,
+  );
+  const titles = () => [...root.querySelectorAll('.crow .item')].map((el) => el.textContent);
+  try {
+    await settle();
+    deepEqual(titles(), ['Plan the trip'], 'the archived chat is not listed');
+    rightClick(root.querySelector('.crow')!);
+    await settle();
+    entry(t('menu.archive')).click();
+    await settle();
+    const search = root.querySelector<HTMLInputElement>('input[type=search]')!;
+    search.value = 'trip';
+    search.dispatchEvent(new InputEvent('input', { bubbles: true }));
+    await settle();
+    deepEqual(titles(), ['Plan the trip', `Old trip notes${t('archive.tag')}`], 'a search finds it, marked');
+    rightClick([...root.querySelectorAll('.crow')].find((r) => r.textContent?.includes('Old trip notes'))!);
+    await settle();
+    deepEqual(labels(), [t('menu.rename'), t('menu.unarchive'), t('menu.delete')]);
+    entry(t('menu.unarchive')).click();
+    await settle();
+    deepEqual(archived, [['c1', true], ['c2', false]]);
+  } finally {
+    api.archive = original;
+    dispose();
+    root.remove();
+  }
+});
+
+check('nested: a conversation an agent started sits under the one that started it, in the order given', () => {
+  const rows = [{ id: 'c' }, { id: 'a' }, { id: 'b', startedBy: 'a' }, { id: 'd', startedBy: 'gone' }, { id: 'e', startedBy: 'b' }, { id: 'f', startedBy: 'c' }];
+  deepEqual(nest(rows).map((r) => r.id), ['c', 'f', 'a', 'b', 'e', 'd']);
+  ok(nest(rows).every((r) => rows.includes(r)), 'the same rows, so the sidebar keeps their nodes');
+});
+
+check('nested: the sidebar indents a conversation an agent started under its starter', async () => {
+  const root = stage();
+  setArea('project');
+  const now = Date.now();
+  const conversations: Summary[] = [
+    { id: 'k1', title: 'Docs page', area: 'project', projectId: 'p1', updatedAt: now, startedBy: 'm1' },
+    { id: 'm1', title: 'Main work', area: 'project', projectId: 'p1', updatedAt: now - 1 },
+  ];
+  const dispose = render(() => createComponent(Sidebar, {
+    conversations, projects, vendors: [], version: '0', place: { area: 'project', projectId: 'p1' }, running: [], quotas: {}, now,
+    onNew: () => {}, onArea: () => {}, onProject: () => {}, onNewIn: () => {}, onAddProject: () => {}, onOpen: () => {}, onRemove: () => {}, onSettings: () => {},
+  }), root);
+  try {
+    await settle();
+    const rows = [...root.querySelectorAll('.proj-chats .crow')];
+    deepEqual(rows.map((r) => r.textContent?.trim()), ['Main work', 'Docs page']);
+    deepEqual(rows.map((r) => r.classList.contains('child')), [false, true]);
+  } finally {
+    setArea('chat');
+    dispose();
+    root.remove();
+  }
+});
+
+check('archive: the pick-up lists leave out an archived conversation', () => {
+  const recent = [{ id: 'a', archived: true }, { id: 'b' }, { id: 'c' }];
+  deepEqual(pickUp(recent, [], 3).map((c) => c.id), ['b', 'c']);
 });
 
 check('right-click: a project offers a new conversation, its folder and removal, which asks twice', async () => {
@@ -212,8 +297,10 @@ check('right-click: the keyboard opens the menu on a focused row, arrows move, E
     item.focus();
     key(item, { key: 'F10', shiftKey: true });
     await settle();
-    deepEqual(labels(), [t('menu.rename'), t('menu.delete')]);
+    deepEqual(labels(), [t('menu.rename'), t('menu.archive'), t('menu.delete')]);
     equal(document.activeElement, entry(t('menu.rename')), 'the first item takes focus');
+    key(document.activeElement!, { key: 'ArrowDown' });
+    equal(document.activeElement, entry(t('menu.archive')));
     key(document.activeElement!, { key: 'ArrowDown' });
     equal(document.activeElement, entry(t('menu.delete')));
     key(document.activeElement!, { key: 'ArrowDown' });
@@ -382,6 +469,44 @@ check('right-click: your message offers Copy and Edit, an answer offers Copy and
     deepEqual(labels(), [t('menu.copy')]);
   } finally {
     restoreClipboard();
+    dispose();
+    root.remove();
+  }
+});
+
+check('a conversation whose copy holds unsaved work is deleted only after its row asks once more (R201)', async () => {
+  const root = stage();
+  const calls: string[] = [];
+  // The engine refuses the first delete: its copy has changes found nowhere else.
+  const dispose = sidebar(root, calls, () => [], () => {}, async (id, discard) => {
+    calls.push(discard ? `discard ${id}` : `remove ${id}`);
+    return discard ? undefined : 'unsaved';
+  });
+  try {
+    const x = root.querySelector<HTMLButtonElement>('.crow .x')!;
+    x.click();
+    await settle();
+    equal(x.textContent, t('side.confirmDelete'), 'the first click asks as always');
+    x.click();
+    await settle();
+    deepEqual(calls, ['remove c1']);
+    equal(x.textContent, t('side.confirmDiscard'), 'refused: the row now says what would be lost');
+    equal(x.getAttribute('aria-label'), t('side.unsavedCopy'));
+    x.click();
+    await settle();
+    deepEqual(calls, ['remove c1', 'discard c1'], 'only the click on that question discards');
+
+    calls.length = 0;
+    rightClick(root.querySelector('.crow')!);
+    await settle();
+    entry(t('menu.delete')).click();
+    await settle();
+    await deliberate();
+    entry(t('side.confirmDelete')).click();
+    await settle();
+    deepEqual(calls, ['remove c1'], 'the menu asks the engine the same way');
+    equal(x.textContent, t('side.confirmDiscard'), 'and the row asks the question');
+  } finally {
     dispose();
     root.remove();
   }

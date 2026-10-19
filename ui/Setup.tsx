@@ -4,6 +4,7 @@ import { Stage, Title } from './FirstRun.tsx';
 import { Icon, VendorMark } from './Glyphs.tsx';
 import { fromEngine, t } from './i18n.ts';
 import { Peek } from './Mark.tsx';
+import { animateList } from './motion.ts';
 import {
   OFFICIAL_PAGES,
   setupCard,
@@ -127,7 +128,7 @@ export function Setup(props: SetupProps) {
           </For>
         </div>
 
-        <div class="setup-cards">
+        <div class="setup-cards" ref={animateList}>
           <For each={(['claude', 'codex'] as const).filter((v) => selected().includes(v))}>
             {(vendor) => {
               const card = () =>
@@ -142,7 +143,7 @@ export function Setup(props: SetupProps) {
                 );
 
               return (
-                <div class="setup-card" data-vendor={vendor}>
+                <div class="setup-card" data-vendor={vendor} ref={animateList}>
                   <div class="setup-card-header">
                     <h2>{vendor === 'claude' ? t('setup.claude') : t('setup.chatgpt')}</h2>
                     <span class={`setup-badge ${card().status}`}>
@@ -175,7 +176,7 @@ export function Setup(props: SetupProps) {
                   </Show>
 
                   <Show when={card().actions.length > 0}>
-                    <div class="setup-card-actions">
+                    <div class="setup-card-actions" ref={animateList}>
                       <Show when={card().actions.includes('install')}>
                         <button
                           type="button"

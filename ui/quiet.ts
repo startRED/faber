@@ -85,6 +85,8 @@ export function heldKey(e: AppEvent): string | undefined {
       return `message:${e.conversationId}:${e.message.id}`;
     case 'queue':
       return `queue:${e.conversationId}`;
+    case 'context':
+      return `context:${e.conversationId}`;
     case 'quota':
       return `quota:${e.vendor}:${e.window}`;
     case 'running':

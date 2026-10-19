@@ -30,28 +30,69 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use uuid::Uuid;
 
 mod answer;
+mod archive;
 mod auto;
+mod auto_archive;
 mod browse;
+mod by_itself;
+mod compact;
+mod copies;
+mod ended;
+pub use copies::GitRunner;
 pub mod facts;
 mod helpers;
+mod install_gate;
+mod keep_going;
 mod parked;
-mod project_budget;
-mod project_sessions;
+mod pr_watch;
 mod quota_watch;
 mod recovery;
+mod siblings;
 mod stuck_watch;
+mod unbounded;
 mod usage_view;
+mod verifying;
+pub use pr_watch::{PrReader, gh_reader};
 pub use usage_view::{VendorUsage, WindowUsage};
+pub use verifying::{FIX, MAX_FIXES};
 
 #[derive(Debug, Clone, PartialEq, Serialize)]
 #[serde(tag = "type", rename_all = "camelCase", rename_all_fields = "camelCase")]
 pub enum AppEvent {
-    Message { conversation_id: String, message: Box<Message> },
-    Queue { conversation_id: String, queued: Vec<QueuedTurn> },
-    Quota { vendor: Vendor, window: String, used: f64, resets_at: f64 },
-    Usage { vendors: Vec<VendorUsage> },
-    Running { revision: u64, items: Vec<RunningItem> },
+    Message {
+        conversation_id: String,
+        message: Box<Message>,
+    },
+    Queue {
+        conversation_id: String,
+        queued: Vec<QueuedTurn>,
+    },
+    Quota {
+        vendor: Vendor,
+        window: String,
+        used: f64,
+        resets_at: f64,
+    },
+    Usage {
+        vendors: Vec<VendorUsage>,
+    },
+    Running {
+        revision: u64,
+        items: Vec<RunningItem>,
+    },
     List,
+    /// How full a conversation's own agent's context is now (None: not known).
+    Context {
+        conversation_id: String,
+        context: Option<ContextFill>,
+    },
+    /// "Keep going" stopped by itself in a conversation, and why (a `reason.keepGoing.*` key): the tray tells the person.
+    Halted {
+        conversation_id: String,
+        title: String,
+        why: String,
+        vendor: Option<Vendor>,
+    },
 }
 
 pub type Emit = Arc<dyn Fn(AppEvent) + Send + Sync>;
@@ -168,8 +209,11 @@ struct Live {
     started: f64,
     /// A turn has finished on this process, so the next one finds the CLI's cache warm.
     served: bool,
-    /// Queued messages handed to the running turn (Codex) and not yet taken in, oldest first.
+    /// Queued messages handed to the running turn and not yet taken in, oldest first.
     steering: Vec<String>,
+    /// A Claude turn ended while a line handed to it was still unread (`finish`): its keep-going reading, kept until that
+    /// line's own turn takes over or the line fails.
+    held: Option<Option<String>>,
     /// The session id the CLI reported at start, kept out of the conversation until a turn really ran on it: a CLI saves a
     /// session only once it has had a turn, so an id from a warm-up that never ran must not be resumed by a later launch.
     unsaved_session: Option<String>,
@@ -260,25 +304,19 @@ struct Core {
     me: Weak<Mutex<Core>>,
     /// Conversations in use, the source of truth while the app runs; every change is written through to disk.
     convs: HashMap<String, Conversation>,
+    /// Runs git for the copies of project conversations (R201), given by the shell; without it they work in the folder.
+    git: Option<copies::GitRunner>,
     /// Faber's own browser (R161 step 7), given by the shell where it has one; without it the tool is not offered.
     browser: Option<std::sync::Arc<dyn crate::browser::Browser>>,
+    /// Runs a project's checks (`crate::verify`), given by the shell; without it the tool is not offered.
+    verifier: Option<std::sync::Arc<crate::verify::Verifier>>,
+    /// What each conversation's folder held when its reply began, for Faber's checks (`verifying::Before`).
+    before: HashMap<String, verifying::Before>,
     live: HashMap<String, Live>,
-    mission_sessions: HashMap<String, Vec<Session>>,
-    /// Owned process trees of writer roles by invocation id, and the terminal event each role reported.
-    worker_trees: HashMap<String, crate::proc::OwnedTree>,
-    worker_terminals: HashMap<String, EngineEvent>,
-    /// Role invocations the engine itself is closing: what their processes report from then on is the shutdown.
-    worker_closing: HashSet<String>,
-    /// Woken when a role turn ends or a mission stops, so a coordinator reads the journal exactly then.
-    mission_wake: Arc<tokio::sync::Notify>,
-    /// The project each mission in `mission_sessions` belongs to, so a project can be asked whether a worker is alive in it.
-    mission_projects: HashMap<String, String>,
-    /// Missions a coordinator in this process drives now, from setup through roles and proofs to the stop (see `drive`),
-    /// each with its project, so removing a project knows without reading its records.
-    driving: HashMap<String, String>,
-    mission_lock: Arc<tokio::sync::Mutex<()>>,
-    local_update: Option<crate::project::update::SlotLayout>,
-    local_build: bool,
+    /// Set while an install of Faber closes the engine's admission (`Engine::install_admission`): nothing new starts.
+    installing: bool,
+    /// Compactions the agents asked for, done once their turn ends (`compact.rs`).
+    compacts: HashMap<String, compact::Plan>,
     /// A new conversation still being typed: its CLI starts before the first message is sent.
     draft: Option<String>,
     /// Streaming text goes to the screen at most ~30 times a second; the message waiting per conversation.
@@ -328,12 +366,19 @@ struct Core {
     offset_known: bool,
     watch_requested: bool,
     clock: Option<Clock>,
+    /// Scales the fixed waits of "keep going" (retries, rests, the question timer); 1 outside tests.
+    keep_pace: f64,
     transfers: HashMap<String, recovery::Transfer>,
+    /// First messages whose separate copy is still being made, by conversation.
+    copying: HashMap<String, copies::Held>,
     credit: Option<(String, String, Vendor)>,
     /// Helpers at work (R161), by the agent's tool call that started each.
     helpers: HashMap<String, helpers::Run>,
     /// The subagents of each running reply, followed for signs of being stuck.
     watched: HashMap<String, stuck_watch::Watched>,
+    /// The pull request each project conversation follows, by conversation (R200), and what reads one.
+    follows: HashMap<String, pr_watch::Watch>,
+    pr_reader: PrReader,
 }
 
 /// How often Claude's plan is checked again.
@@ -346,21 +391,8 @@ pub struct Engine {
     runtime: tokio::runtime::Handle,
 }
 
-/// A mission being driven, from [`Engine::drive`]; the drive ends when this drops, even if the driver panicked.
-pub struct Drive {
-    engine: Engine,
-    mission: String,
-}
-
-impl Drop for Drive {
-    fn drop(&mut self) {
-        self.engine.with(|c| c.driving.remove(&self.mission));
-    }
-}
-
 impl Engine {
     pub fn new(opts: EngineOptions, emit: Emit) -> Engine {
-        crate::project::qualification::use_dir(&opts.data_dir);
         let mut store = Store::new(&opts.data_dir);
         // A crash can leave an unsaved draft behind. Visible records keep their scratch; orphan UUID folders do not.
         let scratch = opts.data_dir.join("chat");
@@ -383,6 +415,7 @@ impl Engine {
             };
         let quotas = remembered(&ledger, unix_secs());
         let runtime = opts.runtime.clone();
+        let pr_reader = gh_reader(&opts.data_dir);
         let core = Arc::new_cyclic(|me| {
             Mutex::new(Core {
                 opts,
@@ -391,16 +424,8 @@ impl Engine {
                 me: me.clone(),
                 convs: HashMap::new(),
                 live: HashMap::new(),
-                mission_sessions: HashMap::new(),
-                worker_trees: HashMap::new(),
-                worker_terminals: HashMap::new(),
-                worker_closing: HashSet::new(),
-                mission_wake: Arc::new(tokio::sync::Notify::new()),
-                mission_projects: HashMap::new(),
-                driving: HashMap::new(),
-                mission_lock: Arc::new(tokio::sync::Mutex::new(())),
-                local_update: None,
-                local_build: false,
+                installing: false,
+                compacts: HashMap::new(),
                 draft: None,
                 pending: HashMap::new(),
                 next_sid: 0,
@@ -429,11 +454,18 @@ impl Engine {
                 offset_known: false,
                 watch_requested: false,
                 clock: None,
+                keep_pace: 1.0,
                 transfers: HashMap::new(),
+                copying: HashMap::new(),
                 credit: None,
                 helpers: HashMap::new(),
                 watched: HashMap::new(),
+                follows: HashMap::new(),
+                pr_reader,
                 browser: None,
+                verifier: None,
+                before: HashMap::new(),
+                git: None,
             })
         });
         Engine { core, runtime }
@@ -597,12 +629,6 @@ impl Engine {
     pub fn open(&self, id: &str) -> Option<Conversation> {
         self.with(|c| c.load(id).cloned())
     }
-    pub fn send(&self, req: SendRequest) -> Result<String, String> {
-        self.with(|c| c.send(req))
-    }
-    pub fn branch(&self, req: BranchRequest) -> Result<String, String> {
-        self.with(|c| c.branch(req))
-    }
     pub fn remove_queued(&self, id: &str, turn_id: &str) {
         self.with(|c| c.remove_queued(id, turn_id))
     }
@@ -617,12 +643,25 @@ impl Engine {
         self.with(|c| c.warm(req))
     }
     pub fn interrupt(&self, id: &str) {
-        self.with(|c| match c.live.get(id).filter(|l| l.turn.is_some()) {
-            Some(l) => {
-                l.session.interrupt();
-                c.stop_helpers(id, false);
+        // One lock for all of it: the end of Faber's checks waits for it, and never sends a turn in between.
+        self.with(|c| {
+            if let Some(conv) = c.convs.get_mut(id) {
+                conv.stopped = true;
             }
-            None => c.stop_waiting(id),
+            c.keep_going_off(id);
+            c.compacts.remove(id);
+            let compacting = c.convs.get(id).is_some_and(|c| c.compacting);
+            match c.live.get(id).filter(|l| l.turn.is_some() || compacting) {
+                Some(l) => {
+                    l.session.interrupt();
+                    c.stop_helpers(id, false);
+                }
+                None => {
+                    // Faber's checks of the reply that just ended stop too; the reply then keeps no row.
+                    c.stop_checks(id);
+                    c.stop_waiting(id)
+                }
+            }
         })
     }
     pub fn rename(&self, id: &str, title: &str) {
@@ -655,7 +694,7 @@ impl Engine {
                     c.blank(Area::Chat, None)
                 }
             };
-            if let Some(live) = c.live.remove(&id) {
+            if let Some(live) = c.retire(&id) {
                 live.session.close();
             }
             if let Some(f) = &folder {
@@ -672,8 +711,9 @@ impl Engine {
             Ok(result)
         })
     }
+    /// Deletes a conversation, unless its copy holds work found nowhere else (see `remove_with`).
     pub fn remove(&self, id: &str) {
-        self.with(|c| c.remove(id))
+        let _ = self.remove_with(id, false);
     }
     pub fn terminal(&self, id: &str) -> Option<TerminalCommand> {
         self.with(|c| c.terminal(id))
@@ -712,7 +752,7 @@ impl Engine {
             let mut projects = c.store.projects_checked().map_err(|e| e.key().to_string())?;
             if let Some(pos) = projects.iter().position(|p| p.id == project.id) {
                 if &projects[pos] != before {
-                    return Err("reason.grant.stale".into());
+                    return Err("error.project.changed".into());
                 }
                 if before == project {
                     return Ok(());
@@ -781,35 +821,23 @@ impl Engine {
         projects.reverse();
         if projects.is_empty() { Err(failure) } else { Ok(projects) }
     }
-    /// Takes a project out of the list. Anything still working in it (a conversation answering, a mission planning or
-    /// running) stops the removal with `error.project.busy`: the person stops it first. Faber's own copy of the project goes;
-    /// the person's folder and the mission journals in it stay.
+    /// Takes a project out of the list. A conversation still answering in it stops the removal with `error.project.busy`:
+    /// the person stops it first. The person's folder stays as it is, with whatever older versions left in it, and so does
+    /// whatever an older version kept in Faber's data folder.
     pub fn remove_project(&self, id: &str) -> Result<(), String> {
-        let data = self.with(|c| {
+        self.with(|c| {
             let mut projects = c.store.projects_checked().map_err(|e| e.key().to_string())?;
-            let Some(project) = projects.iter().find(|p| p.id == id).cloned() else { return Err("error.project.notFound".into()) };
-            let answering = c.convs.values().any(|conv| conv.project_id.as_deref() == Some(id) && running_item(conv).is_some());
-            // A worker session alive in memory counts even if its records on disk were removed or cannot be read.
-            let working = c.mission_sessions.iter().any(|(m, s)| !s.is_empty() && c.mission_projects.get(m).is_some_and(|p| p == id));
-            // A paused mission can still be finishing a setup or a proof in the copy until its drive ends.
-            let driven = c.driving.values().any(|p| p == id);
-            if answering || working || driven || crate::project::has_active_mission(Path::new(&project.path), &c.opts.data_dir, id) {
+            if !projects.iter().any(|p| p.id == id) {
+                return Err("error.project.notFound".into());
+            }
+            if c.convs.values().any(|conv| conv.project_id.as_deref() == Some(id) && running_item(conv).is_some()) {
                 return Err("error.project.busy".into());
             }
             projects.retain(|p| p.id != id);
             c.store.save_projects(&projects).map_err(|_| "error.store.write".to_string())?;
             c.list_changed();
-            Ok::<_, String>(c.opts.data_dir.clone())
-        })?;
-        // Away from the lock: deleting a big copy takes a while, and nothing works in it any more.
-        if let Ok(copy) = crate::project::workspace::Workspace::new(&data, id) {
-            std::thread::spawn(move || {
-                if let Err(reason) = copy.discard() {
-                    eprintln!("faber: the copy of a removed project stays ({reason})");
-                }
-            });
-        }
-        Ok(())
+            Ok(())
+        })
     }
     /// Swaps the CLIs in use, for example after one was installed or signed in to. Idle processes of a changed CLI
     /// close and the shared Codex processes retire, so the next turn starts the new one; a turn in flight finishes
@@ -834,20 +862,24 @@ impl Engine {
             Some(TerminalCommand { command: cli.command, args, cwd: c.opts.data_dir.clone() })
         })
     }
-    /// Whether any answer is streaming or waits for the user (the running list is not empty), a mission worker runs, or a
-    /// mission is being driven.
+    /// Whether any answer is streaming or waits for the user (the running list is not empty).
     /// The shell uses it to hold back anything that would end the process (installing an update).
     pub fn is_working(&self) -> bool {
-        self.with(|c| !c.running.items.is_empty() || c.mission_sessions.values().any(|s| !s.is_empty()) || !c.driving.is_empty())
+        self.with(|c| {
+            !c.running.items.is_empty()
+                // A conversation that goes on by itself works between turns and while it waits too (R199).
+                || c.convs.values().any(|conv| conv.keep_going.is_some())
+        })
     }
-    /// Marks `mission` of `project` as driven by this process until the returned guard drops; `None` when it already is, so
-    /// a mission never has two drivers. While any mission is driven the engine is working.
-    pub fn drive(&self, mission: &str, project: &str) -> Option<Drive> {
-        self.with(|c| !c.driving.contains_key(mission) && c.driving.insert(mission.into(), project.into()).is_none())
-            .then(|| Drive { engine: self.clone(), mission: mission.to_string() })
+    /// Takes up the conversations "keep going" was on in when Faber last closed, once the shell has its CLIs and accounts: each
+    /// goes on after a short wait, or when its saved wait ends. Call it once at start.
+    pub fn resume_keep_going(&self) {
+        self.with(|c| c.resume_keep_going())
     }
-    pub fn is_driving(&self, mission: &str) -> bool {
-        self.with(|c| c.driving.contains_key(mission))
+    /// Scales the fixed waits of "keep going" (a retry after an error, a rest, the question timer); only tests change it.
+    #[doc(hidden)]
+    pub fn set_keep_going_pace(&self, scale: f64) {
+        self.with(|c| c.keep_pace = scale)
     }
     pub fn shutdown(&self) {
         self.with(|c| {
@@ -866,9 +898,6 @@ impl Engine {
                 l.session.close();
             }
             c.close_helpers();
-            for session in c.mission_sessions.drain().flat_map(|(_, sessions)| sessions) {
-                session.close();
-            }
             for (_, server) in c.codex.drain() {
                 server.retire();
             }
@@ -914,6 +943,20 @@ impl Core {
         (self.emit)(AppEvent::Quota { vendor, window: window.to_string(), used, resets_at });
         self.stop_unapproved_paid(vendor, false);
         self.emit_usage();
+        self.keep_going_recheck();
+    }
+
+    /// A whole reading of the account (every window of it noted just now) with room in every vendor-wide window overrules a
+    /// limit the CLI reported without a reset, which before only a turn could clear; keep going waiting on it goes on.
+    pub(super) fn reading_done(&mut self, vendor: Vendor) {
+        let now = self.secs();
+        let v = self.ledger.of_mut(vendor);
+        if v.reach == Reach::Out(None) && v.snap(now).windows_show_room(now) {
+            v.reach = Reach::Clear;
+            self.save_ledger(true);
+            self.emit_usage();
+            self.keep_going_recheck();
+        }
     }
 
     /// What a CLI said about the account: merged into what the ledger knows, field by field.
@@ -942,6 +985,7 @@ impl Core {
         }
         self.stop_unapproved_paid(vendor, spent);
         self.emit_usage();
+        self.keep_going_recheck();
     }
 
     fn stop_unapproved_paid(&mut self, vendor: Vendor, spent: bool) {
@@ -968,10 +1012,12 @@ impl Core {
         for id in stopped {
             self.note_turn(&id, None, true);
             self.stop_helpers(&id, true);
-            if let Some(l) = self.live.remove(&id) {
+            if let Some(l) = self.retire(&id) {
                 l.session.close();
             }
-            if paid && !unknown && !billed && self.transfers.get(&id).is_some_and(|t| !t.by_hand) {
+            // With "keep going" on, a turn the person picked by hand moves too: nobody is there to click it.
+            let unattended = self.convs.get(&id).is_some_and(|c| c.keep_going.is_some());
+            if paid && !unknown && !billed && self.transfers.get(&id).is_some_and(|t| !t.by_hand || unattended) {
                 if let Err(error) = self.recover(&id, false)
                     && let Some(reply) = self.transfers.get(&id).map(|t| t.reply.clone())
                 {
@@ -1082,15 +1128,19 @@ impl Core {
 
     fn replace_clis(&mut self, clis: BTreeMap<Vendor, Cli>) {
         let changed = |v: Vendor| self.opts.clis.get(&v) != clis.get(&v);
-        let stale: Vec<String> =
-            self.live.iter().filter(|(_, l)| l.turn.is_none() && changed(l.vendor)).map(|(id, _)| id.clone()).collect();
+        let stale: Vec<String> = self
+            .live
+            .iter()
+            .filter(|(id, l)| l.turn.is_none() && !self.compacting(id) && changed(l.vendor))
+            .map(|(id, _)| id.clone())
+            .collect();
         if changed(Vendor::Codex) {
             for (_, server) in self.codex.drain() {
                 server.retire();
             }
         }
         for id in stale {
-            if let Some(l) = self.live.remove(&id) {
+            if let Some(l) = self.retire(&id) {
                 l.session.close();
             }
         }
@@ -1123,7 +1173,9 @@ impl Core {
             .projects()
             .into_iter()
             .find(|p| Some(&p.id) == c.project_id.as_ref())
-            .map(|p| PathBuf::from(p.path))
+            // A conversation with a copy of its own works there; one removed after its work was merged comes back at the
+            // next message, before anything runs.
+            .map(|p| c.copy.as_ref().map_or_else(|| PathBuf::from(p.path), |copy| copy.folder()))
             .ok_or_else(|| "error.projectGone".to_string())
             .and_then(|path| crate::permissions::checked_folder(&path).ok_or_else(|| "error.workingFolder".to_string()))
     }
@@ -1252,7 +1304,7 @@ impl Core {
         if stricter {
             let active: Vec<String> = self.live.iter().filter(|(_, live)| live.turn.is_some()).map(|(id, _)| id.clone()).collect();
             for id in active {
-                if let Some(live) = self.live.remove(&id) {
+                if let Some(live) = self.retire(&id) {
                     live.session.interrupt();
                     live.session.close();
                     if let Some(message) =
@@ -1276,6 +1328,7 @@ impl Core {
                 .iter()
                 .filter(|(id, l)| {
                     l.turn.is_none()
+                        && !self.compacting(id)
                         && (settings.permissions != before.permissions
                             || tuned
                             || self.convs.get(*id).is_some_and(|c| c.area == Area::Project))
@@ -1283,7 +1336,7 @@ impl Core {
                 .map(|(id, _)| id.clone())
                 .collect();
             for id in idle {
-                if let Some(l) = self.live.remove(&id) {
+                if let Some(l) = self.retire(&id) {
                     l.session.close();
                 }
             }
@@ -1333,14 +1386,12 @@ impl Core {
         self.claude_flags
     }
 
-    /// A tool of one of the last replies. A message steered into the turn starts a new reply, so a tool that began in the one
-    /// before still ends there; the current reply is looked at first.
+    /// A tool of the conversation's replies. A message steered into the turn starts a new reply, so a tool that began in one
+    /// before still ends there, however many messages came since (a helper in the background outlives several); the current
+    /// reply is looked at first, then the others from the newest.
     fn tool_of(&mut self, conv: &str, id: &str) -> Option<&mut ToolUse> {
         let current = self.live.get(conv).and_then(|l| l.turn.clone());
-        let replies = self.convs.get_mut(conv).into_iter().flat_map(|c| c.messages.iter_mut().rev()).filter(|m| m.role == Role::Assistant);
-        let mut recent = replies.take(3).collect::<Vec<_>>();
-        recent.sort_by_key(|m| Some(&m.id) != current.as_ref());
-        recent.into_iter().filter_map(|m| m.tools.as_mut()).flatten().find(|t| t.id == id)
+        tool_in(&mut self.convs.get_mut(conv)?.messages, current.as_deref(), id)
     }
 
     /// A subagent's call that just ended gets the facts of what it did (R161 step 4); any other step is left as it is.
@@ -1382,6 +1433,7 @@ impl Core {
                 | EngineEvent::TurnStarted
                 | EngineEvent::Quota { .. }
                 | EngineEvent::Signals(_)
+                | EngineEvent::Context { .. }
                 | EngineEvent::Error { .. }
         ) && let Some(id) = self.live.get_mut(conv).and_then(|l| l.unsaved_session.take())
             && let Some(c) = self.convs.get_mut(conv)
@@ -1396,7 +1448,22 @@ impl Core {
                 self.save(conv);
             }
         }
+        // While the context is compacted only its end matters (`compact.rs`).
+        if self.convs.get(conv).is_some_and(|c| c.compacting) && self.compaction_event(conv, &event) {
+            return;
+        }
+        // What the reply says or does moves it: its age counts from here, and more words after the agent finished mean it was not done.
+        if let Some(main) = event.moves_reply()
+            && let Some(m) = self.turn(conv)
+        {
+            m.moved_at = Some(now());
+            if main {
+                m.finished_at = None;
+            }
+        }
         match event {
+            EngineEvent::Context { used, window } => return self.note_context(conv, vendor, used, window),
+            EngineEvent::Compacted { after } => return self.note_compacted(conv, vendor, after),
             // Codex accepted the turn: if Faber dies now, the next launch resumes this session instead of starting one that never
             // heard of the turn.
             EngineEvent::TurnStarted => {
@@ -1441,6 +1508,14 @@ impl Core {
                     l.break_pending = true;
                 }
                 return;
+            }
+            // The main thread said all it will say; a tool call still open (a helper in the background) means it is not done.
+            EngineEvent::Settled => {
+                if let Some(m) = self.turn(conv)
+                    && m.tools.iter().flatten().all(|t| t.ok.is_some() || t.parent.is_some())
+                {
+                    m.finished_at = Some(now());
+                }
             }
             EngineEvent::Text(delta) => {
                 let pending = self.live.get(conv).is_some_and(|l| l.break_pending);
@@ -1500,6 +1575,7 @@ impl Core {
                 }
                 self.settle_facts(conv, &id);
                 self.watch_ended(conv, &id);
+                self.pr_seen(conv, &id, &text);
             }
             EngineEvent::HelperDone { id, ok, text } => {
                 // A helper that ran with its call is already settled by the call's own result, its full report included.
@@ -1512,6 +1588,9 @@ impl Core {
             }
             EngineEvent::HelperCall { id, input } => return self.start_helper(conv, id, input),
             EngineEvent::BrowseCall { id, input } => return self.browse(conv, id, input),
+            EngineEvent::ConversationCall { id, input } => return self.conversation_call(conv, id, input),
+            EngineEvent::VerifyCall { id, input } => return self.verify_call(conv, id, input),
+            EngineEvent::MapCall { id, input } => return self.map_call(conv, id, input),
             EngineEvent::Permission { request_id, tool, input } => {
                 // A request that touches a credential folder is refused in both modes, with no card (best effort for a command
                 // line: see `touches_credentials`). Full access never shows a card. The answer is decided here, under the lock
@@ -1549,10 +1628,14 @@ impl Core {
                     return self.auto_answer(conv, vec![Permission { request_id, tool, input, epoch: None }]);
                 }
                 let epoch = self.store.settings().grants_epoch;
+                let asked = question.then(|| request_id.clone());
                 if let Some(m) = self.turn(conv) {
                     m.permissions.get_or_insert_default().push(Permission { request_id, tool, input, epoch });
                 }
                 self.weigh(conv);
+                if let (Some(request), Some(turn)) = (asked, turn_id.as_deref()) {
+                    self.watch_question(conv, turn, &request);
+                }
                 return self.push(conv, turn_id.as_deref(), true);
             }
             EngineEvent::CacheWarm { secs, started_ms } => {
@@ -1622,6 +1705,12 @@ impl Core {
                 let can_run = crate::route::candidates(&self.vendors(), &self.codex_models);
                 if let Some(m) = self.turn(conv) {
                     m.status = Some(if ok { Status::Done } else { Status::Stopped });
+                    // Only a turn that ended well is done: a failed one may still be waited on or moved, and works again then.
+                    if ok {
+                        m.finished_at.get_or_insert_with(now);
+                    } else {
+                        m.finished_at = None;
+                    }
                     m.cost_usd = cost.map(|cost| m.cost_usd.unwrap_or(0.0) + cost).or(m.cost_usd);
                     m.input_tokens = Some(input_tokens);
                     m.output_tokens = Some(output_tokens);
@@ -1632,7 +1721,9 @@ impl Core {
                     m.permissions = None;
                     m.nudge = nudge::of(m, area, &can_run);
                 }
-                if !ok && self.transfers.get(conv).is_some_and(|t| t.moving) {
+                // A limit hit again after a move goes to recovery when keep going is on, which moves again (up to `MAX_MOVES`).
+                let unattended = self.convs.get(conv).is_some_and(|c| c.keep_going.is_some());
+                if !ok && self.transfers.get(conv).is_some_and(|t| t.moving) && !(unattended && recovery::plan_limit(&reason)) {
                     self.stop_helpers(conv, true);
                     if let Some(reply) = turn_id {
                         self.move_failed(conv, &reply);
@@ -1643,7 +1734,7 @@ impl Core {
                     self.ledger.of_mut(vendor).reach = Reach::Out(None);
                     self.save_ledger(true);
                     self.stop_helpers(conv, true);
-                    if let Some(l) = self.live.remove(conv) {
+                    if let Some(l) = self.retire(conv) {
                         l.session.close();
                     }
                     if let Err(e) = self.recover(conv, false)
@@ -1692,10 +1783,16 @@ impl Core {
                     self.unwatch(conv);
                     self.note_turn(conv, None, true);
                     self.stop_helpers(conv, true);
-                    if let Some(l) = self.live.remove(conv) {
+                    if let Some(l) = self.retire(conv) {
                         l.session.close();
                     }
-                    if self.transfers.get(conv).is_some_and(|t| t.moving) {
+                    // What was handed to the turn and never taken in died with the process: it waits in the queue again.
+                    if let Some(c) = self.convs.get_mut(conv).filter(|c| c.queued.iter().any(|q| q.sending)) {
+                        c.queued.iter_mut().for_each(|q| q.sending = false);
+                        self.emit_queue(conv);
+                    }
+                    let unattended = self.convs.get(conv).is_some_and(|c| c.keep_going.is_some());
+                    if self.transfers.get(conv).is_some_and(|t| t.moving) && !(unattended && limited) {
                         if let Some(reply) = turn_id {
                             self.move_failed(conv, &reply);
                         }
@@ -1720,10 +1817,35 @@ impl Core {
 
     fn finish(&mut self, conv: &str, turn_id: Option<String>) {
         self.unwatch(conv);
-        self.transfers.remove(conv);
         self.stop_helpers(conv, true);
+        // Claude Code takes a line handed to its turn at the turn's next step; one still unread when the turn ends is the next
+        // turn by itself, after a stop too (fixture `steer-stopped`). The conversation stays busy until that turn takes it in, so
+        // nothing starts before it: not the queue, Faber's checks or keep going, and a plan limit there still continues it. The
+        // reply is read for keep going now (its stop line leaves it, a stop is said on it); if the line fails after all, the turn
+        // ends from that reading (`steer_failed`). The checks of the reply that follows cover this one's changes too.
+        if self.live.get(conv).is_some_and(|l| l.vendor == Vendor::Claude && !l.steering.is_empty()) {
+            let read = self.keep_going_ended(conv, turn_id.as_deref());
+            if let Some(l) = self.live.get_mut(conv) {
+                l.held = Some(read);
+            }
+            if let Some(c) = self.convs.get_mut(conv) {
+                c.updated_at = now();
+            }
+            self.save(conv);
+            self.save_ledger(false);
+            self.push(conv, turn_id.as_deref(), true);
+            self.list_changed();
+            return;
+        }
+        self.end_turn(conv, turn_id, None);
+    }
+
+    /// The rest of a turn's end, with the keep-going reading `finish` already made when it held the turn.
+    fn end_turn(&mut self, conv: &str, turn_id: Option<String>, read: Option<Option<String>>) {
+        self.transfers.remove(conv);
         if let Some(l) = self.live.get_mut(conv) {
             l.turn = None;
+            l.held = None;
             // Whatever was handed to the turn and not taken in stays in the queue, and goes out like the rest of it.
             l.steering.clear();
         }
@@ -1750,6 +1872,16 @@ impl Core {
         } else {
             return;
         };
+        // A turn that failed or was stopped compacts nothing: the agent's request ended with it.
+        if !completed_ok {
+            self.compacts.remove(conv);
+        }
+        let keep_going = match read {
+            Some(read) => read,
+            None => self.keep_going_ended(conv, turn_id.as_deref()),
+        };
+        // A project reply that changed files is done once Faber's checks say so (R146): the queue and keep going wait.
+        let checking = completed_ok && turn_id.as_deref().is_some_and(|reply| self.check_done(conv, reply, keep_going.clone()));
         self.save(conv);
         self.save_ledger(false);
         self.push(conv, turn_id.as_deref(), true);
@@ -1758,13 +1890,21 @@ impl Core {
             self.emit_queue(conv);
         }
         if self.live.get(conv).is_some_and(|l| self.opts.clis.get(&l.vendor) != Some(&l.cli))
-            && let Some(l) = self.live.remove(conv)
+            && let Some(l) = self.retire(conv)
         {
             l.session.close();
         }
         // After the CLI check above: a changed CLI is replaced before the next turn starts, never under it.
-        if completed_ok {
+        if completed_ok && !checking {
             self.drain(conv);
+        }
+        if !checking {
+            self.keep_going_unless_compacting(conv, keep_going);
+            // Faber's checks end the turn later (`verifying.rs`), and the report waits for them. An idle process that
+            // exits ends no reply, so it reports nothing twice.
+            if turn_id.is_some() {
+                self.tell_parent(conv);
+            }
         }
         self.close_when_idle(conv);
     }
@@ -1779,8 +1919,10 @@ impl Core {
             tokio::time::sleep(idle).await;
             let Some(core) = me.upgrade() else { return };
             let mut core = core.lock().unwrap_or_else(|e| e.into_inner());
+            // A compaction is the CLI at work with no turn of Faber's: its end closes the process when it is idle (`compaction_ended`).
             if core.live.get(&conv).is_some_and(|l| l.sid == sid && l.used == used && l.turn.is_none())
-                && let Some(l) = core.live.remove(&conv)
+                && !core.compacting(&conv)
+                && let Some(l) = core.retire(&conv)
             {
                 l.session.close();
             }
@@ -1836,11 +1978,13 @@ impl Core {
         if let Some(c) = self.convs.get(conv) {
             (self.emit)(AppEvent::Queue { conversation_id: conv.to_string(), queued: c.queued.clone() });
         }
+        // A message waiting keeps a finished reply's row at work (`settled`).
+        self.refresh_running();
     }
 
-    /// A message written while a turn runs. Codex takes it into that turn (`turn/steer`) and the message becomes part of
-    /// the conversation when Codex says it has; every other case waits here and goes out as the next turn. Either way it
-    /// is saved with the conversation first, so a crash or a refusal cannot lose it.
+    /// A message written while a turn runs. The running CLI takes it into that turn (Codex `turn/steer`, Claude Code a line on
+    /// its input) and the message becomes part of the conversation when the CLI says it has; every other case waits here and
+    /// goes out as the next turn. Either way it is saved with the conversation first, so a crash or a refusal cannot lose it.
     fn enqueue(&mut self, id: &str, req: SendRequest) -> Result<String, String> {
         let c = self.convs.get(id).ok_or("error.conversationGone")?;
         if c.queued.len() >= MAX_QUEUED {
@@ -1863,19 +2007,17 @@ impl Core {
             choice: req.choice,
             at,
             sending: false,
+            wake: None,
         };
         let c = self.convs.get(id).ok_or("error.conversationGone")?;
-        // Steering waits behind nothing: a message that is already queued would be passed by one sent straight in.
-        let steer = c.queued.iter().all(|q| q.sending)
-            && matches!(item.choice.vendor.as_str(), "auto" | "codex")
-            && self.live.get(id).is_some_and(|l| l.vendor == Vendor::Codex && l.turn.is_some());
+        // Steering waits behind nothing: a message that is already queued would be passed by one sent straight in. A reply whose
+        // agent already finished takes nothing in: the message waits for the CLI to close the turn and goes out as the next one.
+        let finished = c.messages.last().is_some_and(|m| m.role == Role::Assistant && m.finished_at.is_some());
+        let steer = !finished
+            && c.queued.iter().all(|q| q.sending)
+            && self.live.get(id).is_some_and(|l| l.turn.is_some() && [l.vendor.name(), "auto"].contains(&item.choice.vendor.as_str()));
         if steer {
-            item.sending = true;
-            let turn = UserTurn { text: self.model_text(id, &item), images: item.images.clone().unwrap_or_default() };
-            if let Some(l) = self.live.get_mut(id) {
-                l.steering.push(item.id.clone());
-                l.session.steer(turn, &item.id);
-            }
+            self.steer(id, &mut item);
         }
         if let Some(c) = self.convs.get_mut(id) {
             c.queued.push(item);
@@ -1884,6 +2026,16 @@ impl Core {
         self.save(id);
         self.emit_queue(id);
         Ok(id.to_string())
+    }
+
+    /// Hands a message to the running turn; the CLI takes it in at its next step (`taken_in`) or refuses it (`steer_failed`).
+    fn steer(&mut self, id: &str, item: &mut QueuedTurn) {
+        item.sending = true;
+        let turn = UserTurn { text: self.model_text(id, item), images: item.images.clone().unwrap_or_default() };
+        if let Some(l) = self.live.get_mut(id) {
+            l.steering.push(item.id.clone());
+            l.session.steer(turn, &item.id);
+        }
     }
 
     /// What the CLI is told for a message: what the person wrote, with the note about the files they attached.
@@ -1904,34 +2056,43 @@ impl Core {
         recovery::with_attachments(&item.text, area, &shown)
     }
 
-    /// Codex took the oldest message handed to the running turn in (or the one named): it joins the conversation, and the
+    /// The CLI took the oldest message handed to the running turn in (or the one named): it joins the conversation, and the
     /// answer goes on in a new reply under it, because that is what answers it.
     fn taken_in(&mut self, conv: &str, tag: Option<String>) {
+        let secs = self.secs();
         let Some(l) = self.live.get_mut(conv) else { return };
         let Some(at) = tag.and_then(|t| l.steering.iter().position(|s| *s == t)).or((!l.steering.is_empty()).then_some(0)) else { return };
         let queued_id = l.steering.remove(at);
         let before = l.turn.clone();
-        let model = l.running.clone().or_else(|| l.model.clone());
+        let (vendor, model) = (l.vendor, l.running.clone().or_else(|| l.model.clone()));
+        // A line taken in after its turn ended (`finish` held it) is a turn of the CLI's own: it is counted from now.
+        if l.held.take().is_some() && l.started == 0.0 {
+            l.started = secs;
+        }
         let Some(c) = self.convs.get_mut(conv) else { return };
         let Some(pos) = c.queued.iter().position(|q| q.id == queued_id) else { return };
         let item = c.queued.remove(pos);
-        if let Some(m) = before.as_ref().and_then(|b| c.messages.iter_mut().find(|m| &m.id == b)) {
+        // A reply the person stopped keeps saying so; Claude Code still answers the line it was handed (fixture `steer-stopped`).
+        if let Some(m) = before.as_ref().and_then(|b| c.messages.iter_mut().find(|m| &m.id == b && m.status == Some(Status::Streaming))) {
             m.status = Some(Status::Done);
         }
         let now = now();
         let mut question = Message::new(new_id(), Role::User, item.text.clone(), now);
         question.images = item.images.clone();
         question.attachments = item.attachments.clone();
+        question.wake = item.wake.clone();
         let mut reply = Message::new(new_id(), Role::Assistant, String::new(), now);
-        reply.vendor = Some(Vendor::Codex);
+        reply.vendor = Some(vendor);
         reply.model = model;
         reply.tools = Some(vec![]);
         reply.status = Some(Status::Streaming);
+        reply.finished_at = None;
         let (question_id, reply_id) = (question.id.clone(), reply.id.clone());
         c.messages.push(question);
         c.messages.push(reply);
         c.updated_at = now;
         let text = self.model_text(conv, &item);
+        self.note_before(conv);
         if let Some(l) = self.live.get_mut(conv) {
             l.turn = Some(reply_id.clone());
             l.answer_started = false;
@@ -1953,8 +2114,18 @@ impl Core {
 
     /// Codex did not take the message in: it stays in the queue and goes out as the next turn.
     fn steer_failed(&mut self, conv: &str, tag: &str) {
+        let mut ended = None;
         if let Some(l) = self.live.get_mut(conv) {
             l.steering.retain(|s| s != tag);
+            // The turn was held for this line (`finish`), and the CLI never got it: the turn ends now.
+            if l.steering.is_empty()
+                && let Some(read) = l.held.take()
+            {
+                ended = Some((l.turn.clone(), read));
+            }
+        }
+        if let Some((turn, read)) = ended {
+            return self.end_turn(conv, turn, Some(read));
         }
         if let Some(q) = self.convs.get_mut(conv).and_then(|c| c.queued.iter_mut().find(|q| q.id == tag)) {
             q.sending = false;
@@ -1967,9 +2138,13 @@ impl Core {
     /// After an answer that finished well, the next message in the queue goes out. Anything else (a stop, a failure) leaves
     /// the queue for the person to decide.
     fn drain(&mut self, conv: &str) {
+        // A compaction the agent asked for comes first; the queue goes out when it ended (`compact.rs`).
+        if self.compact_due(conv) {
+            return;
+        }
         let idle = !self.live.get(conv).is_some_and(|l| l.turn.is_some());
         let Some(c) = self.convs.get_mut(conv) else { return };
-        if !idle || c.messages.last().is_none_or(|m| m.status != Some(Status::Done)) || c.queued.is_empty() {
+        if !idle || c.messages.last().is_none_or(|m| m.status != Some(Status::Done)) || c.queued.is_empty() || verifying::checking(c) {
             return;
         }
         let next = c.queued.remove(0);
@@ -1991,14 +2166,43 @@ impl Core {
     }
 
     fn send_queued(&mut self, id: &str, turn_id: &str) -> Result<(), String> {
-        let busy = self.live.get(id).is_some_and(|l| l.turn.is_some())
-            || self.convs.get(id).and_then(|c| c.messages.last()).is_some_and(|m| m.status == Some(Status::Streaming));
-        if busy {
-            return Err("error.busy".into());
+        // While an answer runs, the message goes into its turn, ahead of the ones still waiting: the person chose it.
+        let running = self.live.get(id).filter(|l| l.turn.is_some()).map(|l| l.vendor.name());
+        if let Some(vendor) = running {
+            let c = self.convs.get_mut(id).ok_or("error.conversationGone")?;
+            let pos = c.queued.iter().position(|q| q.id == turn_id).ok_or("error.messageGone")?;
+            if c.queued[pos].sending {
+                return Ok(());
+            }
+            let mut item = c.queued.remove(pos);
+            let at = c.queued.iter().rposition(|q| q.sending).map_or(0, |p| p + 1);
+            // One for the other AI cannot go into this turn: it goes first among those that wait.
+            if [vendor, "auto"].contains(&item.choice.vendor.as_str()) {
+                self.steer(id, &mut item);
+            }
+            if let Some(c) = self.convs.get_mut(id) {
+                c.queued.insert(at, item);
+            }
+            self.save(id);
+            self.emit_queue(id);
+            return Ok(());
         }
+        let busy = self.live.get(id).is_some_and(|l| l.turn.is_some())
+            || self
+                .convs
+                .get(id)
+                .is_some_and(|c| verifying::checking(c) || c.messages.last().is_some_and(|m| m.status == Some(Status::Streaming)));
         let Some(c) = self.convs.get_mut(id) else { return Err("error.conversationGone".into()) };
         let pos = c.queued.iter().position(|q| q.id == turn_id).ok_or("error.messageGone")?;
         let item = c.queued.remove(pos);
+        // Something with no turn to take it runs (Faber's checks, a wait for quota, the pick of an AI): it goes first.
+        if busy {
+            let at = c.queued.iter().rposition(|q| q.sending).map_or(0, |p| p + 1);
+            c.queued.insert(at, item);
+            self.save(id);
+            self.emit_queue(id);
+            return Ok(());
+        }
         self.save(id);
         self.emit_queue(id);
         self.dispatch_queued(id, item)
@@ -2008,7 +2212,7 @@ impl Core {
     /// lost; once the turn exists, a failure shows on that turn's reply like any other.
     fn dispatch_queued(&mut self, id: &str, item: QueuedTurn) -> Result<(), String> {
         self.load(id).ok_or("error.conversationGone")?;
-        if self.local_build {
+        if self.installing {
             self.requeue(id, item);
             return Err("error.update.activeOperations".into());
         }
@@ -2021,8 +2225,14 @@ impl Core {
         }
         let model_text = self.model_text(id, &item);
         let auto = item.choice.vendor == "auto";
+        // A turn Faber sends by itself (`by_itself.rs`) is never one the person picked: an AI billed per use is not spent on.
+        let by_hand = !auto && item.wake.is_none();
         let route = if auto { self.next_route(id) } else { None };
         let c = self.convs.get_mut(id).expect("checked above");
+        // A turn that starts ends any wait of keep going: its end decides again, and no timer or reading sends a second one.
+        if let Some(kg) = c.keep_going.as_mut() {
+            kg.wait_until = None;
+        }
         c.choice = Some(Choice { effort: (!auto).then(|| item.choice.effort.unwrap_or_default()), ..item.choice.clone() });
         let routing = route.is_some();
         let pick = match &route {
@@ -2042,6 +2252,7 @@ impl Core {
         let mut question = Message::new(new_id(), Role::User, item.text.clone(), at);
         question.images = item.images.clone();
         question.attachments = item.attachments.clone();
+        question.wake = item.wake.clone();
         let mut reply = Message::new(new_id(), Role::Assistant, String::new(), at);
         if !routing {
             reply.vendor = Some(pick.vendor);
@@ -2051,6 +2262,7 @@ impl Core {
         reply.note = resent.then(|| "note.historyResent".to_string());
         reply.tools = Some(vec![]);
         reply.status = Some(Status::Streaming);
+        reply.finished_at = None;
         let reply_id = reply.id.clone();
         let question_id = question.id.clone();
         c.messages.push(question);
@@ -2068,7 +2280,7 @@ impl Core {
                 pick: pick.clone(),
                 text: model_text.clone(),
                 images: images.clone(),
-                by_hand: !auto,
+                by_hand,
                 retried: false,
                 moving: false,
                 check: "glance",
@@ -2091,7 +2303,7 @@ impl Core {
             });
             return Ok(());
         }
-        if let Err(error) = self.dispatch(id, &reply_id, &pick, text, images, !auto) {
+        if let Err(error) = self.dispatch(id, &reply_id, &pick, text, images, by_hand) {
             self.fail_reply(id, &reply_id, error.clone());
             return Err(error);
         }
@@ -2127,6 +2339,7 @@ impl Core {
         if items == self.running.items {
             return;
         }
+        self.mark_ended(&items);
         self.running = Running { revision: self.running.revision + 1, items: items.clone() };
         (self.emit)(AppEvent::Running { revision: self.running.revision, items });
     }
@@ -2135,10 +2348,11 @@ impl Core {
     pub(super) fn fail_reply(&mut self, id: &str, reply_id: &str, error: String) {
         if let Some(m) = self.convs.get_mut(id).and_then(|c| c.messages.iter_mut().find(|m| m.id == reply_id)) {
             m.status = Some(Status::Error);
-            m.error = Some(error);
+            m.error = Some(error.clone());
         }
         self.save(id);
         self.push(id, Some(reply_id), true);
+        self.keep_going_failed(id, reply_id, &error);
     }
 
     /// The shared Codex process for an area, hooks choice and permissions, started again if it died.
@@ -2178,6 +2392,18 @@ impl Core {
 
     /// Hands a turn to the conversation's CLI, starting the CLI if needed.
     fn start(&mut self, id: &str, reply_id: &str, pick: &Pick, text: String, images: Vec<Image>, by_hand: bool) -> Result<(), String> {
+        // The conversation's copy is still being made: nothing starts before it, wherever the turn comes from (a first
+        // message, Auto's route, a queued message sent now). The latest turn is the one that starts once it is attached.
+        if let Some(held) = self.copying.get_mut(id) {
+            held.reply = reply_id.to_string();
+            held.tail = Some(copies::Tail { pick: pick.clone(), text, images, by_hand });
+            self.push(id, Some(reply_id), true);
+            return Ok(());
+        }
+        if let Some(kg) = self.convs.get_mut(id).and_then(|c| c.keep_going.as_mut()) {
+            kg.waiting = None;
+        }
+        self.note_away(id, reply_id);
         let approved = self.credit.as_ref().is_some_and(|(c, r, v)| c == id && r == reply_id && *v == pick.vendor);
         self.gate_turn_approved(pick, by_hand, approved)?;
         self.launch(id, pick)?;
@@ -2192,6 +2418,7 @@ impl Core {
             }
             m.error = None;
             m.status = Some(Status::Streaming);
+            m.finished_at = None;
             m.permissions = None;
             m.mode = self.live.get(id).and_then(|l| l.permissions.fallback_note(l.runs));
         }
@@ -2205,6 +2432,7 @@ impl Core {
             return Err("error.conversationGone".into());
         }
         self.begin_unbounded(pick.vendor)?;
+        self.note_before(id);
         if let Some(l) = self.live.get_mut(id) {
             l.started = started;
             l.turn = Some(reply_id.to_string());
@@ -2240,7 +2468,7 @@ impl Core {
         let cwd = match self.convs.get(conv).ok_or_else(|| "error.conversationGone".to_string()).and_then(|c| self.cwd_of(c)) {
             Ok(cwd) => cwd,
             Err(error) => {
-                if let Some(l) = self.live.remove(conv) {
+                if let Some(l) = self.retire(conv) {
                     l.session.close();
                 }
                 return Err(error);
@@ -2260,7 +2488,7 @@ impl Core {
                 return Ok(());
             }
             l.session.close();
-            self.live.remove(conv);
+            self.retire(conv);
         }
         let c = self.convs.get(conv).ok_or("error.conversationGone")?;
         let cwd_used = cwd.clone();
@@ -2308,6 +2536,8 @@ impl Core {
         let (model, effort) = (pick.model.clone(), Some(pick.effort.clone()));
         let helper = self.offers_helper(area, pick.vendor);
         let browse = self.offers_browser(area, permissions);
+        let conversations = siblings::offers(area);
+        let verify = self.offers_verify(area, permissions);
         let session = match pick.vendor {
             Vendor::Claude => start_claude(
                 ClaudeOptions {
@@ -2316,6 +2546,8 @@ impl Core {
                     launch: ClaudeLaunch {
                         helper,
                         browse,
+                        conversations,
+                        verify,
                         area,
                         model,
                         effort,
@@ -2332,9 +2564,23 @@ impl Core {
                 },
                 sink,
             ),
-            Vendor::Codex => self
-                .codex_server(area, user_hooks, permissions, &cli)
-                .open(CodexThread { helper, browse, cwd, model, effort, resume, instructions: None, user_name, permissions, tuning }, sink),
+            Vendor::Codex => self.codex_server(area, user_hooks, permissions, &cli).open(
+                CodexThread {
+                    helper,
+                    browse,
+                    conversations,
+                    verify,
+                    cwd,
+                    model,
+                    effort,
+                    resume,
+                    instructions: None,
+                    user_name,
+                    permissions,
+                    tuning,
+                },
+                sink,
+            ),
         };
         self.live.insert(
             conv.to_string(),
@@ -2360,6 +2606,7 @@ impl Core {
                 started: 0.0,
                 served: false,
                 steering: vec![],
+                held: None,
                 unsaved_session: None,
             },
         );
@@ -2369,13 +2616,13 @@ impl Core {
             let Some(oldest) = self
                 .live
                 .iter()
-                .filter(|(_, l)| claude(l) && l.turn.is_none() && l.sid != sid)
+                .filter(|(id, l)| claude(l) && l.turn.is_none() && l.sid != sid && !self.compacting(id))
                 .min_by_key(|(_, l)| l.used)
                 .map(|(id, _)| id.clone())
             else {
                 break;
             };
-            if let Some(l) = self.live.remove(&oldest) {
+            if let Some(l) = self.retire(&oldest) {
                 l.session.close();
             }
         }
@@ -2385,14 +2632,19 @@ impl Core {
     }
 
     fn blank(&mut self, area: Area, project_id: Option<String>) -> String {
+        self.blank_as(new_id(), area, project_id)
+    }
+
+    fn blank_as(&mut self, id: String, area: Area, project_id: Option<String>) -> String {
         let at = now();
         let c = Conversation {
-            id: new_id(),
+            id,
             title: String::new(),
             choice: None,
             area,
             project_id,
             working_folder: None,
+            copy: None,
             sessions: BTreeMap::new(),
             tentative: BTreeMap::new(),
             command_gate: false,
@@ -2400,12 +2652,21 @@ impl Core {
             allow_always: None,
             allow_always_epochs: BTreeMap::new(),
             branch_of: None,
+            started_by: None,
             user_name: self.store.settings().user_name.and_then(|name| clean_name(&name)),
             persona_version: Some(crate::persona::VERSION),
             created_at: at,
             updated_at: at,
             queued: Vec::new(),
+            keep_going: None,
+            archived_at: None,
+            ended: None,
+            context: None,
             messages: vec![],
+            reported: (None, None),
+            compacting: false,
+            weighing: None,
+            stopped: false,
         };
         let id = c.id.clone();
         self.convs.insert(id.clone(), c);
@@ -2413,17 +2674,28 @@ impl Core {
     }
 
     fn send(&mut self, req: SendRequest) -> Result<String, String> {
-        if self.local_build {
+        if self.installing {
             return Err("error.update.activeOperations".into());
         }
         let fallback = pick_model(&req.choice, &self.vendors(), self.codex_recommended.as_deref()).ok_or("error.noSubscription")?;
         let existing = req.conversation_id.as_deref().and_then(|id| self.load(id).map(|c| c.id.clone()));
+        // Writing to an archived conversation brings it back.
+        if let Some(id) = &existing
+            && self.convs.get(id).is_some_and(|c| c.archived_at.is_some())
+        {
+            self.set_archived(id, false)?;
+        }
         if let Some(id) = &existing
             && (self.live.get(id).is_some_and(|l| l.turn.is_some())
-                || self.convs.get(id).and_then(|c| c.messages.last()).is_some_and(|m| m.status == Some(Status::Streaming)))
+                || self
+                    .convs
+                    .get(id)
+                    .is_some_and(|c| verifying::checking(c) || c.messages.last().is_some_and(|m| m.status == Some(Status::Streaming))))
         {
             return self.enqueue(id, req);
         }
+        // Decided under the lock that takes the draft, so the copy is made for the conversation the message goes to.
+        let plan = self.copy_plan(&req);
         let draft = self.draft.clone().filter(|d| self.convs.get(d).is_some_and(|c| c.area == req.area && c.project_id == req.project_id));
         let id = match existing {
             Some(id) => id,
@@ -2451,6 +2723,10 @@ impl Core {
             }
             files
         };
+        // Named on the conversation before its first message is saved, so a restart can never find the message without it.
+        if let Some(plan) = &plan {
+            self.name_copy(&id, plan);
+        }
         let at = now();
         let auto = req.choice.vendor == "auto";
         let route = if auto { self.next_route(&id) } else { None };
@@ -2492,6 +2768,7 @@ impl Core {
         reply.note = resent.then(|| "note.historyResent".to_string());
         reply.tools = Some(vec![]);
         reply.status = Some(Status::Streaming);
+        reply.finished_at = None;
         let reply_id = reply.id.clone();
         let question_id = question.id.clone();
         c.messages.push(question);
@@ -2515,6 +2792,19 @@ impl Core {
             },
         );
         let text = if joining_late { with_history(&history, &text, &|n| attachment_place(area, &data_dir, &id, n)) } else { text };
+        // Git can take seconds: the message shows now, the copy is made away from the lock, and what starts the answer waits.
+        match self.copying.get_mut(&id) {
+            // The copy of an answer stopped meanwhile is still being made: this message takes its place and waits for it.
+            Some(held) => {
+                held.reply = reply_id.clone();
+                held.tail = None;
+            }
+            None => {
+                if let Some(plan) = plan {
+                    self.hold_for_copy(&id, &reply_id, plan);
+                }
+            }
+        }
         if let Some(before) = route {
             let only = before.as_ref().map(|p| p.vendor);
             let route = self.route_for(&req.text, req.images.len() + req.files.len(), only);
@@ -2542,13 +2832,20 @@ impl Core {
 
     // Edit a message or redo an answer with another model: a new conversation keeps everything before that message,
     // with the chat workspace copied, and sends the new text. The original stays as it was.
-    fn branch(&mut self, req: BranchRequest) -> Result<String, String> {
-        if self.local_build {
+    fn branch(&mut self, req: BranchRequest, copy: Option<(String, crate::project::copy::WorkCopy)>) -> Result<String, String> {
+        if self.installing {
             return Err("error.update.activeOperations".into());
         }
         let source = self.load(&req.conversation_id).cloned().ok_or("error.messageGone")?;
         let at = source.messages.iter().position(|m| m.id == req.message_id).ok_or("error.messageGone")?;
-        let id = self.blank(source.area, source.project_id.clone());
+        let id = match copy {
+            Some((id, copy)) => {
+                let id = self.blank_as(id, source.area, source.project_id.clone());
+                self.convs.get_mut(&id).expect("just created").copy = Some(copy);
+                id
+            }
+            None => self.blank(source.area, source.project_id.clone()),
+        };
         let from = self.workspace_of(&source.id);
         let to = self.workspace_of(&id);
         let c = self.convs.get_mut(&id).expect("just created");
@@ -2560,6 +2857,8 @@ impl Core {
             .cloned()
             .map(|mut m| {
                 settle(&mut m);
+                // The pull request stays the source's to follow: two conversations never wake on the same one.
+                m.follow = None;
                 m
             })
             .collect();
@@ -2598,7 +2897,7 @@ impl Core {
 
     // Starts the CLI before the user finishes typing, so the first word arrives sooner.
     fn warm(&mut self, req: WarmRequest) {
-        if self.local_build {
+        if self.installing {
             return;
         }
         let Some(fallback) = pick_model(&req.choice, &self.vendors(), self.codex_recommended.as_deref()) else { return };
@@ -2618,13 +2917,16 @@ impl Core {
             }
             _ => fallback,
         };
+        if self.copy_due(&id) {
+            return;
+        }
         let _ = self.launch(&id, &pick);
     }
 
     /// Throws away the blank conversation being typed, with the CLI that was started for it.
     fn drop_draft(&mut self) {
         if let Some(old) = self.draft.take() {
-            if let Some(l) = self.live.remove(&old) {
+            if let Some(l) = self.retire(&old) {
                 l.session.close();
             }
             self.convs.remove(&old);
@@ -2665,7 +2967,9 @@ impl Core {
     fn remove(&mut self, id: &str) {
         self.note_turn(id, None, true);
         self.stop_helpers(id, true);
-        if let Some(l) = self.live.remove(id) {
+        self.follows.remove(id);
+        self.before.remove(id);
+        if let Some(l) = self.retire(id) {
             l.session.close();
         }
         if self.store.get(id).is_some() || self.convs.contains_key(id) {
@@ -2747,6 +3051,7 @@ fn unseen(c: char) -> bool {
 
 /// The row of the running list for a conversation, if its latest reply is streaming, has unanswered permissions or has parked
 /// requests (denied for want of anyone to answer; they wait for the person until the next message, and count as "needs you").
+/// Faber's checks of it count too: running, it is at work; failing with no fix asked, it needs the person (R146).
 /// Cache warmth is not here: it is a quiet note on the reply itself.
 fn running_item(c: &Conversation) -> Option<RunningItem> {
     let reply = c.messages.last().filter(|m| m.role == Role::Assistant)?;
@@ -2755,9 +3060,43 @@ fn running_item(c: &Conversation) -> Option<RunningItem> {
     let parked_more = reply.parked_more.unwrap_or(0);
     let stuck: Vec<String> =
         reply.tools.iter().flatten().filter(|t| t.sign.is_some_and(crate::stuck::Sign::stuck)).map(|t| t.id.clone()).collect();
-    if reply.status != Some(Status::Streaming) && permissions.is_empty() && parked.is_empty() && parked_more == 0 {
+    let held = reply.follow.as_ref().filter(|f| f.held && f.state.open()).map(|f| (f.number, f.head.clone().unwrap_or_default()));
+    let checks = reply.checks.as_ref().map(|k| k.state);
+    let checks_need = checks == Some(ChecksState::NeedsYou);
+    // Keep going between two turns (waiting for a reset, an error to pass, a rest) is still at work: the list says until when,
+    // and no idle update restarts Faber under it.
+    let kg_wait = c.keep_going.as_ref().and_then(|k| k.wait_until).filter(|_| reply.status != Some(Status::Streaming));
+    let keep_wait = c.keep_going.as_ref().and_then(|k| k.waiting.clone());
+    if reply.status != Some(Status::Streaming)
+        && !c.compacting
+        && c.weighing.is_none()
+        && kg_wait.is_none()
+        && keep_wait.is_none()
+        && permissions.is_empty()
+        && parked.is_empty()
+        && parked_more == 0
+        && held.is_none()
+        && checks != Some(ChecksState::Running)
+        && !checks_need
+    {
         return None;
     }
+    let state = if permissions.is_empty() && parked.is_empty() && parked_more == 0 && stuck.is_empty() && held.is_none() && !checks_need {
+        RunState::Working
+    } else {
+        RunState::NeedsYou
+    };
+    // Only the CLI's turn is still closing: nothing else keeps the conversation at work (not Keep going, its checks, a compaction, a
+    // message waiting), so the screen reads it as done.
+    let settled = state == RunState::Working
+        && reply.status == Some(Status::Streaming)
+        && reply.finished_at.is_some()
+        && reply.wait_until.is_none()
+        && !c.compacting
+        && c.weighing.is_none()
+        && c.keep_going.is_none()
+        && c.queued.is_empty()
+        && checks != Some(ChecksState::Running);
     Some(RunningItem {
         conversation_id: c.id.clone(),
         turn_id: reply.id.clone(),
@@ -2766,17 +3105,23 @@ fn running_item(c: &Conversation) -> Option<RunningItem> {
         project_id: c.project_id.clone(),
         vendor: reply.vendor,
         model: reply.model.clone(),
-        state: if permissions.is_empty() && parked.is_empty() && parked_more == 0 && stuck.is_empty() {
-            RunState::Working
-        } else {
-            RunState::NeedsYou
-        },
+        state,
         since: reply.at,
         permissions,
         parked,
         parked_more,
         stuck,
-        wait_until: reply.wait_until.filter(|_| reply.status == Some(Status::Streaming)),
+        wait_until: reply.wait_until.filter(|_| reply.status == Some(Status::Streaming)).or(kg_wait),
+        held,
+        keep_going: c.keep_going.is_some(),
+        keep_wait,
+        keep_progress: c.keep_going.as_ref().map(|k| crate::model::KeepProgress {
+            turns: k.work,
+            since: k.since,
+            last: keep_going::progress_line(&c.messages),
+        }),
+        weighing: c.weighing.is_some(),
+        settled,
     })
 }
 
@@ -2797,5 +3142,34 @@ fn copy_dir(from: &Path, to: &Path) {
         } else {
             let _ = std::fs::copy(entry.path(), target);
         }
+    }
+}
+
+/// The tool `id` of the conversation's replies: the current reply first, then the others from the newest.
+fn tool_in<'a>(messages: &'a mut [Message], current: Option<&str>, id: &str) -> Option<&'a mut ToolUse> {
+    let has = |m: &Message| m.role == Role::Assistant && m.tools.iter().flatten().any(|t| t.id == id);
+    let at = messages.iter().rposition(|m| Some(m.id.as_str()) == current && has(m)).or_else(|| messages.iter().rposition(has))?;
+    messages[at].tools.as_mut()?.iter_mut().find(|t| t.id == id)
+}
+
+#[cfg(test)]
+mod tool_in_tests {
+    use super::*;
+    use serde_json::json;
+
+    fn reply(id: &str, tools: &[&str]) -> Message {
+        let tools = tools.iter().map(|t| json!({ "id": t, "name": "Agent", "input": {} })).collect::<Vec<_>>();
+        serde_json::from_value(json!({ "id": id, "role": "assistant", "text": "", "at": 0, "tools": tools })).unwrap()
+    }
+
+    #[test]
+    fn a_helper_that_ends_after_many_messages_ends_on_its_own_call() {
+        let mut messages = vec![reply("a1", &["helper"]), reply("a2", &[]), reply("a3", &[]), reply("a4", &[]), reply("a5", &["late"])];
+        tool_in(&mut messages, Some("a5"), "helper").unwrap().ok = Some(true);
+        assert_eq!(messages[0].tools.as_ref().unwrap()[0].ok, Some(true), "four replies later, the call is still found");
+        assert!(tool_in(&mut messages, Some("a5"), "nobody").is_none());
+        let mut twice = vec![reply("a1", &["t"]), reply("a2", &["t"])];
+        tool_in(&mut twice, Some("a1"), "t").unwrap().ok = Some(false);
+        assert_eq!(twice[0].tools.as_ref().unwrap()[0].ok, Some(false), "the current reply is looked at first");
     }
 }

@@ -62,7 +62,7 @@ fn do_not_ask_text(ctx: &mut Ctx) -> Result {
 const PICKED: &str = "document.querySelector('#set-permissions-pick').textContent.trim()";
 
 /// Opens the permissions menu and picks the mode at that place in its list (1 = Ask, 5 = Full access).
-fn pick_mode(page: &mut Page, place: usize) -> Result {
+pub(super) fn pick_mode(page: &mut Page, place: usize) -> Result {
     page.click(&css("#set-permissions-pick"))?;
     page.click(&css(&format!("#set-permissions-pick-list [role=option]:nth-child({place})")))
 }
@@ -83,12 +83,12 @@ fn chat_without_cards(ctx: &mut Ctx) -> Result {
     let question = css("article [data-testid=question-card]");
     page.wait_visible(&question)?;
     ensure(page.count(&css("div.ask:not(.question)"))? == 0, || "full access must not leave a permission card".into())?;
-    page.click(&question.clone().css(".q-option").has_text("SQLite"))?;
+    page.click(&question.clone().css(".q-opt").has_text("SQLite"))?;
     let send = page.text_of("ask.question.send")?;
     page.click(&question.clone().role("button", &send).exact())?;
     let actions = page.named("article", "answer.label")?.css(".actions");
     page.wait_visible(&actions)?;
-    ensure(page.count(&css("div.ask"))? == 0, || "the answered question must not stay on screen".into())?;
+    page.wait_for("the answered question to fold away and leave", "document.querySelectorAll('div.ask').length === 0")?;
     let settings = page.named("button", "settings.open")?.exact();
     page.click(&settings)?;
     let folder = page.named("button", "set.chooseFolder")?;

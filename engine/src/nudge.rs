@@ -72,7 +72,7 @@ const SOURCE: [&str; 17] = ["rs", "ts", "tsx", "js", "jsx", "mjs", "cjs", "py", 
 
 /// Splits a command line into the words of each command, breaking at `&&`, `||`, `;`, `|`, `&` and newlines outside
 /// quotes. None when the line uses syntax this does not read: substitution, subshells, heredocs, an open quote.
-fn segments(line: &str) -> Option<Vec<Vec<String>>> {
+pub(crate) fn segments(line: &str) -> Option<Vec<Vec<String>>> {
     let (mut all, mut words, mut word, mut started) = (vec![], vec![], String::new(), false);
     let mut quote: Option<char> = None;
     let mut chars = line.chars().peekable();
@@ -121,7 +121,7 @@ fn segments(line: &str) -> Option<Vec<Vec<String>>> {
 }
 
 /// A program name without its folder or extension: `C:\bin\Cargo.EXE` is `cargo`.
-fn program(word: &str) -> String {
+pub(crate) fn program(word: &str) -> String {
     let name = word.rsplit(['/', '\\']).next().unwrap_or(word).to_lowercase();
     ["exe", "cmd", "bat", "ps1"].iter().find_map(|e| name.strip_suffix(&format!(".{e}"))).unwrap_or(&name).to_string()
 }
@@ -164,7 +164,7 @@ fn is_check_line(line: &str, depth: u8) -> bool {
 
 /// The command line a shell tool ran: Claude's `Bash` and `PowerShell` carry `{command}`, Codex's `commandExecution` the
 /// bare string.
-fn command(tool: &ToolUse) -> Option<&str> {
+pub(crate) fn command(tool: &ToolUse) -> Option<&str> {
     match tool.name.as_str() {
         "Bash" | "PowerShell" => tool.input["command"].as_str(),
         "commandExecution" => tool.input.as_str().or(tool.input["command"].as_str()),

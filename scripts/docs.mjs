@@ -22,8 +22,12 @@ export const LARGE = {
 
 const HISTORY = ['docs/superpowers/', 'docs/research/', 'docs/brand/'];
 
-/** Living pages: every Markdown file under docs/ except history and the logo sources. */
-export const isLiving = (file) => file.startsWith('docs/') && file.endsWith('.md') && !HISTORY.some((h) => file.startsWith(h));
+/** A task of the queue: a brief that leaves with the pull request that does it, listed by docs/tasks/README.md. */
+const isTask = (file) => file.startsWith('docs/tasks/') && file !== 'docs/tasks/README.md';
+
+/** Living pages: every Markdown file under docs/ except history, the logo sources and the queue's tasks. */
+export const isLiving = (file) =>
+  file.startsWith('docs/') && file.endsWith('.md') && !HISTORY.some((h) => file.startsWith(h)) && !isTask(file);
 
 /** A heading's anchor as GitHub writes it: from the rendered text, so links, code marks and emphasis go first. */
 export const slug = (text) =>

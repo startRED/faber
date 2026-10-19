@@ -60,7 +60,7 @@ const HEIGHTS: [string, string][] = [
   ['.btn', '--h-md'], ['.btn.big', '--h-lg'], ['.ap-bar .btn', '--h-lg'], ['.iconbtn', '--h-md'], ['.chip', '--h-sm'], ['.chip.choose', '--h-sm'],
   ['.pill', '--h-sm'], ['.send', '--h-md'], ['.seg-ctl', '--h-md'], ['.field', '--h-md'], ['.field.sm', '--h-sm'], ['.field.hex', '--h-sm'],
   ['.newchat', '--h-lg'], ['.run-btn', '--h-md'], ['.plus', '--h-sm'], ['.toast button', '--h-sm'], ['.dot', '--h-sm'], ['.lt', '--h-sm'],
-  ['.sizes button', '--h-lg'], ['.item', '--h-sm'], ['.nav .item', '--h-md'], ['.area', '--h-md'],
+  ['.item', '--h-sm'], ['.nav .item', '--h-md'], ['.area', '--h-md'],
 ];
 
 check('grammar: every control takes its height from one of the three tokens', () => {
