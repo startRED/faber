@@ -177,12 +177,69 @@ Describe-only list, grouped by what the person experiences (inferred from string
 - File safety: open a root folder once and then open, stat, create, delete or rename entries relative to it without ever following a link out of it.
   The app refuses to fall back to ordinary path opens if this is missing.
 - Processes: process tree, lineage (parent chain, group), creation time, memory footprints, a "pre-load this process's memory when RAM allows" call, a job
-  object that holds the app and its children, which processes are attached to a console, and the list of TCP listeners with their owning process. The app
+  object that marks the app and its children (see the decompiled detail below: it carries no kill rule), which processes are attached to a console, and the list of TCP listeners with their owning process. The app
   joins listeners with lineage to find dev servers started by a session and offers them in its preview.
 - System chores: schedule or cancel a timer that can wake the computer; read/write/delete registry values and keys; edit the user PATH without expanding
   variables; start or query a Windows service (the sandbox VM service); enable the Virtual Machine Platform feature; check whether the compute service is
   available and which services are missing; apply a compressed binary delta to rebuild a VM disk image (returns checksum and bytes written);
   list network drives; find the default app and icon for a file type; package identity and "is the package being serviced".
+
+#### Decompiled detail of the addon on Windows (observed: decompiled; no values or key material read)
+
+Windows, focus and the taskbar:
+- There is no tray, taskbar, jump-list or notification-icon code in the addon; those stay in the app's own window layer.
+- Bring a window to the front: select it as foreground, then toggle it to "always on top" and straight back to normal, which
+  defeats the focus-stealing rules; a second variant does the same asynchronously. Putting a window behind another keeps its
+  size and position and does not activate it. This is what the "stealth relaunch" uses to restore the person's window order.
+- Hide and unhide apps for computer use: windows are minimized and later restored; while doing it the system's minimize
+  animation is switched off for that window so nothing flickers.
+- Window rectangles for screenshot masking come from the compositor's real frame bounds, and windows the compositor has
+  "cloaked" (on another virtual desktop, hidden by the shell) are skipped. The addon also listens for foreground changes,
+  keyboard focus changes and desktop switches to keep its window list fresh.
+- A hold-to-talk keyboard hook runs on its own thread; start fails with a clear error if the thread does not report ready or the
+  system refuses the hook. Typing can be paced like a person; key names are validated before any is sent.
+
+Processes and jobs:
+- The "app job" is a plain, unnamed job object that the app puts itself into once (repeat calls do nothing). No kill-on-close or
+  other limit is set on it, so it only marks the app and every child it starts (children inherit it); "is this process in the app
+  job" is then a membership test. It is a tag for ownership checks, not a cleanup mechanism.
+- Memory pre-load for a window process: the app asks the addon to pull a process's private memory back into RAM after the person
+  returns from being away. The call carries the process id and its creation time (a mismatch is refused as "identity mismatch"),
+  a byte cap and a deadline of 2 seconds. The app side only runs it if at least 256 MB of RAM is free, caps the request at a
+  quarter of the free RAM and at 256 MB, 512 MB or 1 GB depending on the PC's total memory, and turns itself off after two
+  deadline misses. Outcomes are plain words: ok, deadline, low memory, query failed, prefetch failed, no regions, identity mismatch.
+- Listening ports come from the system's TCP table (it retries until the table size settles); the app keeps only loopback
+  addresses (127.x, ::1, or any-address) when it looks for a session's dev server.
+- Wake timer: the app passes an absolute time in milliseconds since 1970; the addon converts it to the system's time base and sets
+  a timer that is allowed to wake the PC from sleep. "Not supported" is reported as a distinct code.
+
+Files and shell:
+- Safe file operations open the root folder once (without following a link), then open every later path piece relative to the
+  previous handle, so a link or junction in any piece makes the call fail with a "too many links" style error. Moves across the
+  root fail with a cross-device error, volumes that cannot tell reparse-point kinds are refused rather than trusted, and opening a
+  directory as a file or the reverse gives the usual directory errors.
+- The registry calls take a hive, key path and value name. The user PATH is read raw (keeps unexpanded variables) and written back
+  with the same type; an unexpected value type is refused.
+- Services: the addon connects to the service manager with connect-only rights, can start the VM service and query its state
+  (stopped, start pending, running, and so on). Turning on the virtual machine feature runs a hidden PowerShell command that
+  asks Windows to enable it, which raises the normal elevation prompt; a refusal is reported as "UAC may have been denied".
+- Network drives are listed through the standard network enumeration; the default app and icon for a file type come from the shell.
+
+Credentials and identity (purpose only):
+- The credential manager is not used. Cross-profile secrets use the per-user data-protection API with prompts forbidden and a
+  fixed 38-byte application-specific extra secret; input above 4 GiB is refused.
+- The device key is a P-256 signing key created in the PC's security chip through the platform crypto provider, silently (no
+  prompt), found again by label; it signs on request and never leaves the chip; "hardware unavailable" and "not found" are
+  separate errors. Windows Hello is a consent prompt with a message, a cancel call, and an availability answer of available,
+  not configured or unavailable.
+
+Answers for the browser bridge:
+- The app's check that a pipe belongs to the right user is done here: it waits for a free pipe instance (waiting while all are
+  busy) for up to 5 seconds by default ("timed out after 5000ms", "the pipe disappeared", "no pipe instance became available",
+  "the pipe does not exist"), opens it so that the server can only identify, not impersonate, the caller, reads the pipe object's
+  owner and the server's process id, and refuses with "refusing to use this pipe" if the owner is missing or is not the same user
+  (or, for the VM service pipe, the system account). The owner check is on the pipe object, so a squatter running as another
+  user cannot pass. This settles the bridge's owner-verification unknown.
 
 ### 2.4 OpenAI desktop launchers
 
@@ -217,8 +274,12 @@ never read CLI credentials; memory budget matters.
    buttons that carry the URL and action. Faber already lets the agent click and type on its pages; this makes it available to external CLIs too. Medium effort.
 4. Dev-server chips: list TCP listeners, join with process ancestry to the session's CLI, and show "Open preview of :5173" under the reply. Windows
    API is simple (listener table plus snapshot of processes). Low effort, high perceived polish; fits the "less text, more interactive" goal.
-5. Job-object kill-on-close for every child (CLI, ssh, MCP servers, wrappers) plus the "app job" marker: nothing survives Faber closing, which also
-   protects memory budget. Probably partly there in the winproc crate; confirm coverage for the ssh path.
+5. Job-object kill-on-close for every child (CLI, ssh, MCP servers, wrappers): the SSH command wrapper does this, but the Claude app's own "app job" is
+   only a marker with no kill rule, so Faber should set the kill-on-close limit itself. Nothing should survive Faber closing; that also protects the memory
+   budget. Probably partly there in the winproc crate; confirm coverage for the ssh path.
+5b. Memory pre-load after idle (observed in the Claude app): when the person returns after being away, pull the main view's memory back into RAM within a
+   2 second deadline, only if 256 MB or more is free, capped at a quarter of free RAM, and stop after two deadline misses. Low effort; makes returning feel
+   instant without a resident cost. Must be measured against Faber's memory rule before use.
 6. Identity checks for local pipes: refuse to talk to a pipe whose server is another user, and verify the asker by OS-reported pid and ancestor
    chain, never self-reported. Reuse for any Faber helper that gets a secret.
 7. Screenshot masking for any future computer-use: black out windows that are not on an allow list before the model sees pixels; refuse to capture if masking fails.
@@ -230,7 +291,8 @@ never read CLI credentials; memory budget matters.
 
 ## 4. Unknowns and bounds
 
-- The native addon is still described only from strings and the app's scripts; its decompile was not part of this pass.
+- Addon: the keyboard-hook timing, the paced-typing delays and the exact set of registry keys the app touches were not recovered; the
+  macOS-only functions were not studied.
 - Not recovered: the type and unit of the pong timestamp, the crash reporter's upload address and whether uploads are on by default,
   and whether the launcher registers any link scheme (no registration code was seen in it; the app or installer most likely does).
 - Nothing was observed at runtime: no pipe traffic, no real ssh prompts, no real browser session. The vendor account endpoints used for pairing were not contacted.
