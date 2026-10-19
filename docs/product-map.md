@@ -276,6 +276,7 @@ checks in `tests/ui/index.ts`, real-app scenarios in `testkit/src/screen/mod.rs`
 | Missions | Removed (R215); their data folders are left alone | `engine/tests/running.rs`; `testkit/src/screen/projects.rs` (the git executor) |
 | UX sentinel and memory budget | Done; composition (art under text, a name in three places, uneven columns) since R172 | `testkit/src/sentinel.rs`, `testkit/src/screen/sentinel.rs`, `tests/ux/baseline.json`, `testkit/src/screen/app.rs` (400 MB) |
 | Visual critique (R172) | Done, a step of the process: `node scripts/shots.mjs before` and `after`, scored by a fresh session | `scripts/shots.test.mjs`; the sentinel's composition scenario in `testkit/src/screen/sentinel.rs` |
+| First-user review (R244) | Done, a step of the process: `node scripts/first-user.mjs` has a fresh AI that sees only the screen walk the first run, a chat, Projects and Settings, and lists what confused it in docs/research/ | `scripts/first-user.test.mjs`; `testkit/examples/ux_audit.rs` |
 | This map | Done | `engine/tests/product_map.rs`; the trap tasks and the weekly coherence pass in `testkit/coherence/` (R151) |
 
 Not built yet, so nothing may assume it: the catalog and live manifest, the toolbox, Livre, snapshots and undo, visual

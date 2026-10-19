@@ -37,7 +37,7 @@ points nowhere; a page that grows past the limit splits by topic, and its row he
 | [dev/testing.md](dev/testing.md) | Tests: `cargo t`, screen tests, build folder and slots, what a run prints |
 | [dev/workflow.md](dev/workflow.md) | Landing work: lane claims, merge on green, the task queue, a red base, the numbers given at landing |
 | [dev/whats-new.md](dev/whats-new.md) | Writing a what's-new entry: the words, the kinds, numbers for speed and memory |
-| [dev/sentinel.md](dev/sentinel.md) | The UX sentinel and the visual critique |
+| [dev/sentinel.md](dev/sentinel.md) | The UX sentinel, the visual critique and the first-user review |
 | [dev/self-development.md](dev/self-development.md) | Faber building Faber from its own project conversation: how to start it and which part does what |
 | [security-r97-review.md](security-r97-review.md) | The verified security review; its R121/R124 section is kept current |
 | [tasks/README.md](tasks/README.md) | What a session does next, in order, one file per task (`node scripts/tasks.mjs next`) |
