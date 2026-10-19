@@ -1,5 +1,5 @@
 import { createSignal, For, Show } from 'solid-js';
-import type { Project, RunningItem } from './api.ts';
+import type { Project, RunningItem, Summary } from './api.ts';
 import { AgentChat } from './AgentChat.tsx';
 import { Asks, Parkeds } from './Ask.tsx';
 import { Icon, VendorMark } from './Glyphs.tsx';
@@ -19,8 +19,13 @@ import type { AgentStep } from './worklog.ts';
  * that waits is answered here, in place; a click on a row opens its conversation. */
 export function Running(props: {
   items: RunningItem[];
+  /** Runs that ended while nobody looked (`doneCards`): a calm card each, until opened or dismissed. */
+  done?: Summary[];
   projects: Project[];
   onOpen: (item: RunningItem) => void;
+  /** A done card's click opens its conversation, which clears it; its × only clears it. */
+  onOpenDone?: (c: Summary) => void;
+  onDismiss?: (c: Summary) => void;
   onClose: () => void;
   /** Opened by the user over the stage: it is a modal dialog. Docked, or opened by itself, it is not. */
   modal: boolean;
@@ -41,7 +46,14 @@ export function Running(props: {
   // The times move while the column is open and stop with it.
   const [now, setNow] = createSignal(Date.now());
   everyWhileShown(15_000, () => setNow(Date.now()));
-  const blocks = () => blocksOf(props.items);
+  const blocks = () => blocksOf(props.items, props.done);
+  const rows = () => props.items.length + (props.done?.length ?? 0);
+  const ended = (c: Summary) => c.ended!;
+  const endWords = (c: Summary) => (ended(c).kind === 'done' ? t('run.done') : ended(c).kind === 'failed' ? t('run.doneFailed') : t('run.needsYou'));
+  const worked = (c: Summary) => {
+    const e = elapsed(0, ended(c).workMs);
+    return t('run.worked', { time: t(e.key, { n: e.n }) });
+  };
   const nameOf = (key: string) => (key === 'chat' ? t('area.chat') : (props.projects.find((p) => p.id === key)?.name ?? t('area.projects')));
   const words = (item: RunningItem) =>
     item.waitUntil
@@ -79,11 +91,11 @@ export function Running(props: {
               <h2 id="running-title" class="display">
                 {t('run.title')}
               </h2>
-              <span class="n num">{props.items.length}</span>
+              <span class="n num">{rows()}</span>
             </div>
             <div class="rc-body" ref={animateList}>
               <Show
-                when={props.items.length > 0}
+                when={rows() > 0}
                 fallback={
                   <div class="rc-empty">
                     <Peek />
@@ -141,6 +153,26 @@ export function Running(props: {
                                 <Parkeds parked={item.parked ?? []} more={item.parkedMore} />
                               </Show>
                               <Show when={item.held}>{(held) => <p class="run-held">{t('run.held', { pr: `#${held()[0]}` })}</p>}</Show>
+                            </li>
+                          )}
+                        </For>
+                        <For each={block.done}>
+                          {(c) => (
+                            <li class="ri done" classList={{ need: ended(c).kind !== 'done' }} ref={animateList}>
+                              <div class="rhead">
+                                <span class="vm end">
+                                  <Icon name={ended(c).kind === 'done' ? 'check' : 'ask'} small />
+                                  <span class="verb">{endWords(c)}</span>
+                                </span>
+                                <span class="time num">{worked(c)}</span>
+                                <button class="iconbtn dismiss" aria-label={t('run.dismiss', { title: c.title || t('run.untitled') })} title={t('run.dismiss', { title: c.title || t('run.untitled') })} onClick={() => props.onDismiss?.(c)}>
+                                  <Icon name="close" small />
+                                </button>
+                              </div>
+                              <button class="name" onClick={() => props.onOpenDone?.(c)}>
+                                {c.title || t('run.untitled')}
+                              </button>
+                              <Show when={ended(c).line}>{(line) => <p class="run-kg"><span class="last" title={line()}>{line()}</span></p>}</Show>
                             </li>
                           )}
                         </For>

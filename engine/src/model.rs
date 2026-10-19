@@ -618,6 +618,10 @@ pub struct Conversation {
     /// until the person brings it back or writes to it.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub archived_at: Option<u64>,
+    /// Its last run ended and the person has not opened it since (`engine/src/engine/ended.rs`): the running column's done card
+    /// and the sidebar's dot read it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub ended: Option<Ended>,
     /// How full the context of the conversation's own agent is, as its CLI last said (`engine/src/engine/compact.rs`).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub context: Option<ContextFill>,
@@ -633,6 +637,9 @@ pub struct Conversation {
     /// (`engine/src/engine/verifying.rs`), the reply's id: the conversation is at work meanwhile. Never shown or saved.
     #[serde(skip)]
     pub weighing: Option<String>,
+    /// The person pressed Stop on the run under way: its end leaves no done card (`engine/src/engine/ended.rs`). Never saved.
+    #[serde(skip)]
+    pub stopped: bool,
 }
 
 /// The context of a conversation's own agent: `used` tokens of a `window`, the point where its CLI compacts by itself.
@@ -696,6 +703,41 @@ pub struct Summary {
     /// The conversation whose agent started this one: the sidebar shows it under that one.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub started_by: Option<String>,
+    /// Its last run ended and nobody has opened it since, while that is recent (`Ended::current`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub ended: Option<Ended>,
+}
+
+/// How a run ended that nobody saw end (task 016): a done card in the running column and a dot on the sidebar row until the
+/// person opens the conversation.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Ended {
+    /// When, in milliseconds.
+    pub at: u64,
+    pub kind: EndKind,
+    /// How long the run worked, from its first turn to its end, in milliseconds.
+    pub work_ms: u64,
+    /// The last line the agent wrote, as the running row showed it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub line: Option<String>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum EndKind {
+    Done,
+    /// It stopped on something only the person can settle: a question, Keep going's cap, an AI billed per use.
+    NeedsYou,
+    Failed,
+}
+
+impl Ended {
+    /// A card nobody opens goes by itself: a failure after a day, the rest after a week (as the other apps' cards do).
+    pub fn current(&self, now: u64) -> bool {
+        let days = if self.kind == EndKind::Failed { 1 } else { 7 };
+        now.saturating_sub(self.at) < days * 86_400_000
+    }
 }
 
 /// Where a running conversation stands: answering, or waiting for the user.

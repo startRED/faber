@@ -163,6 +163,7 @@ impl Store {
     }
 
     pub fn list(&self) -> Vec<Summary> {
+        let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_millis() as u64);
         let mut list: Vec<Summary> = fs::read_dir(&self.conversations)
             .into_iter()
             .flatten()
@@ -173,6 +174,7 @@ impl Store {
                 keep_going: c.keep_going.is_some(),
                 archived: c.archived_at.is_some(),
                 started_by: c.started_by,
+                ended: c.ended.filter(|e| e.current(now)),
                 id: c.id,
                 title: c.title,
                 area: c.area,

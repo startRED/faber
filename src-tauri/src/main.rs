@@ -219,6 +219,12 @@ async fn keep_going(faber: State<'_, Faber>, id: String, on: bool) -> Res<()> {
     faber.engine.keep_going(&id, on)
 }
 
+/// The person has the conversation open on a visible window: the done card and the dot of its last run go.
+#[tauri::command]
+async fn seen(faber: State<'_, Faber>, id: String) -> Res<()> {
+    faber.engine.seen(&id)
+}
+
 #[tauri::command]
 async fn remove_queued(faber: State<'_, Faber>, id: String, turn_id: String) -> Res<()> {
     faber.engine.remove_queued(&id, &turn_id);
@@ -796,6 +802,7 @@ fn main() {
                 route_draft,
                 interrupt,
                 keep_going,
+                seen,
                 archive,
                 answer,
                 answer_question,

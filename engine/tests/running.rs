@@ -4,7 +4,7 @@ use crate::support;
 
 use faber_engine::cli::Cli;
 use faber_engine::engine::Ask;
-use faber_engine::model::{Area, Permissions, RunState, RunningItem, Settings, Status, Vendor};
+use faber_engine::model::{Area, EndKind, Permissions, RunState, RunningItem, Settings, Status, Vendor};
 use faber_engine::proc::Spawner;
 use faber_engine::router::Choice;
 use faber_engine::{AppEvent, Engine, EngineOptions, SendRequest};
@@ -512,6 +512,40 @@ async fn an_answer_the_cli_cannot_take_is_undelivered_and_the_same_card_can_be_a
 
     taken(answer(&engine, &rows.1[0], true).await);
     assert_eq!(f.wire.lines_with("control_response"), 1);
+    engine.shutdown();
+}
+
+// Task 016: a run that ends leaves one mark on its conversation, the done card's and the sidebar dot's, until the person sees it.
+#[tokio::test]
+async fn a_run_that_ends_is_marked_until_the_person_sees_it() {
+    let dir = tempfile::tempdir().unwrap();
+    let (engine, mut rx) = engine(dir.path(), &[Vendor::Claude], fake(fixture("claude", "chat")).spawn, None);
+    let id = engine.send(request(Area::Chat, None, SKY, "claude")).unwrap();
+    lists_until(&mut rx, WAIT, |rows| !rows.is_empty()).await;
+    lists_until(&mut rx, WAIT, |rows| rows.is_empty()).await;
+    let summary = engine.state().conversations.into_iter().find(|c| c.id == id).unwrap();
+    let ended = summary.ended.expect("the end is marked");
+    assert_eq!(ended.kind, EndKind::Done);
+    assert!(ended.line.is_some(), "the card says the last line it wrote");
+    engine.seen(&id).unwrap();
+    assert_eq!(engine.state().conversations.into_iter().find(|c| c.id == id).unwrap().ended, None, "seen: the card and the dot go");
+    assert_eq!(engine.open(&id).unwrap().ended, None, "and it stays seen");
+    engine.shutdown();
+}
+
+#[tokio::test]
+async fn a_run_the_person_stopped_leaves_no_mark() {
+    let dir = tempfile::tempdir().unwrap();
+    let (engine, mut rx) = engine(dir.path(), &[Vendor::Claude], fake(fixture("claude", "interrupt")).spawn, None);
+    let id = engine.send(request(Area::Chat, None, "Write a 600-word essay about the history of bread.", "claude")).unwrap();
+    lists_until(&mut rx, WAIT, |rows| !rows.is_empty()).await;
+    engine.interrupt(&id);
+    lists_until(&mut rx, WAIT, |rows| rows.is_empty()).await;
+    assert_eq!(
+        engine.state().conversations.into_iter().find(|c| c.id == id).unwrap().ended,
+        None,
+        "the person stopped it: they were there"
+    );
     engine.shutdown();
 }
 

@@ -396,6 +396,8 @@ fn seed(dir: &Path, long: bool) -> Conversation {
         queued: vec![],
         keep_going: None,
         archived_at: None,
+        ended: None,
+        stopped: false,
         context: None,
         reported: (None, None),
         compacting: false,

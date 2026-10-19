@@ -188,6 +188,17 @@ export interface Summary {
   archived?: boolean;
   /** The conversation whose agent started this one, which the sidebar shows it under. */
   startedBy?: string;
+  /** Its last run ended and nobody has opened it since: the running column's done card and the sidebar's dot. */
+  ended?: Ended;
+}
+/** How a run ended that nobody saw end (engine `Ended`). */
+export interface Ended {
+  at: number;
+  kind: 'done' | 'needsYou' | 'failed';
+  /** From its first turn to its end, in milliseconds. */
+  workMs: number;
+  /** The last line the agent wrote. */
+  line?: string;
 }
 export interface WorkCopy {
   path: string;
@@ -466,6 +477,8 @@ export const api = {
     invoke<void>('route_draft', { req, text }),
   interrupt: (id: string) => invoke<void>('interrupt', { id }),
   keepGoing: (id: string, on: boolean) => invoke<void>('keep_going', { id, on }),
+  /** The person has the conversation open on a visible window: the done card and the dot of its last run go. */
+  seen: (id: string) => invoke<void>('seen', { id }),
   /** Archives a conversation, or brings an archived one back. */
   archive: (id: string, on: boolean) => invoke<void>('archive', { id, on }),
   answer: (id: string, turnId: string, requestId: string, allow: boolean, always = false) =>

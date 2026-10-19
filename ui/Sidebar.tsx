@@ -185,6 +185,9 @@ export function Sidebar(props: Props) {
           <Show when={row.c.archived}>
             <span class="tag-quiet">{t('archive.tag')}</span>
           </Show>
+          <Show when={row.c.ended && row.c.id !== props.place.id}>
+            <span class="unseen" role="img" aria-label={t('side.unseen')} title={t('side.unseen')} />
+          </Show>
           <Show when={props.running.find((r) => r.conversationId === row.c.id)?.waitUntil}>{(at) => <span class="waiting-label" title={t('run.waiting', { when: untilReset(at()) })}>{t('run.waiting', { when: untilReset(at()) })}</span>}</Show>
         </button>
       </Show>

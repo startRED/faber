@@ -37,6 +37,7 @@ mod browse;
 mod by_itself;
 mod compact;
 mod copies;
+mod ended;
 pub use copies::GitRunner;
 pub mod facts;
 mod helpers;
@@ -644,6 +645,9 @@ impl Engine {
     pub fn interrupt(&self, id: &str) {
         // One lock for all of it: the end of Faber's checks waits for it, and never sends a turn in between.
         self.with(|c| {
+            if let Some(conv) = c.convs.get_mut(id) {
+                conv.stopped = true;
+            }
             c.keep_going_off(id);
             c.compacts.remove(id);
             let compacting = c.convs.get(id).is_some_and(|c| c.compacting);
@@ -2337,6 +2341,7 @@ impl Core {
         if items == self.running.items {
             return;
         }
+        self.mark_ended(&items);
         self.running = Running { revision: self.running.revision + 1, items: items.clone() };
         (self.emit)(AppEvent::Running { revision: self.running.revision, items });
     }
@@ -2657,11 +2662,13 @@ impl Core {
             queued: Vec::new(),
             keep_going: None,
             archived_at: None,
+            ended: None,
             context: None,
             messages: vec![],
             reported: (None, None),
             compacting: false,
             weighing: None,
+            stopped: false,
         };
         let id = c.id.clone();
         self.convs.insert(id.clone(), c);

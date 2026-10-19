@@ -18,7 +18,7 @@ import {
   type Vendor,
   STOPS,
 } from './api.ts';
-import { inOrder, refreshed, saveAndApply, watchSystem } from './appearance.ts';
+import { inOrder, refreshed, saveAndApply, watchSystem, windowHidden } from './appearance.ts';
 import { useClock } from './clock.ts';
 import { Composer, type Draft } from './Composer.tsx';
 import { ContextMeter } from './Context.tsx';
@@ -43,7 +43,7 @@ import { Running } from './Running.tsx';
 import { agentWide, openedAgent, showAgent, startMessage, toggleAgentWide } from './AgentChat.tsx';
 import { openedSite, showSite } from './Site.tsx';
 import { agentSteps } from './worklog.ts';
-import { createAutoOpen, openPlace, type Place, placeOfRunning, shownRunning, stopOffered, store, waitingKeys } from './running.ts';
+import { createAutoOpen, doneCards, openPlace, type Place, placeOfRunning, shownRunning, stopOffered, store, waitingKeys } from './running.ts';
 import { type Keep, type Section, Settings } from './Settings.tsx';
 import { Setup } from './Setup.tsx';
 import { continuePatch, type FirstStep, firstRunStep, lookDue, setupPatch } from './setup.ts';
@@ -210,6 +210,19 @@ export function App(props: { initial: AppState; update?: UpdateStatus; inbox: { 
   const every = () => store.list().items;
   const items = createMemo(() => shownRunning(every()));
   const needing = () => items().filter((i) => i.state === 'needsYou').length;
+  // A run that ended while nobody looked stays a done card in the column and a dot on its sidebar row (task 016) until the person
+  // sees the conversation: its thread loaded on the stage (not under Settings, the setup or the first run) of a window they can
+  // see (not hidden, no game in front). The engine keeps the mark, so a restart keeps both.
+  const onScreen = () => {
+    const id = place().id;
+    const covered = windowHidden() || settingsOpen() || setupOpen() || !!step() || loading();
+    return !id || covered || current()?.id !== id ? undefined : id;
+  };
+  const done = createMemo(() => doneCards(state().conversations, every(), onScreen()));
+  createEffect(() => {
+    const id = onScreen();
+    if (id && state().conversations.some((c) => c.id === id && c.ended)) void api.seen(id).catch(() => {});
+  });
 
   // ---- The widths the person gave the sidebar and the running column by dragging their edges (ui/Grip.tsx), kept per window like the
   // other small conveniences, and focus mode (Ctrl+B): the sidebar and the column step aside to give the stage the whole window.
@@ -807,9 +820,15 @@ export function App(props: { initial: AppState; update?: UpdateStatus; inbox: { 
   const runningColumn = () => (
     <Running
       items={items()}
+      done={done()}
       projects={state().projects}
       modal={trapped()}
       onOpen={openRunning}
+      onOpenDone={(c) => {
+        if (!docked()) closeColumn();
+        openSummary(c);
+      }}
+      onDismiss={(c) => void api.seen(c.id).catch(() => {})}
       onClose={closeColumn}
       agent={sideAgent()}
       site={sideSite()}

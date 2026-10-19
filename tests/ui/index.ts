@@ -24,6 +24,7 @@ import './effort.check.ts';
 import './first-frame.check.ts';
 import './follow.check.ts';
 import './plumbing.check.ts';
+import './donecard.check.ts';
 import './foot.check.ts';
 import './checks.check.ts';
 import './idle.check.ts';
