@@ -125,6 +125,16 @@ The numbers above are the usual widths. The person can change them, and the shel
 - The caret blinks only while words arrive; a reply at work after its words shows its step under them, in the status
   line's style. Faber's plumbing takes no row: its own message is a loop mark after the next reply's model (R241; the
   product map's Work log and Faber's own message say the rest).
+- A project agent's plan (R248) sits under the newest reply, above its files, while the agent works and until every step
+  is done: a quiet head "Plan · 2 of 5" in the small size, then one line per step, a small square mark before it: a check
+  and the third ink when done, an accent ring and the full ink on the current one (`aria-current`), plain when still to
+  do; each state is said to a screen reader. What the agent says it is doing now (its `status`, 3 to 6 words) takes the
+  place of the newest step's words under the reply while it works. A reply the agent closed with `wrap_up` ends, above
+  the actions row, with one box on a hairline: the recap, then at most one question in the semibold weight and its one
+  or two replies as buttons, the recommendation the primary one. Only the newest reply, once it is done, offers the
+  buttons; a click sends the button's words as the person's message. A question Faber answered while Keep going ran
+  shows "You were away, so Faber answered “…”" with the loop icon instead of buttons. Nothing in the plan or the box
+  moves; both wrap at 720 px.
 - There is no permission sentence over a conversation: the mode is a Settings matter.
 - Keep going (R199): the chip, its quiet lines, its quota warning and what it shows on coming back are in
   [keep-going.md](keep-going.md).

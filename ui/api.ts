@@ -116,6 +116,29 @@ export interface Message {
   /** On a reply: when the agent said all it will say, in milliseconds. Set while the reply still streams, it is finished for the
    * person while the CLI closes its turn. */
   finishedAt?: number;
+  /** On a reply: what the agent said it is doing now, in a few words (task 017). */
+  now?: string;
+  /** On a reply: the closing box of the task it ended. */
+  wrapUp?: WrapUp;
+}
+/** A project agent's plan for the request (engine `Plan`): it belongs to the conversation. */
+export interface Plan {
+  steps: { text: string; state: 'pending' | 'active' | 'done' }[];
+  at: number;
+}
+/** "3 of 7": a plan's steps done and in all. */
+export interface PlanCount {
+  done: number;
+  total: number;
+}
+/** The closing box of a task (engine `WrapUp`): a recap, and maybe one question with its replies, the recommendation first. */
+export interface WrapUp {
+  recap: string;
+  ask?: string;
+  actions?: string[];
+  done?: boolean;
+  /** The reply Faber gave for the person while Keep going ran and nobody answered. */
+  answered?: string;
 }
 export type ChecksState = 'running' | 'passed' | 'failed' | 'needsYou';
 export interface Checks {
@@ -168,6 +191,8 @@ export interface Conversation {
   keepGoing?: { turns: number; failed: number };
   /** How full its own agent's context is, once the CLI has said so (the topbar's meter). */
   context?: ContextFill;
+  /** The agent's plan for the request. */
+  plan?: Plan;
   /** When it was archived: it is off the sidebar and its composer gives way to a line that brings it back. */
   archivedAt?: number;
   messages: Message[];
@@ -190,6 +215,8 @@ export interface Summary {
   startedBy?: string;
   /** Its last run ended and nobody has opened it since: the running column's done card and the sidebar's dot. */
   ended?: Ended;
+  /** How far the agent's plan has come. */
+  plan?: PlanCount;
 }
 /** How a run ended that nobody saw end (engine `Ended`). */
 export interface Ended {
@@ -338,13 +365,17 @@ export interface RunningItem {
   /** "Keep going" is on: it runs on its own. */
   keepGoing?: boolean;
   /** "Keep going" waits to send the next turn, for a reason of its own (a quota wait is `waitUntil`), until `until` (seconds). */
-  keepWait?: { why: 'retry' | 'rest' | 'busy' | 'start'; until: number };
+  keepWait?: { why: 'retry' | 'rest' | 'busy' | 'start' | 'question'; until: number };
   /** How far a conversation that goes on by itself has come: turns of work, when it began (ms, 0 unknown), the last line it wrote. */
   keepProgress?: { turns: number; since: number; last?: string };
   /** Faber asks git whether the last reply changed files, before its checks would start. */
   weighing?: boolean;
   /** The agent finished and only the CLI's turn is closing, with nothing else running: the screen leaves the row out. */
   settled?: boolean;
+  /** How far the agent's plan has come. */
+  plan?: PlanCount;
+  /** What the agent said it is doing now, on the reply under way. */
+  now?: string;
 }
 /** The running list in the engine's order, with a revision that grows by one with every list the engine sends. */
 export interface RunningList {
@@ -423,6 +454,7 @@ export type AppEvent =
   | { type: 'usage'; vendors: VendorUsage[] }
   | { type: 'list' }
   | { type: 'context'; conversationId: string; context?: ContextFill }
+  | { type: 'plan'; conversationId: string; plan?: Plan }
   | { type: 'halted'; conversationId: string; title: string; why: string; vendor?: Vendor }
   | SetupProgressEvent;
 

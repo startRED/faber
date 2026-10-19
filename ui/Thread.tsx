@@ -1,10 +1,11 @@
 import { createEffect, createMemo, createResource, createSignal, For, Index, on, onCleanup, Show, type Accessor } from 'solid-js';
-import { api, type Checks, type Choice, type Follow, type Message, type QueuedTurn, type VendorUsage } from './api.ts';
+import { api, type Checks, type Choice, type Follow, type Message, type Plan, type QueuedTurn, type VendorUsage } from './api.ts';
 import { Asks, Parkeds } from './Ask.tsx';
 import { copyItem, openMenu } from './contextmenu.ts';
 import { keep, kept, release, useDraft } from './unsent.ts';
 import { Icon, VendorMark } from './Glyphs.tsx';
 import { QuotaCard } from './QuotaCard.tsx';
+import { PlanList, WrapUpBox } from './Plan.tsx';
 import { html, Markdown, openLinks } from './markdown.tsx';
 import { agentMeta, ChangedLines, openedAgent, SourceList, showAgent, tellAbout, ToolChip } from './AgentChat.tsx';
 import { untilReset } from './Sidebar.tsx';
@@ -16,7 +17,7 @@ import { windowHidden } from './appearance.ts';
 import { elapsed, warmLeft } from './running.ts';
 import { agePending, ageNow, footText, tickWhile } from './foot.ts';
 import { quotaPending } from './QuotaCard.tsx';
-import { agentState, agentSteps, changeOf, isAgentCall, middle, sameTools, sourcesOf, thinkingParts, toolLine, type AgentStep } from './worklog.ts';
+import { agentState, agentSteps, changeOf, isAgentCall, isProgressCall, middle, sameTools, sourcesOf, thinkingParts, toolLine, type AgentStep } from './worklog.ts';
 
 const IMAGE = /\.(png|jpe?g|gif|webp|svg)$/i;
 
@@ -127,6 +128,10 @@ interface Shared {
   usage?: VendorUsage[];
   /** Faber asks git whether the last reply changed files (the running row's `weighing`). */
   weighing?: boolean;
+  /** The agent's plan for the request, drawn under the newest reply (task 017). */
+  plan?: Plan;
+  /** A button of a closing box: its words go as the person's message. */
+  onReply?: (text: string) => void;
 }
 
 function Answer(props: Shared & { m: Accessor<Message>; messages?: Message[]; prompt?: Message; last?: boolean }) {
@@ -137,7 +142,7 @@ function Answer(props: Shared & { m: Accessor<Message>; messages?: Message[]; pr
   // While an answer streams the engine sends the whole message every 33 ms. Each memo below compares by value, so a tick that
   // changed only the tools never touches the text, and one that changed only the text never touches the tools.
   const text = createMemo(() => hideStop(m().text, m().status === 'streaming'));
-  const tools = createMemo(() => m().tools ?? [], [], { equals: sameTools });
+  const tools = createMemo(() => (m().tools ?? []).filter((tool) => !isProgressCall(tool)), [], { equals: sameTools });
   // A quiet note on the latest reply only (a later turn overtakes an older one): how long the CLI keeps its prompt cache warm,
   // shown in the cost's tooltip, hidden while unknown and once cold. One timer, and only while the note is shown.
   const [now, setNow] = createSignal(Date.now());
@@ -225,7 +230,11 @@ function Answer(props: Shared & { m: Accessor<Message>; messages?: Message[]; pr
   });
   // The sites it opened, for research (R161 step 9); a subagent's reading stays in its own step.
   const sources = createMemo(() => sourcesOf(own()));
+  // What the agent said it is doing now (task 017) stands in for the newest step's words while it works.
+  const nowLine = () => (working() ? m().now : undefined);
   const latest = createMemo(() => {
+    const now = nowLine();
+    if (now && !finalText().trim()) return now;
     const tool = tools().at(-1);
     if (tool && tool.ok === undefined) return toolLine(tool);
     if (finalText().trim()) return '';
@@ -243,7 +252,8 @@ function Answer(props: Shared & { m: Accessor<Message>; messages?: Message[]; pr
     if (!working() || !finalText().trim() || waiting().length || m().waitUntil) return '';
     // A running step shows at once (the caret never blinks over one); "Thinking…" waits until the words stop.
     const tool = runningStep();
-    return tool ? toolLine(tool) : typing() ? '' : t('activity.thinkingNow');
+    if (tool) return nowLine() || toolLine(tool);
+    return typing() ? '' : nowLine() || t('activity.thinkingNow');
   };
   const [clock, setClock] = createSignal(Date.now());
   // A memo, so the timer is made again only when another step starts, not on every tick of the stream.
@@ -405,6 +415,10 @@ function Answer(props: Shared & { m: Accessor<Message>; messages?: Message[]; pr
           </Show>
         </div>
       </Show>
+      {/* The plan sits under the newest reply while the work goes on, and until every step is done. */}
+      <Show when={props.last && props.plan?.steps.length && (working() || props.plan.steps.some((s) => s.state !== 'done')) ? props.plan : undefined}>
+        {(plan) => <PlanList plan={plan()} />}
+      </Show>
       <Show when={m().files?.length}>
         <div class="files" aria-label={t('files.label')} ref={animateList}>
           <For each={m().files}>{(f) => <FileCard conversationId={props.conversationId} file={f} />}</For>
@@ -437,6 +451,7 @@ function Answer(props: Shared & { m: Accessor<Message>; messages?: Message[]; pr
           {fromEngine(m().halt, { ai: m().vendor ? vendorName(m().vendor!) : t('model.auto') })}
         </p>
       </Show>
+      <Show when={m().wrapUp}>{(box) => <WrapUpBox box={box()} open={!!props.last && !working()} onReply={props.onReply} />}</Show>
       <Show when={!working() || foot()}>
         {/* While the agent works the row holds only the foot line; `.actions` is the finished reply's row, which screen tests wait for. */}
         <div class={working() ? 'live-foot' : 'actions'}>

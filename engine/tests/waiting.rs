@@ -397,6 +397,7 @@ fn seed(dir: &Path, long: bool) -> Conversation {
         keep_going: None,
         archived_at: None,
         ended: None,
+        plan: None,
         stopped: false,
         context: None,
         reported: (None, None),

@@ -1838,6 +1838,7 @@ async fn stop_leaves_no_worker(parent_script: &str, why: &str) {
                 browse: false,
                 conversations: false,
                 verify: false,
+                progress: false,
                 area: Area::Project,
                 model: None,
                 effort: None,

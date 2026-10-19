@@ -44,6 +44,7 @@ mod helpers;
 mod install_gate;
 mod keep_going;
 mod parked;
+mod plan;
 mod pr_watch;
 mod quota_watch;
 mod recovery;
@@ -81,6 +82,11 @@ pub enum AppEvent {
         items: Vec<RunningItem>,
     },
     List,
+    /// The agent's plan changed (None: it cleared it), for the checklist under the newest reply.
+    Plan {
+        conversation_id: String,
+        plan: Option<Plan>,
+    },
     /// How full a conversation's own agent's context is now (None: not known).
     Context {
         conversation_id: String,
@@ -1591,6 +1597,7 @@ impl Core {
             EngineEvent::ConversationCall { id, input } => return self.conversation_call(conv, id, input),
             EngineEvent::VerifyCall { id, input } => return self.verify_call(conv, id, input),
             EngineEvent::MapCall { id, input } => return self.map_call(conv, id, input),
+            EngineEvent::ProgressCall { id, tool, input } => return self.progress_call(conv, id, tool, input),
             EngineEvent::Permission { request_id, tool, input } => {
                 // A request that touches a credential folder is refused in both modes, with no card (best effort for a command
                 // line: see `touches_credentials`). Full access never shows a card. The answer is decided here, under the lock
@@ -2544,6 +2551,7 @@ impl Core {
         let browse = self.offers_browser(area, permissions);
         let conversations = siblings::offers(area);
         let verify = self.offers_verify(area, permissions);
+        let progress = area == Area::Project;
         let session = match pick.vendor {
             Vendor::Claude => start_claude(
                 ClaudeOptions {
@@ -2554,6 +2562,7 @@ impl Core {
                         browse,
                         conversations,
                         verify,
+                        progress,
                         area,
                         model,
                         effort,
@@ -2577,6 +2586,7 @@ impl Core {
                     browse,
                     conversations,
                     verify,
+                    progress,
                     cwd,
                     model,
                     effort,
@@ -2668,6 +2678,7 @@ impl Core {
             keep_going: None,
             archived_at: None,
             ended: None,
+            plan: None,
             context: None,
             messages: vec![],
             reported: (None, None),
@@ -3129,6 +3140,8 @@ fn running_item(c: &Conversation) -> Option<RunningItem> {
         }),
         weighing: c.weighing.is_some(),
         settled,
+        plan: c.plan.as_ref().map(Plan::count),
+        now: reply.now.clone().filter(|_| reply.status == Some(Status::Streaming)),
     })
 }
 

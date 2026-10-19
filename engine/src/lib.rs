@@ -22,6 +22,7 @@ pub mod nudge;
 pub mod permissions;
 pub mod persona;
 pub mod proc;
+pub mod progress;
 pub mod project;
 pub mod recents;
 pub mod route;

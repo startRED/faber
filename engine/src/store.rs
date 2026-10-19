@@ -175,6 +175,7 @@ impl Store {
                 archived: c.archived_at.is_some(),
                 started_by: c.started_by,
                 ended: c.ended.filter(|e| e.current(now)),
+                plan: c.plan.as_ref().map(crate::model::Plan::count),
                 id: c.id,
                 title: c.title,
                 area: c.area,

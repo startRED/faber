@@ -38,6 +38,8 @@ pub struct ClaudeLaunch {
     pub conversations: bool,
     /// Faber's checks (`crate::verify`): a project's agent in full access, where the shell gives a runner.
     pub verify: bool,
+    /// The plan, the status and the closing box (`crate::progress`): a project's own agent.
+    pub progress: bool,
     /// The skills installed from Faber's catalog (`crate::tools`), for a project's agent outside Isolated.
     pub tools: crate::tools::Delivery,
 }
@@ -51,6 +53,7 @@ fn mcp_tools(launch: &ClaudeLaunch) -> crate::helper::Tools {
         verify: launch.verify,
         // The map only reads files: it goes where the checks go.
         map: launch.verify,
+        progress: launch.progress,
     }
 }
 
@@ -415,6 +418,7 @@ pub fn parse_claude_message(msg: &Value) -> Vec<EngineEvent> {
                         Some(crate::sibling::CLAUDE_NAME) => crate::sibling::TOOL.to_string(),
                         Some(crate::verify::CLAUDE_NAME) => crate::verify::TOOL.to_string(),
                         Some(crate::map::CLAUDE_NAME) => crate::map::TOOL.to_string(),
+                        Some(name) if let Some(tool) = crate::progress::claude_tool(name) => tool.to_string(),
                         _ => s(&c["name"]),
                     };
                     EngineEvent::Tool { id: s(&c["id"]), name, input: c["input"].clone(), parent: parent.clone() }
@@ -647,6 +651,7 @@ pub fn start_claude(opts: ClaudeOptions, on_event: EventSink) -> Session {
                                             crate::sibling::NAME => EngineEvent::ConversationCall { id, input },
                                             crate::verify::NAME => EngineEvent::VerifyCall { id, input },
                                             crate::map::NAME => EngineEvent::MapCall { id, input },
+                                            name if let Some(tool) = crate::progress::tool_of(name) => EngineEvent::ProgressCall { id, tool, input },
                                             _ => EngineEvent::HelperCall { id, input },
                                         });
                                     }
@@ -679,6 +684,7 @@ pub fn start_claude(opts: ClaudeOptions, on_event: EventSink) -> Session {
                                         || (tool == crate::browser::CLAUDE_NAME && opts.launch.browse)
                                         || (tool == crate::sibling::CLAUDE_NAME && opts.launch.conversations)
                                         || ((tool == crate::verify::CLAUDE_NAME || tool == crate::map::CLAUDE_NAME) && opts.launch.verify)
+                                        || (crate::progress::claude_tool(tool).is_some() && opts.launch.progress)
                                     {
                                         let msg = json!({ "type": "control_response", "response": { "subtype": "success", "request_id": request_id,
                                             "response": { "behavior": "allow", "updatedInput": input } } });

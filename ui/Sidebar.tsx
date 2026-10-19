@@ -11,6 +11,7 @@ import { vendorName } from './models.ts';
 import { forgetProject } from './projects.ts';
 import type { Place } from './running.ts';
 import { mac } from './WindowControls.tsx';
+import { planWords } from './Plan.tsx';
 import { ageOf, freshness, groupChats, matches, nest, type Quotas, showsChats, tailOf, tightest } from './sidebar.ts';
 
 /** The name of a conversation while it is being renamed: Enter keeps it, Esc and leaving the box too when nothing changed. */
@@ -180,7 +181,7 @@ export function Sidebar(props: Props) {
           />
         }
       >
-        <button class="item" aria-current={row.c.id === props.place.id} onClick={() => props.onOpen(row.c)}>
+        <button class="item" aria-current={row.c.id === props.place.id} title={row.c.plan ? `${row.c.title} · ${planWords(row.c.plan)}` : undefined} onClick={() => props.onOpen(row.c)}>
           <span>{row.c.title}</span>
           <Show when={row.c.archived}>
             <span class="tag-quiet">{t('archive.tag')}</span>

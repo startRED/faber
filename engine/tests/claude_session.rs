@@ -14,6 +14,7 @@ fn launch(area: Area) -> ClaudeLaunch {
         browse: false,
         conversations: false,
         verify: false,
+        progress: false,
         area,
         model: None,
         effort: None,

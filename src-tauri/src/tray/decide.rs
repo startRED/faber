@@ -530,6 +530,8 @@ mod tests {
             keep_progress: None,
             weighing: false,
             settled: false,
+            plan: None,
+            now: None,
         }
     }
 

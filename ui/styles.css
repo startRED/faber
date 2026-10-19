@@ -1242,3 +1242,22 @@ html.away-win :is(.amb, .amb *) { animation-play-state: paused !important; }
 .tour-dim { transition: background-color var(--dur-ui) var(--ease); }
 .tour-ring { animation: fade-in var(--dur-ui) var(--ease) both; }
 .tour-ring.leaving { animation: fade-out var(--dur-exit) var(--ease-in) both; }
+
+/* Task 017: the agent's plan under the newest reply, and the closing box of a task. Quiet facts: nothing moves. */
+.plan { margin: 10px 0 4px; font-size: var(--fs-sm); color: var(--ink-2); }
+.plan-head { display: flex; gap: 8px; margin: 0 0 4px; color: var(--ink-3); }
+.plan ol { list-style: none; margin: 0; padding: 0; display: grid; gap: 2px; }
+.plan li { display: flex; align-items: baseline; gap: 8px; min-width: 0; }
+.plan li .mark { flex: none; width: 14px; height: 14px; border-radius: 4px; box-shadow: inset 0 0 0 1px var(--line-2); display: inline-grid; place-items: center; transform: translateY(2px); }
+.plan li .text { min-width: 0; overflow-wrap: anywhere; }
+.plan li.done { color: var(--ink-3); }
+.plan li.done .mark { box-shadow: none; color: var(--ink-3); }
+.plan li.active { color: var(--ink); }
+.plan li.active .mark { box-shadow: inset 0 0 0 1.5px var(--accent); }
+.plan li .now { color: var(--ink-3); }
+.wrap-up { margin: 12px 0 4px; padding: 10px 12px; border-radius: var(--r-md); box-shadow: inset 0 0 0 1px var(--line-2); display: grid; gap: 8px; }
+.wrap-up .recap { margin: 0; }
+.wrap-ask { display: grid; gap: 8px; }
+.wrap-ask .q { margin: 0; font-weight: 600; }
+.wrap-actions { display: flex; flex-wrap: wrap; gap: 8px; }
+.ri .name .plan-n { color: var(--ink-3); margin-right: 6px; font-size: var(--fs-sm); }

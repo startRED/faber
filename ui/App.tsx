@@ -10,6 +10,7 @@ import {
   type AppEvent,
   type Conversation,
   type Experience,
+  type Plan,
   type Project,
   type RunningItem,
   type Settings as Saved,
@@ -378,7 +379,10 @@ export function App(props: { initial: AppState; update?: UpdateStatus; inbox: { 
   });
 
   // The conversation the user is in: opening it asks the engine for a snapshot and the answer takes a while.
+  // A plan that changed while its conversation was opening: the snapshot may be older (task 017).
+  const planHeard: { plan?: { id: string; plan?: Plan } } = {};
   const go = async (next: Place) => {
+    planHeard.plan = undefined;
     setPlace(next);
     remember('faber.place', next);
     const token = opening.begin(next.id);
@@ -397,7 +401,9 @@ export function App(props: { initial: AppState; update?: UpdateStatus; inbox: { 
     if (done.stale) return;
     setLoading(false);
     setFrom(Math.max(0, (done.conversation?.messages.length ?? 0) - PAGE));
-    setCurrent(done.conversation);
+    const heard = planHeard.plan as { id: string; plan?: Plan } | undefined;
+    const plan = heard?.id === done.conversation?.id ? heard : undefined;
+    setCurrent(done.conversation && plan ? { ...done.conversation, plan: plan.plan } : done.conversation);
     setChoice(next.id ? recall<Choice>(`faber.choice.${next.id}`, done.conversation?.choice ?? { vendor: 'auto' }) : { vendor: 'auto' });
     if (done.conversation) queueMicrotask(() => restoreRejected(done.conversation!.id, done.conversation!.messages.at(-1)));
   };
@@ -455,6 +461,10 @@ export function App(props: { initial: AppState; update?: UpdateStatus; inbox: { 
       }
       if (e.type === 'context') {
         setCurrent((c) => (c?.id === e.conversationId ? { ...c, context: e.context ?? undefined } : c));
+      }
+      if (e.type === 'plan') {
+        if (opening.id === e.conversationId) planHeard.plan = { id: e.conversationId, plan: e.plan ?? undefined };
+        setCurrent((c) => (c?.id === e.conversationId ? { ...c, plan: e.plan ?? undefined } : c));
       }
     });
     // Any key in a text field holds the running column back for a moment, whether or not the text changed (the arrows
@@ -1145,6 +1155,8 @@ ${copy().path}`}>
                                     options={options()}
                                     choice={picked()}
                                     onBranch={(messageId, text, chosen) => void branch(messageId, text, chosen ?? picked())}
+                                    plan={c().plan}
+                                    onReply={(text) => void send({ text, images: [], files: [] })}
                                   />
                                 )}
                               </Show>

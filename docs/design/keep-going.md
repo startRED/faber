@@ -22,3 +22,8 @@ own, the newest reply starts, right under the model's name, with one quiet line 
 as the stop line: "While you were away (3 h): 14 turns of work, 1 switch to the other AI, 2 questions answered for you."
 (a part that did not happen is left out), and each question Faber answered is one more such line ("You were away, so Faber
 answered “…” with “…”."). Nothing moves.
+The agent's own closing box (R248, [layout.md](layout.md)) ends Keep going when it says the request is done, checked
+once like the stop line. A box that asks the person something makes Keep going wait ten minutes, its row saying "waiting
+for your answer"; then Faber sends the first reply for them and the box says which. A conversation with a plan shows
+"2 of 5" before its title in the running column, and the sidebar row's tooltip adds it; the agent's now line is the
+row's quiet line while Keep going is off.

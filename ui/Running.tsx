@@ -8,6 +8,7 @@ import type { Limits } from './layout.ts';
 import { everyWhileShown } from './idle.ts';
 import { t } from './i18n.ts';
 import { Peek } from './Mark.tsx';
+import { planWords } from './Plan.tsx';
 import { SitePane, type OpenSite } from './Site.tsx';
 import { vendorName } from './models.ts';
 import { animateList } from './motion.ts';
@@ -136,8 +137,10 @@ export function Running(props: {
                                 <span class="time num">{since(item)}</span>
                               </div>
                               <button class="name" onClick={() => props.onOpen(item)}>
+                                <Show when={item.plan}>{(n) => <span class="plan-n num">{planWords(n())}</span>}</Show>
                                 {item.title || t('run.untitled')}
                               </button>
+                              <Show when={!item.keepProgress && item.now}>{(now) => <p class="run-kg"><span class="last" title={now()}>{now()}</span></p>}</Show>
                               <Show when={item.keepProgress}>
                                 {(p) => (
                                   <p class="run-kg">

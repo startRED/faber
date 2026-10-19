@@ -49,6 +49,7 @@ import './settings.check.ts';
 import './shell.check.ts';
 import './projects.check.ts';
 import './pace.check.ts';
+import './plan.check.ts';
 import './question.check.ts';
 import './quiet.check.ts';
 import './agents.check.ts';

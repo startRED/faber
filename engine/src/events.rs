@@ -91,6 +91,13 @@ pub enum EngineEvent {
         id: String,
         input: Value,
     },
+    /// The agent called `plan`, `status` or `wrap_up` (`crate::progress`; `tool` is the name both drivers give it). The engine
+    /// writes it down and answers at once with `Session::helper_reply`.
+    ProgressCall {
+        id: String,
+        tool: &'static str,
+        input: Value,
+    },
     /// The agent called Faber's helper tool (R161, `crate::helper`): `id` is that tool call. The CLI waits for the answer,
     /// which the engine sends with `Session::helper_reply` once the helper is done.
     HelperCall {
