@@ -88,8 +88,6 @@ pub struct Ended {
     pub said_stop: bool,
     /// The turn only waited: under a minute, no tool.
     pub idle: bool,
-    /// Faber sent the turn itself (not the person).
-    pub own: bool,
 }
 
 /// How long it rests after `n` failures in a row.
@@ -118,8 +116,9 @@ pub fn next(kg: &KeepGoing, ended: Ended, room: Result<(), &'static str>) -> Nex
     if ended.asked {
         return Next::Halt("reason.keepGoing.asked");
     }
-    // Only the answer to Faber's own check turn ends it: a stop in a turn of the person's is a first stop.
-    if ended.said_stop && kg.checked && ended.own {
+    // A stop after a stop ends it, whoever sent the turn: the person asking "is it done?" between Faber's turns must not keep
+    // it going forever without a word (task 015). A first stop, in any turn, is checked once.
+    if ended.said_stop && kg.checked {
         return Next::Halt("reason.keepGoing.done");
     }
     if kg.work >= MAX_TURNS {
@@ -146,6 +145,51 @@ pub fn stop_at(text: &str) -> Option<usize> {
     let line = text[..start].rfind('\n').map_or(0, |n| n + 1);
     let cut = if text[line..start].chars().all(|c| c.is_whitespace() || mark(c)) { line } else { start };
     Some(text[..cut].trim_end().len())
+}
+
+/// Takes every [`STOP`] out of a reply, since it is a signal for Faber and never words for the person (task 015): a line that
+/// holds only it (with the marks a model puts around a line) wherever it is, such as before the answer to a hook, and one at
+/// the very end of the last line. `positions` are offsets into the text in UTF-16 units (the reply's `activity_end` and
+/// `text_breaks`); each one after a cut moves back with it. True when there was one.
+pub fn strip_stop(text: &mut String, positions: &mut [&mut usize]) -> bool {
+    let mark = |c: char| matches!(c, '`' | '*' | '_' | '"' | '\'');
+    let bare = |line: &str| line.trim().trim_matches(|c: char| mark(c) || c == '.').trim().eq_ignore_ascii_case(STOP);
+    let units = |s: &str| s.encode_utf16().count();
+    // Each cut as (start, end) in bytes, in order.
+    let mut cuts = Vec::new();
+    let mut at = 0;
+    for line in text.split_inclusive('\n') {
+        if bare(line) {
+            cuts.push((at, at + line.len()));
+        }
+        at += line.len();
+    }
+    let mut kept = String::with_capacity(text.len());
+    let mut from = 0;
+    for &(start, end) in &cuts {
+        kept.push_str(&text[from..start]);
+        from = end;
+    }
+    kept.push_str(&text[from..]);
+    if let Some(end) = stop_at(&kept) {
+        cuts.push((usize::MAX, usize::MAX));
+        kept.truncate(end);
+    }
+    if cuts.is_empty() {
+        return false;
+    }
+    // Positions move back by the UTF-16 length of every whole-line cut before them; none passes the end.
+    let line_cuts: Vec<(usize, usize)> =
+        cuts.iter().filter(|c| c.0 != usize::MAX).map(|&(start, end)| (units(&text[..start]), units(&text[start..end]))).collect();
+    let trimmed = kept.trim_end().len();
+    kept.truncate(trimmed);
+    let len = units(&kept);
+    for p in positions.iter_mut() {
+        let shift: usize = line_cuts.iter().filter(|(start, _)| *start < **p).map(|(start, n)| (**p - start).min(*n)).sum();
+        **p = (**p - shift).min(len);
+    }
+    *text = kept;
+    true
 }
 
 /// What it did since it was turned on, once that was long enough for the person to be away.
@@ -310,7 +354,6 @@ impl Core {
     pub(super) fn keep_going_ended(&mut self, conv: &str, turn_id: Option<&str>) -> Option<String> {
         let reply_id = turn_id?;
         let c = self.convs.get_mut(conv)?;
-        c.keep_going.as_ref()?;
         // Whether Faber sent the turn itself: a turn of the person's in between never takes back a stop the agent already said.
         let own = c
             .messages
@@ -319,19 +362,28 @@ impl Core {
             .and_then(|i| c.messages.get(i))
             .is_some_and(|u| u.wake.as_ref().is_some_and(|w| w.why == "wake.keepGoing"));
         let m = c.messages.last_mut().filter(|m| m.id == reply_id && m.role == Role::Assistant)?;
+        // The stop line leaves every reply, Keep going on or off: an agent told about it once may write it again later.
+        let stripped = {
+            let mut end = m.activity_end.unwrap_or(0);
+            let had_breaks = m.text_breaks.is_some();
+            let mut breaks = m.text_breaks.take().unwrap_or_default();
+            let mut positions: Vec<&mut usize> = std::iter::once(&mut end).chain(breaks.iter_mut()).collect();
+            let found = strip_stop(&mut m.text, &mut positions);
+            if m.activity_end.is_some() {
+                m.activity_end = Some(end);
+            }
+            let len = m.text.encode_utf16().count();
+            breaks.retain(|b| *b < len);
+            m.text_breaks = had_breaks.then_some(breaks);
+            found
+        };
+        // `finish` saves and sends the reply either way.
+        c.keep_going.as_ref()?;
+        let m = c.messages.last_mut()?;
         let ok = m.status == Some(Status::Done);
         let error = m.error.clone().unwrap_or_else(|| "error.turnFailed".into());
         let asked = ok && unanswered_question(m);
-        let said_stop = ok
-            && stop_at(&m.text).is_some_and(|at| {
-                m.text.truncate(at);
-                let len = m.text.encode_utf16().count();
-                m.activity_end = m.activity_end.map(|e| e.min(len));
-                if let Some(breaks) = m.text_breaks.as_mut() {
-                    breaks.retain(|b| *b < len);
-                }
-                true
-            });
+        let said_stop = ok && stripped;
         let idle = ok && m.tools.iter().flatten().next().is_none() && now().saturating_sub(m.at) < QUICK_MS;
         let kg = c.keep_going.as_mut()?;
         // A reply `fail_reply` already failed (and decided on) is not decided on twice.
@@ -354,7 +406,7 @@ impl Core {
         }
         let before = kg.clone();
         self.note_away(conv, reply_id);
-        let decision = next(&before, Ended { asked, said_stop, idle, own }, self.room_next(conv));
+        let decision = next(&before, Ended { asked, said_stop, idle }, self.room_next(conv));
         // The first stop is asked about once, by the check turn; whatever else follows asks nothing.
         if let Some(kg) = self.convs.get_mut(conv).and_then(|c| c.keep_going.as_mut()) {
             kg.checked = said_stop || (before.checked && !own);
@@ -780,7 +832,7 @@ fn drop_own_turns(c: &mut Conversation) {
 mod tests {
     use super::*;
 
-    const DONE: Ended = Ended { asked: false, said_stop: false, idle: false, own: true };
+    const DONE: Ended = Ended { asked: false, said_stop: false, idle: false };
 
     fn wait(secs: f64, why: &'static str) -> Next {
         Next::Wait { secs, why }
@@ -800,11 +852,6 @@ mod tests {
         assert_eq!(next(&kg, Ended { said_stop: true, ..DONE }, Ok(())), Next::Continue);
         let checked = KeepGoing { checked: true, ..kg.clone() };
         assert_eq!(next(&checked, Ended { said_stop: true, ..DONE }, Ok(())), Next::Halt("reason.keepGoing.done"));
-        assert_eq!(
-            next(&checked, Ended { said_stop: true, own: false, ..DONE }, Ok(())),
-            Next::Continue,
-            "a stop in the person's own turn is not the answer to the check"
-        );
         assert_eq!(next(&KeepGoing { work: MAX_TURNS, ..kg.clone() }, DONE, Ok(())), Next::Halt("reason.keepGoing.cap"));
         assert_eq!(next(&kg, DONE, Err("reason.keepGoing.billed")), Next::Halt("reason.keepGoing.billed"));
     }
@@ -865,6 +912,92 @@ mod tests {
         assert_eq!(&code[..stop_at(code).unwrap()], "Changed `a.rs`");
         let quoted = "He said \"done\" [keep going: stop]";
         assert_eq!(&quoted[..stop_at(quoted).unwrap()], "He said \"done\"");
+    }
+
+    fn stripped(text: &str, at: &[usize]) -> (String, Vec<usize>, bool) {
+        let mut text = text.to_string();
+        let mut at = at.to_vec();
+        let found = strip_stop(&mut text, &mut at.iter_mut().collect::<Vec<_>>());
+        (text, at, found)
+    }
+
+    #[test]
+    fn every_stop_line_leaves_the_reply_and_the_places_in_it_move_back_with_it() {
+        let units = |s: &str| s.encode_utf16().count();
+        // At the end, inline or on its own line.
+        assert_eq!(
+            stripped(
+                "All done.
+
+[keep going: stop]
+",
+                &[]
+            )
+            .0,
+            "All done."
+        );
+        assert_eq!(stripped("All done. [keep going: stop]", &[]).0, "All done.");
+        // In the middle, before the answer to a hook, with the marks a model puts around it; what follows moves back.
+        let text = "Checked it.
+**[Keep going: STOP]**
+The hook said ok.";
+        let after = units(
+            "Checked it.
+**[Keep going: STOP]**
+",
+        );
+        let (kept, at, found) = stripped(text, &[3, after, units(text)]);
+        assert!(found);
+        assert_eq!(
+            kept,
+            "Checked it.
+The hook said ok."
+        );
+        assert_eq!(
+            at,
+            vec![
+                3,
+                units(
+                    "Checked it.
+"
+                ),
+                units(&kept)
+            ],
+            "before stays, after moves back, none passes the end"
+        );
+        // A place inside the cut line lands where the line was; a UTF-16 count, not bytes.
+        let (kept, at, _) = stripped(
+            "é
+[keep going: stop]
+fim",
+            &[5],
+        );
+        assert_eq!(
+            (kept.as_str(), at[0]),
+            (
+                "é
+fim", 2
+            )
+        );
+        // A mention inside a sentence is words, and a reply without it is untouched.
+        assert_eq!(
+            stripped("The line [keep going: stop] is for Faber, then more", &[]),
+            ("The line [keep going: stop] is for Faber, then more".into(), vec![], false)
+        );
+        assert_eq!(
+            stripped(
+                "Nothing  
+",
+                &[9]
+            ),
+            (
+                "Nothing  
+"
+                .into(),
+                vec![9],
+                false
+            )
+        );
     }
 
     fn reply(text: &str) -> Message {

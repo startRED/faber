@@ -473,6 +473,76 @@ async fn a_message_the_person_queued_goes_first_and_the_stop_line_still_counts()
     engine.shutdown();
 }
 
+// Task 015: the person asking "is it done?" between Faber's turns never keeps it going without a word. A stop after a stop
+// ends it, whoever sent the turn, and the tray says so.
+#[tokio::test]
+async fn a_second_stop_in_the_persons_own_turn_ends_it_with_a_notice() {
+    let (dir, project) = (tempfile::tempdir().unwrap(), support::work_folder());
+    let (engine, mut rx, mut pipe, id) = started(dir.path(), project.path()).await;
+    engine.keep_going(&id, true).unwrap();
+    let choice = Choice { vendor: "claude".into(), model: Some("haiku".into()), effort: None };
+    let status = SendRequest {
+        conversation_id: Some(id.clone()),
+        area: Area::Project,
+        project_id: None,
+        text: "Is all of it done?".into(),
+        images: vec![],
+        files: vec![],
+        choice,
+    };
+    engine.send(status).unwrap();
+    answers_at(
+        &mut pipe,
+        "All of it is done.
+[keep going: stop]",
+        true,
+        0.1,
+    )
+    .await;
+    until_turns(&pipe, 2).await;
+    echo(&mut pipe, 1).await;
+    answers_at(
+        &mut pipe,
+        "Yes, all of it.
+[keep going: stop]",
+        true,
+        0.1,
+    )
+    .await;
+    let c = until(&engine, &id, |c| idle(c) && c.keep_going.is_none()).await;
+    let reply = c.messages.last().unwrap();
+    assert_eq!((reply.text.as_str(), reply.halt.as_deref()), ("Yes, all of it.", Some("reason.keepGoing.done")));
+    tokio::time::sleep(Duration::from_millis(60)).await;
+    assert_eq!(turns(&pipe).len(), 2, "no check turn after the second stop");
+    assert_eq!(halts(&mut rx), vec!["reason.keepGoing.done".to_string()]);
+    engine.shutdown();
+}
+
+// The stop line is never words for the person: it leaves a reply with Keep going off too, and from the middle of one, such as
+// before the answer to a hook.
+#[tokio::test]
+async fn the_stop_line_leaves_every_reply_wherever_it_is() {
+    let (dir, project) = (tempfile::tempdir().unwrap(), support::work_folder());
+    let (engine, mut rx, mut pipe, id) = started(dir.path(), project.path()).await;
+    answers_at(
+        &mut pipe,
+        "Checked it.
+**[keep going: stop]**
+The hook said ok.",
+        true,
+        0.1,
+    )
+    .await;
+    let c = until(&engine, &id, idle).await;
+    assert_eq!(
+        c.messages.last().unwrap().text,
+        "Checked it.
+The hook said ok."
+    );
+    assert!(halts(&mut rx).is_empty(), "with Keep going off there is nothing to end");
+    engine.shutdown();
+}
+
 #[tokio::test]
 async fn a_turn_cut_at_the_limit_waits_for_quota_and_a_reading_with_room_sends_the_next_turn() {
     let (dir, project) = (tempfile::tempdir().unwrap(), support::work_folder());

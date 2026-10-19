@@ -376,6 +376,8 @@ html.sizing, html.sizing * { cursor: col-resize !important; user-select: none !i
 .model .vm.codex b { color: var(--codex-ink); }
 .model .vm:not(.claude):not(.codex) b { color: var(--ink-2); }
 .model em { font-style: normal; }
+/* A turn Faber started by itself, or a history it sent again: a quiet loop mark whose tooltip says which; never a row. */
+.model .by-faber { display: inline-flex; color: var(--ink-3); }
 .md { overflow-wrap: anywhere; }
 .md > :first-child { margin-top: 0; }
 .md > :last-child { margin-bottom: 0; }
@@ -430,6 +432,8 @@ details.thinking div { white-space: pre-wrap; padding: 6px 0 0 12px; border-left
 /* The step is cut, never its time. */
 .activity-latest .step { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
 .activity-latest .long { flex: none; white-space: pre; font-variant-numeric: tabular-nums; }
+/* The same line under the words, once the reply has some: where the eye already is. */
+.activity-latest.after { margin-top: -4px; }
 /* The checks a running reply ran: one quiet line, a check mark while none failed, the error note's 2 px edge once one did. */
 .tally { display: flex; align-items: center; gap: 6px; margin: -4px 0 0; color: var(--ink-3); font-size: var(--fs-sm); font-variant-numeric: tabular-nums; }
 .tally svg { color: var(--accent-text); }

@@ -6,9 +6,9 @@ in [layout.md](layout.md).
 
 Keep going (R199): in a project conversation under way, the composer bar has a "Keep going" chip after the model's,
 with the loop icon; pressed (`aria-pressed`) it takes the accent's soft fill and ink, never the amber, and its tooltip
-says the composer's Stop ends it. A message Faber sent by itself is one quiet line with the same icon where the
-person's bubble would be ("Faber asked it to keep going"; what the agent was told is its tooltip), and a reply after
-which it stopped by itself ends with one calm line that says why, in the same style (C001). Nothing moves.
+says the composer's Stop ends it. A message Faber sent by itself takes no row (R241): the reply to it shows the same icon,
+small, after the model's name, with "Faber asked it to keep going" as its tooltip, and a reply to it with nothing in it
+is not drawn. A reply after which it stopped by itself ends with one calm line that says why (C001). Nothing moves.
 When every AI it may use is near its limit, spent faster than its daily line, out, or billed per use (R216), one
 amber line sits right above the composer, at its width, with the loop icon: before it turns on, the chip's first click shows it with
 "Keep going anyway" and "Not now" (turning it off never asks); while it is on, the same line stays without buttons and

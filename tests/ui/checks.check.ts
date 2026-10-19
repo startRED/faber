@@ -46,7 +46,7 @@ check('checks: a reply that changed files shows Faber checking it, then what pas
     const why = line.querySelector<HTMLDetailsElement>('details')!;
     equal(why.querySelector('summary')!.textContent, t('checks.why'));
     ok(why.querySelector('pre')!.textContent!.includes('error TS2322'), 'the short failure is behind it');
-    equal(failed.root.querySelector('.woke')!.textContent, t('wake.checksFixing', { checks: 'npm run lint' }), 'the fix turn is a quiet line');
+    equal(failed.root.querySelector('.woke'), null, "Faber's own message takes no row");
   } finally {
     failed.close();
   }

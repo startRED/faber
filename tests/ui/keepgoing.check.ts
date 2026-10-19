@@ -43,7 +43,7 @@ check('keep going: the project composer offers it as a chip that says whether it
   }
 });
 
-check('keep going: Faber\'s own message is a quiet line, and a stop says why on the reply', async () => {
+check('keep going: Faber\'s own message takes no row, and a stop says why on the reply', async () => {
   const root = document.createElement('div');
   document.body.append(root);
   const mine: Message = { id: 'u1', role: 'user', text: 'Fix the login page', at: 1 };
@@ -57,7 +57,9 @@ check('keep going: Faber\'s own message is a quiet line, and a stop says why on 
     await settle();
     equal(root.querySelectorAll('.you').length, 1, 'only the person\'s own words are a bubble');
     const lines = [...root.querySelectorAll('.woke')].map((el) => el.textContent?.trim());
-    deepEqual(lines, [t('wake.keepGoing'), t('reason.keepGoing.pace', { ai: 'Codex' })]);
+    deepEqual(lines, [t('reason.keepGoing.pace', { ai: 'Codex' })]);
+    const marks = [...root.querySelectorAll<HTMLElement>('.model .by-faber')].map((el) => el.getAttribute('aria-label'));
+    deepEqual(marks, [t('wake.keepGoing')], 'only the reply to Faber\'s message carries its mark');
   } finally {
     dispose();
     root.remove();

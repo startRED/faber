@@ -117,23 +117,26 @@ The numbers above are the usual widths. The person can change them, and the shel
   then "Done", "Done · 12 min of work" once the work took a minute or more, and on the newest reply "· updated 3 min ago"
   ("just now" under a minute, none past a day). A reply that works shows only this text in the row, the buttons join it when
   it is done, so the row does not grow. The agent is done when its last message ended and no tool call of the reply is open,
-  though the CLI may close its turn up to a minute later (its Stop hooks): from then the cursor stops, the work folds into
+  though the CLI may close its turn up to a minute later (its Stop hooks): from then the work folds into
   its activity, the buttons appear, the running column and the topbar's count leave it out, and the composer reads Send,
   where a message waits in the queue. More words after that undo it. The age ticks once a minute on the newest reply only,
   never while the window is hidden; older replies run no timer. A reply from before the times were kept, a stop and an error
   say nothing here. Nothing animates.
+- The caret blinks only while words arrive; a reply at work after its words shows its step under them, in the status
+  line's style. Faber's plumbing takes no row: its own message is a loop mark after the next reply's model (R241; the
+  product map's Work log and Faber's own message say the rest).
 - There is no permission sentence over a conversation: the mode is a Settings matter.
 - Keep going (R199): the chip, its quiet lines, its quota warning and what it shows on coming back are in
   [keep-going.md](keep-going.md).
 - A project reply that opened, queued or pushed a pull request ends with one pace-style line (R200): its words ("Following
   pull request #93: checks running.") link to the page, and "Stop following" sits beside them while it is open. Only checks
-  that wait for the person turn it amber. When the checks fail, Faber's own message is Keep
-  going's quiet line, naming the pull request and its failed checks.
+  that wait for the person turn it amber. When the checks fail, Faber's own message is the loop
+  mark on the next reply, its tooltip naming the pull request and its failed checks.
 - A project reply that changed files, in full access, ends with Faber's own checks (R146) in the same pace-style line,
   above the pull request's: "Faber is running the checks on these changes…", then "Faber's checks passed (3 checks)." or
   "Faber's checks failed: npm run lint." with "What failed" under it, the work log's disclosure holding each failed check's
-  first three short failures in the data face. Faber's fix turn is Keep going's quiet line ("Faber's checks failed (npm run
-  lint). Faber asked the agent to fix them."); after two in a row, or where Faber does not ask (the reply asked the
+  first three short failures in the data face. Faber's fix turn is the loop mark on the next reply ("Faber's checks failed (npm run
+  lint). Faber asked the agent to fix them." in its tooltip); after two in a row, or where Faber does not ask (the reply asked the
   person something, Keep going stopped on it, the pace is used up), the line turns amber and says it needs the person.
   While the checks run the conversation reads as at work: the composer shows Stop, and a message written then waits in
   the queue. Nothing moves, and no setting or first-run step comes with it.

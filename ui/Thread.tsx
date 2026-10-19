@@ -1,4 +1,4 @@
-import { createEffect, createMemo, createResource, createSignal, For, Index, onCleanup, Show, type Accessor } from 'solid-js';
+import { createEffect, createMemo, createResource, createSignal, For, Index, on, onCleanup, Show, type Accessor } from 'solid-js';
 import { api, type Checks, type Choice, type Follow, type Message, type QueuedTurn, type VendorUsage } from './api.ts';
 import { Asks, Parkeds } from './Ask.tsx';
 import { copyItem, openMenu } from './contextmenu.ts';
@@ -45,12 +45,32 @@ function FileCard(props: { conversationId: string; file: { path: string; size: n
 
 // What an answer cost at API prices, small: the visible number is the cost, and the tooltip holds the rest (what it counted and,
 // on the latest answer, how long the prompt cache stays warm).
-const costOf = (m: Message) => (m.costUsd ? money(m.costUsd, m.costUsd < 0.01 ? 4 : 2) : '');
+// A turn whose meters came back partly empty shows "≈" before the number; the reason is in the tooltip, never a line of its own.
+// With no number at all, the mark stays alone, so the reason is still one hover away.
+const costOf = (m: Message) => (m.costUsd ? `${m.incomplete ? '≈' : ''}${money(m.costUsd, m.costUsd < 0.01 ? 4 : 2)}` : m.incomplete ? '≈' : '');
 function costTitle(m: Message, warm: string): string {
-  const parts = [t('answer.cost', { cost: money(m.costUsd ?? 0, 4) })];
+  const parts = m.costUsd ? [t('answer.cost', { cost: money(m.costUsd, 4) })] : [];
   if (m.inputTokens) parts.push(t('answer.tokens', { input: compact(m.inputTokens), output: compact(m.outputTokens ?? 0) }));
   if (warm) parts.push(warm);
+  if (m.incomplete) parts.push(t('answer.meterIncomplete'));
   return parts.join(' · ');
+}
+
+// Keep going's stop line (engine STOP) is a signal for Faber, never words: the engine takes it out when the turn ends, and until
+// then it is blanked where the engine would cut it (a line of its own with any marks around it, the end of the text, and while
+// the reply streams a last line that is still arriving as one). Spaces of the same length keep every place the engine marked in
+// the text (activity_end, text_breaks) where it was.
+const STOP = '[keep going: stop]';
+const STOP_LINE = /^[ \t\x60*_"'.]*\[keep going: stop\][ \t\x60*_"'.]*\r?$/gim;
+const STOP_END = /\[keep going: stop\][\s\x60*_"'.]*$/i;
+const blank = (s: string) => ' '.repeat(s.length);
+function hideStop(text: string, streaming: boolean): string {
+  if (!text.includes('[')) return text;
+  const out = text.replace(STOP_LINE, blank).replace(STOP_END, blank);
+  if (!streaming) return out;
+  const last = out.slice(out.lastIndexOf('\n') + 1);
+  const bare = last.trim().replace(/^[\x60*_"'.]+/, '').trim().toLowerCase();
+  return bare.length > 1 && STOP.startsWith(bare) ? out.slice(0, out.length - last.length) + blank(last) : out;
 }
 
 // The picker names Claude models by alias ("opus"), so the full id of the next rung is matched to its entry.
@@ -110,10 +130,13 @@ interface Shared {
 }
 
 function Answer(props: Shared & { m: Accessor<Message>; messages?: Message[]; prompt?: Message; last?: boolean }) {
+  // A turn Faber started by itself: its message takes no row (Faber's own plumbing never does, the 2026-10-19 design), so the
+  // reply's header carries it as a small loop mark whose tooltip says what Faber asked.
+  const woke = () => props.prompt?.wake;
   const m = () => props.m();
   // While an answer streams the engine sends the whole message every 33 ms. Each memo below compares by value, so a tick that
   // changed only the tools never touches the text, and one that changed only the text never touches the tools.
-  const text = createMemo(() => m().text);
+  const text = createMemo(() => hideStop(m().text, m().status === 'streaming'));
   const tools = createMemo(() => m().tools ?? [], [], { equals: sameTools });
   // A quiet note on the latest reply only (a later turn overtakes an older one): how long the CLI keeps its prompt cache warm,
   // shown in the cost's tooltip, hidden while unknown and once cold. One timer, and only while the note is shown.
@@ -133,6 +156,24 @@ function Answer(props: Shared & { m: Accessor<Message>; messages?: Message[]; pr
   // Streaming and not yet finished: the agent still writes or works. Once it said all it will say, the reply reads as done while the
   // CLI closes its turn (its Stop hooks, say), and more words after that would undo it.
   const working = () => streaming() && m().finishedAt === undefined;
+  // The caret means words are arriving. It shows before the first word, and after that only while the text grew in the last
+  // moment: never while the agent runs a step or thinks after writing (a reply on 2026-10-19 blinked for nine minutes while a
+  // command waited, and looked finished and stuck at once). One timer, reset by each change of the text.
+  const TYPING = 1_500;
+  const [typing, setTyping] = createSignal(false);
+  let typingTimer: ReturnType<typeof setTimeout> | undefined;
+  createEffect(
+    on(
+      text,
+      () => {
+        clearTimeout(typingTimer);
+        if (!working()) return setTyping(false);
+        setTyping(true);
+        typingTimer = setTimeout(() => setTyping(false), TYPING);
+      },
+    ),
+  );
+  onCleanup(() => clearTimeout(typingTimer));
   // The foot line says which of the two it is, how long the work took, and on the newest reply how long ago it last changed. One
   // timer, only for the newest reply, only while its age can change and the window is shown; a memo, so it is made again only
   // when that flips, never on the 33 ms ticks of the stream. It reads the ticking clock, so past a day the timer stops.
@@ -194,12 +235,19 @@ function Answer(props: Shared & { m: Accessor<Message>; messages?: Message[]; pr
   // quick step never shows a number that changes before it can be read; the clock ticks only while such a step runs and
   // the window shows.
   const LONG = 30_000;
+  // The newest of the agent's own steps still open, wherever it is in the list: a later one may already have ended.
+  const runningStep = createMemo(() => (working() ? tools().findLast((tool) => !tool.parent && tool.ok === undefined) : undefined));
+  // Under the words: the step it is on, in the status line's words, or that it is thinking (only once words stop). Never
+  // while a question waits on the person.
+  const after = () => {
+    if (!working() || !finalText().trim() || waiting().length || m().waitUntil) return '';
+    // A running step shows at once (the caret never blinks over one); "Thinking…" waits until the words stop.
+    const tool = runningStep();
+    return tool ? toolLine(tool) : typing() ? '' : t('activity.thinkingNow');
+  };
   const [clock, setClock] = createSignal(Date.now());
   // A memo, so the timer is made again only when another step starts, not on every tick of the stream.
-  const runningSince = createMemo(() => {
-    const tool = tools().at(-1);
-    return working() && tool && tool.ok === undefined ? tool.started : undefined;
-  });
+  const runningSince = () => runningStep()?.started;
   createEffect(() => {
     if (runningSince() === undefined || windowHidden()) return;
     setClock(Date.now());
@@ -231,8 +279,14 @@ function Answer(props: Shared & { m: Accessor<Message>; messages?: Message[]; pr
   const reason = () =>
     m().reason ? fromEngine(m().reason, { when: m().waitUntil ? untilReset(m().waitUntil!) : t('quota.unknown'), from: m().movedFrom ? vendorName(m().movedFrom!) : '', to: m().vendor ? vendorName(m().vendor!) : '' }) : '';
   const showsReason = () => !!m().reason && m().reason !== 'reason.waiting' && (!m().vendor || m().reason!.startsWith('reason.moved'));
+  const wokeWhy = () => {
+    const wake = woke();
+    return wake ? fromEngine(wake.why, { pr: wake.pr ? `#${wake.pr}` : '', checks: (wake.checks ?? []).join(', ') }) : '';
+  };
+  // What Faber did around this turn by itself: the message it sent, a history it sent again. A tooltip, never a row.
+  const byFaber = () => [wokeWhy(), m().note ? fromEngine(m().note) : ''].filter(Boolean).join(' · ');
   const headerTitle = () =>
-    [m().vendor ? vendorName(m().vendor!) : '', m().vendor && !standIn() ? prettyModel(m().model) : '', reason()]
+    [m().vendor ? vendorName(m().vendor!) : '', m().vendor && !standIn() ? prettyModel(m().model) : '', reason(), byFaber()]
       .filter(Boolean)
       .join(' · ');
   // A retry goes to the model the composer has now: the one place the model is chosen.
@@ -257,6 +311,11 @@ function Answer(props: Shared & { m: Accessor<Message>; messages?: Message[]; pr
         </span>
         <Show when={m().vendor && m().effort}><span class="effort">· {t(`answer.effort.${m().effort!}`)}</span></Show>
         <Show when={showsReason()}><em>· {reason()}</em></Show>
+        <Show when={byFaber()}>
+          <span class="by-faber" role="img" aria-label={byFaber()}>
+            <Icon name="loop" small />
+          </span>
+        </Show>
       </div>
       {/* After half an hour on its own, "keep going" tells at the top of the newest reply what happened while the person was away. */}
       <Show when={m().away || m().autoAnswers?.length}>
@@ -279,7 +338,6 @@ function Answer(props: Shared & { m: Accessor<Message>; messages?: Message[]; pr
       </Show>
       <Show when={m().pace}>{(pace) => <p class="pace">{t(`reason.pace.${pace().kind}`, { vendor: vendorName(pace().vendor), other: m().vendor ? vendorName(m().vendor!) : t('model.auto') })}</p>}</Show>
       <Show when={m().mode}><p class="pace">{fromEngine(m().mode)}</p></Show>
-      <Show when={m().note}><p class="pace">{fromEngine(m().note)}</p></Show>
       <QuotaCard id={props.conversationId} m={m()} usage={props.usage ?? []} />
       <Show when={steps()}>
         <details class="activity disclosure">
@@ -304,7 +362,7 @@ function Answer(props: Shared & { m: Accessor<Message>; messages?: Message[]; pr
           <Index each={agents()}>{(step) => <AgentRow step={step} streaming={working()} conversationId={props.conversationId} messageId={m().id} />}</Index>
         </div>
       </Show>
-      <Show when={(steps() || agents().length) && working() && latest()}>
+      <Show when={(steps() || agents().length) && working() && latest() && !finalText().trim()}>
         <div class="activity-latest" role="status" aria-live="polite" aria-atomic="true" title={latest()}>
           <span class="step">{latest()}</span>
           {/* The time is for the eye: a live region that changed every few seconds would keep talking. */}
@@ -334,10 +392,19 @@ function Answer(props: Shared & { m: Accessor<Message>; messages?: Message[]; pr
       <Parkeds parked={m().parked ?? []} more={m().parkedMore} surface="ask" />
       <div class="md" aria-busy={working()} onClick={openLinks}>
         <Markdown text={finalText()} />
-        <Show when={working() && !waiting().length && !m().waitUntil}>
+        <Show when={working() && !waiting().length && !m().waitUntil && !runningStep() && (typing() || !finalText().trim())}>
           <span class="cursor" aria-hidden="true" />
         </Show>
       </div>
+      {/* Words on screen and the agent still at work: the step it is on sits right under them, where the eye is. */}
+      <Show when={after()}>
+        <div class="activity-latest after" role="status" aria-live="polite" aria-atomic="true">
+          <span class="step">{after()}</span>
+          <Show when={longFor()}>
+            <span class="long" aria-hidden="true"> · {longFor()}</span>
+          </Show>
+        </div>
+      </Show>
       <Show when={m().files?.length}>
         <div class="files" aria-label={t('files.label')} ref={animateList}>
           <For each={m().files}>{(f) => <FileCard conversationId={props.conversationId} file={f} />}</For>
@@ -356,13 +423,13 @@ function Answer(props: Shared & { m: Accessor<Message>; messages?: Message[]; pr
         </div>
       </Show>
       <Show when={m().follow}>{(f) => <FollowLine conversationId={props.conversationId} f={f()} />}</Show>
-      <Show when={m().status === 'stopped'}>
+      {/* Only the person's own Stop is said: a turn Faber started and cut needs no word. */}
+      <Show when={m().status === 'stopped' && props.prompt && !props.prompt.wake}>
         <div class="note">{t('answer.stopped')}</div>
       </Show>
       <Show when={m().error && !quotaPending(m())}>
         <div class="note err">{fromEngine(m().error, { when: m().waitUntil ? untilReset(m().waitUntil!) : t('quota.unknown') })}</div>
       </Show>
-      <Show when={m().incomplete}><p class="note">{t('answer.meterIncomplete')}</p></Show>
       {/* "Keep going" stopped by itself after this reply: why, in one calm line (C001). */}
       <Show when={m().halt}>
         <p class="woke halt">
@@ -423,7 +490,9 @@ function ChecksLine(props: { c: Checks }) {
             {(f) => (
               <div class="checks-failed">
                 <code>{f.command}</code>
-                <pre>{(f.lines ?? []).join('')}</pre>
+                <Show when={(f.lines ?? []).join('').trim()} fallback={<p>{t('checks.noDetails')}</p>}>
+                  <pre>{(f.lines ?? []).join('')}</pre>
+                </Show>
               </div>
             )}
           </For>
@@ -530,19 +599,10 @@ function Mine(props: { editKey: string; m: Accessor<Message>; onBranch: OnBranch
   );
 }
 
-// A message Faber sent by itself ("keep going"): one quiet line where the person's bubble would be, since the words are
-// not theirs. What the agent was told stays in the tooltip.
-function Woke(props: { m: Accessor<Message> }) {
-  const wake = () => props.m().wake!;
-  return (
-    <div class="mine">
-      <p class="woke" title={props.m().text}>
-        <Icon name="loop" small />
-        {fromEngine(wake().why, { pr: wake().pr ? `#${wake().pr}` : '', checks: (wake().checks ?? []).join(', ') })}
-      </p>
-    </div>
-  );
-}
+/** A reply with nothing for the person: no words, no steps, nothing waiting on them. One that answered a message Faber sent by
+ * itself is not drawn at all. */
+const empty = (m: Message) =>
+  !m.text.trim() && !m.tools?.length && !m.thinking && !m.error && !m.checks && !m.follow && !m.halt && !m.permissions?.length && !m.parked?.length && !m.files?.length;
 
 // A message written while an answer was running. The person can take it back until it is sent; one already handed to the
 // running answer (`sending`) cannot be, and one that waits for the next turn can be sent by hand once nothing runs.
@@ -614,8 +674,16 @@ export function Thread(props: Shared & { messages: Message[]; queued?: QueuedTur
     <>
       <Index each={props.messages.slice(props.from)}>
         {(m, i) => (
-          <Show when={m().role === 'user'} fallback={<Answer {...props} m={m} prompt={prompt(props.from + i)} last={props.from + i === props.messages.length - 1} />}>
-            <Show when={!m().wake} fallback={<Woke m={m} />}>
+          <Show
+            when={m().role === 'user'}
+            fallback={
+              <Show when={!(prompt(props.from + i)?.wake && m().status !== 'streaming' && empty(m()))}>
+                <Answer {...props} m={m} prompt={prompt(props.from + i)} last={props.from + i === props.messages.length - 1} />
+              </Show>
+            }
+          >
+            {/* A message Faber sent by itself takes no row: the reply's header carries it (`woke` in Answer). */}
+            <Show when={!m().wake}>
               <Show when={`edit.${props.conversationId}.${m().id}`} keyed>
                 {(editKey) => <Mine editKey={editKey} m={m} onBranch={props.onBranch} />}
               </Show>
