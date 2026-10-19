@@ -302,7 +302,25 @@ svg.i.sm { width: 14px; height: 14px; }
 .afile { display: inline-flex; align-items: center; gap: 10px; min-width: 0; padding: 7px 12px 7px 9px; border-radius: var(--r-md); background: var(--s1); box-shadow: inset 0 0 0 1px var(--line-2); font-size: var(--fs-sm); }
 .afile .fi { flex: none; display: grid; place-items: center; width: 26px; height: 26px; border-radius: var(--r-xs); background: var(--accent-soft); color: var(--accent-text); }
 .afile > span:last-child { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.you img { display: block; max-width: 220px; max-height: 160px; border-radius: var(--r-sm); margin-bottom: 8px; }
+.you .shots { margin-bottom: 8px; }
+.shots { display: flex; flex-wrap: wrap; gap: 8px; }
+.zoom { display: block; padding: 0; line-height: 0; border-radius: var(--r-sm); cursor: zoom-in; box-shadow: 0 0 0 1px var(--line-2); transition: box-shadow var(--dur-fast); }
+.zoom:hover { box-shadow: 0 0 0 1px var(--control-line); }
+.zoom:focus-visible { outline: 2px solid var(--accent-text); outline-offset: 2px; }
+.zoom img { display: block; border-radius: inherit; background: var(--s3); object-fit: cover; }
+.you .zoom img { max-width: min(100%, 360px); max-height: 280px; }
+.lightbox { position: fixed; inset: 0; z-index: 60; display: grid; place-items: center; padding: 56px 88px; background: color-mix(in srgb, var(--bg) 90%, transparent); animation: veil-in var(--dur-ui) var(--ease) both; }
+.lightbox > img { max-width: 100%; max-height: 100%; min-width: 0; min-height: 0; object-fit: contain; border-radius: var(--r-md); box-shadow: var(--lift-shadow); animation: arrive var(--dur-arrive) var(--ease) both; }
+.lb-btn { position: absolute; display: grid; place-items: center; width: 44px; height: 44px; border-radius: 50%; background: var(--s2); color: var(--ink); box-shadow: 0 0 0 1px var(--line-2); transition: background var(--dur-fast), opacity var(--dur-fast); }
+.lb-btn:hover:not(:disabled) { background: var(--s3); }
+.lb-btn:disabled { opacity: 0.3; cursor: default; }
+.lb-btn:focus-visible { outline: 2px solid var(--accent-text); outline-offset: 2px; }
+.lb-close { top: 16px; right: 16px; }
+.lb-prev, .lb-next { top: 50%; margin-top: -22px; }
+.lb-prev { left: 20px; }
+.lb-next { right: 20px; }
+.lb-count { position: absolute; top: 24px; left: 50%; transform: translateX(-50%); font-size: var(--fs-sm); color: var(--ink-2); }
+@keyframes veil-in { from { opacity: 0; } }
 .you .edit { position: absolute; left: -44px; top: 10px; color: var(--ink-3); font-size: var(--fs-xs); visibility: hidden; }
 .you:hover .edit, .you .edit:focus-visible { visibility: visible; }
 .you.editing { width: 80%; display: grid; gap: 8px; }
@@ -420,7 +438,8 @@ details.thinking div { white-space: pre-wrap; padding: 6px 0 0 12px; border-left
 @keyframes arrive { from { opacity: 0; transform: translateY(var(--arrive-y)); } }
 .files { display: grid; gap: 8px; }
 .file { display: grid; gap: 8px; padding: 10px 12px; background: var(--s1); box-shadow: inset 0 0 0 1px var(--line-2); border-radius: var(--r-md); }
-.file img { max-width: 100%; max-height: 360px; border-radius: var(--r-sm); justify-self: start; background: var(--s3); }
+.file .zoom { justify-self: start; max-width: 100%; }
+.file img { max-width: 100%; max-height: 420px; }
 .file div { display: flex; align-items: center; gap: 10px; font-size: var(--fs-sm); min-width: 0; }
 .file span { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .file small { color: var(--ink-3); }

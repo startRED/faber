@@ -1,0 +1,12 @@
+{
+  "notes": {
+    "new": {
+      "en": "You can click a picture in a conversation to see it full size and move between the pictures with the arrows or the left and right keys.",
+      "pt-BR": "Você pode clicar numa imagem da conversa para vê-la em tela cheia e passar de uma para outra com as setas ou as teclas esquerda e direita.",
+      "es": "Puedes hacer clic en una imagen de la conversación para verla a pantalla completa y pasar de una a otra con las flechas o con las teclas izquierda y derecha.",
+      "fr": "Vous pouvez cliquer sur une image de la conversation pour la voir en grand et passer de l’une à l’autre avec les flèches ou les touches gauche et droite.",
+      "de": "Du kannst ein Bild in der Unterhaltung anklicken, um es groß zu sehen, und mit den Pfeilen oder den Tasten links und rechts zum nächsten wechseln."
+    }
+  },
+  "decisions": []
+}

@@ -4,6 +4,7 @@ import { Asks, Parkeds } from './Ask.tsx';
 import { copyItem, openMenu } from './contextmenu.ts';
 import { keep, kept, release, useDraft } from './unsent.ts';
 import { Icon, VendorMark } from './Glyphs.tsx';
+import { Thumb } from './Lightbox.tsx';
 import { QuotaCard } from './QuotaCard.tsx';
 import { html, Markdown, openLinks } from './markdown.tsx';
 import { agentMeta, ChangedLines, openedAgent, SourceList, showAgent, tellAbout, ToolChip } from './AgentChat.tsx';
@@ -27,7 +28,7 @@ function FileCard(props: { conversationId: string; file: { path: string; size: n
   );
   return (
     <div class="file">
-      <Show when={preview()}>{(src) => <img src={src()} alt={props.file.path} />}</Show>
+      <Show when={preview()}>{(src) => <Thumb src={src()} alt={props.file.path} />}</Show>
       <div>
         <span>{props.file.path}</span>
         <small>{bytes(props.file.size)}</small>
@@ -384,7 +385,9 @@ function Mine(props: { editKey: string; m: Accessor<Message>; onBranch: OnBranch
             </div>
           </Show>
           <div class="you">
-            <For each={props.m().images}>{(img) => <img alt={t('mine.image')} src={`data:${img.mediaType};base64,${img.base64}`} />}</For>
+            <div class="shots">
+              <For each={props.m().images}>{(img) => <Thumb alt={t('mine.image')} src={`data:${img.mediaType};base64,${img.base64}`} />}</For>
+            </div>
             {props.m().text}
             <button class="edit" onClick={() => setEditing(props.m().text)} aria-label={t('mine.editLabel')}>
               {t('mine.edit')}
@@ -443,7 +446,9 @@ function Queued(props: { conversationId: string; q: QueuedTurn; busy: boolean; o
       </Show>
       <div class="you queued">
         <span class="queue-badge">{t('queue.label')}</span>
-        <For each={props.q.images}>{(img) => <img alt={t('mine.image')} src={`data:${img.mediaType};base64,${img.base64}`} />}</For>
+        <div class="shots">
+          <For each={props.q.images}>{(img) => <Thumb alt={t('mine.image')} src={`data:${img.mediaType};base64,${img.base64}`} />}</For>
+        </div>
         <Show when={props.q.text}>
           <div class="queue-text">{props.q.text}</div>
         </Show>

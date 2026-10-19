@@ -18,6 +18,7 @@ import './check.check.ts';
 import './composer.check.ts';
 import './contextmenu.check.ts';
 import './hole.check.ts';
+import './lightbox.check.ts';
 import './effort.check.ts';
 import './first-frame.check.ts';
 import './idle.check.ts';

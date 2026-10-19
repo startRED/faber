@@ -83,6 +83,11 @@ inside its own area.
   (`ui/markdown.tsx`): a block whose source did not change keeps its DOM and only the open one is parsed and sanitised
   again. A tick that changed only the tools builds no text. Everything that reaches the page passes DOMPurify.
 
+### Pictures
+
+- A picture the person sends shows up to 360 by 280 px, and a picture Faber sends in a file card up to 420 px tall, both with a hairline edge and a zoom cursor.
+- Any of them opens in the image viewer (`ui/Lightbox.tsx`): the picture as large as the window allows on a veil, round arrows on both sides (dimmed at the first and last), the left and right keys, "2 of 5" on top, a close button, Esc and a click outside. It steps through the pictures of the conversation, the person's and Faber's together. Focus goes to the close button and comes back to the thumbnail. Reduced motion shows it without the fade.
+
 ### Work log
 
 - The work log and a helper's row share one disclosure style (`.disclosure`: a quiet card, a chevron, the hover).

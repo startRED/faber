@@ -46,6 +46,7 @@ import { tutorialDue } from './tour.ts';
 import { Tutorial } from './Tutorial.tsx';
 import { Welcome } from './Welcome.tsx';
 import { UpdateStage } from './UpdateStage.tsx';
+import { Lightbox } from './Lightbox.tsx';
 import { WhatsNew } from './WhatsNew.tsx';
 import { mac, WindowControls } from './WindowControls.tsx';
 
@@ -931,7 +932,7 @@ export function App(props: { initial: AppState; update?: UpdateStatus; inbox: { 
                           <Hole avoid={() => [...work!.querySelectorAll('.welcome-grid .peek, .welcome-grid .w-main')]} />
                         </Show>
                       </Show>
-                      <div class="thread" classList={{ welcome: newChat() }} ref={(el) => {
+                      <div class="thread" data-gallery classList={{ welcome: newChat() }} ref={(el) => {
                         thread = el;
                         onMount(() => {
                           // Keep the tail visible as the composer grows, without pulling a reader back down.
@@ -1029,6 +1030,7 @@ export function App(props: { initial: AppState; update?: UpdateStatus; inbox: { 
       <Show when={notesOpen()}>
         <WhatsNew version={state().version} notes={notes()} onClose={closeNotes} />
       </Show>
+      <Lightbox />
     </div>
   );
 }
