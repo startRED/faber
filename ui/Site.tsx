@@ -16,16 +16,62 @@ export interface OpenSite {
 export interface SiteStep {
   call: string;
   words: string;
+  /** The screen sizes a check looked at the page on, a picture each, in order. */
+  looks?: SiteLook[];
+}
+
+/** The page at one screen size, in a check at several (`engine/src/browser.rs`, `looks_text`). */
+export interface SiteLook {
+  /** The picture's call id: the call's own with the size's place after it. */
+  picture: string;
+  screen: 'site.screen.pc' | 'site.screen.mac' | 'site.screen.tablet' | 'site.screen.phone';
+  width: number;
+  height: number;
+  fits: boolean;
+}
+
+const SCREENS = { 'a PC': 'site.screen.pc', 'a MacBook': 'site.screen.mac', 'a tablet': 'site.screen.tablet', 'a phone': 'site.screen.phone' } as const;
+const SIZE = /^(a PC|a MacBook|a tablet|a phone), (\d+)x(\d+) at [\d.]+x/;
+
+/** Faber's own lines of an answer, above the page's words. */
+const headOf = (tool: ToolUse) => (tool.output ?? '').split("\nThe page's visible text follows.", 1)[0]!;
+
+/** The sizes a check looked at, read from Faber's own lines ("Size 2 of 6: a phone, 390x844 at 3x: fits."). */
+export function looksOf(tool: ToolUse): SiteLook[] {
+  if (tool.name !== 'Browser' || tool.ok !== true) return [];
+  return headOf(tool)
+    .split('\n')
+    .flatMap((line) => {
+      const [, place, rest] = /^Size (\d+) of \d+: (.*)$/.exec(line) ?? [];
+      const [said, screen, width, height] = SIZE.exec(rest ?? '') ?? [];
+      if (!said) return [];
+      // Only Faber's words for a page wider than the screen, or cut by its edge, say it does not fit; a size the person's turn
+      // stopped, or one with no picture, says nothing of it.
+      const fits = !/^: (?:\d+ px wider than the screen|cut by the right edge)/.test(rest!.slice(said.length));
+      return [{ picture: `${tool.id}-s${place}`, screen: SCREENS[screen as keyof typeof SCREENS], width: Number(width), height: Number(height), fits }];
+    });
+}
+
+/** The size a page is shown at, from Faber's own line, when the agent chose one. */
+function sizeOf(tool: ToolUse): string | undefined {
+  const [said, screen, width, height] = /^Shown at the size of (a PC|a MacBook|a tablet|a phone), (\d+)x(\d+)/m.exec(headOf(tool)) ?? [];
+  return said ? t('site.size', { screen: t(SCREENS[screen as keyof typeof SCREENS]), width: width!, height: height! }) : undefined;
 }
 
 const quoted = (text: unknown) => (typeof text === 'string' ? text.replace(/\s+/g, ' ').trim() : '');
 
 /** A browser call in plain words. What the agent typed never shows, only where: it can be a search, a name or a secret. */
 export function stepWords(tool: ToolUse): string {
-  const input = (tool.input ?? {}) as { url?: unknown; action?: unknown; target?: unknown; up?: unknown };
+  const input = (tool.input ?? {}) as { url?: unknown; action?: unknown; target?: unknown; up?: unknown; size?: unknown };
   if (typeof input.url === 'string') return t('site.step.open', { host: hostOf(siteOf(tool)?.url ?? input.url) });
   const target = quoted(input.target);
+  if (input.size !== undefined && input.size !== null) {
+    const size = sizeOf(tool);
+    return size ? t('site.step.size', { size }) : t('site.step.ownSize');
+  }
   switch (input.action) {
+    case 'sizes':
+      return t('site.step.sizes', { n: looksOf(tool).length });
     case 'click':
       return t('site.step.click', { target });
     case 'type':
@@ -41,7 +87,12 @@ export function stepWords(tool: ToolUse): string {
 
 /** Every call of a reply that the browser did, in order: the log the page view steps through. */
 export const stepsOf = (tools: ToolUse[]): SiteStep[] =>
-  tools.filter((tool) => tool.name === 'Browser' && tool.ok === true).map((tool) => ({ call: tool.id, words: stepWords(tool) }));
+  tools
+    .filter((tool) => tool.name === 'Browser' && tool.ok === true)
+    .map((tool) => {
+      const looks = looksOf(tool);
+      return { call: tool.id, words: stepWords(tool), ...(looks.length ? { looks } : {}) };
+    });
 
 /** What "While you were away" shows of the browser (step 8): the latest step on each page the run left over its last `turns`
  * replies, the newest four, each with the picture taken after it. */
@@ -199,6 +250,32 @@ export function SiteCard(props: { conversationId: string; tool: ToolUse; site: {
   );
 }
 
+/** A check at several screen sizes, in the page's place: each size's picture with its name, and where the page runs past the
+ * screen's edge, said in words. The pictures load only while the step is picked. */
+function SiteLooks(props: { conversationId: string; looks: SiteLook[] }) {
+  return (
+    <ul class="site-looks" aria-label={t('site.sizes')}>
+      <Index each={props.looks}>
+        {(look) => {
+          const [picture] = createResource(() => look().picture, (call) => api.sitePicture(props.conversationId, call).catch(() => null));
+          const size = () => t('site.size', { screen: t(look().screen), width: look().width, height: look().height });
+          return (
+            <li>
+              <Show when={picture()} fallback={<span class="site-look-none" />}>
+                {(src) => <img src={src()} alt={size()} style={{ 'aspect-ratio': `${look().width} / ${look().height}` }} />}
+              </Show>
+              <span>{size()}</span>
+              <Show when={!look().fits}>
+                <span class="site-look-wider">{t('site.size.wider')}</span>
+              </Show>
+            </li>
+          );
+        }}
+      </Index>
+    </ul>
+  );
+}
+
 /** The page in the running column: Faber's browser sits over this box, measured here, and leaves when the box goes. Every
  * move of the box moves it, and it is placed again whenever the window changes size. */
 export function SitePane(props: { site: OpenSite; onBack: () => void; onClose: () => void }) {
@@ -249,7 +326,8 @@ export function SitePane(props: { site: OpenSite; onBack: () => void; onClose: (
   );
   // Another card opened in the same pane starts on its live page.
   createEffect(on(() => props.site, () => setPicked(undefined), { defer: true }));
-  const pick = (call?: string) => setPicked(call === steps().at(-1)?.call ? undefined : call);
+  // The latest step is the live page, unless it is a check at several sizes: its pictures are what it saw.
+  const pick = (call?: string) => setPicked(call === steps().at(-1)?.call && !steps().at(-1)?.looks ? undefined : call);
   const keys = (e: KeyboardEvent) => {
     const list = steps();
     // From the row that has the focus: the agent may have added steps since it got it.
@@ -279,14 +357,27 @@ export function SitePane(props: { site: OpenSite; onBack: () => void; onClose: (
       </div>
       <div class="rc-body side-body site-body">
         <p class="side-meta">{t('site.meta', { host: hostOf(live()) })}</p>
-        <div class="site-view" ref={(el) => (box = el)} role="img" aria-label={t('site.view', { title: title() })}>
+        {/* The sizes of a check are a list a screen reader walks, never one image. */}
+        <div
+          class="site-view"
+          ref={(el) => (box = el)}
+          role={picked() && steps()[pickedAt()]?.looks ? undefined : 'img'}
+          aria-label={picked() && steps()[pickedAt()]?.looks ? undefined : t('site.view', { title: title() })}
+        >
           <Show when={picked()}>
-            <Show when={still()} fallback={<Show when={!still.loading}><p class="site-none">{t('site.step.noPicture')}</p></Show>}>
-              {(src) => <img src={src()} alt="" />}
+            <Show
+              when={steps()[pickedAt()]?.looks}
+              fallback={
+                <Show when={still()} fallback={<Show when={!still.loading}><p class="site-none">{t('site.step.noPicture')}</p></Show>}>
+                  {(src) => <img src={src()} alt="" />}
+                </Show>
+              }
+            >
+              {(looks) => <SiteLooks conversationId={props.site.conversationId} looks={looks()} />}
             </Show>
           </Show>
         </div>
-        <Show when={steps().length > 1}>
+        <Show when={steps().length > 1 || steps().some((step) => step.looks)}>
           <div class="site-log">
             <Show when={picked()}>
               <button class="btn" onClick={() => setPicked(undefined)}>

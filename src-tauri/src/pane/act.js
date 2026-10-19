@@ -189,6 +189,26 @@ export default (request) => {
     }
     return { ok: true, turn, changed };
   }
+  if (request.kind === 'fits') {
+    // Whether the page fits the screen's width: how far it runs past it, so it scrolls sideways, and the words of the first
+    // few things a person sees cut by the right edge (partly on screen; one wholly off it is a closed menu or a slide).
+    const width = document.documentElement.clientWidth || window.innerWidth;
+    const wider = Math.max(0, Math.round(document.documentElement.scrollWidth - width));
+    const cut = [];
+    for (const el of document.body ? document.body.querySelectorAll('*') : []) {
+      if (cut.length >= 3) break;
+      if (el.children.length || !seen(el)) continue;
+      const box = el.getBoundingClientRect();
+      const words = String(el.innerText || el.getAttribute('aria-label') || el.getAttribute('alt') || '').replace(/\s+/g, ' ').trim().slice(0, 60);
+      if (box.right > width + 1 && box.left < width && words && !cut.includes(words)) cut.push(words);
+    }
+    // Its pictures reach the agent, so a page with a form or a button on view that commits money is a payment here too,
+    // even with a saved card and no card field: it gets no picture.
+    const pays =
+      all('form').some((f) => seen(f) && paysForm(f)) ||
+      all('button, input[type=submit], input[type=image], [role=button]').some((c) => seen(c) && commits(c));
+    return { ok: true, turn: turn || (pays ? 'a payment' : ''), wider, cut };
+  }
   if (request.kind === 'scroll') {
     unmark();
     window.scrollBy(0, (request.down ? 1 : -1) * window.innerHeight * 0.8);

@@ -136,8 +136,17 @@ fn called(name: &Value, tools: Tools) -> Option<&'static str> {
 }
 
 /// The answer to a tool call, once the helper is done.
-pub fn mcp_result(rpc: &Value, ok: bool, text: &str) -> Value {
-    json!({ "jsonrpc": "2.0", "id": rpc, "result": { "content": [{ "type": "text", "text": text }], "isError": !ok } })
+pub fn mcp_result(rpc: &Value, ok: bool, text: &str, pictures: &[String]) -> Value {
+    let mut content = vec![json!({ "type": "text", "text": text })];
+    content.extend(pictures.iter().map(|p| json!({ "type": "image", "data": p, "mimeType": "image/jpeg" })));
+    json!({ "jsonrpc": "2.0", "id": rpc, "result": { "content": content, "isError": !ok } })
+}
+
+/// The same answer as a Codex dynamic tool's result: the text, then each JPEG picture (base64) as an image the model sees.
+pub fn dynamic_result(ok: bool, text: &str, pictures: &[String]) -> Value {
+    let mut items = vec![json!({ "type": "inputText", "text": text })];
+    items.extend(pictures.iter().map(|p| json!({ "type": "inputImage", "imageUrl": format!("data:image/jpeg;base64,{p}") })));
+    json!({ "success": ok, "contentItems": items })
 }
 
 /// The other vendor: a helper always comes from the one that is not running the conversation.
@@ -242,6 +251,30 @@ mod tests {
     }
 
     // R161 step 7: the browser sits beside the helper, and a session lists and answers only the tools it offers.
+    #[test]
+    fn pictures_reach_the_agent_after_the_text_in_both_clis_and_none_is_only_text() {
+        let pictures = ["AQI=".to_string(), "Aw==".to_string()];
+        let claude = mcp_result(&json!(7), true, "Checked", &pictures);
+        assert_eq!(
+            claude["result"]["content"],
+            json!([
+                { "type": "text", "text": "Checked" },
+                { "type": "image", "data": "AQI=", "mimeType": "image/jpeg" },
+                { "type": "image", "data": "Aw==", "mimeType": "image/jpeg" }
+            ])
+        );
+        let codex = dynamic_result(true, "Checked", &pictures[..1]);
+        assert_eq!(
+            codex,
+            json!({ "success": true, "contentItems": [
+                { "type": "inputText", "text": "Checked" },
+                { "type": "inputImage", "imageUrl": "data:image/jpeg;base64,AQI=" }
+            ] })
+        );
+        assert_eq!(mcp_result(&json!(1), false, "No", &[])["result"]["content"], json!([{ "type": "text", "text": "No" }]));
+        assert_eq!(dynamic_result(false, "No", &[])["contentItems"], json!([{ "type": "inputText", "text": "No" }]));
+    }
+
     #[test]
     fn the_mcp_server_holds_only_the_tools_the_session_offers() {
         let list = |tools| match mcp(&json!({"method":"tools/list","jsonrpc":"2.0","id":1}), tools) {

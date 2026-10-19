@@ -232,6 +232,8 @@ pub enum SessionCommand {
         id: String,
         ok: bool,
         text: String,
+        /// JPEG pictures that go with the text, base64, in order: the agent sees them (a check at several screen sizes).
+        pictures: Vec<String>,
     },
     /// Compact the conversation's context now (Claude Code: the `/compact` command as the next line; Codex: the thread's
     /// compaction request). It ends like a turn, with a `Done`.
@@ -278,7 +280,11 @@ impl Session {
         delivered
     }
     pub fn helper_reply(&self, id: &str, ok: bool, text: String) {
-        (self.send)(SessionCommand::HelperReply { id: id.to_string(), ok, text });
+        self.helper_reply_with_pictures(id, ok, text, Vec::new());
+    }
+    /// Like `helper_reply`, with JPEG pictures (base64) the agent sees after the text.
+    pub fn helper_reply_with_pictures(&self, id: &str, ok: bool, text: String, pictures: Vec<String>) {
+        (self.send)(SessionCommand::HelperReply { id: id.to_string(), ok, text, pictures });
     }
     pub fn compact(&self) {
         (self.send)(SessionCommand::Compact);

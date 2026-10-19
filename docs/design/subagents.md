@@ -81,7 +81,12 @@ browser during the reply, the log of its steps fills at most a third of the colu
 third ink (a number in the data face, then the step's words; what the agent typed never shows, only the field), the step
 on view in the first ink on the second surface. Picking a step puts the picture taken after it in the box, from the page's
 top, and moves the live page out of the window; the latest step, or "Back to the live page" above the log, brings it back.
-Arrow keys, Home and End walk the log. Nothing in it moves. Where the page asks for a login, a captcha or a
+Arrow keys, Home and End walk the log. Nothing in it moves. A check at several screen sizes is one step, "Checked it on 6
+screen sizes", and its log shows even when it is the reply's only step; picking it, even as the latest, puts a grid in
+the box instead of one picture: each size's picture whole at its own shape (columns of at least 132 px, at most 240 px
+tall, the hairline edge, 4 px radius), its name under it in the third ink and the data size ("Phone · 390 × 844"), and
+"Runs past the edge" in the conversation's amber where the page is wider than that screen or the edge cuts something. A
+size with no picture keeps its place as a plain block of the second surface. Where the page asks for a login, a captcha or a
 payment the card has one line in the conversation's other amber, with the 2 px edge of a stuck subagent's line: "Your
 turn: log in on this page", and no picture, since one could hold what the person typed; the agent cannot click or type
 there.

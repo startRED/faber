@@ -1246,10 +1246,10 @@ async fn serve(started: std::io::Result<proc::Proc>, opts: CodexServerOptions, m
                         };
                         let _ = ack.send(delivery);
                     }
-                    SessionCommand::HelperReply { id, ok, text } => {
+                    SessionCommand::HelperReply { id, ok, text, pictures } => {
                         let Some(t) = threads.get_mut(&key) else { continue };
                         let Some(request) = t.helpers.remove(&id) else { continue };
-                        let _ = proc::write_line(&mut *stdin, &json!({"id":request,"result":{"success":ok,"contentItems":[{"type":"inputText","text":text}]}})).await;
+                        let _ = proc::write_line(&mut *stdin, &json!({"id":request,"result":crate::helper::dynamic_result(ok, &text, &pictures)})).await;
                     }
                     SessionCommand::Interrupt => {
                         if let Some(t) = threads.get_mut(&key) { for job in t.commands.drain(..) { job.abort(); } }

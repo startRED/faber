@@ -766,10 +766,10 @@ pub fn start_claude(opts: ClaudeOptions, on_event: EventSink) -> Session {
                         };
                         let _ = ack.send(delivery);
                     }
-                    Some(SessionCommand::HelperReply { id, ok, text }) => {
+                    Some(SessionCommand::HelperReply { id, ok, text, pictures }) => {
                         let Some((request_id, rpc)) = helpers.remove(&id) else { continue };
                         let msg = json!({ "type": "control_response", "response": { "subtype": "success", "request_id": request_id,
-                            "response": { "mcp_response": crate::helper::mcp_result(&rpc, ok, &text) } } });
+                            "response": { "mcp_response": crate::helper::mcp_result(&rpc, ok, &text, &pictures) } } });
                         let _ = proc::write_line(&mut *stdin, &msg).await;
                     }
                     Some(SessionCommand::Interrupt) => {

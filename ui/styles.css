@@ -504,6 +504,12 @@ details.thinking div { white-space: pre-wrap; padding: 6px 0 0 12px; border-left
 /* A step of the log stands in for the live page: the picture the browser took after it, from the page's top. */
 .site-view img { display: block; width: 100%; height: 100%; object-fit: cover; object-position: top; }
 .site-none { margin: 0; padding: 16px; color: var(--ink-3); font-size: var(--fs-sm); }
+/* A check at several screen sizes: each size's picture whole, at its own shape, with its name under it. Still, like the log. */
+.site-looks { display: grid; grid-template-columns: repeat(auto-fill, minmax(132px, 1fr)); align-items: start; gap: 16px 12px; height: 100%; margin: 0; padding: 12px; list-style: none; overflow-y: auto; }
+.site-looks li { display: flex; flex-direction: column; gap: 4px; min-width: 0; color: var(--ink-3); font-size: var(--fs-xs); }
+.site-view .site-looks img { width: 100%; height: auto; max-height: 240px; object-fit: contain; object-position: top left; border-radius: var(--r-xs); box-shadow: 0 0 0 1px var(--line-2); }
+.site-look-none { display: block; aspect-ratio: 16 / 10; border-radius: var(--r-xs); background: var(--s2); }
+.site-look-wider { color: var(--amber-ink); }
 /* What the agent did on its pages, oldest first: one quiet row per step, the shown one in the first ink. It never moves. */
 .site-log { flex: none; display: flex; flex-direction: column; gap: 8px; padding-top: 12px; max-height: 34%; min-height: 0; }
 .site-log .btn { align-self: flex-start; }

@@ -17,7 +17,8 @@
 mod native;
 
 use base64::Engine as _;
-use faber_engine::browser::{Browser, MAX_TEXT, MAX_TITLE, MAX_URL, Page, Request, Turn};
+use faber_engine::browser::{Browser, Look, MAX_CUT, MAX_TEXT, MAX_TITLE, MAX_URL, Page, Request, Turn};
+use faber_engine::screens::Viewport;
 use serde_json::{Value, json};
 use std::future::Future;
 use std::pin::Pin;
@@ -49,6 +50,26 @@ fn act_function() -> &'static str {
 }
 /// The picture in the reply is this share of the page's size.
 const PICTURE_SCALE: f64 = 0.375;
+/// The longest side of a picture at a screen size of the agent's, in the picture's pixels, whatever the screen's density.
+const LOOK_SIDE: f64 = 640.0;
+/// How long a page has to lay itself out again at a new screen size before it is looked at.
+const RESIZED: Duration = Duration::from_millis(400);
+
+/// The share of a page at `size` its picture takes: the capture counts each of the screen's device pixels, so a dense phone
+/// screen is scaled down further than a PC's, and every picture's longest side is `LOOK_SIDE`.
+fn look_scale(size: &Viewport) -> f64 {
+    (LOOK_SIDE / (f64::from(size.width.max(size.height)) * size.scale)).min(1.0)
+}
+
+/// The DevTools parameters that draw the page at `size`, as that screen would: its width, height and density, and a phone's
+/// or tablet's layout rules and touch.
+fn metrics(size: &Viewport) -> (Value, Value) {
+    let mobile = size.mobile();
+    (
+        json!({ "width": size.width, "height": size.height, "deviceScaleFactor": size.scale, "mobile": mobile }),
+        json!({ "enabled": mobile, "maxTouchPoints": if mobile { 5 } else { 1 } }),
+    )
+}
 
 /// Whether the pane may load `url`: a web page, never one of Faber's own origins (nor, in a development build, the screen's
 /// own dev server).
@@ -99,6 +120,10 @@ struct State {
     /// Pages Faber loaded (the agent's, or a card's) that have not finished: that many next finishes are not sites the
     /// person went to. A load that never finishes leaves one more skipped: the list can fall short, never say more.
     skip_finish: u32,
+    /// The screen size the agent chose for its pages (`Request::Size`), none for the pane's own; kept until it closes.
+    size: Option<Viewport>,
+    /// The page is drawn at a size of the agent's, not the pane's: the person taking the pane gets the pane's own back.
+    emulated: bool,
 }
 
 /// The screen's boxes the pane is placed over, named by numbers that only grow while the screen lives. A box that let the
@@ -276,6 +301,7 @@ impl Pane {
             s.shown = false;
             s.reported = None;
             s.visited.clear();
+            (s.size, s.emulated) = (None, false);
             s.webview.take()
         };
         self.looking.send_replace(false);
@@ -306,6 +332,15 @@ impl Pane {
             webview.set_size(LogicalSize { width, height }).is_ok() && webview.set_position(LogicalPosition { x, y }).is_ok()
         })
         .await;
+        // The person sees the page at the pane's own size, never at a screen size the agent chose; its next call draws it so
+        // again. Under `acting`, so a check at several sizes never changes the size under their hands.
+        if placed && crate::lock(&self.state).emulated {
+            let _acting = self.acting.lock().await;
+            if self.call("Emulation.clearDeviceMetricsOverride", json!({})).await.is_ok() {
+                let _ = self.call("Emulation.setTouchEmulationEnabled", json!({ "enabled": false })).await;
+                crate::lock(&self.state).emulated = false;
+            }
+        }
         self.touch();
         placed
     }
@@ -447,6 +482,67 @@ impl Pane {
         })
     }
 
+    /// Draws the page at `size` (none: the pane's own), unless the person took the pane since the call began: under `acting`,
+    /// so their taking it waits for the change and then gets the pane's own size back (`place`).
+    async fn emulate(&self, size: Option<Viewport>, taken: u64) -> Result<(), String> {
+        let _acting = self.acting.lock().await;
+        self.person_took_it(taken)?;
+        let Some(size) = size else {
+            if crate::lock(&self.state).emulated {
+                self.call("Emulation.clearDeviceMetricsOverride", json!({})).await?;
+                self.call("Emulation.setTouchEmulationEnabled", json!({ "enabled": false })).await?;
+                crate::lock(&self.state).emulated = false;
+            }
+            return Ok(());
+        };
+        let (screen, touch) = metrics(&size);
+        crate::lock(&self.state).emulated = true;
+        self.call("Emulation.setDeviceMetricsOverride", screen).await?;
+        self.call("Emulation.setTouchEmulationEnabled", touch).await?;
+        Ok(())
+    }
+
+    /// The page at each of `sizes`, a picture and whether it fits each, then back at the size it had. A page that is the
+    /// person's turn stops the check there, with no picture.
+    async fn looks(&self, sizes: &[Viewport], taken: u64) -> Result<Vec<Look>, String> {
+        let looked = self.each_size(sizes, taken).await;
+        // Back at the size it had, whether or not every size was looked at; one the person took gets the pane's own (`place`).
+        let size = crate::lock(&self.state).size;
+        let back = self.emulate(size, taken).await;
+        let looks = looked?;
+        back?;
+        tokio::time::sleep(RESIZED).await;
+        Ok(looks)
+    }
+
+    async fn each_size(&self, sizes: &[Viewport], taken: u64) -> Result<Vec<Look>, String> {
+        let mut looks = Vec::new();
+        for size in sizes {
+            self.emulate(Some(*size), taken).await?;
+            tokio::time::sleep(RESIZED).await;
+            let expression = format!(
+                "(() => {{ const act = {}; const turn = act({{ kind: 'read', watch: true }}).turn; const fits = act({{ kind: 'fits' }}); \
+                 return {{ turn: fits.turn || turn, wider: fits.wider, cut: fits.cut, x: scrollX, y: scrollY }}; }})()",
+                act_function()
+            );
+            let context = self.world().await?;
+            let value = self.evaluate_in(context, &expression, taken, false).await?;
+            let turn = value["turn"].as_str().and_then(Turn::from_words);
+            let wider = value["wider"].as_u64().unwrap_or(0).min(100_000) as u32;
+            let cut: Vec<String> =
+                value["cut"].as_array().into_iter().flatten().filter_map(Value::as_str).take(MAX_CUT).map(str::to_string).collect();
+            let (picture, turn) = match turn {
+                Some(turn) => (None, Some(turn)),
+                None => self.picture(context, &value, Some(size), taken).await?,
+            };
+            looks.push(Look { size: *size, picture, wider, cut, turn });
+            if turn.is_some() {
+                break;
+            }
+        }
+        Ok(looks)
+    }
+
     async fn act_page(self: Arc<Self>, conversation: String, request: Request) -> Result<Page, String> {
         let _turn = self.take().await?;
         let (mine, taken, reported) = {
@@ -478,7 +574,22 @@ impl Pane {
             }
             Request::Scroll { down } => Some(json!({ "kind": "scroll", "down": down })),
             Request::Back => Some(json!({ "kind": "back" })),
+            Request::Size(size) => {
+                crate::lock(&self.state).size = *size;
+                None
+            }
+            Request::Sizes(_) => None,
         };
+        // The size the agent chose holds for every call, after the person had the pane and on a page just opened; a check at
+        // several sizes that was cut off (an error, the engine's deadline) left another drawn, which goes here.
+        let (size, emulated) = {
+            let s = crate::lock(&self.state);
+            (s.size, s.emulated)
+        };
+        if size.is_some() || emulated {
+            self.touch();
+            self.emulate(size, taken).await?;
+        }
         let mut navigated = matches!(request, Request::Open(_));
         // The turn the action itself refused: the page is the same and stays the person's, whatever the next look says.
         let mut refused = None;
@@ -497,10 +608,20 @@ impl Pane {
             let _ = tokio::time::timeout(LOAD, loads.wait_for(|(_, finished)| *finished > before)).await;
             // Pages that draw themselves after the load get a moment.
             tokio::time::sleep(Duration::from_millis(600)).await;
-        } else if !matches!(request, Request::Read) && refused.is_none() {
+        } else if matches!(request, Request::Size(_)) {
+            tokio::time::sleep(RESIZED).await;
+        } else if !matches!(request, Request::Read | Request::Sizes(_)) && refused.is_none() {
             tokio::time::sleep(Duration::from_millis(300)).await;
         }
+        let looks = match &request {
+            Request::Sizes(sizes) => {
+                self.touch();
+                self.looks(sizes, taken).await?
+            }
+            _ => Vec::new(),
+        };
         let (mut page, href) = self.read(refused, taken).await?;
+        page.looks = looks;
         let mut s = crate::lock(&self.state);
         // The person took the pane after the last look: this answer is old, and their use is the next one's to tell.
         if s.taken != taken {
@@ -532,41 +653,59 @@ impl Pane {
         let context = self.world().await?;
         let value = self.evaluate_in(context, &expression, taken, false).await?;
         let text = |key: &str| value[key].as_str().unwrap_or_default().to_string();
-        let at = |key: &str| value[key].as_f64().filter(|v| v.is_finite() && *v >= 0.0).unwrap_or(0.0).min(1e7);
         let mut turn = refused.or_else(|| Turn::from_words(&text("turn")));
+        let size = crate::lock(&self.state).size;
         let mut picture = None;
         if turn.is_none() {
-            self.person_took_it(taken)?;
-            picture = self
-                .call(
-                    "Page.captureScreenshot",
-                    json!({
-                        "format": "jpeg",
-                        "quality": 60,
-                        "clip": { "x": at("x"), "y": at("y"), "width": SIZE.width, "height": SIZE.height, "scale": PICTURE_SCALE }
-                    }),
-                )
-                .await
-                .ok()
-                .and_then(|shot| shot["data"].as_str().and_then(|d| base64::engine::general_purpose::STANDARD.decode(d).ok()));
-            // A login or a payment that came up while the picture was taken is in it, and so is anything the page changed
-            // meanwhile (it cannot be told from here what it was): the picture is dropped. A page that went to another document
-            // took the world with it.
-            let settle = format!("({})({{ kind: 'settle' }})", act_function());
-            match self.evaluate_in(context, &settle, taken, false).await {
-                Ok(after) => {
-                    turn = after["turn"].as_str().and_then(Turn::from_words);
-                    if turn.is_some() || after["changed"].as_bool() != Some(false) {
-                        picture = None;
-                    }
-                }
-                Err(_) if self.person_took_it(taken).is_ok() => picture = None,
-                Err(e) => return Err(e),
-            }
+            (picture, turn) = self.picture(context, &value, size.as_ref(), taken).await?;
         }
         self.person_took_it(taken)?;
-        let page = Page { url: text("url"), title: text("title"), text: text("text"), picture, turn, ..Page::default() };
+        let page = Page { url: text("url"), title: text("title"), text: text("text"), picture, turn, size, ..Page::default() };
         Ok((page, text("href")))
+    }
+
+    /// A picture of what is in view at `size` (none: the pane's own), from where `seen` says the page is scrolled to, after a
+    /// look that started watching the page (`kind: 'read', watch: true`). A login or a payment that came up while it was
+    /// taken is in it, and so is anything the page changed meanwhile (it cannot be told from here what it was): the picture
+    /// is dropped, and the turn the page shows then is answered. A page that went to another document took the world with it.
+    async fn picture(
+        &self,
+        context: i64,
+        seen: &Value,
+        size: Option<&Viewport>,
+        taken: u64,
+    ) -> Result<(Option<Vec<u8>>, Option<Turn>), String> {
+        let at = |key: &str| seen[key].as_f64().filter(|v| v.is_finite() && *v >= 0.0).unwrap_or(0.0).min(1e7);
+        let (width, height, scale) = match size {
+            Some(size) => (f64::from(size.width), f64::from(size.height), look_scale(size)),
+            None => (SIZE.width, SIZE.height, PICTURE_SCALE),
+        };
+        self.person_took_it(taken)?;
+        let mut picture = self
+            .call(
+                "Page.captureScreenshot",
+                json!({
+                    "format": "jpeg",
+                    "quality": 60,
+                    "clip": { "x": at("x"), "y": at("y"), "width": width, "height": height, "scale": scale }
+                }),
+            )
+            .await
+            .ok()
+            .and_then(|shot| shot["data"].as_str().and_then(|d| base64::engine::general_purpose::STANDARD.decode(d).ok()));
+        let settle = format!("({})({{ kind: 'settle' }})", act_function());
+        let mut turn = None;
+        match self.evaluate_in(context, &settle, taken, false).await {
+            Ok(after) => {
+                turn = after["turn"].as_str().and_then(Turn::from_words);
+                if turn.is_some() || after["changed"].as_bool() != Some(false) {
+                    picture = None;
+                }
+            }
+            Err(_) if self.person_took_it(taken).is_ok() => picture = None,
+            Err(e) => return Err(e),
+        }
+        Ok((picture, turn))
     }
 }
 
@@ -711,6 +850,20 @@ mod tests {
             drop(busy);
             assert_eq!(taking.await, "placed", "and goes on once the action is over");
         });
+    }
+
+    #[test]
+    fn a_page_at_a_screen_size_is_drawn_as_that_screen_and_pictured_at_one_size() {
+        for size in faber_engine::screens::SIZES {
+            let side = f64::from(size.width.max(size.height)) * size.scale * look_scale(&size);
+            assert!((side - LOOK_SIDE).abs() < 0.01, "{} at {}x is pictured {side} px long", size.name(), size.scale);
+            let (screen, touch) = metrics(&size);
+            assert_eq!(
+                (screen["width"].as_u64(), screen["deviceScaleFactor"].as_f64(), screen["mobile"].as_bool()),
+                (Some(u64::from(size.width)), Some(size.scale), Some(size.mobile()))
+            );
+            assert_eq!(touch["enabled"].as_bool(), Some(size.mobile()), "touch on phones and tablets only");
+        }
     }
 
     #[test]

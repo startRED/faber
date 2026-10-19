@@ -22,33 +22,63 @@ impl Core {
             (_, Err(why)) => Err(format!("Faber's browser did not do it: {why}.")),
             (Some(b), Ok(request)) => Ok((b, request)),
         };
-        let (b, request) = match opened {
+        let (b, mut request) = match opened {
             Ok(open) => open,
-            Err(text) => return self.answer_browse(conv, sid, &call, false, text),
+            Err(text) => return self.answer_browse(conv, sid, &call, false, text, Vec::new()),
         };
+        // A check at the sizes that matter, with none named: the ones of where the project runs, from its own files.
+        let folder = matches!(&request, browser::Request::Sizes(sizes) if sizes.is_empty())
+            .then(|| self.convs.get(conv).and_then(|c| self.cwd_of(c).ok()))
+            .flatten();
         let (me, conv, dir) = (self.me.clone(), conv.to_string(), self.opts.data_dir.join("attachments").join(conv));
         self.opts.runtime.spawn(async move {
-            let (ok, text) = match tokio::time::timeout(OPEN_TIMEOUT, b.act(conv.clone(), request)).await {
-                Ok(Ok(page)) => {
-                    // A picture that cannot be kept only leaves the card without one.
-                    if let (Some(picture), Some(name)) = (&page.picture, browser::picture_name(&call)) {
-                        let _ = std::fs::create_dir_all(&dir).and_then(|()| std::fs::write(dir.join(name), picture));
+            let mut picked = None;
+            if let browser::Request::Sizes(sizes) = &mut request
+                && sizes.is_empty()
+            {
+                let kind = match folder {
+                    Some(folder) => {
+                        tokio::task::spawn_blocking(move || crate::screens::kind_of(&folder)).await.unwrap_or(crate::screens::Kind::Web)
+                    }
+                    None => crate::screens::Kind::Web,
+                };
+                *sizes = crate::screens::sizes_of(kind.screens());
+                picked = Some(kind);
+            }
+            let (ok, text, pictures) = match tokio::time::timeout(OPEN_TIMEOUT, b.act(conv.clone(), request)).await {
+                Ok(Ok(mut page)) => {
+                    page.picked = picked;
+                    // A picture that cannot be kept only leaves the card without one. Each size's picture is the call's
+                    // with the size's place after it (`<call>-s1`), so the screen asks for it like any other.
+                    let pictures = std::iter::once((call.clone(), page.picture.as_ref()))
+                        .chain(page.looks.iter().enumerate().map(|(n, look)| (format!("{call}-s{}", n + 1), look.picture.as_ref())));
+                    let mut kept = false;
+                    for (id, picture) in pictures {
+                        if let (Some(picture), Some(name)) = (picture, browser::picture_name(&id)) {
+                            kept |= std::fs::create_dir_all(&dir).and_then(|()| std::fs::write(dir.join(name), picture)).is_ok();
+                        }
+                    }
+                    if kept {
                         browser::trim_pictures(&dir, browser::MAX_PICTURES_BYTES);
                     }
-                    (true, browser::result_text(&page))
+                    // The agent sees each size's picture too (the owner, 2026-10-19), in the order of its lines; a page that is
+                    // the person's turn has none.
+                    (true, browser::result_text(&page), browser::look_pictures(&page))
                 }
-                Ok(Err(why)) => (false, format!("Faber's browser did not do it: {why}.")),
-                Err(_) => (false, "The page took longer than 45 seconds; it stays in Faber's browser, without its text.".into()),
+                Ok(Err(why)) => (false, format!("Faber's browser did not do it: {why}."), Vec::new()),
+                Err(_) => {
+                    (false, "The page took longer than 45 seconds; it stays in Faber's browser, without its text.".into(), Vec::new())
+                }
             };
             let Some(core) = me.upgrade() else { return };
-            core.lock().unwrap_or_else(|e| e.into_inner()).answer_browse(&conv, sid, &call, ok, text);
+            core.lock().unwrap_or_else(|e| e.into_inner()).answer_browse(&conv, sid, &call, ok, text, pictures);
         });
     }
 
     /// The answer goes back only to the process that asked: a conversation that was stopped or moved on drops it.
-    fn answer_browse(&self, conv: &str, sid: u64, call: &str, ok: bool, text: String) {
+    fn answer_browse(&self, conv: &str, sid: u64, call: &str, ok: bool, text: String, pictures: Vec<String>) {
         if let Some(l) = self.live.get(conv).filter(|l| l.sid == sid) {
-            l.session.helper_reply(call, ok, text);
+            l.session.helper_reply_with_pictures(call, ok, text, pictures);
         }
     }
 
