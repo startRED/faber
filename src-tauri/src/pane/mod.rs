@@ -60,6 +60,7 @@ fn allowed(url: &Url) -> bool {
 
 pub struct Pane {
     app: AppHandle,
+    /// Never call a webview getter or await under this lock: `on_page_load` takes it on the window's thread.
     state: Mutex<State>,
     /// The pages that started and the last of them that finished, so an open waits for its own page and never for a late
     /// end of the one before.
@@ -90,6 +91,11 @@ struct State {
     /// The whole address the last answer to the owner reported (never the cut one the agent gets), which an action only runs on
     /// (the page may have moved since). None until the owner has read or opened a page: nothing is clicked or typed before.
     reported: Option<String>,
+    /// The sites the person went to while the pane was theirs, since the agent's last call (`went_to`).
+    visited: Vec<String>,
+    /// Pages Faber loaded (the agent's, or a card's) that have not finished: that many next finishes are not sites the
+    /// person went to. A load that never finishes leaves one more skipped: the list can fall short, never say more.
+    skip_finish: u32,
 }
 
 /// The screen's boxes the pane is placed over, named by numbers that only grow while the screen lives. A box that let the
@@ -187,6 +193,8 @@ impl Pane {
             return Err("only web pages open in Faber's browser".into());
         }
         let before = self.loads.borrow().0;
+        // A page Faber loads is the agent's or a card's, never one the person went to.
+        crate::lock(&self.state).skip_finish += 1;
         self.touch();
         if let Some(webview) = self.webview() {
             if webview.navigate(parsed.clone()).is_ok() {
@@ -196,7 +204,7 @@ impl Pane {
             self.close();
         }
         let window = self.app.get_window("main").ok_or("Faber's window is closed")?;
-        let (loads, app) = (self.loads.clone(), self.app.clone());
+        let (loads, app, pane) = (self.loads.clone(), self.app.clone(), Arc::downgrade(self));
         let builder = WebviewBuilder::new(LABEL, WebviewUrl::External(parsed))
             .incognito(true)
             .on_navigation(allowed)
@@ -206,6 +214,15 @@ impl Pane {
                 PageLoadEvent::Started => loads.send_modify(|(started, _)| *started += 1),
                 PageLoadEvent::Finished => {
                     loads.send_modify(|(started, finished)| *finished = *started);
+                    // A page that finished while the person had the pane is one they went to: the agent hears its site next time.
+                    if let Some(pane) = pane.upgrade() {
+                        let mut s = crate::lock(&pane.state);
+                        if s.skip_finish > 0 {
+                            s.skip_finish -= 1;
+                        } else if s.shown {
+                            went_to(&mut s.visited, payload.url());
+                        }
+                    }
                     // The screen names the page it shows by where it is now, never by the card it was opened from.
                     let _ = app.emit_to("main", "faber:site", payload.url().as_str());
                 }
@@ -230,6 +247,7 @@ impl Pane {
                     let left = s.used.map_or(Duration::ZERO, |u| IDLE.saturating_sub(u.elapsed()));
                     if left.is_zero() && !s.shown {
                         s.idle_watch = false;
+                        s.visited.clear();
                         Err(s.webview.take())
                     } else {
                         Ok(left.max(Duration::from_secs(1)))
@@ -253,6 +271,7 @@ impl Pane {
             let mut s = crate::lock(&self.state);
             s.shown = false;
             s.reported = None;
+            s.visited.clear();
             s.webview.take()
         };
         self.looking.send_replace(false);
@@ -317,6 +336,9 @@ impl Pane {
         let shown = self.load(url).is_ok();
         if shown {
             let mut s = crate::lock(&self.state);
+            if s.owner.as_deref() != Some(conversation) {
+                s.visited.clear();
+            }
             s.owner = Some(conversation.to_string());
             s.reported = None;
         }
@@ -422,9 +444,10 @@ impl Pane {
 
     async fn act_page(self: Arc<Self>, conversation: String, request: Request) -> Result<Page, String> {
         let _turn = self.take().await?;
-        let (person, taken, reported) = {
-            let mut s = crate::lock(&self.state);
-            (std::mem::take(&mut s.handed_back), s.taken, s.reported.clone())
+        let (mine, taken, reported) = {
+            let s = crate::lock(&self.state);
+            // What the person did on another conversation's page is never this agent's to hear.
+            (s.owner.as_deref() == Some(conversation.as_str()), s.taken, s.reported.clone())
         };
         let mut loads = self.loads.subscribe();
         let before = self.loads.borrow().0;
@@ -432,6 +455,9 @@ impl Pane {
             Request::Open(url) => {
                 self.load(url)?;
                 let mut s = crate::lock(&self.state);
+                if !mine {
+                    s.visited.clear();
+                }
                 s.owner = Some(conversation);
                 s.reported = None;
                 None
@@ -469,15 +495,26 @@ impl Pane {
         } else if !matches!(request, Request::Read) && refused.is_none() {
             tokio::time::sleep(Duration::from_millis(300)).await;
         }
-        let (page, href) = self.read(refused, person, taken).await?;
-        crate::lock(&self.state).reported = Some(href);
+        let (mut page, href) = self.read(refused, taken).await?;
+        let mut s = crate::lock(&self.state);
+        // The person took the pane after the last look: this answer is old, and their use is the next one's to tell.
+        if s.taken != taken {
+            return Err("the person took over Faber's browser; ask them, or try again once they go back".into());
+        }
+        // Taken only by an answer that reaches the agent: a call that failed leaves them for the next.
+        let used = std::mem::take(&mut s.handed_back);
+        let visited = std::mem::take(&mut s.visited);
+        if mine {
+            (page.person, page.visited) = (used, visited);
+        }
+        s.reported = Some(href);
         Ok(page)
     }
 
     /// The page as it is: its address, title and text, and a picture of what is in view, none on a page that is the
     /// person's turn, where it could hold what they typed. `refused` is the turn an action just refused there. Answers, besides
     /// the page, its whole address, which stays in the shell.
-    async fn read(&self, refused: Option<Turn>, person: bool, taken: u64) -> Result<(Page, String), String> {
+    async fn read(&self, refused: Option<Turn>, taken: u64) -> Result<(Page, String), String> {
         // Cut inside the page, so a huge page never crosses into Faber whole; one more character tells the engine it was cut.
         // Its turn is looked at in the same step as its text, and what changes in the page from then on is counted.
         let expression = format!(
@@ -523,8 +560,42 @@ impl Pane {
             }
         }
         self.person_took_it(taken)?;
-        let page = Page { url: text("url"), title: text("title"), text: text("text"), picture, turn, person };
+        let page = Page { url: text("url"), title: text("title"), text: text("text"), picture, turn, ..Page::default() };
         Ok((page, text("href")))
+    }
+}
+
+/// The most sites the agent hears the person went to: the latest of them.
+const MAX_VISITED: usize = 5;
+
+/// Notes a site the person went to, for the agent and so for its vendor: only the site's own name (`docs.github.com` is
+/// `github.com`, since a subdomain can be a token or a tenant), only for web pages with a plain name, never a local address
+/// or an intranet name, once for pages in a row on the same site, the latest few kept. A page that finishes after the person
+/// left the pane is not counted: the list can fall short, never say more.
+fn went_to(visited: &mut Vec<String>, url: &Url) {
+    let Some(host) = url.domain() else { return };
+    let host = host.trim_end_matches('.').to_ascii_lowercase();
+    let plain = host.len() <= 253 && host.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'-' || b == b'.');
+    let labels: Vec<&str> = host.split('.').collect();
+    if !matches!(url.scheme(), "http" | "https") || !plain || labels.len() < 2 || labels.iter().any(|l| l.is_empty() || l.len() > 63) {
+        return;
+    }
+    let tld = labels[labels.len() - 1];
+    // Names that only mean something inside a network (RFC 6762, 6761, and the usual intranet ones) are never told.
+    if matches!(
+        tld,
+        "local" | "localhost" | "internal" | "intranet" | "corp" | "home" | "lan" | "localdomain" | "test" | "invalid" | "arpa" | "private"
+    ) {
+        return;
+    }
+    // The last two labels, always: under a country's second level that is only `co.uk`, which says little, but any rule that
+    // keeps a third label lets a subdomain through somewhere (`token.org.de`).
+    let site = labels[labels.len() - 2..].join(".");
+    if visited.last() != Some(&site) {
+        visited.push(site);
+    }
+    if visited.len() > MAX_VISITED {
+        visited.remove(0);
     }
 }
 
@@ -554,6 +625,40 @@ impl Browser for PaneBrowser {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_agent_hears_the_sites_the_person_went_to_by_name_once_each_in_a_row_and_only_the_latest() {
+        let mut visited = Vec::new();
+        for url in [
+            "https://www.GitHub.com/a?code=secret",
+            "https://docs.github.com./b",
+            "https://docs.rs/",
+            "about:blank",
+            "http://localhost:3000/",
+            "http://192.168.0.1/",
+            "http://[::1]/",
+            "http://intranet/",
+            "https://a1b2c3d4e5.ngrok.io/",
+            "https://shop.example.co.uk/",
+            "https://ignore.previous!instructions.com/",
+            "https://secret-token.box.com/",
+            "https://alice.corp/",
+            "https://printer.local/",
+            "https://secret-token.org.de/",
+        ] {
+            went_to(&mut visited, &url.parse().unwrap());
+        }
+        assert_eq!(
+            visited,
+            ["docs.rs", "ngrok.io", "co.uk", "box.com", "org.de"],
+            "site names only, never an address, a token or a local name; the latest five"
+        );
+        for n in 0..9 {
+            went_to(&mut visited, &format!("https://s{n}.org/").parse().unwrap());
+        }
+        assert_eq!(visited.len(), MAX_VISITED);
+        assert_eq!(visited.last().map(String::as_str), Some("s8.org"));
+    }
 
     #[test]
     fn boxes_that_let_go_place_no_more_and_an_older_one_cannot_take_the_pane_from_a_newer() {

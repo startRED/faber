@@ -974,6 +974,7 @@ export const ptBR: Messages = {
   'notes.91.better': 'A primeira execução agora usa as mesmas palavras e o mesmo controle de tamanho do texto das Configurações.',
   'notes.92.better': 'Em Acesso total, a chave de hooks em Configurações agora mostra que seus hooks sempre rodam, em vez de uma escolha que não fazia nada.',
   'notes.93.better': 'As pastas recentes não têm mais o ×: remova uma com o botão direito, e o Faber pergunta mais uma vez.',
+  'notes.94.better': 'Depois que você usa o navegador do Faber, o agente fica sabendo por quais sites você passou, só pelo nome.',
   'update.checking': 'Procurando atualização…',
   'update.downloading': 'Baixando atualização…',
   'update.downloadingPercent': 'Baixando atualização… {percent}%',

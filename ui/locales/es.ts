@@ -987,6 +987,7 @@ export const es: Messages = {
   'notes.91.better': 'El primer inicio ahora usa las mismas palabras y el mismo control de tamaño de texto que Ajustes.',
   'notes.92.better': 'En Acceso total, el interruptor de hooks en Ajustes ahora muestra que tus hooks siempre se ejecutan, en vez de una opción que no hacía nada.',
   'notes.93.better': 'Las carpetas recientes ya no tienen ×: quita una con el botón derecho, y Faber pregunta una vez más.',
+  'notes.94.better': 'Después de que usas el navegador de Faber, el agente sabe por qué sitios pasaste, solo por el nombre.',
   'update.checking': 'Buscando una actualización…',
   'update.downloading': 'Descargando actualización…',
   'update.downloadingPercent': 'Descargando actualización… {percent} %',

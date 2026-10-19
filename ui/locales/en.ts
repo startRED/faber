@@ -867,6 +867,7 @@ export const en = {
   'notes.91.better': 'The first run now uses the same words and text size slider as Settings.',
   'notes.92.better': 'In Full access, the hooks switch in Settings now shows that your hooks always run, instead of a choice that did nothing.',
   'notes.93.better': 'Recent folders no longer have an ×: remove one with a right click, and Faber asks once more.',
+  'notes.94.better': "After you use Faber's browser, the agent hears which sites you went to, by name only.",
   'update.checking': 'Looking for an update…',
   'update.downloading': 'Downloading update…',
   'update.downloadingPercent': 'Downloading update… {percent}%',

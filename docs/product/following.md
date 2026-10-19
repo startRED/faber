@@ -117,8 +117,10 @@ frames) and checked against today's code. It fills the steps of R161 and never b
    browser during the reply, in plain words with what it typed left out, and picking one shows the picture taken after it
    in the live page's place; the latest step, or "Back to the live page", is the page itself again (taking over from
    there). The pictures of one conversation take at most 20 MB on disk, the oldest going first. "While you were away" shows
-   the pages the run left open, a picture each with what the agent last did there. Still to come: pictures of the person's
-   own page changes. The plan:
+   the pages the run left open, a picture each with what the agent last did there. When the person hands the page back, the
+   agent hears the sites they went to by the last two labels of their name only (never an address or a subdomain). Pictures
+   of the person's own page changes are not kept: the owner chose so (2026-10-18), since they can show their logged-in
+   pages. The plan as first written:
    Each pane keeps a log: a small picture at each page change or agent action, with the
    action that caused it, typed secrets masked and password fields blurred. Watching live is playing the end of that
    log, coming back later is scrubbing it, and "Take over from here" starts from the latest picture. Only the pane the
