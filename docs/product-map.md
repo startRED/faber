@@ -144,7 +144,7 @@ closed). There is no "Learn more" link. The version ("Faber 1.2.3") closes the l
   only) and the theme file (save or open). Back to default.
 - **Accounts and limits**: one card per AI: its mark, name, plan (capitalised; a question when the CLI cannot tell), one
   status word (amber only near a real limit), one row per quota window (name, share, bar with the expected-pace mark,
-  reset time) and Faber's own spend today at API prices. Every note about how the figures are read sits behind one
+  reset time) and Faber's own spend today in API value ("Faber today: $1.25 in API value", the words of a reply's cost too). Every note about how the figures are read sits behind one
   "Details" fold per card. "Manage accounts" opens the account cards, once, at the top.
 - **Privacy**: three statements (no telemetry, history stays on this PC, CLI logins are never read). No controls.
 
@@ -290,9 +290,6 @@ one. Delete a line in the commit that fixes it. The weekly coherence pass (`test
 lines and the removal of fixed ones.
 
 6. (fixed by R160: a project opens a chat, not a mission start card.)
-12. Money and quota in four vocabularies ("Own cost", "Cost so far", "Faber today … API-equivalent", "… at API prices";
-    "Account pace", "Accounts and limits"); which words stay is the owner's call (Owner). Amounts are written the language's way
-    (`money` and `amount` in `ui/i18n.ts`).
 
 ## Worked example: adding a setting
 

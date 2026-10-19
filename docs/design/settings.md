@@ -126,7 +126,7 @@ How the Settings screen, the first-run steps and the tutorial look and behave.
   the plan with its first letter capital, and one status word in a pill that is amber only when a window is really near
   its limit (C002; fast use is said calmly). Then one row per quota window the vendor has reported (name, used share, a
   bar with the expected-pace mark, and the reset time written in full); an old reading, or none, shows "—". The card ends
-  with Faber's own spend today at API prices, written the language's way with two decimals. Every note about how the
+  with Faber's own spend today in API value, written the language's way with two decimals. Every note about how the
   figures are read (counting delay, shared account, incomplete meters, learning, foreign use, extra usage, each window's
   projection and age) is behind one "Details" fold per card. "Manage accounts" appears once in the section.
 - Privacy has three statements: telemetry is off, history stays on this PC, and Faber never reads the CLI logins.

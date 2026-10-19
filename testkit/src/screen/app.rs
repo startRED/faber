@@ -248,10 +248,10 @@ fn streams_an_answer(ctx: &mut Ctx) -> Result {
     ensure(tips["header"].as_str().is_some_and(|t| t.contains(&reason)), || {
         format!("the header's tooltip should say why Auto chose it: {tips}")
     })?;
-    ensure(tips["cost"].as_str().is_some_and(|t| t.contains("at API prices")), || {
+    ensure(tips["cost"].as_str().is_some_and(|t| t.contains("in API value")), || {
         format!("the cost's tooltip should show the price note: {tips}")
     })?;
-    ensure(!text.contains(&reason) && !text.contains("at API prices"), || format!("neither sits on the page itself: {text}"))?;
+    ensure(!text.contains(&reason) && !text.contains("in API value"), || format!("neither sits on the page itself: {text}"))?;
     page.wait_visible(&css(".list .item").has_text(QUESTION))?;
     ctx.shot(&mut app, "chat")
 }
