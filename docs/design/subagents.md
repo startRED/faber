@@ -59,7 +59,9 @@ helper tool existed keeps its Codex thread without it, since Codex takes dynamic
 A page a project's agent opened in Faber's browser (R161 step 7) is a card among the reply's files, in the file card's
 surface: the picture the browser took of the page's top (a 16:10 crop at most 480 px wide, the page loaded at 1280 by 800
 and drawn at 0.375), then the page's title over its site in the third ink, both ellipsized, and "See the page". The
-title and address come from Faber's own first lines of the answer, never from the page's words. An app the agent
+title and address come from Faber's own first lines of the answer, never from the page's words. Inside the page, where the agent last clicked or typed carries a 2 px ring (#4c8dff, 6 px radius, a 12% fill,
+4 px outside the thing) and a 20 px pointer of the same blue with a white edge at its middle: the page has none of
+Faber's tokens, so the colours are fixed; nothing moves, so no motion level applies. An app the agent
 started on this computer (the app pane) has the same card with no picture: "Your app, running here" over its address
 and port in the third ink, read from a line of a command's output that says a server is up there (never from an error
 line), and "See the page" opens it the same way. "See the page" opens it

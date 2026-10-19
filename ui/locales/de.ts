@@ -991,6 +991,7 @@ export const de: Messages = {
   'notes.94.better': 'Nachdem du Fabers Browser benutzt hast, erfährt der Agent, auf welchen Seiten du warst, nur mit ihrem Namen.',
   'notes.95.better': 'Ohne verbundene KI sagt Projekte das jetzt und bietet an, eine zu verbinden, wie der Chat.',
   'notes.96.new': 'Wenn der Agent deine App auf diesem Computer startet, zeigt die Antwort eine Karte dafür, und „Seite ansehen“ öffnet die App neben dem Chat.',
+  'notes.97.better': 'In Fabers Browser zeigen ein Ring und ein Zeiger, wo der Agent zuletzt geklickt oder getippt hat, auf den Bildern seiner Schritte und auf der Seite, wenn du sie übernimmst.',
   'update.checking': 'Suche nach einem Update…',
   'update.downloading': 'Update wird heruntergeladen…',
   'update.downloadingPercent': 'Update wird heruntergeladen… {percent} %',

@@ -109,6 +109,62 @@ export default (request) => {
   const moved = () => typeof request.at === 'string' && strip(request.at) !== strip(location.href);
   const gone = () => ({ ok: false, why: 'moved', seen: [location.hostname] });
 
+  // Where the agent acted (R161 step 9, browsing): a ring around the thing and a pointer at it, over the page, for the person
+  // who takes the pane and for the picture taken after the action; it follows the thing as the page scrolls or the pane
+  // changes size, and goes at the agent's next action. It is drawn once the action is done, so nothing of the page runs
+  // between the checks and the action; from plain elements (never markup, never a custom element a page could define) under
+  // a closed shadow root the page's scripts and Faber's reading cannot see into, in the top layer (over a modal dialog too),
+  // in the document of the thing (a frame of the page's own site too); nothing in it animates. Each action runs in a world
+  // of its own, so the ring carries the shell's random name and only a node with it is removed. Drawing it never stops an
+  // action.
+  const named = typeof request.mark === 'string' && /^[0-9a-f]{16}$/.test(request.mark) ? request.mark : '';
+  const unmark = () => {
+    try {
+      if (named) for (const old of all(`div[data-faber-mark="${named}"]`)) old.remove();
+    } catch {
+      // A ring that cannot be removed is only a drawing.
+    }
+  };
+  const mark = (el) => {
+    unmark();
+    if (!named || !el.isConnected || !seen(el)) return;
+    try {
+      const doc = el.ownerDocument;
+      const view = doc.defaultView;
+      const host = doc.createElement('div');
+      host.setAttribute('data-faber-mark', named);
+      host.setAttribute('popover', 'manual');
+      host.style.cssText = 'all: initial; position: fixed; inset: 0; pointer-events: none; z-index: 2147483647;';
+      const shadow = host.attachShadow({ mode: 'closed' });
+      const ring = doc.createElement('div');
+      const svg = 'http://www.w3.org/2000/svg';
+      const pointer = doc.createElementNS(svg, 'svg');
+      pointer.setAttribute('viewBox', '0 0 20 20');
+      const path = doc.createElementNS(svg, 'path');
+      path.setAttribute('d', 'M2 2 L2 16 L6 12 L9 18 L11.5 17 L8.5 11 L14 11 Z');
+      path.setAttribute('fill', '#4c8dff');
+      path.setAttribute('stroke', '#fff');
+      path.setAttribute('stroke-width', '1.5');
+      path.setAttribute('stroke-linejoin', 'round');
+      pointer.append(path);
+      shadow.append(ring, pointer);
+      const stop = new AbortController();
+      const place = () => {
+        if (!host.isConnected) return stop.abort();
+        const r = el.getBoundingClientRect();
+        ring.style.cssText = `position: fixed; left: ${r.left - 4}px; top: ${r.top - 4}px; width: ${r.width + 8}px; height: ${r.height + 8}px; box-sizing: border-box; border: 2px solid #4c8dff; border-radius: 6px; background: rgba(76, 141, 255, 0.12);`;
+        pointer.style.cssText = `position: fixed; left: ${r.left + r.width / 2}px; top: ${r.top + r.height / 2}px; width: 20px; height: 20px; overflow: visible;`;
+      };
+      doc.documentElement.append(host);
+      host.showPopover?.();
+      place();
+      view.addEventListener('resize', place, { signal: stop.signal });
+      view.addEventListener('scroll', place, { signal: stop.signal, capture: true, passive: true });
+    } catch {
+      // A page that refuses the drawing still gets the action.
+    }
+  };
+
   const turn = turnOf();
   if (request.kind === 'read') {
     if (request.watch) {
@@ -134,10 +190,12 @@ export default (request) => {
     return { ok: true, turn, changed };
   }
   if (request.kind === 'scroll') {
+    unmark();
     window.scrollBy(0, (request.down ? 1 : -1) * window.innerHeight * 0.8);
     return { ok: true, turn };
   }
   if (request.kind === 'back') {
+    unmark();
     history.back();
     return { ok: true, turn };
   }
@@ -177,6 +235,7 @@ export default (request) => {
     one.scrollIntoView({ block: 'center' });
     if (moved()) return gone();
     one.click();
+    mark(one);
     return { ok: true };
   }
   if (request.kind === 'type') {
@@ -214,6 +273,7 @@ export default (request) => {
       if (form) form.requestSubmit ? form.requestSubmit() : form.submit();
       else field.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', code: 'Enter', bubbles: true }));
     }
+    mark(field);
     return { ok: true };
   }
   return { ok: false, why: 'unknown' };

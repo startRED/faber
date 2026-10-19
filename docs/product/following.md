@@ -149,6 +149,10 @@ frames) and checked against today's code. It fills the steps of R161 and never b
    Built (R193): researching, as the sites the reply opened under the status line, the one it reads now in the first
    ink. Codex reports its searches only, so its replies list no site yet.
    Built (R194): long work, as the time a step has run at the end of the status line, past half a minute.
+   Built (R239): browsing, as a ring around what the agent clicked or typed in and a pointer at it, drawn over the page,
+   following it as the page scrolls, until its next action, so the picture of each step and the page the person takes show where it acted; nothing moves.
+   Pointer-level actions, and the outline of a changed part and a named pointer per subagent while a screen is built, stay
+   for later (Erick, 2026-10-18); the app card already opens the app, which its dev server reloads by itself.
 
 **Across all of them:**
 

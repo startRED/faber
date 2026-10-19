@@ -304,6 +304,57 @@ check('page in the browser: the agent clicks and types by the words a person see
   ),
 );
 
+check('page in the browser: where the agent clicked or typed shows as a ring and a pointer out of the page’s reach, until its next action', () =>
+  onPage('<button id="go">Next</button><label>Search <input id="q"></label><div data-faber-mark="ffffffffffffffff" id="mine">The page’s own</div><faber-mark id="tag">Also the page’s</faber-mark><button id="hide">Close menu</button><iframe id="fr"></iframe>', (page) => {
+    page.addEventListener('click', (e) => e.preventDefault());
+    const mark = '0123456789abcdef';
+    const inner = (page.querySelector('#fr') as HTMLIFrameElement).contentDocument!;
+    inner.body.innerHTML = '<button>Inside</button>';
+    const marks = (doc: Document = document) => [...doc.querySelectorAll(`div[data-faber-mark="${mark}"]`)] as HTMLElement[];
+    try {
+      deepEqual(act({ kind: 'read', watch: true }), { ok: true, turn: '' });
+      // The closed root is out of reach by design; the check keeps the one Faber makes to look where the ring sits.
+      const attach = Element.prototype.attachShadow;
+      let drawn: ShadowRoot | undefined;
+      Element.prototype.attachShadow = function (init) {
+        return (drawn = attach.call(this, init));
+      };
+      try {
+        deepEqual(act({ kind: 'click', target: 'next', mark }), { ok: true });
+      } finally {
+        Element.prototype.attachShadow = attach;
+      }
+      equal(marks().length, 1, 'the click is marked once it is done');
+      const button = page.querySelector('#go')!.getBoundingClientRect();
+      const ring = drawn!.firstElementChild as HTMLElement;
+      deepEqual([parseFloat(ring.style.left), parseFloat(ring.style.top)], [button.left - 4, button.top - 4], 'the ring sits around the thing');
+      page.style.top = '30px';
+      window.dispatchEvent(new Event('resize'));
+      equal(parseFloat(ring.style.top), page.querySelector('#go')!.getBoundingClientRect().top - 4, 'and follows it when the page moves under it');
+      page.style.top = '0px';
+      deepEqual(act({ kind: 'read', watch: true }), { ok: true, turn: '' });
+      equal(act({ kind: 'settle' }).changed, false, 'the ring drawn before the picture never makes it unfit to keep');
+      equal(marks()[0]!.shadowRoot, null, 'in a closed root the page cannot read');
+      equal(getComputedStyle(marks()[0]!).pointerEvents, 'none', 'it never takes a click of the page or the person');
+      ok(!document.body.contains(marks()[0]!), 'outside the body, so the words Faber reads stay the page’s');
+      deepEqual(act({ kind: 'type', target: 'search', text: 'tokio', mark }), { ok: true });
+      equal(marks().length, 1, 'the newest action replaces the last ring');
+      deepEqual(act({ kind: 'click', target: 'inside', mark }), { ok: true });
+      deepEqual([marks().length, marks(inner).length], [0, 1], 'a thing in a frame of the page’s own site is marked in that frame');
+      deepEqual(act({ kind: 'scroll', down: true, mark }), { ok: true, turn: '' });
+      equal(marks(inner).length, 0, 'a scroll takes it away, since the page moved under it');
+      ok(page.querySelector('#mine') && page.querySelector('#tag'), 'a node of the page is never taken for the ring, whatever it is called');
+      page.querySelector('#hide')!.addEventListener('click', (e) => ((e.currentTarget as HTMLElement).style.display = 'none'));
+      deepEqual(act({ kind: 'click', target: 'close menu', mark }), { ok: true });
+      equal(marks().length, 0, 'a thing the click hid gets no ring, which would point at a corner');
+      act({ kind: 'click', target: 'next' });
+      equal(marks().length, 0, 'no ring without the shell’s name for it');
+    } finally {
+      for (const m of [...marks(), ...marks(inner)]) m.remove();
+    }
+  }),
+);
+
 check('page in the browser: on a login, a captcha or a payment the agent reads but never clicks or types', () =>
   onPage('<label>Password <input type="password" id="p"></label><button id="in">Sign in</button>', (page) => {
     let clicked = 0;

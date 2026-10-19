@@ -871,6 +871,7 @@ export const en = {
   'notes.94.better': "After you use Faber's browser, the agent hears which sites you went to, by name only.",
   'notes.95.better': 'With no AI connected, Projects now says so and offers to connect one, like Chat.',
   'notes.96.new': 'When the agent starts your app on this computer, the reply shows a card for it, and "See the page" opens the app beside the chat.',
+  'notes.97.better': "In Faber's browser, a ring and a pointer show where the agent last clicked or typed, in the pictures of its steps and on the page when you take it.",
   'update.checking': 'Looking for an update…',
   'update.downloading': 'Downloading update…',
   'update.downloadingPercent': 'Downloading update… {percent}%',

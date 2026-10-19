@@ -71,6 +71,9 @@ pub struct Pane {
     looking: tokio::sync::watch::Sender<bool>,
     /// Held while an action of the agent changes the page: the person takes the pane only when it is over.
     acting: tokio::sync::Mutex<()>,
+    /// The random name `act.js` gives the ring it draws where the agent acted, so it removes its own ring and never a node of
+    /// the page (each action runs in a world of its own and cannot keep the node itself).
+    mark: String,
 }
 
 #[derive(Default)]
@@ -179,6 +182,7 @@ impl Pane {
             opening: tokio::sync::Mutex::new(()),
             looking: tokio::sync::watch::channel(false).0,
             acting: tokio::sync::Mutex::new(()),
+            mark: format!("{:016x}", std::hash::BuildHasher::hash_one(&std::collections::hash_map::RandomState::new(), 0u8)),
         })
     }
 
@@ -414,7 +418,8 @@ impl Pane {
 
     /// Runs `act.js` on the page and answers what it said: whether it did it, and what is the person's turn there. Its
     /// reasons are codes; the words are Faber's, and the page's own words in them are quoted.
-    async fn run_act(&self, request: Value, taken: u64) -> Result<(bool, Option<Turn>), String> {
+    async fn run_act(&self, mut request: Value, taken: u64) -> Result<(bool, Option<Turn>), String> {
+        request["mark"] = json!(self.mark);
         let changes = matches!(request["kind"].as_str(), Some("click" | "type" | "back"));
         let value = self.evaluate(&format!("({})({request})", act_function()), taken, changes).await?;
         if !value.is_object() {

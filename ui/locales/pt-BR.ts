@@ -978,6 +978,7 @@ export const ptBR: Messages = {
   'notes.94.better': 'Depois que você usa o navegador do Faber, o agente fica sabendo por quais sites você passou, só pelo nome.',
   'notes.95.better': 'Sem nenhuma IA conectada, Projetos agora avisa e oferece conectar uma, como o Chat.',
   'notes.96.new': 'Quando o agente inicia seu app neste computador, a resposta mostra um cartão para ele, e "Ver a página" abre o app ao lado do chat.',
+  'notes.97.better': 'No navegador do Faber, um anel e uma seta mostram onde o agente clicou ou digitou por último, nas fotos dos passos e na página quando você assume.',
   'update.checking': 'Procurando atualização…',
   'update.downloading': 'Baixando atualização…',
   'update.downloadingPercent': 'Baixando atualização… {percent}%',

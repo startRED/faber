@@ -991,6 +991,7 @@ export const fr: Messages = {
   'notes.94.better': "Après que vous avez utilisé le navigateur de Faber, l'agent apprend sur quels sites vous êtes allé, par leur nom seulement.",
   'notes.95.better': "Sans IA connectée, Projets le dit désormais et propose d'en connecter une, comme le Chat.",
   'notes.96.new': "Quand l'agent lance votre app sur cet ordinateur, la réponse affiche une carte pour elle, et « Voir la page » ouvre l'app à côté du chat.",
+  'notes.97.better': "Dans le navigateur de Faber, un anneau et un pointeur montrent où l'agent a cliqué ou écrit en dernier, sur les images de ses étapes et sur la page quand vous la reprenez.",
   'update.checking': 'Recherche d’une mise à jour…',
   'update.downloading': 'Téléchargement de la mise à jour…',
   'update.downloadingPercent': 'Téléchargement de la mise à jour… {percent} %',
