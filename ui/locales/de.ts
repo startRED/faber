@@ -988,6 +988,7 @@ export const de: Messages = {
   'notes.92.better': 'Bei Vollzugriff zeigt der Hooks-Schalter in den Einstellungen jetzt, dass deine Hooks immer laufen, statt einer Wahl ohne Wirkung.',
   'notes.93.better': 'Zuletzt geöffnete Ordner haben kein × mehr: Entferne einen per Rechtsklick, und Faber fragt noch einmal nach.',
   'notes.94.better': 'Nachdem du Fabers Browser benutzt hast, erfährt der Agent, auf welchen Seiten du warst, nur mit ihrem Namen.',
+  'notes.95.better': 'Ohne verbundene KI sagt Projekte das jetzt und bietet an, eine zu verbinden, wie der Chat.',
   'update.checking': 'Suche nach einem Update…',
   'update.downloading': 'Update wird heruntergeladen…',
   'update.downloadingPercent': 'Update wird heruntergeladen… {percent} %',

@@ -712,7 +712,8 @@ export function App(props: { initial: AppState; update?: UpdateStatus; inbox: { 
     const id = place().id;
     if (id) void api.archive(id, false).then(refresh, (err) => setSaveError(failureText(err)));
   };
-  const needsProject = () => area() === 'project' && !project();
+  // With no AI, Projects says what Chat says ("No AI connected") instead of offering a folder nothing could work in.
+  const needsProject = () => area() === 'project' && !project() && state().vendors.length > 0;
   // The new conversation of a chat with a connected AI is the one place the effects of a look appear.
   const newChat = () => (area() === 'chat' || !!project()) && state().vendors.length > 0 && !current()?.messages.length;
   // A new conversation the user is in, not a remembered one that is still on its way: the tutorial would open over it and

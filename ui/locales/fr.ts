@@ -988,6 +988,7 @@ export const fr: Messages = {
   'notes.92.better': "En Accès total, l'interrupteur des hooks dans les Réglages montre désormais que vos hooks s'exécutent toujours, au lieu d'un choix sans effet.",
   'notes.93.better': "Les dossiers récents n'ont plus de × : retirez-en un d'un clic droit, et Faber demande une fois de plus.",
   'notes.94.better': "Après que vous avez utilisé le navigateur de Faber, l'agent apprend sur quels sites vous êtes allé, par leur nom seulement.",
+  'notes.95.better': "Sans IA connectée, Projets le dit désormais et propose d'en connecter une, comme le Chat.",
   'update.checking': 'Recherche d’une mise à jour…',
   'update.downloading': 'Téléchargement de la mise à jour…',
   'update.downloadingPercent': 'Téléchargement de la mise à jour… {percent} %',

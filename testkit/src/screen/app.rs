@@ -374,7 +374,13 @@ fn says_what_to_do(ctx: &mut Ctx) -> Result {
     let lower = body.to_lowercase();
     ensure(!["reopen", "restart", "relaunch"].iter().any(|w| lower.contains(w)), || format!("it should not ask to restart: {body}"))?;
     // There is nothing to type into: no composer, so no permission line or model choice either.
-    same(page.count(&css(".composer"))?, 0, "no composer with no AI")
+    same(page.count(&css(".composer"))?, 0, "no composer with no AI")?;
+    // Projects says the same, not "Add project folder" for a folder no AI could work in.
+    let projects = page.named("button", "area.projects")?;
+    page.click(&projects)?;
+    page.wait_visible(&title)?;
+    same(page.count(&css(".projects-root"))?, 0, "no project picker with no AI")?;
+    same(page.count(&css(".composer"))?, 0, "no composer in Projects with no AI")
 }
 
 fn switches_language(ctx: &mut Ctx) -> Result {
