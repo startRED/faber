@@ -24,6 +24,8 @@ interface Props {
   mode?: PermissionMode;
   onMode?: (mode: PermissionMode) => void;
   busy: boolean;
+  /** Subagents and helpers at work in the reply under way: Stop asks first, since it ends them too. */
+  helpers?: number;
   /** "Keep going" in a project conversation under way: on, off, or undefined where it is not offered. */
   keepGoing?: boolean;
   onKeepGoing?: (on: boolean) => void;
@@ -78,6 +80,26 @@ async function attach(list: Iterable<File>, draft: Draft): Promise<{ draft: Draf
     names.push(file.name);
   }
   return { draft: { text, images, files }, names };
+}
+
+/** What Stop asks while helpers are at work: how many it ends too, "Stop all", and "Keep working", focused, which Escape
+ * picks too. The composer's Stop and the plan-limit card's ask the same way. When it goes, however it goes, focus that was in
+ * it lands on `back` instead of the page. */
+export function StopAsk(props: { helpers: number; onStop: () => void; onKeep: () => void; back?: () => HTMLElement | undefined }) {
+  let root: HTMLDivElement | undefined;
+  onCleanup(() => {
+    const had = !!root?.contains(document.activeElement);
+    queueMicrotask(() => {
+      if (had || !document.activeElement || document.activeElement === document.body) props.back?.()?.focus();
+    });
+  });
+  return (
+    <div ref={(el) => (root = el)} class="stop-ask" role="group" aria-label={t('composer.stop')} onKeyDown={(e) => e.key === 'Escape' && props.onKeep()}>
+      <span role="status">{t('composer.stopHelpers', { n: props.helpers })}</span>
+      <button type="button" class="send stop" onClick={() => props.onStop()}>{t('composer.stopAll')}</button>
+      <button type="button" class="send" ref={(el) => queueMicrotask(() => el.focus())} onClick={() => props.onKeep()}>{t('composer.keepWorking')}</button>
+    </div>
+  );
 }
 
 export function Composer(props: Props) {
@@ -168,6 +190,13 @@ export function Composer(props: Props) {
     setDraft(result.draft);
     setNames((n) => [...n, ...result.names]);
   };
+
+  // Stop with helpers at work says what it ends and offers to let them work; it closes by itself once they are done.
+  const [stopping, setStopping] = createSignal(false);
+  let stopButton: HTMLButtonElement | undefined;
+  createEffect(() => {
+    if (!props.busy || !props.helpers) setStopping(false);
+  });
 
   return (
     <form
@@ -291,8 +320,14 @@ export function Composer(props: Props) {
             <span>{t('composer.keepGoing')}</span>
           </button>
         </Show>
-        <Show when={props.busy}>
-          <button type="button" class="send stop" onClick={() => props.onStop()} aria-label={t('composer.stop')}>
+        <Show when={props.busy && stopping()}>
+          <StopAsk helpers={props.helpers ?? 0} onStop={() => {
+            setStopping(false);
+            props.onStop();
+          }} onKeep={() => setStopping(false)} back={() => (stopButton?.isConnected ? stopButton : field)} />
+        </Show>
+        <Show when={props.busy && !stopping()}>
+          <button ref={(el) => (stopButton = el)} type="button" class="send stop" onClick={() => (props.helpers ? setStopping(true) : props.onStop())} aria-label={t('composer.stop')}>
             <svg class="i sm" viewBox="0 0 24 24" aria-hidden="true" style={{ fill: 'currentColor', stroke: 'none' }}>
               <rect width="12" height="12" x="6" y="6" rx="2" />
             </svg>

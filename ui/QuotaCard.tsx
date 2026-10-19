@@ -4,6 +4,8 @@ import { fromEngine, t } from './i18n.ts';
 import { vendorName } from './models.ts';
 import { animateList, keepForExit } from './motion.ts';
 import { untilReset } from './Sidebar.tsx';
+import { helpersAtWork } from './worklog.ts';
+import { StopAsk } from './Composer.tsx';
 
 /** Whether the reply waits for quota: the card under the answer then says so, and nothing else on the screen repeats it. */
 export const quotaPending = (m: Message): boolean =>
@@ -12,6 +14,9 @@ export const quotaPending = (m: Message): boolean =>
 /** The second click is consent for this reply only. No setting or next message inherits it. */
 export function QuotaCard(props: { id: string; m: Message; usage: VendorUsage[] }) {
   const [confirming, setConfirming] = createSignal(false);
+  const [stopping, setStopping] = createSignal(false);
+  let stopButton: HTMLButtonElement | undefined;
+  const helpers = () => helpersAtWork([props.m]);
   const [sending, setSending] = createSignal(false);
   const [error, setError] = createSignal<string>();
   const vendor = () => props.m.vendor;
@@ -42,7 +47,11 @@ export function QuotaCard(props: { id: string; m: Message; usage: VendorUsage[] 
           <button class="btn secondary" disabled={sending()} onClick={() => setConfirming(false)}>{t('mine.cancel')}</button>
         </Show>
       </Show>
-      <Show when={props.m.status === 'streaming'}><button class="btn secondary" onClick={() => void api.interrupt(props.id)}>{t('composer.stop')}</button></Show>
+      <Show when={props.m.status === 'streaming'}>
+        <Show when={stopping() && helpers()} fallback={<button ref={(el) => (stopButton = el)} class="btn secondary" onClick={() => (helpers() ? setStopping(true) : void api.interrupt(props.id))}>{t('composer.stop')}</button>}>
+          <StopAsk helpers={helpers()} onStop={() => void api.interrupt(props.id)} onKeep={() => setStopping(false)} back={() => stopButton} />
+        </Show>
+      </Show>
       <Show when={error()}><p class="err">{error()}</p></Show>
     </div>
   </Show>;

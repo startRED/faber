@@ -1395,6 +1395,35 @@ async fn claude_takes_a_message_into_the_running_turn_at_its_next_step_and_the_a
     assert_eq!(f.wire.lines_with(PONG), 1, "the message went to the CLI once");
 }
 
+// Live capture (claude, Haiku 5.5, the flags Faber uses): the agent left a subagent working in the background (a 30 s
+// command) and ended its turn; a line written while the subagent still worked became a turn of its own, and the subagent
+// went on to its own result. On 2026-10-17 a message written then was only queued, so the owner pressed Stop to get it
+// through, and Stop ended four helpers at work: no message ever needs that again.
+#[tokio::test]
+async fn a_message_written_while_helpers_work_in_the_background_reaches_claude_and_stops_none_of_them() {
+    const HELPER: &str = "Use the Agent tool once, with subagent_type general-purpose and run_in_background true, for this task: run the shell command `ping -n 31 127.0.0.1 > /dev/null` with the Bash tool in the foreground (never with run_in_background), wait for it to finish, and then reply with only the word kiwi. Right after starting it, end your turn with only the word started. Do not wait for it.";
+    let dir = tempfile::tempdir().unwrap();
+    let f = fake(fixture("claude", "background-steer"));
+    let (engine, _rx) = engine(dir.path(), Vendor::Claude, f.spawn.clone());
+    let id = engine.send(ask(Area::Chat, HELPER, choice("claude", Some("haiku")))).unwrap();
+    // The agent's own turn ended; the reply waits for the helper it left working.
+    until(&engine, &id, |c| c.messages[1].text.contains("started")).await;
+    let waiting = engine.open(&id).unwrap();
+    assert_eq!(waiting.messages[1].status, Some(Status::Streaming), "the reply still waits for its helper");
+    let agent = waiting.messages[1].tools.iter().flatten().find(|t| t.name == "Agent").unwrap();
+    assert_eq!(agent.ok, None, "the helper shows at work, so the screen counts it before a Stop");
+    say(&engine, &id, "claude", PONG).unwrap();
+
+    let c = until(&engine, &id, |c| settled(c, 4) && c.messages.iter().any(|m| m.text.contains("kiwi"))).await;
+    engine.shutdown();
+    assert_eq!(f.mismatches.lock().unwrap().clone(), Vec::<String>::new());
+    assert_eq!(f.wire.lines_with("\"interrupt\""), 0, "nothing written to the CLI stops the turn or its helpers");
+    assert_eq!(f.wire.lines_with(PONG), 1, "the message went to the CLI once");
+    assert_eq!(texts(&c), [HELPER, PONG]);
+    assert!(c.messages.iter().all(|m| m.status != Some(Status::Stopped)), "{:?}", c.messages.iter().map(|m| m.status).collect::<Vec<_>>());
+    assert!(c.queued.is_empty());
+}
+
 #[tokio::test]
 async fn a_waiting_message_sent_now_goes_into_the_running_turn() {
     let dir = tempfile::tempdir().unwrap();

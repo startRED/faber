@@ -31,7 +31,10 @@ helpers included, read as working again with the new reply.
 A Codex subagent (`spawn_agent`, started only when the person asks for one) is the same row. Codex gives it a path instead of a description, so its title is the
 path's last part with spaces (`/root/read_docs` reads "read docs"), and it has no kind. Its approvals show on the
 conversation's own card, since the person cannot open the subagent; one that arrives after the reply ended is refused,
-and Stop and closing the conversation reach the subagent too. What a subagent still does after its reply ended reaches
+and Stop and closing the conversation reach the subagent too. With any subagent or helper at work, Stop asks first in place of
+its button: one line in the second ink saying how many it ends, then "Stop all" (the Stop look) and "Keep working" (the
+accent, focused, and Escape picks it); the question goes by itself when they are done. A message written meanwhile never
+stops one. What a subagent still does after its reply ended reaches
 no reply, so its step reads "stopped". Codex counts each thread's usage on its own, so the
 engine adds the subagent's tokens and cost to the reply that started it, and marks the reply's usage incomplete when a
 subagent is still at work as it ends.

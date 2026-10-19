@@ -61,6 +61,7 @@ import './styles.check.ts';
 import './grammar.check.ts';
 import './lighter.check.ts';
 import './steer.check.ts';
+import './stop-helpers.check.ts';
 import './thread.check.ts';
 import './tutorial.check.ts';
 import './unsent.check.ts';

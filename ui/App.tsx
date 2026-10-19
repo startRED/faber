@@ -42,7 +42,7 @@ import { createOpening, upsert } from './opening.ts';
 import { Running } from './Running.tsx';
 import { agentWide, openedAgent, showAgent, startMessage, toggleAgentWide } from './AgentChat.tsx';
 import { openedSite, showSite } from './Site.tsx';
-import { agentSteps } from './worklog.ts';
+import { agentSteps, helpersAtWork } from './worklog.ts';
 import { createAutoOpen, doneCards, openPlace, type Place, placeOfRunning, shownRunning, stopOffered, store, waitingKeys } from './running.ts';
 import { type Keep, type Section, Settings } from './Settings.tsx';
 import { Setup } from './Setup.tsx';
@@ -786,6 +786,7 @@ export function App(props: { initial: AppState; update?: UpdateStatus; inbox: { 
         mode={state().settings.permissions ?? 'dontAsk'}
         onMode={(permissions) => void saveSettings({ permissions })}
         busy={busy() && !loading()}
+        helpers={helpersAtWork(current()?.messages)}
         locked={loading()}
         placeholder={area() === 'project' ? t('composer.projectPlaceholder') : newChat() ? t('composer.chatPlaceholder') : t('composer.replyPlaceholder')}
         hints={newChat() ? homeHints(area() === 'project' ? 'project' : 'chat') : undefined}

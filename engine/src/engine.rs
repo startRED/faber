@@ -1386,14 +1386,12 @@ impl Core {
         self.claude_flags
     }
 
-    /// A tool of one of the last replies. A message steered into the turn starts a new reply, so a tool that began in the one
-    /// before still ends there; the current reply is looked at first.
+    /// A tool of the conversation's replies. A message steered into the turn starts a new reply, so a tool that began in one
+    /// before still ends there, however many messages came since (a helper in the background outlives several); the current
+    /// reply is looked at first, then the others from the newest.
     fn tool_of(&mut self, conv: &str, id: &str) -> Option<&mut ToolUse> {
         let current = self.live.get(conv).and_then(|l| l.turn.clone());
-        let replies = self.convs.get_mut(conv).into_iter().flat_map(|c| c.messages.iter_mut().rev()).filter(|m| m.role == Role::Assistant);
-        let mut recent = replies.take(3).collect::<Vec<_>>();
-        recent.sort_by_key(|m| Some(&m.id) != current.as_ref());
-        recent.into_iter().filter_map(|m| m.tools.as_mut()).flatten().find(|t| t.id == id)
+        tool_in(&mut self.convs.get_mut(conv)?.messages, current.as_deref(), id)
     }
 
     /// A subagent's call that just ended gets the facts of what it did (R161 step 4); any other step is left as it is.
@@ -3144,5 +3142,34 @@ fn copy_dir(from: &Path, to: &Path) {
         } else {
             let _ = std::fs::copy(entry.path(), target);
         }
+    }
+}
+
+/// The tool `id` of the conversation's replies: the current reply first, then the others from the newest.
+fn tool_in<'a>(messages: &'a mut [Message], current: Option<&str>, id: &str) -> Option<&'a mut ToolUse> {
+    let has = |m: &Message| m.role == Role::Assistant && m.tools.iter().flatten().any(|t| t.id == id);
+    let at = messages.iter().rposition(|m| Some(m.id.as_str()) == current && has(m)).or_else(|| messages.iter().rposition(has))?;
+    messages[at].tools.as_mut()?.iter_mut().find(|t| t.id == id)
+}
+
+#[cfg(test)]
+mod tool_in_tests {
+    use super::*;
+    use serde_json::json;
+
+    fn reply(id: &str, tools: &[&str]) -> Message {
+        let tools = tools.iter().map(|t| json!({ "id": t, "name": "Agent", "input": {} })).collect::<Vec<_>>();
+        serde_json::from_value(json!({ "id": id, "role": "assistant", "text": "", "at": 0, "tools": tools })).unwrap()
+    }
+
+    #[test]
+    fn a_helper_that_ends_after_many_messages_ends_on_its_own_call() {
+        let mut messages = vec![reply("a1", &["helper"]), reply("a2", &[]), reply("a3", &[]), reply("a4", &[]), reply("a5", &["late"])];
+        tool_in(&mut messages, Some("a5"), "helper").unwrap().ok = Some(true);
+        assert_eq!(messages[0].tools.as_ref().unwrap()[0].ok, Some(true), "four replies later, the call is still found");
+        assert!(tool_in(&mut messages, Some("a5"), "nobody").is_none());
+        let mut twice = vec![reply("a1", &["t"]), reply("a2", &["t"])];
+        tool_in(&mut twice, Some("a1"), "t").unwrap().ok = Some(false);
+        assert_eq!(twice[0].tools.as_ref().unwrap()[0].ok, Some(false), "the current reply is looked at first");
     }
 }
