@@ -6,7 +6,8 @@ and how far it got. In his words, today it is "muito texto bruto". Sources: the 
 [../../research/2026-10-18-harness-output-ui/](../../research/2026-10-18-harness-output-ui/README.md) (behavior only)
 and Faber's code at `origin/phase-1-base` on 2026-10-19.
 
-Status: proposal. The tasks in [../../tasks/](../../tasks/README.md) numbered 016 to 019 build it, in that order.
+Status: approved by Erick on 2026-10-19 ("pode aprovar, ficou bem melhor assim"). The tasks in
+[../../tasks/](../../tasks/README.md) numbered 016 to 019 build it, in that order.
 
 ## What went wrong in that conversation
 
@@ -67,6 +68,12 @@ From the study pages (claude-desktop-rendering 2.6-2.8 and 5.3-5.4; openai-deskt
   own quiet marker, never a user bubble.
 
 ## Design
+
+**The rule over all of it** (Erick, 2026-10-19: "bem direto ao ponto e sem distrações"): the conversation shows only
+what the agent did and found, where the work stands, and what needs the person. Faber's own plumbing never takes a
+row of its own: the messages Faber sends by itself, retries, meter gaps, hook output, Keep going's signals and history
+resends live at most in a tooltip, in the work log or in the run header's count. A new row in the thread has to say
+which of the three it is.
 
 Ten parts, ranked by value over effort. Faber already has most of the parts these hang on:
 - the MCP server over stdio and Codex's dynamic tools (`engine/src/helper.rs`), with `helper`, `browse`,
@@ -163,8 +170,9 @@ Consecutive turns Faber started by itself render as one run, not as a list of tu
 - inside, each turn's work log stays folded;
 - only the newest turn's final text and the closing box stay open.
 
-A turn whose only content is Faber's "keep going" message and nothing else, an empty turn, is not drawn; it only adds
-to the count. "While you were away" stays the run's first line, and its questions become part 9's card.
+Faber's own messages (keep going, fix the checks, a helper finished, history compacted) are never drawn as rows: they
+add to the header's count, and its tooltip lists them. A turn with nothing for the person, where the agent only
+acknowledged, is not drawn either. Task 016 removes the rows first; this part adds the header. "While you were away" stays the run's first line, and its questions become part 9's card.
 
 ### 6. Narration diet (tasks 017 and 018)
 
@@ -195,7 +203,7 @@ Each chip carries its state: running, passed, failed or waiting. A finished one 
 reply ends. Faber reads all of these from the tool calls it already parses, with no new protocol. This is what makes
 the waiting narration of part 6 unnecessary.
 
-### 8. Notice hygiene (task 018)
+### 8. Notice hygiene (task 016)
 
 - **Notices of the same kind in a row merge into one row with a count.** Identical notices in one run show once with
   "×N" (data face). This covers "Interrompida." from an automatic
@@ -204,6 +212,9 @@ the waiting narration of part 6 unnecessary.
   sentence as its tooltip.
 - **"Interrompida." shows only when the person stopped the reply.** A turn Faber cut (Keep going's own stop, a
   restart) says nothing.
+- **Faber's own messages leave the thread** (the rule above). "O Faber pediu para continuar" and the other wake rows
+  are not drawn, and "A sessão anterior se perdeu…" becomes the tooltip of the reply's header. A row stays only where
+  the person must act (checks that failed twice and now need them), in the amber note style.
 - **A failed check line is shown only with its failures.** "O que falhou" with nothing under it is a bug: it shows "no
   details" instead.
 

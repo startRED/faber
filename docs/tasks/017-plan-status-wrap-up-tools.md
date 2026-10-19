@@ -1,6 +1,6 @@
 # The agent shows its plan, what it is doing now, and a closing box
 
-Build parts 2, 3, 4 and the prompt half of part 6 of [the design](docs/superpowers/specs/2026-10-19-legible-agent-runs-design.md#2-the-plan-the-person-can-see-task-017):
+Build parts 2, 3, 4 and the prompt half of part 6 of [the design](../superpowers/specs/2026-10-19-legible-agent-runs-design.md#2-the-plan-the-person-can-see-task-017):
 - Three tools on Faber's MCP server (engine/src/helper.rs), for Claude Code and Codex alike:
   - `plan`: the conversation's checklist;
   - `status`: 3 to 6 words of what the agent is doing now;

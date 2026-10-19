@@ -1,6 +1,6 @@
 # What the agent left running shows as chips, and followed PRs show their state
 
-Build parts 7 and 10 of [the design](docs/superpowers/specs/2026-10-19-legible-agent-runs-design.md#7-background-work-as-chips-task-019):
+Build parts 7 and 10 of [the design](../superpowers/specs/2026-10-19-legible-agent-runs-design.md#7-background-work-as-chips-task-019):
 - One row of quiet chips under the plan for what the agent left running: background shells, monitors, helpers,
   Faber's checks and followed pull requests. Each shows running, passed, failed or waiting. They are read from the
   tool calls Faber already parses.
