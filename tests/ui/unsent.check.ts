@@ -4,7 +4,7 @@ import themes from '../../src-tauri/src/themes.json';
 import { Thread } from '../../ui/Thread.tsx';
 import type { Message } from '../../ui/api.ts';
 import { dirtyCount, keep, kept, release } from '../../ui/unsent.ts';
-import { check, equal, ok } from './check.ts';
+import { check, equal, ok, until } from './check.ts';
 
 const settle = () => new Promise((resolve) => setTimeout(resolve, 30));
 
@@ -158,10 +158,14 @@ check('thread: in a scrolled thread, cancelling an edit leaves every paragraph o
   }), host.querySelector('.col')!);
   const thread = host.querySelector<HTMLElement>('.thread')!;
   const pin = () => { thread.scrollTop = thread.scrollHeight; };
-  const drawn = (when: string) => {
-    const blocks = [...host.querySelectorAll<HTMLElement>('.ai > .md > div > p')];
-    equal(blocks.length, paragraphs.length, `${when}: every paragraph is in the answer`);
-    for (const block of blocks) {
+  const blocks = () => [...host.querySelectorAll<HTMLElement>('.ai > .md > div > p')];
+  const allDrawn = () => blocks().length === paragraphs.length && blocks().every((block) => block.getBoundingClientRect().height > 0 && block.checkVisibility({ contentVisibilityAuto: true }));
+  // The browser decides what content-visibility skips on a rendering update, and a slow or hidden window (macOS CI) makes
+  // that update late. A paragraph that stays skipped or empty for seconds still fails.
+  const drawn = async (when: string) => {
+    await until(allDrawn).catch(() => {}); // the asserts below say which paragraph is wrong
+    equal(blocks().length, paragraphs.length, `${when}: every paragraph is in the answer`);
+    for (const block of blocks()) {
       ok(block.getBoundingClientRect().height > 0, `${when}: a paragraph has no height`);
       ok(block.checkVisibility({ contentVisibilityAuto: true }), `${when}: a paragraph is skipped by the browser`);
     }
@@ -171,19 +175,19 @@ check('thread: in a scrolled thread, cancelling an edit leaves every paragraph o
     await settle();
     pin();
     await settle();
-    drawn('before the edit');
+    await drawn('before the edit');
     host.querySelector<HTMLButtonElement>('button.edit')!.click();
     await settle();
     pin();
     setMessage(say(paragraphs, 1));
     await settle();
-    drawn('while the edit box is open');
+    await drawn('while the edit box is open');
     host.querySelector<HTMLButtonElement>('.you.editing button[type="button"]')!.click();
     await settle();
-    drawn('right after cancelling');
+    await drawn('right after cancelling');
     pin();
     await settle();
-    drawn('after the thread follows the tail');
+    await drawn('after the thread follows the tail');
   } finally {
     dispose();
     host.remove();

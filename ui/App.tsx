@@ -503,6 +503,9 @@ export function App(props: { initial: AppState; update?: UpdateStatus; inbox: { 
     const plan = heard?.id === done.conversation?.id ? heard : undefined;
     setCurrent(done.conversation && plan ? { ...done.conversation, plan: plan.plan } : done.conversation);
     setSearchIndex(target);
+    // Consume the reveal as soon as the run blocks have heard it, not on a frame: a window that draws no frame (minimised,
+    // hidden, a slow machine) would keep it, and the next automatic turn would unfold its new run block by itself.
+    queueMicrotask(() => setSearchIndex(undefined));
     if (target !== undefined) searchFrame = requestAnimationFrame(() => {
       searchMark = thread?.querySelector<HTMLElement>(`[data-message-index="${target}"]`) ?? undefined;
       if (!searchMark) return;
@@ -512,8 +515,6 @@ export function App(props: { initial: AppState; update?: UpdateStatus; inbox: { 
       searchMark.scrollIntoView({ block: 'center', behavior: smooth ? 'smooth' : 'instant' });
       lastScrollTop = thread?.scrollTop ?? 0;
       searchTimer = setTimeout(() => searchMark?.classList.remove('search-focus'), 1800);
-      // Consume the reveal in App: the next automatic turn can recreate its RunBlock.
-      setSearchIndex(undefined);
     });
     setChoice(next.id ? recall<Choice>(`faber.choice.${next.id}`, done.conversation?.choice ?? { vendor: 'auto' }) : { vendor: 'auto' });
     if (done.conversation) queueMicrotask(() => restoreRejected(done.conversation!.id, done.conversation!.messages.at(-1)));

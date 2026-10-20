@@ -63,6 +63,13 @@ export function ok(value: unknown, message = 'expected a true value'): asserts v
   if (!value) throw new Error(message);
 }
 
+/** Waits until `done` holds, polling, for what the screen finishes on an animation frame or after a promise: a window that is
+ * slow or hidden (macOS CI) draws frames late, so a fixed pause there is a guess. A change that never happens still fails. */
+export async function until(done: () => unknown, ms = 4000, message = 'it did not happen in time'): Promise<void> {
+  for (let waited = 0; !done() && waited < ms; waited += 25) await new Promise((resolve) => setTimeout(resolve, 25));
+  ok(done(), message);
+}
+
 export function equal<T>(actual: T, expected: T, message = 'values differ'): void {
   if (!Object.is(actual, expected)) throw new Error(`${message}: expected ${show(expected)}, got ${show(actual)}`);
 }
