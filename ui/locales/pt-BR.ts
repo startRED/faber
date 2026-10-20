@@ -1064,6 +1064,7 @@ export const ptBR: Messages = {
   'notes.114.better': 'As imagens que você anexa ficam maiores na caixa de mensagem, e um clique em qualquer imagem, ali ou na conversa, abre ela grande.',
   'notes.115.better': 'Quando o Continuar sozinho trabalha por conta própria, os turnos agora aparecem como um bloco só, com quanto tempo ele trabalhou, fechado até você abrir, e as perguntas que o Faber respondeu por você ficam num cartão onde dá para trocar cada resposta.',
   'notes.116.better': 'A tela de contas agora diz qual plano cada IA usa, e uma instalação que falha oferece a página oficial de instalação.',
+  'notes.117.better': 'A linha de uso na barra lateral mostra o limite semanal de cada IA; o de cinco horas fica na dica e nas Configurações.',
   'update.checking': 'Procurando atualização…',
   'update.downloading': 'Baixando atualização…',
   'update.downloadingPercent': 'Baixando atualização… {percent}%',

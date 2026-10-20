@@ -1077,6 +1077,7 @@ export const de: Messages = {
   'notes.114.better': 'Angehängte Bilder sind im Nachrichtenfeld jetzt größer, und ein Klick auf ein Bild, dort oder im Gespräch, öffnet es groß.',
   'notes.115.better': 'Wenn Selbst weitermachen allein arbeitet, stehen seine Arbeitsschritte jetzt in einem Block mit der Arbeitszeit, zugeklappt, bis du ihn öffnest, und die Fragen, die Faber für dich beantwortet hat, stehen auf einer Karte, auf der du jede Antwort ändern kannst.',
   'notes.116.better': 'Die Kontokarten sagen jetzt, mit welchem Abo jede KI läuft, und eine fehlgeschlagene Installation bietet die offizielle Installationsseite an.',
+  'notes.117.better': 'Die Nutzungszeile in der Seitenleiste zeigt das Wochenlimit jeder KI; das Fünf-Stunden-Limit steht im Tooltip und in den Einstellungen.',
   'update.checking': 'Suche nach einem Update…',
   'update.downloading': 'Update wird heruntergeladen…',
   'update.downloadingPercent': 'Update wird heruntergeladen… {percent} %',

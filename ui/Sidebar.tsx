@@ -12,7 +12,7 @@ import { forgetProject } from './projects.ts';
 import type { Place } from './running.ts';
 import { mac } from './WindowControls.tsx';
 import { planWords } from './Plan.tsx';
-import { ageOf, freshness, groupChats, matches, nest, type Quotas, showsChats, tailOf, tightest } from './sidebar.ts';
+import { ageOf, freshness, groupChats, lineReading, matches, nest, otherReadings, type Quotas, showsChats, tailOf } from './sidebar.ts';
 
 /** The name of a conversation while it is being renamed: Enter keeps it, Esc and leaving the box too when nothing changed. */
 function RenameBox(props: { title: string; onDone: (title?: string) => void }) {
@@ -336,12 +336,13 @@ export function Sidebar(props: Props) {
             <span>{t('settings.open')}</span>
           </button>
         </div>
-        {/* One thin line per connected AI: its mark, how much of its tightest window is used, the share. The window, the reset,
-            how old the reading is and "still counting" (C010) are in the tooltip, so the line never wraps. */}
+        {/* One thin line per connected AI: its mark, how much of its weekly window is used (R177), the share. The window, the
+            reset, the other windows (the five-hour one), how old the reading is and "still counting" (C010) are in the
+            tooltip, so the line never wraps. */}
         <div class="usage" role="group" aria-label={t('quota.label')}>
           <For each={props.vendors}>
             {(v) => {
-              const q = () => tightest(props.quotas, v, props.now);
+              const q = () => lineReading(props.quotas, v, props.now);
               const fresh = () => freshness(props.usage, v, q()?.window);
               // While use is still being counted the real share can only be higher, so it reads "≥ 44%" (C010).
               const share = () => (!q() ? t('quota.unknown') : fresh().counting ? t('quota.atLeast', { share: percent(q()!.used) }) : percent(q()!.used));
@@ -350,11 +351,12 @@ export function Sidebar(props: Props) {
                 q()
                   ? [
                       `${t('quota.window', { window: windowName(q()!.window) })} · ${untilReset(q()!.resetsAt)}`,
+                      ...otherReadings(props.quotas, v, props.now, q()).map((o) => `${t('quota.window', { window: windowName(o.window) })}: ${percent(o.used)}`),
                       fresh().uncountedPoints ? t('quota.uncounted', { share: `${fresh().uncountedPoints}%` }) : '',
                       fresh().readAt !== undefined ? t('quota.read', { when: ageWords(fresh().readAt!, props.now) }) : '',
                       fresh().counting ? t('quota.counting') : '',
                     ]
-                  : [t('side.usage')];
+                  : [...otherReadings(props.quotas, v, props.now).map((o) => `${t('quota.window', { window: windowName(o.window) })}: ${percent(o.used)}`), t('side.usage')];
               return (
                 <button class="vendor" classList={{ low: low() }} onClick={() => props.onSettings('usage')} title={[vendorName(v), ...details()].filter(Boolean).join(' · ')}>
                   <VendorMark vendor={v} />

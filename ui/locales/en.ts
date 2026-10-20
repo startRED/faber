@@ -957,6 +957,7 @@ export const en = {
   'notes.114.better': 'Pictures you attach are bigger in the message box, and a click on any picture, there or in the conversation, opens it large.',
   'notes.115.better': 'When Keep going works on its own, its turns now read as one block with how long it worked, folded until you open it, and the questions Faber answered for you sit in one card where you can change each answer.',
   'notes.116.better': 'The account cards now say which plan each AI runs on, and a failed install offers the official install page.',
+  'notes.117.better': 'The usage line in the sidebar shows each AI’s weekly limit; the five-hour one is in its tooltip and in Settings.',
   'update.checking': 'Looking for an update…',
   'update.downloading': 'Downloading update…',
   'update.downloadingPercent': 'Downloading update… {percent}%',

@@ -73,11 +73,11 @@ The numbers above are the usual widths. The person can change them, and the shel
   smallest size and the third ink. Opened, once its reply ends, the composer's place holds one card of the composer's
   width: the line "This conversation is archived…" in the second ink and a small Unarchive button at its right.
 - The footer is one row, the person's name when they gave one and Settings, then one thin line per connected vendor: its
-  shape, a 3 px bar and the used share of its tightest quota window, in the small size. Nothing on the line wraps. The
-  window, the reset, how old the reading is, the not-yet-counted estimate and the vendor's name are its tooltip. While
+  shape, a 3 px bar and the used share of its weekly quota window (R177; a vendor that never reported one shows its tightest), in the
+  small size. Nothing on the line wraps. The window, the reset, the other windows with their shares (the five-hour one), how old the reading is, the not-yet-counted estimate and the vendor's name are its tooltip. While
   use is still being counted the share reads "≥ 44%" (the real share can only be higher), with the words in the tooltip
   (C010). The bar is amber only when the engine says the quota is nearly used. The line opens Settings > Accounts and limits.
-  A vendor with no reading yet, or only an expired one, shows "—". The version is not on the sidebar: it is the
+  A vendor with no reading yet, or a weekly reading past its reset, shows "—". The version is not on the sidebar: it is the
   tooltip of the Settings button.
 - Search filters conversation titles and project names on screen; full-text search comes in Phase 2. The percentage and
   "stopped" tails come with the progress view in Phase 3.

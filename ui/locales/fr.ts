@@ -1077,6 +1077,7 @@ export const fr: Messages = {
   'notes.114.better': 'Les images que tu joins sont plus grandes dans la zone du message, et un clic sur n’importe laquelle, là ou dans la conversation, l’ouvre en grand.',
   'notes.115.better': "Quand Continuer seul travaille de lui-même, ses tours forment maintenant un seul bloc avec la durée du travail, replié jusqu'à ce que vous l'ouvriez, et les questions auxquelles Faber a répondu pour vous sont dans une carte où vous pouvez changer chaque réponse.",
   'notes.116.better': 'L’écran des comptes indique maintenant l’abonnement de chaque IA, et une installation ratée propose la page d’installation officielle.',
+  'notes.117.better': 'La ligne d’usage de la barre latérale montre la limite hebdomadaire de chaque IA ; celle de cinq heures est dans l’infobulle et dans les Réglages.',
   'update.checking': 'Recherche d’une mise à jour…',
   'update.downloading': 'Téléchargement de la mise à jour…',
   'update.downloadingPercent': 'Téléchargement de la mise à jour… {percent} %',

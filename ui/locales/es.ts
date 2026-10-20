@@ -1077,6 +1077,7 @@ export const es: Messages = {
   'notes.114.better': 'Las imágenes que adjuntas se ven más grandes en el cuadro del mensaje, y un clic en cualquiera, ahí o en la conversación, la abre en grande.',
   'notes.115.better': 'Cuando Seguir solo trabaja por su cuenta, sus turnos ahora se ven como un solo bloque con cuánto tiempo trabajó, plegado hasta que lo abres, y las preguntas que Faber respondió por ti están en una tarjeta donde puedes cambiar cada respuesta.',
   'notes.116.better': 'La pantalla de cuentas ahora dice qué plan usa cada IA, y una instalación fallida ofrece la página oficial de instalación.',
+  'notes.117.better': 'La línea de uso de la barra lateral muestra el límite semanal de cada IA; el de cinco horas está en su descripción y en Ajustes.',
   'update.checking': 'Buscando una actualización…',
   'update.downloading': 'Descargando actualización…',
   'update.downloadingPercent': 'Descargando actualización… {percent} %',
