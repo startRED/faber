@@ -583,6 +583,12 @@ select.pill option { background: var(--s2); color: var(--ink); }
 .attach-remove:hover { color: var(--ink); }
 .attach-remove:focus-visible { outline: 2px solid var(--accent-text); outline-offset: 1px; }
 .composer textarea::placeholder { color: var(--ink-3); }
+/* `@` in the composer (parity T4): the context menu's surface over the box. It opens on a keystroke, so it does not move. */
+.mentions { position: absolute; left: 12px; bottom: calc(100% + 6px); z-index: 2; display: grid; gap: 1px; width: min(420px, calc(100% - 24px)); max-height: min(320px, 40vh); overflow-y: auto; margin: 0; padding: 4px; list-style: none; border-radius: var(--r-md); background: var(--s2); color: var(--ink); box-shadow: var(--lift-shadow), inset 0 0 0 1px var(--line-2); scrollbar-width: thin; }
+.mentions li { display: flex; align-items: center; gap: 8px; min-width: 0; padding: 6px 10px; border-radius: var(--r-xs); color: var(--ink-2); font-size: var(--fs-sm); cursor: pointer; }
+.mentions li span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.mentions li.on { background: var(--s3); color: var(--ink); }
+.mentions.waiting { padding: 8px 14px; color: var(--ink-3); font-size: var(--fs-sm); }
 /* The idle composer (ui/Ghost.tsx): a typing bar and a hint drawn over the empty field, where its placeholder would be. The
    field keeps its own placeholder for readers of the screen and shows it again whenever the hints are not drawn. */
 .composer:has(.idle-box) textarea::placeholder { color: transparent; }

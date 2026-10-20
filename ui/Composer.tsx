@@ -1,5 +1,5 @@
 import { createEffect, createSignal, For, on, onCleanup, onMount, Show } from 'solid-js';
-import { DEFAULT_EFFORT, type Choice, type Effort, PERMISSION_MODES, type PermissionMode, type Vendor } from './api.ts';
+import { DEFAULT_EFFORT, type Choice, type Effort, type Mention, PERMISSION_MODES, type PermissionMode, type Vendor } from './api.ts';
 import { Ghost } from './Ghost.tsx';
 import { Pic } from './ImageViewer.tsx';
 import { Icon } from './Glyphs.tsx';
@@ -48,6 +48,22 @@ interface Props {
   onReady?: (fill: (text: string) => void) => void;
   /** Names this box's unsent text in storage; the text comes back after a restart. */
   draftKey?: string;
+  /** `@` lists the working folder's entries that match what follows it (parity T4); absent where there is no folder yet. */
+  onMention?: (query: string) => Promise<Mention[]>;
+}
+
+/** The `@` being typed at the caret: where it starts and what follows it, or undefined. A path with a space is written
+ * `@"My folder/…"`, so a quote opens one that spaces do not end. */
+export function mentionAt(text: string, caret: number): { at: number; query: string } | undefined {
+  const m = /(^|\s)@(?:"([^"]*)|([^\s@"]*))$/.exec(text.slice(0, caret));
+  return m ? { at: m.index + m[1]!.length, query: m[2] ?? m[3]! } : undefined;
+}
+
+/** How an entry is written into the message, so `mentionAt` reads it back: quoted when it has a space or an `@` (the engine
+ * never offers a name with a double quote); a folder stays open so its entries show next. */
+export function mentionText(path: string, dir: boolean): string {
+  if (!/[\s@]/.test(path)) return `@${path}${dir ? '' : ' '}`;
+  return dir ? `@"${path}` : `@"${path}" `;
 }
 
 // Small text files go inside the message (no tool call needed); anything else is attached as a file.
@@ -164,8 +180,68 @@ export function Composer(props: Props) {
       props.onWarm();
     }
   };
+  // `@`: the list of matching entries over the box while an `@` is typed at the caret. The engine is asked once typing
+  // pauses briefly; until its answer for the current query comes, the list on screen is an older one and cannot be picked.
+  const [mentions, setMentions] = createSignal<Mention[]>([]);
+  const [active, setActive] = createSignal(0);
+  const [pending, setPending] = createSignal(false);
+  // An answer that takes long shows a waiting line, so a held Enter is never a box that seems not to answer.
+  const [slow, setSlow] = createSignal(false);
+  let slowing: ReturnType<typeof setTimeout> | undefined;
+  let mention: { at: number; query: string } | undefined;
+  // The entry the arrows reach stays in view in a long list.
+  createEffect(on(active, (i) => document.getElementById(`mention-${i}`)?.scrollIntoView({ block: 'nearest' }), { defer: true }));
+  let asked = 0;
+  let asking: ReturnType<typeof setTimeout> | undefined;
+  const closeMentions = () => {
+    asked++;
+    clearTimeout(asking);
+    clearTimeout(slowing);
+    mention = undefined;
+    setPending(false);
+    setSlow(false);
+    setMentions([]);
+  };
+  onCleanup(closeMentions);
+  const lookForMention = (el: HTMLTextAreaElement) => {
+    const found = props.onMention ? mentionAt(el.value, el.selectionStart ?? el.value.length) : undefined;
+    if (!found) return closeMentions();
+    if (found.at === mention?.at && found.query === mention.query) return;
+    mention = found;
+    const ticket = ++asked;
+    const ask = props.onMention!;
+    setPending(true);
+    clearTimeout(asking);
+    clearTimeout(slowing);
+    slowing = setTimeout(() => ticket === asked && setSlow(true), 300);
+    const answered = (list: Mention[]) => {
+      if (ticket !== asked) return;
+      clearTimeout(slowing);
+      setPending(false);
+      setSlow(false);
+      setMentions(list);
+      setActive(0);
+    };
+    asking = setTimeout(() => void ask(found.query).then(answered, () => answered([])), 60);
+  };
+  // The path takes the place of the `@` and what followed it, as a typed edit (undo takes it back). A file ends with a space;
+  // a folder stays open, so its own entries show next. Nothing is put in unless the caret still ends that same `@`.
+  const pickMention = (m: Mention) => {
+    if (!field || !mention || pending()) return;
+    const now = mentionAt(field.value, field.selectionStart ?? field.value.length);
+    if (now?.at !== mention.at || now.query !== mention.query) return closeMentions();
+    field.focus();
+    field.setSelectionRange(mention.at, field.selectionStart ?? field.value.length);
+    const words = mentionText(m.path, m.dir);
+    if (!document.execCommand('insertText', false, words)) {
+      const text = field.value;
+      field.value = text.slice(0, field.selectionStart) + words + text.slice(field.selectionEnd);
+      field.dispatchEvent(new InputEvent('input', { bubbles: true }));
+    }
+  };
   const send = () => {
     if (!canSend()) return;
+    closeMentions();
     clearTimeout(pause);
     props.onSend(draft());
     setDraft(EMPTY);
@@ -242,20 +318,54 @@ export function Composer(props: Props) {
         placeholder={props.placeholder}
         value={draft().text}
         onFocus={() => setFocused(true)}
-        onBlur={() => setFocused(false)}
+        onBlur={() => {
+          setFocused(false);
+          closeMentions();
+        }}
+        aria-controls={mentions().length ? 'composer-mentions' : undefined}
+        aria-activedescendant={mentions().length ? `mention-${active()}` : undefined}
         onInput={(e) => {
           const text = e.currentTarget.value;
           setDraft((d) => ({ ...d, text }));
+          lookForMention(e.currentTarget);
           warm();
           clearTimeout(pause);
           if (text.trim()) pause = setTimeout(() => props.onPause(text), 300);
         }}
         onKeyDown={(e) => {
+          const list = mentions();
+          if (mention && (list.length || pending()) && !e.isComposing) {
+            const moves: Record<string, number> = { ArrowDown: 1, ArrowUp: -1 };
+            if (e.key in moves && list.length) {
+              e.preventDefault();
+              setActive((i) => (i + moves[e.key]! + list.length) % list.length);
+              return;
+            }
+            // While the answer for what was just typed is on its way, Enter neither sends nor puts in an older entry; with
+            // no list on screen yet, only Enter waits.
+            if ((e.key === 'Enter' || (e.key === 'Tab' && list.length)) && !e.shiftKey) {
+              e.preventDefault();
+              if (list.length) pickMention(list[active()]!);
+              return;
+            }
+            if (e.key === 'Escape') {
+              // The list closes; the window's own Escape (the running column, a dialog) does not hear it.
+              e.preventDefault();
+              e.stopPropagation();
+              closeMentions();
+              return;
+            }
+          }
           if (e.key === 'Enter' && !e.shiftKey && !e.isComposing) {
             e.preventDefault();
             send();
           }
         }}
+        // The caret moved away from the `@` (or to another one): the list follows it.
+        onKeyUp={(e) => {
+          if (/^(Arrow(Left|Right)|Home|End|Page(Up|Down))$/.test(e.key)) lookForMention(e.currentTarget);
+        }}
+        onClick={(e) => lookForMention(e.currentTarget)}
         onPaste={(e) => {
           const images = [...(e.clipboardData?.files ?? [])].filter((f) => f.type.startsWith('image/'));
           if (images.length) {
@@ -269,6 +379,33 @@ export function Composer(props: Props) {
           queueMicrotask(() => el.focus());
         }}
       />
+      <Show when={slow() && !mentions().length}>
+        <p class="mentions waiting" role="status">{t('composer.mentionsWaiting')}</p>
+      </Show>
+      <Show when={mentions().length}>
+        <ul class="mentions" id="composer-mentions" role="listbox" aria-label={t('composer.mentions')} aria-busy={pending()}>
+          <For each={mentions()}>
+            {(m, i) => (
+              <li
+                id={`mention-${i()}`}
+                role="option"
+                aria-selected={i() === active()}
+                classList={{ on: i() === active() }}
+                onMouseDown={(e) => {
+                  // The box keeps focus, so the list is still there when the click lands; only the main button picks.
+                  if (e.button !== 0) return;
+                  e.preventDefault();
+                  pickMention(m);
+                }}
+                onMouseMove={() => setActive(i())}
+              >
+                <Icon name={m.dir ? 'folder' : 'sheet'} small />
+                <span>{m.path}</span>
+              </li>
+            )}
+          </For>
+        </ul>
+      </Show>
       <Show when={props.hints && !hasContent()}>
         <Ghost hints={props.hints!} focused={focused()} />
       </Show>

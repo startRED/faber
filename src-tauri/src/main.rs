@@ -242,6 +242,34 @@ async fn tell_helper(faber: State<'_, Faber>, id: String, call_id: String, text:
     faber.engine.tell_helper(&id, &call_id, &text)
 }
 
+/// `@` in the composer (parity T4): the entries of the working folder that match `query`, at most 50. Git may run, off the async
+/// threads. One listing runs at a time, and a query that a newer one replaced while it waited gives up, so typing fast in a
+/// big repository never piles up git runs or their output.
+#[tauri::command]
+async fn mentions(
+    faber: State<'_, Faber>,
+    id: Option<String>,
+    project_id: Option<String>,
+    query: String,
+) -> Res<Vec<faber_engine::mention::Mention>> {
+    // At most one query runs and one waits: a newer one answers the waiting one at once with nothing and takes its place.
+    static LISTING: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
+    static WAITING: std::sync::Mutex<Option<tokio::sync::oneshot::Sender<()>>> = std::sync::Mutex::new(None);
+    let (replaced, gone) = tokio::sync::oneshot::channel();
+    if let Some(older) = WAITING.lock().unwrap_or_else(|e| e.into_inner()).replace(replaced) {
+        let _ = older.send(());
+    }
+    let _one = tokio::select! {
+        biased;
+        _ = gone => return Ok(vec![]),
+        one = LISTING.lock() => one,
+    };
+    let engine = faber.engine.clone();
+    Ok(tauri::async_runtime::spawn_blocking(move || engine.mentions(id.as_deref(), project_id.as_deref(), &query))
+        .await
+        .unwrap_or_default())
+}
+
 /// A quick question on the side of a conversation (R250); `model` is the tab's own pick, or the conversation's.
 #[tauri::command]
 async fn ask_aside(faber: State<'_, Faber>, id: String, question: String, model: Option<String>) -> Res<String> {
@@ -829,6 +857,7 @@ fn main() {
                 remove_queued,
                 send_queued,
                 tell_helper,
+                mentions,
                 ask_aside,
                 stop_aside,
                 asides,

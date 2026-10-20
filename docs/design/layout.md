@@ -93,6 +93,9 @@ The numbers above are the usual widths. The person can change them, and the shel
 - "Pick up where you left off" lists up to three conversations of both areas under the suggestions: those that need the
   person first, then the most recently updated.
 - The composer keeps its model picker, "AI: choose for me".
+- `@` in the composer of a conversation with a working folder opens a list of matching files and folders over the box,
+  on the context menu's surface, left-aligned with the text. It opens on a keystroke, so it does not move; the entry the
+  arrows reach is highlighted and stays in view, and a long path ends in an ellipsis.
 - Auto chooses both the model and its effort. A manual model adds an adjacent low, medium or high effort choice,
   defaulting to medium (R102). Each conversation remembers its choice. Changes apply to the next message only (the
   composer does not repeat it), and each answer keeps the effort actually used and shows it in its header. Both CLI drivers always receive that effort.

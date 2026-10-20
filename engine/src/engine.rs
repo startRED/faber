@@ -743,6 +743,23 @@ impl Engine {
     pub fn remove(&self, id: &str) {
         let _ = self.remove_with(id, false);
     }
+    /// `@` in the composer (parity T4): the entries of the working folder of conversation `id`, or of a new conversation's
+    /// project, that match `query`. A new chat has no folder yet, so it has none. The folder is checked and git runs outside
+    /// the engine's lock, since either may wait on a slow disk.
+    pub fn mentions(&self, id: Option<&str>, project_id: Option<&str>, query: &str) -> Vec<crate::mention::Mention> {
+        let Some((folder, git)) = self.with(|c| {
+            let folder = match id.and_then(|id| c.convs.get(id)) {
+                Some(conv) => c.folder_of(conv).ok(),
+                None => project_id.and_then(|p| c.store.projects().into_iter().find(|x| x.id == p)).map(|p| PathBuf::from(p.path)),
+            };
+            folder.map(|f| (f, c.git.clone()))
+        }) else {
+            return vec![];
+        };
+        let Some(folder) = crate::permissions::checked_folder(&folder) else { return vec![] };
+        let mut git = git.and_then(|run| run());
+        crate::mention::find(&folder, git.as_deref_mut().map(|g| g as &mut dyn crate::project::git::Executor), query)
+    }
     pub fn terminal(&self, id: &str) -> Option<TerminalCommand> {
         self.with(|c| c.terminal(id))
     }
@@ -1192,14 +1209,19 @@ impl Core {
     }
 
     fn cwd_of(&self, c: &Conversation) -> Result<PathBuf, String> {
+        let dir = self.folder_of(c)?;
+        if c.area == Area::Chat && c.working_folder.is_none() {
+            std::fs::create_dir_all(&dir).map_err(|_| "error.projectSandbox")?;
+        }
+        // The private folder and a chosen one are checked alike on every launch: a link put there since may lead somewhere
+        // that is not allowed. The CLI starts in the path that was checked.
+        crate::permissions::checked_folder(&dir).ok_or_else(|| "error.workingFolder".to_string())
+    }
+
+    /// Where conversation `c` works, before it is checked (`cwd_of`). Reads only the engine's own state.
+    fn folder_of(&self, c: &Conversation) -> Result<PathBuf, String> {
         if c.area == Area::Chat {
-            let dir = self.workspace_of(&c.id);
-            if c.working_folder.is_none() {
-                std::fs::create_dir_all(&dir).map_err(|_| "error.projectSandbox")?;
-            }
-            // The private folder and a chosen one are checked alike on every launch: a link put there since may lead somewhere
-            // that is not allowed. The CLI starts in the path that was checked.
-            return crate::permissions::checked_folder(&dir).ok_or_else(|| "error.workingFolder".to_string());
+            return Ok(self.workspace_of(&c.id));
         }
         self.store
             .projects()
@@ -1209,7 +1231,6 @@ impl Core {
             // next message, before anything runs.
             .map(|p| c.copy.as_ref().map_or_else(|| PathBuf::from(p.path), |copy| copy.folder()))
             .ok_or_else(|| "error.projectGone".to_string())
-            .and_then(|path| crate::permissions::checked_folder(&path).ok_or_else(|| "error.workingFolder".to_string()))
     }
 
     fn load(&mut self, id: &str) -> Option<&mut Conversation> {

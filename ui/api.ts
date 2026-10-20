@@ -446,6 +446,11 @@ export interface SetupProgressEvent {
   error?: string;
   detail?: string;
 }
+/** An entry of a working folder offered by `@` in the composer (parity T4): its path from the folder, `/` between parts. */
+export interface Mention {
+  path: string;
+  dir: boolean;
+}
 /** A quick question on the side of a conversation (R250), as the engine keeps it until the turn after it ends. */
 export interface Aside {
   id: string;
@@ -546,6 +551,8 @@ export const api = {
   removeQueued: (id: string, turnId: string) => invoke<void>('remove_queued', { id, turnId }),
   sendQueued: (id: string, turnId: string) => invoke<void>('send_queued', { id, turnId }),
   tellHelper: (id: string, callId: string, text: string) => invoke<void>('tell_helper', { id, callId, text }),
+  /** `@` in the composer: the working folder's entries that match `query`, at most 50; a new chat has none. */
+  mentions: (id: string | undefined, projectId: string | undefined, query: string) => invoke<Mention[]>('mentions', { id, projectId, query }),
   /** A quick question on the side (R250); refused with an `error.aside.*` key, `error.quotaOut` or `error.billedPerUse`. */
   askAside: (id: string, question: string, model?: string) => invoke<string>('ask_aside', { id, question, model }),
   stopAside: (asideId: string) => invoke<void>('stop_aside', { asideId }),
