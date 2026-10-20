@@ -368,6 +368,18 @@ svg.i.sm { width: 14px; height: 14px; }
 .patch-line.add { background: var(--accent-soft); }
 .patch-line.del { background: color-mix(in srgb, var(--danger) 12%, transparent); }
 .patch-line.hunk { color: var(--ink-3); }
+/* A file a reply named (parity P2): numbered lines, the number outside the selection, the line the agent pointed at marked. */
+.file-meta { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 12px; min-width: 0; padding: 0 12px 12px; }
+.file-meta .change-path { flex: 1 1 100%; }
+.file-meta .btn { margin-left: auto; }
+.file-text { margin: 0; font-family: var(--font-data); font-size: var(--fs-xs); color: var(--ink-2); }
+.file-line { display: block; line-height: 1.6; white-space: pre-wrap; overflow-wrap: anywhere; padding-left: 7ch; text-indent: -7ch; }
+.file-line::before { content: attr(data-n); display: inline-block; width: 6ch; margin-right: 1ch; text-indent: 0; text-align: right; color: var(--ink-3); user-select: none; }
+.file-line.mark { background: color-mix(in srgb, var(--accent) 16%, transparent); box-shadow: inset 2px 0 var(--accent); color: var(--ink); }
+.file-line.mark::before { color: var(--ink); }
+.md a.file-ref { text-underline-offset: 3px; }
+.md a.file-ref:hover { text-decoration-color: currentColor; }
+.md a.file-ref code { color: inherit; text-decoration: inherit; text-decoration-color: inherit; text-underline-offset: 3px; }
 .aside { display: grid; justify-items: start; gap: 8px; }
 .aside .bad, .aside .side-meta { margin: 0; }
 .aside-answer { max-width: 100%; overflow-wrap: anywhere; }

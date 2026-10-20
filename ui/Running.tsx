@@ -2,6 +2,7 @@ import { createSignal, For, Show } from 'solid-js';
 import type { BackgroundCommand, Conversation, FileChange, Project, RunningItem, Summary } from './api.ts';
 import { AgentChat } from './AgentChat.tsx';
 import { Changes } from './Changes.tsx';
+import { FilePane } from './FileView.tsx';
 import { Commands } from './Commands.tsx';
 import { Asks, Parkeds } from './Ask.tsx';
 import { Icon, VendorMark } from './Glyphs.tsx';
@@ -41,6 +42,8 @@ export function Running(props: {
   /** The quick question on the side (R250), opened from the list's head or by `/btw`, shown the same way. */
   aside?: { conversation?: Conversation; options: Option[] };
   onAside?: () => void;
+  /** A file a reply named (parity P2), shown the same way. */
+  file?: { conversationId: string; at: string };
   changes?: { id: string; files: FileChange[]; loading: boolean; incomplete?: boolean; loadingMore?: boolean; onMore?: () => void; onReview?: (security: boolean) => void };
   onChanges?: () => void;
   background?: BackgroundCommand[];
@@ -98,7 +101,7 @@ export function Running(props: {
       <Show
         when={props.agent}
         fallback={
-          <Show when={props.site} fallback={<Show when={props.aside} fallback={<Show when={props.changes} fallback={<Show when={props.commands} fallback={<>
+          <Show when={props.site} fallback={<Show when={props.aside} fallback={<Show when={props.file} fallback={<Show when={props.changes} fallback={<Show when={props.commands} fallback={<>
             <div class="rc-head">
               <button class="iconbtn" aria-label={t('run.close')} title={t('run.close')} onClick={() => props.onClose()}>
                 <Icon name="close" />
@@ -216,6 +219,8 @@ export function Running(props: {
             <Commands items={props.background ?? []} conversations={props.conversations ?? []} onBack={() => props.onBack?.()} onClose={props.onClose} />
           </Show>}>
             {(changes) => <Changes id={changes().id} files={changes().files} loading={changes().loading} incomplete={changes().incomplete} loadingMore={changes().loadingMore} onMore={changes().onMore} onReview={changes().onReview} onBack={() => props.onBack?.()} onClose={props.onClose} />}
+          </Show>}>
+            {(file) => <FilePane conversationId={file().conversationId} at={file().at} onBack={() => props.onBack?.()} onClose={props.onClose} />}
           </Show>}>
             {(aside) => <QuickQuestion conversation={aside().conversation} options={aside().options} onBack={() => props.onBack?.()} onClose={props.onClose} onTell={(text) => props.onTell?.(text)} />}
           </Show>}>

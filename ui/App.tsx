@@ -49,6 +49,7 @@ import { createOpening, upsert } from './opening.ts';
 import { Running } from './Running.tsx';
 import { agentWide, openedAgent, showAgent, startMessage, toggleAgentWide } from './AgentChat.tsx';
 import { openedSite, showSite } from './Site.tsx';
+import { openedFile, showFile } from './fileref.ts';
 import { answered, btw, heardAsides, openedAside, showAside } from './QuickQuestion.tsx';
 import { agentSteps, helpersAtWork } from './worklog.ts';
 import { createAutoOpen, doneCards, openPlace, type Place, placeOfRunning, shownRunning, stopOffered, store, waitingKeys } from './running.ts';
@@ -399,6 +400,7 @@ export function App(props: { initial: AppState; update?: UpdateStatus; inbox: { 
     showAgent(undefined);
     showSite(undefined);
     showAside(undefined);
+    showFile(undefined);
     setChangesOpen(undefined);
     setBackgroundOpen(false);
     if (!columnOpen()) return;
@@ -458,10 +460,19 @@ export function App(props: { initial: AppState; update?: UpdateStatus; inbox: { 
       { defer: true },
     ),
   );
-  createEffect(on(openedAgent, (open) => open && (showSite(undefined), showAside(undefined), setChangesOpen(undefined), setBackgroundOpen(false)), { defer: true }));
-  createEffect(on(openedSite, (open) => open && (showAgent(undefined), showAside(undefined), setChangesOpen(undefined), setBackgroundOpen(false)), { defer: true }));
-  createEffect(on(openedAside, (open) => open && (showAgent(undefined), showSite(undefined), setChangesOpen(undefined), setBackgroundOpen(false)), { defer: true }));
-  createEffect(on(() => openedAgent() ?? openedSite() ?? openedAside() ?? (changesOpen() ? { conversationId: changesOpen() } : undefined), (open) => {
+  // A file a reply named (parity P2) is always of the conversation on screen: its links are only clicked there, and another
+  // conversation closes it. Kept while the reply streams (`current` changes on every tick), so the column neither reads the file
+  // again nor takes focus back.
+  const sideFile = createMemo(() => {
+    const open = openedFile();
+    const id = current()?.id;
+    return open && id ? { conversationId: id, at: open.ref, open } : undefined;
+  }, undefined, { equals: (a, b) => a?.open === b?.open && a?.conversationId === b?.conversationId });
+  createEffect(on(openedAgent, (open) => open && (showSite(undefined), showAside(undefined), showFile(undefined), setChangesOpen(undefined), setBackgroundOpen(false)), { defer: true }));
+  createEffect(on(openedSite, (open) => open && (showAgent(undefined), showAside(undefined), showFile(undefined), setChangesOpen(undefined), setBackgroundOpen(false)), { defer: true }));
+  createEffect(on(openedAside, (open) => open && (showAgent(undefined), showSite(undefined), showFile(undefined), setChangesOpen(undefined), setBackgroundOpen(false)), { defer: true }));
+  createEffect(on(openedFile, (open) => open && (showAgent(undefined), showSite(undefined), showAside(undefined), setChangesOpen(undefined), setBackgroundOpen(false)), { defer: true }));
+  createEffect(on(() => openedAgent() ?? openedSite() ?? openedAside() ?? sideFile() ?? (changesOpen() ? { conversationId: changesOpen() } : undefined), (open) => {
     if (!open) return;
     // One of another conversation is never shown (`sideAgent`); it goes when the conversation on screen changes.
     if (current()?.id !== open.conversationId) return;
@@ -478,6 +489,7 @@ export function App(props: { initial: AppState; update?: UpdateStatus; inbox: { 
     if (openedSite() && openedSite()!.conversationId !== id) showSite(undefined);
     if (openedAside() && openedAside()!.conversationId !== id) showAside(undefined);
     if (changesOpen() !== id) setChangesOpen(undefined);
+    showFile(undefined);
   }, { defer: true }));
   // The window changes width while the column is open: it becomes a modal dialog or stops being one, and its element is
   // drawn again, so focus goes where the new state wants it.
@@ -1053,6 +1065,7 @@ export function App(props: { initial: AppState; update?: UpdateStatus; inbox: { 
         showAgent(undefined);
         showSite(undefined);
         showAside(undefined);
+        showFile(undefined);
         setChangesOpen(undefined);
         setBackgroundOpen(true);
         if (!byUser()) {
@@ -1072,6 +1085,7 @@ export function App(props: { initial: AppState; update?: UpdateStatus; inbox: { 
       agent={sideAgent()}
       site={sideSite()}
       aside={sideAside() && { conversation: current(), options: options() }}
+      file={sideFile()}
       changes={sideChanges() ? { id: sideChanges()!, files: changeList()?.files ?? [], incomplete: changeList()?.incomplete ?? false, loading: changes.loading, loadingMore: loadingMoreChanges(), onMore: () => void moreChanges(), onReview: canReview() ? (security) => {
         if (!canReview()) return;
         const text = t(security ? 'changes.reviewSecurityRequest' : 'changes.reviewRequest');
@@ -1083,6 +1097,7 @@ export function App(props: { initial: AppState; update?: UpdateStatus; inbox: { 
         showAgent(undefined);
         showSite(undefined);
         showAside(undefined);
+        showFile(undefined);
         setBackgroundOpen(false);
         setChangesOpen(current()?.id);
       } : undefined}
@@ -1091,6 +1106,7 @@ export function App(props: { initial: AppState; update?: UpdateStatus; inbox: { 
         showAgent(undefined);
         showSite(undefined);
         showAside(undefined);
+        showFile(undefined);
         setChangesOpen(undefined);
         setBackgroundOpen(false);
         // The back button is gone with the subagent or the page: focus stays in the column, on the list's first control.

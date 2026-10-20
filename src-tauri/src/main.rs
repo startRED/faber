@@ -754,7 +754,7 @@ async fn save_file(app: AppHandle, faber: State<'_, Faber>, id: String, path: St
 
 #[tauri::command]
 async fn show_file(app: AppHandle, faber: State<'_, Faber>, id: String, path: String) -> Res<()> {
-    let Some(source) = faber.engine.workspace_file(&id, &path) else { return Ok(()) };
+    let Some(source) = faber.engine.folder_file(&id, &path) else { return Ok(()) };
     app.opener().reveal_item_in_dir(source).map_err(|_| "error.file.show".into())
 }
 
@@ -765,6 +765,14 @@ async fn show_project(app: AppHandle, faber: State<'_, Faber>, id: String) -> Re
     let project = faber.engine.project(&id)?;
     let folder = folder::local_folder(&project.path)?;
     app.opener().reveal_item_in_dir(folder).map_err(|_| "error.file.show".into())
+}
+
+/// A file a reply names, read only around its line (parity P2), from inside the conversation's folder.
+#[tauri::command]
+async fn read_file_at(faber: State<'_, Faber>, id: String, path: String) -> Res<faber_engine::fileview::FileView> {
+    let engine = faber.engine.clone();
+    let read = tauri::async_runtime::spawn_blocking(move || engine.read_file_at(&id, &path)).await;
+    Ok(read.unwrap_or_else(|_| faber_engine::fileview::FileView::failed("error.file.read")))
 }
 
 /// An image from a chat workspace as a data URL, so the page never reads the disk itself.
@@ -1205,6 +1213,7 @@ fn main() {
                 stop_background,
                 changes,
                 change_patch,
+                read_file_at,
                 rewind_points,
                 rewind_redos,
                 rewind_redo_preview,

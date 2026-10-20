@@ -22,7 +22,7 @@ rest of the shell are in [layout.md](layout.md).
   file, never the empty state; a new file past
   the counting limit says its count is unavailable. A partial list keeps the files found, says files are still missing
   in one quiet line and offers "Show more files"; it never claims nothing changed. Closing a file releases its patch;
-  ending a turn refreshes the list. Agent, page, quick-question and changes views exclude one another. Opening Changes
+  ending a turn refreshes the list. Agent, page, quick-question, changes and file views exclude one another. Opening Changes
   in a column that opened by itself uses the other side views' transition: over the stage it becomes modal and traps focus.
 - With changed files, the Changes head offers "Review" as its main action and a quieter "Review with security" beside it
   (R279). The actions wrap in a narrow column; they use the existing button states and reduced-motion rules. Each sends
@@ -32,6 +32,11 @@ rest of the shell are in [layout.md](layout.md).
   security issues; findings come back in the conversation, worst first in a short list, or a clear no-findings answer.
   Sending returns to the running list and puts focus on its first control. No review controls appear with no changed
   files or in Chat; there is no new setting, screen, timer or stored state.
+- A file a reply names (a code span such as `src/app.ts:42`, or a link to a file) is drawn as a link and opens in place of
+  the list with the same head: its name as the title, its path and "Line 42" in quiet text, "Show", then the lines in the
+  data font, each number in a muted gutter that selection and copying skip. The named line (or range) has the accent's
+  soft background, the one mark on the view, and is scrolled to the middle without motion. Nothing moves; refused,
+  missing, empty, binary and too-large files have plain words, and a failed read offers "Try again".
 - A run that ended while nobody looked keeps a calm card in its block (R242): no fill, a thin line around it, a check
   and "done" (amber when it needs the person), the time it worked and its last line. A click opens it, its × clears it;
   nothing else moves. The sidebar row shows a 6 px accent dot until the conversation is seen.

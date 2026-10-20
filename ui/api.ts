@@ -533,6 +533,18 @@ export interface ChangePatch {
   binary: boolean;
   error?: string | null;
 }
+/** A file a reply names, read only around its line (parity P2): at most 4,000 lines, the first of them numbered `first`. */
+export interface FileView {
+  path: string;
+  line?: number;
+  end?: number;
+  first: number;
+  text: string;
+  total: number;
+  tooLarge: boolean;
+  binary: boolean;
+  error?: string | null;
+}
 
 /** Private turn history; step A exposes the contract without adding any screen. */
 export interface RewindCoverage {
@@ -750,6 +762,7 @@ export const api = {
   saveFile: (id: string, path: string) => invoke<boolean>('save_file', { id, path }),
   showFile: (id: string, path: string) => invoke<void>('show_file', { id, path }),
   readImage: (id: string, path: string) => invoke<string | null>('read_image', { id, path }),
+  readFileAt: (id: string, path: string) => invoke<FileView>('read_file_at', { id, path }),
   /** Faber's browser pane (R161 step 7): over a box of the screen, off it, a page the person opens, a call's picture. */
   sitePlace: (boxId: number, x: number, y: number, width: number, height: number) => invoke<boolean>('site_place', { load: LOAD, boxId, x, y, width, height }),
   sitePark: (boxId: number) => invoke<void>('site_park', { load: LOAD, boxId }),

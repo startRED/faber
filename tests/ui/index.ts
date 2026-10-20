@@ -25,6 +25,7 @@ import './pin.check.ts';
 import './hole.check.ts';
 import './effort.check.ts';
 import './first-frame.check.ts';
+import './file-at-line.check.ts';
 import './follow.check.ts';
 import './plumbing.check.ts';
 import './donecard.check.ts';

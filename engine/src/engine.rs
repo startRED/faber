@@ -899,7 +899,6 @@ impl Engine {
     pub fn terminal(&self, id: &str) -> Option<TerminalCommand> {
         self.with(|c| c.terminal(id))
     }
-    /// The absolute path of a file in a chat workspace, or None if the path points outside it or is missing.
     /// Gives the engine Faber's own browser (R161 step 7). Sessions that start afterwards offer it to a project's agent.
     pub fn set_browser(&self, browser: std::sync::Arc<dyn crate::browser::Browser>) {
         self.with(|c| c.browser = Some(browser));
@@ -908,8 +907,14 @@ impl Engine {
     pub fn site_picture(&self, id: &str, call: &str) -> Option<PathBuf> {
         self.with(|c| c.site_picture(id, call))
     }
+    /// The absolute path of a file in a chat workspace, or None if the path points outside it or is missing.
     pub fn workspace_file(&self, id: &str, path: &str) -> Option<PathBuf> {
         self.with(|c| c.store.get(id).is_some().then(|| inside_folder(&c.workspace_of(id), path)).flatten().filter(|p| p.is_file()))
+    }
+    /// A file in the folder any conversation works in (a chat's workspace, a project or its copy), only to be shown in the
+    /// file manager: nothing reads or copies through this path, which a link swapped in afterwards could redirect.
+    pub fn folder_file(&self, id: &str, path: &str) -> Option<PathBuf> {
+        self.with(|c| inside_folder(&c.conversation_folder(id)?, path)).filter(|p| p.is_file())
     }
     pub fn add_project(&self, path: &str) -> Result<Project, String> {
         self.with(|c| c.add_project(path))
@@ -1353,6 +1358,15 @@ impl Core {
         // The private folder and a chosen one are checked alike on every launch: a link put there since may lead somewhere
         // that is not allowed. The CLI starts in the path that was checked.
         crate::permissions::checked_folder(&dir).ok_or_else(|| "error.workingFolder".to_string())
+    }
+
+    /// Where the saved conversation `id` works (`folder_of`), without loading it, checked like a launch checks it (`cwd_of`).
+    fn conversation_folder(&self, id: &str) -> Option<PathBuf> {
+        let folder = match self.convs.get(id) {
+            Some(c) => self.folder_of(c).ok(),
+            None => self.folder_of(&self.store.get(id)?).ok(),
+        }?;
+        crate::permissions::checked_folder(&folder)
     }
 
     /// Where conversation `c` works, before it is checked (`cwd_of`). Reads only the engine's own state.

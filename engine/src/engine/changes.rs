@@ -32,4 +32,10 @@ impl Engine {
         let Some(mut exec) = run() else { return ChangePatch::failed() };
         crate::changes::patch(&mut *exec, &copy, path)
     }
+
+    /// A file a reply names, read only around its line (parity P2), from inside the folder the conversation works in.
+    pub fn read_file_at(&self, id: &str, raw: &str) -> crate::fileview::FileView {
+        let Some(root) = self.with(|c| c.conversation_folder(id)) else { return crate::fileview::FileView::failed("error.file.missing") };
+        crate::fileview::view(&root, raw)
+    }
 }

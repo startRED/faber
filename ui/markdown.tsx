@@ -2,13 +2,14 @@ import DOMPurify from 'dompurify';
 import { type Links, marked, type Token } from 'marked';
 import { createRenderEffect } from 'solid-js';
 import { api } from './api.ts';
+import { fileRenderer, showFile } from './fileref.ts';
 import { iconMarkup } from './Glyphs.tsx';
 import { t } from './i18n.ts';
 import { openViewer } from './Viewer.tsx';
 
 // Model output is untrusted: rendered as Markdown, then stripped of anything that could run. Every piece of HTML that reaches
 // the page passes through DOMPurify here, and nowhere else.
-const OPTIONS = { async: false, gfm: true } as const;
+const OPTIONS = { async: false, gfm: true, renderer: fileRenderer } as const;
 
 // The last two words of a plain heading go in `em`, which the look draws in its quieter tone.
 const quiet = (h3: string, text: string) => {
@@ -38,7 +39,8 @@ function copyCode(button: Element) {
   );
 }
 
-/** Links in answers open in the person's browser, never inside Faber; a picture opens full screen; a code block copies itself. */
+/** Links in answers open in the person's browser, never inside Faber; a file the answer names opens in the running column; a
+ * picture opens full screen; a code block copies itself. */
 export function openLinks(e: MouseEvent) {
   const target = e.target as HTMLElement;
   const copy = target.closest('.cb-copy');
@@ -49,7 +51,8 @@ export function openLinks(e: MouseEvent) {
     return;
   }
   e.preventDefault();
-  if (/^https?:\/\//.test(a.href)) void api.openLink(a.href);
+  if (a.dataset.file) showFile(a.dataset.file);
+  else if (/^https?:\/\//.test(a.href)) void api.openLink(a.href);
 }
 
 /** The safe HTML of a whole text. */

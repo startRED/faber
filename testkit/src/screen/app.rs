@@ -113,6 +113,10 @@ pub fn scenarios() -> Vec<Scenario> {
             run: changes_memory,
         },
         Scenario {
+            name: "a file a reply names opens at its line in the running column, and one outside the folder does not",
+            run: file_at_a_line,
+        },
+        Scenario {
             name: "background commands: thirty-two capped outputs open in the column and one stops without a message",
             run: background_commands_memory,
         },
@@ -1026,6 +1030,62 @@ fn changes_memory(ctx: &mut Ctx) -> Result {
     );
     ctx.notes.push(numbers.clone());
     ensure(peak <= BUDGET_MB && closed <= BUDGET_MB, || format!("{numbers}; over the {BUDGET_MB} MB budget"))
+}
+
+/// Parity P2: a reply names `src/app.ts:240` and links a file outside the conversation's folder. The first opens read only in
+/// the running column with line 240 marked and in view; the second is refused by the engine, which reads nothing.
+fn file_at_a_line(ctx: &mut Ctx) -> Result {
+    start_settings(ctx, "en")?;
+    let folder = ctx.sb.sandbox.join("named-files");
+    std::fs::create_dir_all(folder.join("src")).map_err(|e| e.to_string())?;
+    let text: String = (1..=300).map(|i| format!("line {i}\n")).collect();
+    std::fs::write(folder.join("src/app.ts"), text).map_err(|e| e.to_string())?;
+    std::fs::write(ctx.sb.sandbox.join("outside.txt"), "not for the reply").map_err(|e| e.to_string())?;
+    let at: u64 = 1_790_000_000_000;
+    let id = "5f1c0000-0000-4000-8000-0000000000f1";
+    let reply = "[The old note](../outside.txt) is gone; the greeting is in `src/app.ts:240`.";
+    let conversation = json!({
+        "id": id, "title": "Named file", "area": "chat", "sessions": {}, "createdAt": at, "updatedAt": at,
+        "workingFolder": folder.to_string_lossy(),
+        "messages": [
+            { "id": "5f1c0000-0000-4000-8000-0000000000f2", "role": "user", "text": "Where is the greeting?", "at": at },
+            { "id": "5f1c0000-0000-4000-8000-0000000000f3", "role": "assistant", "text": reply, "at": at + 1, "vendor": "claude", "model": "claude-haiku-5-5", "status": "done" }
+        ]
+    });
+    let conversations = ctx.sb.data.join("conversations");
+    std::fs::create_dir_all(&conversations).map_err(|e| e.to_string())?;
+    std::fs::write(conversations.join(format!("{id}.json")), conversation.to_string()).map_err(|e| e.to_string())?;
+
+    let launch = claude_chat(ctx);
+    let mut app = ctx.launch(launch)?;
+    let page = &mut app.page;
+    // The CI window's size: the running column covers the conversation there instead of sitting beside it.
+    super::shell::set_size(page, 1028, 779)?;
+    page.click(&css(".list .item").has_text("Named file"))?;
+    page.click(&css("article.ai a.file-ref").has_text("src/app.ts:240"))?;
+    page.wait_visible(&css(".file-view .file-line.mark"))?;
+    same(page.count(&css(".file-line.mark"))?, 1, "one line is marked")?;
+    same(page.inner_text(&css(".file-line.mark"))?, "line 240".to_string(), "the marked line is the one the reply named")?;
+    same(page.count(&css(".file-line"))?, 300, "the whole short file is shown")?;
+    page.wait_for(
+        "the marked line to be in view",
+        "(() => { const m = document.querySelector('.file-line.mark').getBoundingClientRect(); const b = document.querySelector('.file-view').getBoundingClientRect(); return m.top >= b.top && m.bottom <= b.bottom; })()",
+    )?;
+    // The column's entrance has ended before the picture the visual critique reads.
+    pause(0.5);
+    ctx.shot(&mut app, "file-at-a-line")?;
+    let page = &mut app.page;
+    let back = page.named("button", "agent.back")?;
+    page.click(&back)?;
+    page.wait_gone(&css(".file-view"))?;
+    // A column that covers the conversation leaves it inert: it closes before the next link is clicked.
+    let close = page.named("button", "run.close")?;
+    page.click(&close)?;
+    page.wait_gone(&css(".runcol"))?;
+    page.click(&css("article.ai a.file-ref").has_text("The old note"))?;
+    let refused = page.text_of("error.file.outside")?;
+    page.wait_visible(&css(".file-view [role=status]").has_text(&refused))?;
+    same(page.count(&css(".file-line"))?, 0, "nothing outside the folder is shown")
 }
 
 fn background_commands_memory(ctx: &mut Ctx) -> Result {

@@ -429,7 +429,7 @@ fn lines(bytes: &[u8]) -> usize {
 }
 
 /// Reads only a plain file inside the copy, never links, device files, pipes or protected files.
-fn read(root: &Path, path: &str, limit: usize) -> std::io::Result<Vec<u8>> {
+pub(crate) fn read(root: &Path, path: &str, limit: usize) -> std::io::Result<Vec<u8>> {
     if !safe(path) {
         return Err(std::io::ErrorKind::InvalidInput.into());
     }
