@@ -4,6 +4,7 @@ import { Asks, Parkeds } from './Ask.tsx';
 import { copyItem, openMenu } from './contextmenu.ts';
 import { keep, kept, release, useDraft } from './unsent.ts';
 import { Icon, VendorMark } from './Glyphs.tsx';
+import { Pic } from './ImageViewer.tsx';
 import { QuotaCard } from './QuotaCard.tsx';
 import { PlanList, WrapUpBox } from './Plan.tsx';
 import { html, Markdown, openLinks } from './markdown.tsx';
@@ -576,7 +577,7 @@ function Mine(props: { editKey: string; m: Accessor<Message>; onBranch: OnBranch
             </div>
           </Show>
           <div class="you">
-            <For each={props.m().images}>{(img) => <img alt={t('mine.image')} src={`data:${img.mediaType};base64,${img.base64}`} />}</For>
+            <For each={props.m().images}>{(img) => <Pic img={img} />}</For>
             {props.m().text}
             <button class="edit" onClick={() => setEditing(props.m().text)} aria-label={t('mine.editLabel')}>
               {t('mine.edit')}
@@ -640,7 +641,7 @@ function Queued(props: { conversationId: string; q: QueuedTurn; busy: boolean; o
       </Show>
       <div class="you queued">
         <span class="queue-badge">{t('queue.label')}</span>
-        <For each={props.q.images}>{(img) => <img alt={t('mine.image')} src={`data:${img.mediaType};base64,${img.base64}`} />}</For>
+        <For each={props.q.images}>{(img) => <Pic img={img} />}</For>
         <Show when={props.q.text}>
           <div class="queue-text">{props.q.text}</div>
         </Show>

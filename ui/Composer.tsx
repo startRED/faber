@@ -1,6 +1,7 @@
 import { createEffect, createSignal, For, on, onCleanup, onMount, Show } from 'solid-js';
 import { DEFAULT_EFFORT, type Choice, type Effort, PERMISSION_MODES, type PermissionMode, type Vendor } from './api.ts';
 import { Ghost } from './Ghost.tsx';
+import { Pic } from './ImageViewer.tsx';
 import { Icon } from './Glyphs.tsx';
 import { t } from './i18n.ts';
 import type { Option } from './models.ts';
@@ -218,8 +219,8 @@ export function Composer(props: Props) {
           <For each={draft().images}>
             {(img, i) => (
               <span class="attach-thumb">
-                <img alt={t('mine.image')} src={`data:${img.mediaType};base64,${img.base64}`} />
-                <button type="button" onClick={() => setDraft((d) => ({ ...d, images: d.images.filter((_, j) => j !== i()) }))} aria-label={t('composer.removeImage')} title={t('composer.removeImage')}>
+                <Pic img={img} />
+                <button type="button" class="attach-remove" onClick={() => setDraft((d) => ({ ...d, images: d.images.filter((_, j) => j !== i()) }))} aria-label={t('composer.removeImage')} title={t('composer.removeImage')}>
                   <Icon name="close" small />
                 </button>
               </span>
