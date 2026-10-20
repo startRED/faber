@@ -3,7 +3,7 @@ import { render } from 'solid-js/web';
 import { api, type Message, type ToolUse } from '../../ui/api.ts';
 import { useLanguage } from '../../ui/i18n.ts';
 import { Running } from '../../ui/Running.tsx';
-import { appsOf, awaySites, looksOf, openedSite, showSite, siteOf, sitesOf, stepsOf, type OpenSite } from '../../ui/Site.tsx';
+import { addressOf, appsOf, awaySites, looksOf, openedSite, showSite, siteOf, sitesOf, stepsOf, type OpenSite } from '../../ui/Site.tsx';
 import { Thread } from '../../ui/Thread.tsx';
 import { check, deepEqual, equal, ok } from './check.ts';
 import act from '../../src-tauri/src/pane/act.js';
@@ -136,8 +136,9 @@ check('page in the browser: the column places Faber’s browser over its box, an
     moveTo('https://look-alike.example/login');
     equal(root.querySelector('#running-title')!.textContent!.trim(), 'look-alike.example', 'a page that left the site is named by where it is now');
     equal(root.querySelector('.side-meta')!.textContent, "look-alike.example, in Faber's browser");
-    root.querySelector<HTMLButtonElement>('.back')!.click();
-    equal(back, 1);
+    equal(root.querySelector('.back'), null, 'the page is a view of its own: the run button shows the list');
+    equal(root.querySelector<HTMLInputElement>('.site-address')!.value, 'https://look-alike.example/login', 'the address field shows where the page is now');
+    equal(back, 0);
     setSite(undefined);
     equal(parked, 1, 'the browser leaves the screen with the page');
     equal(boxParked, boxPlaced, 'for the box it was placed over');
@@ -701,3 +702,74 @@ check('screen sizes: a page with a form or a button that pays is the person’s 
     equal(act({ kind: 'fits' }).turn, '', 'an ordinary form is no payment');
   }),
 );
+
+check('page in the browser: the address field takes a bare name as https, a local app as http, and refuses what is no web page', () => {
+  equal(addressOf('example.com'), 'https://example.com/');
+  equal(addressOf('  docs.example.org/guide?q=1 '), 'https://docs.example.org/guide?q=1');
+  equal(addressOf('localhost:5173'), 'http://localhost:5173/', 'a port is not a scheme');
+  equal(addressOf('http://example.com'), 'http://example.com/');
+  for (const bad of ['', '   ', 'two words', 'file:///C:/secret', 'javascript:alert(1)', 'about:blank']) equal(addressOf(bad), undefined, bad);
+});
+
+check('page in the browser: with no page yet the pane shows only its address field, and Enter opens what was typed in this conversation', async () => {
+  useLanguage('en');
+  const [siteOpen, sitePlace, sitePark, onSite] = [api.siteOpen, api.sitePlace, api.sitePark, api.onSite];
+  const opened: string[][] = [];
+  let placed = 0;
+  let refuse = false;
+  api.siteOpen = async (id, url) => (opened.push([id, url]), !refuse);
+  api.sitePlace = async () => (placed++, true);
+  api.sitePark = async () => {};
+  api.onSite = async () => () => {};
+  const root = document.createElement('div');
+  root.style.cssText = 'position: fixed; left: 0; top: 0; width: 360px; height: 600px; display: flex;';
+  document.body.append(root);
+  showSite({ conversationId: 'c1', url: '', title: '' });
+  const dispose = render(
+    () =>
+      createComponent(Running, {
+        items: [],
+        projects: [],
+        modal: false,
+        onOpen: () => {},
+        onClose: () => {},
+        ref: () => {},
+        get site() {
+          return openedSite();
+        },
+      }),
+    root,
+  );
+  const frames = () => new Promise((done) => requestAnimationFrame(() => requestAnimationFrame(done)));
+  try {
+    await frames();
+    equal(root.querySelector('#running-title')!.textContent!.trim(), "Faber's browser");
+    equal(root.querySelector('.side-meta')!.textContent, "Open any web page here. This conversation's agent can read it too.");
+    equal(placed, 0, 'nothing is placed before there is a page');
+    const field = root.querySelector<HTMLInputElement>('.site-address')!;
+    const type = (text: string) => {
+      field.value = text;
+      field.dispatchEvent(new InputEvent('input', { bubbles: true }));
+      field.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true }));
+    };
+    type('file:///C:/secret');
+    await frames();
+    deepEqual(opened, [], 'what is no web page never reaches the browser');
+    ok(root.querySelector('[role="alert"]'), 'and the pane says so');
+    type('example.com');
+    await frames();
+    deepEqual(opened, [['c1', 'https://example.com/']], 'the page opens for this conversation');
+    equal(openedSite()?.url, 'https://example.com/', 'the pane now holds that page');
+    equal(root.querySelector('[role="alert"]'), null);
+    ok(placed > 0, 'and places the browser over its box');
+    refuse = true;
+    type('example.org');
+    await frames();
+    ok(root.querySelector('[role="alert"]'), 'a page the browser refused is said');
+  } finally {
+    showSite(undefined);
+    Object.assign(api, { siteOpen, sitePlace, sitePark, onSite });
+    dispose();
+    root.remove();
+  }
+});

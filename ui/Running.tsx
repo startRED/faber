@@ -39,17 +39,17 @@ export function Running(props: {
   agent?: { step: AgentStep; streaming: boolean; helpable: boolean };
   /** A page of Faber's browser the person opened from a reply, shown the same way. */
   site?: OpenSite;
-  /** The quick question on the side (R250), opened from the list's head or by `/btw`, shown the same way. */
+  /** The quick question on the side (R250), opened from the topbar, Ctrl+; or `/btw`, shown the same way. */
   aside?: { conversation?: Conversation; options: Option[] };
-  onAside?: () => void;
   /** A file a reply named (parity P2), shown the same way. */
   file?: { conversationId: string; at: string };
+  /** The conversation's changes, opened from the topbar. */
   changes?: { id: string; files: FileChange[]; loading: boolean; incomplete?: boolean; loadingMore?: boolean; onMore?: () => void; onReview?: (security: boolean) => void };
-  onChanges?: () => void;
   background?: BackgroundCommand[];
   conversations?: Summary[];
   commands?: boolean;
   onCommands?: () => void;
+  /** Back from an opened subagent or the commands to the list. */
   onBack?: () => void;
   /** The open subagent fills the stage as a full thread (the column sits over the work area), and the control in its head that swaps the two. */
   wide?: boolean;
@@ -113,14 +113,6 @@ export function Running(props: {
               <Show when={props.onCommands}>
                 <button class="btn ghost rc-commands" onClick={props.onCommands}>
                   {t('commands.title')}<Show when={commandCount()}>{' '}<span class="num">{commandCount()}</span></Show>
-                </button>
-              </Show>
-              <Show when={props.onChanges}>
-                <button class="btn ghost rc-changes" onClick={() => props.onChanges!()}>{t('changes.title')}</button>
-              </Show>
-              <Show when={props.onAside}>
-                <button class="btn ghost rc-aside" onClick={() => props.onAside!()}>
-                  {t('aside.title')}
                 </button>
               </Show>
             </div>
@@ -218,13 +210,13 @@ export function Running(props: {
           </>}>
             <Commands items={props.background ?? []} conversations={props.conversations ?? []} onBack={() => props.onBack?.()} onClose={props.onClose} />
           </Show>}>
-            {(changes) => <Changes id={changes().id} files={changes().files} loading={changes().loading} incomplete={changes().incomplete} loadingMore={changes().loadingMore} onMore={changes().onMore} onReview={changes().onReview} onBack={() => props.onBack?.()} onClose={props.onClose} />}
+            {(changes) => <Changes id={changes().id} files={changes().files} loading={changes().loading} incomplete={changes().incomplete} loadingMore={changes().loadingMore} onMore={changes().onMore} onReview={changes().onReview} onClose={props.onClose} />}
           </Show>}>
             {(file) => <FilePane conversationId={file().conversationId} at={file().at} onBack={() => props.onBack?.()} onClose={props.onClose} />}
           </Show>}>
-            {(aside) => <QuickQuestion conversation={aside().conversation} options={aside().options} onBack={() => props.onBack?.()} onClose={props.onClose} onTell={(text) => props.onTell?.(text)} />}
+            {(aside) => <QuickQuestion conversation={aside().conversation} options={aside().options} onClose={props.onClose} onTell={(text) => props.onTell?.(text)} />}
           </Show>}>
-            {(site) => <SitePane site={site()} onBack={() => props.onBack?.()} onClose={props.onClose} />}
+            {(site) => <SitePane site={site()} onClose={props.onClose} />}
           </Show>
         }
       >

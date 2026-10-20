@@ -233,6 +233,10 @@ svg.i { width: 16px; height: 16px; flex: none; stroke: currentColor; fill: none;
 svg.i.sm { width: 14px; height: 14px; }
 .iconbtn { width: var(--h-md); height: var(--h-md); display: grid; place-items: center; border-radius: var(--r-sm); color: var(--ink-3); }
 .iconbtn:hover { background: var(--s3); color: var(--ink); }
+/* The topbar's pane buttons: what the right column shows besides the running list; the one on screen stays lit. */
+.panes { display: inline-flex; align-items: center; gap: 2px; flex: none; }
+.panes .iconbtn { transition: background-color var(--dur-fast) var(--ease), color var(--dur-fast) var(--ease); }
+.panes .iconbtn[aria-pressed='true'] { background: var(--s3); color: var(--ink); }
 
 /* The run button: how much runs, and in amber with the words when something needs the user. */
 .ctx-wrap { position: relative; display: inline-flex; flex: none; }
@@ -317,14 +321,10 @@ svg.i.sm { width: 14px; height: 14px; }
 .side-write .field { max-width: none; height: auto; padding: 8px 10px; resize: vertical; line-height: 1.5; }
 .side-write .btn { height: var(--h-sm); }
 .side-write .bad { margin: 0; color: var(--ink-2); }
-/* The quick question on the side (R250): its button in the list's head, each question with its answer, and the box. */
-.rc-head .rc-aside { order: 2; margin-left: auto; height: var(--h-sm); }
-.rc-head:has(.rc-aside) .iconbtn { margin-left: 0; }
-.rc-head :is(.rc-changes, .rc-commands) { order: 2; height: var(--h-sm); }
-.rc-head:has(.rc-changes, .rc-commands) { flex-wrap: wrap; }
-.rc-head:has(.rc-changes, .rc-commands) h2 { flex: 1; }
-.rc-head:has(.rc-changes, .rc-commands) .iconbtn { margin-left: 0; }
-.rc-head:has(.rc-changes, .rc-commands) .rc-aside { margin-left: 0; }
+/* The quick question on the side (R250): each question with its answer, and the box. */
+/* The agent's commands, the one view still opened from the list's head, and their rows. */
+.rc-head .rc-commands { order: 2; margin-left: auto; height: var(--h-sm); }
+.rc-head:has(.rc-commands) .iconbtn { margin-left: 0; }
 .commands-view, .command-row { min-width: 0; }
 .command-row .command-stop { height: var(--h-sm); margin-left: auto; }
 .command-row .command-conversation { font-size: var(--fs-xs); overflow-wrap: anywhere; }
@@ -595,6 +595,11 @@ details.thinking div { white-space: pre-wrap; padding: 6px 0 0 12px; border-left
 /* The box Faber's browser is placed over: it fills the column and never scrolls, so the page stays where it is drawn. */
 .site-body { display: flex; flex-direction: column; overflow: hidden; }
 .site-view { flex: 1; min-height: 0; border-radius: var(--r-sm); background: var(--s3); box-shadow: inset 0 0 0 1px var(--line-2); overflow: hidden; }
+.site-view.blank { display: none; }
+/* The address field of Faber's browser, under the head: where the page is, and where the person goes next. */
+.site-bar { display: flex; align-items: center; gap: 4px; padding: 0 12px 8px 18px; }
+.field.site-address { flex: 1; min-width: 0; max-width: none; height: var(--h-sm); padding: 0 10px; font-family: var(--font-data); font-size: var(--fs-xs); }
+.site-bar + .bad { margin: 0 18px 8px; }
 /* A step of the log stands in for the live page: the picture the browser took after it, from the page's top. */
 .site-view img { display: block; width: 100%; height: 100%; object-fit: cover; object-position: top; }
 .site-none { margin: 0; padding: 16px; color: var(--ink-3); font-size: var(--fs-sm); }

@@ -7,14 +7,14 @@ rest of the shell are in [layout.md](layout.md).
 - With nothing running it says "Nothing running" once and has no footer sentence.
 - "Commands" in the list's head replaces the list with the agent's commands, like an opened helper, with the same back
   arrow, title, close button, modal focus rules and Curioso empty state. Its count appears only while commands run.
-  The other side views close when it opens. Each row uses the running list's head and quiet conversation name, the
+  The other side views, the topbar's included, close when it opens. Each row uses the running list's head and quiet conversation name, the
   literal command in the data face, its state in words and a quiet Stop where the AI supports stopping it. The last
   20 output lines (at most 8 KiB) are plain wrapped text, never HTML; at most 32 rows per conversation stay in memory.
   A stop failure says so on its row and leaves retry available; an acknowledgement waits for the AI's end event.
   Finished rows leave when the conversation's turn ends, or immediately when they finish after it. The list updates
   by events, with no polling, new motion, console or terminal; closing the view releases its output elements.
-- A project conversation with changed files has one "Changes" control in the list's head. It replaces the list, like a
-  helper or a page, with a back arrow, title and close. Each file is a disclosure with the work log's `+N −N` counts;
+- A project conversation with changed files has one "Changes" button among the topbar's pane buttons. It replaces the
+  list, like a page or the quick question, with its title and close. Each file is a disclosure with the work log's `+N −N` counts;
   opening it closes the previous file and reads only its patch, so at most one patch stays mounted in total. Added and
   removed lines carry their signs and a quiet background, code and paths wrap, and nothing in the patch moves.
   Closing a file cancels its entrance, so switching quickly cannot reopen it. Loading, empty, binary and too-large
@@ -30,7 +30,7 @@ rest of the shell are in [layout.md](layout.md).
   appears as the person's message. It asks for a read-only review against the copy base (or HEAD), through Faber's helper
   with the other connected AI, or a fresh subagent of its own otherwise (R146, R161). The security action asks for bugs and
   security issues; findings come back in the conversation, worst first in a short list, or a clear no-findings answer.
-  Sending returns to the running list and puts focus on its first control. No review controls appear with no changed
+  Sending closes the column the person opened, so the findings stream in the conversation (a column that shows by itself goes back to its running list). No review controls appear with no changed
   files or in Chat; there is no new setting, screen, timer or stored state.
 - A file a reply names (a code span such as `src/app.ts:42`, or a link to a file) is drawn as a link and opens in place of
   the list with the same head: its name as the title, its path and "Line 42" in quiet text, "Show", then the lines in the
@@ -87,8 +87,8 @@ rest of the shell are in [layout.md](layout.md).
   Faber's checks, a compaction and approved work waiting to advance keep the row. Messages held after a failed or stopped
   turn, or unable to start, do not count as working and keep Send now available. The topbar's count follows the column.
 - With no items it shows an empty state with Curioso.
-- "Quick question" (R250) is a quiet button at the end of the list's head, before the close button. It opens the quick
-  question in place of the list, with the back arrow and the close button in its head like an opened subagent; `/btw`
+- "Quick question" (R250) is the first of the topbar's pane buttons, and Ctrl+; does the same. It opens the quick
+  question in place of the list, with its title and the close button in its head; `/btw`
   in the conversation's box opens it the same way, from any width (over the stage below 1,100 px). Each question sits in
   the same bubble as a subagent's brief, its answer below it as a reply, and a quiet "Send to the agent" under a finished
   one; while it runs, "Looking…" and a quiet Stop. The box is the side chat's (Enter asks, Shift+Enter breaks the line),

@@ -31,6 +31,8 @@ export const SHORTCUTS = {
   find: { group: 'anywhere', label: 'find.label', caps: ['ctrl', 'F'], ctrl: 'f' },
   settings: { group: 'anywhere', label: 'settings.open', caps: ['ctrl', ','], ctrl: ',', loose: true },
   running: { group: 'anywhere', label: 'run.toggle', caps: ['ctrl', '.'], ctrl: '.', loose: true },
+  // Loose: a semicolon takes Shift on German and Spanish keyboards.
+  aside: { group: 'anywhere', label: 'aside.title', caps: ['ctrl', ';'], ctrl: ';', loose: true },
   focus: { group: 'anywhere', label: 'keys.focus', caps: ['ctrl', 'B'], ctrl: 'b' },
   menu: { group: 'anywhere', label: 'keys.menu', caps: ['shift', 'f10'], also: ['menukey'] },
   sheet: { group: 'anywhere', label: 'keys.title', caps: ['?'] },

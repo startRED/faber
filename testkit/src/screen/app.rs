@@ -1002,8 +1002,7 @@ fn changes_memory(ctx: &mut Ctx) -> Result {
     app.page.click(&projects)?;
     app.page.click(&css(".prow .item").has_text("Demo"))?;
     app.page.click(&css(".proj-chats .item").has_text("Update the greeting"))?;
-    app.page.click(&css(".run-btn"))?;
-    app.page.click(&css(".rc-changes"))?;
+    app.page.click(&css(".topbar .pane-changes"))?;
     app.page.wait_count(&css(".change-file"), 30)?;
     let (baseline, webview) = ctx.memory_mb(app.id)?;
     ensure(webview, || "the memory reading must include WebView2".into())?;
@@ -1254,12 +1253,11 @@ fn reviews_change(ctx: &mut Ctx) -> Result {
     page.click(&css(".proj-chats .item").has_text("Update the greeting"))?;
     let model = page.labelled("composer.model")?;
     page.select_option(&model, "Claude Haiku")?;
-    page.click(&css(".run-btn"))?;
     for (key, finding, scope) in [
         ("changes.review", "The changed greeting has no fallback.", "for bugs."),
         ("changes.reviewSecurity", "The changed path accepts untrusted input.", "for bugs and security issues."),
     ] {
-        page.click(&css(".rc-changes"))?;
+        page.click(&css(".topbar .pane-changes"))?;
         page.wait_count(&css(".changes-review button"), 2)?;
         let review = page.named("button", key)?.exact();
         page.click(&review)?;
@@ -1307,8 +1305,7 @@ fn recap_on_demand(ctx: &mut Ctx) -> Result {
     page.wait_visible(&css("article.ai .actions"))?;
     let thread = "JSON.stringify([...document.querySelectorAll('article')].map(e => e.textContent))";
     let before = page.eval(thread)?;
-    page.click(&css(".run-btn"))?;
-    page.click(&css(".rc-aside"))?;
+    page.click(&css(".topbar .pane-aside"))?;
     page.wait_visible(&css("#aside-box"))?;
     for (i, entry) in ["button", "menu", "send"].iter().enumerate() {
         match *entry {

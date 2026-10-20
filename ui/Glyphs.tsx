@@ -52,6 +52,9 @@ const PATHS = {
   stop: ['M7 7h10v10H7Z'],
   edit: ['M12 20h9', 'M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4Z'],
   end: ['M12 5v14', 'm19 12-7 7-7-7', 'M5 21h14'],
+  // The buttons of the topbar that pick what the right column shows: the conversation's changes and Faber's browser.
+  changes: ['M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8Z', 'M9 11h6', 'M12 8v6', 'M9 17h6'],
+  globe: ['M3 12a9 9 0 1 0 18 0 9 9 0 1 0-18 0', 'M3 12h18', 'M12 3c2.5 2.6 3.8 5.6 3.8 9s-1.3 6.4-3.8 9c-2.5-2.6-3.8-5.6-3.8-9s1.3-6.4 3.8-9Z'],
 } as const;
 
 /** The same drawing as markup, for the places that build their DOM by hand (the copy button of a code block). */

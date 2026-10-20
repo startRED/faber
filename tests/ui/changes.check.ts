@@ -48,7 +48,7 @@ check('review change: both requests use the conversation send path while idle or
         host.querySelector<HTMLButtonElement>('.run-btn')!.click();
         await settle();
         for (const security of [false, true]) {
-          host.querySelector<HTMLButtonElement>('.rc-changes')!.click();
+          host.querySelector<HTMLButtonElement>('.pane-changes')!.click();
           await settle();
           const buttons = host.querySelectorAll<HTMLButtonElement>('.changes-review button');
           equal(buttons.length, 2, 'the changes head offers both reviews');
@@ -62,15 +62,15 @@ check('review change: both requests use the conversation send path while idle or
           ok(sent.text.includes(security ? 'for bugs and security issues.' : 'for bugs.'));
           for (const words of ['copy base', 'helper tool', 'other AI when it is connected', 'fresh read-only subagent', 'short list, worst first', 'Do not change files', 'no findings']) ok(sent.text.includes(words), words);
           deepEqual(sent.images, []); deepEqual(sent.files, []);
-          equal(host.querySelector('.changes-view'), null, 'sending returns to the running list');
-          ok(host.querySelector('.rc-body:not(.changes-view)'), 'the running list is back');
+          equal(host.querySelector('.changes-view'), null, 'sending closes the changes');
+          equal(host.querySelector('.pane-changes')!.getAttribute('aria-pressed'), 'false', 'and the column, so the findings stream in the conversation');
           sent = undefined;
         }
         // No project control is allowed to leak into a Chat conversation, even with file tools in its history.
         c.area = 'chat'; delete c.projectId;
         hear({ type: 'message', conversationId: c.id, message: { id: 'chat-answer', role: 'assistant', text: 'Done.', at: Date.now(), status: 'done' } });
         await settle();
-        equal(host.querySelector('.rc-changes'), null);
+        equal(host.querySelector('.pane-changes'), null);
         equal(host.querySelector('.changes-review'), null);
       } finally { dispose(); host.remove(); }
     }
@@ -119,7 +119,7 @@ check('review change: switching conversations hides both review buttons before t
     await settle();
     host.querySelector<HTMLButtonElement>('.run-btn')!.click();
     await settle();
-    host.querySelector<HTMLButtonElement>('.rc-changes')!.click();
+    host.querySelector<HTMLButtonElement>('.pane-changes')!.click();
     await settle();
     const buttons = [...host.querySelectorAll<HTMLButtonElement>('.changes-review button')];
     equal(buttons.length, 2, 'both reviews are available for the loaded conversation');
@@ -231,7 +231,7 @@ check('conversation changes: failed and timed-out patch reads show a retry inste
         return { text: '@@ -1 +1 @@\n-old\n+loaded\n', binary: false, tooLarge: false };
       };
       const dispose = render(() => createComponent(Changes, {
-        id: 'failed-review', files: [{ path: 'report.txt', added: 1, removed: 1, binary: false, status: 'modified' }], loading: false, onBack: () => {}, onClose: () => {},
+        id: 'failed-review', files: [{ path: 'report.txt', added: 1, removed: 1, binary: false, status: 'modified' }], loading: false, onClose: () => {},
       }), host);
       try {
         host.querySelector('summary')!.click();
@@ -300,20 +300,24 @@ check('conversation changes: at 720 px, the auto-opened column becomes modal, pa
     ok(automatic, 'the pending request opens the column without a click');
     equal(automatic.getAttribute('aria-modal'), null, 'the automatic column does not capture focus');
     ok(!host.querySelector<HTMLElement>('.dock')!.inert, 'the composer is reachable before opening a side view');
-    const control = host.querySelector<HTMLButtonElement>('.rc-changes');
-    ok(control, 'a project conversation with changes offers the single control in the column head');
-    equal(control!.closest('.rc-head')?.parentElement?.id, 'running');
+    const control = host.querySelector<HTMLButtonElement>('.pane-changes');
+    ok(control, 'a project conversation with changes offers the single control among the pane buttons');
+    ok(control!.closest('.topbar'), 'the control sits in the topbar, apart from the running list');
+    equal(host.querySelector('#running .rc-head button:not(.iconbtn, .rc-commands)'), null, 'the running list head holds no other view but the commands');
+    equal(control!.getAttribute('aria-pressed'), 'false');
     control!.click();
     await settle();
     const modal = host.querySelector<HTMLElement>('#running')!;
     equal(modal.getAttribute('aria-modal'), 'true', 'Changes uses the same modal transition as the other side views');
     ok(modal.contains(document.activeElement), 'focus moves inside the column');
     for (const selector of ['.thread', '.dock', '.topbar', '.side']) ok(host.querySelector<HTMLElement>(selector)!.inert, `${selector} stays behind the modal`);
-    const back = modal.querySelector<HTMLButtonElement>('.back')!;
-    back.focus();
+    equal(control!.getAttribute('aria-pressed'), 'true', 'the pane button says its view is on screen');
+    equal(modal.querySelector('.back'), null, 'a view the topbar opened has no way back: the run button shows the list');
+    const first = modal.querySelector<HTMLButtonElement>('.side-head .iconbtn')!;
+    first.focus();
     const tab = new KeyboardEvent('keydown', { key: 'Tab', shiftKey: true, bubbles: true, cancelable: true });
-    back.dispatchEvent(tab);
-    ok(tab.defaultPrevented && modal.contains(document.activeElement) && document.activeElement !== back, 'Shift+Tab wraps inside the existing focus trap');
+    first.dispatchEvent(tab);
+    ok(tab.defaultPrevented && modal.contains(document.activeElement) && document.activeElement !== first, 'Shift+Tab wraps inside the existing focus trap');
     equal(host.querySelectorAll('#running').length, 1, 'the existing column is reused');
     equal(host.querySelector('.rc-body:not(.changes-view)'), null, 'the running list makes way for the changes');
     equal(disclosures().length, 1, 'the files already found stay visible on an incomplete page');
@@ -343,9 +347,9 @@ check('conversation changes: at 720 px, the auto-opened column becomes modal, pa
     source.querySelector('summary')!.click();
     await settle();
     deepEqual(patchReads, ['src/greeting.ts', 'src/greeting.ts'], 'a reopened file is read afresh');
-    host.querySelector<HTMLButtonElement>('.changes-view .back, .side-head .back')!.click();
+    host.querySelector<HTMLButtonElement>('.side-head .iconbtn')!.click();
     await settle();
-    ok(host.querySelector('.rc-body'), 'back returns to the running list');
+    equal(host.querySelector('.changes-view'), null, 'closing the view takes the changes away');
     equal(host.querySelector('.change-patch'), null);
     const beforeTurn = listReads;
     files = [];
@@ -353,7 +357,7 @@ check('conversation changes: at 720 px, the auto-opened column becomes modal, pa
     hear({ type: 'message', conversationId: c.id, message: { id: 'r2', role: 'assistant', at: Date.now(), text: 'No changes left.', status: 'done' } });
     await settle();
     ok(listReads > beforeTurn, 'the end of a turn refreshes git counts');
-    equal(host.querySelector('.rc-changes'), null, 'nothing changed leaves no control');
+    equal(host.querySelector('.pane-changes'), null, 'nothing changed leaves no control');
   } finally {
     dispose(); host.remove(); Object.assign(api, before);
     store.offer({ revision: revision + 2, items: [] });

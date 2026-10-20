@@ -276,9 +276,26 @@ function SiteLooks(props: { conversationId: string; looks: SiteLook[] }) {
   );
 }
 
-/** The page in the running column: Faber's browser sits over this box, measured here, and leaves when the box goes. Every
- * move of the box moves it, and it is placed again whenever the window changes size. */
-export function SitePane(props: { site: OpenSite; onBack: () => void; onClose: () => void }) {
+/** What the person typed in the address field, as an address the browser loads: a bare name gets https. The shell still
+ * refuses anything but a web page (`allowed` in src-tauri/src/pane/mod.rs). */
+export function addressOf(typed: string): string | undefined {
+  const text = typed.trim();
+  if (!text || /\s/.test(text)) return undefined;
+  // "localhost:3000" names a host and a port, not a scheme; an app on this computer usually serves plain http.
+  const schemed = /^[a-z][a-z0-9+.-]*:/i.test(text) && !/^[^:/]+:\d+(\/|$)/.test(text);
+  const url = schemed ? text : /^(localhost|127\.0\.0\.1)([:/]|$)/i.test(text) ? `http://${text}` : `https://${text}`;
+  try {
+    const parsed = new URL(url);
+    return parsed.protocol === 'https:' || parsed.protocol === 'http:' ? parsed.href : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+/** The page in the right column: Faber's browser sits over this box, measured here, and leaves when the box goes. Every
+ * move of the box moves it, and it is placed again whenever the window changes size. The address field above it takes
+ * the person anywhere on the web; with no page yet, only the field shows. */
+export function SitePane(props: { site: OpenSite; onClose: () => void }) {
   let box: HTMLDivElement | undefined;
   // The shell never places a box again once it let the page go, so coming back from a step of the log takes a new one.
   let id = boxId();
@@ -287,8 +304,9 @@ export function SitePane(props: { site: OpenSite; onBack: () => void; onClose: (
   const stop = api.onSite(setLive);
   onCleanup(() => void stop.then((unlisten) => unlisten()).catch(() => {}));
   const place = () => {
-    // While a step of the log shows, its picture holds the box and the page stays out of the window.
-    if (picked()) return;
+    // While a step of the log shows, its picture holds the box and the page stays out of the window; with no page yet there
+    // is nothing to place.
+    if (picked() || blank()) return;
     const r = box?.getBoundingClientRect();
     if (!r) return;
     if (r.width >= 1 && r.height >= 1) void api.sitePlace(id, r.left, r.top, r.width, r.height);
@@ -324,8 +342,8 @@ export function SitePane(props: { site: OpenSite; onBack: () => void; onClose: (
       { defer: true },
     ),
   );
-  // Another card opened in the same pane starts on its live page.
-  createEffect(on(() => props.site, () => setPicked(undefined), { defer: true }));
+  // Another card, or an address typed in the field, starts on its live page, placed at once (the first one after a blank pane).
+  createEffect(on(() => props.site, () => (setPicked(undefined), place()), { defer: true }));
   // The latest step is the live page, unless it is a check at several sizes: its pictures are what it saw.
   const pick = (call?: string) => setPicked(call === steps().at(-1)?.call && !steps().at(-1)?.looks ? undefined : call);
   const keys = (e: KeyboardEvent) => {
@@ -341,13 +359,35 @@ export function SitePane(props: { site: OpenSite; onBack: () => void; onClose: (
     buttons[to]?.focus();
   };
   const moved = () => hostOf(live()) !== hostOf(props.site.url);
-  const title = () => (moved() ? hostOf(live()) : props.site.title || hostOf(props.site.url));
+  const blank = () => !props.site.url;
+  const title = () => (blank() ? t('site.browser') : moved() ? hostOf(live()) : props.site.title || hostOf(props.site.url));
+  // The address field shows where the page is until the person types; Enter loads what they typed, Esc puts it back.
+  const [typed, setTyped] = createSignal<string>();
+  const [refused, setRefused] = createSignal(false);
+  createEffect(on(live, () => setTyped(undefined), { defer: true }));
+  const go = async (to: string | undefined) => {
+    setRefused(false);
+    if (!to || !(await api.siteOpen(props.site.conversationId, to).catch(() => false))) return setRefused(true);
+    setTyped(undefined);
+    // The new page is the live one, even on the same site: a step's picture that stood in for the page goes.
+    setPicked(undefined);
+    setLive(to);
+    if (blank() || hostOf(to) !== hostOf(props.site.url)) showSite({ conversationId: props.site.conversationId, url: to, title: '' });
+  };
+  const addressKeys = (e: KeyboardEvent) => {
+    if (e.key === 'Enter') {
+      e.preventDefault();
+      void go(addressOf(typed() ?? live()));
+    } else if (e.key === 'Escape' && typed() !== undefined) {
+      // Only the typing goes: the column itself stays.
+      e.stopPropagation();
+      setTyped(undefined);
+      setRefused(false);
+    }
+  };
   return (
     <>
       <div class="rc-head side-head">
-        <button class="iconbtn back" aria-label={t('agent.back')} title={t('agent.back')} onClick={() => props.onBack()}>
-          <Icon name="left" />
-        </button>
         <h2 id="running-title" class="display" title={live()}>
           {title()}
         </h2>
@@ -355,11 +395,31 @@ export function SitePane(props: { site: OpenSite; onBack: () => void; onClose: (
           <Icon name="close" />
         </button>
       </div>
+      <div class="site-bar">
+        <input
+          class="field site-address"
+          type="text"
+          inputmode="url"
+          spellcheck={false}
+          autocomplete="off"
+          aria-label={t('site.address')}
+          aria-invalid={refused() || undefined}
+          placeholder={t('site.addressHint')}
+          value={typed() ?? (blank() ? '' : live())}
+          onInput={(e) => (setTyped(e.currentTarget.value), setRefused(false))}
+          onFocus={(e) => e.currentTarget.select()}
+          onKeyDown={addressKeys}
+        />
+      </div>
+      <Show when={refused()}>
+        <p class="side-meta bad" role="alert">{t('site.refused')}</p>
+      </Show>
       <div class="rc-body side-body site-body">
-        <p class="side-meta">{t('site.meta', { host: hostOf(live()) })}</p>
+        <p class="side-meta">{blank() ? t('site.blank') : t('site.meta', { host: hostOf(live()) })}</p>
         {/* The sizes of a check are a list a screen reader walks, never one image. */}
         <div
           class="site-view"
+          classList={{ blank: blank() }}
           ref={(el) => (box = el)}
           role={picked() && steps()[pickedAt()]?.looks ? undefined : 'img'}
           aria-label={picked() && steps()[pickedAt()]?.looks ? undefined : t('site.view', { title: title() })}

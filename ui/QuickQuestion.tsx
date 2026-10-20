@@ -44,7 +44,6 @@ export function QuickQuestion(props: {
   conversation?: Conversation;
   /** The models of the person's AIs; the picker offers those of the conversation's own AI. */
   options: Option[];
-  onBack: () => void;
   onClose: () => void;
   onTell: (text: string) => void;
 }) {
@@ -89,9 +88,6 @@ export function QuickQuestion(props: {
   return (
     <>
       <div class="rc-head side-head">
-        <button class="iconbtn back" aria-label={t('agent.back')} title={t('agent.back')} onClick={() => props.onBack()}>
-          <Icon name="left" />
-        </button>
         <h2 id="running-title" class="display">
           {t('aside.title')}
         </h2>

@@ -33,7 +33,7 @@ import { LookStep } from './FirstRun.tsx';
 import { keepFocusIn } from './focus.ts';
 import { Icon } from './Glyphs.tsx';
 import { failureText, lang, t, templates, useLanguage } from './i18n.ts';
-import { pressed, pressedAny } from './keys.ts';
+import { keysOf, pressed, pressedAny } from './keys.ts';
 import { homeHints } from './idle.ts';
 import { createFileDrop } from './drop.ts';
 import { Grip } from './Grip.tsx';
@@ -48,7 +48,7 @@ import { Projects } from './Projects.tsx';
 import { createOpening, upsert } from './opening.ts';
 import { Running } from './Running.tsx';
 import { agentWide, openedAgent, showAgent, startMessage, toggleAgentWide } from './AgentChat.tsx';
-import { openedSite, showSite } from './Site.tsx';
+import { openedSite, showSite, sitesOf } from './Site.tsx';
 import { openedFile, showFile } from './fileref.ts';
 import { answered, btw, heardAsides, openedAside, showAside } from './QuickQuestion.tsx';
 import { agentSteps, helpersAtWork } from './worklog.ts';
@@ -87,6 +87,8 @@ function remember(key: string, value: unknown) {
 
 // A long conversation draws only its latest messages, and more as the user scrolls up, so memory stays flat.
 const PAGE = 40;
+// Faber's browser is a pane of the window only on Windows (R161 step 7).
+const isWindows = navigator.userAgent.includes('Windows');
 const TYPING = 'textarea, input:not([type=checkbox], [type=radio], [type=range], [type=color], [type=file]), [contenteditable]';
 
 /** `initial` is the state the page started from; `main.tsx` has already applied its look and handed the running list to
@@ -695,6 +697,10 @@ export function App(props: { initial: AppState; update?: UpdateStatus; inbox: { 
         // Settings and the account cards replace the shell: the column is not on screen to toggle.
         if (inShell) toggleColumn();
       }
+      if (pressed(e, 'aside')) {
+        e.preventDefault();
+        if (inShell && canAside()) toggleAside();
+      }
       if (e.key === 'Escape') {
         if (sideOverlay() && inShell) return closeSide();
         // A column the user opened over the stage is modal; one that opened itself answers Esc only while focus is in it.
@@ -1054,6 +1060,33 @@ export function App(props: { initial: AppState; update?: UpdateStatus; inbox: { 
     });
   }, { defer: true }));
 
+  // The topbar's pane buttons (R303): each puts its view in the right column, apart from the running list, and the one
+  // already there closes the column when pressed again.
+  const hasChanges = () => !!(changeList()?.files.length || changeList()?.incomplete);
+  const toggleAside = () => (sideAside() && colShown() ? closeColumn() : showAside({ conversationId: current()?.id }));
+  const toggleChanges = () => {
+    if (sideChanges() && colShown()) return closeColumn();
+    showAgent(undefined);
+    showSite(undefined);
+    showAside(undefined);
+    showFile(undefined);
+    setBackgroundOpen(false);
+    setChangesOpen(current()?.id);
+    // The same conversation's changes again: the signal does not move, so the column is opened here.
+    if (!colShown()) openColumn(true);
+  };
+  // Faber's browser is a pane of the window on Windows, and its pages belong to a project conversation (R161 step 7).
+  const canBrowse = () => isWindows && current()?.area === 'project' && current()?.id === place().id;
+  const toggleSite = async () => {
+    if (sideSite() && colShown()) return closeColumn();
+    const c = current();
+    if (!c) return;
+    // The page this conversation's agent last opened, else an empty page with its address field.
+    const last = sitesOf(c.messages.flatMap((m) => m.tools ?? [])).at(-1)?.site;
+    if (last && (await api.siteOpen(c.id, last.url).catch(() => false))) return showSite({ conversationId: c.id, url: last.url, title: last.title });
+    showSite({ conversationId: c.id, url: '', title: '' });
+  };
+
   const runningColumn = () => (
     <Running
       items={items()}
@@ -1090,19 +1123,10 @@ export function App(props: { initial: AppState; update?: UpdateStatus; inbox: { 
       changes={sideChanges() ? { id: sideChanges()!, files: changeList()?.files ?? [], incomplete: changeList()?.incomplete ?? false, loading: changes.loading, loadingMore: loadingMoreChanges(), onMore: () => void moreChanges(), onReview: canReview() ? (security) => {
         if (!canReview()) return;
         const text = t(security ? 'changes.reviewSecurityRequest' : 'changes.reviewRequest');
-        setChangesOpen(undefined);
+        // The column goes, so the findings stream in the conversation the topbar's button opened it over.
+        closeColumn();
         void send({ text, images: [], files: [] });
-        queueMicrotask(() => column?.querySelector<HTMLElement>('button')?.focus());
       } : undefined } : undefined}
-      onChanges={changeList()?.files.length || changeList()?.incomplete ? () => {
-        showAgent(undefined);
-        showSite(undefined);
-        showAside(undefined);
-        showFile(undefined);
-        setBackgroundOpen(false);
-        setChangesOpen(current()?.id);
-      } : undefined}
-      onAside={canAside() ? () => showAside({ conversationId: current()?.id }) : undefined}
       onBack={() => {
         showAgent(undefined);
         showSite(undefined);
@@ -1364,6 +1388,29 @@ ${copy().path}`}>
                         onFail={fail}
                       />
                     )}
+                  </Show>
+                  <Show when={current()?.id === place().id && current()}>
+                    <div class="panes" role="group" aria-label={t('panes.label')}>
+                      <button
+                        class="iconbtn pane-aside"
+                        aria-pressed={!!sideAside() && colShown()}
+                        aria-label={t('aside.title')}
+                        title={`${t('aside.title')} (${keysOf('aside')})`}
+                        onClick={toggleAside}
+                      >
+                        <Icon name="chat" />
+                      </button>
+                      <Show when={hasChanges()}>
+                        <button class="iconbtn pane-changes" aria-pressed={!!sideChanges() && colShown()} aria-label={t('changes.title')} title={t('changes.title')} onClick={toggleChanges}>
+                          <Icon name="changes" />
+                        </button>
+                      </Show>
+                      <Show when={canBrowse()}>
+                        <button class="iconbtn pane-site" aria-pressed={!!sideSite() && colShown()} aria-label={t('site.browser')} title={t('site.browser')} onClick={() => void toggleSite()}>
+                          <Icon name="globe" />
+                        </button>
+                      </Show>
+                    </div>
                   </Show>
                   <button
                     class="run-btn"

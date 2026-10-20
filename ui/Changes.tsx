@@ -41,11 +41,10 @@ export function ChangesPreview<T extends { path: string }>(props: { files: T[]; 
 }
 
 /** The conversation's whole change, in the running column's existing side view. */
-export function Changes(props: { id: string; files: FileChange[]; loading: boolean; incomplete?: boolean; loadingMore?: boolean; onMore?: () => void; onReview?: (security: boolean) => void; onBack: () => void; onClose: () => void }) {
+export function Changes(props: { id: string; files: FileChange[]; loading: boolean; incomplete?: boolean; loadingMore?: boolean; onMore?: () => void; onReview?: (security: boolean) => void; onClose: () => void }) {
   return (
     <>
       <div class="rc-head side-head changes-head">
-        <button class="iconbtn back" aria-label={t('agent.back')} title={t('agent.back')} onClick={props.onBack}><Icon name="left" /></button>
         <h2 id="running-title" class="display">{t('changes.title')}</h2>
         <button class="iconbtn" aria-label={t('run.close')} title={t('run.close')} onClick={props.onClose}><Icon name="close" /></button>
         <Show when={props.files.length && props.onReview}>

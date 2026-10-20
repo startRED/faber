@@ -56,6 +56,12 @@ The numbers above are the usual widths. The person can change them, and the shel
   item needs the user it turns amber, shows the speech bubble and reads "{n} running · {m} needs you". The words are
   always visible.
 - Before the run button, the open conversation's Context meter (R221): a 16 px ring and "{pct}%" in the quiet second ink, with the tokens in its tooltip. It is status (C003): it shows once the CLI has said both numbers, with no motion or setting (C011). A click opens a small panel under it (R274), on the right-click menu's surface and motion and anchored to its right edge: the tokens line, what fills the context (a quiet two-column list, the part at the left and its tokens at the right) when Claude Code counted it, and below a hairline "Compact now" with one quiet line under it. Nothing in it is a setting; Esc or a click outside closes it. It turns amber only from 85% of the window, near where the CLI compacts by itself (C002), never sooner.
+- Between the Context meter and the run button, the open conversation's pane buttons (R303): quiet 32 px icon
+  buttons with their names in the tooltip: Quick question (Ctrl+;), Changes (only while the project conversation has
+  changed files) and Faber's browser (a project conversation on Windows). Each puts its own view in the right column,
+  apart from the running list; the one on screen stays lit (`aria-pressed`) and pressing it again closes the column.
+  The run button is the way to the running list, so these views have no back arrow. Below 1,100 px a column the person
+  opened sits over the stage as a modal dialog and the topbar waits behind it: its close button or Esc closes it.
 
 ### Sidebar
 
@@ -95,6 +101,7 @@ projects. Faber has no worktree creation for projects, so an environment has no 
 
 ### Running column
 
-Its rows, cards, file changes and when it opens by itself: [running.md](running.md). "Changes" replaces the running list
-inside that same column, with a way back; it never adds a second column. Like the other side views, opening it makes an
+Its rows, cards, file changes and when it opens by itself: [running.md](running.md). The topbar's pane buttons put
+Changes, the quick question or Faber's browser in that same column in place of the running list, each a view of its own
+with its title and close; it never adds a second column. Like the other side views, opening it makes an
 automatically opened overlay modal. At most one file's patch stays open, and a partial list offers continuation.

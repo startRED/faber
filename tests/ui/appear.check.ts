@@ -13,6 +13,8 @@ import { check, equal, ok } from './check.ts';
 
 const settle = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 const exit = () => millis(document.documentElement, '--dur-exit', 180);
+/** Opening takes '--dur-ui', longer than an exit since exits got quicker. */
+const entry = () => millis(document.documentElement, '--dur-ui', 220);
 
 /** A page that is in full motion whatever the PC asks for: the system preference is read through one media query. The mock
  * reaches the script only. A check that needs the stylesheet's own transitions (`css`) stands down when the PC asks for less
@@ -48,7 +50,7 @@ check('appear: the "?" text of a row grows open and shrinks away, and is out of 
     ok(wrap?.classList.contains('open') && wrap.querySelector('.st-more'), 'open: the text is there');
     ok(wrap.getAnimations().length > 0, 'it grows from nothing instead of appearing at its height');
     equal(getComputedStyle(wrap.firstElementChild!).overflow, 'hidden', 'clipped while it grows');
-    await settle(exit() + 120);
+    await settle(entry() + 120);
     equal(wrap.getAnimations().length, 0, 'and rests');
     equal(getComputedStyle(wrap.firstElementChild!).overflow, 'visible', 'free once it rests, so a focus ring is never cut');
     q.click();

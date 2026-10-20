@@ -55,10 +55,8 @@ for (const entry of ['button', 'menu', 'send'] as const) {
       await settle();
       const field = host.querySelector<HTMLTextAreaElement>('.composer textarea')!;
       if (entry === 'button') {
-        host.querySelector<HTMLButtonElement>('.run-btn')!.click();
-        await settle();
-        ok(host.querySelector('.rc-aside'), 'the running head offers a quick question with nothing running');
-        host.querySelector<HTMLButtonElement>('.rc-aside')!.click();
+        ok(host.querySelector('.topbar .pane-aside'), 'the topbar offers a quick question with nothing running');
+        host.querySelector<HTMLButtonElement>('.pane-aside')!.click();
         await settle();
         const box = host.querySelector<HTMLTextAreaElement>('#aside-box')!;
         box.value = 'Why the parser?';
@@ -199,10 +197,15 @@ check('quick question: before the agent has answered, the tab says when it can b
     equal(asked, 0, 'a recap cannot run before the first answer either');
     equal(field.value, '/recap', 'the unasked recap stays in the box');
     ok(!host.querySelector('.aside-recap'), 'there is no recap button before the first answer');
-    host.querySelector<HTMLButtonElement>('.side-head .back')!.click();
+    equal(host.querySelector('.side-head .back'), null, 'it is a view of its own, with no way back to the running list');
+    equal(host.querySelector('.pane-aside')!.getAttribute('aria-pressed'), 'true', 'the topbar says the quick question is on screen');
+    const ctrlSemicolon = () => window.dispatchEvent(new KeyboardEvent('keydown', { key: ';', ctrlKey: true, bubbles: true, cancelable: true }));
+    ctrlSemicolon();
     await settle();
-    equal(host.querySelector('#running-title')!.textContent, t('run.title'), 'the back arrow returns to the running list');
-    ok(host.querySelector('.rc-aside'), 'the list\'s head opens it again');
+    equal(host.querySelector('[data-surface="aside"]'), null, 'Ctrl+; closes it');
+    ctrlSemicolon();
+    await settle();
+    ok(host.querySelector('[data-surface="aside"]'), 'and Ctrl+; opens it again');
   } finally {
     dispose();
     host.remove();
