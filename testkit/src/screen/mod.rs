@@ -2,6 +2,7 @@
 //! only WebView2 has the port. Each scenario gets its own sandbox, and is audited when it ends.
 
 pub mod app;
+pub mod approve_plan;
 #[cfg(windows)]
 pub mod containment;
 pub mod first_run;
@@ -38,6 +39,7 @@ pub fn all() -> Vec<Scenario> {
     let all = app::scenarios()
         .into_iter()
         .chain(permissions::scenarios())
+        .chain(approve_plan::scenarios())
         .chain(projects::scenarios())
         .chain(shell::scenarios())
         .chain(review::scenarios())

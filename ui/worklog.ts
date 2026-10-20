@@ -65,7 +65,7 @@ function detailOf(input: unknown): string {
   if (typeof input === 'string') return input;
   if (Array.isArray(input)) return input.map((c) => (c as { path?: string })?.path).filter(Boolean).join(', ');
   const o = input as Record<string, unknown> | undefined;
-  const detail = o && (o.query ?? o.url ?? o.target ?? o.file_path ?? o.notebook_path ?? o.command ?? o.pattern ?? o.skill);
+  const detail = o && (o.query ?? o.url ?? o.target ?? o.file_path ?? o.notebook_path ?? o.command ?? o.pattern ?? o.skill ?? o.plan);
   return typeof detail === 'string' ? detail.replace(/^https?:\/\//, '') : '';
 }
 

@@ -709,6 +709,9 @@ pub struct Conversation {
     /// The choice for the next message, retained independently in each conversation.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub choice: Option<crate::router::Choice>,
+    /// Codex's saved thread is still in Plan; its first work turn must explicitly leave that prompt.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub codex_plan: bool,
     pub area: Area,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub project_id: Option<String>,
@@ -796,9 +799,13 @@ pub struct Conversation {
     /// (`engine/src/engine/verifying.rs`), the reply's id: the conversation is at work meanwhile. Never shown or saved.
     #[serde(skip)]
     pub weighing: Option<String>,
-    /// The person pressed Stop on the run under way: its end leaves no done card (`engine/src/engine/ended.rs`). Never saved.
+    /// The person pressed Stop: the closing turn cannot drain the queue or leave a done card (`engine/src/engine/ended.rs`).
+    /// A new turn clears it; running-list updates never do. Never saved.
     #[serde(skip)]
     pub stopped: bool,
+    /// A message the person explicitly sends while a stopped turn is still closing. Starts through Send now once idle.
+    #[serde(skip)]
+    pub send_after_stop: Option<String>,
 }
 
 /// The context of a conversation's own agent: `used` tokens of a `window`, the point where its CLI compacts by itself.
@@ -1066,6 +1073,12 @@ pub struct Settings {
     /// held one. Only the engine sets it.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub grants_epoch: Option<String>,
+    /// A plan card may approve only under the revision it was shown with. Only the engine changes this token.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub permissions_revision: Option<String>,
+    /// The mode before the person chose Plan, consumed by the next plan card. Any later mode pick clears it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub before_plan: Option<Permissions>,
     /// Receive previews: update checks read the preview channel (the newest build) instead of the weekly stable one (off by
     /// default). Turning it off never installs an older version: a running preview takes only the next stable line, never
     /// the stable of its own `X.Y.Z`, which may be built from an older preview (`src-tauri/src/update.rs`).

@@ -11,6 +11,276 @@ use std::sync::Arc;
 use std::time::Duration;
 use support::{Entry, drive, fake, fixture, next_permission, text_of};
 
+#[tokio::test]
+async fn r160_stop_before_codex_resume_cancels_the_approved_plan_before_it_is_sent() {
+    stop_before_resume("Go ahead with the plan.", true).await;
+}
+
+#[tokio::test]
+async fn r160_stop_before_codex_resume_cancels_an_ordinary_message_before_it_is_sent() {
+    stop_before_resume("ordinary message", false).await;
+}
+
+async fn stop_before_resume(text: &str, leave_plan: bool) {
+    let (spawn, mut input, mut output) = support::controlled();
+    let server = CodexServer::start(CodexServerOptions {
+        permissions: Permissions::Ask,
+        cli: faber_engine::cli::Cli { command: "fake".into(), prefix: vec![] },
+        cwd: ".".into(),
+        area: Area::Chat,
+        user_hooks: false,
+        windows: false,
+        spawn,
+        tools: Default::default(),
+    });
+    let (tx, mut events) = tokio::sync::mpsc::unbounded_channel();
+    let session = server.open(
+        CodexThread { resume: Some("t".into()), leave_plan, ..mode_thread(Permissions::Ask, Default::default()) },
+        Arc::new(move |event| drop(tx.send(event))),
+    );
+    support::expect_method(&mut input, "initialize").await;
+    support::emit(&mut output, json!({"id":1,"result":{}})).await;
+    support::expect_method(&mut input, "initialized").await;
+    let resume = support::expect_method(&mut input, "thread/resume").await;
+    session.send(UserTurn::text(text));
+    session.interrupt();
+    // The answer is a queue barrier: Stop was processed before the held resume reply is released.
+    assert_eq!(session.answer("missing", false).await, Ok(Delivery::Unknown));
+    support::emit(&mut output, json!({"id":resume["id"],"result":{"thread":{"id":"t","model":"test"}}})).await;
+    support::expect_method(&mut input, "skills/list").await;
+    use tokio::io::AsyncBufReadExt;
+    let mut line = String::new();
+    assert!(tokio::time::timeout(Duration::from_millis(50), input.read_line(&mut line)).await.is_err(), "stopped work was sent: {line}");
+    let done = tokio::time::timeout(Duration::from_secs(1), async {
+        loop {
+            if let Some(event @ EngineEvent::Done { .. }) = events.recv().await {
+                break event;
+            }
+        }
+    })
+    .await
+    .expect("a cancelled, never-started turn still finishes the engine reply");
+    assert!(matches!(done, EngineEvent::Done { ok: false, reason, input_tokens: 0, .. } if reason == "interrupted"));
+    // Stop applies to the cancelled message, not the person's next deliberate message.
+    session.send(UserTurn::text("after Stop"));
+    let next = support::expect_method(&mut input, "turn/start").await;
+    assert_eq!(next["params"]["input"][0]["text"], "after Stop");
+    session.close();
+    server.retire();
+}
+
+#[tokio::test]
+async fn r160_stop_before_codex_turn_id_interrupts_when_the_start_reply_supplies_it() {
+    stop_before_turn_id(false, false).await;
+}
+
+#[tokio::test]
+async fn r160_stop_before_codex_turn_id_interrupts_when_the_notification_supplies_it() {
+    stop_before_turn_id(true, false).await;
+}
+
+#[tokio::test(start_paused = true)]
+async fn r160_stop_before_codex_turn_id_survives_retirement_after_the_stop_grace_expires() {
+    tokio::time::timeout(Duration::from_secs(20), stop_before_turn_id(false, true))
+        .await
+        .expect("a late turn id is interrupted without shutting down before completion");
+}
+
+async fn stop_before_turn_id(notification_first: bool, delayed: bool) {
+    let (spawn, mut input, mut output) = support::controlled();
+    let server = CodexServer::start(CodexServerOptions {
+        permissions: Permissions::Ask,
+        cli: faber_engine::cli::Cli { command: "fake".into(), prefix: vec![] },
+        cwd: ".".into(),
+        area: Area::Chat,
+        user_hooks: false,
+        windows: false,
+        spawn,
+        tools: Default::default(),
+    });
+    let (tx, mut events) = tokio::sync::mpsc::unbounded_channel();
+    let session = server.open(mode_thread(Permissions::Ask, Default::default()), Arc::new(move |event| drop(tx.send(event))));
+    support::expect_method(&mut input, "initialize").await;
+    support::emit(&mut output, json!({"id":1,"result":{}})).await;
+    support::expect_method(&mut input, "initialized").await;
+    let open = support::expect_method(&mut input, "thread/start").await;
+    support::emit(&mut output, json!({"id":open["id"],"result":{"thread":{"id":"t","model":"test"}}})).await;
+    session.send(UserTurn::text("ordinary message"));
+    let start = support::expect_method(&mut input, "turn/start").await;
+    session.interrupt();
+    assert_eq!(session.answer("missing", false).await, Ok(Delivery::Unknown));
+    if delayed {
+        tokio::time::advance(Duration::from_secs(6)).await;
+        let failure = tokio::time::timeout(Duration::from_secs(1), async {
+            loop {
+                if let Some(event @ EngineEvent::Error { fatal: true, .. }) = events.recv().await {
+                    break event;
+                }
+            }
+        })
+        .await
+        .expect("the unconfirmed Stop retires the engine's live session");
+        assert!(matches!(failure, EngineEvent::Error { message, .. } if message == "error.cli.stopUnconfirmed"));
+        session.close();
+        assert_eq!(session.answer("missing", false).await, Ok(Delivery::Unknown));
+        // Unrelated process news must not let the closing-thread cleanup forget the pending Stop either.
+        support::emit(&mut output, json!({"method":"account/updated","params":{}})).await;
+    }
+    let reply = json!({"id":start["id"],"result":{"turn":{"id":"one"}}});
+    let notification = json!({"method":"turn/started","params":{"threadId":"t","turn":{"id":"one"}}});
+    support::emit(&mut output, if notification_first { notification.clone() } else { reply.clone() }).await;
+    let interrupt = support::expect_method(&mut input, "turn/interrupt").await;
+    assert_eq!(interrupt["params"], json!({"threadId":"t","turnId":"one"}));
+    support::emit(&mut output, if notification_first { reply } else { notification }).await;
+    assert_eq!(session.answer("missing", false).await, Ok(Delivery::Unknown));
+    use tokio::io::AsyncBufReadExt;
+    let mut line = String::new();
+    assert!(tokio::time::timeout(Duration::from_millis(50), input.read_line(&mut line)).await.is_err(), "duplicate interrupt: {line}");
+    support::emit(&mut output, json!({"method":"turn/completed","params":{"threadId":"t","turn":{"id":"one","status":"interrupted"}}}))
+        .await;
+    session.close();
+    server.retire();
+}
+
+#[tokio::test]
+async fn r160_plan_collaboration_uses_the_model_returned_by_the_thread() {
+    let (spawn, mut input, mut output) = support::controlled();
+    let server = CodexServer::start(CodexServerOptions {
+        permissions: Permissions::Plan,
+        cli: faber_engine::cli::Cli { command: "fake".into(), prefix: vec![] },
+        cwd: ".".into(),
+        area: Area::Chat,
+        user_hooks: false,
+        windows: false,
+        spawn,
+        tools: Default::default(),
+    });
+    let session = server.open(
+        CodexThread {
+            helper: Default::default(),
+            browse: false,
+            conversations: false,
+            verify: false,
+            progress: false,
+            leave_plan: false,
+            cwd: ".".into(),
+            model: None,
+            effort: Some("high".into()),
+            resume: None,
+            instructions: None,
+            user_name: None,
+            permissions: Permissions::Plan,
+            tuning: Default::default(),
+        },
+        Arc::new(|_| {}),
+    );
+    support::expect_method(&mut input, "initialize").await;
+    support::emit(&mut output, json!({"id":1,"result":{}})).await;
+    support::expect_method(&mut input, "initialized").await;
+    support::expect_method(&mut input, "thread/start").await;
+    support::emit(&mut output, json!({"id":2,"result":{"thread":{"id":"t","model":"thread-model"}}})).await;
+    session.send(UserTurn::text("make a plan"));
+    let start = support::expect_method(&mut input, "turn/start").await;
+    assert_eq!(start["params"]["collaborationMode"]["mode"], "plan");
+    assert_eq!(start["params"]["collaborationMode"]["settings"]["model"], "thread-model");
+    assert_eq!(start["params"]["collaborationMode"]["settings"]["reasoning_effort"], "high");
+    assert_eq!(start["params"]["input"][0]["text"], "make a plan");
+    session.close();
+    server.retire();
+}
+
+#[tokio::test]
+async fn r160_ordinary_default_turn_omits_collaboration_mode() {
+    let (spawn, mut input, mut output) = support::controlled();
+    let server = CodexServer::start(CodexServerOptions {
+        permissions: Permissions::Ask,
+        cli: faber_engine::cli::Cli { command: "fake".into(), prefix: vec![] },
+        cwd: ".".into(),
+        area: Area::Chat,
+        user_hooks: false,
+        windows: false,
+        spawn,
+        tools: Default::default(),
+    });
+    let session = server.open(
+        CodexThread {
+            helper: Default::default(),
+            browse: false,
+            conversations: false,
+            verify: false,
+            progress: false,
+            leave_plan: false,
+            cwd: ".".into(),
+            model: None,
+            effort: None,
+            resume: None,
+            instructions: None,
+            user_name: None,
+            permissions: Permissions::Ask,
+            tuning: Default::default(),
+        },
+        Arc::new(|_| {}),
+    );
+    support::expect_method(&mut input, "initialize").await;
+    support::emit(&mut output, json!({"id":1,"result":{}})).await;
+    support::expect_method(&mut input, "initialized").await;
+    support::expect_method(&mut input, "thread/start").await;
+    support::emit(&mut output, json!({"id":2,"result":{"thread":{"id":"t","model":"thread-model"}}})).await;
+    session.send(UserTurn::text("ordinary turn"));
+    let start = support::expect_method(&mut input, "turn/start").await;
+    assert!(start["params"].get("collaborationMode").is_none());
+    session.close();
+    server.retire();
+}
+
+#[tokio::test]
+async fn r160_resumed_plan_sends_default_once_then_omits_collaboration_mode() {
+    let (spawn, mut input, mut output) = support::controlled();
+    let server = CodexServer::start(CodexServerOptions {
+        permissions: Permissions::AcceptEdits,
+        cli: faber_engine::cli::Cli { command: "fake".into(), prefix: vec![] },
+        cwd: ".".into(),
+        area: Area::Chat,
+        user_hooks: false,
+        windows: false,
+        spawn,
+        tools: Default::default(),
+    });
+    let session = server.open(
+        CodexThread {
+            helper: Default::default(),
+            browse: false,
+            conversations: false,
+            verify: false,
+            progress: false,
+            leave_plan: true,
+            cwd: ".".into(),
+            model: None,
+            effort: None,
+            resume: Some("t".into()),
+            instructions: None,
+            user_name: None,
+            permissions: Permissions::AcceptEdits,
+            tuning: Default::default(),
+        },
+        Arc::new(|_| {}),
+    );
+    support::expect_method(&mut input, "initialize").await;
+    support::emit(&mut output, json!({"id":1,"result":{}})).await;
+    support::expect_method(&mut input, "initialized").await;
+    support::expect_method(&mut input, "thread/resume").await;
+    session.send(UserTurn::text("approved run"));
+    session.send(UserTurn::text("next ordinary turn"));
+    support::emit(&mut output, json!({"id":2,"result":{"thread":{"id":"t","model":"thread-model"}}})).await;
+    let leaving = support::expect_method(&mut input, "turn/start").await;
+    assert_eq!(leaving["params"]["collaborationMode"]["mode"], "default");
+    assert_eq!(leaving["params"]["collaborationMode"]["settings"]["model"], "thread-model");
+    let ordinary = support::expect_method(&mut input, "turn/start").await;
+    assert!(ordinary["params"].get("collaborationMode").is_none());
+    session.close();
+    server.retire();
+}
+
 fn visible(event: &EngineEvent) -> bool {
     !matches!(event, EngineEvent::Writers { .. } | EngineEvent::Cursor { .. } | EngineEvent::WriterExit { .. })
 }
@@ -267,6 +537,7 @@ async fn contained_thread(server: &CodexServer, wire: &mut ContainedWire, id: &s
             conversations: false,
             verify: false,
             progress: false,
+            leave_plan: false,
             cwd: ".".into(),
             model: None,
             effort: None,
@@ -694,6 +965,7 @@ async fn opus_1_codex_manual_turns_stay_available_after_long_silence_or_start_er
                 conversations: false,
                 verify: false,
                 progress: false,
+                leave_plan: false,
                 cwd: ".".into(),
                 model: None,
                 effort: None,
@@ -812,6 +1084,7 @@ async fn review_7_codex_preserves_a_turn_sent_before_interrupt_acknowledgement()
             conversations: false,
             verify: false,
             progress: false,
+            leave_plan: false,
             cwd: ".".into(),
             model: None,
             effort: None,
@@ -868,6 +1141,7 @@ async fn an_ignored_interrupt_quarantines_only_that_thread_and_preserves_a_runni
                 conversations: false,
                 verify: false,
                 progress: false,
+                leave_plan: false,
                 cwd: ".".into(),
                 model: None,
                 effort: None,
@@ -918,6 +1192,7 @@ async fn run(
         conversations: false,
         verify: false,
         progress: false,
+        leave_plan: false,
         cwd: ".".into(),
         model: None,
         effort: None,
@@ -1136,6 +1411,7 @@ async fn r161_a_codex_subagent_approval_outside_its_turn_is_refused() {
             conversations: false,
             verify: false,
             progress: false,
+            leave_plan: false,
             cwd: ".".into(),
             model: None,
             effort: None,
@@ -1197,6 +1473,7 @@ async fn codex_an_answer_that_fails_to_write_keeps_the_approval_and_the_retry_is
         conversations: false,
         verify: false,
         progress: false,
+        leave_plan: false,
         cwd: ".".into(),
         model: None,
         effort: None,
@@ -1246,6 +1523,7 @@ async fn codex_an_answer_that_may_be_half_written_is_never_written_again() {
         conversations: false,
         verify: false,
         progress: false,
+        leave_plan: false,
         cwd: ".".into(),
         model: None,
         effort: None,
@@ -1382,6 +1660,7 @@ async fn review3_user_mcp_servers_are_disabled_before_start_and_resume_without_c
                     conversations: false,
                     verify: false,
                     progress: false,
+                    leave_plan: false,
                     cwd: ".".into(),
                     model: None,
                     effort: None,
@@ -1446,6 +1725,7 @@ async fn one_process_serves_two_conversations_at_once_and_keeps_their_answers_ap
             conversations: false,
             verify: false,
             progress: false,
+            leave_plan: false,
             cwd: ".".into(),
             model: None,
             effort: Some("medium".into()),
@@ -1486,6 +1766,7 @@ fn a_side_question_thread_has_its_own_instructions_restricted_reads_no_writes_an
         conversations: false,
         verify: false,
         progress: false,
+        leave_plan: false,
         cwd: ".".into(),
         model: Some("gpt-6-luna".into()),
         effort: None,
@@ -1513,6 +1794,7 @@ fn permissions_keep_the_workspace_sandbox_and_disable_project_network_without_ap
                     conversations: false,
                     verify: false,
                     progress: false,
+                    leave_plan: false,
                     cwd: "project".into(),
                     model: Some("model".into()),
                     effort: None,
@@ -1575,6 +1857,7 @@ async fn l2_serialized_start_and_resume_carry_the_no_approval_offline_policy() {
                     conversations: false,
                     verify: false,
                     progress: false,
+                    leave_plan: false,
                     cwd: ".".into(),
                     model: None,
                     effort: None,
@@ -1639,6 +1922,7 @@ async fn a_project_with_no_approvals_declines_a_residual_request_without_emittin
                         conversations: false,
                         verify: false,
                         progress: false,
+                        leave_plan: false,
                         cwd: ".".into(),
                         model: None,
                         effort: None,
@@ -1668,6 +1952,7 @@ fn the_name_is_a_developer_instruction_that_resume_repeats_and_a_side_question_n
         conversations: false,
         verify: false,
         progress: false,
+        leave_plan: false,
         cwd: ".".into(),
         model: None,
         effort: None,
@@ -1746,6 +2031,7 @@ async fn a_steer_before_the_turn_has_an_id_is_not_delivered() {
         conversations: false,
         verify: false,
         progress: false,
+        leave_plan: false,
         cwd: ".".into(),
         model: None,
         effort: None,
@@ -1840,6 +2126,7 @@ async fn review3_command_gate_declines_git_mutations_and_runs_builds_only_in_the
                 conversations: false,
                 verify: false,
                 progress: false,
+                leave_plan: false,
                 cwd: root.path().into(),
                 model: None,
                 effort: None,
@@ -1918,6 +2205,7 @@ fn r121_codex_full_access_has_no_sandbox_no_approvals_and_no_host_command_tool()
                 conversations: false,
                 verify: false,
                 progress: false,
+                leave_plan: false,
                 cwd: "project".into(),
                 model: None,
                 effort: None,
@@ -1947,6 +2235,7 @@ fn r121_a_side_question_stays_isolated_whatever_mode_the_person_chose() {
             conversations: false,
             verify: false,
             progress: false,
+            leave_plan: false,
             cwd: ".".into(),
             model: None,
             effort: None,
@@ -2012,6 +2301,7 @@ async fn r121_a_full_access_thread_keeps_the_persons_mcp_servers_and_starts_with
                 conversations: false,
                 verify: false,
                 progress: false,
+                leave_plan: false,
                 cwd: ".".into(),
                 model: None,
                 effort: None,
@@ -2070,6 +2360,7 @@ async fn r124_a_full_access_thread_hands_a_residual_approval_to_the_engine_and_n
                         conversations: false,
                         verify: false,
                         progress: false,
+                        leave_plan: false,
                         cwd: ".".into(),
                         model: None,
                         effort: None,
@@ -2122,6 +2413,7 @@ fn mode_thread(permissions: Permissions, tuning: faber_engine::model::Tuning) ->
         conversations: false,
         verify: false,
         progress: false,
+        leave_plan: false,
         cwd: "project".into(),
         model: None,
         effort: None,
@@ -2406,6 +2698,7 @@ async fn r161_codex_calling_the_helper_waits_for_its_report_and_gets_it_as_the_t
         conversations: false,
         verify: false,
         progress: false,
+        leave_plan: false,
         cwd: ".".into(),
         model: Some("gpt-6-luna".into()),
         ..mode_thread(Permissions::FullAccess, Default::default())

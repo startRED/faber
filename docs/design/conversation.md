@@ -48,6 +48,9 @@ above an answer. The window widths, the sidebar and the running column are in [l
   buttons; a click sends the button's words as the person's message. A question Faber answered while Keep going ran
   keeps no buttons: the reply's answers card says what it chose ([keep-going.md](keep-going.md)). Nothing in the plan or the box
   moves; both wrap at 720 px.
+- A completed plan in Plan mode ends with the shared plan approval card ([running.md](running.md)): Approve and run,
+  its run mode, and Keep planning. A closing box keeps its recap but no reply buttons while plan approval waits. The composer
+  reads the shared Settings mode; the card says it applies to all conversations. Faber's work turn is one quiet line.
 - A message's pictures and files sit above its text, right-aligned, as one wrapped row of 72 px rounded thumbnails and
   small file cards (icon, name, type), with "+N" as the fifth tile when there are more than five. The bubble has 17 px
   of padding, a line height of 1.6 and at most 620 px. The same thumbnail is drawn in the message box at 56 px, where

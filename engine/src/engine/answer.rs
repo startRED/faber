@@ -33,7 +33,73 @@ impl Engine {
     /// answer could not be written or was not confirmed in time. The lock is free while the engine waits, so nothing
     /// else in the engine waits for the CLI.
     pub async fn answer(&self, conv: &str, turn_id: &str, request_id: &str, allow: bool, always: bool) -> Result<(), String> {
+        let plan = self.with(|c| {
+            c.convs
+                .get(conv)
+                .and_then(|c| c.messages.last())
+                .filter(|m| m.id == turn_id)
+                .and_then(|m| m.permissions.iter().flatten().find(|p| p.request_id == request_id && p.tool == "ExitPlanMode"))
+                .map(|p| serde_json::from_value::<Permissions>(p.input["mode"].clone()).unwrap_or(Permissions::Ask))
+        });
+        if let Some(mode) = plan {
+            return self.approve_plan(conv, turn_id, request_id, allow.then_some(mode)).await;
+        }
         self.answer_with(conv, turn_id, request_id, allow, always, None).await
+    }
+
+    /// Only the person can approve a plan. None keeps planning; a chosen mode approves and starts the work.
+    pub async fn approve_plan(&self, conv: &str, turn_id: &str, request_id: &str, mode: Option<Permissions>) -> Result<(), String> {
+        if matches!(mode, Some(Permissions::Plan | Permissions::Isolated)) {
+            return Err(STALE.into());
+        }
+        if mode.is_none() && self.with(|c| c.plan_card(conv, turn_id, request_id).map(|(vendor, _)| vendor == Vendor::Claude))? {
+            return self.answer_with(conv, turn_id, request_id, false, false, None).await;
+        }
+        self.with(|c| {
+            let (vendor, revision) = c.plan_card(conv, turn_id, request_id)?;
+            if mode.is_none() {
+                c.remove_plan_card(conv, turn_id, request_id);
+                c.save(conv);
+                c.push(conv, Some(turn_id), true);
+                c.drain(conv);
+                return Ok(());
+            }
+            if revision != Some(serde_json::json!(c.store.settings().permissions_revision)) {
+                return Err("error.permission.planChanged".into());
+            }
+            c.check_plan_send(conv)?;
+            if c.convs.get(conv).is_some_and(|c| c.queued.len() >= MAX_QUEUED) {
+                return Err("error.queueFull".into());
+            }
+            if vendor == Vendor::Claude {
+                let live = c.live.get(conv).filter(|l| l.turn.as_deref() == Some(turn_id)).ok_or(STALE)?;
+                // The permission answer only exits planning. Work belongs to a new ordinary turn.
+                drop(live.session.answer(request_id, true));
+                live.session.interrupt();
+                live.session.close();
+                c.stop_helpers(conv, false);
+            }
+            c.remove_plan_card(conv, turn_id, request_id);
+            if let Some(m) = c.convs.get_mut(conv).and_then(|c| c.messages.last_mut()) {
+                m.status = Some(Status::Done);
+                m.permissions = None;
+                m.finished_at.get_or_insert_with(now);
+            }
+            // The closing turn still reports its counters through the ordinary Done event.
+            if let Err(why) = c.save_settings(Settings { permissions: mode, ..Settings::default() }) {
+                if let Some(m) = c.convs.get_mut(conv).and_then(|c| c.messages.last_mut()) {
+                    m.error = Some(why.clone());
+                }
+                c.save(conv);
+                c.push(conv, Some(turn_id), true);
+                return Err(why);
+            }
+            c.send_by_itself(conv, "Go ahead with the plan.".into(), crate::model::Wake::of("wake.approvedPlan"))?;
+            c.drain(conv);
+            c.save(conv);
+            c.push(conv, Some(turn_id), true);
+            Ok(())
+        })
     }
 
     /// Answers a question the agent asked the user (`AskUserQuestion`) with what the user chose: each question's text to the
@@ -59,11 +125,70 @@ impl Engine {
             // A queue that closed, or a session that said nothing in time, leaves the request waiting.
             results.push((id, timeout_at(deadline, ack).await.ok().and_then(|r| r.ok())));
         }
-        self.with(|c| c.settle_answer(conv, turn_id, sid, &tool, (allow && always).then_some(epoch), &results))
+        let result = self.with(|c| c.settle_answer(conv, turn_id, sid, &tool, (allow && always).then_some(epoch), &results));
+        // Claude may finish immediately after taking a planning denial; its confirmed delivery still succeeds.
+        if matches!(&result, Err(why) if why == STALE)
+            && !allow
+            && tool == "ExitPlanMode"
+            && matches!(results.first(), Some((_, Some(Delivery::Delivered))))
+        {
+            Ok(())
+        } else {
+            result
+        }
     }
 }
 
 impl Core {
+    /// Once another turn starts, an earlier Codex plan is no longer waiting for approval, including after restart.
+    pub(super) fn clear_older_plan_cards(&mut self, conv: &str, reply: &str) {
+        let Some(c) = self.convs.get_mut(conv) else { return };
+        let mut changed = Vec::new();
+        for m in c.messages.iter_mut().filter(|m| m.id != reply && m.vendor == Some(Vendor::Codex)) {
+            if let Some(waiting) = m.permissions.as_mut() {
+                let before = waiting.len();
+                waiting.retain(|p| p.tool != "ExitPlanMode");
+                if waiting.len() != before {
+                    changed.push(m.id.clone());
+                }
+            }
+        }
+        if !changed.is_empty() {
+            self.save(conv);
+            for id in changed {
+                self.push(conv, Some(&id), true);
+            }
+        }
+    }
+
+    fn plan_card(&mut self, conv: &str, turn: &str, request: &str) -> Result<(Vendor, Option<serde_json::Value>), String> {
+        let m = self.load(conv).and_then(|c| c.messages.last()).filter(|m| m.id == turn).ok_or(STALE)?;
+        let p = m.permissions.iter().flatten().find(|p| p.tool == "ExitPlanMode" && p.request_id == request).ok_or(STALE)?;
+        Ok((m.vendor.ok_or(STALE)?, p.input.get("modeRevision").cloned()))
+    }
+
+    fn remove_plan_card(&mut self, conv: &str, turn: &str, request: &str) {
+        if let Some(m) = self.convs.get_mut(conv).and_then(|c| c.messages.iter_mut().find(|m| m.id == turn))
+            && let Some(waiting) = m.permissions.as_mut()
+        {
+            waiting.retain(|p| p.request_id != request);
+        }
+    }
+
+    fn check_plan_send(&self, conv: &str) -> Result<(), String> {
+        if self.installing {
+            return Err("error.update.activeOperations".into());
+        }
+        let conversation = self.convs.get(conv).ok_or(STALE)?;
+        let choice = conversation.choice.as_ref().ok_or(STALE)?;
+        let pick = pick_model(choice, &self.vendors(), self.codex_recommended.as_deref()).ok_or("error.noSubscription")?;
+        if choice.vendor != "auto" {
+            self.gate_turn(&pick, true)?;
+        }
+        self.cwd_of(conversation)?;
+        Ok(())
+    }
+
     /// Checks that the conversation is live, that `turn_id` is its current turn and that the request waits in it, then
     /// hands the answer to the session. It changes no permission. "Always" also answers the other waiting requests for
     /// the same tool.
@@ -83,8 +208,11 @@ impl Core {
         let (tool, epoch) = (clicked.tool.clone(), clicked.epoch.clone());
         // Not in Plan, and not for a card made under an epoch that is gone: that answer lets only its own request through.
         // A question the agent asks is never remembered: each one is the person's to answer.
-        let always =
-            always && tool != "AskUserQuestion" && live.permissions != Permissions::Plan && epoch == self.store.settings().grants_epoch;
+        let always = always
+            && tool != "AskUserQuestion"
+            && tool != "ExitPlanMode"
+            && live.permissions != Permissions::Plan
+            && epoch == self.store.settings().grants_epoch;
         let others = waiting.iter().filter(|p| allow && always && p.tool == tool && p.request_id != request_id);
         let ids = std::iter::once(request_id).chain(others.map(|p| p.request_id.as_str()));
         let requests = ids
@@ -190,6 +318,7 @@ impl Core {
     /// take, or did not confirm in time, becomes a question on the list again, so the turn is never left blocked behind
     /// a row that says it is working.
     pub(super) fn auto_answer(&self, conv: &str, asks: Vec<Permission>) {
+        let asks: Vec<_> = asks.into_iter().filter(|p| p.tool != "ExitPlanMode").collect();
         let Some(l) = self.live.get(conv).filter(|_| !asks.is_empty()) else { return };
         let (sid, turn) = (l.sid, l.turn.clone());
         let sent: Vec<_> = asks.into_iter().map(|p| (l.session.answer(&p.request_id, true), p)).collect();
@@ -288,6 +417,7 @@ mod tests {
     fn seed(engine: &Engine, session: Session, turns: &[(&str, &[(&str, &str)])]) -> String {
         engine.with(|c| {
             let id = c.blank(Area::Chat, None);
+            let revision = c.store.settings().permissions_revision;
             let conv = c.convs.get_mut(&id).unwrap();
             conv.title = "Seeded".into();
             for (n, (turn, waiting)) in turns.iter().enumerate() {
@@ -298,7 +428,7 @@ mod tests {
                 let ask = |(request_id, tool): &(&str, &str)| Permission {
                     request_id: request_id.to_string(),
                     tool: tool.to_string(),
-                    input: json!({}),
+                    input: if *tool == "ExitPlanMode" { json!({"modeRevision": revision}) } else { json!({}) },
                     epoch: None,
                 };
                 reply.permissions = (!waiting.is_empty()).then(|| waiting.iter().map(ask).collect());
@@ -347,6 +477,613 @@ mod tests {
 
     fn running_events(events: &Mutex<Vec<AppEvent>>) -> usize {
         events.lock().unwrap().iter().filter(|e| matches!(e, AppEvent::Running { .. })).count()
+    }
+
+    #[tokio::test]
+    async fn r160_review_plan_approval_names_the_clicked_request_and_refuses_a_stale_one() {
+        for request in ["missing", "second"] {
+            let dir = tempfile::tempdir().unwrap();
+            let (engine, _) = engine(dir.path());
+            engine.save_settings(Settings { permissions: Some(Permissions::Ask), ..Settings::default() }).unwrap();
+            let s = stub(vec![]);
+            let id = seed(&engine, s.session.clone(), &[("t1", &[("first", "ExitPlanMode"), ("second", "ExitPlanMode")])]);
+            let result = engine.approve_plan(&id, "t1", request, None).await;
+            if request == "missing" {
+                assert_eq!(result, Err(STALE.into()));
+                assert!(s.asked.lock().unwrap().is_empty());
+                assert_eq!(waiting(&engine, &id, "t1"), ["first", "second"]);
+            } else {
+                assert_eq!(result, Ok(()));
+                assert_eq!(*s.asked.lock().unwrap(), ["second"]);
+                assert_eq!(waiting(&engine, &id, "t1"), ["first"]);
+            }
+        }
+    }
+
+    #[tokio::test]
+    async fn r160_plan_card_without_a_revision_cannot_approve_but_can_keep_planning() {
+        let dir = tempfile::tempdir().unwrap();
+        let (engine, _) = engine(dir.path());
+        let session = stub(vec![]);
+        let id = seed(&engine, session.session, &[("t1", &[("plan", "ExitPlanMode")])]);
+        engine.with(|c| {
+            c.convs.get_mut(&id).unwrap().messages.last_mut().unwrap().permissions.as_mut().unwrap()[0].input = json!({});
+        });
+        assert_eq!(engine.approve_plan(&id, "t1", "plan", Some(Permissions::FullAccess)).await, Err("error.permission.planChanged".into()));
+        assert!(session.asked.lock().unwrap().is_empty());
+        engine.approve_plan(&id, "t1", "plan", None).await.unwrap();
+        assert_eq!(*session.asked.lock().unwrap(), ["plan"]);
+        engine.shutdown();
+    }
+
+    #[tokio::test]
+    async fn r160_keep_planning_keeps_the_card_until_claude_confirms_delivery() {
+        let dir = tempfile::tempdir().unwrap();
+        let (engine, _) = engine(dir.path());
+        let s = stub(vec![Reply::Say(Delivery::WriteFailed), Reply::Say(Delivery::Delivered)]);
+        let id = seed(&engine, s.session, &[("plan-turn", &[("plan", "ExitPlanMode")])]);
+        assert_eq!(engine.approve_plan(&id, "plan-turn", "plan", None).await, Err(UNDELIVERED.into()));
+        assert_eq!(waiting(&engine, &id, "plan-turn"), ["plan"]);
+        assert_eq!(*s.asked.lock().unwrap(), ["plan"]);
+        engine.approve_plan(&id, "plan-turn", "plan", None).await.unwrap();
+        assert!(waiting(&engine, &id, "plan-turn").is_empty());
+        assert_eq!(*s.asked.lock().unwrap(), ["plan", "plan"]);
+        engine.shutdown();
+    }
+
+    #[tokio::test]
+    async fn r160_keep_planning_accepts_confirmed_delivery_without_draining_a_newer_plan() {
+        let dir = tempfile::tempdir().unwrap();
+        let (engine, _) = engine(dir.path());
+        let s = stub(vec![Reply::Hold]);
+        let id = seed(&engine, s.session, &[("plan-turn", &[("plan", "ExitPlanMode")])]);
+        let release = async {
+            while s.held.lock().unwrap().is_empty() {
+                tokio::task::yield_now().await;
+            }
+            engine.with(|c| {
+                c.handle(
+                    &id,
+                    1,
+                    EngineEvent::Done {
+                        ok: true,
+                        reason: String::new(),
+                        cost_total_usd: None,
+                        input_tokens: 0,
+                        output_tokens: 0,
+                        cache_read_tokens: 0,
+                        cache_write_tokens: 0,
+                        cache_write_1h_tokens: 0,
+                        incomplete: false,
+                    },
+                )
+            });
+            // A later Codex turn can already be waiting for its own approval when the old acknowledgement settles.
+            engine.with(|c| {
+                c.opts.clis.insert(Vendor::Claude, Cli { command: "fake".into(), prefix: vec![] });
+                c.retire(&id);
+                let conversation = c.convs.get_mut(&id).unwrap();
+                let mut plan = Message::new("new-plan".into(), Role::Assistant, "Another plan.".into(), 3);
+                plan.status = Some(Status::Done);
+                plan.vendor = Some(Vendor::Codex);
+                plan.permissions =
+                    Some(vec![Permission { request_id: "new-request".into(), tool: "ExitPlanMode".into(), input: json!({}), epoch: None }]);
+                conversation.messages.push(plan);
+                conversation.queued.push(QueuedTurn {
+                    id: "waiting".into(),
+                    text: "Keep this behind the newer plan.".into(),
+                    images: None,
+                    attachments: None,
+                    choice: Choice { vendor: "claude".into(), model: None, effort: None },
+                    at: 4,
+                    sending: false,
+                    wake: None,
+                });
+            });
+            s.held.lock().unwrap().pop().unwrap().send(Delivery::Delivered).unwrap();
+        };
+        let (result, ()) = tokio::join!(engine.approve_plan(&id, "plan-turn", "plan", None), release);
+        assert_eq!(result, Ok(()), "the CLI confirmed the denial before the call returned");
+        assert!(waiting(&engine, &id, "plan-turn").is_empty());
+        let conversation = engine.open(&id).unwrap();
+        assert_eq!(conversation.messages.last().unwrap().id, "new-plan", "an old denial must not drain a newer turn's queue");
+        assert_eq!(conversation.queued.len(), 1);
+        assert_eq!(waiting(&engine, &id, "new-plan"), ["new-request"]);
+        engine.shutdown();
+    }
+
+    #[tokio::test]
+    async fn r160_explicit_send_during_claudes_stopped_plan_close_starts_afterwards() {
+        stop_holds_the_old_queue(Vendor::Claude, Some(Resume::NewMessage)).await;
+    }
+
+    #[tokio::test]
+    async fn r160_send_now_during_claudes_stopped_plan_close_starts_afterwards() {
+        stop_holds_the_old_queue(Vendor::Claude, Some(Resume::SendNow)).await;
+    }
+
+    #[tokio::test]
+    async fn r160_explicit_send_during_codexs_stopped_plan_close_starts_afterwards() {
+        stop_holds_the_old_queue(Vendor::Codex, Some(Resume::NewMessage)).await;
+    }
+
+    #[tokio::test]
+    async fn r160_send_now_during_codexs_stopped_plan_close_starts_afterwards() {
+        stop_holds_the_old_queue(Vendor::Codex, Some(Resume::SendNow)).await;
+    }
+
+    #[tokio::test]
+    async fn r160_explicit_send_after_stop_never_steers_into_the_closing_turn() {
+        let dir = tempfile::tempdir().unwrap();
+        let (engine, _) = engine(dir.path());
+        let steered = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let calls = steered.clone();
+        let session = Session::from_fn(move |cmd| {
+            if matches!(cmd, SessionCommand::Steer { .. }) {
+                calls.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            }
+        });
+        let id = seed(&engine, session, &[("ordinary-turn", &[])]);
+        engine.with(|c| {
+            c.opts.clis.insert(Vendor::Claude, Cli { command: "fake".into(), prefix: vec![] });
+        });
+        engine.interrupt(&id);
+        engine
+            .send(SendRequest {
+                conversation_id: Some(id.clone()),
+                area: Area::Chat,
+                project_id: None,
+                text: "Start after Stop.".into(),
+                images: vec![],
+                files: vec![],
+                choice: Choice { vendor: "claude".into(), model: None, effort: None },
+            })
+            .unwrap();
+        assert_eq!(steered.load(std::sync::atomic::Ordering::SeqCst), 0, "the stopped CLI must receive no more input");
+        engine.with(|c| {
+            c.handle(
+                &id,
+                1,
+                EngineEvent::Done {
+                    ok: false,
+                    reason: "interrupted".into(),
+                    cost_total_usd: None,
+                    input_tokens: 0,
+                    output_tokens: 0,
+                    cache_read_tokens: 0,
+                    cache_write_tokens: 0,
+                    cache_write_1h_tokens: 0,
+                    incomplete: false,
+                },
+            )
+        });
+        let ended = engine.open(&id).unwrap();
+        assert_eq!(ended.messages.len(), 4);
+        assert_eq!(ended.messages[2].text, "Start after Stop.");
+        assert!(ended.queued.is_empty());
+        engine.shutdown();
+    }
+
+    #[tokio::test]
+    async fn r160_stop_then_approve_claudes_plan_starts_work_when_its_held_result_arrives() {
+        for stop_again in [false, true] {
+            stop_then_approve(Vendor::Claude, true, stop_again).await;
+        }
+    }
+
+    #[tokio::test]
+    async fn r160_stop_then_approve_codexs_plan_starts_work_when_its_held_result_arrives() {
+        for stop_again in [false, true] {
+            stop_then_approve(Vendor::Codex, true, stop_again).await;
+        }
+    }
+
+    #[tokio::test]
+    async fn r160_stop_then_approve_codexs_finished_plan_sends_only_the_approved_work() {
+        stop_then_approve(Vendor::Codex, false, false).await;
+    }
+
+    async fn stop_then_approve(vendor: Vendor, closing: bool, stop_again: bool) {
+        let dir = tempfile::tempdir().unwrap();
+        let (engine, events) = engine(dir.path());
+        let id = seed(&engine, stub(vec![]).session, &[("plan-turn", &[("plan", "ExitPlanMode")])]);
+        let launched = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        engine.with(|c| {
+            let calls = launched.clone();
+            c.opts.spawn = Arc::new(move |_, _, _| {
+                calls.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                Err(std::io::Error::other("this test never starts a process"))
+            });
+            c.opts.clis = Vendor::ALL.into_iter().map(|v| (v, Cli { command: v.name().into(), prefix: vec![] })).collect();
+            let live = c.live.get_mut(&id).unwrap();
+            live.vendor = vendor;
+            live.permissions = Permissions::Plan;
+            let conversation = c.convs.get_mut(&id).unwrap();
+            conversation.choice = Some(Choice { vendor: vendor.name().into(), model: None, effort: None });
+            conversation.messages.last_mut().unwrap().vendor = Some(vendor);
+        });
+        let other = if vendor == Vendor::Claude { Vendor::Codex } else { Vendor::Claude };
+        engine
+            .send(SendRequest {
+                conversation_id: Some(id.clone()),
+                area: Area::Chat,
+                project_id: None,
+                text: "Leave the older message waiting.".into(),
+                images: vec![],
+                files: vec![],
+                choice: Choice { vendor: other.name().into(), model: None, effort: None },
+            })
+            .unwrap();
+        let done = || EngineEvent::Done {
+            ok: !closing,
+            reason: if closing { "interrupted".into() } else { String::new() },
+            cost_total_usd: Some(0.03),
+            input_tokens: 100,
+            output_tokens: 20,
+            cache_read_tokens: 0,
+            cache_write_tokens: 0,
+            cache_write_1h_tokens: 0,
+            incomplete: false,
+        };
+        if !closing {
+            engine.with(|c| c.handle(&id, 1, done()));
+        }
+        engine.interrupt(&id);
+        assert!(engine.open(&id).unwrap().stopped);
+        events.lock().unwrap().clear();
+        let approval = engine.approve_plan(&id, "plan-turn", "plan", Some(Permissions::Ask)).await;
+        assert_eq!(engine.settings().permissions, Some(Permissions::Ask));
+        assert!(waiting(&engine, &id, "plan-turn").is_empty());
+        if closing {
+            approval.unwrap();
+            assert_eq!(launched.load(std::sync::atomic::Ordering::SeqCst), 0, "the old turn must close before work starts");
+            assert_eq!(engine.open(&id).unwrap().queued.len(), 2);
+            let state = engine.state();
+            let work = state
+                .running
+                .items
+                .iter()
+                .find(|item| item.conversation_id == id)
+                .expect("the screen must keep Stop available while approved work waits for closing");
+            assert_eq!(work.state, RunState::Working);
+            assert!(!work.settled);
+            assert!(
+                events.lock().unwrap().iter().all(|event| match event {
+                    AppEvent::Running { items, .. } => items.iter().any(|item| item.conversation_id == id),
+                    _ => true,
+                }),
+                "no running update may hide Stop during approval"
+            );
+            if stop_again {
+                engine.interrupt(&id);
+                assert!(engine.state().running.items.iter().all(|item| item.conversation_id != id));
+                assert!(engine.open(&id).unwrap().send_after_stop.is_none());
+            }
+            engine.with(|c| c.handle(&id, 1, done()));
+        }
+        if stop_again {
+            assert_eq!(launched.load(std::sync::atomic::Ordering::SeqCst), 0, "the second Stop cancels deferred work");
+            let conversation = engine.open(&id).unwrap();
+            assert_eq!(conversation.messages.len(), 2);
+            assert_eq!(conversation.queued.len(), 1);
+            assert_eq!(conversation.queued[0].text, "Leave the older message waiting.");
+            assert!(conversation.stopped);
+            assert!(conversation.ended.is_none());
+            engine.shutdown();
+            return;
+        }
+        // The launcher records dispatch and refuses it, so no real process runs in this unit test.
+        assert_eq!(launched.load(std::sync::atomic::Ordering::SeqCst), 1, "approval after Stop is an explicit send");
+        let conversation = engine.open(&id).unwrap();
+        assert_eq!(conversation.messages.len(), 4);
+        assert_eq!(conversation.messages[1].status, Some(Status::Done));
+        assert_eq!(conversation.messages[1].input_tokens, Some(100));
+        assert_eq!(conversation.messages[2].wake.as_ref().unwrap().why, "wake.approvedPlan");
+        assert_eq!(conversation.messages[2].text, "Go ahead with the plan.");
+        assert_eq!(conversation.queued.len(), 1);
+        assert_eq!(conversation.queued[0].text, "Leave the older message waiting.");
+        assert!(!conversation.stopped);
+        assert!(conversation.send_after_stop.is_none());
+        engine.shutdown();
+    }
+
+    enum Resume {
+        NewMessage,
+        SendNow,
+    }
+
+    #[tokio::test]
+    async fn r160_stop_holds_the_old_queue_until_claudes_closing_plan_ends() {
+        stop_holds_the_old_queue(Vendor::Claude, None).await;
+    }
+
+    #[tokio::test]
+    async fn r160_stop_holds_the_old_queue_until_codexs_closing_plan_ends() {
+        stop_holds_the_old_queue(Vendor::Codex, None).await;
+    }
+
+    async fn stop_holds_the_old_queue(vendor: Vendor, resume: Option<Resume>) {
+        let dir = tempfile::tempdir().unwrap();
+        let (engine, _) = engine(dir.path());
+        let id = seed(&engine, stub(vec![]).session, &[("plan-turn", &[("plan", "ExitPlanMode")])]);
+        let launched = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        engine.with(|c| {
+            let calls = launched.clone();
+            c.opts.spawn = Arc::new(move |_, _, _| {
+                calls.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                Err(std::io::Error::other("this test never starts a process"))
+            });
+            c.opts.clis = Vendor::ALL.into_iter().map(|v| (v, Cli { command: v.name().into(), prefix: vec![] })).collect();
+            let live = c.live.get_mut(&id).unwrap();
+            live.vendor = vendor;
+            live.permissions = Permissions::Plan;
+            let conversation = c.convs.get_mut(&id).unwrap();
+            conversation.choice = Some(Choice { vendor: vendor.name().into(), model: None, effort: None });
+            conversation.messages.last_mut().unwrap().vendor = Some(vendor);
+        });
+        let other = if vendor == Vendor::Claude { Vendor::Codex } else { Vendor::Claude };
+        engine
+            .send(SendRequest {
+                conversation_id: Some(id.clone()),
+                area: Area::Chat,
+                project_id: None,
+                text: "Read the older message.".into(),
+                images: vec![],
+                files: vec![],
+                choice: Choice { vendor: other.name().into(), model: None, effort: None },
+            })
+            .unwrap();
+        engine.approve_plan(&id, "plan-turn", "plan", Some(Permissions::Ask)).await.unwrap();
+        assert_eq!(engine.open(&id).unwrap().queued.len(), 2);
+        engine.interrupt(&id);
+        let held = engine.open(&id).unwrap();
+        assert_eq!(held.queued.len(), 1, "Stop removes approved work and leaves the older message");
+        assert_eq!(held.queued[0].text, "Read the older message.");
+        assert!(engine.state().running.items.iter().all(|item| item.conversation_id != id));
+        match resume {
+            Some(Resume::NewMessage) => {
+                engine
+                    .send(SendRequest {
+                        conversation_id: Some(id.clone()),
+                        area: Area::Chat,
+                        project_id: None,
+                        text: "Run the new message.".into(),
+                        images: vec![],
+                        files: vec![],
+                        choice: Choice { vendor: other.name().into(), model: None, effort: None },
+                    })
+                    .unwrap();
+            }
+            Some(Resume::SendNow) => engine.send_queued(&id, &held.queued[0].id).unwrap(),
+            None => {}
+        }
+        assert_eq!(launched.load(std::sync::atomic::Ordering::SeqCst), 0, "the closing turn still owns the session");
+        // Release the completion only now: permission approval must not let its Done status restart the queue.
+        engine.with(|c| {
+            c.handle(
+                &id,
+                1,
+                EngineEvent::Done {
+                    ok: false,
+                    reason: "interrupted".into(),
+                    cost_total_usd: Some(0.03),
+                    input_tokens: 100,
+                    output_tokens: 20,
+                    cache_read_tokens: 0,
+                    cache_write_tokens: 0,
+                    cache_write_1h_tokens: 0,
+                    incomplete: false,
+                },
+            )
+        });
+        let ended = engine.open(&id).unwrap();
+        if let Some(resume) = resume {
+            assert_eq!(launched.load(std::sync::atomic::Ordering::SeqCst), 1, "the explicitly sent message starts once closing ends");
+            assert_eq!(ended.messages.len(), 4);
+            let expected = match resume {
+                Resume::NewMessage => "Run the new message.",
+                Resume::SendNow => "Read the older message.",
+            };
+            assert_eq!(ended.messages[2].text, expected);
+            if matches!(resume, Resume::NewMessage) {
+                assert_eq!(ended.queued, held.queued, "the untouched older message stays held");
+            } else {
+                assert!(ended.queued.is_empty());
+            }
+            assert!(!ended.stopped);
+            engine.shutdown();
+            return;
+        }
+        assert_eq!(ended.messages.len(), 2, "the older message must not start when the interrupted result arrives");
+        assert_eq!(ended.messages[1].status, Some(Status::Done));
+        assert_eq!(ended.messages[1].input_tokens, Some(100));
+        assert_eq!(ended.queued, held.queued);
+        assert!(ended.ended.is_none(), "the person's Stop leaves no done card");
+        assert_eq!(launched.load(std::sync::atomic::Ordering::SeqCst), 0);
+        assert!(engine.state().running.items.iter().all(|item| item.conversation_id != id));
+        // A deliberate Send now starts a new run; the fake launcher refuses it after recording the launch.
+        let _ = engine.send_queued(&id, &held.queued[0].id);
+        assert_eq!(launched.load(std::sync::atomic::Ordering::SeqCst), 1);
+        assert!(!engine.open(&id).unwrap().stopped, "a new manual turn clears the previous Stop");
+        engine.shutdown();
+    }
+
+    #[tokio::test]
+    async fn r160_completed_plan_keeps_done_and_drains_work_if_its_closing_process_fails() {
+        let dir = tempfile::tempdir().unwrap();
+        let (engine, _) = engine(dir.path());
+        let session = stub(vec![]);
+        let id = seed(&engine, session.session, &[("t1", &[("plan", "ExitPlanMode")])]);
+        engine.with(|c| {
+            c.opts.clis.insert(Vendor::Claude, Cli { command: "fake".into(), prefix: vec![] });
+            c.convs.get_mut(&id).unwrap().choice = Some(Choice { vendor: "claude".into(), model: None, effort: None });
+        });
+        engine.answer(&id, "t1", "plan", true, false).await.unwrap();
+        assert_eq!(engine.settings().permissions, Some(Permissions::Ask), "a legacy card without prior mode never loosens Ask");
+        engine.with(|c| c.handle(&id, 1, EngineEvent::Error { message: "error.cli.interruptTimeout".into(), fatal: true }));
+        let conversation = engine.open(&id).unwrap();
+        assert_eq!(conversation.messages[1].status, Some(Status::Done), "the accepted plan stays finished");
+        assert_eq!(conversation.messages[1].incomplete, Some(true), "the missing final counters are explicit");
+        assert_eq!(conversation.messages.len(), 4, "the ordinary work turn was dispatched");
+        assert_eq!(conversation.messages[2].wake.as_ref().unwrap().why, "wake.approvedPlan");
+        assert!(conversation.queued.is_empty());
+        engine.shutdown();
+    }
+
+    #[tokio::test]
+    async fn r160_codex_plan_exit_is_saved_when_the_work_turn_is_accepted_even_if_it_stops() {
+        let dir = tempfile::tempdir().unwrap();
+        let (engine, _) = engine(dir.path());
+        let id = seed(&engine, stub(vec![]).session, &[("t1", &[])]);
+        engine.with(|c| {
+            c.convs.get_mut(&id).unwrap().codex_plan = true;
+            let live = c.live.get_mut(&id).unwrap();
+            live.vendor = Vendor::Codex;
+            live.permissions = Permissions::Ask;
+            c.handle(&id, 1, EngineEvent::TurnStarted);
+        });
+        assert!(!engine.open(&id).unwrap().codex_plan, "acceptance already left the sticky Plan prompt");
+        assert!(!Store::new(dir.path()).get(&id).unwrap().codex_plan, "a restart must not send a second default transition");
+        engine.with(|c| {
+            c.handle(
+                &id,
+                1,
+                EngineEvent::Done {
+                    ok: false,
+                    reason: "interrupted".into(),
+                    cost_total_usd: None,
+                    input_tokens: 0,
+                    output_tokens: 0,
+                    cache_read_tokens: 0,
+                    cache_write_tokens: 0,
+                    cache_write_1h_tokens: 0,
+                    incomplete: true,
+                },
+            )
+        });
+        assert!(!engine.open(&id).unwrap().codex_plan);
+        engine.shutdown();
+    }
+
+    #[tokio::test]
+    async fn r160_shared_plan_defaults_never_loosen_an_agent_entered_plan_and_consume_history() {
+        for vendor in [Vendor::Claude, Vendor::Codex] {
+            for current in [Permissions::Ask, Permissions::AcceptEdits, Permissions::Plan] {
+                let dir = tempfile::tempdir().unwrap();
+                let (engine, _) = engine(dir.path());
+                let id = seed(&engine, stub(vec![]).session, &[("before", &[]), ("t1", &[])]);
+                engine.with(|c| {
+                    c.store
+                        .save_settings(&Settings {
+                            permissions: Some(current),
+                            before_plan: Some(Permissions::FullAccess),
+                            ..Settings::default()
+                        })
+                        .unwrap();
+                    let live = c.live.get_mut(&id).unwrap();
+                    live.vendor = vendor;
+                    // Codex only supplies a completed plan when its turn runs in Plan.
+                    live.permissions = if vendor == Vendor::Codex { Permissions::Plan } else { current };
+                    if vendor == Vendor::Codex {
+                        c.store
+                            .save_settings(&Settings {
+                                permissions: Some(Permissions::Plan),
+                                before_plan: Some(current),
+                                ..Settings::default()
+                            })
+                            .unwrap();
+                    }
+                    c.handle(
+                        &id,
+                        1,
+                        EngineEvent::Permission {
+                            request_id: "plan".into(),
+                            tool: "ExitPlanMode".into(),
+                            input: json!({"plan":"Check the parser."}),
+                        },
+                    );
+                });
+                let card = engine.open(&id).unwrap().messages.last().unwrap().permissions.as_ref().unwrap()[0].clone();
+                let selected: Permissions = serde_json::from_value(card.input["mode"].clone()).unwrap();
+                if current != Permissions::Plan {
+                    assert_eq!(selected, current);
+                }
+                assert_eq!(engine.settings().before_plan, None, "history is consumed even when the agent entered Plan itself");
+            }
+        }
+    }
+
+    #[tokio::test]
+    async fn r160_shared_the_card_omits_a_plan_already_carried_by_the_reply() {
+        for vendor in [Vendor::Claude, Vendor::Codex] {
+            let dir = tempfile::tempdir().unwrap();
+            let (engine, _) = engine(dir.path());
+            let id = seed(&engine, stub(vec![]).session, &[("t1", &[])]);
+            engine.with(|c| {
+                let live = c.live.get_mut(&id).unwrap();
+                live.vendor = vendor;
+                live.permissions = Permissions::Plan;
+                c.convs.get_mut(&id).unwrap().messages.last_mut().unwrap().text = "Check the parser.".into();
+                c.handle(
+                    &id,
+                    1,
+                    EngineEvent::Permission {
+                        request_id: "plan".into(),
+                        tool: "ExitPlanMode".into(),
+                        input: json!({"plan":"Check the parser."}),
+                    },
+                );
+            });
+            let conversation = engine.open(&id).unwrap();
+            let reply = conversation.messages.last().unwrap();
+            assert_eq!(reply.text, "Check the parser.");
+            assert!(reply.permissions.as_ref().unwrap()[0].input.get("plan").is_none(), "the card must not render a second copy");
+        }
+    }
+
+    #[tokio::test]
+    async fn r160_shared_a_later_mode_pick_clears_the_saved_plan_default() {
+        let dir = tempfile::tempdir().unwrap();
+        let (engine, _) = engine(dir.path());
+        engine.save_settings(Settings { permissions: Some(Permissions::Ask), ..Settings::default() }).unwrap();
+        engine.save_settings(Settings { permissions: Some(Permissions::Plan), ..Settings::default() }).unwrap();
+        assert_eq!(engine.settings().before_plan, Some(Permissions::Ask));
+        engine.save_settings(Settings { permissions: Some(Permissions::AcceptEdits), ..Settings::default() }).unwrap();
+        assert_eq!(engine.settings().before_plan, None);
+        engine.save_settings(Settings { permissions: Some(Permissions::Plan), ..Settings::default() }).unwrap();
+        assert_eq!(engine.settings().before_plan, Some(Permissions::AcceptEdits));
+        engine.save_settings(Settings { permissions: Some(Permissions::Plan), ..Settings::default() }).unwrap();
+        assert_eq!(engine.settings().before_plan, None, "even a later pick of Plan discards the old choice");
+    }
+
+    #[tokio::test]
+    async fn keep_going_enabled_after_a_codex_plan_waits_for_the_person() {
+        let dir = tempfile::tempdir().unwrap();
+        let (engine, _) = engine(dir.path());
+        let s = stub(vec![]);
+        let id = seed(&engine, s.session.clone(), &[("t1", &[("plan:item", "ExitPlanMode")])]);
+        engine.with(|c| {
+            let conv = c.convs.get_mut(&id).unwrap();
+            conv.area = Area::Project;
+            let m = conv.messages.last_mut().unwrap();
+            m.status = Some(Status::Done);
+            m.vendor = Some(Vendor::Codex);
+            m.wrap_up = Some(WrapUp {
+                recap: "Ready.".into(),
+                ask: Some("Start?".into()),
+                actions: vec!["Start".into()],
+                done: false,
+                answered: None,
+            });
+            c.live.get_mut(&id).unwrap().turn = None;
+        });
+        engine.keep_going(&id, true).unwrap();
+        engine.with(|c| c.keep_going_after(&id, Some("t1".into())));
+        let conv = engine.open(&id).unwrap();
+        assert!(conv.keep_going.unwrap().waiting.is_none(), "a plan never arms the closing question's automatic answer");
+        assert_eq!(conv.messages.len(), 2, "no automatic turn starts behind the plan card");
+        assert!(conv.messages.last().unwrap().wrap_up.as_ref().unwrap().answered.is_none());
+        assert!(s.asked.lock().unwrap().is_empty());
     }
 
     #[tokio::test]

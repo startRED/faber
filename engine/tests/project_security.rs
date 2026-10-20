@@ -51,6 +51,7 @@ fn review3_codex_credential_denies_survive_in_both_areas_and_on_resume() {
             let (_, params) = thread_params(
                 area,
                 &CodexThread {
+                    leave_plan: false,
                     helper: Default::default(),
                     browse: false,
                     conversations: false,
@@ -110,6 +111,7 @@ fn review3_codex_shells_use_the_shared_git_gate_instead_of_native_execution() {
         let (_, params) = thread_params(
             area,
             &CodexThread {
+                leave_plan: false,
                 helper: Default::default(),
                 browse: false,
                 conversations: false,
@@ -229,6 +231,7 @@ fn c1_project_reads_are_confined_and_credentials_and_updater_keys_are_denied() {
 fn c1_h4_codex_network_is_off_on_start_and_resume_even_if_user_settings_enable_it() {
     for resume in [None, Some("thread".into())] {
         let t = CodexThread {
+            leave_plan: false,
             helper: Default::default(),
             browse: false,
             conversations: false,
@@ -294,6 +297,7 @@ fn review2_m2_child_git_parameters_cannot_override_host_configuration() {
 fn review2_h2_codex_selects_a_restricted_read_profile_on_start_and_resume() {
     for resume in [None, Some("thread".into())] {
         let t = CodexThread {
+            leave_plan: false,
             helper: Default::default(),
             browse: false,
             conversations: false,
@@ -346,6 +350,7 @@ fn r107_isolated_chat_reuses_project_protections_and_existing_users_default_to_f
 #[test]
 fn m6_sandbox_failures_are_intended_and_writable_roots_must_not_expand_into_user_caches() {
     let t = CodexThread {
+        leave_plan: false,
         helper: Default::default(),
         browse: false,
         conversations: false,
@@ -384,6 +389,7 @@ fn r107_internal_questions_restrict_reads_and_never_grant_workspace_writes() {
             let (_, params) = thread_params(
                 area,
                 &CodexThread {
+                    leave_plan: false,
                     helper: Default::default(),
                     browse: false,
                     conversations: false,

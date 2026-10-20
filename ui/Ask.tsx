@@ -1,5 +1,7 @@
 import { createEffect, createMemo, createSignal, createUniqueId, For, onCleanup, Show, untrack } from 'solid-js';
-import { api, type Parked, type Permission } from './api.ts';
+import { api, PERMISSION_MODES, type Parked, type Permission, type PermissionMode } from './api.ts';
+import { PermissionChip } from './Composer.tsx';
+import { Markdown, openLinks } from './markdown.tsx';
 import { motion } from './appearance.ts';
 import { Icon } from './Glyphs.tsx';
 import { fromEngine, t } from './i18n.ts';
@@ -334,6 +336,58 @@ function QuestionCard(props: { conversationId: string; turnId: string; permissio
   );
 }
 
+/** The same plan decision in the thread and running column; the engine owns both the mode and the run. */
+export function PlanCard(props: { conversationId: string; turnId: string; permission: Permission; surface?: string }) {
+  const input = () => props.permission.input as { mode?: PermissionMode; plan?: unknown };
+  const plan = () => typeof input()?.plan === 'string' ? input().plan as string : '';
+  const modes = PERMISSION_MODES.filter((m) => m !== 'plan');
+  const [mode, setMode] = createSignal<PermissionMode>(modes.find((m) => m === input()?.mode) ?? 'ask');
+  const [sending, setSending] = createSignal(false);
+  const [changed, setChanged] = createSignal(false);
+  const [dropped, setDropped] = createSignal(false);
+  const [problem, setProblem] = createSignal<string>();
+  const answer = async (approve: boolean) => {
+    setSending(true);
+    setProblem(undefined);
+    try {
+      await api.approvePlan(props.conversationId, props.turnId, props.permission.requestId, approve ? mode() : undefined);
+    } catch (err) {
+      const outcome = answerOutcome(err);
+      if (outcome === 'stale') setDropped(true);
+      else {
+        if (outcome.problem === 'error.permission.planChanged') setChanged(true);
+        setProblem(fromEngine(outcome.problem));
+      }
+    } finally {
+      setSending(false);
+    }
+  };
+  return (
+    <Show when={!dropped()}>
+      <div class="ask plan-approval" data-surface={props.surface} data-testid="plan-approval" role="group" aria-label={t('ask.plan.title')} aria-busy={sending()}>
+        <b role={props.surface === 'ask' ? 'status' : undefined} aria-live={props.surface === 'ask' ? 'polite' : undefined}>{t('ask.plan.title')}</b>
+        <Show when={plan()}>{(text) => <div class="md" onClick={openLinks}><Markdown text={text()} /></div>}</Show>
+        <div>
+          <PermissionChip mode={mode()} onMode={setMode} modes={modes} caption={t('ask.plan.mode')} disabled={sending() || changed()} />
+          <p class="note">{t('ask.plan.shared')}</p>
+        </div>
+        <div>
+          <button class="btn primary" ref={(el) => {
+            // The running column can show the same card; only its thread copy receives focus.
+            if (props.surface === 'ask') queueMicrotask(() => {
+              const active = document.activeElement;
+              if (active instanceof HTMLElement && (active.matches('input, textarea') || active.isContentEditable)) return;
+              if (el.isConnected) el.focus({ preventScroll: true });
+            });
+          }} disabled={sending() || changed()} onClick={() => void answer(true)}>{t('ask.plan.approve')}</button>
+          <button class="btn" disabled={sending()} onClick={() => void answer(false)}>{t('ask.plan.keep')}</button>
+        </div>
+        <Show when={problem()}><div class="note err" role="alert">{problem()}</div></Show>
+      </div>
+    </Show>
+  );
+}
+
 /** One question the CLI waits on. The conversation, the turn and the request name it, so an answer can only reach the
  * question it was given for. The same question can be on screen twice (in the thread and in the running column). */
 function Card(props: { conversationId: string; turnId: string; permission: Permission; surface?: string }) {
@@ -410,7 +464,9 @@ export function Asks(props: { conversationId: string; turnId: string; permission
     <>
       <Show when={shown()} keyed>
         {(p) =>
-          p.tool === 'AskUserQuestion' ? (
+          p.tool === 'ExitPlanMode' ? (
+            <PlanCard conversationId={props.conversationId} turnId={props.turnId} permission={p} surface={props.surface} />
+          ) : p.tool === 'AskUserQuestion' ? (
             <QuestionCard conversationId={props.conversationId} turnId={props.turnId} permission={p} surface={props.surface} gone={gone()} />
           ) : (
             <Card conversationId={props.conversationId} turnId={props.turnId} permission={p} surface={props.surface} />

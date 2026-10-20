@@ -139,6 +139,7 @@ impl Core {
             }
             Vendor::Codex => self.codex_server(Area::Project, user_hooks, permissions, &cli).open(
                 CodexThread {
+                    leave_plan: false,
                     cwd,
                     model,
                     effort,

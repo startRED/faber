@@ -285,6 +285,7 @@ impl Core {
         let session = match vendor {
             Vendor::Codex => self.codex_server(Area::Chat, false, Permissions::Isolated, &cli).open(
                 CodexThread {
+                    leave_plan: false,
                     helper: Default::default(),
                     browse: false,
                     conversations: false,

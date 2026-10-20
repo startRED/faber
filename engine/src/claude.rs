@@ -205,17 +205,24 @@ fn web_allowed(web: WebSearch) -> Option<&'static str> {
     }
 }
 
-/// The answer that lets a request through. Leaving plan mode (the plan was approved) also names the mode the session goes on in:
-/// the CLI returns to the mode it was in before plan, which for a session that began in plan is `default` (read in the CLI),
-/// and naming it keeps the person's own `defaultMode` from ever being the one that takes over.
+/// The native permission mode for the next CLI launch.
+pub fn permission_mode(mode: Permissions) -> &'static str {
+    match mode {
+        Permissions::Ask => "default",
+        Permissions::AcceptEdits => "acceptEdits",
+        Permissions::Plan => "plan",
+        Permissions::Auto => "auto",
+        Permissions::FullAccess => "bypassPermissions",
+        Permissions::Isolated => "default",
+    }
+}
+
+/// Allows only this tool request; permission modes are chosen when the next process launches.
 fn allow_response(tool: &str, input: &Value, reply: Option<&Value>) -> Value {
     let mut response = json!({ "behavior": "allow", "updatedInput": input });
     // A question the agent asked comes back with the user's choices: the question list as it was, plus `answers`.
     if let (true, Some(answers)) = (tool == "AskUserQuestion", reply) {
         response["updatedInput"]["answers"] = answers.clone();
-    }
-    if tool == "ExitPlanMode" {
-        response["updatedPermissions"] = json!([{ "type": "setMode", "mode": "default", "destination": "session" }]);
     }
     response
 }
@@ -293,10 +300,14 @@ pub fn claude_args(launch: &ClaudeLaunch) -> Vec<String> {
     } else {
         let mut settings = json!({});
         if launch.area == Area::Chat {
-            args.extend(["--tools".into(), CHAT_TOOLS.into()]);
+            args.extend([
+                "--tools".into(),
+                if launch.permissions == Permissions::Plan { format!("{CHAT_TOOLS},ExitPlanMode") } else { CHAT_TOOLS.into() },
+            ]);
             match launch.permissions {
                 mode if mode.guarded() => {
-                    args.extend(["--strict-mcp-config".into(), "--restricted".into()]);
+                    args.push("--strict-mcp-config".into());
+                    args.push("--restricted".into());
                     if let Some(allowed) = web_allowed(launch.tuning.web) {
                         args.extend(["--allowedTools".into(), allowed.into()]);
                     }
@@ -330,13 +341,7 @@ pub fn claude_args(launch: &ClaudeLaunch) -> Vec<String> {
             // Every guarded mode carries the same credential denies as full access: a person's own rule or an approval card
             // must not open them.
             mode => {
-                let name = match mode {
-                    Permissions::AcceptEdits => "acceptEdits",
-                    Permissions::Plan => "plan",
-                    Permissions::Auto => "auto",
-                    _ => "default",
-                };
-                args.extend(["--permission-mode".into(), name.into()]);
+                args.extend(["--permission-mode".into(), permission_mode(mode).into()]);
                 settings["permissions"] = json!({ "deny": deny() });
             }
         }
@@ -997,7 +1002,7 @@ pub fn start_claude(opts: ClaudeOptions, on_event: EventSink) -> Session {
                         let delivery = match pending.get(&request_id) {
                             None => Delivery::Unknown,
                             Some((tool, input)) => {
-                                let response = if allow { allow_response(tool, input, reply.as_ref()) } else { json!({ "behavior": "deny", "message": DECLINED[0] }) };
+                                let response = if allow { allow_response(tool, input, reply.as_ref()) } else { json!({ "behavior": "deny", "message": if tool == "ExitPlanMode" { "The person wants to keep planning." } else { DECLINED[0] } }) };
                                 let msg = json!({ "type": "control_response", "response": { "subtype": "success", "request_id": request_id, "response": response } });
                                 match proc::write_line(&mut *stdin, &msg).await {
                                     Ok(()) => {
@@ -1236,12 +1241,12 @@ mod allow_tests {
     }
 
     #[test]
-    fn r140_leaving_plan_names_the_mode_default_for_the_session_and_no_other_request_names_one() {
+    fn r160_exiting_plan_only_answers_the_tool_and_never_changes_the_session_mode() {
         let input = json!({ "plan": "do it" });
         let leaving = allow_response("ExitPlanMode", &input, None);
         assert_eq!(leaving["behavior"], "allow");
         assert_eq!(leaving["updatedInput"], input);
-        assert_eq!(leaving["updatedPermissions"], json!([{ "type": "setMode", "mode": "default", "destination": "session" }]));
+        assert!(leaving.get("updatedPermissions").is_none());
         for tool in ["Write", "Bash", "Edit", "WebFetch"] {
             let plain = allow_response(tool, &input, None);
             assert_eq!(plain, json!({ "behavior": "allow", "updatedInput": input }), "{tool}");

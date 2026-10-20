@@ -492,12 +492,12 @@ mod tests {
         let mut reply = Message::new("r".into(), Role::Assistant, "Done.".into(), 2);
         reply.status = Some(Status::Done);
         c.messages.push(reply);
-        assert_eq!(super::super::running_item(&c), None, "a finished reply with nothing after it is idle");
+        assert_eq!(super::super::running_item(&c, None), None, "a finished reply with nothing after it is idle");
         c.weighing = Some("r".into());
-        let row = super::super::running_item(&c).expect("at work while git answers");
+        let row = super::super::running_item(&c, None).expect("at work while git answers");
         assert_eq!((row.state, row.weighing), (crate::model::RunState::Working, true), "the screen shows Stop and the line");
         c.weighing = None;
-        assert_eq!(super::super::running_item(&c), None);
+        assert_eq!(super::super::running_item(&c, None), None);
     }
 
     #[test]

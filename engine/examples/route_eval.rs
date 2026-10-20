@@ -101,6 +101,7 @@ impl Router {
                         instructions,
                         user_name: None,
                         permissions: Permissions::Ask,
+                        leave_plan: false,
                         tuning: Default::default(),
                     },
                     sink,

@@ -88,6 +88,54 @@ struct SavedSettings {
     look: Look,
 }
 
+fn shown_settings(settings: Settings, keeper: &dyn AutostartKeeper) -> Settings {
+    let mut settings = settings.shown();
+    settings.autostart = Some(autostart::shown(keeper, settings.autostart()));
+    settings.appearance = look::usable(settings.appearance.take());
+    settings
+}
+
+fn event_for_screen(event: AppEvent, keeper: &dyn AutostartKeeper) -> AppEvent {
+    match event {
+        AppEvent::Settings { settings } => AppEvent::Settings { settings: shown_settings(settings, keeper) },
+        event => event,
+    }
+}
+
+#[cfg(test)]
+mod settings_event_tests {
+    use super::*;
+    use faber_engine::model::Permissions;
+
+    #[test]
+    fn r160_settings_events_keep_screen_defaults_and_shell_values() {
+        let keeper = FakeAutostart::new(false);
+        let sparse = Settings {
+            permissions: Some(Permissions::Ask),
+            autostart: Some(true),
+            appearance: Some(serde_json::from_value(serde_json::json!({"base":"unknown"})).unwrap()),
+            ..Settings::default()
+        };
+        let AppEvent::Settings { settings } = event_for_screen(AppEvent::Settings { settings: sparse }, &keeper) else {
+            panic!("settings event changed its type");
+        };
+        assert_eq!(settings.notifications, Some(true));
+        assert_eq!(settings.notification_sound, Some(true));
+        assert_eq!(settings.keep_awake, Some(true));
+        assert_eq!(settings.permissions, Some(Permissions::Ask));
+        assert_eq!(settings.autostart, Some(false), "the switch follows the shell, not stale storage");
+        assert!(settings.appearance.is_none(), "unusable saved appearances follow the ordinary response");
+
+        let off = Settings { notifications: Some(false), notification_sound: Some(false), keep_awake: Some(false), ..Settings::default() };
+        let AppEvent::Settings { settings } = event_for_screen(AppEvent::Settings { settings: off }, &keeper) else {
+            panic!("settings event changed its type");
+        };
+        assert_eq!(settings.notifications, Some(false));
+        assert_eq!(settings.notification_sound, Some(false));
+        assert_eq!(settings.keep_awake, Some(false));
+    }
+}
+
 const IMAGE_TYPES: [(&str, &str); 6] = [
     ("png", "image/png"),
     ("jpg", "image/jpeg"),
@@ -112,9 +160,7 @@ fn main_window(app: &AppHandle) -> Option<tauri::Window> {
 #[tauri::command]
 async fn state(app: AppHandle, faber: State<'_, Faber>) -> Res<FullState> {
     let mut state = faber.engine.state();
-    state.settings = std::mem::take(&mut state.settings).shown();
-    state.settings.autostart = Some(autostart::shown(lock(&faber.autostart).as_ref(), state.settings.autostart()));
-    state.settings.appearance = look::usable(state.settings.appearance.take());
+    state.settings = shown_settings(std::mem::take(&mut state.settings), lock(&faber.autostart).as_ref());
     let look = look::stored(state.settings.appearance.as_ref());
     Ok(FullState { state, look, models: lock(&faber.models).clone(), version: app.package_info().version.to_string() })
 }
@@ -365,6 +411,17 @@ async fn answer(faber: State<'_, Faber>, id: String, turn_id: String, request_id
     faber.engine.answer(&id, &turn_id, &request_id, allow, always).await
 }
 
+#[tauri::command]
+async fn approve_plan(
+    faber: State<'_, Faber>,
+    id: String,
+    turn_id: String,
+    request_id: String,
+    mode: Option<faber_engine::model::Permissions>,
+) -> Res<()> {
+    faber.engine.approve_plan(&id, &turn_id, &request_id, mode).await
+}
+
 /// The person's choices for a question the agent asked: each question's text to the label picked.
 #[tauri::command]
 async fn answer_question(faber: State<'_, Faber>, id: String, turn_id: String, request_id: String, answers: serde_json::Value) -> Res<()> {
@@ -610,11 +667,9 @@ async fn save_settings(faber: State<'_, Faber>, mut patch: Settings) -> Result<S
         patch.appearance = Some(look::validated(map)?.0.to_map());
     }
     let autostart = lock(&faber.autostart);
-    let mut settings = autostart::save(autostart.as_ref(), patch.autostart, || faber.engine.save_settings(patch))?.shown();
-    // The answer replaces the settings on screen, so the switch shows what Windows will do, as `state` does.
-    settings.autostart = Some(autostart::shown(autostart.as_ref(), settings.autostart()));
+    let settings = autostart::save(autostart.as_ref(), patch.autostart, || faber.engine.save_settings(patch))?;
+    let settings = shown_settings(settings, autostart.as_ref());
     lock(&faber.awake).set_enabled(settings.keep_awake());
-    settings.appearance = look::usable(settings.appearance.take());
     let look = look::stored(settings.appearance.as_ref());
     Ok(SavedSettings { settings, look })
 }
@@ -1199,6 +1254,7 @@ fn main() {
                 pin,
                 answer,
                 answer_question,
+                approve_plan,
                 rename,
                 remove,
                 remove_queued,
@@ -1311,6 +1367,7 @@ fn main() {
             let keep_awake = faber_engine::store::Store::new(&data_dir).settings().keep_awake();
             let awake = Arc::new(Mutex::new(CountedAwake::new(power, keep_awake)?));
             let awake_for_emit = awake.clone();
+            let autostart_for_emit = autostart_keeper.clone();
             let emit = Arc::new(move |e: AppEvent| {
                 // The engine calls this with its lock held, and the tray waits for the main thread, which can be waiting
                 // for that lock. So the tray works on its own thread; it keeps the newest list, whatever the order.
@@ -1328,7 +1385,7 @@ fn main() {
                     let (app, title, why, vendor) = (handle.clone(), title.clone(), why.clone(), *vendor);
                     tauri::async_runtime::spawn_blocking(move || tray::on_halted(&app, &title, &why, vendor));
                 }
-                let _ = handle.emit("faber:event", e);
+                let _ = handle.emit("faber:event", event_for_screen(e, autostart_for_emit.as_ref()));
             });
             let opts = EngineOptions {
                 data_dir: data_dir.clone(),

@@ -55,6 +55,28 @@ rest of the shell are in [layout.md](layout.md).
   exit time while the thread closes up under it. Tiles and steps change colour over the fast time and the mark scales in
   from half size; under reduced motion everything is instant and the state is still carried by the filled mark, the ring
   and the tick.
+- Plan approval uses the same card in the thread and column: "Ready to run this plan?", the composer's native permission
+  picker labelled "Run in" (its four modes except Plan), one amber "Approve and run" and a quiet "Keep planning". One short
+  line says the choice sets the permission mode for all conversations. The plan appears once: in the reply, or as sanitized
+  Markdown in the card when the tool input alone carried it. The thread announces politely and focuses its main action only
+  when no editable field has focus; the column never takes focus or repeats the announcement.
+  Its default never loosens the mode before Plan, including the first conversation: the saved prior choice, the session's
+  current mode for agent-entered Plan, or Ask for unknown history. That saved choice is consumed once and cleared by later picks.
+  A later permission pick invalidates approval of an older card, even after a restart or a change back. The card explains
+  the refusal, disables approval and leaves Keep planning available.
+  Approval removes the card, ends planning as Done with its cost, saves the one shared Settings mode and queues a normal work
+  turn for both CLIs. Approval drains an idle queue in order, so older messages run before the approved work. Its visible line is Faber's own "Faber started the approved plan", in the person's language. Stop cancels
+  that queued turn, or stops it normally once running. Older queued messages then wait for Send now, even when the late
+  planning result arrives; list and done-card updates cannot clear Stop. A new message, Send now or Approve and run chosen during that
+  closing interval starts once it ends, through normal Send now; untouched messages remain queued. A new actual turn clears Stop.
+  The running count and Stop stay available while planning closes;
+  a Stop before Codex supplies its thread or turn id still cancels the opening work, as for any message. Keep planning keeps the mode and releases the queue;
+  Claude's card stays retryable until its denial is delivered. Approval's settings event uses the same filled defaults and
+  shell adjustments as ordinary Settings responses. A Codex project approved into Full access keeps its checks, map and
+  browser on the same thread; their definitions persist across modes, but calls in other modes return a plain refusal.
+  New messages remove
+  older Codex cards. No automatic answer approves a plan. The controls disable while submitting; a failed Settings save shows
+  the reason on the ended reply and starts no work. It shares the card's tokens, wraps at 720 px and adds no motion or idle process.
 - Clicking a row opens that conversation, setting the area, the project and the conversation together.
 - The column is closed when the window opens. It opens by itself once for each question it has not yet shown, 1.5 s
   after the last keystroke in any text field, including questions already waiting at launch. If the user closes it
@@ -62,7 +84,8 @@ rest of the shell are in [layout.md](layout.md).
 - Items are grouped by project. Projects that have something needing the user come first, and inside a project the
   amber item comes first. The order is stable, so rows do not jump.
 - A reply whose agent has finished, with only the CLI's turn still closing, is not a row: it is done for the person. Keep going,
-  Faber's checks, a compaction and a queued message keep the row. The topbar's count follows the column.
+  Faber's checks, a compaction and approved work waiting to advance keep the row. Messages held after a failed or stopped
+  turn, or unable to start, do not count as working and keep Send now available. The topbar's count follows the column.
 - With no items it shows an empty state with Curioso.
 - "Quick question" (R250) is a quiet button at the end of the list's head, before the close button. It opens the quick
   question in place of the list, with the back arrow and the close button in its head like an opened subagent; `/btw`

@@ -101,6 +101,9 @@ pub enum AppEvent {
         plan: Option<Plan>,
     },
     /// How full a conversation's own agent's context is now (None: not known).
+    Settings {
+        settings: Settings,
+    },
     Context {
         conversation_id: String,
         context: Option<ContextFill>,
@@ -326,9 +329,15 @@ fn new_id() -> String {
     Uuid::new_v4().to_string()
 }
 
-/// A message no running CLI owns: nothing streams and no permission waits any more.
+/// A message no running CLI owns: streaming stops and native requests go. A completed Codex plan remains a decision.
 fn settle(m: &mut Message) {
-    m.permissions = None;
+    if m.vendor == Some(Vendor::Codex) && m.status == Some(Status::Done) {
+        if let Some(waiting) = m.permissions.as_mut() {
+            waiting.retain(|p| p.tool == "ExitPlanMode");
+        }
+    } else {
+        m.permissions = None;
+    }
     if m.status == Some(Status::Streaming) {
         m.status = Some(Status::Stopped);
     }
@@ -783,7 +792,11 @@ impl Engine {
         self.with(|c| {
             if let Some(conv) = c.convs.get_mut(id) {
                 conv.stopped = true;
+                conv.send_after_stop = None;
+                conv.queued.retain(|q| q.wake.as_ref().is_none_or(|w| w.why != "wake.approvedPlan"));
             }
+            c.save(id);
+            c.emit_queue(id);
             c.keep_going_off(id);
             c.compacts.remove(id);
             let compacting = c.convs.get(id).is_some_and(|c| c.compacting);
@@ -1016,7 +1029,7 @@ impl Engine {
             if !projects.iter().any(|p| p.id == id) {
                 return Err("error.project.notFound".into());
             }
-            if c.convs.values().any(|conv| conv.project_id.as_deref() == Some(id) && running_item(conv).is_some()) {
+            if c.convs.values().any(|conv| conv.project_id.as_deref() == Some(id) && running_item(conv, c.live.get(&conv.id)).is_some()) {
                 return Err("error.project.busy".into());
             }
             projects.retain(|p| p.id != id);
@@ -1497,6 +1510,8 @@ impl Core {
             keep_awake: patch.keep_awake.or(before.keep_awake),
             autostart: patch.autostart.or(before.autostart),
             grants_epoch: before.grants_epoch,
+            before_plan: before.before_plan,
+            permissions_revision: before.permissions_revision,
             previews: patch.previews.or(before.previews),
         };
         // A stricter mode revokes every remembered "Always allow" in the very save that changes the mode, by replacing the grants
@@ -1505,6 +1520,12 @@ impl Core {
         let (was, to) = (before.permissions.unwrap_or_default(), settings.permissions());
         if to.strictness() > was.strictness() {
             settings.grants_epoch = Some(crate::model::new_epoch());
+        }
+        let permissions_picked = patch.permissions.is_some();
+        // History belongs to the same Settings mode. A later explicit pick, even the same mode, replaces it.
+        if permissions_picked {
+            settings.permissions_revision = Some(crate::model::new_epoch());
+            settings.before_plan = (to == Permissions::Plan && was != Permissions::Plan).then_some(was);
         }
         self.store.save_settings(&settings).map_err(|_| "error.settings.saveFailed".to_string())?;
         // A turn keeps the mode it started with until it ends, so moving to a stricter mode stops the turns under way (a turn
@@ -1523,7 +1544,19 @@ impl Core {
             self.store.clear_grants(&|id| self.convs.contains_key(id));
         }
         if stricter {
-            let active: Vec<String> = self.live.iter().filter(|(_, live)| live.turn.is_some()).map(|(id, _)| id.clone()).collect();
+            let active: Vec<String> = self
+                .live
+                .iter()
+                .filter(|(id, live)| {
+                    live.turn.as_ref().is_some_and(|turn| {
+                        self.convs
+                            .get(*id)
+                            .and_then(|c| c.messages.iter().find(|m| &m.id == turn))
+                            .is_some_and(|m| m.status == Some(Status::Streaming))
+                    })
+                })
+                .map(|(id, _)| id.clone())
+                .collect();
             for id in active {
                 if let Some(live) = self.retire(&id) {
                     live.session.interrupt();
@@ -1576,6 +1609,7 @@ impl Core {
                 }
             }
         }
+        (self.emit)(AppEvent::Settings { settings: settings.clone() });
         Ok(settings)
     }
 
@@ -1704,6 +1738,30 @@ impl Core {
         if self.convs.get(conv).is_some_and(|c| c.compacting) && self.compaction_event(conv, &event) {
             return;
         }
+        // A completed turn may still report usage while its process closes; it cannot start more work.
+        if self.turn(conv).is_some_and(|m| m.status == Some(Status::Done)) {
+            match &event {
+                EngineEvent::Permission { request_id, .. } => {
+                    if let Some(l) = self.live.get(conv) {
+                        drop(l.session.answer(request_id, false));
+                    }
+                    return;
+                }
+                EngineEvent::HelperCall { id, .. }
+                | EngineEvent::BrowseCall { id, .. }
+                | EngineEvent::ConversationCall { id, .. }
+                | EngineEvent::VerifyCall { id, .. }
+                | EngineEvent::MapCall { id, .. }
+                | EngineEvent::ProgressCall { id, .. } => {
+                    if let Some(l) = self.live.get(conv) {
+                        l.session.helper_reply(id, false, "The turn has ended.".into());
+                    }
+                    return;
+                }
+                EngineEvent::Text(_) | EngineEvent::Thinking(_) | EngineEvent::Tool { .. } => return,
+                _ => {}
+            }
+        }
         // What the reply says or does moves it: its age counts from here, and more words after the agent finished mean it was not done.
         if let Some(main) = event.moves_reply()
             && let Some(m) = self.turn(conv)
@@ -1733,6 +1791,15 @@ impl Core {
             // Codex accepted the turn: if Faber dies now, the next launch resumes this session instead of starting one that never
             // heard of the turn.
             EngineEvent::TurnStarted => {
+                if vendor == Vendor::Codex {
+                    let planning = self.live.get(conv).is_some_and(|l| l.permissions == Permissions::Plan);
+                    if let Some(c) = self.convs.get_mut(conv)
+                        && c.codex_plan != planning
+                    {
+                        c.codex_plan = planning;
+                        self.save(conv);
+                    }
+                }
                 let fresh = self.live.get(conv).and_then(|l| l.unsaved_session.clone());
                 if let (Some(id), Some(c)) = (fresh, self.convs.get_mut(conv))
                     && c.sessions.get(&vendor) != Some(&id)
@@ -1858,13 +1925,51 @@ impl Core {
             EngineEvent::VerifyCall { id, input } => return self.verify_call(conv, id, input),
             EngineEvent::MapCall { id, input } => return self.map_call(conv, id, input),
             EngineEvent::ProgressCall { id, tool, input } => return self.progress_call(conv, id, tool, input),
-            EngineEvent::Permission { request_id, tool, input } => {
+            EngineEvent::Permission { request_id, tool, mut input } => {
+                if self.turn(conv).is_some_and(|m| m.status != Some(Status::Streaming)) {
+                    if let Some(l) = self.live.get(conv) {
+                        drop(l.session.answer(&request_id, false));
+                    }
+                    return;
+                }
+                let plan_card = tool == "ExitPlanMode";
+                if plan_card {
+                    if !input.is_object() {
+                        input = serde_json::json!({});
+                    }
+                    // A plan's approval is always the person's, even in Full access or with a remembered grant.
+                    let mut settings = self.store.settings();
+                    let current = self.live.get(conv).map_or(settings.permissions(), |l| l.permissions);
+                    let had_before = settings.before_plan.is_some();
+                    let before = settings.before_plan.take().filter(|m| !matches!(m, Permissions::Plan | Permissions::Isolated));
+                    let mode = if current == Permissions::Plan { before.unwrap_or(Permissions::Ask) } else { current };
+                    // Consume the saved choice only once; agent-entered Plan always uses the session's current mode.
+                    if had_before {
+                        let _ = self.store.save_settings(&settings);
+                    }
+                    input["mode"] = serde_json::to_value(mode).unwrap_or_default();
+                    input["modeRevision"] = serde_json::to_value(&settings.permissions_revision).unwrap_or_default();
+                    if input["plan"].as_str().is_some_and(|plan| {
+                        !plan.is_empty() && self.convs.get(conv).and_then(|c| c.messages.last()).is_some_and(|m| m.text.contains(plan))
+                    }) && let Some(fields) = input.as_object_mut()
+                    {
+                        fields.remove("plan");
+                    }
+                    if vendor == Vendor::Codex {
+                        if !self.live.get(conv).is_some_and(|l| l.permissions == Permissions::Plan) {
+                            return;
+                        }
+                        if let Some(c) = self.convs.get_mut(conv) {
+                            c.codex_plan = true;
+                        }
+                    }
+                }
                 // A request that touches a credential folder is refused in both modes, with no card (best effort for a command
                 // line: see `touches_credentials`). Full access never shows a card. The answer is decided here, under the lock
                 // that also saves the mode, so a request that was already on its way when the person switched to Ask finds the
                 // session gone (and is never accepted).
                 // A question the agent asks the person is always a card, in every mode: only the person can answer it.
-                let question = tool == "AskUserQuestion";
+                let question = tool == "AskUserQuestion" || plan_card;
                 let cwd = self.convs.get(conv).and_then(|c| self.cwd_of(c).ok());
                 if let Some(l) = self.live.get(conv)
                     && !question
@@ -1927,6 +2032,9 @@ impl Core {
                 incomplete,
                 reason,
             } => {
+                // A turn explicitly completed before interruption (plan approval) stays Done while its counters arrive.
+                let ended = self.turn(conv).is_some_and(|m| m.status == Some(Status::Done));
+                let ok = ok || ended;
                 // Claude reports a conversation total; Codex has already priced this turn's individual requests.
                 let session = self.convs.get(conv).and_then(|c| c.sessions.get(&vendor)).cloned().unwrap_or_default();
                 let area = self.convs.get(conv).map_or(Area::Chat, |c| c.area);
@@ -1986,7 +2094,13 @@ impl Core {
                     m.cache_write_tokens = Some(cache_write_tokens);
                     m.cache_write_1h_tokens = Some(cache_write_1h_tokens);
                     m.incomplete = (incomplete || m.incomplete.unwrap_or(false)).then_some(true);
-                    m.permissions = None;
+                    if vendor == Vendor::Codex && ok {
+                        if let Some(waiting) = m.permissions.as_mut() {
+                            waiting.retain(|p| p.tool == "ExitPlanMode");
+                        }
+                    } else {
+                        m.permissions = None;
+                    }
                     m.nudge = nudge::of(m, area, &can_run);
                 }
                 // A limit hit again after a move goes to recovery when keep going is on, which moves again (up to `MAX_MOVES`).
@@ -2012,9 +2126,25 @@ impl Core {
                     }
                     return;
                 }
-                return self.finish(conv, turn_id);
+                if ended && let Some(l) = self.retire(conv) {
+                    l.session.close();
+                }
+                self.finish(conv, turn_id);
+                return;
             }
             EngineEvent::Error { message, fatal } => {
+                // A completed turn's closing process may fail instead of reporting final counters. Work already queued
+                // after that turn still goes through the normal path; missing counters are never presented as zero use.
+                if fatal && self.turn(conv).is_some_and(|m| m.status == Some(Status::Done)) {
+                    self.note_turn(conv, None, true);
+                    if let Some(m) = self.turn(conv) {
+                        m.incomplete = Some(true);
+                    }
+                    if let Some(l) = self.retire(conv) {
+                        l.session.close();
+                    }
+                    return self.finish(conv, turn_id);
+                }
                 // The CLI no longer has the session this launch resumed (a warm-up that never ran a turn, or a cleaned-up history).
                 let mut message = message;
                 if fatal && resumed && recovery::session_lost(&message) {
@@ -2149,12 +2279,18 @@ impl Core {
         if !completed_ok {
             self.compacts.remove(conv);
         }
+        let approving = self
+            .convs
+            .get(conv)
+            .and_then(|c| c.messages.last())
+            .is_some_and(|m| m.permissions.iter().flatten().any(|p| p.tool == "ExitPlanMode"));
         let keep_going = match read {
             Some(read) => read,
             None => self.keep_going_ended(conv, turn_id.as_deref()),
         };
         // A project reply that changed files is done once Faber's checks say so (R146): the queue and keep going wait.
-        let checking = completed_ok && turn_id.as_deref().is_some_and(|reply| self.check_done(conv, reply, keep_going.clone()));
+        let checking =
+            completed_ok && !approving && turn_id.as_deref().is_some_and(|reply| self.check_done(conv, reply, keep_going.clone()));
         self.save(conv);
         self.save_ledger(false);
         self.push(conv, turn_id.as_deref(), true);
@@ -2167,12 +2303,18 @@ impl Core {
         {
             l.session.close();
         }
-        // After the CLI check above: a changed CLI is replaced before the next turn starts, never under it.
-        if completed_ok && !checking {
+        // At the closing boundary, a deliberate send after Stop uses the ordinary Send now path; untouched messages stay held.
+        let requested = self.convs.get_mut(conv).and_then(|c| c.send_after_stop.take());
+        if let Some(requested) = requested {
+            let _ = self.send_queued(conv, &requested);
+        } else if completed_ok && !checking && !approving {
+            // A changed CLI was replaced above before the next turn starts, never under it.
             self.drain(conv);
         }
         if !checking {
-            self.keep_going_unless_compacting(conv, keep_going);
+            if !approving {
+                self.keep_going_unless_compacting(conv, keep_going);
+            }
             // Faber's checks end the turn later (`verifying.rs`), and the report waits for them. An idle process that
             // exits ends no reply, so it reports nothing twice.
             if turn_id.is_some() {
@@ -2289,12 +2431,16 @@ impl Core {
         // agent already finished takes nothing in: the message waits for the CLI to close the turn and goes out as the next one.
         let finished = c.messages.last().is_some_and(|m| m.role == Role::Assistant && m.finished_at.is_some());
         let steer = !finished
+            && !c.stopped
             && c.queued.iter().all(|q| q.sending)
             && self.live.get(id).is_some_and(|l| l.turn.is_some() && [l.vendor.name(), "auto"].contains(&item.choice.vendor.as_str()));
         if steer {
             self.steer(id, &mut item);
         }
         if let Some(c) = self.convs.get_mut(id) {
+            if c.stopped {
+                c.send_after_stop.get_or_insert_with(|| item.id.clone());
+            }
             c.queued.push(item);
             c.updated_at = at;
         }
@@ -2370,6 +2516,7 @@ impl Core {
         reply.status = Some(Status::Streaming);
         reply.finished_at = None;
         let (question_id, reply_id) = (question.id.clone(), reply.id.clone());
+        c.stopped = false;
         c.messages.push(question);
         c.messages.push(reply);
         c.updated_at = now;
@@ -2430,7 +2577,12 @@ impl Core {
             return;
         }
         let Some(c) = self.convs.get_mut(conv) else { return };
-        if !idle || c.messages.last().is_none_or(|m| m.status != Some(Status::Done)) || c.queued.is_empty() || verifying::checking(c) {
+        if !idle
+            || c.stopped
+            || c.messages.last().is_none_or(|m| m.status != Some(Status::Done))
+            || c.queued.is_empty()
+            || verifying::checking(c)
+        {
             return;
         }
         let next = c.queued.remove(0);
@@ -2475,8 +2627,13 @@ impl Core {
             }
             let mut item = c.queued.remove(pos);
             let at = c.queued.iter().rposition(|q| q.sending).map_or(0, |p| p + 1);
+            // A stopped turn accepts no steering, even when its final result has not arrived yet.
+            let stopped = c.stopped;
+            if stopped {
+                c.send_after_stop = Some(item.id.clone());
+            }
             // One for the other AI cannot go into this turn: it goes first among those that wait.
-            if [vendor, "auto"].contains(&item.choice.vendor.as_str()) {
+            if !stopped && [vendor, "auto"].contains(&item.choice.vendor.as_str()) {
                 self.steer(id, &mut item);
             }
             if let Some(c) = self.convs.get_mut(id) {
@@ -2529,7 +2686,7 @@ impl Core {
         let model_text = self.model_text(id, &item);
         let auto = item.choice.vendor == "auto";
         // A turn Faber sends by itself (`by_itself.rs`) is never one the person picked: an AI billed per use is not spent on.
-        let by_hand = !auto && item.wake.is_none();
+        let by_hand = !auto && item.wake.as_ref().is_none_or(|w| w.why == "wake.approvedPlan");
         let route = if auto { self.next_route(id) } else { None };
         let point = self.take_rewind_steer(&item.id);
         let c = self.convs.get_mut(id).expect("checked above");
@@ -2570,9 +2727,11 @@ impl Core {
         reply.finished_at = None;
         let reply_id = reply.id.clone();
         let question_id = question.id.clone();
+        c.stopped = false;
         c.messages.push(question);
         c.messages.push(reply);
         c.updated_at = at;
+        self.clear_older_plan_cards(id, &reply_id);
         self.save(id);
         self.list_changed();
         self.emit_message(id, &question_id);
@@ -2618,7 +2777,7 @@ impl Core {
     /// The conversations to show in the running list, in the order the screen draws them: blocks that hold a question
     /// first, then the sidebar's project order with Chat last; inside a block the questions first, oldest first.
     fn running_items(&self) -> Vec<RunningItem> {
-        let mut items: Vec<RunningItem> = self.convs.values().filter_map(running_item).collect();
+        let mut items: Vec<RunningItem> = self.convs.values().filter_map(|c| running_item(c, self.live.get(&c.id))).collect();
         if items.is_empty() {
             return items;
         }
@@ -2876,13 +3035,16 @@ impl Core {
         let resume = c.resumable(pick.vendor).cloned();
         let resumed = resume.is_some();
         let area = c.area;
+        let leave_plan = c.codex_plan && permissions != Permissions::Plan;
         // The conversation's own name, fixed when it began: a rename in Settings never reaches a conversation under way.
         let user_name = c.user_name.clone();
         let (model, effort) = (pick.model.clone(), Some(pick.effort.clone()));
         let helper = self.offers_helper(area, pick.vendor);
-        let browse = self.offers_browser(area, permissions);
+        // Codex keeps dynamic tools with its thread; register project capabilities once and gate calls by the live mode.
+        let tool_mode = if pick.vendor == Vendor::Codex && area == Area::Project { Permissions::FullAccess } else { permissions };
+        let browse = self.offers_browser(area, tool_mode);
         let conversations = siblings::offers(area);
-        let verify = self.offers_verify(area, permissions);
+        let verify = self.offers_verify(area, tool_mode);
         let progress = area == Area::Project;
         self.rewind_session_started(conv, sid, cwd_used.clone());
         let session = match pick.vendor {
@@ -2927,6 +3089,7 @@ impl Core {
                     instructions: None,
                     user_name,
                     permissions,
+                    leave_plan,
                     tuning: tuning.clone(),
                 },
                 sink,
@@ -2999,6 +3162,7 @@ impl Core {
             sessions: BTreeMap::new(),
             tentative: BTreeMap::new(),
             command_gate: false,
+            codex_plan: false,
             cost_base: BTreeMap::new(),
             allow_always: None,
             allow_always_epochs: BTreeMap::new(),
@@ -3023,6 +3187,7 @@ impl Core {
             compacting: false,
             weighing: None,
             stopped: false,
+            send_after_stop: None,
         };
         let id = c.id.clone();
         self.convs.insert(id.clone(), c);
@@ -3130,9 +3295,11 @@ impl Core {
         reply.finished_at = None;
         let reply_id = reply.id.clone();
         let question_id = question.id.clone();
+        c.stopped = false;
         c.messages.push(question);
         c.messages.push(reply);
         c.updated_at = at;
+        self.clear_older_plan_cards(&id, &reply_id);
         self.save(&id);
         self.list_changed();
         // An open conversation only grows through these events, so the question goes out as well as the answer.
@@ -3452,7 +3619,7 @@ fn unseen(c: char) -> bool {
 /// requests (denied for want of anyone to answer; they wait for the person until the next message, and count as "needs you").
 /// Faber's checks of it count too: running, it is at work; failing with no fix asked, it needs the person (R146).
 /// Cache warmth is not here: it is a quiet note on the reply itself.
-fn running_item(c: &Conversation) -> Option<RunningItem> {
+fn running_item(c: &Conversation, live: Option<&Live>) -> Option<RunningItem> {
     let reply = c.messages.last().filter(|m| m.role == Role::Assistant)?;
     let permissions = reply.permissions.clone().unwrap_or_default();
     let parked = reply.parked.clone().unwrap_or_default();
@@ -3466,11 +3633,18 @@ fn running_item(c: &Conversation) -> Option<RunningItem> {
     // and no idle update restarts Faber under it.
     let kg_wait = c.keep_going.as_ref().and_then(|k| k.wait_until).filter(|_| reply.status != Some(Status::Streaming));
     let keep_wait = c.keep_going.as_ref().and_then(|k| k.waiting.clone());
+    let approved_work = reply.status == Some(Status::Done)
+        && live.is_some_and(|l| l.turn.as_deref() == Some(reply.id.as_str()))
+        && c.queued.iter().any(|q| {
+            q.wake.as_ref().is_some_and(|w| w.why == "wake.approvedPlan")
+                && (!c.stopped || c.send_after_stop.as_deref() == Some(q.id.as_str()))
+        });
     if reply.status != Some(Status::Streaming)
         && !c.compacting
         && c.weighing.is_none()
         && kg_wait.is_none()
         && keep_wait.is_none()
+        && !approved_work
         && permissions.is_empty()
         && parked.is_empty()
         && parked_more == 0

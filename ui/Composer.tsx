@@ -147,6 +147,19 @@ export function StopAsk(props: { helpers: number; onStop: () => void; onKeep: ()
   );
 }
 
+/** The conversation's mode picker: every surface uses the same choices and their one-line meanings. */
+export function PermissionChip(props: { mode: PermissionMode; onMode: (mode: PermissionMode) => void; modes?: readonly PermissionMode[]; caption?: string; disabled?: boolean }) {
+  return (
+    <label class="chip choose mode" title={t(`set.permissions.${props.mode}.line`)}>
+      <Show when={props.caption}><span>{props.caption}</span></Show>
+      <select aria-label={props.caption ?? t('composer.mode')} aria-description={t(`set.permissions.${props.mode}.line`)} value={props.mode} disabled={props.disabled} onChange={(e) => props.onMode(e.currentTarget.value as PermissionMode)}>
+        <For each={props.modes ?? PERMISSION_MODES}>{(m) => <option value={m} selected={m === props.mode} title={t(`set.permissions.${m}.line`)}>{t(`set.permissions.${m}`)}</option>}</For>
+      </select>
+      <Icon name="down" small />
+    </label>
+  );
+}
+
 export function Composer(props: Props) {
   const [draft, setDraft] = createSignal<Draft>({ ...EMPTY, text: props.draftKey ? kept(props.draftKey) : '' });
   const [inlined, setInlined] = createSignal<Inlined[]>([]);
@@ -680,12 +693,7 @@ export function Composer(props: Props) {
           </label>
         </Show>
         <Show when={props.mode && props.onMode}>
-          <label class="chip choose mode" title={t(`set.permissions.${props.mode!}.line`)}>
-            <select aria-label={t('composer.mode')} value={props.mode} onChange={(e) => props.onMode!(e.currentTarget.value as PermissionMode)}>
-              <For each={PERMISSION_MODES}>{(m) => <option value={m} selected={m === props.mode} title={t(`set.permissions.${m}.line`)}>{t(`set.permissions.${m}`)}</option>}</For>
-            </select>
-            <Icon name="down" small />
-          </label>
+          <PermissionChip mode={props.mode!} onMode={props.onMode!} />
         </Show>
         <Show when={props.keepGoing !== undefined && props.onKeepGoing}>
           <button

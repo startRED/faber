@@ -20,7 +20,12 @@ impl Core {
             if c.queued.len() >= MAX_QUEUED {
                 return Err("error.queueFull".into());
             }
+            // Approval is the person's explicit send, even though Faber supplies its visible line.
+            let requested = (c.stopped && item.wake.as_ref().is_some_and(|w| w.why == "wake.approvedPlan")).then(|| item.id.clone());
             c.queued.push(item);
+            if let Some(requested) = requested {
+                return self.send_queued(conv, &requested);
+            }
             self.save(conv);
             self.emit_queue(conv);
             return Ok(());

@@ -9,14 +9,24 @@ const OPEN_TIMEOUT: Duration = Duration::from_secs(45);
 
 impl Core {
     /// Whether a conversation offers the browser: a project's own agent in full access, where the shell has a browser. The
-    /// modes that ask have no card for a page yet, and Codex runs its dynamic tools without one, so they do not offer it.
+    /// modes that ask have no card for a page yet. Codex retains the tool definition across modes, so calls check this too.
     pub(super) fn offers_browser(&self, area: Area, permissions: Permissions) -> bool {
         area == Area::Project && permissions == Permissions::FullAccess && self.browser.is_some()
     }
 
     /// The agent called the browser. A request that cannot be done is answered at once with why, so the agent goes on.
     pub(super) fn browse(&mut self, conv: &str, call: String, input: serde_json::Value) {
-        let Some(sid) = self.live.get(conv).map(|l| l.sid) else { return };
+        let Some(live) = self.live.get(conv) else { return };
+        let sid = live.sid;
+        let area = self.convs.get(conv).map_or(Area::Chat, |c| c.area);
+        if !self.offers_browser(area, live.permissions) {
+            let why = if self.browser.is_none() {
+                "Faber's browser is not available here."
+            } else {
+                "Faber's browser is available only in project conversations with full access."
+            };
+            return self.answer_browse(conv, sid, &call, false, why.into(), Vec::new());
+        }
         let opened = match (self.browser.clone(), browser::checked_request(&input)) {
             (None, _) => Err("Faber's browser is not available here.".to_string()),
             (_, Err(why)) => Err(format!("Faber's browser did not do it: {why}.")),

@@ -38,7 +38,6 @@ Size: S small, M medium, L large. Wave: 1 next, 2 after, 3 later or with its pha
 | # | Gap | Who has it | Faber today | Way | Size | Wave |
 |---|---|---|---|---|---|---|
 | U3 | Review the change for bugs or security from a button (`/review`, `/security-review`) | Claude Code, Codex | Faber's own checks tool only | Pass-through; the other vendor reviews | S | 2 |
-| U4 | Plan, approve, then run: approve the plan and switch the mode in one step | Claude Code, Codex `/plan` | Plan is a permission mode | Extends Permissions and the closing box | S | 2 |
 
 ## Context and cost
 

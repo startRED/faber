@@ -1207,6 +1207,7 @@ async fn the_hooks_choice_is_saved_and_restarts_idle_project_clis_with_it() {
     let f = fake(fixture("claude", "chat"));
     let (engine, mut rx) = engine(dir.path(), Vendor::Claude, f.spawn.clone());
     engine.save_settings(Settings { permissions: Some(Permissions::Ask), ..Settings::default() }).unwrap();
+    let revision = engine.settings().permissions_revision.expect("a mode pick has a revision");
     let project = engine.add_project(&dir.path().to_string_lossy()).unwrap();
     let send = || SendRequest { project_id: Some(project.id.clone()), ..ask(Area::Project, SKY, choice("claude", None)) };
     let last_args = || f.args.lock().unwrap().last().cloned().unwrap_or_default().join(" ");
@@ -1223,6 +1224,11 @@ async fn the_hooks_choice_is_saved_and_restarts_idle_project_clis_with_it() {
     let mut saved = read_json(&dir.path().join("settings.json"));
     // Full access to Ask is a stricter move, so the save carries a new grants epoch (a random token, no time).
     assert!(saved.as_object_mut().unwrap().remove("grantsEpoch").unwrap().as_str().unwrap().len() >= 32);
+    assert_eq!(
+        saved.as_object_mut().unwrap().remove("permissionsRevision"),
+        Some(serde_json::json!(revision)),
+        "unrelated settings keep the mode revision"
+    );
     assert_eq!(saved, serde_json::json!({ "userHooks": true, "permissions":"ask", "appearance": { "base": "oficina" } }));
 }
 
@@ -1776,6 +1782,10 @@ async fn a_stopped_or_failed_turn_keeps_the_queue_and_the_person_sends_it() {
     tokio::time::sleep(Duration::from_millis(100)).await;
     let c = engine.open(&id).unwrap();
     assert_eq!(c.queued.len(), 1, "a turn that did not finish does not send what waits behind it");
+    assert!(
+        engine.state().running.items.iter().all(|item| item.conversation_id != id),
+        "a held queue must leave Send now and the manual controls available"
+    );
     assert_eq!(f.wire.lines_with("second"), 0);
 
     let queued = c.queued[0].id.clone();
@@ -3416,6 +3426,140 @@ async fn r161_a_claude_helper_told_during_its_last_words_answers_in_a_second_tur
     assert!(!report.contains("The config check found nothing risky"), "the first turn's words were not the last: {report}");
 }
 
+/// R160: ExitPlanMode is a question from the person even in Full access; a live remembered grant and the automatic Full access
+/// answer must not consume it.
+#[tokio::test]
+async fn r160_claude_plan_approval_is_never_auto_answered_by_full_access_or_a_remembered_grant() {
+    let dir = tempfile::tempdir().unwrap();
+    let first = fake(fixture("claude", "chat"));
+    let (engine, mut rx) = engine(dir.path(), Vendor::Claude, first.spawn.clone());
+    engine
+        .save_settings(Settings {
+            permissions: Some(Permissions::FullAccess),
+            grants_epoch: Some("plan-grant-epoch".into()),
+            ..Settings::default()
+        })
+        .unwrap();
+    let id = engine.send(ask(Area::Chat, SKY, choice("claude", Some("haiku")))).unwrap();
+    finished(&mut rx, |_| {}).await;
+    engine.shutdown();
+    let record = dir.path().join("conversations").join(format!("{id}.json"));
+    let mut saved = read_json(&record);
+    saved["allowAlways"] = json!(["ExitPlanMode"]);
+    saved["allowAlwaysEpochs"] = json!({"ExitPlanMode":"plan-grant-epoch"});
+    std::fs::write(&record, serde_json::to_vec(&saved).unwrap()).unwrap();
+
+    let f = fake(fixture("claude", "approve-plan"));
+    let (engine, _) = self::engine(dir.path(), Vendor::Claude, f.spawn.clone());
+    let id = engine
+        .send(SendRequest { conversation_id: Some(id), ..ask(Area::Chat, "Plan this change.", choice("claude", Some("haiku"))) })
+        .unwrap();
+    let card = until(&engine, &id, |c| c.messages.iter().any(|m| m.permissions.as_ref().is_some_and(|p| !p.is_empty()))).await;
+    let reply = card.messages.last().unwrap();
+    assert_eq!(reply.permissions.as_ref().unwrap()[0].tool, "ExitPlanMode");
+    assert!(!f.wire.messages().iter().any(|m| m["type"] == "control_response"), "the card waits for the person");
+    assert!(f.mismatches.lock().unwrap().is_empty(), "{:?}", f.mismatches.lock().unwrap());
+    engine.shutdown();
+}
+
+/// R160: choosing Keep planning denies the ExitPlanMode request with the explicit explanation and leaves the conversation in
+/// Plan, without starting work under a looser permission mode.
+#[tokio::test]
+async fn r160_claude_keep_planning_declines_plan_exit_without_changing_permissions() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut entries = fixture("claude", "approve-plan");
+    entries.retain(|e| !(e.input && e.msg["type"] == "control_request"));
+    let result = entries.iter_mut().find(|e| e.msg["type"] == "result").unwrap();
+    result.msg["subtype"] = "success".into();
+    result.msg["is_error"] = false.into();
+    let expected = entries.iter_mut().find(|e| e.input && e.msg["type"] == "control_response").unwrap();
+    expected.msg["response"]["response"]["behavior"] = "deny".into();
+    expected.msg["response"]["response"]["message"] = "The person wants to keep planning.".into();
+    let f = fake(entries);
+    let (engine, _) = engine(dir.path(), Vendor::Claude, f.spawn.clone());
+    engine.save_settings(Settings { permissions: Some(Permissions::Plan), ..Settings::default() }).unwrap();
+    let id = engine.send(ask(Area::Chat, "Plan this change.", choice("claude", Some("haiku")))).unwrap();
+    let card = until(&engine, &id, |c| c.messages.iter().any(|m| m.permissions.as_ref().is_some_and(|p| !p.is_empty()))).await;
+    let turn_id = card.messages.last().unwrap().id.clone();
+    engine.approve_plan(&id, &turn_id, &card.messages.last().unwrap().permissions.as_ref().unwrap()[0].request_id, None).await.unwrap();
+    until(&engine, &id, |c| c.messages.len() == 2 && c.messages.iter().all(|m| m.status != Some(Status::Streaming))).await;
+    assert_eq!(engine.state().settings.permissions, Some(Permissions::Plan));
+    let response = f.wire.messages().into_iter().find(|m| m["type"] == "control_response").unwrap();
+    assert_eq!(response["response"]["response"]["behavior"], "deny");
+    assert_eq!(response["response"]["response"]["message"], "The person wants to keep planning.");
+    assert!(f.mismatches.lock().unwrap().is_empty(), "{:?}", f.mismatches.lock().unwrap());
+    engine.shutdown();
+}
+
+/// R160: Codex's completed plan item is the approval card's source. Approving it resumes the same thread under the chosen
+/// permission server and sends an ordinary user turn in default collaboration mode.
+#[tokio::test]
+async fn r160_codex_plan_approval_resumes_under_the_selected_mode_and_starts_default_collaboration() {
+    let dir = tempfile::tempdir().unwrap();
+    let first = fake(fixture("codex", "approve-plan"));
+    let resumed = fake(fixture("codex", "approve-plan-run"));
+    let (first_spawn, resumed_spawn) = (first.spawn.clone(), resumed.spawn.clone());
+    let calls = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+    let spawn_calls = calls.clone();
+    let spawn: Spawner = Arc::new(move |bin, args, cwd| {
+        if spawn_calls.fetch_add(1, std::sync::atomic::Ordering::SeqCst) == 0 {
+            first_spawn(bin, args, cwd)
+        } else {
+            resumed_spawn(bin, args, cwd)
+        }
+    });
+    let (engine, _) = engine(dir.path(), Vendor::Codex, spawn);
+    engine.save_settings(Settings { permissions: Some(Permissions::Plan), ..Settings::default() }).unwrap();
+    let id = engine.send(ask(Area::Chat, "Plan this change.", choice("codex", None))).unwrap();
+    let card = until(&engine, &id, |c| c.messages.iter().any(|m| m.permissions.as_ref().is_some_and(|p| !p.is_empty()))).await;
+    let reply = card.messages.last().unwrap();
+    let permission = reply.permissions.as_ref().unwrap().first().unwrap();
+    assert_eq!(permission.request_id, "plan:plan-item");
+    assert!(permission.input.get("plan").is_none(), "the plan is already in the reply text");
+    assert!(reply.text.contains("1. Inspect the parser.\n2. Add the check."));
+    assert_eq!(permission.input["mode"], "dontAsk", "the shared mode before Plan was Full access");
+    let initial_turn = first.wire.messages().into_iter().find(|m| m["method"] == "turn/start").unwrap();
+    assert_eq!(
+        initial_turn["params"]["collaborationMode"]["settings"]["model"], "gpt-6-luna",
+        "the CLI-reported model fills the required Plan preset"
+    );
+
+    engine.approve_plan(&id, &reply.id, &reply.permissions.as_ref().unwrap()[0].request_id, Some(Permissions::AcceptEdits)).await.unwrap();
+    until(&engine, &id, |c| c.messages.iter().any(|m| m.text == "Started the approved work." && m.status != Some(Status::Streaming))).await;
+    assert_eq!(engine.state().settings.permissions, Some(Permissions::AcceptEdits));
+    let messages = resumed.wire.messages();
+    let resume = messages.iter().find(|m| m["method"] == "thread/resume").unwrap();
+    assert_eq!(resume["params"]["sandbox"], "workspace-write");
+    assert_eq!(resume["params"]["approvalPolicy"], "on-request");
+    let turn = messages.iter().find(|m| m["method"] == "turn/start").unwrap();
+    assert_eq!(turn["params"]["input"][0]["text"], "Go ahead with the plan.");
+    assert_eq!(turn["params"]["collaborationMode"]["mode"], "default");
+    assert!(first.mismatches.lock().unwrap().is_empty(), "{:?}", first.mismatches.lock().unwrap());
+    assert!(resumed.mismatches.lock().unwrap().is_empty(), "{:?}", resumed.mismatches.lock().unwrap());
+    engine.shutdown();
+}
+
+/// R160: closing Codex's plan card with Keep planning clears the request only. It neither starts a resumed session nor sends
+/// the approval prompt, and the conversation stays in Plan.
+#[tokio::test]
+async fn r160_codex_keep_planning_does_not_resume_or_start_a_work_turn() {
+    let dir = tempfile::tempdir().unwrap();
+    let f = fake(fixture("codex", "approve-plan"));
+    let (engine, _) = engine(dir.path(), Vendor::Codex, f.spawn.clone());
+    engine.save_settings(Settings { permissions: Some(Permissions::Plan), ..Settings::default() }).unwrap();
+    let id = engine.send(ask(Area::Chat, "Plan this change.", choice("codex", Some("gpt-6-luna")))).unwrap();
+    let card = until(&engine, &id, |c| c.messages.iter().any(|m| m.permissions.as_ref().is_some_and(|p| !p.is_empty()))).await;
+    let turn_id = card.messages.last().unwrap().id.clone();
+    engine.approve_plan(&id, &turn_id, &card.messages.last().unwrap().permissions.as_ref().unwrap()[0].request_id, None).await.unwrap();
+    let kept = engine.open(&id).unwrap();
+    assert_eq!(engine.state().settings.permissions, Some(Permissions::Plan));
+    assert!(kept.messages.last().unwrap().permissions.as_ref().is_none_or(Vec::is_empty));
+    let messages = f.wire.messages();
+    assert_eq!(messages.iter().filter(|m| m["method"] == "turn/start").count(), 1);
+    assert_eq!(messages.iter().filter(|m| m["method"] == "thread/resume").count(), 0);
+    assert!(f.mismatches.lock().unwrap().is_empty(), "{:?}", f.mismatches.lock().unwrap());
+    engine.shutdown();
+}
 /// Parity T7: an edit and a retry of the same message are its versions, each a conversation with its own answer, in the order
 /// they were written; a fresh start reads which conversation branched from which back from the files.
 #[tokio::test]
@@ -3690,11 +3834,17 @@ fn reply_style_migration_keeps_the_recovery_epoch_after_restart() {
     let path = dir.path().join("settings.json");
     std::fs::write(&path, "{").unwrap();
     let store = Store::new(dir.path());
-    let revoked = store.settings().grants_epoch.unwrap();
+    let recovered = store.settings();
+    let revoked = recovered.grants_epoch.unwrap();
+    let revision = recovered.permissions_revision.unwrap();
     std::fs::write(&path, r#"{"verbosity":"high","permissions":"ask"}"#).unwrap();
-    assert_eq!(store.settings().grants_epoch.as_deref(), Some(revoked.as_str()));
+    let migrated = store.settings();
+    assert_eq!(migrated.grants_epoch.as_deref(), Some(revoked.as_str()));
+    assert_eq!(migrated.permissions_revision.as_deref(), Some(revision.as_str()));
     drop(store);
-    assert_eq!(Store::new(dir.path()).settings().grants_epoch.as_deref(), Some(revoked.as_str()));
+    let restarted = Store::new(dir.path()).settings();
+    assert_eq!(restarted.grants_epoch.as_deref(), Some(revoked.as_str()));
+    assert_eq!(restarted.permissions_revision.as_deref(), Some(revision.as_str()));
 }
 
 #[tokio::test]

@@ -14,6 +14,8 @@ mod support;
 
 #[path = "account.rs"]
 mod account;
+#[path = "approve_plan_review.rs"]
+mod approve_plan_review;
 #[path = "auto.rs"]
 mod auto;
 #[path = "auto_archive.rs"]

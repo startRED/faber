@@ -125,6 +125,7 @@ impl Core {
             // The server Faber's own questions already use (`open_aux`), not one more beside the conversation's.
             Vendor::Codex => self.codex_server(Area::Chat, false, Permissions::Isolated, &cli).open(
                 CodexThread {
+                    leave_plan: false,
                     cwd,
                     model: model.clone(),
                     effort,

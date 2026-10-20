@@ -407,6 +407,9 @@ impl Core {
             found
         };
         // `finish` saves and sends the reply either way.
+        if m.permissions.iter().flatten().any(|p| p.tool == "ExitPlanMode") {
+            return None;
+        }
         c.keep_going.as_ref()?;
         let m = c.messages.last_mut()?;
         let ok = m.status == Some(Status::Done);
@@ -463,8 +466,10 @@ impl Core {
     pub(super) fn keep_going_after(&mut self, conv: &str, reply_id: Option<String>) {
         let Some(reply_id) = reply_id else { return };
         let Some(c) = self.convs.get_mut(conv).filter(|c| c.keep_going.is_some()) else { return };
-        let busy =
-            self.live.get(conv).is_some_and(|l| l.turn.is_some()) || c.messages.last().is_some_and(|m| m.status == Some(Status::Streaming));
+        let busy = self.live.get(conv).is_some_and(|l| l.turn.is_some())
+            || c.messages
+                .last()
+                .is_some_and(|m| m.status == Some(Status::Streaming) || m.permissions.iter().flatten().any(|p| p.tool == "ExitPlanMode"));
         if busy {
             return;
         }
@@ -535,7 +540,9 @@ impl Core {
     /// call this while it runs).
     pub(super) fn go_on(&mut self, conv: &str, reply_id: &str) {
         let Some(c) = self.convs.get(conv) else { return };
-        if c.keep_going.as_ref().is_some_and(|k| k.waiting.is_some()) {
+        if c.keep_going.as_ref().is_some_and(|k| k.waiting.is_some())
+            || c.messages.last().is_some_and(|m| m.permissions.iter().flatten().any(|p| p.tool == "ExitPlanMode"))
+        {
             return;
         }
         // A closing box that asks the person something gets its ten minutes first, however Faber came here (the end of the

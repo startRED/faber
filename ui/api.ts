@@ -626,6 +626,7 @@ export type AppEvent =
   | ({ type: 'quota' } & QuotaReading)
   | ({ type: 'running' } & RunningList)
   | { type: 'usage'; vendors: VendorUsage[] }
+  | { type: 'settings'; settings: Settings }
   | { type: 'list' }
   | { type: 'context'; conversationId: string; context?: ContextFill }
   | { type: 'contextParts'; conversationId: string; parts: ContextPart[] }
@@ -705,6 +706,7 @@ export const api = {
   pin: (id: string, on: boolean) => invoke<void>('pin', { id, on }),
   answer: (id: string, turnId: string, requestId: string, allow: boolean, always = false) =>
     invoke<void>('answer', { id, turnId, requestId, allow, always }),
+  approvePlan: (id: string, turnId: string, requestId: string, mode?: PermissionMode) => invoke<void>('approve_plan', { id, turnId, requestId, mode: mode ?? null }),
   /** The choices for a question the assistant asked: each question's text to the label picked (several joined by a comma). */
   answerQuestion: (id: string, turnId: string, requestId: string, answers: Record<string, string>) =>
     invoke<void>('answer_question', { id, turnId, requestId, answers }),

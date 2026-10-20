@@ -35,6 +35,8 @@ fn settings_keys() -> Vec<String> {
         reply_style: Some(Default::default()),
         reply_style_text: Some(String::new()),
         grants_epoch: Some(String::new()),
+        before_plan: Some(Permissions::Ask),
+        permissions_revision: Some(String::new()),
         previews: Some(true),
     };
     serde_json::to_value(every).unwrap().as_object().unwrap().keys().cloned().collect()

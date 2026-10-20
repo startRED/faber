@@ -307,7 +307,8 @@ impl Store {
             }
             settings.reply_style_text = settings.reply_style_text.as_deref().map(crate::model::clean_reply_style_text);
             if let Some(epoch) = recovery.clone() {
-                settings.grants_epoch = Some(epoch);
+                settings.grants_epoch = Some(epoch.clone());
+                settings.permissions_revision = Some(epoch);
             }
             if migrated {
                 // A read-only disk may defer the rewrite until the person's next successful save.
@@ -321,6 +322,7 @@ impl Store {
             Err(_) => Settings {
                 permissions: Some(crate::model::Permissions::Ask),
                 grants_epoch: Some(recovery.get_or_insert_with(crate::model::new_epoch).clone()),
+                permissions_revision: recovery.clone(),
                 ..Settings::default()
             },
         }

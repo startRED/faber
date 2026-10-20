@@ -132,6 +132,7 @@ pub struct CodexTurnState {
     prompt: Option<u64>,
     /// User messages seen in the current turn: the first is the turn's own prompt, any later one was steered in.
     users: u32,
+    plan: Option<(String, String)>,
     /// What the turn's subagents used, which Codex counts in their own threads.
     subagents: Totals,
     subagents_cost: Option<f64>,
@@ -474,6 +475,9 @@ fn parse_notification(msg: &Value, state: &mut CodexTurnState) -> Vec<EngineEven
         "item/started" => {
             let item = &p["item"];
             let kind = item["type"].as_str().unwrap_or_default();
+            if kind == "plan" {
+                return vec![];
+            }
             if kind == "agentMessage" {
                 return vec![EngineEvent::Break { final_answer: item["phase"] == "final_answer" }];
             }
@@ -526,6 +530,14 @@ fn parse_notification(msg: &Value, state: &mut CodexTurnState) -> Vec<EngineEven
             if kind == "contextCompaction" {
                 return vec![EngineEvent::Compacted { after: None }];
             }
+            if kind == "plan" {
+                let text = s(&item["text"]);
+                if !text.trim().is_empty() {
+                    state.plan = Some((id, text.clone()));
+                    return vec![EngineEvent::Break { final_answer: true }, EngineEvent::Text(text)];
+                }
+                return vec![];
+            }
             if kind == "agentMessage" {
                 let text = s(&item["text"]);
                 return if !text.is_empty() && !state.streamed.contains(&id) { vec![EngineEvent::Text(text)] } else { vec![] };
@@ -549,6 +561,7 @@ fn parse_notification(msg: &Value, state: &mut CodexTurnState) -> Vec<EngineEven
             vec![EngineEvent::ToolResult { id, ok, declined: item["status"] == "declined", text }]
         }
         "turn/started" => {
+            state.plan = None;
             state.base = state.total;
             state.cost = 0.0;
             state.priced = false;
@@ -628,17 +641,25 @@ fn parse_notification(msg: &Value, state: &mut CodexTurnState) -> Vec<EngineEven
             let u = used.unwrap_or_default();
             let sub = state.subagents;
             let cost = state.priced.then(|| state.cost + state.subagents_cost.unwrap_or(0.0));
-            vec![EngineEvent::Done {
-                ok: status == "completed",
-                reason: p["turn"]["error"]["message"].as_str().map(String::from).unwrap_or(status),
-                cost_total_usd: cost,
-                input_tokens: u.input + sub.input,
-                output_tokens: u.output + sub.output,
-                cache_read_tokens: u.cached + sub.cached,
-                cache_write_tokens: u.written.unwrap_or(0) + sub.written.unwrap_or(0),
-                cache_write_1h_tokens: 0,
-                incomplete: used.is_none() || u.written.is_none() || state.price_incomplete || state.subagents_incomplete,
-            }]
+            let approval = state.plan.take().filter(|_| status == "completed").map(|(id, _)| EngineEvent::Permission {
+                request_id: format!("plan:{id}"),
+                tool: "ExitPlanMode".into(),
+                input: json!({}),
+            });
+            approval
+                .into_iter()
+                .chain([EngineEvent::Done {
+                    ok: status == "completed",
+                    reason: p["turn"]["error"]["message"].as_str().map(String::from).unwrap_or(status),
+                    cost_total_usd: cost,
+                    input_tokens: u.input + sub.input,
+                    output_tokens: u.output + sub.output,
+                    cache_read_tokens: u.cached + sub.cached,
+                    cache_write_tokens: u.written.unwrap_or(0) + sub.written.unwrap_or(0),
+                    cache_write_1h_tokens: 0,
+                    incomplete: used.is_none() || u.written.is_none() || state.price_incomplete || state.subagents_incomplete,
+                }])
+                .collect()
         }
         "error" => {
             let message = p["error"]["message"].as_str().map(String::from).unwrap_or_else(|| p.to_string().chars().take(300).collect());
@@ -699,6 +720,8 @@ pub struct CodexThread {
     /// How the user wants to be called; see `ClaudeLaunch::user_name`.
     pub user_name: Option<String>,
     pub permissions: Permissions,
+    /// Reset the app-server's sticky Plan collaboration mode once after resuming a thread approved to run.
+    pub leave_plan: bool,
     pub tuning: Tuning,
     /// Faber's helper tool (R161), as for `ClaudeLaunch::helper`.
     pub helper: crate::helper::Helper,
@@ -768,6 +791,7 @@ struct Thread {
     /// Helper calls (R161) waiting for their report: the tool call id to the id of Codex's request.
     helpers: HashMap<String, Value>,
     watch: proc::TurnWatch,
+    interrupt_pending: bool,
     blocked: bool,
     closing: bool,
     stop_children: bool,
@@ -859,6 +883,7 @@ impl Thread {
         let (helpers, unknown) = subagents.writers(key);
         self.turn.is_none()
             && !self.watch.active()
+            && !self.interrupt_pending
             && !self.blocked
             && self.commands.is_empty()
             && self.native_commands.items.is_empty()
@@ -899,9 +924,14 @@ impl Thread {
         if self.blocked || self.watch.stopping() {
             return None;
         }
-        let ids = self.id.clone().zip(self.turn.clone())?;
+        if !self.watch.active() && self.turn.is_none() {
+            return None;
+        }
         self.watch.interrupt();
-        Some(ids)
+        let ids = self.id.clone().zip(self.turn.clone());
+        // turn/start may be on the wire before either response supplies its id.
+        self.interrupt_pending = ids.is_none();
+        ids
     }
 }
 
@@ -938,6 +968,26 @@ fn turn_params(thread: &str, effort: Option<&str>, turn: &UserTurn) -> Value {
     if let Some(effort) = effort {
         params["effort"] = effort.into();
     }
+    params
+}
+
+/// Collaboration mode selects Codex's actual planning prompt; a read-only sandbox alone is not Plan mode.
+fn start_params(thread: &str, settings: &mut CodexThread, model: &str, turn: &UserTurn) -> Value {
+    let mut params = turn_params(thread, settings.effort.as_deref(), turn);
+    let leave_plan = settings.leave_plan && !model.is_empty();
+    if leave_plan {
+        settings.leave_plan = false;
+    }
+    // The app-server keeps its current collaboration mode. Send Plan only when entering a Plan turn; ordinary turns omit it.
+    // Its settings must use the model actually returned by thread/start or thread/resume, never a guessed model name.
+    if (settings.permissions == Permissions::Plan || leave_plan) && settings.instructions.is_none() && !model.is_empty() {
+        params["collaborationMode"] = json!({
+            "mode": if settings.permissions == Permissions::Plan { "plan" } else { "default" },
+            "settings": { "model": model,
+                "reasoning_effort": settings.effort, "developer_instructions": null }
+        });
+    }
+    // thread/start or thread/resume already sets this session's sandbox and approval policy from the same mode.
     params
 }
 
@@ -1226,7 +1276,9 @@ async fn serve(
             && ((retired && threads.is_empty())
                 || (!threads.is_empty()
                     && threads.iter().all(|(&key, t)| {
-                        t.closing && !t.native_pending(key, &subagents) && ((!t.watch.active() && t.turn.is_none()) || t.blocked)
+                        t.closing
+                            && !t.native_pending(key, &subagents)
+                            && ((!t.watch.active() && t.turn.is_none() && !t.interrupt_pending) || (!no_process && t.blocked))
                     })))
         {
             stop!();
@@ -1361,6 +1413,7 @@ async fn serve(
                             }
                             if let Waiting::Other(key,"turn/start" | "thread/compact/start") = kind && let Some(t) = threads.get_mut(&key) {
                                 t.watch.finish();
+                                t.interrupt_pending = false;
                                 t.turn = None;
                                 t.early_completion.clear();
                                 t.publish_writers(key, &subagents);
@@ -1414,8 +1467,9 @@ async fn serve(
                                 let Some(t) = threads.get_mut(&key) else { continue };
                                 let thread = &msg["result"]["thread"];
                                 let id = s(&thread["id"]);
-                                let shown = thread["model"].as_str().map(String::from).or_else(|| t.params.model.clone()).unwrap_or_else(|| "codex".into());
-                                t.state.model = shown.clone();
+                                let actual_model = msg["result"]["model"].as_str().or_else(|| thread["model"].as_str()).unwrap_or_default().to_string();
+                                let shown = if actual_model.is_empty() { "codex".into() } else { actual_model.clone() };
+                                t.state.model = actual_model;
                                 (t.sink)(EngineEvent::Started { session_id: id.clone(), model: shown });
                                 by_id.insert(id.clone(), key);
                                 t.id = Some(id.clone());
@@ -1431,13 +1485,17 @@ async fn serve(
                                     t.watch.begin();
                                     t.publish_writers(key, &subagents);
                                     t.state.base = t.state.total;
-                                    let params = turn_params(&id, t.params.effort.as_deref(), &turn);
+                                    let params = start_params(&id, &mut t.params, &t.state.model, &turn);
                                     request!("turn/start", params, Waiting::Other(key, "turn/start"));
                                 }
                             }
                             Waiting::Other(key, "turn/start") => {
                                 if let Some(t) = threads.get_mut(&key) {
                                     t.turn = msg["result"]["turn"]["id"].as_str().map(String::from).or(t.turn.take());
+                                    if t.interrupt_pending && let Some((thread, turn)) = t.id.clone().zip(t.turn.clone()) {
+                                        t.interrupt_pending = false;
+                                        request!("turn/interrupt", json!({ "threadId": thread, "turnId": turn }), Waiting::Other(key, "turn/interrupt"));
+                                    }
                                     t.publish_writers(key, &subagents);
                                     if let Some(completed) = std::mem::take(&mut t.early_completion).into_iter().find(|msg|msg["params"]["turn"]["id"].as_str() == t.turn.as_deref()) {
                                         confirmed.push_back(completed);
@@ -1669,6 +1727,10 @@ async fn serve(
                                 }
                                 if method == Some("turn/started") {
                                     t.turn = params["turn"]["id"].as_str().map(String::from);
+                                    if t.interrupt_pending && let Some((thread, turn)) = t.id.clone().zip(t.turn.clone()) {
+                                        t.interrupt_pending = false;
+                                        request!("turn/interrupt", json!({ "threadId": thread, "turnId": turn }), Waiting::Other(key, "turn/interrupt"));
+                                    }
                                     t.publish_writers(key, &subagents);
                                     if !t.blocked {
                                         (t.sink)(EngineEvent::TurnStarted);
@@ -1687,6 +1749,7 @@ async fn serve(
                                     }
                                     t.turn = None;
                                     t.watch.finish();
+                                    t.interrupt_pending = false;
                                 }
                                 let tracked = subagents.track(key, params["turnId"].as_str(), &msg);
                                 if method != Some("turn/completed") { t.publish_writers(key, &subagents); }
@@ -1703,7 +1766,7 @@ async fn serve(
                                         t.stop_children = false;
                                         t.publish_writers(key, &subagents);
                                         t.state.base = t.state.total;
-                                        request!("turn/start", turn_params(&id, t.params.effort.as_deref(), &turn), Waiting::Other(*by_id.get(&id).expect("registered thread"), "turn/start"));
+                                        request!("turn/start", start_params(&id, &mut t.params, &t.state.model, &turn), Waiting::Other(*by_id.get(&id).expect("registered thread"), "turn/start"));
                                     }
                                 }
                                 if threads.get(&key).is_some_and(|t| t.stop_children) { stop_native!(key); }
@@ -1724,7 +1787,7 @@ async fn serve(
             cmd = rx.recv(), if !stopping => match cmd {
                 Some(ServerCommand::Open { key, thread, sink }) => {
                     let state = CodexTurnState::new(thread.resume.is_some());
-                    let t = Thread { sink, params: thread, id: None, turn: None, queued: vec![], compact: false, state, approvals: HashMap::new(), helpers: HashMap::new(), watch: proc::TurnWatch::default(), blocked: false, closing: false, stop_children: false, early_completion: vec![], commands: HashMap::new(), unconfirmed_commands: HashMap::new(), owns_server: !no_process, server_writers: false, native_commands: Default::default(), stop_reported: false };
+                    let t = Thread { sink, params: thread, id: None, turn: None, queued: vec![], compact: false, state, approvals: HashMap::new(), helpers: HashMap::new(), watch: proc::TurnWatch::default(), interrupt_pending: false, blocked: false, closing: false, stop_children: false, early_completion: vec![], commands: HashMap::new(), unconfirmed_commands: HashMap::new(), owns_server: !no_process, server_writers: false, native_commands: Default::default(), stop_reported: false };
                     if ready {
                         open_thread!(key, &t);
                     } else {
@@ -1746,7 +1809,7 @@ async fn serve(
                                 t.watch.begin();
                                 t.publish_writers(key, &subagents);
                                 t.state.base = t.state.total;
-                                request!("turn/start", turn_params(&id, t.params.effort.as_deref(), &turn), Waiting::Other(key, "turn/start"));
+                                request!("turn/start", start_params(&id, &mut t.params, &t.state.model, &turn), Waiting::Other(key, "turn/start"));
                             }
                             None => t.queued.push(turn),
                         }
@@ -1812,6 +1875,16 @@ async fn serve(
                         let _ = proc::write_line(&mut *stdin, &json!({"id":request,"result":crate::helper::dynamic_result(ok, &text, &pictures)})).await;
                     }
                     SessionCommand::Interrupt => {
+                        if let Some(t) = threads.get_mut(&key) {
+                            let queued = !t.queued.is_empty();
+                            t.queued.clear();
+                            if queued && !t.blocked && !t.watch.stopping() && !t.watch.active() && t.turn.is_none() {
+                                // No turn is on the wire while the thread opens: discard it without starting work.
+                                (t.sink)(EngineEvent::Done { ok: false, reason: "interrupted".into(), cost_total_usd: Some(0.0),
+                                    input_tokens: 0, output_tokens: 0, cache_read_tokens: 0, cache_write_tokens: 0,
+                                    cache_write_1h_tokens: 0, incomplete: false });
+                            }
+                        }
                         // A compaction still waiting for its thread never starts; its end is said here, as Codex would.
                         if let Some(t) = threads.get_mut(&key) && std::mem::take(&mut t.compact) {
                             (t.sink)(EngineEvent::Done { ok: false, reason: "interrupted".into(), cost_total_usd: None, input_tokens: 0, output_tokens: 0, cache_read_tokens: 0, cache_write_tokens: 0, cache_write_1h_tokens: 0, incomplete: true });
@@ -1844,6 +1917,8 @@ async fn serve(
                             request!("turn/interrupt", json!({ "threadId": thread, "turnId": turn }), Waiting::Other(key, SUBAGENT_STOP));
                         }
                         if let Some(t) = threads.get_mut(&key) {
+                            t.queued.clear();
+                            t.compact = false;
                             t.closing = true;
                             t.stop_children = true;
                             t.stop_reported = false;
@@ -2060,6 +2135,7 @@ mod rewind_tests {
                 instructions: None,
                 user_name: None,
                 permissions: Permissions::Ask,
+                leave_plan: false,
                 tuning: Default::default(),
                 helper: crate::helper::Helper::Off,
                 browse: false,
@@ -2075,6 +2151,7 @@ mod rewind_tests {
             approvals: HashMap::new(),
             helpers: HashMap::new(),
             watch: Default::default(),
+            interrupt_pending: false,
             blocked: false,
             closing: false,
             stop_children: false,
@@ -2086,6 +2163,19 @@ mod rewind_tests {
             native_commands: Default::default(),
             stop_reported: false,
         }
+    }
+
+    #[tokio::test]
+    async fn plan_stop_before_the_turn_id_also_cancels_commands_without_forgetting_their_writers() {
+        let mut owner = thread(Arc::new(|_| {}));
+        owner.watch.begin();
+        let (cancel, cancelled) = tokio::sync::oneshot::channel();
+        owner.commands.insert("command".into(), (Some(cancel), tokio::spawn(async {})));
+        assert!(owner.interrupt().is_none());
+        assert!(owner.interrupt_pending && owner.watch.stopping());
+        assert!(cancelled.await.is_ok());
+        assert!(owner.commands.contains_key("command"));
+        assert!(!owner.drained(1, &Subagents::default()));
     }
 
     #[tokio::test]

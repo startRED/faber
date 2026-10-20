@@ -1327,6 +1327,47 @@ async fn the_cache_lifetime_starts_when_the_request_is_sent_not_when_the_first_w
 // R140: the vendors' own range of modes.
 
 #[test]
+fn r160_review_chat_in_plan_offers_the_exit_tool_without_dropping_restriction() {
+    let args = claude_args(&ClaudeLaunch { permissions: Permissions::Plan, flags: NEWER, ..launch(Area::Chat) });
+    let tools = &args[args.iter().position(|a| a == "--tools").unwrap() + 1];
+    assert!(tools.split(',').any(|tool| tool == "ExitPlanMode"), "the model must be able to ask for plan approval");
+    assert!(args.contains(&"--restricted".into()), "Plan stays restricted until the next ordinary launch");
+}
+
+#[tokio::test]
+async fn r160_plan_approval_answers_without_changing_the_old_mode_and_interrupt_reports_its_usage() {
+    let f = fake(fixture("claude", "approve-plan"));
+    let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
+    let session = start_claude(
+        ClaudeOptions {
+            bin: "fake".into(),
+            cwd: ".".into(),
+            launch: ClaudeLaunch { permissions: Permissions::Plan, ..launch(Area::Chat) },
+            spawn: f.spawn.clone(),
+            sandbox: None,
+        },
+        Arc::new(move |e| drop(tx.send(e))),
+    );
+    session.send(UserTurn::text("Plan this change."));
+    let request_id = next_permission(&mut rx).await;
+    assert_eq!(session.answer(&request_id, true).await.unwrap(), Delivery::Delivered);
+    session.interrupt();
+    loop {
+        let event = tokio::time::timeout(Duration::from_secs(3), rx.recv()).await.unwrap().unwrap();
+        if let EngineEvent::Done { cost_total_usd, input_tokens, output_tokens, .. } = event {
+            assert_eq!((input_tokens, output_tokens), (100, 20));
+            assert!((cost_total_usd.unwrap() - 0.03).abs() < 1e-9);
+            break;
+        }
+    }
+    let response = f.wire.messages().into_iter().find(|m| m["response"]["request_id"] == request_id).unwrap();
+    assert_eq!(response["response"]["response"]["behavior"], "allow");
+    assert!(response["response"]["response"].get("updatedPermissions").is_none());
+    assert!(f.mismatches.lock().unwrap().is_empty(), "{:?}", f.mismatches.lock().unwrap());
+    session.close();
+}
+
+#[test]
 fn r140_each_mode_names_the_native_claude_mode_in_chat_and_projects() {
     let native = [
         (Permissions::Ask, "default"),
@@ -1341,6 +1382,7 @@ fn r140_each_mode_names_the_native_claude_mode_in_chat_and_projects() {
             let at = args.iter().position(|a| a == "--permission-mode").unwrap();
             assert_eq!(args[at + 1], name, "{permissions:?} {area:?}");
             assert!(deny_rules(&args).contains(&"Read(~/.ssh/**)".to_string()), "credentials stay blocked in {permissions:?}");
+            assert!(!args.contains(&"--allow-dangerously-skip-permissions".into()));
             let restricted = args.contains(&"--restricted".into());
             assert_eq!(restricted, area == Area::Chat && permissions.guarded(), "{permissions:?} {area:?}");
         }

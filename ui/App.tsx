@@ -627,6 +627,7 @@ export function App(props: { initial: AppState; update?: UpdateStatus; inbox: { 
       }
       if (e.type === 'list') void refresh();
       if (e.type === 'usage') setState((s) => ({ ...s, usage: e.vendors }));
+      if (e.type === 'settings') setState((s) => ({ ...s, settings: e.settings }));
       if (e.type === 'message') restoreRejected(e.conversationId, e.message.role === 'assistant' ? e.message : undefined);
       if (e.type === 'quota') setQuotas((q) => withQuota(q, e));
       if (e.type === 'message' && opening.hear(e.conversationId, e.message) === 'apply') {

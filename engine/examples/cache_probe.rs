@@ -213,6 +213,7 @@ impl Probe {
             instructions: None,
             user_name: None,
             permissions: Permissions::Ask,
+            leave_plan: false,
             tuning: Default::default(),
         };
         (server.open(thread, sink), rx)

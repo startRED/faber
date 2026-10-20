@@ -83,6 +83,7 @@ import './viewer.check.ts';
 import './tutorial.check.ts';
 import './unsent.check.ts';
 import './context.check.ts';
+import './approve-plan.check.ts';
 import './calm.check.ts';
 import './homes.check.ts';
 import './update.check.ts';

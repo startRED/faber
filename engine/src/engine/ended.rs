@@ -32,7 +32,7 @@ impl Core {
         for old in self.running.items.iter().filter(|i| !listed(&i.conversation_id)) {
             let Some(c) = self.convs.get_mut(&old.conversation_id) else { continue };
             // The person's own Stop: they were there.
-            if std::mem::take(&mut c.stopped) {
+            if c.stopped {
                 continue;
             }
             let Some(kind) = end_kind(c) else { continue };
@@ -42,10 +42,6 @@ impl Core {
         }
         for item in items.iter().filter(|i| !i.settled) {
             let Some(c) = self.convs.get_mut(&item.conversation_id) else { continue };
-            // A new turn is a new run: a Stop pressed on an earlier one no longer counts, even if a parked request kept the row.
-            if !self.running.items.iter().any(|old| old.conversation_id == item.conversation_id && old.turn_id == item.turn_id) {
-                c.stopped = false;
-            }
             if c.ended.take().is_some() {
                 changed.push(item.conversation_id.clone());
             }
