@@ -218,7 +218,7 @@ check('search-messages: clicking a hit opens its old message, unfolds its run an
         ok(button, `${area}: the existing search returns the message hit`);
         scrolled = undefined;
         button.click();
-        await settle(350);
+        await until(() => root.querySelector('[data-message-index="3"]') === document.activeElement);
         const target = root.querySelector<HTMLElement>('[data-message-index="3"]');
         ok(target, 'an old message outside the latest page is mounted');
         ok(target.textContent?.includes('mentions café'));

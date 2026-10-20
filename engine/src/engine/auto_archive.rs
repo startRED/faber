@@ -45,6 +45,7 @@ impl Core {
         let follow = c.messages.iter().rev().find_map(|m| m.follow.as_ref());
         let rests = c.area == Area::Project
             && c.archived_at.is_none()
+            && c.pinned_at.is_none()
             && c.queued.is_empty()
             && c.keep_going.is_none()
             && c.weighing.is_none()

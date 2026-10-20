@@ -76,6 +76,8 @@ export interface Message {
   role: 'user' | 'assistant';
   text: string;
   at: number;
+  /** On a reply that ended well: how long it took from its start, in milliseconds; absent on older replies. */
+  took?: number;
   textBreaks?: number[];
   activityEnd?: number;
   images?: Image[];
@@ -185,6 +187,17 @@ export interface QueuedTurn {
   sending?: boolean;
   wake?: Message['wake'];
 }
+/** One version of a message: the conversation that shows it and the message there (parity T7). */
+export interface VersionAt {
+  conversationId: string;
+  messageId: string;
+}
+/** The versions of one message of the open conversation, in the order they were written; `at` is this one. */
+export interface Versions {
+  messageId: string;
+  at: number;
+  list: VersionAt[];
+}
 export interface Conversation {
   id: string;
   title: string;
@@ -208,12 +221,19 @@ export interface Conversation {
   plan?: Plan;
   /** When it was archived: it is off the sidebar and its composer gives way to a line that brings it back. */
   archivedAt?: number;
+  /** When the person pinned it to the top of its sidebar list. */
+  pinnedAt?: number;
   messages: Message[];
 }
 /** The tokens a conversation's own agent holds, and the window they are counted against. */
 export interface ContextFill {
   used: number;
   window: number;
+}
+/** One part of what fills the context, as the CLI counts it (`key`: a `ctx.part.*` key). */
+export interface ContextPart {
+  key: string;
+  tokens: number;
 }
 export interface Summary {
   id: string;
@@ -224,6 +244,7 @@ export interface Summary {
   /** "Keep going" is on. */
   keepGoing?: boolean;
   archived?: boolean;
+  pinnedAt?: number;
   /** The conversation whose agent started this one, which the sidebar shows it under. */
   startedBy?: string;
   /** Its last run ended and nobody has opened it since: the running column's done card and the sidebar's dot. */
@@ -516,6 +537,7 @@ export type AppEvent =
   | { type: 'usage'; vendors: VendorUsage[] }
   | { type: 'list' }
   | { type: 'context'; conversationId: string; context?: ContextFill }
+  | { type: 'contextParts'; conversationId: string; parts: ContextPart[] }
   | { type: 'plan'; conversationId: string; plan?: Plan }
   | { type: 'halted'; conversationId: string; title: string; why: string; vendor?: Vendor }
   | SetupProgressEvent;
@@ -576,6 +598,8 @@ export const api = {
   open: (id: string) => invoke<Conversation | null>('open', { id }),
   send: (req: SendRequest) => invoke<string>('send', { req }),
   branch: (req: { conversationId: string; messageId: string; text: string; choice: Choice }) => invoke<string>('branch', { req }),
+  branchHere: (conversationId: string, messageId: string) => invoke<string>('branch_here', { conversationId, messageId }),
+  versions: (id: string) => invoke<Versions[]>('versions', { id }),
   warm: (req: { conversationId?: string; area: Area; projectId?: string; choice: Choice }) => invoke<void>('warm', { req }),
   routeDraft: (req: { conversationId?: string; area: Area; projectId?: string; choice: Choice }, text: string) =>
     invoke<void>('route_draft', { req, text }),
@@ -585,6 +609,7 @@ export const api = {
   seen: (id: string) => invoke<void>('seen', { id }),
   /** Archives a conversation, or brings an archived one back. */
   archive: (id: string, on: boolean) => invoke<void>('archive', { id, on }),
+  pin: (id: string, on: boolean) => invoke<void>('pin', { id, on }),
   answer: (id: string, turnId: string, requestId: string, allow: boolean, always = false) =>
     invoke<void>('answer', { id, turnId, requestId, allow, always }),
   /** The choices for a question the assistant asked: each question's text to the label picked (several joined by a comma). */
@@ -600,6 +625,7 @@ export const api = {
     return invoke<string[]>('prompt_history', args).finally(() => signal?.removeEventListener('abort', cancel));
   },
   rename: (id: string, title: string) => invoke<void>('rename', { id, title }),
+  exportConversation: (id: string, words: { you: string; auto: string; attachments: string; files: string }) => invoke<boolean>('export_conversation', { id, words }),
   /** Refused with `error.copy.unsaved` while its copy holds work found nowhere else, unless `discard`. */
   remove: (id: string, discard = false) => invoke<void>('remove', { id, discard }),
   removeQueued: (id: string, turnId: string) => invoke<void>('remove_queued', { id, turnId }),
@@ -609,6 +635,8 @@ export const api = {
   /** `@` in the composer: the working folder's entries that match `query`, at most 50; a new chat has none. */
   mentions: (id: string | undefined, projectId: string | undefined, query: string) => invoke<Mention[]>('mentions', { id, projectId, query }),
   commands: (id?: string, vendor?: Vendor) => invoke<Command[]>('commands', { id, vendor }),
+  compactNow: (id: string) => invoke<void>('compact_now', { id }),
+  contextParts: (id: string) => invoke<boolean>('context_parts', { id }),
   changes: (id: string, cursor?: string) => invoke<ChangeList>('changes', { id, cursor }),
   changePatch: (id: string, path: string) => invoke<ChangePatch>('change_patch', { id, path }),
   /** A quick question on the side (R250); refused with an `error.aside.*` key, `error.quotaOut` or `error.billedPerUse`. */

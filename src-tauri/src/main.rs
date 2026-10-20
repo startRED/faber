@@ -298,6 +298,22 @@ async fn branch(faber: State<'_, Faber>, req: BranchRequest) -> Res<String> {
     tauri::async_runtime::spawn_blocking(move || engine.branch(req)).await.map_err(|_| "error.copy.failed".to_string())?
 }
 
+/// "Branch from here" on an answer: a new conversation with every message up to it, where nothing is sent yet.
+#[tauri::command]
+async fn branch_here(faber: State<'_, Faber>, conversation_id: String, message_id: String) -> Res<String> {
+    let engine = faber.engine.clone();
+    tauri::async_runtime::spawn_blocking(move || engine.branch_here(&conversation_id, &message_id))
+        .await
+        .map_err(|_| "error.copy.failed".to_string())?
+}
+
+/// The messages of a conversation that have other versions; the other conversations of its family are read from disk.
+#[tauri::command]
+async fn versions(faber: State<'_, Faber>, id: String) -> Res<Vec<faber_engine::model::Versions>> {
+    let engine = faber.engine.clone();
+    tauri::async_runtime::spawn_blocking(move || engine.versions(&id)).await.map_err(|_| "error.messageGone".to_string())
+}
+
 #[tauri::command]
 fn set_clock(faber: State<'_, Faber>, utc_offset: i64) {
     faber.engine.set_utc_offset(utc_offset);
@@ -377,6 +393,11 @@ async fn archive(faber: State<'_, Faber>, id: String, on: bool) -> Res<()> {
 }
 
 #[tauri::command]
+async fn pin(faber: State<'_, Faber>, id: String, on: bool) -> Res<()> {
+    faber.engine.pin(&id, on)
+}
+
+#[tauri::command]
 async fn keep_going(faber: State<'_, Faber>, id: String, on: bool) -> Res<()> {
     faber.engine.keep_going(&id, on)
 }
@@ -440,6 +461,16 @@ async fn mentions(
 #[tauri::command]
 fn commands(faber: State<'_, Faber>, id: Option<String>, vendor: Option<Vendor>) -> Vec<faber_engine::model::AgentCommand> {
     faber.engine.commands(id.as_deref(), vendor)
+}
+/// "Compact now" in the context meter: the CLI's own compaction of the conversation's context.
+#[tauri::command]
+fn compact_now(faber: State<'_, Faber>, id: String) -> Res<()> {
+    faber.engine.compact_now(&id)
+}
+/// The context meter opened: asks what fills the context; the parts come as an event. False when no CLI can say now.
+#[tauri::command]
+fn context_parts(faber: State<'_, Faber>, id: String) -> bool {
+    faber.engine.context_parts(&id)
 }
 /// At most one git listing runs and one waits; a newer request replaces the waiting one.
 #[tauri::command]
@@ -543,6 +574,32 @@ async fn save_theme(app: AppHandle, appearance: Map<String, Value>, name: String
     let Some(target) = dialog.blocking_save_file() else { return Ok(false) };
     look::export_theme(&target.into_path().map_err(|_| Failure::key("error.theme.write"))?, &json)?;
     Ok(true)
+}
+
+#[tauri::command]
+async fn export_conversation(
+    app: AppHandle,
+    faber: State<'_, Faber>,
+    id: String,
+    words: faber_engine::export::Words,
+) -> Result<bool, Failure> {
+    use std::io::Write;
+    let engine = faber.engine.clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        let (title, markdown) = engine.export_conversation(&id, &words).map_err(Failure::key)?;
+        let stem: String = title.chars().filter(|c| c.is_alphanumeric() || matches!(c, ' ' | '-' | '_')).take(120).collect();
+        let stem = if stem.trim().is_empty() { "Faber" } else { stem.trim() };
+        let mut dialog = app.dialog().file().add_filter("Markdown", &["md"]).set_file_name(format!("{stem}.md"));
+        if let Some(w) = main_window(&app) {
+            dialog = dialog.set_parent(&w);
+        }
+        let Some(target) = dialog.blocking_save_file() else { return Ok(false) };
+        let target = target.into_path().map_err(|_| Failure::key("error.export.write"))?;
+        look::replace_file(&target, |file| file.write_all(markdown.as_bytes())).map_err(|_| Failure::key("error.export.write"))?;
+        Ok(true)
+    })
+    .await
+    .map_err(|_| Failure::key("error.export.write"))?
 }
 
 #[tauri::command]
@@ -777,6 +834,16 @@ async fn report_checks(app: AppHandle, json: String) -> Res<()> {
     std::fs::write(&part, json).and_then(|()| std::fs::rename(&part, &out)).map_err(|e| e.to_string())?;
     app.exit(0);
     Ok(())
+}
+
+/// Test builds only: the checks page says which check starts, and the shell keeps that note next to the report
+/// (`FABER_CHECKS_OUT` with the extension `progress`). The runner resets its wait whenever the note changes, so a run that
+/// is slow but alive never times out while a page stuck inside one check still does.
+#[cfg(feature = "test-hooks")]
+#[tauri::command]
+fn checks_progress(note: String) -> Res<()> {
+    let out = PathBuf::from(std::env::var_os("FABER_CHECKS_OUT").ok_or("FABER_CHECKS_OUT is not set")?);
+    std::fs::write(out.with_extension("progress"), note).map_err(|e| e.to_string())
 }
 
 /// Uses setup module to detect CLIs on this computer.
@@ -1050,6 +1117,8 @@ fn main() {
                 prompt_history,
                 send,
                 branch,
+                branch_here,
+                versions,
                 warm,
                 set_clock,
                 quota_attention,
@@ -1062,6 +1131,7 @@ fn main() {
                 keep_going,
                 seen,
                 archive,
+                pin,
                 answer,
                 answer_question,
                 rename,
@@ -1072,6 +1142,8 @@ fn main() {
                 tell_helper,
                 mentions,
                 commands,
+                compact_now,
+                context_parts,
                 changes,
                 change_patch,
                 ask_aside,
@@ -1082,6 +1154,7 @@ fn main() {
                 preview_look,
                 save_settings,
                 save_theme,
+                export_conversation,
                 open_theme,
                 add_project,
                 recents,
@@ -1116,7 +1189,9 @@ fn main() {
                 tools::tools_install,
                 tools::tools_remove,
                 #[cfg(feature = "test-hooks")]
-                report_checks
+                report_checks,
+                #[cfg(feature = "test-hooks")]
+                checks_progress
             ];
             // Only the screen calls Faber: a web page in the browser pane (R161 step 7) is refused before any command runs.
             move |invoke: tauri::ipc::Invoke| {

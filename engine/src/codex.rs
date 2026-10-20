@@ -629,6 +629,8 @@ struct Thread {
     id: Option<String>,
     turn: Option<String>,
     queued: Vec<UserTurn>,
+    /// A compaction asked for before the thread was open: it goes out once it is.
+    compact: bool,
     state: CodexTurnState,
     approvals: HashMap<String, Value>,
     /// Helper calls (R161) waiting for their report: the tool call id to the id of Codex's request.
@@ -1000,6 +1002,11 @@ async fn serve(started: std::io::Result<proc::Proc>, opts: CodexServerOptions, m
                                 t.id = Some(id.clone());
                                 let _ = proc::write_line(&mut *stdin, &json!({"id":format!("faber-commands-{key}"), "method":"skills/list",
                                     "params":{"cwds":[t.params.cwd]}})).await;
+                                if std::mem::take(&mut t.compact) {
+                                    t.watch.begin();
+                                    t.state.base = t.state.total;
+                                    request!("thread/compact/start", json!({ "threadId": id }), Waiting::Other(key, "thread/compact/start"));
+                                }
                                 for turn in std::mem::take(&mut t.queued) {
                                     t.watch.begin();
                                     t.state.base = t.state.total;
@@ -1255,7 +1262,7 @@ async fn serve(started: std::io::Result<proc::Proc>, opts: CodexServerOptions, m
             cmd = rx.recv(), if !stopping => match cmd {
                 Some(ServerCommand::Open { key, thread, sink }) => {
                     let state = CodexTurnState::new(thread.resume.is_some());
-                    let t = Thread { sink, params: thread, id: None, turn: None, queued: vec![], state, approvals: HashMap::new(), helpers: HashMap::new(), watch: proc::TurnWatch::default(), blocked: false, closing: false, early_completion: vec![], commands: vec![] };
+                    let t = Thread { sink, params: thread, id: None, turn: None, queued: vec![], compact: false, state, approvals: HashMap::new(), helpers: HashMap::new(), watch: proc::TurnWatch::default(), blocked: false, closing: false, early_completion: vec![], commands: vec![] };
                     if ready {
                         open_thread!(key, &t);
                     } else {
@@ -1281,12 +1288,18 @@ async fn serve(started: std::io::Result<proc::Proc>, opts: CodexServerOptions, m
                     SessionCommand::Compact => {
                         let Some(t) = threads.get_mut(&key) else { continue };
                         if t.blocked || t.closing || t.watch.stopping() { continue; }
-                        if let Some(id) = t.id.clone() {
-                            t.watch.begin();
-                            t.state.base = t.state.total;
-                            request!("thread/compact/start", json!({ "threadId": id }), Waiting::Other(key, "thread/compact/start"));
+                        match t.id.clone() {
+                            Some(id) => {
+                                t.watch.begin();
+                                t.state.base = t.state.total;
+                                request!("thread/compact/start", json!({ "threadId": id }), Waiting::Other(key, "thread/compact/start"));
+                            }
+                            // A thread still opening (a conversation reopened only to compact): once it is open.
+                            None => t.compact = true,
                         }
                     }
+                    // Codex reports only the whole: there are no parts to count.
+                    SessionCommand::ContextUsage => {}
                     SessionCommand::Steer { turn, tag } => {
                         let Some(t) = threads.get_mut(&key) else { continue };
                         match (t.id.clone(), t.turn.clone()) {
@@ -1332,6 +1345,10 @@ async fn serve(started: std::io::Result<proc::Proc>, opts: CodexServerOptions, m
                     }
                     SessionCommand::Interrupt => {
                         if let Some(t) = threads.get_mut(&key) { for job in t.commands.drain(..) { job.abort(); } }
+                        // A compaction still waiting for its thread never starts; its end is said here, as Codex would.
+                        if let Some(t) = threads.get_mut(&key) && std::mem::take(&mut t.compact) {
+                            (t.sink)(EngineEvent::Done { ok: false, reason: "interrupted".into(), cost_total_usd: None, input_tokens: 0, output_tokens: 0, cache_read_tokens: 0, cache_write_tokens: 0, cache_write_1h_tokens: 0, incomplete: true });
+                        }
                         if let Some(t) = threads.get_mut(&key)
                             && !t.blocked && !t.watch.stopping()
                             && let Some((thread, turn)) = t.id.clone().zip(t.turn.clone()) {

@@ -72,7 +72,12 @@ pub fn scenarios() -> Vec<Scenario> {
             run: names_the_codex_model_while_streaming,
         },
         Scenario { name: "edit-queued: edited words reach the CLI in the same queued message", run: edits_queued },
+        Scenario {
+            name: "recap: button and slash ask the fake CLI on the side of an idle conversation without changing its thread",
+            run: recap_on_demand,
+        },
         Scenario { name: "editing a message sends it as a branch and keeps the original conversation", run: edits_as_a_branch },
+        Scenario { name: "a retry is a version of the message and the arrows walk the versions (task 200)", run: walks_versions },
         Scenario { name: "deleting a conversation asks once, then removes it", run: deletes_after_asking },
         Scenario { name: "the sidebar footer shows the name the person gave, above the accounts", run: shows_the_name },
         Scenario { name: "with no AI installed, the app says what to do", run: says_what_to_do },
@@ -1057,6 +1062,77 @@ fn thousand_messages(ctx: &mut Ctx) -> Result {
     ensure(mb <= BUDGET_MB, || format!("{mb:.0} MB is over the {BUDGET_MB} MB budget"))
 }
 
+fn recap_on_demand(ctx: &mut Ctx) -> Result {
+    start_settings(ctx, "en")?;
+    let conversation = json!({
+        "id": "recap-idle", "title": "Parser recap", "area": "chat", "createdAt": 1, "updatedAt": 2,
+        "sessions": { "claude": "parser-session" }, "queued": [],
+        "messages": [
+            { "id": "q1", "role": "user", "text": "Refactor the parser, then test it.", "at": 1 },
+            { "id": "a1", "role": "assistant", "text": "The parser is done. Tests remain open.", "at": 2,
+              "vendor": "claude", "model": "claude-sonnet-5-5", "status": "done" }
+        ]
+    });
+    let folder = ctx.sb.data.join("conversations");
+    std::fs::create_dir_all(&folder).map_err(|e| e.to_string())?;
+    let file = folder.join("recap-idle.json");
+    std::fs::write(&file, conversation.to_string()).map_err(|e| e.to_string())?;
+    let mut app = ctx.launch(Launch {
+        claude: CliSlot::Fake,
+        recording: Some(ctx.paths.fixtures.join("claude/recap-on-demand.jsonl")),
+        ..Launch::default()
+    })?;
+    let page = &mut app.page;
+    page.click(&css(".list .item").has_text("Parser recap"))?;
+    page.wait_visible(&css("article.ai .actions"))?;
+    let thread = "JSON.stringify([...document.querySelectorAll('article')].map(e => e.textContent))";
+    let before = page.eval(thread)?;
+    page.click(&css(".run-btn"))?;
+    page.click(&css(".rc-aside"))?;
+    page.wait_visible(&css("#aside-box"))?;
+    for (i, entry) in ["button", "menu", "send"].iter().enumerate() {
+        match *entry {
+            "button" => page.click(&css(".aside-recap"))?,
+            "menu" => {
+                // In a narrow window the open column holds the focus: close it, as a person would, before typing.
+                let close = page.text_of("run.close")?;
+                page.click(&css(".side-head").role("button", &close).exact())?;
+                page.fill(&css(".composer textarea"), "/recap")?;
+                // The list opens after its own short delay, longer on a slow machine.
+                page.wait_visible(&css(".mentions [role=option]").has_text("/recap"))?;
+                page.click(&css(".mentions [role=option]").has_text("/recap"))?;
+            }
+            _ => {
+                let close = page.text_of("run.close")?;
+                page.click(&css(".side-head").role("button", &close).exact())?;
+                page.fill(&css(".composer textarea"), "/recap")?;
+                // Answers on the side carry their own "Send to the agent" buttons: only the composer's own.
+                let send = page.text_of("composer.send")?;
+                page.click(&css(".composer").role("button", &send).exact())?;
+            }
+        }
+        page.wait_count(&css(".aside[data-state=done]"), i + 1)?;
+        same(
+            page.inner_text(&css(".aside-answer").last())?,
+            "You asked for a parser refactor. The parser is done. Tests remain open.".to_string(),
+            "the fake CLI's side answer",
+        )?;
+        same(page.eval(thread)?, before.clone(), "the main thread after a recap")?;
+        same(page.eval("document.querySelector('.composer textarea').value")?, json!(""), "recap inserts nothing")?;
+        let saved: serde_json::Value =
+            serde_json::from_slice(&std::fs::read(&file).map_err(|e| e.to_string())?).map_err(|e| e.to_string())?;
+        for key in ["messages", "queued", "sessions"] {
+            same(&saved[key], &conversation[key], &format!("saved {key} after {entry}"))?;
+        }
+    }
+    ctx.shot(&mut app, "recap-idle")?;
+    ctx.close(app.id)?;
+    let output = ctx.output(app.id);
+    ensure(!output.contains("sent user") && !output.contains("recorded user"), || {
+        format!("the fake CLI received a different question: {output}")
+    })
+}
+
 fn edits_queued(ctx: &mut Ctx) -> Result {
     start_settings(ctx, "en")?;
     let mut app = ctx.launch(Launch {
@@ -1097,6 +1173,52 @@ fn edits_queued(ctx: &mut Ctx) -> Result {
     ensure(!output.contains("sent user") && !output.contains("recorded user"), || {
         format!("the fake CLI received different words: {output}")
     })
+}
+
+/// Parity T7: a retry is the message's second version; the arrows under it walk the versions by mouse and by keyboard, each
+/// opening its own conversation, and "Branch from here" on an answer opens one more where nothing is sent.
+fn walks_versions(ctx: &mut Ctx) -> Result {
+    start_settings(ctx, "en")?;
+    let launch = claude_chat(ctx);
+    let mut app = ctx.launch(launch)?;
+    let page = &mut app.page;
+    ask(page, QUESTION)?;
+    let actions = page.named("article", "answer.label")?.css(".actions");
+    page.wait_visible(&actions)?;
+    let retry = page.text_of("answer.retry")?.split('{').next().unwrap_or_default().trim().to_string();
+    page.right_click(&css("article.ai"))?;
+    page.click(&css(".cmenu [role=menuitem]").has_text(&retry))?;
+    page.wait_for("two conversations in the list", "document.querySelectorAll('.list .item').length === 2")?;
+    page.wait_visible(&actions)?;
+    let count = "document.querySelector('.versions span')?.textContent";
+    page.wait_for("the retry to be version 2 of 2", &format!("{count} === '2/2'"))?;
+    let back = page.named("button", "mine.versionBack")?;
+    page.click(&back)?;
+    page.wait_for("the first version to open", &format!("{count} === '1/2'"))?;
+    let next = page.named("button", "mine.versionNext")?;
+    page.press_on(&next, "ArrowRight")?;
+    page.wait_for("the arrow key to open the second version", &format!("{count} === '2/2'"))?;
+    // Focus stays on the arrows, so the keys keep walking.
+    page.wait_for("focus to come back to the arrows", "!!document.activeElement?.closest('.versions')")?;
+    page.press("ArrowLeft")?;
+    page.wait_for("the arrow keys to walk back", &format!("{count} === '1/2'"))?;
+    page.wait_for("focus to come back to the arrows", "!!document.activeElement?.closest('.versions')")?;
+    page.press("ArrowRight")?;
+    page.wait_for("and forth again", &format!("{count} === '2/2'"))?;
+    ctx.shot(&mut app, "versions")?;
+    let page = &mut app.page;
+    let here = page.text_of("answer.branchHere")?;
+    page.wait_visible(&actions)?;
+    page.right_click(&css("article.ai .model"))?;
+    page.wait_visible(&css(".cmenu [role=menuitem]").has_text(&here))?;
+    page.click(&css(".cmenu [role=menuitem]").has_text(&here))?;
+    page.wait_for("three conversations in the list", "document.querySelectorAll('.list .item').length === 3")?;
+    // The newest conversation is the branch, and it is the open one; its question still has two versions, since it holds the
+    // retried one.
+    page.wait_for("the branch to open", "document.querySelector('.list .item')?.getAttribute('aria-current') === 'true'")?;
+    page.wait_for("its question to show its versions", &format!("{count} === '2/2'"))?;
+    same(page.count(&css(".you"))?, 1, "the branch holds the question")?;
+    same(page.count(&css("article.ai"))?, 1, "and its answer, with nothing sent")
 }
 
 #[cfg(test)]

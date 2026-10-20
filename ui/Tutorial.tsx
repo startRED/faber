@@ -2,6 +2,7 @@ import { createEffect, createSignal, onCleanup, onMount, Show } from 'solid-js';
 import type { Experience } from './api.ts';
 import { keepFocusIn } from './focus.ts';
 import { t } from './i18n.ts';
+import { pressedAny } from './keys.ts';
 import type { Key } from './locales/en.ts';
 import { Mark } from './Mark.tsx';
 import { animateList, keepForExit } from './motion.ts';
@@ -117,7 +118,7 @@ export function Tutorial(props: { experience?: Experience; onEnd: () => void }) 
         end();
       } else if (e.key === 'Tab' && !ctrl && !e.altKey) {
         keepFocusIn(e, document.querySelector('.coach'));
-      } else if (ctrl && ['n', ',', '.'].includes(e.key.toLowerCase())) {
+      } else if (pressedAny(e)) {
         e.preventDefault();
         e.stopPropagation();
       }

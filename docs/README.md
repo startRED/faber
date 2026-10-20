@@ -28,8 +28,11 @@ points nowhere; a page that grows past the limit splits by topic, and its row he
 | [design/README.md](design/README.md) | Before any screen change: the design in short, rules for every screen, the first frame, the screen cards |
 | [design/looks.md](design/looks.md) | Themes, presets, colour, type, motion, the one grammar, idle cost, effects |
 | [design/brand.md](design/brand.md) | The mark, the app icon, empty states, brand rules |
-| [design/layout.md](design/layout.md) | Window widths, titlebar, sidebar, the homes, answers, the work log |
+| [design/conversation.md](design/conversation.md) | An open conversation: the answers and their bar, your messages, the viewer, the work log |
+| [design/layout.md](design/layout.md) | Window widths, titlebar, the homes, the running column |
+| [design/sidebar.md](design/sidebar.md) | Sidebar area lists, pinning, export, archive and footer |
 | [design/composer.md](design/composer.md) | The shared message box: file mentions, commands, earlier messages and their search |
+| [design/branch.md](design/branch.md) | "Branch from here" and the arrows between the versions of a message |
 | [design/queue.md](design/queue.md) | Queued messages, in-place editing, keyboard controls and drafts when a message leaves the queue |
 | [design/running.md](design/running.md) | The running column: rows, question cards, done cards, when it opens by itself |
 | [design/keep-going.md](design/keep-going.md) | Keep going: the chip, the quiet lines, the quota warning, the running row and the summary on coming back |

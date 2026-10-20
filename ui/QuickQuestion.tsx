@@ -38,8 +38,8 @@ export function btw(text: string): string | undefined {
   return m ? (m[1] ?? '').trim() : undefined;
 }
 
-/** A quick question on the side of the conversation on screen: it asks a read-only copy of the conversation while the agent
- * works, and nothing goes back to it unless the person sends an answer to the agent's box (`onTell`). */
+/** A quick question on the side of the conversation on screen: it asks a read-only copy of the conversation, and nothing
+ * goes back to it unless the person sends an answer to the agent's box (`onTell`). */
 export function QuickQuestion(props: {
   conversation?: Conversation;
   /** The models of the person's AIs; the picker offers those of the conversation's own AI. */
@@ -69,11 +69,13 @@ export function QuickQuestion(props: {
     const conversation = id();
     if (!conversation || !question.trim()) return;
     setError('');
+    // The recap's fixed question is not the person's: their draft in the box stays as it was.
+    const own = question !== t('aside.recapQuestion');
     try {
       await api.askAside(conversation, question, model() || undefined);
-      setText('');
+      if (own) setText('');
     } catch (err) {
-      setText(question);
+      if (own) setText(question);
       setError(fromEngine(errorText(err)));
     }
   };
@@ -155,6 +157,9 @@ export function QuickQuestion(props: {
               }}
             />
             <div class="aside-row">
+              <button type="button" class="btn ghost aside-recap" disabled={asking()} onClick={() => void ask(t('aside.recapQuestion'))}>
+                {t('aside.recap')}
+              </button>
               <Show when={models().length > 1}>
                 <select class="field" aria-label={t('aside.model')} value={model()} onChange={(e) => setModel(e.currentTarget.value)}>
                   <option value="">{t('aside.sameModel')}</option>

@@ -200,6 +200,9 @@ pub struct Message {
     pub activity_end: Option<usize>,
     /// Milliseconds since the Unix epoch.
     pub at: u64,
+    /// On a reply that ended well: how long it took from its start (`at`), in milliseconds. Absent on older replies.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub took: Option<u64>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub images: Option<Vec<Image>>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -597,6 +600,7 @@ impl Message {
             text_breaks: None,
             activity_end: None,
             at,
+            took: None,
             images: None,
             attachments: None,
             vendor: None,
@@ -638,6 +642,26 @@ impl Message {
             wrap_up: None,
         }
     }
+}
+
+/// The versions of one message of the open conversation (parity T7): the conversations that took another way at it.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Versions {
+    /// The message in the open conversation.
+    pub message_id: String,
+    /// Which of `list` it is.
+    pub at: usize,
+    /// Every version, in the order they were written.
+    pub list: Vec<VersionAt>,
+}
+
+/// One version: the conversation that shows it and the message there.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct VersionAt {
+    pub conversation_id: String,
+    pub message_id: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -734,6 +758,9 @@ pub struct Conversation {
     /// until the person brings it back or writes to it.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub archived_at: Option<u64>,
+    /// When the person pinned it to the top of its sidebar list. Archiving removes the pin.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pinned_at: Option<u64>,
     /// Its last run ended and the person has not opened it since (`engine/src/engine/ended.rs`): the running column's done card
     /// and the sidebar's dot read it.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -767,6 +794,15 @@ pub struct Conversation {
 pub struct ContextFill {
     pub used: u64,
     pub window: u64,
+}
+
+/// One part of what fills a conversation's own agent's context, as its CLI counts it: `key` is a `ctx.part.*` key (the
+/// system part, tools, files, the conversation, other).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ContextPart {
+    pub key: String,
+    pub tokens: u64,
 }
 
 /// The longest name Faber keeps, in characters.
@@ -819,6 +855,8 @@ pub struct Summary {
     pub keep_going: bool,
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub archived: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pinned_at: Option<u64>,
     /// The conversation whose agent started this one: the sidebar shows it under that one.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub started_by: Option<String>,

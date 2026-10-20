@@ -6,7 +6,7 @@ use faber_engine::cli::Cli;
 use faber_engine::model::{Area, ContextFill, Conversation, Role, RunState, Settings, Status, Vendor};
 use faber_engine::proc::{Proc, Spawner};
 use faber_engine::router::{Choice, Effort};
-use faber_engine::{AppEvent, Engine, EngineOptions, SendRequest};
+use faber_engine::{AppEvent, Engine, EngineOptions, SendRequest, WarmRequest};
 use serde_json::{Value, json};
 use std::collections::BTreeMap;
 use std::path::Path;
@@ -170,6 +170,11 @@ async fn tool(agent: &mut Pipe, n: u64, args: Value) -> (bool, String) {
     panic!("{request} was never answered");
 }
 
+/// The line Faber sends to compact: the CLI's command with what the summary must keep.
+fn compact_line() -> String {
+    format!("/compact {}", faber_engine::claude::COMPACT_FOCUS)
+}
+
 /// What Claude Code says when the conversation was compacted on request (`/compact`), recorded from 2.1.302.
 async fn compacts(agent: &mut Pipe, after: u64) {
     agent.say(json!({ "type": "system", "subtype": "status", "status": "compacting" })).await;
@@ -242,7 +247,7 @@ async fn the_agent_compacts_itself_when_its_turn_ends_and_gets_its_own_next_word
     agent.say(response(Value::Null, 2, 150_000, 5_000)).await;
     agent.say(result(1_000_000)).await;
     until_turns(&agent, 2).await;
-    assert_eq!(turns(&agent)[1], "/compact", "the CLI is asked once the turn ended");
+    assert_eq!(turns(&agent)[1], compact_line(), "the CLI is asked once the turn ended");
     // While it compacts, the conversation is at work: the person's message waits behind it.
     let queued = SendRequest {
         conversation_id: Some(id.clone()),
@@ -284,7 +289,7 @@ async fn a_compaction_without_next_sends_no_turn_and_a_failed_turn_compacts_noth
     assert!(ok);
     answers(&mut agent, "One topic is done.", true).await;
     until_turns(&agent, 2).await;
-    assert_eq!(turns(&agent)[1], "/compact");
+    assert_eq!(turns(&agent)[1], compact_line());
     compacts(&mut agent, 900).await;
     until(&engine, &id, |c| !c.compacting).await;
     tokio::time::sleep(Duration::from_millis(100)).await;
@@ -412,6 +417,11 @@ async fn stop_during_a_compaction_interrupts_it_and_nothing_goes_out_after_it() 
 /// A Codex app-server that answers like the recorded one: a turn that calls the conversation tool once, a compaction that runs
 /// as a turn of its own, and a context update after every request.
 fn codex(seen: Arc<Mutex<Vec<Value>>>) -> Spawner {
+    codex_with(seen, true)
+}
+
+/// The small app-server; `asks` makes the first turn call `compact` itself.
+fn codex_with(seen: Arc<Mutex<Vec<Value>>>, asks: bool) -> Spawner {
     Arc::new(move |_bin, _argv, _cwd| {
         let (driver_in, fake_in) = tokio::io::duplex(1 << 20);
         let (mut out, driver_out) = tokio::io::duplex(1 << 20);
@@ -446,7 +456,7 @@ fn codex(seen: Arc<Mutex<Vec<Value>>>) -> Spawner {
                 match msg["method"].as_str() {
                     Some("initialize") => say.push(json!({ "id": id, "result": {} })),
                     Some("config/read") => say.push(json!({ "id": id, "result": { "config": {} } })),
-                    Some("thread/start") => {
+                    Some("thread/start" | "thread/resume") => {
                         say.push(json!({ "id": id, "result": { "thread": { "id": "thread-1", "model": "gpt-6-luna" } } }))
                     }
                     Some("turn/start") => {
@@ -454,7 +464,7 @@ fn codex(seen: Arc<Mutex<Vec<Value>>>) -> Spawner {
                         let turn = format!("turn-{turns}");
                         say.push(json!({ "id": id, "result": { "turn": { "id": turn, "items": [], "status": "inProgress" } } }));
                         say.push(started(&turn));
-                        if turns == 1 {
+                        if turns == 1 && asks {
                             // The agent asks to be compacted; the turn goes on when Faber answers the call.
                             say.push(usage(40_000));
                             say.push(json!({ "id": 900, "method": "item/tool/call", "params": { "threadId": thread, "turnId": turn, "callId": "c1", "tool": "conversation",
@@ -530,5 +540,242 @@ async fn codex_reports_its_context_compacts_on_request_and_continues_with_next()
     assert!(seen.contains(&Some(ContextFill { used: 40_000, window: 258_400 })), "{seen:?}");
     assert!(seen.contains(&Some(ContextFill { used: 13_808, window: 258_400 })), "{seen:?}");
     assert_eq!(c.context, Some(ContextFill { used: 13_808, window: 258_400 }));
+    engine.shutdown();
+}
+
+fn codex_engine(dir: &Path, seen: Arc<Mutex<Vec<Value>>>) -> Engine {
+    let opts = EngineOptions {
+        data_dir: dir.into(),
+        clis: BTreeMap::from([(Vendor::Codex, Cli { command: "codex".into(), prefix: vec![] })]),
+        spawn: codex_with(seen, false),
+        windows: false,
+        claude_env_billed: false,
+        max_warm: 3,
+        idle: Duration::from_secs(120),
+        runtime: tokio::runtime::Handle::current(),
+        ask: None,
+    };
+    let engine = Engine::new(opts, Arc::new(|_| {}));
+    let plan = faber_engine::signals::Signals { billing: Some(faber_engine::budget::Billing::Subscription), ..Default::default() };
+    engine.note_account_events(Vendor::Codex, vec![faber_engine::events::EngineEvent::Signals(plan)]);
+    engine
+}
+
+/// "Compact now" in the context meter (task 190): Claude Code gets its own `/compact`, and nothing is sent after it, since
+/// the person said nothing more.
+#[tokio::test]
+async fn compact_now_sends_claude_code_its_own_compact_and_nothing_after_it() {
+    let (dir, project) = (tempfile::tempdir().unwrap(), crate::support::work_folder());
+    let (engine, _rx, mut agent, id) = started(dir.path(), project.path()).await;
+    // While the agent works, it is not the moment: the compaction would cut its turn.
+    assert_eq!(engine.compact_now(&id), Err("error.compact.busy".to_string()));
+    answers(&mut agent, "The login page works.", true).await;
+    until(&engine, &id, idle).await;
+    engine.compact_now(&id).unwrap();
+    until_turns(&agent, 2).await;
+    assert!(turns(&agent)[1].starts_with("/compact "), "{:?}", turns(&agent));
+    assert!(until(&engine, &id, |c| c.compacting).await.compacting);
+    compacts(&mut agent, 900).await;
+    let c = until(&engine, &id, |c| !c.compacting).await;
+    tokio::time::sleep(Duration::from_millis(100)).await;
+    assert_eq!(turns(&agent).len(), 2, "nothing goes out after a compaction the person asked for");
+    assert!(c.messages.iter().all(|m| m.wake.is_none()));
+    engine.shutdown();
+}
+
+/// Claude Code closes an idle process: "Compact now" starts one on the conversation's own session for the compaction.
+#[tokio::test]
+async fn compact_now_starts_claude_code_again_when_its_idle_process_was_closed() {
+    let (dir, project) = (tempfile::tempdir().unwrap(), crate::support::work_folder());
+    let (engine, _rx, mut agent, id, made) = started_with(dir.path(), project.path(), Duration::from_millis(100), 3).await;
+    answers(&mut agent, "The login page works.", true).await;
+    until(&engine, &id, idle).await;
+    for _ in 0..300 {
+        if agent.closed.load(std::sync::atomic::Ordering::SeqCst) {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(10)).await;
+    }
+    assert!(agent.closed.load(std::sync::atomic::Ordering::SeqCst), "the idle process stays open");
+    engine.compact_now(&id).unwrap();
+    let mut again = next_pipe(&made).await;
+    until_turns(&again, 1).await;
+    assert!(turns(&again).len() == 1 && turns(&again)[0].starts_with("/compact "), "{:?}", turns(&again));
+    // The person types meanwhile with another model picked: the warm-up waits, since a new process would end the compaction.
+    let other = Choice { vendor: "claude".into(), model: Some("opus".into()), effort: Some(Effort::High) };
+    engine.warm(WarmRequest {
+        conversation_id: Some(id.clone()),
+        area: Area::Project,
+        project_id: engine.open(&id).unwrap().project_id,
+        choice: other,
+    });
+    tokio::time::sleep(Duration::from_millis(100)).await;
+    assert!(made.lock().unwrap().is_empty(), "a warm-up replaced the compacting process");
+    compacts(&mut again, 700).await;
+    until(&engine, &id, |c| !c.compacting).await;
+    tokio::time::sleep(Duration::from_millis(100)).await;
+    assert_eq!(turns(&again).len(), 1, "nothing goes out after it");
+    engine.shutdown();
+}
+
+/// Opening the meter asks Claude Code what fills the context, without a turn; the answer comes back in Faber's parts.
+#[tokio::test]
+async fn the_meter_asks_claude_code_what_fills_the_context_without_a_turn() {
+    let (dir, project) = (tempfile::tempdir().unwrap(), crate::support::work_folder());
+    let (engine, mut rx, mut agent, id) = started(dir.path(), project.path()).await;
+    answers(&mut agent, "The login page works.", true).await;
+    until(&engine, &id, idle).await;
+    assert!(engine.context_parts(&id));
+    let mut request = None;
+    for _ in 0..300 {
+        request = agent.lines.lock().unwrap().iter().find(|m| m["request"]["subtype"] == "get_context_usage").cloned();
+        if request.is_some() {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(10)).await;
+    }
+    let request = request.expect("no get_context_usage request");
+    assert_eq!(request["request"]["detail"], "summary", "a summary sends no token-count request");
+    assert_eq!(turns(&agent).len(), 1, "no turn for it");
+    // The shape of Claude Code's answer (SDKControlGetContextUsageResponse), cut to what Faber reads.
+    let categories = json!([
+        { "name": "System prompt", "tokens": 3000, "color": "x", "kind": "used" },
+        { "name": "System tools", "tokens": 12000, "color": "x", "kind": "used" },
+        { "name": "MCP tools", "tokens": 2000, "color": "x", "kind": "used" },
+        { "name": "MCP tools (deferred)", "tokens": 9000, "color": "x", "kind": "deferred", "isDeferred": true },
+        { "name": "Memory files", "tokens": 1500, "color": "x", "kind": "used" },
+        { "name": "Skills", "tokens": 500, "color": "x", "kind": "used" },
+        { "name": "Messages", "tokens": 40000, "color": "x", "kind": "used" },
+        { "name": "Free space", "tokens": 900000, "color": "x", "kind": "free" },
+        { "name": "Autocompact buffer", "tokens": 33000, "color": "x", "kind": "buffer" },
+    ]);
+    agent
+        .say(json!({ "type": "control_response", "response": { "subtype": "success", "request_id": request["request_id"],
+            "response": { "categories": categories, "totalTokens": 59000, "maxTokens": 1_000_000, "percentage": 5.9 } } }))
+        .await;
+    let mut parts = None;
+    for _ in 0..300 {
+        while let Ok(e) = rx.try_recv() {
+            if let AppEvent::ContextParts { conversation_id, parts: p } = e {
+                assert_eq!(conversation_id, id);
+                parts = Some(p);
+            }
+        }
+        if parts.is_some() {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(10)).await;
+    }
+    let parts: Vec<(String, u64)> = parts.expect("no parts").into_iter().map(|p| (p.key, p.tokens)).collect();
+    assert_eq!(
+        parts,
+        vec![
+            ("ctx.part.system".to_string(), 3500),
+            ("ctx.part.tools".to_string(), 14000),
+            ("ctx.part.files".to_string(), 1500),
+            ("ctx.part.conversation".to_string(), 40000),
+        ]
+    );
+    engine.shutdown();
+}
+
+/// Codex gets its own compaction request, also for a conversation reopened after Faber started again, whose thread is still
+/// opening when the person asks; and it counts no parts.
+#[tokio::test]
+async fn compact_now_sends_codex_its_own_request_also_while_its_thread_opens() {
+    let (dir, project) = (tempfile::tempdir().unwrap(), crate::support::work_folder());
+    let seen = Arc::new(Mutex::new(vec![]));
+    let engine = codex_engine(dir.path(), seen.clone());
+    let p = engine.add_project(&project.path().to_string_lossy()).unwrap();
+    let request = SendRequest {
+        conversation_id: None,
+        area: Area::Project,
+        project_id: Some(p.id),
+        text: "Write the docs".into(),
+        images: vec![],
+        files: vec![],
+        choice: Choice { vendor: "codex".into(), model: None, effort: Some(Effort::High) },
+    };
+    let id = engine.send(request).unwrap();
+    until(&engine, &id, |c| c.messages.len() >= 2 && idle(c)).await;
+    assert!(!engine.context_parts(&id), "Codex reports only the whole");
+    engine.shutdown();
+
+    let seen = Arc::new(Mutex::new(vec![]));
+    let engine = codex_engine(dir.path(), seen.clone());
+    // The person opens it again after Faber started, and asks.
+    engine.open(&id).unwrap();
+    engine.compact_now(&id).unwrap();
+    until(&engine, &id, |c| !c.compacting).await;
+    let methods: Vec<String> = seen.lock().unwrap().iter().filter_map(|m| m["method"].as_str().map(String::from)).collect();
+    let at = |name: &str| methods.iter().position(|m| m == name).unwrap_or_else(|| panic!("{name} missing in {methods:?}"));
+    assert!(at("thread/resume") < at("thread/compact/start"), "{methods:?}");
+    assert!(!methods.iter().any(|m| m == "turn/start"), "no turn for a compaction: {methods:?}");
+    assert_eq!(engine.open(&id).unwrap().context.map(|f| f.used), Some(13_808));
+    engine.shutdown();
+}
+
+/// The agent calls one of Faber's progress tools (`wrap_up` here) and Faber answers it.
+async fn progress(agent: &mut Pipe, request: &str, tool: &str, input: Value) {
+    let call = json!({ "jsonrpc": "2.0", "id": 7, "method": "tools/call", "params": { "name": tool, "arguments": input } });
+    agent
+        .say(json!({ "type": "control_request", "request_id": request,
+        "request": { "subtype": "mcp_message", "server_name": "faber", "message": call } }))
+        .await;
+    for _ in 0..300 {
+        if agent.lines.lock().unwrap().iter().any(|m| m["response"]["request_id"] == request) {
+            return;
+        }
+        tokio::time::sleep(Duration::from_millis(10)).await;
+    }
+    panic!("Faber never answered the {tool} call");
+}
+
+/// A Keep going turn whose main thread held `read` tokens, closing a task with a box or not.
+async fn kept_turn(agent: &mut Pipe, n: usize, read: u64, closes: bool) {
+    agent.say(response(Value::Null, 2, read, 0)).await;
+    if closes {
+        progress(agent, &format!("w{n}"), "wrap_up", json!({ "recap": "The login page is fixed and checked." })).await;
+    }
+    agent.say(result(1_000_000)).await;
+}
+
+/// Under Keep going Faber compacts by itself between tasks, like a careful person: after a reply that closed a task with a
+/// context of a quarter of its window, it asks the CLI to compact before it sends the next turn, and the turn follows the
+/// summary. A small context, or a reply that closed nothing below three fifths, goes straight on. A compaction that failed
+/// is not asked again before the next turn.
+#[tokio::test]
+async fn keep_going_compacts_a_large_context_between_tasks_before_its_next_turn() {
+    let (dir, project) = (tempfile::tempdir().unwrap(), crate::support::work_folder());
+    let (engine, _rx, mut agent, id) = started(dir.path(), project.path()).await;
+    engine.set_keep_going_pace(0.001);
+    engine.keep_going(&id, true).unwrap();
+    let keep_going = |t: &str| t.starts_with("The person is away");
+
+    // Small: on at once.
+    kept_turn(&mut agent, 1, 200_000, true).await;
+    until_turns(&agent, 2).await;
+    assert!(keep_going(&turns(&agent)[1]), "{:?}", turns(&agent));
+    // Large, but the reply closed nothing: on at once too.
+    kept_turn(&mut agent, 2, 400_000, false).await;
+    until_turns(&agent, 3).await;
+    assert!(keep_going(&turns(&agent)[2]), "{:?}", turns(&agent));
+
+    // A task closed with a quarter of the window held: compacted first, then the next turn.
+    kept_turn(&mut agent, 3, 300_000, true).await;
+    until_turns(&agent, 4).await;
+    assert_eq!(turns(&agent)[3], compact_line());
+    compacts(&mut agent, 9_000).await;
+    until_turns(&agent, 5).await;
+    assert!(keep_going(&turns(&agent)[4]), "{:?}", turns(&agent));
+    assert_eq!(engine.open(&id).unwrap().context.map(|c| c.used), Some(9_000));
+
+    // A compaction that fails goes on with the turn, and is not asked again in a loop.
+    kept_turn(&mut agent, 4, 700_000, false).await;
+    until_turns(&agent, 6).await;
+    assert_eq!(turns(&agent)[5], compact_line());
+    agent.say(json!({ "type": "result", "subtype": "error_during_execution", "is_error": true, "total_cost_usd": 0.0, "usage": {} })).await;
+    until_turns(&agent, 7).await;
+    assert!(keep_going(&turns(&agent)[6]), "{:?}", turns(&agent));
     engine.shutdown();
 }

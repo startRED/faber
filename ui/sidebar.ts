@@ -4,7 +4,11 @@ import type { Key } from './locales/en.ts';
 // The data behind the sidebar: how the chats are grouped, which quota reading each vendor shows, and what the tail of a
 // project says. Pure functions, so the screen's checks run them with a fixed clock.
 
-export type ChatGroup = 'today' | 'week' | 'earlier';
+export type ChatGroup = 'pinned' | 'today' | 'week' | 'earlier';
+
+/** Pinned conversations keep their own order, independent of new messages. */
+export const pinned = <T extends { pinnedAt?: number }>(rows: T[]): T[] =>
+  rows.filter((c) => c.pinnedAt !== undefined).sort((a, b) => b.pinnedAt! - a.pinnedAt!);
 
 const fold = (text: string) => text.normalize('NFD').replace(/\p{M}/gu, '').toLowerCase();
 
@@ -16,14 +20,16 @@ const startOfDay = (ms: number, back = 0) => {
   return new Date(d.getFullYear(), d.getMonth(), d.getDate() - back).getTime();
 };
 
-/** Chats, newest first as given, in three groups: today, the six days before today ("this week"), and earlier. Empty
- * groups are left out. Local midnight draws the lines, so the groups follow the user's own days. */
-export function groupChats<T extends { updatedAt: number }>(chats: T[], now: number): { group: ChatGroup; chats: T[] }[] {
+/** Pinned first, then chats as given in their local date groups. A search uses the date groups alone. */
+export function groupChats<T extends { updatedAt: number; pinnedAt?: number }>(chats: T[], now: number, groupPins = true): { group: ChatGroup; chats: T[] }[] {
   const today = startOfDay(now);
   const week = startOfDay(now, 6);
-  const groups: Record<ChatGroup, T[]> = { today: [], week: [], earlier: [] };
-  for (const chat of chats) groups[chat.updatedAt >= today ? 'today' : chat.updatedAt >= week ? 'week' : 'earlier'].push(chat);
-  return (['today', 'week', 'earlier'] as const).filter((g) => groups[g].length > 0).map((g) => ({ group: g, chats: groups[g] }));
+  const groups: Record<ChatGroup, T[]> = { pinned: groupPins ? pinned(chats) : [], today: [], week: [], earlier: [] };
+  for (const chat of chats) {
+    if (groupPins && chat.pinnedAt !== undefined) continue;
+    groups[chat.updatedAt >= today ? 'today' : chat.updatedAt >= week ? 'week' : 'earlier'].push(chat);
+  }
+  return (['pinned', 'today', 'week', 'earlier'] as const).filter((g) => groups[g].length > 0).map((g) => ({ group: g, chats: groups[g] }));
 }
 
 /** Conversations in the order given, except that each one an agent started follows the conversation that started it (in

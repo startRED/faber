@@ -31,11 +31,12 @@ fn right_click(ctx: &mut Ctx) -> Result {
     // What the page decided about every right-click after Faber's own handlers: the browser's menu is stopped in all of them.
     page.eval("window.__rc = []; window.addEventListener('contextmenu', (e) => window.__rc.push(e.defaultPrevented)); true")?;
 
-    // A chat in the sidebar: Rename, Archive, Delete.
+    // A chat in the sidebar: Rename, Pin, Export, Archive, Delete.
     page.right_click(&css(".list .crow"))?;
     page.wait_visible(&css(".cmenu"))?;
-    let (rename, archive, delete) = (page.text_of("menu.rename")?, page.text_of("menu.archive")?, page.text_of("menu.delete")?);
-    same(menu_words(page)?, vec![rename.clone(), archive.clone(), delete], "the menu of a chat")?;
+    let (rename, pin, archive, delete) =
+        (page.text_of("menu.rename")?, page.text_of("menu.pin")?, page.text_of("menu.archive")?, page.text_of("menu.delete")?);
+    same(menu_words(page)?, vec![rename.clone(), pin, page.text_of("menu.export")?, archive.clone(), delete], "the menu of a chat")?;
     // The animation has settled when the shot is taken.
     std::thread::sleep(Duration::from_millis(400));
     ctx.shot(&mut app, "chat-menu")?;

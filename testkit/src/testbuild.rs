@@ -562,7 +562,7 @@ mod tests {
         files(&dist, &mut all);
         for file in all.iter().filter(|f| matches!(f.extension().and_then(|e| e.to_str()), Some("js" | "html" | "css"))) {
             let text = std::fs::read_to_string(file).unwrap_or_default();
-            for marker in ["__faberChecks", "__faberText", "report_checks"] {
+            for marker in ["__faberChecks", "__faberText", "report_checks", "checks_progress"] {
                 assert!(!text.contains(marker), "{} contains {marker}", file.display());
             }
         }

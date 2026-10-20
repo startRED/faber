@@ -2,6 +2,9 @@ import DOMPurify from 'dompurify';
 import { type Links, marked, type Token } from 'marked';
 import { createRenderEffect } from 'solid-js';
 import { api } from './api.ts';
+import { iconMarkup } from './Glyphs.tsx';
+import { t } from './i18n.ts';
+import { openViewer } from './Viewer.tsx';
 
 // Model output is untrusted: rendered as Markdown, then stripped of anything that could run. Every piece of HTML that reaches
 // the page passes through DOMPurify here, and nowhere else.
@@ -19,10 +22,32 @@ const tidy = (markup: string) => DOMPurify.sanitize(markup).replace(/<h3>([^<]*)
 const parsed = new Map<string, string>();
 const LIMIT = 64;
 
-/** Links in answers open in the person's browser, never inside Faber. */
+const copiedAt = new WeakMap<Element, ReturnType<typeof setTimeout>>();
+
+// The copy button of a code block: only that block's words, and the icon turns into a check for a moment (one timer, set by the click).
+function copyCode(button: Element) {
+  const words = button.closest('.codeblock')?.querySelector('code')?.textContent ?? '';
+  void Promise.resolve(navigator.clipboard.writeText(words)).then(
+    () => {
+      const mark = button.querySelector('.swap');
+      clearTimeout(copiedAt.get(button));
+      mark?.classList.add('done');
+      copiedAt.set(button, setTimeout(() => mark?.classList.remove('done'), 1600));
+    },
+    () => {},
+  );
+}
+
+/** Links in answers open in the person's browser, never inside Faber; a picture opens full screen; a code block copies itself. */
 export function openLinks(e: MouseEvent) {
-  const a = (e.target as HTMLElement).closest('a');
-  if (!a) return;
+  const target = e.target as HTMLElement;
+  const copy = target.closest('.cb-copy');
+  if (copy) return copyCode(copy);
+  const a = target.closest('a');
+  if (!a) {
+    if (target instanceof HTMLImageElement && target.closest('.md')) openViewer(target);
+    return;
+  }
   e.preventDefault();
   if (/^https?:\/\//.test(a.href)) void api.openLink(a.href);
 }
@@ -45,6 +70,43 @@ interface Shown {
   links: string;
 }
 const shown = new WeakMap<HTMLElement, Shown>();
+
+/** Enter or Space on a picture of an answer opens it, as a click does (the picture is a button to the keyboard). */
+export function pressImage(e: KeyboardEvent) {
+  if ((e.key !== 'Enter' && e.key !== ' ') || !(e.target instanceof HTMLImageElement) || !e.target.closest('.md')) return;
+  e.preventDefault();
+  openViewer(e.target);
+}
+
+// A code block gets a bar above it: the language it was written in, when it says one, and a button that copies that block only.
+// A picture can be reached and opened with the keyboard.
+function dress(root: DocumentFragment) {
+  for (const img of root.querySelectorAll('img')) {
+    if (img.closest('a')) continue;
+    img.tabIndex = 0;
+    img.setAttribute('role', 'button');
+    img.setAttribute('aria-label', t('viewer.open', { name: img.alt || t('composer.image') }));
+  }
+  for (const code of root.querySelectorAll('pre > code')) {
+    const pre = code.parentElement!;
+    const box = document.createElement('div');
+    box.className = 'codeblock';
+    const bar = document.createElement('div');
+    bar.className = 'cb-bar';
+    const language = document.createElement('span');
+    language.className = 'cb-lang';
+    language.textContent = /language-([\w+#.-]+)/.exec(code.className)?.[1] ?? '';
+    const button = document.createElement('button');
+    button.type = 'button';
+    button.className = 'iconbtn cb-copy';
+    button.title = t('code.copy');
+    button.setAttribute('aria-label', t('code.copy'));
+    button.innerHTML = `<span class="swap">${iconMarkup('copy')}${iconMarkup('check')}</span>`;
+    bar.append(language, button);
+    pre.replaceWith(box);
+    box.append(bar, pre);
+  }
+}
 
 /** The top-level blocks of a text: one entry per paragraph, list, code block, quote or table. A block of raw HTML can open in
  * one block and close in another, so a text that has one is a single block, sanitised whole. */
@@ -73,6 +135,7 @@ export function renderMarkdown(root: HTMLElement, text: string): void {
     const template = document.createElement('template');
     template.innerHTML = tidy(block.token ? marked.parser(Object.assign([block.token], { links }), OPTIONS) : marked.parse(block.raw, OPTIONS));
     raws.push(block.raw);
+    dress(template.content);
     nodes.push([...template.content.childNodes]);
     root.append(template.content);
   }

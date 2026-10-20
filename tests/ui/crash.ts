@@ -15,6 +15,11 @@ export function report(results: Result[]): void {
   void invoke('report_checks', { json: JSON.stringify(results) });
 }
 
+/** Tells the shell which check starts now; it writes a note the runner watches, so a slow run is never taken for a stuck one. */
+export function progress(index: number, total: number, name: string): void {
+  void invoke('checks_progress', { note: `${index + 1}/${total} ${name}` }).catch(() => {});
+}
+
 export function crash(message: string): void {
   report([{ name: 'page error', ok: false, message, ms: 0 }]);
 }

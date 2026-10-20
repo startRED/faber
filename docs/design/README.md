@@ -36,7 +36,7 @@ The shared message box's lists and earlier messages live in [composer.md](compos
   button. Theme thumbnails are `aria-hidden`, and each theme card is named by its name and its description.
 - Areas whose content can grow scroll; they never cut content off.
 - Right-click is Faber's own (R123, `ui/contextmenu.ts`, `ui/ContextMenu.tsx`). The browser's menu never shows, and its
-  reload, print, save and view-source shortcuts do nothing. A menu opens only on a chat (Rename, Delete), a project (New
+  reload, print, save and view-source shortcuts do nothing. A menu opens only on a conversation (Rename, Pin or Unpin when not archived, Archive or Unarchive, Delete), a project (New
   conversation in this project, Open folder, Remove from Faber), a message (Copy; Edit on yours; Redo on an answer),
   selected text (Copy) and a text field (Cut, Copy, Paste, Select all, with the ones that cannot apply disabled); anywhere
   else nothing opens. Each menu has at most four items, only actions that already exist on screen, and a destructive one
@@ -63,5 +63,5 @@ project-home-calm lands, with those lines gone, is its approved photo.
 | :--- | :--- | :--- | :--- | :--- |
 | Chat home ([map](../product-map.md#screens-and-surfaces), [layout](layout.md#the-new-conversation-screen)) | Starting or picking up a conversation | Writing in the composer | Settings, switches, a second model picker, another area's rows | `critique-chat-home-1920x1080.png`, `-1280x800.png` |
 | A project's home ([map](../product-map.md#screens-and-surfaces), [layout](layout.md#the-new-conversation-screen)) | Giving the agent work in this project's folder | Writing the goal in the composer | Chat's suggestions, hints or conversations; the project's settings (Settings, Projects); art behind the words; the project's name more than twice | `critique-project-home-1920x1080.png`, `-1280x800.png` |
-| An open conversation ([map](../product-map.md#screens-and-surfaces), [work log](layout.md#work-log)) | Reading the work and answering it | Answering in the composer, or the card that needs the person | Settings beyond one status line; technical logs outside a fold; motion on text being read | `critique-conversation-1920x1080.png`, `-1280x800.png` |
+| An open conversation ([map](../product-map.md#screens-and-surfaces), [work log](conversation.md#work-log)) | Reading the work and answering it | Answering in the composer, or the card that needs the person | Settings beyond one status line; technical logs outside a fold; motion on text being read | `critique-conversation-1920x1080.png`, `-1280x800.png` |
 | Settings ([map](../product-map.md#settings-screen), [layout](settings.md#settings)) | Changing how Faber behaves, one short line per option | Choosing an option in the section that is open | Work (a conversation, a goal); explanations longer than a line outside "Learn more"; a new section where one fits | `critique-settings-1920x1080.png`, `-1280x800.png` |

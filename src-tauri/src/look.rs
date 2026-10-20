@@ -6,7 +6,7 @@ use serde::Serialize;
 use serde_json::{Map, Value};
 use std::collections::BTreeMap;
 use std::io::{self, Read, Write};
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use std::sync::OnceLock;
 
 type Obj = Map<String, Value>;
@@ -635,20 +635,13 @@ pub fn write_theme_file(appearance: &Obj, name: &str) -> Result<String, Failure>
 
 /// Writes `target` through a sibling file and renames it over the target only when the whole write worked, so a full disk
 /// or a crash halfway leaves the file that was there as it was.
-fn replace_file(target: &Path, write: impl FnOnce(&mut std::fs::File) -> io::Result<()>) -> io::Result<()> {
-    let mut name = target.as_os_str().to_owned();
-    name.push(".faber-tmp");
-    let temp = PathBuf::from(name);
-    let done = std::fs::File::create(&temp).and_then(|mut file| {
-        write(&mut file)?;
-        file.sync_all()?;
-        drop(file);
-        std::fs::rename(&temp, target)
-    });
-    if done.is_err() {
-        let _ = std::fs::remove_file(&temp);
-    }
-    done
+pub(crate) fn replace_file(target: &Path, write: impl FnOnce(&mut std::fs::File) -> io::Result<()>) -> io::Result<()> {
+    let parent = target.parent().filter(|path| !path.as_os_str().is_empty()).unwrap_or_else(|| Path::new("."));
+    // Exclusive creation never follows or truncates an existing entry, including a hard link to the destination.
+    let mut temp = tempfile::Builder::new().prefix(".faber-").tempfile_in(parent)?;
+    write(temp.as_file_mut())?;
+    temp.as_file().sync_all()?;
+    temp.persist(target).map(|_| ()).map_err(|failure| failure.error)
 }
 
 /// Saves a theme file the person picked a place for. The words of a failure are ours; the system's stay out of the screen.
@@ -674,6 +667,7 @@ pub fn frame_color(look: &Look) -> Rgb {
 mod tests {
     use super::*;
     use serde_json::json;
+    use std::path::PathBuf;
 
     fn rgb(h: &str) -> Rgb {
         parse_hex(h).expect("a test colour")
@@ -1112,6 +1106,34 @@ mod tests {
         std::fs::create_dir(&folder).unwrap();
         assert_eq!(export_theme(&folder, "x").unwrap_err(), Failure::key("error.theme.write"));
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn export_temp_collisions_and_hard_links_never_truncate_existing_files() {
+        for linked in [false, true] {
+            let dir = tempfile::tempdir().unwrap();
+            let target = dir.path().join("report.md");
+            let collision = dir.path().join("report.md.faber-tmp");
+            std::fs::write(&target, "original report").unwrap();
+            if linked {
+                std::fs::hard_link(&target, &collision).unwrap();
+            } else {
+                std::fs::write(&collision, "unrelated file").unwrap();
+            }
+            let collision_before = std::fs::read(&collision).unwrap();
+            let failed = replace_file(&target, |file| {
+                file.write_all(b"partial export")?;
+                Err(io::Error::other("disk full"))
+            });
+            assert!(failed.is_err());
+            assert_eq!(std::fs::read_to_string(&target).unwrap(), "original report");
+            assert_eq!(std::fs::read(&collision).unwrap(), collision_before);
+            assert_eq!(std::fs::read_dir(dir.path()).unwrap().count(), 2, "failed writes leave no new temporary file");
+            replace_file(&target, |file| file.write_all(b"complete export")).unwrap();
+            assert_eq!(std::fs::read_to_string(&target).unwrap(), "complete export");
+            assert_eq!(std::fs::read(&collision).unwrap(), collision_before);
+            assert_eq!(std::fs::read_dir(dir.path()).unwrap().count(), 2);
+        }
     }
 
     #[test]

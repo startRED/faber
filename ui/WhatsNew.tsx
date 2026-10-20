@@ -1,6 +1,7 @@
 import { For, onCleanup, onMount } from 'solid-js';
 import { keepFocusIn } from './focus.ts';
 import { t } from './i18n.ts';
+import { pressedAny } from './keys.ts';
 import type { Key } from './locales/en.ts';
 import { Mark } from './Mark.tsx';
 import { Icon } from './Glyphs.tsx';
@@ -31,7 +32,7 @@ export function WhatsNew(props: { version: string; notes: Note[]; onClose: () =>
         props.onClose();
       } else if (e.key === 'Tab' && !e.ctrlKey && !e.metaKey && !e.altKey) {
         keepFocusIn(e, root);
-      } else if ((e.ctrlKey || e.metaKey) && ['n', ',', '.'].includes(e.key.toLowerCase())) {
+      } else if (pressedAny(e)) {
         e.preventDefault();
         e.stopPropagation();
       }

@@ -55,10 +55,20 @@ export function unpaint(): void {
 
 /** Scrolls `root` so the match sits in the middle of it, unless it is already in plain view. Smooth only in full motion. */
 export function bringIntoView(root: HTMLElement, range: Range, smooth: boolean): void {
-  const box = range.getBoundingClientRect();
+  let box = range.getBoundingClientRect();
+  if (!box.height) {
+    // Text inside a block the page skips while it is off screen (content-visibility) has no box yet: bring its block to the
+    // middle first, which renders it, then place the match itself.
+    const block = range.startContainer.parentElement;
+    if (!block) return;
+    block.scrollIntoView({ block: 'center', behavior: smooth ? 'smooth' : 'auto' });
+    if (smooth) return;
+    box = range.getBoundingClientRect();
+    if (!box.height) return;
+  }
   const view = root.getBoundingClientRect();
   // The find bar covers the top right of the thread, so a match under it counts as out of view.
-  if (box.height && box.top >= view.top + 64 && box.bottom <= view.bottom - 24) return;
+  if (box.top >= view.top + 64 && box.bottom <= view.bottom - 24) return;
   const top = root.scrollTop + box.top - view.top - (root.clientHeight - box.height) / 2;
   root.scrollTo({ top: Math.max(0, top), behavior: smooth ? 'smooth' : 'auto' });
 }

@@ -2,6 +2,7 @@ import { createEffect, createSignal, on, onCleanup, onMount, Show } from 'solid-
 import { bringIntoView, LIMIT, paint, rangesIn, unpaint } from './find.ts';
 import { Icon } from './Glyphs.tsx';
 import { t } from './i18n.ts';
+import { pressed } from './keys.ts';
 import { keepForExit } from './motion.ts';
 
 /** How long the thread may keep changing (an answer streaming in) before the matches are looked for again. */
@@ -12,7 +13,7 @@ const none = { ranges: [] as Range[], capped: false };
 const smooth = (root: HTMLElement) =>
   root.closest<HTMLElement>('[data-motion]')?.dataset.motion === 'full' && !matchMedia('(prefers-reduced-motion: reduce)').matches;
 // Another layer on top of the shell owns the keys until it closes.
-const covered = () => !!document.querySelector('.pal-scrim:not(.leaving), .cmenu:not(.leaving)');
+const covered = () => !!document.querySelector('.pal-scrim:not(.leaving), .cmenu:not(.leaving), .ctx-panel:not(.leaving)');
 
 /** Ctrl+F in an open conversation: a small bar over the top of the thread that counts and paints every place a word appears and
  * goes from one to the next. Its elements, its observer and the paint exist only while it is open. */
@@ -68,8 +69,7 @@ export function Find(props: { enabled: boolean; root: () => HTMLElement | undefi
 
   onMount(() => {
     const onKey = (e: KeyboardEvent) => {
-      const ctrl = e.ctrlKey || e.metaKey;
-      if (ctrl && !e.altKey && !e.shiftKey && e.key.toLowerCase() === 'f') {
+      if (pressed(e, 'find')) {
         // The browser's own find never shows: Faber's is the only one.
         e.preventDefault();
         if (!props.enabled || covered()) return;

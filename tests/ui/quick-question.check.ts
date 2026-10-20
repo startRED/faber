@@ -19,6 +19,80 @@ const look = {
   appearance: { base: 'sala', ground: 'sala', accent: '#ffffff', textFont: 'archivo', headingFont: 'narrow', textSize: 14, density: 1, corners: 1, motion: 'none', effects: { ambient: false, texture: false, glow: false } },
 };
 
+for (const entry of ['button', 'menu', 'send'] as const) {
+  check(`recap: ${entry} answers on the side of an idle conversation and leaves its thread alone`, async () => {
+    const settle = () => new Promise((resolve) => setTimeout(resolve, 50));
+    const host = document.createElement('div');
+    document.body.append(host);
+    const before = { open: api.open, send: api.send, state: api.state, warm: api.warm, routeDraft: api.routeDraft, setClock: api.setClock, setShellTexts: api.setShellTexts, interrupt: api.interrupt, askAside: api.askAside, asides: api.asides, commands: api.commands };
+    const storage = localStorage.getItem('faber.place');
+    const c: Conversation = {
+      id: `recap-${entry}`, title: 'Parser', area: entry === 'menu' ? 'project' : 'chat', projectId: entry === 'menu' ? 'p1' : undefined,
+      createdAt: 1, updatedAt: 1, sessions: { claude: 's1' }, queued: [],
+      messages: [{ id: 'q', role: 'user', text: 'Refactor the parser', at: 0 },
+        { id: 'a', role: 'assistant', text: 'Parser refactored. Tests still open.', at: 1, status: 'done', vendor: 'claude', model: 'claude-sonnet-5-5' }],
+    };
+    const initial = { conversations: [{ id: c.id, title: c.title, area: c.area, projectId: c.projectId, updatedAt: 1 }],
+      projects: [{ id: 'p1', name: 'Parser', path: '/parser' }], vendors: ['claude'],
+      settings: { setup: 'done', tutorialDone: true, language: entry === 'menu' ? 'pt-BR' : 'en', appearance: { base: 'sala' } },
+      running: { revision: 0, items: [] }, quotas: [], usage: [], models: [], version: 'test', look,
+    } as AppState;
+    const snapshot = JSON.stringify(c);
+    const asked: string[] = [];
+    let sent = 0;
+    let stopped = 0;
+    api.open = async () => c; api.state = async () => initial;
+    api.send = async () => { sent++; return c.id; };
+    api.interrupt = async () => { stopped++; };
+    api.warm = async () => {}; api.routeDraft = async () => {};
+    api.setClock = async () => {}; api.setShellTexts = async () => {};
+    api.asides = async () => []; api.commands = async () => [];
+    api.askAside = async (id, question) => { equal(id, c.id); asked.push(question); return `a-${entry}`; };
+    localStorage.setItem('faber.place', JSON.stringify({ area: c.area, projectId: c.projectId, id: c.id }));
+    let hear!: (event: AppEvent) => void;
+    const dispose = render(() => createComponent(App, { initial, inbox: { take: (listener?: (event: AppEvent) => void) => { if (listener) hear = listener; } } }), host);
+    try {
+      await settle();
+      const field = host.querySelector<HTMLTextAreaElement>('.composer textarea')!;
+      if (entry === 'button') {
+        host.querySelector<HTMLButtonElement>('.run-btn')!.click();
+        await settle();
+        ok(host.querySelector('.rc-aside'), 'the running head offers a quick question with nothing running');
+        host.querySelector<HTMLButtonElement>('.rc-aside')!.click();
+        await settle();
+        const box = host.querySelector<HTMLTextAreaElement>('#aside-box')!;
+        box.value = 'Why the parser?';
+        box.dispatchEvent(new InputEvent('input', { bubbles: true }));
+        host.querySelector<HTMLButtonElement>('.aside-recap')!.click();
+      } else {
+        field.value = '/recap'; field.setSelectionRange(6, 6);
+        field.dispatchEvent(new InputEvent('input', { bubbles: true }));
+        if (entry === 'menu') {
+          await new Promise((resolve) => setTimeout(resolve, 180));
+          const option = host.querySelector<HTMLElement>('.mentions [role="option"]')!;
+          equal(option.querySelector('span')?.textContent, '/recap');
+          equal(option.querySelector('.mention-note')?.textContent, t('aside.recap'));
+          option.dispatchEvent(new MouseEvent('mousedown', { button: 0, bubbles: true, cancelable: true }));
+        } else host.querySelector('form.composer')!.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
+      }
+      await settle();
+      deepEqual(asked, [t('aside.recapQuestion')], 'the fixed question follows the person’s language');
+      if (entry === 'button') equal(host.querySelector<HTMLTextAreaElement>('#aside-box')!.value, 'Why the parser?', 'a recap keeps the person’s own draft');
+      const aside: Aside = { id: `a-${entry}`, question: asked[0], answer: 'You asked for a refactor. The parser is done. Tests remain.', vendor: 'claude', state: 'done' };
+      hear({ type: 'asides', conversationId: c.id, asides: [aside] });
+      await settle();
+      equal(host.querySelector('.aside-answer')?.textContent?.trim(), aside.answer);
+      ok(![...host.querySelectorAll('article')].some((a) => a.textContent!.includes(aside.answer)), 'only the side panel holds the recap');
+      equal(field.value, '', 'nothing is inserted in the main box');
+      equal(sent, 0); equal(stopped, 0);
+      equal(JSON.stringify(c), snapshot, 'messages, queue and session are unchanged');
+    } finally {
+      dispose(); host.remove(); Object.assign(api, before);
+      if (storage === null) localStorage.removeItem('faber.place'); else localStorage.setItem('faber.place', storage);
+    }
+  });
+}
+
 check('quick question: asked while the agent works, it leaves the turn, its queue and its session alone', async () => {
   const settle = () => new Promise((resolve) => setTimeout(resolve, 30));
   const host = document.createElement('div');
@@ -72,7 +146,7 @@ check('quick question: asked while the agent works, it leaves the turn, its queu
     await settle();
     ok(host.querySelector('.aside-answer strong')?.textContent === 'tokenizer', 'the answer reads like any reply');
     // The thread and its queue are as they were: nothing of the side question is in them.
-    ok(!host.querySelector('.thread, main')!.textContent!.includes('why that file?'), 'the thread never shows the question');
+    ok(!host.querySelector('.thread')!.textContent!.includes('why that file?'), 'the thread never shows the question');
     ok(host.textContent!.includes('Then add tests'), 'the queued message is still there');
 
     const sendBack = [...host.querySelectorAll<HTMLButtonElement>('.aside button')].find((b) => b.textContent === t('aside.send'))!;
@@ -118,6 +192,13 @@ check('quick question: before the agent has answered, the tab says when it can b
     equal(field.value, '/btw how is it going?', 'the words stay in the box, never lost');
     ok(host.querySelector('[data-surface="aside"]')!.textContent!.includes(t('aside.none')), 'it says to ask once the agent has answered');
     ok(!host.querySelector('#aside-box'), 'there is no box to ask in yet');
+    field.value = '/recap';
+    field.dispatchEvent(new InputEvent('input', { bubbles: true }));
+    host.querySelector('form.composer')!.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
+    await settle();
+    equal(asked, 0, 'a recap cannot run before the first answer either');
+    equal(field.value, '/recap', 'the unasked recap stays in the box');
+    ok(!host.querySelector('.aside-recap'), 'there is no recap button before the first answer');
     host.querySelector<HTMLButtonElement>('.side-head .back')!.click();
     await settle();
     equal(host.querySelector('#running-title')!.textContent, t('run.title'), 'the back arrow returns to the running list');

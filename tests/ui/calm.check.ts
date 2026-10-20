@@ -37,22 +37,23 @@ function thread(messages: Message[], extra: Partial<Parameters<typeof Thread>[0]
   return { root, close: () => { dispose(); root.remove(); } };
 }
 
-check('calm: under an answer, three icon buttons with names, a step up when offered, and the cost, all on one line', () => {
+check('calm: under an answer, four icon buttons with names, a step up when offered, the time and the cost, all on one line', () => {
   useLanguage('en');
   const nudge = { reason: 'nudge.failedCheck', vendor: 'claude', model: 'claude-opus-5-5', effort: 'medium' } as const;
-  const reply = answer({ costUsd: 0.0042, inputTokens: 22_000, outputTokens: 310, cacheWarmUntil: Date.now() + 3_600_000, nudge });
+  const reply = answer({ costUsd: 0.0042, inputTokens: 22_000, outputTokens: 310, cacheWarmUntil: Date.now() + 3_600_000, nudge, took: 94_000 });
   for (const width of [660, 420]) {
     const view = thread([question, reply], { options: [{ label: 'Claude Sonnet', choice: { vendor: 'claude', model: 'sonnet' } }] }, width);
     try {
       const actions = view.root.querySelector<HTMLElement>('.actions')!;
       equal(view.root.querySelectorAll('select').length, 0, 'no model picker under an answer: the model is chosen in the composer only');
       const icons = [...actions.querySelectorAll<HTMLButtonElement>('button.iconbtn')];
-      equal(icons.length, 3, 'copy, retry, open in terminal');
+      equal(icons.length, 4, 'copy, read aloud, retry, open in terminal');
       for (const button of icons) {
         ok(button.title && button.getAttribute('aria-label'), 'each icon button has a tooltip and an accessible name');
         ok(button.querySelector('svg') && button.textContent === '', 'and shows an icon, no words');
       }
-      deepEqual(icons.map((b) => b.getAttribute('aria-label')), [t('answer.copy'), t('answer.retry', { model: t('model.auto') }), t('answer.terminal')]);
+      deepEqual(icons.map((b) => b.getAttribute('aria-label')), [t('answer.copy'), t('answer.listen'), t('answer.retry', { model: t('model.auto') }), t('answer.terminal')]);
+      ok(actions.querySelector('.when time') && actions.querySelector('.when .took'), 'the time it was sent and how long it took');
       const cost = actions.querySelector<HTMLElement>('.cost')!;
       equal(cost.textContent, money(0.0042, 4), 'the visible cost is the number alone');
       ok(cost.title.includes(compact(22_000)) && cost.title.includes(t('answer.cost', { cost: money(0.0042, 4) })), `the tooltip holds the tokens: ${cost.title}`);

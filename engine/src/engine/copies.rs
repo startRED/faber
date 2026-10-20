@@ -58,10 +58,22 @@ impl Engine {
     /// Edits a message or redoes an answer as a new conversation; in a project it gets a copy of its own, from the
     /// source's branch when the source has one.
     pub fn branch(&self, req: BranchRequest) -> Result<String, String> {
+        self.branch_as(req, false)
+    }
+
+    /// "Branch from here" on an answer (parity T7): a new conversation with every message up to it, where nothing is sent
+    /// until the person writes.
+    pub fn branch_here(&self, conversation_id: &str, message_id: &str) -> Result<String, String> {
+        let title = self.with(|c| c.load(conversation_id).map(|c| c.title.clone())).ok_or("error.messageGone")?;
+        let choice = Choice { vendor: "auto".into(), model: None, effort: None };
+        self.branch_as(BranchRequest { conversation_id: conversation_id.into(), message_id: message_id.into(), text: title, choice }, true)
+    }
+
+    fn branch_as(&self, req: BranchRequest, here: bool) -> Result<String, String> {
         let made = Self::make_copy(self.with(|c| c.copy_plan_branch(&req)))?;
         let (result, stray) = self.with(|c| {
             let id = made.as_ref().map(|(id, _)| id.clone());
-            let result = c.branch(req, made.clone());
+            let result = c.branch(req, made.clone(), here);
             // A branch refused before its conversation existed leaves the copy behind.
             let stray = made.filter(|_| id.is_some_and(|id| !c.convs.contains_key(&id)));
             (result, stray)

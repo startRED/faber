@@ -16,6 +16,467 @@ use tokio::sync::mpsc::UnboundedReceiver;
 const SKY: &str = "In one sentence: why is the sky blue?";
 const TWO_WRITES: &str = "Create a.txt containing 'one'. Then create b.txt containing 'two'. Use the Write tool for each, one at a time.";
 
+fn export_words() -> faber_engine::export::Words {
+    faber_engine::export::Words { you: "You".into(), auto: "Auto".into(), attachments: "Attachments".into(), files: "Files changed".into() }
+}
+
+fn export_paths(conversation: &faber_engine::model::Conversation) -> faber_engine::export::Paths {
+    faber_engine::export::Paths::new(conversation.working_folder.as_deref().unwrap_or(""), "C:/Users/Erick", true)
+}
+
+#[test]
+fn conversation_export_markdown_fixture() {
+    let conversation = serde_json::from_str(include_str!("../../tests/fixtures/conversation-export.json")).unwrap();
+    let zone = chrono::FixedOffset::west_opt(3 * 3600).unwrap();
+    let actual = faber_engine::export::markdown(&conversation, &export_words(), &zone, &export_paths(&conversation)).unwrap();
+    assert_eq!(actual, include_str!("../../tests/fixtures/conversation-export.md"));
+}
+
+#[test]
+fn conversation_export_fallbacks() {
+    let mut conversation: faber_engine::model::Conversation =
+        serde_json::from_str(include_str!("../../tests/fixtures/conversation-export.json")).unwrap();
+    let words = export_words();
+    let zone = chrono::FixedOffset::east_opt(3600).unwrap();
+    conversation.user_name = None;
+    conversation.messages[1].activity_end = None;
+    conversation.messages[3].model = Some("codex".into());
+    let actual = faber_engine::export::markdown(&conversation, &words, &zone, &export_paths(&conversation)).unwrap();
+    assert!(actual.contains("## You · 2026-01-01T01:00:00+01:00"));
+    assert!(actual.contains("## Codex · 2026-01-01T01:03:00+01:00"));
+    assert!(actual.contains("🦀 Checking files."), "legacy text without a known boundary is kept");
+    conversation.messages[1].model = None;
+    assert!(faber_engine::export::markdown(&conversation, &words, &zone, &export_paths(&conversation)).unwrap().contains("## Claude ·"));
+    conversation.messages[1].vendor = None;
+    assert!(faber_engine::export::markdown(&conversation, &words, &zone, &export_paths(&conversation)).unwrap().contains("## Auto ·"));
+    conversation.messages[0].at = u64::MAX;
+    assert_eq!(faber_engine::export::markdown(&conversation, &words, &zone, &export_paths(&conversation)), Err("error.export.read"));
+    conversation.messages.clear();
+    assert_eq!(faber_engine::export::markdown(&conversation, &words, &zone, &export_paths(&conversation)).unwrap(), "# Trip notes\n");
+}
+
+fn export_sample(text: &str) -> faber_engine::model::Conversation {
+    let mut conversation: faber_engine::model::Conversation =
+        serde_json::from_str(include_str!("../../tests/fixtures/conversation-export.json")).unwrap();
+    conversation.messages = vec![conversation.messages[3].clone(), conversation.messages[0].clone()];
+    conversation.messages[0].text = text.into();
+    conversation.messages[0].status = Some(Status::Stopped);
+    conversation.messages[1].text = "Visible next turn".into();
+    conversation.messages[1].attachments = None;
+    conversation.messages[1].images = None;
+    conversation
+}
+
+#[test]
+fn conversation_export_prefix_home_keeps_the_entire_path_suffix_with_spaces() {
+    use pulldown_cmark::{Event, Parser};
+    let conversation = export_sample("Read C:\\Users\\Erick\\My Documents\\private\\report.md.");
+    let actual = faber_engine::export::markdown(&conversation, &export_words(), &chrono::Utc, &export_paths(&conversation)).unwrap();
+    let visible: String = Parser::new(&actual)
+        .filter_map(|event| match event {
+            Event::Text(text) => Some(text.into_string()),
+            _ => None,
+        })
+        .collect();
+    assert!(visible.contains("Read ~\\My Documents\\private\\report.md."), "the home prefix alone is replaced: {actual}");
+    assert!(!actual.contains("Users"));
+}
+
+#[test]
+fn conversation_export_prefix_preserves_division_operators() {
+    use pulldown_cmark::{Event, Parser};
+    let source = "const average = total / count;";
+    let conversation = export_sample(&format!("`{source}`"));
+    let actual = faber_engine::export::markdown(&conversation, &export_words(), &chrono::Utc, &export_paths(&conversation)).unwrap();
+    let code = Parser::new(&actual).find_map(|event| match event {
+        Event::Code(text) => Some(text.into_string()),
+        _ => None,
+    });
+    assert_eq!(code.as_deref(), Some(source));
+}
+
+#[test]
+fn conversation_export_prefix_preserves_comments_and_their_urls() {
+    use pulldown_cmark::{Event, Parser};
+    let source = "// Read https://example.org/a";
+    let conversation = export_sample(&format!("```js\n{source}\n```"));
+    let actual = faber_engine::export::markdown(&conversation, &export_words(), &chrono::Utc, &export_paths(&conversation)).unwrap();
+    assert!(
+        Parser::new(&actual).any(|event| matches!(event, Event::Text(text) if text.as_ref() == format!("{source}\n"))),
+        "the complete comment remains: {actual}"
+    );
+}
+
+#[test]
+fn conversation_export_prefix_working_folder_in_a_link_keeps_its_name_and_suffix() {
+    use pulldown_cmark::{Event, Parser, Tag};
+    let mut conversation = export_sample("[Report](<E:/Workspace/My Project/sub/report.md>)");
+    conversation.working_folder = Some("E:/Workspace/My Project".into());
+    let actual = faber_engine::export::markdown(&conversation, &export_words(), &chrono::Utc, &export_paths(&conversation)).unwrap();
+    let link = Parser::new(&actual).find_map(|event| match event {
+        Event::Start(Tag::Link { dest_url, .. }) => Some(dest_url.into_string()),
+        _ => None,
+    });
+    assert_eq!(link.as_deref(), Some("My Project/sub/report.md"));
+}
+
+#[test]
+fn conversation_export_prefixes_match_slashes_and_windows_case_without_guessing_other_paths() {
+    use pulldown_cmark::{Event, Parser};
+    for (source, expected) in [
+        (r"Read c:\uSeRs/ERICk\My Documents/private\report.md.", r"Read ~\My Documents/private\report.md."),
+        (r"C:/Users/Erick/Work Area/sub/report.md", "Work Area/sub/report.md"),
+        (r"C:\Users\Erick\Work Area\sub\report.md", r"Work Area\sub\report.md"),
+        // Prefixes are literal known text, wherever they occur; their extent is never guessed.
+        ("C:/Users/Erickson/report.md", "~son/report.md"),
+        ("C:/Users/Erick Smith/report.md", "~ Smith/report.md"),
+        ("Home C:/Users/Erick now", "Home ~ now"),
+        (r#"open("C:/Users/Erick")"#, r#"open("~")"#),
+        (r#"open("C:/Users/Erick/Work Area")"#, r#"open("Work Area")"#),
+        ("D:/unrelated/private/report.md", "D:/unrelated/private/report.md"),
+        ("/unrelated/report.md", "/unrelated/report.md"),
+        ("https://example.org/C:/Users/Erick/report.md", "https://example.org/C:/Users/Erick/report.md"),
+        ("total / count; // Read https://example.org/a", "total / count; // Read https://example.org/a"),
+        (
+            r#"fetch("https://example.org/a");open("C:/Users/Erick/private/report.md")"#,
+            r#"fetch("https://example.org/a");open("~/private/report.md")"#,
+        ),
+    ] {
+        let mut conversation = export_sample(&format!("`{source}`"));
+        conversation.working_folder = Some("C:/Users/Erick/Work Area".into());
+        let actual = faber_engine::export::markdown(&conversation, &export_words(), &chrono::Utc, &export_paths(&conversation)).unwrap();
+        let code = Parser::new(&actual).find_map(|event| match event {
+            Event::Code(text) => Some(text.into_string()),
+            _ => None,
+        });
+        assert_eq!(code.as_deref(), Some(expected), "source: {source}");
+    }
+    let conversation = export_sample("`/home/Erick/work/report.md /HOME/ERICK/report.md /backup/home/Erick/report.md`");
+    let paths = faber_engine::export::Paths::new("/home/Erick/work", "/home/Erick", false);
+    let actual = faber_engine::export::markdown(&conversation, &export_words(), &chrono::Utc, &paths).unwrap();
+    assert!(
+        actual.contains("`work/report.md /HOME/ERICK/report.md /backup~/report.md`"),
+        "Unix matching is literal and case sensitive: {actual}"
+    );
+}
+
+#[test]
+fn conversation_export_prefixes_apply_to_encoded_links_and_picture_targets() {
+    use pulldown_cmark::{Event, Parser, Tag};
+    let conversation = export_sample(concat!(
+        "[Report](C:%5cUsers%5cERICk%5cMy%20Documents%5creport.md) ",
+        "![Picture](<C:/Users/Erick/My Documents/picture.png>) ",
+        "<img src=\"C:/Users/Erick/My Documents/photo.png\"> ",
+        "![Web](https://example.org/a%2Fb.png?next=%23section)"
+    ));
+    let actual = faber_engine::export::markdown(&conversation, &export_words(), &chrono::Utc, &export_paths(&conversation)).unwrap();
+    let mut visible = String::new();
+    let mut links = vec![];
+    for event in Parser::new(&actual) {
+        match event {
+            Event::Text(text) => visible.push_str(&text),
+            Event::Start(Tag::Link { dest_url, .. }) => links.push(dest_url.into_string()),
+            Event::Start(Tag::Image { .. }) => panic!("a picture remained embedded: {actual}"),
+            _ => {}
+        }
+    }
+    assert_eq!(links, [r"~\My Documents\report.md"]);
+    assert!(visible.contains("~/My Documents/picture.png"), "{actual}");
+    assert!(visible.contains("~/My Documents/photo.png"), "{actual}");
+    assert!(visible.contains("https://example.org/a%2Fb.png?next=%23section"), "{actual}");
+    assert!(!actual.contains("Users"));
+}
+
+#[tokio::test]
+async fn conversation_export_uses_the_saved_chat_project_and_copy_working_folder() {
+    use faber_engine::{model::Project, project::copy::WorkCopy, store::Store};
+    let dir = tempfile::tempdir().unwrap();
+    let (engine, _rx) = engine(dir.path(), Vendor::Claude, fake(vec![]).spawn);
+    let store = Store::new(dir.path());
+    let project = Project::new("export-project".into(), "Project".into(), "C:/export-private/Project Folder".into());
+    store.save_projects(std::slice::from_ref(&project)).unwrap();
+    let copy = WorkCopy {
+        path: "C:/export-private/Copy Folder".into(),
+        branch: "faber/export".into(),
+        root: project.path.clone(),
+        sub: "app".into(),
+        base: None,
+    };
+    for (area, work_copy, root, expected) in [
+        (Area::Chat, None, "C:/export-private/Chat Folder", "Chat Folder/sub/report.md"),
+        (Area::Project, None, "C:/export-private/Project Folder", "Project Folder/sub/report.md"),
+        (Area::Project, Some(copy), "C:/export-private/Copy Folder/app", "app/sub/report.md"),
+    ] {
+        let mut conversation = export_sample(&format!("`{root}/sub/report.md`"));
+        conversation.area = area;
+        conversation.project_id = Some(project.id.clone());
+        conversation.working_folder = (area == Area::Chat).then(|| root.to_string());
+        conversation.copy = work_copy;
+        store.save(&conversation);
+        let (_, actual) = engine.export_conversation(&conversation.id, &export_words()).unwrap();
+        assert!(actual.contains(&format!("`{expected}`")), "{actual}");
+        assert!(!actual.contains("export-private"), "{actual}");
+    }
+    engine.shutdown();
+}
+
+#[test]
+fn conversation_export_replaces_pictures_without_embedding_bytes() {
+    use pulldown_cmark::{Event, Parser, Tag};
+    for source in [
+        "[report](C:/Users/Erick/private/report.md) ![picture](/private/picture.png)",
+        "[report](file:///C:/Users/Erick/private/report.md) ![picture](https://example.org/private/picture.png?secret=hidden)",
+        "[report][doc] ![picture][image]\n\n[doc]: //server/private/report.md\n[image]: /private/picture.png",
+        "Read C:/Users/Erick/private/report.md and `/private/picture.png`.",
+        "Read \\\\server\\private\\report.md and ![picture](/private/picture.png)",
+        "`C:\\Users\\Erick\\My Documents\\private\\report.md` ![picture](/private/picture.png)",
+        "```text\nC:\\Users\\Erick\\My Documents\\private\\report.md\n/private/picture.png\n```",
+        "```text\nC:\\Users\\Erick\\private\\report.md\n/private/picture.png\n```",
+        "<a href=\"/private/report.md\">report</a> ![picture](data:image/png;base64,PRIVATE_BYTES)",
+        "[report](C:/Users/Erick/private/report.md) <img src=\"data:image/png;base64,PRIVATE_BYTES\">",
+        "[report](C:/Users/Erick/private/report.md) <img src=\"data&#58;image/png;base64,PRIVATE_BYTES\">",
+        "[report](C:/Users/Erick/private/report.md) <img src=\"data&colon;image/png;base64,PRIVATE_BYTES\">",
+        "[report](C:/Users/Erick/private/report.md) <img src=\"data&#x3aimage/png;base64,PRIVATE_BYTES\">",
+        "[report](C:/Users/Erick/private/report.md) <img src=\"d\na\tt\ra:image/png;base64,PRIVATE_BYTES\">",
+        "[report](C:/Users/Erick/private/report.md) [download](data:application/pdf;base64,PRIVATE_BYTES) ![picture](/private/picture.png)",
+    ] {
+        let actual =
+            faber_engine::export::markdown(&export_sample(source), &export_words(), &chrono::Utc, &export_paths(&export_sample(source)))
+                .unwrap();
+        for private in ["Users", "PRIVATE_BYTES"] {
+            assert!(!actual.contains(private), "{private} leaked from {source}: {actual}");
+        }
+        assert!(!Parser::new(&actual).any(|event| matches!(event, Event::Start(Tag::Image { .. }))), "images become filenames: {actual}");
+        let visible: String = Parser::new(&actual)
+            .filter_map(|event| match event {
+                Event::Text(text) | Event::Code(text) => Some(text.into_string()),
+                _ => None,
+            })
+            .collect();
+        assert!(actual.contains("report.md"), "the file's name remains in its text or link destination: {actual}");
+        assert!(visible.contains("picture.png") || visible.contains("image-1.png"), "the picture's name remains: {actual}");
+    }
+}
+
+#[test]
+fn conversation_export_message_executable_link_is_literal_text() {
+    use pulldown_cmark::{Event, Parser, Tag};
+    let source = "[Run](javascript:alert(1))";
+    assert!(Parser::new(source).any(|event| matches!(event, Event::Start(Tag::Link { .. }))));
+    let conversation = export_sample(source);
+    let actual = faber_engine::export::markdown(&conversation, &export_words(), &chrono::Utc, &export_paths(&conversation)).unwrap();
+    let mut visible = String::new();
+    for event in Parser::new(&actual) {
+        match event {
+            Event::Start(Tag::Link { .. } | Tag::Image { .. }) | Event::Html(_) | Event::InlineHtml(_) => {
+                panic!("an executable destination remained active: {actual}");
+            }
+            Event::Text(text) | Event::Code(text) => visible.push_str(&text),
+            _ => {}
+        }
+    }
+    assert!(visible.contains("Run"), "the link label remains: {actual}");
+    assert!(visible.contains("javascript:alert(1)"), "the destination remains literal: {actual}");
+}
+
+#[test]
+fn conversation_export_message_mixed_case_scheme_with_leading_whitespace_is_literal() {
+    use pulldown_cmark::{Event, Parser, Tag};
+    let source = "[Run](< &#x09;&#x01;JaVaScRiPt:alert(1)>)";
+    assert!(Parser::new(source).any(|event| matches!(event, Event::Start(Tag::Link { .. }))), "the input must exercise a parsed link");
+    let conversation = export_sample(source);
+    let actual = faber_engine::export::markdown(&conversation, &export_words(), &chrono::Utc, &export_paths(&conversation)).unwrap();
+    let mut visible = String::new();
+    for event in Parser::new(&actual) {
+        match event {
+            Event::Start(Tag::Link { .. } | Tag::Image { .. }) | Event::Html(_) | Event::InlineHtml(_) => {
+                panic!("the obscured executable scheme remained active: {actual}");
+            }
+            Event::Text(text) | Event::Code(text) => visible.push_str(&text),
+            _ => {}
+        }
+    }
+    assert!(visible.contains("JaVaScRiPt:alert(1)"), "the destination remains literal: {actual}");
+}
+
+#[test]
+fn conversation_export_message_links_allow_only_web_mail_and_schemeless_destinations() {
+    use pulldown_cmark::{Event, Parser, Tag};
+    for (destination, expected) in [
+        ("https://example.org/a%2Fb", Some("https://example.org/a%2Fb")),
+        ("HTTP://example.org/a", Some("HTTP://example.org/a")),
+        ("http:example.org/a", Some("http:example.org/a")),
+        ("MaIlTo:person@example.org", Some("MaIlTo:person@example.org")),
+        ("sub/report.md", Some("sub/report.md")),
+        ("/sub/report.md", Some("/sub/report.md")),
+        ("#section", Some("#section")),
+        ("C:/Users/Erick/report.md", Some("~/report.md")),
+        ("javascript:alert(1)", None),
+        ("java&#x09;script:alert(1)", None),
+        (" &#x01;&#x1f;JaVaScRiPt:alert(1)", None),
+        ("VbScRiPt:msgbox(1)", None),
+        ("file:///C:/Users/Erick/report.md", None),
+        ("ftp://example.org/a", None),
+        ("custom:open", None),
+        ("data:text/html,PRIVATE_BYTES", None),
+        (" &#x09;DaTa:image/png;base64,PRIVATE_BYTES", None),
+    ] {
+        let source = format!("[Reference](<{destination}>)");
+        assert!(Parser::new(&source).any(|event| matches!(event, Event::Start(Tag::Link { .. }))), "must exercise a link: {source}");
+        let conversation = export_sample(&source);
+        let actual = faber_engine::export::markdown(&conversation, &export_words(), &chrono::Utc, &export_paths(&conversation)).unwrap();
+        let mut links = vec![];
+        let mut visible = String::new();
+        for event in Parser::new(&actual) {
+            match event {
+                Event::Start(Tag::Link { dest_url, .. }) => links.push(dest_url.into_string()),
+                Event::Text(text) | Event::Code(text) => visible.push_str(&text),
+                Event::Start(Tag::Image { .. }) | Event::Html(_) | Event::InlineHtml(_) => panic!("active content: {actual}"),
+                _ => {}
+            }
+        }
+        assert_eq!(links, expected.into_iter().collect::<Vec<_>>(), "source: {source}, export: {actual}");
+        assert!(visible.contains("Reference"), "the label stays readable: {actual}");
+        assert!(!actual.contains("PRIVATE_BYTES"), "embedded bytes stay omitted: {actual}");
+    }
+    let conversation = export_sample("![Picture](< &#x09;DaTa:image/png;base64,PRIVATE_BYTES>)");
+    let actual = faber_engine::export::markdown(&conversation, &export_words(), &chrono::Utc, &export_paths(&conversation)).unwrap();
+    assert!(!Parser::new(&actual).any(|event| matches!(event, Event::Start(Tag::Link { .. } | Tag::Image { .. }))));
+    assert!(!actual.contains("PRIVATE_BYTES"));
+    assert!(actual.contains("image-1.png"));
+}
+
+#[test]
+fn conversation_export_preserves_encoded_web_link_destinations() {
+    use pulldown_cmark::{Event, Parser, Tag};
+    let destination = "https://example.org/a%2Fb?token=a%26b&next=%23section";
+    let source = format!("[Reference]({destination})");
+    let actual =
+        faber_engine::export::markdown(&export_sample(&source), &export_words(), &chrono::Utc, &export_paths(&export_sample(&source)))
+            .unwrap();
+    let links: Vec<_> = Parser::new(&actual)
+        .filter_map(|event| match event {
+            Event::Start(Tag::Link { dest_url, .. }) => Some(dest_url.into_string()),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(links, [destination]);
+}
+
+#[test]
+fn conversation_export_generated_words_are_literal_markdown() {
+    use pulldown_cmark::{Event, Parser, Tag};
+    let attack = "<img src=x onerror=alert(1)> **bold** [link](javascript:alert) & text";
+    let mut conversation = export_sample("Ordinary reply");
+    conversation.title = attack.into();
+    conversation.user_name = Some(attack.into());
+    conversation.messages[0].attachments = Some(vec![attack.into()]);
+    let mut words = export_words();
+    words.attachments = attack.into();
+    let actual = faber_engine::export::markdown(&conversation, &words, &chrono::Utc, &export_paths(&conversation)).unwrap();
+    let mut headings = vec![];
+    let mut heading = None;
+    for event in Parser::new(&actual) {
+        match event {
+            Event::Start(Tag::Heading { .. }) => heading = Some(String::new()),
+            Event::Text(text) if heading.is_some() => heading.as_mut().unwrap().push_str(&text),
+            Event::End(pulldown_cmark::TagEnd::Heading(_)) => headings.push(heading.take().unwrap()),
+            Event::Html(_) | Event::InlineHtml(_) | Event::Start(Tag::Image { .. } | Tag::Link { .. } | Tag::Strong) => {
+                panic!("generated words became markup: {actual}")
+            }
+            _ => {}
+        }
+    }
+    assert_eq!(headings[0], attack);
+    assert!(headings[2].starts_with(attack));
+}
+
+#[test]
+fn conversation_export_contains_each_messages_markdown_scope() {
+    use pulldown_cmark::{Event, Parser, Tag, TagEnd};
+    for source in
+        ["```rust\nunfinished", "~~~~text\nunfinished", "<!-- unfinished comment", "<div>unfinished block", "[shared]: /private/report.md"]
+    {
+        let mut conversation = export_sample(source);
+        conversation.messages[1].text = "Visible next turn [shared]".into();
+        let actual = faber_engine::export::markdown(&conversation, &export_words(), &chrono::Utc, &export_paths(&conversation))
+            .unwrap_or_else(|error| panic!("{source}: {error}"));
+        let mut code = false;
+        let mut headings = 0;
+        let mut following = false;
+        for event in Parser::new(&actual) {
+            match event {
+                Event::Start(Tag::CodeBlock(_)) => code = true,
+                Event::End(TagEnd::CodeBlock) => code = false,
+                Event::Start(Tag::Heading { .. }) => {
+                    assert!(!code, "a following heading is inside code after {source}: {actual}");
+                    headings += 1;
+                }
+                Event::Html(_) | Event::InlineHtml(_) => panic!("a raw HTML scope can hide following messages: {actual}"),
+                Event::Text(text) if text.contains("Visible next turn") => {
+                    assert!(!code, "the next message is inside code after {source}: {actual}");
+                    following = true;
+                }
+                Event::Start(Tag::Link { .. }) => panic!("a previous message's definition escaped its scope: {actual}"),
+                _ => {}
+            }
+        }
+        assert_eq!(headings, 3, "every speaker remains outside the previous message: {actual}");
+        assert!(following, "the next message stays visible: {actual}");
+    }
+}
+
+#[tokio::test]
+async fn pin_is_stored_survives_reopening_and_unpin_removes_the_stored_value() {
+    let dir = support::tempdir();
+    let (first, mut rx) = engine(dir.path(), Vendor::Claude, fake(fixture("claude", "chat")).spawn);
+    let id = first.send(ask(Area::Chat, SKY, choice("claude", None))).unwrap();
+    finished(&mut rx, |_| {}).await;
+    let before = first.open(&id).unwrap();
+    assert_eq!(before.pinned_at, None, "older conversations without pinnedAt remain unpinned");
+    first.pin(&id, true).unwrap();
+    let at = first.open(&id).unwrap().pinned_at.expect("the conversation is pinned");
+    assert!(at >= before.created_at);
+    assert_eq!(first.open(&id).unwrap().updated_at, before.updated_at, "pinning does not count as conversation activity");
+    first.pin(&id, true).unwrap();
+    assert_eq!(first.open(&id).unwrap().pinned_at, Some(at), "pin is idempotent");
+    assert!(std::iter::from_fn(|| rx.try_recv().ok()).any(|e| matches!(e, AppEvent::List)), "the sidebar refreshes");
+    let file = dir.path().join("conversations").join(format!("{id}.json"));
+    assert_eq!(read_json(&file)["pinnedAt"], at);
+    first.shutdown();
+
+    let (second, _) = engine(dir.path(), Vendor::Claude, fake(vec![]).spawn);
+    assert_eq!(second.open(&id).unwrap().pinned_at, Some(at));
+    assert_eq!(second.state().conversations.iter().find(|c| c.id == id).unwrap().pinned_at, Some(at));
+    second.pin(&id, false).unwrap();
+    assert_eq!(second.open(&id).unwrap().pinned_at, None);
+    assert_eq!(second.state().conversations.iter().find(|c| c.id == id).unwrap().pinned_at, None);
+    assert!(read_json(&file).get("pinnedAt").is_none(), "unpin removes the key, rather than saving null");
+    second.pin(&id, false).unwrap();
+    assert_eq!(second.pin("gone", true), Err("error.conversationGone".into()));
+    second.shutdown();
+}
+
+#[tokio::test]
+async fn archiving_a_pinned_conversation_removes_its_pin_and_unarchive_does_not_restore_it() {
+    let dir = support::tempdir();
+    let (engine, mut rx) = engine(dir.path(), Vendor::Claude, fake(fixture("claude", "chat")).spawn);
+    let id = engine.send(ask(Area::Chat, SKY, choice("claude", None))).unwrap();
+    finished(&mut rx, |_| {}).await;
+    engine.pin(&id, true).unwrap();
+    engine.archive(&id, true).unwrap();
+    let c = engine.open(&id).unwrap();
+    assert!(c.archived_at.is_some());
+    assert_eq!(c.pinned_at, None);
+    let file = dir.path().join("conversations").join(format!("{id}.json"));
+    assert!(read_json(&file).get("pinnedAt").is_none());
+    engine.pin(&id, true).unwrap();
+    assert_eq!(engine.open(&id).unwrap().pinned_at, None, "a stale menu cannot pin an archived conversation");
+    engine.archive(&id, false).unwrap();
+    assert_eq!(engine.open(&id).unwrap().pinned_at, None);
+    engine.shutdown();
+}
+
 #[tokio::test]
 async fn slash_init_populates_the_conversation_and_vendor_fallback_without_saving_it() {
     let mut entries = fixture("claude", "chat");
@@ -387,6 +848,8 @@ async fn a_chat_turn_streams_to_the_screen_and_is_saved_with_model_reason_sessio
     let reply = finished(&mut rx, |_| {}).await;
     engine.shutdown();
     assert_eq!(reply.status, Some(Status::Done));
+    // The time the answer took, for the bar under it, is saved with the reply; a reply that did not end well has none.
+    assert!(reply.took.is_some_and(|ms| ms < 60_000), "took {:?}", reply.took);
     assert!(reply.text.contains("Rayleigh"));
     assert_eq!(reply.model.as_deref(), Some("claude-haiku-5-5"));
     assert_eq!(reply.reason.as_deref(), Some("reason.chosen"));
@@ -2556,8 +3019,11 @@ async fn r250_a_quick_question_on_the_side_leaves_the_turn_its_queue_and_its_ses
     assert_eq!(said["message"]["content"], "why that file?", "the fork knows the rest: {said}");
 
     // Every read goes through the working folder's policy, whatever the conversation's mode: a secret in the folder never.
+    // The agent is given the folder's canonical spelling: a CI temp folder can be spelled with an 8.3 name (RUNNER~1), and the
+    // policy refuses any `~` in a path.
+    let folder = faber_engine::permissions::working_root(dir.path()).unwrap();
     for (request, file) in [("r1", ".env"), ("r2", "parser.rs")] {
-        let path = dir.path().join(file).to_string_lossy().into_owned();
+        let path = folder.join(file).to_string_lossy().into_owned();
         side.say(json!({ "type": "control_request", "request_id": request, "request": { "subtype": "can_use_tool", "tool_name": "Read", "input": { "file_path": path } } })).await;
     }
     for _ in 0..300 {
@@ -2945,4 +3411,86 @@ async fn r161_a_claude_helper_told_during_its_last_words_answers_in_a_second_tur
     told_was_taken(&tool, &report);
     assert!(report.starts_with("Retries above 5 aren't dangerous in themselves"), "the second turn's words: {report}");
     assert!(!report.contains("The config check found nothing risky"), "the first turn's words were not the last: {report}");
+}
+
+/// Parity T7: an edit and a retry of the same message are its versions, each a conversation with its own answer, in the order
+/// they were written; a fresh start reads which conversation branched from which back from the files.
+#[tokio::test]
+async fn an_edit_and_a_retry_are_versions_of_the_same_message_each_with_its_own_answer() {
+    let dir = tempfile::tempdir().unwrap();
+    let (e, mut rx) = engine(dir.path(), Vendor::Claude, fake(fixture("claude", "chat")).spawn);
+    let pick = || choice("claude", Some("haiku"));
+    let id = e.send(ask(Area::Chat, SKY, pick())).unwrap();
+    finished(&mut rx, |_| {}).await;
+    assert!(e.versions(&id).is_empty(), "one version only");
+    let first = |conv: &str| e.open(conv).unwrap().messages[0].id.clone();
+    let edit = e.branch(BranchRequest { conversation_id: id.clone(), message_id: first(&id), text: SKY.into(), choice: pick() }).unwrap();
+    finished(&mut rx, |_| {}).await;
+    let retry =
+        e.branch(BranchRequest { conversation_id: edit.clone(), message_id: first(&edit), text: SKY.into(), choice: pick() }).unwrap();
+    finished(&mut rx, |_| {}).await;
+    e.shutdown();
+    let order = vec![id.clone(), edit.clone(), retry.clone()];
+    let check = |e: &Engine| {
+        for (n, conv) in order.iter().enumerate() {
+            let v = e.versions(conv);
+            assert_eq!(v.len(), 1, "{v:?}");
+            assert_eq!((v[0].at, &v[0].message_id), (n, &e.open(conv).unwrap().messages[0].id));
+            assert_eq!(v[0].list.iter().map(|x| x.conversation_id.clone()).collect::<Vec<_>>(), order);
+            assert_eq!(e.open(conv).unwrap().messages.len(), 2, "each version keeps its own answer");
+        }
+    };
+    check(&e);
+    let (again, _rx) = engine(dir.path(), Vendor::Claude, fake(fixture("claude", "chat")).spawn);
+    check(&again);
+    // The middle version goes: the other two stay versions of each other, after a restart too.
+    again.remove_with(&edit, true).unwrap();
+    again.shutdown();
+    let (later, _rx) = engine(dir.path(), Vendor::Claude, fake(fixture("claude", "chat")).spawn);
+    let v = later.versions(&retry);
+    assert_eq!(
+        v.iter().flat_map(|v| v.list.iter().map(|x| x.conversation_id.clone())).collect::<Vec<_>>(),
+        vec![id.clone(), retry.clone()]
+    );
+}
+
+/// "Branch from here" on an answer keeps every message up to it and sends nothing; a message edited later in the branch is
+/// a version there, while the messages before it, shared by the whole family, have one version.
+#[tokio::test]
+async fn branch_from_here_keeps_the_answer_sends_nothing_and_a_middle_edit_is_a_version() {
+    let dir = tempfile::tempdir().unwrap();
+    let (e, mut rx) = engine(dir.path(), Vendor::Claude, fake(fixture("claude", "chat")).spawn);
+    let pick = || choice("claude", Some("haiku"));
+    let id = e.send(ask(Area::Chat, SKY, pick())).unwrap();
+    finished(&mut rx, |_| {}).await;
+    let source = e.open(&id).unwrap();
+    let here = e.branch_here(&id, &source.messages[1].id).unwrap();
+    tokio::time::sleep(Duration::from_millis(100)).await;
+    let branch = e.open(&here).unwrap();
+    let ids = |c: &faber_engine::model::Conversation| c.messages.iter().map(|m| m.id.clone()).collect::<Vec<_>>();
+    assert_eq!(ids(&branch), ids(&source), "nothing is sent until the person writes");
+    assert_eq!(branch.branch_of.as_ref().map(|b| b.message_id.clone()), Some(source.messages[1].id.clone()));
+    assert!(e.versions(&here).is_empty());
+    e.shutdown();
+    // The person went on in the branch and then edited that newer message: written as the files would hold it.
+    let file = |id: &str| dir.path().join("conversations").join(format!("{id}.json"));
+    let mut went_on = read_json(&file(&here));
+    let mut said = went_on["messages"][0].clone();
+    let mut answer = went_on["messages"][1].clone();
+    let at = said["at"].as_u64().unwrap();
+    (said["id"], said["at"], answer["id"]) = (json!("middle"), json!(at + 10), json!("middle-answer"));
+    went_on["messages"].as_array_mut().unwrap().extend([said.clone(), answer.clone()]);
+    std::fs::write(file(&here), went_on.to_string()).unwrap();
+    let mut edited = went_on.clone();
+    let messages = edited["messages"].as_array_mut().unwrap();
+    (messages[2]["id"], messages[2]["at"], messages[3]["id"]) = (json!("middle-2"), json!(at + 20), json!("middle-2-answer"));
+    (edited["id"], edited["branchOf"]) = (json!("edit-1"), json!({ "conversationId": here, "messageId": "middle" }));
+    std::fs::write(file("edit-1"), edited.to_string()).unwrap();
+    let (e, _rx) = engine(dir.path(), Vendor::Claude, fake(fixture("claude", "chat")).spawn);
+    let v = e.versions(&here);
+    assert_eq!(v.len(), 1, "{v:?}");
+    assert_eq!((v[0].message_id.as_str(), v[0].at), ("middle", 0));
+    assert_eq!(v[0].list.iter().map(|x| x.conversation_id.as_str()).collect::<Vec<_>>(), vec![here.as_str(), "edit-1"]);
+    assert_eq!(e.versions("edit-1")[0].at, 1);
+    assert!(e.versions(&id).is_empty(), "the source has no message at that place");
 }

@@ -100,7 +100,7 @@ check('right-click: the browser reload, print, save and view-source shortcuts do
   equal(key(document.body, { key: 'F2' }), true, 'other keys are left alone');
 });
 
-check('right-click: a chat offers Rename and Delete, Delete asks twice, Rename edits in place', async () => {
+check('right-click: a chat offers Rename, Export, Archive and Delete, Delete asks twice, Rename edits in place', async () => {
   const root = stage();
   const calls: string[] = [];
   const renamed: Array<[string, string]> = [];
@@ -111,7 +111,7 @@ check('right-click: a chat offers Rename and Delete, Delete asks twice, Rename e
     const row = [...root.querySelectorAll('.crow')].find((r) => r.textContent?.includes('Plan the trip'))!;
     equal(rightClick(row), false);
     await settle();
-    deepEqual(labels(), [t('menu.rename'), t('menu.archive'), t('menu.delete')]);
+    deepEqual(labels(), [t('menu.rename'), t('menu.pin'), t('menu.export'), t('menu.archive'), t('menu.delete')]);
     ok(entry(t('menu.delete')).classList.contains('danger'), 'Delete is last and in the danger colour');
     entry(t('menu.delete')).click();
     await settle();
@@ -156,6 +156,57 @@ check('right-click: a chat offers Rename and Delete, Delete asks twice, Rename e
   }
 });
 
+check('conversation export: both areas save their own row, cancel silently and show a refused save', async () => {
+  const calls: Array<[string, unknown]> = [];
+  const errors: unknown[] = [];
+  const original = api.exportConversation;
+  let outcome: boolean | string = true;
+  api.exportConversation = async (id, words) => {
+    calls.push([id, words]);
+    if (typeof outcome === 'string') throw { key: outcome };
+    return outcome;
+  };
+  try {
+    for (const place of ['chat', 'project'] as const) {
+      const root = stage();
+      const dispose = render(() => [
+        createComponent(Sidebar, {
+          conversations: [...chats, { id: 'pc', title: 'Project chat', area: 'project', projectId: 'p1', updatedAt: Date.now() }],
+          projects, vendors: [], version: '0', place: { area: place, projectId: place === 'project' ? 'p1' : undefined }, running: [], quotas: {}, now: Date.now(),
+          onNew: () => {}, onArea: () => {}, onProject: () => {}, onNewIn: () => {}, onAddProject: () => {}, onOpen: () => {}, onRemove: () => {}, onSettings: () => {},
+          onError: (err: unknown) => errors.push(err),
+        }),
+        createComponent(ContextMenuHost, {}),
+      ], root);
+      try {
+        await settle();
+        for (const result of [true, false, 'error.export.write']) {
+          outcome = result;
+          const title = place === 'chat' ? 'Plan the trip' : 'Project chat';
+          const row = [...root.querySelectorAll('.crow')].find((el) => el.querySelector('.item > span')?.textContent === title);
+          ok(row, `${title} is listed in ${place}`);
+          rightClick(row);
+          await settle();
+          const button = entry(t('menu.export'));
+          ok(button, 'Export is in the conversation menu');
+          const before = calls.length;
+          button.click();
+          await settle();
+          equal(calls.length, before + 1, 'each activation exports exactly once');
+          deepEqual(calls.at(-1), [place === 'chat' ? 'c1' : 'pc', { you: t('export.you'), auto: t('model.auto'), attachments: t('export.attachments'), files: t('export.files') }]);
+          equal(menus().length, 0, 'the menu closes after Export');
+        }
+      } finally {
+        dispose();
+        root.remove();
+      }
+    }
+    deepEqual(errors, [{ key: 'error.export.write' }, { key: 'error.export.write' }], 'only failed saves say anything');
+  } finally {
+    api.exportConversation = original;
+  }
+});
+
 check('archive: an archived chat leaves the sidebar, a search finds it marked, and the menu archives and brings back', async () => {
   const root = stage();
   const archived: Array<[string, boolean]> = [];
@@ -187,7 +238,7 @@ check('archive: an archived chat leaves the sidebar, a search finds it marked, a
     deepEqual(titles(), ['Plan the trip', `Old trip notes${t('archive.tag')}`], 'a search finds it, marked');
     rightClick([...root.querySelectorAll('.crow')].find((r) => r.textContent?.includes('Old trip notes'))!);
     await settle();
-    deepEqual(labels(), [t('menu.rename'), t('menu.unarchive'), t('menu.delete')]);
+    deepEqual(labels(), [t('menu.rename'), t('menu.export'), t('menu.unarchive'), t('menu.delete')]);
     entry(t('menu.unarchive')).click();
     await settle();
     deepEqual(archived, [['c1', true], ['c2', false]]);
@@ -297,8 +348,12 @@ check('right-click: the keyboard opens the menu on a focused row, arrows move, E
     item.focus();
     key(item, { key: 'F10', shiftKey: true });
     await settle();
-    deepEqual(labels(), [t('menu.rename'), t('menu.archive'), t('menu.delete')]);
+    deepEqual(labels(), [t('menu.rename'), t('menu.pin'), t('menu.export'), t('menu.archive'), t('menu.delete')]);
     equal(document.activeElement, entry(t('menu.rename')), 'the first item takes focus');
+    key(document.activeElement!, { key: 'ArrowDown' });
+    equal(document.activeElement, entry(t('menu.pin')));
+    key(document.activeElement!, { key: 'ArrowDown' });
+    equal(document.activeElement, entry(t('menu.export')));
     key(document.activeElement!, { key: 'ArrowDown' });
     equal(document.activeElement, entry(t('menu.archive')));
     key(document.activeElement!, { key: 'ArrowDown' });

@@ -3,6 +3,8 @@ import type { Area, Project, Summary } from './api.ts';
 import { keepFocusIn } from './focus.ts';
 import { Icon } from './Glyphs.tsx';
 import { t } from './i18n.ts';
+import { pressed } from './keys.ts';
+import { openShortcuts } from './Shortcuts.tsx';
 import type { Key } from './locales/en.ts';
 import { keepForExit } from './motion.ts';
 import { type Entry, rank } from './palette.ts';
@@ -55,6 +57,7 @@ export function Palette(props: Props) {
     ...SECTIONS.map(([id, key, icon]): Item => ({ id: `settings-${id}`, kind: 'action', label: t('palette.settings', { section: t(key) }), icon, run: () => props.onSettings(id) })),
     { id: 'running', kind: 'action', label: t('run.toggle'), icon: 'panel', run: props.onRunning },
     { id: 'add', kind: 'action', label: t('side.addProject'), icon: 'plus', run: props.onAddProject },
+    { id: 'keys', kind: 'action', label: t('keys.title'), icon: 'keyboard', run: openShortcuts },
   ];
   // The newest conversation first, whatever order the list came in.
   const conversations = (): Item[] => {
@@ -110,9 +113,8 @@ export function Palette(props: Props) {
   onMount(() => {
     const onKey = (e: KeyboardEvent) => {
       const ctrl = e.ctrlKey || e.metaKey;
-      const key = e.key.toLowerCase();
       const swallow = () => (e.preventDefault(), e.stopImmediatePropagation());
-      if (ctrl && !e.altKey && !e.shiftKey && key === 'k') {
+      if (pressed(e, 'palette')) {
         e.preventDefault();
         if (!props.enabled) return;
         e.stopImmediatePropagation();
@@ -121,7 +123,7 @@ export function Palette(props: Props) {
       // A right-click menu over the box (Cut, Copy, Paste) owns the keys until it closes.
       if (!open() || document.querySelector('.cmenu:not(.leaving)')) return;
       // The shortcuts of the screen underneath wait until the box is closed.
-      if (ctrl && ['n', ',', '.', 'f'].includes(key)) return swallow();
+      if ((['new', 'settings', 'running', 'find', 'focus'] as const).some((id) => pressed(e, id))) return swallow();
       const count = rows().length;
       if (e.key === 'Escape') {
         swallow();

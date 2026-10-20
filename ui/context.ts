@@ -1,5 +1,6 @@
-// The Context meter in the topbar (R221): how full the conversation's own agent's context is. Pure, so the checks can read it.
-import type { ContextFill } from './api.ts';
+// The Context meter in the topbar (R221): how full the conversation's own agent's context is, and what fills it (task 190).
+import { createSignal } from 'solid-js';
+import type { ContextFill, ContextPart } from './api.ts';
 
 /** From this share of the window the meter turns amber: the CLI compacts by itself not far above it (C002: never alarm sooner). */
 export const NEAR = 0.85;
@@ -12,3 +13,11 @@ export const percentOf = (fill: ContextFill): number => Math.round(share(fill) *
 
 /** Near the point where the CLI would compact by itself. */
 export const near = (fill: ContextFill): boolean => share(fill) >= NEAR;
+
+const [parts, setParts] = createSignal<{ id: string; parts: ContextPart[] }>();
+
+/** What fills a conversation's context, part by part, as its CLI last counted it (only Claude Code does, on request). */
+export const partsOf = (id: string): ContextPart[] | undefined => (parts()?.id === id ? parts()!.parts : undefined);
+
+/** The CLI answered the meter's question. Only the newest answer is kept: the meter shows one conversation at a time. */
+export const heardParts = (id: string, list: ContextPart[]) => setParts({ id, parts: list });

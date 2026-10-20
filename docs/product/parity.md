@@ -28,7 +28,7 @@ Size: S small, M medium, L large. Wave: 1 next, 2 after, 3 later or with its pha
 | # | Gap | Who has it | Faber today | Way | Size | Wave |
 |---|---|---|---|---|---|---|
 | T6 | Earlier prompts with the up arrow, and a search over them | both CLIs | None | Composer | S | 2 |
-| T7 | Branch from any point without editing, and arrows between the versions of an edited or retried message | claude.ai, ChatGPT, `/branch`, `/fork` | Editing branches into a new conversation | Extends Branch | M | 2 |
+| T7 | Branch from any point without editing, and arrows between the versions of an edited or retried message | claude.ai, ChatGPT, `/branch`, `/fork` | Done: "Branch from here" on an answer, and arrows between the versions, each its own conversation | Extends Branch | M | 2 |
 | T8 | Voice: dictate into the box | all four | None | The system's own speech input, no service | M | 3 |
 | T9 | Talk out loud with the AI (voice mode) | claude.ai, ChatGPT, Codex realtime | None | Owner's call (cost, phase) | L | 3 |
 | T10 | A global key that opens a small box to ask from anywhere (Quick Entry) | Claude app | Tray only | Owner's call (a second window) | M | 3 |
@@ -45,8 +45,7 @@ Size: S small, M medium, L large. Wave: 1 next, 2 after, 3 later or with its pha
 
 | # | Gap | Who has it | Faber today | Way | Size | Wave |
 |---|---|---|---|---|---|---|
-| C1 | What fills the context, and "compact now" from the meter (`/context`, `/compact`) | Claude Code, Codex, Claude app | Meter (R221); the agent compacts in Projects; Claude Code's `/context` and `/compact` are reachable from the `/` menu | Extends Context meter | S | 2 |
-| C2 | A recap of a long conversation on demand (`/recap`) | both CLIs | Closing box per task | Extends the quick question on the side ([following.md](following.md) item 10) | S | 2 |
+| C1 | What fills the context, and "compact now" from the meter (`/context`, `/compact`) | Claude Code, Codex, Claude app | Done: the meter opens what fills the context (Claude Code's parts) and "Compact now" for both CLIs; the `/` entries stay | Extends Context meter | S | 2 |
 | C3 | Usage over days and weeks, per model and area (`/usage` stats, `/insights`) | Claude Code, Codex | Quota now and spend today | Extends Accounts and limits | M | 3 |
 
 ## Finding and keeping
@@ -78,7 +77,7 @@ Size: S small, M medium, L large. Wave: 1 next, 2 after, 3 later or with its pha
 | X1 | See and switch MCP servers and connectors, with their status (`/mcp`, apps) | all four | None on screen | The catalog, MCP part | M | 2 |
 | X2 | See, add and remove skills and plugins (`/skills`, `/plugin`) | both CLIs, both apps | Catalog skills for the agent (R247) | Extends the catalog | M | 2 |
 | X3 | Memory: what the AI learned, edit or delete it, per project (`/memory`, claude.ai, ChatGPT) | all four | Planned (following.md, learning) | Already in the roadmap | M | 2 |
-| X4 | Instructions and knowledge files for a group of chats | claude.ai, ChatGPT projects | Projects read AGENTS.md; Chat has none | Owner's call (Chat projects?) | M | 2 |
+| X4 | Instructions and knowledge files for a group of chats | claude.ai, ChatGPT projects | Projects read AGENTS.md; Chat has none | Owner chose it (2026-10-20): a group of chats in Chat | M | 2 |
 | X5 | Reply style: concise, explanatory, a custom one (`/output-style`, styles, personality) | all four | Codex length only | Settings, passed to each CLI | S | 2 |
 | X6 | Hooks: see which run and where they come from (`/hooks`) | both CLIs | One switch | Extends the hooks row | S | 3 |
 
@@ -105,7 +104,7 @@ Size: S small, M medium, L large. Wave: 1 next, 2 after, 3 later or with its pha
 
 | # | Gap | Who has it | Faber today | Way | Size | Wave |
 |---|---|---|---|---|---|---|
-| K1 | The list of shortcuts (`?`), and keys for model, effort and mode | both CLIs, both apps | A few fixed keys | A shortcut sheet; keys stay fixed | S | 2 |
+| K1 | The list of shortcuts (`?`), and keys for model, effort and mode | both CLIs, both apps | Done: ? lists every key, read from the one list of keys | A shortcut sheet; keys stay fixed | S | 2 |
 | K2 | Search in Settings | Codex app | Five short sections | Only if Settings grows | S | 3 |
 | K3 | A health check that finds and fixes setup problems (`/doctor`) | both CLIs | The account cards check | Extends the account cards | S | 3 |
 | K4 | What's new in the CLI itself (`/release-notes`) | Claude Code | Faber's own notes | Owner's call | S | 3 |

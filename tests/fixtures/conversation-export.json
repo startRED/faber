@@ -1,0 +1,78 @@
+{
+  "id": "export-fixture",
+  "title": "Trip notes",
+  "area": "chat",
+  "userName": "Erick",
+  "createdAt": 1767225600000,
+  "updatedAt": 1767225900000,
+  "workingFolder": "C:/private/folder",
+  "sessions": {
+    "claude": "PRIVATE_SESSION"
+  },
+  "allowAlways": [
+    "PRIVATE_SETTING"
+  ],
+  "messages": [
+    {
+      "id": "u1",
+      "role": "user",
+      "text": "Make **a plan**.",
+      "at": 1767225600000,
+      "attachments": [
+        "C:\\private\\notes.txt",
+        "/private/map.pdf"
+      ],
+      "images": [
+        {
+          "mediaType": "image/png",
+          "base64": "PRIVATE_IMAGE_BYTES"
+        }
+      ]
+    },
+    {
+      "id": "a1",
+      "role": "assistant",
+      "text": "🦀 Checking files.\n\n## Plan\n\n- Visit the coast\n- Bring water",
+      "activityEnd": 20,
+      "at": 1767225660000,
+      "status": "done",
+      "vendor": "claude",
+      "model": "claude-sonnet-5-5",
+      "thinking": "PRIVATE_THINKING",
+      "tools": [
+        {
+          "id": "tool",
+          "name": "Read",
+          "input": {
+            "path": "/private/secret"
+          },
+          "output": "PRIVATE_TOKEN"
+        }
+      ],
+      "files": [
+        {
+          "path": "/private/report.md",
+          "size": 12
+        }
+      ]
+    },
+    {
+      "id": "f1",
+      "role": "user",
+      "text": "Keep going.",
+      "at": 1767225720000,
+      "wake": {
+        "why": "wake.keepGoing"
+      }
+    },
+    {
+      "id": "a2",
+      "role": "assistant",
+      "text": "Done.\n\n```text\nready\n```",
+      "at": 1767225780000,
+      "status": "done",
+      "vendor": "codex",
+      "model": "gpt-6-luna"
+    }
+  ]
+}

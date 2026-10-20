@@ -164,6 +164,10 @@ pub enum EngineEvent {
     Compacted {
         after: Option<u64>,
     },
+    /// What fills the context, part by part, in answer to `Session::context_usage` (only Claude Code counts it).
+    ContextParts {
+        parts: Vec<crate::model::ContextPart>,
+    },
     /// The running turn took in a message sent to it with `Session::steer`. `tag` is the one that call carried when the CLI
     /// echoes it back; without one, the oldest message still on its way is the one.
     Injected {
@@ -246,6 +250,9 @@ pub enum SessionCommand {
     /// Compact the conversation's context now (Claude Code: the `/compact` command as the next line; Codex: the thread's
     /// compaction request). It ends like a turn, with a `Done`.
     Compact,
+    /// Ask what fills the context, part by part, without a turn (Claude Code's `get_context_usage` control request, from
+    /// the last response's usage and local estimates). Its answer is an `EngineEvent::ContextParts`; Codex counts no parts.
+    ContextUsage,
     Interrupt,
     Close,
 }
@@ -296,6 +303,9 @@ impl Session {
     }
     pub fn compact(&self) {
         (self.send)(SessionCommand::Compact);
+    }
+    pub fn context_usage(&self) {
+        (self.send)(SessionCommand::ContextUsage);
     }
     pub fn interrupt(&self) {
         (self.send)(SessionCommand::Interrupt);

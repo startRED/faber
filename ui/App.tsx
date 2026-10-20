@@ -8,6 +8,7 @@ import {
   type AppState,
   type Choice,
   type AppEvent,
+  type ContextFill,
   type Conversation,
   type Experience,
   type Plan,
@@ -17,6 +18,7 @@ import {
   type Summary,
   type UpdateStatus,
   type Vendor,
+  type Versions,
   STOPS,
 } from './api.ts';
 import { inOrder, refreshed, saveAndApply, watchSystem, windowHidden } from './appearance.ts';
@@ -24,12 +26,14 @@ import { useClock } from './clock.ts';
 import { Composer, type Draft } from './Composer.tsx';
 import { queuedDrafts, recoverQueuedDraft } from './unsent.ts';
 import { ContextMeter } from './Context.tsx';
+import { heardParts } from './context.ts';
 import { Empty } from './Empty.tsx';
 import { Find } from './Find.tsx';
 import { LookStep } from './FirstRun.tsx';
 import { keepFocusIn } from './focus.ts';
 import { Icon } from './Glyphs.tsx';
 import { failureText, lang, t, templates, useLanguage } from './i18n.ts';
+import { pressed, pressedAny } from './keys.ts';
 import { homeHints } from './idle.ts';
 import { createFileDrop } from './drop.ts';
 import { Grip } from './Grip.tsx';
@@ -39,6 +43,7 @@ import { isFirstInstall, newestId, NOTES, type Note, whatsNew } from './notes.ts
 import { modelOptions, vendorName } from './models.ts';
 import { animateDetails, animateList, keepForExit, watchMotion } from './motion.ts';
 import { Palette } from './Palette.tsx';
+import { Shortcuts, shortcutsOpen } from './Shortcuts.tsx';
 import { Projects } from './Projects.tsx';
 import { createOpening, upsert } from './opening.ts';
 import { Running } from './Running.tsx';
@@ -52,6 +57,7 @@ import { Setup } from './Setup.tsx';
 import { continuePatch, type FirstStep, firstRunStep, lookDue, setupPatch } from './setup.ts';
 import { Sidebar } from './Sidebar.tsx';
 import { keepRows, seedQuotas, withQuota } from './sidebar.ts';
+import { ToEnd } from './Floating.tsx';
 import { Thread } from './Thread.tsx';
 import { tutorialDue } from './tour.ts';
 import { Tutorial } from './Tutorial.tsx';
@@ -93,7 +99,34 @@ export function App(props: { initial: AppState; update?: UpdateStatus; inbox: { 
   // with another conversation's project.
   const [place, setPlace] = createSignal<Place>({ area: saved?.area ?? 'chat', projectId: saved?.projectId });
   const [current, setCurrent] = createSignal<Conversation>();
+  // The last context each conversation reported. A first message's report can come while its conversation is still
+  // opening, before it is current; kept here, the meter shows it once it is.
+  const [heardContext, setHeardContext] = createSignal<Record<string, ContextFill | undefined>>({});
+  const contextOf = (c: Conversation) => (c.id in heardContext() ? heardContext()[c.id] : c.context);
   const [searchIndex, setSearchIndex] = createSignal<number>();
+  // The messages of the open conversation that have other versions (parity T7), asked when it opens.
+  const [versions, setVersions] = createSignal<Versions[]>([]);
+  // Only the newest ask's answer is kept; a step through the versions gives focus back to the arrows it came from.
+  let versionsAsk = 0;
+  let versionFocus: { index: number; by: number } | undefined;
+  const askVersions = (id: string) => {
+    const ask = ++versionsAsk;
+    void api
+      .versions(id)
+      .then((list) => {
+        if (ask !== versionsAsk || place().id !== id) return;
+        setVersions(list);
+        const want = versionFocus;
+        versionFocus = undefined;
+        if (want)
+          requestAnimationFrame(() => {
+            const arrows = [...(thread?.querySelectorAll<HTMLButtonElement>(`[data-message-index="${want.index}"] .versions button`) ?? [])];
+            const same = arrows[want.by < 0 ? 0 : 1];
+            (same && !same.disabled ? same : arrows.find((b) => !b.disabled))?.focus({ preventScroll: true });
+          });
+      })
+      .catch(() => {});
+  };
   let searchFrame: number | undefined;
   let searchMark: HTMLElement | undefined;
   let searchTimer: ReturnType<typeof setTimeout> | undefined;
@@ -408,6 +441,17 @@ export function App(props: { initial: AppState; update?: UpdateStatus; inbox: { 
     return open && current()?.id === open.conversationId ? open : undefined;
   };
   const sideChanges = () => changesOpen() && changesOpen() === current()?.id ? changesOpen() : undefined;
+  // A conversation deleted, archived or branched changes the list, and with it the versions of the open one.
+  createEffect(
+    on(
+      () => state().conversations,
+      () => {
+        const id = current()?.id;
+        if (id && !loading()) askVersions(id);
+      },
+      { defer: true },
+    ),
+  );
   createEffect(on(openedAgent, (open) => open && (showSite(undefined), showAside(undefined), setChangesOpen(undefined)), { defer: true }));
   createEffect(on(openedSite, (open) => open && (showAgent(undefined), showAside(undefined), setChangesOpen(undefined)), { defer: true }));
   createEffect(on(openedAside, (open) => open && (showAgent(undefined), showSite(undefined), setChangesOpen(undefined)), { defer: true }));
@@ -474,6 +518,7 @@ export function App(props: { initial: AppState; update?: UpdateStatus; inbox: { 
     setUntil(undefined);
     setFrom(Math.max(0, (current()?.messages.length ?? 0) - PAGE));
     planHeard.plan = undefined;
+    setVersions([]);
     setPlace(next);
     remember('faber.place', next);
     const token = opening.begin(next.id);
@@ -500,6 +545,7 @@ export function App(props: { initial: AppState; update?: UpdateStatus; inbox: { 
     const plan = heard?.id === done.conversation?.id ? heard : undefined;
     setCurrent(done.conversation && plan ? { ...done.conversation, plan: plan.plan } : done.conversation);
     setSearchIndex(target);
+    if (done.conversation) askVersions(done.conversation.id);
     if (target !== undefined) searchFrame = requestAnimationFrame(() => {
       searchMark = thread?.querySelector<HTMLElement>(`[data-message-index="${target}"]`) ?? undefined;
       if (!searchMark) return;
@@ -572,8 +618,10 @@ export function App(props: { initial: AppState; update?: UpdateStatus; inbox: { 
         setCurrent((c) => (c?.id === e.conversationId ? { ...c, queued: e.queued } : c));
       }
       if (e.type === 'context') {
+        setHeardContext((h) => ({ ...h, [e.conversationId]: e.context ?? undefined }));
         setCurrent((c) => (c?.id === e.conversationId ? { ...c, context: e.context ?? undefined } : c));
       }
+      if (e.type === 'contextParts') heardParts(e.conversationId, e.parts);
       if (e.type === 'plan') {
         if (opening.id === e.conversationId) planHeard.plan = { id: e.conversationId, plan: e.plan ?? undefined };
         setCurrent((c) => (c?.id === e.conversationId ? { ...c, plan: e.plan ?? undefined } : c));
@@ -593,7 +641,7 @@ export function App(props: { initial: AppState; update?: UpdateStatus; inbox: { 
       // A first-run step and a tutorial card are modal: their own buttons are the only way on, so Esc, Ctrl N, Ctrl , and
       // Ctrl . do nothing (the card handles its own keys, ui/Tutorial.tsx).
       if (step() || tourOpen()) {
-        if (ctrl && ['n', ',', '.', 'b'].includes(e.key.toLowerCase())) e.preventDefault();
+        if (pressedAny(e)) e.preventDefault();
         if (step() && e.key === 'Tab' && !ctrl && !e.altKey) keepFocusIn(e, document.querySelector<HTMLElement>('.fr-stage'));
         return;
       }
@@ -604,7 +652,7 @@ export function App(props: { initial: AppState; update?: UpdateStatus; inbox: { 
         } else if (sideOverlay()) keepFocusIn(e, sideEl);
         else if (trapped()) keepFocusIn(e, column);
       }
-      if (ctrl && e.key.toLowerCase() === 'n') {
+      if (pressed(e, 'new')) {
         e.preventDefault();
         closeSettings();
         opener = undefined; // the new conversation's composer takes focus, not the control that opened the cards
@@ -617,12 +665,12 @@ export function App(props: { initial: AppState; update?: UpdateStatus; inbox: { 
         }
         void fresh(place()).then(focusComposer);
       }
-      if (ctrl && e.key === ',') openSettings();
-      if (ctrl && !e.shiftKey && !e.altKey && e.key.toLowerCase() === 'b') {
+      if (pressed(e, 'settings')) openSettings();
+      if (pressed(e, 'focus')) {
         e.preventDefault();
         if (inShell) toggleFocus();
       }
-      if (ctrl && e.key === '.') {
+      if (pressed(e, 'running')) {
         e.preventDefault();
         // Settings and the account cards replace the shell: the column is not on screen to toggle.
         if (inShell) toggleColumn();
@@ -714,8 +762,9 @@ export function App(props: { initial: AppState; update?: UpdateStatus; inbox: { 
 
   const send = async (draft: Draft) => {
     setQueuedNotice(undefined);
-    // `/btw <question>` asks on the side (R250): it opens the quick question with it, and the conversation never sees it.
-    const side = draft.images.length || draft.files.length ? undefined : btw(draft.text);
+    // Faber's side questions never reach the conversation, including the fixed recap question.
+    const side = draft.images.length || draft.files.length ? undefined
+      : /^\/recap$/i.test(draft.text.trim()) ? t('aside.recapQuestion') : btw(draft.text);
     if (side !== undefined) {
       showAside({ conversationId: current()?.id, question: answered(current()) ? side : undefined });
       // Before the agent has answered there is nothing to ask about: the words go back in the box, and the tab says when.
@@ -774,6 +823,20 @@ export function App(props: { initial: AppState; update?: UpdateStatus; inbox: { 
     try {
       const id = await api.branch({ conversationId: c.id, messageId, text, choice: picked });
       remember(`faber.choice.${id}`, picked);
+      await go({ ...at, id });
+    } catch (err) {
+      fail(err);
+    }
+  };
+  // "Branch from here" on an answer: the new conversation opens with nothing sent, the composer's choice kept for it.
+  const branchHere = async (messageId: string) => {
+    const c = current();
+    if (!c) return;
+    const at = place();
+    setError(undefined);
+    try {
+      const id = await api.branchHere(c.id, messageId);
+      remember(`faber.choice.${id}`, picked());
       await go({ ...at, id });
     } catch (err) {
       fail(err);
@@ -955,6 +1018,7 @@ export function App(props: { initial: AppState; update?: UpdateStatus; inbox: { 
         }}
         commandsVersion={commandsVersion()}
         canAside={canAside()}
+        onRecap={() => showAside({ conversationId: current()?.id, question: answered(current()) ? t('aside.recapQuestion') : undefined })}
         onRestore={(f) => {
           restore = f;
           queueMicrotask(() => current() && restoreRejected(current()!.id, current()!.messages.at(-1)));
@@ -1241,7 +1305,19 @@ ${copy().path}`}>
                   </Switch>
                 </div>
                 <div class="right">
-                  <Show when={current()?.id === place().id ? current()?.context : undefined}>{(fill) => <ContextMeter fill={fill()} />}</Show>
+                  <Show when={current()?.id === place().id ? current() && contextOf(current()!) : undefined}>{(fill) => (
+                      <ContextMeter
+                        id={place().id!}
+                        fill={fill()}
+                        // As the engine allows it: nothing at work, and the last reply ended well.
+                        busy={
+                          state().running.items.some((i) => i.conversationId === place().id) ||
+                          current()?.messages.at(-1)?.status !== 'done'
+                        }
+                        onFail={fail}
+                      />
+                    )}
+                  </Show>
                   <button
                     class="run-btn"
                     data-tour="run"
@@ -1318,6 +1394,12 @@ ${copy().path}`}>
                                     options={options()}
                                     choice={picked()}
                                     onBranch={(messageId, text, chosen) => void branch(messageId, text, chosen ?? picked())}
+                                    onBranchHere={(messageId) => void branchHere(messageId)}
+                                    versions={versions()}
+                                    onVersion={(to, index, by) => {
+                                      versionFocus = { index, by };
+                                      void go({ ...place(), id: to.conversationId }, index);
+                                    }}
                                     plan={c().plan}
                                     onReply={(text) => void send({ text, images: [], files: [] })}
                                   />
@@ -1349,6 +1431,9 @@ ${copy().path}`}>
                           </Show>
                         </Show>
                       </div>
+                      <Show when={!newChat() && !needsProject()}>
+                        <ToEnd thread={() => thread} />
+                      </Show>
                       <Show when={!newChat() && !needsProject() && state().vendors.length > 0}>
                         <div class="dock" inert={trapped()} onInput={() => setQueuedNotice(undefined)}>
                           <Show when={queuedNotice() && queuedNotice() === current()?.id}>
@@ -1412,7 +1497,7 @@ ${copy().path}`}>
         <WhatsNew version={state().version} notes={notes()} onClose={closeNotes} />
       </Show>
       <Palette
-        enabled={!step() && !setupOpen() && !tourOpen() && !notesOpen() && !startScreen()}
+        enabled={!step() && !setupOpen() && !tourOpen() && !notesOpen() && !startScreen() && !shortcutsOpen()}
         conversations={state().conversations}
         projects={state().projects}
         onOpen={openSummary}
@@ -1423,6 +1508,7 @@ ${copy().path}`}>
         onRunning={() => (closeSettings(), toggleColumn())}
         onAddProject={() => (closeSettings(), void addProject().catch(fail))}
       />
+      <Shortcuts enabled={!step() && !setupOpen() && !tourOpen() && !notesOpen() && !startScreen()} />
     </div>
   );
 }

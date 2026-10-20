@@ -5,6 +5,19 @@
 use super::*;
 
 impl Engine {
+    pub fn pin(&self, id: &str, on: bool) -> Result<(), String> {
+        self.with(|core| {
+            let c = core.load(id).ok_or("error.conversationGone")?;
+            if on == c.pinned_at.is_some() || (on && c.archived_at.is_some()) {
+                return Ok(());
+            }
+            c.pinned_at = on.then(now);
+            core.save(id);
+            core.list_changed();
+            Ok(())
+        })
+    }
+
     pub fn archive(&self, id: &str, on: bool) -> Result<(), String> {
         self.with(|c| c.set_archived(id, on))
     }
@@ -26,6 +39,7 @@ impl Core {
             }
         }
         if on {
+            c.pinned_at = None;
             // What Faber queued by itself (a report, a question, Keep going) never wakes an archived conversation.
             c.queued.retain(|q| q.sending || q.wake.is_none());
         }

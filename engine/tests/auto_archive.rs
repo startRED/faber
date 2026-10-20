@@ -124,6 +124,32 @@ fn archived(engine: &Engine, id: &str) -> bool {
 }
 
 #[tokio::test]
+async fn auto_archive_spares_pinned_conversations_for_both_age_and_merged_pull_requests() {
+    let dir = support::tempdir();
+    let (spawn, made) = pipes();
+    let (engine, reads) = boot(dir.path(), spawn);
+    let project = engine.add_project(&dir.path().to_string_lossy()).unwrap();
+    let (idle, _a) = answered(&engine, &made, ask(Area::Project, &project.id, None, "look around")).await;
+    engine.pin(&idle, true).unwrap();
+    engine.archive_at(now() + 8 * DAY, None);
+    assert!(!archived(&engine, &idle), "a pin keeps an old conversation");
+
+    let (merged, _b) = opened(&engine, &made, &project.id).await;
+    engine.pin(&merged, true).unwrap();
+    reads.lock().unwrap().push_back(look(PrState::Merged, CiState::Passing));
+    engine.look_at_prs().await;
+    assert!(!archived(&engine, &merged), "a pin also keeps a conversation whose pull request ended");
+    engine.archive_at(now() + 8 * DAY, None);
+    assert!(!archived(&engine, &merged));
+    engine.pin(&idle, false).unwrap();
+    engine.pin(&merged, false).unwrap();
+    engine.archive_at(now() + 8 * DAY, None);
+    assert!(archived(&engine, &idle));
+    assert!(archived(&engine, &merged));
+    engine.shutdown();
+}
+
+#[tokio::test]
 async fn r_next_a_merged_or_closed_pull_request_archives_its_conversation_and_an_open_one_does_not() {
     let dir = support::tempdir();
     let (spawn, made) = pipes();

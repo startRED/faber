@@ -74,7 +74,7 @@ check('slash: App uses each AI\'s own or last list, refreshes on announcements a
   const enter = () => field().dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true }));
   const shown = () => [...root.querySelectorAll('.mentions [role="option"] span:first-of-type')].map((span) => span.textContent);
   // The agent's own commands, without Faber's quick question, which comes first whenever it is available.
-  const cli = () => shown().filter((name) => name !== '/btw');
+  const cli = () => shown().filter((name) => name !== '/btw' && name !== '/recap');
   const down = () => field().dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true, cancelable: true }));
   try {
     await settle();
@@ -86,6 +86,7 @@ check('slash: App uses each AI\'s own or last list, refreshes on announcements a
     await settle();
     deepEqual(asked.at(-1), [conversation.id, 'codex'], 'the latest Claude answer cannot override the current choice');
     deepEqual(cli(), ['$review-notes'], 'the other AI never leaks into the list');
+    down();
     down();
     enter();
     await settle();
@@ -107,6 +108,7 @@ check('slash: App uses each AI\'s own or last list, refreshes on announcements a
     await settle();
     deepEqual(asked.at(-1), [conversation.id, 'claude'], 'switching refreshes an already open token too');
     deepEqual(cli(), ['/context'], 'a Codex answer cannot override the new Claude choice');
+    down();
     down();
     enter();
     await settle();
@@ -176,7 +178,7 @@ check('slash: App uses each AI\'s own or last list, refreshes on announcements a
           if (stage === 'open') equal(root.querySelector('.mentions [role="option"]'), first, 'streaming keeps the open rows');
           if (i === 3) finish?.();
           await new Promise((resolve) => setTimeout(resolve, 20));
-          if (i >= 6) deepEqual(shown(), token === '/' ? ['/btw', '/context'] : ['notes.md'], `${token} ${stage} completes during streaming`);
+          if (i >= 6) deepEqual(shown(), token === '/' ? ['/btw', '/recap', '/context'] : ['notes.md'], `${token} ${stage} completes during streaming`);
         }
         equal(queries(), beforeQueries + 1, 'streaming never restarts a completion query');
         equal(document.activeElement, field(), 'the field stays focused');
@@ -433,9 +435,11 @@ check('slash: the quick question comes first only where available and inserts wi
   let slow = false;
   let sent = 0;
   let choices = 0;
+  let recaps = 0;
   const dispose = render(() => createComponent(Composer, {
     vendors: ['claude', 'codex'], options: [], choice: { vendor: 'auto' }, busy: false, placeholder: 'Write',
     get canAside() { return available(); },
+    onRecap: () => { recaps++; },
     onChoice: () => { choices++; }, onStop: () => {}, onWarm: () => {}, onPause: () => {},
     onSend: () => { sent++; },
     onCommands: async () => {
@@ -463,7 +467,7 @@ check('slash: the quick question comes first only where available and inserts wi
     deepEqual(shown(), ['/context', '$review'], 'a new conversation offers no quick question');
     setAvailable(true);
     await settle();
-    deepEqual(shown(), ['/btw', '/context', '$review']);
+    deepEqual(shown(), ['/btw', '/recap', '/context', '$review']);
     equal(rows()[0]!.querySelector('.mention-note')?.textContent, t('aside.title'));
     equal(rows()[0]!.querySelector('.mention-vendor'), null, 'Faber owns the action');
     rows()[0]!.dispatchEvent(new MouseEvent('mousedown', { button: 2, bubbles: true, cancelable: true }));
@@ -473,6 +477,25 @@ check('slash: the quick question comes first only where available and inserts wi
     equal(field().value, '/btw ');
     equal(sent, 0);
     equal(choices, 0, 'the quick question keeps the existing choice');
+
+    type('/RECAP');
+    await settle();
+    deepEqual(shown(), ['/recap']);
+    equal(rows()[0]!.querySelector('.mention-note')?.textContent, t('aside.recap'));
+    field().dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true }));
+    await settle();
+    equal(recaps, 1, 'choosing the recap asks at once');
+    equal(field().value, '', 'the recap inserts nothing');
+    equal(sent, 0, 'nothing is sent to the main conversation');
+    equal(choices, 0, 'the recap keeps Auto');
+
+    // The / list opens only for a box holding the command alone, so a recap never meets a draft here; the mouse asks too.
+    type('/recap');
+    await settle();
+    rows()[0]!.dispatchEvent(new MouseEvent('mousedown', { button: 0, bubbles: true, cancelable: true }));
+    await settle();
+    equal(recaps, 2, 'choosing the recap with the mouse asks too');
+    equal(field().value, '');
 
     type('/BT');
     await settle();
@@ -488,7 +511,7 @@ check('slash: the quick question comes first only where available and inserts wi
     failed = true;
     type('/');
     await settle();
-    deepEqual(shown(), ['/btw'], 'a failed agent list cannot hide Faber\'s action');
+    deepEqual(shown(), ['/btw', '/recap'], 'a failed agent list cannot hide Faber\'s actions');
     setAvailable(false);
     await settle();
     equal(root.querySelector('.mentions'), null, 'availability changes refresh the same token');

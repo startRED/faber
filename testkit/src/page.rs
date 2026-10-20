@@ -173,7 +173,8 @@ impl Page {
 
     /// A control labelled by a translation key.
     pub fn labelled(&mut self, key: &str) -> Result<Loc, String> {
-        Ok(label(&self.text_of(key)?))
+        // The whole name: "Edit message" must not answer to "Message".
+        Ok(label(&self.text_of(key)?).exact())
     }
 
     // Looking.

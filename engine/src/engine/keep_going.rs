@@ -561,6 +561,10 @@ impl Core {
     }
 
     fn send_next(&mut self, conv: &str, reply_id: &str) {
+        // A large context is compacted first; its end comes back here (`compact.rs`).
+        if self.compact_at_boundary(conv, reply_id) {
+            return;
+        }
         let mut text = CONTINUE.to_string();
         let mut chosen = None;
         if let Some(c) = self.convs.get_mut(conv) {
@@ -639,7 +643,7 @@ impl Core {
     /// an AI billed per use is never spent on by itself. How fast the week's quota is spent never holds it back (R212):
     /// whoever started it trusts Faber to keep going, and Auto's pace only picks which AI answers. An account not read yet
     /// is its own reason, since it is read in a moment.
-    fn room(&self, vendor: Vendor, model: Option<&str>) -> Result<(), &'static str> {
+    pub(super) fn room(&self, vendor: Vendor, model: Option<&str>) -> Result<(), &'static str> {
         match self.allows(vendor, model.and_then(family_of), Purpose::UserTurn { by_hand: false }, false) {
             Err(Why::Billing) if self.ledger.of(vendor).billing == Billing::Unknown => Err(UNKNOWN),
             Err(Why::Billing) => Err("reason.keepGoing.billed"),

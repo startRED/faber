@@ -1,12 +1,14 @@
 import { createEffect, createMemo, createSignal, For, on, onCleanup, onMount, Show } from 'solid-js';
 import { DEFAULT_EFFORT, type Choice, type Command, type Effort, type Mention, PERMISSION_MODES, type PermissionMode, type Vendor } from './api.ts';
 import { Ghost } from './Ghost.tsx';
-import { Pic } from './ImageViewer.tsx';
 import { Icon } from './Glyphs.tsx';
 import { t } from './i18n.ts';
 import { type Option, vendorName } from './models.ts';
 import { caretOnFirstLine, resizeComposer } from './composer-size.ts';
+import { animateList, keepForExit } from './motion.ts';
+import { Thumb } from './Thumbs.tsx';
 import { keep, kept, release, useDraft } from './unsent.ts';
+import { pressed } from './keys.ts';
 
 export interface Draft {
   text: string;
@@ -56,11 +58,12 @@ interface Props {
   onHistory?: (signal: AbortSignal) => Promise<string[]>;
   /** An announcement from the engine invalidates an open or pending `/` query. */
   commandsVersion?: number;
-  /** The conversation can answer a quick question on the side; `/btw` is Faber's first command. */
+  /** The open conversation offers Faber's `/btw` and `/recap` before the agent's commands. */
   canAside?: boolean;
+  onRecap?: () => void;
 }
 
-type Completion = { path: string; dir: boolean; command?: Command; aside?: boolean; history?: boolean };
+type Completion = { path: string; dir: boolean; command?: Command; aside?: 'btw' | 'recap'; history?: boolean };
 type Trigger = { at: number; query: string; kind: 'mention' | 'command' | 'history' };
 
 /** The `@` being typed at the caret: where it starts and what follows it, or undefined. A path with a space is written
@@ -91,24 +94,37 @@ function readAs(file: File, how: 'text' | 'dataUrl'): Promise<string> {
   });
 }
 
+// A small text file written into the message: its name, and the exact words it added, so taking it away takes those words out.
+interface Inlined {
+  name: string;
+  block: string;
+}
+// The name a picture came with. A draft keeps only the media type and the data, so the name waits here, by the picture itself,
+// and is still found when a rejected message puts its draft back.
+const called = new WeakMap<object, string>();
+// The small text files a draft had when it was sent, kept by the draft itself: a message the engine rejects comes back with them.
+const sentWith = new WeakMap<object, Inlined[]>();
+
 // Images go to the model as images, small text files inside the message, and anything else as a file the model opens.
-async function attach(list: Iterable<File>, draft: Draft): Promise<{ draft: Draft; names: string[] }> {
-  const names: string[] = [];
+async function attach(list: Iterable<File>, draft: Draft): Promise<{ draft: Draft; inlined: Inlined[] }> {
+  const inlined: Inlined[] = [];
   let { text, images, files } = draft;
   for (const file of list) {
     if (file.type.startsWith('image/')) {
       const url = await readAs(file, 'dataUrl');
-      images = [...images, { mediaType: file.type, base64: url.slice(url.indexOf(',') + 1) }];
-      continue; // an image shows as its own thumbnail, not as a name
+      const image = { mediaType: file.type, base64: url.slice(url.indexOf(',') + 1) };
+      called.set(image, file.name);
+      images = [...images, image];
     } else if ((file.type.startsWith('text/') || TEXT.test(file.name)) && file.size <= INLINE_TEXT) {
-      text = `${text}${text ? '\n\n' : ''}${t('composer.attachedFile', { name: file.name })}\n\`\`\`\n${await readAs(file, 'text')}\n\`\`\``;
+      const block = `${text ? '\n\n' : ''}${t('composer.attachedFile', { name: file.name })}\n\`\`\`\n${await readAs(file, 'text')}\n\`\`\``;
+      text += block;
+      inlined.push({ name: file.name, block });
     } else {
       const url = await readAs(file, 'dataUrl');
       files = [...files, { name: file.name, base64: url.slice(url.indexOf(',') + 1) }];
     }
-    names.push(file.name);
   }
-  return { draft: { text, images, files }, names };
+  return { draft: { text, images, files }, inlined };
 }
 
 /** What Stop asks while helpers are at work: how many it ends too, "Stop all", and "Keep working", focused, which Escape
@@ -133,7 +149,7 @@ export function StopAsk(props: { helpers: number; onStop: () => void; onKeep: ()
 
 export function Composer(props: Props) {
   const [draft, setDraft] = createSignal<Draft>({ ...EMPTY, text: props.draftKey ? kept(props.draftKey) : '' });
-  const [names, setNames] = createSignal<string[]>([]);
+  const [inlined, setInlined] = createSignal<Inlined[]>([]);
   const [focused, setFocused] = createSignal(false);
   const [historyMode, setHistoryMode] = createSignal<'browse' | 'search'>();
   const [historyError, setHistoryError] = createSignal(false);
@@ -321,10 +337,14 @@ export function Composer(props: Props) {
         ? loadHistory().then((list) => list.filter((text) => text.toLowerCase().includes(query)).map((path) => ({ path, dir: false, history: true })))
         : found.kind === 'mention' ? ask!(found.query) : (commands?.() ?? Promise.resolve([])).catch(() => []).then((commands) => {
         const list: Completion[] = commands
-          .filter((c) => props.vendors.includes(c.vendor) && c.name.toLowerCase().includes(query))
+          .filter((c) => props.vendors.includes(c.vendor) && c.name.toLowerCase().includes(query)
+            && !(canAside && ['btw', 'recap'].includes(c.name.toLowerCase())))
           .sort((a, b) => Number(b.name.toLowerCase().startsWith(query)) - Number(a.name.toLowerCase().startsWith(query)))
           .map((command) => ({ path: `${command.vendor === 'claude' ? '/' : '$'}${command.name}`, dir: false, command }));
-        if (canAside && 'btw'.includes(query)) list.unshift({ path: '/btw', dir: false, aside: true });
+        if (canAside) {
+          if ('recap'.includes(query)) list.unshift({ path: '/recap', dir: false, aside: 'recap' });
+          if ('btw'.includes(query)) list.unshift({ path: '/btw', dir: false, aside: 'btw' });
+        }
         return list.slice(0, 50);
       });
       void request.then(answered, () => answered([]));
@@ -354,6 +374,13 @@ export function Composer(props: Props) {
     if (m.aside && !props.canAside) return closeMentions();
     const now = triggerAt(field);
     if (now?.at !== mention.at || now.query !== mention.query || now.kind !== mention.kind) return closeMentions();
+    if (m.aside === 'recap') {
+      const text = field.value.slice(0, mention.at) + field.value.slice(field.selectionStart);
+      closeMentions();
+      editDraft((d) => ({ ...d, text }));
+      props.onRecap?.();
+      return;
+    }
     const at = mention.at;
     if (m.command && props.choice.vendor === 'auto') {
       const choice = props.options.find((o) => o.choice.vendor === m.command!.vendor)?.choice;
@@ -375,9 +402,11 @@ export function Composer(props: Props) {
     cancelHistoryRead();
     closeMentions();
     clearTimeout(pause);
-    props.onSend(draft());
+    const sending = draft();
+    sentWith.set(sending, inlined());
+    props.onSend(sending);
     setDraft(EMPTY);
-    setNames([]);
+    setInlined([]);
     warmed = false;
   };
   props.onReady?.((text) => {
@@ -388,12 +417,12 @@ export function Composer(props: Props) {
   });
   props.onRestore?.((saved) => {
     if (hasContent() || props.locked) return false;
-    editDraft(() => saved); setNames(saved.files.map((f) => f.name)); warmed = false;
+    editDraft(() => saved); setInlined(sentWith.get(saved) ?? []); warmed = false;
     field?.focus(); return true;
   });
   props.onClearRestored?.((saved) => {
     if (draft() !== saved) return false;
-    editDraft(() => EMPTY); setNames([]); warmed = false; return true;
+    editDraft(() => EMPTY); setInlined([]); warmed = false; return true;
   });
   const add = async (list: Iterable<File>) => {
     const files = [...list];
@@ -401,12 +430,33 @@ export function Composer(props: Props) {
     // Escape or a late recall must not undo this edit while FileReader is still at work.
     if (historyMode()) leaveHistory(historyMode() === 'search');
     const result = await attach(files, EMPTY);
-    editDraft((d) => ({
-      text: result.draft.text ? `${d.text}${d.text ? '\n\n' : ''}${result.draft.text}` : d.text,
-      images: [...d.images, ...result.draft.images],
-      files: [...d.files, ...result.draft.files],
-    }));
-    setNames((n) => [...n, ...result.names]);
+    let added = result.inlined;
+    editDraft((d) => {
+      const gap = d.text ? '\n\n' : '';
+      // The first small text file starts the added words, so the gap before them belongs to it: taking it away takes the gap too.
+      added = result.inlined.map((item, i) => (i === 0 ? { ...item, block: gap + item.block } : item));
+      return {
+        text: result.draft.text ? `${d.text}${gap}${result.draft.text}` : d.text,
+        images: [...d.images, ...result.draft.images],
+        files: [...d.files, ...result.draft.files],
+      };
+    });
+    setInlined((all) => [...all, ...added]);
+  };
+  // The attachments, each its own. A memo per kind, so typing (which makes a new draft) never builds the thumbnails again.
+  const images = createMemo(() => draft().images);
+  const files = createMemo(() => draft().files);
+  const count = () => images().length + files().length + inlined().length;
+  const shown = keepForExit(() => count() > 0);
+  const dropImage = (image: Draft['images'][number]) => editDraft((d) => ({ ...d, images: d.images.filter((i) => i !== image) }));
+  const dropFile = (file: Draft['files'][number]) => editDraft((d) => ({ ...d, files: d.files.filter((f) => f !== file) }));
+  const dropText = (item: Inlined) => {
+    setInlined((all) => all.filter((i) => i !== item));
+    editDraft((d) => ({ ...d, text: d.text.replace(item.block, '') }));
+  };
+  const dropAll = () => {
+    editDraft((d) => ({ ...d, images: [], files: [], text: inlined().reduce((text, i) => text.replace(i.block, ''), d.text) }));
+    setInlined([]);
   };
 
   // Stop with helpers at work says what it ends and offers to let them work; it closes by itself once they are done.
@@ -430,26 +480,21 @@ export function Composer(props: Props) {
         if (e.dataTransfer) void add(e.dataTransfer.files);
       }}
     >
-      <Show when={names().length > 0 || draft().images.length > 0}>
-        <div class="chips">
-          <For each={draft().images}>
-            {(img, i) => (
-              <span class="attach-thumb">
-                <Pic img={img} />
-                <button type="button" class="attach-remove" onMouseDown={keepEditingFocus} onClick={() => editDraft((d) => ({ ...d, images: d.images.filter((_, j) => j !== i()) }))} aria-label={t('composer.removeImage')} title={t('composer.removeImage')}>
-                  <Icon name="close" small />
+      {/* The row opens and closes with its height, so the box never jumps when the first file lands or the last one goes. */}
+      <Show when={shown()}>
+        <div class="fold attachments" classList={{ open: count() > 0 }} inert={count() === 0}>
+          <div class="fold-inner">
+            <div class="attach-row" ref={animateList} onMouseDown={keepEditingFocus}>
+              <For each={images()}>{(image) => <Thumb name={called.get(image) ?? t('composer.image')} src={`data:${image.mediaType};base64,${image.base64}`} onRemove={() => dropImage(image)} />}</For>
+              <For each={files()}>{(file) => <Thumb name={file.name} onRemove={() => dropFile(file)} />}</For>
+              <For each={inlined()}>{(item) => <Thumb name={item.name} onRemove={() => dropText(item)} />}</For>
+              <Show when={count() > 1}>
+                <button type="button" class="more attach-all" onClick={dropAll}>
+                  {t('composer.removeAttachments')}
                 </button>
-              </span>
-            )}
-          </For>
-          <For each={names()}>{(name) => <span class="chip">{name}</span>}</For>
-          <Show when={names().length > 0}>
-            <span class="chip">
-              <button type="button" onMouseDown={keepEditingFocus} onClick={() => (editDraft((d) => ({ ...d, files: [] })), setNames([]))} aria-label={t('composer.removeAttachments')} title={t('composer.removeAttachments')}>
-                <Icon name="close" small />
-              </button>
-            </span>
-          </Show>
+              </Show>
+            </div>
+          </div>
         </div>
       </Show>
       <textarea
@@ -481,7 +526,7 @@ export function Composer(props: Props) {
         }}
         onKeyDown={(e) => {
           if (e.isComposing) return;
-          if (props.onHistory && e.ctrlKey && !e.altKey && !e.shiftKey && e.key.toLowerCase() === 'r') {
+          if (props.onHistory && pressed(e, 'search')) {
             e.preventDefault();
             e.stopPropagation();
             rememberDraft();
@@ -580,7 +625,7 @@ export function Composer(props: Props) {
               >
                 <Icon name={m.command || m.aside ? 'terminal' : m.dir ? 'folder' : 'sheet'} small />
                 <span>{m.path}</span>
-                <Show when={m.aside || m.command?.note}><span class="mention-note">{m.aside ? t('aside.title') : m.command!.note}</span></Show>
+                <Show when={m.aside || m.command?.note}><span class="mention-note">{m.aside ? t(m.aside === 'recap' ? 'aside.recap' : 'aside.title') : m.command!.note}</span></Show>
                 <Show when={m.command && mixedCommands()}>
                   <span class="mention-vendor">{t('composer.commandAgent', { name: vendorName(m.command!.vendor) })}</span>
                 </Show>

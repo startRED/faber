@@ -2,7 +2,7 @@
 
 How a reply shows the subagents and helpers its agent hands work to: the rows, the running column, the stuck signs, and the pages
 the agent opens in Faber's browser, which open in the same place.
-The work log they sit under is in [layout.md](layout.md).
+The work log they sit under is in [conversation.md](conversation.md).
 
 ## Subagent steps
 
