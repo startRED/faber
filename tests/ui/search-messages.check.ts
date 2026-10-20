@@ -172,11 +172,13 @@ check('search-messages: clicking a hit opens its old message, unfolds its run an
   api.notesSeen = async () => Number.MAX_SAFE_INTEGER;
   // The screen focuses and scrolls to a hit on an animation frame, and a slow or hidden window (macOS CI) draws frames late:
   // a click is finished when the scroll was asked for, never after a fixed time.
+  let jumps = 0; let opens = 0;
   const jump = async (hitButton: HTMLElement) => {
     scrolled = undefined;
+    const number = ++jumps; const before = opens;
     hitButton.click();
-    const state = () => `hit connected ${hitButton.isConnected}, thread has ${document.querySelectorAll('[data-message-index]').length} messages, message 3 ${document.querySelector('[data-message-index="3"]') ? 'mounted' : 'missing'}`;
-    await until(() => scrolled !== undefined, 4000, `the jump never asked for a scroll (${state()})`);
+    const state = () => `jump ${number} in ${[...document.querySelectorAll('[data-motion]')].map((e) => (e as HTMLElement).dataset.motion).join('/')}: hit connected ${hitButton.isConnected}, ${document.querySelectorAll('[data-message-index]').length} messages drawn, message 3 ${document.querySelector('[data-message-index="3"]') ? 'mounted' : 'missing'}, ${document.querySelectorAll('.message-hit').length} hits, ${opens - before} conversation opens since the click, thread reads "${(document.querySelector('.thread')?.textContent ?? '').trim().slice(0, 60)}"`;
+    await until(() => scrolled !== undefined, 4000, () => `the jump never asked for a scroll (${state()})`);
   };
   try {
     for (const area of ['chat', 'project'] as const) for (const motion of ['full', 'reduced', 'none'] as const) {
@@ -189,7 +191,7 @@ check('search-messages: clicking a hit opens its old message, unfolds its run an
           ...(i === 2 || i === 4 ? { wake: { why: 'wake.keepGoing' } } : {}),
         })),
       };
-      api.open = async (id) => { equal(id, conversation.id); return conversation; };
+      api.open = async (id) => { opens += 1; equal(id, conversation.id); return conversation; };
       let receive: ((event: AppEvent) => void) | undefined;
       api.send = async (draft) => {
         const question: Message = { id: 'new-question', at: 100, role: 'user', text: draft.text };
