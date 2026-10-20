@@ -23,6 +23,23 @@ impl Vendor {
     }
 }
 
+/// A command or skill advertised by the running CLI.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Command {
+    pub name: String,
+    pub skill: bool,
+    pub note: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AgentCommand {
+    pub vendor: Vendor,
+    #[serde(flatten)]
+    pub command: Command,
+}
+
 /// Chat uses a chosen folder or a private scratch folder; a project uses the folder the user opened.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
@@ -656,6 +673,9 @@ pub struct QueuedTurn {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Conversation {
+    /// The commands advertised by each of this conversation's CLIs. Never saved.
+    #[serde(skip)]
+    pub commands: BTreeMap<Vendor, Vec<Command>>,
     pub id: String,
     pub title: String,
     /// The choice for the next message, retained independently in each conversation.

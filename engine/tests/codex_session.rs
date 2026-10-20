@@ -1468,6 +1468,83 @@ fn mode_thread(permissions: Permissions, tuning: faber_engine::model::Tuning) ->
     }
 }
 
+#[tokio::test]
+async fn slash_skills_are_requested_once_with_the_thread_folder_and_become_commands() {
+    let f = fake(fixture("codex", "slash-skills"));
+    let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
+    let server = CodexServer::start(CodexServerOptions {
+        permissions: Permissions::Ask,
+        cli: faber_engine::cli::Cli { command: "fake".into(), prefix: vec![] },
+        cwd: ".".into(),
+        area: Area::Chat,
+        user_hooks: false,
+        windows: false,
+        spawn: f.spawn.clone(),
+        tools: Default::default(),
+    });
+    let session = server.open(mode_thread(Permissions::Ask, Default::default()), Arc::new(move |event| drop(tx.send(event))));
+    assert!(matches!(rx.recv().await, Some(EngineEvent::Started { .. })));
+    let event = tokio::time::timeout(Duration::from_secs(3), rx.recv()).await.unwrap().unwrap();
+    let EngineEvent::Commands(commands) = event else { panic!("skills answer advertises commands") };
+    assert_eq!(
+        commands,
+        [
+            faber_engine::model::Command { name: "garden-plan".into(), skill: true, note: Some("Plan a garden".into()) },
+            faber_engine::model::Command { name: "tidy".into(), skill: true, note: Some("Tidy the folder.".into()) },
+        ]
+    );
+    let requests: Vec<_> = f.wire.messages().into_iter().filter(|m| m["method"] == "skills/list").collect();
+    assert_eq!(requests.len(), 1);
+    assert_eq!(requests[0]["params"], json!({"cwds":["project"]}));
+    assert!(f.mismatches.lock().unwrap().is_empty());
+    session.close();
+    server.retire();
+}
+
+#[tokio::test]
+async fn slash_failed_or_odd_skills_answers_are_silent_and_notes_are_bounded() {
+    for result in [
+        json!({"error":{"message":"unavailable"}}),
+        json!({"result":{"data":null}}),
+        json!({"result":{"data":[{"cwd":"other","skills":[]}]}}),
+        json!({"result":{"data":[{"cwd":"project","skills":[{"name":"long","enabled":true,"shortDescription":"é".repeat(140)}]}]}}),
+    ] {
+        let (spawn, mut input, mut output) = support::controlled();
+        let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
+        let server = CodexServer::start(CodexServerOptions {
+            permissions: Permissions::Ask,
+            cli: faber_engine::cli::Cli { command: "fake".into(), prefix: vec![] },
+            cwd: ".".into(),
+            area: Area::Chat,
+            user_hooks: false,
+            windows: false,
+            spawn,
+            tools: Default::default(),
+        });
+        let session = server.open(mode_thread(Permissions::Ask, Default::default()), Arc::new(move |e| drop(tx.send(e))));
+        support::expect_method(&mut input, "initialize").await;
+        support::emit(&mut output, json!({"id":1,"result":{}})).await;
+        support::expect_method(&mut input, "initialized").await;
+        support::expect_method(&mut input, "thread/start").await;
+        support::emit(&mut output, json!({"id":2,"result":{"thread":{"id":"t"}}})).await;
+        assert!(matches!(rx.recv().await, Some(EngineEvent::Started { .. })));
+        let request = support::expect_method(&mut input, "skills/list").await;
+        let mut answer = result;
+        answer["id"] = request["id"].clone();
+        let long = answer["result"]["data"][0]["skills"][0]["name"] == "long";
+        support::emit(&mut output, answer).await;
+        session.send(UserTurn::text("still works"));
+        support::expect_method(&mut input, "turn/start").await;
+        if long {
+            let Some(EngineEvent::Commands(commands)) = rx.recv().await else { panic!("a valid list is delivered") };
+            assert_eq!(commands[0].note.as_ref().unwrap().chars().count(), 120);
+        }
+        assert!(rx.try_recv().is_err(), "a failed list never becomes an error on screen");
+        session.close();
+        server.retire();
+    }
+}
+
 #[test]
 fn r140_each_mode_maps_to_the_nearest_codex_policy_sandbox_and_reviewer() {
     let table = [

@@ -67,6 +67,7 @@ import './grammar.check.ts';
 import './lighter.check.ts';
 import './continue.check.ts';
 import './mention.check.ts';
+import './slash.check.ts';
 import './quick-question.check.ts';
 import './steer.check.ts';
 import './stop-helpers.check.ts';

@@ -8,6 +8,29 @@ use std::sync::Arc;
 use std::time::Duration;
 use support::{Entry, drive, fake, fixture, next_permission, text_of};
 
+#[test]
+fn slash_init_keeps_skills_and_safe_builtins_in_the_advertised_order() {
+    let init = &fixture("claude", "slash-init")[1].msg;
+    let events = parse_claude_message(init);
+    let EngineEvent::Commands(commands) = &events[1] else { panic!("init advertises commands") };
+    let names: Vec<_> = commands.iter().map(|c| (c.name.as_str(), c.skill)).collect();
+    assert_eq!(
+        names,
+        [
+            ("context", false),
+            ("garden-plan", true),
+            ("plugin:tidy", true),
+            ("compact", false),
+            ("security-review", false),
+            ("recap", false),
+            ("insights", false),
+            ("init", false)
+        ]
+    );
+    assert!(commands.iter().all(|c| c.note.is_none()));
+    assert!(matches!(&events[0], EngineEvent::Started { session_id, .. } if session_id == "slash-session"));
+}
+
 fn launch(area: Area) -> ClaudeLaunch {
     ClaudeLaunch {
         helper: Default::default(),

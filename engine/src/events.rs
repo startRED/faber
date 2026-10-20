@@ -33,6 +33,7 @@ pub fn terminal_reason(raw: &str) -> &'static str {
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum EngineEvent {
+    Commands(Vec<crate::model::Command>),
     Started {
         session_id: String,
         model: String,

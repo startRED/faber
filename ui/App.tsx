@@ -131,6 +131,14 @@ export function App(props: { initial: AppState; update?: UpdateStatus; inbox: { 
     finally { setLoadingMoreChanges(false); }
   };
   const [choice, setChoice] = createSignal<Choice>({ vendor: 'auto' });
+  const [commandsVersion, setCommandsVersion] = createSignal(0);
+  const commandVendor = () => {
+    const conversation = current();
+    const chosen = picked();
+    return chosen.vendor !== 'auto' ? chosen.vendor
+      : conversation?.messages.findLast((m) => m.role === 'assistant' && m.vendor)?.vendor
+        ?? (conversation?.choice?.vendor !== 'auto' ? conversation?.choice?.vendor : undefined);
+  };
   const [quotas, setQuotas] = createSignal(seedQuotas(props.initial.quotas));
   const clock = useClock();
   const [error, setError] = createSignal<string>();
@@ -530,6 +538,9 @@ export function App(props: { initial: AppState; update?: UpdateStatus; inbox: { 
     // The restored conversation is already opening (`go` above), so what the inbox held since the page started is kept for
     // its snapshot and nothing is lost between the two.
     props.inbox.take((e) => {
+      if (e.type === 'commands' && (e.conversationId === current()?.id || !commandVendor() || e.vendor === commandVendor())) {
+        setCommandsVersion((n) => n + 1);
+      }
       if (e.type === 'list') void refresh();
       if (e.type === 'usage') setState((s) => ({ ...s, usage: e.vendors }));
       if (e.type === 'message') restoreRejected(e.conversationId, e.message.role === 'assistant' ? e.message : undefined);
@@ -807,6 +818,9 @@ export function App(props: { initial: AppState; update?: UpdateStatus; inbox: { 
   // What the composer shows: Stop ends the work; once the agent finished (only the CLI's turn is closing) it reads Send, and what is
   // written then waits in the queue like any message written while the engine is busy.
   const busy = () => stopOffered(engineBusy(), every(), current()?.id);
+  // As the running column's head button (R250): any open conversation; before its first answer the tab says to ask once the
+  // agent has answered. A boolean memo, so streaming updates never touch the lists that read it.
+  const canAside = createMemo(() => !!current());
   // "Send now" works while an answer streams (the engine hands the message to its turn, or puts it first); Faber's own checks
   // keep it hidden, as Stop is what ends them.
   const checking = () => engineBusy() && current()?.messages.at(-1)?.status !== 'streaming';
@@ -914,6 +928,12 @@ export function App(props: { initial: AppState; update?: UpdateStatus; inbox: { 
         }}
         onReady={(f) => (fill = f)}
         onMention={current() || (area() === 'project' && projectId()) ? (query) => api.mentions(current()?.id, area() === 'project' ? projectId() : undefined, query) : undefined}
+        onCommands={() => {
+          const vendor = commandVendor();
+          return api.commands(current()?.id, vendor).then((list) => vendor ? list.filter((c) => c.vendor === vendor) : list);
+        }}
+        commandsVersion={commandsVersion()}
+        canAside={canAside()}
         onRestore={(f) => {
           restore = f;
           queueMicrotask(() => current() && restoreRejected(current()!.id, current()!.messages.at(-1)));
@@ -952,7 +972,7 @@ export function App(props: { initial: AppState; update?: UpdateStatus; inbox: { 
         showAside(undefined);
         setChangesOpen(current()?.id);
       } : undefined}
-      onAside={current() ? () => showAside({ conversationId: current()?.id }) : undefined}
+      onAside={canAside() ? () => showAside({ conversationId: current()?.id }) : undefined}
       onBack={() => {
         showAgent(undefined);
         showSite(undefined);

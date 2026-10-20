@@ -342,6 +342,11 @@ async fn mentions(
         .unwrap_or_default())
 }
 
+/// The last advertised commands, read from memory without starting a CLI.
+#[tauri::command]
+fn commands(faber: State<'_, Faber>, id: Option<String>, vendor: Option<Vendor>) -> Vec<faber_engine::model::AgentCommand> {
+    faber.engine.commands(id.as_deref(), vendor)
+}
 /// At most one git listing runs and one waits; a newer request replaces the waiting one.
 #[tauri::command]
 async fn changes(faber: State<'_, Faber>, id: String, cursor: Option<String>) -> Res<faber_engine::changes::ChangeList> {
@@ -970,6 +975,7 @@ fn main() {
                 send_queued,
                 tell_helper,
                 mentions,
+                commands,
                 changes,
                 change_patch,
                 ask_aside,

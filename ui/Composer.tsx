@@ -1,10 +1,10 @@
-import { createEffect, createSignal, For, on, onCleanup, onMount, Show } from 'solid-js';
-import { DEFAULT_EFFORT, type Choice, type Effort, type Mention, PERMISSION_MODES, type PermissionMode, type Vendor } from './api.ts';
+import { createEffect, createMemo, createSignal, For, on, onCleanup, onMount, Show } from 'solid-js';
+import { DEFAULT_EFFORT, type Choice, type Command, type Effort, type Mention, PERMISSION_MODES, type PermissionMode, type Vendor } from './api.ts';
 import { Ghost } from './Ghost.tsx';
 import { Pic } from './ImageViewer.tsx';
 import { Icon } from './Glyphs.tsx';
 import { t } from './i18n.ts';
-import type { Option } from './models.ts';
+import { type Option, vendorName } from './models.ts';
 import { resizeComposer } from './composer-size.ts';
 import { keep, kept, release, useDraft } from './unsent.ts';
 
@@ -50,7 +50,16 @@ interface Props {
   draftKey?: string;
   /** `@` lists the working folder's entries that match what follows it (parity T4); absent where there is no folder yet. */
   onMention?: (query: string) => Promise<Mention[]>;
+  /** `/` lists this conversation's agent commands, or the chosen agents' last reported lists for a new conversation. */
+  onCommands?: () => Promise<Command[]>;
+  /** An announcement from the engine invalidates an open or pending `/` query. */
+  commandsVersion?: number;
+  /** The conversation can answer a quick question on the side; `/btw` is Faber's first command. */
+  canAside?: boolean;
 }
+
+type Completion = { path: string; dir: boolean; command?: Command; aside?: boolean };
+type Trigger = { at: number; query: string; kind: 'mention' | 'command' };
 
 /** The `@` being typed at the caret: where it starts and what follows it, or undefined. A path with a space is written
  * `@"My folder/…"`, so a quote opens one that spaces do not end. */
@@ -180,15 +189,26 @@ export function Composer(props: Props) {
       props.onWarm();
     }
   };
-  // `@`: the list of matching entries over the box while an `@` is typed at the caret. The engine is asked once typing
+  // `@` and `/` share the list over the box and every interaction. The engine is asked once typing
   // pauses briefly; until its answer for the current query comes, the list on screen is an older one and cannot be picked.
-  const [mentions, setMentions] = createSignal<Mention[]>([]);
+  const [mentions, setMentions] = createSignal<Completion[]>([]);
+  const mixedCommands = createMemo(() => new Set(mentions().flatMap((m) => m.command ? [m.command.vendor] : [])).size > 1);
   const [active, setActive] = createSignal(0);
   const [pending, setPending] = createSignal(false);
+  const [kind, setKind] = createSignal<Trigger['kind']>('mention');
   // An answer that takes long shows a waiting line, so a held Enter is never a box that seems not to answer.
   const [slow, setSlow] = createSignal(false);
   let slowing: ReturnType<typeof setTimeout> | undefined;
-  let mention: { at: number; query: string } | undefined;
+  let mention: Trigger | undefined;
+  const triggerAt = (el: HTMLTextAreaElement): Trigger | undefined => {
+    const caret = el.selectionStart ?? el.value.length;
+    if (el.selectionEnd !== caret) return;
+    if ((props.onCommands || props.canAside) && caret === el.value.length && /^\/\S*$/.test(el.value)) {
+      return { at: 0, query: el.value.slice(1), kind: 'command' };
+    }
+    const found = props.onMention ? mentionAt(el.value, caret) : undefined;
+    return found ? { ...found, kind: 'mention' } : undefined;
+  };
   // The entry the arrows reach stays in view in a long list.
   createEffect(on(active, (i) => document.getElementById(`mention-${i}`)?.scrollIntoView({ block: 'nearest' }), { defer: true }));
   let asked = 0;
@@ -204,17 +224,21 @@ export function Composer(props: Props) {
   };
   onCleanup(closeMentions);
   const lookForMention = (el: HTMLTextAreaElement) => {
-    const found = props.onMention ? mentionAt(el.value, el.selectionStart ?? el.value.length) : undefined;
+    const found = triggerAt(el);
     if (!found) return closeMentions();
-    if (found.at === mention?.at && found.query === mention.query) return;
+    if (found.at === mention?.at && found.query === mention.query && found.kind === mention.kind) return;
+    if (found.kind !== mention?.kind) setMentions([]);
     mention = found;
+    setKind(found.kind);
     const ticket = ++asked;
-    const ask = props.onMention!;
+    const ask = props.onMention;
+    const commands = props.onCommands;
+    const canAside = props.canAside;
     setPending(true);
     clearTimeout(asking);
     clearTimeout(slowing);
     slowing = setTimeout(() => ticket === asked && setSlow(true), 300);
-    const answered = (list: Mention[]) => {
+    const answered = (list: Completion[]) => {
       if (ticket !== asked) return;
       clearTimeout(slowing);
       setPending(false);
@@ -222,17 +246,44 @@ export function Composer(props: Props) {
       setMentions(list);
       setActive(0);
     };
-    asking = setTimeout(() => void ask(found.query).then(answered, () => answered([])), 60);
+    asking = setTimeout(() => {
+      const query = found.query.toLowerCase();
+      const request = found.kind === 'mention' ? ask!(found.query) : (commands?.() ?? Promise.resolve([])).catch(() => []).then((commands) => {
+        const list: Completion[] = commands
+          .filter((c) => props.vendors.includes(c.vendor) && c.name.toLowerCase().includes(query))
+          .sort((a, b) => Number(b.name.toLowerCase().startsWith(query)) - Number(a.name.toLowerCase().startsWith(query)))
+          .map((command) => ({ path: `${command.vendor === 'claude' ? '/' : '$'}${command.name}`, dir: false, command }));
+        if (canAside && 'btw'.includes(query)) list.unshift({ path: '/btw', dir: false, aside: true });
+        return list.slice(0, 50);
+      });
+      void request.then(answered, () => answered([]));
+    }, 60);
   };
+  // Refresh only when these values change, not when their callers reread a streaming conversation or a model choice.
+  const asideAvailable = createMemo(() => !!props.canAside);
+  const commandVendor = createMemo(() => props.choice.vendor);
+  const commandsVersion = createMemo(() => props.commandsVersion);
+  createEffect(on(() => [asideAvailable(), commandVendor(), commandsVersion()], () => {
+    if (mention?.kind !== 'command' || !field) return;
+    closeMentions();
+    lookForMention(field);
+  }, { defer: true }));
   // The path takes the place of the `@` and what followed it, as a typed edit (undo takes it back). A file ends with a space;
   // a folder stays open, so its own entries show next. Nothing is put in unless the caret still ends that same `@`.
-  const pickMention = (m: Mention) => {
+  const pickMention = (m: Completion) => {
     if (!field || !mention || pending()) return;
-    const now = mentionAt(field.value, field.selectionStart ?? field.value.length);
-    if (now?.at !== mention.at || now.query !== mention.query) return closeMentions();
+    if (m.aside && !props.canAside) return closeMentions();
+    const now = triggerAt(field);
+    if (now?.at !== mention.at || now.query !== mention.query || now.kind !== mention.kind) return closeMentions();
+    const at = mention.at;
+    if (m.command && props.choice.vendor === 'auto') {
+      const choice = props.options.find((o) => o.choice.vendor === m.command!.vendor)?.choice;
+      props.onChoice({ ...(choice ?? { vendor: m.command.vendor }), effort: DEFAULT_EFFORT });
+      warmed = false;
+    }
     field.focus();
-    field.setSelectionRange(mention.at, field.selectionStart ?? field.value.length);
-    const words = mentionText(m.path, m.dir);
+    field.setSelectionRange(at, field.selectionStart ?? field.value.length);
+    const words = m.command || m.aside ? `${m.path} ` : mentionText(m.path, m.dir);
     if (!document.execCommand('insertText', false, words)) {
       const text = field.value;
       field.value = text.slice(0, field.selectionStart) + words + text.slice(field.selectionEnd);
@@ -317,7 +368,10 @@ export function Composer(props: Props) {
         rows={1}
         placeholder={props.placeholder}
         value={draft().text}
-        onFocus={() => setFocused(true)}
+        onFocus={(e) => {
+          setFocused(true);
+          lookForMention(e.currentTarget);
+        }}
         onBlur={() => {
           setFocused(false);
           closeMentions();
@@ -334,7 +388,7 @@ export function Composer(props: Props) {
         }}
         onKeyDown={(e) => {
           const list = mentions();
-          if (mention && (list.length || pending()) && !e.isComposing) {
+          if (mention && (list.length || pending() || e.key === 'Escape') && !e.isComposing) {
             const moves: Record<string, number> = { ArrowDown: 1, ArrowUp: -1 };
             if (e.key in moves && list.length) {
               e.preventDefault();
@@ -361,7 +415,7 @@ export function Composer(props: Props) {
             send();
           }
         }}
-        // The caret moved away from the `@` (or to another one): the list follows it.
+        // The caret moved away from the token (or to another one): the shared list follows it.
         onKeyUp={(e) => {
           if (/^(Arrow(Left|Right)|Home|End|Page(Up|Down))$/.test(e.key)) lookForMention(e.currentTarget);
         }}
@@ -383,7 +437,7 @@ export function Composer(props: Props) {
         <p class="mentions waiting" role="status">{t('composer.mentionsWaiting')}</p>
       </Show>
       <Show when={mentions().length}>
-        <ul class="mentions" id="composer-mentions" role="listbox" aria-label={t('composer.mentions')} aria-busy={pending()}>
+        <ul class="mentions" id="composer-mentions" role="listbox" aria-label={t(kind() === 'command' ? 'composer.commands' : 'composer.mentions')} aria-busy={pending()}>
           <For each={mentions()}>
             {(m, i) => (
               <li
@@ -399,8 +453,12 @@ export function Composer(props: Props) {
                 }}
                 onMouseMove={() => setActive(i())}
               >
-                <Icon name={m.dir ? 'folder' : 'sheet'} small />
+                <Icon name={m.command || m.aside ? 'terminal' : m.dir ? 'folder' : 'sheet'} small />
                 <span>{m.path}</span>
+                <Show when={m.aside || m.command?.note}><span class="mention-note">{m.aside ? t('aside.title') : m.command!.note}</span></Show>
+                <Show when={m.command && mixedCommands()}>
+                  <span class="mention-vendor">{t('composer.commandAgent', { name: vendorName(m.command!.vendor) })}</span>
+                </Show>
               </li>
             )}
           </For>

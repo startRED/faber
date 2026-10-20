@@ -466,6 +466,13 @@ export interface Mention {
   path: string;
   dir: boolean;
 }
+/** A command or skill reported by an agent, offered by `/` without starting a process. */
+export interface Command {
+  vendor: Vendor;
+  name: string;
+  skill: boolean;
+  note?: string | null;
+}
 /** Git's current changes in a conversation's working copy, against its starting branch. */
 export interface FileChange {
   path: string;
@@ -500,6 +507,7 @@ export interface Aside {
   error?: string | null;
 }
 export type AppEvent =
+  | { type: 'commands'; conversationId: string; vendor: Vendor }
   | { type: 'message'; conversationId: string; message: Message }
   | { type: 'asides'; conversationId: string; asides: Aside[] }
   | { type: 'queue'; conversationId: string; queued: QueuedTurn[] }
@@ -591,6 +599,7 @@ export const api = {
   tellHelper: (id: string, callId: string, text: string) => invoke<void>('tell_helper', { id, callId, text }),
   /** `@` in the composer: the working folder's entries that match `query`, at most 50; a new chat has none. */
   mentions: (id: string | undefined, projectId: string | undefined, query: string) => invoke<Mention[]>('mentions', { id, projectId, query }),
+  commands: (id?: string, vendor?: Vendor) => invoke<Command[]>('commands', { id, vendor }),
   changes: (id: string, cursor?: string) => invoke<ChangeList>('changes', { id, cursor }),
   changePatch: (id: string, path: string) => invoke<ChangePatch>('change_patch', { id, path }),
   /** A quick question on the side (R250); refused with an `error.aside.*` key, `error.quotaOut` or `error.billedPerUse`. */

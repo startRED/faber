@@ -59,9 +59,6 @@ The numbers above are the usual widths. The person can change them, and the shel
 
 ### Sidebar
 
-Its one search field also finds message text below title matches and opens the selected message; see
-[search.md](search.md#sidebar-search) for its result rows, states and motion.
-
 - At the top: "New conversation" (Ctrl N), then the two areas, Chat and Projects, the latter with a count.
 - The sidebar lists only the open area's items (R168): Chat lists the chats and no Projects block, not even an empty
   one; Projects lists the projects with their conversations and the add-folder control, and no chats. Rows keep their DOM
@@ -82,7 +79,7 @@ Its one search field also finds message text below title matches and opens the s
   (C010). The bar is amber only when the engine says the quota is nearly used. The line opens Settings > Accounts and limits.
   A vendor with no reading yet, or a weekly reading past its reset, shows "—". The version is not on the sidebar: it is the
   tooltip of the Settings button.
-- Search filters titles and project names, then finds message text below them. The percentage and "stopped" tails
+- Search filters titles and project names, then message text, and opens the message ([search.md](search.md#sidebar-search)). The percentage and "stopped" tails
   come with the progress view in Phase 3.
 
 ### The new conversation screen
@@ -92,13 +89,15 @@ Its one search field also finds message text below title matches and opens the s
   shows whether Chat may change files.
 - A greeting, "Where do we start?", ending with the person's name when they gave one.
 - Three short hand-written suggestions per language, as chips under the composer: one row at the usual text size, the
-  last chip wrapping only on a narrow window or a large text size. Clicking one fills the composer and moves focus there. It sends nothing. A hover changes only the chip's colour.
+  last chip wrapping only on a narrow window or a large text size. A click fills the composer and focuses it, sending nothing; a hover changes only its colour.
 - "Pick up where you left off" lists up to three conversations of both areas under the suggestions: those that need the
   person first, then the most recently updated.
 - The composer keeps its model picker, "AI: choose for me".
-- `@` in the composer of a conversation with a working folder opens a list of matching files and folders over the box,
-  on the context menu's surface, left-aligned with the text. It opens on a keystroke, so it does not move; the entry the
-  arrows reach is highlighted and stays in view, and a long path ends in an ellipsis.
+- `@` in a conversation with a working folder lists matching files and folders over the box, on the context menu's
+  surface, left-aligned with the text, with no motion; the entry the arrows reach is highlighted and kept in view, and a
+  long path ends in an ellipsis. `/` at the start opens the same list for the agent's commands and skills (`/btw` first
+  in an open conversation); a pick inserts the CLI's spelling without sending. Both lists follow the caret and ignore
+  older answers and non-main mouse buttons.
 - Auto chooses both the model and its effort. A manual model adds an adjacent low, medium or high effort choice,
   defaulting to medium (R102). Each conversation remembers its choice. Changes apply to the next message only (the
   composer does not repeat it), and each answer keeps the effort actually used and shows it in its header. Both CLI drivers always receive that effort.

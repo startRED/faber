@@ -16,6 +16,41 @@ use tokio::sync::mpsc::UnboundedReceiver;
 const SKY: &str = "In one sentence: why is the sky blue?";
 const TWO_WRITES: &str = "Create a.txt containing 'one'. Then create b.txt containing 'two'. Use the Write tool for each, one at a time.";
 
+#[tokio::test]
+async fn slash_init_populates_the_conversation_and_vendor_fallback_without_saving_it() {
+    let mut entries = fixture("claude", "chat");
+    let init = fixture("claude", "slash-init")[1].msg.clone();
+    let entry = entries.iter_mut().find(|e| e.msg["type"] == "system" && e.msg["subtype"] == "init").unwrap();
+    entry.msg = init;
+    let f = fake(entries);
+    let dir = tempfile::tempdir().unwrap();
+    let (engine, mut rx) = engine(dir.path(), Vendor::Claude, f.spawn.clone());
+    let id = engine.send(ask(Area::Chat, SKY, choice("claude", None))).unwrap();
+    loop {
+        let event = tokio::time::timeout(Duration::from_secs(3), rx.recv()).await.expect("no command announcement").unwrap();
+        if let AppEvent::Commands { conversation_id, vendor } = &event {
+            assert_eq!(conversation_id, &id);
+            assert_eq!(*vendor, Vendor::Claude);
+            assert!(!engine.commands(Some(&id), Some(*vendor)).is_empty(), "the list is available before the screen hears it");
+            assert_eq!(serde_json::to_value(&event).unwrap(), json!({"type":"commands","conversationId":id,"vendor":"claude"}));
+            break;
+        }
+    }
+    finished(&mut rx, |_| {}).await;
+    let commands = engine.commands(Some(&id), Some(Vendor::Claude));
+    assert_eq!(commands[0].command.name, "context");
+    assert_eq!(commands, engine.commands(None, Some(Vendor::Claude)));
+    let starts = f.args.lock().unwrap().len();
+    assert!(engine.commands(None, Some(Vendor::Codex)).is_empty());
+    assert_eq!(starts, f.args.lock().unwrap().len());
+    let saved = faber_engine::store::Store::new(dir.path()).get(&id).unwrap();
+    assert!(saved.commands.is_empty());
+    assert!(f.mismatches.lock().unwrap().is_empty());
+    engine.remove(&id);
+    assert_eq!(engine.commands(None, Some(Vendor::Claude)), commands);
+    engine.shutdown();
+}
+
 fn engine(dir: &Path, vendor: Vendor, spawn: Spawner) -> (Engine, UnboundedReceiver<AppEvent>) {
     engine_idle(dir, vendor, spawn, Duration::from_secs(120))
 }
@@ -895,6 +930,11 @@ fn a_model_joining_midway_gets_the_earlier_conversation_as_text() {
     let history = [Message::new("1".into(), Role::User, "hi".into(), 0), Message::new("2".into(), Role::Assistant, "hello".into(), 0)];
     let text = faber_engine::engine::with_history(&history, "and now?", &|n| n.to_string());
     assert!(text.ends_with("User: hi\n\nAssistant: hello\n\nNow the user says:\nand now?"));
+    // A command of Claude Code runs only from the start of the message, so it never gets the record in front of it.
+    use faber_engine::engine::is_cli_command;
+    assert!(is_cli_command(Vendor::Claude, "/context") && is_cli_command(Vendor::Claude, "/review the parser"));
+    assert!(!is_cli_command(Vendor::Codex, "/context") && !is_cli_command(Vendor::Claude, "/ not one"));
+    assert!(!is_cli_command(Vendor::Claude, "see /context"));
     // Files stay reachable by name and place; images cannot go as text, so the count says they are missing.
     let mut with_files = history.clone();
     with_files[0].attachments = Some(vec!["notes.pdf".into()]);

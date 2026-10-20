@@ -598,6 +598,29 @@ enum Waiting {
     Steer(u64, String),
 }
 
+fn skill_commands(result: &Value, cwd: &std::path::Path) -> Option<Vec<crate::model::Command>> {
+    let entry = result["data"].as_array()?.iter().find(|entry| entry["cwd"].as_str().is_some_and(|s| std::path::Path::new(s) == cwd))?;
+    let skills = entry["skills"].as_array()?;
+    Some(
+        skills
+            .iter()
+            .filter_map(|skill| {
+                if skill["enabled"].as_bool() != Some(true) {
+                    return None;
+                }
+                let name = skill["name"].as_str().filter(|name| !name.is_empty())?;
+                let note = skill["shortDescription"]
+                    .as_str()
+                    .filter(|s| !s.trim().is_empty())
+                    .or_else(|| skill["description"].as_str().map(|s| s.split_inclusive(['.', '!', '?']).next().unwrap_or(s)))
+                    .map(|s| s.trim().chars().take(120).collect::<String>())
+                    .filter(|s| !s.is_empty());
+                Some(crate::model::Command { name: name.into(), skill: true, note })
+            })
+            .collect(),
+    )
+}
+
 /// A conversation's side of the shared process.
 struct Thread {
     early_completion: Vec<Value>,
@@ -913,6 +936,12 @@ async fn serve(started: std::io::Result<proc::Proc>, opts: CodexServerOptions, m
                 };
                 let method = msg["method"].as_str();
                 let params = &msg["params"];
+                if let Some(key) = msg["id"].as_str().and_then(|id| id.strip_prefix("faber-commands-")).and_then(|key| key.parse::<u64>().ok()) {
+                    if let Some(t) = threads.get(&key) && let Some(commands) = skill_commands(&msg["result"], &t.params.cwd) {
+                        (t.sink)(EngineEvent::Commands(commands));
+                    }
+                    continue;
+                }
                 match (method, msg.get("id")) {
                     // An answer to one of Faber's requests.
                     (None, Some(id)) => {
@@ -969,6 +998,8 @@ async fn serve(started: std::io::Result<proc::Proc>, opts: CodexServerOptions, m
                                 (t.sink)(EngineEvent::Started { session_id: id.clone(), model: shown });
                                 by_id.insert(id.clone(), key);
                                 t.id = Some(id.clone());
+                                let _ = proc::write_line(&mut *stdin, &json!({"id":format!("faber-commands-{key}"), "method":"skills/list",
+                                    "params":{"cwds":[t.params.cwd]}})).await;
                                 for turn in std::mem::take(&mut t.queued) {
                                     t.watch.begin();
                                     t.state.base = t.state.total;

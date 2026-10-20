@@ -63,6 +63,10 @@ pub use verifying::{FIX, MAX_FIXES};
 #[derive(Debug, Clone, PartialEq, Serialize)]
 #[serde(tag = "type", rename_all = "camelCase", rename_all_fields = "camelCase")]
 pub enum AppEvent {
+    Commands {
+        conversation_id: String,
+        vendor: Vendor,
+    },
     Message {
         conversation_id: String,
         message: Box<Message>,
@@ -239,6 +243,13 @@ const MAX_QUEUED: usize = 10;
 /// A model that joins a conversation midway, or a fresh session that replaces a lost one, reads what was said before as plain
 /// text: every message, the names and places of the files attached, a count of the images it cannot see, and each tool's result
 /// shortened as `handover::transcript` does. The reply that carries it says so (`note.historyResent`).
+/// A message that is one of Claude Code's own commands (`/name ...`, task 060): the CLI runs it only from the very start of
+/// the message, so a model joining midway gets it as it is, without the earlier conversation in front of it. Codex finds a
+/// `$skill` anywhere in the text, so its messages always get the record.
+pub fn is_cli_command(vendor: Vendor, text: &str) -> bool {
+    vendor == Vendor::Claude && text.strip_prefix('/').is_some_and(|rest| rest.starts_with(|c: char| c.is_alphanumeric()))
+}
+
 pub fn with_history(history: &[Message], text: &str, place: &dyn Fn(&str) -> String) -> String {
     let lines = history
         .iter()
@@ -344,6 +355,8 @@ struct Core {
     codex_recommended: Option<String>,
     /// Every model the account can run on Codex, once listed.
     codex_models: Vec<String>,
+    /// The last advertised list per AI, used before a conversation has its own. Never saved.
+    commands: BTreeMap<Vendor, Vec<Command>>,
     /// The latest reading of each quota window, per vendor. Auto prices the models by the share used.
     quotas: HashMap<(Vendor, String), QuotaReading>,
     /// The running list as last emitted.
@@ -451,6 +464,7 @@ impl Engine {
                 codex: HashMap::new(),
                 codex_recommended: None,
                 codex_models: vec![],
+                commands: BTreeMap::new(),
                 quotas,
                 running: Running::default(),
                 guess: None,
@@ -776,6 +790,25 @@ impl Engine {
         let Some(folder) = crate::permissions::checked_folder(&folder) else { return vec![] };
         let mut git = git.and_then(|run| run());
         crate::mention::find(&folder, git.as_deref_mut().map(|g| g as &mut dyn crate::project::git::Executor), query)
+    }
+    /// Reads advertised commands without starting a CLI.
+    pub fn commands(&self, id: Option<&str>, vendor: Option<Vendor>) -> Vec<AgentCommand> {
+        self.with(|c| {
+            let conversation = id.and_then(|id| c.convs.get(id));
+            Vendor::ALL
+                .into_iter()
+                .filter(|v| vendor.is_none_or(|vendor| *v == vendor))
+                .flat_map(|vendor| {
+                    conversation
+                        .and_then(|conv| conv.commands.get(&vendor))
+                        .or_else(|| c.commands.get(&vendor))
+                        .into_iter()
+                        .flatten()
+                        .cloned()
+                        .map(move |command| AgentCommand { vendor, command })
+                })
+                .collect()
+        })
     }
     pub fn terminal(&self, id: &str) -> Option<TerminalCommand> {
         self.with(|c| c.terminal(id))
@@ -1501,6 +1534,7 @@ impl Core {
         if !matches!(
             event,
             EngineEvent::Started { .. }
+                | EngineEvent::Commands(_)
                 | EngineEvent::TurnStarted
                 | EngineEvent::Quota { .. }
                 | EngineEvent::Signals(_)
@@ -1533,6 +1567,14 @@ impl Core {
             }
         }
         match event {
+            EngineEvent::Commands(commands) => {
+                if let Some(c) = self.convs.get_mut(conv) {
+                    c.commands.insert(vendor, commands.clone());
+                }
+                self.commands.insert(vendor, commands);
+                (self.emit)(AppEvent::Commands { conversation_id: conv.to_string(), vendor });
+                return;
+            }
             EngineEvent::Context { used, window } => return self.note_context(conv, vendor, used, window),
             EngineEvent::Compacted { after } => return self.note_compacted(conv, vendor, after),
             // Codex accepted the turn: if Faber dies now, the next launch resumes this session instead of starting one that never
@@ -2730,6 +2772,7 @@ impl Core {
     fn blank_as(&mut self, id: String, area: Area, project_id: Option<String>) -> String {
         let at = now();
         let c = Conversation {
+            commands: BTreeMap::new(),
             id,
             title: String::new(),
             choice: None,
@@ -2884,7 +2927,11 @@ impl Core {
                 check: "glance",
             },
         );
-        let text = if joining_late { with_history(&history, &text, &|n| attachment_place(area, &data_dir, &id, n)) } else { text };
+        let text = if joining_late && !is_cli_command(pick.vendor, &text) {
+            with_history(&history, &text, &|n| attachment_place(area, &data_dir, &id, n))
+        } else {
+            text
+        };
         // Git can take seconds: the message shows now, the copy is made away from the lock, and what starts the answer waits.
         match self.copying.get_mut(&id) {
             // The copy of an answer stopped meanwhile is still being made: this message takes its place and waits for it.
@@ -3253,6 +3300,59 @@ fn tool_in<'a>(messages: &'a mut [Message], current: Option<&str>, id: &str) -> 
 mod tool_in_tests {
     use super::*;
     use serde_json::json;
+
+    #[tokio::test]
+    async fn slash_commands_use_the_conversation_list_or_the_last_vendor_lists_without_starting_a_process() {
+        let dir = tempfile::tempdir().unwrap();
+        let engine = Engine::new(
+            EngineOptions {
+                data_dir: dir.path().into(),
+                clis: BTreeMap::new(),
+                spawn: Arc::new(|_, _, _| panic!("listing commands starts no process")),
+                windows: false,
+                claude_env_billed: false,
+                max_warm: 3,
+                idle: Duration::from_secs(120),
+                runtime: tokio::runtime::Handle::current(),
+                ask: None,
+            },
+            Arc::new(|_| {}),
+        );
+        let command = |name: &str| Command { name: name.into(), skill: true, note: None };
+        let id = engine.with(|c| {
+            c.commands.insert(Vendor::Claude, vec![command("latest")]);
+            c.commands.insert(Vendor::Codex, vec![command("other-ai")]);
+            c.blank(Area::Chat, None)
+        });
+        assert_eq!(engine.commands(None, None).len(), 2);
+        assert_eq!(engine.commands(Some(&id), Some(Vendor::Claude))[0].command.name, "latest");
+        engine.with(|c| {
+            c.convs.get_mut(&id).unwrap().commands.insert(Vendor::Claude, vec![command("own")]);
+        });
+        let own = engine.commands(Some(&id), None);
+        assert_eq!(own.len(), 2, "each AI uses its own conversation list or its last advertised list");
+        assert_eq!(own[0].command.name, "own");
+        assert_eq!(own[0].vendor, Vendor::Claude);
+        let codex = engine.commands(Some(&id), Some(Vendor::Codex));
+        assert_eq!(codex.len(), 1, "a Claude-only conversation still offers Codex's last list when switching AI");
+        assert_eq!(codex[0].vendor, Vendor::Codex);
+        assert_eq!(codex[0].command.name, "other-ai");
+        assert_eq!(own[1], codex[0]);
+        let conv = engine.with(|c| c.convs.get(&id).unwrap().clone());
+        let saved = serde_json::to_value(&conv).unwrap();
+        assert!(saved.get("commands").is_none());
+        let loaded: Conversation = serde_json::from_value(saved).unwrap();
+        assert!(loaded.commands.is_empty());
+        engine.with(|c| {
+            c.convs.get_mut(&id).unwrap().commands.insert(Vendor::Claude, vec![]);
+        });
+        assert!(engine.commands(Some(&id), Some(Vendor::Claude)).is_empty(), "an advertised empty list overrides that AI's fallback");
+        assert_eq!(engine.commands(Some(&id), None), codex, "an empty Claude list cannot hide Codex's fallback");
+        engine.with(|c| {
+            c.convs.remove(&id);
+        });
+        assert_eq!(engine.commands(Some(&id), Some(Vendor::Claude))[0].command.name, "latest");
+    }
 
     fn reply(id: &str, tools: &[&str]) -> Message {
         let tools = tools.iter().map(|t| json!({ "id": t, "name": "Agent", "input": {} })).collect::<Vec<_>>();

@@ -409,10 +409,30 @@ fn s(v: &Value) -> String {
 /// defensively; lines that carry nothing the app shows give no events.
 pub fn parse_claude_message(msg: &Value) -> Vec<EngineEvent> {
     match msg["type"].as_str().unwrap_or_default() {
-        "system" if msg["subtype"] == "init" => match (msg["session_id"].as_str(), msg["model"].as_str()) {
-            (Some(id), Some(model)) => vec![EngineEvent::Started { session_id: id.into(), model: model.into() }],
-            _ => vec![EngineEvent::Error { message: "Claude Code started without a session id.".into(), fatal: false }],
-        },
+        "system" if msg["subtype"] == "init" => {
+            let mut events = match (msg["session_id"].as_str(), msg["model"].as_str()) {
+                (Some(id), Some(model)) => vec![EngineEvent::Started { session_id: id.into(), model: model.into() }],
+                _ => vec![EngineEvent::Error { message: "Claude Code started without a session id.".into(), fatal: false }],
+            };
+            if let Some(names) = msg["slash_commands"].as_array() {
+                // Other built-ins change Faber's controls, need the terminal, manage the CLI or can spend money.
+                const ALLOWED: &[&str] = &["compact", "context", "init", "review", "security-review", "recap", "insights"];
+                let skills = msg["skills"].as_array();
+                let terminal = msg["terminal_slash_commands"].as_array();
+                let commands = names
+                    .iter()
+                    .filter_map(|name| {
+                        let name = name.as_str()?;
+                        let skill = skills.is_some_and(|skills| skills.iter().any(|s| s == name));
+                        (!name.starts_with('_')
+                            && (skill || (ALLOWED.contains(&name) && !terminal.is_some_and(|t| t.iter().any(|s| s == name)))))
+                        .then(|| crate::model::Command { name: name.into(), skill, note: None })
+                    })
+                    .collect();
+                events.push(EngineEvent::Commands(commands));
+            }
+            events
+        }
         // A subagent's own words stream too (`parent_tool_use_id` names the agent call that started it): they are its work, never
         // the answer, so only its tool calls are shown, inside its step.
         "stream_event" if !msg["parent_tool_use_id"].is_null() => vec![],

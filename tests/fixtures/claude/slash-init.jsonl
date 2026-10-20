@@ -1,0 +1,2 @@
+{"dir":"in","msg":{"type":"user","message":{"role":"user","content":"/context"}}}
+{"dir":"out","msg":{"type":"system","subtype":"init","session_id":"slash-session","model":"test-model","slash_commands":["context","garden-plan","model","plugin:tidy","doctor","compact","review","security-review","recap","insights","init","_internal","color","rename","clear","mcp","usage-credits","fast","output-style","ultrareview"],"terminal_slash_commands":["doctor","color","review"],"skills":["garden-plan","plugin:tidy","_internal"]}}
