@@ -94,6 +94,55 @@ impl Core {
         Ok(answer)
     }
 
+    /// The person pressed "Compact now" in the context meter: the same compaction the agent asks for, with no `next`, done
+    /// at once since no turn runs. A conversation whose agent has no process
+    /// (Claude Code closes an idle one) gets one with its last reply's choice, resuming its own session.
+    pub(super) fn compact_now(&mut self, conv: &str) -> Result<(), String> {
+        let c = self.convs.get(conv).ok_or("error.conversationGone")?;
+        if c.compacting || self.compacts.contains_key(conv) {
+            return Ok(());
+        }
+        let turn = self.live.get(conv).is_some_and(|l| l.turn.is_some());
+        if turn || verifying::checking(c) || !c.queued.is_empty() || c.messages.last().is_none_or(|m| m.status != Some(Status::Done)) {
+            return Err("error.compact.busy".into());
+        }
+        let last = c.messages.iter().rev().find(|m| m.role == Role::Assistant && m.vendor.is_some()).ok_or("error.compact.busy")?;
+        let pick = crate::router::Pick {
+            vendor: last.vendor.unwrap_or(Vendor::Claude),
+            model: last.model.clone(),
+            effort: last.effort.clone().unwrap_or_else(|| "medium".into()),
+            reason: String::new(),
+            pace: None,
+        };
+        // The context to compact is the last reply's agent's; a process warmed for another CLI picked in the composer is not it.
+        if self.live.get(conv).is_some_and(|l| l.vendor != pick.vendor)
+            && let Some(l) = self.retire(conv)
+        {
+            l.session.close();
+        }
+        if !self.live.contains_key(conv) {
+            self.launch(conv, &pick)?;
+        }
+        self.compacts.insert(conv.to_string(), Plan { next: None });
+        if !self.compact_due(conv) {
+            self.compacts.remove(conv);
+            return Err("error.compact.busy".into());
+        }
+        Ok(())
+    }
+
+    /// The person opened the context meter: Claude Code is asked what fills the context, part by part (no turn, no
+    /// process started for it). False when nobody can answer: no running Claude Code process for this conversation.
+    pub(super) fn ask_context_parts(&self, conv: &str) -> bool {
+        match self.live.get(conv).filter(|l| l.vendor == Vendor::Claude) {
+            Some(l) => {
+                l.session.context_usage();
+                true
+            }
+            None => false,
+        }
+    }
+
     /// The point where the queue, Faber's checks and Keep going would go on (`drain`): when a compaction was asked for and
     /// the agent's last turn ended well, it starts now. True while it starts or runs, so nothing else goes out meanwhile.
     pub(super) fn compact_due(&mut self, conv: &str) -> bool {
@@ -180,7 +229,11 @@ impl Core {
     pub(super) fn compaction_event(&mut self, conv: &str, event: &EngineEvent) -> bool {
         match event {
             // Context news and account news are the same as at any time.
-            EngineEvent::Context { .. } | EngineEvent::Compacted { .. } | EngineEvent::Quota { .. } | EngineEvent::Signals(_) => false,
+            EngineEvent::Context { .. }
+            | EngineEvent::ContextParts { .. }
+            | EngineEvent::Compacted { .. }
+            | EngineEvent::Quota { .. }
+            | EngineEvent::Signals(_) => false,
             EngineEvent::Done { ok, .. } => {
                 self.compaction_ended(conv, *ok);
                 true

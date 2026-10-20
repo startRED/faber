@@ -13,7 +13,7 @@ const none = { ranges: [] as Range[], capped: false };
 const smooth = (root: HTMLElement) =>
   root.closest<HTMLElement>('[data-motion]')?.dataset.motion === 'full' && !matchMedia('(prefers-reduced-motion: reduce)').matches;
 // Another layer on top of the shell owns the keys until it closes.
-const covered = () => !!document.querySelector('.pal-scrim:not(.leaving), .cmenu:not(.leaving)');
+const covered = () => !!document.querySelector('.pal-scrim:not(.leaving), .cmenu:not(.leaving), .ctx-panel:not(.leaving)');
 
 /** Ctrl+F in an open conversation: a small bar over the top of the thread that counts and paints every place a word appears and
  * goes from one to the next. Its elements, its observer and the paint exist only while it is open. */

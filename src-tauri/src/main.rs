@@ -446,6 +446,16 @@ async fn mentions(
 fn commands(faber: State<'_, Faber>, id: Option<String>, vendor: Option<Vendor>) -> Vec<faber_engine::model::AgentCommand> {
     faber.engine.commands(id.as_deref(), vendor)
 }
+/// "Compact now" in the context meter: the CLI's own compaction of the conversation's context.
+#[tauri::command]
+fn compact_now(faber: State<'_, Faber>, id: String) -> Res<()> {
+    faber.engine.compact_now(&id)
+}
+/// The context meter opened: asks what fills the context; the parts come as an event. False when no CLI can say now.
+#[tauri::command]
+fn context_parts(faber: State<'_, Faber>, id: String) -> bool {
+    faber.engine.context_parts(&id)
+}
 /// At most one git listing runs and one waits; a newer request replaces the waiting one.
 #[tauri::command]
 async fn changes(faber: State<'_, Faber>, id: String, cursor: Option<String>) -> Res<faber_engine::changes::ChangeList> {
@@ -1114,6 +1124,8 @@ fn main() {
                 tell_helper,
                 mentions,
                 commands,
+                compact_now,
+                context_parts,
                 changes,
                 change_patch,
                 ask_aside,

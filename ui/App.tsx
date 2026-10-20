@@ -8,6 +8,7 @@ import {
   type AppState,
   type Choice,
   type AppEvent,
+  type ContextFill,
   type Conversation,
   type Experience,
   type Plan,
@@ -24,6 +25,7 @@ import { useClock } from './clock.ts';
 import { Composer, type Draft } from './Composer.tsx';
 import { queuedDrafts, recoverQueuedDraft } from './unsent.ts';
 import { ContextMeter } from './Context.tsx';
+import { heardParts } from './context.ts';
 import { Empty } from './Empty.tsx';
 import { Find } from './Find.tsx';
 import { LookStep } from './FirstRun.tsx';
@@ -96,6 +98,10 @@ export function App(props: { initial: AppState; update?: UpdateStatus; inbox: { 
   // with another conversation's project.
   const [place, setPlace] = createSignal<Place>({ area: saved?.area ?? 'chat', projectId: saved?.projectId });
   const [current, setCurrent] = createSignal<Conversation>();
+  // The last context each conversation reported. A first message's report can come while its conversation is still
+  // opening, before it is current; kept here, the meter shows it once it is.
+  const [heardContext, setHeardContext] = createSignal<Record<string, ContextFill | undefined>>({});
+  const contextOf = (c: Conversation) => (c.id in heardContext() ? heardContext()[c.id] : c.context);
   const [searchIndex, setSearchIndex] = createSignal<number>();
   let searchFrame: number | undefined;
   let searchMark: HTMLElement | undefined;
@@ -575,8 +581,10 @@ export function App(props: { initial: AppState; update?: UpdateStatus; inbox: { 
         setCurrent((c) => (c?.id === e.conversationId ? { ...c, queued: e.queued } : c));
       }
       if (e.type === 'context') {
+        setHeardContext((h) => ({ ...h, [e.conversationId]: e.context ?? undefined }));
         setCurrent((c) => (c?.id === e.conversationId ? { ...c, context: e.context ?? undefined } : c));
       }
+      if (e.type === 'contextParts') heardParts(e.conversationId, e.parts);
       if (e.type === 'plan') {
         if (opening.id === e.conversationId) planHeard.plan = { id: e.conversationId, plan: e.plan ?? undefined };
         setCurrent((c) => (c?.id === e.conversationId ? { ...c, plan: e.plan ?? undefined } : c));
@@ -1246,7 +1254,19 @@ ${copy().path}`}>
                   </Switch>
                 </div>
                 <div class="right">
-                  <Show when={current()?.id === place().id ? current()?.context : undefined}>{(fill) => <ContextMeter fill={fill()} />}</Show>
+                  <Show when={current()?.id === place().id ? current() && contextOf(current()!) : undefined}>{(fill) => (
+                      <ContextMeter
+                        id={place().id!}
+                        fill={fill()}
+                        // As the engine allows it: nothing at work, and the last reply ended well.
+                        busy={
+                          state().running.items.some((i) => i.conversationId === place().id) ||
+                          current()?.messages.at(-1)?.status !== 'done'
+                        }
+                        onFail={fail}
+                      />
+                    )}
+                  </Show>
                   <button
                     class="run-btn"
                     data-tour="run"

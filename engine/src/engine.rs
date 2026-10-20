@@ -99,6 +99,11 @@ pub enum AppEvent {
         conversation_id: String,
         context: Option<ContextFill>,
     },
+    /// What fills a conversation's own agent's context, part by part, answering `Engine::context_parts`.
+    ContextParts {
+        conversation_id: String,
+        parts: Vec<crate::model::ContextPart>,
+    },
     /// "Keep going" stopped by itself in a conversation, and why (a `reason.keepGoing.*` key): the tray tells the person.
     Halted {
         conversation_id: String,
@@ -826,6 +831,14 @@ impl Engine {
         let Some(folder) = crate::permissions::checked_folder(&folder) else { return vec![] };
         let mut git = git.and_then(|run| run());
         crate::mention::find(&folder, git.as_deref_mut().map(|g| g as &mut dyn crate::project::git::Executor), query)
+    }
+    /// "Compact now" in the context meter: the CLI's own compaction, as when the agent asks for it (`compact.rs`).
+    pub fn compact_now(&self, id: &str) -> Result<(), String> {
+        self.with(|c| c.compact_now(id))
+    }
+    /// Asks what fills a conversation's context; the parts come as `AppEvent::ContextParts`. False when no CLI can say now.
+    pub fn context_parts(&self, id: &str) -> bool {
+        self.with(|c| c.ask_context_parts(id))
     }
     /// Reads advertised commands without starting a CLI.
     pub fn commands(&self, id: Option<&str>, vendor: Option<Vendor>) -> Vec<AgentCommand> {
@@ -1575,6 +1588,7 @@ impl Core {
                 | EngineEvent::Quota { .. }
                 | EngineEvent::Signals(_)
                 | EngineEvent::Context { .. }
+                | EngineEvent::ContextParts { .. }
                 | EngineEvent::Error { .. }
         ) && let Some(id) = self.live.get_mut(conv).and_then(|l| l.unsaved_session.take())
             && let Some(c) = self.convs.get_mut(conv)
@@ -1613,6 +1627,10 @@ impl Core {
             }
             EngineEvent::Context { used, window } => return self.note_context(conv, vendor, used, window),
             EngineEvent::Compacted { after } => return self.note_compacted(conv, vendor, after),
+            EngineEvent::ContextParts { parts } => {
+                (self.emit)(AppEvent::ContextParts { conversation_id: conv.to_string(), parts });
+                return;
+            }
             // Codex accepted the turn: if Faber dies now, the next launch resumes this session instead of starting one that never
             // heard of the turn.
             EngineEvent::TurnStarted => {
@@ -3093,7 +3111,8 @@ impl Core {
         }
         let Some(fallback) = pick_model(&req.choice, &self.vendors(), self.codex_recommended.as_deref()) else { return };
         let id = self.draft_for(&req);
-        if self.live.get(&id).is_some_and(|l| l.turn.is_some()) {
+        // A compaction runs without a turn; replacing its process would end it unheard.
+        if self.live.get(&id).is_some_and(|l| l.turn.is_some()) || self.compacting(&id) || self.compacts.contains_key(&id) {
             return;
         }
         let pick = match (req.choice.vendor == "auto", self.convs.get(&id)) {

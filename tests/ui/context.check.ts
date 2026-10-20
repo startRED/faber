@@ -2,7 +2,7 @@ import { createComponent, createSignal } from 'solid-js';
 import { render } from 'solid-js/web';
 import { ContextMeter } from '../../ui/Context.tsx';
 import type { ContextFill } from '../../ui/api.ts';
-import { NEAR, near, percentOf, share } from '../../ui/context.ts';
+import { heardParts, NEAR, near, percentOf, share } from '../../ui/context.ts';
 import { t, useLanguage } from '../../ui/i18n.ts';
 import { check, equal, ok } from './check.ts';
 
@@ -22,7 +22,7 @@ check('context: the meter says the percent, keeps the tokens in its tooltip and 
   const root = document.createElement('div');
   document.body.append(root);
   const [fill, setFill] = createSignal<ContextFill>({ used: 150_000, window: 300_000 });
-  const dispose = render(() => createComponent(ContextMeter, { get fill() { return fill(); } }), root);
+  const dispose = render(() => createComponent(ContextMeter, { id: 'c1', busy: false, onFail: () => {}, get fill() { return fill(); } }), root);
   try {
     await settle();
     const meter = () => root.querySelector<HTMLElement>('[data-testid=context]')!;
@@ -40,6 +40,50 @@ check('context: the meter says the percent, keeps the tokens in its tooltip and 
     ok(meter().title.startsWith('Kontext:'), 'in the language of the screen');
   } finally {
     useLanguage('en');
+    dispose();
+    root.remove();
+  }
+});
+
+check('context: a click opens what fills the context, part by part, and Compact now waits while the AI works', async () => {
+  const root = document.createElement('div');
+  document.body.append(root);
+  const [busy, setBusy] = createSignal(true);
+  const dispose = render(
+    () => createComponent(ContextMeter, { id: 'c2', fill: { used: 59_000, window: 150_000 }, onFail: () => {}, get busy() { return busy(); } }),
+    root,
+  );
+  try {
+    await settle();
+    equal(root.querySelector('.ctx-panel'), null, 'closed until asked');
+    const meter = root.querySelector<HTMLButtonElement>('[data-testid=context]')!;
+    meter.click();
+    await settle();
+    const panel = root.querySelector('.ctx-panel')!;
+    equal(meter.getAttribute('aria-expanded'), 'true');
+    equal(panel.querySelector('.ctx-parts'), null, 'no parts before the CLI counted them');
+    heardParts('c2', [{ key: 'ctx.part.system', tokens: 3500 }, { key: 'ctx.part.conversation', tokens: 40_000 }]);
+    heardParts('other', [{ key: 'ctx.part.tools', tokens: 1 }]);
+    await settle();
+    equal(panel.querySelector('.ctx-parts'), null, 'parts of another conversation are not these');
+    heardParts('c2', [{ key: 'ctx.part.system', tokens: 3500 }, { key: 'ctx.part.conversation', tokens: 40_000 }]);
+    await settle();
+    equal([...panel.querySelectorAll('.ctx-parts dt')].map((d) => d.textContent).join('|'), [t('ctx.part.system'), t('ctx.part.conversation')].join('|'));
+    const compact = panel.querySelector<HTMLButtonElement>('.ctx-act button')!;
+    equal(compact.textContent?.trim(), t('ctx.compact'));
+    ok(compact.disabled, 'not while the AI works');
+    equal(panel.querySelector('.ctx-hint')?.textContent, t('ctx.compactBusy'));
+    setBusy(false);
+    await settle();
+    ok(!compact.disabled);
+    equal(panel.querySelector('.ctx-hint')?.textContent, t('ctx.compactHint'));
+    // Esc closes it and gives focus back to the meter.
+    compact.focus();
+    compact.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }));
+    await settle();
+    equal(meter.getAttribute('aria-expanded'), 'false');
+    equal(document.activeElement, meter);
+  } finally {
     dispose();
     root.remove();
   }

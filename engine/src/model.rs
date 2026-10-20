@@ -776,6 +776,15 @@ pub struct ContextFill {
     pub window: u64,
 }
 
+/// One part of what fills a conversation's own agent's context, as its CLI counts it: `key` is a `ctx.part.*` key (the
+/// system part, tools, files, the conversation, other).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ContextPart {
+    pub key: String,
+    pub tokens: u64,
+}
+
 /// The longest name Faber keeps, in characters.
 pub const NAME_LIMIT: usize = 40;
 

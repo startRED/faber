@@ -411,6 +411,42 @@ fn s(v: &Value) -> String {
     v.as_str().unwrap_or_default().to_string()
 }
 
+/// What fills the context, from Claude Code's answer to `get_context_usage`: the categories it counts as used, summed into
+/// Faber's parts (the system part, tools, files, the conversation) as `ctx.part.*` keys, in that order. Free room, the
+/// compaction buffer and deferred tools hold nothing; a category Faber does not know counts as other, so the parts always
+/// add up to what Claude Code counted.
+pub fn context_parts(usage: &Value) -> Vec<crate::model::ContextPart> {
+    const KEYS: [&str; 5] = ["ctx.part.system", "ctx.part.tools", "ctx.part.files", "ctx.part.conversation", "ctx.part.other"];
+    let mut sums = [0u64; 5];
+    for category in usage["categories"].as_array().into_iter().flatten() {
+        let name = category["name"].as_str().unwrap_or_default().to_ascii_lowercase();
+        let held = match category["kind"].as_str() {
+            Some(kind) => kind == "used",
+            None => !name.contains("free") && !name.contains("buffer"),
+        };
+        if !held || category["isDeferred"] == true {
+            continue;
+        }
+        let part = if name.contains("message") {
+            3
+        } else if name.contains("tool") {
+            1
+        } else if name.contains("memory") || name.contains("file") {
+            2
+        } else if ["system", "agent", "skill", "command"].iter().any(|word| name.contains(word)) {
+            0
+        } else {
+            4
+        };
+        sums[part] += category["tokens"].as_u64().unwrap_or(0);
+    }
+    KEYS.iter()
+        .zip(sums)
+        .filter(|(_, tokens)| *tokens > 0)
+        .map(|(key, tokens)| crate::model::ContextPart { key: (*key).into(), tokens })
+        .collect()
+}
+
 /// Turns one stream-json line into engine events. Claude Code's JSON is loosely typed, so fields are read
 /// defensively; lines that carry nothing the app shows give no events.
 pub fn parse_claude_message(msg: &Value) -> Vec<EngineEvent> {
@@ -646,6 +682,8 @@ pub fn start_claude(opts: ClaudeOptions, on_event: EventSink) -> Session {
         let mut helpers: HashMap<String, (String, Value)> = HashMap::new();
         let mut closed = false;
         let mut control_id = 0u32;
+        // The id of the `get_context_usage` request still waiting for its answer.
+        let mut usage_request: Option<String> = None;
         let mut watch = proc::TurnWatch::default();
         let mut queued: Vec<UserTurn> = vec![];
         // Lines not yet echoed back, in order, with their words: the tag of one the person wrote while a turn ran, none for a
@@ -686,6 +724,13 @@ pub fn start_claude(opts: ClaudeOptions, on_event: EventSink) -> Session {
                     }
                     match serde_json::from_str::<Value>(&line) {
                         Ok(msg) => {
+                            if msg["type"] == "control_response" && usage_request.is_some() && msg["response"]["request_id"].as_str() == usage_request.as_deref() {
+                                usage_request = None;
+                                if msg["response"]["subtype"] == "success" {
+                                    on_event(EngineEvent::ContextParts { parts: context_parts(&msg["response"]["response"]) });
+                                }
+                                continue;
+                            }
                             if msg["type"] == "stream_event" && msg["event"]["type"] == "message_start" && msg["parent_tool_use_id"].is_null() {
                                 request_began = Some(turn_sent_ms);
                             }
@@ -811,6 +856,14 @@ pub fn start_claude(opts: ClaudeOptions, on_event: EventSink) -> Session {
                         turn_sent_ms = unix_ms();
                         if replay { unread.push_back((None, turn.text.clone())); }
                         let _ = proc::write_line(&mut *stdin, &user_message(&turn)).await;
+                    }
+                    // What fills the context, counted from the last response and local estimates: no turn, no token-count request.
+                    Some(SessionCommand::ContextUsage) => {
+                        control_id += 1;
+                        let id = format!("faber-{control_id}");
+                        let msg = json!({ "type": "control_request", "request_id": id, "request": { "subtype": "get_context_usage", "detail": "summary" } });
+                        usage_request = Some(id);
+                        let _ = proc::write_line(&mut *stdin, &msg).await;
                     }
                     // The CLI's own command, as a line of its own: it compacts and answers with a result like any turn.
                     Some(SessionCommand::Compact) => {

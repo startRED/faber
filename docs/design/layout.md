@@ -55,7 +55,7 @@ The numbers above are the usual widths. The person can change them, and the shel
   keyboard focus and while the column is open. Otherwise it reads "{n} running". When an
   item needs the user it turns amber, shows the speech bubble and reads "{n} running · {m} needs you". The words are
   always visible.
-- Before the run button, the open conversation's Context meter (R221): a 16 px ring and "{pct}%" in the quiet second ink, with the tokens in its tooltip. It is status (C003): it shows once the CLI has said both numbers, with no click, motion or setting (C011). It turns amber only from 85% of the window, near where the CLI compacts by itself (C002), never sooner.
+- Before the run button, the open conversation's Context meter (R221): a 16 px ring and "{pct}%" in the quiet second ink, with the tokens in its tooltip. It is status (C003): it shows once the CLI has said both numbers, with no motion or setting (C011). A click opens a small panel under it (R274), on the right-click menu's surface and motion and anchored to its right edge: the tokens line, what fills the context (a quiet two-column list, the part at the left and its tokens at the right) when Claude Code counted it, and below a hairline "Compact now" with one quiet line under it. Nothing in it is a setting; Esc or a click outside closes it. It turns amber only from 85% of the window, near where the CLI compacts by itself (C002), never sooner.
 
 ### Sidebar
 

@@ -219,6 +219,11 @@ export interface ContextFill {
   used: number;
   window: number;
 }
+/** One part of what fills the context, as the CLI counts it (`key`: a `ctx.part.*` key). */
+export interface ContextPart {
+  key: string;
+  tokens: number;
+}
 export interface Summary {
   id: string;
   title: string;
@@ -521,6 +526,7 @@ export type AppEvent =
   | { type: 'usage'; vendors: VendorUsage[] }
   | { type: 'list' }
   | { type: 'context'; conversationId: string; context?: ContextFill }
+  | { type: 'contextParts'; conversationId: string; parts: ContextPart[] }
   | { type: 'plan'; conversationId: string; plan?: Plan }
   | { type: 'halted'; conversationId: string; title: string; why: string; vendor?: Vendor }
   | SetupProgressEvent;
@@ -616,6 +622,8 @@ export const api = {
   /** `@` in the composer: the working folder's entries that match `query`, at most 50; a new chat has none. */
   mentions: (id: string | undefined, projectId: string | undefined, query: string) => invoke<Mention[]>('mentions', { id, projectId, query }),
   commands: (id?: string, vendor?: Vendor) => invoke<Command[]>('commands', { id, vendor }),
+  compactNow: (id: string) => invoke<void>('compact_now', { id }),
+  contextParts: (id: string) => invoke<boolean>('context_parts', { id }),
   changes: (id: string, cursor?: string) => invoke<ChangeList>('changes', { id, cursor }),
   changePatch: (id: string, path: string) => invoke<ChangePatch>('change_patch', { id, path }),
   /** A quick question on the side (R250); refused with an `error.aside.*` key, `error.quotaOut` or `error.billedPerUse`. */

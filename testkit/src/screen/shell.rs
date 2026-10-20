@@ -15,6 +15,7 @@ const TWO_WRITES: &str = "Create a.txt containing 'one'. Then create b.txt conta
 
 pub fn scenarios() -> Vec<Scenario> {
     vec![
+        Scenario { name: "the context meter opens what fills the context and compacts it now (task 190)", run: compacts_now },
         Scenario {
             name: "R161: a subagent the agent starts is one step in its reply, with what it ran and its report",
             run: subagent_step,
@@ -1097,5 +1098,53 @@ fn subagent_column(ctx: &mut Ctx, language: &str) -> Result {
         }
     }
     app.page.cdp.call("Emulation.clearDeviceMetricsOverride", json!({}))?;
+    Ok(())
+}
+
+/// Task 190: a click on the context meter shows what fills the context, as Claude Code counts it, and "Compact now" hands the
+/// conversation to Claude Code's own `/compact`; the meter then says the summary's size. The recording is `chat.jsonl` with
+/// Claude Code's answers to `get_context_usage` and `/compact` after it.
+fn compacts_now(ctx: &mut Ctx) -> Result {
+    start_settings(ctx, "en")?;
+    let mut app = ctx.launch(Launch {
+        claude: CliSlot::Fake,
+        codex: CliSlot::Off,
+        recording: Some(ctx.paths.fixtures.join("claude/compact-now.jsonl")),
+        ..Launch::default()
+    })?;
+    let page = &mut app.page;
+    let model = page.labelled("composer.model")?;
+    page.select_option(&model, "Claude Haiku")?;
+    ask(page, "In one sentence: why is the sky blue?")?;
+    let actions = page.named("article", "answer.label")?.css(".actions");
+    page.wait_visible(&actions)?;
+    let meter = css("[data-testid=context]");
+    page.wait_visible(&meter)?;
+    // The percent rounds both sizes to 0% of a large window; the tokens in the label tell them apart.
+    let before = page.attr(&meter, "aria-label")?;
+    page.click(&meter)?;
+    let panel = css(".ctx-panel");
+    page.wait_visible(&panel)?;
+    // The parts Claude Code counted, in Faber's words; free room is not one of them.
+    let system = page.text_in("ctx.part.system", "en")?;
+    page.wait_visible(&panel.clone().css(".ctx-parts dt").has_text(&system))?;
+    ensure(page.count(&panel.clone().css(".ctx-parts dt"))? == 3, || {
+        "the parts are not the system, the tools and the conversation".into()
+    })?;
+    ctx.shot(&mut app, "context-panel")?;
+    let page = &mut app.page;
+    let compact = page.named("button", "ctx.compact")?;
+    page.click(&compact)?;
+    page.wait_gone(&panel)?;
+    // The summary is what the context holds now.
+    for _ in 0..100 {
+        if page.attr(&meter, "aria-label")? != before {
+            break;
+        }
+        pause(0.05);
+    }
+    let after = page.attr(&meter, "aria-label")?;
+    ensure(after != before, || format!("the meter still says {before:?} after the compaction"))?;
+    ensure(!page.inner_text(&css("main"))?.contains("/compact"), || "the compaction shows as a message".into())?;
     Ok(())
 }

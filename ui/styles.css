@@ -235,7 +235,19 @@ svg.i.sm { width: 14px; height: 14px; }
 .iconbtn:hover { background: var(--s3); color: var(--ink); }
 
 /* The run button: how much runs, and in amber with the words when something needs the user. */
-.ctx { display: inline-flex; align-items: center; gap: 6px; flex: none; color: var(--ink-3); font-size: var(--fs-xs); font-variant-numeric: tabular-nums; white-space: nowrap; cursor: default; }
+.ctx-wrap { position: relative; display: inline-flex; flex: none; }
+.ctx { display: inline-flex; align-items: center; gap: 6px; flex: none; height: var(--h-sm); padding: 0 6px; border: 0; border-radius: var(--r-sm); background: none; color: var(--ink-3); font: inherit; font-size: var(--fs-xs); font-variant-numeric: tabular-nums; white-space: nowrap; cursor: pointer; transition: color var(--dur-fast) var(--ease); }
+.ctx:hover, .ctx[aria-expanded='true'] { color: var(--ink); }
+/* What fills the context (task 190): the right-click menu's surface and motion, anchored under the meter. */
+.ctx-panel { position: absolute; top: calc(100% + 6px); right: 0; z-index: 30; display: grid; gap: 12px; width: min(320px, calc(100vw - 32px)); padding: 14px; border-radius: var(--r-md); background: var(--s2); color: var(--ink); box-shadow: var(--lift-shadow), inset 0 0 0 1px var(--line-2); transform-origin: 100% 0; animation: cmenu-in var(--dur-ui) var(--ease-spring) both; white-space: normal; }
+.ctx-panel.leaving { pointer-events: none; animation: cmenu-out var(--dur-exit) var(--ease-in) both; }
+.ctx-sum { margin: 0; color: var(--ink-2); font-size: var(--fs-sm); line-height: 1.45; }
+.ctx-parts { display: grid; gap: 4px; margin: 0; }
+.ctx-parts div { display: flex; justify-content: space-between; gap: 12px; font-size: var(--fs-sm); }
+.ctx-parts dt { color: var(--ink-2); }
+.ctx-parts dd { margin: 0; color: var(--ink-3); font-variant-numeric: tabular-nums; }
+.ctx-act { display: grid; justify-items: start; gap: 6px; padding-top: 12px; box-shadow: inset 0 1px 0 var(--line); }
+.ctx-hint { color: var(--ink-3); font-size: var(--fs-xs); line-height: 1.4; }
 .ctx-ring { width: 16px; height: 16px; }
 .ctx-ring circle { fill: none; stroke-width: 2; }
 .ctx-ring .trk { stroke: var(--line-2); }
