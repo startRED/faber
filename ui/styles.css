@@ -326,6 +326,9 @@ svg.i.sm { width: 14px; height: 14px; }
 .rc-head:has(.rc-changes) .iconbtn { margin-left: 0; }
 .rc-head:has(.rc-changes) .rc-aside { margin-left: 0; }
 .changes-view { min-width: 0; }
+.changes-head { flex-wrap: wrap; }
+.changes-review { order: 4; display: flex; flex-wrap: wrap; gap: 8px; width: 100%; }
+.changes-review .btn { height: auto; min-height: var(--h-sm); padding-block: 6px; white-space: normal; }
 .change-file { min-width: 0; }
 .change-path { flex: 1; min-width: 0; overflow-wrap: anywhere; font-family: var(--font-data); }
 .change-counts { color: var(--ink-3); font-size: var(--fs-xs); }

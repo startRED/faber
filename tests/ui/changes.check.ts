@@ -14,6 +14,162 @@ const look = {
   appearance: { base: 'sala', ground: 'sala', accent: '#ffffff', textFont: 'archivo', headingFont: 'narrow', textSize: 14, density: 1, corners: 1, motion: 'none', effects: { ambient: false, texture: false, glow: false } },
 };
 
+check('review change: both requests use the conversation send path while idle or working, never in Chat', async () => {
+  useLanguage('en');
+  const before = { open: api.open, send: api.send, state: api.state, warm: api.warm, routeDraft: api.routeDraft, setClock: api.setClock, setShellTexts: api.setShellTexts, changes: api.changes };
+  const storage = localStorage.getItem('faber.place');
+  const revision = store.list().revision;
+  const settle = () => new Promise((resolve) => setTimeout(resolve, 30));
+  try {
+    for (const busy of [false, true]) {
+      const c = structuredClone(recorded.conversation) as Conversation;
+      const initial = {
+        conversations: [{ id: c.id, title: c.title, area: c.area, projectId: 'p1', updatedAt: c.updatedAt }],
+        projects: [{ id: 'p1', name: 'Greeting', path: 'E:/greeting' }], vendors: ['claude'],
+        settings: { setup: 'done', tutorialDone: true, language: 'en', appearance: { base: 'sala' } },
+        running: { revision: revision + 1, items: busy ? [{ conversationId: c.id, turnId: 'working', title: c.title, area: 'project', projectId: 'p1', state: 'working', since: 0, permissions: [] }] : [] },
+        quotas: [], usage: [], models: [], version: 'test', look,
+      } as AppState;
+      if (busy) c.messages.at(-1)!.status = 'streaming';
+      let sent: Parameters<typeof api.send>[0] | undefined;
+      api.open = async () => c; api.state = async () => initial;
+      api.warm = async () => {}; api.routeDraft = async () => {};
+      api.setClock = async () => {}; api.setShellTexts = async () => {};
+      api.changes = async () => ({ files: recorded.changes as FileChange[], incomplete: false });
+      api.send = async (request) => { sent = request; return c.id; };
+      localStorage.setItem('faber.place', JSON.stringify({ area: 'project', projectId: 'p1', id: c.id }));
+      store.offer({ revision: store.list().revision + 1, items: initial.running.items });
+      const host = document.createElement('div');
+      document.body.append(host);
+      let hear!: (event: AppEvent) => void;
+      const dispose = render(() => createComponent(App, { initial, inbox: { take: (listener?: (event: AppEvent) => void) => { if (listener) hear = listener; } } }), host);
+      try {
+        await settle();
+        host.querySelector<HTMLButtonElement>('.run-btn')!.click();
+        await settle();
+        for (const security of [false, true]) {
+          host.querySelector<HTMLButtonElement>('.rc-changes')!.click();
+          await settle();
+          const buttons = host.querySelectorAll<HTMLButtonElement>('.changes-review button');
+          equal(buttons.length, 2, 'the changes head offers both reviews');
+          equal(buttons[0]!.textContent, 'Review');
+          equal(buttons[1]!.textContent, 'Review with security');
+          buttons[security ? 1 : 0]!.click();
+          await settle();
+          ok(sent, 'a review calls the same api.send as the composer');
+          equal(sent.conversationId, c.id); equal(sent.area, 'project'); equal(sent.projectId, 'p1');
+          equal(sent.text, t(security ? 'changes.reviewSecurityRequest' : 'changes.reviewRequest'));
+          ok(sent.text.includes(security ? 'for bugs and security issues.' : 'for bugs.'));
+          for (const words of ['copy base', 'helper tool', 'other AI when it is connected', 'fresh read-only subagent', 'short list, worst first', 'Do not change files', 'no findings']) ok(sent.text.includes(words), words);
+          deepEqual(sent.images, []); deepEqual(sent.files, []);
+          equal(host.querySelector('.changes-view'), null, 'sending returns to the running list');
+          ok(host.querySelector('.rc-body:not(.changes-view)'), 'the running list is back');
+          sent = undefined;
+        }
+        // No project control is allowed to leak into a Chat conversation, even with file tools in its history.
+        c.area = 'chat'; delete c.projectId;
+        hear({ type: 'message', conversationId: c.id, message: { id: 'chat-answer', role: 'assistant', text: 'Done.', at: Date.now(), status: 'done' } });
+        await settle();
+        equal(host.querySelector('.rc-changes'), null);
+        equal(host.querySelector('.changes-review'), null);
+      } finally { dispose(); host.remove(); }
+    }
+  } finally {
+    Object.assign(api, before);
+    store.offer({ revision: store.list().revision + 1, items: [] });
+    if (storage === null) localStorage.removeItem('faber.place'); else localStorage.setItem('faber.place', storage);
+  }
+});
+
+check('review change: switching conversations hides both review buttons before the next conversation loads', async () => {
+  useLanguage('en');
+  const before = { open: api.open, send: api.send, state: api.state, warm: api.warm, routeDraft: api.routeDraft, setClock: api.setClock, setShellTexts: api.setShellTexts, changes: api.changes };
+  const storage = localStorage.getItem('faber.place');
+  const width = Object.getOwnPropertyDescriptor(window, 'innerWidth')!;
+  Object.defineProperty(window, 'innerWidth', { configurable: true, value: 1920 });
+  window.dispatchEvent(new Event('resize'));
+  const settle = () => new Promise((resolve) => setTimeout(resolve, 30));
+  const c = structuredClone(recorded.conversation) as Conversation;
+  const next = { ...structuredClone(c), id: 'next-review-project', title: 'Second conversation' };
+  const initial = {
+    conversations: [c, next].map(({ id, title, area, projectId, updatedAt }) => ({ id, title, area, projectId, updatedAt })),
+    projects: [{ id: 'p1', name: 'Greeting', path: 'E:/greeting' }], vendors: ['claude'],
+    settings: { setup: 'done', tutorialDone: true, language: 'en', appearance: { base: 'sala' } },
+    running: { revision: 0, items: [] }, quotas: [], usage: [], models: [], version: 'test', look,
+  } as AppState;
+  const sent: Parameters<typeof api.send>[0][] = [];
+  let finishOpen!: (conversation: Conversation) => void;
+  let openingNext = false;
+  const pending = new Promise<Conversation>((resolve) => { finishOpen = resolve; });
+  api.open = async (id) => {
+    if (id === next.id) { openingNext = true; return pending; }
+    return c;
+  };
+  api.state = async () => initial;
+  api.warm = async () => {}; api.routeDraft = async () => {};
+  api.setClock = async () => {}; api.setShellTexts = async () => {};
+  api.changes = async () => ({ files: recorded.changes as FileChange[], incomplete: false });
+  api.send = async (request) => { sent.push(request); return request.conversationId!; };
+  localStorage.setItem('faber.place', JSON.stringify({ area: 'project', projectId: 'p1', id: c.id }));
+  store.offer({ revision: store.list().revision + 1, items: [] });
+  const host = document.createElement('div');
+  document.body.append(host);
+  const dispose = render(() => createComponent(App, { initial, inbox: { take: () => {} } }), host);
+  try {
+    await settle();
+    host.querySelector<HTMLButtonElement>('.run-btn')!.click();
+    await settle();
+    host.querySelector<HTMLButtonElement>('.rc-changes')!.click();
+    await settle();
+    const buttons = [...host.querySelectorAll<HTMLButtonElement>('.changes-review button')];
+    equal(buttons.length, 2, 'both reviews are available for the loaded conversation');
+    const row = [...host.querySelectorAll<HTMLButtonElement>('.side .item')].find((button) => button.textContent?.includes(next.title));
+    ok(row, 'the second conversation is selectable in the sidebar at desktop width');
+    row.click();
+    await settle();
+    ok(openingNext, 'api.open of the second conversation stays pending');
+    equal(host.querySelector('.side .item[aria-current="true"]')?.textContent?.trim(), next.title);
+    // A click at either former review control cannot send to the old or the opening conversation.
+    for (const button of buttons) button.click();
+    await settle();
+    deepEqual(sent, [], 'no review reaches either conversation during the switch');
+    equal(host.querySelector('.changes-review'), null, 'no review buttons remain while the conversation loads');
+    finishOpen(next);
+    await settle();
+    equal(host.querySelector('.changes-review'), null, 'the old changes view cannot review the newly opened conversation');
+    deepEqual(sent, []);
+  } finally {
+    finishOpen(next);
+    dispose(); host.remove(); Object.assign(api, before);
+    store.offer({ revision: store.list().revision + 1, items: [] });
+    Object.defineProperty(window, 'innerWidth', width);
+    window.dispatchEvent(new Event('resize'));
+    if (storage === null) localStorage.removeItem('faber.place'); else localStorage.setItem('faber.place', storage);
+  }
+});
+
+check('review change: no changed files means no review buttons, including an incomplete empty page', async () => {
+  const host = document.createElement('div');
+  document.body.append(host);
+  const [files, setFiles] = createSignal<FileChange[]>([]);
+  const [incomplete, setIncomplete] = createSignal(false);
+  let sent = false;
+  const dispose = render(() => createComponent(Changes, {
+    id: 'review-empty', get files() { return files(); }, loading: false, get incomplete() { return incomplete(); },
+    onReview: () => { sent = true; }, onBack: () => {}, onClose: () => {},
+  }), host);
+  try {
+    equal(host.querySelector('.changes-review'), null);
+    setIncomplete(true);
+    equal(host.querySelector('.changes-review'), null);
+    setFiles(recorded.changes as FileChange[]);
+    equal(host.querySelectorAll('.changes-review button').length, 2, 'the guard is exercised with a real callback');
+    setFiles([]);
+    equal(host.querySelector('.changes-review'), null, 'the buttons disappear if changes go away');
+    equal(sent, false);
+  } finally { dispose(); host.remove(); }
+});
+
 check('conversation changes: full motion cannot reopen A after opening B and closing B during A entrance', async () => {
   const preference = Object.getOwnPropertyDescriptor(MediaQueryList.prototype, 'matches')!;
   Object.defineProperty(MediaQueryList.prototype, 'matches', { ...preference, get(this: MediaQueryList) {

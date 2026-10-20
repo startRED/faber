@@ -441,6 +441,10 @@ export function App(props: { initial: AppState; update?: UpdateStatus; inbox: { 
     return open && current()?.id === open.conversationId ? open : undefined;
   };
   const sideChanges = () => changesOpen() && changesOpen() === current()?.id ? changesOpen() : undefined;
+  const canReview = () => {
+    const c = current();
+    return !!c && !loading() && !changes.loading && place().id === c.id && sideChanges() === c.id;
+  };
   // A conversation deleted, archived or branched changes the list, and with it the versions of the open one.
   createEffect(
     on(
@@ -1050,7 +1054,13 @@ export function App(props: { initial: AppState; update?: UpdateStatus; inbox: { 
       agent={sideAgent()}
       site={sideSite()}
       aside={sideAside() && { conversation: current(), options: options() }}
-      changes={sideChanges() ? { id: sideChanges()!, files: changeList()?.files ?? [], incomplete: changeList()?.incomplete ?? false, loading: changes.loading, loadingMore: loadingMoreChanges(), onMore: () => void moreChanges() } : undefined}
+      changes={sideChanges() ? { id: sideChanges()!, files: changeList()?.files ?? [], incomplete: changeList()?.incomplete ?? false, loading: changes.loading, loadingMore: loadingMoreChanges(), onMore: () => void moreChanges(), onReview: canReview() ? (security) => {
+        if (!canReview()) return;
+        const text = t(security ? 'changes.reviewSecurityRequest' : 'changes.reviewRequest');
+        setChangesOpen(undefined);
+        void send({ text, images: [], files: [] });
+        queueMicrotask(() => column?.querySelector<HTMLElement>('button')?.focus());
+      } : undefined } : undefined}
       onChanges={changeList()?.files.length || changeList()?.incomplete ? () => {
         showAgent(undefined);
         showSite(undefined);

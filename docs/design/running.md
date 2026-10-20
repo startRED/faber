@@ -16,6 +16,14 @@ rest of the shell are in [layout.md](layout.md).
   in one quiet line and offers "Show more files"; it never claims nothing changed. Closing a file releases its patch;
   ending a turn refreshes the list. Agent, page, quick-question and changes views exclude one another. Opening Changes
   in a column that opened by itself uses the other side views' transition: over the stage it becomes modal and traps focus.
+- With changed files, the Changes head offers "Review" as its main action and a quieter "Review with security" beside it
+  (R279). The actions wrap in a narrow column; they use the existing button states and reduced-motion rules. Each sends
+  its localized request to the conversation's own agent through the message box's send path, so it queues while busy and
+  appears as the person's message. It asks for a read-only review against the copy base (or HEAD), through Faber's helper
+  with the other connected AI, or a fresh subagent of its own otherwise (R146, R161). The security action asks for bugs and
+  security issues; findings come back in the conversation, worst first in a short list, or a clear no-findings answer.
+  Sending returns to the running list and puts focus on its first control. No review controls appear with no changed
+  files or in Chat; there is no new setting, screen, timer or stored state.
 - A run that ended while nobody looked keeps a calm card in its block (R242): no fill, a thin line around it, a check
   and "done" (amber when it needs the person), the time it worked and its last line. A click opens it, its × clears it;
   nothing else moves. The sidebar row shows a 6 px accent dot until the conversation is seen.

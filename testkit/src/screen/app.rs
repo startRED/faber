@@ -73,6 +73,10 @@ pub fn scenarios() -> Vec<Scenario> {
         },
         Scenario { name: "edit-queued: edited words reach the CLI in the same queued message", run: edits_queued },
         Scenario {
+            name: "review change: both buttons send the request and stream findings into the project conversation",
+            run: reviews_change,
+        },
+        Scenario {
             name: "recap: button and slash ask the fake CLI on the side of an idle conversation without changing its thread",
             run: recap_on_demand,
         },
@@ -1060,6 +1064,69 @@ fn thousand_messages(ctx: &mut Ctx) -> Result {
     ctx.notes.push(format!("1000 messages: opened in {open_ms} ms, {mb:.0} MB"));
     ensure(open_ms < 3000, || format!("opening took {open_ms} ms"))?;
     ensure(mb <= BUDGET_MB, || format!("{mb:.0} MB is over the {BUDGET_MB} MB budget"))
+}
+
+fn reviews_change(ctx: &mut Ctx) -> Result {
+    let mut launch = super::projects_ui::fixture(ctx)?;
+    let repo = ctx.sb.sandbox.join("repo");
+    let copy = ctx.sb.data.join("copies/changed-project");
+    std::fs::create_dir_all(copy.parent().ok_or("the copy has no parent")?).map_err(|e| e.to_string())?;
+    let git = faber_engine::cli::find_cli("git").ok_or("git is unavailable")?;
+    super::projects::git(
+        &git.command,
+        &repo,
+        &["worktree", "add", "-b", "faber/review-change", copy.to_str().ok_or("the copy path is not UTF-8")?],
+    )?;
+    std::fs::write(copy.join("fixture"), "changed").map_err(|e| e.to_string())?;
+    let recorded: serde_json::Value =
+        serde_json::from_slice(&std::fs::read(ctx.paths.fixtures.join("conversation-changes.json")).map_err(|e| e.to_string())?)
+            .map_err(|e| e.to_string())?;
+    let mut conversation = recorded["conversation"].clone();
+    conversation["projectId"] = json!("demo");
+    conversation["copy"] = json!({
+        "root": repo.to_string_lossy(), "path": copy.to_string_lossy(),
+        "branch": "faber/review-change", "base": "refs/heads/owner"
+    });
+    let folder = ctx.sb.data.join("conversations");
+    std::fs::create_dir_all(&folder).map_err(|e| e.to_string())?;
+    std::fs::write(folder.join("changed-project.json"), conversation.to_string()).map_err(|e| e.to_string())?;
+    launch.claude = CliSlot::Fake;
+    launch.codex = CliSlot::Off;
+    launch.recording = Some(ctx.paths.fixtures.join("claude/review-change.jsonl"));
+    let mut app = ctx.launch(launch)?;
+    let page = &mut app.page;
+    let projects = page.named("button", "area.projects")?;
+    page.click(&projects)?;
+    page.click(&css(".prow .item").has_text("Demo"))?;
+    page.click(&css(".proj-chats .item").has_text("Update the greeting"))?;
+    let model = page.labelled("composer.model")?;
+    page.select_option(&model, "Claude Haiku")?;
+    page.click(&css(".run-btn"))?;
+    for (key, finding, scope) in [
+        ("changes.review", "The changed greeting has no fallback.", "for bugs."),
+        ("changes.reviewSecurity", "The changed path accepts untrusted input.", "for bugs and security issues."),
+    ] {
+        page.click(&css(".rc-changes"))?;
+        page.wait_count(&css(".changes-review button"), 2)?;
+        let review = page.named("button", key)?.exact();
+        page.click(&review)?;
+        page.wait_gone(&css(".changes-view"))?;
+        page.wait_for(
+            "the review request in the person's conversation message",
+            &format!("[...document.querySelectorAll('.mine .you')].some(e => e.textContent.includes({}))", json!(scope)),
+        )?;
+        page.wait_for(
+            "the review findings streamed from the fake CLI",
+            &format!("[...document.querySelectorAll('article.ai .md')].some(e => e.textContent.includes({}))", json!(finding)),
+        )?;
+        page.wait_for("the review answer to settle", "document.querySelector('article.ai:last-of-type .actions') !== null")?;
+    }
+    ctx.shot(&mut app, "review-change-findings")?;
+    ctx.close(app.id)?;
+    let output = ctx.output(app.id);
+    ensure(!output.contains("sent user") && !output.contains("recorded user"), || {
+        format!("the fake CLI received different review words: {output}")
+    })
 }
 
 fn recap_on_demand(ctx: &mut Ctx) -> Result {

@@ -40,7 +40,7 @@ export function Running(props: {
   /** The quick question on the side (R250), opened from the list's head or by `/btw`, shown the same way. */
   aside?: { conversation?: Conversation; options: Option[] };
   onAside?: () => void;
-  changes?: { id: string; files: FileChange[]; loading: boolean; incomplete?: boolean; loadingMore?: boolean; onMore?: () => void };
+  changes?: { id: string; files: FileChange[]; loading: boolean; incomplete?: boolean; loadingMore?: boolean; onMore?: () => void; onReview?: (security: boolean) => void };
   onChanges?: () => void;
   onBack?: () => void;
   /** The open subagent fills the stage as a full thread (the column sits over the work area), and the control in its head that swaps the two. */
@@ -202,7 +202,7 @@ export function Running(props: {
               </Show>
             </div>
           </>}>
-            {(changes) => <Changes id={changes().id} files={changes().files} loading={changes().loading} incomplete={changes().incomplete} loadingMore={changes().loadingMore} onMore={changes().onMore} onBack={() => props.onBack?.()} onClose={props.onClose} />}
+            {(changes) => <Changes id={changes().id} files={changes().files} loading={changes().loading} incomplete={changes().incomplete} loadingMore={changes().loadingMore} onMore={changes().onMore} onReview={changes().onReview} onBack={() => props.onBack?.()} onClose={props.onClose} />}
           </Show>}>
             {(aside) => <QuickQuestion conversation={aside().conversation} options={aside().options} onBack={() => props.onBack?.()} onClose={props.onClose} onTell={(text) => props.onTell?.(text)} />}
           </Show>}>

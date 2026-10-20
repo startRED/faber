@@ -37,14 +37,20 @@ function ChangedFile(props: { id: string; file: FileChange; open: boolean; onTog
 }
 
 /** The conversation's whole change, in the running column's existing side view. */
-export function Changes(props: { id: string; files: FileChange[]; loading: boolean; incomplete?: boolean; loadingMore?: boolean; onMore?: () => void; onBack: () => void; onClose: () => void }) {
+export function Changes(props: { id: string; files: FileChange[]; loading: boolean; incomplete?: boolean; loadingMore?: boolean; onMore?: () => void; onReview?: (security: boolean) => void; onBack: () => void; onClose: () => void }) {
   const [open, setOpen] = createSignal<string>();
   return (
     <>
-      <div class="rc-head side-head">
+      <div class="rc-head side-head changes-head">
         <button class="iconbtn back" aria-label={t('agent.back')} title={t('agent.back')} onClick={props.onBack}><Icon name="left" /></button>
         <h2 id="running-title" class="display">{t('changes.title')}</h2>
         <button class="iconbtn" aria-label={t('run.close')} title={t('run.close')} onClick={props.onClose}><Icon name="close" /></button>
+        <Show when={props.files.length && props.onReview}>
+          <div class="changes-review">
+            <button class="btn primary" onClick={() => props.onReview?.(false)}>{t('changes.review')}</button>
+            <button class="btn ghost" onClick={() => props.onReview?.(true)}>{t('changes.reviewSecurity')}</button>
+          </div>
+        </Show>
       </div>
       <div class="rc-body side-body changes-view">
         <Show when={!props.loading} fallback={<p class="side-meta" role="status">{t('changes.loading')}</p>}>
