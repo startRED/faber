@@ -82,6 +82,11 @@ above an answer. The window widths, the sidebar and the running column are in [l
 - [Queued messages and editing](queue.md).
 - [Branches and versions](branch.md).
 
+## Go back before a message
+
+Copy/Edit's menu adds Go back, Redo or pending recovery, including after restart. Its confirmation and saved-message
+notice are in [rewind.md](rewind.md). No toolbar action or setting is added.
+
 ## Work log
 
 - The chips' line counts extend into the project's "Changes" view in the running column: git supplies the conversation's

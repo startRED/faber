@@ -33,6 +33,20 @@ pub fn terminal_reason(raw: &str) -> &'static str {
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum EngineEvent {
+    /// This session has ended; true means every process it owns was confirmed stopped.
+    WriterExit {
+        confirmed: bool,
+    },
+    /// Tracked writers still owned by this session, including work that outlives its main turn.
+    Writers {
+        active: Vec<String>,
+        unknown: bool,
+    },
+    /// The last native entry or completed turn, saved only as a continuation boundary.
+    Cursor {
+        entry: Option<String>,
+        turn: Option<String>,
+    },
     Commands(Vec<crate::model::Command>),
     Started {
         session_id: String,

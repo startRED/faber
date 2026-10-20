@@ -12,7 +12,7 @@ use serde_json::{Map, Value, json};
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::time::Duration;
 use tokio::io::{AsyncBufReadExt, BufReader};
 use tokio::sync::mpsc::error::SendError;
@@ -185,6 +185,63 @@ fn subagent_title(path: &str) -> String {
 #[derive(Default)]
 pub struct Subagents(HashMap<String, Subagent>);
 
+#[derive(Default)]
+struct NativeCommands {
+    /// Terminal handles are opaque; CLI completion also needs the server's process-tree proof.
+    items: HashMap<String, Option<String>>,
+    unknown: bool,
+}
+
+fn reported_terminal(item: &Value) -> Option<String> {
+    item["processId"].as_str().filter(|p| !p.is_empty()).map(String::from).or_else(|| item["processId"].as_u64().map(|pid| pid.to_string()))
+}
+
+impl NativeCommands {
+    fn track(&mut self, msg: &Value) {
+        let item = &msg["params"]["item"];
+        if item["type"] != "commandExecution" {
+            return;
+        }
+        let Some(id) = item["id"].as_str().filter(|id| !id.is_empty()) else {
+            self.unknown = true;
+            return;
+        };
+        let process = reported_terminal(item);
+        match msg["method"].as_str() {
+            Some("item/completed") if item["exitCode"].as_i64().is_some() => {
+                self.items.remove(id);
+            }
+            Some("item/started" | "item/completed") if process.is_some() => {
+                self.items.insert(id.into(), process);
+            }
+            Some("item/started") => {
+                self.items.insert(id.into(), None);
+            }
+            Some("item/completed") if !item["processId"].is_null() => {
+                self.unknown = true;
+            }
+            Some("item/completed") if self.items.get(id).is_none_or(Option::is_none) => {
+                self.items.remove(id);
+            }
+            _ => (),
+        }
+    }
+
+    fn unknown(&self) -> bool {
+        self.unknown || self.items.values().any(Option::is_some)
+    }
+
+    fn stops(&self, thread: &str) -> Vec<(String, String, String)> {
+        self.items.iter().filter_map(|(item, process)| Some((thread.into(), item.clone(), process.clone()?))).collect()
+    }
+
+    fn confirm_gone(&mut self, item: &str, process: &str) {
+        if self.items.get(item).and_then(Option::as_deref) == Some(process) {
+            self.items.remove(item);
+        }
+    }
+}
+
 struct Subagent {
     /// The conversation it works for.
     key: u64,
@@ -198,6 +255,9 @@ struct Subagent {
     turn: Option<String>,
     /// Its own turn, while one is under way.
     own: Option<String>,
+    /// The child was announced, but has not confirmed whether its turn is running.
+    pending: bool,
+    commands: NativeCommands,
 }
 
 /// What one notification of a subagent's thread means for its conversation.
@@ -226,6 +286,20 @@ impl Subagents {
         self.0.iter().filter(|(_, sub)| sub.key == key).filter_map(|(thread, sub)| Some((thread.clone(), sub.own.clone()?))).collect()
     }
 
+    fn writers(&self, key: u64) -> (Vec<String>, bool) {
+        let mut active = Vec::new();
+        let mut unknown = false;
+        for (thread, sub) in &self.0 {
+            if sub.key == key {
+                unknown |= sub.pending || sub.commands.unknown();
+                if sub.own.is_some() || sub.pending || !sub.commands.items.is_empty() {
+                    active.push(format!("helper:{thread}"));
+                }
+            }
+        }
+        (active, unknown)
+    }
+
     /// Follows the subagents a notification of conversation `key`, sent for its turn `turn`, starts and ends. One that ends
     /// settles the call that started it, with its report.
     pub fn track(&mut self, key: u64, turn: Option<&str>, msg: &Value) -> Option<EngineEvent> {
@@ -246,11 +320,15 @@ impl Subagents {
                     state,
                     turn,
                     own: None,
+                    pending: true,
+                    commands: Default::default(),
                 });
                 None
             }
             (Some("item/completed"), Some(end @ ("completed" | "interrupted"))) => {
-                let sub = self.0.get(&thread).filter(|sub| sub.key == key)?;
+                let sub = self.0.get_mut(&thread).filter(|sub| sub.key == key)?;
+                sub.pending = false;
+                sub.own = None;
                 Some(EngineEvent::ToolResult { id: sub.call.clone(), ok: end == "completed", declined: false, text: sub.report.clone() })
             }
             _ => None,
@@ -261,16 +339,21 @@ impl Subagents {
     /// Its words are kept as its report and never join the answer. None when the thread is no subagent's.
     pub fn child(&mut self, msg: &Value) -> Option<ChildNews> {
         let sub = self.0.get_mut(msg["params"]["threadId"].as_str()?)?;
+        sub.commands.track(msg);
         match msg["method"].as_str() {
             // Each turn of a subagent names the conversation's turn it serves (a later message to it starts a new one).
             Some("turn/started") => {
                 sub.own = msg["params"]["turn"]["id"].as_str().map(String::from);
+                sub.pending = sub.own.is_none();
                 sub.report.clear();
                 if let Some(root) = msg["params"]["turn"]["rootTurnId"].as_str() {
                     sub.turn = Some(root.to_string());
                 }
             }
-            Some("turn/completed") => sub.own = None,
+            Some("turn/completed") => {
+                sub.own = None;
+                sub.pending = false;
+            }
             _ => {}
         }
         let (key, call, turn) = (sub.key, sub.call.clone(), sub.turn.clone());
@@ -595,6 +678,8 @@ enum Waiting {
     Other(u64, &'static str),
     /// A `turn/steer`; its tag tells the engine which message it was.
     Steer(u64, String),
+    NativeStop(u64, String, String, String),
+    NativeGone(u64, String, String, String, usize),
 }
 
 fn skill_commands(result: &Value, cwd: &std::path::Path) -> Option<Vec<crate::model::Command>> {
@@ -637,7 +722,139 @@ struct Thread {
     watch: proc::TurnWatch,
     blocked: bool,
     closing: bool,
-    commands: Vec<tokio::task::JoinHandle<()>>,
+    stop_children: bool,
+    commands: HashMap<String, (Option<tokio::sync::oneshot::Sender<()>>, tokio::task::JoinHandle<()>)>,
+    unconfirmed_commands: HashMap<String, proc::OwnedTree>,
+    owns_server: bool,
+    server_writers: bool,
+    native_commands: NativeCommands,
+    stop_reported: bool,
+}
+
+type CommandNotice = (u64, Value, proc::CommandOutput);
+fn refresh_native(threads: &mut HashMap<u64, Thread>, key: u64, server: Option<&proc::OwnedTree>, no_process: bool) -> Vec<u64> {
+    let mut clear = no_process;
+    if !no_process && let Some(server) = server {
+        let original_empty = server.descendants().is_ok_and(|children| children.is_empty());
+        #[cfg(unix)]
+        let outside_empty = server.external_descendants().is_ok_and(|children| children.is_empty());
+        #[cfg(windows)]
+        let outside_empty = true;
+        clear = original_empty && outside_empty;
+    }
+    threads
+        .iter_mut()
+        .filter_map(|(&owner, t)| {
+            // Unix terminals have separate groups. Their descendants cannot safely be attributed to one conversation.
+            if (cfg!(unix) || owner == key) && t.server_writers == clear {
+                t.server_writers = !clear;
+                Some(owner)
+            } else {
+                None
+            }
+        })
+        .collect()
+}
+
+impl Thread {
+    fn native_pending(&self, key: u64, subagents: &Subagents) -> bool {
+        !self.native_commands.items.is_empty()
+            || self.native_commands.unknown()
+            || subagents.0.values().any(|sub| sub.key == key && (!sub.commands.items.is_empty() || sub.commands.unknown()))
+    }
+
+    fn report_stop(&mut self, key: u64, subagents: &Subagents) {
+        self.stop_reported = true;
+        self.publish_writers(key, subagents);
+        if self.blocked || self.server_writers || self.native_commands.unknown() || subagents.writers(key).1 {
+            (self.sink)(EngineEvent::Error { message: "error.rewind.stopUnconfirmed".into(), fatal: false });
+        }
+    }
+
+    fn command_finished(&mut self, id: &Value, confirmed: bool, unresolved: Option<proc::OwnedTree>) {
+        if confirmed {
+            self.commands.remove(&id.to_string());
+            self.unconfirmed_commands.remove(&id.to_string());
+        } else if let Some(tree) = unresolved {
+            self.unconfirmed_commands.insert(id.to_string(), tree);
+        } else {
+            self.blocked = true;
+        }
+    }
+
+    fn retry_commands(&mut self, key: u64, tx: &UnboundedSender<CommandNotice>) {
+        for (command, tree) in &self.unconfirmed_commands {
+            if self.commands.get(command).is_some_and(|(_, job)| !job.is_finished()) {
+                continue;
+            }
+            let (Ok(id), tree, tx) = (serde_json::from_str::<Value>(command), tree.clone(), tx.clone()) else { continue };
+            let retry = tokio::spawn(async move {
+                let confirmed = tree.retire().await.is_ok();
+                let _ = tx.send((
+                    key,
+                    id,
+                    proc::CommandOutput {
+                        success: false,
+                        text: "error.cli.stopUnconfirmed".into(),
+                        confirmed,
+                        unresolved: (!confirmed).then_some(tree),
+                    },
+                ));
+            });
+            if let Some((_, job)) = self.commands.get_mut(command) {
+                *job = retry;
+            }
+        }
+    }
+
+    fn drained(&self, key: u64, subagents: &Subagents) -> bool {
+        let (helpers, unknown) = subagents.writers(key);
+        self.turn.is_none()
+            && !self.watch.active()
+            && !self.blocked
+            && self.commands.is_empty()
+            && self.native_commands.items.is_empty()
+            && !self.native_commands.unknown()
+            && helpers.is_empty()
+            && !unknown
+    }
+
+    fn publish_writers(&self, key: u64, subagents: &Subagents) {
+        let (mut active, mut unknown) = subagents.writers(key);
+        for id in self.commands.keys() {
+            active.push(format!("command:{id}"));
+        }
+        for id in self.native_commands.items.keys() {
+            active.push(format!("native-command:{id}"));
+        }
+        if self.owns_server && self.server_writers {
+            active.push("process-tree".into());
+            unknown = true;
+        }
+        if let Some(turn) = &self.turn {
+            active.push(format!("turn:{turn}"));
+        }
+        unknown |= self.blocked
+            || !self.unconfirmed_commands.is_empty()
+            || self.native_commands.unknown()
+            || (self.watch.active() && self.turn.is_none());
+        active.sort_unstable();
+        (self.sink)(EngineEvent::Writers { active, unknown });
+    }
+
+    fn interrupt(&mut self) -> Option<(String, String)> {
+        for (cancel, _) in self.commands.values_mut() {
+            if let Some(cancel) = cancel.take() {
+                let _ = cancel.send(());
+            }
+        }
+        if self.blocked || self.watch.stopping() {
+            return None;
+        }
+        let ids = self.id.clone().zip(self.turn.clone())?;
+        self.watch.interrupt();
+        Some(ids)
+    }
 }
 
 // Only server names are retained. Ignore config values (which can include private integration settings).
@@ -770,6 +987,7 @@ pub fn thread_params(area: Area, t: &CodexThread) -> (&'static str, Value) {
 pub struct CodexServer {
     tx: UnboundedSender<ServerCommand>,
     next: Arc<AtomicU64>,
+    alive: Arc<AtomicBool>,
 }
 
 impl CodexServer {
@@ -778,13 +996,14 @@ impl CodexServer {
         let (tx, rx) = unbounded_channel();
         let args = codex_args(opts.area, opts.windows, opts.user_hooks, opts.permissions);
         let started = (opts.spawn)(&opts.cli.command, &args, &opts.cwd);
-        tokio::spawn(serve(started, opts, rx));
-        CodexServer { tx, next: Arc::new(AtomicU64::new(1)) }
+        let alive = Arc::new(AtomicBool::new(true));
+        tokio::spawn(serve(started, opts, rx, alive.clone()));
+        CodexServer { tx, next: Arc::new(AtomicU64::new(1)), alive }
     }
 
     /// False once the process has stopped; the engine then starts a new one.
     pub fn is_alive(&self) -> bool {
-        !self.tx.is_closed()
+        self.alive.load(Ordering::Acquire) && !self.tx.is_closed()
     }
 
     /// Opens a conversation as a thread. The session behaves as if it had the process to itself.
@@ -792,6 +1011,7 @@ impl CodexServer {
         let key = self.next.fetch_add(1, Ordering::Relaxed);
         if let Err(SendError(ServerCommand::Open { sink, .. })) = self.tx.send(ServerCommand::Open { key, thread, sink }) {
             sink(EngineEvent::Error { message: "Codex stopped.".into(), fatal: true });
+            sink(EngineEvent::WriterExit { confirmed: true });
         }
         // Straight into the server's queue, so commands from all conversations keep the order they were given in.
         let server = self.tx.clone();
@@ -810,16 +1030,23 @@ impl CodexServer {
     }
 }
 
-async fn serve(started: std::io::Result<proc::Proc>, opts: CodexServerOptions, mut rx: UnboundedReceiver<ServerCommand>) {
+async fn serve(
+    started: std::io::Result<proc::Proc>,
+    opts: CodexServerOptions,
+    mut rx: UnboundedReceiver<ServerCommand>,
+    alive: Arc<AtomicBool>,
+) {
     let area = opts.area;
     let mut p = match started {
         Ok(p) => p,
         Err(err) => {
+            alive.store(false, Ordering::Release);
             // Every conversation already waiting hears why; the next one starts a fresh process.
             rx.close();
             while let Some(cmd) = rx.recv().await {
                 if let ServerCommand::Open { sink, .. } = cmd {
                     sink(EngineEvent::Error { message: format!("Codex could not start: {err}"), fatal: true });
+                    sink(EngineEvent::WriterExit { confirmed: true });
                 }
             }
             return;
@@ -830,6 +1057,9 @@ async fn serve(started: std::io::Result<proc::Proc>, opts: CodexServerOptions, m
     let mut stdin = p.stdin;
     let mut child = p.child;
     let mut job = p.contained;
+    let no_process = child.is_none() && job.is_none();
+    let server_tree = job.as_ref().and_then(proc::Containment::owned_tree);
+    let mut shutdown_confirmed = false;
     let mut threads: HashMap<u64, Thread> = HashMap::new();
     let mut by_id: HashMap<String, u64> = HashMap::new();
     let mut subagents = Subagents::default();
@@ -841,7 +1071,7 @@ async fn serve(started: std::io::Result<proc::Proc>, opts: CodexServerOptions, m
     let mut next_id = 0u64;
     let (mut ready, mut retired, mut stopping) = (false, false, false);
     let mut tools = opts.tools.clone();
-    let (command_tx, mut command_rx) = unbounded_channel::<(Value, bool, String)>();
+    let (command_tx, mut command_rx) = unbounded_channel::<CommandNotice>();
 
     macro_rules! request {
         ($method:expr, $params:expr, $kind:expr) => {{
@@ -853,7 +1083,41 @@ async fn serve(started: std::io::Result<proc::Proc>, opts: CodexServerOptions, m
     macro_rules! stop {
         () => {{
             stopping = true;
-            proc::stop(&mut *stdin, &mut child, &mut job).await;
+            alive.store(false, Ordering::Release);
+            shutdown_confirmed |= proc::stop(&mut *stdin, &mut child, &mut job).await;
+        }};
+    }
+    macro_rules! refresh_writers {
+        ($key:expr) => {{
+            for key in refresh_native(&mut threads, $key, server_tree.as_ref(), no_process) {
+                if let Some(t) = threads.get(&key) {
+                    t.publish_writers(key, &subagents);
+                }
+            }
+        }};
+    }
+    macro_rules! stop_native {
+        ($key:expr) => {{
+            let key = $key;
+            refresh_writers!(key);
+            if let Some(t) = threads.get_mut(&key) {
+                t.retry_commands(key, &command_tx);
+            }
+            let mut commands = Vec::new();
+            if let Some(t) = threads.get(&key) && let Some(id) = &t.id {
+                commands.extend(t.native_commands.stops(id));
+            }
+            for (id, sub) in &subagents.0 {
+                if sub.key == key { commands.extend(sub.commands.stops(id)); }
+            }
+            for (thread, item, process) in commands {
+                if waiting.values().any(|w| matches!(w,
+                    Waiting::NativeStop(k, t, i, p) | Waiting::NativeGone(k, t, i, p, _)
+                    if *k == key && t == &thread && i == &item && p == &process)) { continue; }
+                let params = json!({"threadId":thread,"processId":process});
+                request!("thread/backgroundTerminals/terminate", params,
+                    Waiting::NativeStop(key, thread, item, process));
+            }
         }};
     }
     macro_rules! open_thread {
@@ -875,11 +1139,79 @@ async fn serve(started: std::io::Result<proc::Proc>, opts: CodexServerOptions, m
     let init = json!({ "clientInfo": { "name": "faber", "title": "Faber", "version": "0.0.0" }, "capabilities": { "experimentalApi": true, "requestAttestation": false } });
     request!("initialize", init, Waiting::Initialize);
 
+    let mut native_poll_at = None;
     loop {
+        let report: Vec<_> = threads
+            .iter()
+            .filter(|(key, t)| {
+                !no_process
+                    && t.stop_children
+                    && !t.stop_reported
+                    && t.turn.is_none()
+                    && !t.watch.active()
+                    && t.commands.is_empty()
+                    && !waiting.values().any(|w| matches!(w, Waiting::NativeStop(k, ..) | Waiting::NativeGone(k, ..) if *k == **key))
+            })
+            .map(|(&key, _)| key)
+            .collect();
+        for key in report {
+            refresh_writers!(key);
+            if let Some(t) = threads.get_mut(&key) {
+                t.report_stop(key, &subagents);
+            }
+        }
+        let closed: Vec<u64> =
+            threads.iter().filter(|(key, t)| no_process && t.closing && t.drained(**key, &subagents)).map(|(&key, _)| key).collect();
+        for key in closed {
+            subagents.forget(key);
+            if let Some(t) = threads.remove(&key) {
+                (t.sink)(EngineEvent::WriterExit { confirmed: true });
+                if let Some(id) = t.id {
+                    // A replacement may already have resumed this same native thread.
+                    if by_id.get(&id) == Some(&key) {
+                        by_id.remove(&id);
+                    }
+                }
+            }
+        }
+        if !stopping
+            && ((retired && threads.is_empty())
+                || (!threads.is_empty()
+                    && threads.iter().all(|(&key, t)| {
+                        t.closing && !t.native_pending(key, &subagents) && ((!t.watch.active() && t.turn.is_none()) || t.blocked)
+                    })))
+        {
+            stop!();
+        }
         let deadline = threads.values().filter_map(|t| t.watch.deadline()).min();
+        let idle_native: Vec<_> = threads
+            .iter()
+            .filter(|(_, t)| !no_process && t.turn.is_none() && !t.watch.active() && t.server_writers)
+            .map(|(&key, _)| key)
+            .collect();
+        if idle_native.is_empty() {
+            native_poll_at = None;
+        } else {
+            native_poll_at.get_or_insert_with(|| tokio::time::Instant::now() + Duration::from_secs(1));
+        }
         tokio::select! {
-            Some((id, success, text)) = command_rx.recv() => {
-                let _ = proc::write_line(&mut *stdin, &json!({"id":id,"result":{"success":success,"contentItems":[{"type":"inputText","text":text}]}})).await;
+            () = proc::wait_deadline(native_poll_at) => {
+                for key in idle_native.into_iter().take(if cfg!(unix) { 1 } else { usize::MAX }) {
+                    refresh_writers!(key);
+                    if let Some(t) = threads.get(&key) { t.publish_writers(key, &subagents); }
+                }
+                native_poll_at = None;
+            }
+            Some((key, id, result)) = command_rx.recv() => {
+                let retry = threads.get(&key).is_some_and(|t| t.unconfirmed_commands.contains_key(&id.to_string()));
+                if let Some(t) = threads.get_mut(&key) {
+                    t.command_finished(&id, result.confirmed, result.unresolved);
+                    t.publish_writers(key, &subagents);
+                    if !result.confirmed { (t.sink)(EngineEvent::Error { message: "error.rewind.stopUnconfirmed".into(), fatal: false }); }
+                }
+                if !retry {
+                    let _ = proc::write_line(&mut *stdin, &json!({"id":id,"result":{"success":result.success,"contentItems":[{"type":"inputText","text":result.text}]}})).await;
+                }
             }
             () = proc::wait_deadline(deadline) => {
                 let expired: Vec<u64> = threads.iter().filter(|(_, t)| t.watch.deadline().is_some_and(|d| d <= tokio::time::Instant::now())).map(|(&k, _)| k).collect();
@@ -889,6 +1221,7 @@ async fn serve(started: std::io::Result<proc::Proc>, opts: CodexServerOptions, m
                         // A shared process cannot be killed for one task. Retain its identity until completion/recovery.
                         t.blocked = true;
                         t.watch.finish();
+                        t.publish_writers(key, &subagents);
                         (t.sink)(EngineEvent::Error { message: "error.cli.stopUnconfirmed".into(), fatal: true });
                     } else if let Some((thread, turn)) = t.id.clone().zip(t.turn.clone()) {
                         t.watch.interrupt();
@@ -901,10 +1234,14 @@ async fn serve(started: std::io::Result<proc::Proc>, opts: CodexServerOptions, m
                 else { lines.next_line().await }
             } => {
                 let Ok(Some(line)) = line else {
+                    alive.store(false, Ordering::Release);
+                    shutdown_confirmed |= proc::stop(&mut *stdin, &mut child, &mut job).await;
                     if !stopping {
-                        let code = proc::exit_code(&mut child).await;
+                        let code = tokio::time::timeout(Duration::from_secs(1), proc::exit_code(&mut child))
+                            .await.unwrap_or_else(|_| "unknown".into());
                         let message = format!("Codex stopped (exit {code}). {}", tail.lock().unwrap()).trim().to_string();
                         for t in threads.values() {
+                            (t.sink)(EngineEvent::Writers { active: vec![], unknown: true });
                             (t.sink)(EngineEvent::Error { message: message.clone(), fatal: true });
                         }
                     }
@@ -965,18 +1302,53 @@ async fn serve(started: std::io::Result<proc::Proc>, opts: CodexServerOptions, m
                                 Waiting::Thread(key) => (vec![key], "thread", true),
                                 Waiting::Other(key, m) => (vec![key], m, false),
                                 Waiting::Steer(..) => unreachable!("handled above"),
+                                Waiting::NativeStop(key, ..) | Waiting::NativeGone(key, ..) => (vec![key], "thread/backgroundTerminals/terminate", false),
                             };
                             for t in keys.iter().filter_map(|k| threads.get(k)) {
-                                (t.sink)(EngineEvent::Error { message: format!("Codex {what} failed: {detail}"), fatal });
+                                if matches!(kind, Waiting::NativeStop(..) | Waiting::NativeGone(..)) {
+                                    if no_process { (t.sink)(EngineEvent::Error { message: "error.rewind.stopUnconfirmed".into(), fatal: false }); }
+                                } else {
+                                    (t.sink)(EngineEvent::Error { message: format!("Codex {what} failed: {detail}"), fatal });
+                                }
                             }
                             if let Waiting::Other(key,"turn/start" | "thread/compact/start") = kind && let Some(t) = threads.get_mut(&key) {
                                 t.watch.finish();
                                 t.turn = None;
                                 t.early_completion.clear();
+                                t.publish_writers(key, &subagents);
                             }
                             continue;
                         }
                         match kind {
+                            Waiting::NativeStop(key, thread, item, process) => {
+                                // A cancellation acknowledgement alone does not prove the writer has exited.
+                                let params = json!({"threadId":thread});
+                                request!("thread/backgroundTerminals/list", params,
+                                    Waiting::NativeGone(key, thread, item, process, 100));
+                            }
+                            Waiting::NativeGone(key, thread, item, process, pages) => {
+                                let result = &msg["result"];
+                                let Some(data) = result["data"].as_array() else { continue; };
+                                if data.iter().any(|entry| reported_terminal(entry).is_none())
+                                    || !(result["nextCursor"].is_null() || result["nextCursor"].is_string()) { continue; }
+                                if data.iter().any(|entry| reported_terminal(entry).as_deref() == Some(&process)) { continue; }
+                                if let Some(cursor) = result["nextCursor"].as_str() {
+                                    if pages > 0 {
+                                        let params = json!({"threadId":thread,"cursor":cursor});
+                                        request!("thread/backgroundTerminals/list", params,
+                                            Waiting::NativeGone(key, thread, item, process, pages - 1));
+                                    }
+                                    continue;
+                                }
+                                refresh_writers!(key);
+                                if let Some(t) = threads.get_mut(&key) {
+                                    if t.id.as_deref() == Some(&thread) { t.native_commands.confirm_gone(&item, &process); }
+                                    else if let Some(sub) = subagents.0.get_mut(&thread).filter(|sub| sub.key == key) {
+                                        sub.commands.confirm_gone(&item, &process);
+                                    }
+                                    t.publish_writers(key, &subagents);
+                                }
+                            }
                             Waiting::Initialize => {
                                 let _ = proc::write_line(&mut *stdin, &json!({ "method": "initialized" })).await;
                                 // The catalog's skills (`crate::tools`), before any thread opens; its answer needs nothing.
@@ -1003,11 +1375,13 @@ async fn serve(started: std::io::Result<proc::Proc>, opts: CodexServerOptions, m
                                     "params":{"cwds":[t.params.cwd]}})).await;
                                 if std::mem::take(&mut t.compact) {
                                     t.watch.begin();
+                                    t.publish_writers(key, &subagents);
                                     t.state.base = t.state.total;
                                     request!("thread/compact/start", json!({ "threadId": id }), Waiting::Other(key, "thread/compact/start"));
                                 }
                                 for turn in std::mem::take(&mut t.queued) {
                                     t.watch.begin();
+                                    t.publish_writers(key, &subagents);
                                     t.state.base = t.state.total;
                                     let params = turn_params(&id, t.params.effort.as_deref(), &turn);
                                     request!("turn/start", params, Waiting::Other(key, "turn/start"));
@@ -1016,6 +1390,7 @@ async fn serve(started: std::io::Result<proc::Proc>, opts: CodexServerOptions, m
                             Waiting::Other(key, "turn/start") => {
                                 if let Some(t) = threads.get_mut(&key) {
                                     t.turn = msg["result"]["turn"]["id"].as_str().map(String::from).or(t.turn.take());
+                                    t.publish_writers(key, &subagents);
                                     if let Some(completed) = std::mem::take(&mut t.early_completion).into_iter().find(|msg|msg["params"]["turn"]["id"].as_str() == t.turn.as_deref()) {
                                         confirmed.push_back(completed);
                                     }
@@ -1118,15 +1493,23 @@ async fn serve(started: std::io::Result<proc::Proc>, opts: CodexServerOptions, m
                             if let Some(t) = thread && t.params.permissions == Permissions::Isolated && t.params.instructions.is_none() && params["tool"] == "run_command" {
                                 let input = &params["arguments"];
                                 if let Some(argv) = crate::permissions::command_argv(&t.params.cwd, "Bash", input, Some(&opts.cli), &crate::cli::find_cli) {
+                                    let key = top.expect("registered command thread");
                                     let (spawn, cwd, tx, id) = (opts.spawn.clone(), t.params.cwd.clone(), command_tx.clone(), id.clone());
-                                    t.commands.retain(|job| !job.is_finished());
-                                    t.commands.push(tokio::spawn(async move {
+                                    let command = id.to_string();
+                                    let (cancel, cancelled) = tokio::sync::oneshot::channel();
+                                    // The task cannot start until its writer is visible to the engine.
+                                    let (admit, admitted) = tokio::sync::oneshot::channel();
+                                    let job = tokio::spawn(async move {
+                                        if admitted.await.is_err() { return; }
                                         let result = match spawn(&argv[0], &argv[1..], &cwd) {
-                                            Ok(p) => proc::command_output(p).await,
-                                            Err(_) => (false, "error.projectSandbox".into()),
+                                            Ok(p) => proc::command_output(p, cancelled).await,
+                                            Err(_) => proc::CommandOutput { success: false, text: "error.projectSandbox".into(), confirmed: true, unresolved: None },
                                         };
-                                        let _ = tx.send((id, result.0, result.1));
-                                    }));
+                                        let _ = tx.send((key, id, result));
+                                    });
+                                    t.commands.insert(command, (Some(cancel), job));
+                                    t.publish_writers(key, &subagents);
+                                    let _ = admit.send(());
                                     accepted = true;
                                 }
                             }
@@ -1181,9 +1564,19 @@ async fn serve(started: std::io::Result<proc::Proc>, opts: CodexServerOptions, m
                         }
                     }
                     _ => {
+                        // Observe the parent chain before a completion can forget its terminal.
+                        #[cfg(unix)]
+                        if params["item"]["type"] == "commandExecution" { refresh_writers!(0); }
                         // A subagent's own thread speaks for the conversation that started it.
                         if let Some(ChildNews { key, turn, events, used }) = subagents.child(&msg) {
+                            if method == Some("turn/completed") { refresh_writers!(key); }
                             if let Some(t) = threads.get_mut(&key) {
+                                t.publish_writers(key, &subagents);
+                                if t.stop_children && method == Some("turn/started") {
+                                    for (thread, turn) in subagents.at_work(key) {
+                                        request!("turn/interrupt", json!({ "threadId": thread, "turnId": turn }), Waiting::Other(key, SUBAGENT_STOP));
+                                    }
+                                }
                                 // A subagent belongs to the reply it serves: once that reply is over, what it still does or uses
                                 // reaches no other reply.
                                 let current = turn.is_some() && turn == t.turn;
@@ -1192,18 +1585,31 @@ async fn serve(started: std::io::Result<proc::Proc>, opts: CodexServerOptions, m
                                     for event in events { (t.sink)(event); }
                                 }
                             }
+                            if threads.get(&key).is_some_and(|t| t.stop_children) { stop_native!(key); }
                             continue;
                         }
                         let thread_id = params["threadId"].as_str().or_else(|| params["thread"]["id"].as_str());
-                        let key = thread_id.and_then(|t| by_id.get(t)).copied();
+                        // Resuming a thread changes its session key, but an earlier command still belongs to its original owner.
+                        let retained = thread_id.and_then(|id| threads.iter().find_map(|(&key, t)| {
+                            (t.closing && t.id.as_deref() == Some(id)
+                                && params["item"]["type"] == "commandExecution"
+                                && params["item"]["id"].as_str().is_some_and(|item| t.native_commands.items.contains_key(item)))
+                            .then_some(key)
+                        }));
+                        let key = retained.or_else(|| thread_id.and_then(|t| by_id.get(t)).copied());
+                        if method == Some("turn/completed") && let Some(key) = key {
+                            refresh_writers!(key);
+                        }
                         match key.and_then(|k| threads.get_mut(&k).map(|t| (k, t))) {
                             Some((key, t)) => {
+                                t.native_commands.track(&msg);
                                 if method == Some("turn/completed") && params["turn"]["id"].as_str() != t.turn.as_deref() {
                                     if t.turn.is_none() && waiting.values().any(|w| matches!(w,Waiting::Other(key,"turn/start") if Some(key) == thread_id.and_then(|id|by_id.get(id)))) {
                                         if t.early_completion.len() < 2 { t.early_completion.push(msg); }
                                         else {
                                             t.blocked = true;
                                             t.watch.finish();
+                                            t.publish_writers(key, &subagents);
                                             (t.sink)(EngineEvent::Error { message:"error.cli.stopUnconfirmed".into(),fatal:true });
                                         }
                                     }
@@ -1211,11 +1617,13 @@ async fn serve(started: std::io::Result<proc::Proc>, opts: CodexServerOptions, m
                                 }
                                 if method == Some("turn/started") {
                                     t.turn = params["turn"]["id"].as_str().map(String::from);
+                                    t.publish_writers(key, &subagents);
                                     if !t.blocked {
                                         (t.sink)(EngineEvent::TurnStarted);
                                     }
                                 }
                                 if method == Some("turn/completed") {
+                                    (t.sink)(EngineEvent::Cursor { entry: None, turn: params["turn"]["id"].as_str().map(String::from) });
                                     // A subagent still at work has not reported what it used: the reply's usage says so.
                                     if t.turn.as_deref().is_some_and(|turn| subagents.running(key, turn)) {
                                         t.state.subagent_running();
@@ -1228,16 +1636,22 @@ async fn serve(started: std::io::Result<proc::Proc>, opts: CodexServerOptions, m
                                     t.turn = None;
                                     t.watch.finish();
                                 }
-                                for event in parse_codex_notification(&msg, &mut t.state).into_iter().chain(subagents.track(key, params["turnId"].as_str(), &msg)) {
+                                let tracked = subagents.track(key, params["turnId"].as_str(), &msg);
+                                if method != Some("turn/completed") { t.publish_writers(key, &subagents); }
+                                for event in parse_codex_notification(&msg, &mut t.state).into_iter().chain(tracked) {
                                     if !t.blocked { (t.sink)(event); }
                                 }
+                                t.publish_writers(key, &subagents);
                                 if method == Some("turn/completed") && !t.blocked && !t.closing && let Some(id) = t.id.clone() {
                                     for turn in std::mem::take(&mut t.queued) {
                                         t.watch.begin();
+                                        t.stop_children = false;
+                                        t.publish_writers(key, &subagents);
                                         t.state.base = t.state.total;
                                         request!("turn/start", turn_params(&id, t.params.effort.as_deref(), &turn), Waiting::Other(*by_id.get(&id).expect("registered thread"), "turn/start"));
                                     }
                                 }
+                                if threads.get(&key).is_some_and(|t| t.stop_children) { stop_native!(key); }
                             }
                             // Account-wide news, such as quota: one conversation passes it on.
                             None if thread_id.is_none() => {
@@ -1249,34 +1663,32 @@ async fn serve(started: std::io::Result<proc::Proc>, opts: CodexServerOptions, m
                             }
                             None => {}
                         }
-                        let closed: Vec<u64> = threads.iter().filter(|(_, t)| t.closing && t.turn.is_none() && !t.watch.active()).map(|(&k, _)| k).collect();
-                        for key in closed {
-                            subagents.forget(key);
-                            if let Some(t) = threads.remove(&key) && let Some(id) = t.id { by_id.remove(&id); }
-                        }
-                        if retired && threads.is_empty() { stop!(); }
                     }
                 }
             }
             cmd = rx.recv(), if !stopping => match cmd {
                 Some(ServerCommand::Open { key, thread, sink }) => {
                     let state = CodexTurnState::new(thread.resume.is_some());
-                    let t = Thread { sink, params: thread, id: None, turn: None, queued: vec![], compact: false, state, approvals: HashMap::new(), helpers: HashMap::new(), watch: proc::TurnWatch::default(), blocked: false, closing: false, early_completion: vec![], commands: vec![] };
+                    let t = Thread { sink, params: thread, id: None, turn: None, queued: vec![], compact: false, state, approvals: HashMap::new(), helpers: HashMap::new(), watch: proc::TurnWatch::default(), blocked: false, closing: false, stop_children: false, early_completion: vec![], commands: HashMap::new(), unconfirmed_commands: HashMap::new(), owns_server: !no_process, server_writers: false, native_commands: Default::default(), stop_reported: false };
                     if ready {
                         open_thread!(key, &t);
                     } else {
                         pending.push(key);
                     }
                     threads.insert(key, t);
+                    #[cfg(unix)]
+                    refresh_writers!(key);
                 }
                 Some(ServerCommand::Session(key, cmd)) => match cmd {
                     SessionCommand::Send(turn) => {
                         let Some(t) = threads.get_mut(&key) else { continue };
                         if t.blocked || t.closing { continue; }
                         if t.watch.stopping() { t.queued.push(turn); continue; }
+                        t.stop_children = false;
                         match t.id.clone() {
                             Some(id) => {
                                 t.watch.begin();
+                                t.publish_writers(key, &subagents);
                                 t.state.base = t.state.total;
                                 request!("turn/start", turn_params(&id, t.params.effort.as_deref(), &turn), Waiting::Other(key, "turn/start"));
                             }
@@ -1290,6 +1702,7 @@ async fn serve(started: std::io::Result<proc::Proc>, opts: CodexServerOptions, m
                         match t.id.clone() {
                             Some(id) => {
                                 t.watch.begin();
+                                t.publish_writers(key, &subagents);
                                 t.state.base = t.state.total;
                                 request!("thread/compact/start", json!({ "threadId": id }), Waiting::Other(key, "thread/compact/start"));
                             }
@@ -1327,7 +1740,7 @@ async fn serve(started: std::io::Result<proc::Proc>, opts: CodexServerOptions, m
                                         // A half-written or unflushed line cannot be sent again: end the process, and the
                                         // end of its output tells the engine.
                                         if e.torn {
-                                            proc::stop(&mut *stdin, &mut child, &mut job).await;
+                                            shutdown_confirmed |= proc::stop(&mut *stdin, &mut child, &mut job).await;
                                         }
                                         Delivery::WriteFailed
                                     }
@@ -1343,21 +1756,29 @@ async fn serve(started: std::io::Result<proc::Proc>, opts: CodexServerOptions, m
                         let _ = proc::write_line(&mut *stdin, &json!({"id":request,"result":crate::helper::dynamic_result(ok, &text, &pictures)})).await;
                     }
                     SessionCommand::Interrupt => {
-                        if let Some(t) = threads.get_mut(&key) { for job in t.commands.drain(..) { job.abort(); } }
                         // A compaction still waiting for its thread never starts; its end is said here, as Codex would.
                         if let Some(t) = threads.get_mut(&key) && std::mem::take(&mut t.compact) {
                             (t.sink)(EngineEvent::Done { ok: false, reason: "interrupted".into(), cost_total_usd: None, input_tokens: 0, output_tokens: 0, cache_read_tokens: 0, cache_write_tokens: 0, cache_write_1h_tokens: 0, incomplete: true });
                         }
-                        if let Some(t) = threads.get_mut(&key)
-                            && !t.blocked && !t.watch.stopping()
-                            && let Some((thread, turn)) = t.id.clone().zip(t.turn.clone()) {
-                            t.watch.interrupt();
+                        let idle = threads.get(&key).is_some_and(|t| t.turn.is_none() && !t.watch.active());
+                        let busy_peer = threads.iter().any(|(&owner, t)| owner != key && (!t.drained(owner, &subagents)
+                            || t.server_writers || t.id.is_none() || !t.queued.is_empty()));
+                        let native_pending = threads.get(&key).is_some_and(|t| t.native_pending(key, &subagents));
+                        if !no_process && idle && !busy_peer && !native_pending {
+                            // With no other writer, the owned server container is the smallest complete stop boundary.
+                            alive.store(false, Ordering::Release);
+                            shutdown_confirmed |= proc::stop(&mut *stdin, &mut child, &mut job).await;
+                            break;
+                        }
+                        if let Some(t) = threads.get_mut(&key) { t.stop_children = true; t.stop_reported = false; }
+                        if let Some((thread, turn)) = threads.get_mut(&key).and_then(Thread::interrupt) {
                             request!("turn/interrupt", json!({ "threadId": thread, "turnId": turn }), Waiting::Other(key, "turn/interrupt"));
                         }
                         // Stop reaches the conversation's subagents too; one that just ended answers with an error nobody needs.
                         for (thread, turn) in subagents.at_work(key) {
                             request!("turn/interrupt", json!({ "threadId": thread, "turnId": turn }), Waiting::Other(key, SUBAGENT_STOP));
                         }
+                        stop_native!(key);
                     }
                     // Keep an active thread until completion acknowledges the stop; its peers keep running.
                     SessionCommand::Close => {
@@ -1367,23 +1788,19 @@ async fn serve(started: std::io::Result<proc::Proc>, opts: CodexServerOptions, m
                             request!("turn/interrupt", json!({ "threadId": thread, "turnId": turn }), Waiting::Other(key, SUBAGENT_STOP));
                         }
                         if let Some(t) = threads.get_mut(&key) {
-                            for job in t.commands.drain(..) { job.abort(); }
-                            if t.watch.active() || t.turn.is_some() {
-                                t.closing = true;
-                                if !t.blocked && !t.watch.stopping() {
-                                    t.watch.interrupt();
-                                    if let Some((id, turn)) = t.id.clone().zip(t.turn.clone()) {
-                                        request!("turn/interrupt", json!({ "threadId": id, "turnId": turn }), Waiting::Other(key, "turn/interrupt"));
-                                    }
-                                }
-                            } else if let Some(t) = threads.remove(&key) && let Some(id) = t.id {
-                                subagents.forget(key);
-                                by_id.remove(&id);
+                            t.closing = true;
+                            t.stop_children = true;
+                            t.stop_reported = false;
+                            let interrupted = t.interrupt();
+                            if let Some((id, turn)) = interrupted {
+                                request!("turn/interrupt", json!({ "threadId": id, "turnId": turn }), Waiting::Other(key, "turn/interrupt"));
                             }
+                            if (t.watch.active() || t.turn.is_some()) && !t.blocked && !t.watch.stopping() {
+                                t.watch.interrupt();
+                            }
+                            t.publish_writers(key, &subagents);
                         }
-                        if retired && threads.is_empty() {
-                            stop!();
-                        }
+                        stop_native!(key);
                     }
                 },
                 Some(ServerCommand::Tools(next)) => {
@@ -1405,9 +1822,63 @@ async fn serve(started: std::io::Result<proc::Proc>, opts: CodexServerOptions, m
             }
         }
     }
-    for t in threads.values() {
-        for job in &t.commands {
-            job.abort();
+    // Dynamic commands own separate containers; server exit alone cannot retire their writers.
+    for t in threads.values_mut() {
+        for (cancel, _) in t.commands.values_mut() {
+            if let Some(cancel) = cancel.take() {
+                let _ = cancel.send(());
+            }
+        }
+    }
+    let mut announced = HashSet::new();
+    loop {
+        #[cfg(unix)]
+        refresh_writers!(0);
+        let finished: Vec<_> = threads
+            .iter()
+            .filter(|(key, t)| {
+                t.commands.is_empty()
+                    // Unix also checks sampled descendants outside the original group after server exit.
+                    && ((shutdown_confirmed && (cfg!(windows) || !t.server_writers))
+                        || (no_process && !t.blocked && !t.native_pending(**key, &subagents)))
+            })
+            .map(|(&key, _)| key)
+            .collect();
+        for key in finished {
+            if let Some(t) = threads.remove(&key) {
+                (t.sink)(EngineEvent::WriterExit { confirmed: true });
+            }
+        }
+        for (&key, t) in &threads {
+            if announced.insert(key) {
+                (t.sink)(EngineEvent::WriterExit { confirmed: false });
+            }
+        }
+        if threads.is_empty() {
+            break;
+        }
+        tokio::select! {
+            () = tokio::time::sleep(Duration::from_secs(1)), if cfg!(unix) && shutdown_confirmed => {}
+            Some((key, id, result)) = command_rx.recv() => {
+                if let Some(t) = threads.get_mut(&key) {
+                    t.command_finished(&id, result.confirmed, result.unresolved);
+                    t.publish_writers(key, &subagents);
+                }
+            }
+            cmd = rx.recv() => match cmd {
+                Some(ServerCommand::Session(key, SessionCommand::Interrupt | SessionCommand::Close)) => {
+                    if !shutdown_confirmed && job.is_some() {
+                        shutdown_confirmed = proc::stop(&mut *stdin, &mut child, &mut job).await;
+                    }
+                    if let Some(t) = threads.get_mut(&key) { t.retry_commands(key, &command_tx); }
+                }
+                Some(ServerCommand::Open { sink, .. }) => {
+                    sink(EngineEvent::Error { message: "error.driverStopped".into(), fatal: true });
+                    sink(EngineEvent::WriterExit { confirmed: true });
+                }
+                None => break,
+                _ => {}
+            }
         }
     }
 }
@@ -1516,4 +1987,588 @@ pub async fn list_codex_models(bin: &str, cwd: &Path, windows: bool, spawn: Spaw
     let models = tokio::time::timeout(timeout, ask).await.unwrap_or_default();
     proc::stop(&mut *stdin, &mut child, &mut job).await;
     models
+}
+
+#[cfg(test)]
+mod rewind_tests {
+    use super::*;
+
+    fn thread(sink: EventSink) -> Thread {
+        Thread {
+            sink,
+            params: CodexThread {
+                cwd: PathBuf::new(),
+                model: None,
+                effort: None,
+                resume: None,
+                instructions: None,
+                user_name: None,
+                permissions: Permissions::Ask,
+                tuning: Default::default(),
+                helper: crate::helper::Helper::Off,
+                browse: false,
+                conversations: false,
+                verify: false,
+                progress: false,
+            },
+            id: Some("owner".into()),
+            turn: None,
+            queued: vec![],
+            compact: false,
+            state: Default::default(),
+            approvals: HashMap::new(),
+            helpers: HashMap::new(),
+            watch: Default::default(),
+            blocked: false,
+            closing: false,
+            stop_children: false,
+            early_completion: vec![],
+            commands: HashMap::new(),
+            unconfirmed_commands: HashMap::new(),
+            owns_server: false,
+            server_writers: false,
+            native_commands: Default::default(),
+            stop_reported: false,
+        }
+    }
+
+    #[tokio::test]
+    async fn rewind_an_unconfirmed_command_keeps_its_owned_tree_and_stop_can_retry_it() {
+        let empty = Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let query = empty.clone();
+        let contained = proc::Containment::scripted(
+            move || {
+                if query.load(Ordering::Acquire) { Ok(true) } else { Err(std::io::Error::other("query unavailable")) }
+            },
+            || {},
+        );
+        let tree = contained.owned_tree().unwrap();
+        let mut owner = thread(Arc::new(|_| {}));
+        let id = json!("command");
+        let job = tokio::spawn(async {});
+        tokio::task::yield_now().await;
+        owner.commands.insert(id.to_string(), (None, job));
+        owner.command_finished(&id, false, Some(tree));
+        assert!(owner.commands.contains_key(&id.to_string()));
+        assert!(owner.unconfirmed_commands.contains_key(&id.to_string()));
+        assert!(!owner.drained(1, &Subagents::default()));
+        empty.store(true, Ordering::Release);
+        let (sent, mut completed) = unbounded_channel();
+        owner.retry_commands(1, &sent);
+        let (key, retry_id, result) = completed.recv().await.unwrap();
+        assert_eq!((key, &retry_id), (1, &id));
+        assert!(result.confirmed);
+        owner.command_finished(&retry_id, result.confirmed, result.unresolved);
+        assert!(owner.commands.is_empty() && owner.unconfirmed_commands.is_empty());
+        assert!(owner.drained(1, &Subagents::default()));
+    }
+
+    #[test]
+    fn rewind_empty_server_group_never_confirms_a_reported_terminal() {
+        let root = proc::ProcessIdentity { pid: 100, created: 1 };
+        let child = proc::ProcessIdentity { pid: 101, created: 2 };
+        let members = Arc::new(std::sync::Mutex::new(vec![root]));
+        let query = members.clone();
+        let failed = Arc::new(AtomicBool::new(false));
+        let fail_query = failed.clone();
+        let container = proc::Containment::scripted_descendants(
+            root,
+            move || {
+                if fail_query.load(Ordering::Acquire) {
+                    Err(std::io::Error::other("query unavailable"))
+                } else {
+                    Ok(query.lock().unwrap().clone())
+                }
+            },
+            || {},
+        );
+        let server = container.owned_tree().unwrap();
+        let (sent, mut events) = unbounded_channel();
+        let mut owner = thread(Arc::new(move |event| drop(sent.send(event))));
+        owner.owns_server = true;
+        owner.server_writers = true;
+        owner.native_commands.track(&json!({"method":"item/completed", "params":{"item":{
+            "type":"commandExecution", "id":"command", "processId":"0020000", "exitCode":null}}}));
+        assert_eq!(
+            owner.native_commands.stops("owner"),
+            [("owner".into(), "command".into(), "0020000".into())],
+            "even numeric-looking terminal handles are preserved verbatim"
+        );
+        owner.publish_writers(1, &Subagents::default());
+        assert!(
+            matches!(events.try_recv(), Ok(EngineEvent::Writers { active, unknown: true }) if active == ["native-command:command", "process-tree"])
+        );
+        let mut threads = HashMap::from([(1, owner)]);
+        let helpers = Subagents::default();
+        let _ = refresh_native(&mut threads, 1, Some(&server), false);
+        threads[&1].publish_writers(1, &helpers);
+        assert!(
+            matches!(events.try_recv(), Ok(EngineEvent::Writers { active, unknown: true }) if active == ["native-command:command"]),
+            "a reported terminal can still write from outside the original group"
+        );
+        assert!(!threads[&1].drained(1, &helpers));
+        threads.get_mut(&1).unwrap().native_commands.track(&json!({"method":"item/completed", "params":{"item":{
+            "type":"commandExecution", "id":"command", "processId":"0020000", "exitCode":0}}}));
+        threads[&1].publish_writers(1, &helpers);
+        assert!(
+            matches!(events.try_recv(), Ok(EngineEvent::Writers { active, unknown:false }) if active.is_empty()),
+            "CLI completion releases the terminal after the process-table proof is clear"
+        );
+        members.lock().unwrap().push(child);
+        let _ = refresh_native(&mut threads, 1, Some(&server), false);
+        threads[&1].publish_writers(1, &helpers);
+        assert!(
+            matches!(events.try_recv(), Ok(EngineEvent::Writers { active, unknown: true }) if active == ["process-tree"]),
+            "an unreported hook child is a writer without any command item"
+        );
+        failed.store(true, Ordering::Release);
+        let _ = refresh_native(&mut threads, 1, Some(&server), false);
+        threads.get_mut(&1).unwrap().report_stop(1, &helpers);
+        assert!(matches!(events.try_recv(), Ok(EngineEvent::Writers { unknown: true, .. })));
+        assert!(matches!(events.try_recv(), Ok(EngineEvent::Error { message, fatal: false }) if message == "error.rewind.stopUnconfirmed"));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn rewind_cli_exit_and_missing_terminal_need_the_shared_descendant_proof() {
+        for listed_gone in [false, true] {
+            let root = proc::ProcessIdentity { pid: 100, created: 1 };
+            let child = proc::ProcessIdentity { pid: 102, created: 3 };
+            let outside = Arc::new(std::sync::Mutex::new(vec![child]));
+            let query = outside.clone();
+            let contained =
+                proc::Containment::scripted_external_descendants(root, move || Ok(vec![root]), move || Ok(query.lock().unwrap().clone()));
+            let server = contained.owned_tree().unwrap();
+            let sink: EventSink = Arc::new(|_| {});
+            let mut owner = thread(sink.clone());
+            owner.owns_server = true;
+            owner.native_commands.track(&json!({"method":"item/completed","params":{"item":{
+                "type":"commandExecution","id":"cmd","processId":"opaque-terminal","exitCode":null}}}));
+            let mut peer = thread(sink);
+            peer.owns_server = true;
+            let mut threads = HashMap::from([(1, owner), (2, peer)]);
+            let _ = refresh_native(&mut threads, 1, Some(&server), false);
+            if listed_gone {
+                threads.get_mut(&1).unwrap().native_commands.confirm_gone("cmd", "opaque-terminal");
+            } else {
+                threads.get_mut(&1).unwrap().native_commands.track(&json!({"method":"item/completed","params":{"item":{
+                    "type":"commandExecution","id":"cmd","processId":"opaque-terminal","exitCode":0}}}));
+            }
+            let _ = refresh_native(&mut threads, 1, Some(&server), false);
+            assert!(
+                threads.values().all(|thread| thread.server_writers),
+                "neither CLI completion nor listing absence releases the surviving child or its idle peer"
+            );
+            outside.lock().unwrap().clear();
+            let _ = refresh_native(&mut threads, 1, Some(&server), false);
+            assert!(threads.values().all(|thread| !thread.server_writers));
+        }
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn rewind_an_idle_unannounced_child_can_finish_without_another_event_or_stop() {
+        use tokio::io::AsyncWriteExt;
+        async fn read(lines: &mut tokio::io::Lines<BufReader<tokio::io::ReadHalf<tokio::io::DuplexStream>>>) -> Value {
+            loop {
+                let msg: Value = serde_json::from_str(&lines.next_line().await.unwrap().unwrap()).unwrap();
+                if msg["method"] != "skills/list" {
+                    return msg;
+                }
+            }
+        }
+        async fn write(pipe: &mut tokio::io::WriteHalf<tokio::io::DuplexStream>, msg: Value) {
+            pipe.write_all(format!("{msg}\n").as_bytes()).await.unwrap();
+        }
+        tokio::time::timeout(Duration::from_secs(3), async {
+            let root = proc::ProcessIdentity { pid: 100, created: 1 };
+            let child = proc::ProcessIdentity { pid: 101, created: 2 };
+            let members = Arc::new(std::sync::Mutex::new(vec![root, child]));
+            let query = members.clone();
+            let contained = proc::Containment::scripted_descendants(root, move || Ok(query.lock().unwrap().clone()), || {});
+            let (driver, script) = tokio::io::duplex(65536);
+            let (stdout, stdin) = tokio::io::split(driver);
+            let (read_pipe, mut input) = tokio::io::split(script);
+            let mut output = BufReader::new(read_pipe).lines();
+            let (tx, rx) = unbounded_channel();
+            let (sent, mut events) = unbounded_channel();
+            let sink: EventSink = Arc::new(move |event| drop(sent.send(event)));
+            let opts = CodexServerOptions {
+                permissions: Permissions::FullAccess,
+                cli: crate::cli::Cli { command: "unused".into(), prefix: vec![] },
+                cwd: PathBuf::new(),
+                area: Area::Project,
+                user_hooks: false,
+                windows: false,
+                spawn: Arc::new(|_, _, _| panic!("scripted driver must not spawn a process")),
+                tools: Default::default(),
+            };
+            let p = proc::Proc { stdin: Box::new(stdin), stdout: Box::new(stdout), stderr: None, child: None, contained: Some(contained) };
+            let server = tokio::spawn(serve(Ok(p), opts, rx, Arc::new(AtomicBool::new(true))));
+            let init = read(&mut output).await;
+            write(&mut input, json!({"id":init["id"],"result":{}})).await;
+            assert_eq!(read(&mut output).await["method"], "initialized");
+            tx.send(ServerCommand::Open { key: 1, thread: thread(sink.clone()).params, sink }).unwrap();
+            let open = read(&mut output).await;
+            write(&mut input, json!({"id":open["id"],"result":{"thread":{"id":"owner"}}})).await;
+            while !matches!(events.recv().await.unwrap(), EngineEvent::Started { .. }) {}
+            write(&mut input, json!({"method":"turn/started","params":{"threadId":"owner","turn":{"id":"first"}}})).await;
+            write(&mut input, json!({"method":"turn/completed","params":{"threadId":"owner","turn":{"id":"first","status":"completed"}}}))
+                .await;
+            while !matches!(events.recv().await.unwrap(), EngineEvent::Done { .. }) {}
+            assert!(matches!(events.recv().await.unwrap(), EngineEvent::Writers { active, unknown: true } if active == ["process-tree"]));
+            members.lock().unwrap().retain(|member| *member == root);
+            // No command or notification follows; only the owned OS membership changed.
+            tokio::time::advance(Duration::from_secs(1)).await;
+            while !matches!(events.recv().await.unwrap(), EngineEvent::Writers { active, unknown: false } if active.is_empty()) {}
+            server.abort();
+        })
+        .await
+        .expect("natural worker exit publishes idle without Check again or Stop supplying another event");
+    }
+
+    #[tokio::test]
+    async fn rewind_stop_without_main_turn_cancels_commands_until_completion_is_confirmed() {
+        let (sent, mut events) = unbounded_channel();
+        let mut owner = thread(Arc::new(move |event| {
+            let _ = sent.send(event);
+        }));
+        let (cancel, stopped) = tokio::sync::oneshot::channel();
+        let (confirmed, completed) = tokio::sync::oneshot::channel();
+        let job = tokio::spawn(async move {
+            stopped.await.unwrap();
+            let _ = confirmed.send(());
+        });
+        owner.commands.insert("command".into(), (Some(cancel), job));
+        let (peer_cancel, mut peer_stopped) = tokio::sync::oneshot::channel();
+        let mut peer = thread(Arc::new(|_| {}));
+        peer.commands.insert("peer".into(), (Some(peer_cancel), tokio::spawn(std::future::pending())));
+        assert!(owner.interrupt().is_none(), "there is no main turn to interrupt");
+        completed.await.unwrap();
+        assert!(peer_stopped.try_recv().is_err(), "the shared server's other conversation keeps working");
+        owner.publish_writers(1, &Subagents::default());
+        assert!(matches!(events.try_recv(), Ok(EngineEvent::Writers { active, unknown: false }) if active == ["command:command"]));
+        owner.commands.remove("command");
+        owner.publish_writers(1, &Subagents::default());
+        assert!(matches!(events.try_recv(), Ok(EngineEvent::Writers { active, unknown: false }) if active.is_empty()));
+        for (_, job) in peer.commands.values() {
+            job.abort();
+        }
+    }
+
+    #[test]
+    fn rewind_native_background_command_stays_unknown_until_the_cli_reports_its_exit() {
+        let (sent, mut events) = unbounded_channel();
+        let mut owner = thread(Arc::new(move |event| {
+            let _ = sent.send(event);
+        }));
+        owner.native_commands.track(&json!({"method":"item/started","params":{"item":{"type":"commandExecution","id":"cmd"}}}));
+        owner.native_commands.track(&json!({"method":"item/completed","params":{"item":{
+            "type":"commandExecution","id":"cmd","processId":"terminal","exitCode":null,"status":"completed"}}}));
+        owner.publish_writers(1, &Subagents::default());
+        assert!(matches!(events.try_recv(), Ok(EngineEvent::Writers { active, unknown: true }) if active == ["native-command:cmd"]));
+        assert_eq!(owner.native_commands.stops("owner"), [("owner".into(), "cmd".into(), "terminal".into())]);
+        owner.native_commands.confirm_gone("cmd", "different-process");
+        assert!(owner.native_commands.unknown(), "a stale confirmation never clears a different writer");
+        owner.native_commands.track(&json!({"method":"item/completed","params":{"item":{
+            "type":"commandExecution","id":"cmd","processId":"terminal","exitCode":0,"status":"completed"}}}));
+        owner.publish_writers(1, &Subagents::default());
+        assert!(
+            matches!(events.try_recv(), Ok(EngineEvent::Writers { active, unknown: false }) if active.is_empty()),
+            "the CLI explicitly reported this command ended"
+        );
+        owner.native_commands.confirm_gone("cmd", "terminal");
+        owner.publish_writers(1, &Subagents::default());
+        assert!(matches!(events.try_recv(), Ok(EngineEvent::Writers { active, unknown: false }) if active.is_empty()));
+    }
+
+    // Only in-memory pipes and channels: keep the hang guard independent of host load.
+    #[tokio::test(start_paused = true)]
+    async fn rewind_stop_cancels_native_commands_after_turn_and_confirms_exit_without_touching_peers() {
+        use tokio::io::AsyncWriteExt;
+        async fn read(lines: &mut tokio::io::Lines<BufReader<tokio::io::ReadHalf<tokio::io::DuplexStream>>>) -> Value {
+            loop {
+                let msg: Value = serde_json::from_str(&lines.next_line().await.unwrap().unwrap()).unwrap();
+                if msg["method"] != "skills/list" {
+                    return msg;
+                }
+            }
+        }
+        async fn write(pipe: &mut tokio::io::WriteHalf<tokio::io::DuplexStream>, msg: Value) {
+            pipe.write_all(format!("{msg}\n").as_bytes()).await.unwrap();
+        }
+        tokio::time::timeout(Duration::from_secs(3), async {
+            let (driver, script) = tokio::io::duplex(65536);
+            let (stdout, stdin) = tokio::io::split(driver);
+            let (read_pipe, mut input) = tokio::io::split(script);
+            let mut output = BufReader::new(read_pipe).lines();
+            let (tx, rx) = unbounded_channel();
+            let (sent, mut events) = unbounded_channel();
+            let sink: EventSink = Arc::new(move |event| { let _ = sent.send(event); });
+            let opts = CodexServerOptions {
+                permissions: Permissions::FullAccess,
+                cli: crate::cli::Cli { command: "unused".into(), prefix: vec![] },
+                cwd: PathBuf::new(), area: Area::Project, user_hooks: false, windows: false,
+                spawn: Arc::new(|_, _, _| panic!("scripted driver must not spawn a process")), tools: Default::default(),
+            };
+            let p = proc::Proc { stdin: Box::new(stdin), stdout: Box::new(stdout), stderr: None, child: None, contained: None };
+            let server = tokio::spawn(serve(Ok(p), opts, rx, Arc::new(AtomicBool::new(true))));
+            let init = read(&mut output).await;
+            write(&mut input, json!({"id":init["id"],"result":{}})).await;
+            assert_eq!(read(&mut output).await["method"], "initialized");
+            for (key, id) in [(1, "owner"), (2, "peer")] {
+                tx.send(ServerCommand::Open { key, thread: thread(sink.clone()).params, sink: sink.clone() }).unwrap();
+                let open = read(&mut output).await;
+                write(&mut input, json!({"id":open["id"],"result":{"thread":{"id":id}}})).await;
+                while !matches!(events.recv().await.unwrap(), EngineEvent::Started { .. }) {}
+            }
+            // Both commands outlive their turns; their process ids belong to separate threads.
+            for id in ["owner", "peer"] {
+                write(&mut input, json!({"method":"item/completed","params":{"threadId":id,"item":{
+                    "type":"commandExecution","id":"cmd","processId":"terminal","exitCode":null}}})).await;
+            }
+            while !matches!(events.recv().await.unwrap(), EngineEvent::Writers { active, unknown: true } if active == ["native-command:cmd"]) {}
+            tx.send(ServerCommand::Session(1, SessionCommand::Interrupt)).unwrap();
+            let stop = read(&mut output).await;
+            assert_eq!(stop["method"], "thread/backgroundTerminals/terminate");
+            assert_eq!(stop["params"], json!({"threadId":"owner","processId":"terminal"}));
+            write(&mut input, json!({"id":stop["id"],"result":{"terminated":true}})).await;
+            let list = read(&mut output).await;
+            assert_eq!(list["method"], "thread/backgroundTerminals/list");
+            assert_eq!(list["params"]["threadId"], "owner");
+            write(&mut input, json!({"id":list["id"],"result":{"data":[{"processId":"terminal"}]}})).await;
+            // A later notification confirms the list was consumed; a retry must not overtake its answer in select!.
+            write(&mut input, json!({"method":"turn/started","params":{"threadId":"peer","turn":{"id":"barrier"}}})).await;
+            write(&mut input, json!({"method":"turn/completed","params":{"threadId":"peer","turn":{"id":"barrier","status":"completed"}}})).await;
+            while !matches!(events.recv().await.unwrap(), EngineEvent::Done { .. }) {}
+            // An acknowledged cancellation with a still-listed process must not publish idle.
+            tx.send(ServerCommand::Session(1, SessionCommand::Interrupt)).unwrap();
+            let retry = read(&mut output).await;
+            assert_eq!(retry["method"], "thread/backgroundTerminals/terminate");
+            write(&mut input, json!({"id":retry["id"],"error":{"message":"not stopped"}})).await;
+            while !matches!(events.recv().await.unwrap(), EngineEvent::Error { fatal: false, .. }) {}
+            assert!(!events.try_recv().is_ok_and(|e| matches!(e, EngineEvent::Writers { active, unknown: false } if active.is_empty())));
+            tx.send(ServerCommand::Session(1, SessionCommand::Interrupt)).unwrap();
+            let stop = read(&mut output).await;
+            write(&mut input, json!({"id":stop["id"],"result":{"terminated":false}})).await;
+            let list = read(&mut output).await;
+            write(&mut input, json!({"id":list["id"],"result":{"data":[],"nextCursor":"page2"}})).await;
+            let page = read(&mut output).await;
+            assert_eq!(page["params"], json!({"threadId":"owner","cursor":"page2"}));
+            write(&mut input, json!({"id":page["id"],"result":{"data":[],"nextCursor":null}})).await;
+            assert!(matches!(events.recv().await.unwrap(), EngineEvent::Writers { active, unknown: false } if active.is_empty()));
+            tx.send(ServerCommand::Session(2, SessionCommand::Interrupt)).unwrap();
+            let peer = read(&mut output).await;
+            assert_eq!(peer["params"], json!({"threadId":"peer","processId":"terminal"}), "the peer remained live throughout");
+            server.abort();
+        }).await.unwrap();
+    }
+
+    #[test]
+    fn rewind_late_native_helpers_remain_writers_and_stop_is_scoped_to_the_owner() {
+        let mut helpers = Subagents::default();
+        for (key, thread) in [(1, "child"), (2, "peer")] {
+            helpers.track(
+                key,
+                Some("earlier"),
+                &json!({"method":"item/started", "params":{"item":{
+                "type":"subAgentActivity", "kind":"started", "agentThreadId":thread, "id":thread}}}),
+            );
+        }
+        assert_eq!(helpers.writers(1), (vec!["helper:child".into()], true), "an announced helper is unknown until its turn is known");
+        for thread in ["child", "peer"] {
+            helpers.child(&json!({"method":"turn/started", "params":{"threadId":thread,"turn":{"id":"work"}}}));
+        }
+        assert_eq!(helpers.at_work(1), [("child".into(), "work".into())]);
+        assert_eq!(helpers.writers(1), (vec!["helper:child".into()], false));
+        // Its owner has no current turn; child completion still settles the writer independently.
+        helpers.child(&json!({"method":"turn/completed", "params":{"threadId":"child","turn":{"id":"work","status":"completed"}}}));
+        assert_eq!(helpers.writers(1), (vec![], false));
+        assert_eq!(helpers.at_work(2), [("peer".into(), "work".into())]);
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn rewind_replacing_a_session_keeps_its_native_command_until_a_late_exit() {
+        use tokio::io::AsyncWriteExt;
+        async fn read(lines: &mut tokio::io::Lines<BufReader<tokio::io::ReadHalf<tokio::io::DuplexStream>>>) -> Value {
+            loop {
+                let msg: Value = serde_json::from_str(&lines.next_line().await.unwrap().unwrap()).unwrap();
+                if msg["method"] != "skills/list" {
+                    return msg;
+                }
+            }
+        }
+        async fn write(pipe: &mut tokio::io::WriteHalf<tokio::io::DuplexStream>, msg: Value) {
+            pipe.write_all(format!("{msg}\n").as_bytes()).await.unwrap();
+        }
+        tokio::time::timeout(Duration::from_secs(3), async {
+            // A replacement can open a new native thread or resume the same one.
+            for replacement in ["replacement", "owner"] {
+                let (driver, script) = tokio::io::duplex(65536);
+                let (stdout, stdin) = tokio::io::split(driver);
+                let (read_pipe, mut input) = tokio::io::split(script);
+                let mut output = BufReader::new(read_pipe).lines();
+                let (tx, rx) = unbounded_channel();
+                let (sent, mut events) = unbounded_channel();
+                let sink = |key| {
+                    let sent = sent.clone();
+                    Arc::new(move |event| { let _ = sent.send((key, event)); }) as EventSink
+                };
+                let opts = CodexServerOptions {
+                    permissions: Permissions::FullAccess,
+                    cli: crate::cli::Cli { command: "unused".into(), prefix: vec![] },
+                    cwd: PathBuf::new(), area: Area::Project, user_hooks: false, windows: false,
+                    spawn: Arc::new(|_, _, _| panic!("scripted driver must not spawn a process")), tools: Default::default(),
+                };
+                let p = proc::Proc { stdin: Box::new(stdin), stdout: Box::new(stdout), stderr: None, child: None, contained: None };
+                let server = tokio::spawn(serve(Ok(p), opts, rx, Arc::new(AtomicBool::new(true))));
+                let init = read(&mut output).await;
+                write(&mut input, json!({"id":init["id"],"result":{}})).await;
+                assert_eq!(read(&mut output).await["method"], "initialized");
+                for (key, id) in [(1, "owner"), (2, "peer")] {
+                    tx.send(ServerCommand::Open { key, thread: thread(sink(key)).params, sink: sink(key) }).unwrap();
+                    let open = read(&mut output).await;
+                    write(&mut input, json!({"id":open["id"],"result":{"thread":{"id":id}}})).await;
+                    while !matches!(events.recv().await.unwrap(), (k, EngineEvent::Started { .. }) if k == key) {}
+                }
+                for (key, id) in [(1, "owner"), (2, "peer")] {
+                    write(&mut input, json!({"method":"turn/started","params":{"threadId":id,"turn":{"id":"first"}}})).await;
+                    write(&mut input, json!({"method":"item/completed","params":{"threadId":id,"item":{
+                        "type":"commandExecution","id":"cmd","processId":"terminal","exitCode":null}}})).await;
+                    write(&mut input, json!({"method":"turn/completed","params":{"threadId":id,"turn":{"id":"first","status":"completed"}}})).await;
+                    while !matches!(events.recv().await.unwrap(), (k, EngineEvent::Writers { active, unknown: true }) if k == key && active == ["native-command:cmd"]) {}
+                }
+                tx.send(ServerCommand::Session(1, SessionCommand::Close)).unwrap();
+                let stop = read(&mut output).await;
+                assert_eq!(stop["method"], "thread/backgroundTerminals/terminate");
+                assert_eq!(stop["params"], json!({"threadId":"owner","processId":"terminal"}));
+                write(&mut input, json!({"id":stop["id"],"error":{"message":"still running"}})).await;
+                while !matches!(events.recv().await.unwrap(), (1, EngineEvent::Error { .. })) {}
+                let mut next = thread(sink(3)).params;
+                next.effort = Some("high".into());
+                tx.send(ServerCommand::Open { key: 3, thread: next, sink: sink(3) }).unwrap();
+                let open = read(&mut output).await;
+                write(&mut input, json!({"id":open["id"],"result":{"thread":{"id":replacement}}})).await;
+                while !matches!(events.recv().await.unwrap(), (3, EngineEvent::Started { .. })) {}
+                write(&mut input, json!({"method":"turn/started","params":{"threadId":replacement,"turn":{"id":"second"}}})).await;
+                write(&mut input, json!({"method":"turn/completed","params":{"threadId":replacement,"turn":{"id":"second","status":"completed"}}})).await;
+                while !matches!(events.recv().await.unwrap(), (3, EngineEvent::Writers { active, unknown: false }) if active.is_empty()) {}
+                // Only the earlier session can confirm this command's exit, even after native-thread reuse.
+                write(&mut input, json!({"method":"item/completed","params":{"threadId":"owner","item":{
+                    "type":"commandExecution","id":"cmd","processId":"terminal","exitCode":0}}})).await;
+                while !matches!(events.recv().await.unwrap(), (1, EngineEvent::Writers { active, unknown: false }) if active.is_empty()) {}
+                write(&mut input, json!({"method":"turn/started","params":{"threadId":replacement,"turn":{"id":"third"}}})).await;
+                while !matches!(events.recv().await.unwrap(), (3, EngineEvent::TurnStarted)) {}
+                tx.send(ServerCommand::Session(2, SessionCommand::Interrupt)).unwrap();
+                let peer = read(&mut output).await;
+                assert_eq!(peer["params"], json!({"threadId":"peer","processId":"terminal"}), "the peer stayed live and retained its own owner");
+                server.abort();
+            }
+        }).await.expect("the old owner reports exit and the new session remains routable");
+    }
+
+    #[tokio::test]
+    async fn rewind_driver_keeps_late_helpers_open_and_stop_reaches_them_after_done() {
+        use tokio::io::AsyncWriteExt;
+        async fn read(lines: &mut tokio::io::Lines<BufReader<tokio::io::ReadHalf<tokio::io::DuplexStream>>>) -> Value {
+            loop {
+                let msg: Value = serde_json::from_str(&lines.next_line().await.unwrap().unwrap()).unwrap();
+                if msg["method"] != "skills/list" {
+                    return msg;
+                }
+            }
+        }
+        async fn write(pipe: &mut tokio::io::WriteHalf<tokio::io::DuplexStream>, msg: Value) {
+            pipe.write_all(format!("{msg}\n").as_bytes()).await.unwrap();
+        }
+        tokio::time::timeout(Duration::from_secs(3), async {
+            let (driver, script) = tokio::io::duplex(65536);
+            let (stdout, stdin) = tokio::io::split(driver);
+            let (read_pipe, mut input) = tokio::io::split(script);
+            let mut output = BufReader::new(read_pipe).lines();
+            let (tx, rx) = unbounded_channel();
+            let (sent, mut events) = unbounded_channel();
+            let sink: EventSink = Arc::new(move |event| {
+                let _ = sent.send(event);
+            });
+            let opts = CodexServerOptions {
+                permissions: Permissions::FullAccess,
+                cli: crate::cli::Cli { command: "unused".into(), prefix: vec![] },
+                cwd: PathBuf::new(),
+                area: Area::Project,
+                user_hooks: false,
+                windows: false,
+                spawn: Arc::new(|_, _, _| panic!("scripted driver must not spawn a process")),
+                tools: Default::default(),
+            };
+            let p = proc::Proc { stdin: Box::new(stdin), stdout: Box::new(stdout), stderr: None, child: None, contained: None };
+            let server = tokio::spawn(serve(Ok(p), opts, rx, Arc::new(AtomicBool::new(true))));
+            let init = read(&mut output).await;
+            assert_eq!(init["method"], "initialize");
+            write(&mut input, json!({"id":init["id"],"result":{}})).await;
+            assert_eq!(read(&mut output).await["method"], "initialized");
+            tx.send(ServerCommand::Open { key: 1, thread: thread(sink.clone()).params, sink }).unwrap();
+            let open = read(&mut output).await;
+            write(&mut input, json!({"id":open["id"],"result":{"thread":{"id":"owner"}}})).await;
+            while !matches!(events.recv().await.unwrap(), EngineEvent::Started { .. }) {}
+            tx.send(ServerCommand::Session(1, SessionCommand::Send(UserTurn::text("work")))).unwrap();
+            let start = read(&mut output).await;
+            assert_eq!(start["method"], "turn/start");
+            write(&mut input, json!({"id":start["id"],"result":{"turn":{"id":"main"}}})).await;
+            write(&mut input, json!({"method":"turn/started","params":{"threadId":"owner","turn":{"id":"main"}}})).await;
+            write(
+                &mut input,
+                json!({"method":"item/started","params":{"threadId":"owner","turnId":"main","item":{
+                "type":"subAgentActivity","kind":"started","id":"helper-call","agentThreadId":"child"}}}),
+            )
+            .await;
+            write(&mut input, json!({"method":"turn/started","params":{"threadId":"child","turn":{"id":"late","rootTurnId":"main"}}}))
+                .await;
+            write(&mut input, json!({"method":"turn/completed","params":{"threadId":"owner","turn":{"id":"main","status":"completed"}}}))
+                .await;
+            let mut cursor = false;
+            loop {
+                match events.recv().await.unwrap() {
+                    EngineEvent::Cursor { turn, .. } => {
+                        assert_eq!(turn.as_deref(), Some("main"));
+                        cursor = true;
+                    }
+                    EngineEvent::Done { .. } => {
+                        assert!(cursor, "the saved cursor precedes completion");
+                        break;
+                    }
+                    _ => (),
+                }
+            }
+            assert!(matches!(events.recv().await.unwrap(), EngineEvent::Writers { active, unknown: false } if active == ["helper:child"]));
+            tx.send(ServerCommand::Session(1, SessionCommand::Interrupt)).unwrap();
+            let stop = read(&mut output).await;
+            assert_eq!(stop["method"], "turn/interrupt");
+            assert_eq!(stop["params"], json!({"threadId":"child","turnId":"late"}));
+            write(
+                &mut input,
+                json!({"method":"item/completed","params":{"threadId":"child","item":{
+                "type":"commandExecution","id":"child-cmd","processId":"child-terminal","exitCode":null}}}),
+            )
+            .await;
+            let native = read(&mut output).await;
+            assert_eq!(native["method"], "thread/backgroundTerminals/terminate");
+            assert_eq!(native["params"], json!({"threadId":"child","processId":"child-terminal"}));
+            write(&mut input, json!({"method":"turn/completed","params":{"threadId":"child","turn":{"id":"late","status":"interrupted"}}}))
+                .await;
+            while !matches!(events.recv().await.unwrap(), EngineEvent::Writers { active, unknown: true } if active == ["helper:child"]) {}
+            write(&mut input, json!({"id":native["id"],"result":{"terminated":true}})).await;
+            let list = read(&mut output).await;
+            assert_eq!(list["params"]["threadId"], "child");
+            write(&mut input, json!({"id":list["id"],"result":{"data":[]}})).await;
+            // The helper's turn ending did not settle its command; only the scoped process check does.
+            loop {
+                if matches!(events.recv().await.unwrap(), EngineEvent::Writers { active, unknown: false } if active.is_empty()) {
+                    break;
+                }
+            }
+            server.abort();
+        })
+        .await
+        .unwrap();
+    }
 }

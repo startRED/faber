@@ -939,7 +939,7 @@ export function App(props: { initial: AppState; update?: UpdateStatus; inbox: { 
   // With no AI, Projects says what Chat says ("No AI connected") instead of offering a folder nothing could work in.
   const needsProject = () => area() === 'project' && !project() && state().vendors.length > 0;
   // The new conversation of a chat with a connected AI is the one place the effects of a look appear.
-  const newChat = () => (area() === 'chat' || !!project()) && state().vendors.length > 0 && !current()?.messages.length;
+  const newChat = () => (area() === 'chat' || !!project()) && state().vendors.length > 0 && !current()?.messages.length && !current()?.rewindNotice;
   // A new conversation the user is in, not a remembered one that is still on its way: the tutorial would open over it and
   // vanish when its messages arrive.
   const startsFresh = () => newChat() && !loading() && !place().id;
@@ -1385,12 +1385,15 @@ ${copy().path}`}>
                               });
                             }}>
                               <Show
-                                when={current()?.messages.length ? current() : undefined}
+                                when={current()?.messages.length || current()?.rewindNotice ? current() : undefined}
                                 fallback={<NoAiOrProject vendors={state().vendors.length} area={area()} project={project()} onConnect={openSetup} />}
                               >
                                 {(c) => (
                                   <Thread
                                     messages={c().messages}
+                                    rewindNotice={c().rewindNotice}
+                                    onRewind={() => go(place())}
+                                    conversationNames={Object.fromEntries(state().conversations.map((conversation) => [conversation.id, conversation.title]))}
                                     queued={c().queued}
                                     busy={checking()}
                                     weighing={items().some((i) => i.conversationId === c().id && i.weighing)}

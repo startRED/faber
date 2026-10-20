@@ -1205,16 +1205,17 @@ async fn open_in_terminal_resumes_the_same_cli_session_in_the_conversation_folde
 async fn the_hooks_choice_is_saved_and_restarts_idle_project_clis_with_it() {
     let dir = tempfile::tempdir().unwrap();
     let f = fake(fixture("claude", "chat"));
-    let (engine, _rx) = engine(dir.path(), Vendor::Claude, f.spawn.clone());
+    let (engine, mut rx) = engine(dir.path(), Vendor::Claude, f.spawn.clone());
     engine.save_settings(Settings { permissions: Some(Permissions::Ask), ..Settings::default() }).unwrap();
     let project = engine.add_project(&dir.path().to_string_lossy()).unwrap();
-    let warm =
-        || WarmRequest { conversation_id: None, area: Area::Project, project_id: Some(project.id.clone()), choice: choice("claude", None) };
+    let send = || SendRequest { project_id: Some(project.id.clone()), ..ask(Area::Project, SKY, choice("claude", None)) };
     let last_args = || f.args.lock().unwrap().last().cloned().unwrap_or_default().join(" ");
-    engine.warm(warm());
+    engine.send(send()).unwrap();
+    finished(&mut rx, |_| {}).await;
     assert!(last_args().contains("disableAllHooks"));
     engine.save_settings(Settings { user_hooks: Some(true), ..Settings::default() }).unwrap();
-    engine.warm(warm());
+    engine.send(send()).unwrap();
+    finished(&mut rx, |_| {}).await;
     assert!(!last_args().contains("disableAllHooks"));
     let appearance = serde_json::json!({ "base": "oficina" }).as_object().cloned();
     engine.save_settings(Settings { appearance, ..Settings::default() }).unwrap();
@@ -1233,22 +1234,24 @@ async fn permissions_default_without_a_migration_persist_and_restart_idle_projec
         assert_eq!(old.permissions.unwrap_or_default(), Permissions::FullAccess);
     }
     let f = fake(fixture("claude", "chat"));
-    let (engine, _rx) = engine(dir.path(), Vendor::Claude, f.spawn.clone());
+    let (engine, mut rx) = engine(dir.path(), Vendor::Claude, f.spawn.clone());
     let project = engine.add_project(&dir.path().to_string_lossy()).unwrap();
-    let warm =
-        || WarmRequest { conversation_id: None, area: Area::Project, project_id: Some(project.id.clone()), choice: choice("claude", None) };
+    let send = || SendRequest { project_id: Some(project.id.clone()), ..ask(Area::Project, SKY, choice("claude", None)) };
     let last_args = || f.args.lock().unwrap().last().cloned().unwrap();
-    engine.warm(warm());
+    engine.send(send()).unwrap();
+    finished(&mut rx, |_| {}).await;
     assert!(last_args().contains(&"bypassPermissions".into()));
     engine.save_settings(Settings { permissions: Some(Permissions::Ask), ..Settings::default() }).unwrap();
-    engine.warm(warm());
+    engine.send(send()).unwrap();
+    finished(&mut rx, |_| {}).await;
     assert!(!last_args().contains(&"bypassPermissions".into()));
     assert_eq!(f.args.lock().unwrap().len(), 2);
     engine.save_settings(Settings { language: Some("de".into()), ..Settings::default() }).unwrap();
     let saved: Settings = serde_json::from_value(read_json(&dir.path().join("settings.json"))).unwrap();
     assert_eq!(saved.permissions, Some(Permissions::Ask));
     engine.save_settings(Settings { permissions: Some(Permissions::FullAccess), ..Settings::default() }).unwrap();
-    engine.warm(warm());
+    engine.send(send()).unwrap();
+    finished(&mut rx, |_| {}).await;
     assert!(last_args().contains(&"bypassPermissions".into()));
     assert_eq!(f.args.lock().unwrap().len(), 3);
     assert_eq!(engine.settings().language.as_deref(), Some("de"));

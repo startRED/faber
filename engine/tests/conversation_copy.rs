@@ -108,6 +108,7 @@ impl Executor for Git {
                 say("")
             }
             ["worktree", "prune"] | ["branch", "-D", _] => say(""),
+            ["ls-files", ..] => say(""),
             other => panic!("unexpected git command {other:?}"),
         }
     }
@@ -197,6 +198,27 @@ async fn ready(engine: &Engine, id: &str) {
     panic!("the copy of {id} was never made");
 }
 
+async fn agent_started(cwds: &Mutex<Vec<PathBuf>>, count: usize) {
+    for _ in 0..200 {
+        if cwds.lock().unwrap().len() >= count {
+            return;
+        }
+        tokio::time::sleep(Duration::from_millis(25)).await;
+    }
+    panic!("the agent did not start after history capture");
+}
+
+async fn agent_started_in(cwds: &Mutex<Vec<PathBuf>>, copy: &Path) {
+    let expected = copy.canonicalize().unwrap();
+    for _ in 0..200 {
+        if cwds.lock().unwrap().iter().any(|cwd| cwd.canonicalize().is_ok_and(|cwd| cwd == expected)) {
+            return;
+        }
+        tokio::time::sleep(Duration::from_millis(25)).await;
+    }
+    panic!("the agent did not start in its copy {expected:?}; starts: {:?}", cwds.lock().unwrap());
+}
+
 /// A copy is removed away from the engine's lock; give it a moment.
 async fn gone(path: &Path) -> bool {
     for _ in 0..40 {
@@ -212,8 +234,11 @@ async fn gone(path: &Path) -> bool {
 async fn r_next_each_project_conversation_works_in_a_copy_of_its_own_on_a_faber_branch() {
     let s = setup();
     let first = sent(&s.engine, ask(&s.project, "Fix the login page")).await;
+    let a = s.engine.open(&first).unwrap().copy.unwrap();
+    agent_started_in(&s.cwds, Path::new(&a.path)).await;
     let second = sent(&s.engine, ask(&s.project, "Fix the login page")).await;
-    let (a, b) = (s.engine.open(&first).unwrap().copy.unwrap(), s.engine.open(&second).unwrap().copy.unwrap());
+    let b = s.engine.open(&second).unwrap().copy.unwrap();
+    agent_started_in(&s.cwds, Path::new(&b.path)).await;
     assert!(a.branch.starts_with("faber/fix-the-login-page-") && a.branch != b.branch, "{a:?} {b:?}");
     assert_eq!(PathBuf::from(&a.path), faber_engine::project::copy::home(s.data.path()).join(&first));
     assert_eq!(a.base.as_deref(), Some("refs/heads/main"), "merged is measured against the person's branch");
@@ -249,7 +274,8 @@ async fn r_next_with_separate_copies_off_a_new_conversation_works_in_the_project
     s.engine.update_project(&before, &faber_engine::model::Project { separate_copies: false, ..before.clone() }).unwrap();
     let id = s.engine.send(ask(&s.project, "Look around")).unwrap();
     assert!(s.engine.open(&id).unwrap().copy.is_none());
-    assert!(s.git.lock().unwrap().calls.is_empty(), "no git at all");
+    agent_started(&s.cwds, 1).await;
+    assert!(s.git.lock().unwrap().calls.iter().all(|args| args.first().is_some_and(|a| a == "ls-files")), "only history name reads");
     let cwd = s.cwds.lock().unwrap()[0].clone();
     assert_eq!(cwd.canonicalize().unwrap(), s.folder.path().canonicalize().unwrap());
     s.engine.shutdown();
@@ -328,6 +354,7 @@ async fn r_next_a_new_conversation_keeps_its_copy_when_another_project_is_opened
     }));
     let id = sent(&s.engine, ask(&s.project, "Start here")).await;
     let copy = s.engine.open(&id).unwrap().copy.expect("the message went to the conversation its copy was made for");
+    agent_started_in(&s.cwds, Path::new(&copy.path)).await;
     let cwd = s.cwds.lock().unwrap().last().cloned().unwrap();
     assert_eq!(cwd.canonicalize().unwrap(), PathBuf::from(&copy.path).canonicalize().unwrap(), "never in the project folder");
     s.engine.shutdown();
@@ -463,6 +490,20 @@ fn slow() -> Slow {
 #[tokio::test]
 async fn r_next_a_first_message_shows_at_once_and_its_agent_starts_in_the_copy_when_the_copy_is_made() {
     let Slow { setup: s, release, early } = slow();
+    let (capturing, capture_started) = tokio::sync::oneshot::channel();
+    let (finish_capture, capturing_gate) = std::sync::mpsc::channel();
+    let runner = s.git.clone();
+    let capture_gate = Mutex::new(Some((capturing, capturing_gate)));
+    // The first runner makes the copy; the next prepares its capture, even when storage later rejects it.
+    s.engine.set_git(Arc::new(move || {
+        let copied = runner.lock().unwrap().calls.iter().any(|call| call.starts_with(&["worktree".into(), "add".into()]));
+        let gate = if copied { capture_gate.lock().unwrap().take() } else { None };
+        if let Some((capturing, capturing_gate)) = gate {
+            let _ = capturing.send(());
+            capturing_gate.recv_timeout(Duration::from_secs(10)).expect("the test releases history capture");
+        }
+        Some(Box::new(Git(runner.clone())))
+    }));
     let started = std::time::Instant::now();
     let id = s.engine.send(ask(&s.project, "Fix the login page")).unwrap();
     assert!(started.elapsed() < Duration::from_secs(1), "send waited for the copy: {:?}", started.elapsed());
@@ -473,10 +514,15 @@ async fn r_next_a_first_message_shows_at_once_and_its_agent_starts_in_the_copy_w
     assert!(shown.copy.as_ref().is_some_and(|c| c.root.is_empty()), "the copy is named on the conversation, not made: {:?}", shown.copy);
     assert!(s.cwds.lock().unwrap().is_empty(), "the agent must not start before its copy is there");
     assert_eq!(early.lock().unwrap().clone(), [false, false], "the question and the typing reply go out before the copy exists");
-    // The copy is made: it is attached and the agent starts in it, never in the project folder.
+    // The copy attaches first; its history capture must then finish before the agent starts in it.
     let _ = release.send(());
     ready(&s.engine, &id).await;
     let copy = s.engine.open(&id).unwrap().copy.unwrap();
+    tokio::time::timeout(Duration::from_secs(10), capture_started).await.expect("history capture starts after attachment").unwrap();
+    assert!(s.cwds.lock().unwrap().is_empty(), "an attached copy must finish its history capture before the agent starts");
+    assert!(s.engine.open(&id).unwrap().messages[0].rewind.is_none(), "the held capture has not published its baseline yet");
+    finish_capture.send(()).unwrap();
+    agent_started_in(&s.cwds, Path::new(&copy.path)).await;
     let cwds = s.cwds.lock().unwrap().clone();
     assert_eq!(cwds.len(), 1, "{cwds:?}");
     assert_eq!(cwds[0].canonicalize().unwrap(), PathBuf::from(&copy.path).canonicalize().unwrap());
@@ -498,6 +544,7 @@ async fn r_next_a_stopped_first_message_does_not_start_its_agent_when_the_copy_c
     assert!(engine.open(&id).unwrap().copy.is_some_and(|c| !c.root.is_empty()), "the made copy was saved");
     let again = SendRequest { conversation_id: Some(id.clone()), ..ask(&s.project, "Go on") };
     engine.send(again).unwrap();
+    agent_started(&s.cwds, 1).await;
     assert_eq!(s.cwds.lock().unwrap().len(), 1);
     engine.shutdown();
 }

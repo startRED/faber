@@ -165,12 +165,12 @@ mod tests {
                     unsaved_session: None,
                 },
             );
-            c.remove(&id);
+            c.remove(&id).unwrap();
             id
         });
         assert_eq!(Budget::load(&e.ledger()).unwrap().unbounded[&Vendor::Codex], 0);
         assert_eq!(e.ledger().codex.unmetered[&2], 1);
-        e.with(|c| c.remove(&id));
+        e.with(|c| c.remove(&id)).unwrap();
         assert_eq!(e.ledger().codex.unmetered[&2], 1);
         assert_eq!(closed.load(std::sync::atomic::Ordering::SeqCst), 1);
         e.shutdown();

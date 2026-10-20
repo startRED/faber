@@ -511,6 +511,53 @@ async fn change_patch(faber: State<'_, Faber>, id: String, path: String) -> Res<
     Ok(tauri::async_runtime::spawn_blocking(move || engine.change_patch(&id, &path)).await.unwrap_or_default())
 }
 
+#[tauri::command]
+async fn rewind_points(faber: State<'_, Faber>, id: String) -> Res<Vec<faber_engine::rewind::PointInfo>> {
+    let engine = faber.engine.clone();
+    tauri::async_runtime::spawn_blocking(move || engine.rewind_points(&id)).await.map_err(|_| "error.rewind.storage".to_string())?
+}
+
+#[tauri::command]
+async fn rewind_redos(faber: State<'_, Faber>, id: String) -> Res<Vec<faber_engine::rewind::RedoInfo>> {
+    let engine = faber.engine.clone();
+    tauri::async_runtime::spawn_blocking(move || engine.rewind_redos(&id)).await.map_err(|_| "error.rewind.storage".to_string())?
+}
+
+#[tauri::command]
+async fn rewind_redo_preview(faber: State<'_, Faber>, request: faber_engine::rewind::RedoRequest) -> Res<faber_engine::rewind::Preview> {
+    let engine = faber.engine.clone();
+    tauri::async_runtime::spawn_blocking(move || engine.rewind_redo_preview(request))
+        .await
+        .map_err(|_| "error.rewind.storage".to_string())?
+}
+
+#[tauri::command]
+async fn rewind_recover(faber: State<'_, Faber>, id: String) -> Res<()> {
+    let engine = faber.engine.clone();
+    tauri::async_runtime::spawn_blocking(move || engine.rewind_recover(&id)).await.map_err(|_| "error.rewind.storage".to_string())?
+}
+
+#[tauri::command]
+async fn rewind_preview(faber: State<'_, Faber>, request: faber_engine::rewind::RestoreRequest) -> Res<faber_engine::rewind::Preview> {
+    let engine = faber.engine.clone();
+    tauri::async_runtime::spawn_blocking(move || engine.rewind_preview(request)).await.map_err(|_| "error.rewind.storage".to_string())?
+}
+
+#[tauri::command]
+async fn rewind_restore(
+    faber: State<'_, Faber>,
+    request: faber_engine::rewind::RestoreRequest,
+) -> Res<faber_engine::rewind::RestoreResult> {
+    let engine = faber.engine.clone();
+    tauri::async_runtime::spawn_blocking(move || engine.rewind_restore(request)).await.map_err(|_| "error.rewind.storage".to_string())?
+}
+
+#[tauri::command]
+async fn rewind_redo(faber: State<'_, Faber>, request: faber_engine::rewind::RedoRequest) -> Res<faber_engine::rewind::RestoreResult> {
+    let engine = faber.engine.clone();
+    tauri::async_runtime::spawn_blocking(move || engine.rewind_redo(request)).await.map_err(|_| "error.rewind.storage".to_string())?
+}
+
 /// A quick question on the side of a conversation (R250); `model` is the tab's own pick, or the conversation's.
 #[tauri::command]
 async fn ask_aside(faber: State<'_, Faber>, id: String, question: String, model: Option<String>) -> Res<String> {
@@ -1146,6 +1193,13 @@ fn main() {
                 context_parts,
                 changes,
                 change_patch,
+                rewind_points,
+                rewind_redos,
+                rewind_redo_preview,
+                rewind_recover,
+                rewind_preview,
+                rewind_restore,
+                rewind_redo,
                 ask_aside,
                 stop_aside,
                 asides,

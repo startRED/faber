@@ -479,7 +479,7 @@ check('right-click: selected text offers Copy, and only where the click lands on
   }
 });
 
-check('right-click: your message offers Copy and Edit, an answer offers Copy and Redo, a running answer only Copy', async () => {
+check('right-click: your message offers Copy, Edit and Go back, an answer offers Copy and Retry, a running answer only Copy', async () => {
   const root = stage();
   const written = clipboard();
   const branches: Array<[string, string, unknown]> = [];
@@ -500,7 +500,7 @@ check('right-click: your message offers Copy and Edit, an answer offers Copy and
     const mine = root.querySelector('.mine')!;
     equal(rightClick(mine), false);
     await settle();
-    deepEqual(labels(), [t('menu.copy'), t('mine.edit')]);
+    deepEqual(labels(), [t('menu.copy'), t('mine.edit'), t('rewind.title')]);
     entry(t('menu.copy')).click();
     await settle();
     deepEqual(written, ['Make a plan']);

@@ -1,8 +1,10 @@
 //! The slice of a child process a driver needs, so tests can replay a recording without spawning anything.
 
+pub use faber_winproc::process_tree::ProcessIdentity;
 use std::io;
 use std::path::Path;
 use std::process::Stdio;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
 use tokio::process::{Child, Command};
@@ -130,8 +132,15 @@ fn creation_flags(background: bool) -> u32 {
     CREATE_NO_WINDOW | CREATE_SUSPENDED | if background { IDLE_PRIORITY_CLASS } else { 0 }
 }
 
-/// Drain both pipes without retaining an unbounded build log; dropping the future kills the owned child.
-pub(crate) async fn command_output(mut p: Proc) -> (bool, String) {
+pub(crate) struct CommandOutput {
+    pub success: bool,
+    pub text: String,
+    pub confirmed: bool,
+    pub unresolved: Option<OwnedTree>,
+}
+
+/// Drain both pipes; retain ownership for a later Stop if the whole container cannot yet be confirmed empty.
+pub(crate) async fn command_output(mut p: Proc, mut cancel: tokio::sync::oneshot::Receiver<()>) -> CommandOutput {
     async fn drain(mut pipe: Box<dyn AsyncRead + Send + Unpin>) -> io::Result<String> {
         let mut tail = Vec::new();
         let mut buf = [0u8; 4096];
@@ -146,10 +155,43 @@ pub(crate) async fn command_output(mut p: Proc) -> (bool, String) {
             }
         }
     }
+    let mut tree_gone = p.child.is_none() && p.contained.is_none();
     drop(p.stdin);
     let stderr = p.stderr.take().unwrap_or_else(|| Box::new(tokio::io::empty()));
-    let (out, err, code) = tokio::join!(drain(p.stdout), drain(stderr), exit_code(&mut p.child));
-    (code == "0" && out.is_ok() && err.is_ok(), format!("{}{}", out.unwrap_or_default(), err.unwrap_or_default()))
+    let (out, err) = (drain(p.stdout), drain(stderr));
+    tokio::pin!(out, err);
+    let (mut output, mut errors, mut code, mut interrupted) = (None, None, None, false);
+    while output.is_none() || errors.is_none() || code.is_none() {
+        tokio::select! {
+            result = &mut out, if output.is_none() => output = Some(result),
+            result = &mut err, if errors.is_none() => errors = Some(result),
+            result = exit_code(&mut p.child), if code.is_none() => code = Some(result),
+            _ = &mut cancel, if !interrupted => {
+                interrupted = true;
+                let owned = p.contained.is_some();
+                tree_gone |= stop(&mut tokio::io::sink(), &mut p.child, &mut p.contained).await;
+                if owned {
+                    // A held pipe must not hide the retained identity from a subsequent scoped Stop.
+                    return CommandOutput {
+                        success: false,
+                        text: format!("{}{}", output.take().and_then(Result::ok).unwrap_or_default(), errors.take().and_then(Result::ok).unwrap_or_default()),
+                        confirmed: tree_gone,
+                        unresolved: if tree_gone { None } else { p.contained.as_ref().and_then(Containment::owned_tree) },
+                    };
+                }
+            }
+        }
+    }
+    let (out, err, code) = (output.unwrap(), errors.unwrap(), code.unwrap());
+    if let Some(job) = p.contained.as_ref() {
+        tree_gone = job.finish().await;
+    }
+    CommandOutput {
+        success: code == "0" && out.is_ok() && err.is_ok() && !interrupted && tree_gone,
+        text: format!("{}{}", out.unwrap_or_default(), err.unwrap_or_default()),
+        confirmed: tree_gone,
+        unresolved: if tree_gone { None } else { p.contained.as_ref().and_then(Containment::owned_tree) },
+    }
 }
 
 /// Starts a real process with piped stdio, no shell and, on Windows, no console window.
@@ -189,6 +231,8 @@ pub fn spawn_check(cmd: Command) -> io::Result<Proc> {
 
 fn spawn_in_job(mut cmd: Command, join: impl FnOnce(&Child) -> io::Result<Containment>) -> io::Result<Proc> {
     cmd.stdin(Stdio::piped()).stdout(Stdio::piped()).stderr(Stdio::piped()).kill_on_drop(true);
+    #[cfg(unix)]
+    cmd.process_group(0);
     #[cfg(windows)]
     {
         const BELOW_NORMAL_PRIORITY_CLASS: u32 = 0x0000_4000;
@@ -267,40 +311,157 @@ pub(crate) async fn write_line(stdin: &mut (dyn AsyncWrite + Send + Unpin), msg:
     stdin.flush().await.map_err(|_| WriteError { torn: true })
 }
 
-/// Everything a CLI starts, held so it can all be ended together. On Windows this is a job object with kill-on-close and no
-/// breakaway: every process the CLI starts joins the job, and ending the job ends them all, whether or not the CLI is still
-/// alive (a process tree found through parent links is lost as soon as the parent exits). Dropping it ends the processes
-/// too, so a CLI that quits on its own leaves no worker behind. Elsewhere there is no job and only the CLI itself is ended.
+/// The owned job or dedicated process group, retained until every member is confirmed gone.
 pub struct Containment {
-    #[cfg(windows)]
-    job: Arc<Mutex<Option<win32job::Job>>>,
-    #[cfg(windows)]
-    identity: crate::project::ProcessId,
+    tree: Arc<TreeState>,
 }
 
-impl Containment {
-    /// The launched tree's owned identity, and the means to end it and prove it gone. `None` where no job owns the tree.
-    pub fn owned_tree(&self) -> Option<OwnedTree> {
-        #[cfg(windows)]
-        {
-            Some(OwnedTree { identity: self.identity, job: self.job.clone() })
+struct TreeState {
+    #[cfg(windows)]
+    job: Mutex<Option<win32job::Job>>,
+    #[cfg(unix)]
+    pgid: u32,
+    #[cfg(unix)]
+    external: Mutex<faber_winproc::process_tree::ExternalDescendants>,
+    identity: crate::project::ProcessId,
+    root: Option<ProcessIdentity>,
+    confirmed: AtomicBool,
+    #[cfg(test)]
+    probe: Option<LifecycleProbe>,
+}
+
+#[cfg(test)]
+struct LifecycleProbe {
+    empty: Arc<dyn Fn() -> io::Result<bool> + Send + Sync>,
+    terminate: Arc<dyn Fn() + Send + Sync>,
+    members: Option<Arc<dyn Fn() -> io::Result<Vec<ProcessIdentity>> + Send + Sync>>,
+    #[cfg(unix)]
+    external: Option<Arc<dyn Fn() -> io::Result<Vec<ProcessIdentity>> + Send + Sync>>,
+}
+
+impl TreeState {
+    fn members(&self) -> io::Result<Vec<ProcessIdentity>> {
+        if self.confirmed.load(Ordering::Acquire) {
+            return Ok(Vec::new());
         }
-        #[cfg(not(windows))]
+        #[cfg(test)]
+        if let Some(probe) = &self.probe {
+            return probe.members.as_ref().ok_or_else(|| io::Error::other("scripted member query unavailable"))?();
+        }
+        #[cfg(windows)]
+        let members = self
+            .job
+            .lock()
+            .unwrap_or_else(|error| error.into_inner())
+            .as_ref()
+            .ok_or_else(|| io::Error::other("owned job handle is unavailable"))
+            .and_then(|job| faber_winproc::process_tree::job_members(job.handle()))?;
+        #[cfg(unix)]
+        let members = faber_winproc::process_tree::group_members(self.pgid)?;
+        Ok(members.into_iter().map(|member| member.identity).collect())
+    }
+
+    fn descendants(&self) -> io::Result<Vec<ProcessIdentity>> {
+        Ok(self.members()?.into_iter().filter(|member| Some(*member) != self.root).collect())
+    }
+
+    #[cfg(unix)]
+    fn external_descendants(&self) -> io::Result<Vec<ProcessIdentity>> {
+        #[cfg(test)]
+        if let Some(probe) = &self.probe {
+            return probe.external.as_ref().map_or_else(|| Ok(Vec::new()), |sample| sample());
+        }
+        let root = self.root.ok_or_else(|| io::Error::other("owned process identity is unavailable"))?;
+        // Group termination does not end separately grouped descendants observed before their parent exited.
+        self.external.lock().unwrap_or_else(|error| error.into_inner()).sample(root, self.pgid)
+    }
+
+    fn end(&self) {
+        if self.confirmed.load(Ordering::Acquire) {
+            return;
+        }
+        #[cfg(test)]
+        if let Some(probe) = &self.probe {
+            (probe.terminate)();
+            return;
+        }
+        #[cfg(windows)]
+        if let Some(job) = self.job.lock().unwrap_or_else(|e| e.into_inner()).as_ref() {
+            let _ = faber_winproc::job_terminate(job.handle());
+        }
+        #[cfg(unix)]
         {
-            None
+            let _ = faber_winproc::process_group_terminate(self.pgid);
+        }
+    }
+
+    fn empty(&self) -> io::Result<bool> {
+        if self.confirmed.load(Ordering::Acquire) {
+            return Ok(true);
+        }
+        #[cfg(test)]
+        if let Some(probe) = &self.probe {
+            let empty = (probe.empty)()?;
+            if empty {
+                self.confirmed.store(true, Ordering::Release);
+            }
+            return Ok(empty);
+        }
+        #[cfg(windows)]
+        let empty = self
+            .job
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .as_ref()
+            .ok_or_else(|| io::Error::other("owned job handle is unavailable"))
+            .and_then(|job| faber_winproc::job_active_processes(job.handle()))?
+            == 0;
+        #[cfg(unix)]
+        let empty = faber_winproc::process_group_empty(self.pgid)?;
+        if empty {
+            self.confirmed.store(true, Ordering::Release);
+        }
+        Ok(empty)
+    }
+
+    async fn finish(&self) -> bool {
+        self.end();
+        let deadline = Instant::now() + Duration::from_secs(5);
+        loop {
+            match self.empty() {
+                Ok(true) => return true,
+                Ok(false) if Instant::now() < deadline => tokio::time::sleep(Duration::from_millis(10)).await,
+                _ => return false,
+            }
         }
     }
 }
 
+impl Drop for TreeState {
+    fn drop(&mut self) {
+        self.end();
+    }
+}
+
 impl Containment {
+    /// Every live container member except the original CLI instance; unknown queries are errors, never idle.
+    pub fn descendants(&self) -> io::Result<Vec<ProcessIdentity>> {
+        self.tree.descendants()
+    }
+    /// A clone of ownership, never a reconstructed PID or a snapshot of the process list.
+    pub fn owned_tree(&self) -> Option<OwnedTree> {
+        Some(OwnedTree { tree: self.tree.clone() })
+    }
+
     /// What caps the processor share of the job's processes (`Some(percent)`) or lifts the cap (`None`): the game guard of
     /// a check (`crate::verify`), saying whether Windows took it. Nothing elsewhere than Windows, which has no job.
     pub fn cpu_cap(&self) -> Box<dyn Fn(Option<u32>) -> bool + Send + Sync> {
         #[cfg(windows)]
         {
-            let job = self.job.clone();
+            let tree = self.tree.clone();
             Box::new(move |percent| {
-                job.lock()
+                tree.job
+                    .lock()
                     .unwrap_or_else(|e| e.into_inner())
                     .as_ref()
                     .is_some_and(|job| faber_winproc::job_cpu_cap(job.handle(), percent).is_ok())
@@ -317,7 +478,7 @@ impl Containment {
     pub fn peak_memory(&self) -> Option<u64> {
         #[cfg(windows)]
         {
-            let job = self.job.lock().unwrap_or_else(|e| e.into_inner());
+            let job = self.tree.job.lock().unwrap_or_else(|e| e.into_inner());
             job.as_ref().and_then(|job| faber_winproc::job_peak_memory(job.handle()).ok())
         }
         #[cfg(not(windows))]
@@ -326,20 +487,76 @@ impl Containment {
         }
     }
 
-    /// Ends every process of the job now.
+    /// Request termination while retaining the owned job/group for subsequent confirmation.
     fn end(&self) {
-        #[cfg(windows)]
-        if let Some(job) = self.job.lock().unwrap_or_else(|e| e.into_inner()).as_ref() {
-            let _ = faber_winproc::job_terminate(job.handle());
+        self.tree.end();
+    }
+
+    /// Root exit and closed pipes are insufficient: the owned container must have no remaining member.
+    pub(crate) async fn finish(&self) -> bool {
+        self.tree.finish().await
+    }
+
+    #[cfg(test)]
+    pub(crate) fn scripted(
+        empty: impl Fn() -> io::Result<bool> + Send + Sync + 'static,
+        terminate: impl Fn() + Send + Sync + 'static,
+    ) -> Self {
+        Self {
+            tree: Arc::new(TreeState {
+                #[cfg(windows)]
+                job: Mutex::new(None),
+                #[cfg(unix)]
+                pgid: 0,
+                #[cfg(unix)]
+                external: Mutex::default(),
+                identity: crate::project::ProcessId { pid: 42, started_at: 1 },
+                root: Some(ProcessIdentity { pid: 42, created: 1 }),
+                confirmed: AtomicBool::new(false),
+                probe: Some(LifecycleProbe {
+                    empty: Arc::new(empty),
+                    terminate: Arc::new(terminate),
+                    members: None,
+                    #[cfg(unix)]
+                    external: None,
+                }),
+            }),
         }
+    }
+
+    #[cfg(test)]
+    pub(crate) fn scripted_descendants(
+        root: ProcessIdentity,
+        members: impl Fn() -> io::Result<Vec<ProcessIdentity>> + Send + Sync + 'static,
+        terminate: impl Fn() + Send + Sync + 'static,
+    ) -> Self {
+        let mut container = Self::scripted(|| Ok(false), terminate);
+        let state = Arc::get_mut(&mut container.tree).unwrap();
+        state.root = Some(root);
+        state.identity.pid = root.pid;
+        let members = Arc::new(members);
+        let empty = members.clone();
+        let probe = state.probe.as_mut().unwrap();
+        probe.empty = Arc::new(move || empty().map(|members| members.is_empty()));
+        probe.members = Some(members);
+        container
+    }
+
+    #[cfg(all(test, unix))]
+    pub(crate) fn scripted_external_descendants(
+        root: ProcessIdentity,
+        members: impl Fn() -> io::Result<Vec<ProcessIdentity>> + Send + Sync + 'static,
+        external: impl Fn() -> io::Result<Vec<ProcessIdentity>> + Send + Sync + 'static,
+    ) -> Self {
+        let mut container = Self::scripted_descendants(root, members, || {});
+        Arc::get_mut(&mut container.tree).unwrap().probe.as_mut().unwrap().external = Some(Arc::new(external));
+        container
     }
 }
 
-#[cfg(windows)]
 impl Drop for Containment {
     fn drop(&mut self) {
-        // The job may be shared with an `OwnedTree`: closing it here ends the processes whoever holds a clone.
-        drop(self.job.lock().unwrap_or_else(|e| e.into_inner()).take());
+        self.end();
     }
 }
 
@@ -348,14 +565,12 @@ impl Drop for Containment {
 /// one from a PID, a snapshot or a recorded file.
 #[derive(Clone)]
 pub struct OwnedTree {
-    identity: crate::project::ProcessId,
-    #[cfg(windows)]
-    job: Arc<Mutex<Option<win32job::Job>>>,
+    tree: Arc<TreeState>,
 }
 
 impl std::fmt::Debug for OwnedTree {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "OwnedTree({})", self.identity.pid)
+        write!(f, "OwnedTree({})", self.tree.identity.pid)
     }
 }
 
@@ -372,30 +587,27 @@ impl Retired {
 }
 
 impl OwnedTree {
-    /// The root's pid, with the microsecond this engine launched it: a reused pid has another start.
-    pub fn identity(&self) -> crate::project::ProcessId {
-        self.identity
+    pub fn descendants(&self) -> io::Result<Vec<ProcessIdentity>> {
+        self.tree.descendants()
     }
 
-    /// Closes the kill-on-close job, so every member ends, then waits until the root has ended. Safe to repeat: a tree
-    /// already retired answers with the same identity. A pid that was reused meanwhile only delays the answer until it fails.
+    /// Also remember descendants which outlive the parent or leave the original group; this grants no signalling rights.
+    #[cfg(unix)]
+    pub fn external_descendants(&self) -> io::Result<Vec<ProcessIdentity>> {
+        self.tree.external_descendants()
+    }
+
+    /// The root's pid, with the microsecond this engine launched it: a reused pid has another start.
+    pub fn identity(&self) -> crate::project::ProcessId {
+        self.tree.identity
+    }
+
+    /// Keep ownership and query the whole container after termination; a root PID cannot prove its workers ended.
     pub async fn retire(&self) -> io::Result<Retired> {
-        #[cfg(windows)]
-        {
-            drop(self.job.lock().unwrap_or_else(|e| e.into_inner()).take());
-            let deadline = Instant::now() + Duration::from_secs(5);
-            while !faber_winproc::process_ended(self.identity.pid) {
-                if Instant::now() >= deadline {
-                    return Err(io::Error::other("owned tree did not end"));
-                }
-                tokio::time::sleep(Duration::from_millis(10)).await;
-            }
-            Ok(Retired { identity: self.identity })
+        if !self.tree.finish().await {
+            return Err(io::Error::other("owned tree did not end"));
         }
-        #[cfg(not(windows))]
-        {
-            Err(io::Error::other("owned trees need the Windows job"))
-        }
+        Ok(Retired { identity: self.tree.identity })
     }
 }
 
@@ -408,29 +620,76 @@ fn join_job(child: &Child) -> io::Result<Containment> {
     job.assign_process(handle as isize).map_err(io::Error::other)?;
     let started_at = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(1, |d| d.as_micros() as u64).max(1);
     let identity = crate::project::ProcessId { pid: child.id().ok_or_else(|| io::Error::other("the process already ended"))?, started_at };
-    Ok(Containment { job: Arc::new(Mutex::new(Some(job))), identity })
+    let root = faber_winproc::process_tree::job_process_identity(job.handle(), identity.pid)?;
+    Ok(Containment {
+        tree: Arc::new(TreeState {
+            job: Mutex::new(Some(job)),
+            identity,
+            root: Some(root),
+            confirmed: AtomicBool::new(false),
+            #[cfg(test)]
+            probe: None,
+        }),
+    })
 }
 
-#[cfg(not(windows))]
-fn join_job(_child: &Child) -> io::Result<Containment> {
-    Ok(Containment {})
+#[cfg(unix)]
+fn join_job(child: &Child) -> io::Result<Containment> {
+    let pid = child.id().ok_or_else(|| io::Error::other("the process already ended"))?;
+    let started_at = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(1, |d| d.as_micros() as u64).max(1);
+    // A short command can exit before this query; its group remains owned and an unknown root excludes nothing.
+    let root = faber_winproc::process_tree::group_process_identity(pid, pid).ok();
+    Ok(Containment {
+        tree: Arc::new(TreeState {
+            pgid: pid,
+            external: Mutex::default(),
+            identity: crate::project::ProcessId { pid, started_at },
+            root,
+            confirmed: AtomicBool::new(false),
+            #[cfg(test)]
+            probe: None,
+        }),
+    })
 }
 
 /// Ends a process and everything it started, then closes its input. The processes go first: a CLI that quits when its input
 /// closes would otherwise be gone before the tree could be found, and its workers would keep running.
-pub(crate) async fn stop(stdin: &mut (dyn AsyncWrite + Send + Unpin), child: &mut Option<Child>, contained: &mut Option<Containment>) {
-    // Ending the job ends every process in it; dropping it afterwards closes it (on other systems there is nothing to close).
-    let job = contained.take();
-    if let Some(job) = &job {
+pub(crate) async fn stop(
+    stdin: &mut (dyn AsyncWrite + Send + Unpin),
+    child: &mut Option<Child>,
+    contained: &mut Option<Containment>,
+) -> bool {
+    if let Some(job) = contained.as_ref() {
         job.end();
     }
     if let Some(child) = child {
-        if job.is_none() {
+        if contained.is_none() {
             kill_tree(child.id()).await;
         }
         let _ = child.start_kill();
     }
     let _ = stdin.shutdown().await;
+    // Reap the root too: a Unix zombie still belongs to its group until its parent waits.
+    if let Some(child) = child {
+        let _ = tokio::time::timeout(Duration::from_secs(5), child.wait()).await;
+    }
+    let confirmed = match contained.as_ref() {
+        Some(job) => job.finish().await,
+        None => false,
+    };
+    if confirmed {
+        contained.take();
+    }
+    confirmed
+}
+
+/// Keep the owned job until it proves every member ended; closing a pipe alone proves nothing about workers.
+pub(crate) async fn stop_confirmed(
+    stdin: &mut (dyn AsyncWrite + Send + Unpin),
+    child: &mut Option<Child>,
+    contained: &mut Option<Containment>,
+) -> bool {
+    stop(stdin, child, contained).await
 }
 
 /// Fallback for a process that is in no job (a test double, or off Windows). Killing only the CLI leaves a command it started (a build, a script)
@@ -471,6 +730,21 @@ pub(crate) async fn exit_code(child: &mut Option<Child>) -> String {
 mod lifecycle_tests {
     use super::*;
 
+    #[tokio::test]
+    async fn rewind_cancelled_command_waits_for_its_pipes_to_close() {
+        let (output, writer) = tokio::io::duplex(64);
+        let p = Proc { stdin: Box::new(tokio::io::sink()), stdout: Box::new(output), stderr: None, child: None, contained: None };
+        let (stop, cancel) = tokio::sync::oneshot::channel();
+        let task = tokio::spawn(command_output(p, cancel));
+        // Stderr and the scripted child finish before cancellation; stdout stays open.
+        tokio::task::yield_now().await;
+        stop.send(()).unwrap();
+        tokio::task::yield_now().await;
+        assert!(!task.is_finished(), "a writer that still holds a pipe cannot be reported idle");
+        drop(writer);
+        assert!(!task.await.unwrap().success, "an interrupted command is not a success");
+    }
+
     #[tokio::test(start_paused = true)]
     async fn repeated_interrupts_cannot_extend_the_stop_grace() {
         let mut watch = TurnWatch::default();
@@ -492,6 +766,146 @@ mod lifecycle_tests {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn rewind_member_observation_excludes_only_the_actual_cli_generation() {
+        let root = ProcessIdentity { pid: 42, created: 1 };
+        let child = ProcessIdentity { pid: 99, created: 2 };
+        let members = Arc::new(Mutex::new(vec![root, child]));
+        let query = members.clone();
+        let container = Containment::scripted_descendants(root, move || Ok(query.lock().unwrap().clone()), || {});
+        assert_eq!(container.descendants().unwrap(), [child]);
+        *members.lock().unwrap() = vec![root];
+        assert!(container.descendants().unwrap().is_empty(), "a warm CLI alone has no child writer");
+        let reused = ProcessIdentity { pid: root.pid, created: 3 };
+        *members.lock().unwrap() = vec![reused];
+        assert_eq!(container.descendants().unwrap(), [reused], "a recycled PID is never excluded as the original CLI");
+    }
+
+    #[tokio::test]
+    async fn rewind_closing_an_uncontained_pipe_is_not_proof_its_writers_ended() {
+        assert!(!stop_confirmed(&mut tokio::io::sink(), &mut None, &mut None).await);
+    }
+
+    #[tokio::test]
+    async fn rewind_normal_close_confirms_an_owned_job_has_no_remaining_writers() {
+        let mut contained = Some(Containment::scripted(|| Ok(true), || {}));
+        assert!(stop_confirmed(&mut tokio::io::sink(), &mut None, &mut contained).await);
+        assert!(contained.is_none(), "release the job only after its members are confirmed gone");
+    }
+
+    #[tokio::test]
+    async fn rewind_an_unknown_tree_query_keeps_ownership_for_a_retry() {
+        let unknown = Arc::new(AtomicBool::new(true));
+        let query = unknown.clone();
+        let mut contained = Some(Containment::scripted(
+            move || {
+                if query.load(Ordering::Acquire) { Err(io::Error::new(io::ErrorKind::PermissionDenied, "query denied")) } else { Ok(true) }
+            },
+            || {},
+        ));
+        assert!(!stop_confirmed(&mut tokio::io::sink(), &mut None, &mut contained).await);
+        assert!(contained.is_some(), "a failed query must not throw away the owned container");
+        unknown.store(false, Ordering::Release);
+        assert!(stop_confirmed(&mut tokio::io::sink(), &mut None, &mut contained).await);
+        assert!(contained.is_none());
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn rewind_retiring_an_owned_tree_waits_for_its_last_worker_even_after_root_drop() {
+        let empty = Arc::new(AtomicBool::new(false));
+        let query = empty.clone();
+        let terminations = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let terminate = terminations.clone();
+        let contained = Containment::scripted(
+            move || Ok(query.load(Ordering::Acquire)),
+            move || {
+                terminate.fetch_add(1, Ordering::Relaxed);
+            },
+        );
+        let owner = contained.owned_tree().unwrap();
+        drop(contained);
+        let retire = tokio::spawn({
+            let owner = owner.clone();
+            async move { owner.retire().await }
+        });
+        tokio::task::yield_now().await;
+        tokio::time::advance(Duration::from_secs(1)).await;
+        assert!(!retire.is_finished(), "a dead root or closed pipes do not prove its worker ended");
+        empty.store(true, Ordering::Release);
+        tokio::time::advance(Duration::from_millis(10)).await;
+        assert_eq!(retire.await.unwrap().unwrap().identity(), owner.identity());
+        let stopped = terminations.load(Ordering::Relaxed);
+        empty.store(false, Ordering::Release);
+        owner.retire().await.unwrap();
+        assert_eq!(terminations.load(Ordering::Relaxed), stopped, "a confirmed retired identity is never signalled again");
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn rewind_closed_command_pipes_and_root_exit_cannot_release_a_live_descendant() {
+        let empty = Arc::new(AtomicBool::new(false));
+        let query = empty.clone();
+        let contained = Containment::scripted(move || Ok(query.load(Ordering::Acquire)), || {});
+        let p = Proc {
+            stdin: Box::new(tokio::io::sink()),
+            stdout: Box::new(tokio::io::empty()),
+            stderr: None,
+            child: None,
+            contained: Some(contained),
+        };
+        let (_keep, cancel) = tokio::sync::oneshot::channel();
+        let command = tokio::spawn(command_output(p, cancel));
+        tokio::task::yield_now().await;
+        tokio::time::advance(Duration::from_secs(1)).await;
+        assert!(!command.is_finished(), "a descendant may have closed both pipes while it keeps writing files");
+        empty.store(true, Ordering::Release);
+        tokio::time::advance(Duration::from_millis(10)).await;
+        assert!(command.await.unwrap().confirmed, "only the empty-container probe releases the writer");
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn rewind_a_command_whose_descendants_cannot_be_confirmed_reports_unknown() {
+        let p = Proc {
+            stdin: Box::new(tokio::io::sink()),
+            stdout: Box::new(tokio::io::empty()),
+            stderr: None,
+            child: None,
+            contained: Some(Containment::scripted(|| Err(io::Error::other("unknown members")), || {})),
+        };
+        let (_keep, cancel) = tokio::sync::oneshot::channel();
+        let result = command_output(p, cancel).await;
+        assert!(!result.success && !result.confirmed, "a zero exit code and two closed pipes cannot hide a failed tree query");
+        assert!(result.unresolved.is_some(), "Stop must retain the same owned query handle for retry");
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn rewind_a_cancelled_owned_command_exposes_retry_before_its_last_pipe_closes() {
+        let empty = Arc::new(AtomicBool::new(false));
+        let query = empty.clone();
+        let contained = Containment::scripted(
+            move || {
+                if query.load(Ordering::Acquire) { Ok(true) } else { Err(io::Error::other("query unavailable")) }
+            },
+            || {},
+        );
+        let identity = contained.owned_tree().unwrap().identity();
+        let (output, _still_open) = tokio::io::duplex(64);
+        let p =
+            Proc { stdin: Box::new(tokio::io::sink()), stdout: Box::new(output), stderr: None, child: None, contained: Some(contained) };
+        let (stop, cancel) = tokio::sync::oneshot::channel();
+        let command = tokio::spawn(command_output(p, cancel));
+        tokio::task::yield_now().await;
+        stop.send(()).unwrap();
+        let result = tokio::time::timeout(Duration::from_secs(1), command)
+            .await
+            .expect("a held pipe cannot prevent the next Stop from retrying")
+            .unwrap();
+        assert!(!result.confirmed);
+        let tree = result.unresolved.expect("keep the original owned container, not a PID-derived replacement");
+        assert_eq!(tree.identity(), identity);
+        empty.store(true, Ordering::Release);
+        assert_eq!(tree.retire().await.unwrap().identity(), identity);
+    }
 
     /// R124c, item 2: a CLI that cannot be put in its job never runs. It is created suspended, so killing it at that point
     /// means not one instruction of it ran.
@@ -524,9 +938,11 @@ mod tests {
             child: None,
             contained: None,
         };
-        let (ok, text) = tokio::time::timeout(std::time::Duration::from_secs(3), command_output(p)).await.unwrap();
-        assert!(ok && text.ends_with("TAIL_OKSTDERR_OK"));
-        assert!(text.len() <= 8192);
+        let (_keep, cancel) = tokio::sync::oneshot::channel();
+        let result = tokio::time::timeout(std::time::Duration::from_secs(3), command_output(p, cancel)).await.unwrap();
+        assert!(result.confirmed, "the recording started no process");
+        assert!(result.success && result.text.ends_with("TAIL_OKSTDERR_OK"));
+        assert!(result.text.len() <= 8192);
     }
 
     #[cfg(windows)]

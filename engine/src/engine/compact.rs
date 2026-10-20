@@ -146,6 +146,9 @@ impl Core {
     /// The point where the queue, Faber's checks and Keep going would go on (`drain`): when a compaction was asked for and
     /// the agent's last turn ended well, it starts now. True while it starts or runs, so nothing else goes out meanwhile.
     pub(super) fn compact_due(&mut self, conv: &str) -> bool {
+        if self.rewind_blocked(conv) {
+            return false;
+        }
         if !self.compacts.contains_key(conv) {
             return false;
         }
@@ -164,6 +167,7 @@ impl Core {
             return false;
         }
         c.compacting = true;
+        self.rewind.bump(conv);
         l.session.compact();
         self.list_changed();
         true
@@ -209,6 +213,7 @@ impl Core {
     /// Takes a session out of the live ones. A compaction that ran on it is over with it: nothing would ever hear its end.
     pub(super) fn retire(&mut self, conv: &str) -> Option<Live> {
         let live = self.live.remove(conv)?;
+        self.rewind_retire(conv, &live);
         self.compacts.remove(conv);
         if let Some(c) = self.convs.get_mut(conv).filter(|c| c.compacting) {
             c.compacting = false;

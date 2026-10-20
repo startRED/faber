@@ -1,7 +1,10 @@
 //! The engine's integration tests, linked into one test program instead of one per file: on Windows each program is a
 //! separate link and a separate process, and one changed file relinked all 27 at once (33 linkers, 7.8 GB). The files
 //! stay where they are; a new one must be listed here, and `every_test_file_is_listed` fails until it is.
-//! `install_memory.rs` keeps its own program: it reads the memory of its own process, which no other test may share.
+//! Cost tests keep their own programs: they read the memory of their own process, which no other test may share.
+
+// Real containment helpers must not create console hosts that outlive the simulated CLI workers.
+#![cfg_attr(windows, windows_subsystem = "windows")]
 
 // Shared by the files below, which `use crate::support` and `use crate::loopback`.
 mod loopback;
@@ -75,6 +78,8 @@ mod quota;
 mod quota_live;
 #[path = "recents.rs"]
 mod recents;
+#[path = "rewind.rs"]
+mod rewind;
 #[path = "route.rs"]
 mod route;
 #[path = "route_pacing.rs"]
@@ -111,7 +116,7 @@ fn every_test_file_is_listed() {
     let mut missing = Vec::new();
     for entry in std::fs::read_dir(&dir).unwrap() {
         let name = entry.unwrap().file_name().into_string().unwrap();
-        let alone = ["all.rs", "install_memory.rs"].contains(&name.as_str());
+        let alone = ["all.rs", "install_memory.rs", "rewind_cost.rs"].contains(&name.as_str());
         if name.ends_with(".rs") && !alone && !this.contains(&format!("#[path = \"{name}\"]")) {
             missing.push(name);
         }

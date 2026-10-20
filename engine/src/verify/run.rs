@@ -19,13 +19,14 @@ pub struct Spec {
     pub env: Vec<(String, String)>,
 }
 
-/// A started check: its two pipes and its end. Dropping `exit` before it resolves ends the process and everything it
-/// started.
+/// A started check: its two pipes and its end. Dropping `exit` requests cancellation; `confirmed` proves completion.
 pub struct Started {
     pub stdout: Box<dyn AsyncRead + Send + Unpin>,
     pub stderr: Box<dyn AsyncRead + Send + Unpin>,
     /// The exit code, `None` when it ended without one.
     pub exit: Pin<Box<dyn Future<Output = Option<i32>> + Send>>,
+    /// True only after every owned process has ended; absent for runners that start no process.
+    pub confirmed: Option<tokio::sync::watch::Receiver<bool>>,
     /// Caps the check's processor share while a game is in front (true) or lifts the cap (false), saying whether it took;
     /// none where nothing can.
     pub throttle: Option<Box<dyn Fn(bool) -> bool + Send + Sync>>,
@@ -77,38 +78,114 @@ impl Runner for Real {
         let p = crate::proc::spawn_check(cmd)?;
         // Nothing is ever typed into a check.
         drop(p.stdin);
-        let (child, job) = (p.child, p.contained);
+        let (mut child, job) = (p.child, p.contained);
         let throttle = job.as_ref().map(|job| {
             let cap = job.cpu_cap();
             Box::new(move |game: bool| cap(game.then_some(GAME_CPU))) as Box<dyn Fn(bool) -> bool + Send + Sync>
         });
         let peak = job.as_ref().map(|_| std::sync::Arc::new(std::sync::atomic::AtomicU64::new(0)));
-        let measured = Measured { job, slot: peak.clone() };
-        let exit = Box::pin(async move {
-            // The job lives as long as this future: once the check exited, or when the future is dropped before (its
-            // deadline), closing it ends whatever the check left running (on Windows), so its pipes close and nothing
-            // outlives it. Its peak is read just before, either way.
-            let _measured = measured;
-            let mut child = child;
-            match child.as_mut() {
-                Some(child) => child.wait().await.ok().and_then(|s| s.code()),
-                None => None,
+        let measured = Measured { job: job.map(std::sync::Arc::new), slot: peak.clone() };
+        let on_drop = Measured { job: measured.job.clone(), slot: peak.clone() };
+        let (stop, mut stopped) = tokio::sync::oneshot::channel::<()>();
+        let (confirmed, confirmation) = tokio::sync::watch::channel(false);
+        let worker = tokio::spawn(async move {
+            let code = tokio::select! {
+                result = async {
+                    match child.as_mut() {
+                        Some(child) => child.wait().await.ok().and_then(|s| s.code()),
+                        None => None,
+                    }
+                } => result,
+                _ = &mut stopped => {
+                    if let Some(child) = child.as_mut() {
+                        let _ = child.start_kill();
+                    }
+                    None
+                }
+            };
+            // Reap the root before probing its Unix group: a zombie is still a group member.
+            if let Some(child) = child.as_mut() {
+                let _ = tokio::time::timeout(Duration::from_secs(5), child.wait()).await;
             }
+            let tree_gone = match &measured.job {
+                Some(job) => {
+                    confirm_tree(job).await;
+                    true
+                }
+                None => false,
+            };
+            drop(measured);
+            let _ = confirmed.send(tree_gone);
+            code
         });
-        Ok(Started { stdout: p.stdout, stderr: p.stderr.unwrap_or_else(|| Box::new(tokio::io::empty())), exit, throttle, peak })
+        let exit = Box::pin(async move {
+            // Dropping this sender cancels the worker, which retains ownership until termination is confirmed.
+            let _stop = stop;
+            // Admission still needs the measured peak immediately when a deadline drops this future.
+            let _measured = on_drop;
+            worker.await.ok().flatten()
+        });
+        Ok(Started {
+            stdout: p.stdout,
+            stderr: p.stderr.unwrap_or_else(|| Box::new(tokio::io::empty())),
+            exit,
+            confirmed: Some(confirmation),
+            throttle,
+            peak,
+        })
+    }
+}
+
+async fn confirm_tree(job: &crate::proc::Containment) {
+    while !job.finish().await {
+        // Only unresolved owned work is retried; a failed query never drops its last owned handle.
+        tokio::time::sleep(Duration::from_secs(1)).await;
+    }
+}
+
+#[cfg(test)]
+mod tree_tests {
+    use super::*;
+    use std::sync::{
+        Arc,
+        atomic::{AtomicBool, AtomicUsize, Ordering},
+    };
+
+    #[tokio::test(start_paused = true)]
+    async fn rewind_a_check_retains_its_tree_after_a_failed_query_and_retries_without_spinning() {
+        let empty = Arc::new(AtomicBool::new(false));
+        let queries = Arc::new(AtomicUsize::new(0));
+        let (probe, count) = (empty.clone(), queries.clone());
+        let job = crate::proc::Containment::scripted(
+            move || {
+                count.fetch_add(1, Ordering::Relaxed);
+                if probe.load(Ordering::Acquire) { Ok(true) } else { Err(io::Error::other("query unavailable")) }
+            },
+            || {},
+        );
+        let worker = tokio::spawn(async move { confirm_tree(&job).await });
+        tokio::task::yield_now().await;
+        assert_eq!(queries.load(Ordering::Relaxed), 1);
+        assert!(!worker.is_finished());
+        tokio::time::advance(Duration::from_millis(900)).await;
+        assert_eq!(queries.load(Ordering::Relaxed), 1, "a resolved cancellation receiver cannot create a busy loop");
+        empty.store(true, Ordering::Release);
+        tokio::time::advance(Duration::from_millis(100)).await;
+        worker.await.unwrap();
+        assert_eq!(queries.load(Ordering::Relaxed), 2);
     }
 }
 
 /// A check's job, whose peak memory goes to `slot` as it closes.
 struct Measured {
-    job: Option<crate::proc::Containment>,
+    job: Option<std::sync::Arc<crate::proc::Containment>>,
     slot: Option<std::sync::Arc<std::sync::atomic::AtomicU64>>,
 }
 
 impl Drop for Measured {
     fn drop(&mut self) {
         if let (Some(job), Some(slot)) = (&self.job, &self.slot) {
-            slot.store(job.peak_memory().unwrap_or(0), std::sync::atomic::Ordering::Relaxed);
+            slot.fetch_max(job.peak_memory().unwrap_or(0), std::sync::atomic::Ordering::Relaxed);
         }
     }
 }
@@ -297,7 +374,7 @@ pub async fn check(runner: &dyn Runner, spec: &Spec, log: &mut Log, deadline: Du
             };
         }
     };
-    let Started { stdout, stderr, exit, throttle, peak } = started;
+    let Started { stdout, stderr, exit, throttle, peak, .. } = started;
     let (tx, mut rx) = tokio::sync::mpsc::channel::<Vec<u8>>(CHANNEL);
     let mut capture = Capture::default();
     let code = {
@@ -356,7 +433,7 @@ pub async fn check(runner: &dyn Runner, spec: &Spec, log: &mut Log, deadline: Du
     };
     let (exit, timed_out) = match code {
         Some(code) => (code, false),
-        // Dropping the work ended the process and its job.
+        // Dropping the work requests cancellation; the verifier waits for its separate completion confirmation.
         None => (None, true),
     };
     log.flush();
@@ -381,6 +458,7 @@ mod tests {
                 stdout: Box::new(open),
                 stderr: Box::new(tokio::io::empty()),
                 exit: Box::pin(async move { Some(code) }),
+                confirmed: None,
                 throttle: None,
                 peak: None,
             })

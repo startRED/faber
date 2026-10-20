@@ -333,6 +333,30 @@ svg.i.sm { width: 14px; height: 14px; }
 .change-path { flex: 1; min-width: 0; overflow-wrap: anywhere; font-family: var(--font-data); }
 .change-counts { color: var(--ink-3); font-size: var(--fs-xs); }
 .change-content { padding: 0 12px 12px; }
+
+/* A just-in-time confirmation shares Changes' file preview, with no work or timers while it is closed. */
+.rewind-confirm { width: min(640px, calc(100vw - 32px)); max-height: calc(100dvh - 48px); margin: auto; padding: 24px; overflow: auto; color: var(--ink); background: var(--s2); border: 1px solid var(--line-2); border-radius: var(--r-lg); box-shadow: var(--lift-shadow); font-size: var(--fs-ui); overflow-wrap: anywhere; }
+.rewind-confirm[open] { display: grid; gap: 14px; animation: arrive var(--dur-ui) var(--ease) both; }
+.rewind-confirm.leaving { animation: arrive var(--dur-exit) var(--ease-in) both reverse; }
+.rewind-confirm::backdrop { background: color-mix(in srgb, var(--bg) 78%, transparent); }
+.rewind-confirm h2 { margin: 0; font-size: var(--fs-h2); }
+.rewind-confirm p { margin: 0; }
+.rewind-scopes { display: flex; flex-wrap: wrap; gap: 10px 18px; min-width: 0; margin: 0; padding: 0; border: 0; }
+.rewind-scopes legend { margin-bottom: 10px; font-size: var(--fs-sm); color: var(--ink-2); }
+.rewind-scopes label { display: flex; align-items: center; gap: 6px; font-size: var(--fs-sm); }
+.rewind-state:empty, .rewind-counts:empty, .rewind-files:empty { display: none; }
+.rewind-state { display: grid; gap: 6px; font-size: var(--fs-sm); color: var(--ink-2); }
+.rewind-counts { margin: 0; padding-left: 20px; font-size: var(--fs-sm); color: var(--ink-2); }
+.rewind-files { min-width: 0; }
+.rewind-files .change-counts { max-width: 45%; white-space: normal; text-align: end; }
+.rewind-conflict { display: grid; gap: 8px; font-size: var(--fs-sm); }
+.rewind-conflict > span { overflow-wrap: anywhere; }
+.rewind-conflict select { width: 100%; min-width: 0; height: var(--h-md); }
+.rewind-running { display: grid; justify-items: start; gap: 8px; padding-top: 10px; border-top: 1px solid var(--line); font-size: var(--fs-sm); }
+.rewind-running .stop-ask { flex-wrap: wrap; }
+.rewind-limits p { margin: 0; padding: 0 12px 12px; font-size: var(--fs-sm); color: var(--ink-2); }
+.rewind-actions { display: flex; flex-wrap: wrap; justify-content: end; gap: 8px; }
+.rewind-coverage { margin-top: 6px; }
 .change-patch { margin: 0; font-family: var(--font-data); font-size: var(--fs-xs); color: var(--ink-2); }
 .patch-line { display: block; white-space: pre-wrap; overflow-wrap: anywhere; }
 .patch-line.add { background: var(--accent-soft); }

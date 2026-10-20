@@ -86,7 +86,7 @@ impl Engine {
     /// has) is never deleted without `discard`: the answer is `error.copy.unsaved`, and the screen asks the person. An agent
     /// still at work there may write more after any look, so its copy counts as unsaved too.
     pub fn remove_with(&self, id: &str, discard: bool) -> Result<(), String> {
-        let found = self.with(|c| c.copy_state(id).map(|state| (state, c.git.clone())));
+        let found = self.with_rewind_delete(id, |c| Ok::<_, String>(c.copy_state(id).map(|state| (state, c.git.clone()))))?;
         if let Some(((copy, busy, _), run)) = &found
             && !discard
         {
@@ -96,14 +96,14 @@ impl Engine {
             }
         }
         // A message sent while git looked may have started the agent again: then the look no longer holds, and it asks.
-        let moved = self.with(|c| {
+        let moved = self.with_rewind_delete(id, |c| {
             let seen = found.as_ref().map(|((_, _, mark), _)| *mark);
             let moved = !discard && seen.is_some() && c.copy_state(id).is_some_and(|(_, busy, now)| busy || Some(now) != seen);
             if !moved {
-                c.remove(id);
+                c.remove(id)?;
             }
-            moved
-        });
+            Ok::<_, String>(moved)
+        })?;
         if moved {
             return Err("error.copy.unsaved".into());
         }
@@ -230,6 +230,9 @@ impl Core {
             Err(_) => {}
         }
         let Some(Held { reply, tail }) = self.copying.remove(id) else { return stray };
+        if !self.convs.contains_key(id) {
+            self.try_seal_rewind(id);
+        }
         let streaming = !self.closing
             && self
                 .convs

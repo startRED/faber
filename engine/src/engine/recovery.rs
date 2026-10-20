@@ -125,7 +125,7 @@ impl Core {
         if let Some(m) = self.convs.get_mut(conv).and_then(|c| c.messages.iter_mut().find(|m| m.id == t.reply)) {
             m.note = resent.then(|| "note.historyResent".to_string());
         }
-        if let Some(l) = self.live.remove(conv) {
+        if let Some(l) = self.retire(conv) {
             l.session.close();
         }
         if let Err(error) = self.dispatch(conv, &t.reply, &t.pick, text, t.images, t.by_hand) {
@@ -287,7 +287,7 @@ impl Core {
         }
         self.save(id);
         self.push(id, Some(&t.reply), true);
-        if let Some(l) = self.live.remove(id) {
+        if let Some(l) = self.retire(id) {
             l.session.close();
         }
         let partial = self.convs.get(id).and_then(|c| c.messages.last()).map(Partial::of).unwrap_or_default();
@@ -364,7 +364,7 @@ impl Core {
     }
 
     pub(super) fn move_failed(&mut self, id: &str, reply: &str) {
-        if let Some(l) = self.live.remove(id) {
+        if let Some(l) = self.retire(id) {
             l.session.close();
         }
         if let Some(t) = self.transfers.get(id)

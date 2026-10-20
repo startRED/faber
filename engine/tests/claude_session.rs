@@ -8,6 +8,19 @@ use std::sync::Arc;
 use std::time::Duration;
 use support::{Entry, drive, fake, fixture, next_permission, text_of};
 
+fn visible(event: &EngineEvent) -> bool {
+    !matches!(event, EngineEvent::Writers { .. } | EngineEvent::Cursor { .. } | EngineEvent::WriterExit { .. })
+}
+
+async fn next_visible(rx: &mut tokio::sync::mpsc::UnboundedReceiver<EngineEvent>) -> Option<EngineEvent> {
+    while let Some(event) = rx.recv().await {
+        if visible(&event) {
+            return Some(event);
+        }
+    }
+    None
+}
+
 #[test]
 fn slash_init_keeps_skills_and_safe_builtins_in_the_advertised_order() {
     let init = &fixture("claude", "slash-init")[1].msg;
@@ -53,6 +66,164 @@ fn launch(area: Area) -> ClaudeLaunch {
     }
 }
 
+#[tokio::test]
+async fn rewind_real_contained_edit_only_turn_keeps_an_unreported_descendant_until_os_exit() {
+    use crate::codex_session::{contained_message, contained_wire, process_alive, process_exited};
+    tokio::time::timeout(Duration::from_secs(60), async {
+        let peer = contained_wire(1).await;
+        let mut wire = contained_wire(1).await;
+        let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
+        let mut options = launch(Area::Project);
+        options.user_hooks = true;
+        let session = start_claude(
+            ClaudeOptions { bin: "unused".into(), cwd: ".".into(), launch: options, spawn: wire.spawn.clone(), sandbox: None },
+            Arc::new(move |event| drop(tx.send(event))),
+        );
+        session.send(UserTurn::text("edit with a background hook"));
+        assert_eq!(contained_message(&mut wire.input).await["type"], "user");
+        support::emit(
+            &mut wire.output,
+            json!({"type":"assistant","message":{"role":"assistant","content":[{
+                "type":"tool_use","id":"edit","name":"Edit","input":{"file_path":"ordinary.txt","old_string":"old","new_string":"new"}
+            }]}}),
+        )
+        .await;
+        support::emit(&mut wire.output, json!({"type":"result","subtype":"success"})).await;
+        // A wire barrier after result ensures its final writer snapshot was consumed, without a Bash/task event.
+        support::emit(
+            &mut wire.output,
+            json!({"type":"stream_event","parent_tool_use_id":null,"event":{
+                "type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"after-result barrier"}
+            }}),
+        )
+        .await;
+        let (mut done, mut blocked) = (false, false);
+        loop {
+            match rx.recv().await.unwrap() {
+                EngineEvent::Done { .. } => done = true,
+                EngineEvent::Writers { active, unknown } => {
+                    if active.iter().any(|writer| writer.starts_with("process-tree")) && unknown {
+                        blocked = true;
+                    }
+                    if done && active.is_empty() && !unknown {
+                        assert!(!process_alive(wire.workers[0]), "result cannot release an unreported OS writer");
+                    }
+                }
+                EngineEvent::Text(text) if text == "after-result barrier" => break,
+                EngineEvent::Error { message, .. } => panic!("edit-only contained turn failed: {message}"),
+                _ => (),
+            }
+        }
+        assert!(done && blocked, "a hook/session descendant blocks restore even without a named command event");
+        assert!(process_alive(wire.workers[0]), "the result itself did not end the background hook");
+        assert!(!wire.tree.descendants().unwrap().is_empty());
+        wire.release(0);
+        process_exited(wire.workers[0]).await;
+        while !matches!(rx.recv().await.unwrap(), EngineEvent::Writers {active, unknown:false} if active.is_empty()) {}
+        assert!(wire.tree.descendants().unwrap().is_empty(), "only an OS-confirmed empty descendant set reopens writes");
+        assert!(process_alive(peer.tree.identity().pid) && process_alive(peer.workers[0]), "another owned tree is untouched");
+        session.close();
+        while !matches!(rx.recv().await.unwrap(), EngineEvent::WriterExit { confirmed: true }) {}
+        process_exited(wire.tree.identity().pid).await;
+        assert!(process_alive(peer.tree.identity().pid) && process_alive(peer.workers[0]), "close stops only its own container");
+        peer.release(0);
+        process_exited(peer.workers[0]).await;
+        let peer_root = peer.tree.identity().pid;
+        drop(peer);
+        process_exited(peer_root).await;
+    })
+    .await
+    .expect("the real-contained edit-only descendant exchange hung");
+}
+
+#[tokio::test(start_paused = true)]
+async fn rewind_normal_close_keeps_background_writers_until_their_exit_after_the_main_result() {
+    for (result_before_close, interrupt_result) in [(true, true), (true, false), (false, true)] {
+        let (spawn, mut input, mut output) = support::controlled();
+        let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
+        let session = start_claude(
+            ClaudeOptions { bin: "fake".into(), cwd: ".".into(), launch: launch(Area::Project), spawn, sandbox: None },
+            Arc::new(move |event| drop(tx.send(event))),
+        );
+        let exchange = async {
+            session.send(UserTurn::text("background command"));
+            support::read_message(&mut input).await;
+            support::emit(&mut output, json!({"type":"system", "subtype":"task_started", "task_type":"local_bash", "task_id":"command"}))
+                .await;
+            while !matches!(rx.recv().await.unwrap(), EngineEvent::Writers { active, unknown: false } if active == ["task:command"]) {}
+            if result_before_close {
+                support::emit(&mut output, json!({"type":"result", "subtype":"success"})).await;
+                while !matches!(rx.recv().await.unwrap(), EngineEvent::Done { .. }) {}
+            }
+            session.close();
+            assert_eq!(
+                support::read_message(&mut input).await["request"]["subtype"],
+                "interrupt",
+                "Close must reach background work after the reply too"
+            );
+            while !matches!(rx.recv().await.unwrap(), EngineEvent::Writers { active, unknown: true } if active == ["task:command"]) {}
+            if interrupt_result {
+                support::emit(&mut output, json!({"type":"result", "subtype":"interrupted", "is_error":true})).await;
+                while !matches!(rx.recv().await.unwrap(), EngineEvent::Done { .. }) {}
+            }
+            assert!(
+                !std::iter::from_fn(|| rx.try_recv().ok()).any(|event| matches!(event,
+                EngineEvent::Writers { active, unknown: false } if active.is_empty())),
+                "the main result does not confirm a background command ended"
+            );
+            support::emit(&mut output, json!({"type":"system", "subtype":"task_notification", "task_id":"command", "status":"stopped"}))
+                .await;
+            while !matches!(rx.recv().await.unwrap(), EngineEvent::Writers { active, unknown: false } if active.is_empty()) {}
+            while let Some(event) = rx.recv().await {
+                assert!(!matches!(event, EngineEvent::Error { .. }), "normal close completed without a timeout: {event:?}");
+            }
+        };
+        tokio::time::timeout(Duration::from_secs(3), exchange)
+            .await
+            .expect("Close did not keep reading the background command's completion");
+    }
+}
+
+#[tokio::test(start_paused = true)]
+async fn rewind_normal_close_does_not_confirm_background_exit_from_eof_or_an_interrupt_timeout() {
+    for (eof, main_result) in [(true, false), (false, false), (false, true)] {
+        let (spawn, mut input, mut output) = support::controlled();
+        let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
+        let session = start_claude(
+            ClaudeOptions { bin: "fake".into(), cwd: ".".into(), launch: launch(Area::Project), spawn, sandbox: None },
+            Arc::new(move |event| drop(tx.send(event))),
+        );
+        if main_result {
+            session.send(UserTurn::text("background command"));
+            support::read_message(&mut input).await;
+        }
+        support::emit(&mut output, json!({"type":"system", "subtype":"task_started", "task_type":"local_bash", "task_id":"command"})).await;
+        while !matches!(rx.recv().await.unwrap(), EngineEvent::Writers { active, unknown: false } if active == ["task:command"]) {}
+        session.close();
+        assert_eq!(support::read_message(&mut input).await["request"]["subtype"], "interrupt");
+        if main_result {
+            support::emit(&mut output, json!({"type":"result", "subtype":"interrupted", "is_error":true})).await;
+        }
+        if eof {
+            drop(output);
+        }
+        let events = tokio::time::timeout(Duration::from_secs(10), async {
+            let mut events = Vec::new();
+            while let Some(event) = rx.recv().await {
+                events.push(event);
+            }
+            events
+        })
+        .await
+        .expect("Close must have a fixed shutdown deadline even without completion");
+        assert!(events.iter().any(|event| matches!(event, EngineEvent::Writers { unknown: true, .. })));
+        assert!(
+            !events.iter().any(|event| matches!(event, EngineEvent::Writers { active, unknown: false } if active.is_empty())),
+            "neither EOF nor an uncontained stop confirms descendants ended"
+        );
+    }
+}
+
 #[tokio::test(start_paused = true)]
 async fn opus_1_manual_turns_may_be_silent_for_a_long_tool() {
     for area in [Area::Chat, Area::Project] {
@@ -66,7 +237,7 @@ async fn opus_1_manual_turns_may_be_silent_for_a_long_tool() {
         assert_eq!(support::read_message(&mut input).await["type"], "user");
         tokio::time::advance(Duration::from_secs(600)).await;
         tokio::task::yield_now().await;
-        assert!(rx.try_recv().is_err(), "a manual silent turn was interrupted");
+        assert!(!std::iter::from_fn(|| rx.try_recv().ok()).any(|event| visible(&event)), "a manual silent turn was interrupted");
         session.send(UserTurn::text("still available"));
         assert_eq!(support::read_message(&mut input).await["message"]["content"], "still available");
         session.close();
@@ -84,12 +255,12 @@ async fn opus_4_interrupt_after_completion_keeps_the_warm_session() {
     session.send(UserTurn::text("first"));
     support::read_message(&mut input).await;
     support::emit(&mut output, serde_json::json!({"type":"result","subtype":"success"})).await;
-    assert!(matches!(rx.recv().await, Some(EngineEvent::Done { .. })));
+    assert!(matches!(next_visible(&mut rx).await, Some(EngineEvent::Done { .. })));
     session.interrupt();
     tokio::task::yield_now().await;
     tokio::time::advance(Duration::from_secs(6)).await;
     tokio::task::yield_now().await;
-    assert!(rx.try_recv().is_err(), "idle interrupt produced a lifecycle event");
+    assert!(!std::iter::from_fn(|| rx.try_recv().ok()).any(|event| visible(&event)), "idle interrupt produced a lifecycle event");
     session.send(UserTurn::text("second"));
     assert_eq!(support::read_message(&mut input).await["message"]["content"], "second");
     session.close();
@@ -149,9 +320,9 @@ async fn an_ignored_interrupt_ends_the_owned_pipe_without_waiting_forever() {
         Arc::new(move |e| drop(tx.send(e))),
     );
     session.send(UserTurn::text("work"));
-    assert!(matches!(rx.recv().await, Some(EngineEvent::Started { .. })));
+    assert!(matches!(next_visible(&mut rx).await, Some(EngineEvent::Started { .. })));
     session.interrupt();
-    let event = tokio::time::timeout(Duration::from_secs(10), rx.recv()).await.unwrap().unwrap();
+    let event = tokio::time::timeout(Duration::from_secs(10), next_visible(&mut rx)).await.unwrap().unwrap();
     assert!(f.mismatches.lock().unwrap().is_empty());
     assert!(matches!(event, EngineEvent::Error { message, fatal: true } if message == "error.cli.interruptTimeout"));
 }
@@ -170,13 +341,14 @@ async fn run_with(
     first: &str,
     react: impl FnMut(&EngineEvent, &faber_engine::events::Session) -> bool,
 ) -> (Vec<EngineEvent>, Vec<String>) {
-    drive(
+    let (events, mismatches) = drive(
         entries,
         |spawn, sink| start_claude(ClaudeOptions { bin: "claude".into(), cwd: ".".into(), launch, spawn, sandbox: None }, sink),
         first,
         react,
     )
-    .await
+    .await;
+    (events.into_iter().filter(visible).collect(), mismatches)
 }
 
 fn recorded_text(entries: &[Entry]) -> String {
@@ -563,8 +735,11 @@ async fn an_undelivered_automatic_permission_response_ends_the_turn_instead_of_w
         sink,
     );
     session.send(UserTurn::text("first"));
-    assert!(matches!(tokio::time::timeout(Duration::from_secs(3), rx.recv()).await.unwrap(), Some(EngineEvent::Started { .. })));
-    assert!(matches!(tokio::time::timeout(Duration::from_secs(3), rx.recv()).await.unwrap(),
+    assert!(matches!(
+        tokio::time::timeout(Duration::from_secs(3), next_visible(&mut rx)).await.unwrap(),
+        Some(EngineEvent::Started { .. })
+    ));
+    assert!(matches!(tokio::time::timeout(Duration::from_secs(3), next_visible(&mut rx)).await.unwrap(),
         Some(EngineEvent::Error { message, fatal: true }) if message == "error.permission.undelivered"));
     session.close();
 }

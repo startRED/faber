@@ -670,17 +670,23 @@ pub fn start_claude(opts: ClaudeOptions, on_event: EventSink) -> Session {
     tokio::spawn(async move {
         let mut p = match started {
             Ok(p) => p,
-            Err(err) => return on_event(EngineEvent::Error { message: format!("Claude Code could not start: {err}"), fatal: true }),
+            Err(err) => {
+                on_event(EngineEvent::Error { message: format!("Claude Code could not start: {err}"), fatal: true });
+                return on_event(EngineEvent::WriterExit { confirmed: true });
+            }
         };
         let tail = proc::stderr_tail(p.stderr.take());
         let mut lines = BufReader::new(p.stdout).lines();
         let mut stdin = p.stdin;
         let mut child = p.child;
         let mut job = p.contained;
+        let no_process = child.is_none() && job.is_none();
+        let mut shutdown_confirmed = false;
         let mut pending: HashMap<String, (String, Value)> = HashMap::new();
         // Helper calls waiting for their report: tool call id to the control request and the JSON-RPC id that carried it.
         let mut helpers: HashMap<String, (String, Value)> = HashMap::new();
         let mut closed = false;
+        let mut close_deadline = None;
         let mut control_id = 0u32;
         // The id of the `get_context_usage` request still waiting for its answer.
         let mut usage_request: Option<String> = None;
@@ -696,24 +702,41 @@ pub fn start_claude(opts: ClaudeOptions, on_event: EventSink) -> Session {
         // the lines that follow (status, retries), so later requests of a tool turn count from the first: never more warmth than there is.
         let mut turn_sent_ms = unix_ms();
         let mut background = background::Background::default();
-        loop {
-            let deadline = watch.deadline();
+        let mut writers = background::Writers::default();
+        let mut tree_check = None;
+        on_event(writers.snapshot());
+        'driver: loop {
+            let deadline = close_deadline.or(watch.deadline());
             tokio::select! {
+                () = proc::wait_deadline(tree_check) => {
+                    if let Some(container) = job.as_ref() { writers.observe_tree(container.descendants()); }
+                    tree_check = writers.tree_pending().then(|| tokio::time::Instant::now() + std::time::Duration::from_secs(1));
+                    on_event(writers.snapshot());
+                }
                 () = proc::wait_deadline(deadline) => {
-                    if watch.stopping() {
-                        proc::stop(&mut *stdin, &mut child, &mut job).await;
+                    if closed || watch.stopping() {
+                        let confirmed = proc::stop_confirmed(&mut *stdin, &mut child, &mut job).await;
+                        shutdown_confirmed |= confirmed;
+                        writers.shutdown(confirmed, watch.active());
+                        on_event(writers.snapshot());
                         on_event(EngineEvent::Error { message: "error.cli.interruptTimeout".into(), fatal: true });
                         break;
                     }
                     watch.interrupt();
+                    writers.interrupt();
+                    on_event(writers.snapshot());
                     control_id += 1;
                     let msg = json!({ "type": "control_request", "request_id": format!("faber-{control_id}"), "request": { "subtype": "interrupt" } });
                     let _ = proc::write_line(&mut *stdin, &msg).await;
                 }
                 line = lines.next_line() => {
                     let Ok(Some(line)) = line else {
+                        shutdown_confirmed |= proc::stop_confirmed(&mut *stdin, &mut child, &mut job).await;
+                        writers.shutdown(shutdown_confirmed, watch.active());
+                        on_event(writers.snapshot());
                         if !closed {
-                            let code = proc::exit_code(&mut child).await;
+                            let code = tokio::time::timeout(std::time::Duration::from_secs(1), proc::exit_code(&mut child))
+                                .await.unwrap_or_else(|_| "unknown".into());
                             let tail = tail.lock().unwrap().clone();
                             on_event(EngineEvent::Error { message: format!("Claude Code stopped (exit {code}). {tail}").trim().into(), fatal: true });
                         }
@@ -730,6 +753,26 @@ pub fn start_claude(opts: ClaudeOptions, on_event: EventSink) -> Session {
                                     on_event(EngineEvent::ContextParts { parts: context_parts(&msg["response"]["response"]) });
                                 }
                                 continue;
+                            }
+                            writers.observe(&msg);
+                            if msg["type"] == "result" || (msg["type"] == "system" &&
+                                matches!(msg["subtype"].as_str(), Some("init" | "task_started" | "task_notification")))
+                            {
+                                if let Some(container) = job.as_ref() { writers.observe_tree(container.descendants()); }
+                                tree_check = writers.tree_pending().then(|| tokio::time::Instant::now() + std::time::Duration::from_secs(1));
+                                if writers.tree_pending() { on_event(writers.snapshot()); }
+                            }
+                            // Announce tool launches before their calls reach the engine, but idle only after Done.
+                            if matches!(msg["type"].as_str(), Some("assistant" | "user"))
+                                || (msg["type"] == "system" && matches!(msg["subtype"].as_str(), Some("task_started" | "task_notification")))
+                            {
+                                on_event(writers.snapshot());
+                            }
+                            if matches!(msg["type"].as_str(), Some("assistant" | "user"))
+                                && msg["parent_tool_use_id"].is_null()
+                                && let Some(entry) = msg["uuid"].as_str().filter(|id| !id.is_empty())
+                            {
+                                on_event(EngineEvent::Cursor { entry: Some(entry.into()), turn: None });
                             }
                             if msg["type"] == "stream_event" && msg["event"]["type"] == "message_start" && msg["parent_tool_use_id"].is_null() {
                                 request_began = Some(turn_sent_ms);
@@ -819,8 +862,8 @@ pub fn start_claude(opts: ClaudeOptions, on_event: EventSink) -> Session {
                                             "response": response } });
                                         if proc::write_line(&mut *stdin, &msg).await.is_err() {
                                             on_event(EngineEvent::Error { message: "error.permission.undelivered".into(), fatal: true });
-                                            proc::stop(&mut *stdin, &mut child, &mut job).await;
-                                            return;
+                                            shutdown_confirmed |= proc::stop(&mut *stdin, &mut child, &mut job).await;
+                                            break 'driver;
                                         }
                                         continue;
                                     }
@@ -828,8 +871,14 @@ pub fn start_claude(opts: ClaudeOptions, on_event: EventSink) -> Session {
                                 }
                                 on_event(event);
                             }
-                            if closed && !watch.active() {
-                                proc::stop(&mut *stdin, &mut child, &mut job).await;
+                            if msg["type"] == "result" {
+                                on_event(writers.snapshot());
+                            }
+                            if closed && !watch.active() && !writers.busy() {
+                                let confirmed = proc::stop_confirmed(&mut *stdin, &mut child, &mut job).await;
+                                shutdown_confirmed |= confirmed;
+                                writers.shutdown(confirmed, false);
+                                on_event(writers.snapshot());
                                 break;
                             }
                             if finished {
@@ -839,19 +888,25 @@ pub fn start_claude(opts: ClaudeOptions, on_event: EventSink) -> Session {
                                 if !unread.is_empty() { watch.begin(); }
                                 for turn in std::mem::take(&mut queued) {
                                     watch.begin();
+                                    on_event(writers.snapshot());
                                     turn_sent_ms = unix_ms();
                                     if replay { unread.push_back((None, turn.text.clone())); }
                                     let _ = proc::write_line(&mut *stdin, &user_message(&turn)).await;
                                 }
                             }
                         }
-                        Err(_) => on_event(EngineEvent::Error { message: format!("Unexpected output from Claude Code: {}", line.chars().take(200).collect::<String>()), fatal: false }),
+                        Err(_) => {
+                            writers.lost(watch.active());
+                            on_event(writers.snapshot());
+                            on_event(EngineEvent::Error { message: format!("Unexpected output from Claude Code: {}", line.chars().take(200).collect::<String>()), fatal: false });
+                        }
                     }
                 }
                 cmd = rx.recv(), if !closed => match cmd {
                     Some(SessionCommand::Send(turn)) => {
                         if watch.stopping() { queued.push(turn); continue; }
                         watch.begin();
+                        on_event(writers.snapshot());
                         request_began = None;
                         turn_sent_ms = unix_ms();
                         if replay { unread.push_back((None, turn.text.clone())); }
@@ -870,6 +925,7 @@ pub fn start_claude(opts: ClaudeOptions, on_event: EventSink) -> Session {
                         if watch.stopping() { continue; }
                         let turn = UserTurn::text(format!("/compact {COMPACT_FOCUS}"));
                         watch.begin();
+                        on_event(writers.snapshot());
                         request_began = None;
                         turn_sent_ms = unix_ms();
                         if replay { unread.push_back((None, turn.text.clone())); }
@@ -901,7 +957,7 @@ pub fn start_claude(opts: ClaudeOptions, on_event: EventSink) -> Session {
                                         // A half-written or unflushed line cannot be sent again: end the process, and the
                                         // end of its output tells the engine.
                                         if e.torn {
-                                            proc::stop(&mut *stdin, &mut child, &mut job).await;
+                                            shutdown_confirmed |= proc::stop(&mut *stdin, &mut child, &mut job).await;
                                         }
                                         Delivery::WriteFailed
                                     }
@@ -917,27 +973,50 @@ pub fn start_claude(opts: ClaudeOptions, on_event: EventSink) -> Session {
                         let _ = proc::write_line(&mut *stdin, &msg).await;
                     }
                     Some(SessionCommand::Interrupt) => {
-                        if !watch.active() || watch.stopping() { continue; }
+                        if !writers.should_interrupt(watch.active(), watch.stopping()) { continue; }
                         watch.interrupt();
+                        writers.interrupt();
+                        on_event(writers.snapshot());
                         control_id += 1;
                         let msg = json!({ "type": "control_request", "request_id": format!("faber-{control_id}"), "request": { "subtype": "interrupt" } });
                         let _ = proc::write_line(&mut *stdin, &msg).await;
                     }
                     Some(SessionCommand::Close) | None => {
                         closed = true;
-                        if watch.active() {
+                        if watch.active() || writers.busy() {
                             if !watch.stopping() {
-                                watch.interrupt();
+                                if watch.active() { watch.interrupt(); }
+                                writers.interrupt();
+                                on_event(writers.snapshot());
                                 control_id += 1;
                                 let msg = json!({ "type": "control_request", "request_id": format!("faber-{control_id}"), "request": { "subtype": "interrupt" } });
                                 let _ = proc::write_line(&mut *stdin, &msg).await;
                             }
+                            close_deadline = Some(watch.deadline().unwrap_or_else(|| tokio::time::Instant::now() + std::time::Duration::from_secs(5)));
                         } else {
-                            proc::stop(&mut *stdin, &mut child, &mut job).await;
+                            let confirmed = proc::stop_confirmed(&mut *stdin, &mut child, &mut job).await;
+                            shutdown_confirmed |= confirmed;
+                            writers.shutdown(confirmed, false);
+                            on_event(writers.snapshot());
                             break;
                         }
                     }
                 }
+            }
+        }
+        shutdown_confirmed |= no_process && !watch.active() && !writers.busy();
+        on_event(EngineEvent::WriterExit { confirmed: shutdown_confirmed });
+        // An unresolved owned tree keeps its original session control, so Stop can retry the same handle.
+        while !shutdown_confirmed && job.is_some() {
+            match rx.recv().await {
+                Some(SessionCommand::Interrupt | SessionCommand::Close) => {
+                    shutdown_confirmed = proc::stop_confirmed(&mut *stdin, &mut child, &mut job).await;
+                    writers.shutdown(shutdown_confirmed, watch.active());
+                    on_event(writers.snapshot());
+                    on_event(EngineEvent::WriterExit { confirmed: shutdown_confirmed });
+                }
+                None => break,
+                _ => {}
             }
         }
     });
@@ -971,6 +1050,90 @@ fn user_message(turn: &UserTurn) -> Value {
 #[cfg(test)]
 mod allow_tests {
     use super::*;
+
+    #[tokio::test(start_paused = true)]
+    async fn rewind_close_retains_a_failed_tree_query_until_stop_retries_the_same_owned_container() {
+        use crate::proc::ProcessIdentity;
+        use std::sync::{
+            Mutex,
+            atomic::{AtomicBool, Ordering},
+        };
+        use tokio::io::AsyncWriteExt;
+        let empty = Arc::new(AtomicBool::new(false));
+        let query = empty.clone();
+        let unavailable = Arc::new(AtomicBool::new(false));
+        let failed_query = unavailable.clone();
+        let contained = proc::Containment::scripted_descendants(
+            ProcessIdentity { pid: 42, created: 1 },
+            move || {
+                if query.load(Ordering::Acquire) {
+                    Ok(Vec::new())
+                } else if failed_query.load(Ordering::Acquire) {
+                    Err(std::io::Error::other("query unavailable"))
+                } else {
+                    Ok(vec![ProcessIdentity { pid: 99, created: 2 }])
+                }
+            },
+            || {},
+        );
+        let (driver, script) = tokio::io::duplex(65536);
+        let (stdout, stdin) = tokio::io::split(driver);
+        let (input, mut output) = tokio::io::split(script);
+        let mut input = BufReader::new(input).lines();
+        let process = Arc::new(Mutex::new(Some(proc::Proc {
+            stdin: Box::new(stdin),
+            stdout: Box::new(stdout),
+            stderr: None,
+            child: None,
+            contained: Some(contained),
+        })));
+        let spawn = Arc::new(move |_: &str, _: &[String], _: &std::path::Path| Ok(process.lock().unwrap().take().unwrap()));
+        let launch = ClaudeLaunch {
+            area: Area::Project,
+            model: None,
+            effort: None,
+            resume: None,
+            user_hooks: false,
+            permissions: Permissions::Ask,
+            instructions: None,
+            user_name: None,
+            flags: Default::default(),
+            tuning: Default::default(),
+            helper: Default::default(),
+            browse: false,
+            conversations: false,
+            verify: false,
+            progress: false,
+            tools: Default::default(),
+        };
+        let (sent, mut events) = tokio::sync::mpsc::unbounded_channel();
+        let session = start_claude(
+            ClaudeOptions { bin: "scripted".into(), cwd: PathBuf::new(), launch, spawn, sandbox: None },
+            Arc::new(move |event| drop(sent.send(event))),
+        );
+        let exchange = async {
+            session.send(UserTurn::text("command"));
+            input.next_line().await.unwrap().unwrap();
+            let started = json!({"type":"system", "subtype":"task_started", "task_type":"local_bash", "task_id":"command"});
+            output.write_all(format!("{started}\n").as_bytes()).await.unwrap();
+            while !matches!(events.recv().await.unwrap(), EngineEvent::Writers { active, unknown: true } if active.contains(&"process-tree:99".into()))
+            {
+            }
+            session.close();
+            let interrupt: Value = serde_json::from_str(&input.next_line().await.unwrap().unwrap()).unwrap();
+            assert_eq!(interrupt["request"]["subtype"], "interrupt");
+            unavailable.store(true, Ordering::Release);
+            output.shutdown().await.unwrap();
+            drop(output);
+            while !matches!(events.recv().await.unwrap(), EngineEvent::WriterExit { confirmed: false }) {}
+            empty.store(true, Ordering::Release);
+            session.interrupt();
+            while !matches!(events.recv().await.unwrap(), EngineEvent::WriterExit { confirmed: true }) {}
+        };
+        tokio::time::timeout(std::time::Duration::from_secs(3), exchange)
+            .await
+            .expect("the retained Stop route must retry the same owned tree");
+    }
 
     #[test]
     fn the_main_threads_end_turn_settles_the_reply_before_the_result_comes() {

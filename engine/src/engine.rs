@@ -51,6 +51,7 @@ mod plan;
 mod pr_watch;
 mod quota_watch;
 mod recovery;
+mod rewind;
 mod siblings;
 mod stuck_watch;
 mod unbounded;
@@ -420,6 +421,7 @@ struct Core {
     /// The pull request each project conversation follows, by conversation (R200), and what reads one.
     follows: HashMap<String, pr_watch::Watch>,
     pr_reader: PrReader,
+    rewind: rewind::State,
 }
 
 /// How often Claude's plan is checked again.
@@ -458,6 +460,7 @@ impl Engine {
         let quotas = remembered(&ledger, unix_secs());
         let runtime = opts.runtime.clone();
         let pr_reader = gh_reader(&opts.data_dir);
+        let rewind = rewind::State::new(&opts.data_dir);
         let core = Arc::new_cyclic(|me| {
             Mutex::new(Core {
                 opts,
@@ -513,10 +516,13 @@ impl Engine {
                 verifier: None,
                 before: HashMap::new(),
                 git: None,
+                rewind,
             })
         });
         let _ = search.start();
-        Engine { core, runtime }
+        let engine = Engine { core, runtime };
+        engine.recover_rewind();
+        engine
     }
 
     /// Clones the index handle under the lock, then does the search outside it, on a blocking worker.
@@ -759,16 +765,17 @@ impl Engine {
             c.keep_going_off(id);
             c.compacts.remove(id);
             let compacting = c.convs.get(id).is_some_and(|c| c.compacting);
-            match c.live.get(id).filter(|l| l.turn.is_some() || compacting) {
-                Some(l) => {
-                    l.session.interrupt();
-                    c.stop_helpers(id, false);
-                }
-                None => {
-                    // Faber's checks of the reply that just ended stop too; the reply then keeps no row.
-                    c.stop_checks(id);
-                    c.stop_waiting(id)
-                }
+            let active = c.live.get(id).is_some_and(|l| l.turn.is_some() || compacting);
+            if let Some(l) = c.live.get(id) {
+                // Helpers and commands can outlive the main turn; its driver still owns their stop.
+                l.session.interrupt();
+            }
+            c.rewind_stop_retired(id);
+            c.stop_helpers(id, false);
+            if !active {
+                // Faber's checks of the reply that just ended stop too; the reply then keeps no row.
+                c.stop_checks(id);
+                c.stop_waiting(id)
             }
         })
     }
@@ -1583,10 +1590,21 @@ impl Core {
     }
 
     fn handle(&mut self, conv: &str, sid: u64, event: EngineEvent) {
-        let Some(entry) = self.live.get(conv) else { return };
-        if entry.sid != sid {
+        let current = self.live.get(conv).is_some_and(|entry| entry.sid == sid);
+        // A replaced session still owns its writers; no other late event may reach the new reply.
+        if matches!(event, EngineEvent::Writers { .. } | EngineEvent::WriterExit { .. })
+            && (current || self.rewind_tracks_session(conv, sid))
+        {
+            self.rewind_event(conv, sid, &event);
             return;
         }
+        if !current {
+            return;
+        }
+        if self.rewind_event(conv, sid, &event) {
+            return;
+        }
+        let entry = self.live.get(conv).expect("session checked above");
         let (vendor, resumed) = (entry.vendor, entry.resumed);
         let turn_id = entry.turn.clone();
         // A turn ran on the session: from here on it is the conversation's session for this vendor.
@@ -1627,6 +1645,7 @@ impl Core {
             }
         }
         match event {
+            EngineEvent::Writers { .. } | EngineEvent::WriterExit { .. } | EngineEvent::Cursor { .. } => return,
             EngineEvent::Commands(commands) => {
                 if let Some(c) = self.convs.get_mut(conv) {
                     c.commands.insert(vendor, commands.clone());
@@ -2086,11 +2105,13 @@ impl Core {
             }
         }
         self.close_when_idle(conv);
+        self.try_seal_rewind(conv);
     }
 
     /// A Claude process costs about 120 MB just waiting, so it closes when it has been idle for a while; the next
     /// turn resumes the same session. Any newer use cancels the timer.
-    fn close_when_idle(&self, conv: &str) {
+    fn close_when_idle(&mut self, conv: &str) {
+        self.try_seal_rewind(conv);
         let Some(l) = self.live.get(conv).filter(|l| l.vendor == Vendor::Claude) else { return };
         let (sid, used, idle) = (l.sid, l.used, self.opts.idle);
         let (me, conv) = (self.me.clone(), conv.to_string());
@@ -2209,8 +2230,12 @@ impl Core {
 
     /// Hands a message to the running turn; the CLI takes it in at its next step (`taken_in`) or refuses it (`steer_failed`).
     fn steer(&mut self, id: &str, item: &mut QueuedTurn) {
+        if self.prepare_rewind_steer(id, item) {
+            return;
+        }
         item.sending = true;
         let turn = UserTurn { text: self.model_text(id, item), images: item.images.clone().unwrap_or_default() };
+        self.rewind.bump(id);
         if let Some(l) = self.live.get_mut(id) {
             l.steering.push(item.id.clone());
             l.session.steer(turn, &item.id);
@@ -2248,6 +2273,7 @@ impl Core {
         if l.held.take().is_some() && l.started == 0.0 {
             l.started = secs;
         }
+        let point = self.take_rewind_steer(&queued_id);
         let Some(c) = self.convs.get_mut(conv) else { return };
         let Some(pos) = c.queued.iter().position(|q| q.id == queued_id) else { return };
         let item = c.queued.remove(pos);
@@ -2256,11 +2282,13 @@ impl Core {
             m.status = Some(Status::Done);
         }
         let now = now();
-        let mut question = Message::new(new_id(), Role::User, item.text.clone(), now);
+        let mut question = Message::new(item.id.clone(), Role::User, item.text.clone(), now);
         question.images = item.images.clone();
         question.attachments = item.attachments.clone();
         question.wake = item.wake.clone();
-        let mut reply = Message::new(new_id(), Role::Assistant, String::new(), now);
+        let mut reply =
+            Message::new(point.as_ref().map_or_else(new_id, |point| point.turn_id.clone()), Role::Assistant, String::new(), now);
+        question.rewind = point;
         reply.vendor = Some(vendor);
         reply.model = model;
         reply.tools = Some(vec![]);
@@ -2293,6 +2321,10 @@ impl Core {
 
     /// Codex did not take the message in: it stays in the queue and goes out as the next turn.
     fn steer_failed(&mut self, conv: &str, tag: &str) {
+        let _ = self.take_rewind_steer(tag);
+        if let Some(q) = self.convs.get_mut(conv).and_then(|c| c.queued.iter_mut().find(|q| q.id == tag)) {
+            q.sending = false;
+        }
         let mut ended = None;
         if let Some(l) = self.live.get_mut(conv) {
             l.steering.retain(|s| s != tag);
@@ -2305,9 +2337,6 @@ impl Core {
         }
         if let Some((turn, read)) = ended {
             return self.end_turn(conv, turn, Some(read));
-        }
-        if let Some(q) = self.convs.get_mut(conv).and_then(|c| c.queued.iter_mut().find(|q| q.id == tag)) {
-            q.sending = false;
         }
         self.save(conv);
         self.emit_queue(conv);
@@ -2322,6 +2351,9 @@ impl Core {
             return;
         }
         let idle = !self.live.get(conv).is_some_and(|l| l.turn.is_some());
+        if self.convs.get(conv).and_then(|c| c.queued.first()).is_some_and(|item| self.preparing_rewind_steer(&item.id)) {
+            return;
+        }
         let Some(c) = self.convs.get_mut(conv) else { return };
         if !idle || c.messages.last().is_none_or(|m| m.status != Some(Status::Done)) || c.queued.is_empty() || verifying::checking(c) {
             return;
@@ -2404,6 +2436,10 @@ impl Core {
     /// lost; once the turn exists, a failure shows on that turn's reply like any other.
     fn dispatch_queued(&mut self, id: &str, item: QueuedTurn) -> Result<(), String> {
         self.load(id).ok_or("error.conversationGone")?;
+        if self.rewind_blocked(id) {
+            self.requeue(id, item);
+            return Err("error.rewind.busy".into());
+        }
         if self.installing {
             self.requeue(id, item);
             return Err("error.update.activeOperations".into());
@@ -2420,6 +2456,7 @@ impl Core {
         // A turn Faber sends by itself (`by_itself.rs`) is never one the person picked: an AI billed per use is not spent on.
         let by_hand = !auto && item.wake.is_none();
         let route = if auto { self.next_route(id) } else { None };
+        let point = self.take_rewind_steer(&item.id);
         let c = self.convs.get_mut(id).expect("checked above");
         // A turn that starts ends any wait of keep going: its end decides again, and no timer or reading sends a second one.
         if let Some(kg) = c.keep_going.as_mut() {
@@ -2441,17 +2478,18 @@ impl Core {
         let at = now();
         let resent = joining_late && session_was_lost(c, pick.vendor);
         let area = c.area;
-        let mut question = Message::new(new_id(), Role::User, item.text.clone(), at);
+        let mut question = Message::new(item.id.clone(), Role::User, item.text.clone(), at);
         question.images = item.images.clone();
         question.attachments = item.attachments.clone();
         question.wake = item.wake.clone();
-        let mut reply = Message::new(new_id(), Role::Assistant, String::new(), at);
+        let mut reply = Message::new(point.as_ref().map_or_else(new_id, |point| point.turn_id.clone()), Role::Assistant, String::new(), at);
         if !routing {
             reply.vendor = Some(pick.vendor);
             reply.model = pick.model.clone();
         }
         reply.reason = Some(if routing { "reason.routing".into() } else { pick.reason.clone() });
         reply.note = resent.then(|| "note.historyResent".to_string());
+        question.rewind = point;
         reply.tools = Some(vec![]);
         reply.status = Some(Status::Streaming);
         reply.finished_at = None;
@@ -2600,6 +2638,9 @@ impl Core {
 
     /// Hands a turn to the conversation's CLI, starting the CLI if needed.
     fn start(&mut self, id: &str, reply_id: &str, pick: &Pick, text: String, images: Vec<Image>, by_hand: bool) -> Result<(), String> {
+        if self.rewind_blocked(id) {
+            return Err("error.rewind.busy".into());
+        }
         // The conversation's copy is still being made: nothing starts before it, wherever the turn comes from (a first
         // message, Auto's route, a queued message sent now). The latest turn is the one that starts once it is attached.
         if let Some(held) = self.copying.get_mut(id) {
@@ -2608,13 +2649,27 @@ impl Core {
             self.push(id, Some(reply_id), true);
             return Ok(());
         }
+        if self.capture_rewind(id, reply_id, pick, text.clone(), images.clone(), by_hand) {
+            return Ok(());
+        }
         if let Some(kg) = self.convs.get_mut(id).and_then(|c| c.keep_going.as_mut()) {
             kg.waiting = None;
         }
         self.note_away(id, reply_id);
         let approved = self.credit.as_ref().is_some_and(|(c, r, v)| c == id && r == reply_id && *v == pick.vendor);
         self.gate_turn_approved(pick, by_hand, approved)?;
+        if self.convs.get(id).is_some_and(|c| c.rewind_notice.is_some())
+            && let Some(live) = self.retire(id)
+        {
+            live.session.close();
+        }
         self.launch(id, pick)?;
+        let text = if let Some(summary) = self.convs.get_mut(id).and_then(|c| c.rewind_summary.take()) {
+            format!("{summary}\n\n{text}")
+        } else {
+            text
+        };
+        let rewind_notice = self.convs.get_mut(id).and_then(|c| c.rewind_notice.take());
         self.credit = None;
         if let Some(m) = self.convs.get_mut(id).and_then(|c| c.messages.iter_mut().find(|m| m.id == reply_id)) {
             m.vendor = Some(pick.vendor);
@@ -2629,6 +2684,9 @@ impl Core {
             m.finished_at = None;
             m.permissions = None;
             m.mode = self.live.get(id).and_then(|l| l.permissions.fallback_note(l.runs));
+            if rewind_notice.is_some() {
+                m.note = rewind_notice;
+            }
         }
         if let Some(running) = self.live.get(id).and_then(|l| l.running.clone())
             && let Some(m) = self.convs.get_mut(id).and_then(|c| c.messages.iter_mut().find(|m| m.id == reply_id))
@@ -2641,6 +2699,7 @@ impl Core {
         }
         self.begin_unbounded(pick.vendor)?;
         self.note_before(id);
+        self.rewind.bump(id);
         if let Some(l) = self.live.get_mut(id) {
             l.started = started;
             l.turn = Some(reply_id.to_string());
@@ -2661,6 +2720,9 @@ impl Core {
     }
 
     fn launch(&mut self, conv: &str, pick: &Pick) -> Result<(), String> {
+        if self.rewind_blocked(conv) {
+            return Err("error.rewind.busy".into());
+        }
         self.tick += 1;
         let cli = self.opts.clis.get(&pick.vendor).cloned();
         let settings = self.store.settings();
@@ -2747,6 +2809,7 @@ impl Core {
         let conversations = siblings::offers(area);
         let verify = self.offers_verify(area, permissions);
         let progress = area == Area::Project;
+        self.rewind_session_started(conv, sid, cwd_used.clone());
         let session = match pick.vendor {
             Vendor::Claude => start_claude(
                 ClaudeOptions {
@@ -2878,6 +2941,8 @@ impl Core {
             plan: None,
             context: None,
             messages: vec![],
+            rewind_notice: None,
+            rewind_summary: None,
             reported: (None, None),
             compacting: false,
             weighing: None,
@@ -2894,6 +2959,9 @@ impl Core {
         }
         let fallback = pick_model(&req.choice, &self.vendors(), self.codex_recommended.as_deref()).ok_or("error.noSubscription")?;
         let existing = req.conversation_id.as_deref().and_then(|id| self.load(id).map(|c| c.id.clone()));
+        if existing.as_ref().is_some_and(|id| self.rewind_blocked(id)) {
+            return Err("error.rewind.busy".into());
+        }
         // Writing to an archived conversation brings it back.
         if let Some(id) = &existing
             && self.convs.get(id).is_some_and(|c| c.archived_at.is_some())
@@ -3155,19 +3223,29 @@ impl Core {
             }
             _ => fallback,
         };
-        if self.copy_due(&id) {
+        self.warm_launch(&id, &pick);
+    }
+
+    fn warm_launch(&mut self, id: &str, pick: &Pick) {
+        // Startup can write project files, so it waits for the sent message's baseline.
+        if self.copy_due(id) || self.convs.get(id).is_some_and(|c| c.area == Area::Project || c.working_folder.is_some()) {
             return;
         }
-        let _ = self.launch(&id, &pick);
+        let _ = self.launch(id, pick);
     }
 
     /// Throws away the blank conversation being typed, with the CLI that was started for it.
     fn drop_draft(&mut self) {
+        if self.draft.as_deref().is_some_and(|id| self.rewind_delete_allowed(id).is_err()) {
+            return;
+        }
         if let Some(old) = self.draft.take() {
             if let Some(l) = self.retire(&old) {
                 l.session.close();
             }
+            self.rewind_forget(&old);
             self.convs.remove(&old);
+            self.try_seal_rewind(&old);
             let _ = std::fs::remove_dir_all(self.scratch_of(&old));
         }
     }
@@ -3202,7 +3280,8 @@ impl Core {
         self.list_changed();
     }
 
-    fn remove(&mut self, id: &str) {
+    fn remove(&mut self, id: &str) -> Result<(), String> {
+        self.rewind_delete_allowed(id)?;
         self.note_turn(id, None, true);
         self.stop_helpers(id, true);
         self.close_asides(Some(id));
@@ -3214,12 +3293,15 @@ impl Core {
         }
         if self.store.get(id).is_some() || self.convs.contains_key(id) {
             self.keep_family(id);
+            self.rewind_forget(id);
             self.store.remove(id);
             self.convs.remove(id);
+            self.try_seal_rewind(id);
             let _ = std::fs::remove_dir_all(self.scratch_of(id));
             let _ = std::fs::remove_dir_all(self.opts.data_dir.join("attachments").join(id));
         }
         self.list_changed();
+        Ok(())
     }
 
     fn terminal(&mut self, id: &str) -> Option<TerminalCommand> {
@@ -3399,6 +3481,89 @@ fn tool_in<'a>(messages: &'a mut [Message], current: Option<&str>, id: &str) -> 
 mod tool_in_tests {
     use super::*;
     use serde_json::json;
+
+    #[tokio::test]
+    async fn rewind_stop_reaches_idle_sessions_without_stopping_other_conversations() {
+        let data = tempfile::tempdir().unwrap();
+        let engine = Engine::new(
+            EngineOptions {
+                data_dir: data.path().to_path_buf(),
+                clis: Default::default(),
+                spawn: Arc::new(|_, _, _| panic!("the stop test must never spawn a process")),
+                windows: cfg!(windows),
+                claude_env_billed: false,
+                max_warm: 0,
+                idle: Duration::from_secs(60),
+                runtime: tokio::runtime::Handle::current(),
+                ask: None,
+            },
+            Arc::new(|_| {}),
+        );
+        let (sent, mut received) = tokio::sync::mpsc::unbounded_channel();
+        engine.with(|core| {
+            for (id, vendor) in [("a", Vendor::Claude), ("b", Vendor::Codex)] {
+                let sent = sent.clone();
+                core.live.insert(
+                    id.into(),
+                    Live {
+                        vendor,
+                        model: None,
+                        running: None,
+                        effort: String::new(),
+                        sid: 1,
+                        session: Session::from_fn(move |cmd| {
+                            let _ = sent.send((id, cmd));
+                        }),
+                        turn: None,
+                        break_pending: false,
+                        answer_started: false,
+                        used: 0,
+                        cli: Cli { command: "unused".into(), prefix: vec![] },
+                        resumed: false,
+                        permissions: Permissions::Ask,
+                        tuning: Default::default(),
+                        runs: Permissions::Ask,
+                        cwd: data.path().to_path_buf(),
+                        by_hand: true,
+                        approved: false,
+                        started: 0.0,
+                        served: true,
+                        steering: vec![],
+                        held: None,
+                        unsaved_session: None,
+                    },
+                );
+            }
+        });
+        engine.interrupt("a");
+        assert!(matches!(received.try_recv(), Ok(("a", crate::events::SessionCommand::Interrupt))));
+        assert!(received.try_recv().is_err(), "the other conversation is not stopped");
+        engine.interrupt("b");
+        assert!(matches!(received.try_recv(), Ok(("b", crate::events::SessionCommand::Interrupt))));
+        engine.with(|core| {
+            core.rewind_session_started("b", 1, data.path().into());
+            let mut replacement = core.retire("b").unwrap();
+            replacement.sid = 2;
+            replacement.effort = "high".into();
+            core.rewind_session_started("b", 2, data.path().into());
+            core.live.insert("b".into(), replacement);
+            core.handle("b", 2, EngineEvent::Writers { active: vec![], unknown: false });
+            assert!(core.rewind_tracks_session("b", 1), "replacement before the first Writers event retains its predecessor");
+        });
+        engine.interrupt("b");
+        assert!(matches!(received.try_recv(), Ok(("b", crate::events::SessionCommand::Interrupt))));
+        assert!(matches!(received.try_recv(), Ok(("b", crate::events::SessionCommand::Interrupt))), "Stop also reaches the retired owner");
+        assert!(received.try_recv().is_err(), "the other conversation remains untouched");
+        engine.with(|core| {
+            core.handle("b", 1, EngineEvent::Writers { active: vec![], unknown: false });
+            assert!(core.rewind_tracks_session("b", 1), "an idle snapshot cannot confirm a retired process tree exited");
+            core.handle("b", 1, EngineEvent::WriterExit { confirmed: true });
+            assert!(!core.rewind_tracks_session("b", 1), "late exit confirmation from the old session is accepted");
+        });
+        engine.interrupt("b");
+        assert!(matches!(received.try_recv(), Ok(("b", crate::events::SessionCommand::Interrupt))));
+        assert!(received.try_recv().is_err(), "confirmed retired owners are released");
+    }
 
     #[tokio::test]
     async fn slash_commands_use_the_conversation_list_or_the_last_vendor_lists_without_starting_a_process() {

@@ -27,7 +27,7 @@ pub use select::{Scripts, Watch, heavy, scripts, watch};
 use crate::project::proof::output;
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
@@ -337,6 +337,7 @@ const MAX_REMEMBERED: usize = 512;
 const METADATA_MOST: usize = 4;
 const METADATA_TIME: Duration = Duration::from_secs(60);
 const METADATA_BYTES: u64 = 16 << 20;
+const UNKNOWN_FOLDER_LIMIT: usize = 1_024;
 
 /// The verifier: one per engine. It holds no process and no timer while idle.
 pub struct Verifier {
@@ -347,8 +348,10 @@ pub struct Verifier {
     /// The free memory a build is admitted against.
     free: admit::Free,
     passed: Mutex<Passed>,
-    /// The run of each folder, which a newer one stops, with who started it (a conversation's id).
-    running: Mutex<HashMap<PathBuf, Running>>,
+    /// Current and draining runs, with the folder and conversation that own them.
+    running: Mutex<HashMap<u64, Running>>,
+    /// None after saturation: every folder remains blocked without retaining an unbounded list.
+    unknown: Mutex<Option<HashSet<PathBuf>>>,
     next: AtomicU64,
     clock: fn() -> u64,
     /// The game guard (`run::Guard`): none where the shell cannot tell.
@@ -358,9 +361,25 @@ pub struct Verifier {
 }
 
 struct Running {
-    id: u64,
+    folder: PathBuf,
     owner: String,
     task: tokio::task::AbortHandle,
+}
+
+/// Every launched process keeps the run active until its separate cancellation worker confirms completion.
+struct Confirming<'a> {
+    runner: &'a dyn Runner,
+    pending: Arc<Mutex<Vec<tokio::sync::watch::Receiver<bool>>>>,
+}
+
+impl Runner for Confirming<'_> {
+    fn start(&self, spec: &Spec) -> std::io::Result<Started> {
+        let started = self.runner.start(spec)?;
+        if let Some(confirmed) = &started.confirmed {
+            self.pending.lock().unwrap_or_else(|e| e.into_inner()).push(confirmed.clone());
+        }
+        Ok(started)
+    }
 }
 
 fn now_millis() -> u64 {
@@ -382,6 +401,7 @@ impl Verifier {
             free: Arc::new(|| None),
             passed: Mutex::new(Passed::default()),
             running: Mutex::new(HashMap::new()),
+            unknown: Mutex::new(Some(HashSet::new())),
             next: AtomicU64::new(0),
             clock: now_millis,
             guard: None,
@@ -426,18 +446,31 @@ impl Verifier {
     ) -> impl Future<Output = Outcome> + Send + 'static + use<F> {
         let id = self.next.fetch_add(1, Ordering::Relaxed);
         let me = self.clone();
-        let task = runtime.spawn(async move { me.run(request.await).await });
-        let run = Running { id, owner: owner.to_string(), task: task.abort_handle() };
-        if let Some(older) = self.running.lock().unwrap_or_else(|e| e.into_inner()).insert(folder.clone(), run) {
-            older.task.abort();
+        let pending = Arc::new(Mutex::new(Vec::new()));
+        let confirmations = pending.clone();
+        let task = runtime.spawn(async move {
+            let runner = Confirming { runner: &*me.runner, pending: confirmations };
+            me.run(request.await, &runner).await
+        });
+        let run = Running { folder: folder.clone(), owner: owner.to_string(), task: task.abort_handle() };
+        {
+            let mut running = self.running.lock().unwrap_or_else(|e| e.into_inner());
+            for older in running.values().filter(|r| r.folder == folder) {
+                older.task.abort();
+            }
+            running.insert(id, run);
         }
         let me = self.clone();
         async move {
             let outcome = task.await.unwrap_or_else(|_| Outcome::nothing(level, "reason.verify.stopped"));
-            let mut running = me.running.lock().unwrap_or_else(|e| e.into_inner());
-            if running.get(&folder).is_some_and(|r| r.id == id) {
-                running.remove(&folder);
+            let confirmations = std::mem::take(&mut *pending.lock().unwrap_or_else(|e| e.into_inner()));
+            for mut confirmed in confirmations {
+                if confirmed.wait_for(|done| *done).await.is_err() {
+                    // A failed confirmation never opens restore admission just because its worker ended.
+                    me.remember_unknown(&folder);
+                }
             }
+            me.running.lock().unwrap_or_else(|e| e.into_inner()).remove(&id);
             outcome
         }
     }
@@ -445,13 +478,13 @@ impl Verifier {
     /// Stops the verify of `folder` that `owner` started, if one runs: its processes end with their job. Another's run of
     /// the same folder (two conversations of one project without a copy share it) goes on. True when one was stopped.
     pub fn stop(&self, folder: &Path, owner: &str) -> bool {
-        let mut running = self.running.lock().unwrap_or_else(|e| e.into_inner());
-        if running.get(folder).is_none_or(|r| r.owner != owner) {
-            return false;
+        let running = self.running.lock().unwrap_or_else(|e| e.into_inner());
+        let mut stopped = false;
+        for r in running.values().filter(|r| r.folder == folder && r.owner == owner) {
+            r.task.abort();
+            stopped = true;
         }
-        let Some(r) = running.remove(folder) else { return false };
-        r.task.abort();
-        true
+        stopped
     }
 
     /// Whether no verify runs anywhere.
@@ -459,14 +492,44 @@ impl Verifier {
         self.running.lock().unwrap_or_else(|e| e.into_inner()).is_empty()
     }
 
+    /// Only checks whose folders overlap can write into a restore's range.
+    pub fn active_in(&self, folder: &Path) -> bool {
+        self.running
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .values()
+            .any(|r| r.folder.starts_with(folder) || folder.starts_with(&r.folder))
+            || self.unknown_in(folder)
+    }
+
+    /// A native check without process-tree completion proof remains a possible writer.
+    pub fn unknown_in(&self, folder: &Path) -> bool {
+        self.unknown
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .as_ref()
+            .is_none_or(|folders| folders.iter().any(|p| p.starts_with(folder) || folder.starts_with(p)))
+    }
+
+    fn remember_unknown(&self, folder: &Path) {
+        let mut unknown = self.unknown.lock().unwrap_or_else(|e| e.into_inner());
+        if let Some(folders) = unknown.as_mut() {
+            if folders.len() >= UNKNOWN_FOLDER_LIMIT && !folders.contains(folder) {
+                *unknown = None;
+            } else {
+                folders.insert(folder.into());
+            }
+        }
+    }
+
     /// The workspace graph of the package at `manifest` (`cargo metadata --no-deps`), when Cargo gives it within
     /// `METADATA_TIME`.
-    async fn metadata(&self, request: &Request, manifest: &str) -> Option<String> {
+    async fn metadata(&self, request: &Request, manifest: &str, runner: &dyn Runner) -> Option<String> {
         use tokio::io::AsyncReadExt;
         let args = ["metadata", "--format-version", "1", "--no-deps", "--manifest-path", manifest];
         let spec =
             Spec { program: "cargo".into(), args: args.map(String::from).to_vec(), cwd: request.folder.clone(), env: request.local.vars() };
-        let started = self.runner.start(&spec).ok()?;
+        let started = runner.start(&spec).ok()?;
         let (mut stdout, mut stderr) = (started.stdout.take(METADATA_BYTES), started.stderr);
         let mut out = Vec::new();
         let read = async {
@@ -481,10 +544,10 @@ impl Verifier {
 
     /// Whether a verify of `folder` runs now.
     pub fn busy(&self, folder: &Path) -> bool {
-        self.running.lock().unwrap_or_else(|e| e.into_inner()).get(folder).is_some_and(|r| !r.task.is_finished())
+        self.running.lock().unwrap_or_else(|e| e.into_inner()).values().any(|r| r.folder == folder)
     }
 
-    async fn run(&self, request: Request) -> Outcome {
+    async fn run(&self, request: Request, runner: &dyn Runner) -> Outcome {
         let level = request.level.unwrap_or(Level::Fast);
         let began = std::time::Instant::now();
         let (mut planned, refused) = plan(&request.commands, &request.folder);
@@ -506,7 +569,7 @@ impl Verifier {
                 self.game_over().await;
             }
             for (manifest, _) in touched.iter().take(METADATA_MOST) {
-                if let Some(json) = self.metadata(&request, manifest).await {
+                if let Some(json) = self.metadata(&request, manifest, runner).await {
                     manifests.extend(select::rust_dependents(&request.folder, &json, &touched));
                 }
             }
@@ -576,7 +639,7 @@ impl Verifier {
                 env: vars.clone(),
             };
             log.line("== npm ci (the dependencies were not installed in this folder) ==");
-            let ran = run::check(&*self.runner, &spec, &mut log, self.deadline, self.guard.as_ref()).await;
+            let ran = run::check(runner, &spec, &mut log, self.deadline, self.guard.as_ref()).await;
             if ran.exit != Some(0) {
                 results.push(result("npm ci", &ran, &root));
             }
@@ -597,7 +660,7 @@ impl Verifier {
             // its own: passing then, it turns nothing red (R190 V3). Any other failure stands at once.
             let mut retried = false;
             let mut out = loop {
-                let ran = run::check(&*self.runner, &spec, &mut log, self.deadline, self.guard.as_ref()).await;
+                let ran = run::check(runner, &spec, &mut log, self.deadline, self.guard.as_ref()).await;
                 log.line(&format!("== {}: exit {:?} after {} ms ==", check.command, ran.exit, ran.took.as_millis()));
                 let mut out = result(&check.command, &ran, &root);
                 if ran.refused.is_some() {
@@ -756,6 +819,7 @@ mod tests {
                 true
             });
             Ok(Started {
+                confirmed: None,
                 stdout: Box::new(std::io::Cursor::new(out.into_bytes())),
                 stderr: Box::new(tokio::io::empty()),
                 exit,
@@ -1273,6 +1337,83 @@ mod tests {
         assert_eq!(out.reason.as_deref(), Some("reason.verify.stopped"));
         assert!(!out.ok());
         assert!(runner.started.lock().unwrap().is_empty());
+    }
+
+    #[tokio::test]
+    async fn rewind_stopped_and_superseded_checks_wait_for_each_process_confirmation() {
+        struct Draining {
+            confirmations: Mutex<std::collections::VecDeque<tokio::sync::watch::Receiver<bool>>>,
+            started: tokio::sync::mpsc::UnboundedSender<()>,
+        }
+        impl Runner for Draining {
+            fn start(&self, _: &Spec) -> std::io::Result<Started> {
+                let confirmed = self.confirmations.lock().unwrap().pop_front().unwrap();
+                let _ = self.started.send(());
+                Ok(Started {
+                    stdout: Box::new(tokio::io::empty()),
+                    stderr: Box::new(tokio::io::empty()),
+                    exit: Box::pin(std::future::pending()),
+                    confirmed: Some(confirmed),
+                    throttle: None,
+                    peak: None,
+                })
+            }
+        }
+        let dir = tempfile::tempdir().unwrap();
+        let (first, first_confirmation) = tokio::sync::watch::channel(false);
+        let (second, second_confirmation) = tokio::sync::watch::channel(false);
+        let (unknown, unknown_confirmation) = tokio::sync::watch::channel(false);
+        drop(unknown);
+        let (started, mut starts) = tokio::sync::mpsc::unbounded_channel();
+        let verifier = Arc::new(Verifier::new(Arc::new(Draining {
+            confirmations: Mutex::new([first_confirmation, second_confirmation, unknown_confirmation].into()),
+            started,
+        })));
+        let request = || Request {
+            folder: dir.path().into(),
+            level: Some(Level::Full),
+            commands: vec!["node check.js".into()],
+            ..Request::default()
+        };
+        let first_run =
+            verifier.start(&tokio::runtime::Handle::current(), dir.path().into(), "a", Level::Full, std::future::ready(request()));
+        let first_run = tokio::spawn(first_run);
+        starts.recv().await.unwrap();
+        assert!(verifier.stop(dir.path(), "a"));
+        assert!(verifier.active_in(&dir.path().join("nested")), "Stop cannot report idle before completion");
+        let second_run =
+            verifier.start(&tokio::runtime::Handle::current(), dir.path().into(), "b", Level::Full, std::future::ready(request()));
+        let second_run = tokio::spawn(second_run);
+        starts.recv().await.unwrap();
+        assert!(verifier.stop(dir.path(), "b"));
+        second.send(true).unwrap();
+        second_run.await.unwrap();
+        assert!(verifier.active_in(dir.path()), "a newer completed check cannot hide an older draining one");
+        assert!(!first_run.is_finished());
+        first.send(true).unwrap();
+        first_run.await.unwrap();
+        assert!(verifier.idle());
+        assert!(!verifier.active_in(dir.path()));
+        let unknown_run =
+            verifier.start(&tokio::runtime::Handle::current(), dir.path().into(), "c", Level::Full, std::future::ready(request()));
+        let unknown_run = tokio::spawn(unknown_run);
+        starts.recv().await.unwrap();
+        assert!(verifier.stop(dir.path(), "c"));
+        unknown_run.await.unwrap();
+        assert!(verifier.idle(), "unknown tree ownership does not hang the check's outcome");
+        assert!(verifier.active_in(dir.path()), "failed native confirmation must never open restore admission");
+        assert!(verifier.unknown_in(&dir.path().join("nested")));
+        assert!(!verifier.active_in(&dir.path().with_file_name("unrelated")));
+    }
+
+    #[test]
+    fn rewind_unknown_check_folder_saturation_blocks_all_ranges_instead_of_forgetting_writers() {
+        let verifier = Verifier::new(Arc::new(passing()));
+        for at in 0..=UNKNOWN_FOLDER_LIMIT {
+            verifier.remember_unknown(&PathBuf::from(format!("unknown-{at}")));
+        }
+        assert!(verifier.unknown.lock().unwrap().is_none(), "saturation releases the bounded list");
+        assert!(verifier.active_in(Path::new("elsewhere")), "an unrelated range stays blocked after saturation");
     }
 
     #[test]

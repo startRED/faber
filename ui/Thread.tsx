@@ -8,6 +8,7 @@ import {
   type Message,
   type Plan,
   type QueuedTurn,
+  type RewindRedoInfo,
   type VendorUsage,
   type VersionAt,
   type Versions,
@@ -18,6 +19,7 @@ import { keep, kept, recoverQueuedDraft, release, useDraft } from './unsent.ts';
 import { Icon, VendorMark } from './Glyphs.tsx';
 import { QuotaCard } from './QuotaCard.tsx';
 import { PlanList, WrapUpBox } from './Plan.tsx';
+import { Rewind } from './Rewind.tsx';
 import { AnswersCard, answeredIn, folded, RunBlock, runsOf, type Answered } from './Run.tsx';
 import { html, Markdown, openLinks, pressImage } from './markdown.tsx';
 import { agentMeta, ChangedLines, openedAgent, SourceList, showAgent, tellAbout, ToolChip } from './AgentChat.tsx';
@@ -28,7 +30,7 @@ import { Strip, Thumb } from './Thumbs.tsx';
 import { canSpeak, speaking, stopSpeech, toggleSpeech } from './speech.ts';
 import { bytes, compact, duration, failureText, fromEngine, lang, money, t } from './i18n.ts';
 import { prettyModel, vendorName, type Option } from './models.ts';
-import { animateList } from './motion.ts';
+import { animateList, keepForExit } from './motion.ts';
 import { windowHidden } from './appearance.ts';
 import { elapsed, warmLeft } from './running.ts';
 import { agePending, ageNow, footText, tickWhile } from './foot.ts';
@@ -673,6 +675,9 @@ function Mine(props: {
   m: Accessor<Message>;
   onBranch: OnBranch;
   messageIndex: number;
+  onRewind: () => void;
+  onRedo?: () => void;
+  recovery?: boolean;
   versions?: Versions;
   onVersion?: (to: VersionAt, messageIndex: number, by: number) => void;
 }) {
@@ -692,8 +697,8 @@ function Mine(props: {
         <div
           class="mine"
           data-message-index={props.messageIndex}
-          tabindex="-1"
-          onContextMenu={(e) => openMenu(e, [copyItem(props.m().text), { id: 'edit', label: t('mine.edit'), run: () => setEditing(props.m().text) }])}
+          tabindex="0"
+          onContextMenu={(e) => openMenu(e, [copyItem(props.m().text), { id: 'edit', label: t('mine.edit'), run: () => setEditing(props.m().text) }, ...(props.onRedo ? [{ id: 'rewind-redo', label: t(props.recovery ? 'rewind.recover' : 'rewind.redo'), run: props.onRedo }] : []), { id: 'rewind', label: t('rewind.title'), danger: true, run: props.onRewind }], e.currentTarget)}
         >
           <Strip images={props.m().images} files={props.m().attachments} />
           <Show when={props.m().text}>
@@ -706,6 +711,9 @@ function Mine(props: {
               <Icon name="edit" small />
             </button>
           </div>
+          <Show when={props.m().rewind?.coverage.incomplete || props.m().rewind?.coverage.unavailable}>
+            <p class="side-meta rewind-coverage">{t('rewind.coverage')}</p>
+          </Show>
           <Show when={props.versions}>{(v) => <VersionArrows v={v()} onGo={(to, by) => props.onVersion?.(to, props.messageIndex, by)} />}</Show>
         </div>
       }
@@ -900,7 +908,17 @@ function Narration(props: { text: string }) {
   );
 }
 
-export function Thread(props: Shared & { messages: Message[]; queued?: QueuedTurn[]; busy?: boolean; onError?: (err: unknown) => void; onQueuedRecovered?: (id: string, text: string) => void; from: number; until?: number; searchIndex?: number }) {
+export function Thread(props: Shared & { messages: Message[]; queued?: QueuedTurn[]; busy?: boolean; onError?: (err: unknown) => void; onQueuedRecovered?: (id: string, text: string) => void; from: number; until?: number; searchIndex?: number; rewindNotice?: string; conversationNames?: Record<string, string>; onRewind?: () => Promise<void> }) {
+  const [restore, setRestore] = createSignal<{ message: Message; redo?: RewindRedoInfo }>();
+  const [open, setOpen] = createSignal(false);
+  const shown = keepForExit(open);
+  const [revision, setRevision] = createSignal(0);
+  // A completed turn refreshes discovery; text streaming never asks the disk for history.
+  const [redos] = createResource(() => `${props.conversationId}:${props.messages.length}:${props.messages.at(-1)?.status}:${revision()}`, () => api.rewindRedos(props.conversationId).catch(() => []));
+  const redo = () => redos()?.[0];
+  const lastMine = createMemo(() => props.messages.findLast((m) => m.role === 'user' && !m.wake)?.id);
+  const redoAt = createMemo(() => props.messages.some((m) => m.id === redo()?.messageId && m.role === 'user' && !m.wake) ? redo()?.messageId : lastMine());
+  const showRestore = (message: Message, redo?: RewindRedoInfo) => { setRestore({ message, redo }); setOpen(true); };
   const queuedIds = createMemo(() => (props.queued ?? []).map((q) => q.id));
   const prompt = (at: number) => (props.messages[at - 1]?.role === 'user' ? props.messages[at - 1] : undefined);
   // Turns Faber sent by itself, one after another, read as one run (task 018): its earlier turns fold under one header.
@@ -919,6 +937,11 @@ export function Thread(props: Shared & { messages: Message[]; queued?: QueuedTur
   );
   return (
     <>
+      <Show when={props.rewindNotice}>
+        <p class="woke" classList={{ 'rewind-empty': !props.messages.length }} tabindex={props.messages.length ? undefined : 0} onContextMenu={(e) => { const available = redo(); if (!props.messages.length && available) openMenu(e, [{ id: 'rewind-redo', label: t(available.recovery ? 'rewind.recover' : 'rewind.redo'), run: () => showRestore({ id: available.messageId, role: 'user', text: '', at: 0 }, available) }], e.currentTarget); }}>
+          {fromEngine(props.rewindNotice)}
+        </p>
+      </Show>
       <Index each={props.messages.slice(props.from, props.until)}>
         {(m, i) => (
           <Show
@@ -951,6 +974,9 @@ export function Thread(props: Shared & { messages: Message[]; queued?: QueuedTur
                     m={m}
                     onBranch={props.onBranch}
                     messageIndex={props.from + i}
+                    onRewind={() => showRestore(m())}
+                    onRedo={m().id === redoAt() && redo() ? () => showRestore(m(), redo()) : undefined}
+                    recovery={redo()?.recovery}
                     versions={props.versions?.find((v) => v.messageId === m().id)}
                     onVersion={props.onVersion}
                   />
@@ -967,6 +993,7 @@ export function Thread(props: Shared & { messages: Message[]; queued?: QueuedTur
             busy={props.busy ?? false} onRecovered={props.onQueuedRecovered} onError={props.onError} />;
         }}</For>
       }</Show>
+      <Show when={shown() ? restore() : undefined} keyed>{(target) => <Rewind conversationId={props.conversationId} messageId={target.message.id} point={target.message.rewind} redo={target.redo} conversationNames={props.conversationNames} leaving={!open()} onClose={() => setOpen(false)} onChanged={async () => { await props.onRewind?.(); setRevision((n) => n + 1); }} />}</Show>
       <Quote />
     </>
   );

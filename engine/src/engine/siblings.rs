@@ -144,8 +144,10 @@ impl Core {
                     if !c.convs.get(&child).is_some_and(|c| c.messages.is_empty()) {
                         return None;
                     }
-                    let copy = c.convs.get_mut(&child).and_then(|c| c.copy.take()).map(|copy| (child.clone(), copy));
-                    c.remove(&child);
+                    let copy = c.convs.get(&child).and_then(|c| c.copy.clone()).map(|copy| (child.clone(), copy));
+                    if c.remove(&child).is_err() {
+                        return None;
+                    }
                     copy
                 });
                 engine.drop_copy(stray);
@@ -157,7 +159,7 @@ impl Core {
             // Saved with its first message before it failed: it stays, with the error in its reply, and the agent is told.
             Err(_) if self.convs.get(&id).is_some_and(|c| !c.messages.is_empty()) => Ok((id, false)),
             Err(_) => {
-                self.convs.remove(&id);
+                let _ = self.remove(&id);
                 Err("the conversation could not start")
             }
         }

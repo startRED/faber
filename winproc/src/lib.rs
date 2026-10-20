@@ -20,10 +20,57 @@ pub fn background_thread() -> std::io::Result<()> {
 #[cfg(windows)]
 pub use imp::{background_thread, job_active_processes, job_cpu_cap, job_peak_memory, job_terminate, process_ended, resume_process};
 
-#[cfg(windows)]
 mod files;
-#[cfg(windows)]
 pub use files::open_plain_file;
+pub mod process_tree;
+
+#[cfg(unix)]
+fn owned_group(pgid: u32) -> std::io::Result<rustix::process::Pid> {
+    i32::try_from(pgid)
+        .ok()
+        .filter(|pid| *pid > 1)
+        .and_then(rustix::process::Pid::from_raw)
+        .ok_or_else(|| std::io::Error::new(std::io::ErrorKind::InvalidInput, "invalid owned process group"))
+}
+
+/// Signal only a dedicated group created by Faber, never the application's current group.
+#[cfg(unix)]
+pub fn process_group_terminate(pgid: u32) -> std::io::Result<()> {
+    match rustix::process::kill_process_group(owned_group(pgid)?, rustix::process::Signal::KILL) {
+        Ok(()) | Err(rustix::io::Errno::SRCH) => Ok(()),
+        Err(error) => Err(error.into()),
+    }
+}
+
+/// Only ESRCH proves no member remains. Permission failures and other query failures are not proof.
+#[cfg(unix)]
+pub fn process_group_empty(pgid: u32) -> std::io::Result<bool> {
+    group_empty_result(rustix::process::test_kill_process_group(owned_group(pgid)?))
+}
+
+#[cfg(unix)]
+fn group_empty_result(result: rustix::io::Result<()>) -> std::io::Result<bool> {
+    match result {
+        Err(rustix::io::Errno::SRCH) => Ok(true),
+        Ok(()) => Ok(false),
+        Err(error) => Err(error.into()),
+    }
+}
+
+#[cfg(all(test, unix))]
+mod group_tests {
+    use super::*;
+
+    #[test]
+    fn only_no_such_process_confirms_a_group_empty() {
+        assert!(group_empty_result(Err(rustix::io::Errno::SRCH)).unwrap());
+        assert!(!group_empty_result(Ok(())).unwrap());
+        assert!(group_empty_result(Err(rustix::io::Errno::PERM)).is_err());
+        for id in [0, 1, u32::MAX] {
+            assert!(owned_group(id).is_err());
+        }
+    }
+}
 
 #[cfg(windows)]
 mod imp {
@@ -291,3 +338,5 @@ mod processes {
 
 #[cfg(windows)]
 pub use processes::{ProcessInfo, processes};
+
+pub mod rewind;

@@ -5,10 +5,11 @@ version.workspace = true
 edition.workspace = true
 license.workspace = true
 repository.workspace = true
-# One test program for every file in tests/ (see tests/all.rs), plus the memory test that must run alone.
+# One test program for every file in tests/ (see tests/all.rs), plus cost tests that must run alone.
 autotests = false
 
 [dependencies]
+faber-winproc = { path = "../winproc" }
 # The existing workspace dependency supplies a safe native disk-space reading at build admission.
 # The free memory a Cargo build of the verifier is admitted against.
 sysinfo = { version = "0.39.6", default-features = false, features = ["disk", "system"] }
@@ -21,8 +22,9 @@ pulldown-cmark-to-cmark = "23"
 # Already in the workspace: HTML's attribute rules also decode numeric entities without a semicolon.
 html5ever = "0.39"
 flate2 = "1"
+crc32fast = "1"
 reqwest = { version = "0.13", default-features = false, features = ["rustls"] }
-serde = { version = "1", features = ["derive"] }
+serde = { version = "1", features = ["derive", "rc"] }
 serde_json = "1"
 sha2 = "0.11"
 tar = "0.4"
@@ -35,9 +37,6 @@ zip = { version = "8", default-features = false, features = ["deflate"] }
 winreg = "0.56"
 # Job objects (a CLI and everything it starts are ended together); the safe wrapper keeps this crate free of unsafe code.
 win32job = "2"
-
-[target.'cfg(any(windows, target_os = "macos"))'.dependencies]
-faber-winproc = { path = "../winproc" }
 
 [target.'cfg(unix)'.dependencies]
 # Safe directory-relative file operations; already used by the workspace's dependencies.
@@ -63,3 +62,7 @@ path = "tests/all.rs"
 [[test]]
 name = "install_memory"
 path = "tests/install_memory.rs"
+
+[[test]]
+name = "rewind_cost"
+path = "tests/rewind_cost.rs"

@@ -110,6 +110,7 @@ export interface Message {
   mode?: string;
   /** A note under the reply, as an engine key (`note.historyResent`). */
   note?: string;
+  rewind?: RewindPoint;
   waitUntil?: number;
   movedFrom?: Vendor;
   /** The next rung up, offered when the turn's own tools show it stopped early. */
@@ -224,6 +225,8 @@ export interface Conversation {
   /** When the person pinned it to the top of its sidebar list. */
   pinnedAt?: number;
   messages: Message[];
+  rewindNotice?: string;
+  rewindSummary?: string;
 }
 /** The tokens a conversation's own agent holds, and the window they are counted against. */
 export interface ContextFill {
@@ -517,6 +520,67 @@ export interface ChangePatch {
   binary: boolean;
   error?: string | null;
 }
+
+/** Private turn history; step A exposes the contract without adding any screen. */
+export interface RewindCoverage {
+  saved: number;
+  skipped: number;
+  unavailable: boolean;
+  incomplete: boolean;
+}
+export interface RewindCursor {
+  entry: string | null;
+  turn: string | null;
+}
+export interface RewindPoint {
+  id: string;
+  messageId: string;
+  turnId: string;
+  at: number;
+  coverage: RewindCoverage;
+  sealed: boolean;
+  cursor: RewindCursor;
+}
+export interface RewindRequest {
+  conversationId: string;
+  messageId: string;
+  mode: 'files' | 'conversation' | 'both';
+  savedVersions: string[];
+}
+export interface RewindRedoRequest {
+  conversationId: string;
+  id: string;
+  savedVersions: string[];
+}
+export interface RewindRedoInfo {
+  id: string;
+  messageId: string;
+  mode: RewindRequest['mode'];
+  expiresAt: number;
+  recovery?: boolean;
+}
+export interface RewindPreview {
+  files: { path: string; action: 'replace' | 'recreate' | 'remove'; conflict: boolean; unavailable: boolean }[];
+  replacements: number;
+  recreations: number;
+  removals: number;
+  conflicts: number;
+  messages: number;
+  coverage: RewindCoverage;
+  running: { conversationId: string; writers: string[]; unknown: boolean }[];
+  recovery: boolean;
+  redoExpiresAt: number | null;
+  notice: string;
+}
+export interface RewindResult {
+  id: string;
+  restored: string[];
+  kept: string[];
+  failed: string[];
+  partial: boolean;
+  recovery: boolean;
+  notice: string | null;
+}
 /** A quick question on the side of a conversation (R250), as the engine keeps it until the turn after it ends. */
 export interface Aside {
   id: string;
@@ -627,7 +691,7 @@ export const api = {
   },
   rename: (id: string, title: string) => invoke<void>('rename', { id, title }),
   exportConversation: (id: string, words: { you: string; auto: string; attachments: string; files: string }) => invoke<boolean>('export_conversation', { id, words }),
-  /** Refused with `error.copy.unsaved` while its copy holds work found nowhere else, unless `discard`. */
+  /** Pending rewind recovery always refuses deletion; `discard` only overrides `error.copy.unsaved`. */
   remove: (id: string, discard = false) => invoke<void>('remove', { id, discard }),
   removeQueued: (id: string, turnId: string) => invoke<void>('remove_queued', { id, turnId }),
   editQueued: (id: string, turnId: string, text: string) => invoke<void>('edit_queued', { id, turnId, text }),
@@ -639,6 +703,13 @@ export const api = {
   compactNow: (id: string) => invoke<void>('compact_now', { id }),
   contextParts: (id: string) => invoke<boolean>('context_parts', { id }),
   changes: (id: string, cursor?: string) => invoke<ChangeList>('changes', { id, cursor }),
+  rewindPoints: (id: string) => invoke<RewindPoint[]>('rewind_points', { id }),
+  rewindRedos: (id: string) => invoke<RewindRedoInfo[]>('rewind_redos', { id }),
+  rewindRedoPreview: (request: RewindRedoRequest) => invoke<RewindPreview>('rewind_redo_preview', { request }),
+  rewindRecover: (id: string) => invoke<void>('rewind_recover', { id }),
+  rewindPreview: (request: RewindRequest) => invoke<RewindPreview>('rewind_preview', { request }),
+  rewindRestore: (request: RewindRequest) => invoke<RewindResult>('rewind_restore', { request }),
+  rewindRedo: (request: RewindRedoRequest) => invoke<RewindResult>('rewind_redo', { request }),
   changePatch: (id: string, path: string) => invoke<ChangePatch>('change_patch', { id, path }),
   /** A quick question on the side (R250); refused with an `error.aside.*` key, `error.quotaOut` or `error.billedPerUse`. */
   askAside: (id: string, question: string, model?: string) => invoke<string>('ask_aside', { id, question, model }),

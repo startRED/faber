@@ -28,6 +28,7 @@ impl Runner for Fake {
             ("", 0)
         };
         Ok(Started {
+            confirmed: None,
             throttle: None,
             peak: None,
             stdout: Box::new(std::io::Cursor::new(out.as_bytes().to_vec())),
@@ -174,6 +175,7 @@ impl Runner for Flaky {
         let (out, code) =
             if failing { ("ui/App.tsx(3,7): error TS2322: Type 'string' is not assignable to type 'number'.\n", 2) } else { ("", 0) };
         Ok(Started {
+            confirmed: None,
             throttle: None,
             peak: None,
             stdout: Box::new(std::io::Cursor::new(out.as_bytes().to_vec())),
@@ -207,6 +209,7 @@ impl Runner for Gated {
         let code = if lint && self.fails { 2 } else { 0 };
         let gate = self.gate.clone();
         Ok(Started {
+            confirmed: None,
             throttle: None,
             peak: None,
             stdout: Box::new(std::io::Cursor::new(out.as_bytes().to_vec())),
@@ -394,6 +397,7 @@ struct Git {
     top: String,
     untracked: Arc<Mutex<Vec<String>>>,
     listed: Arc<std::sync::atomic::AtomicUsize>,
+    rewind_listed: Arc<Mutex<Vec<Invocation>>>,
 }
 
 impl Executor for Git {
@@ -405,11 +409,17 @@ impl Executor for Git {
             ["rev-parse", "--verify", "--quiet", "HEAD^{commit}"] => say("a".repeat(40)),
             ["merge-base", ..] => say("b".repeat(40)),
             ["diff", ..] => say(String::new()),
-            ["ls-files", ..] => {
+            ["ls-files", "--others", "--exclude-standard", "-z", "--full-name"] => {
                 let names = self.untracked.lock().unwrap().join("\0");
                 self.listed.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
                 say(names)
             }
+            ["ls-files", ..] if call.args.iter().any(|arg| arg.starts_with("--git-dir=")) => {
+                self.rewind_listed.lock().unwrap().push(call.clone());
+                say(if args.contains(&"--ignored") { String::new() } else { self.untracked.lock().unwrap().join("\0") })
+            }
+            // Exercise rewind's private-history fallback, separately from the verifier's listing above.
+            ["ls-files", ..] => Ok(Output { success: false, stdout: vec![] }),
             _ => Ok(Output { success: false, stdout: vec![] }),
         }
     }
@@ -423,7 +433,12 @@ async fn a_reply_that_changes_files_only_by_a_command_gets_its_checks_and_one_th
     std::fs::write(folder.join("AGENTS.md"), AGENTS).unwrap();
     let (spawn, made) = pipes();
     let engine = engine(dir.path(), spawn);
-    let git = Git { top: folder.to_string_lossy().into_owned(), untracked: Arc::default(), listed: Arc::default() };
+    let git = Git {
+        top: folder.to_string_lossy().into_owned(),
+        untracked: Arc::default(),
+        listed: Arc::default(),
+        rewind_listed: Arc::default(),
+    };
     let runner = git.clone();
     engine.set_git(Arc::new(move || Some(Box::new(runner.clone()) as Box<dyn Executor + Send>)));
     let checks = Flaky::new(0);
@@ -442,6 +457,19 @@ async fn a_reply_that_changes_files_only_by_a_command_gets_its_checks_and_one_th
         tokio::time::sleep(Duration::from_millis(10)).await;
     }
     assert_eq!(read(), 1, "the reply's start asked git once");
+    {
+        let captures = git.rewind_listed.lock().unwrap();
+        assert_eq!(captures.len(), 2, "rewind separately listed saved and ignored files");
+        let history = dir.path().join("data/rewind").canonicalize().unwrap();
+        assert!(
+            captures.iter().all(|call| call
+                .args
+                .iter()
+                .filter_map(|arg| arg.strip_prefix("--git-dir="))
+                .any(|path| { Path::new(path).canonicalize().is_ok_and(|path| path.parent() == Some(history.as_path())) })),
+            "rewind listed through its private git directory"
+        );
+    }
     std::fs::write(folder.join("ui.rs"), "fn main() {}\n").unwrap();
     git.untracked.lock().unwrap().push("ui.rs".into());
     replies(&mut pipe, 1, false).await;
@@ -521,6 +549,23 @@ async fn while_the_checks_run_the_conversation_is_at_work_and_stop_ends_them_wit
     assert_eq!(messages.len(), 2);
     tokio::time::sleep(Duration::from_millis(60)).await;
     assert_eq!(turns(&pipe).len(), 1, "{:?}", turns(&pipe));
+    let request = faber_engine::rewind::RestoreRequest {
+        conversation_id: id.clone(),
+        message_id: messages[0].id.clone(),
+        mode: faber_engine::rewind::Mode::Conversation,
+        saved_versions: vec![],
+    };
+    tokio::time::timeout(Duration::from_secs(3), async {
+        loop {
+            if engine.rewind_preview(request.clone()).unwrap().running.is_empty() {
+                break;
+            }
+            tokio::task::yield_now().await;
+        }
+    })
+    .await
+    .expect("confirmed stopped checks must release rewind admission");
+    assert_eq!(turns(&pipe).len(), 1, "confirmed stopped checks never restart work");
     engine.shutdown();
 }
 

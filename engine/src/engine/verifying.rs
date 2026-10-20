@@ -121,6 +121,9 @@ impl Core {
     }
 
     pub(super) fn verify_request(&self, conv: &str, level: verify::Level) -> Result<Prepared, &'static str> {
+        if self.rewind_blocked(conv) {
+            return Err("error.rewind.busy");
+        }
         let verifier = self.verifier.clone().ok_or("Faber's checks are not available here")?;
         let c = self.convs.get(conv).ok_or("the conversation is gone")?;
         let project =
@@ -162,7 +165,9 @@ impl Core {
         self.opts.runtime.spawn(async move {
             let outcome = pending.await;
             let Some(core) = me.upgrade() else { return };
-            core.lock().unwrap_or_else(|e| e.into_inner()).answer_verify(&conv, sid, &call, outcome.ok(), outcome.text());
+            let mut core = core.lock().unwrap_or_else(|e| e.into_inner());
+            core.answer_verify(&conv, sid, &call, outcome.ok(), outcome.text());
+            core.rewind_checks_ended(&conv);
         });
     }
 
@@ -189,10 +194,12 @@ impl Core {
 
     /// The agent's turn stopped or ended: the checks it started stop with it, and their processes end with their jobs.
     /// Another conversation's checks of the same folder (one without a copy of its own) go on.
-    pub(super) fn stop_verify(&self, conv: &str) {
+    pub(super) fn stop_verify(&mut self, conv: &str) {
         let Some(verifier) = self.verifier.as_ref().filter(|v| !v.idle()) else { return };
-        if let Some(folder) = self.convs.get(conv).filter(|c| c.area == Area::Project).and_then(|c| self.cwd_of(c).ok()) {
-            verifier.stop(&folder, conv);
+        if let Some(folder) = self.convs.get(conv).filter(|c| c.area == Area::Project).and_then(|c| self.cwd_of(c).ok())
+            && verifier.stop(&folder, conv)
+        {
+            self.rewind_checks_stopping(conv);
         }
     }
 
@@ -314,7 +321,9 @@ impl Core {
         self.opts.runtime.spawn(async move {
             let outcome = pending.await;
             let Some(core) = me.upgrade() else { return };
-            core.lock().unwrap_or_else(|e| e.into_inner()).checks_ended(&conv, &reply, keep_going, outcome);
+            let mut core = core.lock().unwrap_or_else(|e| e.into_inner());
+            core.checks_ended(&conv, &reply, keep_going, outcome);
+            core.rewind_checks_ended(&conv);
         });
     }
 

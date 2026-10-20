@@ -88,11 +88,11 @@ fn base(exec: &mut Request<'_>, copy: &WorkCopy) -> Option<String> {
     Some(head)
 }
 
-fn safe(path: &str) -> bool {
+pub(crate) fn safe(path: &str) -> bool {
     !path.is_empty()
         && !path.starts_with('/')
         && !path.contains(['\\', ':', '\0'])
-        && path.split('/').all(|part| !part.is_empty() && !matches!(part, "." | ".." | ".git"))
+        && path.split('/').all(|part| !part.is_empty() && !matches!(part, "." | "..") && !part.eq_ignore_ascii_case(".git"))
         && !crate::permissions::secret(Path::new(path), true)
         && !crate::verify::own_log(path)
 }
@@ -433,10 +433,8 @@ fn read(root: &Path, path: &str, limit: usize) -> std::io::Result<Vec<u8>> {
     if !safe(path) {
         return Err(std::io::ErrorKind::InvalidInput.into());
     }
-    #[cfg(windows)]
+    #[cfg(any(windows, unix))]
     let file = faber_winproc::open_plain_file(root, Path::new(path))?;
-    #[cfg(unix)]
-    let file = open_plain_file(root, path, || {})?;
     #[cfg(not(any(windows, unix)))]
     return Err(std::io::ErrorKind::Unsupported.into());
     if !file.metadata()?.is_file() {
@@ -445,22 +443,6 @@ fn read(root: &Path, path: &str, limit: usize) -> std::io::Result<Vec<u8>> {
     let mut bytes = vec![];
     file.take(limit.saturating_add(1) as u64).read_to_end(&mut bytes)?;
     Ok(bytes)
-}
-
-#[cfg(unix)]
-fn open_plain_file(root: &Path, path: &str, after_parent: impl FnOnce()) -> std::io::Result<std::fs::File> {
-    use rustix::fs::{Mode, OFlags, open, openat};
-    let flags = OFlags::RDONLY | OFlags::NOFOLLOW | OFlags::NONBLOCK | OFlags::CLOEXEC;
-    let mut dir = open(root, flags | OFlags::DIRECTORY, Mode::empty())?;
-    let mut parts = path.split('/').peekable();
-    while let Some(part) = parts.next() {
-        if parts.peek().is_none() {
-            after_parent();
-            return Ok(openat(&dir, part, flags, Mode::empty())?.into());
-        }
-        dir = openat(&dir, part, flags | OFlags::DIRECTORY, Mode::empty())?;
-    }
-    Err(std::io::Error::from(std::io::ErrorKind::InvalidInput))
 }
 
 /// Preserve Git's line-ending policy on the current snapshot without filters or rewriting the base blob.
@@ -659,25 +641,6 @@ pub fn patch(exec: &mut dyn Executor, copy: &WorkCopy, path: &str) -> ChangePatc
 mod tests {
     use super::*;
 
-    #[cfg(unix)]
-    #[test]
-    fn changes_parent_swap_reads_the_pinned_directory_and_never_the_outside_target() {
-        use std::os::unix::fs::symlink;
-        let root = tempfile::tempdir().unwrap();
-        let outside = tempfile::tempdir().unwrap();
-        std::fs::create_dir(root.path().join("notes")).unwrap();
-        std::fs::write(root.path().join("notes/report.txt"), "inside").unwrap();
-        std::fs::write(outside.path().join("report.txt"), "private outside").unwrap();
-        let mut file = open_plain_file(root.path(), "notes/report.txt", || {
-            std::fs::rename(root.path().join("notes"), root.path().join("moved")).unwrap();
-            symlink(outside.path(), root.path().join("notes")).unwrap();
-        })
-        .unwrap();
-        let mut text = String::new();
-        file.read_to_string(&mut text).unwrap();
-        assert_eq!(text, "inside");
-        assert!(read(root.path(), "notes/report.txt", 100).is_err());
-    }
     #[test]
     fn parses_spaces_tabs_binary_and_raw_status_without_quoting_paths() {
         let stats = b":000000 100644 a b A\0new file.rs\0:100644 000000 a b D\0gone.rs\0\

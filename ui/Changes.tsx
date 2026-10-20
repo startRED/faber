@@ -1,4 +1,4 @@
-import { createMemo, createResource, createSignal, For, Show } from 'solid-js';
+import { createMemo, createResource, createSignal, For, Show, type JSX } from 'solid-js';
 import { api, type FileChange } from './api.ts';
 import { Breakable, Delta } from './AgentChat.tsx';
 import { Icon } from './Glyphs.tsx';
@@ -27,18 +27,21 @@ function Patch(props: { id: string; file: FileChange }) {
   );
 }
 
-function ChangedFile(props: { id: string; file: FileChange; open: boolean; onToggle: (open: boolean) => void }) {
+/** The same one-file-at-a-time preview for Changes and a restore confirmation. Closed files hold no content. */
+export function ChangesPreview<T extends { path: string }>(props: { files: T[]; summary: (file: T) => JSX.Element; children: (file: T) => JSX.Element }) {
+  const [open, setOpen] = createSignal<string>();
   return (
-    <details class="disclosure change-file" open={props.open} onToggle={(event) => props.onToggle(event.currentTarget.open)}>
-      <summary><span class="change-path"><Breakable text={props.file.path} /></span><Show when={props.file.countsKnown !== false && !props.file.binary} fallback={<span class="change-counts">{t(props.file.binary ? 'changes.binary' : 'changes.countsUnknown')}</span>}><Delta change={props.file} /></Show></summary>
-      <Show when={props.open}><div class="change-content"><Show when={!props.file.tooLarge} fallback={<p class="side-meta">{t('changes.tooLarge')}</p>}><Patch id={props.id} file={props.file} /></Show></div></Show>
-    </details>
+    <For each={props.files}>{(file) => (
+      <details class="disclosure change-file" open={open() === file.path} onToggle={(event) => setOpen((path) => event.currentTarget.open ? file.path : path === file.path ? undefined : path)}>
+        <summary><span class="change-path"><Breakable text={file.path} /></span>{props.summary(file)}</summary>
+        <Show when={open() === file.path}><div class="change-content">{props.children(file)}</div></Show>
+      </details>
+    )}</For>
   );
 }
 
 /** The conversation's whole change, in the running column's existing side view. */
 export function Changes(props: { id: string; files: FileChange[]; loading: boolean; incomplete?: boolean; loadingMore?: boolean; onMore?: () => void; onReview?: (security: boolean) => void; onBack: () => void; onClose: () => void }) {
-  const [open, setOpen] = createSignal<string>();
   return (
     <>
       <div class="rc-head side-head changes-head">
@@ -55,7 +58,9 @@ export function Changes(props: { id: string; files: FileChange[]; loading: boole
       <div class="rc-body side-body changes-view">
         <Show when={!props.loading} fallback={<p class="side-meta" role="status">{t('changes.loading')}</p>}>
           <Show when={props.files.length} fallback={!props.incomplete && <p class="side-meta">{t('changes.empty')}</p>}>
-            <For each={props.files}>{(file) => <ChangedFile id={props.id} file={file} open={open() === file.path} onToggle={(expanded) => setOpen((path) => expanded ? file.path : path === file.path ? undefined : path)} />}</For>
+            <ChangesPreview files={props.files} summary={(file) => <Show when={file.countsKnown !== false && !file.binary} fallback={<span class="change-counts">{t(file.binary ? 'changes.binary' : 'changes.countsUnknown')}</span>}><Delta change={file} /></Show>}>
+              {(file) => <Show when={!file.tooLarge} fallback={<p class="side-meta">{t('changes.tooLarge')}</p>}><Patch id={props.id} file={file} /></Show>}
+            </ChangesPreview>
           </Show>
           <Show when={props.incomplete}><p class="side-meta" role="status">{t('changes.incomplete')}</p><button class="btn ghost changes-more" disabled={props.loadingMore} onClick={props.onMore}>{t(props.loadingMore ? 'changes.loading' : 'changes.more')}</button></Show>
         </Show>

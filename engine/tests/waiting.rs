@@ -380,6 +380,8 @@ fn seed(dir: &Path, long: bool) -> Conversation {
         choice: None,
         id: "seeded".into(),
         title: "Existing chat".into(),
+        rewind_notice: None,
+        rewind_summary: None,
         area: Area::Chat,
         project_id: None,
         sessions: BTreeMap::from([(Vendor::Claude, "old-session".into())]),

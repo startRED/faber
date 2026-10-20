@@ -11,6 +11,656 @@ use std::sync::Arc;
 use std::time::Duration;
 use support::{Entry, drive, fake, fixture, next_permission, text_of};
 
+fn visible(event: &EngineEvent) -> bool {
+    !matches!(event, EngineEvent::Writers { .. } | EngineEvent::Cursor { .. } | EngineEvent::WriterExit { .. })
+}
+
+async fn next_visible<T>(rx: &mut tokio::sync::mpsc::UnboundedReceiver<(T, EngineEvent)>) -> Option<(T, EngineEvent)> {
+    while let Some((owner, event)) = rx.recv().await {
+        if visible(&event) {
+            return Some((owner, event));
+        }
+    }
+    None
+}
+
+/// A real contained process tree with only its protocol pipes replaced by the deterministic test wire.
+pub(crate) struct ContainedWire {
+    pub spawn: faber_engine::proc::Spawner,
+    pub input: tokio::io::BufReader<tokio::io::DuplexStream>,
+    pub output: tokio::io::DuplexStream,
+    pub tree: faber_engine::proc::OwnedTree,
+    pub workers: Vec<u32>,
+    directory: tempfile::TempDir,
+    _stdin: Box<dyn tokio::io::AsyncWrite + Send + Unpin>,
+}
+
+impl ContainedWire {
+    pub fn release(&self, worker: usize) {
+        std::fs::write(self.directory.path().join(format!("release-{worker}")), b"exit").unwrap();
+    }
+}
+
+impl Drop for ContainedWire {
+    fn drop(&mut self) {
+        for worker in 0..self.workers.len() {
+            let _ = std::fs::write(self.directory.path().join(format!("release-{worker}")), b"exit");
+        }
+    }
+}
+
+pub(crate) fn process_alive(pid: u32) -> bool {
+    let mut system = sysinfo::System::new();
+    let pid = sysinfo::Pid::from_u32(pid);
+    system.refresh_processes_specifics(sysinfo::ProcessesToUpdate::Some(&[pid]), true, sysinfo::ProcessRefreshKind::nothing());
+    system.process(pid).is_some_and(|process| process.status() != sysinfo::ProcessStatus::Zombie)
+}
+
+pub(crate) fn contained_diagnostics(tree: &faber_engine::proc::OwnedTree) -> String {
+    let members = tree.descendants();
+    #[cfg(windows)]
+    let names = {
+        let snapshot = faber_winproc::processes().unwrap_or_default();
+        members
+            .as_ref()
+            .map(|members| {
+                members
+                    .iter()
+                    .map(|member| {
+                        let process = snapshot.iter().find(|process| process.pid == member.pid && process.created == member.created);
+                        json!({"pid":member.pid,"created":member.created,"name":process.map(|process| &process.name),
+                "parent":process.map(|process| process.parent)})
+                    })
+                    .collect::<Vec<_>>()
+            })
+            .unwrap_or_default()
+    };
+    #[cfg(not(windows))]
+    let names: Vec<serde_json::Value> = vec![];
+    format!("root={:?}, descendants={members:?}, process_names={names:?}", tree.identity())
+}
+
+pub(crate) async fn contained_wire(workers: usize) -> ContainedWire {
+    contained_wire_with_groups(workers, false).await
+}
+
+async fn contained_wire_with_groups(workers: usize, separate_groups: bool) -> ContainedWire {
+    contained_wire_with_descendant(workers, separate_groups, false).await
+}
+
+async fn contained_wire_with_descendant(workers: usize, separate_groups: bool, descendant: bool) -> ContainedWire {
+    let directory = tempfile::tempdir().unwrap();
+    let mut command = tokio::process::Command::new(std::env::current_exe().unwrap());
+    command
+        .args(["--exact", "codex_session::rewind_contained_process_helper", "--ignored", "--nocapture"])
+        .env("FABER_REWIND_PROCESS_HELPER", "root")
+        .env("FABER_REWIND_PROCESS_FOLDER", directory.path())
+        .env("FABER_REWIND_PROCESS_SEPARATE_GROUPS", if separate_groups { "1" } else { "0" })
+        .env("FABER_REWIND_PROCESS_DESCENDANT", if descendant { "1" } else { "0" })
+        .env("FABER_REWIND_PROCESS_WORKERS", workers.to_string());
+    let mut process = faber_engine::proc::spawn_command(command).unwrap();
+    assert!(process.child.is_some() && process.contained.is_some(), "exercise the driver's real-process branch");
+    let tree = process.contained.as_ref().unwrap().owned_tree().unwrap();
+    let ready = tokio::time::timeout(Duration::from_secs(30), async {
+        loop {
+            if let Ok(bytes) = std::fs::read(directory.path().join("ready.json"))
+                && let Ok(ready) = serde_json::from_slice::<serde_json::Value>(&bytes)
+            {
+                break ready;
+            }
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+    })
+    .await
+    .expect("the contained helper did not announce its workers");
+    assert_eq!(ready["root"].as_u64().unwrap() as u32, tree.identity().pid);
+    let workers = ready["workers"].as_array().unwrap().iter().map(|pid| pid.as_u64().unwrap() as u32).collect();
+    let (stdin, input) = tokio::io::duplex(65536);
+    let (output, mut injected) = tokio::io::duplex(65536);
+    let (stdout, mut forwarded) = tokio::io::duplex(65536);
+    let real_stdin = std::mem::replace(&mut process.stdin, Box::new(stdin));
+    let mut real_stdout = std::mem::replace(&mut process.stdout, Box::new(stdout));
+    tokio::spawn(async move {
+        let mut discard = tokio::io::sink();
+        // A dead real server closes its protocol pipe even while the test still holds its injection endpoint.
+        tokio::select! {
+            _ = tokio::io::copy(&mut real_stdout, &mut discard) => (),
+            _ = tokio::io::copy(&mut injected, &mut forwarded) => (),
+        }
+    });
+    let process = Arc::new(std::sync::Mutex::new(Some(process)));
+    ContainedWire {
+        spawn: Arc::new(move |_, _, _| Ok(process.lock().unwrap().take().expect("one server per real tree"))),
+        input: tokio::io::BufReader::new(input),
+        output,
+        tree,
+        workers,
+        directory,
+        _stdin: real_stdin,
+    }
+}
+
+#[test]
+#[ignore = "child entry point used only by the contained-process integration tests"]
+fn rewind_contained_process_helper() {
+    use std::io::Read;
+    let Ok(role) = std::env::var("FABER_REWIND_PROCESS_HELPER") else { return };
+    let folder = std::path::PathBuf::from(std::env::var_os("FABER_REWIND_PROCESS_FOLDER").unwrap());
+    if role == "worker" {
+        let worker = std::env::var("FABER_REWIND_PROCESS_WORKER").unwrap();
+        if worker == "0" && std::env::var("FABER_REWIND_PROCESS_DESCENDANT").as_deref() == Ok("1") {
+            #[allow(clippy::zombie_processes, reason = "the regression requires a child to outlive its immediate parent")]
+            let child = std::process::Command::new(std::env::current_exe().unwrap())
+                .args(["--exact", "codex_session::rewind_contained_process_helper", "--ignored", "--nocapture"])
+                .env("FABER_REWIND_PROCESS_WORKER", "1")
+                .stdin(std::process::Stdio::null())
+                .stdout(std::process::Stdio::null())
+                .stderr(std::process::Stdio::null())
+                .spawn()
+                .unwrap();
+            std::fs::write(folder.join("descendant"), child.id().to_string()).unwrap();
+        }
+        let release = folder.join(format!("release-{worker}"));
+        let deadline = std::time::Instant::now() + Duration::from_secs(120);
+        while folder.exists() && !release.exists() && std::time::Instant::now() < deadline {
+            std::thread::sleep(Duration::from_millis(10));
+        }
+        if release.exists() && std::env::var("FABER_REWIND_PROCESS_SEPARATE_GROUPS").as_deref() == Ok("1") {
+            std::fs::write(folder.join(format!("written-{worker}")), b"opened after the turn ended").unwrap();
+        }
+        return;
+    }
+    assert_eq!(role, "root");
+    let count: usize = std::env::var("FABER_REWIND_PROCESS_WORKERS").unwrap().parse().unwrap();
+    let mut children = Vec::new();
+    for worker in 0..count {
+        let mut command = std::process::Command::new(std::env::current_exe().unwrap());
+        command
+            .args(["--exact", "codex_session::rewind_contained_process_helper", "--ignored", "--nocapture"])
+            .env("FABER_REWIND_PROCESS_HELPER", "worker")
+            .env("FABER_REWIND_PROCESS_WORKER", worker.to_string())
+            .stdin(std::process::Stdio::null())
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null());
+        #[cfg(windows)]
+        {
+            use std::os::windows::process::CommandExt;
+            command.creation_flags(0x0800_0000);
+        }
+        #[cfg(unix)]
+        if std::env::var("FABER_REWIND_PROCESS_SEPARATE_GROUPS").as_deref() == Ok("1") {
+            use std::os::unix::process::CommandExt;
+            command.process_group(0);
+        }
+        children.push(command.spawn().unwrap());
+    }
+    let mut workers = children.iter().map(std::process::Child::id).collect::<Vec<_>>();
+    if std::env::var("FABER_REWIND_PROCESS_DESCENDANT").as_deref() == Ok("1") {
+        let deadline = std::time::Instant::now() + Duration::from_secs(30);
+        loop {
+            if let Ok(value) = std::fs::read_to_string(folder.join("descendant"))
+                && let Ok(pid) = value.parse::<u32>()
+            {
+                workers.push(pid);
+                break;
+            }
+            assert!(std::time::Instant::now() < deadline, "the terminal did not announce its child");
+            std::thread::sleep(Duration::from_millis(10));
+        }
+    }
+    std::fs::write(folder.join("ready.json"), serde_json::to_vec(&json!({"root":std::process::id(),"workers":workers})).unwrap()).unwrap();
+    let (closed, input) = std::sync::mpsc::channel();
+    std::thread::spawn(move || {
+        let _ = std::io::stdin().read(&mut [0]);
+        let _ = closed.send(());
+    });
+    let deadline = std::time::Instant::now() + Duration::from_secs(120);
+    while input.try_recv().is_err() && std::time::Instant::now() < deadline {
+        children.retain_mut(|child| child.try_wait().unwrap().is_none());
+        std::thread::sleep(Duration::from_millis(10));
+    }
+    for mut child in children {
+        let _ = child.kill();
+        let _ = child.wait();
+    }
+}
+
+pub(crate) async fn contained_message(input: &mut tokio::io::BufReader<tokio::io::DuplexStream>) -> serde_json::Value {
+    use tokio::io::AsyncBufReadExt;
+    tokio::time::timeout(Duration::from_secs(30), async {
+        loop {
+            let mut line = String::new();
+            input.read_line(&mut line).await.unwrap();
+            let msg: serde_json::Value = serde_json::from_str(&line).unwrap();
+            if msg["method"] != "skills/list" {
+                return msg;
+            }
+        }
+    })
+    .await
+    .expect("the real-contained driver stopped responding")
+}
+
+async fn contained_server(wire: &mut ContainedWire) -> CodexServer {
+    let server = CodexServer::start(CodexServerOptions {
+        permissions: Permissions::Ask,
+        cli: faber_engine::cli::Cli { command: "unused".into(), prefix: vec![] },
+        cwd: ".".into(),
+        area: Area::Project,
+        user_hooks: true,
+        windows: cfg!(windows),
+        spawn: wire.spawn.clone(),
+        tools: Default::default(),
+    });
+    let initialize = contained_message(&mut wire.input).await;
+    assert_eq!(initialize["method"], "initialize");
+    support::emit(&mut wire.output, json!({"id":initialize["id"],"result":{}})).await;
+    assert_eq!(contained_message(&mut wire.input).await["method"], "initialized");
+    server
+}
+
+async fn contained_thread(server: &CodexServer, wire: &mut ContainedWire, id: &str, sink: faber_engine::claude::EventSink) -> Session {
+    let session = server.open(
+        CodexThread {
+            helper: Default::default(),
+            browse: false,
+            conversations: false,
+            verify: false,
+            progress: false,
+            cwd: ".".into(),
+            model: None,
+            effort: None,
+            resume: None,
+            instructions: None,
+            user_name: None,
+            permissions: Permissions::Ask,
+            tuning: Default::default(),
+        },
+        sink,
+    );
+    let open = contained_message(&mut wire.input).await;
+    assert_eq!(open["method"], "thread/start");
+    support::emit(&mut wire.output, json!({"id":open["id"],"result":{"thread":{"id":id}}})).await;
+    session
+}
+
+async fn contained_turn(session: &Session, wire: &mut ContainedWire, turn: &str) {
+    session.send(UserTurn::text(turn));
+    let start = contained_message(&mut wire.input).await;
+    assert_eq!(start["method"], "turn/start");
+    support::emit(&mut wire.output, json!({"id":start["id"],"result":{"turn":{"id":turn}}})).await;
+}
+
+pub(crate) async fn process_exited(pid: u32) {
+    tokio::time::timeout(Duration::from_secs(30), async {
+        while process_alive(pid) {
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+    })
+    .await
+    .expect("the contained worker did not exit");
+}
+
+#[tokio::test]
+async fn rewind_real_contained_idle_stop_after_native_exit_keeps_the_shared_peer_and_clears_the_owner() {
+    tokio::time::timeout(Duration::from_secs(60), async {
+        let mut wire = contained_wire(1).await;
+        let server = contained_server(&mut wire).await;
+        let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
+        let owner_tx = tx.clone();
+        let owner = contained_thread(&server, &mut wire, "owner", Arc::new(move |event| drop(owner_tx.send(("owner", event))))).await;
+        let peer = contained_thread(&server, &mut wire, "peer", Arc::new(move |event| drop(tx.send(("peer", event))))).await;
+        contained_turn(&owner, &mut wire, "owner-turn").await;
+        support::emit(&mut wire.output, json!({"method":"item/started","params":{"threadId":"owner","item":{
+            "type":"commandExecution","id":"native","processId":"owner-terminal-handle"}}})).await;
+        while !matches!(rx.recv().await.unwrap(), ("owner", EngineEvent::Writers {active, ..}) if active.iter().any(|id| id == "native-command:native")) {}
+        contained_turn(&peer, &mut wire, "peer-turn").await;
+        wire.release(0);
+        process_exited(wire.workers[0]).await;
+        assert!(wire.tree.descendants().unwrap().is_empty(), "the native command really exited, not only its protocol item: {}", contained_diagnostics(&wire.tree));
+        support::emit(&mut wire.output, json!({"method":"item/completed","params":{"threadId":"owner","item":{
+            "type":"commandExecution","id":"native","processId":"owner-terminal-handle","exitCode":0}}})).await;
+        support::emit(&mut wire.output, json!({"method":"turn/completed","params":{"threadId":"owner","turn":{"id":"owner-turn","status":"completed"}}})).await;
+        let (mut done, mut clear) = (false, false);
+        while !done || !clear {
+            match rx.recv().await.unwrap() {
+                ("owner", EngineEvent::Done { .. }) => done = true,
+                ("owner", EngineEvent::Writers {active, unknown:false}) if active.is_empty() => clear = true,
+                _ => (),
+            }
+        }
+        owner.interrupt();
+        server.tools(faber_engine::tools::Delivery { skills: Some(wire.directory.path().into()), ..Default::default() });
+        let barrier = contained_message(&mut wire.input).await;
+        assert_eq!(barrier["method"], "skills/extraRoots/set", "idle Stop needs no cancellation request");
+        support::emit(&mut wire.output, json!({"method":"item/agentMessage/delta","params":{"threadId":"peer","turnId":"peer-turn","itemId":"words","delta":"peer still active"}})).await;
+        loop {
+            match rx.recv().await.unwrap() {
+                ("owner", EngineEvent::Writers {active, unknown}) => assert!(active.is_empty() && !unknown, "idle Stop invented an unresolved writer"),
+                (_, EngineEvent::Error {message, ..}) => panic!("idle Stop failed: {message}"),
+                ("peer", EngineEvent::Text(text)) if text == "peer still active" => break,
+                ("peer", EngineEvent::WriterExit { .. } | EngineEvent::Done { .. }) => panic!("idle Stop ended the peer"),
+                _ => (),
+            }
+        }
+        assert!(process_alive(wire.tree.identity().pid), "the shared server stayed alive for the peer");
+        support::emit(&mut wire.output, json!({"method":"turn/completed","params":{"threadId":"peer","turn":{"id":"peer-turn","status":"completed"}}})).await;
+        while !matches!(rx.recv().await.unwrap(), ("peer", EngineEvent::Done { .. })) {}
+        owner.close(); peer.close(); server.retire();
+        let mut exits = std::collections::BTreeSet::new();
+        while exits.len() < 2 {
+            if let (owner, EngineEvent::WriterExit {confirmed:true}) = rx.recv().await.unwrap() { exits.insert(owner); }
+        }
+        process_exited(wire.tree.identity().pid).await;
+    }).await.expect("the real-contained idle Stop exchange hung");
+}
+
+#[cfg(unix)]
+#[tokio::test]
+async fn rewind_a_reported_terminal_outside_the_original_group_stays_unknown_until_the_cli_reports_exit() {
+    tokio::time::timeout(Duration::from_secs(60), async {
+        for disconnect in [false, true] {
+        let mut wire = contained_wire_with_groups(1, true).await;
+        let server = contained_server(&mut wire).await;
+        let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
+        let owner = contained_thread(&server, &mut wire, "owner", Arc::new(move |event| drop(tx.send(event)))).await;
+        contained_turn(&owner, &mut wire, "owner-turn").await;
+        support::emit(&mut wire.output, json!({"method":"item/started","params":{"threadId":"owner","item":{
+            "type":"commandExecution","id":"terminal","processId":"opaque-pty-terminal"}}})).await;
+        while !matches!(rx.recv().await.unwrap(), EngineEvent::Writers {active, unknown:true}
+            if active.iter().any(|id| id == "native-command:terminal")) {}
+        assert!(wire.tree.descendants().unwrap().is_empty(), "the terminal is deliberately in its own process group");
+        assert!(process_alive(wire.workers[0]), "absence from the original group does not mean the terminal ended");
+        support::emit(&mut wire.output, json!({"method":"item/completed","params":{"threadId":"owner","item":{
+            "type":"commandExecution","id":"terminal","processId":"opaque-pty-terminal","exitCode":null}}})).await;
+        support::emit(&mut wire.output, json!({"method":"turn/completed","params":{"threadId":"owner","turn":{"id":"owner-turn","status":"completed"}}})).await;
+        support::emit(&mut wire.output, json!({"method":"item/agentMessage/delta","params":{"threadId":"owner","turnId":"owner-turn","itemId":"barrier","delta":"turn ended"}})).await;
+        let mut done = false;
+        loop {
+            match rx.recv().await.unwrap() {
+                EngineEvent::Done { .. } => done = true,
+                EngineEvent::Writers {active, unknown} => {
+                    assert!(unknown && active.iter().any(|id| id == "native-command:terminal"),
+                        "the original group's empty snapshot cannot release a reported terminal");
+                }
+                EngineEvent::Text(text) if text == "turn ended" => break,
+                _ => (),
+            }
+        }
+        assert!(done);
+        if disconnect {
+            use tokio::io::AsyncWriteExt;
+            wire.output.shutdown().await.unwrap();
+            loop {
+                if let EngineEvent::WriterExit {confirmed} = rx.recv().await.unwrap() {
+                    assert!(!confirmed, "ending the original process group cannot confirm a detached terminal's exit");
+                    break;
+                }
+            }
+            process_exited(wire.tree.identity().pid).await;
+            assert!(process_alive(wire.workers[0]), "the reported terminal outlives its disconnected app-server");
+        }
+        assert!(!wire.directory.path().join("written-0").exists());
+        std::fs::write(wire.directory.path().join("written-0"), b"the version a restore would put here").unwrap();
+        wire.release(0);
+        if disconnect {
+            // The original parent is gone; the file proves execution reached the fresh open even before orphan reaping.
+            tokio::time::timeout(Duration::from_secs(30), async {
+                while std::fs::read(wire.directory.path().join("written-0")).unwrap() != b"opened after the turn ended" {
+                    tokio::time::sleep(Duration::from_millis(10)).await;
+                }
+            }).await.expect("the detached terminal did not reach its release barrier");
+            process_exited(wire.workers[0]).await;
+            owner.interrupt();
+            while !matches!(rx.recv().await.unwrap(), EngineEvent::WriterExit {confirmed:true}) {}
+            drop(owner);
+            server.retire();
+            drop(server);
+            continue;
+        }
+        process_exited(wire.workers[0]).await;
+        assert_eq!(std::fs::read(wire.directory.path().join("written-0")).unwrap(), b"opened after the turn ended",
+            "the unreported terminal could freshly open a file after the original group was already empty");
+        support::emit(&mut wire.output, json!({"method":"item/completed","params":{"threadId":"owner","item":{
+            "type":"commandExecution","id":"terminal","processId":"opaque-pty-terminal","exitCode":0}}})).await;
+        while !matches!(rx.recv().await.unwrap(), EngineEvent::Writers {active, unknown:false} if active.is_empty()) {}
+        owner.close(); server.retire();
+        while !matches!(rx.recv().await.unwrap(), EngineEvent::WriterExit {confirmed:true}) {}
+        process_exited(wire.tree.identity().pid).await;
+        }
+    }).await.expect("the separate-process-group terminal regression hung");
+}
+
+#[cfg(windows)]
+#[tokio::test]
+async fn rewind_real_contained_idle_stop_retires_the_whole_job_after_a_premature_native_exit_code() {
+    tokio::time::timeout(Duration::from_secs(60), async {
+        let mut wire = contained_wire(1).await;
+        let server = contained_server(&mut wire).await;
+        let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
+        let owner = contained_thread(&server, &mut wire, "owner", Arc::new(move |event| drop(tx.send(event)))).await;
+        contained_turn(&owner, &mut wire, "owner-turn").await;
+        support::emit(&mut wire.output, json!({"method":"item/started","params":{"threadId":"owner","item":{
+            "type":"commandExecution","id":"native","processId":"owner-terminal-handle"}}})).await;
+        while !matches!(rx.recv().await.unwrap(), EngineEvent::Writers {active, ..} if active.iter().any(|id| id == "native-command:native")) {}
+        support::emit(&mut wire.output, json!({"method":"item/completed","params":{"threadId":"owner","item":{
+            "type":"commandExecution","id":"native","processId":"owner-terminal-handle","exitCode":0}}})).await;
+        support::emit(&mut wire.output, json!({"method":"turn/completed","params":{"threadId":"owner","turn":{"id":"owner-turn","status":"completed"}}})).await;
+        support::emit(&mut wire.output, json!({"method":"item/agentMessage/delta","params":{"threadId":"owner","turnId":"owner-turn","itemId":"barrier","delta":"turn ended"}})).await;
+        let (mut done, mut blocked) = (false, false);
+        loop {
+            match rx.recv().await.unwrap() {
+                EngineEvent::Done { .. } => done = true,
+                EngineEvent::Writers {active, unknown} => {
+                    blocked |= !active.is_empty() && unknown;
+                    assert!(!active.is_empty() || unknown, "an exit code cannot release a real live native writer");
+                }
+                EngineEvent::Text(text) if text == "turn ended" => break,
+                EngineEvent::Error {message, ..} => panic!("premature native completion failed: {message}"),
+                _ => (),
+            }
+        }
+        assert!(done && blocked && process_alive(wire.workers[0]));
+        owner.interrupt();
+        while !matches!(rx.recv().await.unwrap(), EngineEvent::WriterExit {confirmed:true}) {}
+        process_exited(wire.workers[0]).await;
+        process_exited(wire.tree.identity().pid).await;
+        assert!(wire.tree.descendants().unwrap().is_empty());
+        server.retire();
+    }).await.expect("idle Stop did not retire the real native command container");
+}
+
+#[cfg(unix)]
+#[tokio::test]
+async fn rewind_a_native_exit_keeps_every_shared_conversation_blocked_until_its_sampled_child_exits() {
+    tokio::time::timeout(Duration::from_secs(60), async {
+        let mut wire = contained_wire_with_descendant(1, true, true).await;
+        assert_eq!(wire.workers.len(), 2, "the native terminal has a real child");
+        let server = contained_server(&mut wire).await;
+        let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
+        let owner_tx = tx.clone();
+        let owner = contained_thread(&server, &mut wire, "owner", Arc::new(move |event| drop(owner_tx.send(("owner", event))))).await;
+        let peer = contained_thread(&server, &mut wire, "peer", Arc::new(move |event| drop(tx.send(("peer", event))))).await;
+        contained_turn(&owner, &mut wire, "owner-turn").await;
+        support::emit(
+            &mut wire.output,
+            json!({"method":"item/started","params":{"threadId":"owner","item":{
+            "type":"commandExecution","id":"native","processId":"opaque-terminal-handle"}}}),
+        )
+        .await;
+        let mut states = std::collections::BTreeMap::new();
+        loop {
+            if let (thread, EngineEvent::Writers { active, unknown }) = rx.recv().await.unwrap() {
+                states.insert(thread, unknown);
+                if thread == "owner" && unknown && active.iter().any(|id| id == "native-command:native") {
+                    break;
+                }
+            }
+        }
+        assert!(wire.tree.descendants().unwrap().is_empty(), "both terminal processes are outside the original server group");
+        assert!(wire.workers.iter().all(|pid| process_alive(*pid)), "the report samples the complete live parent chain");
+        support::emit(
+            &mut wire.output,
+            json!({"method":"turn/completed","params":{"threadId":"owner","turn":{"id":"owner-turn","status":"completed"}}}),
+        )
+        .await;
+        loop {
+            match rx.recv().await.unwrap() {
+                ("owner", EngineEvent::Done { .. }) => break,
+                (thread, EngineEvent::Writers { unknown, .. }) => {
+                    states.insert(thread, unknown);
+                }
+                _ => (),
+            }
+        }
+
+        wire.release(0);
+        process_exited(wire.workers[0]).await;
+        assert!(process_alive(wire.workers[1]), "successful terminal exit leaves its child alive and reparented");
+        support::emit(
+            &mut wire.output,
+            json!({"method":"item/completed","params":{"threadId":"owner","item":{
+            "type":"commandExecution","id":"native","processId":"opaque-terminal-handle","exitCode":0}}}),
+        )
+        .await;
+        let mut seen = std::collections::BTreeSet::new();
+        for thread in ["owner", "peer"] {
+            support::emit(
+                &mut wire.output,
+                json!({"method":"item/agentMessage/delta","params":{
+                "threadId":thread,"turnId":"owner-turn","itemId":"barrier","delta":"parent exited"}}),
+            )
+            .await;
+        }
+        while seen.len() < 2 {
+            match rx.recv().await.unwrap() {
+                (thread, EngineEvent::Writers { unknown, .. }) => {
+                    assert!(unknown, "{thread} was released while the native command's sampled child can still write");
+                    states.insert(thread, unknown);
+                }
+                (thread, EngineEvent::Text(text)) if text == "parent exited" => {
+                    seen.insert(thread);
+                }
+                (_, EngineEvent::WriterExit { confirmed: true }) => panic!("the live native child was declared gone"),
+                _ => (),
+            }
+        }
+        assert_eq!(
+            states,
+            std::collections::BTreeMap::from([("owner", true), ("peer", true)]),
+            "the shared server blocks both conversations"
+        );
+        let destination = wire.directory.path().join("written-1");
+        std::fs::write(&destination, b"the restored version").unwrap();
+        wire.release(1);
+        process_exited(wire.workers[1]).await;
+        assert_eq!(
+            std::fs::read(destination).unwrap(),
+            b"opened after the turn ended",
+            "the surviving child freshly opened the file after exitCode: 0"
+        );
+        let mut clear = std::collections::BTreeSet::new();
+        while clear.len() < 2 {
+            if let (thread, EngineEvent::Writers { active, unknown: false }) = rx.recv().await.unwrap()
+                && active.is_empty()
+            {
+                clear.insert(thread);
+            }
+        }
+        owner.close();
+        peer.close();
+        server.retire();
+        let mut exits = std::collections::BTreeSet::new();
+        while exits.len() < 2 {
+            if let (thread, EngineEvent::WriterExit { confirmed: true }) = rx.recv().await.unwrap() {
+                exits.insert(thread);
+            }
+        }
+        process_exited(wire.tree.identity().pid).await;
+    })
+    .await
+    .expect("the native terminal's surviving-child regression hung");
+}
+
+#[tokio::test]
+async fn rewind_real_contained_shared_stop_uses_terminal_handles_without_claiming_a_peers_process() {
+    tokio::time::timeout(Duration::from_secs(60), async {
+        let mut wire = contained_wire(2).await;
+        let server = contained_server(&mut wire).await;
+        let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
+        let owner_tx = tx.clone();
+        let owner = contained_thread(&server, &mut wire, "owner", Arc::new(move |event| drop(owner_tx.send(("owner", event))))).await;
+        let peer = contained_thread(&server, &mut wire, "peer", Arc::new(move |event| drop(tx.send(("peer", event))))).await;
+        // The owner's opaque terminal handle happens to equal the peer's operating-system PID.
+        let owner_terminal = wire.workers[1].to_string();
+        let peer_terminal = "peer-terminal-handle";
+        for (id, session, terminal) in [("owner", &owner, owner_terminal.as_str()), ("peer", &peer, peer_terminal)] {
+            contained_turn(session, &mut wire, &format!("{id}-turn")).await;
+            support::emit(&mut wire.output, json!({"method":"item/started","params":{"threadId":id,"item":{
+                "type":"commandExecution","id":"native","processId":terminal}}})).await;
+            while !matches!(rx.recv().await.unwrap(), (key, EngineEvent::Writers {active, ..})
+                if key == id && active.iter().any(|item| item == "native-command:native")) {}
+        }
+        assert_eq!(wire.tree.descendants().unwrap().len(), 2, "both native commands are actual owned child processes: {}", contained_diagnostics(&wire.tree));
+        support::emit(&mut wire.output, json!({"method":"item/completed","params":{"threadId":"owner","item":{
+            "type":"commandExecution","id":"native","processId":owner_terminal,"exitCode":null}}})).await;
+        support::emit(&mut wire.output, json!({"method":"turn/completed","params":{"threadId":"owner","turn":{"id":"owner-turn","status":"completed"}}})).await;
+        while !matches!(rx.recv().await.unwrap(), ("owner", EngineEvent::Done { .. })) {}
+        owner.interrupt();
+        let mut reported_gone = false;
+        let mut stopped = false;
+        let mut listed = false;
+        while !reported_gone || !stopped || !listed {
+            tokio::select! {
+                message = contained_message(&mut wire.input) => {
+                    match message["method"].as_str().unwrap() {
+                        "thread/backgroundTerminals/terminate" => {
+                            assert_eq!(message["params"]["threadId"], "owner", "Stop cannot address the peer");
+                            assert_eq!(message["params"]["processId"], owner_terminal);
+                            assert!(process_alive(wire.workers[1]), "a terminal handle must never authorize killing a matching OS PID");
+                            // The CLI, which knows the opaque handle's owner, stops its own command.
+                            wire.release(0);
+                            process_exited(wire.workers[0]).await;
+                            support::emit(&mut wire.output, json!({"id":message["id"],"result":{}})).await;
+                            stopped = true;
+                        }
+                        "thread/backgroundTerminals/list" => {
+                            assert_eq!(message["params"]["threadId"], "owner");
+                            support::emit(&mut wire.output, json!({"id":message["id"],"result":{"data":[]}})).await;
+                            listed = true;
+                        }
+                        method => panic!("unexpected stop request: {method}"),
+                    }
+                }
+                event = rx.recv() => match event.unwrap() {
+                    ("owner", EngineEvent::Writers {active, unknown:true}) if stopped && listed && !active.iter().any(|id| id == "native-command:native") => {
+                        assert!(active.iter().any(|id| id == "process-tree"), "unattributed server children still block restore");
+                        reported_gone = true;
+                    }
+                    ("peer", EngineEvent::Done { .. } | EngineEvent::WriterExit { .. } | EngineEvent::Error { .. }) => panic!("Stop interrupted the shared peer"),
+                    ("owner", EngineEvent::Error {message, ..}) => assert_eq!(message, "error.rewind.stopUnconfirmed"),
+                    _ => (),
+                },
+            }
+        }
+        assert!(process_alive(wire.workers[1]), "the peer's command stayed alive");
+        assert!(process_alive(wire.tree.identity().pid), "the peer's app-server stayed alive");
+        assert_eq!(wire.tree.descendants().unwrap().iter().map(|process| process.pid).collect::<Vec<_>>(), vec![wire.workers[1]]);
+        wire.release(1);
+        process_exited(wire.workers[1]).await;
+        support::emit(&mut wire.output, json!({"method":"item/completed","params":{"threadId":"peer","item":{
+            "type":"commandExecution","id":"native","processId":peer_terminal,"exitCode":0}}})).await;
+        support::emit(&mut wire.output, json!({"method":"turn/completed","params":{"threadId":"peer","turn":{"id":"peer-turn","status":"completed"}}})).await;
+        while !matches!(rx.recv().await.unwrap(), ("peer", EngineEvent::Done { .. })) {}
+        owner.close(); peer.close(); server.retire();
+        let mut exits = std::collections::BTreeSet::new();
+        while exits.len() < 2 {
+            if let (owner, EngineEvent::WriterExit {confirmed:true}) = rx.recv().await.unwrap() { exits.insert(owner); }
+        }
+        process_exited(wire.tree.identity().pid).await;
+    }).await.expect("the real-contained scoped Stop exchange hung");
+}
+
 #[tokio::test(start_paused = true)]
 async fn opus_1_codex_manual_turns_stay_available_after_long_silence_or_start_error() {
     for area in [Area::Chat, Area::Project] {
@@ -42,7 +692,11 @@ async fn opus_1_codex_manual_turns_stay_available_after_long_silence_or_start_er
                 permissions: Permissions::Ask,
                 tuning: Default::default(),
             },
-            Arc::new(move |e| drop(tx.send(e))),
+            Arc::new(move |e| {
+                if visible(&e) {
+                    drop(tx.send(e));
+                }
+            }),
         );
         support::expect_method(&mut input, "initialize").await;
         support::emit(&mut output, json!({"id":1,"result":{}})).await;
@@ -56,14 +710,14 @@ async fn opus_1_codex_manual_turns_stay_available_after_long_silence_or_start_er
         tokio::task::yield_now().await;
         tokio::time::advance(Duration::from_secs(600)).await;
         tokio::task::yield_now().await;
-        assert!(rx.try_recv().is_err());
+        assert!(!std::iter::from_fn(|| rx.try_recv().ok()).any(|event| visible(&event)));
         session.send(UserTurn::text("second"));
         let second = support::expect_method(&mut input, "turn/start").await;
         support::emit(&mut output, json!({"id":second["id"],"error":{"code":-1,"message":"rejected"}})).await;
         assert!(matches!(rx.recv().await, Some(EngineEvent::Error { fatal: false, .. })));
         tokio::time::advance(Duration::from_secs(600)).await;
         tokio::task::yield_now().await;
-        assert!(rx.try_recv().is_err(), "a failed start left the watchdog armed");
+        assert!(!std::iter::from_fn(|| rx.try_recv().ok()).any(|event| visible(&event)), "a failed start left the watchdog armed");
         session.send(UserTurn::text("third"));
         support::expect_method(&mut input, "turn/start").await;
         session.close();
@@ -227,13 +881,13 @@ async fn an_ignored_interrupt_quarantines_only_that_thread_and_preserves_a_runni
         }
     }
     a.interrupt();
-    let (name, event) = tokio::time::timeout(Duration::from_secs(10), rx.recv()).await.unwrap().unwrap();
+    let (name, event) = tokio::time::timeout(Duration::from_secs(10), next_visible(&mut rx)).await.unwrap().unwrap();
     assert_eq!(name, "a");
     assert!(matches!(event, EngineEvent::Error { message, fatal:true } if message == "error.cli.stopUnconfirmed"));
     assert!(server.is_alive(), "a thread's timeout must not kill the shared server");
     a.send(UserTurn::text("must not dispatch"));
     assert_eq!(b.answer("approval-b", true).await, Ok(Delivery::Delivered));
-    assert!(matches!(rx.recv().await, Some(("b", EngineEvent::Done { ok: true, .. }))));
+    assert!(matches!(next_visible(&mut rx).await, Some(("b", EngineEvent::Done { ok: true, .. }))));
     assert_eq!(f.wire.lines_with("turn/start"), 2, "the quarantined thread dispatched nothing");
     assert!(f.mismatches.lock().unwrap().is_empty(), "{:?}", f.mismatches.lock().unwrap());
     a.close();
@@ -1536,10 +2190,19 @@ async fn slash_failed_or_odd_skills_answers_are_silent_and_notes_are_bounded() {
         session.send(UserTurn::text("still works"));
         support::expect_method(&mut input, "turn/start").await;
         if long {
-            let Some(EngineEvent::Commands(commands)) = rx.recv().await else { panic!("a valid list is delivered") };
+            let commands = loop {
+                let event = rx.recv().await.expect("a valid list is delivered");
+                if !visible(&event) {
+                    continue;
+                }
+                let EngineEvent::Commands(commands) = event else { panic!("a valid list is delivered") };
+                break commands;
+            };
             assert_eq!(commands[0].note.as_ref().unwrap().chars().count(), 120);
         }
-        assert!(rx.try_recv().is_err(), "a failed list never becomes an error on screen");
+        while let Ok(event) = rx.try_recv() {
+            assert!(!visible(&event), "a failed list never becomes an event on screen: {event:?}");
+        }
         session.close();
         server.retire();
     }

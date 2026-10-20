@@ -166,7 +166,7 @@ impl Core {
         if let (Some(r), Some(id)) = (verdict.and_then(|v| self.table(&v, only)), warm)
             && self.convs.get(&id).is_some_and(|c| c.messages.is_empty())
         {
-            let _ = self.launch(&id, &r.pick());
+            self.warm_launch(&id, &r.pick());
         }
         if let Some(d) = self.next_draft.take()
             && (d.request != request || d.only != only)
@@ -422,5 +422,57 @@ impl Core {
 pub(super) fn stop_router(stop: Option<Stop>) {
     if let Some(session) = stop.and_then(|s| s.lock().unwrap_or_else(|e| e.into_inner()).take()) {
         session.close();
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn rewind_a_guessed_project_route_never_starts_before_its_message() {
+        let data = tempfile::tempdir().unwrap();
+        let engine = Engine::new(
+            EngineOptions {
+                data_dir: data.path().into(),
+                clis: BTreeMap::from([(Vendor::Claude, Cli { command: "fake".into(), prefix: vec![] })]),
+                spawn: Arc::new(|_, _, _| panic!("project startup must wait for capture")),
+                windows: false,
+                claude_env_billed: false,
+                max_warm: 3,
+                idle: Duration::from_secs(60),
+                runtime: tokio::runtime::Handle::current(),
+                ask: None,
+            },
+            Arc::new(|_| {}),
+        );
+        let project = engine.add_project(&data.path().to_string_lossy()).unwrap();
+        engine.note_account_events(
+            Vendor::Claude,
+            vec![EngineEvent::Signals(crate::signals::Signals { billing: Some(Billing::Subscription), ..Default::default() })],
+        );
+        engine.with(|core| {
+            let verdict = asked(r#"{"kind":"code","difficulty":"easy","confidence":0.95}"#).unwrap();
+            assert!(core.table(&verdict, None).is_some(), "the route must have a launchable pick");
+            for area in [Area::Project, Area::Chat] {
+                let conversation = serde_json::from_value(serde_json::json!({
+                    "id":"draft", "title":"Draft", "area": area, "projectId": project.id, "workingFolder": data.path(),
+                    "createdAt":1, "updatedAt":1, "messages":[]
+                }))
+                .unwrap();
+                core.convs.insert("draft".into(), conversation);
+                core.guess = Some(Guess {
+                    request: "fix".into(),
+                    result: None,
+                    waiters: vec![],
+                    warm: Some("draft".into()),
+                    only: None,
+                    stop: None,
+                });
+                core.guessed("fix", None, Some(verdict));
+                assert!(core.live.is_empty(), "a guessed draft route waits for its baseline in either area");
+            }
+        });
+        engine.shutdown();
     }
 }

@@ -264,6 +264,9 @@ pub struct Message {
     /// A plain-language note under the reply (an i18n key): `note.historyResent` when the earlier conversation was sent again as text.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub note: Option<String>,
+    /// Coverage of the file baseline immediately before this user message; unavailable history never blocks a turn.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub rewind: Option<crate::rewind::PointInfo>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub wait_until: Option<f64>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -628,6 +631,7 @@ impl Message {
             moved_from: None,
             mode: None,
             note: None,
+            rewind: None,
             recovery: None,
             nudge: None,
             follow: None,
@@ -772,6 +776,11 @@ pub struct Conversation {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub plan: Option<Plan>,
     pub messages: Vec<Message>,
+    /// Saved-message continuation after rewind; consumed by the next reply, never a native CLI resume.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub rewind_notice: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub rewind_summary: Option<String>,
     /// What its CLI last reported, each on its own (a report may name only one): the prompt's size and the model's window,
     /// before the point where Faber's CLI flags make it compact. Never saved.
     #[serde(skip)]

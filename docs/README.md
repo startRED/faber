@@ -34,6 +34,7 @@ points nowhere; a page that grows past the limit splits by topic, and its row he
 | [design/composer.md](design/composer.md) | The shared message box: file mentions, commands, earlier messages and their search |
 | [design/branch.md](design/branch.md) | "Branch from here" and the arrows between the versions of a message |
 | [design/queue.md](design/queue.md) | Queued messages, in-place editing, keyboard controls and drafts when a message leaves the queue |
+| [design/rewind.md](design/rewind.md) | The message menu's Go back, Redo and recovery confirmation, file preview and saved-message notice |
 | [design/running.md](design/running.md) | The running column: rows, question cards, done cards, when it opens by itself |
 | [design/keep-going.md](design/keep-going.md) | Keep going: the chip, the quiet lines, the quota warning, the running row and the summary on coming back |
 | [design/search.md](design/search.md) | Sidebar message search, the command box (Ctrl+K) and find in a conversation (Ctrl+F) |
@@ -71,6 +72,7 @@ one is never touched again, and its boxes say nothing.
 | superpowers/specs/2026-10-17-built-in-verifier.md | Approved (R190), in progress: V0 measured ([research/2026-10-17-verifier-v0-measurements.md](research/2026-10-17-verifier-v0-measurements.md)), V1 started (the `verify` tool, R203). Faber's own verifier in the engine, checks in seconds on the PC, GitHub only confirms |
 | superpowers/specs/2026-10-17-agent-pane-webview-spike.md | Spike done: go for step 7 of "Watching the agent work", with the five rules in its Recommendation |
 | superpowers/specs/2026-10-19-legible-agent-runs-design.md | Approved (Erick, 2026-10-19), tasks 016 to 020 queued: a finished reply looks finished, a done card, the plan, status and closing-box tools, one block per Keep going run, plain words with a technical tab |
+| superpowers/specs/2026-10-20-rewind-design.md | Approved (Erick's three answers, 2026-10-20; seventh fresh review), task 090 in progress: go back to before a message, files, conversation or both, with redo |
 | research/ | Measurements, probes and reviews of the day in their name; model names and prices in them go stale fast. The UX, notification and screen-flake reviews of 2026-10-12 live here; their conclusions are in design/ and product/ |
 
 A new spec or plan goes to `superpowers/specs` or `superpowers/plans` with the date in its name and a `Status:` line at the

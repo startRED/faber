@@ -14,7 +14,7 @@ pub(super) struct Run {
     conv: String,
     sid: u64,
     /// Tells this helper's events apart from a helper that replaced it under the same call id.
-    hsid: u64,
+    pub(super) hsid: u64,
     vendor: Vendor,
     model: String,
     session: Session,
@@ -44,6 +44,9 @@ struct Ended {
 }
 
 impl Core {
+    pub(super) fn helpers_in(&self, conv: &str) -> bool {
+        self.helpers.values().any(|h| h.conv == conv)
+    }
     /// Whether a project conversation on `vendor` offers the helper tool: the other vendor's CLI is connected.
     pub(super) fn offers_helper(&self, area: Area, vendor: Vendor) -> Helper {
         if area == Area::Project && self.opts.clis.contains_key(&helper::other(vendor)) { Helper::Offers } else { Helper::Off }
@@ -60,6 +63,9 @@ impl Core {
     }
 
     fn launch_helper(&mut self, conv: &str, call: &str, input: &serde_json::Value) -> Result<(), &'static str> {
+        if self.rewind_blocked(conv) {
+            return Err("error.rewind.busy");
+        }
         let l = self.live.get(conv).ok_or("the conversation is gone")?;
         let (sid, vendor, permissions, tuning, cwd) = (
             l.sid,
@@ -91,6 +97,7 @@ impl Core {
         let user_hooks = self.store.settings().user_hooks == Some(true) && permissions.guarded();
         self.next_sid += 1;
         let hsid = self.next_sid;
+        self.rewind_helper_started(call, hsid, conv, cwd.clone());
         let (me, key) = (self.me.clone(), call.to_string());
         let sink: EventSink = Arc::new(move |event| {
             if let Some(core) = me.upgrade() {
@@ -149,6 +156,7 @@ impl Core {
                 sink,
             ),
         };
+        self.rewind_helper_session(call, hsid, session.clone());
         session.send(UserTurn::text(prompt));
         let started = self.secs();
         let run = Run {
@@ -169,6 +177,7 @@ impl Core {
             stopping: false,
         };
         if let Some(old) = self.helpers.insert(call.to_string(), run) {
+            self.rewind_helper_retire(call, old.hsid);
             old.session.close();
         }
         self.expire_helper(call, hsid, MAX_RUN, "it ran out of time");
@@ -182,6 +191,7 @@ impl Core {
         if text.is_empty() {
             return Err("error.helperEmpty".into());
         }
+        self.rewind.bump(conv);
         let h = self.helpers.get_mut(call).filter(|h| h.conv == conv).ok_or("error.helperDone")?;
         let id = new_id();
         h.waiting.push(id.clone());
@@ -229,6 +239,7 @@ impl Core {
     /// What a helper's own session reports. Its tools show inside the agent's call; nobody answers its approvals, because the
     /// person sees only the agent: the agent hears what was refused and can do it itself, where the person approves it.
     fn helper_event(&mut self, call: &str, hsid: u64, event: EngineEvent) {
+        self.rewind_helper_event(call, hsid, &event);
         let Some(h) = self.helpers.get_mut(call).filter(|h| h.hsid == hsid) else { return };
         let (conv, sid, vendor) = (h.conv.clone(), h.sid, h.vendor);
         match event {
@@ -299,6 +310,7 @@ impl Core {
 
     fn end_helper(&mut self, call: &str, ok: bool, error: Option<&str>, cost: Option<f64>, incomplete: bool) {
         let Some(h) = self.helpers.remove(call) else { return };
+        self.rewind_helper_retire(call, h.hsid);
         h.session.close();
         self.note_span(h.vendor, h.started, &h.model, cost, incomplete);
         let (ok, mut text) = helper::report(ok, &h.report, &h.refused, error);
@@ -367,6 +379,7 @@ impl Core {
         for call in calls {
             if close {
                 if let Some(h) = self.helpers.remove(&call) {
+                    self.rewind_helper_retire(&call, h.hsid);
                     h.session.close();
                     self.note_span(h.vendor, h.started, &h.model, None, true);
                     self.never_read(&h.conv, &call, &h.waiting);

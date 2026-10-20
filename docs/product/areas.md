@@ -20,6 +20,16 @@ Chat and Projects, the lead agent that picks its own path, its modes, its toolbo
 The user always sees what is happening: the model behind each answer, the remaining quota of each subscription and
 when it renews, and, for running work, who is building and who is reviewing.
 
+Both areas can go back before a message through its menu: files, conversation or both, with a preview, conflict choices
+and Redo. It works without a connected AI. Private file history has fixed size and age limits and reports incomplete,
+unsaved or expired coverage; continuing uses the saved messages and says so. The engine never rolls back spending,
+permissions or remote effects, and going back waits until overlapping work is idle.
+
+### Not built yet
+
+Moving a chat to a project, native CLI continuation after going back, rich rewind diffs and configurable history limits
+are not built. The existing Changes preview supplies rewind's file list.
+
 ## Universal by design
 
 There is no fixed pipeline per kind of request and no list of supported tasks. In Projects, the lead agent is a live
