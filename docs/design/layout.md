@@ -161,6 +161,8 @@ The numbers above are the usual widths. The person can change them, and the shel
   (`ui/markdown.tsx`): a block whose source did not change keeps its DOM and only the open one is parsed and sanitised
   again. A tick that changed only the tools builds no text. Everything that reaches the page passes DOMPurify.
 
+- [Queued messages and editing](queue.md).
+
 ### Work log
 
 - The chips' line counts extend into the project's "Changes" view in the running column: git supplies the conversation's

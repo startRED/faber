@@ -1,8 +1,8 @@
 import { createEffect, createMemo, createResource, createSignal, For, Index, on, onCleanup, Show, type Accessor } from 'solid-js';
-import { api, type Checks, type Choice, type Follow, type Message, type Plan, type QueuedTurn, type VendorUsage } from './api.ts';
+import { api, errorText, type Checks, type Choice, type Follow, type Message, type Plan, type QueuedTurn, type VendorUsage } from './api.ts';
 import { Asks, Parkeds } from './Ask.tsx';
 import { copyItem, openMenu } from './contextmenu.ts';
-import { keep, kept, release, useDraft } from './unsent.ts';
+import { keep, kept, recoverQueuedDraft, release, useDraft } from './unsent.ts';
 import { Icon, VendorMark } from './Glyphs.tsx';
 import { Pic } from './ImageViewer.tsx';
 import { QuotaCard } from './QuotaCard.tsx';
@@ -12,7 +12,7 @@ import { html, Markdown, openLinks } from './markdown.tsx';
 import { agentMeta, ChangedLines, openedAgent, SourceList, showAgent, tellAbout, ToolChip } from './AgentChat.tsx';
 import { untilReset } from './Sidebar.tsx';
 import { appsOf, AwayPage, awaySites, SiteCard, sitesOf, stepsOf } from './Site.tsx';
-import { bytes, compact, fromEngine, money, t } from './i18n.ts';
+import { bytes, compact, failureText, fromEngine, money, t } from './i18n.ts';
 import { prettyModel, vendorName, type Option } from './models.ts';
 import { animateList } from './motion.ts';
 import { windowHidden } from './appearance.ts';
@@ -626,7 +626,58 @@ const empty = (m: Message) =>
 
 // A message written while an answer was running. The person can take it back until it is sent; one already handed to the
 // running answer (`sending`) cannot be, and one that waits for the next turn can be sent by hand once nothing runs.
-function Queued(props: { conversationId: string; q: QueuedTurn; busy: boolean; onError?: (err: unknown) => void }) {
+function Queued(props: { conversationId: string; q: QueuedTurn; busy: boolean; onRecovered?: (id: string, text: string) => void; onError?: (err: unknown) => void }) {
+  const editKey = `queued-edit.${props.conversationId}.${props.q.id}`;
+  const [editing, setEditing] = createSignal<string | undefined>(kept(editKey) || undefined);
+  const [saving, setSaving] = createSignal(false);
+  const [error, setError] = createSignal('');
+  let editButton: HTMLButtonElement | undefined;
+  let disposed = false;
+  onCleanup(() => { disposed = true; release(editKey); });
+  useDraft(() => editing() !== undefined);
+  const write = (text: string) => {
+    setEditing(text);
+    keep(editKey, text);
+  };
+  const restoreFocus = () => queueMicrotask(() => {
+    const target = editButton?.isConnected && !editButton.disabled ? editButton
+      : document.querySelector<HTMLElement>('.composer textarea:not(:disabled)') ?? document.querySelector<HTMLElement>('.run-btn');
+    target?.focus();
+  });
+  const cancel = () => {
+    if (saving()) return;
+    setEditing(undefined);
+    keep(editKey, '');
+    setError('');
+    restoreFocus();
+  };
+  const save = async () => {
+    const text = editing();
+    if (text === undefined || saving()) return;
+    if (!text.trim()) {
+      setError(t('error.queueEmpty'));
+      return;
+    }
+    setSaving(true);
+    setError('');
+    try {
+      await api.editQueued(props.conversationId, props.q.id, text);
+      // A different mounted editor may now own newer words under this key.
+      if (disposed) return;
+      setEditing(undefined);
+      keep(editKey, '');
+      restoreFocus();
+    } catch (err) {
+      if (disposed) return;
+      if (errorText(err) === 'error.queueChanged') {
+        const restored = recoverQueuedDraft(props.conversationId, props.q.id);
+        setEditing(undefined);
+        if (restored !== undefined) props.onRecovered?.(props.conversationId, restored);
+      } else setError(failureText(err));
+    } finally {
+      setSaving(false);
+    }
+  };
   return (
     <div class="mine queued">
       <Show when={props.q.attachments?.length}>
@@ -643,24 +694,58 @@ function Queued(props: { conversationId: string; q: QueuedTurn; busy: boolean; o
           </For>
         </div>
       </Show>
-      <div class="you queued">
+      <div class="you queued" classList={{ editing: editing() !== undefined }}>
         <span class="queue-badge">{t('queue.label')}</span>
         <For each={props.q.images}>{(img) => <Pic img={img} />}</For>
-        <Show when={props.q.text}>
-          <div class="queue-text">{props.q.text}</div>
+        <Show
+          when={editing() !== undefined}
+          fallback={
+            <>
+              <Show when={props.q.text}>
+                <div class="queue-text">{props.q.text}</div>
+              </Show>
+              <div class="actions">
+                <Show when={!props.q.sending}>
+                  <button type="button" ref={(el) => { editButton = el; }} aria-label={t('queue.editLabel')} onClick={() => {
+                    write(props.q.text);
+                  }}>{t('queue.edit')}</button>
+                </Show>
+                <Show when={!props.q.sending}>
+                  <button type="button" onClick={() => api.removeQueued(props.conversationId, props.q.id).catch((err) => props.onError?.(err))} aria-label={t('queue.removeLabel')}>
+                    {t('queue.remove')}
+                  </button>
+                </Show>
+                <Show when={!props.busy}>
+                  <button type="button" onClick={() => api.sendQueued(props.conversationId, props.q.id).catch((err) => props.onError?.(err))} aria-label={t('queue.sendNowLabel')}>
+                    {t('queue.sendNow')}
+                  </button>
+                </Show>
+              </div>
+            </>
+          }
+        >
+          <form onSubmit={(e) => { e.preventDefault(); void save(); }} onKeyDown={(e) => {
+            if (!e.isComposing && e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); cancel(); }
+          }}>
+            <textarea
+              aria-label={t('queue.editLabel')}
+              value={editing()}
+              rows={Math.min(10, (editing() ?? '').split('\n').length + 1)}
+              disabled={saving()}
+              onInput={(e) => write(e.currentTarget.value)}
+              onKeyDown={(e) => {
+                if (e.isComposing) return;
+                if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); void save(); }
+              }}
+              ref={(el) => queueMicrotask(() => el.focus())}
+            />
+            <Show when={error()}><p class="queue-error" role="alert">{error()}</p></Show>
+            <div class="actions">
+              <button type="submit" disabled={saving()}>{t('queue.save')}</button>
+              <button type="button" disabled={saving()} onClick={cancel}>{t('queue.cancel')}</button>
+            </div>
+          </form>
         </Show>
-        <div class="actions">
-          <Show when={!props.q.sending}>
-            <button type="button" onClick={() => api.removeQueued(props.conversationId, props.q.id).catch((err) => props.onError?.(err))} aria-label={t('queue.removeLabel')}>
-              {t('queue.remove')}
-            </button>
-          </Show>
-          <Show when={!props.busy}>
-            <button type="button" onClick={() => api.sendQueued(props.conversationId, props.q.id).catch((err) => props.onError?.(err))} aria-label={t('queue.sendNowLabel')}>
-              {t('queue.sendNow')}
-            </button>
-          </Show>
-        </div>
       </div>
     </div>
   );
@@ -707,7 +792,8 @@ function Narration(props: { text: string }) {
   );
 }
 
-export function Thread(props: Shared & { messages: Message[]; queued?: QueuedTurn[]; busy?: boolean; onError?: (err: unknown) => void; from: number; until?: number; searchIndex?: number }) {
+export function Thread(props: Shared & { messages: Message[]; queued?: QueuedTurn[]; busy?: boolean; onError?: (err: unknown) => void; onQueuedRecovered?: (id: string, text: string) => void; from: number; until?: number; searchIndex?: number }) {
+  const queuedIds = createMemo(() => (props.queued ?? []).map((q) => q.id));
   const prompt = (at: number) => (props.messages[at - 1]?.role === 'user' ? props.messages[at - 1] : undefined);
   // Turns Faber sent by itself, one after another, read as one run (task 018): its earlier turns fold under one header.
   const runs = createMemo(() => runsOf(props.messages));
@@ -757,7 +843,13 @@ export function Thread(props: Shared & { messages: Message[]; queued?: QueuedTur
           </Show>
         )}
       </Index>
-      <For each={props.queued}>{(q) => <Queued conversationId={props.conversationId} q={q} busy={props.busy ?? false} onError={props.onError} />}</For>
+      <Show when={props.conversationId} keyed>{(conversationId) =>
+        <For each={queuedIds()}>{(id) => {
+          const initial = props.queued!.find((q) => q.id === id)!;
+          return <Queued conversationId={conversationId} q={props.queued?.find((q) => q.id === id) ?? initial}
+            busy={props.busy ?? false} onRecovered={props.onQueuedRecovered} onError={props.onError} />;
+        }}</For>
+      }</Show>
     </>
   );
 }

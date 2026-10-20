@@ -27,7 +27,6 @@ Size: S small, M medium, L large. Wave: 1 next, 2 after, 3 later or with its pha
 
 | # | Gap | Who has it | Faber today | Way | Size | Wave |
 |---|---|---|---|---|---|---|
-| T5 | Edit a queued message before it runs | Codex | Remove only | Extends Queue, steer | S | 2 |
 | T6 | Earlier prompts with the up arrow, and a search over them | both CLIs | None | Composer | S | 2 |
 | T7 | Branch from any point without editing, and arrows between the versions of an edited or retried message | claude.ai, ChatGPT, `/branch`, `/fork` | Editing branches into a new conversation | Extends Branch | M | 2 |
 | T8 | Voice: dictate into the box | all four | None | The system's own speech input, no service | M | 3 |

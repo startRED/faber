@@ -1322,6 +1322,72 @@ async fn a_stopped_or_failed_turn_keeps_the_queue_and_the_person_sends_it() {
 }
 
 #[tokio::test]
+async fn edit_queued_saves_only_the_text_preserving_order_id_and_attachments() {
+    let dir = tempfile::tempdir().unwrap();
+    let (first, mut rx) = engine(dir.path(), Vendor::Claude, fake(fixture("claude", "chat")).spawn);
+    let id = first.send(ask(Area::Chat, SKY, choice("claude", Some("haiku")))).unwrap();
+    finished(&mut rx, |_| {}).await;
+    first.shutdown();
+    let file = dir.path().join("conversations").join(format!("{id}.json"));
+    let mut saved = read_json(&file);
+    saved["queued"] = json!([
+        {"id":"first", "text":"Original", "choice":{"vendor":"claude"}, "at":1,
+         "attachments":["notes.txt"], "images":[{"mediaType":"image/png", "base64":"aW1hZ2U="}]},
+        {"id":"second", "text":"Next", "choice":{"vendor":"claude"}, "at":2}
+    ]);
+    std::fs::write(&file, saved.to_string()).unwrap();
+    let (reopened, mut events) = engine(dir.path(), Vendor::Claude, fake(vec![]).spawn);
+    let before = reopened.open(&id).unwrap().queued;
+    reopened.edit_queued(&id, "first", "Edited\nwords").unwrap();
+    let mut expected = before;
+    expected[0].text = "Edited\nwords".into();
+    assert_eq!(reopened.open(&id).unwrap().queued, expected);
+    assert_eq!(read_json(&file)["queued"], serde_json::to_value(&expected).unwrap());
+    assert!(std::iter::from_fn(|| events.try_recv().ok()).any(|event| matches!(event,
+        AppEvent::Queue { conversation_id, queued } if conversation_id == id && queued == expected)));
+    for text in ["", " \n\t"] {
+        assert_eq!(reopened.edit_queued(&id, "first", text).unwrap_err(), "error.queueEmpty");
+    }
+    assert_eq!(reopened.open(&id).unwrap().queued, expected);
+    reopened.remove_queued(&id, "second");
+    assert_eq!(reopened.edit_queued(&id, "second", "Too late").unwrap_err(), "error.queueChanged");
+    assert_eq!(reopened.edit_queued(&id, "missing", "Too late").unwrap_err(), "error.queueChanged");
+    assert_eq!(reopened.edit_queued("missing", "first", "Words").unwrap_err(), "error.conversationGone");
+    reopened.shutdown();
+    let (again, _) = engine(dir.path(), Vendor::Claude, fake(vec![]).spawn);
+    assert_eq!(again.open(&id).unwrap().queued, expected[..1]);
+    again.shutdown();
+}
+
+#[tokio::test]
+async fn edit_queued_reaches_the_cli_and_send_now_refuses_later_edits() {
+    for send_now in [false, true] {
+        let dir = tempfile::tempdir().unwrap();
+        let f = fake(fixture("claude", "edit-queued"));
+        let (engine, _) = engine(dir.path(), Vendor::Claude, f.spawn.clone());
+        let id = engine.send(ask(Area::Chat, "Start queued edit", choice("claude", Some("haiku")))).unwrap();
+        until(&engine, &id, |c| c.messages.last().is_some_and(|m| m.finished_at.is_some())).await;
+        say(&engine, &id, "claude", "Original queued words").unwrap();
+        let q = engine.open(&id).unwrap().queued[0].clone();
+        assert!(!q.sending);
+        engine.edit_queued(&id, &q.id, "Edited queued words\nSecond line").unwrap();
+        if send_now {
+            engine.send_queued(&id, &q.id).unwrap();
+            assert!(engine.open(&id).unwrap().queued[0].sending);
+            assert_eq!(engine.edit_queued(&id, &q.id, "Too late").unwrap_err(), "error.queueChanged");
+        }
+        let c = until(&engine, &id, |c| settled(c, 4)).await;
+        assert_eq!(texts(&c), ["Start queued edit", "Edited queued words\nSecond line"]);
+        assert!(c.queued.is_empty());
+        assert_eq!(engine.edit_queued(&id, &q.id, "Too late").unwrap_err(), "error.queueChanged");
+        assert_eq!(f.wire.lines_with("Edited queued words"), 1);
+        assert_eq!(f.wire.lines_with("Original queued words"), 0);
+        assert!(f.mismatches.lock().unwrap().is_empty());
+        engine.shutdown();
+    }
+}
+
+#[tokio::test]
 async fn the_queue_is_saved_with_the_conversation_and_survives_a_restart() {
     let dir = tempfile::tempdir().unwrap();
     let f = fake(claude_turns(&[("first", false)]));

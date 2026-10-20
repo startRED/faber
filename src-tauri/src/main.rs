@@ -305,6 +305,11 @@ async fn remove_queued(faber: State<'_, Faber>, id: String, turn_id: String) -> 
 }
 
 #[tauri::command]
+async fn edit_queued(faber: State<'_, Faber>, id: String, turn_id: String, text: String) -> Res<()> {
+    faber.engine.edit_queued(&id, &turn_id, &text)
+}
+
+#[tauri::command]
 async fn send_queued(faber: State<'_, Faber>, id: String, turn_id: String) -> Res<()> {
     faber.engine.send_queued(&id, &turn_id)
 }
@@ -972,6 +977,7 @@ fn main() {
                 rename,
                 remove,
                 remove_queued,
+                edit_queued,
                 send_queued,
                 tell_helper,
                 mentions,

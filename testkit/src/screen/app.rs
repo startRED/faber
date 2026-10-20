@@ -71,6 +71,7 @@ pub fn scenarios() -> Vec<Scenario> {
             name: "with Auto on Codex, the answer names the model the CLI reports before the first word and keeps it to the end",
             run: names_the_codex_model_while_streaming,
         },
+        Scenario { name: "edit-queued: edited words reach the CLI in the same queued message", run: edits_queued },
         Scenario { name: "editing a message sends it as a branch and keeps the original conversation", run: edits_as_a_branch },
         Scenario { name: "deleting a conversation asks once, then removes it", run: deletes_after_asking },
         Scenario { name: "the sidebar footer shows the name the person gave, above the accounts", run: shows_the_name },
@@ -1054,6 +1055,48 @@ fn thousand_messages(ctx: &mut Ctx) -> Result {
     ctx.notes.push(format!("1000 messages: opened in {open_ms} ms, {mb:.0} MB"));
     ensure(open_ms < 3000, || format!("opening took {open_ms} ms"))?;
     ensure(mb <= BUDGET_MB, || format!("{mb:.0} MB is over the {BUDGET_MB} MB budget"))
+}
+
+fn edits_queued(ctx: &mut Ctx) -> Result {
+    start_settings(ctx, "en")?;
+    let mut app = ctx.launch(Launch {
+        claude: CliSlot::Fake,
+        recording: Some(ctx.paths.fixtures.join("claude/edit-queued.jsonl")),
+        ..Launch::default()
+    })?;
+    let page = &mut app.page;
+    // This recording starts with the person's message, not Auto's separate routing question.
+    let model = page.labelled("composer.model")?;
+    page.select_option(&model, "Claude Haiku")?;
+    ask(page, "Start queued edit")?;
+    // The CLI has ended its answer but is still closing the turn, so the next message waits.
+    page.wait_for("the answer to settle", "document.querySelector('article.ai .actions') !== null")?;
+    ask(page, "Original queued words")?;
+    let edit = page.named("button", "queue.editLabel")?;
+    page.click(&edit)?;
+    let field = page.labelled("queue.editLabel")?;
+    page.fill(&field, "Edited queued words\nSecond line")?;
+    ctx.shot(&mut app, "edit-queued-editor")?;
+    let page = &mut app.page;
+    page.press_on(&field, "Enter")?;
+    page.wait_for("the saved queued words", "document.querySelector('.queue-text')?.textContent === 'Edited queued words\\nSecond line'")?;
+    ctx.shot(&mut app, "edit-queued-saved")?;
+    std::fs::write(ctx.sb.state.join("release"), "").map_err(|e| e.to_string())?;
+    let page = &mut app.page;
+    // The fake CLI echoes its expected input, so reading only the bubble would not prove what it received.
+    page.wait_for(
+        "the edited message to reach the CLI",
+        "[...document.querySelectorAll('article.ai .md')].some(e => e.textContent.includes('Received edited queue words.'))",
+    )?;
+    page.wait_for("the queue to empty", "document.querySelectorAll('.mine.queued').length === 0")?;
+    ensure(page.inner_text(&css(".mine .you").has_text("Edited queued words"))?.contains("Second line"), || {
+        "the sent message lost the edit".into()
+    })?;
+    ctx.close(app.id)?;
+    let output = ctx.output(app.id);
+    ensure(!output.contains("sent user") && !output.contains("recorded user"), || {
+        format!("the fake CLI received different words: {output}")
+    })
 }
 
 #[cfg(test)]

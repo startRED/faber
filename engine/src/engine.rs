@@ -681,6 +681,9 @@ impl Engine {
     pub fn remove_queued(&self, id: &str, turn_id: &str) {
         self.with(|c| c.remove_queued(id, turn_id))
     }
+    pub fn edit_queued(&self, id: &str, turn_id: &str, text: &str) -> Result<(), String> {
+        self.with(|c| c.edit_queued(id, turn_id, text))
+    }
     pub fn send_queued(&self, id: &str, turn_id: &str) -> Result<(), String> {
         self.with(|c| c.send_queued(id, turn_id))
     }
@@ -2265,6 +2268,19 @@ impl Core {
         self.save(conv);
         self.emit_queue(conv);
         let _ = self.dispatch_queued(conv, next);
+    }
+
+    fn edit_queued(&mut self, id: &str, turn_id: &str, text: &str) -> Result<(), String> {
+        if text.trim().is_empty() {
+            return Err("error.queueEmpty".into());
+        }
+        let c = self.convs.get_mut(id).ok_or("error.conversationGone")?;
+        let item = c.queued.iter_mut().find(|q| q.id == turn_id && !q.sending).ok_or("error.queueChanged")?;
+        item.text = text.into();
+        c.updated_at = now();
+        self.save(id);
+        self.emit_queue(id);
+        Ok(())
     }
 
     fn remove_queued(&mut self, id: &str, turn_id: &str) {

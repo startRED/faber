@@ -42,6 +42,31 @@ export function kept(key: string): string {
   }
 }
 
+/** Saved queue editors can outlive their rows or the whole screen. Read them without an editor registry. */
+export function queuedDrafts(conversationId: string): string[] {
+  const prefix = `queued-edit.${conversationId}.`;
+  const keys = new Set([...memory.keys()].filter((key) => key.startsWith(prefix)));
+  try {
+    for (let i = 0; i < localStorage.length; i++) {
+      const key = localStorage.key(i);
+      if (key?.startsWith(KEPT + prefix)) keys.add(key.slice(KEPT.length));
+    }
+  } catch { /* Failed writes remain readable in memory. */ }
+  return [...keys].map((key) => key.slice(prefix.length));
+}
+
+/** Returns a lost edit to its conversation's message box, preserving any words already there. */
+export function recoverQueuedDraft(conversationId: string, turnId: string): string | undefined {
+  const key = `queued-edit.${conversationId}.${turnId}`;
+  const edit = kept(key);
+  if (!edit.trim()) return;
+  const existing = kept(conversationId);
+  const text = existing ? `${existing}\n\n${edit}` : edit;
+  keep(conversationId, text);
+  keep(key, '');
+  return text;
+}
+
 // A box whose text could not be written stays reported as dirty, so no unattended install ends the window on text that
 // lives only in memory; the next successful write, or clearing the box, lifts it.
 const unwritten = new Map<string, object>();

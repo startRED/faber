@@ -595,6 +595,7 @@ export const api = {
   /** Refused with `error.copy.unsaved` while its copy holds work found nowhere else, unless `discard`. */
   remove: (id: string, discard = false) => invoke<void>('remove', { id, discard }),
   removeQueued: (id: string, turnId: string) => invoke<void>('remove_queued', { id, turnId }),
+  editQueued: (id: string, turnId: string, text: string) => invoke<void>('edit_queued', { id, turnId, text }),
   sendQueued: (id: string, turnId: string) => invoke<void>('send_queued', { id, turnId }),
   tellHelper: (id: string, callId: string, text: string) => invoke<void>('tell_helper', { id, callId, text }),
   /** `@` in the composer: the working folder's entries that match `query`, at most 50; a new chat has none. */

@@ -22,6 +22,7 @@ import {
 import { inOrder, refreshed, saveAndApply, watchSystem, windowHidden } from './appearance.ts';
 import { useClock } from './clock.ts';
 import { Composer, type Draft } from './Composer.tsx';
+import { queuedDrafts, recoverQueuedDraft } from './unsent.ts';
 import { ContextMeter } from './Context.tsx';
 import { Empty } from './Empty.tsx';
 import { Find } from './Find.tsx';
@@ -219,6 +220,24 @@ export function App(props: { initial: AppState; update?: UpdateStatus; inbox: { 
     held.delete(id);
   };
   let fill: ((text: string) => void) | undefined;
+  const [queuedNotice, setQueuedNotice] = createSignal<string>();
+  const showRecoveredQueue = (id: string, text: string) => {
+    setQueuedNotice(id);
+    if (!loading() && place().id === id) fill?.(text);
+  };
+  // Queue edits remain recoverable after Settings, a thread change or a restart, without keeping their rows alive.
+  const draftQueue = createMemo(() => current()?.queued);
+  const draftConversation = createMemo(() => current()?.id);
+  createEffect(on([draftQueue, draftConversation, loading], () => {
+    const c = current();
+    if (!c || loading() || place().id !== c.id) return;
+    const ids = new Set(c.queued?.map((q) => q.id));
+    for (const id of queuedDrafts(c.id)) {
+      if (ids.has(id)) continue;
+      const text = recoverQueuedDraft(c.id, id);
+      if (text !== undefined) showRecoveredQueue(c.id, text);
+    }
+  }));
   let stick = true;
   // One observer keeps the tail visible when the thread box or the column inside it changes size.
   let tail: ResizeObserver | undefined;
@@ -694,6 +713,7 @@ export function App(props: { initial: AppState; update?: UpdateStatus; inbox: { 
   const target = () => ({ area: area(), projectId: area() === 'project' ? projectId() : undefined });
 
   const send = async (draft: Draft) => {
+    setQueuedNotice(undefined);
     // `/btw <question>` asks on the side (R250): it opens the quick question with it, and the conversation never sees it.
     const side = draft.images.length || draft.files.length ? undefined : btw(draft.text);
     if (side !== undefined) {
@@ -1288,6 +1308,7 @@ ${copy().path}`}>
                                     busy={checking()}
                                     weighing={items().some((i) => i.conversationId === c().id && i.weighing)}
                                     onError={fail}
+                                    onQueuedRecovered={showRecoveredQueue}
                                     usage={state().usage ?? []}
                                     from={from()}
                                     until={until()}
@@ -1328,7 +1349,10 @@ ${copy().path}`}>
                         </Show>
                       </div>
                       <Show when={!newChat() && !needsProject() && state().vendors.length > 0}>
-                        <div class="dock" inert={trapped()}>
+                        <div class="dock" inert={trapped()} onInput={() => setQueuedNotice(undefined)}>
+                          <Show when={queuedNotice() && queuedNotice() === current()?.id}>
+                            <p class="note" role="status">{t('queue.editRecovered')}</p>
+                          </Show>
                           <KeepGoingNote
                             warning={keepGoingWarn()}
                             on={!!keepGoing()}
