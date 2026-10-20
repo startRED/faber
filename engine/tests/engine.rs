@@ -406,6 +406,44 @@ async fn after_reopening_the_app_the_conversation_resumes_its_cli_session() {
     assert_eq!(second.open(&id).unwrap().messages.len(), 4);
 }
 
+/// Parity T2: a past project conversation goes on as a chat does, in its project, on the same CLI session.
+#[tokio::test]
+async fn a_past_project_conversation_goes_on_in_its_cli_session_after_reopening_the_app() {
+    let dir = tempfile::tempdir().unwrap();
+    let folder = dir.path().join("work");
+    std::fs::create_dir_all(&folder).unwrap();
+    let (first, mut rx) = engine(dir.path(), Vendor::Claude, fake(fixture("claude", "chat")).spawn);
+    let project = first.add_project(&folder.to_string_lossy()).unwrap();
+    let id = first
+        .send(SendRequest { project_id: Some(project.id.clone()), ..ask(Area::Project, SKY, choice("claude", Some("haiku"))) })
+        .unwrap();
+    finished(&mut rx, |_| {}).await;
+    first.shutdown();
+
+    let file = dir.path().join("conversations").join(format!("{id}.json"));
+    let mut saved = read_json(&file);
+    saved["sessions"]["claude"] = "3ee0bd99-72d2-4c5b-8420-a9f85ee53981".into();
+    std::fs::write(&file, saved.to_string()).unwrap();
+
+    let f = fake(fixture("claude", "resume"));
+    let (second, mut rx) = engine(dir.path(), Vendor::Claude, f.spawn.clone());
+    let text = "What single word did you reply with last time? Answer with only that word.";
+    second
+        .send(SendRequest {
+            conversation_id: Some(id.clone()),
+            project_id: Some(project.id),
+            ..ask(Area::Project, text, choice("claude", Some("haiku")))
+        })
+        .unwrap();
+    let reply = finished(&mut rx, |_| {}).await;
+    second.shutdown();
+    let args = f.args.lock().unwrap()[0].clone();
+    assert_eq!(args[args.iter().position(|a| a == "--resume").unwrap() + 1], "3ee0bd99-72d2-4c5b-8420-a9f85ee53981");
+    assert_eq!(reply.text.trim(), "pong");
+    let c = second.open(&id).unwrap();
+    assert_eq!((c.area, c.messages.len()), (Area::Project, 4), "the reply joins the same project conversation");
+}
+
 #[tokio::test]
 async fn an_answer_cut_off_by_a_crash_reopens_as_stopped_not_typing_forever() {
     let dir = tempfile::tempdir().unwrap();

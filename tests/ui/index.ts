@@ -63,6 +63,7 @@ import './setup.check.ts';
 import './styles.check.ts';
 import './grammar.check.ts';
 import './lighter.check.ts';
+import './continue.check.ts';
 import './steer.check.ts';
 import './stop-helpers.check.ts';
 import './thread.check.ts';
