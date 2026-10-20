@@ -6,13 +6,13 @@ import { windowHidden } from './appearance.ts';
 import { openMenu } from './contextmenu.ts';
 import { Icon, VendorMark } from './Glyphs.tsx';
 import { percent, t } from './i18n.ts';
+import { keysOf } from './keys.ts';
 import { en, type Key } from './locales/en.ts';
 import { Peek } from './Mark.tsx';
 import { animateList, keepForExit } from './motion.ts';
 import { vendorName } from './models.ts';
 import { forgetProject } from './projects.ts';
 import type { Place } from './running.ts';
-import { mac } from './WindowControls.tsx';
 import { planWords } from './Plan.tsx';
 import { ageOf, freshness, groupChats, lineReading, matches, nest, otherReadings, type Quotas, showsChats, tailOf } from './sidebar.ts';
 
@@ -243,7 +243,7 @@ export function Sidebar(props: Props) {
       <button class="newchat" onClick={() => props.onNew()}>
         <Icon name="plus" />
         <span>{t('side.new')}</span>
-        <kbd>{t(mac ? 'key.newMac' : 'key.new')}</kbd>
+        <kbd>{keysOf('new')}</kbd>
       </button>
       <div class="areas" role="group" aria-label={t('area.label')}>
         <button class="area" aria-pressed={props.place.area === 'chat'} onClick={() => props.onArea('chat')}>
@@ -387,7 +387,7 @@ export function Sidebar(props: Props) {
           <Show when={props.userName}>
             <div class="who">{props.userName}</div>
           </Show>
-          <button class="area" onClick={() => props.onSettings()} title={`${t('settings.shortcut')} · ${t('side.version', { version: props.version })}`}>
+          <button class="area" onClick={() => props.onSettings()} title={`${t('settings.open')} (${keysOf('settings')}) · ${t('side.version', { version: props.version })}`}>
             <Icon name="sliders" />
             <span>{t('settings.open')}</span>
           </button>

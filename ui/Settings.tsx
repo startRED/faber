@@ -6,6 +6,7 @@ import { Fold, Group, Opt, PickMenu, Segmented, Toggle } from './controls.tsx';
 import { factory } from './draft.ts';
 import { Icon } from './Glyphs.tsx';
 import { LANGUAGES, t } from './i18n.ts';
+import { openShortcuts } from './Shortcuts.tsx';
 import { vendorName } from './models.ts';
 import { animateList } from './motion.ts';
 import { ProjectsSection } from './ProjectSettings.tsx';
@@ -187,6 +188,11 @@ export function Settings(props: Props) {
                   </button>
                 </Opt>
               </Show>
+              <Opt id="set-keys" label={t('set.keys')} hint={t('set.keysHint')}>
+                <button type="button" class="btn" onClick={openShortcuts}>
+                  {t('set.keysShow')}
+                </button>
+              </Opt>
             </Group>
             <Group title={t('set.group.ai')}>
               <Opt id="set-permissions" label={t('set.permissions')} hint={t(`set.permissions.${mode()}.line`)} more={t(MORE[mode()])}>

@@ -2,6 +2,7 @@ import { createEffect, createSignal, on, onCleanup, onMount, Show } from 'solid-
 import { bringIntoView, LIMIT, paint, rangesIn, unpaint } from './find.ts';
 import { Icon } from './Glyphs.tsx';
 import { t } from './i18n.ts';
+import { pressed } from './keys.ts';
 import { keepForExit } from './motion.ts';
 
 /** How long the thread may keep changing (an answer streaming in) before the matches are looked for again. */
@@ -68,8 +69,7 @@ export function Find(props: { enabled: boolean; root: () => HTMLElement | undefi
 
   onMount(() => {
     const onKey = (e: KeyboardEvent) => {
-      const ctrl = e.ctrlKey || e.metaKey;
-      if (ctrl && !e.altKey && !e.shiftKey && e.key.toLowerCase() === 'f') {
+      if (pressed(e, 'find')) {
         // The browser's own find never shows: Faber's is the only one.
         e.preventDefault();
         if (!props.enabled || covered()) return;

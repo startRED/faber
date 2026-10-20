@@ -47,6 +47,7 @@ import './find.check.ts';
 import './search-messages.check.ts';
 import './review-answer.check.ts';
 import './run.check.ts';
+import './shortcuts.check.ts';
 import './review-motion.check.ts';
 import './running.check.ts';
 import './settings.check.ts';

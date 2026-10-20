@@ -30,6 +30,7 @@ import { LookStep } from './FirstRun.tsx';
 import { keepFocusIn } from './focus.ts';
 import { Icon } from './Glyphs.tsx';
 import { failureText, lang, t, templates, useLanguage } from './i18n.ts';
+import { pressed, pressedAny } from './keys.ts';
 import { homeHints } from './idle.ts';
 import { createFileDrop } from './drop.ts';
 import { Grip } from './Grip.tsx';
@@ -39,6 +40,7 @@ import { isFirstInstall, newestId, NOTES, type Note, whatsNew } from './notes.ts
 import { modelOptions, vendorName } from './models.ts';
 import { animateDetails, animateList, keepForExit, watchMotion } from './motion.ts';
 import { Palette } from './Palette.tsx';
+import { Shortcuts, shortcutsOpen } from './Shortcuts.tsx';
 import { Projects } from './Projects.tsx';
 import { createOpening, upsert } from './opening.ts';
 import { Running } from './Running.tsx';
@@ -593,7 +595,7 @@ export function App(props: { initial: AppState; update?: UpdateStatus; inbox: { 
       // A first-run step and a tutorial card are modal: their own buttons are the only way on, so Esc, Ctrl N, Ctrl , and
       // Ctrl . do nothing (the card handles its own keys, ui/Tutorial.tsx).
       if (step() || tourOpen()) {
-        if (ctrl && ['n', ',', '.', 'b'].includes(e.key.toLowerCase())) e.preventDefault();
+        if (pressedAny(e)) e.preventDefault();
         if (step() && e.key === 'Tab' && !ctrl && !e.altKey) keepFocusIn(e, document.querySelector<HTMLElement>('.fr-stage'));
         return;
       }
@@ -604,7 +606,7 @@ export function App(props: { initial: AppState; update?: UpdateStatus; inbox: { 
         } else if (sideOverlay()) keepFocusIn(e, sideEl);
         else if (trapped()) keepFocusIn(e, column);
       }
-      if (ctrl && e.key.toLowerCase() === 'n') {
+      if (pressed(e, 'new')) {
         e.preventDefault();
         closeSettings();
         opener = undefined; // the new conversation's composer takes focus, not the control that opened the cards
@@ -617,12 +619,12 @@ export function App(props: { initial: AppState; update?: UpdateStatus; inbox: { 
         }
         void fresh(place()).then(focusComposer);
       }
-      if (ctrl && e.key === ',') openSettings();
-      if (ctrl && !e.shiftKey && !e.altKey && e.key.toLowerCase() === 'b') {
+      if (pressed(e, 'settings')) openSettings();
+      if (pressed(e, 'focus')) {
         e.preventDefault();
         if (inShell) toggleFocus();
       }
-      if (ctrl && e.key === '.') {
+      if (pressed(e, 'running')) {
         e.preventDefault();
         // Settings and the account cards replace the shell: the column is not on screen to toggle.
         if (inShell) toggleColumn();
@@ -1412,7 +1414,7 @@ ${copy().path}`}>
         <WhatsNew version={state().version} notes={notes()} onClose={closeNotes} />
       </Show>
       <Palette
-        enabled={!step() && !setupOpen() && !tourOpen() && !notesOpen() && !startScreen()}
+        enabled={!step() && !setupOpen() && !tourOpen() && !notesOpen() && !startScreen() && !shortcutsOpen()}
         conversations={state().conversations}
         projects={state().projects}
         onOpen={openSummary}
@@ -1423,6 +1425,7 @@ ${copy().path}`}>
         onRunning={() => (closeSettings(), toggleColumn())}
         onAddProject={() => (closeSettings(), void addProject().catch(fail))}
       />
+      <Shortcuts enabled={!step() && !setupOpen() && !tourOpen() && !notesOpen() && !startScreen()} />
     </div>
   );
 }

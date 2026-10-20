@@ -105,7 +105,7 @@ Size: S small, M medium, L large. Wave: 1 next, 2 after, 3 later or with its pha
 
 | # | Gap | Who has it | Faber today | Way | Size | Wave |
 |---|---|---|---|---|---|---|
-| K1 | The list of shortcuts (`?`), and keys for model, effort and mode | both CLIs, both apps | A few fixed keys | A shortcut sheet; keys stay fixed | S | 2 |
+| K1 | The list of shortcuts (`?`), and keys for model, effort and mode | both CLIs, both apps | Done: ? lists every key, read from the one list of keys | A shortcut sheet; keys stay fixed | S | 2 |
 | K2 | Search in Settings | Codex app | Five short sections | Only if Settings grows | S | 3 |
 | K3 | A health check that finds and fixes setup problems (`/doctor`) | both CLIs | The account cards check | Extends the account cards | S | 3 |
 | K4 | What's new in the CLI itself (`/release-notes`) | Claude Code | Faber's own notes | Owner's call | S | 3 |

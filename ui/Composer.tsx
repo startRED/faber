@@ -7,6 +7,7 @@ import { t } from './i18n.ts';
 import { type Option, vendorName } from './models.ts';
 import { caretOnFirstLine, resizeComposer } from './composer-size.ts';
 import { keep, kept, release, useDraft } from './unsent.ts';
+import { pressed } from './keys.ts';
 
 export interface Draft {
   text: string;
@@ -481,7 +482,7 @@ export function Composer(props: Props) {
         }}
         onKeyDown={(e) => {
           if (e.isComposing) return;
-          if (props.onHistory && e.ctrlKey && !e.altKey && !e.shiftKey && e.key.toLowerCase() === 'r') {
+          if (props.onHistory && pressed(e, 'search')) {
             e.preventDefault();
             e.stopPropagation();
             rememberDraft();

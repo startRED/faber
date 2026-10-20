@@ -1,6 +1,6 @@
 # Search
 
-How the sidebar search, command box (Ctrl+K) and find in a conversation (Ctrl+F) look and move. The rest of the shell is in
+How the sidebar search, command box (Ctrl+K), find in a conversation (Ctrl+F) and the list of shortcuts (?) look and move. The rest of the shell is in
 [layout.md](layout.md).
 
 ## Sidebar search
@@ -54,3 +54,8 @@ query replaces the waiter and cancels the running scan between files. No index f
   nothing is wrapped. Enter and Shift+Enter move with a smooth scroll that centres the match unless it is already in plain
   view (instant in reduced and no motion); Esc closes the bar before the sidebar or the running column. When the running
   column covers the thread, the bar slides left of it. Both are instant in reduced and no motion.
+- **?** outside a text box opens the list of shortcuts in the Ctrl+K box's own surface, scrim and motion: a heading row
+  (`--h-lg`, a hairline under it) with a close button that takes focus, then "Anywhere" and "In the message box" with the
+  box's quiet headings and a row per key (`--h-md`): what it does at the left, its caps as `kbd` at the right in the data
+  face. Rows never highlight, since nothing in the list is picked. It is a modal dialog like the box, and it exists in the
+  page only while open.

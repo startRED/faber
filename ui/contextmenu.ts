@@ -1,5 +1,6 @@
 import { createSignal } from 'solid-js';
 import { t } from './i18n.ts';
+import { browserKey } from './keys.ts';
 
 // Right-click in Faber. The browser's own menu (Back, Reload, Print...) never shows. Where a menu helps, it is Faber's: a
 // row, a message, selected text or a text field opens `openMenu`; anywhere else nothing opens at all.
@@ -135,7 +136,6 @@ export function installContextMenu(): void {
   window.addEventListener(
     'keydown',
     (e) => {
-      const ctrl = e.ctrlKey || e.metaKey;
       if (e.key === 'ContextMenu' || (e.key === 'F10' && e.shiftKey)) {
         e.preventDefault();
         keyAt = performance.now();
@@ -144,8 +144,7 @@ export function installContextMenu(): void {
         e.preventDefault();
         e.stopPropagation();
         closeMenu(true);
-      } else if (e.key === 'F5' || e.key === 'F7' || (ctrl && !e.altKey && ['r', 'p', 's', 'u', 'f'].includes(e.key.toLowerCase()))) {
-        // The browser's own reload, caret browsing, print, save, view-source and find: Faber has no use for them (its own find is ui/Find.tsx).
+      } else if (browserKey(e)) {
         e.preventDefault();
       }
     },
