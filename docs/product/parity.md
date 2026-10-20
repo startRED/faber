@@ -27,7 +27,7 @@ Size: S small, M medium, L large. Wave: 1 next, 2 after, 3 later or with its pha
 
 | # | Gap | Who has it | Faber today | Way | Size | Wave |
 |---|---|---|---|---|---|---|
-| T1 | Quick question on the side, without stopping the agent or waiting in its queue (`/btw`) | Claude Code, Codex `/side`, Claude app side chat | Planned, waiting for the owner ([following.md](following.md) item 10) | Fork the CLI session, read only | M | 1 |
+| T1 | Quick question on the side, without stopping the agent or waiting in its queue (`/btw`) | Claude Code, Codex `/side`, Claude app side chat | Approved (R250), task 035 ([following.md](following.md) item 10) | Fork the CLI session, read only | M | 1 |
 | T2 | Continue a past project conversation | all | Read only, no composer | Resume its CLI session as Chat does | S | 1 |
 | T3 | `/` menu: the CLI's commands, its skills and Faber's actions, filtered as you type | all four | None | Pass-through, plus Faber's own actions | M | 1 |
 | T4 | `@` to point at a file or folder of the project | Claude Code, Codex, both apps | Attach or drop only | Search the working folder | S | 1 |

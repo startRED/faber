@@ -154,7 +154,7 @@ frames) and checked against today's code. It fills the steps of R161 and never b
    Pointer-level actions, and the outline of a changed part and a named pointer per subagent while a screen is built, stay
    for later (Erick, 2026-10-18); the app card already opens the app, which its dev server reloads by itself.
 
-10. **A quick question on the side (planned, R-next awaiting the owner).** While the agent works, the person can ask
+10. **A quick question on the side (approved, R250; task 035).** While the agent works, the person can ask
     "how is it going?" or "why that file?" without stopping it or waiting in its queue (the queue only empties when a
     turn ends). The running column gets a "Quick question" tab next to the running list, the same column as the
     side chat of step 3, so there is no new pane; typing `/btw <question>` in the conversation's box opens it with the
