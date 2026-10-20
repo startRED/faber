@@ -35,6 +35,9 @@ map's "Known incoherences": new ones, and removals of the ones the code has fixe
      storage key, shell command and right-click item it adds or changes, with `file:line`.
    - Map and design statements: for the map sections and the docs/design/ sections that name a changed file, list each
      statement the code now contradicts, with `file:line`.
+   - Parity: the commands and flags of the installed Claude Code and Codex (`claude --help`, `codex --help`, their
+     changelogs since the cut-off) that `docs/product/parity.md` neither lists as a gap nor sets aside, and the rows
+     the code has closed since.
 5. Judge, in one Sonnet subagent at medium effort, with the collected facts, `docs/product-map.md`,
    `docs/product-rules.md` (the "Where things go" table, Chat and Projects alike, the taste cards) and `vistos.md`:
    - a fixed incoherence becomes a removal;
@@ -42,6 +45,7 @@ map's "Known incoherences": new ones, and removals of the ones the code has fixe
      existing thing, a Chat and Projects difference, or a broken card becomes a new line, in the map's style (one or
      two sentences, plain words, "Owner" when it needs a taste or direction call);
    - a map or design statement the code contradicts becomes a correction;
+   - a new CLI command or flag becomes a parity row (or a line under "Not to be closed"), and a closed row a removal;
    - anything already in `vistos.md` is skipped unless the code changed at that spot since.
 6. Report. Write `<date>.md` in the notes folder: first a summary in plain Portuguese for the owner (at most five
    lines: how many lines to add, remove or correct, and the one that matters most), then the exact English lines to
