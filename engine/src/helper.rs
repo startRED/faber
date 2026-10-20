@@ -27,6 +27,8 @@ pub enum Helper {
     Offers,
     /// A helper: it leaves no history in the CLI and cannot call a helper of its own.
     Is,
+    /// A quick question on the side (R250): it may only read, search and list the working folder, and leaves no history.
+    Aside,
 }
 
 const DESCRIPTION: &str = "Hands one self-contained piece of work, a review of your work, or a second opinion to a helper agent \
@@ -72,11 +74,13 @@ pub struct Tools {
     pub verify: bool,
     /// The project's map (`crate::map`).
     pub map: bool,
+    /// The plan, the status and the closing box (`crate::progress`).
+    pub progress: bool,
 }
 
 impl Tools {
     pub fn any(self) -> bool {
-        self.helper || self.browse || self.conversation || self.verify || self.map
+        self.helper || self.browse || self.conversation || self.verify || self.map || self.progress
     }
 }
 
@@ -108,6 +112,9 @@ pub fn mcp(message: &Value, tools: Tools) -> Mcp {
             if tools.map {
                 list.push(crate::map::mcp_tool());
             }
+            if tools.progress {
+                list.extend(crate::progress::mcp_tools());
+            }
             answer(json!({ "tools": list }))
         }
         "tools/call" if let Some(tool) = called(&message["params"]["name"], tools) => {
@@ -131,6 +138,9 @@ fn called(name: &Value, tools: Tools) -> Option<&'static str> {
         crate::sibling::NAME if tools.conversation => Some(crate::sibling::NAME),
         crate::verify::NAME if tools.verify => Some(crate::verify::NAME),
         crate::map::NAME if tools.map => Some(crate::map::NAME),
+        crate::progress::PLAN if tools.progress => Some(crate::progress::PLAN),
+        crate::progress::STATUS if tools.progress => Some(crate::progress::STATUS),
+        crate::progress::WRAP_UP if tools.progress => Some(crate::progress::WRAP_UP),
         _ => None,
     }
 }
@@ -230,7 +240,8 @@ mod tests {
 
     #[test]
     fn the_mcp_server_lists_one_tool_and_hands_its_call_on_with_the_tool_call_id() {
-        let mcp = |m: &Value| mcp(m, Tools { helper: true, browse: false, conversation: false, verify: false, map: false });
+        let mcp =
+            |m: &Value| mcp(m, Tools { helper: true, browse: false, conversation: false, verify: false, map: false, progress: false });
         let init = json!({"method":"initialize","params":{"protocolVersion":"2025-11-25"},"jsonrpc":"2.0","id":0});
         let Mcp::Answer(a) = mcp(&init) else { panic!() };
         assert_eq!((a["id"].clone(), a["result"]["protocolVersion"].clone()), (json!(0), json!("2025-11-25")));
@@ -283,19 +294,30 @@ mod tests {
             }
             Mcp::Call { .. } => panic!(),
         };
-        assert_eq!(list(Tools { helper: true, browse: true, conversation: false, verify: false, map: false }), ["helper", "browse"]);
-        assert_eq!(list(Tools { helper: false, browse: true, conversation: false, verify: false, map: false }), ["browse"]);
-        assert_eq!(list(Tools { helper: false, browse: false, conversation: false, verify: true, map: true }), ["verify", "map"]);
+        assert_eq!(
+            list(Tools { helper: true, browse: true, conversation: false, verify: false, map: false, progress: false }),
+            ["helper", "browse"]
+        );
+        assert_eq!(
+            list(Tools { helper: false, browse: true, conversation: false, verify: false, map: false, progress: false }),
+            ["browse"]
+        );
+        assert_eq!(
+            list(Tools { helper: false, browse: false, conversation: false, verify: true, map: true, progress: false }),
+            ["verify", "map"]
+        );
         let map = json!({"method":"tools/call","params":{"name":"map","arguments":{}},"jsonrpc":"2.0","id":5});
         assert!(matches!(mcp(&map, Tools { verify: true, map: true, ..Tools::default() }), Mcp::Call { tool: crate::map::NAME, .. }));
         assert!(matches!(mcp(&map, Tools { verify: true, ..Tools::default() }), Mcp::Answer(_)), "a map that is not offered is refused");
         let call = json!({"method":"tools/call","params":{"name":"browse","arguments":{"url":"https://a.org"},
             "_meta":{"claudecode/toolUseId":"toolu_2"}},"jsonrpc":"2.0","id":4});
         assert_eq!(
-            mcp(&call, Tools { helper: false, browse: true, conversation: false, verify: false, map: false }),
+            mcp(&call, Tools { helper: false, browse: true, conversation: false, verify: false, map: false, progress: false }),
             Mcp::Call { tool: crate::browser::NAME, id: "toolu_2".into(), rpc: json!(4), input: json!({"url":"https://a.org"}) }
         );
-        let Mcp::Answer(refused) = mcp(&call, Tools { helper: true, browse: false, conversation: false, verify: false, map: false }) else {
+        let Mcp::Answer(refused) =
+            mcp(&call, Tools { helper: true, browse: false, conversation: false, verify: false, map: false, progress: false })
+        else {
             panic!("a tool not offered is never called")
         };
         assert_eq!(refused["error"]["code"], -32601);

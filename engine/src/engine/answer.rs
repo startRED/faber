@@ -972,6 +972,13 @@ mod tests {
     /// The reply of the seeded conversation and its row in the running list, once the screen's next tick has passed.
     async fn settled(engine: &Engine, id: &str) -> (Option<u64>, Option<bool>) {
         tokio::time::sleep(Duration::from_millis(80)).await;
+        // The screen's update waits 33 ms on a spawned task, which a busy machine may run late (macOS in CI, 2026-10-19):
+        // send what is pending now, so the running list read below is never one update behind.
+        engine.with(|c| {
+            if let Some(message) = c.pending.remove(id) {
+                c.emit_message(id, &message);
+            }
+        });
         let reply = engine.open(id).unwrap().messages.pop().unwrap();
         (reply.finished_at, engine.state().running.items.first().map(|i| i.settled))
     }

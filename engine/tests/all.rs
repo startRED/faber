@@ -5,6 +5,8 @@
 
 // Shared by the files below, which `use crate::support` and `use crate::loopback`.
 mod loopback;
+#[path = "prompt_history.rs"]
+mod prompt_history;
 mod support;
 
 #[path = "account.rs"]
@@ -17,6 +19,8 @@ mod auto_archive;
 mod budget;
 #[path = "cache_health.rs"]
 mod cache_health;
+#[path = "changes.rs"]
+mod changes;
 #[path = "claude_session.rs"]
 mod claude_session;
 #[path = "codex_session.rs"]
@@ -77,6 +81,8 @@ mod route;
 mod route_pacing;
 #[path = "running.rs"]
 mod running;
+#[path = "search.rs"]
+mod search;
 #[path = "session_resume.rs"]
 mod session_resume;
 #[path = "signals.rs"]
@@ -85,6 +91,8 @@ mod signals;
 mod simulation;
 #[path = "stuck.rs"]
 mod stuck;
+#[path = "tools.rs"]
+mod tools;
 #[path = "turn_usage.rs"]
 mod turn_usage;
 #[path = "usage_view.rs"]

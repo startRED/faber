@@ -848,3 +848,133 @@ async fn every_ai_out_of_quota_with_a_known_reset_waits_on_screen_instead_of_sto
     assert!(engine.state().running.items.iter().all(|r| r.conversation_id != id));
     engine.shutdown();
 }
+
+/// The agent calls one of Faber's own tools (`plan`, `status`, `wrap_up`) and gets Faber's answer back: its text and whether
+/// it was an error.
+async fn calls(pipe: &mut Pipe, request: &str, tool: &str, input: Value) -> (String, bool) {
+    let call = json!({ "jsonrpc": "2.0", "id": 7, "method": "tools/call", "params": { "name": tool, "arguments": input } });
+    pipe.say(json!({ "type": "control_request", "request_id": request,
+        "request": { "subtype": "mcp_message", "server_name": "faber", "message": call } }))
+        .await;
+    for _ in 0..300 {
+        let answer = pipe.lines.lock().unwrap().iter().find(|m| m["response"]["request_id"] == request).cloned();
+        if let Some(a) = answer {
+            let result = &a["response"]["response"]["mcp_response"]["result"];
+            return (result["content"][0]["text"].as_str().unwrap_or_default().to_string(), result["isError"] == true);
+        }
+        tokio::time::sleep(Duration::from_millis(10)).await;
+    }
+    panic!("Faber never answered the {tool} call");
+}
+
+/// Task 017: a project agent keeps its plan, says what it is doing now and closes with a box, through Faber's own tools.
+/// The plan belongs to the conversation (and the list's row counts it); the now line and the box belong to the reply.
+#[tokio::test]
+async fn the_agent_keeps_a_plan_says_what_it_does_now_and_closes_with_a_box() {
+    let (dir, project) = (tempfile::tempdir().unwrap(), support::work_folder());
+    let (engine, mut rx, mut pipe, id) = started(dir.path(), project.path()).await;
+    let steps =
+        json!({ "steps": [{ "text": "Fix the login page", "state": "in_progress" }, { "text": "Fix the rest", "state": "pending" }] });
+    let (said, error) = calls(&mut pipe, "p1", "plan", steps).await;
+    assert!(!error && said.contains("0 of 2"), "{said}");
+    let (said, _) = calls(&mut pipe, "s1", "status", json!({ "text": "Reading the login page" })).await;
+    assert!(!said.is_empty());
+    let c = until(&engine, &id, |c| c.messages.last().is_some_and(|m| m.now.is_some())).await;
+    assert_eq!(c.messages.last().unwrap().now.as_deref(), Some("Reading the login page"));
+    let row = engine.state().running.items.into_iter().find(|r| r.conversation_id == id).expect("it runs");
+    assert_eq!((row.now.as_deref(), row.plan.map(|p| (p.done, p.total))), (Some("Reading the login page"), Some((0, 2))));
+    let (said, _) = calls(&mut pipe, "p2", "plan", json!({ "advance": true })).await;
+    assert!(said.contains("1 of 2"), "{said}");
+    // A wrong call is answered as an error the agent can read, and changes nothing.
+    let (said, error) = calls(&mut pipe, "w0", "wrap_up", json!({ "ask": "Ship it?" })).await;
+    assert!(error && said.contains("recap"), "{said}");
+    let box_ =
+        json!({ "recap": "The login page works. The rest is not checked yet.", "ask": "Check the rest now?", "actions": ["Yes", "Later"] });
+    let (said, error) = calls(&mut pipe, "w1", "wrap_up", box_).await;
+    assert!(!error && said.contains("End your turn"), "{said}");
+    answers(&mut pipe, "Done for now.", true).await;
+    let c = until(&engine, &id, idle).await;
+    let plan = c.plan.clone().expect("the plan stays with the conversation");
+    let states: Vec<_> = plan.steps.iter().map(|s| format!("{:?}", s.state)).collect();
+    assert_eq!(states, ["Done", "Active"]);
+    let reply = c.messages.last().unwrap();
+    let wrap = reply.wrap_up.clone().expect("the reply keeps its box");
+    assert_eq!(
+        (wrap.ask.as_deref(), wrap.actions.clone(), wrap.done),
+        (Some("Check the rest now?"), vec!["Yes".to_string(), "Later".into()], false)
+    );
+    assert_eq!(engine.state().conversations.iter().find(|s| s.id == id).and_then(|s| s.plan.map(|p| (p.done, p.total))), Some((1, 2)));
+    let mut plans = 0;
+    while let Ok(e) = rx.try_recv() {
+        if matches!(e, AppEvent::Plan { .. }) {
+            plans += 1;
+        }
+    }
+    assert_eq!(plans, 2, "the screen hears of each change of the plan");
+    // Saved and read back the same.
+    assert_eq!(engine.open(&id).unwrap().plan, Some(plan));
+    engine.shutdown();
+}
+
+/// Task 017: under Keep going, a closing box that says the request is done ends it like the stop line, on the second time
+/// (the first is checked against the original request).
+#[tokio::test]
+async fn keep_going_ends_when_the_closing_box_says_the_request_is_done() {
+    let (dir, project) = (tempfile::tempdir().unwrap(), support::work_folder());
+    let (engine, mut rx, mut pipe, id) = started(dir.path(), project.path()).await;
+    engine.keep_going(&id, true).unwrap();
+    let done = json!({ "recap": "The login page and the rest are fixed. Both were checked.", "done": true });
+    calls(&mut pipe, "d1", "wrap_up", done.clone()).await;
+    answers_at(&mut pipe, "All fixed.", true, 0.1).await;
+    until_turns(&pipe, 2).await;
+    assert!(turns(&pipe)[1].contains("original request word for word"), "{:?}", turns(&pipe));
+    calls(&mut pipe, "d2", "wrap_up", done).await;
+    answers_at(&mut pipe, "Nothing is left.", true, 0.1).await;
+    let c = until(&engine, &id, |c| idle(c) && c.keep_going.is_none()).await;
+    assert_eq!(c.messages.last().unwrap().halt.as_deref(), Some("reason.keepGoing.done"));
+    tokio::time::sleep(Duration::from_millis(60)).await;
+    assert_eq!(turns(&pipe).len(), 2, "no turn after nothing was left");
+    assert_eq!(halts(&mut rx), vec!["reason.keepGoing.done".to_string()]);
+    engine.shutdown();
+}
+
+/// Task 017: under Keep going, a closing box with a question waits for the person; when nobody answers, Faber sends the
+/// recommended reply (the first button), says so to the agent, and the box shows which reply it chose.
+#[tokio::test]
+async fn keep_going_answers_a_closing_question_nobody_answered_with_its_first_reply() {
+    let (dir, project) = (tempfile::tempdir().unwrap(), support::work_folder());
+    let (engine, _rx, mut pipe, id) = started(dir.path(), project.path()).await;
+    engine.keep_going(&id, true).unwrap();
+    let ask = json!({ "recap": "The login page works. The docs are not written.", "ask": "Write the docs now?", "actions": ["Yes, write them", "Skip"] });
+    calls(&mut pipe, "q1", "wrap_up", ask).await;
+    answers_at(&mut pipe, "Login fixed.", true, 0.1).await;
+    let c = until(&engine, &id, |c| c.keep_going.as_ref().is_some_and(|k| k.waiting.is_some())).await;
+    assert_eq!(c.keep_going.unwrap().waiting.map(|w| w.why), Some("question".to_string()));
+    until_turns(&pipe, 2).await;
+    let sent = &turns(&pipe)[1];
+    assert!(sent.contains("did not answer your question in time") && sent.contains("\"Yes, write them\""), "{sent}");
+    let c = until(&engine, &id, |c| c.messages.len() >= 4).await;
+    let reply = c.messages.iter().rev().find(|m| m.wrap_up.is_some()).unwrap();
+    assert_eq!(reply.wrap_up.as_ref().unwrap().answered.as_deref(), Some("Yes, write them"));
+    assert_eq!(c.keep_going.unwrap().answered, 1);
+    engine.shutdown();
+}
+
+/// Task 017, review: Keep going turned on after a closing question already waits gives the person the same ten minutes
+/// before Faber answers it for them.
+#[tokio::test]
+async fn keep_going_turned_on_after_a_closing_question_still_waits_before_answering_it() {
+    let (dir, project) = (tempfile::tempdir().unwrap(), support::work_folder());
+    let (engine, _rx, mut pipe, id) = started(dir.path(), project.path()).await;
+    let ask = json!({ "recap": "The login page works.", "ask": "Write the docs now?", "actions": ["Yes", "Skip"] });
+    calls(&mut pipe, "q1", "wrap_up", ask).await;
+    answers_at(&mut pipe, "Login fixed.", true, 0.1).await;
+    until(&engine, &id, idle).await;
+    engine.keep_going(&id, true).unwrap();
+    let c = until(&engine, &id, |c| c.keep_going.as_ref().is_some_and(|k| k.waiting.is_some())).await;
+    assert_eq!(c.keep_going.unwrap().waiting.map(|w| w.why), Some("question".to_string()));
+    assert_eq!(turns(&pipe).len(), 1, "nothing is sent while the person may still answer");
+    until_turns(&pipe, 2).await;
+    assert!(turns(&pipe)[1].contains("\"Yes\""), "{:?}", turns(&pipe));
+    engine.shutdown();
+}

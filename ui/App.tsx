@@ -1,4 +1,4 @@
-import { createEffect, createMemo, createSignal, Match, on, onCleanup, onMount, Show, Switch } from 'solid-js';
+import { createEffect, createMemo, createResource, createSignal, Match, on, onCleanup, onMount, Show, Switch } from 'solid-js';
 import { Ambient } from './Ambient.tsx';
 import { Hole } from './Hole.tsx';
 import {
@@ -10,6 +10,7 @@ import {
   type AppEvent,
   type Conversation,
   type Experience,
+  type Plan,
   type Project,
   type RunningItem,
   type Settings as Saved,
@@ -21,6 +22,7 @@ import {
 import { inOrder, refreshed, saveAndApply, watchSystem, windowHidden } from './appearance.ts';
 import { useClock } from './clock.ts';
 import { Composer, type Draft } from './Composer.tsx';
+import { queuedDrafts, recoverQueuedDraft } from './unsent.ts';
 import { ContextMeter } from './Context.tsx';
 import { Empty } from './Empty.tsx';
 import { Find } from './Find.tsx';
@@ -42,6 +44,7 @@ import { createOpening, upsert } from './opening.ts';
 import { Running } from './Running.tsx';
 import { agentWide, openedAgent, showAgent, startMessage, toggleAgentWide } from './AgentChat.tsx';
 import { openedSite, showSite } from './Site.tsx';
+import { answered, btw, heardAsides, openedAside, showAside } from './QuickQuestion.tsx';
 import { agentSteps, helpersAtWork } from './worklog.ts';
 import { createAutoOpen, doneCards, openPlace, type Place, placeOfRunning, shownRunning, stopOffered, store, waitingKeys } from './running.ts';
 import { type Keep, type Section, Settings } from './Settings.tsx';
@@ -54,7 +57,6 @@ import { tutorialDue } from './tour.ts';
 import { Tutorial } from './Tutorial.tsx';
 import { Welcome } from './Welcome.tsx';
 import { UpdateStage } from './UpdateStage.tsx';
-import { Lightbox } from './Lightbox.tsx';
 import { WhatsNew } from './WhatsNew.tsx';
 import { mac, WindowControls } from './WindowControls.tsx';
 import { keepGoingWarning } from './keep-going.ts';
@@ -91,7 +93,53 @@ export function App(props: { initial: AppState; update?: UpdateStatus; inbox: { 
   // with another conversation's project.
   const [place, setPlace] = createSignal<Place>({ area: saved?.area ?? 'chat', projectId: saved?.projectId });
   const [current, setCurrent] = createSignal<Conversation>();
+  const [searchIndex, setSearchIndex] = createSignal<number>();
+  let searchFrame: number | undefined;
+  let searchMark: HTMLElement | undefined;
+  let searchTimer: ReturnType<typeof setTimeout> | undefined;
+  const clearSearch = () => {
+    if (searchFrame !== undefined) cancelAnimationFrame(searchFrame);
+    clearTimeout(searchTimer);
+    searchMark?.classList.remove('search-focus');
+    searchMark = undefined;
+    setSearchIndex(undefined);
+  };
+  onCleanup(clearSearch);
+  const [changesOpen, setChangesOpen] = createSignal<string>();
+  // A stable key avoids reading git on every streamed token; a turn ending reads the list again.
+  const changesKey = createMemo(() => {
+    const c = current();
+    if (c?.area !== 'project') return undefined;
+    const reply = c.messages.findLast((m) => m.role === 'assistant');
+    return `${c.id}\0${reply?.id ?? ''}\0${reply?.status ?? ''}`;
+  });
+  const [changes, { mutate: setChanges }] = createResource(changesKey, (key) => api.changes(key.split('\0')[0]!).catch(() => ({ files: [], incomplete: true, next: '' })).then((list) => ({ key, ...list })));
+  const [loadingMoreChanges, setLoadingMoreChanges] = createSignal(false);
+  const changeList = () => {
+    const list = changes();
+    return list && list.key === changesKey() ? list : undefined;
+  };
+  const moreChanges = async () => {
+    const list = changeList();
+    if (!list || loadingMoreChanges()) return;
+    setLoadingMoreChanges(true);
+    try {
+      const page = await api.changes(list.key.split('\0')[0]!, list.next);
+      if (list.key !== changesKey()) return;
+      const files = [...new Map([...list.files, ...page.files].map((file) => [file.path, file])).values()];
+      setChanges({ ...page, files, key: list.key });
+    } catch { /* Keep the partial list and its continuation available for another try. */ }
+    finally { setLoadingMoreChanges(false); }
+  };
   const [choice, setChoice] = createSignal<Choice>({ vendor: 'auto' });
+  const [commandsVersion, setCommandsVersion] = createSignal(0);
+  const commandVendor = () => {
+    const conversation = current();
+    const chosen = picked();
+    return chosen.vendor !== 'auto' ? chosen.vendor
+      : conversation?.messages.findLast((m) => m.role === 'assistant' && m.vendor)?.vendor
+        ?? (conversation?.choice?.vendor !== 'auto' ? conversation?.choice?.vendor : undefined);
+  };
   const [quotas, setQuotas] = createSignal(seedQuotas(props.initial.quotas));
   const clock = useClock();
   const [error, setError] = createSignal<string>();
@@ -142,6 +190,7 @@ export function App(props: { initial: AppState; update?: UpdateStatus; inbox: { 
   // The choices of step 2 while the person is back at step 1, so going back and forward loses nothing.
   const [kept, setKept] = createSignal<{ appearance: Appearance; experience?: Experience; name: string }>();
   const [from, setFrom] = createSignal(0);
+  const [until, setUntil] = createSignal<number>();
   // True from the moment the user picks a conversation until its snapshot is in: the screen still shows the old
   // conversation then, so nothing may be sent or warmed for either.
   const [loading, setLoading] = createSignal(false);
@@ -171,6 +220,24 @@ export function App(props: { initial: AppState; update?: UpdateStatus; inbox: { 
     held.delete(id);
   };
   let fill: ((text: string) => void) | undefined;
+  const [queuedNotice, setQueuedNotice] = createSignal<string>();
+  const showRecoveredQueue = (id: string, text: string) => {
+    setQueuedNotice(id);
+    if (!loading() && place().id === id) fill?.(text);
+  };
+  // Queue edits remain recoverable after Settings, a thread change or a restart, without keeping their rows alive.
+  const draftQueue = createMemo(() => current()?.queued);
+  const draftConversation = createMemo(() => current()?.id);
+  createEffect(on([draftQueue, draftConversation, loading], () => {
+    const c = current();
+    if (!c || loading() || place().id !== c.id) return;
+    const ids = new Set(c.queued?.map((q) => q.id));
+    for (const id of queuedDrafts(c.id)) {
+      if (ids.has(id)) continue;
+      const text = recoverQueuedDraft(c.id, id);
+      if (text !== undefined) showRecoveredQueue(c.id, text);
+    }
+  }));
   let stick = true;
   // One observer keeps the tail visible when the thread box or the column inside it changes size.
   let tail: ResizeObserver | undefined;
@@ -297,6 +364,8 @@ export function App(props: { initial: AppState; update?: UpdateStatus; inbox: { 
   const closeColumn = () => {
     showAgent(undefined);
     showSite(undefined);
+    showAside(undefined);
+    setChangesOpen(undefined);
     if (!columnOpen()) return;
     // Closed while it was waiting for the typing to stop, or after it: the questions seen stay seen.
     autoOpen.seen(waitingKeys(items()));
@@ -333,9 +402,16 @@ export function App(props: { initial: AppState; update?: UpdateStatus; inbox: { 
     const open = openedSite();
     return open && current()?.id === open.conversationId ? open : undefined;
   };
-  createEffect(on(openedAgent, (open) => open && showSite(undefined), { defer: true }));
-  createEffect(on(openedSite, (open) => open && showAgent(undefined), { defer: true }));
-  createEffect(on(() => openedAgent() ?? openedSite(), (open) => {
+  // The quick question on the side (R250), of the conversation on screen, or of none yet (it says to ask once it has started).
+  const sideAside = () => {
+    const open = openedAside();
+    return open && current()?.id === open.conversationId ? open : undefined;
+  };
+  const sideChanges = () => changesOpen() && changesOpen() === current()?.id ? changesOpen() : undefined;
+  createEffect(on(openedAgent, (open) => open && (showSite(undefined), showAside(undefined), setChangesOpen(undefined)), { defer: true }));
+  createEffect(on(openedSite, (open) => open && (showAgent(undefined), showAside(undefined), setChangesOpen(undefined)), { defer: true }));
+  createEffect(on(openedAside, (open) => open && (showAgent(undefined), showSite(undefined), setChangesOpen(undefined)), { defer: true }));
+  createEffect(on(() => openedAgent() ?? openedSite() ?? openedAside() ?? (changesOpen() ? { conversationId: changesOpen() } : undefined), (open) => {
     if (!open) return;
     // One of another conversation is never shown (`sideAgent`); it goes when the conversation on screen changes.
     if (current()?.id !== open.conversationId) return;
@@ -350,6 +426,8 @@ export function App(props: { initial: AppState; update?: UpdateStatus; inbox: { 
   createEffect(on(() => current()?.id, (id) => {
     if (openedAgent() && openedAgent()!.conversationId !== id) showAgent(undefined);
     if (openedSite() && openedSite()!.conversationId !== id) showSite(undefined);
+    if (openedAside() && openedAside()!.conversationId !== id) showAside(undefined);
+    if (changesOpen() !== id) setChangesOpen(undefined);
   }, { defer: true }));
   // The window changes width while the column is open: it becomes a modal dialog or stops being one, and its element is
   // drawn again, so focus goes where the new state wants it.
@@ -378,8 +456,24 @@ export function App(props: { initial: AppState; update?: UpdateStatus; inbox: { 
     consider();
   });
 
+  // A page whose messages fold into a run (task 018) may not fill the window, and a list that cannot scroll never asks for
+  // the page above it: it takes pages until it scrolls or nothing is left.
+  const fillPage = (): void => {
+    requestAnimationFrame(() => {
+      if (!thread || from() === 0 || thread.scrollHeight > thread.clientHeight) return;
+      setFrom((f) => Math.max(0, f - PAGE));
+      fillPage();
+    });
+  };
+
+  // A plan that changed while its conversation was opening: the snapshot may be older (task 017).
+  const planHeard: { plan?: { id: string; plan?: Plan } } = {};
   // The conversation the user is in: opening it asks the engine for a snapshot and the answer takes a while.
-  const go = async (next: Place) => {
+  const go = async (next: Place, messageIndex?: number) => {
+    clearSearch();
+    setUntil(undefined);
+    setFrom(Math.max(0, (current()?.messages.length ?? 0) - PAGE));
+    planHeard.plan = undefined;
     setPlace(next);
     remember('faber.place', next);
     const token = opening.begin(next.id);
@@ -397,8 +491,27 @@ export function App(props: { initial: AppState; update?: UpdateStatus; inbox: { 
     const done = opening.finish(token, snapshot);
     if (done.stale) return;
     setLoading(false);
-    setFrom(Math.max(0, (done.conversation?.messages.length ?? 0) - PAGE));
-    setCurrent(done.conversation);
+    const target = messageIndex !== undefined && messageIndex >= 0 && messageIndex < (done.conversation?.messages.length ?? 0) ? messageIndex : undefined;
+    stick = target === undefined;
+    setUntil(target === undefined ? undefined : Math.min(done.conversation!.messages.length, target + PAGE));
+    setFrom(Math.min(target ?? Infinity, Math.max(0, (done.conversation?.messages.length ?? 0) - PAGE)));
+    fillPage();
+    const heard = planHeard.plan as { id: string; plan?: Plan } | undefined;
+    const plan = heard?.id === done.conversation?.id ? heard : undefined;
+    setCurrent(done.conversation && plan ? { ...done.conversation, plan: plan.plan } : done.conversation);
+    setSearchIndex(target);
+    if (target !== undefined) searchFrame = requestAnimationFrame(() => {
+      searchMark = thread?.querySelector<HTMLElement>(`[data-message-index="${target}"]`) ?? undefined;
+      if (!searchMark) return;
+      searchMark.classList.add('search-focus');
+      searchMark.focus({ preventScroll: true });
+      const smooth = searchMark.closest<HTMLElement>('[data-motion]')?.dataset.motion === 'full' && !matchMedia('(prefers-reduced-motion: reduce)').matches;
+      searchMark.scrollIntoView({ block: 'center', behavior: smooth ? 'smooth' : 'instant' });
+      lastScrollTop = thread?.scrollTop ?? 0;
+      searchTimer = setTimeout(() => searchMark?.classList.remove('search-focus'), 1800);
+      // Consume the reveal in App: the next automatic turn can recreate its RunBlock.
+      setSearchIndex(undefined);
+    });
     setChoice(next.id ? recall<Choice>(`faber.choice.${next.id}`, done.conversation?.choice ?? { vendor: 'auto' }) : { vendor: 'auto' });
     if (done.conversation) queueMicrotask(() => restoreRejected(done.conversation!.id, done.conversation!.messages.at(-1)));
   };
@@ -444,6 +557,9 @@ export function App(props: { initial: AppState; update?: UpdateStatus; inbox: { 
     // The restored conversation is already opening (`go` above), so what the inbox held since the page started is kept for
     // its snapshot and nothing is lost between the two.
     props.inbox.take((e) => {
+      if (e.type === 'commands' && (e.conversationId === current()?.id || !commandVendor() || e.vendor === commandVendor())) {
+        setCommandsVersion((n) => n + 1);
+      }
       if (e.type === 'list') void refresh();
       if (e.type === 'usage') setState((s) => ({ ...s, usage: e.vendors }));
       if (e.type === 'message') restoreRejected(e.conversationId, e.message.role === 'assistant' ? e.message : undefined);
@@ -451,11 +567,16 @@ export function App(props: { initial: AppState; update?: UpdateStatus; inbox: { 
       if (e.type === 'message' && opening.hear(e.conversationId, e.message) === 'apply') {
         setCurrent((c) => (c?.id === e.conversationId ? upsert(c, e.message) : c));
       }
+      if (e.type === 'asides') heardAsides(e.conversationId, e.asides);
       if (e.type === 'queue') {
         setCurrent((c) => (c?.id === e.conversationId ? { ...c, queued: e.queued } : c));
       }
       if (e.type === 'context') {
         setCurrent((c) => (c?.id === e.conversationId ? { ...c, context: e.context ?? undefined } : c));
+      }
+      if (e.type === 'plan') {
+        if (opening.id === e.conversationId) planHeard.plan = { id: e.conversationId, plan: e.plan ?? undefined };
+        setCurrent((c) => (c?.id === e.conversationId ? { ...c, plan: e.plan ?? undefined } : c));
       }
     });
     // Any key in a text field holds the running column back for a moment, whether or not the text changed (the arrows
@@ -560,9 +681,15 @@ export function App(props: { initial: AppState; update?: UpdateStatus; inbox: { 
   );
 
   const onScroll = (el: HTMLDivElement) => {
-    if (el.scrollHeight - el.scrollTop - el.clientHeight < 40) stick = true;
+    const below = el.scrollHeight - el.scrollTop - el.clientHeight;
+    const end = until();
+    if (below < 40 && (end === undefined || end >= (current()?.messages.length ?? 0))) stick = true;
     else if (el.scrollTop < lastScrollTop - 1) stick = false;
     lastScrollTop = el.scrollTop;
+    if (below < 400 && end !== undefined) {
+      const next = end + PAGE;
+      setUntil(next < (current()?.messages.length ?? 0) ? next : undefined);
+    }
     if (el.scrollTop < 400 && from() > 0) {
       // The earlier messages appear above; keep what the user is reading in place.
       const before = el.scrollHeight;
@@ -586,6 +713,16 @@ export function App(props: { initial: AppState; update?: UpdateStatus; inbox: { 
   const target = () => ({ area: area(), projectId: area() === 'project' ? projectId() : undefined });
 
   const send = async (draft: Draft) => {
+    setQueuedNotice(undefined);
+    // `/btw <question>` asks on the side (R250): it opens the quick question with it, and the conversation never sees it.
+    const side = draft.images.length || draft.files.length ? undefined : btw(draft.text);
+    if (side !== undefined) {
+      showAside({ conversationId: current()?.id, question: answered(current()) ? side : undefined });
+      // Before the agent has answered there is nothing to ask about: the words go back in the box, and the tab says when.
+      // (after the box has emptied itself for the send).
+      if (!answered(current())) queueMicrotask(() => restore?.(draft));
+      return;
+    }
     // The place is taken once: the message, and the conversation it opens, belong to the place it was written in.
     const at = place();
     const chosen = picked();
@@ -595,6 +732,9 @@ export function App(props: { initial: AppState; update?: UpdateStatus; inbox: { 
     const alongside = engineBusy();
     let accepted = false;
     setError(undefined);
+    clearSearch();
+    setUntil(undefined);
+    setFrom(Math.max(0, (current()?.messages.length ?? 0) - PAGE));
     stick = true;
     try {
       const id = await api.send({
@@ -698,6 +838,9 @@ export function App(props: { initial: AppState; update?: UpdateStatus; inbox: { 
   // What the composer shows: Stop ends the work; once the agent finished (only the CLI's turn is closing) it reads Send, and what is
   // written then waits in the queue like any message written while the engine is busy.
   const busy = () => stopOffered(engineBusy(), every(), current()?.id);
+  // As the running column's head button (R250): any open conversation; before its first answer the tab says to ask once the
+  // agent has answered. A boolean memo, so streaming updates never touch the lists that read it.
+  const canAside = createMemo(() => !!current());
   // "Send now" works while an answer streams (the engine hands the message to its turn, or puts it first); Faber's own checks
   // keep it hidden, as Stop is what ends them.
   const checking = () => engineBusy() && current()?.messages.at(-1)?.status !== 'streaming';
@@ -804,6 +947,14 @@ export function App(props: { initial: AppState; update?: UpdateStatus; inbox: { 
           if (!loading() && picked().vendor === 'auto') void api.routeDraft({ conversationId: current()?.id, ...target(), choice: picked() }, text);
         }}
         onReady={(f) => (fill = f)}
+        onHistory={(signal) => api.promptHistory(current()?.id, area(), area() === 'project' ? projectId() : undefined, signal)}
+        onMention={current() || (area() === 'project' && projectId()) ? (query) => api.mentions(current()?.id, area() === 'project' ? projectId() : undefined, query) : undefined}
+        onCommands={() => {
+          const vendor = commandVendor();
+          return api.commands(current()?.id, vendor).then((list) => vendor ? list.filter((c) => c.vendor === vendor) : list);
+        }}
+        commandsVersion={commandsVersion()}
+        canAside={canAside()}
         onRestore={(f) => {
           restore = f;
           queueMicrotask(() => current() && restoreRejected(current()!.id, current()!.messages.at(-1)));
@@ -834,9 +985,20 @@ export function App(props: { initial: AppState; update?: UpdateStatus; inbox: { 
       onClose={closeColumn}
       agent={sideAgent()}
       site={sideSite()}
+      aside={sideAside() && { conversation: current(), options: options() }}
+      changes={sideChanges() ? { id: sideChanges()!, files: changeList()?.files ?? [], incomplete: changeList()?.incomplete ?? false, loading: changes.loading, loadingMore: loadingMoreChanges(), onMore: () => void moreChanges() } : undefined}
+      onChanges={changeList()?.files.length || changeList()?.incomplete ? () => {
+        showAgent(undefined);
+        showSite(undefined);
+        showAside(undefined);
+        setChangesOpen(current()?.id);
+      } : undefined}
+      onAside={canAside() ? () => showAside({ conversationId: current()?.id }) : undefined}
       onBack={() => {
         showAgent(undefined);
         showSite(undefined);
+        showAside(undefined);
+        setChangesOpen(undefined);
         // The back button is gone with the subagent or the page: focus stays in the column, on the list's first control.
         queueMicrotask(() => column?.querySelector<HTMLElement>('button')?.focus());
       }}
@@ -1005,6 +1167,13 @@ export function App(props: { initial: AppState; update?: UpdateStatus; inbox: { 
                 onNewIn={(id) => (closeSide(false), void fresh({ area: 'project', projectId: id }))}
                 onAddProject={() => void addProject().catch(fail)}
                 onOpen={openSummary}
+                onMessage={(hit) => {
+                  const c = state().conversations.find((c) => c.id === hit.conversationId);
+                  if (!c) return;
+                  closeSettings();
+                  closeSide(false);
+                  void go(openPlace(place(), c), hit.messageIndex);
+                }}
                 onRemove={remove}
                 onSettings={(at) => (closeSide(false), openSettings(at))}
                 onError={(err) => setSaveError(failureText(err))}
@@ -1140,12 +1309,17 @@ ${copy().path}`}>
                                     busy={checking()}
                                     weighing={items().some((i) => i.conversationId === c().id && i.weighing)}
                                     onError={fail}
+                                    onQueuedRecovered={showRecoveredQueue}
                                     usage={state().usage ?? []}
                                     from={from()}
+                                    until={until()}
+                                    searchIndex={searchIndex()}
                                     conversationId={c().id}
                                     options={options()}
                                     choice={picked()}
                                     onBranch={(messageId, text, chosen) => void branch(messageId, text, chosen ?? picked())}
+                                    plan={c().plan}
+                                    onReply={(text) => void send({ text, images: [], files: [] })}
                                   />
                                 )}
                               </Show>
@@ -1176,7 +1350,10 @@ ${copy().path}`}>
                         </Show>
                       </div>
                       <Show when={!newChat() && !needsProject() && state().vendors.length > 0}>
-                        <div class="dock" inert={trapped()}>
+                        <div class="dock" inert={trapped()} onInput={() => setQueuedNotice(undefined)}>
+                          <Show when={queuedNotice() && queuedNotice() === current()?.id}>
+                            <p class="note" role="status">{t('queue.editRecovered')}</p>
+                          </Show>
                           <KeepGoingNote
                             warning={keepGoingWarn()}
                             on={!!keepGoing()}
@@ -1234,7 +1411,6 @@ ${copy().path}`}>
       <Show when={notesOpen()}>
         <WhatsNew version={state().version} notes={notes()} onClose={closeNotes} />
       </Show>
-      <Lightbox />
       <Palette
         enabled={!step() && !setupOpen() && !tourOpen() && !notesOpen() && !startScreen()}
         conversations={state().conversations}
@@ -1262,7 +1438,7 @@ function NoAiOrProject(props: {
       <Match when={props.vendors === 0}>
         <Empty
           title={t('empty.noAiTitle')}
-          line={t('empty.noAiBody')}
+          line={t(props.area === 'project' ? 'empty.noAiProjectsBody' : 'empty.noAiBody')}
           button={{ label: t('empty.noAiButton'), onClick: props.onConnect, restore: 'connect' }}
         />
       </Match>

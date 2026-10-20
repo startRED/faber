@@ -374,6 +374,7 @@ fn seed(dir: &Path, long: bool) -> Conversation {
     answer.model = Some("claude-opus-5-5".into());
     answer.reason = Some("reason.route.chat.hard".into());
     let c = Conversation {
+        commands: BTreeMap::new(),
         working_folder: None,
         copy: None,
         choice: None,
@@ -397,6 +398,7 @@ fn seed(dir: &Path, long: bool) -> Conversation {
         keep_going: None,
         archived_at: None,
         ended: None,
+        plan: None,
         stopped: false,
         context: None,
         reported: (None, None),

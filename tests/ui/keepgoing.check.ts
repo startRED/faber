@@ -143,8 +143,10 @@ check('keep going: the newest reply says what happened while the person was away
     const lines = [...root.querySelectorAll('.woke')].map((el) => el.textContent?.trim());
     deepEqual(lines, [
       t('away.summary', { title: t('away.title', { time: t('time.hours', { n: 3 }) }), parts: `${t('away.turns', { n: 14 })}, ${t('away.switches', { n: 1 })}, ${t('away.answered', { n: 2 })}` }),
-      t('away.chose', { question: 'Which database?', answer: 'SQLite' }),
+      t('answers.title', { n: 1 }),
     ]);
+    // The question Faber answered is a row of one card, with the answer it chose.
+    deepEqual([...root.querySelectorAll('.answers li')].map((li) => [li.querySelector('.q')!.textContent, li.querySelector('.a')!.textContent]), [['Which database?', 'SQLite']]);
     ok(root.querySelector('.ai .woke.away')!.compareDocumentPosition(root.querySelector('.ai .md')!) & Node.DOCUMENT_POSITION_FOLLOWING, 'the summary sits above the answer');
   } finally {
     dispose();

@@ -33,6 +33,7 @@ pub fn terminal_reason(raw: &str) -> &'static str {
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum EngineEvent {
+    Commands(Vec<crate::model::Command>),
     Started {
         session_id: String,
         model: String,
@@ -89,6 +90,13 @@ pub enum EngineEvent {
     /// The agent asked for the project's map (`crate::map`). The engine answers with `Session::helper_reply`.
     MapCall {
         id: String,
+        input: Value,
+    },
+    /// The agent called `plan`, `status` or `wrap_up` (`crate::progress`; `tool` is the name both drivers give it). The engine
+    /// writes it down and answers at once with `Session::helper_reply`.
+    ProgressCall {
+        id: String,
+        tool: &'static str,
         input: Value,
     },
     /// The agent called Faber's helper tool (R161, `crate::helper`): `id` is that tool call. The CLI waits for the answer,

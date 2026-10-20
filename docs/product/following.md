@@ -154,6 +154,28 @@ frames) and checked against today's code. It fills the steps of R161 and never b
    Pointer-level actions, and the outline of a changed part and a named pointer per subagent while a screen is built, stay
    for later (Erick, 2026-10-18); the app card already opens the app, which its dev server reloads by itself.
 
+10. **A quick question on the side (built, R250; product map "Quick question on the side").** While the agent works, the person can ask
+    "how is it going?" or "why that file?" without stopping it or waiting in its queue (the queue only empties when a
+    turn ends). The running column gets a "Quick question" tab next to the running list, the same column as the
+    side chat of step 3, so there is no new pane; typing `/btw <question>` in the conversation's box opens it with the
+    question in.
+    - **Context:** a copy of the conversation as it stands. Claude Code resumes the conversation's own CLI session with
+      `--fork-session`, so the main session is never touched and its cache is shared; Codex, which has no fork, gets a
+      new side request with Faber's own record of the conversation (its last messages and the steps under way). As built,
+      Codex answers from that record with no shell: on Windows its shell cannot start under Faber's read-only profile.
+    - **Read only:** it may read, search and list files in the working folder and nothing else: no edits, commands,
+      browser, helpers or MCP servers. Claude Code runs with only Read, Grep and Glob allowed; Codex with its read-only
+      sandbox. An answer that needs action ends with "Send to the agent", which puts the text in the main box.
+    - **Nothing goes back:** the side answers never enter the main conversation or its CLI session. They live while
+      the tab is open and stay in Faber's data for that conversation until the next turn ends, then go.
+    - **Cheap and quiet:** one CLI process per question, gone when it answers, on the same model at low effort (the
+      person can change it in the tab's own picker); the quota bar counts it like any turn. Nothing runs before a
+      question, and a game in front changes nothing (no window, no focus).
+    - **Edges:** a conversation with no turn yet has nothing to copy, so the tab says so; a quota stop shows the usual
+      quota message; a 720 px window shows the tab over the running list with a back arrow, as the side chat does.
+    - Check: `tests/ui/quick-question.check.ts` asks while a recorded turn runs and proves the main turn, its queue and
+      its CLI session did not change; `engine/tests/` proves the fork and the read-only tool list.
+
 **Across all of them:**
 
 - **Quiet during games.** Built on Windows (R191): the tray's check of a game in front is one the screen asks

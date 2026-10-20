@@ -38,6 +38,10 @@ pub struct ClaudeLaunch {
     pub conversations: bool,
     /// Faber's checks (`crate::verify`): a project's agent in full access, where the shell gives a runner.
     pub verify: bool,
+    /// The plan, the status and the closing box (`crate::progress`): a project's own agent.
+    pub progress: bool,
+    /// The skills installed from Faber's catalog (`crate::tools`), for a project's agent outside Isolated.
+    pub tools: crate::tools::Delivery,
 }
 
 /// The tools Faber's MCP server holds for a launch: the helper for a project's own agent, the browser where it is offered.
@@ -49,7 +53,20 @@ fn mcp_tools(launch: &ClaudeLaunch) -> crate::helper::Tools {
         verify: launch.verify,
         // The map only reads files: it goes where the checks go.
         map: launch.verify,
+        progress: launch.progress,
     }
+}
+
+/// Where the catalog's skills go (`crate::tools`): a project's own agent, in every mode but Isolated, which turns every
+/// customization off. Chat keeps its lean tool list, which has no skill tool.
+pub fn offers_tools(area: Area, permissions: Permissions) -> bool {
+    area == Area::Project && permissions != Permissions::Isolated
+}
+
+/// Where the catalog's tool servers go: a project's agent in Full access only, as Faber's own browser (R195). A server runs
+/// outside the CLI's sandbox, with the network on and the whole disk in reach, so the modes that ask never get one.
+pub fn offers_servers(area: Area, permissions: Permissions) -> bool {
+    area == Area::Project && permissions == Permissions::FullAccess
 }
 
 /// Flags that only newer CLIs take, read once from `claude --help` (`from_help`). A flag the CLI does not list is never
@@ -62,6 +79,8 @@ pub struct ClaudeFlags {
     pub permission_prompts: bool,
     /// `auto` among the `--permission-mode` choices: the CLI's own reviewer approves the safe actions (R140).
     pub auto_mode: bool,
+    /// `--plugin-dir <path>`: a plugin loaded from a folder for this session only (2.1.302), how the catalog's skills arrive.
+    pub plugin_dir: bool,
 }
 
 impl ClaudeFlags {
@@ -92,6 +111,7 @@ impl ClaudeFlags {
             autocompact: declares("--autocompact"),
             permission_prompts: declares("--permission-prompts"),
             auto_mode: modes.contains("\"auto\""),
+            plugin_dir: declares("--plugin-dir"),
         }
     }
 }
@@ -99,6 +119,14 @@ impl ClaudeFlags {
 // Chat stays lean: a fixed list of built-in tools. Ask keeps Chat restricted with no MCP servers; Isolated also drops every
 // startup customization; full access leaves the person's own integrations on.
 const CHAT_TOOLS: &str = "Read,Write,Edit,Glob,Grep,Bash,WebSearch,WebFetch,AskUserQuestion";
+
+/// A quick question on the side (R250) reads, searches and lists, and nothing else.
+pub const ASIDE_TOOLS: &str = "Read,Grep,Glob";
+
+/// What a fork of the conversation's session is told for a quick question on the side, on top of what it already knows.
+pub const ASIDE_FORKED: &str = "This is a quick side question from the person about this conversation, asked while the main agent \
+keeps working. Answer it briefly and plainly. You can only read, search and list files in the working folder: you cannot edit \
+files, run commands or browse. If the answer needs an action, say so in one line; the person can send it to the main agent.";
 
 /// The empty integration loadout of a side question: no MCP servers, no settings files, no hooks.
 fn claude_exposure_args() -> Vec<String> {
@@ -230,7 +258,25 @@ pub fn claude_args(launch: &ClaudeLaunch) -> Vec<String> {
     // `--permission-prompts none` did, except a question the agent asks the person (`AskUserQuestion`), a card in every mode.
     args.extend(["--permission-prompt-tool".into(), "stdio".into()]);
     let env = |name: &str| std::env::var(name).ok();
-    if let Some(instructions) = &launch.instructions {
+    let aside = launch.helper == crate::helper::Helper::Aside;
+    if aside {
+        // A quick question on the side (R250): only reads in the working folder, none of the person's integrations, and no
+        // history: a fork of the conversation's session leaves that session as it was. Every read asks, so the driver checks it with
+        // the isolated mode's working-folder policy (secrets, links leading out), whatever mode the conversation is in.
+        let settings = json!({ "disableAllHooks": true,
+            "permissions": { "blockReadsOutsideWorkingDirectories": true, "deny": tool_deny(&env), "ask": ["Read(//**)", "*"] } });
+        for a in
+            ["--tools", ASIDE_TOOLS, "--strict-mcp-config", "--mcp-config", "{\"mcpServers\":{}}", "--safe-mode", "--setting-sources", ""]
+        {
+            args.push(a.into());
+        }
+        args.extend(["--permission-mode".into(), "bypassPermissions".into(), "--settings".into(), settings.to_string()]);
+        args.extend(["--append-system-prompt".into(), launch.instructions.clone().unwrap_or_else(|| ASIDE_FORKED.into())]);
+        args.push("--no-session-persistence".into());
+        if launch.resume.is_some() {
+            args.push("--fork-session".into());
+        }
+    } else if let Some(instructions) = &launch.instructions {
         // Whatever mode the person chose, Faber's own requests run without the person's hooks, settings files, MCP servers and
         // plugins: a hook that fired on every background routing turn would run the person's commands unasked.
         for a in ["--system-prompt", instructions, "--tools", "", "--no-session-persistence"] {
@@ -300,12 +346,28 @@ pub fn claude_args(launch: &ClaudeLaunch) -> Vec<String> {
             args.push(settings.to_string());
         }
     }
-    if launch.instructions.is_none() {
+    if launch.instructions.is_none() && !aside {
         args.push("--append-system-prompt".into());
         args.push(persona(&PersonaInput { name: launch.user_name.as_deref() }));
         // R161: Faber's own MCP server, answered by this driver over stdio, holds the helper tool and the browser.
-        if mcp_tools(launch).any() {
+        // The catalog's servers join it in the same config, where Faber offers its tools.
+        let servers = if offers_servers(launch.area, launch.permissions) { launch.tools.servers.as_slice() } else { &[] };
+        if !servers.is_empty() {
+            let mut config: Value =
+                serde_json::from_str(if mcp_tools(launch).any() { crate::helper::CLAUDE_MCP_CONFIG } else { r#"{"mcpServers":{}}"# })
+                    .unwrap_or_default();
+            for s in servers {
+                config["mcpServers"][&s.name] = json!({ "type": "stdio", "command": s.command, "args": s.args, "env": s.env });
+            }
+            args.extend(["--mcp-config".into(), config.to_string()]);
+        } else if mcp_tools(launch).any() {
             args.extend(["--mcp-config".into(), crate::helper::CLAUDE_MCP_CONFIG.into()]);
+        }
+        // The catalog's skills, as one plugin from Faber's store, where Faber offers them.
+        if let Some(plugin) =
+            launch.tools.plugin.as_ref().filter(|_| offers_tools(launch.area, launch.permissions) && launch.flags.plugin_dir)
+        {
+            args.extend(["--plugin-dir".into(), plugin.to_string_lossy().into_owned()]);
         }
         // The CLI echoes each line it is given when it takes it in, so a line the person wrote while it works is known to be
         // read, and by which turn. A helper keeps no history.
@@ -315,7 +377,7 @@ pub fn claude_args(launch: &ClaudeLaunch) -> Vec<String> {
         }
     }
     // Side questions keep the CLI default, and an older CLI that does not list the flag would refuse to start with it.
-    let compacts = launch.flags.autocompact && launch.instructions.is_none();
+    let compacts = launch.flags.autocompact && launch.instructions.is_none() && !aside;
     if let Some(window) = compacts.then(|| launch.model.as_deref().and_then(autocompact_window)).flatten() {
         args.extend(["--autocompact".into(), window]);
     }
@@ -347,10 +409,30 @@ fn s(v: &Value) -> String {
 /// defensively; lines that carry nothing the app shows give no events.
 pub fn parse_claude_message(msg: &Value) -> Vec<EngineEvent> {
     match msg["type"].as_str().unwrap_or_default() {
-        "system" if msg["subtype"] == "init" => match (msg["session_id"].as_str(), msg["model"].as_str()) {
-            (Some(id), Some(model)) => vec![EngineEvent::Started { session_id: id.into(), model: model.into() }],
-            _ => vec![EngineEvent::Error { message: "Claude Code started without a session id.".into(), fatal: false }],
-        },
+        "system" if msg["subtype"] == "init" => {
+            let mut events = match (msg["session_id"].as_str(), msg["model"].as_str()) {
+                (Some(id), Some(model)) => vec![EngineEvent::Started { session_id: id.into(), model: model.into() }],
+                _ => vec![EngineEvent::Error { message: "Claude Code started without a session id.".into(), fatal: false }],
+            };
+            if let Some(names) = msg["slash_commands"].as_array() {
+                // Other built-ins change Faber's controls, need the terminal, manage the CLI or can spend money.
+                const ALLOWED: &[&str] = &["compact", "context", "init", "review", "security-review", "recap", "insights"];
+                let skills = msg["skills"].as_array();
+                let terminal = msg["terminal_slash_commands"].as_array();
+                let commands = names
+                    .iter()
+                    .filter_map(|name| {
+                        let name = name.as_str()?;
+                        let skill = skills.is_some_and(|skills| skills.iter().any(|s| s == name));
+                        (!name.starts_with('_')
+                            && (skill || (ALLOWED.contains(&name) && !terminal.is_some_and(|t| t.iter().any(|s| s == name)))))
+                        .then(|| crate::model::Command { name: name.into(), skill, note: None })
+                    })
+                    .collect();
+                events.push(EngineEvent::Commands(commands));
+            }
+            events
+        }
         // A subagent's own words stream too (`parent_tool_use_id` names the agent call that started it): they are its work, never
         // the answer, so only its tool calls are shown, inside its step.
         "stream_event" if !msg["parent_tool_use_id"].is_null() => vec![],
@@ -398,6 +480,7 @@ pub fn parse_claude_message(msg: &Value) -> Vec<EngineEvent> {
                         Some(crate::sibling::CLAUDE_NAME) => crate::sibling::TOOL.to_string(),
                         Some(crate::verify::CLAUDE_NAME) => crate::verify::TOOL.to_string(),
                         Some(crate::map::CLAUDE_NAME) => crate::map::TOOL.to_string(),
+                        Some(name) if let Some(tool) = crate::progress::claude_tool(name) => tool.to_string(),
                         _ => s(&c["name"]),
                     };
                     EngineEvent::Tool { id: s(&c["id"]), name, input: c["input"].clone(), parent: parent.clone() }
@@ -630,6 +713,7 @@ pub fn start_claude(opts: ClaudeOptions, on_event: EventSink) -> Session {
                                             crate::sibling::NAME => EngineEvent::ConversationCall { id, input },
                                             crate::verify::NAME => EngineEvent::VerifyCall { id, input },
                                             crate::map::NAME => EngineEvent::MapCall { id, input },
+                                            name if let Some(tool) = crate::progress::tool_of(name) => EngineEvent::ProgressCall { id, tool, input },
                                             _ => EngineEvent::HelperCall { id, input },
                                         });
                                     }
@@ -662,6 +746,7 @@ pub fn start_claude(opts: ClaudeOptions, on_event: EventSink) -> Session {
                                         || (tool == crate::browser::CLAUDE_NAME && opts.launch.browse)
                                         || (tool == crate::sibling::CLAUDE_NAME && opts.launch.conversations)
                                         || ((tool == crate::verify::CLAUDE_NAME || tool == crate::map::CLAUDE_NAME) && opts.launch.verify)
+                                        || (crate::progress::claude_tool(tool).is_some() && opts.launch.progress)
                                     {
                                         let msg = json!({ "type": "control_response", "response": { "subtype": "success", "request_id": request_id,
                                             "response": { "behavior": "allow", "updatedInput": input } } });

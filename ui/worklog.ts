@@ -115,6 +115,9 @@ export const toolLine = (tool: ToolUse): string => {
 
 /** A piece of work the agent handed on: a subagent of its own CLI (`Agent`, `Task`), or a helper from the other AI (`Helper`,
  * Faber's own tool, R161). */
+/** A call of the plan, the now line or the closing box (task 017): drawn as themselves, never as a step. */
+export const isProgressCall = (tool: ToolUse): boolean => tool.name === 'Plan' || tool.name === 'Status' || tool.name === 'WrapUp';
+
 export const isAgentCall = (tool: ToolUse): boolean => !tool.parent && (SUBAGENT.has(tool.name) || tool.name === 'Helper');
 
 export interface AgentStep {

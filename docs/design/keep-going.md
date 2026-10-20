@@ -20,5 +20,17 @@ ellipsis (its full text is the tooltip); the verb beside the AI's name says the 
 error", "waiting for an update to finish"), and "Waiting for quota until …" for a quota wait. After half an hour on its
 own, the newest reply starts, right under the model's name, with one quiet line and the loop icon, in the same style
 as the stop line: "While you were away (3 h): 14 turns of work, 1 switch to the other AI, 2 questions answered for you."
-(a part that did not happen is left out), and each question Faber answered is one more such line ("You were away, so Faber
-answered “…” with “…”."). Nothing moves.
+(a part that did not happen is left out). The questions Faber answered (the agent's own and its closing box's) are one
+quiet card under it on the soft fill: "Faber answered 2 questions for you" with the loop icon, then a row each,
+the question cut to one line in the second ink, the answer chosen in the full ink, and a ghost "Change" button that sends
+the other choice as the person's message (a menu picks it when there are several). Nothing moves.
+One run, one block (R251): two or more turns in a row Faber sent by itself, with no message of the person between, sit
+under one header in the work log's disclosure: the loop icon, "Worked on its own · 2 h · 14 turns · plan 5 of 7" on one
+line with an ellipsis, its tooltip counting what Faber asked ("Faber asked it to keep going ×12"). Closed by default; open,
+it shows the earlier turns, a little dimmer, each with its own work log folded, and a turn with nothing in it is not
+drawn. The newest turn stays open under the header, with "While you were away" and the answers card at its top.
+The agent's own closing box (R248, [layout.md](layout.md)) ends Keep going when it says the request is done, checked
+once like the stop line. A box that asks the person something makes Keep going wait ten minutes, its row saying "waiting
+for your answer"; then Faber sends the first reply for them and the box says which. A conversation with a plan shows
+"2 of 5" before its title in the running column, and the sidebar row's tooltip adds it; the agent's now line is the
+row's quiet line while Keep going is off.

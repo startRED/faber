@@ -31,19 +31,23 @@ use uuid::Uuid;
 
 mod answer;
 mod archive;
+mod aside;
 mod auto;
 mod auto_archive;
 mod browse;
 mod by_itself;
+mod changes;
 mod compact;
 mod copies;
 mod ended;
+pub use aside::Aside;
 pub use copies::GitRunner;
 pub mod facts;
 mod helpers;
 mod install_gate;
 mod keep_going;
 mod parked;
+mod plan;
 mod pr_watch;
 mod quota_watch;
 mod recovery;
@@ -59,6 +63,10 @@ pub use verifying::{FIX, MAX_FIXES};
 #[derive(Debug, Clone, PartialEq, Serialize)]
 #[serde(tag = "type", rename_all = "camelCase", rename_all_fields = "camelCase")]
 pub enum AppEvent {
+    Commands {
+        conversation_id: String,
+        vendor: Vendor,
+    },
     Message {
         conversation_id: String,
         message: Box<Message>,
@@ -81,6 +89,11 @@ pub enum AppEvent {
         items: Vec<RunningItem>,
     },
     List,
+    /// The agent's plan changed (None: it cleared it), for the checklist under the newest reply.
+    Plan {
+        conversation_id: String,
+        plan: Option<Plan>,
+    },
     /// How full a conversation's own agent's context is now (None: not known).
     Context {
         conversation_id: String,
@@ -92,6 +105,11 @@ pub enum AppEvent {
         title: String,
         why: String,
         vendor: Option<Vendor>,
+    },
+    /// The quick questions on the side of a conversation (R250), all of them each time one changes.
+    Asides {
+        conversation_id: String,
+        asides: Vec<aside::Aside>,
     },
 }
 
@@ -225,6 +243,13 @@ const MAX_QUEUED: usize = 10;
 /// A model that joins a conversation midway, or a fresh session that replaces a lost one, reads what was said before as plain
 /// text: every message, the names and places of the files attached, a count of the images it cannot see, and each tool's result
 /// shortened as `handover::transcript` does. The reply that carries it says so (`note.historyResent`).
+/// A message that is one of Claude Code's own commands (`/name ...`, task 060): the CLI runs it only from the very start of
+/// the message, so a model joining midway gets it as it is, without the earlier conversation in front of it. Codex finds a
+/// `$skill` anywhere in the text, so its messages always get the record.
+pub fn is_cli_command(vendor: Vendor, text: &str) -> bool {
+    vendor == Vendor::Claude && text.strip_prefix('/').is_some_and(|rest| rest.starts_with(|c: char| c.is_alphanumeric()))
+}
+
 pub fn with_history(history: &[Message], text: &str, place: &dyn Fn(&str) -> String) -> String {
     let lines = history
         .iter()
@@ -330,6 +355,8 @@ struct Core {
     codex_recommended: Option<String>,
     /// Every model the account can run on Codex, once listed.
     codex_models: Vec<String>,
+    /// The last advertised list per AI, used before a conversation has its own. Never saved.
+    commands: BTreeMap<Vendor, Vec<Command>>,
     /// The latest reading of each quota window, per vendor. Auto prices the models by the share used.
     quotas: HashMap<(Vendor, String), QuotaReading>,
     /// The running list as last emitted.
@@ -374,6 +401,9 @@ struct Core {
     credit: Option<(String, String, Vendor)>,
     /// Helpers at work (R161), by the agent's tool call that started each.
     helpers: HashMap<String, helpers::Run>,
+    /// The quick questions on the side (R250), by conversation, and the ones still asking, by question.
+    asides: HashMap<String, Vec<aside::Aside>>,
+    asking: HashMap<String, aside::Asking>,
     /// The subagents of each running reply, followed for signs of being stuck.
     watched: HashMap<String, stuck_watch::Watched>,
     /// The pull request each project conversation follows, by conversation (R200), and what reads one.
@@ -394,6 +424,7 @@ pub struct Engine {
 impl Engine {
     pub fn new(opts: EngineOptions, emit: Emit) -> Engine {
         let mut store = Store::new(&opts.data_dir);
+        let search = store.search();
         // A crash can leave an unsaved draft behind. Visible records keep their scratch; orphan UUID folders do not.
         let scratch = opts.data_dir.join("chat");
         if scratch.symlink_metadata().is_ok_and(|m| !m.file_type().is_symlink()) {
@@ -433,6 +464,7 @@ impl Engine {
                 codex: HashMap::new(),
                 codex_recommended: None,
                 codex_models: vec![],
+                commands: BTreeMap::new(),
                 quotas,
                 running: Running::default(),
                 guess: None,
@@ -459,6 +491,8 @@ impl Engine {
                 copying: HashMap::new(),
                 credit: None,
                 helpers: HashMap::new(),
+                asides: HashMap::new(),
+                asking: HashMap::new(),
                 watched: HashMap::new(),
                 follows: HashMap::new(),
                 pr_reader,
@@ -468,7 +502,37 @@ impl Engine {
                 git: None,
             })
         });
+        let _ = search.start();
         Engine { core, runtime }
+    }
+
+    /// Clones the index handle under the lock, then does the search outside it, on a blocking worker.
+    pub fn search_messages(&self, query: &str, area: Area) -> Result<crate::search::Results, &'static str> {
+        self.with(|c| c.store.search()).query(query, area)
+    }
+
+    /// The blocking read runs outside the engine lock, as sidebar search does.
+    pub fn prompt_history(&self, conversation_id: Option<&str>, area: Area, project_id: Option<&str>) -> Result<Vec<String>, &'static str> {
+        self.with(|c| c.store.search()).prompt_history(conversation_id, area, project_id)
+    }
+
+    pub fn prompt_history_cancellable(
+        &self,
+        conversation_id: Option<&str>,
+        area: Area,
+        project_id: Option<&str>,
+        cancelled: &std::sync::atomic::AtomicBool,
+    ) -> Result<Vec<String>, &'static str> {
+        self.with(|c| c.store.search()).prompt_history_cancellable(conversation_id, area, project_id, cancelled)
+    }
+
+    pub fn search_messages_cancellable(
+        &self,
+        query: &str,
+        area: Area,
+        cancelled: &std::sync::atomic::AtomicBool,
+    ) -> Result<crate::search::Results, &'static str> {
+        self.with(|c| c.store.search()).query_cancellable(query, area, cancelled)
     }
 
     fn with<T>(&self, f: impl FnOnce(&mut Core) -> T) -> T {
@@ -632,12 +696,25 @@ impl Engine {
     pub fn remove_queued(&self, id: &str, turn_id: &str) {
         self.with(|c| c.remove_queued(id, turn_id))
     }
+    pub fn edit_queued(&self, id: &str, turn_id: &str, text: &str) -> Result<(), String> {
+        self.with(|c| c.edit_queued(id, turn_id, text))
+    }
     pub fn send_queued(&self, id: &str, turn_id: &str) -> Result<(), String> {
         self.with(|c| c.send_queued(id, turn_id))
     }
     /// Writes to a helper at work (R161 step 5): `call_id` is the agent's helper call in conversation `id`.
     pub fn tell_helper(&self, id: &str, call_id: &str, text: &str) -> Result<(), String> {
         self.with(|c| c.tell_helper(id, call_id, text))
+    }
+    /// A quick question on the side of conversation `id` (R250): the question's id, or why it cannot be asked (a key).
+    pub fn ask_aside(&self, id: &str, question: &str, model: Option<String>) -> Result<String, String> {
+        self.with(|c| c.ask_aside(id, question, model))
+    }
+    pub fn stop_aside(&self, aside_id: &str) {
+        self.with(|c| c.stop_aside(aside_id))
+    }
+    pub fn asides(&self, id: &str) -> Vec<aside::Aside> {
+        self.with(|c| c.asides_of(id))
     }
     pub fn warm(&self, req: WarmRequest) {
         self.with(|c| c.warm(req))
@@ -714,6 +791,42 @@ impl Engine {
     /// Deletes a conversation, unless its copy holds work found nowhere else (see `remove_with`).
     pub fn remove(&self, id: &str) {
         let _ = self.remove_with(id, false);
+    }
+    /// `@` in the composer (parity T4): the entries of the working folder of conversation `id`, or of a new conversation's
+    /// project, that match `query`. A new chat has no folder yet, so it has none. The folder is checked and git runs outside
+    /// the engine's lock, since either may wait on a slow disk.
+    pub fn mentions(&self, id: Option<&str>, project_id: Option<&str>, query: &str) -> Vec<crate::mention::Mention> {
+        let Some((folder, git)) = self.with(|c| {
+            let folder = match id.and_then(|id| c.convs.get(id)) {
+                Some(conv) => c.folder_of(conv).ok(),
+                None => project_id.and_then(|p| c.store.projects().into_iter().find(|x| x.id == p)).map(|p| PathBuf::from(p.path)),
+            };
+            folder.map(|f| (f, c.git.clone()))
+        }) else {
+            return vec![];
+        };
+        let Some(folder) = crate::permissions::checked_folder(&folder) else { return vec![] };
+        let mut git = git.and_then(|run| run());
+        crate::mention::find(&folder, git.as_deref_mut().map(|g| g as &mut dyn crate::project::git::Executor), query)
+    }
+    /// Reads advertised commands without starting a CLI.
+    pub fn commands(&self, id: Option<&str>, vendor: Option<Vendor>) -> Vec<AgentCommand> {
+        self.with(|c| {
+            let conversation = id.and_then(|id| c.convs.get(id));
+            Vendor::ALL
+                .into_iter()
+                .filter(|v| vendor.is_none_or(|vendor| *v == vendor))
+                .flat_map(|vendor| {
+                    conversation
+                        .and_then(|conv| conv.commands.get(&vendor))
+                        .or_else(|| c.commands.get(&vendor))
+                        .into_iter()
+                        .flatten()
+                        .cloned()
+                        .map(move |command| AgentCommand { vendor, command })
+                })
+                .collect()
+        })
     }
     pub fn terminal(&self, id: &str) -> Option<TerminalCommand> {
         self.with(|c| c.terminal(id))
@@ -898,12 +1011,14 @@ impl Engine {
                 l.session.close();
             }
             c.close_helpers();
+            c.close_asides(None);
             for (_, server) in c.codex.drain() {
                 server.retire();
             }
             c.close_spare();
             c.save_ledger(true);
             c.store.release_budget();
+            c.store.search().stop();
         })
     }
 }
@@ -996,6 +1111,7 @@ impl Core {
         if unknown || billed || paid {
             self.stop_paid_helpers(vendor);
         }
+        self.stop_paid_asides(vendor, paid && !billed);
         let stopped: Vec<String> = self
             .live
             .iter()
@@ -1067,6 +1183,8 @@ impl Core {
         let Some(l) = self.live.get(conv).filter(|l| l.started > 0.0) else { return };
         let (vendor, start, model) = (l.vendor, l.started, l.running.clone().or_else(|| l.model.clone()).unwrap_or_default());
         self.note_span(vendor, start, &model, cost, incomplete);
+        // The turn ended: the quick questions asked before it began are over.
+        self.drop_asides(conv, start);
         if let Some(l) = self.live.get_mut(conv) {
             l.started = 0.0;
         }
@@ -1160,14 +1278,19 @@ impl Core {
     }
 
     fn cwd_of(&self, c: &Conversation) -> Result<PathBuf, String> {
+        let dir = self.folder_of(c)?;
+        if c.area == Area::Chat && c.working_folder.is_none() {
+            std::fs::create_dir_all(&dir).map_err(|_| "error.projectSandbox")?;
+        }
+        // The private folder and a chosen one are checked alike on every launch: a link put there since may lead somewhere
+        // that is not allowed. The CLI starts in the path that was checked.
+        crate::permissions::checked_folder(&dir).ok_or_else(|| "error.workingFolder".to_string())
+    }
+
+    /// Where conversation `c` works, before it is checked (`cwd_of`). Reads only the engine's own state.
+    fn folder_of(&self, c: &Conversation) -> Result<PathBuf, String> {
         if c.area == Area::Chat {
-            let dir = self.workspace_of(&c.id);
-            if c.working_folder.is_none() {
-                std::fs::create_dir_all(&dir).map_err(|_| "error.projectSandbox")?;
-            }
-            // The private folder and a chosen one are checked alike on every launch: a link put there since may lead somewhere
-            // that is not allowed. The CLI starts in the path that was checked.
-            return crate::permissions::checked_folder(&dir).ok_or_else(|| "error.workingFolder".to_string());
+            return Ok(self.workspace_of(&c.id));
         }
         self.store
             .projects()
@@ -1177,7 +1300,6 @@ impl Core {
             // next message, before anything runs.
             .map(|p| c.copy.as_ref().map_or_else(|| PathBuf::from(p.path), |copy| copy.folder()))
             .ok_or_else(|| "error.projectGone".to_string())
-            .and_then(|path| crate::permissions::checked_folder(&path).ok_or_else(|| "error.workingFolder".to_string()))
     }
 
     fn load(&mut self, id: &str) -> Option<&mut Conversation> {
@@ -1430,6 +1552,7 @@ impl Core {
         if !matches!(
             event,
             EngineEvent::Started { .. }
+                | EngineEvent::Commands(_)
                 | EngineEvent::TurnStarted
                 | EngineEvent::Quota { .. }
                 | EngineEvent::Signals(_)
@@ -1462,6 +1585,14 @@ impl Core {
             }
         }
         match event {
+            EngineEvent::Commands(commands) => {
+                if let Some(c) = self.convs.get_mut(conv) {
+                    c.commands.insert(vendor, commands.clone());
+                }
+                self.commands.insert(vendor, commands);
+                (self.emit)(AppEvent::Commands { conversation_id: conv.to_string(), vendor });
+                return;
+            }
             EngineEvent::Context { used, window } => return self.note_context(conv, vendor, used, window),
             EngineEvent::Compacted { after } => return self.note_compacted(conv, vendor, after),
             // Codex accepted the turn: if Faber dies now, the next launch resumes this session instead of starting one that never
@@ -1591,6 +1722,7 @@ impl Core {
             EngineEvent::ConversationCall { id, input } => return self.conversation_call(conv, id, input),
             EngineEvent::VerifyCall { id, input } => return self.verify_call(conv, id, input),
             EngineEvent::MapCall { id, input } => return self.map_call(conv, id, input),
+            EngineEvent::ProgressCall { id, tool, input } => return self.progress_call(conv, id, tool, input),
             EngineEvent::Permission { request_id, tool, input } => {
                 // A request that touches a credential folder is refused in both modes, with no card (best effort for a command
                 // line: see `touches_credentials`). Full access never shows a card. The answer is decided here, under the lock
@@ -2153,6 +2285,19 @@ impl Core {
         let _ = self.dispatch_queued(conv, next);
     }
 
+    fn edit_queued(&mut self, id: &str, turn_id: &str, text: &str) -> Result<(), String> {
+        if text.trim().is_empty() {
+            return Err("error.queueEmpty".into());
+        }
+        let c = self.convs.get_mut(id).ok_or("error.conversationGone")?;
+        let item = c.queued.iter_mut().find(|q| q.id == turn_id && !q.sending).ok_or("error.queueChanged")?;
+        item.text = text.into();
+        c.updated_at = now();
+        self.save(id);
+        self.emit_queue(id);
+        Ok(())
+    }
+
     fn remove_queued(&mut self, id: &str, turn_id: &str) {
         if let Some(c) = self.convs.get_mut(id) {
             let before = c.queued.len();
@@ -2355,6 +2500,18 @@ impl Core {
         self.keep_going_failed(id, reply_id, &error);
     }
 
+    /// What the tool store hands this session: nothing where no tool is offered, and servers only where they are.
+    fn tools_for(&self, area: Area, permissions: Permissions) -> crate::tools::Delivery {
+        if !crate::claude::offers_tools(area, permissions) {
+            return Default::default();
+        }
+        let mut tools = crate::tools::Store::new(&self.opts.data_dir).delivery();
+        if !crate::claude::offers_servers(area, permissions) {
+            tools.servers.clear();
+        }
+        tools
+    }
+
     /// The shared Codex process for an area, hooks choice and permissions, started again if it died.
     fn codex_server(&mut self, area: Area, user_hooks: bool, permissions: Permissions, cli: &Cli) -> &CodexServer {
         let opts = CodexServerOptions {
@@ -2365,10 +2522,14 @@ impl Core {
             user_hooks,
             windows: self.opts.windows,
             spawn: spawner(&self.opts.spawn, cli),
+            // What the store holds checked; a running server hears each change (`CodexServer::tools`).
+            tools: self.tools_for(area, permissions),
         };
         let server = self.codex.entry((area, user_hooks, permissions)).or_insert_with(|| CodexServer::start(opts.clone()));
         if !server.is_alive() {
             *server = CodexServer::start(opts);
+        } else {
+            server.tools(opts.tools);
         }
         server
     }
@@ -2538,6 +2699,7 @@ impl Core {
         let browse = self.offers_browser(area, permissions);
         let conversations = siblings::offers(area);
         let verify = self.offers_verify(area, permissions);
+        let progress = area == Area::Project;
         let session = match pick.vendor {
             Vendor::Claude => start_claude(
                 ClaudeOptions {
@@ -2548,6 +2710,7 @@ impl Core {
                         browse,
                         conversations,
                         verify,
+                        progress,
                         area,
                         model,
                         effort,
@@ -2558,6 +2721,7 @@ impl Core {
                         user_name,
                         flags,
                         tuning,
+                        tools: self.tools_for(area, permissions),
                     },
                     spawn,
                     sandbox: self.opts.clis.get(&Vendor::Codex).cloned(),
@@ -2570,6 +2734,7 @@ impl Core {
                     browse,
                     conversations,
                     verify,
+                    progress,
                     cwd,
                     model,
                     effort,
@@ -2638,6 +2803,7 @@ impl Core {
     fn blank_as(&mut self, id: String, area: Area, project_id: Option<String>) -> String {
         let at = now();
         let c = Conversation {
+            commands: BTreeMap::new(),
             id,
             title: String::new(),
             choice: None,
@@ -2661,6 +2827,7 @@ impl Core {
             keep_going: None,
             archived_at: None,
             ended: None,
+            plan: None,
             context: None,
             messages: vec![],
             reported: (None, None),
@@ -2791,7 +2958,11 @@ impl Core {
                 check: "glance",
             },
         );
-        let text = if joining_late { with_history(&history, &text, &|n| attachment_place(area, &data_dir, &id, n)) } else { text };
+        let text = if joining_late && !is_cli_command(pick.vendor, &text) {
+            with_history(&history, &text, &|n| attachment_place(area, &data_dir, &id, n))
+        } else {
+            text
+        };
         // Git can take seconds: the message shows now, the copy is made away from the lock, and what starts the answer waits.
         match self.copying.get_mut(&id) {
             // The copy of an answer stopped meanwhile is still being made: this message takes its place and waits for it.
@@ -2967,6 +3138,8 @@ impl Core {
     fn remove(&mut self, id: &str) {
         self.note_turn(id, None, true);
         self.stop_helpers(id, true);
+        self.close_asides(Some(id));
+        self.asides.remove(id);
         self.follows.remove(id);
         self.before.remove(id);
         if let Some(l) = self.retire(id) {
@@ -3122,6 +3295,8 @@ fn running_item(c: &Conversation) -> Option<RunningItem> {
         }),
         weighing: c.weighing.is_some(),
         settled,
+        plan: c.plan.as_ref().map(Plan::count),
+        now: reply.now.clone().filter(|_| reply.status == Some(Status::Streaming)),
     })
 }
 
@@ -3156,6 +3331,59 @@ fn tool_in<'a>(messages: &'a mut [Message], current: Option<&str>, id: &str) -> 
 mod tool_in_tests {
     use super::*;
     use serde_json::json;
+
+    #[tokio::test]
+    async fn slash_commands_use_the_conversation_list_or_the_last_vendor_lists_without_starting_a_process() {
+        let dir = tempfile::tempdir().unwrap();
+        let engine = Engine::new(
+            EngineOptions {
+                data_dir: dir.path().into(),
+                clis: BTreeMap::new(),
+                spawn: Arc::new(|_, _, _| panic!("listing commands starts no process")),
+                windows: false,
+                claude_env_billed: false,
+                max_warm: 3,
+                idle: Duration::from_secs(120),
+                runtime: tokio::runtime::Handle::current(),
+                ask: None,
+            },
+            Arc::new(|_| {}),
+        );
+        let command = |name: &str| Command { name: name.into(), skill: true, note: None };
+        let id = engine.with(|c| {
+            c.commands.insert(Vendor::Claude, vec![command("latest")]);
+            c.commands.insert(Vendor::Codex, vec![command("other-ai")]);
+            c.blank(Area::Chat, None)
+        });
+        assert_eq!(engine.commands(None, None).len(), 2);
+        assert_eq!(engine.commands(Some(&id), Some(Vendor::Claude))[0].command.name, "latest");
+        engine.with(|c| {
+            c.convs.get_mut(&id).unwrap().commands.insert(Vendor::Claude, vec![command("own")]);
+        });
+        let own = engine.commands(Some(&id), None);
+        assert_eq!(own.len(), 2, "each AI uses its own conversation list or its last advertised list");
+        assert_eq!(own[0].command.name, "own");
+        assert_eq!(own[0].vendor, Vendor::Claude);
+        let codex = engine.commands(Some(&id), Some(Vendor::Codex));
+        assert_eq!(codex.len(), 1, "a Claude-only conversation still offers Codex's last list when switching AI");
+        assert_eq!(codex[0].vendor, Vendor::Codex);
+        assert_eq!(codex[0].command.name, "other-ai");
+        assert_eq!(own[1], codex[0]);
+        let conv = engine.with(|c| c.convs.get(&id).unwrap().clone());
+        let saved = serde_json::to_value(&conv).unwrap();
+        assert!(saved.get("commands").is_none());
+        let loaded: Conversation = serde_json::from_value(saved).unwrap();
+        assert!(loaded.commands.is_empty());
+        engine.with(|c| {
+            c.convs.get_mut(&id).unwrap().commands.insert(Vendor::Claude, vec![]);
+        });
+        assert!(engine.commands(Some(&id), Some(Vendor::Claude)).is_empty(), "an advertised empty list overrides that AI's fallback");
+        assert_eq!(engine.commands(Some(&id), None), codex, "an empty Claude list cannot hide Codex's fallback");
+        engine.with(|c| {
+            c.convs.remove(&id);
+        });
+        assert_eq!(engine.commands(Some(&id), Some(Vendor::Claude))[0].command.name, "latest");
+    }
 
     fn reply(id: &str, tools: &[&str]) -> Message {
         let tools = tools.iter().map(|t| json!({ "id": t, "name": "Agent", "input": {} })).collect::<Vec<_>>();

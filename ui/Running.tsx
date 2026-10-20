@@ -1,6 +1,7 @@
 import { createSignal, For, Show } from 'solid-js';
-import type { Project, RunningItem, Summary } from './api.ts';
+import type { Conversation, FileChange, Project, RunningItem, Summary } from './api.ts';
 import { AgentChat } from './AgentChat.tsx';
+import { Changes } from './Changes.tsx';
 import { Asks, Parkeds } from './Ask.tsx';
 import { Icon, VendorMark } from './Glyphs.tsx';
 import { Grip } from './Grip.tsx';
@@ -8,6 +9,9 @@ import type { Limits } from './layout.ts';
 import { everyWhileShown } from './idle.ts';
 import { t } from './i18n.ts';
 import { Peek } from './Mark.tsx';
+import { planWords } from './Plan.tsx';
+import { QuickQuestion } from './QuickQuestion.tsx';
+import type { Option } from './models.ts';
 import { SitePane, type OpenSite } from './Site.tsx';
 import { vendorName } from './models.ts';
 import { animateList } from './motion.ts';
@@ -33,6 +37,11 @@ export function Running(props: {
   agent?: { step: AgentStep; streaming: boolean; helpable: boolean };
   /** A page of Faber's browser the person opened from a reply, shown the same way. */
   site?: OpenSite;
+  /** The quick question on the side (R250), opened from the list's head or by `/btw`, shown the same way. */
+  aside?: { conversation?: Conversation; options: Option[] };
+  onAside?: () => void;
+  changes?: { id: string; files: FileChange[]; loading: boolean; incomplete?: boolean; loadingMore?: boolean; onMore?: () => void };
+  onChanges?: () => void;
   onBack?: () => void;
   /** The open subagent fills the stage as a full thread (the column sits over the work area), and the control in its head that swaps the two. */
   wide?: boolean;
@@ -83,7 +92,7 @@ export function Running(props: {
       <Show
         when={props.agent}
         fallback={
-          <Show when={props.site} fallback={<>
+          <Show when={props.site} fallback={<Show when={props.aside} fallback={<Show when={props.changes} fallback={<>
             <div class="rc-head">
               <button class="iconbtn" aria-label={t('run.close')} title={t('run.close')} onClick={() => props.onClose()}>
                 <Icon name="close" />
@@ -92,6 +101,14 @@ export function Running(props: {
                 {t('run.title')}
               </h2>
               <span class="n num">{rows()}</span>
+              <Show when={props.onChanges}>
+                <button class="btn ghost rc-changes" onClick={() => props.onChanges!()}>{t('changes.title')}</button>
+              </Show>
+              <Show when={props.onAside}>
+                <button class="btn ghost rc-aside" onClick={() => props.onAside!()}>
+                  {t('aside.title')}
+                </button>
+              </Show>
             </div>
             <div class="rc-body" ref={animateList}>
               <Show
@@ -136,8 +153,10 @@ export function Running(props: {
                                 <span class="time num">{since(item)}</span>
                               </div>
                               <button class="name" onClick={() => props.onOpen(item)}>
+                                <Show when={item.plan}>{(n) => <span class="plan-n num">{planWords(n())}</span>}</Show>
                                 {item.title || t('run.untitled')}
                               </button>
+                              <Show when={!item.keepProgress && item.now}>{(now) => <p class="run-kg"><span class="last" title={now()}>{now()}</span></p>}</Show>
                               <Show when={item.keepProgress}>
                                 {(p) => (
                                   <p class="run-kg">
@@ -183,6 +202,10 @@ export function Running(props: {
               </Show>
             </div>
           </>}>
+            {(changes) => <Changes id={changes().id} files={changes().files} loading={changes().loading} incomplete={changes().incomplete} loadingMore={changes().loadingMore} onMore={changes().onMore} onBack={() => props.onBack?.()} onClose={props.onClose} />}
+          </Show>}>
+            {(aside) => <QuickQuestion conversation={aside().conversation} options={aside().options} onBack={() => props.onBack?.()} onClose={props.onClose} onTell={(text) => props.onTell?.(text)} />}
+          </Show>}>
             {(site) => <SitePane site={site()} onBack={() => props.onBack?.()} onClose={props.onClose} />}
           </Show>
         }

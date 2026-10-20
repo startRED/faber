@@ -73,14 +73,14 @@ The numbers above are the usual widths. The person can change them, and the shel
   smallest size and the third ink. Opened, once its reply ends, the composer's place holds one card of the composer's
   width: the line "This conversation is archived…" in the second ink and a small Unarchive button at its right.
 - The footer is one row, the person's name when they gave one and Settings, then one thin line per connected vendor: its
-  shape, a 3 px bar and the used share of its tightest quota window, in the small size. Nothing on the line wraps. The
-  window, the reset, how old the reading is, the not-yet-counted estimate and the vendor's name are its tooltip. While
+  shape, a 3 px bar and the used share of its weekly quota window (R177; a vendor that never reported one shows its tightest), in the
+  small size. Nothing on the line wraps. The window, the reset, the other windows with their shares (the five-hour one), how old the reading is, the not-yet-counted estimate and the vendor's name are its tooltip. While
   use is still being counted the share reads "≥ 44%" (the real share can only be higher), with the words in the tooltip
   (C010). The bar is amber only when the engine says the quota is nearly used. The line opens Settings > Accounts and limits.
-  A vendor with no reading yet, or only an expired one, shows "—". The version is not on the sidebar: it is the
+  A vendor with no reading yet, or a weekly reading past its reset, shows "—". The version is not on the sidebar: it is the
   tooltip of the Settings button.
-- Search filters conversation titles and project names on screen; full-text search comes in Phase 2. The percentage and
-  "stopped" tails come with the progress view in Phase 3.
+- Search filters titles and project names, then message text, and opens the message ([search.md](search.md#sidebar-search)). The percentage and "stopped" tails
+  come with the progress view in Phase 3.
 
 ### The new conversation screen
 
@@ -89,10 +89,11 @@ The numbers above are the usual widths. The person can change them, and the shel
   shows whether Chat may change files.
 - A greeting, "Where do we start?", ending with the person's name when they gave one.
 - Three short hand-written suggestions per language, as chips under the composer: one row at the usual text size, the
-  last chip wrapping only on a narrow window or a large text size. Clicking one fills the composer and moves focus there. It sends nothing. A hover changes only the chip's colour.
+  last chip wrapping only on a narrow window or a large text size. A click fills the composer and focuses it, sending nothing; a hover changes only its colour.
 - "Pick up where you left off" lists up to three conversations of both areas under the suggestions: those that need the
   person first, then the most recently updated.
 - The composer keeps its model picker, "AI: choose for me".
+- File mentions, commands and earlier messages share the list over the box ([composer.md](composer.md)).
 - Auto chooses both the model and its effort. A manual model adds an adjacent low, medium or high effort choice,
   defaulting to medium (R102). Each conversation remembers its choice. Changes apply to the next message only (the
   composer does not repeat it), and each answer keeps the effort actually used and shows it in its header. Both CLI drivers always receive that effort.
@@ -122,9 +123,21 @@ The numbers above are the usual widths. The person can change them, and the shel
   where a message waits in the queue. More words after that undo it. The age ticks once a minute on the newest reply only,
   never while the window is hidden; older replies run no timer. A reply from before the times were kept, a stop and an error
   say nothing here. Nothing animates.
+- In the work log, what the agent wrote between its steps shows its last two paragraphs; earlier ones wait under a quiet
+  "1 more" link in the third ink (R251). A code block keeps the narration whole. The answer itself never folds.
 - The caret blinks only while words arrive; a reply at work after its words shows its step under them, in the status
   line's style. Faber's plumbing takes no row: its own message is a loop mark after the next reply's model (R241; the
   product map's Work log and Faber's own message say the rest).
+- A project agent's plan (R248) sits under the newest reply, above its files, while the agent works and until every step
+  is done: a quiet head "Plan · 2 of 5" in the small size, then one line per step, a small square mark before it: a check
+  and the third ink when done, an accent ring and the full ink on the current one (`aria-current`), plain when still to
+  do; each state is said to a screen reader. What the agent says it is doing now (its `status`, 3 to 6 words) takes the
+  place of the newest step's words under the reply while it works. A reply the agent closed with `wrap_up` ends, above
+  the actions row, with one box on a hairline: the recap, then at most one question in the semibold weight and its one
+  or two replies as buttons, the recommendation the primary one. Only the newest reply, once it is done, offers the
+  buttons; a click sends the button's words as the person's message. A question Faber answered while Keep going ran
+  keeps no buttons: the reply's answers card says what it chose ([keep-going.md](keep-going.md)). Nothing in the plan or the box
+  moves; both wrap at 720 px.
 - There is no permission sentence over a conversation: the mode is a Settings matter.
 - Keep going (R199): the chip, its quiet lines, its quota warning and what it shows on coming back are in
   [keep-going.md](keep-going.md).
@@ -144,13 +157,17 @@ The numbers above are the usual widths. The person can change them, and the shel
   (`ui/markdown.tsx`): a block whose source did not change keeps its DOM and only the open one is parsed and sanitised
   again. A tick that changed only the tools builds no text. Everything that reaches the page passes DOMPurify.
 
+- [Queued messages and editing](queue.md).
+
 ### Pictures
 
-- A picture the person sends shows up to 360 by 280 px, and a picture Faber sends in a file card up to 420 px tall, both with a hairline edge and a zoom cursor.
-- Any of them opens in the image viewer (`ui/Lightbox.tsx`): the picture as large as the window allows on a veil, round arrows on both sides (dimmed at the first and last), the left and right keys, "2 of 5" on top, a close button, Esc and a click outside. It steps through the pictures of the conversation, the person's and Faber's together. Focus goes to the close button and comes back to the thumbnail. Reduced motion shows it without the fade.
+- A picture the person sends shows up to 360 by 280 px, one in a file card up to 420 px tall, both with a hairline edge.
+- It opens in the image viewer (`ui/ImageViewer.tsx`), no motion: as large as the window allows, round arrows (dimmed at the ends), the arrow keys, "2 of 5" on top, a close button, Esc. It steps through the conversation's pictures; focus returns to the thumbnail.
 
 ### Work log
 
+- The chips' line counts extend into the project's "Changes" view in the running column: git supplies the conversation's
+  whole change, including files changed by commands, so its totals can differ from the tool-input counts below.
 - The work log and a helper's row share one disclosure style (`.disclosure`: a quiet card, a chevron, the hover).
 - Each step is a quiet chip: a verb in the ink color ("Reading", "Running") and what it acts on in the mono face, cut
   in the middle. A tool Faber does not know keeps its own name; an MCP tool reads "Using a tool" with its server's name.
@@ -193,4 +210,6 @@ projects. Faber has no worktree creation for projects, so an environment has no 
 
 ### Running column
 
-Its rows, cards and when it opens by itself: [running.md](running.md).
+Its rows, cards, file changes and when it opens by itself: [running.md](running.md). "Changes" replaces the running list
+inside that same column, with a way back; it never adds a second column. Like the other side views, opening it makes an
+automatically opened overlay modal. At most one file's patch stays open, and a partial list offers continuation.

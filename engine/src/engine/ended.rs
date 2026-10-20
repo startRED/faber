@@ -69,7 +69,10 @@ fn end_kind(c: &Conversation) -> Option<EndKind> {
     let reply = c.messages.last().filter(|m| m.role == Role::Assistant)?;
     Some(if reply.error.is_some() || reply.status == Some(Status::Error) {
         EndKind::Failed
-    } else if reply.halt.as_deref().is_some_and(|why| why != "reason.keepGoing.done") || keep_going::unanswered_question(reply) {
+    } else if reply.halt.as_deref().is_some_and(|why| why != "reason.keepGoing.done")
+        || keep_going::unanswered_question(reply)
+        || reply.wrap_up.as_ref().is_some_and(keep_going::asks)
+    {
         EndKind::NeedsYou
     } else {
         EndKind::Done
@@ -111,6 +114,19 @@ mod tests {
         let mut done = reply(Status::Done);
         done.halt = Some("reason.keepGoing.done".into());
         assert_eq!(end_kind(&conv(vec![person(), done])), Some(EndKind::Done));
+        // A closing box that asks the person something waits on them until it is answered.
+        let mut boxed = reply(Status::Done);
+        let ask = crate::model::WrapUp {
+            recap: "Fixed.".into(),
+            ask: Some("Ship it?".into()),
+            actions: vec!["Yes".into()],
+            done: false,
+            answered: None,
+        };
+        boxed.wrap_up = Some(ask.clone());
+        assert_eq!(end_kind(&conv(vec![person(), boxed.clone()])), Some(EndKind::NeedsYou));
+        boxed.wrap_up = Some(crate::model::WrapUp { answered: Some("Yes".into()), ..ask });
+        assert_eq!(end_kind(&conv(vec![person(), boxed])), Some(EndKind::Done));
         assert_eq!(end_kind(&conv(vec![person(), reply(Status::Stopped)])), Some(EndKind::Done), "a turn Faber cut still ends the run");
         let mut archived = conv(vec![person(), reply(Status::Done)]);
         archived.archived_at = Some(1);

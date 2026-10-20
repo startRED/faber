@@ -1,23 +1,25 @@
 import { createEffect, createMemo, createResource, createSignal, For, Index, on, onCleanup, Show, type Accessor } from 'solid-js';
-import { api, type Checks, type Choice, type Follow, type Message, type QueuedTurn, type VendorUsage } from './api.ts';
+import { api, errorText, type Checks, type Choice, type Follow, type Message, type Plan, type QueuedTurn, type VendorUsage } from './api.ts';
 import { Asks, Parkeds } from './Ask.tsx';
 import { copyItem, openMenu } from './contextmenu.ts';
-import { keep, kept, release, useDraft } from './unsent.ts';
+import { keep, kept, recoverQueuedDraft, release, useDraft } from './unsent.ts';
 import { Icon, VendorMark } from './Glyphs.tsx';
-import { Thumb } from './Lightbox.tsx';
+import { Pic, Thumb } from './ImageViewer.tsx';
 import { QuotaCard } from './QuotaCard.tsx';
+import { PlanList, WrapUpBox } from './Plan.tsx';
+import { AnswersCard, answeredIn, folded, RunBlock, runsOf, type Answered } from './Run.tsx';
 import { html, Markdown, openLinks } from './markdown.tsx';
 import { agentMeta, ChangedLines, openedAgent, SourceList, showAgent, tellAbout, ToolChip } from './AgentChat.tsx';
 import { untilReset } from './Sidebar.tsx';
 import { appsOf, AwayPage, awaySites, SiteCard, sitesOf, stepsOf } from './Site.tsx';
-import { bytes, compact, fromEngine, money, t } from './i18n.ts';
+import { bytes, compact, failureText, fromEngine, money, t } from './i18n.ts';
 import { prettyModel, vendorName, type Option } from './models.ts';
 import { animateList } from './motion.ts';
 import { windowHidden } from './appearance.ts';
 import { elapsed, warmLeft } from './running.ts';
 import { agePending, ageNow, footText, tickWhile } from './foot.ts';
 import { quotaPending } from './QuotaCard.tsx';
-import { agentState, agentSteps, changeOf, isAgentCall, middle, sameTools, sourcesOf, thinkingParts, toolLine, type AgentStep } from './worklog.ts';
+import { agentState, agentSteps, changeOf, isAgentCall, isProgressCall, middle, sameTools, sourcesOf, thinkingParts, toolLine, type AgentStep } from './worklog.ts';
 
 const IMAGE = /\.(png|jpe?g|gif|webp|svg)$/i;
 
@@ -128,9 +130,13 @@ interface Shared {
   usage?: VendorUsage[];
   /** Faber asks git whether the last reply changed files (the running row's `weighing`). */
   weighing?: boolean;
+  /** The agent's plan for the request, drawn under the newest reply (task 017). */
+  plan?: Plan;
+  /** A button of a closing box: its words go as the person's message. */
+  onReply?: (text: string) => void;
 }
 
-function Answer(props: Shared & { m: Accessor<Message>; messages?: Message[]; prompt?: Message; last?: boolean }) {
+function Answer(props: Shared & { m: Accessor<Message>; messages?: Message[]; prompt?: Message; last?: boolean; answered?: Answered[]; messageIndex?: number }) {
   // A turn Faber started by itself: its message takes no row (Faber's own plumbing never does, the 2026-10-19 design), so the
   // reply's header carries it as a small loop mark whose tooltip says what Faber asked.
   const woke = () => props.prompt?.wake;
@@ -138,7 +144,7 @@ function Answer(props: Shared & { m: Accessor<Message>; messages?: Message[]; pr
   // While an answer streams the engine sends the whole message every 33 ms. Each memo below compares by value, so a tick that
   // changed only the tools never touches the text, and one that changed only the text never touches the tools.
   const text = createMemo(() => hideStop(m().text, m().status === 'streaming'));
-  const tools = createMemo(() => m().tools ?? [], [], { equals: sameTools });
+  const tools = createMemo(() => (m().tools ?? []).filter((tool) => !isProgressCall(tool)), [], { equals: sameTools });
   // A quiet note on the latest reply only (a later turn overtakes an older one): how long the CLI keeps its prompt cache warm,
   // shown in the cost's tooltip, hidden while unknown and once cold. One timer, and only while the note is shown.
   const [now, setNow] = createSignal(Date.now());
@@ -211,6 +217,8 @@ function Answer(props: Shared & { m: Accessor<Message>; messages?: Message[]; pr
   // The pages the agent opened in Faber's browser and the apps it started on this computer, each a card beside the files.
   const sites = createMemo(() => [...sitesOf(own()), ...appsOf(own())]);
   const pageSteps = createMemo(() => stepsOf(own()));
+  // The questions Faber answered for the person, as one card (task 018): a run's on its newest reply.
+  const answered = createMemo(() => props.answered ?? answeredIn([m()]));
   // Read only on a reply that says what happened while the person was away.
   const awayPages = createMemo(() => {
     const away = m().away;
@@ -226,7 +234,11 @@ function Answer(props: Shared & { m: Accessor<Message>; messages?: Message[]; pr
   });
   // The sites it opened, for research (R161 step 9); a subagent's reading stays in its own step.
   const sources = createMemo(() => sourcesOf(own()));
+  // What the agent said it is doing now (task 017) stands in for the newest step's words while it works.
+  const nowLine = () => (working() ? m().now : undefined);
   const latest = createMemo(() => {
+    const now = nowLine();
+    if (now && !finalText().trim()) return now;
     const tool = tools().at(-1);
     if (tool && tool.ok === undefined) return toolLine(tool);
     if (finalText().trim()) return '';
@@ -244,7 +256,8 @@ function Answer(props: Shared & { m: Accessor<Message>; messages?: Message[]; pr
     if (!working() || !finalText().trim() || waiting().length || m().waitUntil) return '';
     // A running step shows at once (the caret never blinks over one); "Thinking…" waits until the words stop.
     const tool = runningStep();
-    return tool ? toolLine(tool) : typing() ? '' : t('activity.thinkingNow');
+    if (tool) return nowLine() || toolLine(tool);
+    return typing() ? '' : nowLine() || t('activity.thinkingNow');
   };
   const [clock, setClock] = createSignal(Date.now());
   // A memo, so the timer is made again only when another step starts, not on every tick of the stream.
@@ -300,6 +313,8 @@ function Answer(props: Shared & { m: Accessor<Message>; messages?: Message[]; pr
   return (
     <article
       class="ai"
+      data-message-index={props.messageIndex}
+      tabindex="-1"
       aria-label={t('answer.label')}
       onContextMenu={(e) =>
         openMenu(e, [copyItem(m().text), ...(!working() && props.prompt ? [{ id: 'redo', label: retry(), run: () => props.onBranch(props.prompt!.id, props.prompt!.text) }] : [])])
@@ -319,7 +334,7 @@ function Answer(props: Shared & { m: Accessor<Message>; messages?: Message[]; pr
         </Show>
       </div>
       {/* After half an hour on its own, "keep going" tells at the top of the newest reply what happened while the person was away. */}
-      <Show when={m().away || m().autoAnswers?.length}>
+      <Show when={m().away || answered().length}>
         <div class="away-lines">
           <Show when={m().away}>{(away) => <AwayLine away={away()} />}</Show>
           <Show when={awayPages().length}>
@@ -327,14 +342,9 @@ function Answer(props: Shared & { m: Accessor<Message>; messages?: Message[]; pr
               <For each={awayPages()}>{(step) => <AwayPage conversationId={props.conversationId} step={step} />}</For>
             </ul>
           </Show>
-          <For each={m().autoAnswers}>
-            {(a) => (
-              <p class="woke">
-                <Icon name="loop" small />
-                {t('away.chose', { question: a.question, answer: a.answer })}
-              </p>
-            )}
-          </For>
+          <Show when={answered().length}>
+            <AnswersCard answers={answered()} onReply={props.onReply} />
+          </Show>
         </div>
       </Show>
       <Show when={m().pace}>{(pace) => <p class="pace">{t(`reason.pace.${pace().kind}`, { vendor: vendorName(pace().vendor), other: m().vendor ? vendorName(m().vendor!) : t('model.auto') })}</p>}</Show>
@@ -349,7 +359,7 @@ function Answer(props: Shared & { m: Accessor<Message>; messages?: Message[]; pr
                 <For each={thinking()}>{(part) => <p>{part.title ? <b>{part.text}</b> : part.text}</p>}</For>
               </div>
             </Show>
-            <For each={narration()}>{(text) => <div class="md" onClick={openLinks} innerHTML={html(text)} />}</For>
+            <For each={narration()}>{(text) => <Narration text={text} />}</For>
             <Show when={own().length}>
               <div class="tools">
                 <For each={own()}>{(tool) => <ToolChip tool={tool} />}</For>
@@ -406,6 +416,10 @@ function Answer(props: Shared & { m: Accessor<Message>; messages?: Message[]; pr
           </Show>
         </div>
       </Show>
+      {/* The plan sits under the newest reply while the work goes on, and until every step is done. */}
+      <Show when={props.last && props.plan?.steps.length && (working() || props.plan.steps.some((s) => s.state !== 'done')) ? props.plan : undefined}>
+        {(plan) => <PlanList plan={plan()} />}
+      </Show>
       <Show when={m().files?.length}>
         <div class="files" aria-label={t('files.label')} ref={animateList}>
           <For each={m().files}>{(f) => <FileCard conversationId={props.conversationId} file={f} />}</For>
@@ -438,6 +452,7 @@ function Answer(props: Shared & { m: Accessor<Message>; messages?: Message[]; pr
           {fromEngine(m().halt, { ai: m().vendor ? vendorName(m().vendor!) : t('model.auto') })}
         </p>
       </Show>
+      <Show when={m().wrapUp}>{(box) => <WrapUpBox box={box()} open={!!props.last && !working()} onReply={props.onReply} />}</Show>
       <Show when={!working() || foot()}>
         {/* While the agent works the row holds only the foot line; `.actions` is the finished reply's row, which screen tests wait for. */}
         <div class={working() ? 'live-foot' : 'actions'}>
@@ -529,7 +544,7 @@ function FollowLine(props: { conversationId: string; f: Follow }) {
 
 // A message Faber sent by itself (R200): what it is about, as one quiet line; the words the agent got are its tooltip.
 // The user's message; "Edit" sends the new text as a branch, keeping the original conversation as it was.
-function Mine(props: { editKey: string; m: Accessor<Message>; onBranch: OnBranch }) {
+function Mine(props: { editKey: string; m: Accessor<Message>; onBranch: OnBranch; messageIndex: number }) {
   // One editor lives and dies with its (conversation, message) key (the parent re-creates it when the key changes), so
   // what it writes can never land on another message's saved edit.
   const key = () => props.editKey;
@@ -545,6 +560,8 @@ function Mine(props: { editKey: string; m: Accessor<Message>; onBranch: OnBranch
       fallback={
         <div
           class="mine"
+          data-message-index={props.messageIndex}
+          tabindex="-1"
           onContextMenu={(e) => openMenu(e, [copyItem(props.m().text), { id: 'edit', label: t('mine.edit'), run: () => setEditing(props.m().text) }])}
         >
           <Show when={props.m().attachments?.length}>
@@ -563,7 +580,7 @@ function Mine(props: { editKey: string; m: Accessor<Message>; onBranch: OnBranch
           </Show>
           <div class="you">
             <div class="shots">
-              <For each={props.m().images}>{(img) => <Thumb alt={t('mine.image')} src={`data:${img.mediaType};base64,${img.base64}`} />}</For>
+              <For each={props.m().images}>{(img) => <Pic img={img} />}</For>
             </div>
             {props.m().text}
             <button class="edit" onClick={() => setEditing(props.m().text)} aria-label={t('mine.editLabel')}>
@@ -575,6 +592,8 @@ function Mine(props: { editKey: string; m: Accessor<Message>; onBranch: OnBranch
     >
       <form
         class="you editing"
+        data-message-index={props.messageIndex}
+        tabindex="-1"
         onSubmit={(e) => {
           e.preventDefault();
           const text = editing() ?? '';
@@ -609,7 +628,58 @@ const empty = (m: Message) =>
 
 // A message written while an answer was running. The person can take it back until it is sent; one already handed to the
 // running answer (`sending`) cannot be, and one that waits for the next turn can be sent by hand once nothing runs.
-function Queued(props: { conversationId: string; q: QueuedTurn; busy: boolean; onError?: (err: unknown) => void }) {
+function Queued(props: { conversationId: string; q: QueuedTurn; busy: boolean; onRecovered?: (id: string, text: string) => void; onError?: (err: unknown) => void }) {
+  const editKey = `queued-edit.${props.conversationId}.${props.q.id}`;
+  const [editing, setEditing] = createSignal<string | undefined>(kept(editKey) || undefined);
+  const [saving, setSaving] = createSignal(false);
+  const [error, setError] = createSignal('');
+  let editButton: HTMLButtonElement | undefined;
+  let disposed = false;
+  onCleanup(() => { disposed = true; release(editKey); });
+  useDraft(() => editing() !== undefined);
+  const write = (text: string) => {
+    setEditing(text);
+    keep(editKey, text);
+  };
+  const restoreFocus = () => queueMicrotask(() => {
+    const target = editButton?.isConnected && !editButton.disabled ? editButton
+      : document.querySelector<HTMLElement>('.composer textarea:not(:disabled)') ?? document.querySelector<HTMLElement>('.run-btn');
+    target?.focus();
+  });
+  const cancel = () => {
+    if (saving()) return;
+    setEditing(undefined);
+    keep(editKey, '');
+    setError('');
+    restoreFocus();
+  };
+  const save = async () => {
+    const text = editing();
+    if (text === undefined || saving()) return;
+    if (!text.trim()) {
+      setError(t('error.queueEmpty'));
+      return;
+    }
+    setSaving(true);
+    setError('');
+    try {
+      await api.editQueued(props.conversationId, props.q.id, text);
+      // A different mounted editor may now own newer words under this key.
+      if (disposed) return;
+      setEditing(undefined);
+      keep(editKey, '');
+      restoreFocus();
+    } catch (err) {
+      if (disposed) return;
+      if (errorText(err) === 'error.queueChanged') {
+        const restored = recoverQueuedDraft(props.conversationId, props.q.id);
+        setEditing(undefined);
+        if (restored !== undefined) props.onRecovered?.(props.conversationId, restored);
+      } else setError(failureText(err));
+    } finally {
+      setSaving(false);
+    }
+  };
   return (
     <div class="mine queued">
       <Show when={props.q.attachments?.length}>
@@ -626,26 +696,60 @@ function Queued(props: { conversationId: string; q: QueuedTurn; busy: boolean; o
           </For>
         </div>
       </Show>
-      <div class="you queued">
+      <div class="you queued" classList={{ editing: editing() !== undefined }}>
         <span class="queue-badge">{t('queue.label')}</span>
         <div class="shots">
-          <For each={props.q.images}>{(img) => <Thumb alt={t('mine.image')} src={`data:${img.mediaType};base64,${img.base64}`} />}</For>
+          <For each={props.q.images}>{(img) => <Pic img={img} />}</For>
         </div>
-        <Show when={props.q.text}>
-          <div class="queue-text">{props.q.text}</div>
+        <Show
+          when={editing() !== undefined}
+          fallback={
+            <>
+              <Show when={props.q.text}>
+                <div class="queue-text">{props.q.text}</div>
+              </Show>
+              <div class="actions">
+                <Show when={!props.q.sending}>
+                  <button type="button" ref={(el) => { editButton = el; }} aria-label={t('queue.editLabel')} onClick={() => {
+                    write(props.q.text);
+                  }}>{t('queue.edit')}</button>
+                </Show>
+                <Show when={!props.q.sending}>
+                  <button type="button" onClick={() => api.removeQueued(props.conversationId, props.q.id).catch((err) => props.onError?.(err))} aria-label={t('queue.removeLabel')}>
+                    {t('queue.remove')}
+                  </button>
+                </Show>
+                <Show when={!props.busy}>
+                  <button type="button" onClick={() => api.sendQueued(props.conversationId, props.q.id).catch((err) => props.onError?.(err))} aria-label={t('queue.sendNowLabel')}>
+                    {t('queue.sendNow')}
+                  </button>
+                </Show>
+              </div>
+            </>
+          }
+        >
+          <form onSubmit={(e) => { e.preventDefault(); void save(); }} onKeyDown={(e) => {
+            if (!e.isComposing && e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); cancel(); }
+          }}>
+            <textarea
+              aria-label={t('queue.editLabel')}
+              value={editing()}
+              rows={Math.min(10, (editing() ?? '').split('\n').length + 1)}
+              disabled={saving()}
+              onInput={(e) => write(e.currentTarget.value)}
+              onKeyDown={(e) => {
+                if (e.isComposing) return;
+                if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); void save(); }
+              }}
+              ref={(el) => queueMicrotask(() => el.focus())}
+            />
+            <Show when={error()}><p class="queue-error" role="alert">{error()}</p></Show>
+            <div class="actions">
+              <button type="submit" disabled={saving()}>{t('queue.save')}</button>
+              <button type="button" disabled={saving()} onClick={cancel}>{t('queue.cancel')}</button>
+            </div>
+          </form>
         </Show>
-        <div class="actions">
-          <Show when={!props.q.sending}>
-            <button type="button" onClick={() => api.removeQueued(props.conversationId, props.q.id).catch((err) => props.onError?.(err))} aria-label={t('queue.removeLabel')}>
-              {t('queue.remove')}
-            </button>
-          </Show>
-          <Show when={!props.busy}>
-            <button type="button" onClick={() => api.sendQueued(props.conversationId, props.q.id).catch((err) => props.onError?.(err))} aria-label={t('queue.sendNowLabel')}>
-              {t('queue.sendNow')}
-            </button>
-          </Show>
-        </div>
       </div>
     </div>
   );
@@ -673,30 +777,83 @@ function AwayLine(props: { away: NonNullable<Message['away']> }) {
   );
 }
 
-export function Thread(props: Shared & { messages: Message[]; queued?: QueuedTurn[]; busy?: boolean; onError?: (err: unknown) => void; from: number }) {
-  const prompt = (at: number) => (props.messages[at - 1]?.role === 'user' ? props.messages[at - 1] : undefined);
+const PARAGRAPHS = /\n{2,}/;
+const BLANK = '\n\n';
+/** The agent's words between its steps, in the work log: the last two paragraphs, the earlier ones under "N more". */
+function Narration(props: { text: string }) {
+  const [all, setAll] = createSignal(false);
+  const parts = createMemo(() => (props.text.includes('```') ? [props.text] : props.text.split(PARAGRAPHS)));
+  const hidden = () => (all() || parts().length < 3 ? 0 : parts().length - 2);
   return (
     <>
-      <Index each={props.messages.slice(props.from)}>
+      <Show when={hidden()}>
+        <button type="button" class="more-narration" onClick={() => setAll(true)}>
+          {t('narration.more', { n: hidden() })}
+        </button>
+      </Show>
+      <div class="md" onClick={openLinks} innerHTML={html(parts().slice(hidden()).join(BLANK))} />
+    </>
+  );
+}
+
+export function Thread(props: Shared & { messages: Message[]; queued?: QueuedTurn[]; busy?: boolean; onError?: (err: unknown) => void; onQueuedRecovered?: (id: string, text: string) => void; from: number; until?: number; searchIndex?: number }) {
+  const queuedIds = createMemo(() => (props.queued ?? []).map((q) => q.id));
+  const prompt = (at: number) => (props.messages[at - 1]?.role === 'user' ? props.messages[at - 1] : undefined);
+  // Turns Faber sent by itself, one after another, read as one run (task 018): its earlier turns fold under one header.
+  const runs = createMemo(() => runsOf(props.messages));
+  const hidden = createMemo(() => folded(new Map([...runs()].filter(([last]) => last < (props.until ?? Infinity)))));
+  // The questions Faber answered in a run, on its newest reply.
+  const answered = (at: number) => {
+    const run = runs().get(at);
+    return run ? answeredIn(run.replies.map((r) => props.messages[r]!)) : undefined;
+  };
+  const drawn = (m: Message, at: number) => !(prompt(at)?.wake && m.status !== 'streaming' && empty(m));
+  const earlier = (at: number) => (
+    <Show when={drawn(props.messages[at]!, at)}>
+      <Answer {...props} m={() => props.messages[at]!} prompt={prompt(at)} last={false} answered={[]} messageIndex={at} />
+    </Show>
+  );
+  return (
+    <>
+      <Index each={props.messages.slice(props.from, props.until)}>
         {(m, i) => (
           <Show
             when={m().role === 'user'}
             fallback={
-              <Show when={!(prompt(props.from + i)?.wake && m().status !== 'streaming' && empty(m()))}>
-                <Answer {...props} m={m} prompt={prompt(props.from + i)} last={props.from + i === props.messages.length - 1} />
+              <Show when={!hidden().has(props.from + i)}>
+                <Show when={runs().get(props.from + i)}>
+                  {(run) => <RunBlock messages={props.messages} run={run()} plan={props.plan} earlier={earlier} reveal={props.searchIndex} from={props.from} />}
+                </Show>
+                {/* The newest turn of a run is drawn even with nothing of its own when it holds the run's answers. */}
+                <Show when={drawn(m(), props.from + i) || answered(props.from + i)?.length}>
+                  <Answer
+                    {...props}
+                    m={m}
+                    prompt={prompt(props.from + i)}
+                    last={props.from + i === props.messages.length - 1}
+                    answered={answered(props.from + i)}
+                    messageIndex={props.from + i}
+                  />
+                </Show>
               </Show>
             }
           >
             {/* A message Faber sent by itself takes no row: the reply's header carries it (`woke` in Answer). */}
             <Show when={!m().wake}>
               <Show when={`edit.${props.conversationId}.${m().id}`} keyed>
-                {(editKey) => <Mine editKey={editKey} m={m} onBranch={props.onBranch} />}
+                {(editKey) => <Mine editKey={editKey} m={m} onBranch={props.onBranch} messageIndex={props.from + i} />}
               </Show>
             </Show>
           </Show>
         )}
       </Index>
-      <For each={props.queued}>{(q) => <Queued conversationId={props.conversationId} q={q} busy={props.busy ?? false} onError={props.onError} />}</For>
+      <Show when={props.conversationId} keyed>{(conversationId) =>
+        <For each={queuedIds()}>{(id) => {
+          const initial = props.queued!.find((q) => q.id === id)!;
+          return <Queued conversationId={conversationId} q={props.queued?.find((q) => q.id === id) ?? initial}
+            busy={props.busy ?? false} onRecovered={props.onQueuedRecovered} onError={props.onError} />;
+        }}</For>
+      }</Show>
     </>
   );
 }

@@ -199,3 +199,33 @@ check('motion: disclosures animate both ways, survive interruption and toggle in
     root.remove();
   }
 });
+
+check('motion: a hover never moves a row and no card arrives in more than 300ms', () => {
+  // Cards a person picks from (themes, presets) may lift; anything in a list only changes colour.
+  const lifts = new Set(['.tcard:hover', '.preset:hover .thumb']);
+  const moving: string[] = [];
+  const walk = (rules: CSSRuleList) => {
+    for (const rule of rules) {
+      if (rule instanceof CSSStyleRule && rule.selectorText.includes(':hover') && /translate|scale/.test(rule.style.transform)) {
+        if (!rule.selectorText.split(',').every((s) => lifts.has(s.trim()))) moving.push(rule.selectorText);
+      } else if ('cssRules' in rule && !(rule instanceof CSSStyleRule)) walk((rule as CSSGroupingRule).cssRules);
+    }
+  };
+  for (const sheet of document.styleSheets) walk(sheet.cssRules);
+  equal(moving.join(' | '), '');
+
+  const root = document.createElement('div');
+  root.dataset.motion = 'full';
+  for (const [key, value] of Object.entries(themes.css.base)) root.style.setProperty(`--${key}`, value);
+  root.innerHTML = '<div class="toast"></div><div class="ask"></div><div class="dv-card"></div><div class="notes"></div><div class="ask-more"></div>';
+  document.body.append(root);
+  try {
+    if (matchMedia('(prefers-reduced-motion: reduce)').matches) return;
+    for (const el of root.children) {
+      const ms = parseFloat(getComputedStyle(el).animationDuration) * 1000;
+      ok(ms > 0 && ms <= 300, `${el.className} arrives in ${ms}ms`);
+    }
+  } finally {
+    root.remove();
+  }
+});

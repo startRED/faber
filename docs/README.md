@@ -24,13 +24,16 @@ points nowhere; a page that grows past the limit splits by topic, and its row he
 | [product/architecture.md](product/architecture.md) | Processes, memory and CPU budgets, updates, the curated catalog |
 | [product/distribution.md](product/distribution.md) | License, provider terms, distribution |
 | [product/quota-pacing.md](product/quota-pacing.md) | Auto's quota pacing, quota readings and their measurements |
+| [product/parity.md](product/parity.md) | What Claude Code, Codex, claude.ai and ChatGPT have that Faber still lacks, how each gap closes, and what is never closed |
 | [design/README.md](design/README.md) | Before any screen change: the design in short, rules for every screen, the first frame, the screen cards |
 | [design/looks.md](design/looks.md) | Themes, presets, colour, type, motion, the one grammar, idle cost, effects |
 | [design/brand.md](design/brand.md) | The mark, the app icon, empty states, brand rules |
 | [design/layout.md](design/layout.md) | Window widths, titlebar, sidebar, the homes, answers, the work log |
+| [design/composer.md](design/composer.md) | The shared message box: file mentions, commands, earlier messages and their search |
+| [design/queue.md](design/queue.md) | Queued messages, in-place editing, keyboard controls and drafts when a message leaves the queue |
 | [design/running.md](design/running.md) | The running column: rows, question cards, done cards, when it opens by itself |
 | [design/keep-going.md](design/keep-going.md) | Keep going: the chip, the quiet lines, the quota warning, the running row and the summary on coming back |
-| [design/search.md](design/search.md) | The command box (Ctrl+K) and find in a conversation (Ctrl+F) |
+| [design/search.md](design/search.md) | Sidebar message search, the command box (Ctrl+K) and find in a conversation (Ctrl+F) |
 | [design/subagents.md](design/subagents.md) | A reply's subagent and helper rows, their running-column view, the stuck signs and the pages opened in Faber's browser |
 | [design/settings.md](design/settings.md) | The Settings screen, the first run and the tutorial |
 | [design/projects.md](design/projects.md) | The Projects screens, what a project stores, and how its checks run |

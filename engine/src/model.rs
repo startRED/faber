@@ -23,6 +23,23 @@ impl Vendor {
     }
 }
 
+/// A command or skill advertised by the running CLI.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Command {
+    pub name: String,
+    pub skill: bool,
+    pub note: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AgentCommand {
+    pub vendor: Vendor,
+    #[serde(flatten)]
+    pub command: Command,
+}
+
 /// Chat uses a chosen folder or a private scratch folder; a project uses the folder the user opened.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
@@ -280,6 +297,12 @@ pub struct Message {
     /// closes its turn; more words or tools clear it.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub finished_at: Option<u64>,
+    /// On a reply: what the agent said it is doing now, in a few words (`crate::progress::status`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub now: Option<String>,
+    /// On a reply: the closing box of the task it ended (`crate::progress::wrap_up`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub wrap_up: Option<WrapUp>,
 }
 
 /// Faber's checks of a reply (`engine/src/engine/verifying.rs`): running, passed, or what failed.
@@ -427,6 +450,9 @@ pub struct KeepGoing {
     /// Faber waits to send the next turn, and why. Saved, so a restart waits out the rest.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub waiting: Option<KeepWait>,
+    /// The reply whose closing question waited its ten minutes: only then Faber answers it for the person (task 017).
+    #[serde(default, skip)]
+    pub asked_on: Option<String>,
     /// The reply whose failure was already counted, so a reply reported twice counts once.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub failed_on: Option<String>,
@@ -436,8 +462,8 @@ pub struct KeepGoing {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct KeepWait {
-    /// `retry` (after an error), `rest` (the last turn only waited), `busy` (Faber was busy with an update) or `start`
-    /// (Faber just opened). A wait for quota is `wait_until` instead.
+    /// `retry` (after an error), `rest` (the last turn only waited), `busy` (Faber was busy with an update), `start` (Faber
+    /// just opened) or `question` (the closing box asks the person, task 017). A wait for quota is `wait_until` instead.
     pub why: String,
     /// Seconds since the Unix epoch.
     pub until: f64,
@@ -470,14 +496,99 @@ pub struct KeepProgress {
     pub last: Option<String>,
 }
 
+/// A project agent's plan for the request (`crate::progress`): a checklist that belongs to the conversation, so it carries
+/// through Keep going's turns and across restarts.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Plan {
+    pub steps: Vec<PlanStep>,
+    /// When the agent last sent it, in milliseconds.
+    pub at: u64,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct PlanStep {
+    pub text: String,
+    pub state: StepState,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum StepState {
+    Pending,
+    Active,
+    Done,
+}
+
+impl Plan {
+    /// How far it has come: steps done, and steps in all.
+    pub fn count(&self) -> PlanCount {
+        PlanCount { done: self.steps.iter().filter(|s| s.state == StepState::Done).count() as u32, total: self.steps.len() as u32 }
+    }
+}
+
+/// "3 of 7": a plan's steps done and in all, for the running column and the sidebar.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub struct PlanCount {
+    pub done: u32,
+    pub total: u32,
+}
+
+/// The closing box an agent puts at the end of a reply when a task ends (`crate::progress::wrap_up`).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct WrapUp {
+    /// What is now true, then what is not done or not verified.
+    pub recap: String,
+    /// One question whose answer is the person's to give, with its replies (the recommendation first).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub ask: Option<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub actions: Vec<String>,
+    /// The person's whole request is finished and verified: Keep going stops on it.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub done: bool,
+    /// The reply Faber gave for the person while Keep going ran and nobody answered.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub answered: Option<String>,
+}
+
 /// A question the agent asked that Faber answered with the first choice while the person was away.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct AutoAnswer {
     pub question: String,
     pub answer: String,
+    /// The question's other choices, so the person can change the answer later (task 018's "Change").
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub others: Vec<String>,
 }
 
 impl Message {
+    /// What the reply said to the person: its text, then its closing box's recap and question, which the agent does not
+    /// repeat in words. Another AI taking over and a parent conversation read this, not the text alone.
+    pub fn said(&self) -> String {
+        let Some(w) = &self.wrap_up else { return self.text.clone() };
+        let ask = w
+            .ask
+            .as_ref()
+            .map(|q| {
+                format!(
+                    "
+{q} ({})",
+                    w.actions.join(" / ")
+                )
+            })
+            .unwrap_or_default();
+        format!(
+            "{}
+
+{}{ask}",
+            self.text, w.recap
+        )
+        .trim()
+        .to_string()
+    }
+
     pub fn new(id: String, role: Role, text: String, at: u64) -> Self {
         Message {
             id,
@@ -523,6 +634,8 @@ impl Message {
             checks: None,
             moved_at: None,
             finished_at: None,
+            now: None,
+            wrap_up: None,
         }
     }
 }
@@ -560,6 +673,9 @@ pub struct QueuedTurn {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Conversation {
+    /// The commands advertised by each of this conversation's CLIs. Never saved.
+    #[serde(skip)]
+    pub commands: BTreeMap<Vendor, Vec<Command>>,
     pub id: String,
     pub title: String,
     /// The choice for the next message, retained independently in each conversation.
@@ -625,6 +741,9 @@ pub struct Conversation {
     /// How full the context of the conversation's own agent is, as its CLI last said (`engine/src/engine/compact.rs`).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub context: Option<ContextFill>,
+    /// The agent's plan for the request (`crate::progress::plan`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub plan: Option<Plan>,
     pub messages: Vec<Message>,
     /// What its CLI last reported, each on its own (a report may name only one): the prompt's size and the model's window,
     /// before the point where Faber's CLI flags make it compact. Never saved.
@@ -706,6 +825,9 @@ pub struct Summary {
     /// Its last run ended and nobody has opened it since, while that is recent (`Ended::current`).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub ended: Option<Ended>,
+    /// How far the agent's plan has come.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub plan: Option<PlanCount>,
 }
 
 /// How a run ended that nobody saw end (task 016): a done card in the running column and a dot on the sidebar row until the
@@ -801,6 +923,12 @@ pub struct RunningItem {
     /// the awake lock still count it, since a process is still at work.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub settled: bool,
+    /// How far the agent's plan has come.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub plan: Option<PlanCount>,
+    /// What the agent said it is doing now, on the reply under way (`Message::now`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub now: Option<String>,
 }
 
 /// The running list as the engine last sent it. The revision grows by one with every list the engine emits, so a

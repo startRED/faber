@@ -93,6 +93,7 @@ impl Router {
                         browse: false,
                         conversations: false,
                         verify: false,
+                        progress: false,
                         cwd: self.dir.clone(),
                         model,
                         effort,
@@ -112,6 +113,7 @@ impl Router {
                     browse: false,
                     conversations: false,
                     verify: false,
+                    progress: false,
                     area: Area::Chat,
                     model,
                     effort,
@@ -122,6 +124,7 @@ impl Router {
                     flags: Default::default(),
                     permissions: Permissions::Ask,
                     tuning: Default::default(),
+                    tools: Default::default(),
                 };
                 start_claude(
                     ClaudeOptions { bin: cli.command.clone(), cwd: self.dir.clone(), launch, spawn: spawner(cli), sandbox: None },
@@ -158,6 +161,7 @@ async fn main() {
             user_hooks: false,
             windows: cfg!(windows),
             spawn: spawner(&cli),
+            tools: Default::default(),
         });
         (cli, server)
     });

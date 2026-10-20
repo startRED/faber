@@ -136,7 +136,7 @@ pub fn probe(sandbox: &Path) -> Result {
     .map_err(|e| e.to_string())?;
     git(&program, &repo, &["config", "include.path", "extra-config"])?;
     let mut process = Process::find().map_err(|e| e.key().to_string())?;
-    let call = Invocation { cwd: repo.clone(), args: ["add", "--", "a.txt", "b.txt"].map(String::from).to_vec() };
+    let call = Invocation { cwd: repo.clone(), args: ["add", "--", "a.txt", "b.txt"].map(String::from).to_vec(), deadline: None };
     let staged = process.execute(&call).map_err(|e| e.key().to_string())?;
     ensure(staged.success, || "a repository's filter ran through the git executor".into())?;
     std::fs::write(sandbox.join("project-git.ok"), "ok").map_err(|e| e.to_string())

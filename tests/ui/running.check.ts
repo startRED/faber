@@ -2,7 +2,7 @@ import type { QuotaReading, RunningItem, Summary } from '../../ui/api.ts';
 import { widthClass } from '../../ui/layout.ts';
 import { answerOutcome, askKey, blocksOf, createAutoOpen, createRunningStore, doneCards, elapsed, newest, openPlace, pickUp, placeOfRunning, QUIET_MS, waitingKeys, warmLeft } from '../../ui/running.ts';
 import { greetingParts } from '../../ui/greeting.ts';
-import { groupChats, seedQuotas, showsChats, tailOf, tightest, withQuota } from '../../ui/sidebar.ts';
+import { groupChats, lineReading, otherReadings, seedQuotas, showsChats, tailOf, tightest, withQuota } from '../../ui/sidebar.ts';
 import { check, deepEqual, equal, ok } from './check.ts';
 
 const item = (over: Partial<RunningItem> = {}): RunningItem => ({
@@ -204,4 +204,16 @@ check('running: a parked request needs the person and counts like a question', (
   const row = item({ state: 'needsYou', parked });
   equal(blocksOf([row])[0]!.needs, 1);
   equal(row.permissions.length, 0, 'there is no card to answer');
+});
+
+check('quota R177: the sidebar line shows the weekly window, the five-hour one moves to the tooltip, and an old weekly reading is unknown', () => {
+  const now = 1_000_000;
+  const reading = (window: string, used: number, resetsAt: number, vendor: QuotaReading['vendor'] = 'claude'): QuotaReading => ({ vendor, window, used, resetsAt });
+  let quotas = seedQuotas([reading('five_hour', 0.9, 2000), reading('seven_day', 0.3, 5000), reading('five_hour', 0.4, 2000, 'codex')]);
+  equal(lineReading(quotas, 'claude', now)?.window, 'seven_day', 'weekly even when the five-hour window is fuller');
+  deepEqual(otherReadings(quotas, 'claude', now, lineReading(quotas, 'claude', now)).map((q) => q.window), ['five_hour']);
+  equal(lineReading(quotas, 'codex', now)?.window, 'five_hour', 'a vendor with no weekly window shows the one it has');
+  quotas = withQuota(quotas, reading('seven_day', 0.3, 900));
+  equal(lineReading(quotas, 'claude', now), undefined, 'a weekly reading past its reset is not replaced by the five-hour one');
+  equal(lineReading({}, 'claude', now), undefined);
 });

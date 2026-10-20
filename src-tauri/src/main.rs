@@ -13,6 +13,7 @@ mod pane;
 mod project_commands;
 mod setup;
 mod terminal;
+mod tools;
 mod tray;
 mod update;
 
@@ -37,6 +38,7 @@ use serde::Serialize;
 use serde_json::{Map, Value};
 use std::collections::{BTreeMap, HashSet};
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 use tauri::window::Color;
@@ -120,6 +122,166 @@ async fn state(app: AppHandle, faber: State<'_, Faber>) -> Res<FullState> {
 #[tauri::command]
 async fn open(faber: State<'_, Faber>, id: String) -> Res<Option<Conversation>> {
     Ok(faber.engine.open(&id))
+}
+
+struct SearchRequest {
+    replaced: tokio::sync::oneshot::Sender<()>,
+    cancelled: Arc<AtomicBool>,
+}
+
+struct SearchQueue {
+    scanning: tokio::sync::Mutex<()>,
+    latest: Mutex<Option<SearchRequest>>,
+}
+
+impl SearchQueue {
+    const fn new() -> Self {
+        Self { scanning: tokio::sync::Mutex::const_new(()), latest: Mutex::new(None) }
+    }
+
+    async fn acquire(&self) -> Option<(tokio::sync::MutexGuard<'_, ()>, Arc<AtomicBool>)> {
+        let (replaced, gone) = tokio::sync::oneshot::channel();
+        let cancelled = Arc::new(AtomicBool::new(false));
+        if let Some(older) = lock(&self.latest).replace(SearchRequest { replaced, cancelled: cancelled.clone() }) {
+            older.cancelled.store(true, Ordering::Relaxed);
+            let _ = older.replaced.send(());
+        }
+        tokio::select! {
+            biased;
+            _ = gone => None,
+            one = self.scanning.lock() => Some((one, cancelled)),
+        }
+    }
+}
+
+#[tauri::command]
+async fn search_messages(faber: State<'_, Faber>, query: String, area: faber_engine::model::Area) -> Res<faber_engine::search::Results> {
+    // As with mentions: one scan runs and only the latest waits. Superseded scans stop between conversation files.
+    static SEARCHES: SearchQueue = SearchQueue::new();
+    let Some((_one, cancelled)) = SEARCHES.acquire().await else {
+        return Ok(faber_engine::search::Results { ready: true, hits: vec![] });
+    };
+    let engine = faber.engine.clone();
+    tauri::async_runtime::spawn_blocking(move || engine.search_messages_cancellable(&query, area, &cancelled).map_err(str::to_string))
+        .await
+        .map_err(|_| "error.store.read".to_string())?
+}
+
+#[derive(Default)]
+struct PromptReads {
+    active: Option<(String, Arc<AtomicBool>)>,
+    // A blur may arrive before its read starts on the async worker. Retain only recent request ids, never prompt text.
+    cancelled: std::collections::VecDeque<String>,
+}
+
+impl PromptReads {
+    fn start(&mut self, id: String) -> Option<Arc<AtomicBool>> {
+        if self.cancelled.contains(&id) {
+            return None;
+        }
+        let cancelled = Arc::new(AtomicBool::new(false));
+        if let Some((_, old)) = self.active.replace((id, cancelled.clone())) {
+            old.store(true, Ordering::Relaxed);
+        }
+        Some(cancelled)
+    }
+
+    fn cancel(&mut self, id: String) {
+        if self.active.as_ref().is_some_and(|(active, _)| *active == id)
+            && let Some((_, token)) = self.active.take()
+        {
+            token.store(true, Ordering::Relaxed);
+        }
+        self.cancelled.push_back(id);
+        if self.cancelled.len() > 32 {
+            self.cancelled.pop_front();
+        }
+    }
+
+    fn finish(&mut self, id: &str) {
+        if self.active.as_ref().is_some_and(|(active, _)| active == id) {
+            self.active = None;
+        }
+    }
+}
+
+#[tauri::command]
+async fn prompt_history(
+    faber: State<'_, Faber>,
+    request_id: String,
+    cancel: Option<bool>,
+    conversation_id: Option<String>,
+    area: faber_engine::model::Area,
+    project_id: Option<String>,
+) -> Res<Vec<String>> {
+    static READS: std::sync::LazyLock<Mutex<PromptReads>> = std::sync::LazyLock::new(|| Mutex::new(PromptReads::default()));
+    if cancel == Some(true) {
+        lock(&READS).cancel(request_id);
+        return Ok(vec![]);
+    }
+    let Some(cancelled) = lock(&READS).start(request_id.clone()) else { return Ok(vec![]) };
+    let engine = faber.engine.clone();
+    let result = tauri::async_runtime::spawn_blocking(move || {
+        engine.prompt_history_cancellable(conversation_id.as_deref(), area, project_id.as_deref(), &cancelled).map_err(str::to_string)
+    })
+    .await;
+    lock(&READS).finish(&request_id);
+    result.map_err(|_| "error.store.read".to_string())?
+}
+
+#[cfg(test)]
+mod search_queue_tests {
+    use super::{Ordering, PromptReads, SearchQueue};
+    use std::future::Future;
+
+    #[test]
+    fn prompt_history_cancels_superseded_reads_and_only_the_blurred_request() {
+        let mut reads = PromptReads::default();
+        let first = reads.start("first".into()).unwrap();
+        let second = reads.start("second".into()).unwrap();
+        assert!(first.load(Ordering::Relaxed));
+        reads.cancel("first".into());
+        reads.finish("first");
+        assert!(!second.load(Ordering::Relaxed));
+        reads.cancel("second".into());
+        assert!(second.load(Ordering::Relaxed));
+    }
+
+    #[test]
+    fn prompt_history_a_blur_before_worker_start_prevents_the_read_with_bounded_request_ids() {
+        let mut reads = PromptReads::default();
+        for id in 0..40 {
+            reads.cancel(id.to_string());
+        }
+        assert_eq!(reads.cancelled.len(), 32);
+        assert!(reads.start("39".into()).is_none());
+        let token = reads.start("new".into()).unwrap();
+        reads.finish("new");
+        assert!(reads.active.is_none());
+        assert!(!token.load(Ordering::Relaxed));
+    }
+    use std::task::{Context, Poll, Waker};
+
+    #[tokio::test]
+    async fn searches_cancel_the_running_scan_and_replace_only_the_waiting_query() {
+        let queue = SearchQueue::new();
+        let (running, cancelled) = queue.acquire().await.unwrap();
+        let mut context = Context::from_waker(Waker::noop());
+        let mut waiting = std::pin::pin!(queue.acquire());
+        assert!(waiting.as_mut().poll(&mut context).is_pending());
+        assert!(cancelled.load(Ordering::Relaxed), "the running scan must stop before reading another file");
+
+        let mut newest = std::pin::pin!(queue.acquire());
+        assert!(newest.as_mut().poll(&mut context).is_pending(), "the newer scan must wait for the running scan");
+        assert!(matches!(waiting.as_mut().poll(&mut context), Poll::Ready(None)), "the replaced query must give up without scanning");
+        drop(running);
+
+        let (running, cancelled) = newest.await.unwrap();
+        assert!(!cancelled.load(Ordering::Relaxed), "only the latest query gets to scan");
+        drop(running);
+        let (_, cancelled) = queue.acquire().await.unwrap();
+        assert!(!cancelled.load(Ordering::Relaxed), "an idle queue must admit the next query");
+    }
 }
 
 #[tauri::command]
@@ -232,6 +394,11 @@ async fn remove_queued(faber: State<'_, Faber>, id: String, turn_id: String) -> 
 }
 
 #[tauri::command]
+async fn edit_queued(faber: State<'_, Faber>, id: String, turn_id: String, text: String) -> Res<()> {
+    faber.engine.edit_queued(&id, &turn_id, &text)
+}
+
+#[tauri::command]
 async fn send_queued(faber: State<'_, Faber>, id: String, turn_id: String) -> Res<()> {
     faber.engine.send_queued(&id, &turn_id)
 }
@@ -239,6 +406,95 @@ async fn send_queued(faber: State<'_, Faber>, id: String, turn_id: String) -> Re
 #[tauri::command]
 async fn tell_helper(faber: State<'_, Faber>, id: String, call_id: String, text: String) -> Res<()> {
     faber.engine.tell_helper(&id, &call_id, &text)
+}
+
+/// `@` in the composer (parity T4): the entries of the working folder that match `query`, at most 50. Git may run, off the async
+/// threads. One listing runs at a time, and a query that a newer one replaced while it waited gives up, so typing fast in a
+/// big repository never piles up git runs or their output.
+#[tauri::command]
+async fn mentions(
+    faber: State<'_, Faber>,
+    id: Option<String>,
+    project_id: Option<String>,
+    query: String,
+) -> Res<Vec<faber_engine::mention::Mention>> {
+    // At most one query runs and one waits: a newer one answers the waiting one at once with nothing and takes its place.
+    static LISTING: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
+    static WAITING: std::sync::Mutex<Option<tokio::sync::oneshot::Sender<()>>> = std::sync::Mutex::new(None);
+    let (replaced, gone) = tokio::sync::oneshot::channel();
+    if let Some(older) = WAITING.lock().unwrap_or_else(|e| e.into_inner()).replace(replaced) {
+        let _ = older.send(());
+    }
+    let _one = tokio::select! {
+        biased;
+        _ = gone => return Ok(vec![]),
+        one = LISTING.lock() => one,
+    };
+    let engine = faber.engine.clone();
+    Ok(tauri::async_runtime::spawn_blocking(move || engine.mentions(id.as_deref(), project_id.as_deref(), &query))
+        .await
+        .unwrap_or_default())
+}
+
+/// The last advertised commands, read from memory without starting a CLI.
+#[tauri::command]
+fn commands(faber: State<'_, Faber>, id: Option<String>, vendor: Option<Vendor>) -> Vec<faber_engine::model::AgentCommand> {
+    faber.engine.commands(id.as_deref(), vendor)
+}
+/// At most one git listing runs and one waits; a newer request replaces the waiting one.
+#[tauri::command]
+async fn changes(faber: State<'_, Faber>, id: String, cursor: Option<String>) -> Res<faber_engine::changes::ChangeList> {
+    static LISTING: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
+    static WAITING: std::sync::Mutex<Option<tokio::sync::oneshot::Sender<()>>> = std::sync::Mutex::new(None);
+    let (replaced, gone) = tokio::sync::oneshot::channel();
+    if let Some(older) = lock(&WAITING).replace(replaced) {
+        let _ = older.send(());
+    }
+    let _one = tokio::select! {
+        biased;
+        _ = gone => return Ok(faber_engine::changes::ChangeList::default()),
+        one = LISTING.lock() => one,
+    };
+    let engine = faber.engine.clone();
+    Ok(tauri::async_runtime::spawn_blocking(move || engine.changes_page(&id, cursor.as_deref())).await.unwrap_or_default())
+}
+
+#[tauri::command]
+async fn change_patch(faber: State<'_, Faber>, id: String, path: String) -> Res<faber_engine::changes::ChangePatch> {
+    // The newest read waiting for each (conversation, file); a newer one answers the older with nothing.
+    type Waiting = std::collections::HashMap<(String, String), tokio::sync::oneshot::Sender<()>>;
+    static READING: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
+    static WAITING: std::sync::LazyLock<std::sync::Mutex<Waiting>> = std::sync::LazyLock::new(|| std::sync::Mutex::new(Waiting::new()));
+    let key = (id.clone(), path.clone());
+    let (replaced, gone) = tokio::sync::oneshot::channel();
+    if let Some(older) = lock(&WAITING).insert(key.clone(), replaced) {
+        let _ = older.send(());
+    }
+    let _one = tokio::select! {
+        biased;
+        _ = gone => return Ok(faber_engine::changes::ChangePatch::default()),
+        one = READING.lock() => one,
+    };
+    lock(&WAITING).remove(&key);
+    let engine = faber.engine.clone();
+    Ok(tauri::async_runtime::spawn_blocking(move || engine.change_patch(&id, &path)).await.unwrap_or_default())
+}
+
+/// A quick question on the side of a conversation (R250); `model` is the tab's own pick, or the conversation's.
+#[tauri::command]
+async fn ask_aside(faber: State<'_, Faber>, id: String, question: String, model: Option<String>) -> Res<String> {
+    faber.engine.ask_aside(&id, &question, model)
+}
+
+#[tauri::command]
+async fn stop_aside(faber: State<'_, Faber>, aside_id: String) -> Res<()> {
+    faber.engine.stop_aside(&aside_id);
+    Ok(())
+}
+
+#[tauri::command]
+async fn asides(faber: State<'_, Faber>, id: String) -> Res<Vec<faber_engine::engine::Aside>> {
+    Ok(faber.engine.asides(&id))
 }
 
 /// The person stops following the pull request a project conversation follows (R200).
@@ -790,6 +1046,8 @@ fn main() {
                 site_picture,
                 state,
                 open,
+                search_messages,
+                prompt_history,
                 send,
                 branch,
                 warm,
@@ -809,8 +1067,16 @@ fn main() {
                 rename,
                 remove,
                 remove_queued,
+                edit_queued,
                 send_queued,
                 tell_helper,
+                mentions,
+                commands,
+                changes,
+                change_patch,
+                ask_aside,
+                stop_aside,
+                asides,
                 unfollow_pr,
                 remove_project,
                 preview_look,
@@ -846,6 +1112,9 @@ fn main() {
                 setup::setup_check,
                 setup::setup_install,
                 setup::setup_sign_in,
+                tools::tools_list,
+                tools::tools_install,
+                tools::tools_remove,
                 #[cfg(feature = "test-hooks")]
                 report_checks
             ];

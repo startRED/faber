@@ -72,7 +72,9 @@ check('homes: no empty-state line names a path through Settings, in any language
   for (const [code, messages] of Object.entries(languages)) {
     const settings = String(messages['settings.open']);
     const section = String(messages['set.subscriptions']);
-    for (const key of ['empty.noAiBody', 'empty.openProjectBody', 'empty.projectBody']) {
+    // Projects says what the area is for even before an AI is connected (first-user review, 2026-10-19).
+    ok(messages['empty.noAiProjectsBody'] && messages['empty.noAiProjectsBody'] !== messages['empty.noAiBody'], `${code} Projects has its own line`);
+    for (const key of ['empty.noAiBody', 'empty.noAiProjectsBody', 'empty.openProjectBody', 'empty.projectBody']) {
       const line = String(messages[key]);
       ok(!line.includes('→'), `${code} ${key} has no arrow path`);
       ok(!line.includes(settings) && !line.includes(section), `${code} ${key} does not name Settings or its section`);
