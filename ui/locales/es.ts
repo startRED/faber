@@ -491,6 +491,8 @@ export const es: Messages = {
   'error.look.fileInvalid': 'Este archivo de tema no es válido ({detail}).',
   'error.look.fileTooBig': 'Este archivo de tema es demasiado grande.',
   'error.theme.write': 'No se pudo guardar el archivo de tema. El archivo anterior sigue intacto. Revisa el disco y la carpeta e inténtalo de nuevo.',
+  'error.export.read': 'No se pudo abrir la conversación para exportarla. Inténtalo de nuevo.',
+  'error.export.write': 'No se pudo guardar la conversación. Revisa el disco y la carpeta e inténtalo de nuevo.',
   'error.link.web': 'Desde aquí solo se abren enlaces web.',
   'error.link.open': 'No se pudo abrir el enlace.',
   'error.file.save': 'No se pudo guardar el archivo ahí. Revisa la carpeta y el disco, y vuelve a intentarlo.',
@@ -982,6 +984,10 @@ export const es: Messages = {
   "menu.label": "Acciones",
   // Native speaker must translate (needs native review).
   "menu.rename": "Cambiar el nombre",
+  "menu.export": "Exportar",
+  "export.you": "Tú",
+  "export.attachments": "Adjuntos",
+  "export.files": "Archivos modificados",
   // Native speaker must translate (needs native review).
   "menu.renameLabel": "Nombre de la conversación",
   // Native speaker must translate (needs native review).
@@ -1178,6 +1184,7 @@ export const es: Messages = {
   'notes.130.new': 'Pasa el ratón sobre un mensaje para copiarlo, oírlo en voz alta o ver cuándo se envió y cuánto tardó la respuesta.',
   'notes.131.better': 'Las imágenes se ven como miniaturas que se abren a pantalla completa, y la caja de mensaje quita una sola imagen o archivo sin borrar el resto.',
   'notes.132.new': 'Puedes pedir un resumen en Pregunta rápida o con /recap, aunque la conversación esté parada, sin cambiarla.',
+  'notes.133.new': 'Puedes guardar una conversación en Markdown desde su menú del botón derecho.',
   'update.checking': 'Buscando una actualización…',
   'update.downloading': 'Descargando actualización…',
   'update.downloadingPercent': 'Descargando actualización… {percent} %',

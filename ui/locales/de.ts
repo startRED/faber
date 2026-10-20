@@ -491,6 +491,8 @@ export const de: Messages = {
   'error.look.fileInvalid': 'Diese Theme-Datei ist ungültig ({detail}).',
   'error.look.fileTooBig': 'Diese Theme-Datei ist zu groß.',
   'error.theme.write': 'Die Theme-Datei konnte nicht gespeichert werden. Die alte Datei bleibt unverändert. Prüfe Festplatte und Ordner und versuche es erneut.',
+  'error.export.read': 'Die Unterhaltung konnte nicht zum Export geöffnet werden. Versuche es erneut.',
+  'error.export.write': 'Die Unterhaltung konnte nicht gespeichert werden. Prüfe Festplatte und Ordner und versuche es erneut.',
   'error.link.web': 'Von hier öffnen sich nur Weblinks.',
   'error.link.open': 'Der Link ließ sich nicht öffnen.',
   'error.file.save': 'Die Datei ließ sich dort nicht speichern. Prüfe den Ordner und das Laufwerk und versuche es noch einmal.',
@@ -982,6 +984,10 @@ export const de: Messages = {
   "menu.label": "Aktionen",
   // Native speaker must translate (needs native review).
   "menu.rename": "Umbenennen",
+  "menu.export": "Exportieren",
+  "export.you": "Du",
+  "export.attachments": "Anhänge",
+  "export.files": "Geänderte Dateien",
   // Native speaker must translate (needs native review).
   "menu.renameLabel": "Name der Unterhaltung",
   // Native speaker must translate (needs native review).
@@ -1178,6 +1184,7 @@ export const de: Messages = {
   'notes.130.new': 'Fahre mit der Maus über eine Nachricht, um sie zu kopieren, vorlesen zu lassen oder zu sehen, wann sie gesendet wurde und wie lange die Antwort gedauert hat.',
   'notes.131.better': 'Bilder erscheinen als kleine Vorschauen, die sich im Vollbild öffnen, und das Nachrichtenfeld entfernt ein einzelnes Bild oder eine Datei, ohne den Rest zu leeren.',
   'notes.132.new': 'Du kannst unter Kurze Frage oder mit /recap eine Zusammenfassung anfordern, auch bei ruhendem Gespräch, ohne es zu verändern.',
+  'notes.133.new': 'Du kannst eine Unterhaltung über ihr Rechtsklick-Menü als Markdown-Datei speichern.',
   'update.checking': 'Suche nach einem Update…',
   'update.downloading': 'Update wird heruntergeladen…',
   'update.downloadingPercent': 'Update wird heruntergeladen… {percent} %',

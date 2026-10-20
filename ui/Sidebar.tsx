@@ -231,6 +231,7 @@ export function Sidebar(props: Props) {
             label: t(row.c.pinnedAt === undefined ? 'menu.pin' : 'menu.unpin'),
             run: () => void api.pin(row.c.id, row.c.pinnedAt === undefined).catch((err) => props.onError?.(err)),
           }] : []),
+          { id: 'export', label: t('menu.export'), run: () => void api.exportConversation(row.c.id, { you: t('export.you'), auto: t('model.auto'), attachments: t('export.attachments'), files: t('export.files') }).catch((err) => props.onError?.(err)) },
           row.c.archived
             ? { id: 'unarchive', label: t('menu.unarchive'), run: () => void api.archive(row.c.id, false).catch((err) => props.onError?.(err)) }
             : { id: 'archive', label: t('menu.archive'), run: () => void api.archive(row.c.id, true).catch((err) => props.onError?.(err)) },

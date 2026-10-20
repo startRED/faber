@@ -491,6 +491,8 @@ export const fr: Messages = {
   'error.look.fileInvalid': 'Ce fichier de thème n’est pas valide ({detail}).',
   'error.look.fileTooBig': 'Ce fichier de thème est trop volumineux.',
   'error.theme.write': "Le fichier de thème n'a pas pu être enregistré. L'ancien fichier reste intact. Vérifiez le disque et le dossier, puis réessayez.",
+  'error.export.read': 'Impossible d’ouvrir la conversation pour l’exporter. Réessayez.',
+  'error.export.write': 'Impossible d’enregistrer la conversation. Vérifiez le disque et le dossier, puis réessayez.',
   'error.link.web': 'Seuls les liens web s’ouvrent d’ici.',
   'error.link.open': 'Le lien n’a pas pu s’ouvrir.',
   'error.file.save': 'Le fichier n’a pas pu être enregistré à cet endroit. Vérifiez le dossier et le disque, puis réessayez.',
@@ -982,6 +984,10 @@ export const fr: Messages = {
   "menu.label": "Actions",
   // Native speaker must translate (needs native review).
   "menu.rename": "Renommer",
+  "menu.export": "Exporter",
+  "export.you": "Vous",
+  "export.attachments": "Pièces jointes",
+  "export.files": "Fichiers modifiés",
   // Native speaker must translate (needs native review).
   "menu.renameLabel": "Nom de la conversation",
   // Native speaker must translate (needs native review).
@@ -1178,6 +1184,7 @@ export const fr: Messages = {
   'notes.130.new': 'Survolez un message pour le copier, l’écouter à voix haute ou voir quand il a été envoyé et combien de temps la réponse a pris.',
   'notes.131.better': 'Les images apparaissent en miniatures qui s’ouvrent en plein écran, et la zone de message retire une seule image ou un seul fichier sans vider le reste.',
   'notes.132.new': 'Vous pouvez demander un résumé dans Question rapide ou avec /recap, même quand la conversation est au repos, sans la modifier.',
+  'notes.133.new': 'Vous pouvez enregistrer une conversation en Markdown depuis son menu contextuel.',
   'update.checking': 'Recherche d’une mise à jour…',
   'update.downloading': 'Téléchargement de la mise à jour…',
   'update.downloadingPercent': 'Téléchargement de la mise à jour… {percent} %',

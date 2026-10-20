@@ -488,6 +488,8 @@ export const ptBR: Messages = {
   'error.look.fileInvalid': 'Este arquivo de tema não é válido ({detail}).',
   'error.look.fileTooBig': 'Este arquivo de tema é grande demais.',
   'error.theme.write': 'Não foi possível salvar o arquivo de tema. O arquivo antigo continua intacto. Confira o disco e a pasta e tente de novo.',
+  'error.export.read': 'Não foi possível abrir a conversa pra exportar. Tente de novo.',
+  'error.export.write': 'Não foi possível salvar a conversa. Confira o disco e a pasta e tente de novo.',
   'error.link.web': 'Daqui só se abrem links da web.',
   'error.link.open': 'Não foi possível abrir o link.',
   'error.file.save': 'Não foi possível salvar o arquivo ali. Verifique a pasta e o disco e tente de novo.',
@@ -978,6 +980,10 @@ export const ptBR: Messages = {
   // Native speaker must translate (needs native review).
   "menu.label": "Ações",
   "menu.rename": "Mudar o nome",
+  "menu.export": "Exportar",
+  "export.you": "Você",
+  "export.attachments": "Anexos",
+  "export.files": "Arquivos alterados",
   // Native speaker must translate (needs native review).
   "menu.renameLabel": "Nome da conversa",
   "menu.delete": "Apagar",
@@ -1165,6 +1171,7 @@ export const ptBR: Messages = {
   'notes.130.new': 'Passe o mouse numa mensagem para copiá-la, ouvi-la em voz alta ou ver quando foi enviada e quanto tempo a resposta levou.',
   'notes.131.better': 'As imagens aparecem como miniaturas que abrem em tela cheia, e a caixa de mensagem tira só uma imagem ou arquivo sem limpar os outros.',
   'notes.132.new': 'Você pode pedir um resumo em Pergunta rápida ou com /recap, mesmo com a conversa parada, sem mudar nada nela.',
+  'notes.133.new': 'Você pode salvar uma conversa em Markdown pelo menu do botão direito.',
   'update.checking': 'Procurando atualização…',
   'update.downloading': 'Baixando atualização…',
   'update.downloadingPercent': 'Baixando atualização… {percent}%',

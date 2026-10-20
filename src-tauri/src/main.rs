@@ -551,6 +551,32 @@ async fn save_theme(app: AppHandle, appearance: Map<String, Value>, name: String
 }
 
 #[tauri::command]
+async fn export_conversation(
+    app: AppHandle,
+    faber: State<'_, Faber>,
+    id: String,
+    words: faber_engine::export::Words,
+) -> Result<bool, Failure> {
+    use std::io::Write;
+    let engine = faber.engine.clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        let (title, markdown) = engine.export_conversation(&id, &words).map_err(Failure::key)?;
+        let stem: String = title.chars().filter(|c| c.is_alphanumeric() || matches!(c, ' ' | '-' | '_')).take(120).collect();
+        let stem = if stem.trim().is_empty() { "Faber" } else { stem.trim() };
+        let mut dialog = app.dialog().file().add_filter("Markdown", &["md"]).set_file_name(format!("{stem}.md"));
+        if let Some(w) = main_window(&app) {
+            dialog = dialog.set_parent(&w);
+        }
+        let Some(target) = dialog.blocking_save_file() else { return Ok(false) };
+        let target = target.into_path().map_err(|_| Failure::key("error.export.write"))?;
+        look::replace_file(&target, |file| file.write_all(markdown.as_bytes())).map_err(|_| Failure::key("error.export.write"))?;
+        Ok(true)
+    })
+    .await
+    .map_err(|_| Failure::key("error.export.write"))?
+}
+
+#[tauri::command]
 async fn open_theme(app: AppHandle) -> Result<Option<ThemeFile>, Failure> {
     let mut dialog = app.dialog().file().add_filter("JSON", &["json"]);
     if let Some(w) = main_window(&app) {
@@ -1098,6 +1124,7 @@ fn main() {
                 preview_look,
                 save_settings,
                 save_theme,
+                export_conversation,
                 open_theme,
                 add_project,
                 recents,

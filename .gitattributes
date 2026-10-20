@@ -1,2 +1,4 @@
 # The frozen canary fixtures are compared byte for byte; no checkout may change their line endings.
 tests/fixtures/projects/canary/** -text
+# The export fixture is compared byte for byte too.
+tests/fixtures/conversation-export.* -text

@@ -697,6 +697,20 @@ impl Engine {
     pub fn open(&self, id: &str) -> Option<Conversation> {
         self.with(|c| c.load(id).cloned())
     }
+    pub fn export_conversation(&self, id: &str, words: &crate::export::Words) -> Result<(String, String), &'static str> {
+        // Export a saved snapshot without retaining another conversation in the engine's live cache.
+        let (conversation, folder) = self
+            .with(|c| {
+                let conversation = c.store.get(id)?;
+                let folder = c.folder_of(&conversation).unwrap_or_default();
+                Some((conversation, folder))
+            })
+            .ok_or("error.export.read")?;
+        let home = std::env::var_os("USERPROFILE").or_else(|| std::env::var_os("HOME")).unwrap_or_default();
+        let paths = crate::export::Paths::new(&folder.to_string_lossy(), &home.to_string_lossy(), cfg!(windows));
+        let markdown = crate::export::markdown(&conversation, words, &chrono::Local, &paths)?;
+        Ok((conversation.title, markdown))
+    }
     pub fn remove_queued(&self, id: &str, turn_id: &str) {
         self.with(|c| c.remove_queued(id, turn_id))
     }

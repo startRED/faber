@@ -1,6 +1,6 @@
 # Sidebar
 
-The area's conversation lists, pinning, archive and footer. Window widths and the sidebar overlay stay in
+The area's conversation lists, pinning, export, archive and footer. Window widths and the sidebar overlay stay in
 [layout.md](layout.md). Search details are in [search.md](search.md).
 
 Pinned and date groups share one labelled section with a semantic heading, styled like the existing quiet labels.
@@ -14,6 +14,15 @@ has already moved to another control. Pin and Unpin remain usable from the keybo
 - Each project expands to show its conversations, and has a "+". When items in a project need the user, its tail shows
   the amber speech bubble and "{m} needs you". Amber always comes with these words, never with a number alone. When
   something only runs, the tail shows a pulsing dot.
+- In both areas, a conversation’s right-click menu offers Rename, Pin (or Unpin), Export, Archive (or Unarchive), then Delete. Export
+  opens the native save picker, parented to the window, with the title as a plain `.md` filename. Cancelling is silent.
+  The Markdown holds messages with names and local times, filenames for attachments and changed files, and Faber’s own
+  messages marked as Faber. Replies replace only the known working-folder prefix with its folder name and the home prefix with `~`,
+  including links and literal picture targets. Both slash styles match, with case ignored on Windows; unrelated text,
+  division operators, comments and web URLs stay unchanged. Embedded image bytes become generated filenames. Generated labels stay literal;
+  unfinished Markdown cannot consume the next turn. Only http, https, mailto and schemeless message links stay clickable;
+  other destinations and raw HTML are literal text. It leaves out tools, the work log and
+  internal metadata; a failed save uses the usual error line.
 - Pin and Unpin extend the conversation row's right-click menu in both areas. A short Pinned group uses the existing
   group heading and rows: above Today, This week and Earlier in Chat, and first inside each project's expanded list.
   Pinned rows are flat, newest pin first, and appear only once. Unpin returns the row to its normal order and nesting;

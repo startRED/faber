@@ -30,7 +30,7 @@ points nowhere; a page that grows past the limit splits by topic, and its row he
 | [design/brand.md](design/brand.md) | The mark, the app icon, empty states, brand rules |
 | [design/conversation.md](design/conversation.md) | An open conversation: the answers and their bar, your messages, the viewer, the work log |
 | [design/layout.md](design/layout.md) | Window widths, titlebar, the homes, the running column |
-| [design/sidebar.md](design/sidebar.md) | Sidebar area lists, pinning, archive and footer |
+| [design/sidebar.md](design/sidebar.md) | Sidebar area lists, pinning, export, archive and footer |
 | [design/composer.md](design/composer.md) | The shared message box: file mentions, commands, earlier messages and their search |
 | [design/queue.md](design/queue.md) | Queued messages, in-place editing, keyboard controls and drafts when a message leaves the queue |
 | [design/running.md](design/running.md) | The running column: rows, question cards, done cards, when it opens by itself |

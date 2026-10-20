@@ -13,6 +13,13 @@ autotests = false
 # The free memory a Cargo build of the verifier is admitted against.
 sysinfo = { version = "0.39.6", default-features = false, features = ["disk", "system"] }
 base64 = "0.23"
+# Local export timestamps, including the offset at each message's date; already in the workspace's dependency graph.
+chrono = "0.4"
+# Parse and serialize each exported message independently, preserving Markdown while closing its scopes.
+pulldown-cmark = { version = "0.13", default-features = false }
+pulldown-cmark-to-cmark = "23"
+# Already in the workspace: HTML's attribute rules also decode numeric entities without a semicolon.
+html5ever = "0.39"
 flate2 = "1"
 reqwest = { version = "0.13", default-features = false, features = ["rustls"] }
 serde = { version = "1", features = ["derive"] }

@@ -606,6 +606,7 @@ export const api = {
     return invoke<string[]>('prompt_history', args).finally(() => signal?.removeEventListener('abort', cancel));
   },
   rename: (id: string, title: string) => invoke<void>('rename', { id, title }),
+  exportConversation: (id: string, words: { you: string; auto: string; attachments: string; files: string }) => invoke<boolean>('export_conversation', { id, words }),
   /** Refused with `error.copy.unsaved` while its copy holds work found nowhere else, unless `discard`. */
   remove: (id: string, discard = false) => invoke<void>('remove', { id, discard }),
   removeQueued: (id: string, turnId: string) => invoke<void>('remove_queued', { id, turnId }),
