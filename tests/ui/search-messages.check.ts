@@ -8,6 +8,10 @@ import { t } from '../../ui/i18n.ts';
 import { check, equal, ok } from './check.ts';
 
 const settle = (ms = 30) => new Promise((resolve) => setTimeout(resolve, ms));
+// Waits for a state instead of a fixed time, so a slow runner cannot fail the check.
+const until = async (done: () => unknown, limit = 4000) => {
+  for (let waited = 0; waited < limit && !done(); waited += 20) await settle(20);
+};
 const hit = (area: Area): MessageHit => ({
   conversationId: `search-${area}`, area, title: 'A saved conversation', messageIndex: 3,
   snippet: 'Found <b>café</b> in an answer.', highlights: [{ start: 9, end: 13 }],
@@ -232,7 +236,7 @@ check('search-messages: clicking a hit opens its old message, unfolds its run an
         await settle();
         equal(run.open, false, 'a streaming update preserves a run the person collapsed after the search jump');
         button.click();
-        await settle(60);
+        await until(() => root.querySelector('[data-message-index="3"]')?.closest<HTMLDetailsElement>('.run-block')?.open);
         ok(root.querySelector('[data-message-index="3"]')?.closest<HTMLDetailsElement>('.run-block')?.open, 'a new navigation to the same hit opens its run once again');
         ok(root.querySelectorAll('[data-message-index]').length <= 50, 'jumping back does not mount the whole history');
         const thread = root.querySelector<HTMLElement>('.thread')!;
