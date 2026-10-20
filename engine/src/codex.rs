@@ -660,6 +660,8 @@ pub fn thread_params(area: Area, t: &CodexThread) -> (&'static str, Value) {
         // boundary as user turns, with their existing working folder read-only and no workspace writes.
         params.remove("sandbox");
         params.insert("config".into(), crate::permissions::sandbox_config(&t.cwd, false).into());
+        // A quick question on the side (R250) too: on Windows the shell cannot start under that read-only profile ("MXC launcher:
+        // failed to create the process security environment", Codex 0.162), so it answers from Faber's record alone.
         params["config"]["features.shell_tool"] = false.into();
         params.remove("dynamicTools");
         params.insert("approvalPolicy".into(), "never".into());
@@ -682,7 +684,7 @@ pub fn thread_params(area: Area, t: &CodexThread) -> (&'static str, Value) {
             crate::helper::Helper::Is => {
                 params.insert("ephemeral".into(), true.into());
             }
-            crate::helper::Helper::Off => {}
+            crate::helper::Helper::Off | crate::helper::Helper::Aside => {}
         }
         // R161 step 7: Faber's own browser, where it is offered.
         if t.browse {

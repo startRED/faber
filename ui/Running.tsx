@@ -1,5 +1,5 @@
 import { createSignal, For, Show } from 'solid-js';
-import type { Project, RunningItem, Summary } from './api.ts';
+import type { Conversation, Project, RunningItem, Summary } from './api.ts';
 import { AgentChat } from './AgentChat.tsx';
 import { Asks, Parkeds } from './Ask.tsx';
 import { Icon, VendorMark } from './Glyphs.tsx';
@@ -9,6 +9,8 @@ import { everyWhileShown } from './idle.ts';
 import { t } from './i18n.ts';
 import { Peek } from './Mark.tsx';
 import { planWords } from './Plan.tsx';
+import { QuickQuestion } from './QuickQuestion.tsx';
+import type { Option } from './models.ts';
 import { SitePane, type OpenSite } from './Site.tsx';
 import { vendorName } from './models.ts';
 import { animateList } from './motion.ts';
@@ -34,6 +36,9 @@ export function Running(props: {
   agent?: { step: AgentStep; streaming: boolean; helpable: boolean };
   /** A page of Faber's browser the person opened from a reply, shown the same way. */
   site?: OpenSite;
+  /** The quick question on the side (R250), opened from the list's head or by `/btw`, shown the same way. */
+  aside?: { conversation?: Conversation; options: Option[] };
+  onAside?: () => void;
   onBack?: () => void;
   /** The open subagent fills the stage as a full thread (the column sits over the work area), and the control in its head that swaps the two. */
   wide?: boolean;
@@ -84,7 +89,7 @@ export function Running(props: {
       <Show
         when={props.agent}
         fallback={
-          <Show when={props.site} fallback={<>
+          <Show when={props.site} fallback={<Show when={props.aside} fallback={<>
             <div class="rc-head">
               <button class="iconbtn" aria-label={t('run.close')} title={t('run.close')} onClick={() => props.onClose()}>
                 <Icon name="close" />
@@ -93,6 +98,11 @@ export function Running(props: {
                 {t('run.title')}
               </h2>
               <span class="n num">{rows()}</span>
+              <Show when={props.onAside}>
+                <button class="btn ghost rc-aside" onClick={() => props.onAside!()}>
+                  {t('aside.title')}
+                </button>
+              </Show>
             </div>
             <div class="rc-body" ref={animateList}>
               <Show
@@ -186,6 +196,8 @@ export function Running(props: {
               </Show>
             </div>
           </>}>
+            {(aside) => <QuickQuestion conversation={aside().conversation} options={aside().options} onBack={() => props.onBack?.()} onClose={props.onClose} onTell={(text) => props.onTell?.(text)} />}
+          </Show>}>
             {(site) => <SitePane site={site()} onBack={() => props.onBack?.()} onClose={props.onClose} />}
           </Show>
         }

@@ -32,3 +32,10 @@ rest of the shell are in [layout.md](layout.md).
 - A reply whose agent has finished, with only the CLI's turn still closing, is not a row: it is done for the person. Keep going,
   Faber's checks, a compaction and a queued message keep the row. The topbar's count follows the column.
 - With no items it shows an empty state with Curioso.
+- "Quick question" (R250) is a quiet button at the end of the list's head, before the close button. It opens the quick
+  question in place of the list, with the back arrow and the close button in its head like an opened subagent; `/btw`
+  in the conversation's box opens it the same way, from any width (over the stage below 1,100 px). Each question sits in
+  the same bubble as a subagent's brief, its answer below it as a reply, and a quiet "Send to the agent" under a finished
+  one; while it runs, "Looking…" and a quiet Stop. The box is the side chat's (Enter asks, Shift+Enter breaks the line),
+  with the model picker beside Ask when the conversation's AI has more than one model. Nothing in it moves but the
+  list's own entrance (`animateList`).

@@ -27,6 +27,8 @@ pub enum Helper {
     Offers,
     /// A helper: it leaves no history in the CLI and cannot call a helper of its own.
     Is,
+    /// A quick question on the side (R250): it may only read, search and list the working folder, and leaves no history.
+    Aside,
 }
 
 const DESCRIPTION: &str = "Hands one self-contained piece of work, a review of your work, or a second opinion to a helper agent \

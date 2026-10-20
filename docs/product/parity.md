@@ -27,7 +27,6 @@ Size: S small, M medium, L large. Wave: 1 next, 2 after, 3 later or with its pha
 
 | # | Gap | Who has it | Faber today | Way | Size | Wave |
 |---|---|---|---|---|---|---|
-| T1 | Quick question on the side, without stopping the agent or waiting in its queue (`/btw`) | Claude Code, Codex `/side`, Claude app side chat | Approved (R250), task 035 ([following.md](following.md) item 10) | Fork the CLI session, read only | M | 1 |
 | T3 | `/` menu: the CLI's commands, its skills and Faber's actions, filtered as you type | all four | None | Pass-through, plus Faber's own actions | M | 1 |
 | T4 | `@` to point at a file or folder of the project | Claude Code, Codex, both apps | Attach or drop only | Search the working folder | S | 1 |
 | T5 | Edit a queued message before it runs | Codex | Remove only | Extends Queue, steer | S | 2 |
@@ -51,7 +50,7 @@ Size: S small, M medium, L large. Wave: 1 next, 2 after, 3 later or with its pha
 | # | Gap | Who has it | Faber today | Way | Size | Wave |
 |---|---|---|---|---|---|---|
 | C1 | What fills the context, and "compact now" from the meter (`/context`, `/compact`) | Claude Code, Codex, Claude app | Meter (R221); the agent compacts in Projects | Extends Context meter | S | 2 |
-| C2 | A recap of a long conversation on demand (`/recap`) | both CLIs | Closing box per task | Extends T1 (a side question) | S | 2 |
+| C2 | A recap of a long conversation on demand (`/recap`) | both CLIs | Closing box per task | Extends the quick question on the side ([following.md](following.md) item 10) | S | 2 |
 | C3 | Usage over days and weeks, per model and area (`/usage` stats, `/insights`) | Claude Code, Codex | Quota now and spend today | Extends Accounts and limits | M | 3 |
 
 ## Finding and keeping

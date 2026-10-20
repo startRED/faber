@@ -31,6 +31,7 @@ use uuid::Uuid;
 
 mod answer;
 mod archive;
+mod aside;
 mod auto;
 mod auto_archive;
 mod browse;
@@ -38,6 +39,7 @@ mod by_itself;
 mod compact;
 mod copies;
 mod ended;
+pub use aside::Aside;
 pub use copies::GitRunner;
 pub mod facts;
 mod helpers;
@@ -98,6 +100,11 @@ pub enum AppEvent {
         title: String,
         why: String,
         vendor: Option<Vendor>,
+    },
+    /// The quick questions on the side of a conversation (R250), all of them each time one changes.
+    Asides {
+        conversation_id: String,
+        asides: Vec<aside::Aside>,
     },
 }
 
@@ -380,6 +387,9 @@ struct Core {
     credit: Option<(String, String, Vendor)>,
     /// Helpers at work (R161), by the agent's tool call that started each.
     helpers: HashMap<String, helpers::Run>,
+    /// The quick questions on the side (R250), by conversation, and the ones still asking, by question.
+    asides: HashMap<String, Vec<aside::Aside>>,
+    asking: HashMap<String, aside::Asking>,
     /// The subagents of each running reply, followed for signs of being stuck.
     watched: HashMap<String, stuck_watch::Watched>,
     /// The pull request each project conversation follows, by conversation (R200), and what reads one.
@@ -465,6 +475,8 @@ impl Engine {
                 copying: HashMap::new(),
                 credit: None,
                 helpers: HashMap::new(),
+                asides: HashMap::new(),
+                asking: HashMap::new(),
                 watched: HashMap::new(),
                 follows: HashMap::new(),
                 pr_reader,
@@ -644,6 +656,16 @@ impl Engine {
     /// Writes to a helper at work (R161 step 5): `call_id` is the agent's helper call in conversation `id`.
     pub fn tell_helper(&self, id: &str, call_id: &str, text: &str) -> Result<(), String> {
         self.with(|c| c.tell_helper(id, call_id, text))
+    }
+    /// A quick question on the side of conversation `id` (R250): the question's id, or why it cannot be asked (a key).
+    pub fn ask_aside(&self, id: &str, question: &str, model: Option<String>) -> Result<String, String> {
+        self.with(|c| c.ask_aside(id, question, model))
+    }
+    pub fn stop_aside(&self, aside_id: &str) {
+        self.with(|c| c.stop_aside(aside_id))
+    }
+    pub fn asides(&self, id: &str) -> Vec<aside::Aside> {
+        self.with(|c| c.asides_of(id))
     }
     pub fn warm(&self, req: WarmRequest) {
         self.with(|c| c.warm(req))
@@ -904,6 +926,7 @@ impl Engine {
                 l.session.close();
             }
             c.close_helpers();
+            c.close_asides(None);
             for (_, server) in c.codex.drain() {
                 server.retire();
             }
@@ -1002,6 +1025,7 @@ impl Core {
         if unknown || billed || paid {
             self.stop_paid_helpers(vendor);
         }
+        self.stop_paid_asides(vendor, paid && !billed);
         let stopped: Vec<String> = self
             .live
             .iter()
@@ -1073,6 +1097,8 @@ impl Core {
         let Some(l) = self.live.get(conv).filter(|l| l.started > 0.0) else { return };
         let (vendor, start, model) = (l.vendor, l.started, l.running.clone().or_else(|| l.model.clone()).unwrap_or_default());
         self.note_span(vendor, start, &model, cost, incomplete);
+        // The turn ended: the quick questions asked before it began are over.
+        self.drop_asides(conv, start);
         if let Some(l) = self.live.get_mut(conv) {
             l.started = 0.0;
         }
@@ -2985,6 +3011,8 @@ impl Core {
     fn remove(&mut self, id: &str) {
         self.note_turn(id, None, true);
         self.stop_helpers(id, true);
+        self.close_asides(Some(id));
+        self.asides.remove(id);
         self.follows.remove(id);
         self.before.remove(id);
         if let Some(l) = self.retire(id) {

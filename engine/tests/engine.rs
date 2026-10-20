@@ -2396,6 +2396,148 @@ async fn r161_the_agent_hands_a_piece_of_work_to_the_other_vendor_and_gets_its_r
     assert!(reply.cost_usd.unwrap() > 0.00815, "{:?}", reply.cost_usd);
 }
 
+/// R250: a quick question on the side, asked while the agent works, runs in a process of its own on a fork of the
+/// conversation's session at low effort. The running turn never hears it, the queue and the session stay as they were, its
+/// quota counts while it runs, and the answer goes once the turn after it ends.
+#[tokio::test]
+async fn r250_a_quick_question_on_the_side_leaves_the_turn_its_queue_and_its_session_alone() {
+    let dir = tempfile::tempdir().unwrap();
+    let (pipe_spawn, made) = pipes();
+    let argv: Arc<Mutex<Vec<Vec<String>>>> = Arc::default();
+    let seen = argv.clone();
+    let spawn: Spawner = Arc::new(move |bin, args, cwd| {
+        seen.lock().unwrap().push(args.to_vec());
+        pipe_spawn(bin, args, cwd)
+    });
+    let engine = two_vendors(dir.path(), spawn);
+    std::fs::write(dir.path().join(".env"), "TOKEN=synthetic").unwrap();
+    std::fs::write(dir.path().join("parser.rs"), "fn parse() {}").unwrap();
+    let project = engine.add_project(&dir.path().to_string_lossy()).unwrap();
+    assert_eq!(engine.ask_aside("nope", "how is it going?", None).unwrap_err(), "error.conversationGone");
+    let id = engine
+        .send(SendRequest { project_id: Some(project.id), ..ask(Area::Project, "refactor it", choice("claude", Some("sonnet"))) })
+        .unwrap();
+    let mut main = next_pipe(&made).await;
+    main.say(json!({"type":"system","subtype":"init","session_id":"s1","model":"claude-sonnet-5-5"})).await;
+    main.say(json!({"type":"stream_event","parent_tool_use_id":null,"event":{"type":"content_block_delta","delta":{"type":"text_delta","text":"Reading."}}})).await;
+    for _ in 0..300 {
+        if engine.open(&id).is_some_and(|c| c.resumable(Vendor::Claude).is_some()) {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(10)).await;
+    }
+    let before = engine.open(&id).unwrap();
+    let main_lines = main.lines.lock().unwrap().len();
+    assert_eq!(engine.ask_aside(&id, "  ", None).unwrap_err(), "error.aside.empty");
+
+    let aside = engine.ask_aside(&id, "why that file?", None).unwrap();
+    assert_eq!(engine.ask_aside(&id, "and now?", None).unwrap_err(), "error.aside.busy", "one question at a time");
+    let mut side = next_pipe(&made).await;
+    let args = argv.lock().unwrap().last().unwrap().clone();
+    let has = |pair: [&str; 2]| args.windows(2).any(|w| w == pair);
+    assert!(has(["--resume", "s1"]) && args.iter().any(|a| a == "--fork-session") && has(["--tools", "Read,Grep,Glob"]), "{args:?}");
+    assert!(has(["--effort", "low"]) && has(["--model", "claude-sonnet-5-5"]), "same model, low effort: {args:?}");
+    let asked = engine.asides(&id);
+    assert_eq!((asked.len(), asked[0].state, asked[0].question.as_str()), (1, "running", "why that file?"));
+    assert!(engine.state().usage.iter().any(|u| u.vendor == Vendor::Claude && u.counting), "its quota counts while it runs");
+    for _ in 0..300 {
+        if side.lines.lock().unwrap().iter().any(|l| l["type"] == "user") {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(10)).await;
+    }
+    let said = side.lines.lock().unwrap().iter().find(|l| l["type"] == "user").cloned().unwrap();
+    assert_eq!(said["message"]["content"], "why that file?", "the fork knows the rest: {said}");
+
+    // Every read goes through the working folder's policy, whatever the conversation's mode: a secret in the folder never.
+    for (request, file) in [("r1", ".env"), ("r2", "parser.rs")] {
+        let path = dir.path().join(file).to_string_lossy().into_owned();
+        side.say(json!({ "type": "control_request", "request_id": request, "request": { "subtype": "can_use_tool", "tool_name": "Read", "input": { "file_path": path } } })).await;
+    }
+    for _ in 0..300 {
+        if side.answers().len() == 2 {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(10)).await;
+    }
+    let mut answers = side.answers();
+    answers.sort();
+    assert_eq!(answers, [("r1".to_string(), "deny".to_string()), ("r2".to_string(), "allow".to_string())]);
+    side.say(json!({"type":"stream_event","parent_tool_use_id":null,"event":{"type":"content_block_delta","delta":{"type":"text_delta","text":"It holds the parser."}}})).await;
+    side.say(json!({"type":"result","subtype":"success","is_error":false,"total_cost_usd":0.004,"usage":{}})).await;
+    for _ in 0..300 {
+        if engine.asides(&id)[0].state != "running" {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(10)).await;
+    }
+    let done = &engine.asides(&id)[0];
+    assert_eq!((done.state, done.answer.as_str(), done.id.as_str()), ("done", "It holds the parser.", aside.as_str()));
+    assert!(side.closed.load(std::sync::atomic::Ordering::SeqCst) || made.lock().unwrap().is_empty(), "gone once it answered");
+
+    let after = engine.open(&id).unwrap();
+    assert_eq!(main.lines.lock().unwrap().len(), main_lines, "the running turn never heard the question");
+    assert_eq!((after.messages.len(), after.queued.len()), (before.messages.len(), before.queued.len()));
+    assert_eq!(after.resumable(Vendor::Claude), Some(&"s1".to_string()), "the conversation keeps its own session");
+
+    let ended = |engine: &Engine| engine.open(&id).is_some_and(|c| c.messages.last().is_some_and(|m| m.status != Some(Status::Streaming)));
+    main.say(json!({"type":"result","subtype":"success","is_error":false,"total_cost_usd":0.01,"usage":{}})).await;
+    for _ in 0..300 {
+        if ended(&engine) {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(10)).await;
+    }
+    assert!(ended(&engine) && engine.asides(&id).len() == 1, "it stays through the turn it was asked in");
+    engine
+        .send(SendRequest { conversation_id: Some(id.clone()), ..ask(Area::Project, "go on", choice("claude", Some("sonnet"))) })
+        .unwrap();
+    for _ in 0..300 {
+        if main.lines.lock().unwrap().iter().filter(|l| l["type"] == "user").count() == 2 {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(10)).await;
+    }
+    main.say(json!({"type":"result","subtype":"success","is_error":false,"total_cost_usd":0.01,"usage":{}})).await;
+    for _ in 0..300 {
+        if engine.asides(&id).is_empty() {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(10)).await;
+    }
+    assert!(engine.asides(&id).is_empty(), "the answer goes once the turn after it ends");
+    engine.shutdown();
+}
+
+/// R250, review: a quick question stops as soon as any reading of its AI's account shows paid use, which nobody approved for it.
+#[tokio::test]
+async fn r250_a_quick_question_stops_when_a_reading_shows_paid_use() {
+    let dir = tempfile::tempdir().unwrap();
+    let (spawn, made) = pipes();
+    let engine = two_vendors(dir.path(), spawn);
+    let project = engine.add_project(&dir.path().to_string_lossy()).unwrap();
+    let id = engine
+        .send(SendRequest { project_id: Some(project.id), ..ask(Area::Project, "refactor it", choice("claude", Some("sonnet"))) })
+        .unwrap();
+    let mut main = next_pipe(&made).await;
+    main.say(json!({"type":"system","subtype":"init","session_id":"s1","model":"claude-sonnet-5-5"})).await;
+    main.say(json!({"type":"stream_event","parent_tool_use_id":null,"event":{"type":"content_block_delta","delta":{"type":"text_delta","text":"Reading."}}})).await;
+    tokio::time::sleep(Duration::from_millis(50)).await;
+    engine.ask_aside(&id, "why that file?", None).unwrap();
+    let _side = next_pipe(&made).await;
+    let paid = faber_engine::signals::Signals { overage_active: Some(true), ..Default::default() };
+    engine.note_account_events(Vendor::Claude, vec![faber_engine::events::EngineEvent::Signals(paid)]);
+    for _ in 0..300 {
+        if engine.asides(&id)[0].state != "running" {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(10)).await;
+    }
+    let a = &engine.asides(&id)[0];
+    assert_eq!((a.state, a.error.as_deref()), ("failed", Some("error.quotaOut")));
+    engine.shutdown();
+}
+
 /// R161, review: a helper at work counts against its vendor's quota while it runs, and stops, telling the agent why, as soon
 /// as its vendor would bill beyond the subscription (R86): a helper is never picked by hand nor approved for paid use.
 #[tokio::test]

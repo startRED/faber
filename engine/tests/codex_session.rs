@@ -1599,6 +1599,32 @@ fn r161_only_a_project_agent_gets_the_helper_tool_and_a_helper_keeps_no_history(
     assert!(with(Helper::Offers, None, None).get("ephemeral").is_none());
 }
 
+/// R250: a quick question on the side is a thread of its own that reads Faber's record: no shell, no dynamic tool, never asks,
+/// no network or writes, and nothing left to resume.
+#[test]
+fn r250_a_codex_quick_question_runs_nothing_and_leaves_no_history() {
+    use faber_engine::helper::Helper;
+    for permissions in [Permissions::FullAccess, Permissions::Isolated, Permissions::Ask] {
+        let t = CodexThread {
+            helper: Helper::Aside,
+            instructions: Some("Record.".into()),
+            browse: true,
+            verify: true,
+            ..mode_thread(permissions, Default::default())
+        };
+        let p = thread_params(Area::Project, &t).1;
+        assert_eq!(p["ephemeral"], true);
+        assert_eq!(p["approvalPolicy"], "never");
+        assert_eq!(p["config"]["features.shell_tool"], false);
+        assert!(p.get("dynamicTools").is_none() && p.get("sandbox").is_none(), "{p}");
+        let profile = p["config"]["default_permissions"].as_str().unwrap();
+        let profile = &p["config"][format!("permissions.{profile}")];
+        assert_eq!(profile["network"]["enabled"], false);
+        assert_eq!(profile["filesystem"][":workspace_roots"]["."], "read");
+        assert_eq!(p["baseInstructions"], "Record.");
+    }
+}
+
 /// R161 step 7: Faber's browser is a dynamic tool beside the others, offered only where the engine says so.
 #[test]
 fn r161_the_browser_is_a_dynamic_tool_where_it_is_offered() {

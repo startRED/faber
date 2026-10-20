@@ -114,6 +114,14 @@ impl ClaudeFlags {
 // startup customization; full access leaves the person's own integrations on.
 const CHAT_TOOLS: &str = "Read,Write,Edit,Glob,Grep,Bash,WebSearch,WebFetch,AskUserQuestion";
 
+/// A quick question on the side (R250) reads, searches and lists, and nothing else.
+pub const ASIDE_TOOLS: &str = "Read,Grep,Glob";
+
+/// What a fork of the conversation's session is told for a quick question on the side, on top of what it already knows.
+pub const ASIDE_FORKED: &str = "This is a quick side question from the person about this conversation, asked while the main agent \
+keeps working. Answer it briefly and plainly. You can only read, search and list files in the working folder: you cannot edit \
+files, run commands or browse. If the answer needs an action, say so in one line; the person can send it to the main agent.";
+
 /// The empty integration loadout of a side question: no MCP servers, no settings files, no hooks.
 fn claude_exposure_args() -> Vec<String> {
     [
@@ -244,7 +252,25 @@ pub fn claude_args(launch: &ClaudeLaunch) -> Vec<String> {
     // `--permission-prompts none` did, except a question the agent asks the person (`AskUserQuestion`), a card in every mode.
     args.extend(["--permission-prompt-tool".into(), "stdio".into()]);
     let env = |name: &str| std::env::var(name).ok();
-    if let Some(instructions) = &launch.instructions {
+    let aside = launch.helper == crate::helper::Helper::Aside;
+    if aside {
+        // A quick question on the side (R250): only reads in the working folder, none of the person's integrations, and no
+        // history: a fork of the conversation's session leaves that session as it was. Every read asks, so the driver checks it with
+        // the isolated mode's working-folder policy (secrets, links leading out), whatever mode the conversation is in.
+        let settings = json!({ "disableAllHooks": true,
+            "permissions": { "blockReadsOutsideWorkingDirectories": true, "deny": tool_deny(&env), "ask": ["Read(//**)", "*"] } });
+        for a in
+            ["--tools", ASIDE_TOOLS, "--strict-mcp-config", "--mcp-config", "{\"mcpServers\":{}}", "--safe-mode", "--setting-sources", ""]
+        {
+            args.push(a.into());
+        }
+        args.extend(["--permission-mode".into(), "bypassPermissions".into(), "--settings".into(), settings.to_string()]);
+        args.extend(["--append-system-prompt".into(), launch.instructions.clone().unwrap_or_else(|| ASIDE_FORKED.into())]);
+        args.push("--no-session-persistence".into());
+        if launch.resume.is_some() {
+            args.push("--fork-session".into());
+        }
+    } else if let Some(instructions) = &launch.instructions {
         // Whatever mode the person chose, Faber's own requests run without the person's hooks, settings files, MCP servers and
         // plugins: a hook that fired on every background routing turn would run the person's commands unasked.
         for a in ["--system-prompt", instructions, "--tools", "", "--no-session-persistence"] {
@@ -314,7 +340,7 @@ pub fn claude_args(launch: &ClaudeLaunch) -> Vec<String> {
             args.push(settings.to_string());
         }
     }
-    if launch.instructions.is_none() {
+    if launch.instructions.is_none() && !aside {
         args.push("--append-system-prompt".into());
         args.push(persona(&PersonaInput { name: launch.user_name.as_deref() }));
         // R161: Faber's own MCP server, answered by this driver over stdio, holds the helper tool and the browser.
@@ -335,7 +361,7 @@ pub fn claude_args(launch: &ClaudeLaunch) -> Vec<String> {
         }
     }
     // Side questions keep the CLI default, and an older CLI that does not list the flag would refuse to start with it.
-    let compacts = launch.flags.autocompact && launch.instructions.is_none();
+    let compacts = launch.flags.autocompact && launch.instructions.is_none() && !aside;
     if let Some(window) = compacts.then(|| launch.model.as_deref().and_then(autocompact_window)).flatten() {
         args.extend(["--autocompact".into(), window]);
     }

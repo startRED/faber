@@ -39,7 +39,7 @@ pub struct VendorUsage {
 impl Core {
     /// Whether a turn of this vendor is running now: the counter is about to rise by what it is spending.
     pub(super) fn turn_running(&self, vendor: Vendor) -> bool {
-        self.live.values().any(|l| l.vendor == vendor && l.turn.is_some()) || self.helper_running(vendor)
+        self.live.values().any(|l| l.vendor == vendor && l.turn.is_some()) || self.helper_running(vendor) || self.aside_running(vendor)
     }
 
     /// The vendor’s quota as every decision (and the screen) sees it: the ledger’s snapshot, still counting while a turn of

@@ -154,14 +154,15 @@ frames) and checked against today's code. It fills the steps of R161 and never b
    Pointer-level actions, and the outline of a changed part and a named pointer per subagent while a screen is built, stay
    for later (Erick, 2026-10-18); the app card already opens the app, which its dev server reloads by itself.
 
-10. **A quick question on the side (approved, R250; task 035).** While the agent works, the person can ask
+10. **A quick question on the side (built, R250; product map "Quick question on the side").** While the agent works, the person can ask
     "how is it going?" or "why that file?" without stopping it or waiting in its queue (the queue only empties when a
     turn ends). The running column gets a "Quick question" tab next to the running list, the same column as the
     side chat of step 3, so there is no new pane; typing `/btw <question>` in the conversation's box opens it with the
     question in.
     - **Context:** a copy of the conversation as it stands. Claude Code resumes the conversation's own CLI session with
       `--fork-session`, so the main session is never touched and its cache is shared; Codex, which has no fork, gets a
-      new side request with Faber's own record of the conversation (its last messages and the steps under way).
+      new side request with Faber's own record of the conversation (its last messages and the steps under way). As built,
+      Codex answers from that record with no shell: on Windows its shell cannot start under Faber's read-only profile.
     - **Read only:** it may read, search and list files in the working folder and nothing else: no edits, commands,
       browser, helpers or MCP servers. Claude Code runs with only Read, Grep and Glob allowed; Codex with its read-only
       sandbox. An answer that needs action ends with "Send to the agent", which puts the text in the main box.

@@ -1279,6 +1279,44 @@ fn r161_the_helper_tool_reaches_only_the_project_agent() {
     assert!(helper.iter().any(|a| a == "--no-session-persistence") && !helper.iter().any(|a| a == CLAUDE_MCP_CONFIG));
 }
 
+/// R250: a quick question on the side forks the conversation's session, which stays as it was, and may only read, search and
+/// list: none of the person's integrations, no MCP server of Faber's, no history. With no session yet it reads Faber's record.
+#[test]
+fn r250_a_quick_question_forks_the_session_and_only_reads() {
+    use faber_engine::claude::{ASIDE_FORKED, ASIDE_TOOLS};
+    use faber_engine::helper::{CLAUDE_MCP_CONFIG, Helper};
+    let has = |a: &[String], pair: [&str; 2]| a.windows(2).any(|w| w == pair);
+    for area in [Area::Chat, Area::Project] {
+        let forked = claude_args(&ClaudeLaunch {
+            helper: Helper::Aside,
+            resume: Some("s1".into()),
+            browse: true,
+            verify: true,
+            permissions: Permissions::FullAccess,
+            effort: Some("low".into()),
+            ..launch(area)
+        });
+        assert!(has(&forked, ["--resume", "s1"]) && forked.iter().any(|a| a == "--fork-session"), "{forked:?}");
+        assert!(has(&forked, ["--tools", ASIDE_TOOLS]) && ASIDE_TOOLS == "Read,Grep,Glob");
+        assert_eq!(forked.iter().filter(|a| *a == "--tools").count(), 1, "no second tool list widens it");
+        assert!(forked.iter().any(|a| a == "--no-session-persistence"));
+        assert!(has(&forked, ["--append-system-prompt", ASIDE_FORKED]) && has(&forked, ["--effort", "low"]));
+        for gone in [CLAUDE_MCP_CONFIG, "--replay-user-messages", "--plugin-dir", "--system-prompt"] {
+            assert!(!forked.iter().any(|a| a == gone), "{gone}");
+        }
+        assert!(has(&forked, ["--setting-sources", ""]) && forked.iter().any(|a| a == "--strict-mcp-config"));
+        let settings = forked.windows(2).find(|w| w[0] == "--settings").map(|w| w[1].clone()).unwrap();
+        let settings: serde_json::Value = serde_json::from_str(&settings).unwrap();
+        assert_eq!(settings["disableAllHooks"], true);
+        assert_eq!(settings["permissions"]["blockReadsOutsideWorkingDirectories"], true);
+        assert_eq!(settings["permissions"]["ask"], json!(["Read(//**)", "*"]), "every read asks, so the driver checks it");
+        assert!(settings["permissions"]["deny"].as_array().is_some_and(|d| !d.is_empty()), "the credential folders stay closed");
+        let recorded = claude_args(&ClaudeLaunch { helper: Helper::Aside, instructions: Some("Record.".into()), ..launch(area) });
+        assert!(!recorded.iter().any(|a| a == "--fork-session" || a == "--resume"));
+        assert!(has(&recorded, ["--append-system-prompt", "Record."]) && has(&recorded, ["--tools", ASIDE_TOOLS]));
+    }
+}
+
 /// R161 step 7: Faber's MCP server is there for the browser alone too, never for a side question, and a helper keeps no
 /// history whether or not it browses.
 #[test]

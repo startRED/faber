@@ -446,8 +446,20 @@ export interface SetupProgressEvent {
   error?: string;
   detail?: string;
 }
+/** A quick question on the side of a conversation (R250), as the engine keeps it until the turn after it ends. */
+export interface Aside {
+  id: string;
+  question: string;
+  answer: string;
+  vendor: Vendor;
+  model?: string | null;
+  state: 'running' | 'done' | 'stopped' | 'failed';
+  /** A translation key when it failed. */
+  error?: string | null;
+}
 export type AppEvent =
   | { type: 'message'; conversationId: string; message: Message }
+  | { type: 'asides'; conversationId: string; asides: Aside[] }
   | { type: 'queue'; conversationId: string; queued: QueuedTurn[] }
   | ({ type: 'quota' } & QuotaReading)
   | ({ type: 'running' } & RunningList)
@@ -534,6 +546,10 @@ export const api = {
   removeQueued: (id: string, turnId: string) => invoke<void>('remove_queued', { id, turnId }),
   sendQueued: (id: string, turnId: string) => invoke<void>('send_queued', { id, turnId }),
   tellHelper: (id: string, callId: string, text: string) => invoke<void>('tell_helper', { id, callId, text }),
+  /** A quick question on the side (R250); refused with an `error.aside.*` key, `error.quotaOut` or `error.billedPerUse`. */
+  askAside: (id: string, question: string, model?: string) => invoke<string>('ask_aside', { id, question, model }),
+  stopAside: (asideId: string) => invoke<void>('stop_aside', { asideId }),
+  asides: (id: string) => invoke<Aside[]>('asides', { id }),
   unfollowPr: (id: string) => invoke<void>('unfollow_pr', { id }),
   removeProject: (id: string) => invoke<void>('remove_project', { id }),
   showProject: (id: string) => invoke<void>('show_project', { id }),

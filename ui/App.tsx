@@ -43,6 +43,7 @@ import { createOpening, upsert } from './opening.ts';
 import { Running } from './Running.tsx';
 import { agentWide, openedAgent, showAgent, startMessage, toggleAgentWide } from './AgentChat.tsx';
 import { openedSite, showSite } from './Site.tsx';
+import { answered, btw, heardAsides, openedAside, showAside } from './QuickQuestion.tsx';
 import { agentSteps, helpersAtWork } from './worklog.ts';
 import { createAutoOpen, doneCards, openPlace, type Place, placeOfRunning, shownRunning, stopOffered, store, waitingKeys } from './running.ts';
 import { type Keep, type Section, Settings } from './Settings.tsx';
@@ -297,6 +298,7 @@ export function App(props: { initial: AppState; update?: UpdateStatus; inbox: { 
   const closeColumn = () => {
     showAgent(undefined);
     showSite(undefined);
+    showAside(undefined);
     if (!columnOpen()) return;
     // Closed while it was waiting for the typing to stop, or after it: the questions seen stay seen.
     autoOpen.seen(waitingKeys(items()));
@@ -333,9 +335,15 @@ export function App(props: { initial: AppState; update?: UpdateStatus; inbox: { 
     const open = openedSite();
     return open && current()?.id === open.conversationId ? open : undefined;
   };
-  createEffect(on(openedAgent, (open) => open && showSite(undefined), { defer: true }));
-  createEffect(on(openedSite, (open) => open && showAgent(undefined), { defer: true }));
-  createEffect(on(() => openedAgent() ?? openedSite(), (open) => {
+  // The quick question on the side (R250), of the conversation on screen, or of none yet (it says to ask once it has started).
+  const sideAside = () => {
+    const open = openedAside();
+    return open && current()?.id === open.conversationId ? open : undefined;
+  };
+  createEffect(on(openedAgent, (open) => open && (showSite(undefined), showAside(undefined)), { defer: true }));
+  createEffect(on(openedSite, (open) => open && (showAgent(undefined), showAside(undefined)), { defer: true }));
+  createEffect(on(openedAside, (open) => open && (showAgent(undefined), showSite(undefined)), { defer: true }));
+  createEffect(on(() => openedAgent() ?? openedSite() ?? openedAside(), (open) => {
     if (!open) return;
     // One of another conversation is never shown (`sideAgent`); it goes when the conversation on screen changes.
     if (current()?.id !== open.conversationId) return;
@@ -350,6 +358,7 @@ export function App(props: { initial: AppState; update?: UpdateStatus; inbox: { 
   createEffect(on(() => current()?.id, (id) => {
     if (openedAgent() && openedAgent()!.conversationId !== id) showAgent(undefined);
     if (openedSite() && openedSite()!.conversationId !== id) showSite(undefined);
+    if (openedAside() && openedAside()!.conversationId !== id) showAside(undefined);
   }, { defer: true }));
   // The window changes width while the column is open: it becomes a modal dialog or stops being one, and its element is
   // drawn again, so focus goes where the new state wants it.
@@ -467,6 +476,7 @@ export function App(props: { initial: AppState; update?: UpdateStatus; inbox: { 
       if (e.type === 'message' && opening.hear(e.conversationId, e.message) === 'apply') {
         setCurrent((c) => (c?.id === e.conversationId ? upsert(c, e.message) : c));
       }
+      if (e.type === 'asides') heardAsides(e.conversationId, e.asides);
       if (e.type === 'queue') {
         setCurrent((c) => (c?.id === e.conversationId ? { ...c, queued: e.queued } : c));
       }
@@ -606,6 +616,15 @@ export function App(props: { initial: AppState; update?: UpdateStatus; inbox: { 
   const target = () => ({ area: area(), projectId: area() === 'project' ? projectId() : undefined });
 
   const send = async (draft: Draft) => {
+    // `/btw <question>` asks on the side (R250): it opens the quick question with it, and the conversation never sees it.
+    const side = draft.images.length || draft.files.length ? undefined : btw(draft.text);
+    if (side !== undefined) {
+      showAside({ conversationId: current()?.id, question: answered(current()) ? side : undefined });
+      // Before the agent has answered there is nothing to ask about: the words go back in the box, and the tab says when.
+      // (after the box has emptied itself for the send).
+      if (!answered(current())) queueMicrotask(() => restore?.(draft));
+      return;
+    }
     // The place is taken once: the message, and the conversation it opens, belong to the place it was written in.
     const at = place();
     const chosen = picked();
@@ -854,9 +873,12 @@ export function App(props: { initial: AppState; update?: UpdateStatus; inbox: { 
       onClose={closeColumn}
       agent={sideAgent()}
       site={sideSite()}
+      aside={sideAside() && { conversation: current(), options: options() }}
+      onAside={current() ? () => showAside({ conversationId: current()?.id }) : undefined}
       onBack={() => {
         showAgent(undefined);
         showSite(undefined);
+        showAside(undefined);
         // The back button is gone with the subagent or the page: focus stays in the column, on the list's first control.
         queueMicrotask(() => column?.querySelector<HTMLElement>('button')?.focus());
       }}

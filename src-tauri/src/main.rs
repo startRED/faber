@@ -242,6 +242,23 @@ async fn tell_helper(faber: State<'_, Faber>, id: String, call_id: String, text:
     faber.engine.tell_helper(&id, &call_id, &text)
 }
 
+/// A quick question on the side of a conversation (R250); `model` is the tab's own pick, or the conversation's.
+#[tauri::command]
+async fn ask_aside(faber: State<'_, Faber>, id: String, question: String, model: Option<String>) -> Res<String> {
+    faber.engine.ask_aside(&id, &question, model)
+}
+
+#[tauri::command]
+async fn stop_aside(faber: State<'_, Faber>, aside_id: String) -> Res<()> {
+    faber.engine.stop_aside(&aside_id);
+    Ok(())
+}
+
+#[tauri::command]
+async fn asides(faber: State<'_, Faber>, id: String) -> Res<Vec<faber_engine::engine::Aside>> {
+    Ok(faber.engine.asides(&id))
+}
+
 /// The person stops following the pull request a project conversation follows (R200).
 #[tauri::command]
 async fn unfollow_pr(faber: State<'_, Faber>, id: String) -> Res<()> {
@@ -812,6 +829,9 @@ fn main() {
                 remove_queued,
                 send_queued,
                 tell_helper,
+                ask_aside,
+                stop_aside,
+                asides,
                 unfollow_pr,
                 remove_project,
                 preview_look,
