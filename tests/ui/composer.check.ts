@@ -1,8 +1,8 @@
 import { createComponent } from 'solid-js';
 import { render } from 'solid-js/web';
 import themes from '../../src-tauri/src/themes.json';
-import { Composer } from '../../ui/Composer.tsx';
-import { ImageViewerHost } from '../../ui/ImageViewer.tsx';
+import { Composer, type Draft } from '../../ui/Composer.tsx';
+import { t } from '../../ui/i18n.ts';
 import { check, equal, ok } from './check.ts';
 
 check('composer: wrapped text grows to 40vh, scrolls inside and shrinks after sending', async () => {
@@ -84,71 +84,95 @@ check('composer: typed text survives a reload and is forgotten once sent', async
   }
 });
 
-check('composer: a dropped image shows as a thumbnail with its own remove button, not as a name', async () => {
+const PNG = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==';
+
+check('composer: images show thumbnails and files small cards, each with its own x that removes only it', async () => {
+  const settle = (ms = 30) => new Promise((resolve) => setTimeout(resolve, ms));
   const root = document.createElement('div');
+  root.style.cssText = 'position:fixed;left:0;top:0;width:700px';
+  for (const [key, value] of Object.entries(themes.css.base)) root.style.setProperty(`--${key}`, value);
   root.dataset.motion = 'none';
   document.body.append(root);
-  let sent = 0;
+  let sent: Draft | undefined;
   const dispose = render(() => createComponent(Composer, {
-    vendors: ['codex'], options: [], choice: { vendor: 'auto' }, busy: false, placeholder: 'Ask',
-    onChoice: () => {}, onStop: () => {}, onWarm: () => {}, onPause: () => {},
-    onSend: (draft) => { sent = draft.images.length; },
+    vendors: ['codex'], options: [], choice: { vendor: 'auto' }, busy: false, placeholder: '',
+    onChoice: () => {}, onStop: () => {}, onWarm: () => {}, onPause: () => {}, onSend: (draft) => { sent = draft; },
   }), root);
-  const settle = () => new Promise((resolve) => setTimeout(resolve, 60));
-  // Reading a dropped file takes as long as the system's file reader does: a slow runner needs more than one pause.
-  const drawn = async (n: number) => {
-    for (let i = 0; i < 50 && root.querySelectorAll('.attach-thumb img').length !== n; i++) await settle();
-  };
   try {
+    await settle();
+    equal(root.querySelector('.attach-row'), null, 'nothing attached, no row');
     const form = root.querySelector('form')!;
-    const drop = new Event('drop', { bubbles: true, cancelable: true });
-    const files = new DataTransfer();
-    for (const name of ['one.png', 'two.png']) files.items.add(new File([new Uint8Array([137, 80, 78, 71])], name, { type: 'image/png' }));
-    Object.defineProperty(drop, 'dataTransfer', { value: files });
-    form.dispatchEvent(drop);
-    await drawn(2);
-    equal(root.querySelectorAll('.attach-thumb img').length, 2, 'each image is drawn');
-    ok(!root.textContent!.includes('one.png'), 'an image is not named in a chip');
-    root.querySelector<HTMLButtonElement>('.attach-remove')!.click();
+    const image = (name: string) => new File([Uint8Array.from(atob(PNG), (c) => c.charCodeAt(0))], name, { type: 'image/png' });
+    const transfer = new DataTransfer();
+    for (const file of [image('one.png'), image('two.png'), new File(['%PDF-1.4'], 'doc.pdf', { type: 'application/pdf' }), new File(['hello notes'], 'notes.txt', { type: 'text/plain' })]) transfer.items.add(file);
+    form.dispatchEvent(new DragEvent('drop', { dataTransfer: transfer, bubbles: true, cancelable: true }));
+    await settle(150);
+    const thumbs = () => [...root.querySelectorAll<HTMLElement>('.attach-row .thumb')];
+    const nameOf = (el: HTMLElement) => el.querySelector('img')?.alt ?? el.querySelector('b')!.textContent;
+    equal(thumbs().map(nameOf).join(), 'one.png,two.png,doc.pdf,notes.txt');
+    equal(thumbs().filter((el) => el.querySelector('img')).length, 2, 'the pictures are thumbnails');
+    equal(thumbs().filter((el) => el.classList.contains('file')).length, 2, 'the others are cards');
+    for (const el of thumbs().filter((e) => e.querySelector('img'))) ok(el.getBoundingClientRect().width <= 64, 'a thumbnail is small');
+    const field = root.querySelector('textarea')!;
+    ok(field.value.includes('hello notes'), 'a small text file goes inside the message');
+    const x = (name: string) => root.querySelector<HTMLButtonElement>(`.thumb-x[aria-label="${t('composer.removeOne', { name })}"]`)!;
+    equal(root.querySelectorAll('.thumb-x').length, 4, 'each one has its own x');
+    equal(getComputedStyle(x('two.png')).opacity, '0', 'shown only for the pointer or the keyboard');
+    equal(getComputedStyle(x('two.png')).visibility, 'visible', 'so the keyboard still reaches it');
+    // A hidden test window never has the focus or a pointer, so the rule that shows it is read.
+    const rules = [...document.styleSheets].flatMap((sheet) => [...sheet.cssRules]).filter((r): r is CSSStyleRule => r instanceof CSSStyleRule);
+    ok(rules.some((r) => r.selectorText.includes('.thumb-x') && r.selectorText.includes(':focus-within') && r.style.opacity === '1'), 'and by hover or focus it shows');
+    ok(root.querySelector('.attach-all'), 'with several, one quiet "remove all" remains');
+    x('two.png').click();
+    x('notes.txt').click();
     await settle();
-    equal(root.querySelectorAll('.attach-thumb img').length, 1, 'its button takes out only that image');
+    equal(thumbs().map(nameOf).join(), 'one.png,doc.pdf', 'only the ones pressed went');
+    ok(!field.value.includes('hello notes'), 'a text file takes its words out of the message with it');
     form.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
+    await settle(400);
+    equal(sent?.images.length, 1, 'one picture is sent');
+    equal(sent?.files.map((f) => f.name).join(), 'doc.pdf');
+    equal(root.querySelector('.attach-row'), null, 'and the row closes after sending');
+    form.dispatchEvent(new DragEvent('drop', { dataTransfer: transfer, bubbles: true, cancelable: true }));
+    await settle(150);
+    root.querySelector<HTMLButtonElement>('.attach-all')!.click();
     await settle();
-    equal(sent, 1, 'only the image left goes out');
-    equal(root.querySelectorAll('.attach-thumb').length, 0, 'sending clears the thumbnails');
+    equal(thumbs().length, 0, 'remove all clears the row');
   } finally {
     dispose();
     root.remove();
   }
 });
 
-check('composer: a click on a thumbnail opens the image large, and Escape closes it', async () => {
+check('composer: a rejected message comes back with its pictures, files and text files, each still with its own x', async () => {
+  const settle = (ms = 30) => new Promise((resolve) => setTimeout(resolve, ms));
   const root = document.createElement('div');
+  root.style.cssText = 'position:fixed;left:0;top:0;width:700px';
   root.dataset.motion = 'none';
   document.body.append(root);
-  const dispose = render(() => [
-    createComponent(Composer, {
-      vendors: ['codex'], options: [], choice: { vendor: 'auto' }, busy: false, placeholder: 'Ask',
-      onChoice: () => {}, onStop: () => {}, onWarm: () => {}, onPause: () => {}, onSend: () => {},
-    }),
-    createComponent(ImageViewerHost, {}),
-  ], root);
-  const settle = () => new Promise((resolve) => setTimeout(resolve, 60));
+  let sent: Draft | undefined;
+  let restore!: (draft: Draft) => boolean;
+  const dispose = render(() => createComponent(Composer, {
+    vendors: ['codex'], options: [], choice: { vendor: 'auto' }, busy: false, placeholder: '',
+    onChoice: () => {}, onStop: () => {}, onWarm: () => {}, onPause: () => {}, onSend: (draft) => { sent = draft; },
+    onRestore: (put) => { restore = put; },
+  }), root);
   try {
-    const drop = new Event('drop', { bubbles: true, cancelable: true });
-    const files = new DataTransfer();
-    files.items.add(new File([new Uint8Array([137, 80, 78, 71])], 'one.png', { type: 'image/png' }));
-    Object.defineProperty(drop, 'dataTransfer', { value: files });
-    root.querySelector('form')!.dispatchEvent(drop);
-    for (let i = 0; i < 50 && !root.querySelector('.pic'); i++) await settle();
-    equal(root.querySelector('.viewer'), null, 'nothing is large before a click');
-    root.querySelector<HTMLButtonElement>('.pic')!.click();
     await settle();
-    ok(root.querySelector('.viewer[role="dialog"] img'), 'the click opens the image large');
-    root.querySelector('.viewer-scrim')!.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+    const form = root.querySelector('form')!;
+    const transfer = new DataTransfer();
+    transfer.items.add(new File([Uint8Array.from(atob(PNG), (c) => c.charCodeAt(0))], 'shot.png', { type: 'image/png' }));
+    transfer.items.add(new File(['hello notes'], 'notes.txt', { type: 'text/plain' }));
+    form.dispatchEvent(new DragEvent('drop', { dataTransfer: transfer, bubbles: true, cancelable: true }));
+    await settle(150);
+    form.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
+    await settle(400);
+    equal(root.querySelectorAll('.thumb').length, 0, 'sent, the box is empty');
+    ok(restore(sent!), 'the screen puts the rejected message back');
     await settle();
-    equal(root.querySelector('.viewer'), null, 'Escape closes it');
-    ok(root.querySelector('.attach-thumb'), 'the thumbnail stays in the box');
+    const names = [...root.querySelectorAll('.attach-row .thumb')].map((el) => el.querySelector('img')?.alt ?? el.querySelector('b')!.textContent);
+    equal(names.join(), 'shot.png,notes.txt', 'with the names it had, the text file too');
+    equal(root.querySelectorAll('.thumb-x').length, 2);
   } finally {
     dispose();
     root.remove();

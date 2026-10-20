@@ -438,6 +438,8 @@ async fn a_chat_turn_streams_to_the_screen_and_is_saved_with_model_reason_sessio
     let reply = finished(&mut rx, |_| {}).await;
     engine.shutdown();
     assert_eq!(reply.status, Some(Status::Done));
+    // The time the answer took, for the bar under it, is saved with the reply; a reply that did not end well has none.
+    assert!(reply.took.is_some_and(|ms| ms < 60_000), "took {:?}", reply.took);
     assert!(reply.text.contains("Rayleigh"));
     assert_eq!(reply.model.as_deref(), Some("claude-haiku-5-5"));
     assert_eq!(reply.reason.as_deref(), Some("reason.chosen"));

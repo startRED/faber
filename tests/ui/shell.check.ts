@@ -30,14 +30,14 @@ check('layout: a dragged width keeps the stage 440 px wide, and what storage hol
 
 check('layout: the running column takes the room beside the reading column, 360 to 560 px, and never the thread’s own width', () => {
   equal(autoRun(1920, 248), 560, 'a 1,920 px window gives it the most');
-  equal(autoRun(1600, 248), 560);
-  equal(autoRun(1440, 248), 492);
+  equal(autoRun(1600, 248), 552);
+  equal(autoRun(1440, 248), 392);
   equal(autoRun(1280, 248), 360);
   equal(autoRun(1100, 248), 360, 'a window that is nearly full keeps the least');
   for (const win of [1100, 1280, 1366, 1440, 1600, 1920, 2560]) {
     const run = Math.min(autoRun(win, 248), limitsOf('run', win, 248, true).max);
     ok(win - 248 - run >= 440, `${win} px keeps the stage`);
-    if (win >= 1440) ok(win - 248 - run >= 660, `${win} px keeps the thread its 660 px`);
+    if (win >= 1440) ok(win - 248 - run >= 760, `${win} px keeps the thread its 760 px`);
   }
 });
 
@@ -383,7 +383,7 @@ check('shell: a file over the window says "Drop to attach" anywhere, and droppin
     root.querySelector('.topbar')!.dispatchEvent(dragged('drop', 'notes.txt'));
     await settle(320);
     equal(document.querySelector('.dropveil'), null, 'the notice goes once the file is let go');
-    ok([...root.querySelectorAll('.composer .chip')].some((chip) => chip.textContent!.includes('notes.txt')), 'the composer holds the file');
+    ok([...root.querySelectorAll('.composer .attach-row [title]')].some((el) => el.getAttribute('title')!.includes('notes.txt')), 'the composer holds the file');
 
     // The pointer leaving the window ends the notice with nothing attached.
     root.querySelector('.topbar')!.dispatchEvent(dragged('dragenter', 'other.txt'));

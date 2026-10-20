@@ -47,7 +47,16 @@ const PATHS = {
   lock: ['M7 11V7a5 5 0 0 1 10 0v4', 'M5 11h14a2 2 0 0 1 2 2v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-7a2 2 0 0 1 2-2Z'],
   download: ['M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4', 'm7 10 5 5 5-5', 'M12 15V3'],
   upload: ['M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4', 'm17 8-5-5-5 5', 'M12 3v12'],
+  // Under a message: read aloud, stop reading, edit, and the arrow that takes the thread to its end.
+  speaker: ['M11 5 6 9H2v6h4l5 4V5Z', 'M15.5 8.5a5 5 0 0 1 0 7', 'M19 5a9 9 0 0 1 0 14'],
+  stop: ['M7 7h10v10H7Z'],
+  edit: ['M12 20h9', 'M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4Z'],
+  end: ['M12 5v14', 'm19 12-7 7-7-7', 'M5 21h14'],
 } as const;
+
+/** The same drawing as markup, for the places that build their DOM by hand (the copy button of a code block). */
+export const iconMarkup = (name: keyof typeof PATHS) =>
+  `<svg class="i sm" viewBox="0 0 24 24" aria-hidden="true">${PATHS[name].map((d) => `<path d="${d}"/>`).join('')}</svg>`;
 
 export function Icon(props: { name: keyof typeof PATHS; small?: boolean }) {
   return (

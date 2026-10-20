@@ -87,8 +87,8 @@ check('prompt-history: drop, attach, paste and attachment removal commit the edi
       } else if (action === 'paste-image') {
         deliver('paste', new File([new Uint8Array([137, 80, 78, 71])], 'image.png', { type: 'image/png' }));
       } else if (action.startsWith('remove-')) {
-        const key = action === 'remove-image' ? 'composer.removeImage' : 'composer.removeAttachments';
-        const button = [...box.root.querySelectorAll<HTMLButtonElement>('button')].find((button) => button.getAttribute('aria-label') === t(key))!;
+        const label = t('composer.removeOne', { name: action === 'remove-image' ? 'image.png' : 'archive.bin' });
+        const button = [...box.root.querySelectorAll<HTMLButtonElement>('button')].find((button) => button.getAttribute('aria-label') === label)!;
         ok(button, `the attachment exists before ${action}`);
         const down = new MouseEvent('mousedown', { button: 0, bubbles: true, cancelable: true });
         button.dispatchEvent(down);

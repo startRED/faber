@@ -195,7 +195,7 @@ fn check_shell(at: &str, seen: &Value, width: u32, modal: bool) -> Result {
     ensure(close.is_null() || (close["hit"] == true && close["clipped"] == false && close["inert"] == false), || {
         format!("{at}: the column's close button cannot be used: {close}")
     })?;
-    ensure(num(seen, &["col", "w"]) <= 660.5 || seen["col"].is_null(), || format!("{at}: the reading column is {}", seen["col"]["w"]))
+    ensure(num(seen, &["col", "w"]) <= 760.5 || seen["col"].is_null(), || format!("{at}: the reading column is {}", seen["col"]["w"]))
 }
 
 fn follows_the_width(ctx: &mut Ctx) -> Result {
@@ -227,11 +227,11 @@ fn follows_the_width(ctx: &mut Ctx) -> Result {
             same(peek["still"].as_bool(), Some(true), "Curioso is still")?;
         }
         if width >= 1100 {
-            // The room beside the 660 px reading column (the window less the sidebar and 700 px), 360 to 560 px, with the 8 px of
+            // The room beside the 760 px reading column (the window less the sidebar and 800 px), 360 to 560 px, with the 8 px of
             // frame that runs round the stage.
             same(
                 num(&open, &["docked", "w"]) + 8.0,
-                (f64::from(width) - 248.0 - 700.0).clamp(360.0, 560.0),
+                (f64::from(width) - 248.0 - 800.0).clamp(360.0, 560.0),
                 &format!("{at}: the docked column"),
             )?;
             ensure(num(&open, &["main", "w"]) >= 439.5, || format!("{at}: the stage is {} px", open["main"]["w"]))?;

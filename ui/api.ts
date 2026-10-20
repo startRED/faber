@@ -76,6 +76,8 @@ export interface Message {
   role: 'user' | 'assistant';
   text: string;
   at: number;
+  /** On a reply that ended well: how long it took from its start, in milliseconds; absent on older replies. */
+  took?: number;
   textBreaks?: number[];
   activityEnd?: number;
   images?: Image[];

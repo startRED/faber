@@ -4,7 +4,6 @@ import './styles.css';
 import { type AppEvent, api } from './api.ts';
 import { App } from './App.tsx';
 import { ContextMenuHost } from './ContextMenu.tsx';
-import { ImageViewerHost } from './ImageViewer.tsx';
 import { installContextMenu } from './contextmenu.ts';
 import { applyLook } from './appearance.ts';
 import { createInbox } from './inbox.ts';
@@ -54,7 +53,6 @@ render(
     <>
       <App initial={state} update={update} inbox={inbox} />
       <ContextMenuHost />
-      <ImageViewerHost />
     </>
   ),
   document.getElementById('root')!,

@@ -45,7 +45,7 @@ export const SIDE: Limits & { fallback: number } = { min: 200, max: 360, fallbac
 export const RUN: Limits = { min: 300, max: 560 };
 export const STAGE_MIN = 440;
 /** The reading column's width, which the running column never takes. */
-export const READING = 660;
+export const READING = 760;
 
 /** The widths an edge may take. A docked column leaves the stage STAGE_MIN; one over the stage may take its whole range. */
 export function limitsOf(edge: Edge, win: number, side: number, docked: boolean): Limits {

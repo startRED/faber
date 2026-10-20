@@ -54,7 +54,7 @@ export function keepForExit(open: Accessor<boolean>): Accessor<boolean> {
   return shown;
 }
 
-function level(el: HTMLElement): string {
+export function level(el: HTMLElement): string {
   if (performance.now() < resizeUntil) return 'none';
   const requested = el.closest<HTMLElement>('[data-motion]')?.dataset.motion ?? 'full';
   return requested === 'full' && system.matches ? 'reduced' : requested;

@@ -4,15 +4,17 @@ import { Asks, Parkeds } from './Ask.tsx';
 import { copyItem, openMenu } from './contextmenu.ts';
 import { keep, kept, recoverQueuedDraft, release, useDraft } from './unsent.ts';
 import { Icon, VendorMark } from './Glyphs.tsx';
-import { Pic } from './ImageViewer.tsx';
 import { QuotaCard } from './QuotaCard.tsx';
 import { PlanList, WrapUpBox } from './Plan.tsx';
 import { AnswersCard, answeredIn, folded, RunBlock, runsOf, type Answered } from './Run.tsx';
-import { html, Markdown, openLinks } from './markdown.tsx';
+import { html, Markdown, openLinks, pressImage } from './markdown.tsx';
 import { agentMeta, ChangedLines, openedAgent, SourceList, showAgent, tellAbout, ToolChip } from './AgentChat.tsx';
 import { untilReset } from './Sidebar.tsx';
 import { appsOf, AwayPage, awaySites, SiteCard, sitesOf, stepsOf } from './Site.tsx';
-import { bytes, compact, failureText, fromEngine, money, t } from './i18n.ts';
+import { Quote } from './Floating.tsx';
+import { Strip, Thumb } from './Thumbs.tsx';
+import { canSpeak, speaking, stopSpeech, toggleSpeech } from './speech.ts';
+import { bytes, compact, duration, failureText, fromEngine, lang, money, t } from './i18n.ts';
 import { prettyModel, vendorName, type Option } from './models.ts';
 import { animateList } from './motion.ts';
 import { windowHidden } from './appearance.ts';
@@ -23,7 +25,8 @@ import { agentState, agentSteps, changeOf, isAgentCall, isProgressCall, middle, 
 
 const IMAGE = /\.(png|jpe?g|gif|webp|svg)$/i;
 
-// A file the answer created in the chat workspace: images show inline; anything can be saved to the computer.
+// A file the answer created in the chat workspace: images show as a small picture that opens full screen; anything can be saved to
+// the computer.
 function FileCard(props: { conversationId: string; file: { path: string; size: number } }) {
   const [preview] = createResource(
     () => (IMAGE.test(props.file.path) ? props.file.path : undefined),
@@ -31,7 +34,7 @@ function FileCard(props: { conversationId: string; file: { path: string; size: n
   );
   return (
     <div class="file">
-      <Show when={preview()}>{(src) => <img src={src()} alt={props.file.path} />}</Show>
+      <Show when={preview()}>{(src) => <Thumb name={props.file.path} src={src()} />}</Show>
       <div>
         <span>{props.file.path}</span>
         <small>{bytes(props.file.size)}</small>
@@ -57,6 +60,48 @@ function costTitle(m: Message, warm: string): string {
   if (warm) parts.push(warm);
   if (m.incomplete) parts.push(t('answer.meterIncomplete'));
   return parts.join(' · ');
+}
+
+// Copy under a message. The icon turns into a check for a moment once the words are on the clipboard: one timer, started by the click.
+function CopyButton(props: { text: () => string }) {
+  const [copied, setCopied] = createSignal(false);
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  onCleanup(() => clearTimeout(timer));
+  const copy = () =>
+    void Promise.resolve(navigator.clipboard.writeText(props.text())).then(
+      () => {
+        setCopied(true);
+        clearTimeout(timer);
+        timer = setTimeout(() => setCopied(false), 1600);
+      },
+      () => {},
+    );
+  const label = () => t(copied() ? 'answer.copied' : 'answer.copy');
+  return (
+    <button type="button" class="iconbtn" title={label()} aria-label={label()} onClick={copy}>
+      <span class="swap" classList={{ done: copied() }}>
+        <Icon name="copy" small />
+        <Icon name="check" small />
+      </span>
+    </button>
+  );
+}
+
+// When a message was sent (the short time; the whole date is the tooltip) and, on an answer, how long it took. Old replies carry
+// no duration, and then the time stands alone.
+function When(props: { at: number; took?: number }) {
+  const took = () => (props.took && props.took >= 500 ? duration(Math.max(1, Math.round(props.took / 1000))) : '');
+  const date = () => new Date(props.at).toLocaleString(lang(), { dateStyle: 'full', timeStyle: 'medium' });
+  return (
+    <Show when={props.at > 0}>
+      <span class="when num" title={took() ? `${date()} · ${t('answer.took', { time: took() })}` : date()}>
+        <time datetime={new Date(props.at).toISOString()}>{new Date(props.at).toLocaleTimeString(lang(), { hour: 'numeric', minute: '2-digit' })}</time>
+        <Show when={took()}>
+          <span class="took"> · {took()}</span>
+        </Show>
+      </span>
+    </Show>
+  );
 }
 
 // Keep going's stop line (engine STOP) is a signal for Faber, never words: the engine takes it out when the turn ends, and until
@@ -144,6 +189,11 @@ function Answer(props: Shared & { m: Accessor<Message>; messages?: Message[]; pr
   // While an answer streams the engine sends the whole message every 33 ms. Each memo below compares by value, so a tick that
   // changed only the tools never touches the text, and one that changed only the text never touches the tools.
   const text = createMemo(() => hideStop(m().text, m().status === 'streaming'));
+  // An answer read aloud stops with its message: when the person opens another conversation, the voice does not go on.
+  createEffect(() => {
+    const id = m().id;
+    onCleanup(() => stopSpeech(id));
+  });
   const tools = createMemo(() => (m().tools ?? []).filter((tool) => !isProgressCall(tool)), [], { equals: sameTools });
   // A quiet note on the latest reply only (a later turn overtakes an older one): how long the CLI keeps its prompt cache warm,
   // shown in the cost's tooltip, hidden while unknown and once cold. One timer, and only while the note is shown.
@@ -401,7 +451,7 @@ function Answer(props: Shared & { m: Accessor<Message>; messages?: Message[]; pr
       <Show when={changing()}>{(change) => <ChangedLines change={change()} />}</Show>
       <Asks conversationId={props.conversationId} turnId={m().id} permissions={waiting()} surface="ask" />
       <Parkeds parked={m().parked ?? []} more={m().parkedMore} surface="ask" />
-      <div class="md" aria-busy={working()} onClick={openLinks}>
+      <div class="md" aria-busy={working()} onClick={openLinks} onKeyDown={pressImage}>
         <Markdown text={finalText()} />
         <Show when={working() && !waiting().length && !m().waitUntil && !runningStep() && (typing() || !finalText().trim())}>
           <span class="cursor" aria-hidden="true" />
@@ -454,12 +504,26 @@ function Answer(props: Shared & { m: Accessor<Message>; messages?: Message[]; pr
       </Show>
       <Show when={m().wrapUp}>{(box) => <WrapUpBox box={box()} open={!!props.last && !working()} onReply={props.onReply} />}</Show>
       <Show when={!working() || foot()}>
-        {/* While the agent works the row holds only the foot line; `.actions` is the finished reply's row, which screen tests wait for. */}
+        {/* While the agent works the row holds only the foot line; `.actions` is the finished reply's row, which screen tests wait for.
+            Its buttons, time and cost show on hover or focus (the hover bar); the foot line, which says the reply is done, stays. */}
         <div class={working() ? 'live-foot' : 'actions'}>
           <Show when={!working()}>
-          <button type="button" class="iconbtn" title={t('answer.copy')} aria-label={t('answer.copy')} onClick={() => void navigator.clipboard.writeText(m().text)}>
-            <Icon name="copy" small />
-          </button>
+          <CopyButton text={() => m().text} />
+          <Show when={canSpeak() && finalText().trim()}>
+            <button
+              type="button"
+              class="iconbtn"
+              aria-pressed={speaking() === m().id}
+              title={t(speaking() === m().id ? 'answer.listenStop' : 'answer.listen')}
+              aria-label={t(speaking() === m().id ? 'answer.listenStop' : 'answer.listen')}
+              onClick={() => toggleSpeech(m().id, finalText())}
+            >
+              <span class="swap" classList={{ done: speaking() === m().id }}>
+                <Icon name="speaker" small />
+                <Icon name="stop" small />
+              </span>
+            </button>
+          </Show>
           <Show when={props.prompt} keyed>
             {(prompt) => (
               <button type="button" class="iconbtn" title={retry()} aria-label={retry()} onClick={() => props.onBranch(prompt.id, prompt.text)}>
@@ -484,7 +548,10 @@ function Answer(props: Shared & { m: Accessor<Message>; messages?: Message[]; pr
           </Show>
           </Show>
           <Show when={foot()}>{(line) => <span class="foot" title={line()}>{line()}</span>}</Show>
-          <Show when={!working() && costOf(m())}>{(cost) => <span class="cost num" title={costTitle(m(), warm())}>{cost()}</span>}</Show>
+          <Show when={!working()}>
+            <When at={m().at} took={m().took} />
+            <Show when={costOf(m())}>{(cost) => <span class="cost num" title={costTitle(m(), warm())}>{cost()}</span>}</Show>
+          </Show>
         </div>
       </Show>
     </article>
@@ -564,25 +631,15 @@ function Mine(props: { editKey: string; m: Accessor<Message>; onBranch: OnBranch
           tabindex="-1"
           onContextMenu={(e) => openMenu(e, [copyItem(props.m().text), { id: 'edit', label: t('mine.edit'), run: () => setEditing(props.m().text) }])}
         >
-          <Show when={props.m().attachments?.length}>
-            <div class="attach">
-              <For each={props.m().attachments}>
-                {(name) => (
-                  <span class="afile">
-                    <span class="fi">
-                      <Icon name="sheet" />
-                    </span>
-                    <span>{name}</span>
-                  </span>
-                )}
-              </For>
-            </div>
+          <Strip images={props.m().images} files={props.m().attachments} />
+          <Show when={props.m().text}>
+            <div class="you">{props.m().text}</div>
           </Show>
-          <div class="you">
-            <For each={props.m().images}>{(img) => <Pic img={img} />}</For>
-            {props.m().text}
-            <button class="edit" onClick={() => setEditing(props.m().text)} aria-label={t('mine.editLabel')}>
-              {t('mine.edit')}
+          <div class="bar mine-bar">
+            <When at={props.m().at} />
+            <CopyButton text={() => props.m().text} />
+            <button type="button" class="iconbtn edit" onClick={() => setEditing(props.m().text)} title={t('mine.editLabel')} aria-label={t('mine.editLabel')}>
+              <Icon name="edit" small />
             </button>
           </div>
         </div>
@@ -680,23 +737,9 @@ function Queued(props: { conversationId: string; q: QueuedTurn; busy: boolean; o
   };
   return (
     <div class="mine queued">
-      <Show when={props.q.attachments?.length}>
-        <div class="attach">
-          <For each={props.q.attachments}>
-            {(name) => (
-              <span class="afile">
-                <span class="fi">
-                  <Icon name="sheet" />
-                </span>
-                <span>{name}</span>
-              </span>
-            )}
-          </For>
-        </div>
-      </Show>
+      <Strip images={props.q.images} files={props.q.attachments} />
       <div class="you queued" classList={{ editing: editing() !== undefined }}>
         <span class="queue-badge">{t('queue.label')}</span>
-        <For each={props.q.images}>{(img) => <Pic img={img} />}</For>
         <Show
           when={editing() !== undefined}
           fallback={
@@ -850,6 +893,7 @@ export function Thread(props: Shared & { messages: Message[]; queued?: QueuedTur
             busy={props.busy ?? false} onRecovered={props.onQueuedRecovered} onError={props.onError} />;
         }}</For>
       }</Show>
+      <Quote />
     </>
   );
 }

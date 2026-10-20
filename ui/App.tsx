@@ -54,6 +54,7 @@ import { Setup } from './Setup.tsx';
 import { continuePatch, type FirstStep, firstRunStep, lookDue, setupPatch } from './setup.ts';
 import { Sidebar } from './Sidebar.tsx';
 import { keepRows, seedQuotas, withQuota } from './sidebar.ts';
+import { ToEnd } from './Floating.tsx';
 import { Thread } from './Thread.tsx';
 import { tutorialDue } from './tour.ts';
 import { Tutorial } from './Tutorial.tsx';
@@ -1351,6 +1352,9 @@ ${copy().path}`}>
                           </Show>
                         </Show>
                       </div>
+                      <Show when={!newChat() && !needsProject()}>
+                        <ToEnd thread={() => thread} />
+                      </Show>
                       <Show when={!newChat() && !needsProject() && state().vendors.length > 0}>
                         <div class="dock" inert={trapped()} onInput={() => setQueuedNotice(undefined)}>
                           <Show when={queuedNotice() && queuedNotice() === current()?.id}>

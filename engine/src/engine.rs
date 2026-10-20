@@ -1841,6 +1841,7 @@ impl Core {
                 let can_run = crate::route::candidates(&self.vendors(), &self.codex_models);
                 if let Some(m) = self.turn(conv) {
                     m.status = Some(if ok { Status::Done } else { Status::Stopped });
+                    m.took = ok.then(|| now().saturating_sub(m.at));
                     // Only a turn that ended well is done: a failed one may still be waited on or moved, and works again then.
                     if ok {
                         m.finished_at.get_or_insert_with(now);

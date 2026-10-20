@@ -200,6 +200,9 @@ pub struct Message {
     pub activity_end: Option<usize>,
     /// Milliseconds since the Unix epoch.
     pub at: u64,
+    /// On a reply that ended well: how long it took from its start (`at`), in milliseconds. Absent on older replies.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub took: Option<u64>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub images: Option<Vec<Image>>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -597,6 +600,7 @@ impl Message {
             text_breaks: None,
             activity_end: None,
             at,
+            took: None,
             images: None,
             attachments: None,
             vendor: None,
