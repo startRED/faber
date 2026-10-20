@@ -120,7 +120,7 @@ async fn rewind_real_contained_edit_only_turn_keeps_an_unreported_descendant_unt
         wire.release(0);
         process_exited(wire.workers[0]).await;
         while !matches!(rx.recv().await.unwrap(), EngineEvent::Writers {active, unknown:false} if active.is_empty()) {}
-        assert!(wire.tree.descendants().unwrap().is_empty(), "only an OS-confirmed empty descendant set reopens writes");
+        crate::codex_session::descendants_gone(&wire.tree, "only an OS-confirmed empty descendant set reopens writes").await;
         assert!(process_alive(peer.tree.identity().pid) && process_alive(peer.workers[0]), "another owned tree is untouched");
         session.close();
         while !matches!(rx.recv().await.unwrap(), EngineEvent::WriterExit { confirmed: true }) {}

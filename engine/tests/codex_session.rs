@@ -301,6 +301,17 @@ pub(crate) async fn process_exited(pid: u32) {
     .expect("the contained worker did not exit");
 }
 
+/// The OS lists a process as a group member until its exit completes, which can lag the moment `process_alive` stops
+/// seeing it (macOS reports a dying process as running for a few more milliseconds): wait, bounded, for the listing to
+/// empty. A member that never leaves still fails, with the diagnostics.
+pub(crate) async fn descendants_gone(tree: &faber_engine::proc::OwnedTree, what: &str) {
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(30);
+    while !tree.descendants().unwrap().is_empty() {
+        assert!(tokio::time::Instant::now() < deadline, "{what}: {}", contained_diagnostics(tree));
+        tokio::time::sleep(Duration::from_millis(10)).await;
+    }
+}
+
 #[tokio::test]
 async fn rewind_real_contained_idle_stop_after_native_exit_keeps_the_shared_peer_and_clears_the_owner() {
     tokio::time::timeout(Duration::from_secs(60), async {
@@ -317,7 +328,7 @@ async fn rewind_real_contained_idle_stop_after_native_exit_keeps_the_shared_peer
         contained_turn(&peer, &mut wire, "peer-turn").await;
         wire.release(0);
         process_exited(wire.workers[0]).await;
-        assert!(wire.tree.descendants().unwrap().is_empty(), "the native command really exited, not only its protocol item: {}", contained_diagnostics(&wire.tree));
+        descendants_gone(&wire.tree, "the native command really exited, not only its protocol item").await;
         support::emit(&mut wire.output, json!({"method":"item/completed","params":{"threadId":"owner","item":{
             "type":"commandExecution","id":"native","processId":"owner-terminal-handle","exitCode":0}}})).await;
         support::emit(&mut wire.output, json!({"method":"turn/completed","params":{"threadId":"owner","turn":{"id":"owner-turn","status":"completed"}}})).await;
