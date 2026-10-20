@@ -160,7 +160,7 @@ impl Engine {
 
 impl Core {
     /// The project a conversation belongs to.
-    fn project_of(&self, id: Option<&str>) -> Option<Project> {
+    pub(super) fn project_of(&self, id: Option<&str>) -> Option<Project> {
         let id = id?;
         self.store.projects().into_iter().find(|p| p.id == id)
     }
@@ -276,7 +276,8 @@ impl Core {
             Some(copy) if !copy.root.is_empty() && Path::new(&copy.path).is_dir() => return None,
             Some(copy) => copy.branch.clone(),
             // A conversation an agent started has its title already: a better name than the brief.
-            None if c.messages.is_empty() && project.separate_copies => {
+            // A session picked up from a terminal (parity F5) goes on in the folder it ran in.
+            None if c.messages.is_empty() && c.sessions.is_empty() && project.separate_copies => {
                 copy::branch_for(if c.title.is_empty() { &req.text } else { &c.title }, &id)
             }
             None => return None,

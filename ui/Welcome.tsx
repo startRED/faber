@@ -1,5 +1,5 @@
-import { createMemo, For, type JSX, Show } from 'solid-js';
-import type { Project, RunningItem, Summary } from './api.ts';
+import { createMemo, createSignal, For, type JSX, Match, Show, Switch } from 'solid-js';
+import type { CliSession, Project, RunningItem, Summary } from './api.ts';
 import { Icon, VendorMark } from './Glyphs.tsx';
 import { greetingParts } from './greeting.ts';
 import { lang, t } from './i18n.ts';
@@ -26,7 +26,8 @@ export function when(ms: number): string {
  * given, and the three conversations to pick up, those that wait for the user first. In Chat three short suggestions sit
  * under the composer and fill it without sending anything; the effects of the look sit behind (ui/Ambient.tsx). In a
  * project Curioso and a quiet line with the project and its folder come first, one line says where the agent works, and
- * the pick-up list holds only this project's conversations: the composer's hints already show what to ask. */
+ * the pick-up list holds only this project's conversations: the composer's hints already show what to ask. With Codex
+ * connected, a quiet button under it lists the sessions started in a terminal in the project's folder (parity F5). */
 export function Welcome(props: {
   /** How the person asked to be called, if they did. */
   name?: string;
@@ -37,6 +38,8 @@ export function Welcome(props: {
   project?: Project;
   onSuggest: (text: string) => void;
   onOpen: (conversation: Summary) => void;
+  /** In a project with Codex connected: its terminal sessions, asked for only when the person opens the list. */
+  terminal?: { list: (projectId: string) => Promise<CliSession[]>; onPick: (projectId: string, session: CliSession) => void };
   children: JSX.Element;
 }) {
   const title = () => {
@@ -92,8 +95,67 @@ export function Welcome(props: {
             </For>
           </section>
         </Show>
+        {/* Keyed by the project, so another project's home never shows this one's sessions. */}
+        <Show when={props.terminal && props.project?.id} keyed>
+          {(id) => <FromTerminal list={() => props.terminal!.list(id)} onPick={(s) => props.terminal!.onPick(id, s)} />}
+        </Show>
       </div>
     </div>
+  );
+}
+
+/** The sessions started in a terminal in the project's folder: one button, and the list once asked for, since each
+ * asking starts the CLI for a moment. A row opens the session as a conversation that goes on where it was. */
+function FromTerminal(props: { list: () => Promise<CliSession[]>; onPick: (session: CliSession) => void }) {
+  const [found, setFound] = createSignal<CliSession[] | 'looking'>();
+  const look = async () => {
+    setFound('looking');
+    setFound(await props.list().catch(() => []));
+  };
+  const sessions = () => {
+    const f = found();
+    return Array.isArray(f) ? f : undefined;
+  };
+  return (
+    <section class="resume terminal" aria-labelledby="terminal-title" aria-busy={found() === 'looking'}>
+      <Show
+        when={found()}
+        fallback={
+          <button type="button" class="from-terminal" id="terminal-title" title={t('s1.terminal.hint')} onClick={() => void look()}>
+            <Icon name="terminal" small />
+            {t('s1.terminal')}
+          </button>
+        }
+      >
+        <h2 id="terminal-title">{t('s1.terminal')}</h2>
+        <Switch>
+          <Match when={found() === 'looking'}>
+            <p class="s" role="status">
+              {t('aside.looking')}
+            </p>
+          </Match>
+          <Match when={sessions()?.length === 0}>
+            <p class="s" role="status">
+              {t('s1.terminal.none')}
+            </p>
+          </Match>
+          <Match when={sessions()}>
+            {(list) => (
+              <For each={list().slice(0, 5)}>
+                {(s) => (
+                  <button type="button" class="rrow" onClick={() => props.onPick(s)}>
+                    <span class="t">{s.title || t('run.untitled')}</span>
+                    <span class="s">
+                      {vendorName(s.vendor)} · {when(s.updatedAt)}
+                    </span>
+                  </button>
+                )}
+              </For>
+            )}
+          </Match>
+        </Switch>
+      </Show>
+    </section>
   );
 }
 

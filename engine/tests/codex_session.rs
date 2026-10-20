@@ -1,8 +1,8 @@
 use crate::support;
 
 use faber_engine::codex::{
-    CodexServer, CodexServerOptions, CodexThread, CodexTurnState, codex_args, codex_thread, list_codex_models, parse_codex_notification,
-    read_codex_limits, thread_params,
+    CodexServer, CodexServerOptions, CodexThread, CodexTurnState, codex_args, codex_thread, list_codex_models, list_codex_threads,
+    parse_codex_notification, read_codex_limits, thread_params,
 };
 use faber_engine::events::{Delivery, EngineEvent, Session, UserTurn};
 use faber_engine::model::{Area, Permissions};
@@ -749,6 +749,27 @@ async fn the_chatgpt_model_list_comes_from_the_account_without_hidden_models() {
     assert_eq!(*f.mismatches.lock().unwrap(), Vec::<String>::new());
     let got: Vec<(String, String, bool)> = models.into_iter().map(|m| (m.id, m.label, m.is_default)).collect();
     assert_eq!(got, [("gpt-6.1-sol".into(), "GPT-6.1-Sol".into(), true), ("gpt-6-astra".into(), "GPT-6-Astra".into(), false)]);
+}
+
+/// Parity F5: the sessions started in a terminal in the project folder, newest first, named by their title or else their
+/// first message on one line, without the ones Codex never saved.
+#[tokio::test]
+async fn the_terminal_sessions_of_a_folder_come_from_the_cli_own_list() {
+    let f = fake(fixture("codex", "threads"));
+    let list = list_codex_threads("codex", "/work/app".as_ref(), false, f.spawn.clone(), Duration::from_secs(3)).await;
+    assert_eq!(*f.mismatches.lock().unwrap(), Vec::<String>::new());
+    let got: Vec<(&str, &str, u64)> = list.iter().map(|s| (s.id.as_str(), s.title.as_str(), s.updated_at)).collect();
+    assert_eq!(
+        got,
+        [
+            ("019a2b3c-0001-7000-8000-000000000001", "Fix the login form", 1_791_623_000_000),
+            ("019a2b3c-0002-7000-8000-000000000002", "why does the build fail on windows", 1_791_510_000_000),
+        ]
+    );
+    assert!(list.iter().all(|s| s.vendor == faber_engine::model::Vendor::Codex));
+    assert_eq!((list[0].model.as_deref(), list[1].model.as_deref()), (Some("gpt-6.1-sol"), None));
+    let silent = fake(vec![]);
+    assert!(list_codex_threads("codex", "/work/app".as_ref(), false, silent.spawn.clone(), Duration::from_millis(50)).await.is_empty());
 }
 
 #[tokio::test]

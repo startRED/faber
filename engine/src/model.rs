@@ -23,6 +23,20 @@ impl Vendor {
     }
 }
 
+/// A session the person started with a CLI in a terminal, as that CLI lists it, which a project conversation can go on with
+/// (parity F5). `updated_at` is in milliseconds.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CliSession {
+    pub vendor: Vendor,
+    pub id: String,
+    pub title: String,
+    /// The model the session last used, when the CLI says.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub model: Option<String>,
+    pub updated_at: u64,
+}
+
 /// A command or skill advertised by the running CLI.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]

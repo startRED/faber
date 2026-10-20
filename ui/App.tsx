@@ -7,6 +7,7 @@ import {
   type Appearance,
   type AppState,
   type Choice,
+  type CliSession,
   type AppEvent,
   type ContextFill,
   type Conversation,
@@ -562,6 +563,16 @@ export function App(props: { initial: AppState; update?: UpdateStatus; inbox: { 
     if (done.conversation) queueMicrotask(() => restoreRejected(done.conversation!.id, done.conversation!.messages.at(-1)));
   };
   const fresh = (next: Pick<Place, 'area' | 'projectId'>) => go({ ...next, id: undefined });
+  // A session started in a terminal (parity F5) becomes this project's conversation, or opens the one it already is.
+  const pickUpSession = async (projectId: string, session: CliSession) => {
+    setError(undefined);
+    try {
+      const id = await api.pickUp(projectId, session);
+      await go({ area: 'project', projectId, id });
+    } catch (err) {
+      fail(err);
+    }
+  };
   const openSummary = (c: Summary) => {
     closeSettings();
     closeSide(false);
@@ -1421,6 +1432,11 @@ ${copy().path}`}>
                             project={area() === 'project' ? project() : undefined}
                             onSuggest={(text) => fill?.(text)}
                             onOpen={openSummary}
+                            terminal={
+                              area() === 'project' && project() && state().vendors.includes('codex')
+                                ? { list: api.cliSessions, onPick: (projectId, s) => void pickUpSession(projectId, s) }
+                                : undefined
+                            }
                           >
                             {composer()}
                           </Welcome>

@@ -292,6 +292,21 @@ async fn send(faber: State<'_, Faber>, req: SendRequest) -> Res<String> {
     tauri::async_runtime::spawn_blocking(move || engine.send(req)).await.map_err(|_| "error.copy.failed".to_string())?
 }
 
+/// The sessions started in a terminal in a project's folder (parity F5).
+#[tauri::command]
+async fn cli_sessions(faber: State<'_, Faber>, project_id: String) -> Res<Vec<faber_engine::model::CliSession>> {
+    faber.engine.cli_sessions(&project_id, Duration::from_secs(20)).await
+}
+
+/// Opens a session started in a terminal as a project conversation, or the one already opened for it.
+#[tauri::command]
+async fn pick_up(faber: State<'_, Faber>, project_id: String, session: faber_engine::model::CliSession) -> Res<String> {
+    let engine = faber.engine.clone();
+    tauri::async_runtime::spawn_blocking(move || engine.pick_up(&project_id, session))
+        .await
+        .map_err(|_| "error.conversationGone".to_string())?
+}
+
 #[tauri::command]
 async fn branch(faber: State<'_, Faber>, req: BranchRequest) -> Res<String> {
     let engine = faber.engine.clone();
@@ -1117,6 +1132,8 @@ fn main() {
                 prompt_history,
                 send,
                 branch,
+                cli_sessions,
+                pick_up,
                 branch_here,
                 versions,
                 warm,

@@ -2,12 +2,12 @@
 //! `thread/resume` of a thread that never ran a turn fails with "no rollout found", as the real one does.
 
 use faber_engine::cli::Cli;
-use faber_engine::model::{Area, Message, Role, Status, Vendor};
+use faber_engine::model::{Area, CliSession, Message, Role, Status, Vendor};
 use faber_engine::proc::{Proc, Spawner};
 use faber_engine::router::{Choice, Effort};
 use faber_engine::{AppEvent, Engine, EngineOptions, SendRequest, WarmRequest};
 use serde_json::{Value, json};
-use std::collections::{BTreeMap, HashSet};
+use std::collections::HashSet;
 use std::path::Path;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
@@ -124,10 +124,16 @@ fn codex(disk: Shared) -> Spawner {
 }
 
 fn start(dir: &Path, disk: &Shared) -> (Engine, UnboundedReceiver<AppEvent>) {
+    start_with(dir, disk, &[Vendor::Codex])
+}
+
+/// The same, with these CLIs installed; every one of them is the fake app-server, so a turn that reaches Claude Code never
+/// gets an answer.
+fn start_with(dir: &Path, disk: &Shared, vendors: &[Vendor]) -> (Engine, UnboundedReceiver<AppEvent>) {
     let (tx, rx) = tokio::sync::mpsc::unbounded_channel();
     let opts = EngineOptions {
         data_dir: dir.into(),
-        clis: BTreeMap::from([(Vendor::Codex, Cli { command: "codex".into(), prefix: vec![] })]),
+        clis: vendors.iter().map(|v| (*v, Cli { command: v.name().into(), prefix: vec![] })).collect(),
         spawn: codex(disk.clone()),
         windows: false,
         claude_env_billed: false,
@@ -404,6 +410,92 @@ async fn recovery_carries_attachment_references_and_tells_the_user_that_images_w
     let text = d.turns.last().unwrap();
     assert!(text.contains("[attached file: attachments/notes.pdf]"), "{text}");
     assert!(text.contains("[1 image(s) sent here are not included]"), "{text}");
+    drop(d);
+    engine.shutdown();
+}
+
+fn project_send(id: &str, project_id: &str, text: &str) -> SendRequest {
+    SendRequest {
+        conversation_id: Some(id.into()),
+        area: Area::Project,
+        project_id: Some(project_id.into()),
+        ..send(None, text, Effort::High)
+    }
+}
+
+fn terminal_session(id: &str) -> CliSession {
+    CliSession { vendor: Vendor::Codex, id: id.into(), title: "Fix the login form".into(), model: Some("gpt-6-old".into()), updated_at: 1 }
+}
+
+/// Parity F5: a session started in a terminal becomes a project conversation whose first message resumes that very thread.
+#[tokio::test]
+async fn a_terminal_session_picked_up_in_a_project_resumes_its_own_thread_and_is_picked_up_once() {
+    let (dir, disk) = (tempfile::tempdir().unwrap(), Shared::default());
+    let folder = tempfile::tempdir().unwrap();
+    disk.lock().unwrap().ran.insert("term-1".into());
+    let (engine, mut rx) = start(dir.path(), &disk);
+    engine.set_codex_models(vec!["gpt-6-luna".into()], Some("gpt-6-luna".into()));
+    let project = engine.add_project(&folder.path().to_string_lossy()).unwrap();
+    assert_eq!(engine.pick_up("no-such-project", terminal_session("term-1")), Err("error.projectGone".into()));
+    let id = engine.pick_up(&project.id, terminal_session("term-1")).unwrap();
+    let c = engine.open(&id).unwrap();
+    assert_eq!((c.area, c.project_id.as_deref(), c.title.as_str()), (Area::Project, Some(project.id.as_str()), "Fix the login form"));
+    assert_eq!(c.sessions[&Vendor::Codex], "term-1");
+    let model = c.choice.and_then(|c| c.model);
+    assert_eq!(model.as_deref(), Some("gpt-6-luna"), "a model the account no longer offers gives way to its default");
+    assert_eq!(engine.pick_up(&project.id, terminal_session("term-1")).unwrap(), id, "the same session makes a second conversation");
+    engine.send(project_send(&id, &project.id, "go on")).unwrap();
+    let reply = finished(&mut rx).await;
+    assert_eq!((reply.status, reply.text.as_str()), (Some(Status::Done), "pong"), "{:?}", reply.error);
+    let d = disk.lock().unwrap();
+    assert_eq!(d.asked, vec!["thread/resume term-1"], "the terminal's thread was not resumed");
+    assert_eq!(d.turns, vec!["go on"]);
+    drop(d);
+    engine.shutdown();
+    // After a restart the conversation is found on disk, not made again, archived or not.
+    let (engine, _rx) = start(dir.path(), &disk);
+    assert_eq!(engine.pick_up(&project.id, terminal_session("term-1")).unwrap(), id);
+    engine.archive(&id, true).unwrap();
+    assert_eq!(engine.pick_up(&project.id, terminal_session("term-1")).unwrap(), id, "an archived one is made again");
+    // Before the account's models have come, the session's own model stays, so the picker never falls back to Auto.
+    let early = engine.pick_up(&project.id, terminal_session("term-2")).unwrap();
+    let model = engine.open(&early).unwrap().choice.and_then(|c| c.model);
+    assert_eq!(model.as_deref(), Some("gpt-6-old"));
+    engine.shutdown();
+}
+
+/// With both CLIs and Auto in the box, the first message of a picked-up session still resumes it with Codex.
+#[tokio::test]
+async fn auto_sends_the_first_message_of_a_picked_up_session_to_its_own_cli() {
+    let (dir, disk) = (tempfile::tempdir().unwrap(), Shared::default());
+    let folder = tempfile::tempdir().unwrap();
+    disk.lock().unwrap().ran.insert("term-1".into());
+    let (engine, mut rx) = start_with(dir.path(), &disk, &[Vendor::Claude, Vendor::Codex]);
+    let project = engine.add_project(&folder.path().to_string_lossy()).unwrap();
+    let id = engine.pick_up(&project.id, terminal_session("term-1")).unwrap();
+    let auto = Choice { vendor: "auto".into(), model: None, effort: None };
+    engine.send(SendRequest { choice: auto, ..project_send(&id, &project.id, "go on") }).unwrap();
+    let reply = finished(&mut rx).await;
+    assert_eq!((reply.status, reply.text.as_str()), (Some(Status::Done), "pong"), "{:?}", reply.error);
+    assert_eq!(disk.lock().unwrap().asked, vec!["thread/resume term-1"]);
+    engine.shutdown();
+}
+
+/// A session the CLI no longer has (deleted between the list and the message) is not an error: the message runs once, in a
+/// new thread.
+#[tokio::test]
+async fn a_picked_up_session_the_cli_no_longer_has_runs_the_message_once_in_a_new_thread() {
+    let (dir, disk) = (tempfile::tempdir().unwrap(), Shared::default());
+    let folder = tempfile::tempdir().unwrap();
+    let (engine, mut rx) = start(dir.path(), &disk);
+    let project = engine.add_project(&folder.path().to_string_lossy()).unwrap();
+    let id = engine.pick_up(&project.id, terminal_session("gone")).unwrap();
+    engine.send(project_send(&id, &project.id, "go on")).unwrap();
+    let reply = finished(&mut rx).await;
+    assert_eq!((reply.status, reply.text.as_str()), (Some(Status::Done), "pong"), "{:?}", reply.error);
+    let d = disk.lock().unwrap();
+    assert_eq!(d.asked, vec!["thread/resume gone", "thread/start"]);
+    assert_eq!(d.turns, vec!["go on"]);
     drop(d);
     engine.shutdown();
 }
