@@ -111,7 +111,7 @@ check('right-click: a chat offers Rename and Delete, Delete asks twice, Rename e
     const row = [...root.querySelectorAll('.crow')].find((r) => r.textContent?.includes('Plan the trip'))!;
     equal(rightClick(row), false);
     await settle();
-    deepEqual(labels(), [t('menu.rename'), t('menu.archive'), t('menu.delete')]);
+    deepEqual(labels(), [t('menu.rename'), t('menu.pin'), t('menu.archive'), t('menu.delete')]);
     ok(entry(t('menu.delete')).classList.contains('danger'), 'Delete is last and in the danger colour');
     entry(t('menu.delete')).click();
     await settle();
@@ -297,8 +297,10 @@ check('right-click: the keyboard opens the menu on a focused row, arrows move, E
     item.focus();
     key(item, { key: 'F10', shiftKey: true });
     await settle();
-    deepEqual(labels(), [t('menu.rename'), t('menu.archive'), t('menu.delete')]);
+    deepEqual(labels(), [t('menu.rename'), t('menu.pin'), t('menu.archive'), t('menu.delete')]);
     equal(document.activeElement, entry(t('menu.rename')), 'the first item takes focus');
+    key(document.activeElement!, { key: 'ArrowDown' });
+    equal(document.activeElement, entry(t('menu.pin')));
     key(document.activeElement!, { key: 'ArrowDown' });
     equal(document.activeElement, entry(t('menu.archive')));
     key(document.activeElement!, { key: 'ArrowDown' });

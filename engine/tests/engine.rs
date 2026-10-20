@@ -17,6 +17,57 @@ const SKY: &str = "In one sentence: why is the sky blue?";
 const TWO_WRITES: &str = "Create a.txt containing 'one'. Then create b.txt containing 'two'. Use the Write tool for each, one at a time.";
 
 #[tokio::test]
+async fn pin_is_stored_survives_reopening_and_unpin_removes_the_stored_value() {
+    let dir = support::tempdir();
+    let (first, mut rx) = engine(dir.path(), Vendor::Claude, fake(fixture("claude", "chat")).spawn);
+    let id = first.send(ask(Area::Chat, SKY, choice("claude", None))).unwrap();
+    finished(&mut rx, |_| {}).await;
+    let before = first.open(&id).unwrap();
+    assert_eq!(before.pinned_at, None, "older conversations without pinnedAt remain unpinned");
+    first.pin(&id, true).unwrap();
+    let at = first.open(&id).unwrap().pinned_at.expect("the conversation is pinned");
+    assert!(at >= before.created_at);
+    assert_eq!(first.open(&id).unwrap().updated_at, before.updated_at, "pinning does not count as conversation activity");
+    first.pin(&id, true).unwrap();
+    assert_eq!(first.open(&id).unwrap().pinned_at, Some(at), "pin is idempotent");
+    assert!(std::iter::from_fn(|| rx.try_recv().ok()).any(|e| matches!(e, AppEvent::List)), "the sidebar refreshes");
+    let file = dir.path().join("conversations").join(format!("{id}.json"));
+    assert_eq!(read_json(&file)["pinnedAt"], at);
+    first.shutdown();
+
+    let (second, _) = engine(dir.path(), Vendor::Claude, fake(vec![]).spawn);
+    assert_eq!(second.open(&id).unwrap().pinned_at, Some(at));
+    assert_eq!(second.state().conversations.iter().find(|c| c.id == id).unwrap().pinned_at, Some(at));
+    second.pin(&id, false).unwrap();
+    assert_eq!(second.open(&id).unwrap().pinned_at, None);
+    assert_eq!(second.state().conversations.iter().find(|c| c.id == id).unwrap().pinned_at, None);
+    assert!(read_json(&file).get("pinnedAt").is_none(), "unpin removes the key, rather than saving null");
+    second.pin(&id, false).unwrap();
+    assert_eq!(second.pin("gone", true), Err("error.conversationGone".into()));
+    second.shutdown();
+}
+
+#[tokio::test]
+async fn archiving_a_pinned_conversation_removes_its_pin_and_unarchive_does_not_restore_it() {
+    let dir = support::tempdir();
+    let (engine, mut rx) = engine(dir.path(), Vendor::Claude, fake(fixture("claude", "chat")).spawn);
+    let id = engine.send(ask(Area::Chat, SKY, choice("claude", None))).unwrap();
+    finished(&mut rx, |_| {}).await;
+    engine.pin(&id, true).unwrap();
+    engine.archive(&id, true).unwrap();
+    let c = engine.open(&id).unwrap();
+    assert!(c.archived_at.is_some());
+    assert_eq!(c.pinned_at, None);
+    let file = dir.path().join("conversations").join(format!("{id}.json"));
+    assert!(read_json(&file).get("pinnedAt").is_none());
+    engine.pin(&id, true).unwrap();
+    assert_eq!(engine.open(&id).unwrap().pinned_at, None, "a stale menu cannot pin an archived conversation");
+    engine.archive(&id, false).unwrap();
+    assert_eq!(engine.open(&id).unwrap().pinned_at, None);
+    engine.shutdown();
+}
+
+#[tokio::test]
 async fn slash_init_populates_the_conversation_and_vendor_fallback_without_saving_it() {
     let mut entries = fixture("claude", "chat");
     let init = fixture("claude", "slash-init")[1].msg.clone();

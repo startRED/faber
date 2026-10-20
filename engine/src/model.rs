@@ -734,6 +734,9 @@ pub struct Conversation {
     /// until the person brings it back or writes to it.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub archived_at: Option<u64>,
+    /// When the person pinned it to the top of its sidebar list. Archiving removes the pin.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pinned_at: Option<u64>,
     /// Its last run ended and the person has not opened it since (`engine/src/engine/ended.rs`): the running column's done card
     /// and the sidebar's dot read it.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -819,6 +822,8 @@ pub struct Summary {
     pub keep_going: bool,
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub archived: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pinned_at: Option<u64>,
     /// The conversation whose agent started this one: the sidebar shows it under that one.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub started_by: Option<String>,

@@ -208,6 +208,8 @@ export interface Conversation {
   plan?: Plan;
   /** When it was archived: it is off the sidebar and its composer gives way to a line that brings it back. */
   archivedAt?: number;
+  /** When the person pinned it to the top of its sidebar list. */
+  pinnedAt?: number;
   messages: Message[];
 }
 /** The tokens a conversation's own agent holds, and the window they are counted against. */
@@ -224,6 +226,7 @@ export interface Summary {
   /** "Keep going" is on. */
   keepGoing?: boolean;
   archived?: boolean;
+  pinnedAt?: number;
   /** The conversation whose agent started this one, which the sidebar shows it under. */
   startedBy?: string;
   /** Its last run ended and nobody has opened it since: the running column's done card and the sidebar's dot. */
@@ -585,6 +588,7 @@ export const api = {
   seen: (id: string) => invoke<void>('seen', { id }),
   /** Archives a conversation, or brings an archived one back. */
   archive: (id: string, on: boolean) => invoke<void>('archive', { id, on }),
+  pin: (id: string, on: boolean) => invoke<void>('pin', { id, on }),
   answer: (id: string, turnId: string, requestId: string, allow: boolean, always = false) =>
     invoke<void>('answer', { id, turnId, requestId, allow, always }),
   /** The choices for a question the assistant asked: each question's text to the label picked (several joined by a comma). */

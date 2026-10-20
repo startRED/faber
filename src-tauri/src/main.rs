@@ -377,6 +377,11 @@ async fn archive(faber: State<'_, Faber>, id: String, on: bool) -> Res<()> {
 }
 
 #[tauri::command]
+async fn pin(faber: State<'_, Faber>, id: String, on: bool) -> Res<()> {
+    faber.engine.pin(&id, on)
+}
+
+#[tauri::command]
 async fn keep_going(faber: State<'_, Faber>, id: String, on: bool) -> Res<()> {
     faber.engine.keep_going(&id, on)
 }
@@ -1072,6 +1077,7 @@ fn main() {
                 keep_going,
                 seen,
                 archive,
+                pin,
                 answer,
                 answer_question,
                 rename,

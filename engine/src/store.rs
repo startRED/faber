@@ -181,6 +181,7 @@ impl Store {
             .map(|c| Summary {
                 keep_going: c.keep_going.is_some(),
                 archived: c.archived_at.is_some(),
+                pinned_at: c.pinned_at,
                 started_by: c.started_by,
                 ended: c.ended.filter(|e| e.current(now)),
                 plan: c.plan.as_ref().map(crate::model::Plan::count),

@@ -1,4 +1,4 @@
-import { createEffect, createMemo, createSignal, For, on, onCleanup, Show } from 'solid-js';
+import { createEffect, createMemo, createSignal, createUniqueId, For, type JSX, on, onCleanup, Show } from 'solid-js';
 import { createStore, reconcile } from 'solid-js/store';
 import { UpdateLine } from './UpdateStage.tsx';
 import { api, type Area, type MessageHit, type Project, type RunningItem, type Summary, type UpdateStatus, type Vendor, type VendorUsage } from './api.ts';
@@ -14,7 +14,7 @@ import { vendorName } from './models.ts';
 import { forgetProject } from './projects.ts';
 import type { Place } from './running.ts';
 import { planWords } from './Plan.tsx';
-import { ageOf, freshness, groupChats, lineReading, matches, nest, otherReadings, type Quotas, showsChats, tailOf } from './sidebar.ts';
+import { ageOf, freshness, groupChats, lineReading, matches, nest, otherReadings, pinned, type Quotas, showsChats, tailOf } from './sidebar.ts';
 
 /** The name of a conversation while it is being renamed: Enter keeps it, Esc and leaving the box too when nothing changed. */
 function RenameBox(props: { title: string; onDone: (title?: string) => void }) {
@@ -44,6 +44,16 @@ function RenameBox(props: { title: string; onDone: (title?: string) => void }) {
       }}
       onBlur={(e) => finish(e.currentTarget.value)}
     />
+  );
+}
+
+function ConversationGroup(props: { label: string; children: JSX.Element }) {
+  const heading = createUniqueId();
+  return (
+    <section aria-labelledby={heading} ref={animateList}>
+      <h2 class="group-h" id={heading}>{props.label}</h2>
+      {props.children}
+    </section>
   );
 }
 
@@ -166,9 +176,11 @@ export function Sidebar(props: Props) {
   // An archived conversation leaves the list; a search still finds it.
   const listed = (c: Summary) => (!c.archived || searching()) && matches(c.title, query());
   const inProject = (p: Project) => props.conversations.filter((c) => c.area === 'project' && c.projectId === p.id && listed(c));
+  const projectPins = (p: Project) => searching() ? [] : pinned(inProject(p));
+  const projectRest = (p: Project) => inProject(p).filter((c) => searching() || c.pinnedAt === undefined);
   // A project shows when its name or one of its conversations holds the search, and then opens on those conversations.
   const projects = () => props.projects.filter((p) => !searching() || matches(p.name, query()) || inProject(p).length > 0);
-  const chats = createMemo(() => groupChats(props.conversations.filter((c) => c.area === 'chat' && listed(c)), props.now));
+  const chats = createMemo(() => groupChats(props.conversations.filter((c) => c.area === 'chat' && listed(c)), props.now, !searching()));
   // The one rule for a project showing its conversations: the user opened it, or the search found something in it. The
   // list and aria-expanded both read it, so they never disagree.
   const expanded = (p: Project) => showsChats(open().has(p.id), searching(), inProject(p).length);
@@ -189,13 +201,36 @@ export function Sidebar(props: Props) {
     if ((await props.onRemove(id)) === 'unsaved') setLosing(id);
   };
 
-  const Row = (row: { c: Summary; child?: boolean }) => (
+  const Row = (row: { c: Summary; child?: boolean }) => {
+    let rowEl: HTMLDivElement | undefined;
+    onCleanup(() => {
+      // Focus on any control of the row (its title or its ×) goes back to the recreated row's title.
+      if (!rowEl || !rowEl.contains(document.activeElement)) return;
+      const list = rowEl.closest('.side-scroll');
+      // Regrouping replaces the focused row. Wait for its replacement without taking focus from another control.
+      queueMicrotask(() => {
+        if (list?.isConnected && document.activeElement === document.body) {
+          const title = list.querySelector<HTMLButtonElement>(`[data-conversation-id="${CSS.escape(row.c.id)}"] .item`);
+          title?.focus({ preventScroll: true });
+          // The row may have moved out of view (pinned to the top, or unpinned far below): bring it back in.
+          title?.scrollIntoView({ block: 'nearest' });
+        }
+      });
+    });
+    return (
     <div
+      ref={(el) => (rowEl = el)}
       class="crow"
+      data-conversation-id={row.c.id}
       classList={{ child: row.child }}
       onContextMenu={(e) =>
         openMenu(e, [
           { id: 'rename', label: t('menu.rename'), run: () => setRenaming(row.c.id) },
+          ...(!row.c.archived ? [{
+            id: row.c.pinnedAt === undefined ? 'pin' : 'unpin',
+            label: t(row.c.pinnedAt === undefined ? 'menu.pin' : 'menu.unpin'),
+            run: () => void api.pin(row.c.id, row.c.pinnedAt === undefined).catch((err) => props.onError?.(err)),
+          }] : []),
           row.c.archived
             ? { id: 'unarchive', label: t('menu.unarchive'), run: () => void api.archive(row.c.id, false).catch((err) => props.onError?.(err)) }
             : { id: 'archive', label: t('menu.archive'), run: () => void api.archive(row.c.id, true).catch((err) => props.onError?.(err)) },
@@ -236,7 +271,8 @@ export function Sidebar(props: Props) {
         {losing() === row.c.id ? t('side.confirmDiscard') : confirming() === row.c.id ? t('side.confirmDelete') : <Icon name="close" small />}
       </button>
     </div>
-  );
+    );
+  };
 
   return (
     <>
@@ -327,9 +363,14 @@ export function Sidebar(props: Props) {
                       <div class="fold-inner">
                         <Show when={shown()}>
                           <div class="proj-chats" ref={animateList}>
+                            <Show when={projectPins(p).length > 0}>
+                              <ConversationGroup label={t('side.pinned')}>
+                                <For each={projectPins(p)}>{(c) => <Row c={c} />}</For>
+                              </ConversationGroup>
+                            </Show>
                             {/* A conversation an agent started sits under the one that started it. */}
-                            <For each={nest(inProject(p))}>
-                              {(c) => <Row c={c} child={!!c.startedBy && inProject(p).some((o) => o.id === c.startedBy)} />}
+                            <For each={nest(projectRest(p))}>
+                              {(c) => <Row c={c} child={!!c.startedBy && projectRest(p).some((o) => o.id === c.startedBy)} />}
                             </For>
                           </div>
                         </Show>
@@ -347,10 +388,9 @@ export function Sidebar(props: Props) {
             {/* The groups are keyed by their name and the rows by their conversation, so a refresh builds again only what changed. */}
             <For each={chats().map((g) => g.group)}>
               {(group) => (
-                <section ref={animateList}>
-                  <div class="group-h">{t(`side.${group}` as Key)}</div>
+                <ConversationGroup label={t(`side.${group}` as Key)}>
                   <For each={chats().find((g) => g.group === group)?.chats ?? []}>{(c) => <Row c={c} />}</For>
-                </section>
+                </ConversationGroup>
               )}
             </For>
           </div>

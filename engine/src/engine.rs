@@ -2830,6 +2830,7 @@ impl Core {
             queued: Vec::new(),
             keep_going: None,
             archived_at: None,
+            pinned_at: None,
             ended: None,
             plan: None,
             context: None,

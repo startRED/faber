@@ -84,7 +84,7 @@ input, textarea { caret-color: var(--accent); }
 .area .count { margin-left: auto; font: 400 var(--fs-xs) var(--font-data); color: var(--ink-3); }
 .num { font-family: var(--font-data); font-variant-numeric: tabular-nums; }
 .side-scroll { flex: 1; min-height: 0; overflow-y: auto; overflow-x: hidden; display: flex; flex-direction: column; gap: 16px; scrollbar-width: thin; scrollbar-color: var(--line-3) transparent; }
-.group-h { position: relative; display: flex; align-items: center; padding: 0 10px 5px; font-size: var(--fs-xs); color: var(--ink-3); }
+.group-h { position: relative; display: flex; align-items: center; margin: 0; padding: 0 10px 5px; font-size: var(--fs-xs); font-weight: inherit; color: var(--ink-3); }
 .plus { flex: none; width: var(--h-sm); height: var(--h-sm); display: grid; place-items: center; margin-left: auto; border-radius: var(--r-xs); color: var(--ink-3); }
 /* The "+" of a header shows when the pointer or the keyboard is near it, and takes no room otherwise. It hides with opacity,
    never visibility: a hidden button leaves the tab order, so the keyboard could not reach it to reveal it. */
@@ -103,6 +103,7 @@ input, textarea { caret-color: var(--accent); }
 .prow:hover .tail, .prow:has(:focus-visible) .tail { opacity: 0; }
 .run-dot { flex: none; width: 7px; height: 7px; border-radius: 1px; background: var(--accent); animation: var(--live-anim); }
 .proj-chats { display: grid; grid-template-columns: minmax(0, 1fr); gap: 1px; padding-left: 10px; }
+.proj-chats > section { display: grid; grid-template-columns: minmax(0, 1fr); gap: 1px; }
 .fold { display: grid; grid-template-rows: 0fr; transition: grid-template-rows var(--dur-exit) var(--ease-in); }
 .fold.open { grid-template-rows: 1fr; transition-duration: var(--dur-ui); transition-timing-function: var(--ease); }
 .fold-inner { min-height: 0; overflow: hidden; }

@@ -20,6 +20,7 @@ import './prompt-history.check.ts';
 import './money-words.check.ts';
 import './connect-more.check.ts';
 import './contextmenu.check.ts';
+import './pin.check.ts';
 import './hole.check.ts';
 import './effort.check.ts';
 import './first-frame.check.ts';
