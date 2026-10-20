@@ -175,7 +175,8 @@ check('search-messages: clicking a hit opens its old message, unfolds its run an
   const jump = async (hitButton: HTMLElement) => {
     scrolled = undefined;
     hitButton.click();
-    await until(() => scrolled !== undefined);
+    const state = () => `hit connected ${hitButton.isConnected}, thread has ${document.querySelectorAll('[data-message-index]').length} messages, message 3 ${document.querySelector('[data-message-index="3"]') ? 'mounted' : 'missing'}`;
+    await until(() => scrolled !== undefined, 4000, `the jump never asked for a scroll (${state()})`);
   };
   try {
     for (const area of ['chat', 'project'] as const) for (const motion of ['full', 'reduced', 'none'] as const) {
@@ -216,7 +217,7 @@ check('search-messages: clicking a hit opens its old message, unfolds its run an
       const dispose = render(() => createComponent(App, { initial, inbox: { take: (listener) => { receive = listener; } } }), root);
       try {
         type(root, 'café');
-        await until(() => root.querySelector('.message-hit'));
+        await until(() => root.querySelector('.message-hit'), 4000, 'the search never returned a hit');
         const button = root.querySelector<HTMLButtonElement>('.message-hit');
         ok(button, `${area}: the existing search returns the message hit`);
         await jump(button);
@@ -236,7 +237,7 @@ check('search-messages: clicking a hit opens its old message, unfolds its run an
         receive?.({ type: 'message', conversationId: conversation.id, message: { ...conversation.messages[5]!, text: 'Another streaming chunk', status: 'streaming' } });
         await settle();
         equal(run.open, false, 'a streaming update preserves a run the person collapsed after the search jump');
-        await jump(button);
+        await jump(root.querySelector<HTMLButtonElement>('.message-hit')!);
         ok(root.querySelector('[data-message-index="3"]')?.closest<HTMLDetailsElement>('.run-block')?.open, 'a new navigation to the same hit opens its run once again');
         ok(root.querySelectorAll('[data-message-index]').length <= 50, 'jumping back does not mount the whole history');
         const thread = root.querySelector<HTMLElement>('.thread')!;
@@ -248,13 +249,13 @@ check('search-messages: clicking a hit opens its old message, unfolds its run an
         textarea.value = 'Continue from here';
         textarea.dispatchEvent(new Event('input', { bubbles: true }));
         root.querySelector<HTMLButtonElement>('.composer button[type="submit"]')!.click();
-        await until(() => root.querySelector('[data-message-index="101"]'));
+        await until(() => root.querySelector('[data-message-index="101"]'), 4000, 'sending never showed the new answer');
         ok(root.querySelector('[data-message-index="101"]')?.textContent?.includes('The newest answer'), 'sending leaves the search page and shows the new answer');
         equal(root.querySelector('.search-focus'), null, 'sending clears the old search marker');
         equal(root.querySelector('[data-message-index="3"]'), null, 'sending returns to the latest page without retaining the old history');
         api.searchMessages = async () => ({ ready: true, hits: [{ ...hit(area), messageIndex: 100, snippet: 'Continue from here', highlights: [{ start: 0, end: 8 }] }] });
         type(root, 'continue');
-        await until(() => root.querySelector('.message-hit')?.textContent?.includes('Continue'));
+        await until(() => root.querySelector('.message-hit')?.textContent?.includes('Continue'), 4000, 'the search never returned the hit for continue');
         await jump(root.querySelector<HTMLButtonElement>('.message-hit')!);
         ok(root.querySelector('[data-message-index="100"].search-focus'), 'a hit in the person’s own words opens its message too');
         root.querySelector<HTMLButtonElement>('[data-message-index="100"] .edit')!.click();
@@ -272,7 +273,7 @@ check('search-messages: clicking a hit opens its old message, unfolds its run an
         conversation.messages = conversation.messages.slice(0, 6);
         api.searchMessages = async () => ({ ready: true, hits: [hit(area)] });
         type(root, 'café');
-        await until(() => root.querySelector('.message-hit')?.textContent?.includes('café'));
+        await until(() => root.querySelector('.message-hit')?.textContent?.includes('café'), 4000, 'the search never returned the hit for café');
         await jump(root.querySelector<HTMLButtonElement>('.message-hit')!);
         const revealed = root.querySelector('[data-message-index="3"]')?.closest<HTMLDetailsElement>('.run-block');
         ok(revealed?.open, 'search reveals the earlier answer in the active run');

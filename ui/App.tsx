@@ -100,9 +100,11 @@ export function App(props: { initial: AppState; update?: UpdateStatus; inbox: { 
   let searchFrame: number | undefined;
   let searchMark: HTMLElement | undefined;
   let searchTimer: ReturnType<typeof setTimeout> | undefined;
+  let searchFallback: ReturnType<typeof setTimeout> | undefined;
   const clearSearch = () => {
     if (searchFrame !== undefined) cancelAnimationFrame(searchFrame);
     clearTimeout(searchTimer);
+    clearTimeout(searchFallback);
     searchMark?.classList.remove('search-focus');
     searchMark = undefined;
     setSearchIndex(undefined);
@@ -506,16 +508,30 @@ export function App(props: { initial: AppState; update?: UpdateStatus; inbox: { 
     // Consume the reveal as soon as the run blocks have heard it, not on a frame: a window that draws no frame (minimised,
     // hidden, a slow machine) would keep it, and the next automatic turn would unfold its new run block by itself.
     queueMicrotask(() => setSearchIndex(undefined));
-    if (target !== undefined) searchFrame = requestAnimationFrame(() => {
-      searchMark = thread?.querySelector<HTMLElement>(`[data-message-index="${target}"]`) ?? undefined;
-      if (!searchMark) return;
-      searchMark.classList.add('search-focus');
-      searchMark.focus({ preventScroll: true });
-      const smooth = searchMark.closest<HTMLElement>('[data-motion]')?.dataset.motion === 'full' && !matchMedia('(prefers-reduced-motion: reduce)').matches;
-      searchMark.scrollIntoView({ block: 'center', behavior: smooth ? 'smooth' : 'instant' });
-      lastScrollTop = thread?.scrollTop ?? 0;
-      searchTimer = setTimeout(() => searchMark?.classList.remove('search-focus'), 1800);
-    });
+    if (target !== undefined) {
+      // Focus and scroll happen on the next frame, with a timer beside it: a window that draws no frame (hidden, minimised,
+      // a slow runner) must still reach the message. The message may also be a moment from the screen, so it is looked for
+      // again a few times. Whichever comes first does it, once.
+      let shown = false;
+      const show = (retries: number) => {
+        if (shown) return;
+        const mark = thread?.querySelector<HTMLElement>(`[data-message-index="${target}"]`);
+        if (!mark) {
+          if (retries > 0) searchFallback = setTimeout(() => show(retries - 1), 50);
+          return;
+        }
+        shown = true;
+        searchMark = mark;
+        mark.classList.add('search-focus');
+        mark.focus({ preventScroll: true });
+        const smooth = mark.closest<HTMLElement>('[data-motion]')?.dataset.motion === 'full' && !matchMedia('(prefers-reduced-motion: reduce)').matches;
+        mark.scrollIntoView({ block: 'center', behavior: smooth ? 'smooth' : 'instant' });
+        lastScrollTop = thread?.scrollTop ?? 0;
+        searchTimer = setTimeout(() => mark.classList.remove('search-focus'), 1800);
+      };
+      searchFrame = requestAnimationFrame(() => show(0));
+      searchFallback = setTimeout(() => show(20), 50);
+    }
     setChoice(next.id ? recall<Choice>(`faber.choice.${next.id}`, done.conversation?.choice ?? { vendor: 'auto' }) : { vendor: 'auto' });
     if (done.conversation) queueMicrotask(() => restoreRejected(done.conversation!.id, done.conversation!.messages.at(-1)));
   };
