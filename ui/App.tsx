@@ -1280,7 +1280,7 @@ ${copy().path}`}>
                           <Hole avoid={() => [...work!.querySelectorAll('.welcome-grid .peek, .welcome-grid .w-main')]} />
                         </Show>
                       </Show>
-                      <div class="thread" classList={{ welcome: newChat() }} ref={(el) => {
+                      <div class="thread" data-gallery classList={{ welcome: newChat() }} ref={(el) => {
                         thread = el;
                         onMount(() => {
                           // Keep the tail visible as the composer grows, without pulling a reader back down.

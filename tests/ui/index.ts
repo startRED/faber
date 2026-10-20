@@ -21,6 +21,7 @@ import './money-words.check.ts';
 import './connect-more.check.ts';
 import './contextmenu.check.ts';
 import './hole.check.ts';
+import './viewer.check.ts';
 import './effort.check.ts';
 import './first-frame.check.ts';
 import './follow.check.ts';

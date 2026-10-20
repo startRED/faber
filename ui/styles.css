@@ -397,7 +397,8 @@ html.sizing, html.sizing * { cursor: col-resize !important; user-select: none !i
 .afile { display: inline-flex; align-items: center; gap: 10px; min-width: 0; padding: 7px 12px 7px 9px; border-radius: var(--r-md); background: var(--s1); box-shadow: inset 0 0 0 1px var(--line-2); font-size: var(--fs-sm); }
 .afile .fi { flex: none; display: grid; place-items: center; width: 26px; height: 26px; border-radius: var(--r-xs); background: var(--accent-soft); color: var(--accent-text); }
 .afile > span:last-child { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.you img { display: block; max-width: 220px; max-height: 160px; border-radius: var(--r-sm); margin-bottom: 8px; }
+.you .shots { margin-bottom: 8px; }
+.shots { display: flex; flex-wrap: wrap; gap: 8px; }
 .you .edit { position: absolute; left: -44px; top: 10px; color: var(--ink-3); font-size: var(--fs-xs); visibility: hidden; }
 .you:hover .edit, .you .edit:focus-visible { visibility: visible; }
 .you.editing { width: 80%; display: grid; gap: 8px; }
@@ -523,7 +524,8 @@ details.thinking div { white-space: pre-wrap; padding: 6px 0 0 12px; border-left
 @keyframes arrive { from { opacity: 0; transform: translateY(var(--arrive-y)); } }
 .files { display: grid; gap: 8px; }
 .file { display: grid; gap: 8px; padding: 10px 12px; background: var(--s1); box-shadow: inset 0 0 0 1px var(--line-2); border-radius: var(--r-md); }
-.file img { max-width: 100%; max-height: 360px; border-radius: var(--r-sm); justify-self: start; background: var(--s3); }
+.file .pic { justify-self: start; max-width: 100%; }
+.file img { max-width: 100%; max-height: 420px; }
 .file div { display: flex; align-items: center; gap: 10px; font-size: var(--fs-sm); min-width: 0; }
 .file span { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .file small { color: var(--ink-3); }
@@ -598,7 +600,11 @@ select.pill option { background: var(--s2); color: var(--ink); }
 .dock .composer textarea { height: 40px; min-height: 40px; padding: 13px 16px 0; }
 .composer .chips { padding: 12px 14px 0; }
 .attach-thumb { position: relative; display: block; width: 112px; height: 112px; border-radius: var(--r-sm); overflow: hidden; box-shadow: inset 0 0 0 1px var(--line-2); }
-.pic { display: block; cursor: zoom-in; border-radius: var(--r-sm); }
+.pic { display: block; padding: 0; line-height: 0; cursor: zoom-in; border-radius: var(--r-sm); }
+.pic img { display: block; border-radius: inherit; background: var(--s3); object-fit: cover; }
+.you .pic, .file .pic { box-shadow: 0 0 0 1px var(--line-2); transition: box-shadow var(--dur-fast); }
+.you .pic:hover, .file .pic:hover { box-shadow: 0 0 0 1px var(--control-line); }
+.you .pic img { max-width: min(100%, 360px); max-height: 280px; }
 .pic:focus-visible { outline: 2px solid var(--accent-text); outline-offset: 2px; }
 .attach-thumb .pic { width: 100%; height: 100%; }
 .attach-thumb img { display: block; width: 100%; height: 100%; object-fit: cover; }
@@ -607,6 +613,13 @@ select.pill option { background: var(--s2); color: var(--ink); }
 .viewer img { display: block; max-width: calc(100vw - 48px); max-height: calc(100vh - 48px); object-fit: contain; border-radius: var(--r-sm); box-shadow: var(--card-shadow); }
 .viewer-close { position: absolute; top: 8px; right: 8px; background: var(--s3); color: var(--ink-2); }
 .viewer-close:hover { color: var(--ink); }
+.viewer-nav { position: absolute; top: 50%; margin-top: -22px; display: grid; place-items: center; width: 44px; height: 44px; border-radius: 50%; background: var(--s3); color: var(--ink-2); box-shadow: 0 0 0 1px var(--line-2); }
+.viewer-nav:hover:not(:disabled) { color: var(--ink); }
+.viewer-nav:disabled { opacity: 0.3; cursor: default; }
+.viewer-nav:focus-visible { outline: 2px solid var(--accent-text); outline-offset: 2px; }
+.viewer-prev { left: 20px; }
+.viewer-next { right: 20px; }
+.viewer-count { position: absolute; top: 24px; left: 50%; transform: translateX(-50%); font-size: var(--fs-sm); color: var(--ink-2); }
 .attach-remove { position: absolute; top: 3px; right: 3px; display: grid; place-items: center; padding: 4px; border-radius: 50%; background: var(--s3); color: var(--ink-2); }
 .attach-remove:hover { color: var(--ink); }
 .attach-remove:focus-visible { outline: 2px solid var(--accent-text); outline-offset: 1px; }

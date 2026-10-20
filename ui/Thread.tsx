@@ -4,7 +4,7 @@ import { Asks, Parkeds } from './Ask.tsx';
 import { copyItem, openMenu } from './contextmenu.ts';
 import { keep, kept, recoverQueuedDraft, release, useDraft } from './unsent.ts';
 import { Icon, VendorMark } from './Glyphs.tsx';
-import { Pic } from './ImageViewer.tsx';
+import { Pic, Thumb } from './ImageViewer.tsx';
 import { QuotaCard } from './QuotaCard.tsx';
 import { PlanList, WrapUpBox } from './Plan.tsx';
 import { AnswersCard, answeredIn, folded, RunBlock, runsOf, type Answered } from './Run.tsx';
@@ -31,7 +31,7 @@ function FileCard(props: { conversationId: string; file: { path: string; size: n
   );
   return (
     <div class="file">
-      <Show when={preview()}>{(src) => <img src={src()} alt={props.file.path} />}</Show>
+      <Show when={preview()}>{(src) => <Thumb src={src()} alt={props.file.path} />}</Show>
       <div>
         <span>{props.file.path}</span>
         <small>{bytes(props.file.size)}</small>
@@ -579,7 +579,9 @@ function Mine(props: { editKey: string; m: Accessor<Message>; onBranch: OnBranch
             </div>
           </Show>
           <div class="you">
-            <For each={props.m().images}>{(img) => <Pic img={img} />}</For>
+            <div class="shots">
+              <For each={props.m().images}>{(img) => <Pic img={img} />}</For>
+            </div>
             {props.m().text}
             <button class="edit" onClick={() => setEditing(props.m().text)} aria-label={t('mine.editLabel')}>
               {t('mine.edit')}
@@ -696,7 +698,9 @@ function Queued(props: { conversationId: string; q: QueuedTurn; busy: boolean; o
       </Show>
       <div class="you queued" classList={{ editing: editing() !== undefined }}>
         <span class="queue-badge">{t('queue.label')}</span>
-        <For each={props.q.images}>{(img) => <Pic img={img} />}</For>
+        <div class="shots">
+          <For each={props.q.images}>{(img) => <Pic img={img} />}</For>
+        </div>
         <Show
           when={editing() !== undefined}
           fallback={

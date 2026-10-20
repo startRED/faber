@@ -159,6 +159,11 @@ The numbers above are the usual widths. The person can change them, and the shel
 
 - [Queued messages and editing](queue.md).
 
+### Pictures
+
+- A picture the person sends shows up to 360 by 280 px, one in a file card up to 420 px tall, both with a hairline edge.
+- It opens in the image viewer (`ui/ImageViewer.tsx`), no motion: as large as the window allows, round arrows (dimmed at the ends), the arrow keys, "2 of 5" on top, a close button, Esc. It steps through the conversation's pictures; focus returns to the thumbnail.
+
 ### Work log
 
 - The chips' line counts extend into the project's "Changes" view in the running column: git supplies the conversation's
