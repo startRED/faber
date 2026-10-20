@@ -22,6 +22,7 @@ const OFFICIAL_HOSTS: &[&str] = &[
     "codeload.github.com",
     "release-assets.githubusercontent.com",
     "objects.githubusercontent.com",
+    "registry.npmjs.org",
 ];
 
 /// Verifies that a network URL uses HTTPS and points to an approved official host.

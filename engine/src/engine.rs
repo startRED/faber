@@ -2409,6 +2409,18 @@ impl Core {
         self.keep_going_failed(id, reply_id, &error);
     }
 
+    /// What the tool store hands this session: nothing where no tool is offered, and servers only where they are.
+    fn tools_for(&self, area: Area, permissions: Permissions) -> crate::tools::Delivery {
+        if !crate::claude::offers_tools(area, permissions) {
+            return Default::default();
+        }
+        let mut tools = crate::tools::Store::new(&self.opts.data_dir).delivery();
+        if !crate::claude::offers_servers(area, permissions) {
+            tools.servers.clear();
+        }
+        tools
+    }
+
     /// The shared Codex process for an area, hooks choice and permissions, started again if it died.
     fn codex_server(&mut self, area: Area, user_hooks: bool, permissions: Permissions, cli: &Cli) -> &CodexServer {
         let opts = CodexServerOptions {
@@ -2419,16 +2431,14 @@ impl Core {
             user_hooks,
             windows: self.opts.windows,
             spawn: spawner(&self.opts.spawn, cli),
-            // The store's skill root while it holds a checked skill; a running server hears each change (`CodexServer::skills`).
-            skills: crate::claude::offers_tools(area, permissions)
-                .then(|| crate::tools::Store::new(&self.opts.data_dir).delivery().skills)
-                .flatten(),
+            // What the store holds checked; a running server hears each change (`CodexServer::tools`).
+            tools: self.tools_for(area, permissions),
         };
         let server = self.codex.entry((area, user_hooks, permissions)).or_insert_with(|| CodexServer::start(opts.clone()));
         if !server.is_alive() {
             *server = CodexServer::start(opts);
         } else {
-            server.skills(opts.skills);
+            server.tools(opts.tools);
         }
         server
     }
@@ -2620,7 +2630,7 @@ impl Core {
                         user_name,
                         flags,
                         tuning,
-                        tools: crate::tools::Store::new(&self.opts.data_dir).delivery(),
+                        tools: self.tools_for(area, permissions),
                     },
                     spawn,
                     sandbox: self.opts.clis.get(&Vendor::Codex).cloned(),

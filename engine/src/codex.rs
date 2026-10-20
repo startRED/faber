@@ -528,8 +528,8 @@ pub struct CodexServerOptions {
     pub user_hooks: bool,
     pub windows: bool,
     pub spawn: Spawner,
-    /// The skill root of Faber's tool store (`crate::tools`), for a project's server outside Isolated.
-    pub skills: Option<PathBuf>,
+    /// What Faber's tool store hands over (`crate::tools`), for a project's server outside Isolated: its skill root and servers.
+    pub tools: crate::tools::Delivery,
 }
 
 /// The settings that go into the thread's `config` (R140): web search always, and the two Codex-only choices when the person
@@ -585,7 +585,7 @@ pub struct CodexThread {
 enum ServerCommand {
     Open { key: u64, thread: CodexThread, sink: EventSink },
     Session(u64, SessionCommand),
-    Skills(Option<PathBuf>),
+    Tools(crate::tools::Delivery),
     Retire,
 }
 
@@ -650,6 +650,13 @@ fn turn_params(thread: &str, effort: Option<&str>, turn: &UserTurn) -> Value {
         params["effort"] = effort.into();
     }
     params
+}
+
+/// The catalog's servers (`crate::tools`) beside the person's own, each under its own key so no other server is replaced.
+pub fn add_servers(params: &mut Value, servers: &[crate::tools::Launch]) {
+    for s in servers {
+        params["config"][format!("mcp_servers.{}", s.name)] = json!({ "command": s.command, "args": s.args, "env": s.env });
+    }
 }
 
 pub fn thread_params(area: Area, t: &CodexThread) -> (&'static str, Value) {
@@ -767,10 +774,10 @@ impl CodexServer {
         Session::from_fn(move |cmd| drop(server.send(ServerCommand::Session(key, cmd))))
     }
 
-    /// The catalog's skill root as the store sees it now (`crate::tools`): a store that could not be made clean takes the
-    /// root away from a server already running. Sent again only when it changes.
-    pub fn skills(&self, root: Option<PathBuf>) {
-        let _ = self.tx.send(ServerCommand::Skills(root));
+    /// The catalog's tools as the store sees them now (`crate::tools`): a store that could not be made clean takes them away
+    /// from a server already running. The skill root is sent again only when it changes; servers go with each new thread.
+    pub fn tools(&self, tools: crate::tools::Delivery) {
+        let _ = self.tx.send(ServerCommand::Tools(tools));
     }
 
     /// Stops the process once its last conversation closes; new conversations go to a server with the new settings.
@@ -809,7 +816,7 @@ async fn serve(started: std::io::Result<proc::Proc>, opts: CodexServerOptions, m
     let mut confirmed = VecDeque::new();
     let mut next_id = 0u64;
     let (mut ready, mut retired, mut stopping) = (false, false, false);
-    let mut roots = opts.skills.clone();
+    let mut tools = opts.tools.clone();
     let (command_tx, mut command_rx) = unbounded_channel::<(Value, bool, String)>();
 
     macro_rules! request {
@@ -834,7 +841,8 @@ async fn serve(started: std::io::Result<proc::Proc>, opts: CodexServerOptions, m
                     stop!();
                 }
             } else {
-                let (method, params) = thread_params(area, &$t.params);
+                let (method, mut params) = thread_params(area, &$t.params);
+                add_servers(&mut params, &tools.servers);
                 request!(method, params, Waiting::Thread($key));
             }
         }};
@@ -942,7 +950,7 @@ async fn serve(started: std::io::Result<proc::Proc>, opts: CodexServerOptions, m
                             Waiting::Initialize => {
                                 let _ = proc::write_line(&mut *stdin, &json!({ "method": "initialized" })).await;
                                 // The catalog's skills (`crate::tools`), before any thread opens; its answer needs nothing.
-                                if let Some(root) = &roots {
+                                if let Some(root) = &tools.skills {
                                     let set = json!({ "id": "faber-skills", "method": "skills/extraRoots/set", "params": { "extraRoots": [root] } });
                                     let _ = proc::write_line(&mut *stdin, &set).await;
                                 }
@@ -1331,14 +1339,13 @@ async fn serve(started: std::io::Result<proc::Proc>, opts: CodexServerOptions, m
                         }
                     }
                 },
-                Some(ServerCommand::Skills(next)) => {
-                    if next != roots {
-                        roots = next;
-                        // Before `initialized`, the first set carries the new value by itself.
-                        if ready {
-                            let set = json!({ "id": "faber-skills", "method": "skills/extraRoots/set", "params": { "extraRoots": roots.iter().collect::<Vec<_>>() } });
-                            let _ = proc::write_line(&mut *stdin, &set).await;
-                        }
+                Some(ServerCommand::Tools(next)) => {
+                    let changed = next.skills != tools.skills;
+                    tools = next;
+                    // Before `initialized`, the first set carries the new value by itself.
+                    if changed && ready {
+                        let set = json!({ "id": "faber-skills", "method": "skills/extraRoots/set", "params": { "extraRoots": tools.skills.iter().collect::<Vec<_>>() } });
+                        let _ = proc::write_line(&mut *stdin, &set).await;
                     }
                 }
                 Some(ServerCommand::Retire) => {

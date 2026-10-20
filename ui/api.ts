@@ -431,6 +431,8 @@ export interface ToolRow {
   repo: string;
   home: string;
   installed: boolean;
+  /** A tool server (an npm package Node runs) rather than a skill. */
+  server: boolean;
 }
 
 export interface CheckResult {

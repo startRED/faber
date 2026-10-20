@@ -21,5 +21,8 @@
     { "id": "swift-concurrency", "job": "mobile", "license": "MIT", "repo": "AvdLee/Swift-Concurrency-Agent-Skill", "commit": "d5770817d2622e1585b1f7eaebc791a9cb0959c8", "path": "skills/swift-concurrency", "digest": "0f2d58f36df37de5d45733519bb0d06fe737a8b1e156f0a4fcfdd9b540693394" },
     { "id": "flutter-add-widget-test", "job": "mobile", "license": "BSD-3-Clause", "repo": "flutter/skills", "commit": "6e590650bb4bab87f33187423dc10113d04d4836", "path": "skills/flutter-add-widget-test", "digest": "5cfab5fd20d6b84e28e9b9cc278ac0c3fb2c89a7e850f2b900749b14cb367bbf" },
     { "id": "jetpack-compose-performance", "job": "mobile", "license": "Apache-2.0", "repo": "android/skills", "commit": "ed0a2728ff531174383f910c649694de1eaebcd6", "path": "jetpack-compose/jetpack-compose-performance", "digest": "cc633de97aafd4a719897e870a59800859fa3f0e65be717b2b6dc77677465027" }
+  ],
+  "servers": [
+    { "id": "chrome-devtools", "job": "measure", "license": "Apache-2.0", "repo": "ChromeDevTools/chrome-devtools-mcp", "commit": "a878bcad39584337e055778353246820deafa7c0", "path": "", "digest": "1394e641c6687787946f34d13f03c3eafe92b0470a7611ac30461c531ee78b7a", "server": { "package": "chrome-devtools-mcp", "version": "1.11.0", "entry": "build/src/bin/chrome-devtools-mcp.js", "args": ["--headless", "--isolated", "--no-usage-statistics", "--no-performance-crux", "--no-file-navigations"], "env": { "CHROME_DEVTOOLS_MCP_NO_USAGE_STATISTICS": "1", "CHROME_DEVTOOLS_MCP_NO_UPDATE_CHECKS": "1", "CHROME_DEVTOOLS_MCP_NO_CONFIG_DISCOVERY": "1" } } }
   ]
 }

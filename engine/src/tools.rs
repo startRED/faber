@@ -28,12 +28,39 @@ pub struct Item {
     pub path: String,
     /// `digest` of that folder at that commit.
     pub digest: String,
+    /// Set for a tool server rather than a skill: what installs is the npm package, and `commit` is its release's.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub server: Option<Server>,
+}
+
+/// A tool server of the catalog (step 3): an npm package with no dependencies that Node runs and the CLIs speak to over
+/// stdio (MCP). Faber writes its arguments and environment itself, so its data collection and update checks stay off.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct Server {
+    pub package: String,
+    pub version: String,
+    /// The script Node runs, relative to the package.
+    pub entry: String,
+    pub args: Vec<String>,
+    pub env: BTreeMap<String, String>,
 }
 
 impl Item {
-    /// The repository's archive at the pinned commit. github.com redirects it to codeload.github.com.
+    /// The repository's archive at the pinned commit (github.com redirects it to codeload.github.com), or a server's package.
     pub fn archive_url(&self) -> String {
-        format!("https://github.com/{}/archive/{}.zip", self.repo, self.commit)
+        format!(
+            "https://{}",
+            self.archive_path(match self.server {
+                Some(_) => "registry.npmjs.org",
+                None => "github.com",
+            })
+        )
+    }
+    fn archive_path(&self, host: &str) -> String {
+        match &self.server {
+            Some(s) => format!("{host}/{}/-/{}-{}.tgz", s.package, s.package.rsplit('/').next().unwrap_or(&s.package), s.version),
+            None => format!("{host}/{}/archive/{}.zip", self.repo, self.commit),
+        }
     }
     /// Where a person reads the skill before installing it.
     pub fn home(&self) -> String {
@@ -44,12 +71,20 @@ impl Item {
 #[derive(Deserialize)]
 struct CatalogFile {
     skills: Vec<Item>,
+    #[serde(default)]
+    servers: Vec<Item>,
 }
 
-/// The catalog that ships with this version of Faber.
+/// The catalog that ships with this version of Faber: its skills, then its servers.
 pub fn catalog() -> &'static [Item] {
     static CATALOG: OnceLock<Vec<Item>> = OnceLock::new();
-    CATALOG.get_or_init(|| serde_json::from_str::<CatalogFile>(include_str!("tools.json")).map(|c| c.skills).unwrap_or_default())
+    CATALOG.get_or_init(|| {
+        let file = serde_json::from_str::<CatalogFile>(include_str!("tools.json"));
+        file.map(|c| {
+            c.skills.into_iter().filter(|i| i.server.is_none()).chain(c.servers.into_iter().filter(|i| i.server.is_some())).collect()
+        })
+        .unwrap_or_default()
+    })
 }
 
 pub fn find(id: &str) -> Option<&'static Item> {
@@ -60,22 +95,39 @@ pub fn find(id: &str) -> Option<&'static Item> {
 const ARCHIVE_LIMIT: u64 = 64 * 1024 * 1024;
 const SKILL_LIMIT: u64 = 8 * 1024 * 1024;
 const SKILL_FILES: usize = 400;
+/// A server is built JavaScript with its dependencies inside: chrome-devtools-mcp 1.11.0 is 370 files and 14 MB.
+const SERVER_LIMIT: u64 = 64 * 1024 * 1024;
+const SERVER_FILES: usize = 2000;
 
-/// What the CLIs get from the store: the plugin folder for Claude Code and the skill root for Codex, or nothing while no skill
-/// is installed (an empty plugin would only cost the CLI a folder scan).
+/// What the CLIs get from the store: the plugin folder for Claude Code and the skill root for Codex while a skill is installed
+/// (an empty plugin would only cost the CLI a folder scan), and how to start each installed server.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct Delivery {
     pub plugin: Option<PathBuf>,
     pub skills: Option<PathBuf>,
+    pub servers: Vec<Launch>,
 }
 
-/// Faber's tool store: `<data>/tools/plugin/skills/<id>/`, with the plugin's manifest beside them and `installed.json` saying
-/// which commit each skill came from.
+/// One server as both CLIs start it: Node, the package's script and Faber's arguments, and the environment Faber sets.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Launch {
+    /// The name both CLIs list it under, `faber-<id>`: never the name of a server the person set up, so neither merges into
+    /// the other.
+    pub name: String,
+    pub command: PathBuf,
+    pub args: Vec<String>,
+    pub env: BTreeMap<String, String>,
+}
+
+/// Faber's tool store: `<data>/tools/plugin/skills/<id>/` with the plugin's manifest beside them, `<data>/tools/servers/<id>/`,
+/// and `installed.json` saying which commit each one came from.
 #[derive(Debug, Clone)]
 pub struct Store {
     root: PathBuf,
     /// The catalog the store trusts: its digests decide what may stay at every launch.
     items: Vec<Item>,
+    /// Node for the servers; `None` looks it up on PATH when a server is installed.
+    node: Option<PathBuf>,
 }
 
 impl Store {
@@ -84,7 +136,11 @@ impl Store {
     }
     /// A store that trusts another catalog (tests).
     pub fn with_catalog(data_dir: &Path, items: Vec<Item>) -> Self {
-        Store { root: data_dir.join("tools"), items }
+        Store { root: data_dir.join("tools"), items, node: None }
+    }
+    /// A store that starts its servers with this Node (tests).
+    pub fn with_node(self, node: PathBuf) -> Self {
+        Store { node: Some(node), ..self }
     }
     fn plugin(&self) -> PathBuf {
         self.root.join("plugin")
@@ -92,43 +148,90 @@ impl Store {
     fn skills(&self) -> PathBuf {
         self.plugin().join("skills")
     }
+    fn servers(&self) -> PathBuf {
+        self.root.join("servers")
+    }
+    fn dir(&self, item: &Item) -> PathBuf {
+        match item.server {
+            Some(_) => self.servers().join(&item.id),
+            None => self.skills().join(&item.id),
+        }
+    }
     fn ledger(&self) -> PathBuf {
         self.root.join("installed.json")
     }
 
-    /// Each installed skill and the commit it came from. A folder without a ledger line, or a line without its folder, is not
-    /// installed: an install that was cut leaves nothing the CLIs would load half.
+    /// Each installed tool of the catalog and the commit it came from. A folder without a ledger line, or a line without its
+    /// folder, is not installed: an install that was cut leaves nothing the CLIs would load half.
     pub fn installed(&self) -> BTreeMap<String, String> {
-        let ledger: BTreeMap<String, String> =
-            std::fs::read(self.ledger()).ok().and_then(|b| serde_json::from_slice(&b).ok()).unwrap_or_default();
-        ledger.into_iter().filter(|(id, _)| valid_id(id) && self.skills().join(id).join("SKILL.md").is_file()).collect()
+        let ledger: BTreeMap<String, String> = small_file(&self.ledger()).and_then(|b| serde_json::from_slice(&b).ok()).unwrap_or_default();
+        let present = |id: &String| {
+            self.items.iter().find(|i| &i.id == id).is_some_and(|i| {
+                let marker = i.server.as_ref().map_or("SKILL.md", |s| s.entry.as_str());
+                self.dir(i).join(marker).is_file()
+            })
+        };
+        ledger.into_iter().filter(|(id, _)| valid_id(id) && present(id)).collect()
     }
 
     pub fn delivery(&self) -> Delivery {
         let _store = lock();
-        if !self.prune() || self.installed().is_empty() {
+        // Only what this very launch hashed is handed over.
+        let Some(checked) = self.prune() else {
             return Delivery::default();
-        }
-        Delivery { plugin: Some(self.plugin()), skills: Some(self.skills()) }
+        };
+        let installed = self.installed();
+        let on = |i: &&Item| checked.contains(&i.id) && installed.contains_key(&i.id);
+        let skill = self.items.iter().filter(on).any(|i| i.server.is_none());
+        let mut servers = self.items.iter().filter(on).filter_map(|i| Some((i, i.server.as_ref()?))).peekable();
+        // A server needs Node; without it the CLIs get no server rather than one that fails at every start.
+        // A relative PATH entry would resolve against whatever folder the CLI runs in.
+        let node = servers.peek().and_then(|_| {
+            self.node.clone().or_else(|| crate::cli::find_cli("node").map(|c| PathBuf::from(c.command)).filter(|p| p.is_absolute()))
+        });
+        let servers = servers
+            .filter_map(|(i, s)| {
+                let script = s.entry.split('/').fold(self.dir(i), |path, part| path.join(part));
+                let args = std::iter::once(script.to_string_lossy().into_owned()).chain(s.args.iter().cloned());
+                Some(Launch { name: format!("faber-{}", i.id), command: node.clone()?, args: args.collect(), env: s.env.clone() })
+            })
+            .collect();
+        Delivery { plugin: skill.then(|| self.plugin()), skills: skill.then(|| self.skills()), servers }
     }
 
     /// Before the CLIs get the store, it is made to hold exactly what was checked: a skill folder the ledger does not list (an
     /// install cut between the two), one whose files no longer match the catalog (an agent with full access may write here)
-    /// and anything beside the manifest and the skills leave the plugin. False when one cannot leave: the CLIs would load
-    /// it, so they get nothing.
-    fn prune(&self) -> bool {
+    /// and anything beside the manifest and the skills leave the plugin. Returns the tools it hashed and kept; `None` when
+    /// one cannot leave or a folder cannot be read whole: the CLIs could load it, so they get nothing.
+    fn prune(&self) -> Option<std::collections::HashSet<String>> {
+        // The store's own folders must be folders: a link there would point the CLIs at files the check never saw.
+        let linked = |p: PathBuf| std::fs::symlink_metadata(p).is_ok_and(|m| !m.is_dir());
+        if [self.root.clone(), self.plugin(), self.skills(), self.servers()].into_iter().any(linked) {
+            return None;
+        }
         let ledger = self.installed();
         let mut clean = true;
-        for entry in std::fs::read_dir(self.skills()).into_iter().flatten().flatten() {
-            let name = entry.file_name().to_string_lossy().into_owned();
-            // shortcut: a catalog that pins a newer commit drops the old copy here; reinstall it on update once one exists.
-            let item = self.items.iter().find(|i| i.id == name);
-            let checked = ledger.contains_key(&name) && item.is_some_and(|i| digest(&entry.path()).is_ok_and(|got| got == i.digest));
-            if !checked {
-                clean &= self.discard(&entry.path()).is_ok();
+        let mut checked = std::collections::HashSet::new();
+        for (parent, server) in [(self.skills(), false), (self.servers(), true)] {
+            // A folder that cannot be listed could hide a changed tool: nothing is handed over.
+            let entries = entries(&parent)?;
+            for entry in entries {
+                let name = entry.file_name().to_string_lossy().into_owned();
+                // A link or junction in place of a tool's folder would be followed and hashed as if it were the folder.
+                if !entry.file_type().is_ok_and(|t| t.is_dir()) {
+                    clean &= self.discard(&entry.path()).is_ok();
+                    continue;
+                }
+                // shortcut: a catalog that pins a newer commit drops the old copy here; reinstall it on update once one exists.
+                let item = self.items.iter().find(|i| i.id == name && i.server.is_some() == server);
+                if ledger.contains_key(&name) && item.is_some_and(|i| digest(&entry.path()).is_ok_and(|got| got == i.digest)) {
+                    checked.insert(name);
+                } else {
+                    clean &= self.discard(&entry.path()).is_ok();
+                }
             }
         }
-        for entry in std::fs::read_dir(self.plugin()).into_iter().flatten().flatten() {
+        for entry in entries(&self.plugin())? {
             if !matches!(entry.file_name().to_str(), Some("skills" | ".claude-plugin")) {
                 clean &= self.discard(&entry.path()).is_ok();
             }
@@ -136,7 +239,8 @@ impl Store {
         let manifest = self.plugin().join(".claude-plugin");
         let kept = std::fs::read_dir(&manifest).map(|d| d.flatten().map(|e| e.file_name()).collect::<Vec<_>>());
         let intact = kept.is_ok_and(|names| names == ["plugin.json"])
-            && std::fs::read(manifest.join("plugin.json")).is_ok_and(|b| b == manifest_bytes());
+            && std::fs::symlink_metadata(&manifest).is_ok_and(|m| m.is_dir())
+            && small_file(&manifest.join("plugin.json")).is_some_and(|b| b == manifest_bytes());
         if self.plugin().exists() && !intact {
             clean &= self.discard(&manifest).and_then(|()| self.write_manifest()).is_ok();
         }
@@ -147,7 +251,7 @@ impl Store {
                 let _ = std::fs::remove_dir_all(entry.path()).or_else(|_| std::fs::remove_file(entry.path()));
             }
         }
-        clean
+        clean.then_some(checked)
     }
 
     /// Moves `dir` out of the skill root in one step, then deletes it as far as it can: a file held open stays behind in the
@@ -177,21 +281,31 @@ impl Store {
         }
         // One change to the store at a time, from unpacking to the ledger: what goes live is what was checked.
         let _store = lock();
-        std::fs::create_dir_all(self.skills()).map_err(|e| e.to_string())?;
+        let dest = self.dir(item);
+        std::fs::create_dir_all(dest.parent().unwrap_or(&self.root)).map_err(|e| e.to_string())?;
         let staging = self.root.join(format!(".staging-{}", uuid::Uuid::new_v4()));
-        let result = extract_skill(zip, &item.path, &staging).and_then(|()| {
+        let extracted = match &item.server {
+            Some(_) => extract_package(zip, &staging),
+            None => extract_skill(zip, &item.path, &staging),
+        };
+        let result = extracted.and_then(|()| {
             let got = digest(&staging).map_err(|e| e.to_string())?;
             if got != item.digest {
                 return Err(format!("The files of {} do not match the catalog (got {got})", item.id));
             }
-            let Ok(skill) = std::fs::read_to_string(staging.join("SKILL.md")) else {
-                return Err(format!("{} has no SKILL.md", item.id));
-            };
-            if let Some(key) = widening_key(&skill) {
-                return Err(format!("{} sets {key}, which would widen what the agent may do", item.id));
+            if let Some(server) = &item.server {
+                if !staging.join(&server.entry).is_file() {
+                    return Err(format!("{} has no {}", item.id, server.entry));
+                }
+            } else {
+                let Ok(skill) = std::fs::read_to_string(staging.join("SKILL.md")) else {
+                    return Err(format!("{} has no SKILL.md", item.id));
+                };
+                if let Some(key) = widening_key(&skill) {
+                    return Err(format!("{} sets {key}, which would widen what the agent may do", item.id));
+                }
+                self.write_manifest().map_err(|e| e.to_string())?;
             }
-            self.write_manifest().map_err(|e| e.to_string())?;
-            let dest = self.skills().join(&item.id);
             self.discard(&dest).map_err(|e| e.to_string())?;
             std::fs::rename(&staging, &dest).map_err(|e| e.to_string())?;
             let mut ledger = self.installed();
@@ -212,7 +326,9 @@ impl Store {
             return Err(format!("Invalid skill id: {id}"));
         }
         let _store = lock();
-        self.discard(&self.skills().join(id)).map_err(|e| e.to_string())?;
+        for parent in [self.skills(), self.servers()] {
+            self.discard(&parent.join(id)).map_err(|e| e.to_string())?;
+        }
         let mut ledger = self.installed();
         ledger.remove(id);
         self.write_ledger(&ledger).map_err(|e| e.to_string())
@@ -230,6 +346,21 @@ fn manifest_bytes() -> &'static [u8] {
     br#"{"name":"faber","description":"Skills Faber installed from its catalog, each from its own repository.","version":"1.0.0"}"#
 }
 
+/// The bytes of a plain file of the store (never a link) small enough to be one of its own: a ledger or a manifest.
+fn small_file(path: &Path) -> Option<Vec<u8>> {
+    let meta = std::fs::symlink_metadata(path).ok()?;
+    (meta.is_file() && meta.len() <= 1024 * 1024).then(|| std::fs::read(path).ok()).flatten()
+}
+
+/// The entries of `dir`: none when it does not exist, `None` when it exists but cannot be read whole.
+fn entries(dir: &Path) -> Option<Vec<std::fs::DirEntry>> {
+    match std::fs::read_dir(dir) {
+        Ok(list) => list.collect::<io::Result<Vec<_>>>().ok(),
+        Err(e) if e.kind() == io::ErrorKind::NotFound => Some(Vec::new()),
+        Err(_) => None,
+    }
+}
+
 /// The store changes under one lock for the whole process: two switches flipped together never share a folder or a ledger.
 fn lock() -> std::sync::MutexGuard<'static, ()> {
     static STORE: Mutex<()> = Mutex::new(());
@@ -239,10 +370,11 @@ fn lock() -> std::sync::MutexGuard<'static, ()> {
 /// A file or folder name a skill may hold on every system: no Windows stream (`a:b`), reserved character or name, and no
 /// trailing dot or space that Windows would drop, so what the digest read is all that was written.
 fn portable_name(name: &str) -> bool {
-    const RESERVED: [&str; 4] = ["con", "prn", "aux", "nul"];
+    const RESERVED: [&str; 6] = ["con", "prn", "aux", "nul", "conin$", "conout$"];
     let stem = name.split('.').next().unwrap_or("").to_ascii_lowercase();
+    let port = stem.strip_prefix("com").or_else(|| stem.strip_prefix("lpt"));
     let device = RESERVED.contains(&stem.as_str())
-        || ((stem.starts_with("com") || stem.starts_with("lpt")) && stem.len() == 4 && stem.as_bytes()[3].is_ascii_digit());
+        || port.is_some_and(|n| n.chars().count() == 1 && n.chars().all(|c| c.is_ascii_digit() || matches!(c, '¹' | '²' | '³')));
     !name.is_empty()
         && name.len() <= 255
         && !device
@@ -272,6 +404,14 @@ pub fn digest(dir: &Path) -> io::Result<String> {
     let mut files = Vec::new();
     collect(dir, dir, &mut files)?;
     files.sort();
+    // A file planted to be huge stops the check before it is read.
+    let mut total = 0u64;
+    for rel in &files {
+        total += std::fs::metadata(dir.join(rel))?.len();
+        if total > SERVER_LIMIT {
+            return Err(io::Error::other("Larger than any tool may be"));
+        }
+    }
     let mut hasher = Sha256::new();
     for rel in files {
         let bytes = std::fs::read(dir.join(&rel))?;
@@ -357,10 +497,77 @@ fn extract_skill(zip: &Path, path: &str, dest: &Path) -> Result<(), String> {
     Ok(())
 }
 
+/// Copies the files of an npm package (`.tgz`, every file under `package/`) into `dest`. Only plain files are taken; a link,
+/// an absolute or parent path, a name twice, too many files or too many bytes refuse the whole package.
+fn extract_package(tgz: &Path, dest: &Path) -> Result<(), String> {
+    let file = std::fs::File::open(tgz).map_err(|e| e.to_string())?;
+    if file.metadata().map_err(|e| e.to_string())?.len() > ARCHIVE_LIMIT {
+        return Err("The archive is too large".into());
+    }
+    // Everything the tar reader sees, its long names and extended headers included, comes out of this cap: a small archive
+    // that unpacks to gigabytes stops here.
+    let unpacked = flate2::read::GzDecoder::new(io::BufReader::new(file)).take(SERVER_LIMIT + SERVER_LIMIT / 4);
+    let mut archive = tar::Archive::new(unpacked);
+    let (mut files, mut bytes) = (0usize, 0u64);
+    let mut seen = std::collections::HashSet::new();
+    std::fs::create_dir_all(dest).map_err(|e| e.to_string())?;
+    for entry in archive.entries().map_err(|e| format!("Not a package: {e}"))? {
+        let mut entry = entry.map_err(|e| format!("Not a package: {e}"))?;
+        let kind = entry.header().entry_type();
+        let path = entry.path().map_err(|e| e.to_string())?.into_owned();
+        let Ok(rel) = path.strip_prefix("package") else {
+            return Err(format!("Outside the package: {}", path.display()));
+        };
+        files += 1;
+        if files > SERVER_FILES {
+            return Err("The package is larger than a server may be".into());
+        }
+        if kind.is_dir() || rel.as_os_str().is_empty() {
+            continue;
+        }
+        if kind != tar::EntryType::Regular {
+            return Err(format!("Not a plain file in the package: {}", path.display()));
+        }
+        if !rel.components().all(|c| matches!(c, std::path::Component::Normal(n) if n.to_str().is_some_and(portable_name))) {
+            return Err(format!("A name no system can hold the same way: {}", path.display()));
+        }
+        // A tar may hold one name twice, the second over the first; Windows also ignores case.
+        if !seen.insert(rel.to_string_lossy().to_lowercase()) {
+            return Err(format!("A name twice in the package: {}", path.display()));
+        }
+        bytes += entry.size();
+        if bytes > SERVER_LIMIT {
+            return Err("The package is larger than a server may be".into());
+        }
+        let out = dest.join(crate::install::sanitize_archive_path(rel)?);
+        if let Some(parent) = out.parent() {
+            std::fs::create_dir_all(parent).map_err(|e| e.to_string())?;
+        }
+        let mut body = Vec::new();
+        (&mut entry).take(SERVER_LIMIT + 1).read_to_end(&mut body).map_err(|e| e.to_string())?;
+        if body.len() as u64 != entry.size() {
+            return Err(format!("{} is not the size the package says", path.display()));
+        }
+        std::fs::File::create(&out).and_then(|mut f| f.write_all(&body)).map_err(|e| e.to_string())?;
+    }
+    if files == 0 {
+        return Err("The package is empty".into());
+    }
+    Ok(())
+}
+
 /// The digest `path` of the archive at `zip` would install with, for pinning a new catalog entry (`examples/tools_pin.rs`).
 pub fn digest_of(zip: &Path, path: &str) -> Result<String, String> {
     let dir = std::env::temp_dir().join(format!("faber-pin-{}", uuid::Uuid::new_v4()));
     let result = extract_skill(zip, path, &dir).and_then(|()| digest(&dir).map_err(|e| e.to_string()));
+    let _ = std::fs::remove_dir_all(&dir);
+    result
+}
+
+/// The digest a server's npm package at `tgz` would install with (`examples/tools_pin.rs`).
+pub fn package_digest_of(tgz: &Path) -> Result<String, String> {
+    let dir = std::env::temp_dir().join(format!("faber-pin-{}", uuid::Uuid::new_v4()));
+    let result = extract_package(tgz, &dir).and_then(|()| digest(&dir).map_err(|e| e.to_string()));
     let _ = std::fs::remove_dir_all(&dir);
     result
 }
@@ -399,9 +606,9 @@ pub async fn install(store: &Store, item: &Item, loopback: Option<&str>) -> Resu
     };
     let loopback = loopback.as_deref();
     std::fs::create_dir_all(&store.root).map_err(|e| e.to_string())?;
-    let part = store.root.join(format!(".download-{}.zip", uuid::Uuid::new_v4()));
+    let part = store.root.join(format!(".download-{}", uuid::Uuid::new_v4()));
     let url = match loopback {
-        Some(origin) => format!("{origin}/{}/archive/{}.zip", item.repo, item.commit),
+        Some(origin) => item.archive_path(origin),
         None => item.archive_url(),
     };
     let downloaded =
@@ -441,6 +648,7 @@ mod tests {
             commit: "abc".into(),
             path: "skills/tidy".into(),
             digest: digest.into(),
+            server: None,
         }
     }
 
@@ -539,7 +747,8 @@ mod tests {
 
     #[test]
     fn a_name_windows_would_change_or_a_skill_that_grants_itself_tools_is_refused() {
-        for bad in ["SKILL.md:payload", "con", "NUL.txt", "com1.md", "notes.", "notes ", "a|b"] {
+        for bad in ["SKILL.md:payload", "con", "NUL.txt", "com1.md", "notes.", "notes ", "a|b", "CONIN$", "conout$.txt", "com¹.md", "LPT³"]
+        {
             assert!(!portable_name(bad), "{bad}");
         }
         for good in ["SKILL.md", "run.py", ".gitkeep", "console.md", "com10.md"] {
@@ -592,6 +801,152 @@ mod tests {
         assert!(!skill.exists());
     }
 
+    /// An npm-shaped package: everything under `package/`, each entry with the type it is given.
+    fn package(dir: &Path, files: &[(&str, &[u8], tar::EntryType)]) -> PathBuf {
+        let path = dir.join(format!("pkg-{}.tgz", uuid::Uuid::new_v4()));
+        let gz = flate2::write::GzEncoder::new(std::fs::File::create(&path).unwrap(), flate2::Compression::fast());
+        let mut tar = tar::Builder::new(gz);
+        for (name, body, kind) in files {
+            let mut header = tar::Header::new_gnu();
+            header.set_entry_type(*kind);
+            header.set_size(body.len() as u64);
+            header.set_mode(0o644);
+            if *kind == tar::EntryType::Symlink {
+                header.set_link_name("../../outside.js").unwrap();
+            }
+            // `append_data` would refuse a `..`; the raw path is what a hostile package could hold.
+            let raw = format!("package/{name}");
+            header.as_old_mut().name[..raw.len()].copy_from_slice(raw.as_bytes());
+            header.set_cksum();
+            tar.append(&header, *body).unwrap();
+        }
+        tar.into_inner().unwrap().finish().unwrap();
+        path
+    }
+
+    const RUN: &[u8] = b"console.log('measure')";
+    const FILE: tar::EntryType = tar::EntryType::Regular;
+
+    fn server_item() -> Item {
+        let d = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(d.path().join("bin")).unwrap();
+        std::fs::write(d.path().join("bin/run.js"), RUN).unwrap();
+        std::fs::write(d.path().join("package.json"), b"{}").unwrap();
+        Item {
+            id: "measure".into(),
+            job: "measure".into(),
+            license: "Apache-2.0".into(),
+            repo: "owner/measure".into(),
+            commit: "def".into(),
+            path: String::new(),
+            digest: digest(d.path()).unwrap(),
+            server: Some(Server {
+                package: "measure".into(),
+                version: "1.0.0".into(),
+                entry: "bin/run.js".into(),
+                args: vec!["--headless".into()],
+                env: [("NO_STATS".to_string(), "1".to_string())].into(),
+            }),
+        }
+    }
+
+    #[test]
+    fn a_server_installs_from_its_package_and_starts_under_node_with_faber_s_own_flags() {
+        let tmp = tempfile::tempdir().unwrap();
+        let tgz = package(tmp.path(), &[("bin/run.js", RUN, FILE), ("package.json", b"{}", FILE)]);
+        let store = Store::with_catalog(&tmp.path().join("data"), vec![item(&expected()), server_item()]).with_node("C:/node.exe".into());
+        store.install_from(&server_item(), &tgz).unwrap();
+        let dir = ["data", "tools", "servers", "measure"].iter().fold(tmp.path().to_path_buf(), |p, c| p.join(c));
+        assert_eq!(store.installed().get("measure").map(String::as_str), Some("def"));
+        let delivery = store.delivery();
+        assert_eq!((delivery.plugin, delivery.skills), (None, None), "a server alone hands over no skill plugin");
+        assert_eq!(
+            delivery.servers,
+            vec![Launch {
+                name: "faber-measure".into(),
+                command: "C:/node.exe".into(),
+                args: vec![dir.join("bin").join("run.js").to_string_lossy().into_owned(), "--headless".into()],
+                env: [("NO_STATS".to_string(), "1".to_string())].into(),
+            }]
+        );
+        assert_eq!(server_item().archive_url(), "https://registry.npmjs.org/measure/-/measure-1.0.0.tgz");
+
+        // A changed script takes the server out at the next launch.
+        std::fs::write(dir.join("bin/run.js"), b"console.log('changed')").unwrap();
+        assert!(store.delivery().servers.is_empty());
+        assert!(!dir.exists() && store.installed().is_empty());
+
+        store.install_from(&server_item(), &tgz).unwrap();
+        store.remove("measure").unwrap();
+        assert!(!dir.exists() && store.delivery() == Delivery::default());
+    }
+
+    #[test]
+    fn a_package_with_a_link_a_name_twice_or_a_path_outside_it_is_refused() {
+        let tmp = tempfile::tempdir().unwrap();
+        let store = Store::with_catalog(&tmp.path().join("data"), vec![server_item()]);
+        let refused =
+            |files: &[(&str, &[u8], tar::EntryType)]| store.install_from(&server_item(), &package(tmp.path(), files)).unwrap_err();
+        assert!(refused(&[("bin/run.js", RUN, FILE), ("bin/link.js", b"", tar::EntryType::Symlink)]).contains("Not a plain file"));
+        assert!(refused(&[("bin/run.js", RUN, FILE), ("bin/run.js", b"evil", FILE)]).contains("twice"));
+        assert!(refused(&[("bin/run.js", RUN, FILE), ("BIN/Run.js", b"evil", FILE)]).contains("twice"));
+        assert!(refused(&[("../escape.js", RUN, FILE)]).contains("no system"));
+        assert!(refused(&[("bin/run.js:stream", RUN, FILE)]).contains("no system"));
+        assert!(refused(&[("bin/run.js", RUN, FILE)]).contains("do not match"), "a missing file changes the digest");
+        assert!(store.installed().is_empty() && !tmp.path().join("data/tools/servers/measure").exists());
+    }
+
+    #[test]
+    fn a_link_in_place_of_a_server_s_folder_takes_it_out_at_launch() {
+        let tmp = tempfile::tempdir().unwrap();
+        let tgz = package(tmp.path(), &[("bin/run.js", RUN, FILE), ("package.json", b"{}", FILE)]);
+        let store = Store::with_catalog(&tmp.path().join("data"), vec![server_item()]).with_node("C:/node.exe".into());
+        store.install_from(&server_item(), &tgz).unwrap();
+        let dir = tmp.path().join("data").join("tools").join("servers").join("measure");
+        // The same files elsewhere, where a guarded session could write them after the check.
+        let elsewhere = tmp.path().join("workspace");
+        std::fs::rename(&dir, &elsewhere).unwrap();
+        #[cfg(unix)]
+        let made = std::os::unix::fs::symlink(&elsewhere, &dir);
+        #[cfg(windows)]
+        let made = std::os::windows::fs::symlink_dir(&elsewhere, &dir);
+        if made.is_err() {
+            return; // Windows without the right to make links: nothing to plant.
+        }
+        assert_eq!(digest(&dir).unwrap(), server_item().digest, "followed, the link would pass the digest");
+        assert!(store.delivery().servers.is_empty(), "a linked folder is never handed over");
+        assert!(std::fs::symlink_metadata(&dir).is_err(), "and it leaves the store");
+        assert!(elsewhere.join("bin").join("run.js").is_file(), "what it pointed at is left alone");
+    }
+
+    #[test]
+    fn a_linked_manifest_or_an_oversized_ledger_is_never_read_as_the_store_s_own() {
+        let tmp = tempfile::tempdir().unwrap();
+        let zip = archive(tmp.path(), SKILL);
+        let store = Store::with_catalog(&tmp.path().join("data"), vec![item(&expected())]);
+        store.install_from(&item(&expected()), &zip).unwrap();
+        let ledger = tmp.path().join("data").join("tools").join("installed.json");
+        let kept = std::fs::read(&ledger).unwrap();
+        std::fs::write(&ledger, vec![b' '; 2 * 1024 * 1024]).unwrap();
+        assert!(store.installed().is_empty(), "a ledger past 1 MB lists nothing");
+        std::fs::write(&ledger, kept).unwrap();
+
+        // The same manifest elsewhere, where a guarded session could change it after the check.
+        let manifest = tmp.path().join("data").join("tools").join("plugin").join(".claude-plugin");
+        let elsewhere = tmp.path().join("workspace-manifest");
+        std::fs::rename(&manifest, &elsewhere).unwrap();
+        #[cfg(unix)]
+        let made = std::os::unix::fs::symlink(&elsewhere, &manifest);
+        #[cfg(windows)]
+        let made = std::os::windows::fs::symlink_dir(&elsewhere, &manifest);
+        if made.is_err() {
+            return; // Windows without the right to make links: nothing to plant.
+        }
+        assert!(store.delivery().plugin.is_some(), "the skill still goes, with Faber's own manifest");
+        assert!(std::fs::symlink_metadata(&manifest).is_ok_and(|m| m.is_dir()), "the link was replaced by a real folder");
+        assert!(elsewhere.join("plugin.json").is_file(), "what it pointed at is left alone");
+    }
+
     #[test]
     fn the_digest_ignores_the_order_files_were_written_in() {
         let (a, b) = (tempfile::tempdir().unwrap(), tempfile::tempdir().unwrap());
@@ -618,6 +973,21 @@ mod tests {
             assert_eq!(item.digest.len(), 64, "{} carries its digest", item.id);
             assert!(item.repo.split('/').count() == 2 && !item.path.contains(".."));
             assert!(!item.license.is_empty());
+            if let Some(s) = &item.server {
+                assert!(s.entry.split('/').all(|p| p != ".." && portable_name(p)), "{} starts a script inside its package", item.id);
+                assert!(!s.version.is_empty() && !s.package.contains(".."));
+            }
+        }
+        // R152: the measurement server's data collection, its CrUX lookups and its update checks are off, and its browser has
+        // no window and a profile of its own.
+        let measure = find("chrome-devtools").and_then(|i| i.server.as_ref()).expect("the measurement server is listed");
+        for flag in ["--headless", "--isolated", "--no-usage-statistics", "--no-performance-crux", "--no-file-navigations"] {
+            assert!(measure.args.iter().any(|a| a == flag), "{flag}");
+        }
+        for name in
+            ["CHROME_DEVTOOLS_MCP_NO_USAGE_STATISTICS", "CHROME_DEVTOOLS_MCP_NO_UPDATE_CHECKS", "CHROME_DEVTOOLS_MCP_NO_CONFIG_DISCOVERY"]
+        {
+            assert_eq!(measure.env.get(name).map(String::as_str), Some("1"), "{name}");
         }
     }
 }

@@ -256,6 +256,7 @@ export function Settings(props: Props) {
           <Match when={section() === 'projects'}>
             <div class="psets">
               <SkillsCard onError={props.onError} />
+              <SkillsCard servers onError={props.onError} />
               <ProjectsSection projects={props.projects ?? []} />
             </div>
           </Match>

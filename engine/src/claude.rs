@@ -63,6 +63,12 @@ pub fn offers_tools(area: Area, permissions: Permissions) -> bool {
     area == Area::Project && permissions != Permissions::Isolated
 }
 
+/// Where the catalog's tool servers go: a project's agent in Full access only, as Faber's own browser (R195). A server runs
+/// outside the CLI's sandbox, with the network on and the whole disk in reach, so the modes that ask never get one.
+pub fn offers_servers(area: Area, permissions: Permissions) -> bool {
+    area == Area::Project && permissions == Permissions::FullAccess
+}
+
 /// Flags that only newer CLIs take, read once from `claude --help` (`from_help`). A flag the CLI does not list is never
 /// passed, so an older CLI starts exactly as before: the default (nothing known) is the safe one.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
@@ -344,7 +350,17 @@ pub fn claude_args(launch: &ClaudeLaunch) -> Vec<String> {
         args.push("--append-system-prompt".into());
         args.push(persona(&PersonaInput { name: launch.user_name.as_deref() }));
         // R161: Faber's own MCP server, answered by this driver over stdio, holds the helper tool and the browser.
-        if mcp_tools(launch).any() {
+        // The catalog's servers join it in the same config, where Faber offers its tools.
+        let servers = if offers_servers(launch.area, launch.permissions) { launch.tools.servers.as_slice() } else { &[] };
+        if !servers.is_empty() {
+            let mut config: Value =
+                serde_json::from_str(if mcp_tools(launch).any() { crate::helper::CLAUDE_MCP_CONFIG } else { r#"{"mcpServers":{}}"# })
+                    .unwrap_or_default();
+            for s in servers {
+                config["mcpServers"][&s.name] = json!({ "type": "stdio", "command": s.command, "args": s.args, "env": s.env });
+            }
+            args.extend(["--mcp-config".into(), config.to_string()]);
+        } else if mcp_tools(launch).any() {
             args.extend(["--mcp-config".into(), crate::helper::CLAUDE_MCP_CONFIG.into()]);
         }
         // The catalog's skills, as one plugin from Faber's store, where Faber offers them.

@@ -161,7 +161,7 @@ async fn main() {
             user_hooks: false,
             windows: cfg!(windows),
             spawn: spawner(&cli),
-            skills: None,
+            tools: Default::default(),
         });
         (cli, server)
     });

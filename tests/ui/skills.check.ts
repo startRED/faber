@@ -31,3 +31,23 @@ check('skills: one closed card says how many are on and opens to one switch per 
     root.remove();
   }
 });
+
+check('skills: tool servers have their own closed card, apart from the skills, each with its words and its licence', async () => {
+  const root = document.createElement('div');
+  root.dataset.motion = 'none';
+  document.body.append(root);
+  const dispose = render(() => createComponent(SkillsCard, { servers: true }), root);
+  try {
+    for (let i = 0; i < 100 && !root.querySelector('.pset-head'); i++) await new Promise((r) => setTimeout(r, 20));
+    equal(root.querySelector('[data-skills]')?.getAttribute('data-skills'), 'servers');
+    root.querySelector<HTMLButtonElement>('.pset-head')!.click();
+    await new Promise((r) => setTimeout(r, 20));
+    const row = root.querySelector('[data-opt="set-server-chrome-devtools"]');
+    ok(row, 'the measurement server is listed');
+    ok((row?.querySelector('.st-hint')?.textContent ?? '').endsWith(' · Apache-2.0'), `its line ends with its licence: ${row?.textContent}`);
+    equal(root.querySelector('[data-opt^="set-skill-"]'), null, 'no skill in the servers card');
+  } finally {
+    dispose();
+    root.remove();
+  }
+});

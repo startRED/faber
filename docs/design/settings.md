@@ -30,7 +30,8 @@ How the Settings screen, the first-run steps and the tutorial look and behave.
   21 on") and the chevron. Open, it shows one quiet line, then a switch per skill of the catalog: its name as its
   repository spells it, one line of what it does and its licence, the repository behind the "?". While one installs or
   goes the line says so and every switch waits; a failure turns the switch back and shows the save-error toast; the card
-  is absent when the list cannot be read. The projects follow, each in its own closed card.
+  is absent when the list cannot be read. *Tools for projects* follows, the same card for the catalog's tool servers, its
+  quiet line saying each one runs on this computer with Node.js. The projects follow, each in its own closed card.
 - R140 (Chat; the person's own project sessions take the same modes, and mission roles never do): the Permissions choice is a
   menu of five modes, each with one plain line and its long text behind the closed "?" of the row, which is not in the page
   while closed. The composer of Chat carries the same choice as a chip. Mode by CLI (the CLI that lacks a mode runs the

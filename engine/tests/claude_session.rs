@@ -1368,8 +1368,11 @@ async fn r161_claude_calling_the_helper_waits_for_its_report_and_gets_it_as_the_
 fn the_catalog_s_skills_reach_a_project_s_agent_as_one_plugin_and_nowhere_else() {
     assert!(ClaudeFlags::from_help("  --plugin-dir <path>   Load a plugin from a directory").plugin_dir);
     assert!(!ClaudeFlags::from_help("Use --plugin-dir to load a plugin").plugin_dir, "a flag named in a sentence is no support");
-    let tools =
-        faber_engine::tools::Delivery { plugin: Some("C:/data/tools/plugin".into()), skills: Some("C:/data/tools/plugin/skills".into()) };
+    let tools = faber_engine::tools::Delivery {
+        plugin: Some("C:/data/tools/plugin".into()),
+        skills: Some("C:/data/tools/plugin/skills".into()),
+        servers: vec![],
+    };
     let flags = ClaudeFlags { plugin_dir: true, ..NEWER };
     let args = |area: Area, permissions: Permissions, flags: ClaudeFlags, tools: &faber_engine::tools::Delivery| {
         claude_args(&ClaudeLaunch { permissions, flags, tools: tools.clone(), ..launch(area) })
@@ -1383,4 +1386,35 @@ fn the_catalog_s_skills_reach_a_project_s_agent_as_one_plugin_and_nowhere_else()
     assert!(!loads(&args(Area::Project, Permissions::FullAccess, NEWER, &tools)), "an older CLI starts as before");
     let none = args(Area::Project, Permissions::FullAccess, flags, &Default::default());
     assert!(!none.iter().any(|a| a == "--plugin-dir"), "no skill installed, no plugin");
+}
+
+#[test]
+fn the_catalog_s_servers_join_faber_s_own_in_one_config_only_in_full_access() {
+    let tools = faber_engine::tools::Delivery {
+        servers: vec![faber_engine::tools::Launch {
+            name: "measure".into(),
+            command: "C:/node/node.exe".into(),
+            args: vec!["C:/data/tools/servers/measure/run.js".into(), "--headless".into()],
+            env: [("NO_STATS".to_string(), "1".to_string())].into(),
+        }],
+        ..Default::default()
+    };
+    let config = |area: Area, permissions: Permissions| {
+        let args = claude_args(&ClaudeLaunch { permissions, tools: tools.clone(), verify: true, ..launch(area) });
+        let at = args.iter().position(|a| a == "--mcp-config");
+        assert_eq!(args.iter().filter(|a| *a == "--mcp-config").count(), at.map_or(0, |_| 1), "one config at most: {args:?}");
+        at.map(|i| serde_json::from_str::<serde_json::Value>(&args[i + 1]).unwrap())
+    };
+    let full = config(Area::Project, Permissions::FullAccess).expect("a project's agent in Full access gets the server");
+    assert_eq!(
+        full["mcpServers"]["measure"],
+        serde_json::json!({"type":"stdio","command":"C:/node/node.exe","args":["C:/data/tools/servers/measure/run.js","--headless"],"env":{"NO_STATS":"1"}})
+    );
+    assert_eq!(full["mcpServers"]["faber"]["type"], "sdk", "Faber's own tools stay beside it: {full}");
+    // A server runs outside the CLI's sandbox: the modes that ask, Isolated and Chat never get one (R195, as the browser).
+    let guarded = [Permissions::Ask, Permissions::AcceptEdits, Permissions::Plan, Permissions::Auto].map(|p| (Area::Project, p));
+    for (area, permissions) in guarded.into_iter().chain([(Area::Project, Permissions::Isolated), (Area::Chat, Permissions::FullAccess)]) {
+        let config = config(area, permissions);
+        assert!(config.as_ref().is_none_or(|c| c["mcpServers"].get("measure").is_none()), "{area:?} {permissions:?}: {config:?}");
+    }
 }
