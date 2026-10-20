@@ -69,6 +69,22 @@ export function tightest(quotas: Quotas, vendor: Vendor, now: number): QuotaRead
   return live.reduce<QuotaReading | undefined>((best, q) => (best && best.used >= q.used ? best : q), undefined);
 }
 
+/** What the sidebar's line shows for a vendor (R177): its weekly window. A vendor that has never reported one (a plan with
+ * no weekly cap) shows its tightest window instead; one whose weekly reading has passed its reset shows nothing known. */
+export function lineReading(quotas: Quotas, vendor: Vendor, now: number): QuotaReading | undefined {
+  const weekly = quotas[`${vendor}:seven_day`];
+  if (!weekly) return tightest(quotas, vendor, now);
+  return expired(weekly, now) ? undefined : weekly;
+}
+
+/** The vendor's live readings other than `shown`, short windows first: the tooltip lists them so nothing is lost. */
+export function otherReadings(quotas: Quotas, vendor: Vendor, now: number, shown?: QuotaReading): QuotaReading[] {
+  const rank = (window: string) => (WINDOW_ORDER.includes(window) ? WINDOW_ORDER.indexOf(window) : WINDOW_ORDER.length);
+  return Object.values(quotas)
+    .filter((q) => q.vendor === vendor && q !== shown && !expired(q, now))
+    .sort((a, b) => rank(a.window) - rank(b.window));
+}
+
 /** One line of the usage limits in Settings. A reading that still counts has `used` (a share from 0 to 1) and, when the CLI
  * said when the window resets, `resetsAt` (seconds). A window whose reading is old has only its name; a vendor that has
  * not reported at all has one line with no window. */

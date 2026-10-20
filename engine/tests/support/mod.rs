@@ -56,7 +56,10 @@ pub async fn read_message(input: &mut BufReader<tokio::io::DuplexStream>) -> Val
 }
 
 pub async fn expect_method(input: &mut BufReader<tokio::io::DuplexStream>, method: &str) -> Value {
-    let msg = read_message(input).await;
+    let mut msg = read_message(input).await;
+    while method != "skills/list" && msg["method"] == "skills/list" {
+        msg = read_message(input).await;
+    }
     assert_eq!(msg["method"], method);
     msg
 }
@@ -260,6 +263,13 @@ pub fn replay(entries: Vec<Entry>, mismatches: Mismatches) -> Proc {
         let mut lines = BufReader::new(&mut fake_in).lines();
         loop {
             while at < entries.len() && !entries[at].input {
+                // A recorded faber_hold with a number of milliseconds is a pause between two lines (the screen checks' fake CLI waits for
+                // a release instead); it is never sent.
+                if let Some(ms) = entries[at].msg["faber_hold"].as_u64() {
+                    tokio::time::sleep(Duration::from_millis(ms)).await;
+                    at += 1;
+                    continue;
+                }
                 let line = format!("{}\n", entries[at].msg);
                 if fake_out.write_all(line.as_bytes()).await.is_err() {
                     return;
@@ -269,6 +279,9 @@ pub fn replay(entries: Vec<Entry>, mismatches: Mismatches) -> Proc {
             let Ok(Some(line)) = lines.next_line().await else { break };
             // A line cut short is the writer's failure, not a mismatch of the recording.
             let Ok(sent) = serde_json::from_str::<Value>(&line) else { continue };
+            if sent["method"] == "skills/list" && entries.get(at).is_none_or(|entry| entry.msg["method"] != "skills/list") {
+                continue;
+            }
             if sent["method"] == "config/read" && entries.get(at).is_none_or(|entry| entry.msg["method"] != "config/read") {
                 let reply = format!("{}\n", serde_json::json!({"id":sent["id"],"result":{"config":{}}}));
                 if fake_out.write_all(reply.as_bytes()).await.is_err() {

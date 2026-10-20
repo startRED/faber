@@ -290,6 +290,15 @@ export function animateList(root: HTMLElement, subtree = false): void {
 /** Native disclosure keeps its content visible until the height has finished closing. */
 export function animateDetails(root: HTMLElement): void {
   const running = new Map<HTMLDetailsElement, { animation: Animation; opening: boolean }>();
+  // A controlled disclosure can close without a click (for example when another file opens).
+  const observer = new MutationObserver(() => {
+    for (const [details, pending] of running) {
+      if (details.open && root.contains(details)) continue;
+      running.delete(details);
+      pending.animation.cancel();
+    }
+  });
+  observer.observe(root, { subtree: true, attributes: true, attributeFilter: ['open'], childList: true });
   const click = (event: MouseEvent) => {
     const summary = (event.target as Element).closest('summary');
     const details = summary?.parentElement;
@@ -309,6 +318,10 @@ export function animateDetails(root: HTMLElement): void {
     const done = () => {
       active.delete(animation);
       if (running.get(details)?.animation !== animation) return;
+      if (!details.open || !root.contains(details)) {
+        running.delete(details);
+        return;
+      }
       if (!opening && details.contains(document.activeElement)) summary!.focus();
       details.open = opening;
       running.delete(details);
@@ -317,7 +330,9 @@ export function animateDetails(root: HTMLElement): void {
   };
   root.addEventListener('click', click);
   onCleanup(() => {
+    observer.disconnect();
     root.removeEventListener('click', click);
     for (const { animation } of running.values()) animation.cancel();
+    running.clear();
   });
 }

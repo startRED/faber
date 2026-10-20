@@ -26,6 +26,12 @@ How the Settings screen, the first-run steps and the tutorial look and behave.
   value if the save fails. R107 applies the same default to Chat. Chat uses its chosen canonical folder
   (fixed before the first message), or private per-conversation scratch; deletion/draft cleanup never removes a chosen
   folder. General explains the rule and offers the folder choice.
+- Projects starts with *Skills for projects*: one card closed like a project's, its head the name, how many are on ("2 of
+  21 on") and the chevron. Open, it shows one quiet line, then a switch per skill of the catalog: its name as its
+  repository spells it, one line of what it does and its licence, the repository behind the "?". While one installs or
+  goes the line says so and every switch waits; a failure turns the switch back and shows the save-error toast; the card
+  is absent when the list cannot be read. *Tools for projects* follows, the same card for the catalog's tool servers, its
+  quiet line saying each one runs on this computer with Node.js. The projects follow, each in its own closed card.
 - R140 (Chat; the person's own project sessions take the same modes, and mission roles never do): the Permissions choice is a
   menu of five modes, each with one plain line and its long text behind the closed "?" of the row, which is not in the page
   while closed. The composer of Chat carries the same choice as a chip. Mode by CLI (the CLI that lacks a mode runs the
@@ -126,7 +132,7 @@ How the Settings screen, the first-run steps and the tutorial look and behave.
   the plan with its first letter capital, and one status word in a pill that is amber only when a window is really near
   its limit (C002; fast use is said calmly). Then one row per quota window the vendor has reported (name, used share, a
   bar with the expected-pace mark, and the reset time written in full); an old reading, or none, shows "—". The card ends
-  with Faber's own spend today at API prices, written the language's way with two decimals. Every note about how the
+  with Faber's own spend today in API value, written the language's way with two decimals. Every note about how the
   figures are read (counting delay, shared account, incomplete meters, learning, foreign use, extra usage, each window's
   projection and age) is behind one "Details" fold per card. "Manage accounts" appears once in the section.
 - Privacy has three statements: telemetry is off, history stays on this PC, and Faber never reads the CLI logins.
@@ -141,8 +147,8 @@ How the Settings screen, the first-run steps and the tutorial look and behave.
   Settings, the same cards have no stepper and only a Close button. They save `setup` and nothing else, so reconnecting an
   account never restarts the first run or the tutorial.
 - Step 2 shows the three themes side by side, each a small live render drawn with its own tokens. A choice changes the whole
-  screen at once and saves nothing. Under the cards: text size (three "Aa" sizes), density, motion, "Do you already use
-  AI?" (Never, A lot) and an optional name. Continue saves the appearance, the answer, the name and, unless the tutorial
+  screen at once and saves nothing. Under the cards: text size (the same 13 to 18 px slider as Appearance), density, motion, "Do you already use
+  AI?" (Never, A lot) and "Your name" (optional), in the words Settings uses. Continue saves the appearance, the answer, the name and, unless the tutorial
   was already done, `tutorialDone: false`, in one call. Back keeps the
   choices. An install saved by an older version, whose appearance has no `base`, sees step 2 once.
 - The tutorial starts at the new conversation, with an AI connected, while `tutorialDone` is false. A beginner gets three

@@ -1,6 +1,8 @@
-import { createEffect, createMemo, createSignal, For, on, Show } from 'solid-js';
+import { createEffect, createMemo, createSignal, For, on, onCleanup, Show } from 'solid-js';
+import { createStore, reconcile } from 'solid-js/store';
 import { UpdateLine } from './UpdateStage.tsx';
-import { api, type Area, type Project, type RunningItem, type Summary, type UpdateStatus, type Vendor, type VendorUsage } from './api.ts';
+import { api, type Area, type MessageHit, type Project, type RunningItem, type Summary, type UpdateStatus, type Vendor, type VendorUsage } from './api.ts';
+import { windowHidden } from './appearance.ts';
 import { openMenu } from './contextmenu.ts';
 import { Icon, VendorMark } from './Glyphs.tsx';
 import { percent, t } from './i18n.ts';
@@ -11,7 +13,8 @@ import { vendorName } from './models.ts';
 import { forgetProject } from './projects.ts';
 import type { Place } from './running.ts';
 import { mac } from './WindowControls.tsx';
-import { ageOf, freshness, groupChats, matches, nest, type Quotas, showsChats, tailOf, tightest } from './sidebar.ts';
+import { planWords } from './Plan.tsx';
+import { ageOf, freshness, groupChats, lineReading, matches, nest, otherReadings, type Quotas, showsChats, tailOf } from './sidebar.ts';
 
 /** The name of a conversation while it is being renamed: Enter keeps it, Esc and leaving the box too when nothing changed. */
 function RenameBox(props: { title: string; onDone: (title?: string) => void }) {
@@ -89,12 +92,16 @@ interface Props {
   onNewIn: (id: string) => void;
   onAddProject: () => void;
   onOpen: (conversation: Summary) => void;
+  onMessage?: (hit: MessageHit) => void;
   /** Deletes a conversation; `'unsaved'` when its copy holds work found nowhere else, which needs `discard`. */
   onRemove: (id: string, discard?: boolean) => Promise<'unsaved' | undefined> | void;
   /** Opens Settings; the quota of a vendor opens it at the usage limits. */
   onSettings: (section?: 'usage') => void;
   /** Something a menu asked for was refused (a folder that is gone, a project still working). */
   onError?: (err: unknown) => void;
+  /** The person skipped the account cards and one AI is still not connected: a quiet line offers it until the cards close. */
+  remindConnect?: boolean;
+  onConnect?: () => void;
 }
 
 /** The sidebar: new conversation, the two areas, the projects with their conversations, the chats by day, and at the
@@ -104,9 +111,40 @@ export function Sidebar(props: Props) {
   // A delete refused because the conversation's copy holds work found nowhere else: the same row asks once more.
   const [losing, setLosing] = createSignal<string>();
   const [renaming, setRenaming] = createSignal<string>();
-  // The search box filters the titles on screen; it never leaves the window and nothing is asked of the engine.
+  // Titles filter immediately; message text is searched after a short pause.
   const [query, setQuery] = createSignal('');
   const searching = () => query().trim() !== '';
+  const [hits, setHits] = createStore<(MessageHit & { key: string })[]>([]);
+  const [waiting, setWaiting] = createSignal(false);
+  const [searchFailed, setSearchFailed] = createSignal(false);
+  const searchArea = createMemo(() => props.place.area);
+  let previousSearch: { text: string; area: Area } | undefined;
+  createEffect(() => {
+    const text = query().trim();
+    const area = searchArea();
+    const conversations = props.conversations;
+    const hidden = windowHidden();
+    let cancelled = false;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    if (!text || previousSearch?.text !== text || previousSearch.area !== area) setHits([]);
+    previousSearch = { text, area };
+    setSearchFailed(false);
+    setWaiting(!!text);
+    const search = async () => {
+      try {
+        const result = await api.searchMessages(text, area);
+        if (cancelled) return;
+        setHits(reconcile(result.hits.filter((hit) => hit.area === area && conversations.some((c) => c.id === hit.conversationId))
+          .map((hit) => ({ ...hit, key: `${hit.conversationId}:${hit.messageIndex}` })), { key: 'key' }));
+        setWaiting(!result.ready);
+        if (!result.ready) timer = setTimeout(() => void search(), 700);
+      } catch {
+        if (!cancelled) { setWaiting(false); setSearchFailed(true); }
+      }
+    };
+    if (text && !hidden) timer = setTimeout(() => void search(), 180);
+    onCleanup(() => { cancelled = true; clearTimeout(timer); });
+  });
   // The projects whose conversations show. The project the user is in starts open.
   const [open, setOpen] = createSignal<ReadonlySet<string>>(new Set(props.place.projectId ? [props.place.projectId] : []));
   const toggle = (id: string, on: boolean) =>
@@ -136,7 +174,7 @@ export function Sidebar(props: Props) {
   const expanded = (p: Project) => showsChats(open().has(p.id), searching(), inProject(p).length);
   // Each area lists only its own: Chat its conversations, Projects its projects with theirs.
   const inChat = () => props.place.area === 'chat';
-  const nothing = () => searching() && (inChat() ? chats().length === 0 : projects().length === 0);
+  const nothing = () => searching() && !waiting() && !searchFailed() && hits.length === 0;
   // The first click asks, the second deletes. When the copy holds unsaved work the row asks a third time, saying so.
   const remove = (id: string) => {
     if (losing() === id) {
@@ -177,10 +215,13 @@ export function Sidebar(props: Props) {
           />
         }
       >
-        <button class="item" aria-current={row.c.id === props.place.id} onClick={() => props.onOpen(row.c)}>
+        <button class="item" aria-current={row.c.id === props.place.id} title={row.c.plan ? `${row.c.title} · ${planWords(row.c.plan)}` : undefined} onClick={() => props.onOpen(row.c)}>
           <span>{row.c.title}</span>
           <Show when={row.c.archived}>
             <span class="tag-quiet">{t('archive.tag')}</span>
+          </Show>
+          <Show when={row.c.ended && row.c.id !== props.place.id}>
+            <span class="unseen" role="img" aria-label={t('side.unseen')} title={t('side.unseen')} />
           </Show>
           <Show when={props.running.find((r) => r.conversationId === row.c.id)?.waitUntil}>{(at) => <span class="waiting-label" title={t('run.waiting', { when: untilReset(at()) })}>{t('run.waiting', { when: untilReset(at()) })}</span>}</Show>
         </button>
@@ -219,7 +260,8 @@ export function Sidebar(props: Props) {
         <Icon name="search" small />
         <input type="search" placeholder={t('side.search')} aria-label={t('side.search')} value={query()} onInput={(e) => setQuery(e.currentTarget.value)} />
       </label>
-      <div class="side-scroll" onMouseLeave={() => (setConfirming(undefined), setLosing(undefined))} ref={(el) => animateList(el, true)}>
+      {/* Each keystroke of a search filters the list: rows change at once instead of sliding on every letter. */}
+      <div class="side-scroll" data-motion={query() ? 'none' : undefined} onMouseLeave={() => (setConfirming(undefined), setLosing(undefined))} ref={(el) => animateList(el, true)}>
         <Show when={!inChat()}>
         <section class="projects" aria-labelledby="side-projects" ref={(el) => animateList(el, true)}>
           <div class="group-h">
@@ -300,9 +342,6 @@ export function Sidebar(props: Props) {
           </Show>
         </section>
         </Show>
-        <Show when={nothing()}>
-          <div class="side-empty">{t('side.noMatch')}</div>
-        </Show>
         <Show when={inChat()}>
           <div class="list" ref={(el) => animateList(el, true)}>
             {/* The groups are keyed by their name and the rows by their conversation, so a refresh builds again only what changed. */}
@@ -316,6 +355,31 @@ export function Sidebar(props: Props) {
             </For>
           </div>
         </Show>
+        <Show when={searching()}>
+          <section class="message-hits" aria-labelledby="side-message-hits" aria-busy={waiting()}>
+            <div class="group-h" id="side-message-hits">{t('side.messages')}</div>
+            <Show when={waiting()}><div class="side-empty" role="status">{t('side.searching')}</div></Show>
+            <Show when={searchFailed()}><div class="side-empty" role="status">{t('side.searchFailed')}</div></Show>
+            <For each={hits}>{(hit) => (
+              <button type="button" class="message-hit" onClick={() => props.onMessage?.(hit)}>
+                <span class="hit-heading">
+                  <span class="hit-title">{hit.title}</span>
+                  <Show when={props.conversations.find((c) => c.id === hit.conversationId)?.archived}>
+                    <span class="tag-quiet">{t('archive.tag')}</span>
+                  </Show>
+                </span>
+                <span class="hit-snippet">
+                  <For each={hit.highlights}>{(range, i) => <>
+                    {hit.snippet.slice(i() ? hit.highlights[i() - 1]!.end : 0, range.start)}
+                    <mark>{hit.snippet.slice(range.start, range.end)}</mark>
+                  </>}</For>
+                  {hit.snippet.slice(hit.highlights.at(-1)?.end ?? 0)}
+                </span>
+              </button>
+            )}</For>
+            <Show when={nothing()}><div class="side-empty" role="status">{t('side.noMatch')}</div></Show>
+          </section>
+        </Show>
       </div>
       <div class="side-foot">
         {/* One row: the name, when the person gave one, and Settings. The version waits in Settings' tooltip until Settings shows it. */}
@@ -328,12 +392,13 @@ export function Sidebar(props: Props) {
             <span>{t('settings.open')}</span>
           </button>
         </div>
-        {/* One thin line per connected AI: its mark, how much of its tightest window is used, the share. The window, the reset,
-            how old the reading is and "still counting" (C010) are in the tooltip, so the line never wraps. */}
+        {/* One thin line per connected AI: its mark, how much of its weekly window is used (R177), the share. The window, the
+            reset, the other windows (the five-hour one), how old the reading is and "still counting" (C010) are in the
+            tooltip, so the line never wraps. */}
         <div class="usage" role="group" aria-label={t('quota.label')}>
           <For each={props.vendors}>
             {(v) => {
-              const q = () => tightest(props.quotas, v, props.now);
+              const q = () => lineReading(props.quotas, v, props.now);
               const fresh = () => freshness(props.usage, v, q()?.window);
               // While use is still being counted the real share can only be higher, so it reads "≥ 44%" (C010).
               const share = () => (!q() ? t('quota.unknown') : fresh().counting ? t('quota.atLeast', { share: percent(q()!.used) }) : percent(q()!.used));
@@ -342,11 +407,12 @@ export function Sidebar(props: Props) {
                 q()
                   ? [
                       `${t('quota.window', { window: windowName(q()!.window) })} · ${untilReset(q()!.resetsAt)}`,
+                      ...otherReadings(props.quotas, v, props.now, q()).map((o) => `${t('quota.window', { window: windowName(o.window) })}: ${percent(o.used)}`),
                       fresh().uncountedPoints ? t('quota.uncounted', { share: `${fresh().uncountedPoints}%` }) : '',
                       fresh().readAt !== undefined ? t('quota.read', { when: ageWords(fresh().readAt!, props.now) }) : '',
                       fresh().counting ? t('quota.counting') : '',
                     ]
-                  : [t('side.usage')];
+                  : [...otherReadings(props.quotas, v, props.now).map((o) => `${t('quota.window', { window: windowName(o.window) })}: ${percent(o.used)}`), t('side.usage')];
               return (
                 <button class="vendor" classList={{ low: low() }} onClick={() => props.onSettings('usage')} title={[vendorName(v), ...details()].filter(Boolean).join(' · ')}>
                   <VendorMark vendor={v} />
@@ -364,6 +430,12 @@ export function Sidebar(props: Props) {
           </For>
           <Show when={props.vendors.length === 0}>
             <span class="note">{t('side.noAi')}</span>
+          </Show>
+          <Show when={props.remindConnect}>
+            <button type="button" class="vendor more" data-restore="connect-more" onClick={() => props.onConnect?.()}>
+              <Icon name="plus" small />
+              <span>{t('side.connectMore')}</span>
+            </button>
           </Show>
         </div>
         {/* The update: a calm line while one downloads at open, a quiet control once one waits for a restart. */}

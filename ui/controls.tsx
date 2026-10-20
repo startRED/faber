@@ -117,7 +117,7 @@ export function Opt(props: { id: string; label: string; hint?: string; more?: st
 
 /** A switch is a native checkbox. It moves before its change is answered; when the answer is `false` (a refused save) it
  * goes back to where `checked` says it is. */
-export function Toggle(props: { id: string; label: string; hint?: string; more?: string | string[]; checked: boolean; onChange: (on: boolean) => void | Promise<boolean> }) {
+export function Toggle(props: { id: string; label: string; hint?: string; more?: string | string[]; checked: boolean; disabled?: boolean; onChange: (on: boolean) => void | Promise<boolean> }) {
   return (
     <Opt id={props.id} label={props.label} hint={props.hint} more={props.more} htmlFor={`${props.id}-switch`}>
       <input
@@ -127,6 +127,7 @@ export function Toggle(props: { id: string; label: string; hint?: string; more?:
         role="switch"
         aria-describedby={props.hint ? `${props.id}-hint` : undefined}
         checked={props.checked}
+        disabled={props.disabled}
         onChange={async (e) => {
           const box = e.currentTarget;
           if ((await props.onChange(box.checked)) === false) box.checked = props.checked;

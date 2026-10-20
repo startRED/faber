@@ -8,12 +8,36 @@ use std::sync::Arc;
 use std::time::Duration;
 use support::{Entry, drive, fake, fixture, next_permission, text_of};
 
+#[test]
+fn slash_init_keeps_skills_and_safe_builtins_in_the_advertised_order() {
+    let init = &fixture("claude", "slash-init")[1].msg;
+    let events = parse_claude_message(init);
+    let EngineEvent::Commands(commands) = &events[1] else { panic!("init advertises commands") };
+    let names: Vec<_> = commands.iter().map(|c| (c.name.as_str(), c.skill)).collect();
+    assert_eq!(
+        names,
+        [
+            ("context", false),
+            ("garden-plan", true),
+            ("plugin:tidy", true),
+            ("compact", false),
+            ("security-review", false),
+            ("recap", false),
+            ("insights", false),
+            ("init", false)
+        ]
+    );
+    assert!(commands.iter().all(|c| c.note.is_none()));
+    assert!(matches!(&events[0], EngineEvent::Started { session_id, .. } if session_id == "slash-session"));
+}
+
 fn launch(area: Area) -> ClaudeLaunch {
     ClaudeLaunch {
         helper: Default::default(),
         browse: false,
         conversations: false,
         verify: false,
+        progress: false,
         area,
         model: None,
         effort: None,
@@ -25,6 +49,7 @@ fn launch(area: Area) -> ClaudeLaunch {
         flags: Default::default(),
         // The credential tests below are about the deny rules, not the web: the web is on, as the person's settings default.
         tuning: faber_engine::model::Tuning { web: faber_engine::model::WebSearch::Live, ..Default::default() },
+        tools: Default::default(),
     }
 }
 
@@ -833,7 +858,7 @@ fn r124_a_moved_sign_in_folder_is_denied_where_it_now_is() {
 
 // ---- no blocking prompts in full access, cache warmth, autocompact windows (checked on Claude Code 2.1.296) ----
 
-const NEWER: ClaudeFlags = ClaudeFlags { autocompact: true, permission_prompts: true, auto_mode: true };
+const NEWER: ClaudeFlags = ClaudeFlags { autocompact: true, permission_prompts: true, auto_mode: true, plugin_dir: false };
 
 fn full(area: Area, flags: ClaudeFlags) -> Vec<String> {
     claude_args(&ClaudeLaunch { permissions: Permissions::FullAccess, flags, ..launch(area) })
@@ -866,7 +891,7 @@ fn full_access_lets_the_host_answer_so_questions_reach_the_person_and_every_cred
 #[test]
 fn full_access_starts_the_same_with_or_without_the_newer_flags() {
     for area in [Area::Chat, Area::Project] {
-        let args = full(area, ClaudeFlags { autocompact: true, permission_prompts: false, auto_mode: false });
+        let args = full(area, ClaudeFlags { autocompact: true, permission_prompts: false, auto_mode: false, plugin_dir: false });
         assert!(args.windows(2).any(|a| a == ["--permission-prompt-tool", "stdio"]));
         assert!(!args.contains(&"--permission-prompts".into()));
         assert_eq!(args, full(area, ClaudeFlags::default()));
@@ -924,7 +949,10 @@ fn each_model_compacts_at_its_own_window_once_and_only_where_the_cli_has_the_fla
 #[test]
 fn the_flags_are_read_from_the_help_text_word_by_word() {
     let help = "  --autocompact <auto|tokens>           Auto-compact window size\n  --permission-prompt-tool <tool>  MCP tool\n";
-    assert_eq!(ClaudeFlags::from_help(help), ClaudeFlags { autocompact: true, permission_prompts: false, auto_mode: false });
+    assert_eq!(
+        ClaudeFlags::from_help(help),
+        ClaudeFlags { autocompact: true, permission_prompts: false, auto_mode: false, plugin_dir: false }
+    );
     let both = format!("{help}  --permission-prompts <target>         Who answers permission prompts\n");
     assert_eq!(ClaudeFlags::from_help(&both), ClaudeFlags { auto_mode: false, ..NEWER });
     // A mention in a description is not the flag.
@@ -1274,6 +1302,44 @@ fn r161_the_helper_tool_reaches_only_the_project_agent() {
     assert!(helper.iter().any(|a| a == "--no-session-persistence") && !helper.iter().any(|a| a == CLAUDE_MCP_CONFIG));
 }
 
+/// R250: a quick question on the side forks the conversation's session, which stays as it was, and may only read, search and
+/// list: none of the person's integrations, no MCP server of Faber's, no history. With no session yet it reads Faber's record.
+#[test]
+fn r250_a_quick_question_forks_the_session_and_only_reads() {
+    use faber_engine::claude::{ASIDE_FORKED, ASIDE_TOOLS};
+    use faber_engine::helper::{CLAUDE_MCP_CONFIG, Helper};
+    let has = |a: &[String], pair: [&str; 2]| a.windows(2).any(|w| w == pair);
+    for area in [Area::Chat, Area::Project] {
+        let forked = claude_args(&ClaudeLaunch {
+            helper: Helper::Aside,
+            resume: Some("s1".into()),
+            browse: true,
+            verify: true,
+            permissions: Permissions::FullAccess,
+            effort: Some("low".into()),
+            ..launch(area)
+        });
+        assert!(has(&forked, ["--resume", "s1"]) && forked.iter().any(|a| a == "--fork-session"), "{forked:?}");
+        assert!(has(&forked, ["--tools", ASIDE_TOOLS]) && ASIDE_TOOLS == "Read,Grep,Glob");
+        assert_eq!(forked.iter().filter(|a| *a == "--tools").count(), 1, "no second tool list widens it");
+        assert!(forked.iter().any(|a| a == "--no-session-persistence"));
+        assert!(has(&forked, ["--append-system-prompt", ASIDE_FORKED]) && has(&forked, ["--effort", "low"]));
+        for gone in [CLAUDE_MCP_CONFIG, "--replay-user-messages", "--plugin-dir", "--system-prompt"] {
+            assert!(!forked.iter().any(|a| a == gone), "{gone}");
+        }
+        assert!(has(&forked, ["--setting-sources", ""]) && forked.iter().any(|a| a == "--strict-mcp-config"));
+        let settings = forked.windows(2).find(|w| w[0] == "--settings").map(|w| w[1].clone()).unwrap();
+        let settings: serde_json::Value = serde_json::from_str(&settings).unwrap();
+        assert_eq!(settings["disableAllHooks"], true);
+        assert_eq!(settings["permissions"]["blockReadsOutsideWorkingDirectories"], true);
+        assert_eq!(settings["permissions"]["ask"], json!(["Read(//**)", "*"]), "every read asks, so the driver checks it");
+        assert!(settings["permissions"]["deny"].as_array().is_some_and(|d| !d.is_empty()), "the credential folders stay closed");
+        let recorded = claude_args(&ClaudeLaunch { helper: Helper::Aside, instructions: Some("Record.".into()), ..launch(area) });
+        assert!(!recorded.iter().any(|a| a == "--fork-session" || a == "--resume"));
+        assert!(has(&recorded, ["--append-system-prompt", "Record."]) && has(&recorded, ["--tools", ASIDE_TOOLS]));
+    }
+}
+
 /// R161 step 7: Faber's MCP server is there for the browser alone too, never for a side question, and a helper keeps no
 /// history whether or not it browses.
 #[test]
@@ -1319,4 +1385,59 @@ async fn r161_claude_calling_the_helper_waits_for_its_report_and_gets_it_as_the_
         _ => None,
     });
     assert_eq!(tool, Some(&id), "the tool call and the MCP call are the same step");
+}
+
+#[test]
+fn the_catalog_s_skills_reach_a_project_s_agent_as_one_plugin_and_nowhere_else() {
+    assert!(ClaudeFlags::from_help("  --plugin-dir <path>   Load a plugin from a directory").plugin_dir);
+    assert!(!ClaudeFlags::from_help("Use --plugin-dir to load a plugin").plugin_dir, "a flag named in a sentence is no support");
+    let tools = faber_engine::tools::Delivery {
+        plugin: Some("C:/data/tools/plugin".into()),
+        skills: Some("C:/data/tools/plugin/skills".into()),
+        servers: vec![],
+    };
+    let flags = ClaudeFlags { plugin_dir: true, ..NEWER };
+    let args = |area: Area, permissions: Permissions, flags: ClaudeFlags, tools: &faber_engine::tools::Delivery| {
+        claude_args(&ClaudeLaunch { permissions, flags, tools: tools.clone(), ..launch(area) })
+    };
+    let loads = |args: &[String]| args.windows(2).any(|a| a[0] == "--plugin-dir" && a[1] == "C:/data/tools/plugin");
+    for permissions in [Permissions::FullAccess, Permissions::Ask, Permissions::Auto] {
+        assert!(loads(&args(Area::Project, permissions, flags, &tools)), "{permissions:?}");
+    }
+    assert!(!loads(&args(Area::Project, Permissions::Isolated, flags, &tools)), "Isolated turns every customization off");
+    assert!(!loads(&args(Area::Chat, Permissions::FullAccess, flags, &tools)), "Chat keeps its lean tools");
+    assert!(!loads(&args(Area::Project, Permissions::FullAccess, NEWER, &tools)), "an older CLI starts as before");
+    let none = args(Area::Project, Permissions::FullAccess, flags, &Default::default());
+    assert!(!none.iter().any(|a| a == "--plugin-dir"), "no skill installed, no plugin");
+}
+
+#[test]
+fn the_catalog_s_servers_join_faber_s_own_in_one_config_only_in_full_access() {
+    let tools = faber_engine::tools::Delivery {
+        servers: vec![faber_engine::tools::Launch {
+            name: "measure".into(),
+            command: "C:/node/node.exe".into(),
+            args: vec!["C:/data/tools/servers/measure/run.js".into(), "--headless".into()],
+            env: [("NO_STATS".to_string(), "1".to_string())].into(),
+        }],
+        ..Default::default()
+    };
+    let config = |area: Area, permissions: Permissions| {
+        let args = claude_args(&ClaudeLaunch { permissions, tools: tools.clone(), verify: true, ..launch(area) });
+        let at = args.iter().position(|a| a == "--mcp-config");
+        assert_eq!(args.iter().filter(|a| *a == "--mcp-config").count(), at.map_or(0, |_| 1), "one config at most: {args:?}");
+        at.map(|i| serde_json::from_str::<serde_json::Value>(&args[i + 1]).unwrap())
+    };
+    let full = config(Area::Project, Permissions::FullAccess).expect("a project's agent in Full access gets the server");
+    assert_eq!(
+        full["mcpServers"]["measure"],
+        serde_json::json!({"type":"stdio","command":"C:/node/node.exe","args":["C:/data/tools/servers/measure/run.js","--headless"],"env":{"NO_STATS":"1"}})
+    );
+    assert_eq!(full["mcpServers"]["faber"]["type"], "sdk", "Faber's own tools stay beside it: {full}");
+    // A server runs outside the CLI's sandbox: the modes that ask, Isolated and Chat never get one (R195, as the browser).
+    let guarded = [Permissions::Ask, Permissions::AcceptEdits, Permissions::Plan, Permissions::Auto].map(|p| (Area::Project, p));
+    for (area, permissions) in guarded.into_iter().chain([(Area::Project, Permissions::Isolated), (Area::Chat, Permissions::FullAccess)]) {
+        let config = config(area, permissions);
+        assert!(config.as_ref().is_none_or(|c| c["mcpServers"].get("measure").is_none()), "{area:?} {permissions:?}: {config:?}");
+    }
 }

@@ -16,6 +16,41 @@ use tokio::sync::mpsc::UnboundedReceiver;
 const SKY: &str = "In one sentence: why is the sky blue?";
 const TWO_WRITES: &str = "Create a.txt containing 'one'. Then create b.txt containing 'two'. Use the Write tool for each, one at a time.";
 
+#[tokio::test]
+async fn slash_init_populates_the_conversation_and_vendor_fallback_without_saving_it() {
+    let mut entries = fixture("claude", "chat");
+    let init = fixture("claude", "slash-init")[1].msg.clone();
+    let entry = entries.iter_mut().find(|e| e.msg["type"] == "system" && e.msg["subtype"] == "init").unwrap();
+    entry.msg = init;
+    let f = fake(entries);
+    let dir = tempfile::tempdir().unwrap();
+    let (engine, mut rx) = engine(dir.path(), Vendor::Claude, f.spawn.clone());
+    let id = engine.send(ask(Area::Chat, SKY, choice("claude", None))).unwrap();
+    loop {
+        let event = tokio::time::timeout(Duration::from_secs(3), rx.recv()).await.expect("no command announcement").unwrap();
+        if let AppEvent::Commands { conversation_id, vendor } = &event {
+            assert_eq!(conversation_id, &id);
+            assert_eq!(*vendor, Vendor::Claude);
+            assert!(!engine.commands(Some(&id), Some(*vendor)).is_empty(), "the list is available before the screen hears it");
+            assert_eq!(serde_json::to_value(&event).unwrap(), json!({"type":"commands","conversationId":id,"vendor":"claude"}));
+            break;
+        }
+    }
+    finished(&mut rx, |_| {}).await;
+    let commands = engine.commands(Some(&id), Some(Vendor::Claude));
+    assert_eq!(commands[0].command.name, "context");
+    assert_eq!(commands, engine.commands(None, Some(Vendor::Claude)));
+    let starts = f.args.lock().unwrap().len();
+    assert!(engine.commands(None, Some(Vendor::Codex)).is_empty());
+    assert_eq!(starts, f.args.lock().unwrap().len());
+    let saved = faber_engine::store::Store::new(dir.path()).get(&id).unwrap();
+    assert!(saved.commands.is_empty());
+    assert!(f.mismatches.lock().unwrap().is_empty());
+    engine.remove(&id);
+    assert_eq!(engine.commands(None, Some(Vendor::Claude)), commands);
+    engine.shutdown();
+}
+
 fn engine(dir: &Path, vendor: Vendor, spawn: Spawner) -> (Engine, UnboundedReceiver<AppEvent>) {
     engine_idle(dir, vendor, spawn, Duration::from_secs(120))
 }
@@ -404,6 +439,44 @@ async fn after_reopening_the_app_the_conversation_resumes_its_cli_session() {
     assert_eq!(args[args.iter().position(|a| a == "--resume").unwrap() + 1], "3ee0bd99-72d2-4c5b-8420-a9f85ee53981");
     assert_eq!(reply.text.trim(), "pong");
     assert_eq!(second.open(&id).unwrap().messages.len(), 4);
+}
+
+/// Parity T2: a past project conversation goes on as a chat does, in its project, on the same CLI session.
+#[tokio::test]
+async fn a_past_project_conversation_goes_on_in_its_cli_session_after_reopening_the_app() {
+    let dir = tempfile::tempdir().unwrap();
+    let folder = dir.path().join("work");
+    std::fs::create_dir_all(&folder).unwrap();
+    let (first, mut rx) = engine(dir.path(), Vendor::Claude, fake(fixture("claude", "chat")).spawn);
+    let project = first.add_project(&folder.to_string_lossy()).unwrap();
+    let id = first
+        .send(SendRequest { project_id: Some(project.id.clone()), ..ask(Area::Project, SKY, choice("claude", Some("haiku"))) })
+        .unwrap();
+    finished(&mut rx, |_| {}).await;
+    first.shutdown();
+
+    let file = dir.path().join("conversations").join(format!("{id}.json"));
+    let mut saved = read_json(&file);
+    saved["sessions"]["claude"] = "3ee0bd99-72d2-4c5b-8420-a9f85ee53981".into();
+    std::fs::write(&file, saved.to_string()).unwrap();
+
+    let f = fake(fixture("claude", "resume"));
+    let (second, mut rx) = engine(dir.path(), Vendor::Claude, f.spawn.clone());
+    let text = "What single word did you reply with last time? Answer with only that word.";
+    second
+        .send(SendRequest {
+            conversation_id: Some(id.clone()),
+            project_id: Some(project.id),
+            ..ask(Area::Project, text, choice("claude", Some("haiku")))
+        })
+        .unwrap();
+    let reply = finished(&mut rx, |_| {}).await;
+    second.shutdown();
+    let args = f.args.lock().unwrap()[0].clone();
+    assert_eq!(args[args.iter().position(|a| a == "--resume").unwrap() + 1], "3ee0bd99-72d2-4c5b-8420-a9f85ee53981");
+    assert_eq!(reply.text.trim(), "pong");
+    let c = second.open(&id).unwrap();
+    assert_eq!((c.area, c.messages.len()), (Area::Project, 4), "the reply joins the same project conversation");
 }
 
 #[tokio::test]
@@ -857,6 +930,11 @@ fn a_model_joining_midway_gets_the_earlier_conversation_as_text() {
     let history = [Message::new("1".into(), Role::User, "hi".into(), 0), Message::new("2".into(), Role::Assistant, "hello".into(), 0)];
     let text = faber_engine::engine::with_history(&history, "and now?", &|n| n.to_string());
     assert!(text.ends_with("User: hi\n\nAssistant: hello\n\nNow the user says:\nand now?"));
+    // A command of Claude Code runs only from the start of the message, so it never gets the record in front of it.
+    use faber_engine::engine::is_cli_command;
+    assert!(is_cli_command(Vendor::Claude, "/context") && is_cli_command(Vendor::Claude, "/review the parser"));
+    assert!(!is_cli_command(Vendor::Codex, "/context") && !is_cli_command(Vendor::Claude, "/ not one"));
+    assert!(!is_cli_command(Vendor::Claude, "see /context"));
     // Files stay reachable by name and place; images cannot go as text, so the count says they are missing.
     let mut with_files = history.clone();
     with_files[0].attachments = Some(vec!["notes.pdf".into()]);
@@ -1244,6 +1322,72 @@ async fn a_stopped_or_failed_turn_keeps_the_queue_and_the_person_sends_it() {
 }
 
 #[tokio::test]
+async fn edit_queued_saves_only_the_text_preserving_order_id_and_attachments() {
+    let dir = tempfile::tempdir().unwrap();
+    let (first, mut rx) = engine(dir.path(), Vendor::Claude, fake(fixture("claude", "chat")).spawn);
+    let id = first.send(ask(Area::Chat, SKY, choice("claude", Some("haiku")))).unwrap();
+    finished(&mut rx, |_| {}).await;
+    first.shutdown();
+    let file = dir.path().join("conversations").join(format!("{id}.json"));
+    let mut saved = read_json(&file);
+    saved["queued"] = json!([
+        {"id":"first", "text":"Original", "choice":{"vendor":"claude"}, "at":1,
+         "attachments":["notes.txt"], "images":[{"mediaType":"image/png", "base64":"aW1hZ2U="}]},
+        {"id":"second", "text":"Next", "choice":{"vendor":"claude"}, "at":2}
+    ]);
+    std::fs::write(&file, saved.to_string()).unwrap();
+    let (reopened, mut events) = engine(dir.path(), Vendor::Claude, fake(vec![]).spawn);
+    let before = reopened.open(&id).unwrap().queued;
+    reopened.edit_queued(&id, "first", "Edited\nwords").unwrap();
+    let mut expected = before;
+    expected[0].text = "Edited\nwords".into();
+    assert_eq!(reopened.open(&id).unwrap().queued, expected);
+    assert_eq!(read_json(&file)["queued"], serde_json::to_value(&expected).unwrap());
+    assert!(std::iter::from_fn(|| events.try_recv().ok()).any(|event| matches!(event,
+        AppEvent::Queue { conversation_id, queued } if conversation_id == id && queued == expected)));
+    for text in ["", " \n\t"] {
+        assert_eq!(reopened.edit_queued(&id, "first", text).unwrap_err(), "error.queueEmpty");
+    }
+    assert_eq!(reopened.open(&id).unwrap().queued, expected);
+    reopened.remove_queued(&id, "second");
+    assert_eq!(reopened.edit_queued(&id, "second", "Too late").unwrap_err(), "error.queueChanged");
+    assert_eq!(reopened.edit_queued(&id, "missing", "Too late").unwrap_err(), "error.queueChanged");
+    assert_eq!(reopened.edit_queued("missing", "first", "Words").unwrap_err(), "error.conversationGone");
+    reopened.shutdown();
+    let (again, _) = engine(dir.path(), Vendor::Claude, fake(vec![]).spawn);
+    assert_eq!(again.open(&id).unwrap().queued, expected[..1]);
+    again.shutdown();
+}
+
+#[tokio::test]
+async fn edit_queued_reaches_the_cli_and_send_now_refuses_later_edits() {
+    for send_now in [false, true] {
+        let dir = tempfile::tempdir().unwrap();
+        let f = fake(fixture("claude", "edit-queued"));
+        let (engine, _) = engine(dir.path(), Vendor::Claude, f.spawn.clone());
+        let id = engine.send(ask(Area::Chat, "Start queued edit", choice("claude", Some("haiku")))).unwrap();
+        until(&engine, &id, |c| c.messages.last().is_some_and(|m| m.finished_at.is_some())).await;
+        say(&engine, &id, "claude", "Original queued words").unwrap();
+        let q = engine.open(&id).unwrap().queued[0].clone();
+        assert!(!q.sending);
+        engine.edit_queued(&id, &q.id, "Edited queued words\nSecond line").unwrap();
+        if send_now {
+            engine.send_queued(&id, &q.id).unwrap();
+            assert!(engine.open(&id).unwrap().queued[0].sending);
+            assert_eq!(engine.edit_queued(&id, &q.id, "Too late").unwrap_err(), "error.queueChanged");
+        }
+        let c = until(&engine, &id, |c| settled(c, 4)).await;
+        assert_eq!(texts(&c), ["Start queued edit", "Edited queued words\nSecond line"]);
+        assert!(c.queued.is_empty());
+        assert_eq!(engine.edit_queued(&id, &q.id, "Too late").unwrap_err(), "error.queueChanged");
+        assert_eq!(f.wire.lines_with("Edited queued words"), 1);
+        assert_eq!(f.wire.lines_with("Original queued words"), 0);
+        assert!(f.mismatches.lock().unwrap().is_empty());
+        engine.shutdown();
+    }
+}
+
+#[tokio::test]
 async fn the_queue_is_saved_with_the_conversation_and_survives_a_restart() {
     let dir = tempfile::tempdir().unwrap();
     let f = fake(claude_turns(&[("first", false)]));
@@ -1393,6 +1537,35 @@ async fn claude_takes_a_message_into_the_running_turn_at_its_next_step_and_the_a
     assert_eq!(c.messages[3].vendor, Some(Vendor::Claude));
     assert!(c.queued.is_empty());
     assert_eq!(f.wire.lines_with(PONG), 1, "the message went to the CLI once");
+}
+
+// Live capture (claude, Haiku 5.5, the flags Faber uses): the agent left a subagent working in the background (a 30 s
+// command) and ended its turn; a line written while the subagent still worked became a turn of its own, and the subagent
+// went on to its own result. On 2026-10-17 a message written then was only queued, so the owner pressed Stop to get it
+// through, and Stop ended four helpers at work: no message ever needs that again.
+#[tokio::test]
+async fn a_message_written_while_helpers_work_in_the_background_reaches_claude_and_stops_none_of_them() {
+    const HELPER: &str = "Use the Agent tool once, with subagent_type general-purpose and run_in_background true, for this task: run the shell command `ping -n 31 127.0.0.1 > /dev/null` with the Bash tool in the foreground (never with run_in_background), wait for it to finish, and then reply with only the word kiwi. Right after starting it, end your turn with only the word started. Do not wait for it.";
+    let dir = tempfile::tempdir().unwrap();
+    let f = fake(fixture("claude", "background-steer"));
+    let (engine, _rx) = engine(dir.path(), Vendor::Claude, f.spawn.clone());
+    let id = engine.send(ask(Area::Chat, HELPER, choice("claude", Some("haiku")))).unwrap();
+    // The agent's own turn ended; the reply waits for the helper it left working.
+    until(&engine, &id, |c| c.messages[1].text.contains("started")).await;
+    let waiting = engine.open(&id).unwrap();
+    assert_eq!(waiting.messages[1].status, Some(Status::Streaming), "the reply still waits for its helper");
+    let agent = waiting.messages[1].tools.iter().flatten().find(|t| t.name == "Agent").unwrap();
+    assert_eq!(agent.ok, None, "the helper shows at work, so the screen counts it before a Stop");
+    say(&engine, &id, "claude", PONG).unwrap();
+
+    let c = until(&engine, &id, |c| settled(c, 4) && c.messages.iter().any(|m| m.text.contains("kiwi"))).await;
+    engine.shutdown();
+    assert_eq!(f.mismatches.lock().unwrap().clone(), Vec::<String>::new());
+    assert_eq!(f.wire.lines_with("\"interrupt\""), 0, "nothing written to the CLI stops the turn or its helpers");
+    assert_eq!(f.wire.lines_with(PONG), 1, "the message went to the CLI once");
+    assert_eq!(texts(&c), [HELPER, PONG]);
+    assert!(c.messages.iter().all(|m| m.status != Some(Status::Stopped)), "{:?}", c.messages.iter().map(|m| m.status).collect::<Vec<_>>());
+    assert!(c.queued.is_empty());
 }
 
 #[tokio::test]
@@ -1809,6 +1982,7 @@ async fn stop_leaves_no_worker(parent_script: &str, why: &str) {
                 browse: false,
                 conversations: false,
                 verify: false,
+                progress: false,
                 area: Area::Project,
                 model: None,
                 effort: None,
@@ -1819,6 +1993,7 @@ async fn stop_leaves_no_worker(parent_script: &str, why: &str) {
                 user_name: None,
                 flags: Default::default(),
                 tuning: Default::default(),
+                tools: Default::default(),
             },
             spawn,
             sandbox: None,
@@ -2325,6 +2500,148 @@ async fn r161_the_agent_hands_a_piece_of_work_to_the_other_vendor_and_gets_its_r
     assert!(reply.text.contains("nothing risky"), "{}", reply.text);
     // The helper's cost joins the reply's, which is more than the agent's own turn.
     assert!(reply.cost_usd.unwrap() > 0.00815, "{:?}", reply.cost_usd);
+}
+
+/// R250: a quick question on the side, asked while the agent works, runs in a process of its own on a fork of the
+/// conversation's session at low effort. The running turn never hears it, the queue and the session stay as they were, its
+/// quota counts while it runs, and the answer goes once the turn after it ends.
+#[tokio::test]
+async fn r250_a_quick_question_on_the_side_leaves_the_turn_its_queue_and_its_session_alone() {
+    let dir = tempfile::tempdir().unwrap();
+    let (pipe_spawn, made) = pipes();
+    let argv: Arc<Mutex<Vec<Vec<String>>>> = Arc::default();
+    let seen = argv.clone();
+    let spawn: Spawner = Arc::new(move |bin, args, cwd| {
+        seen.lock().unwrap().push(args.to_vec());
+        pipe_spawn(bin, args, cwd)
+    });
+    let engine = two_vendors(dir.path(), spawn);
+    std::fs::write(dir.path().join(".env"), "TOKEN=synthetic").unwrap();
+    std::fs::write(dir.path().join("parser.rs"), "fn parse() {}").unwrap();
+    let project = engine.add_project(&dir.path().to_string_lossy()).unwrap();
+    assert_eq!(engine.ask_aside("nope", "how is it going?", None).unwrap_err(), "error.conversationGone");
+    let id = engine
+        .send(SendRequest { project_id: Some(project.id), ..ask(Area::Project, "refactor it", choice("claude", Some("sonnet"))) })
+        .unwrap();
+    let mut main = next_pipe(&made).await;
+    main.say(json!({"type":"system","subtype":"init","session_id":"s1","model":"claude-sonnet-5-5"})).await;
+    main.say(json!({"type":"stream_event","parent_tool_use_id":null,"event":{"type":"content_block_delta","delta":{"type":"text_delta","text":"Reading."}}})).await;
+    for _ in 0..300 {
+        if engine.open(&id).is_some_and(|c| c.resumable(Vendor::Claude).is_some()) {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(10)).await;
+    }
+    let before = engine.open(&id).unwrap();
+    let main_lines = main.lines.lock().unwrap().len();
+    assert_eq!(engine.ask_aside(&id, "  ", None).unwrap_err(), "error.aside.empty");
+
+    let aside = engine.ask_aside(&id, "why that file?", None).unwrap();
+    assert_eq!(engine.ask_aside(&id, "and now?", None).unwrap_err(), "error.aside.busy", "one question at a time");
+    let mut side = next_pipe(&made).await;
+    let args = argv.lock().unwrap().last().unwrap().clone();
+    let has = |pair: [&str; 2]| args.windows(2).any(|w| w == pair);
+    assert!(has(["--resume", "s1"]) && args.iter().any(|a| a == "--fork-session") && has(["--tools", "Read,Grep,Glob"]), "{args:?}");
+    assert!(has(["--effort", "low"]) && has(["--model", "claude-sonnet-5-5"]), "same model, low effort: {args:?}");
+    let asked = engine.asides(&id);
+    assert_eq!((asked.len(), asked[0].state, asked[0].question.as_str()), (1, "running", "why that file?"));
+    assert!(engine.state().usage.iter().any(|u| u.vendor == Vendor::Claude && u.counting), "its quota counts while it runs");
+    for _ in 0..300 {
+        if side.lines.lock().unwrap().iter().any(|l| l["type"] == "user") {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(10)).await;
+    }
+    let said = side.lines.lock().unwrap().iter().find(|l| l["type"] == "user").cloned().unwrap();
+    assert_eq!(said["message"]["content"], "why that file?", "the fork knows the rest: {said}");
+
+    // Every read goes through the working folder's policy, whatever the conversation's mode: a secret in the folder never.
+    for (request, file) in [("r1", ".env"), ("r2", "parser.rs")] {
+        let path = dir.path().join(file).to_string_lossy().into_owned();
+        side.say(json!({ "type": "control_request", "request_id": request, "request": { "subtype": "can_use_tool", "tool_name": "Read", "input": { "file_path": path } } })).await;
+    }
+    for _ in 0..300 {
+        if side.answers().len() == 2 {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(10)).await;
+    }
+    let mut answers = side.answers();
+    answers.sort();
+    assert_eq!(answers, [("r1".to_string(), "deny".to_string()), ("r2".to_string(), "allow".to_string())]);
+    side.say(json!({"type":"stream_event","parent_tool_use_id":null,"event":{"type":"content_block_delta","delta":{"type":"text_delta","text":"It holds the parser."}}})).await;
+    side.say(json!({"type":"result","subtype":"success","is_error":false,"total_cost_usd":0.004,"usage":{}})).await;
+    for _ in 0..300 {
+        if engine.asides(&id)[0].state != "running" {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(10)).await;
+    }
+    let done = &engine.asides(&id)[0];
+    assert_eq!((done.state, done.answer.as_str(), done.id.as_str()), ("done", "It holds the parser.", aside.as_str()));
+    assert!(side.closed.load(std::sync::atomic::Ordering::SeqCst) || made.lock().unwrap().is_empty(), "gone once it answered");
+
+    let after = engine.open(&id).unwrap();
+    assert_eq!(main.lines.lock().unwrap().len(), main_lines, "the running turn never heard the question");
+    assert_eq!((after.messages.len(), after.queued.len()), (before.messages.len(), before.queued.len()));
+    assert_eq!(after.resumable(Vendor::Claude), Some(&"s1".to_string()), "the conversation keeps its own session");
+
+    let ended = |engine: &Engine| engine.open(&id).is_some_and(|c| c.messages.last().is_some_and(|m| m.status != Some(Status::Streaming)));
+    main.say(json!({"type":"result","subtype":"success","is_error":false,"total_cost_usd":0.01,"usage":{}})).await;
+    for _ in 0..300 {
+        if ended(&engine) {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(10)).await;
+    }
+    assert!(ended(&engine) && engine.asides(&id).len() == 1, "it stays through the turn it was asked in");
+    engine
+        .send(SendRequest { conversation_id: Some(id.clone()), ..ask(Area::Project, "go on", choice("claude", Some("sonnet"))) })
+        .unwrap();
+    for _ in 0..300 {
+        if main.lines.lock().unwrap().iter().filter(|l| l["type"] == "user").count() == 2 {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(10)).await;
+    }
+    main.say(json!({"type":"result","subtype":"success","is_error":false,"total_cost_usd":0.01,"usage":{}})).await;
+    for _ in 0..300 {
+        if engine.asides(&id).is_empty() {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(10)).await;
+    }
+    assert!(engine.asides(&id).is_empty(), "the answer goes once the turn after it ends");
+    engine.shutdown();
+}
+
+/// R250, review: a quick question stops as soon as any reading of its AI's account shows paid use, which nobody approved for it.
+#[tokio::test]
+async fn r250_a_quick_question_stops_when_a_reading_shows_paid_use() {
+    let dir = tempfile::tempdir().unwrap();
+    let (spawn, made) = pipes();
+    let engine = two_vendors(dir.path(), spawn);
+    let project = engine.add_project(&dir.path().to_string_lossy()).unwrap();
+    let id = engine
+        .send(SendRequest { project_id: Some(project.id), ..ask(Area::Project, "refactor it", choice("claude", Some("sonnet"))) })
+        .unwrap();
+    let mut main = next_pipe(&made).await;
+    main.say(json!({"type":"system","subtype":"init","session_id":"s1","model":"claude-sonnet-5-5"})).await;
+    main.say(json!({"type":"stream_event","parent_tool_use_id":null,"event":{"type":"content_block_delta","delta":{"type":"text_delta","text":"Reading."}}})).await;
+    tokio::time::sleep(Duration::from_millis(50)).await;
+    engine.ask_aside(&id, "why that file?", None).unwrap();
+    let _side = next_pipe(&made).await;
+    let paid = faber_engine::signals::Signals { overage_active: Some(true), ..Default::default() };
+    engine.note_account_events(Vendor::Claude, vec![faber_engine::events::EngineEvent::Signals(paid)]);
+    for _ in 0..300 {
+        if engine.asides(&id)[0].state != "running" {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(10)).await;
+    }
+    let a = &engine.asides(&id)[0];
+    assert_eq!((a.state, a.error.as_deref()), ("failed", Some("error.quotaOut")));
+    engine.shutdown();
 }
 
 /// R161, review: a helper at work counts against its vendor's quota while it runs, and stops, telling the agent why, as soon

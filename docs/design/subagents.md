@@ -31,7 +31,10 @@ helpers included, read as working again with the new reply.
 A Codex subagent (`spawn_agent`, started only when the person asks for one) is the same row. Codex gives it a path instead of a description, so its title is the
 path's last part with spaces (`/root/read_docs` reads "read docs"), and it has no kind. Its approvals show on the
 conversation's own card, since the person cannot open the subagent; one that arrives after the reply ended is refused,
-and Stop and closing the conversation reach the subagent too. What a subagent still does after its reply ended reaches
+and Stop and closing the conversation reach the subagent too. With any subagent or helper at work, Stop asks first in place of
+its button: one line in the second ink saying how many it ends, then "Stop all" (the Stop look) and "Keep working" (the
+accent, focused, and Escape picks it); the question goes by itself when they are done. A message written meanwhile never
+stops one. What a subagent still does after its reply ended reaches
 no reply, so its step reads "stopped". Codex counts each thread's usage on its own, so the
 engine adds the subagent's tokens and cost to the reply that started it, and marks the reply's usage incomplete when a
 subagent is still at work as it ends.
@@ -59,7 +62,12 @@ helper tool existed keeps its Codex thread without it, since Codex takes dynamic
 A page a project's agent opened in Faber's browser (R161 step 7) is a card among the reply's files, in the file card's
 surface: the picture the browser took of the page's top (a 16:10 crop at most 480 px wide, the page loaded at 1280 by 800
 and drawn at 0.375), then the page's title over its site in the third ink, both ellipsized, and "See the page". The
-title and address come from Faber's own first lines of the answer, never from the page's words. "See the page" opens it
+title and address come from Faber's own first lines of the answer, never from the page's words. Inside the page, where the agent last clicked or typed carries a 2 px ring (#4c8dff, 6 px radius, a 12% fill,
+4 px outside the thing) and a 20 px pointer of the same blue with a white edge at its middle: the page has none of
+Faber's tokens, so the colours are fixed; nothing moves, so no motion level applies. An app the agent
+started on this computer (the app pane) has the same card with no picture: "Your app, running here" over its address
+and port in the third ink, read from a line of a command's output that says a server is up there (never from an error
+line), and "See the page" opens it the same way. "See the page" opens it
 in the running column, the subagent's place: the same head (back arrow, the title, close; once a link or redirect
 leaves the card's site, the title is the site the page is on now), a meta line with the site it is on now,
 and under it a box that fills the rest of the column, in the third surface with the hairline edge, over which the page
@@ -68,7 +76,17 @@ size, when the window does and once the column has slid in; when the box goes, t
 it keeps drawing, and it closes after five minutes nobody used it. Opening a subagent closes the page and the other way
 round. Known limit: the page is a native view over the screen, so a menu or toast that would cover the column passes
 under it. While it is on screen the page is the person's: they click and type in it, and the agent's call waits for them
-to go back. A page clicked through several times is one card, its latest. Where the page asks for a login, a captcha or a
+to go back. A page clicked through several times is one card, its latest. Under the box, once the agent did more than one thing in the
+browser during the reply, the log of its steps fills at most a third of the column, oldest first, one quiet row each in the
+third ink (a number in the data face, then the step's words; what the agent typed never shows, only the field), the step
+on view in the first ink on the second surface. Picking a step puts the picture taken after it in the box, from the page's
+top, and moves the live page out of the window; the latest step, or "Back to the live page" above the log, brings it back.
+Arrow keys, Home and End walk the log. Nothing in it moves. A check at several screen sizes is one step, "Checked it on 6
+screen sizes", and its log shows even when it is the reply's only step; picking it, even as the latest, puts a grid in
+the box instead of one picture: each size's picture whole at its own shape (columns of at least 132 px, at most 240 px
+tall, the hairline edge, 4 px radius), its name under it in the third ink and the data size ("Phone · 390 × 844"), and
+"Runs past the edge" in the conversation's amber where the page is wider than that screen or the edge cuts something. A
+size with no picture keeps its place as a plain block of the second surface. Where the page asks for a login, a captcha or a
 payment the card has one line in the conversation's other amber, with the 2 px edge of a stuck subagent's line: "Your
 turn: log in on this page", and no picture, since one could hold what the person typed; the agent cannot click or type
 there.

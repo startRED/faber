@@ -46,7 +46,7 @@ check('checks: a reply that changed files shows Faber checking it, then what pas
     const why = line.querySelector<HTMLDetailsElement>('details')!;
     equal(why.querySelector('summary')!.textContent, t('checks.why'));
     ok(why.querySelector('pre')!.textContent!.includes('error TS2322'), 'the short failure is behind it');
-    equal(failed.root.querySelector('.woke')!.textContent, t('wake.checksFixing', { checks: 'npm run lint' }), 'the fix turn is a quiet line');
+    equal(failed.root.querySelector('.woke'), null, "Faber's own message takes no row");
   } finally {
     failed.close();
   }
@@ -58,5 +58,30 @@ check('checks: a reply that changed files shows Faber checking it, then what pas
     equal(line.querySelector('p')!.textContent, t('checks.needsYou', { n: 1, checks: 'npm run lint' }));
   } finally {
     needs.close();
+  }
+});
+
+check('checks: while Faber asks git whether a reply changed files, the newest reply says so, and only it', () => {
+  const done: Message = { id: 'a', role: 'assistant', text: 'Ran the script.', at: 1, status: 'done', vendor: 'claude', model: 'claude-sonnet-5-5' };
+  const root = document.createElement('div');
+  document.body.append(root);
+  const dispose = render(
+    () => createComponent(Thread, { messages: [question, { ...done, id: 'old' }, question, done], from: 0, conversationId: 'checks-check', options: [], onBranch: () => {}, weighing: true }),
+    root,
+  );
+  try {
+    const lines = root.querySelectorAll('.checks[data-state="weighing"]');
+    equal(lines.length, 1, 'one line, on the newest reply');
+    equal(lines[0]!.textContent, t('checks.weighing'));
+    ok(root.querySelectorAll('article.ai')[1]!.contains(lines[0]!));
+  } finally {
+    dispose();
+    root.remove();
+  }
+  const quiet = mount([question, done]);
+  try {
+    equal(quiet.root.querySelector('.checks'), null, 'nothing once git answered');
+  } finally {
+    quiet.close();
   }
 });

@@ -9,7 +9,7 @@
 
 use super::*;
 use crate::budget::{Reach, Why};
-use crate::model::{AutoAnswer, Away, KeepGoing, KeepWait, Wake};
+use crate::model::{AutoAnswer, Away, KeepGoing, KeepWait, Wake, WrapUp};
 
 /// What the agent is told at each turn Faber sends. It is for the model, so it is English like every prompt of the engine;
 /// the person sees `wake.keepGoing` in their language instead. It names no project's own tools: the project's
@@ -19,14 +19,16 @@ Continue with the next item of your plan, or take the next task from the project
 and check it the way the project says. Do not stop to propose work or to ask for a go-ahead: decide what is yours to decide. \
 Waiting on CI, a queue, a build, a monitor or a review is never a reason to stop: check it again, or do the next item meanwhile. \
 Stop only when the whole request is done and verified, or when only the person can decide something; in that case ask it with your \
-question tool when you have one, and say exactly what you need. When the whole request is done and verified, say so in one short \
-line and end your reply with this line alone: [keep going: stop]";
+question tool when you have one, and say exactly what you need. When the whole request is done and verified, call your wrap_up tool \
+with done set to true; only if you have no wrap_up tool, say so in one short line and end your reply with this line alone: [keep going: stop]";
 
 /// What the agent is told once, when it first says nothing is left: a second look at the original request before Faber believes it.
 pub const CHECK: &str = "Before you stop: reread the person's original request word for word. List anything that is not done or not \
-verified. If anything is left, continue it now. If nothing is left, end your reply with this line alone again: [keep going: stop]";
+verified. If anything is left, continue it now. If nothing is left, call your wrap_up tool with done set to true again; only if you \
+have no wrap_up tool, end your reply with this line alone again: [keep going: stop]";
 
-/// The line the agent ends its reply with when nothing is left. Faber takes it off the answer.
+/// The line the agent ended its reply with when nothing was left, before the closing box's `done` (task 017). Still read for a
+/// release, so a run under way stops, and always taken off the answer.
 pub const STOP: &str = "[keep going: stop]";
 
 /// At most this many turns that did real work Faber sends by itself before it stops and lets the person look. A turn that
@@ -84,12 +86,12 @@ pub enum Next {
 pub struct Ended {
     /// A question the agent asked the person was still unanswered at the end of the turn.
     pub asked: bool,
-    /// The reply ended with [`STOP`].
+    /// The reply ended with [`STOP`], or its closing box says the whole request is done.
     pub said_stop: bool,
+    /// The reply's closing box asks the person something, with buttons Faber can answer for them.
+    pub boxed: bool,
     /// The turn only waited: under a minute, no tool.
     pub idle: bool,
-    /// Faber sent the turn itself (not the person).
-    pub own: bool,
 }
 
 /// How long it rests after `n` failures in a row.
@@ -112,18 +114,28 @@ pub fn failure(kg: &KeepGoing, error: &str) -> Next {
     Next::Wait { secs: backoff(n), why: "retry" }
 }
 
+/// A closing box still waiting for the person's answer.
+pub(super) fn asks(w: &WrapUp) -> bool {
+    !w.done && w.ask.is_some() && !w.actions.is_empty() && w.answered.is_none()
+}
+
 /// The decision after a turn that finished, without the engine: `room` is the door of the AI that answers next (`Err` holds
 /// the reason it says). `kg.work` already counts the turn that ended.
 pub fn next(kg: &KeepGoing, ended: Ended, room: Result<(), &'static str>) -> Next {
     if ended.asked {
         return Next::Halt("reason.keepGoing.asked");
     }
-    // Only the answer to Faber's own check turn ends it: a stop in a turn of the person's is a first stop.
-    if ended.said_stop && kg.checked && ended.own {
+    // A stop after a stop ends it, whoever sent the turn: the person asking "is it done?" between Faber's turns must not keep
+    // it going forever without a word (task 015). A first stop, in any turn, is checked once.
+    if ended.said_stop && kg.checked {
         return Next::Halt("reason.keepGoing.done");
     }
     if kg.work >= MAX_TURNS {
         return Next::Halt("reason.keepGoing.cap");
+    }
+    // The closing box's question waits for the person like a question card, then gets its first button.
+    if ended.boxed && !ended.said_stop {
+        return Next::Wait { secs: QUESTION_WAIT, why: "question" };
     }
     if let Err(why) = room {
         return Next::Halt(why);
@@ -148,6 +160,51 @@ pub fn stop_at(text: &str) -> Option<usize> {
     Some(text[..cut].trim_end().len())
 }
 
+/// Takes every [`STOP`] out of a reply, since it is a signal for Faber and never words for the person (task 015): a line that
+/// holds only it (with the marks a model puts around a line) wherever it is, such as before the answer to a hook, and one at
+/// the very end of the last line. `positions` are offsets into the text in UTF-16 units (the reply's `activity_end` and
+/// `text_breaks`); each one after a cut moves back with it. True when there was one.
+pub fn strip_stop(text: &mut String, positions: &mut [&mut usize]) -> bool {
+    let mark = |c: char| matches!(c, '`' | '*' | '_' | '"' | '\'');
+    let bare = |line: &str| line.trim().trim_matches(|c: char| mark(c) || c == '.').trim().eq_ignore_ascii_case(STOP);
+    let units = |s: &str| s.encode_utf16().count();
+    // Each cut as (start, end) in bytes, in order.
+    let mut cuts = Vec::new();
+    let mut at = 0;
+    for line in text.split_inclusive('\n') {
+        if bare(line) {
+            cuts.push((at, at + line.len()));
+        }
+        at += line.len();
+    }
+    let mut kept = String::with_capacity(text.len());
+    let mut from = 0;
+    for &(start, end) in &cuts {
+        kept.push_str(&text[from..start]);
+        from = end;
+    }
+    kept.push_str(&text[from..]);
+    if let Some(end) = stop_at(&kept) {
+        cuts.push((usize::MAX, usize::MAX));
+        kept.truncate(end);
+    }
+    if cuts.is_empty() {
+        return false;
+    }
+    // Positions move back by the UTF-16 length of every whole-line cut before them; none passes the end.
+    let line_cuts: Vec<(usize, usize)> =
+        cuts.iter().filter(|c| c.0 != usize::MAX).map(|&(start, end)| (units(&text[..start]), units(&text[start..end]))).collect();
+    let trimmed = kept.trim_end().len();
+    kept.truncate(trimmed);
+    let len = units(&kept);
+    for p in positions.iter_mut() {
+        let shift: usize = line_cuts.iter().filter(|(start, _)| *start < **p).map(|(start, n)| (**p - start).min(*n)).sum();
+        **p = (**p - shift).min(len);
+    }
+    *text = kept;
+    true
+}
+
 /// What it did since it was turned on, once that was long enough for the person to be away.
 fn away_of(kg: &KeepGoing) -> Option<Away> {
     let ms = now().saturating_sub(kg.since);
@@ -159,14 +216,25 @@ fn away_of(kg: &KeepGoing) -> Option<Away> {
     })
 }
 
-/// The last line the agent wrote in this conversation, without the marks of a list, a heading or a quote, for the running row.
+/// Where the agent's work stands, for the running row and the done card: the first sentence of its newest closing box, else
+/// what it said it is doing now (task 017), else the last line it wrote, without the marks of a list, a heading or a quote.
 pub(super) fn progress_line(messages: &[Message]) -> Option<String> {
     let text = messages.iter().rev().filter(|m| m.role == Role::Assistant).take(3).find_map(|m| {
+        if let Some(box_) = &m.wrap_up {
+            return Some(crate::progress::first_sentence(&box_.recap));
+        }
+        // Only while the reply works: once it ended, "Fixing the login page" would read as still at it.
+        if m.status == Some(Status::Streaming)
+            && let Some(now) = &m.now
+        {
+            return Some(now.clone());
+        }
         m.text
             .lines()
             .rev()
             .map(|l| l.trim_start_matches(|ch: char| ch.is_whitespace() || "#>*-`".contains(ch)).trim_end())
             .find(|l| !l.is_empty())
+            .map(str::to_string)
     })?;
     Some(match text.char_indices().nth(LINE_CHARS) {
         Some((at, _)) => format!("{}…", text[..at].trim_end()),
@@ -187,10 +255,15 @@ fn first_choices(input: &serde_json::Value) -> Option<(serde_json::Value, Vec<Au
     let mut chosen = vec![];
     for q in input.get("questions")?.as_array()? {
         let question = q.get("question")?.as_str()?.to_string();
-        let first = q.get("options")?.as_array()?.first()?;
-        let label = first.get("label").and_then(|l| l.as_str()).or_else(|| first.as_str())?.to_string();
+        let labels: Vec<String> = q
+            .get("options")?
+            .as_array()?
+            .iter()
+            .filter_map(|o| o.get("label").and_then(|l| l.as_str()).or_else(|| o.as_str()).map(str::to_string))
+            .collect();
+        let (label, others) = labels.split_first()?;
         answers.insert(question.clone(), serde_json::Value::String(label.clone()));
-        chosen.push(AutoAnswer { question, answer: label });
+        chosen.push(AutoAnswer { question, answer: label.clone(), others: others.to_vec() });
     }
     (!chosen.is_empty()).then_some((serde_json::Value::Object(answers), chosen))
 }
@@ -310,7 +383,6 @@ impl Core {
     pub(super) fn keep_going_ended(&mut self, conv: &str, turn_id: Option<&str>) -> Option<String> {
         let reply_id = turn_id?;
         let c = self.convs.get_mut(conv)?;
-        c.keep_going.as_ref()?;
         // Whether Faber sent the turn itself: a turn of the person's in between never takes back a stop the agent already said.
         let own = c
             .messages
@@ -319,19 +391,30 @@ impl Core {
             .and_then(|i| c.messages.get(i))
             .is_some_and(|u| u.wake.as_ref().is_some_and(|w| w.why == "wake.keepGoing"));
         let m = c.messages.last_mut().filter(|m| m.id == reply_id && m.role == Role::Assistant)?;
+        // The stop line leaves every reply, Keep going on or off: an agent told about it once may write it again later.
+        let stripped = {
+            let mut end = m.activity_end.unwrap_or(0);
+            let had_breaks = m.text_breaks.is_some();
+            let mut breaks = m.text_breaks.take().unwrap_or_default();
+            let mut positions: Vec<&mut usize> = std::iter::once(&mut end).chain(breaks.iter_mut()).collect();
+            let found = strip_stop(&mut m.text, &mut positions);
+            if m.activity_end.is_some() {
+                m.activity_end = Some(end);
+            }
+            let len = m.text.encode_utf16().count();
+            breaks.retain(|b| *b < len);
+            m.text_breaks = had_breaks.then_some(breaks);
+            found
+        };
+        // `finish` saves and sends the reply either way.
+        c.keep_going.as_ref()?;
+        let m = c.messages.last_mut()?;
         let ok = m.status == Some(Status::Done);
         let error = m.error.clone().unwrap_or_else(|| "error.turnFailed".into());
         let asked = ok && unanswered_question(m);
-        let said_stop = ok
-            && stop_at(&m.text).is_some_and(|at| {
-                m.text.truncate(at);
-                let len = m.text.encode_utf16().count();
-                m.activity_end = m.activity_end.map(|e| e.min(len));
-                if let Some(breaks) = m.text_breaks.as_mut() {
-                    breaks.retain(|b| *b < len);
-                }
-                true
-            });
+        let done_box = m.wrap_up.as_ref().is_some_and(|w| w.done);
+        let boxed = ok && m.wrap_up.as_ref().is_some_and(asks);
+        let said_stop = ok && (stripped || done_box);
         let idle = ok && m.tools.iter().flatten().next().is_none() && now().saturating_sub(m.at) < QUICK_MS;
         let kg = c.keep_going.as_mut()?;
         // A reply `fail_reply` already failed (and decided on) is not decided on twice.
@@ -354,7 +437,7 @@ impl Core {
         }
         let before = kg.clone();
         self.note_away(conv, reply_id);
-        let decision = next(&before, Ended { asked, said_stop, idle, own }, self.room_next(conv));
+        let decision = next(&before, Ended { asked, said_stop, boxed, idle }, self.room_next(conv));
         // The first stop is asked about once, by the check turn; whatever else follows asks nothing.
         if let Some(kg) = self.convs.get_mut(conv).and_then(|c| c.keep_going.as_mut()) {
             kg.checked = said_stop || (before.checked && !own);
@@ -451,7 +534,16 @@ impl Core {
     /// back, and a message the person left goes first. A rest that has not ended yet holds it (the end of Faber's checks can
     /// call this while it runs).
     pub(super) fn go_on(&mut self, conv: &str, reply_id: &str) {
-        if self.convs.get(conv).and_then(|c| c.keep_going.as_ref()).is_some_and(|k| k.waiting.is_some()) {
+        let Some(c) = self.convs.get(conv) else { return };
+        if c.keep_going.as_ref().is_some_and(|k| k.waiting.is_some()) {
+            return;
+        }
+        // A closing box that asks the person something gets its ten minutes first, however Faber came here (the end of the
+        // turn, Keep going turned on, the end of Faber's checks).
+        let boxed =
+            c.messages.iter().rev().find(|m| m.role == Role::Assistant).filter(|m| m.id == reply_id).and_then(|m| m.wrap_up.as_ref());
+        if boxed.is_some_and(asks) && c.keep_going.as_ref().is_some_and(|k| k.asked_on.as_deref() != Some(reply_id)) {
+            self.arm(conv, reply_id, QUESTION_WAIT * self.keep_pace, "question");
             return;
         }
         match self.room_next(conv) {
@@ -469,17 +561,40 @@ impl Core {
     }
 
     fn send_next(&mut self, conv: &str, reply_id: &str) {
-        let mut text = CONTINUE;
-        if let Some(kg) = self.convs.get_mut(conv).and_then(|c| c.keep_going.as_mut()) {
-            kg.turns += 1;
-            kg.moves = 0;
-            kg.failed_on = None;
-            if kg.checked {
-                text = CHECK;
+        let mut text = CONTINUE.to_string();
+        let mut chosen = None;
+        if let Some(c) = self.convs.get_mut(conv) {
+            chosen = c
+                .messages
+                .iter_mut()
+                .rev()
+                .find(|m| m.role == Role::Assistant)
+                .filter(|m| m.id == reply_id)
+                .and_then(|m| m.wrap_up.as_mut())
+                .filter(|w| asks(w))
+                .and_then(|w| {
+                    w.answered = w.actions.first().cloned();
+                    w.answered.clone()
+                });
+            if let Some(kg) = c.keep_going.as_mut() {
+                kg.turns += 1;
+                kg.moves = 0;
+                kg.failed_on = None;
+                if kg.checked {
+                    text = CHECK.to_string();
+                }
+                if let Some(answer) = &chosen {
+                    kg.answered += 1;
+                    text = format!("{}{text}", answered_for_you(answer));
+                }
             }
         }
         self.save(conv);
-        if let Err(error) = self.send_by_itself(conv, text.into(), Wake::of("wake.keepGoing"))
+        if chosen.is_some() {
+            // The box says which reply Faber chose, and its buttons go.
+            self.push(conv, Some(reply_id), true);
+        }
+        if let Err(error) = self.send_by_itself(conv, text, Wake::of("wake.keepGoing"))
             && !self.reported(conv, &error)
         {
             // A turn that never became a reply (Faber was busy, nothing connected).
@@ -652,7 +767,9 @@ impl Core {
             return;
         }
         if let Some(kg) = c.keep_going.as_mut() {
-            kg.waiting = None;
+            if kg.waiting.take().is_some_and(|w| w.why == "question") {
+                kg.asked_on = Some(reply_id.into());
+            }
             kg.failed_on = None;
         }
         self.go_on(conv, reply_id);
@@ -747,11 +864,17 @@ impl Core {
 }
 
 /// A saved wait's reason as the engine names it.
+/// What the agent reads first when Faber answered its closing box's question for the person: their first button.
+fn answered_for_you(answer: &str) -> String {
+    format!("The person did not answer your question in time, so Faber chose your recommended reply for them: \"{answer}\". ")
+}
+
 fn static_why(why: &str) -> &'static str {
     match why {
         "retry" => "retry",
         "rest" => "rest",
         "busy" => "busy",
+        "question" => "question",
         _ => "start",
     }
 }
@@ -780,7 +903,7 @@ fn drop_own_turns(c: &mut Conversation) {
 mod tests {
     use super::*;
 
-    const DONE: Ended = Ended { asked: false, said_stop: false, idle: false, own: true };
+    const DONE: Ended = Ended { asked: false, said_stop: false, boxed: false, idle: false };
 
     fn wait(secs: f64, why: &'static str) -> Next {
         Next::Wait { secs, why }
@@ -800,11 +923,6 @@ mod tests {
         assert_eq!(next(&kg, Ended { said_stop: true, ..DONE }, Ok(())), Next::Continue);
         let checked = KeepGoing { checked: true, ..kg.clone() };
         assert_eq!(next(&checked, Ended { said_stop: true, ..DONE }, Ok(())), Next::Halt("reason.keepGoing.done"));
-        assert_eq!(
-            next(&checked, Ended { said_stop: true, own: false, ..DONE }, Ok(())),
-            Next::Continue,
-            "a stop in the person's own turn is not the answer to the check"
-        );
         assert_eq!(next(&KeepGoing { work: MAX_TURNS, ..kg.clone() }, DONE, Ok(())), Next::Halt("reason.keepGoing.cap"));
         assert_eq!(next(&kg, DONE, Err("reason.keepGoing.billed")), Next::Halt("reason.keepGoing.billed"));
     }
@@ -845,7 +963,8 @@ mod tests {
         let (answers, chosen) = first_choices(&input).unwrap();
         assert_eq!(answers, serde_json::json!({ "Which database?": "SQLite", "Which port?": "8080" }));
         assert_eq!(chosen.len(), 2);
-        assert_eq!(chosen[0], AutoAnswer { question: "Which database?".into(), answer: "SQLite".into() });
+        assert_eq!(chosen[0], AutoAnswer { question: "Which database?".into(), answer: "SQLite".into(), others: vec!["Postgres".into()] });
+        assert_eq!(chosen[1].others, vec!["9090".to_string()], "the other choices are kept for a change of mind");
         assert_eq!(first_choices(&serde_json::json!({ "questions": [{ "question": "Name?", "options": [] }] })), None);
         assert_eq!(first_choices(&serde_json::json!({})), None);
     }
@@ -865,6 +984,92 @@ mod tests {
         assert_eq!(&code[..stop_at(code).unwrap()], "Changed `a.rs`");
         let quoted = "He said \"done\" [keep going: stop]";
         assert_eq!(&quoted[..stop_at(quoted).unwrap()], "He said \"done\"");
+    }
+
+    fn stripped(text: &str, at: &[usize]) -> (String, Vec<usize>, bool) {
+        let mut text = text.to_string();
+        let mut at = at.to_vec();
+        let found = strip_stop(&mut text, &mut at.iter_mut().collect::<Vec<_>>());
+        (text, at, found)
+    }
+
+    #[test]
+    fn every_stop_line_leaves_the_reply_and_the_places_in_it_move_back_with_it() {
+        let units = |s: &str| s.encode_utf16().count();
+        // At the end, inline or on its own line.
+        assert_eq!(
+            stripped(
+                "All done.
+
+[keep going: stop]
+",
+                &[]
+            )
+            .0,
+            "All done."
+        );
+        assert_eq!(stripped("All done. [keep going: stop]", &[]).0, "All done.");
+        // In the middle, before the answer to a hook, with the marks a model puts around it; what follows moves back.
+        let text = "Checked it.
+**[Keep going: STOP]**
+The hook said ok.";
+        let after = units(
+            "Checked it.
+**[Keep going: STOP]**
+",
+        );
+        let (kept, at, found) = stripped(text, &[3, after, units(text)]);
+        assert!(found);
+        assert_eq!(
+            kept,
+            "Checked it.
+The hook said ok."
+        );
+        assert_eq!(
+            at,
+            vec![
+                3,
+                units(
+                    "Checked it.
+"
+                ),
+                units(&kept)
+            ],
+            "before stays, after moves back, none passes the end"
+        );
+        // A place inside the cut line lands where the line was; a UTF-16 count, not bytes.
+        let (kept, at, _) = stripped(
+            "é
+[keep going: stop]
+fim",
+            &[5],
+        );
+        assert_eq!(
+            (kept.as_str(), at[0]),
+            (
+                "é
+fim", 2
+            )
+        );
+        // A mention inside a sentence is words, and a reply without it is untouched.
+        assert_eq!(
+            stripped("The line [keep going: stop] is for Faber, then more", &[]),
+            ("The line [keep going: stop] is for Faber, then more".into(), vec![], false)
+        );
+        assert_eq!(
+            stripped(
+                "Nothing  
+",
+                &[9]
+            ),
+            (
+                "Nothing  
+"
+                .into(),
+                vec![9],
+                false
+            )
+        );
     }
 
     fn reply(text: &str) -> Message {

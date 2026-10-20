@@ -53,7 +53,7 @@ pub fn transcript(history: &[Message]) -> String {
                 .flatten()
                 .map(|t| format!("\n[{} -> {}]", t.name, cut(t.output.as_deref().unwrap_or_default(), TOOL_CUT)))
                 .collect();
-            format!("{who}: {}{tools}", m.text)
+            format!("{who}: {}{tools}", m.said())
         })
         .collect::<Vec<_>>()
         .join("\n\n")

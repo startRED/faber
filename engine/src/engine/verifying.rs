@@ -284,6 +284,8 @@ impl Core {
         c.weighing = None;
         let last = c.messages.last().is_some_and(|m| m.id == reply_id && m.checks.is_none());
         let idle = self.live.get(conv).is_none_or(|l| l.turn.is_none());
+        // The reply no longer says Faber is looking at git.
+        self.refresh_running();
         if differs && idle && last {
             self.start_checks(conv, reply_id, keep_going, prepared);
             self.save(conv);
@@ -470,6 +472,23 @@ mod tests {
             log: None,
             reason: None,
         }
+    }
+
+    #[test]
+    fn while_git_is_asked_whether_a_reply_changed_files_the_conversation_is_at_work_and_says_so() {
+        let mut c: Conversation = serde_json::from_value(serde_json::json!({
+            "id": "c1", "title": "T", "area": "project", "createdAt": 1, "updatedAt": 1, "messages": []
+        }))
+        .unwrap();
+        let mut reply = Message::new("r".into(), Role::Assistant, "Done.".into(), 2);
+        reply.status = Some(Status::Done);
+        c.messages.push(reply);
+        assert_eq!(super::super::running_item(&c), None, "a finished reply with nothing after it is idle");
+        c.weighing = Some("r".into());
+        let row = super::super::running_item(&c).expect("at work while git answers");
+        assert_eq!((row.state, row.weighing), (crate::model::RunState::Working, true), "the screen shows Stop and the line");
+        c.weighing = None;
+        assert_eq!(super::super::running_item(&c), None);
     }
 
     #[test]

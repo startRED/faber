@@ -158,10 +158,14 @@ mod tests {
     use super::*;
 
     fn dirs(n: usize) -> (tempfile::TempDir, Vec<String>) {
-        // System temp can sit in a folder Faber refuses, so the folders live in the test workspace.
+        // A worktree under `.claude` is refused too, so try the build workspace and then system temp.
         let base = Path::new(env!("CARGO_MANIFEST_DIR")).join("../target/test-workspaces");
         std::fs::create_dir_all(&base).unwrap();
-        let root = tempfile::tempdir_in(base).unwrap();
+        let root = [base, std::env::temp_dir()]
+            .into_iter()
+            .map(|base| tempfile::tempdir_in(base).unwrap())
+            .find(|dir| crate::permissions::checked_folder(dir.path()).is_some())
+            .expect("a folder Faber works in");
         let paths = (0..n)
             .map(|i| {
                 let d = root.path().join(format!("p{i}"));

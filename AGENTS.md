@@ -75,7 +75,8 @@ Read [docs/product-rules.md](docs/product-rules.md) and [docs/product-map.md](do
   reason no default covers.
 - Check the taste cards whose "Touches" match. The review says "cards checked: C00x ok" or names the line that breaks one.
 - Walk it as a newcomer and as a heavy user: first run, no AI connected, empty and waiting states, a 720 px window,
-  reduced motion, the longest language.
+  reduced motion, the longest language. `node scripts/first-user.mjs` has a fresh AI that sees only the screen take a
+  first newcomer pass.
 - Something that goes against a decision ([docs/decisions.md](docs/decisions.md): search it for the words of the change)
   or a card goes to the owner first.
 - How it looks and moves: [docs/design/](docs/design/README.md) (its README and the page of the part you change) and the

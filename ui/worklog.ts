@@ -1,4 +1,4 @@
-import type { ToolUse } from './api.ts';
+import type { Message, ToolUse } from './api.ts';
 import { t } from './i18n.ts';
 import type { Key } from './locales/en.ts';
 
@@ -115,6 +115,9 @@ export const toolLine = (tool: ToolUse): string => {
 
 /** A piece of work the agent handed on: a subagent of its own CLI (`Agent`, `Task`), or a helper from the other AI (`Helper`,
  * Faber's own tool, R161). */
+/** A call of the plan, the now line or the closing box (task 017): drawn as themselves, never as a step. */
+export const isProgressCall = (tool: ToolUse): boolean => tool.name === 'Plan' || tool.name === 'Status' || tool.name === 'WrapUp';
+
 export const isAgentCall = (tool: ToolUse): boolean => !tool.parent && (SUBAGENT.has(tool.name) || tool.name === 'Helper');
 
 export interface AgentStep {
@@ -172,6 +175,28 @@ export function agentState(step: AgentStep, streaming: boolean): AgentState {
   }
   if (declined) return 'declined';
   return ok ? 'done' : 'failed';
+}
+
+/** How many subagents and helpers are still at work, nested ones each counted: what a Stop would end with the turn. A reply
+ * that ended (a message taken into the turn ends the one before it) still holds the background ones it sent and theirs;
+ * the last Stop or error ended everything before it. */
+export function helpersAtWork(messages: Message[] = []): number {
+  const ended = messages.findLastIndex((m) => m.role === 'assistant' && (m.status === 'stopped' || m.status === 'error'));
+  const agent = (tool: ToolUse) => SUBAGENT.has(tool.name) || tool.name === 'Helper';
+  const replies = messages.slice(ended + 1).filter((m) => m.role === 'assistant');
+  // Only agent calls: a long conversation's other steps are never walked. A subagent's own steps land in the reply under
+  // way, so its parent may sit in an earlier one; a subagent's parent is an agent call.
+  const calls = replies.flatMap((m) => (m.tools ?? []).filter(agent).map((tool) => ({ tool, streaming: m.status === 'streaming' })));
+  const open = calls.filter((c) => c.tool.ok === undefined);
+  if (!open.length) return 0;
+  const byId = new Map(calls.map((c) => [c.tool.id, c.tool]));
+  const background = (tool: ToolUse) => {
+    for (let at: ToolUse | undefined = tool, hops = 0; at && hops <= byId.size; at = at.parent ? byId.get(at.parent) : undefined, hops++) {
+      if ((at.input as { run_in_background?: unknown } | undefined)?.run_in_background === true) return true;
+    }
+    return false;
+  };
+  return open.filter((c) => c.streaming || background(c.tool)).length;
 }
 
 /** Whether two lists hold the same tools in the same state, so a message that only grew in text leaves the rows of its tools

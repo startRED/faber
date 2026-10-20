@@ -1,6 +1,6 @@
 # Workflow
 
-How work lands: lane claims, merge on green, the red base and the numbers given at landing.
+How work lands: lane claims, merge on green, the task queue, the direction check, the red base and the numbers given at landing.
 
 ## Lane claims
 
@@ -84,6 +84,23 @@ task back. CI never runs on `claim/` branches.
 
 A session asks the owner only what is the owner's to decide (direction, taste, money), in one short card, and takes the
 next task while the question waits. It stops when `next` says no task is free.
+
+## Direction check
+
+Rules become tests and the queue keeps sessions busy, but nothing else asks whether the work still heads where
+[docs/product/](../product/README.md) says (R243). `node scripts/direction.mjs` asks a fresh read-only Codex session
+(`gpt-6.1-sol`, `codex exec -s read-only`, nothing kept) to read the product pages, the product map with its "Known
+incoherences", the decisions and every queued task, and answer three questions: which goals have no feature yet, which
+features drift from their goal, and which queued tasks no longer serve one. Every finding names the page or decision it
+rests on, and the report says what it could not judge.
+
+It writes `docs/tasks/proposed/REPORT.md` and one proposed task per gap in the task format, each marked as a proposal;
+git ignores the folder, and the queue never reads it. It queues nothing: the owner or the lead session picks a proposal
+by giving it an order and moving it into `docs/tasks/`, and drops a task the report flags only after checking it. A new
+run replaces its own proposals and keeps any other draft there. `--prompt` prints the question without running Codex.
+
+The lead session runs it once a week, and any session runs it before stopping when `tasks.mjs next` says no task is
+free. A run reads about 300 KB of pages, so it costs one long Codex turn of quota and nothing on the PC.
 
 ## Red base
 

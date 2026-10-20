@@ -44,6 +44,12 @@ impl Background {
         }
     }
 
+    /// Whether a background subagent still owes the reply a turn: until it comes back, the main thread ending its message
+    /// does not finish the reply.
+    pub fn owes(&self) -> bool {
+        !self.owed.is_empty()
+    }
+
     /// Keeps the counters of a turn that is not the end of the reply.
     pub fn hold(&mut self, done: EngineEvent) {
         self.held = Some(match self.held.take() {
@@ -134,5 +140,15 @@ mod tests {
         b.ends_reply(&started("c", true, "local_agent"), false);
         assert!(b.ends_reply(&result(None), true), "an interrupt does not wait for what is still out");
         assert!(b.ends_reply(&result(None), false), "and leaves nothing owed for the next reply");
+    }
+
+    #[test]
+    fn a_background_agent_still_out_keeps_the_main_threads_end_from_finishing_the_reply() {
+        let mut b = Background::default();
+        assert!(!b.owes());
+        b.ends_reply(&started("a", true, "local_agent"), false);
+        assert!(b.owes(), "its turn is still to come");
+        b.ends_reply(&result(Some("a")), false);
+        assert!(!b.owes());
     }
 }

@@ -33,6 +33,7 @@ pub fn terminal_reason(raw: &str) -> &'static str {
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum EngineEvent {
+    Commands(Vec<crate::model::Command>),
     Started {
         session_id: String,
         model: String,
@@ -45,6 +46,10 @@ pub enum EngineEvent {
         final_answer: bool,
     },
     Thinking(String),
+    /// The main thread's message ended with `end_turn` (Claude Code's `message_delta`): the agent has said all it will say
+    /// unless a tool call is still open. The CLI's own `result` may come much later (whatever runs after the answer, such as
+    /// the person's Stop hooks), so the screen reads the reply as done now while the engine still waits for `Done`.
+    Settled,
     Tool {
         id: String,
         name: String,
@@ -85,6 +90,13 @@ pub enum EngineEvent {
     /// The agent asked for the project's map (`crate::map`). The engine answers with `Session::helper_reply`.
     MapCall {
         id: String,
+        input: Value,
+    },
+    /// The agent called `plan`, `status` or `wrap_up` (`crate::progress`; `tool` is the name both drivers give it). The engine
+    /// writes it down and answers at once with `Session::helper_reply`.
+    ProgressCall {
+        id: String,
+        tool: &'static str,
         input: Value,
     },
     /// The agent called Faber's helper tool (R161, `crate::helper`): `id` is that tool call. The CLI waits for the answer,
@@ -169,6 +181,19 @@ pub enum EngineEvent {
     },
 }
 
+impl EngineEvent {
+    /// Whether the event is the reply's own words or work, which move it: `Some(true)` from the main thread (it also undoes a
+    /// finish), `Some(false)` from a subagent's tool call or a tool's result.
+    pub fn moves_reply(&self) -> Option<bool> {
+        match self {
+            EngineEvent::Text(_) | EngineEvent::Thinking(_) => Some(true),
+            EngineEvent::Tool { parent, .. } => Some(parent.is_none()),
+            EngineEvent::ToolResult { .. } | EngineEvent::HelperDone { .. } => Some(false),
+            _ => None,
+        }
+    }
+}
+
 /// A user turn: plain text plus optional images.
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct UserTurn {
@@ -215,6 +240,8 @@ pub enum SessionCommand {
         id: String,
         ok: bool,
         text: String,
+        /// JPEG pictures that go with the text, base64, in order: the agent sees them (a check at several screen sizes).
+        pictures: Vec<String>,
     },
     /// Compact the conversation's context now (Claude Code: the `/compact` command as the next line; Codex: the thread's
     /// compaction request). It ends like a turn, with a `Done`.
@@ -261,7 +288,11 @@ impl Session {
         delivered
     }
     pub fn helper_reply(&self, id: &str, ok: bool, text: String) {
-        (self.send)(SessionCommand::HelperReply { id: id.to_string(), ok, text });
+        self.helper_reply_with_pictures(id, ok, text, Vec::new());
+    }
+    /// Like `helper_reply`, with JPEG pictures (base64) the agent sees after the text.
+    pub fn helper_reply_with_pictures(&self, id: &str, ok: bool, text: String, pictures: Vec<String>) {
+        (self.send)(SessionCommand::HelperReply { id: id.to_string(), ok, text, pictures });
     }
     pub fn compact(&self) {
         (self.send)(SessionCommand::Compact);

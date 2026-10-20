@@ -73,14 +73,14 @@ The numbers above are the usual widths. The person can change them, and the shel
   smallest size and the third ink. Opened, once its reply ends, the composer's place holds one card of the composer's
   width: the line "This conversation is archived…" in the second ink and a small Unarchive button at its right.
 - The footer is one row, the person's name when they gave one and Settings, then one thin line per connected vendor: its
-  shape, a 3 px bar and the used share of its tightest quota window, in the small size. Nothing on the line wraps. The
-  window, the reset, how old the reading is, the not-yet-counted estimate and the vendor's name are its tooltip. While
+  shape, a 3 px bar and the used share of its weekly quota window (R177; a vendor that never reported one shows its tightest), in the
+  small size. Nothing on the line wraps. The window, the reset, the other windows with their shares (the five-hour one), how old the reading is, the not-yet-counted estimate and the vendor's name are its tooltip. While
   use is still being counted the share reads "≥ 44%" (the real share can only be higher), with the words in the tooltip
   (C010). The bar is amber only when the engine says the quota is nearly used. The line opens Settings > Accounts and limits.
-  A vendor with no reading yet, or only an expired one, shows "—". The version is not on the sidebar: it is the
+  A vendor with no reading yet, or a weekly reading past its reset, shows "—". The version is not on the sidebar: it is the
   tooltip of the Settings button.
-- Search filters conversation titles and project names on screen; full-text search comes in Phase 2. The percentage and
-  "stopped" tails come with the progress view in Phase 3.
+- Search filters titles and project names, then message text, and opens the message ([search.md](search.md#sidebar-search)). The percentage and "stopped" tails
+  come with the progress view in Phase 3.
 
 ### The new conversation screen
 
@@ -89,10 +89,11 @@ The numbers above are the usual widths. The person can change them, and the shel
   shows whether Chat may change files.
 - A greeting, "Where do we start?", ending with the person's name when they gave one.
 - Three short hand-written suggestions per language, as chips under the composer: one row at the usual text size, the
-  last chip wrapping only on a narrow window or a large text size. Clicking one fills the composer and moves focus there. It sends nothing. A hover changes only the chip's colour.
+  last chip wrapping only on a narrow window or a large text size. A click fills the composer and focuses it, sending nothing; a hover changes only its colour.
 - "Pick up where you left off" lists up to three conversations of both areas under the suggestions: those that need the
   person first, then the most recently updated.
 - The composer keeps its model picker, "AI: choose for me".
+- File mentions, commands and earlier messages share the list over the box ([composer.md](composer.md)).
 - Auto chooses both the model and its effort. A manual model adds an adjacent low, medium or high effort choice,
   defaulting to medium (R102). Each conversation remembers its choice. Changes apply to the next message only (the
   composer does not repeat it), and each answer keeps the effort actually used and shows it in its header. Both CLI drivers always receive that effort.
@@ -112,18 +113,43 @@ The numbers above are the usual widths. The person can change them, and the shel
   when a step up is offered, then the cost in the faint data style. The tokens and how long the cache stays warm are the
   cost's tooltip. There is no model select under an answer: a retry (and the right-click Redo, which names the model)
   uses the composer's current choice.
+- The same line carries the reply's state (the owner, 2026-10-18: "you should have said you finished"), after the buttons, in the
+  quiet ink and the small size, cut with an ellipsis before it pushes a button: "Working" while the agent writes or works,
+  then "Done", "Done · 12 min of work" once the work took a minute or more, and on the newest reply "· updated 3 min ago"
+  ("just now" under a minute, none past a day). A reply that works shows only this text in the row, the buttons join it when
+  it is done, so the row does not grow. The agent is done when its last message ended and no tool call of the reply is open,
+  though the CLI may close its turn up to a minute later (its Stop hooks): from then the work folds into
+  its activity, the buttons appear, the running column and the topbar's count leave it out, and the composer reads Send,
+  where a message waits in the queue. More words after that undo it. The age ticks once a minute on the newest reply only,
+  never while the window is hidden; older replies run no timer. A reply from before the times were kept, a stop and an error
+  say nothing here. Nothing animates.
+- In the work log, what the agent wrote between its steps shows its last two paragraphs; earlier ones wait under a quiet
+  "1 more" link in the third ink (R251). A code block keeps the narration whole. The answer itself never folds.
+- The caret blinks only while words arrive; a reply at work after its words shows its step under them, in the status
+  line's style. Faber's plumbing takes no row: its own message is a loop mark after the next reply's model (R241; the
+  product map's Work log and Faber's own message say the rest).
+- A project agent's plan (R248) sits under the newest reply, above its files, while the agent works and until every step
+  is done: a quiet head "Plan · 2 of 5" in the small size, then one line per step, a small square mark before it: a check
+  and the third ink when done, an accent ring and the full ink on the current one (`aria-current`), plain when still to
+  do; each state is said to a screen reader. What the agent says it is doing now (its `status`, 3 to 6 words) takes the
+  place of the newest step's words under the reply while it works. A reply the agent closed with `wrap_up` ends, above
+  the actions row, with one box on a hairline: the recap, then at most one question in the semibold weight and its one
+  or two replies as buttons, the recommendation the primary one. Only the newest reply, once it is done, offers the
+  buttons; a click sends the button's words as the person's message. A question Faber answered while Keep going ran
+  keeps no buttons: the reply's answers card says what it chose ([keep-going.md](keep-going.md)). Nothing in the plan or the box
+  moves; both wrap at 720 px.
 - There is no permission sentence over a conversation: the mode is a Settings matter.
 - Keep going (R199): the chip, its quiet lines, its quota warning and what it shows on coming back are in
   [keep-going.md](keep-going.md).
 - A project reply that opened, queued or pushed a pull request ends with one pace-style line (R200): its words ("Following
   pull request #93: checks running.") link to the page, and "Stop following" sits beside them while it is open. Only checks
-  that wait for the person turn it amber. When the checks fail, Faber's own message is Keep
-  going's quiet line, naming the pull request and its failed checks.
+  that wait for the person turn it amber. When the checks fail, Faber's own message is the loop
+  mark on the next reply, its tooltip naming the pull request and its failed checks.
 - A project reply that changed files, in full access, ends with Faber's own checks (R146) in the same pace-style line,
   above the pull request's: "Faber is running the checks on these changes…", then "Faber's checks passed (3 checks)." or
   "Faber's checks failed: npm run lint." with "What failed" under it, the work log's disclosure holding each failed check's
-  first three short failures in the data face. Faber's fix turn is Keep going's quiet line ("Faber's checks failed (npm run
-  lint). Faber asked the agent to fix them."); after two in a row, or where Faber does not ask (the reply asked the
+  first three short failures in the data face. Faber's fix turn is the loop mark on the next reply ("Faber's checks failed (npm run
+  lint). Faber asked the agent to fix them." in its tooltip); after two in a row, or where Faber does not ask (the reply asked the
   person something, Keep going stopped on it, the pace is used up), the line turns amber and says it needs the person.
   While the checks run the conversation reads as at work: the composer shows Stop, and a message written then waits in
   the queue. Nothing moves, and no setting or first-run step comes with it.
@@ -131,8 +157,12 @@ The numbers above are the usual widths. The person can change them, and the shel
   (`ui/markdown.tsx`): a block whose source did not change keeps its DOM and only the open one is parsed and sanitised
   again. A tick that changed only the tools builds no text. Everything that reaches the page passes DOMPurify.
 
+- [Queued messages and editing](queue.md).
+
 ### Work log
 
+- The chips' line counts extend into the project's "Changes" view in the running column: git supplies the conversation's
+  whole change, including files changed by commands, so its totals can differ from the tool-input counts below.
 - The work log and a helper's row share one disclosure style (`.disclosure`: a quiet card, a chevron, the hover).
 - Each step is a quiet chip: a verb in the ink color ("Reading", "Running") and what it acts on in the mono face, cut
   in the middle. A tool Faber does not know keeps its own name; an MCP tool reads "Using a tool" with its server's name.
@@ -160,10 +190,9 @@ The numbers above are the usual widths. The person can change them, and the shel
   same ink, in tabular figures, from when the engine saw it start. A long command cuts its own words, never its time.
   The clock ticks every 15 s only while such a step runs and the window shows; the time is hidden from a screen reader,
   since a live region that changed that often would keep talking.
-- While a reply streams, a pulse line sits above the status line: the mark at 10 px inside a 18 px ring whose top arc turns (0.9 s,
-  `transform` only), one word for what it does now (thinking, working, writing) and the seconds since the reply began, in
-  tabular figures. One 1 s clock runs only while the reply streams and the window shows. It is hidden from a screen reader
-  (the status line speaks), and under reduced or no motion the ring stands still: the word and the seconds still carry it.
+- While a reply works, a pulse line sits above the status line: the mark in an 18 px ring whose top arc turns
+  (`--dur-spin`, `transform` only), one word (thinking, working, writing) and the seconds, in tabular figures. One 1 s
+  clock runs only while it works and the window shows. A screen reader skips it; reduced motion stills the ring.
 
 ### Recent folders and environments
 
@@ -179,26 +208,6 @@ projects. Faber has no worktree creation for projects, so an environment has no 
 
 ### Running column
 
-- With nothing running it says "Nothing running" once and has no footer sentence.
-- One block per project, plus one "Chat" block. Each row shows the vendor's shape (a neutral dot while Auto is still
-  choosing the model), the conversation title, the state in words ("Working", "Needs you" or "Choosing the model") and
-  the time since the turn started.
-- An item that needs the user shows the permission card, and the user can answer in place with Allow, Always or Deny.
-  A question the agent asks (`AskUserQuestion`) shows instead as a question card, in the thread and in the column alike.
-  Several questions are steps: a strip of their header words (a number, a tick once answered), one question open at a
-  time in the same cell, so the card keeps one height; the others wait beside it and glide in from the side. Each answer
-  is a tile (radio or checkbox mark that fills with a tick, title, muted description of at most two lines, a small
-  "Recommended" badge), two columns when the card is 640 px wide or more and one below; the chosen tile gets the amber
-  ring. A preview the agent drew sits beside the tiles (below in a narrow card) in a quiet monospace box that fades when
-  the tile in focus changes. Another answer is one quiet button that opens its field. The footer holds "n of m answered",
-  Skip and Send answers (amber, enabled once every question has an answer). Once answered the card in the thread folds away over the
-  exit time while the thread closes up under it. Tiles and steps change colour over the fast time and the mark scales in
-  from half size; under reduced motion everything is instant and the state is still carried by the filled mark, the ring
-  and the tick.
-- Clicking a row opens that conversation, setting the area, the project and the conversation together.
-- The column is closed when the window opens. It opens by itself once for each question it has not yet shown, 1.5 s
-  after the last keystroke in any text field, including questions already waiting at launch. If the user closes it
-  while questions are waiting, those questions never reopen it. Only the button stays amber.
-- Items are grouped by project. Projects that have something needing the user come first, and inside a project the
-  amber item comes first. The order is stable, so rows do not jump.
-- With no items it shows an empty state with Curioso.
+Its rows, cards, file changes and when it opens by itself: [running.md](running.md). "Changes" replaces the running list
+inside that same column, with a way back; it never adds a second column. Like the other side views, opening it makes an
+automatically opened overlay modal. At most one file's patch stays open, and a partial list offers continuation.

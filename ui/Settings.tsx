@@ -10,6 +10,7 @@ import { vendorName } from './models.ts';
 import { animateList } from './motion.ts';
 import { ProjectsSection } from './ProjectSettings.tsx';
 import { Recents } from './Recents.tsx';
+import { SkillsCard } from './Skills.tsx';
 import type { Quotas } from './sidebar.ts';
 
 // Settings: five sections, one grammar. A group is a card, an option is one row (its name and one line at the left, its
@@ -70,6 +71,8 @@ interface Props {
   onClose: () => void;
   /** Opens the account cards; Settings comes back as it was, from `keep`. */
   onOpenSetup: (keep: Keep) => void;
+  /** Closes Settings and plays the tutorial again on a new conversation. */
+  onTour?: () => void;
 }
 
 /** A select for a setting that saves at once: it goes back to the saved value when the save is refused. */
@@ -163,6 +166,27 @@ export function Settings(props: Props) {
                   }}
                 />
               </Opt>
+              {/* The first run's question, here to change (the owner, 2026-10-18): no answer counts as a beginner. */}
+              <Opt id="set-xp" label={t('first.xp.title')} hint={t('set.xpHint')}>
+                <Segmented
+                  bare
+                  id="set-xp-pick"
+                  label={t('first.xp.title')}
+                  value={props.saved.experience ?? 'beginner'}
+                  options={[
+                    ['beginner', t('first.xp.beginner')],
+                    ['experienced', t('first.xp.experienced')],
+                  ]}
+                  onPick={(experience) => void save({ experience })}
+                />
+              </Opt>
+              <Show when={props.onTour}>
+                <Opt id="set-tour" label={t('set.tour')} hint={t('set.tourHint')}>
+                  <button type="button" class="btn" onClick={() => props.onTour?.()}>
+                    {t('set.tourAgain')}
+                  </button>
+                </Opt>
+              </Show>
             </Group>
             <Group title={t('set.group.ai')}>
               <Opt id="set-permissions" label={t('set.permissions')} hint={t(`set.permissions.${mode()}.line`)} more={t(MORE[mode()])}>
@@ -184,7 +208,8 @@ export function Settings(props: Props) {
                   onPick={(webSearch) => void save({ webSearch })}
                 />
               </Opt>
-              <Toggle id="set-hooks" label={t('set.hooksBody')} hint={t('set.hooksHint')} more={t('set.hooksMore')} checked={props.saved.userHooks === true} onChange={(on) => save({ userHooks: on })} />
+              {/* In Full access the person's hooks always run (the CLI's own way), so the switch shows that and cannot change it. */}
+              <Toggle id="set-hooks" label={t('set.hooksBody')} hint={t(mode() === 'dontAsk' ? 'set.hooksLocked' : 'set.hooksHint')} more={t('set.hooksMore')} checked={mode() === 'dontAsk' || props.saved.userHooks === true} disabled={mode() === 'dontAsk'} onChange={(on) => save({ userHooks: on })} />
               <Show when={props.onChatFolder}>
                 <ChatFolder {...props} />
               </Show>
@@ -229,7 +254,11 @@ export function Settings(props: Props) {
             <AccountsSection vendors={props.vendors} quotas={props.quotas} usage={props.usage} now={props.now} onManage={() => props.onOpenSetup({ section: section(), draft: draft() })} />
           </Match>
           <Match when={section() === 'projects'}>
-            <ProjectsSection projects={props.projects ?? []} />
+            <div class="psets">
+              <SkillsCard onError={props.onError} />
+              <SkillsCard servers onError={props.onError} />
+              <ProjectsSection projects={props.projects ?? []} />
+            </div>
           </Match>
           <Match when={section() === 'privacy'}>
             <div class="st-card">

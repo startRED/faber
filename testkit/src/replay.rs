@@ -65,6 +65,9 @@ impl Replay {
     /// One line the app wrote. Returns the lines to send back: the recorded outputs up to the next recorded input.
     pub fn feed(&mut self, line: &str) -> io::Result<Vec<String>> {
         let msg: Value = serde_json::from_str(line).map_err(|e| io::Error::other(format!("not JSON ({e}): {line}")))?;
+        if msg["method"] == "skills/list" && self.entries.get(self.at).is_none_or(|entry| entry.msg["method"] != "skills/list") {
+            return Ok(vec![]);
+        }
         if msg["method"] == "config/read" && self.entries.get(self.at).is_none_or(|entry| entry.msg["method"] != "config/read") {
             return Ok(vec![serde_json::json!({"id":msg["id"],"result":{"config":{}}}).to_string()]);
         }
@@ -94,6 +97,20 @@ mod tests {
 
     fn entry(input: bool, msg: Value) -> Entry {
         Entry { input, msg }
+    }
+
+    #[test]
+    fn slash_skill_discovery_can_be_recorded_or_absent_from_an_older_fixture() {
+        let request = json!({"id":"faber-commands-1","method":"skills/list","params":{"cwds":["project"]}});
+        let turn = json!({"id":3,"method":"turn/start"});
+        let mut old = Replay::new(vec![entry(true, turn.clone())]);
+        assert!(old.feed(&request.to_string()).unwrap().is_empty());
+        old.feed(&turn.to_string()).unwrap();
+        assert!(old.mismatches.is_empty());
+        let answer = json!({"id":"faber-commands-1","result":{"data":[]}});
+        let mut current = Replay::new(vec![entry(true, request.clone()), entry(false, answer.clone())]);
+        assert_eq!(current.feed(&request.to_string()).unwrap(), [answer.to_string()]);
+        assert!(current.mismatches.is_empty());
     }
 
     #[test]

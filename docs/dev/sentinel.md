@@ -43,3 +43,23 @@ Dark Room and pt-BR (`target/faber-test/shots/critique-<screen>-<size>.png`). `n
 copies the photos of the screens the diff touches into `target/faber-test/critique/<label>/` with an index;
 `scripts/shots.test.mjs` keeps the choice of screens. A fresh session scores the `before` and `after` folders out of 40
 with `.claude/skills/visual-critique/SKILL.md`; the score never drops and a touched screen reaches 32.
+
+## First-user review
+
+Checks and the critique know what Faber should look like; a newcomer only knows what the screen says (R244).
+`node scripts/first-user.mjs` starts the hidden test build through `testkit/examples/ux_audit.rs` (first run, no CLI,
+720x480, pt-BR by default; `--size`, `--lang`, `--steps`, `--no-build`) and gives a fresh AI one step at a time: a
+screenshot, the visible text and the controls a screen reader would name, numbered. It answers with one action (click a
+number, type, a key, scroll, done or stuck) and what confused it. The tasks are the first run, a first chat, Projects
+and the language in Settings (`TASKS`), in one app, each starting where the last ended.
+
+The reviewer never sees the code. The default is Haiku through `claude -p --tools ""` with no MCP server, which starts
+with no tool at all (its `init` line lists none); `--agent codex` is gpt-6-luna with its shell, apps, browser and
+computer use switched off and a read-only sandbox. Either runs in an empty folder under the system temp folder, and the
+script refuses one inside the repository. Builds run at idle priority, the reviewer's processes have no window, and no
+CLI runs inside Faber, so its only cost is the reviewer's own calls (about 40 small Haiku turns).
+
+The findings go to `docs/research/first-user-<date>.md`, most serious first, each with what it tried, where it got stuck
+and the step's screenshot in `target/faber-test/first-user/<date>/` (local only). Nothing is fixed from it directly:
+a person reads the list and turns what is real into tasks. `scripts/first-user.test.mjs` keeps the answer parsing, the
+folder check and the report.

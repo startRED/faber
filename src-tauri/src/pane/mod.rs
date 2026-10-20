@@ -17,7 +17,8 @@
 mod native;
 
 use base64::Engine as _;
-use faber_engine::browser::{Browser, MAX_TEXT, MAX_TITLE, MAX_URL, Page, Request, Turn};
+use faber_engine::browser::{Browser, Look, MAX_CUT, MAX_TEXT, MAX_TITLE, MAX_URL, Page, Request, Turn};
+use faber_engine::screens::Viewport;
 use serde_json::{Value, json};
 use std::future::Future;
 use std::pin::Pin;
@@ -49,6 +50,26 @@ fn act_function() -> &'static str {
 }
 /// The picture in the reply is this share of the page's size.
 const PICTURE_SCALE: f64 = 0.375;
+/// The longest side of a picture at a screen size of the agent's, in the picture's pixels, whatever the screen's density.
+const LOOK_SIDE: f64 = 640.0;
+/// How long a page has to lay itself out again at a new screen size before it is looked at.
+const RESIZED: Duration = Duration::from_millis(400);
+
+/// The share of a page at `size` its picture takes: the capture counts each of the screen's device pixels, so a dense phone
+/// screen is scaled down further than a PC's, and every picture's longest side is `LOOK_SIDE`.
+fn look_scale(size: &Viewport) -> f64 {
+    (LOOK_SIDE / (f64::from(size.width.max(size.height)) * size.scale)).min(1.0)
+}
+
+/// The DevTools parameters that draw the page at `size`, as that screen would: its width, height and density, and a phone's
+/// or tablet's layout rules and touch.
+fn metrics(size: &Viewport) -> (Value, Value) {
+    let mobile = size.mobile();
+    (
+        json!({ "width": size.width, "height": size.height, "deviceScaleFactor": size.scale, "mobile": mobile }),
+        json!({ "enabled": mobile, "maxTouchPoints": if mobile { 5 } else { 1 } }),
+    )
+}
 
 /// Whether the pane may load `url`: a web page, never one of Faber's own origins (nor, in a development build, the screen's
 /// own dev server).
@@ -60,6 +81,7 @@ fn allowed(url: &Url) -> bool {
 
 pub struct Pane {
     app: AppHandle,
+    /// Never call a webview getter or await under this lock: `on_page_load` takes it on the window's thread.
     state: Mutex<State>,
     /// The pages that started and the last of them that finished, so an open waits for its own page and never for a late
     /// end of the one before.
@@ -70,6 +92,9 @@ pub struct Pane {
     looking: tokio::sync::watch::Sender<bool>,
     /// Held while an action of the agent changes the page: the person takes the pane only when it is over.
     acting: tokio::sync::Mutex<()>,
+    /// The random name `act.js` gives the ring it draws where the agent acted, so it removes its own ring and never a node of
+    /// the page (each action runs in a world of its own and cannot keep the node itself).
+    mark: String,
 }
 
 #[derive(Default)]
@@ -90,6 +115,15 @@ struct State {
     /// The whole address the last answer to the owner reported (never the cut one the agent gets), which an action only runs on
     /// (the page may have moved since). None until the owner has read or opened a page: nothing is clicked or typed before.
     reported: Option<String>,
+    /// The sites the person went to while the pane was theirs, since the agent's last call (`went_to`).
+    visited: Vec<String>,
+    /// Pages Faber loaded (the agent's, or a card's) that have not finished: that many next finishes are not sites the
+    /// person went to. A load that never finishes leaves one more skipped: the list can fall short, never say more.
+    skip_finish: u32,
+    /// The screen size the agent chose for its pages (`Request::Size`), none for the pane's own; kept until it closes.
+    size: Option<Viewport>,
+    /// The page is drawn at a size of the agent's, not the pane's: the person taking the pane gets the pane's own back.
+    emulated: bool,
 }
 
 /// The screen's boxes the pane is placed over, named by numbers that only grow while the screen lives. A box that let the
@@ -173,6 +207,7 @@ impl Pane {
             opening: tokio::sync::Mutex::new(()),
             looking: tokio::sync::watch::channel(false).0,
             acting: tokio::sync::Mutex::new(()),
+            mark: format!("{:016x}", std::hash::BuildHasher::hash_one(&std::collections::hash_map::RandomState::new(), 0u8)),
         })
     }
 
@@ -187,6 +222,8 @@ impl Pane {
             return Err("only web pages open in Faber's browser".into());
         }
         let before = self.loads.borrow().0;
+        // A page Faber loads is the agent's or a card's, never one the person went to.
+        crate::lock(&self.state).skip_finish += 1;
         self.touch();
         if let Some(webview) = self.webview() {
             if webview.navigate(parsed.clone()).is_ok() {
@@ -196,7 +233,7 @@ impl Pane {
             self.close();
         }
         let window = self.app.get_window("main").ok_or("Faber's window is closed")?;
-        let (loads, app) = (self.loads.clone(), self.app.clone());
+        let (loads, app, pane) = (self.loads.clone(), self.app.clone(), Arc::downgrade(self));
         let builder = WebviewBuilder::new(LABEL, WebviewUrl::External(parsed))
             .incognito(true)
             .on_navigation(allowed)
@@ -206,6 +243,15 @@ impl Pane {
                 PageLoadEvent::Started => loads.send_modify(|(started, _)| *started += 1),
                 PageLoadEvent::Finished => {
                     loads.send_modify(|(started, finished)| *finished = *started);
+                    // A page that finished while the person had the pane is one they went to: the agent hears its site next time.
+                    if let Some(pane) = pane.upgrade() {
+                        let mut s = crate::lock(&pane.state);
+                        if s.skip_finish > 0 {
+                            s.skip_finish -= 1;
+                        } else if s.shown {
+                            went_to(&mut s.visited, payload.url());
+                        }
+                    }
                     // The screen names the page it shows by where it is now, never by the card it was opened from.
                     let _ = app.emit_to("main", "faber:site", payload.url().as_str());
                 }
@@ -230,6 +276,7 @@ impl Pane {
                     let left = s.used.map_or(Duration::ZERO, |u| IDLE.saturating_sub(u.elapsed()));
                     if left.is_zero() && !s.shown {
                         s.idle_watch = false;
+                        s.visited.clear();
                         Err(s.webview.take())
                     } else {
                         Ok(left.max(Duration::from_secs(1)))
@@ -253,6 +300,8 @@ impl Pane {
             let mut s = crate::lock(&self.state);
             s.shown = false;
             s.reported = None;
+            s.visited.clear();
+            (s.size, s.emulated) = (None, false);
             s.webview.take()
         };
         self.looking.send_replace(false);
@@ -283,6 +332,15 @@ impl Pane {
             webview.set_size(LogicalSize { width, height }).is_ok() && webview.set_position(LogicalPosition { x, y }).is_ok()
         })
         .await;
+        // The person sees the page at the pane's own size, never at a screen size the agent chose; its next call draws it so
+        // again. Under `acting`, so a check at several sizes never changes the size under their hands.
+        if placed && crate::lock(&self.state).emulated {
+            let _acting = self.acting.lock().await;
+            if self.call("Emulation.clearDeviceMetricsOverride", json!({})).await.is_ok() {
+                let _ = self.call("Emulation.setTouchEmulationEnabled", json!({ "enabled": false })).await;
+                crate::lock(&self.state).emulated = false;
+            }
+        }
         self.touch();
         placed
     }
@@ -317,6 +375,9 @@ impl Pane {
         let shown = self.load(url).is_ok();
         if shown {
             let mut s = crate::lock(&self.state);
+            if s.owner.as_deref() != Some(conversation) {
+                s.visited.clear();
+            }
             s.owner = Some(conversation.to_string());
             s.reported = None;
         }
@@ -392,7 +453,8 @@ impl Pane {
 
     /// Runs `act.js` on the page and answers what it said: whether it did it, and what is the person's turn there. Its
     /// reasons are codes; the words are Faber's, and the page's own words in them are quoted.
-    async fn run_act(&self, request: Value, taken: u64) -> Result<(bool, Option<Turn>), String> {
+    async fn run_act(&self, mut request: Value, taken: u64) -> Result<(bool, Option<Turn>), String> {
+        request["mark"] = json!(self.mark);
         let changes = matches!(request["kind"].as_str(), Some("click" | "type" | "back"));
         let value = self.evaluate(&format!("({})({request})", act_function()), taken, changes).await?;
         if !value.is_object() {
@@ -420,11 +482,73 @@ impl Pane {
         })
     }
 
+    /// Draws the page at `size` (none: the pane's own), unless the person took the pane since the call began: under `acting`,
+    /// so their taking it waits for the change and then gets the pane's own size back (`place`).
+    async fn emulate(&self, size: Option<Viewport>, taken: u64) -> Result<(), String> {
+        let _acting = self.acting.lock().await;
+        self.person_took_it(taken)?;
+        let Some(size) = size else {
+            if crate::lock(&self.state).emulated {
+                self.call("Emulation.clearDeviceMetricsOverride", json!({})).await?;
+                self.call("Emulation.setTouchEmulationEnabled", json!({ "enabled": false })).await?;
+                crate::lock(&self.state).emulated = false;
+            }
+            return Ok(());
+        };
+        let (screen, touch) = metrics(&size);
+        crate::lock(&self.state).emulated = true;
+        self.call("Emulation.setDeviceMetricsOverride", screen).await?;
+        self.call("Emulation.setTouchEmulationEnabled", touch).await?;
+        Ok(())
+    }
+
+    /// The page at each of `sizes`, a picture and whether it fits each, then back at the size it had. A page that is the
+    /// person's turn stops the check there, with no picture.
+    async fn looks(&self, sizes: &[Viewport], taken: u64) -> Result<Vec<Look>, String> {
+        let looked = self.each_size(sizes, taken).await;
+        // Back at the size it had, whether or not every size was looked at; one the person took gets the pane's own (`place`).
+        let size = crate::lock(&self.state).size;
+        let back = self.emulate(size, taken).await;
+        let looks = looked?;
+        back?;
+        tokio::time::sleep(RESIZED).await;
+        Ok(looks)
+    }
+
+    async fn each_size(&self, sizes: &[Viewport], taken: u64) -> Result<Vec<Look>, String> {
+        let mut looks = Vec::new();
+        for size in sizes {
+            self.emulate(Some(*size), taken).await?;
+            tokio::time::sleep(RESIZED).await;
+            let expression = format!(
+                "(() => {{ const act = {}; const turn = act({{ kind: 'read', watch: true }}).turn; const fits = act({{ kind: 'fits' }}); \
+                 return {{ turn: fits.turn || turn, wider: fits.wider, cut: fits.cut, x: scrollX, y: scrollY }}; }})()",
+                act_function()
+            );
+            let context = self.world().await?;
+            let value = self.evaluate_in(context, &expression, taken, false).await?;
+            let turn = value["turn"].as_str().and_then(Turn::from_words);
+            let wider = value["wider"].as_u64().unwrap_or(0).min(100_000) as u32;
+            let cut: Vec<String> =
+                value["cut"].as_array().into_iter().flatten().filter_map(Value::as_str).take(MAX_CUT).map(str::to_string).collect();
+            let (picture, turn) = match turn {
+                Some(turn) => (None, Some(turn)),
+                None => self.picture(context, &value, Some(size), taken).await?,
+            };
+            looks.push(Look { size: *size, picture, wider, cut, turn });
+            if turn.is_some() {
+                break;
+            }
+        }
+        Ok(looks)
+    }
+
     async fn act_page(self: Arc<Self>, conversation: String, request: Request) -> Result<Page, String> {
         let _turn = self.take().await?;
-        let (person, taken, reported) = {
-            let mut s = crate::lock(&self.state);
-            (std::mem::take(&mut s.handed_back), s.taken, s.reported.clone())
+        let (mine, taken, reported) = {
+            let s = crate::lock(&self.state);
+            // What the person did on another conversation's page is never this agent's to hear.
+            (s.owner.as_deref() == Some(conversation.as_str()), s.taken, s.reported.clone())
         };
         let mut loads = self.loads.subscribe();
         let before = self.loads.borrow().0;
@@ -432,6 +556,9 @@ impl Pane {
             Request::Open(url) => {
                 self.load(url)?;
                 let mut s = crate::lock(&self.state);
+                if !mine {
+                    s.visited.clear();
+                }
                 s.owner = Some(conversation);
                 s.reported = None;
                 None
@@ -447,7 +574,22 @@ impl Pane {
             }
             Request::Scroll { down } => Some(json!({ "kind": "scroll", "down": down })),
             Request::Back => Some(json!({ "kind": "back" })),
+            Request::Size(size) => {
+                crate::lock(&self.state).size = *size;
+                None
+            }
+            Request::Sizes(_) => None,
         };
+        // The size the agent chose holds for every call, after the person had the pane and on a page just opened; a check at
+        // several sizes that was cut off (an error, the engine's deadline) left another drawn, which goes here.
+        let (size, emulated) = {
+            let s = crate::lock(&self.state);
+            (s.size, s.emulated)
+        };
+        if size.is_some() || emulated {
+            self.touch();
+            self.emulate(size, taken).await?;
+        }
         let mut navigated = matches!(request, Request::Open(_));
         // The turn the action itself refused: the page is the same and stays the person's, whatever the next look says.
         let mut refused = None;
@@ -466,18 +608,39 @@ impl Pane {
             let _ = tokio::time::timeout(LOAD, loads.wait_for(|(_, finished)| *finished > before)).await;
             // Pages that draw themselves after the load get a moment.
             tokio::time::sleep(Duration::from_millis(600)).await;
-        } else if !matches!(request, Request::Read) && refused.is_none() {
+        } else if matches!(request, Request::Size(_)) {
+            tokio::time::sleep(RESIZED).await;
+        } else if !matches!(request, Request::Read | Request::Sizes(_)) && refused.is_none() {
             tokio::time::sleep(Duration::from_millis(300)).await;
         }
-        let (page, href) = self.read(refused, person, taken).await?;
-        crate::lock(&self.state).reported = Some(href);
+        let looks = match &request {
+            Request::Sizes(sizes) => {
+                self.touch();
+                self.looks(sizes, taken).await?
+            }
+            _ => Vec::new(),
+        };
+        let (mut page, href) = self.read(refused, taken).await?;
+        page.looks = looks;
+        let mut s = crate::lock(&self.state);
+        // The person took the pane after the last look: this answer is old, and their use is the next one's to tell.
+        if s.taken != taken {
+            return Err("the person took over Faber's browser; ask them, or try again once they go back".into());
+        }
+        // Taken only by an answer that reaches the agent: a call that failed leaves them for the next.
+        let used = std::mem::take(&mut s.handed_back);
+        let visited = std::mem::take(&mut s.visited);
+        if mine {
+            (page.person, page.visited) = (used, visited);
+        }
+        s.reported = Some(href);
         Ok(page)
     }
 
     /// The page as it is: its address, title and text, and a picture of what is in view, none on a page that is the
     /// person's turn, where it could hold what they typed. `refused` is the turn an action just refused there. Answers, besides
     /// the page, its whole address, which stays in the shell.
-    async fn read(&self, refused: Option<Turn>, person: bool, taken: u64) -> Result<(Page, String), String> {
+    async fn read(&self, refused: Option<Turn>, taken: u64) -> Result<(Page, String), String> {
         // Cut inside the page, so a huge page never crosses into Faber whole; one more character tells the engine it was cut.
         // Its turn is looked at in the same step as its text, and what changes in the page from then on is counted.
         let expression = format!(
@@ -490,41 +653,93 @@ impl Pane {
         let context = self.world().await?;
         let value = self.evaluate_in(context, &expression, taken, false).await?;
         let text = |key: &str| value[key].as_str().unwrap_or_default().to_string();
-        let at = |key: &str| value[key].as_f64().filter(|v| v.is_finite() && *v >= 0.0).unwrap_or(0.0).min(1e7);
         let mut turn = refused.or_else(|| Turn::from_words(&text("turn")));
+        let size = crate::lock(&self.state).size;
         let mut picture = None;
         if turn.is_none() {
-            self.person_took_it(taken)?;
-            picture = self
-                .call(
-                    "Page.captureScreenshot",
-                    json!({
-                        "format": "jpeg",
-                        "quality": 60,
-                        "clip": { "x": at("x"), "y": at("y"), "width": SIZE.width, "height": SIZE.height, "scale": PICTURE_SCALE }
-                    }),
-                )
-                .await
-                .ok()
-                .and_then(|shot| shot["data"].as_str().and_then(|d| base64::engine::general_purpose::STANDARD.decode(d).ok()));
-            // A login or a payment that came up while the picture was taken is in it, and so is anything the page changed
-            // meanwhile (it cannot be told from here what it was): the picture is dropped. A page that went to another document
-            // took the world with it.
-            let settle = format!("({})({{ kind: 'settle' }})", act_function());
-            match self.evaluate_in(context, &settle, taken, false).await {
-                Ok(after) => {
-                    turn = after["turn"].as_str().and_then(Turn::from_words);
-                    if turn.is_some() || after["changed"].as_bool() != Some(false) {
-                        picture = None;
-                    }
-                }
-                Err(_) if self.person_took_it(taken).is_ok() => picture = None,
-                Err(e) => return Err(e),
-            }
+            (picture, turn) = self.picture(context, &value, size.as_ref(), taken).await?;
         }
         self.person_took_it(taken)?;
-        let page = Page { url: text("url"), title: text("title"), text: text("text"), picture, turn, person };
+        let page = Page { url: text("url"), title: text("title"), text: text("text"), picture, turn, size, ..Page::default() };
         Ok((page, text("href")))
+    }
+
+    /// A picture of what is in view at `size` (none: the pane's own), from where `seen` says the page is scrolled to, after a
+    /// look that started watching the page (`kind: 'read', watch: true`). A login or a payment that came up while it was
+    /// taken is in it, and so is anything the page changed meanwhile (it cannot be told from here what it was): the picture
+    /// is dropped, and the turn the page shows then is answered. A page that went to another document took the world with it.
+    async fn picture(
+        &self,
+        context: i64,
+        seen: &Value,
+        size: Option<&Viewport>,
+        taken: u64,
+    ) -> Result<(Option<Vec<u8>>, Option<Turn>), String> {
+        let at = |key: &str| seen[key].as_f64().filter(|v| v.is_finite() && *v >= 0.0).unwrap_or(0.0).min(1e7);
+        let (width, height, scale) = match size {
+            Some(size) => (f64::from(size.width), f64::from(size.height), look_scale(size)),
+            None => (SIZE.width, SIZE.height, PICTURE_SCALE),
+        };
+        self.person_took_it(taken)?;
+        let mut picture = self
+            .call(
+                "Page.captureScreenshot",
+                json!({
+                    "format": "jpeg",
+                    "quality": 60,
+                    "clip": { "x": at("x"), "y": at("y"), "width": width, "height": height, "scale": scale }
+                }),
+            )
+            .await
+            .ok()
+            .and_then(|shot| shot["data"].as_str().and_then(|d| base64::engine::general_purpose::STANDARD.decode(d).ok()));
+        let settle = format!("({})({{ kind: 'settle' }})", act_function());
+        let mut turn = None;
+        match self.evaluate_in(context, &settle, taken, false).await {
+            Ok(after) => {
+                turn = after["turn"].as_str().and_then(Turn::from_words);
+                if turn.is_some() || after["changed"].as_bool() != Some(false) {
+                    picture = None;
+                }
+            }
+            Err(_) if self.person_took_it(taken).is_ok() => picture = None,
+            Err(e) => return Err(e),
+        }
+        Ok((picture, turn))
+    }
+}
+
+/// The most sites the agent hears the person went to: the latest of them.
+const MAX_VISITED: usize = 5;
+
+/// Notes a site the person went to, for the agent and so for its vendor: only the site's own name (`docs.github.com` is
+/// `github.com`, since a subdomain can be a token or a tenant), only for web pages with a plain name, never a local address
+/// or an intranet name, once for pages in a row on the same site, the latest few kept. A page that finishes after the person
+/// left the pane is not counted: the list can fall short, never say more.
+fn went_to(visited: &mut Vec<String>, url: &Url) {
+    let Some(host) = url.domain() else { return };
+    let host = host.trim_end_matches('.').to_ascii_lowercase();
+    let plain = host.len() <= 253 && host.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'-' || b == b'.');
+    let labels: Vec<&str> = host.split('.').collect();
+    if !matches!(url.scheme(), "http" | "https") || !plain || labels.len() < 2 || labels.iter().any(|l| l.is_empty() || l.len() > 63) {
+        return;
+    }
+    let tld = labels[labels.len() - 1];
+    // Names that only mean something inside a network (RFC 6762, 6761, and the usual intranet ones) are never told.
+    if matches!(
+        tld,
+        "local" | "localhost" | "internal" | "intranet" | "corp" | "home" | "lan" | "localdomain" | "test" | "invalid" | "arpa" | "private"
+    ) {
+        return;
+    }
+    // The last two labels, always: under a country's second level that is only `co.uk`, which says little, but any rule that
+    // keeps a third label lets a subdomain through somewhere (`token.org.de`).
+    let site = labels[labels.len() - 2..].join(".");
+    if visited.last() != Some(&site) {
+        visited.push(site);
+    }
+    if visited.len() > MAX_VISITED {
+        visited.remove(0);
     }
 }
 
@@ -554,6 +769,40 @@ impl Browser for PaneBrowser {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_agent_hears_the_sites_the_person_went_to_by_name_once_each_in_a_row_and_only_the_latest() {
+        let mut visited = Vec::new();
+        for url in [
+            "https://www.GitHub.com/a?code=secret",
+            "https://docs.github.com./b",
+            "https://docs.rs/",
+            "about:blank",
+            "http://localhost:3000/",
+            "http://192.168.0.1/",
+            "http://[::1]/",
+            "http://intranet/",
+            "https://a1b2c3d4e5.ngrok.io/",
+            "https://shop.example.co.uk/",
+            "https://ignore.previous!instructions.com/",
+            "https://secret-token.box.com/",
+            "https://alice.corp/",
+            "https://printer.local/",
+            "https://secret-token.org.de/",
+        ] {
+            went_to(&mut visited, &url.parse().unwrap());
+        }
+        assert_eq!(
+            visited,
+            ["docs.rs", "ngrok.io", "co.uk", "box.com", "org.de"],
+            "site names only, never an address, a token or a local name; the latest five"
+        );
+        for n in 0..9 {
+            went_to(&mut visited, &format!("https://s{n}.org/").parse().unwrap());
+        }
+        assert_eq!(visited.len(), MAX_VISITED);
+        assert_eq!(visited.last().map(String::as_str), Some("s8.org"));
+    }
 
     #[test]
     fn boxes_that_let_go_place_no_more_and_an_older_one_cannot_take_the_pane_from_a_newer() {
@@ -601,6 +850,20 @@ mod tests {
             drop(busy);
             assert_eq!(taking.await, "placed", "and goes on once the action is over");
         });
+    }
+
+    #[test]
+    fn a_page_at_a_screen_size_is_drawn_as_that_screen_and_pictured_at_one_size() {
+        for size in faber_engine::screens::SIZES {
+            let side = f64::from(size.width.max(size.height)) * size.scale * look_scale(&size);
+            assert!((side - LOOK_SIDE).abs() < 0.01, "{} at {}x is pictured {side} px long", size.name(), size.scale);
+            let (screen, touch) = metrics(&size);
+            assert_eq!(
+                (screen["width"].as_u64(), screen["deviceScaleFactor"].as_f64(), screen["mobile"].as_bool()),
+                (Some(u64::from(size.width)), Some(size.scale), Some(size.mobile()))
+            );
+            assert_eq!(touch["enabled"].as_bool(), Some(size.mobile()), "touch on phones and tablets only");
+        }
     }
 
     #[test]

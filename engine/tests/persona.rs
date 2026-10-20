@@ -21,3 +21,13 @@ fn persona_puts_the_reply_language_first_and_above_the_project() {
     assert!(text.contains("even when the project, its instructions, files or tools use another"));
     assert!(text.contains("progress notes"));
 }
+
+/// R10: quality first, economy before speed. Both drivers get the persona, so the order is checked once here.
+#[test]
+fn persona_puts_economy_before_speed_as_r10_says() {
+    let text = persona(&PersonaInput { name: None });
+    let (quality, economy, speed) =
+        (text.find("Quality first").unwrap(), text.find("then economy").unwrap(), text.find("then speed").unwrap());
+    assert!(quality < economy && economy < speed, "{text}");
+    assert!(!text.contains("then speed, then cost"));
+}

@@ -2,6 +2,7 @@ import { createComponent } from 'solid-js';
 import { render } from 'solid-js/web';
 import themes from '../../src-tauri/src/themes.json';
 import { Composer } from '../../ui/Composer.tsx';
+import { ImageViewerHost } from '../../ui/ImageViewer.tsx';
 import { check, equal, ok } from './check.ts';
 
 check('composer: wrapped text grows to 40vh, scrolls inside and shrinks after sending', async () => {
@@ -80,5 +81,76 @@ check('composer: typed text survives a reload and is forgotten once sent', async
     third.close();
   } finally {
     localStorage.removeItem('faber.unsent.check-reload');
+  }
+});
+
+check('composer: a dropped image shows as a thumbnail with its own remove button, not as a name', async () => {
+  const root = document.createElement('div');
+  root.dataset.motion = 'none';
+  document.body.append(root);
+  let sent = 0;
+  const dispose = render(() => createComponent(Composer, {
+    vendors: ['codex'], options: [], choice: { vendor: 'auto' }, busy: false, placeholder: 'Ask',
+    onChoice: () => {}, onStop: () => {}, onWarm: () => {}, onPause: () => {},
+    onSend: (draft) => { sent = draft.images.length; },
+  }), root);
+  const settle = () => new Promise((resolve) => setTimeout(resolve, 60));
+  // Reading a dropped file takes as long as the system's file reader does: a slow runner needs more than one pause.
+  const drawn = async (n: number) => {
+    for (let i = 0; i < 50 && root.querySelectorAll('.attach-thumb img').length !== n; i++) await settle();
+  };
+  try {
+    const form = root.querySelector('form')!;
+    const drop = new Event('drop', { bubbles: true, cancelable: true });
+    const files = new DataTransfer();
+    for (const name of ['one.png', 'two.png']) files.items.add(new File([new Uint8Array([137, 80, 78, 71])], name, { type: 'image/png' }));
+    Object.defineProperty(drop, 'dataTransfer', { value: files });
+    form.dispatchEvent(drop);
+    await drawn(2);
+    equal(root.querySelectorAll('.attach-thumb img').length, 2, 'each image is drawn');
+    ok(!root.textContent!.includes('one.png'), 'an image is not named in a chip');
+    root.querySelector<HTMLButtonElement>('.attach-remove')!.click();
+    await settle();
+    equal(root.querySelectorAll('.attach-thumb img').length, 1, 'its button takes out only that image');
+    form.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
+    await settle();
+    equal(sent, 1, 'only the image left goes out');
+    equal(root.querySelectorAll('.attach-thumb').length, 0, 'sending clears the thumbnails');
+  } finally {
+    dispose();
+    root.remove();
+  }
+});
+
+check('composer: a click on a thumbnail opens the image large, and Escape closes it', async () => {
+  const root = document.createElement('div');
+  root.dataset.motion = 'none';
+  document.body.append(root);
+  const dispose = render(() => [
+    createComponent(Composer, {
+      vendors: ['codex'], options: [], choice: { vendor: 'auto' }, busy: false, placeholder: 'Ask',
+      onChoice: () => {}, onStop: () => {}, onWarm: () => {}, onPause: () => {}, onSend: () => {},
+    }),
+    createComponent(ImageViewerHost, {}),
+  ], root);
+  const settle = () => new Promise((resolve) => setTimeout(resolve, 60));
+  try {
+    const drop = new Event('drop', { bubbles: true, cancelable: true });
+    const files = new DataTransfer();
+    files.items.add(new File([new Uint8Array([137, 80, 78, 71])], 'one.png', { type: 'image/png' }));
+    Object.defineProperty(drop, 'dataTransfer', { value: files });
+    root.querySelector('form')!.dispatchEvent(drop);
+    for (let i = 0; i < 50 && !root.querySelector('.pic'); i++) await settle();
+    equal(root.querySelector('.viewer'), null, 'nothing is large before a click');
+    root.querySelector<HTMLButtonElement>('.pic')!.click();
+    await settle();
+    ok(root.querySelector('.viewer[role="dialog"] img'), 'the click opens the image large');
+    root.querySelector('.viewer-scrim')!.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+    await settle();
+    equal(root.querySelector('.viewer'), null, 'Escape closes it');
+    ok(root.querySelector('.attach-thumb'), 'the thumbnail stays in the box');
+  } finally {
+    dispose();
+    root.remove();
   }
 });

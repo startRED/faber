@@ -69,15 +69,16 @@ check('follow: the followed pull request is one line under its reply, with one w
   }
 });
 
-check('follow: a message Faber sent by itself is a quiet line, not the person\'s bubble', () => {
+check('follow: a message Faber sent by itself takes no row; the reply to it carries it in its header', () => {
   const sent = 'Checks failed on pull request #93 (acme/app) at commit aaa:\n- gate\nRead why, fix it, push.';
   const wake: Message = { id: 'w', role: 'user', text: sent, at: 2, wake: { why: 'wake.checksFailed', pr: 93, checks: ['gate'] } };
   const view = mount([question, answer('a', {}), wake, answer('b', { status: 'streaming', text: '' })]);
   try {
     ok(!view.root.textContent!.includes('Read why, fix it'), 'the words the agent got are not shown as the person\'s');
-    const line = view.root.querySelector<HTMLElement>('.woke')!;
-    equal(line.textContent!.trim(), t('wake.checksFailed', { pr: '#93', checks: 'gate' }));
-    equal(line.title, sent, 'the words the agent got are one hover away');
+    equal(view.root.querySelector('.woke'), null, 'no row of its own');
+    equal(view.root.querySelectorAll('.you').length, 1, 'only the person\'s own words are a bubble');
+    const mark = view.root.querySelectorAll<HTMLElement>('.ai')[1]!.querySelector<HTMLElement>('.model .by-faber')!;
+    equal(mark.getAttribute('aria-label'), t('wake.checksFailed', { pr: '#93', checks: 'gate' }), 'what Faber asked is one hover away');
   } finally {
     view.close();
   }

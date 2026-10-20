@@ -71,6 +71,7 @@ pub fn scenarios() -> Vec<Scenario> {
             name: "with Auto on Codex, the answer names the model the CLI reports before the first word and keeps it to the end",
             run: names_the_codex_model_while_streaming,
         },
+        Scenario { name: "edit-queued: edited words reach the CLI in the same queued message", run: edits_queued },
         Scenario { name: "editing a message sends it as a branch and keeps the original conversation", run: edits_as_a_branch },
         Scenario { name: "deleting a conversation asks once, then removes it", run: deletes_after_asking },
         Scenario { name: "the sidebar footer shows the name the person gave, above the accounts", run: shows_the_name },
@@ -98,6 +99,10 @@ pub fn scenarios() -> Vec<Scenario> {
         },
         Scenario { name: "after the six looks were applied in turn, Faber stays within its memory budget", run: memory_after_every_look },
         Scenario { name: "a conversation with a thousand messages opens quickly and stays within the budget", run: thousand_messages },
+        Scenario {
+            name: "conversation changes: thirty 3990-line files stay within the memory budget while switching and after closing",
+            run: changes_memory,
+        },
     ]
 }
 
@@ -217,7 +222,8 @@ fn recent_folders(ctx: &mut Ctx) -> Result {
     page.wait_count(&rows, 5)?;
     let gone = css(".recents .rec.gone .rec-main");
     same(page.count(&gone)?, 1, "folders shown as gone")?;
-    ensure(page.is_disabled(&gone)?, || "a folder that is gone can be picked".into())?;
+    // It keeps its focus (the menu key reaches its removal), so it is marked, not disabled (the UI check clicks it and nothing opens).
+    same(page.attr(&gone, "aria-disabled")?.as_deref(), Some("true"), "a folder that is gone is marked so")?;
     ctx.shot(&mut app, "recents-open-project")?;
     let page = &mut app.page;
     let first = rows.clone().css(".rec-main").has_text("alpha");
@@ -247,10 +253,10 @@ fn streams_an_answer(ctx: &mut Ctx) -> Result {
     ensure(tips["header"].as_str().is_some_and(|t| t.contains(&reason)), || {
         format!("the header's tooltip should say why Auto chose it: {tips}")
     })?;
-    ensure(tips["cost"].as_str().is_some_and(|t| t.contains("at API prices")), || {
+    ensure(tips["cost"].as_str().is_some_and(|t| t.contains("in API value")), || {
         format!("the cost's tooltip should show the price note: {tips}")
     })?;
-    ensure(!text.contains(&reason) && !text.contains("at API prices"), || format!("neither sits on the page itself: {text}"))?;
+    ensure(!text.contains(&reason) && !text.contains("in API value"), || format!("neither sits on the page itself: {text}"))?;
     page.wait_visible(&css(".list .item").has_text(QUESTION))?;
     ctx.shot(&mut app, "chat")
 }
@@ -373,7 +379,13 @@ fn says_what_to_do(ctx: &mut Ctx) -> Result {
     let lower = body.to_lowercase();
     ensure(!["reopen", "restart", "relaunch"].iter().any(|w| lower.contains(w)), || format!("it should not ask to restart: {body}"))?;
     // There is nothing to type into: no composer, so no permission line or model choice either.
-    same(page.count(&css(".composer"))?, 0, "no composer with no AI")
+    same(page.count(&css(".composer"))?, 0, "no composer with no AI")?;
+    // Projects says the same, not "Add project folder" for a folder no AI could work in.
+    let projects = page.named("button", "area.projects")?;
+    page.click(&projects)?;
+    page.wait_visible(&title)?;
+    same(page.count(&css(".projects-root"))?, 0, "no project picker with no AI")?;
+    same(page.count(&css(".composer"))?, 0, "no composer in Projects with no AI")
 }
 
 fn switches_language(ctx: &mut Ctx) -> Result {
@@ -454,6 +466,8 @@ fn keeps_appearance(ctx: &mut Ctx) -> Result {
     let page = &mut app.page;
     let general = page.named("button", "set.general")?;
     page.click(&general)?;
+    // In Full access, the default, the person's hooks always run and the switch is locked; it is a choice in the modes that ask.
+    super::permissions::pick_mode(page, 1)?;
     let hooks = page.named("switch", "set.hooksBody")?;
     page.check(&hooks)?;
     // The look applies once it is saved, but the switch does not wait for the screen; closing earlier could lose it.
@@ -664,13 +678,15 @@ fn refused_save(ctx: &mut Ctx) -> Result {
     // A switch moves before its save is answered; a refused save puts it back.
     let general = page.named("button", "set.general")?;
     page.click(&general)?;
-    let hooks = page.named("switch", "set.hooksBody")?;
-    let before = page.is_checked(&hooks)?;
-    page.click(&hooks)?;
-    page.wait_for("the switch to be put back", &format!("document.querySelector('.sw2').checked === {before}"))?;
+    let notify = page.named("switch", "set.notifyMe")?;
+    let before = page.is_checked(&notify)?;
+    page.click(&notify)?;
+    page.wait_for("the switch to be put back", &format!("document.querySelector('#set-notify-switch').checked === {before}"))?;
     let file = ctx.sb.data.join("settings.json");
     let text = std::fs::read_to_string(&file).map_err(|e| e.to_string())?;
-    ensure(!text.contains("manha") && !text.contains("\"userHooks\": true"), || format!("settings.json should be as it was: {text}"))?;
+    ensure(!text.contains("manha") && !text.contains(&format!("\"notifications\": {}", !before)), || {
+        format!("settings.json should be as it was: {text}")
+    })?;
 
     // Once the disk works again the same draft saves, and the alert goes away.
     std::fs::remove_dir(&blocker).map_err(|e| e.to_string())?;
@@ -929,6 +945,76 @@ fn memory_after_every_look(ctx: &mut Ctx) -> Result {
     ensure(mb <= BUDGET_MB, || format!("{mb:.0} MB is over the {BUDGET_MB} MB budget"))
 }
 
+fn changes_memory(ctx: &mut Ctx) -> Result {
+    let fixture = super::projects_ui::fixture(ctx)?;
+    let repo = ctx.sb.sandbox.join("repo");
+    let copy = ctx.sb.data.join("copies/changed-project");
+    std::fs::create_dir_all(copy.parent().ok_or("the copy has no parent")?).map_err(|e| e.to_string())?;
+    let git = faber_engine::cli::find_cli("git").ok_or("git is unavailable")?;
+    super::projects::git(
+        &git.command,
+        &repo,
+        &["worktree", "add", "-b", "faber/changes-budget", copy.to_str().ok_or("the copy path is not UTF-8")?],
+    )?;
+    // Match the DOM check: one hunk header and 3,989 added lines, just below the patch cap.
+    let text: String = (0..3989).map(|i| format!("line {i}\n")).collect();
+    let mut tools = vec![];
+    for i in 0..30 {
+        let path = format!("file-{i:02}.txt");
+        std::fs::write(copy.join(&path), &text).map_err(|e| e.to_string())?;
+        tools.push(json!({ "id": format!("edit-{i}"), "name": "Write", "input": { "file_path": path }, "ok": true }));
+    }
+    let mut recorded: serde_json::Value =
+        serde_json::from_slice(&std::fs::read(ctx.paths.fixtures.join("conversation-changes.json")).map_err(|e| e.to_string())?)
+            .map_err(|e| e.to_string())?;
+    let conversation = &mut recorded["conversation"];
+    conversation["projectId"] = json!("demo");
+    conversation["messages"][1]["tools"] = json!(tools);
+    conversation["copy"] = json!({
+        "root": repo.to_string_lossy(), "path": copy.to_string_lossy(),
+        "branch": "faber/changes-budget", "base": "refs/heads/owner"
+    });
+    let folder = ctx.sb.data.join("conversations");
+    std::fs::create_dir_all(&folder).map_err(|e| e.to_string())?;
+    std::fs::write(folder.join("changed-project.json"), conversation.to_string()).map_err(|e| e.to_string())?;
+
+    let mut launch = claude_chat(ctx);
+    launch.git_bin = fixture.git_bin;
+    let mut app = ctx.launch(launch)?;
+    let projects = app.page.named("button", "area.projects")?;
+    app.page.click(&projects)?;
+    app.page.click(&css(".prow .item").has_text("Demo"))?;
+    app.page.click(&css(".proj-chats .item").has_text("Update the greeting"))?;
+    app.page.click(&css(".run-btn"))?;
+    app.page.click(&css(".rc-changes"))?;
+    app.page.wait_count(&css(".change-file"), 30)?;
+    let (baseline, webview) = ctx.memory_mb(app.id)?;
+    ensure(webview, || "the memory reading must include WebView2".into())?;
+    let mut peak = baseline;
+    let cpu_before = ctx.cpu_ms(app.id)?;
+    let started = Instant::now();
+    for i in 1..=30 {
+        let row = format!(".change-file:nth-child({i})");
+        app.page.click(&css(&format!("{row} > summary")))?;
+        app.page.wait_count(&css(&format!("{row}[open] .patch-line")), 3990)?;
+        same(app.page.count(&css(".change-patch"))?, 1, "only the current file's patch stays mounted")?;
+        peak = peak.max(ctx.memory_mb(app.id)?.0);
+    }
+    let cpu_ms = ctx.cpu_ms(app.id)? - cpu_before;
+    let switch_ms = started.elapsed().as_secs_f64() * 1000.0;
+    let close = app.page.named("button", "run.close")?;
+    app.page.click(&close)?;
+    app.page.wait_gone(&css(".changes-view"))?;
+    same(app.page.count(&css(".patch-line"))?, 0, "closing Changes releases every patch line")?;
+    let (closed, _) = ctx.memory_mb(app.id)?;
+    let numbers = format!(
+        "Changes 30 x 3990 lines: before {baseline:.1} MB, sampled peak {peak:.1} MB, after closing {closed:.1} MB; switching {cpu_ms:.0} ms CPU ({:.1}% of one core over {switch_ms:.0} ms)",
+        cpu_ms / switch_ms * 100.0
+    );
+    ctx.notes.push(numbers.clone());
+    ensure(peak <= BUDGET_MB && closed <= BUDGET_MB, || format!("{numbers}; over the {BUDGET_MB} MB budget"))
+}
+
 fn thousand_messages(ctx: &mut Ctx) -> Result {
     start_settings(ctx, "en")?;
     let at: u64 = 1_790_000_000_000;
@@ -969,6 +1055,48 @@ fn thousand_messages(ctx: &mut Ctx) -> Result {
     ctx.notes.push(format!("1000 messages: opened in {open_ms} ms, {mb:.0} MB"));
     ensure(open_ms < 3000, || format!("opening took {open_ms} ms"))?;
     ensure(mb <= BUDGET_MB, || format!("{mb:.0} MB is over the {BUDGET_MB} MB budget"))
+}
+
+fn edits_queued(ctx: &mut Ctx) -> Result {
+    start_settings(ctx, "en")?;
+    let mut app = ctx.launch(Launch {
+        claude: CliSlot::Fake,
+        recording: Some(ctx.paths.fixtures.join("claude/edit-queued.jsonl")),
+        ..Launch::default()
+    })?;
+    let page = &mut app.page;
+    // This recording starts with the person's message, not Auto's separate routing question.
+    let model = page.labelled("composer.model")?;
+    page.select_option(&model, "Claude Haiku")?;
+    ask(page, "Start queued edit")?;
+    // The CLI has ended its answer but is still closing the turn, so the next message waits.
+    page.wait_for("the answer to settle", "document.querySelector('article.ai .actions') !== null")?;
+    ask(page, "Original queued words")?;
+    let edit = page.named("button", "queue.editLabel")?;
+    page.click(&edit)?;
+    let field = page.labelled("queue.editLabel")?;
+    page.fill(&field, "Edited queued words\nSecond line")?;
+    ctx.shot(&mut app, "edit-queued-editor")?;
+    let page = &mut app.page;
+    page.press_on(&field, "Enter")?;
+    page.wait_for("the saved queued words", "document.querySelector('.queue-text')?.textContent === 'Edited queued words\\nSecond line'")?;
+    ctx.shot(&mut app, "edit-queued-saved")?;
+    std::fs::write(ctx.sb.state.join("release"), "").map_err(|e| e.to_string())?;
+    let page = &mut app.page;
+    // The fake CLI echoes its expected input, so reading only the bubble would not prove what it received.
+    page.wait_for(
+        "the edited message to reach the CLI",
+        "[...document.querySelectorAll('article.ai .md')].some(e => e.textContent.includes('Received edited queue words.'))",
+    )?;
+    page.wait_for("the queue to empty", "document.querySelectorAll('.mine.queued').length === 0")?;
+    ensure(page.inner_text(&css(".mine .you").has_text("Edited queued words"))?.contains("Second line"), || {
+        "the sent message lost the edit".into()
+    })?;
+    ctx.close(app.id)?;
+    let output = ctx.output(app.id);
+    ensure(!output.contains("sent user") && !output.contains("recorded user"), || {
+        format!("the fake CLI received different words: {output}")
+    })
 }
 
 #[cfg(test)]

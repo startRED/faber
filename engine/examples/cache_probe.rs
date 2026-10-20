@@ -133,6 +133,7 @@ impl Probe {
             browse: false,
             conversations: false,
             verify: false,
+            progress: false,
             area: Area::Chat,
             model: Some(CLAUDE_MODEL.into()),
             effort: Some(effort.into()),
@@ -143,6 +144,7 @@ impl Probe {
             flags: Default::default(),
             permissions: Permissions::Ask,
             tuning: Default::default(),
+            tools: Default::default(),
         };
         let session = start_claude(
             ClaudeOptions { bin: cli.command.clone(), cwd: self.dir.clone(), launch, spawn: spawner(&cli), sandbox: None },
@@ -161,6 +163,7 @@ impl Probe {
             browse: false,
             conversations: false,
             verify: false,
+            progress: false,
             area: Area::Chat,
             model: Some("claude-haiku-5-5".into()),
             effort: Some("low".into()),
@@ -171,6 +174,7 @@ impl Probe {
             flags: Default::default(),
             permissions: Permissions::Ask,
             tuning: Default::default(),
+            tools: Default::default(),
         };
         let session = start_claude(
             ClaudeOptions { bin: cli.command.clone(), cwd: self.dir.clone(), launch, spawn: spawner(&cli), sandbox: None },
@@ -189,6 +193,7 @@ impl Probe {
             user_hooks: false,
             windows: cfg!(windows),
             spawn: spawner(&cli),
+            tools: Default::default(),
         })
     }
 
@@ -200,6 +205,7 @@ impl Probe {
             browse: false,
             conversations: false,
             verify: false,
+            progress: false,
             cwd: self.dir.clone(),
             model: Some(CODEX_MODEL.into()),
             effort: Some(effort.into()),

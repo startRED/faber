@@ -277,6 +277,7 @@ impl Core {
         }
         if let Some(m) = self.convs.get_mut(id).and_then(|c| c.messages.last_mut()) {
             m.status = Some(Status::Streaming);
+            m.finished_at = None;
             m.error = None;
             m.permissions = None;
             m.wait_until = None;

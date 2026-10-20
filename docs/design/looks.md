@@ -103,6 +103,8 @@ own inks.
   shortcut, a tab or row switch, a row hover) changes instantly or with a 150 ms fade of colour or opacity at most;
   expressive motion is for rare moments (first run, a finished task, an empty state). Motion is never the only
   signal: every animated change also leaves a static cue (colour, icon or label).
+- So a hover never moves a row (only theme cards and presets lift), a press gives way on buttons but not on list rows,
+  and the sidebar's list changes at once while a search is typed (`tests/ui/motion.check.ts` reads the stylesheet).
 - Nothing teleports (the owner, 2026-10-17): whatever appears, leaves or moves on a screen eases, using `animateList` for lists and swaps, `keepForExit` and the `Collapse` of `ui/controls.tsx` for a row's "?" text, a fold, a project's settings and the update line (a height that grows from nothing and shrinks back), the right-click menu's scale-and-fade for the permission menu, and a plain fade for the update screen's phases and the tutorial ring. Section switches in Settings and the swap between the project and chat homes cross-fade. Counted by frequency like the rest: a row or tab change that happens dozens of times a minute still only fades.
 - Reduced motion and no motion both remove every animation and transition. A system that asks for less motion
   caps the user's level, and a change in the system setting changes only the level.

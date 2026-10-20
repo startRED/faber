@@ -4,7 +4,7 @@ use crate::support;
 
 use faber_engine::cli::Cli;
 use faber_engine::engine::Ask;
-use faber_engine::model::{Area, Permissions, RunState, RunningItem, Settings, Status, Vendor};
+use faber_engine::model::{Area, EndKind, Permissions, RunState, RunningItem, Settings, Status, Vendor};
 use faber_engine::proc::Spawner;
 use faber_engine::router::Choice;
 use faber_engine::{AppEvent, Engine, EngineOptions, SendRequest};
@@ -181,9 +181,42 @@ async fn an_answer_emits_only_the_lists_that_differ_from_the_one_before() {
     // Every message event re-reads the list, and the list is told only when it differs.
     assert!(messages >= 2, "the question and the answer both reached the screen");
     assert_consecutive(&lists);
-    // The turn began, the CLI named its model, the turn ended: three lists at most.
-    assert!(lists.len() <= 3, "{} lists: {lists:?}", lists.len());
+    // The turn began, the CLI named its model, the agent finished, the turn ended: four lists at most.
+    assert!(lists.len() <= 4, "{} lists: {lists:?}", lists.len());
     assert!(lists.windows(2).all(|w| w[0].1 != w[1].1), "two equal lists in a row");
+}
+
+#[tokio::test]
+async fn a_reply_reads_as_finished_when_the_agent_stops_writing_not_when_the_cli_closes_its_turn() {
+    let dir = tempfile::tempdir().unwrap();
+    // The recording holds back the CLI's `result` for 1.5 s (a loaded machine must not swallow the gap) after the last message ended with `end_turn`, as a Stop hook does.
+    let (engine, mut rx) = engine(dir.path(), &[Vendor::Claude], fake(fixture("claude", "chat-settled")).spawn, None);
+    let id = engine.send(request(Area::Chat, None, SKY, "claude")).unwrap();
+    let mut finished_at = None;
+    let mut settled_row = None;
+    let mut ended = false;
+    while !ended {
+        match tokio::time::timeout(WAIT, rx.recv()).await.expect("the answer never ended").expect("engine gone") {
+            AppEvent::Message { message, .. } if message.role == faber_engine::model::Role::Assistant => {
+                if message.status == Some(Status::Streaming) && message.finished_at.is_some() && finished_at.is_none() {
+                    finished_at = Some(std::time::Instant::now());
+                }
+                ended = message.status == Some(Status::Done);
+                if ended {
+                    assert!(message.finished_at.is_some() && message.moved_at.is_some());
+                }
+            }
+            AppEvent::Running { items, .. } if items.iter().any(|i| i.settled) && settled_row.is_none() => {
+                settled_row = Some(std::time::Instant::now());
+            }
+            _ => {}
+        }
+    }
+    engine.shutdown();
+    let _ = id;
+    let (finished, row) = (finished_at.expect("the reply never read as finished while streaming"), settled_row.expect("no settled row"));
+    assert!(finished.elapsed() >= Duration::from_millis(250), "it read as finished long before the result: {:?}", finished.elapsed());
+    assert!(row.elapsed() >= Duration::from_millis(250), "its row was left out long before the result: {:?}", row.elapsed());
 }
 
 #[tokio::test]
@@ -479,6 +512,40 @@ async fn an_answer_the_cli_cannot_take_is_undelivered_and_the_same_card_can_be_a
 
     taken(answer(&engine, &rows.1[0], true).await);
     assert_eq!(f.wire.lines_with("control_response"), 1);
+    engine.shutdown();
+}
+
+// Task 016: a run that ends leaves one mark on its conversation, the done card's and the sidebar dot's, until the person sees it.
+#[tokio::test]
+async fn a_run_that_ends_is_marked_until_the_person_sees_it() {
+    let dir = tempfile::tempdir().unwrap();
+    let (engine, mut rx) = engine(dir.path(), &[Vendor::Claude], fake(fixture("claude", "chat")).spawn, None);
+    let id = engine.send(request(Area::Chat, None, SKY, "claude")).unwrap();
+    lists_until(&mut rx, WAIT, |rows| !rows.is_empty()).await;
+    lists_until(&mut rx, WAIT, |rows| rows.is_empty()).await;
+    let summary = engine.state().conversations.into_iter().find(|c| c.id == id).unwrap();
+    let ended = summary.ended.expect("the end is marked");
+    assert_eq!(ended.kind, EndKind::Done);
+    assert!(ended.line.is_some(), "the card says the last line it wrote");
+    engine.seen(&id).unwrap();
+    assert_eq!(engine.state().conversations.into_iter().find(|c| c.id == id).unwrap().ended, None, "seen: the card and the dot go");
+    assert_eq!(engine.open(&id).unwrap().ended, None, "and it stays seen");
+    engine.shutdown();
+}
+
+#[tokio::test]
+async fn a_run_the_person_stopped_leaves_no_mark() {
+    let dir = tempfile::tempdir().unwrap();
+    let (engine, mut rx) = engine(dir.path(), &[Vendor::Claude], fake(fixture("claude", "interrupt")).spawn, None);
+    let id = engine.send(request(Area::Chat, None, "Write a 600-word essay about the history of bread.", "claude")).unwrap();
+    lists_until(&mut rx, WAIT, |rows| !rows.is_empty()).await;
+    engine.interrupt(&id);
+    lists_until(&mut rx, WAIT, |rows| rows.is_empty()).await;
+    assert_eq!(
+        engine.state().conversations.into_iter().find(|c| c.id == id).unwrap().ended,
+        None,
+        "the person stopped it: they were there"
+    );
     engine.shutdown();
 }
 

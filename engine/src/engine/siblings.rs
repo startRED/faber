@@ -207,7 +207,7 @@ impl Core {
         let busy = self.live.get(id).is_some_and(|l| l.turn.is_some());
         let c = self.convs.get(id).ok_or("the conversation is gone")?;
         let last = c.messages.iter().rev().find(|m| m.role == Role::Assistant);
-        Ok(sibling::read(&c.title, state_of(busy, c), last.map(|m| m.text.as_str()).unwrap_or_default()))
+        Ok(sibling::read(&c.title, state_of(busy, c), &last.map(Message::said).unwrap_or_default()))
     }
 
     /// The project's other conversations the person has not archived, the newest first. One never loaded since Faber
@@ -252,7 +252,7 @@ impl Core {
         if c.keep_going.is_some() || state == State::Working || state == State::Waiting {
             return;
         }
-        let last = c.messages.iter().rev().find(|m| m.role == Role::Assistant).map(|m| m.text.clone()).unwrap_or_default();
+        let last = c.messages.iter().rev().find(|m| m.role == Role::Assistant).map(Message::said).unwrap_or_default();
         let text = sibling::finished(&c.title, conv, state, &last);
         if self.load(&parent).is_none_or(|p| p.archived_at.is_some()) {
             return;

@@ -382,6 +382,7 @@ fn parse_notification(msg: &Value, state: &mut CodexTurnState) -> Vec<EngineEven
                 ("dynamicToolCall", Some(crate::sibling::NAME)) => crate::sibling::TOOL,
                 ("dynamicToolCall", Some(crate::verify::NAME)) => crate::verify::TOOL,
                 ("dynamicToolCall", Some(crate::map::NAME)) => crate::map::TOOL,
+                ("dynamicToolCall", Some(name)) if let Some(tool) = crate::progress::tool_of(name) => tool,
                 _ => kind,
             };
             vec![EngineEvent::Tool { id: s(&item["id"]), name: name.into(), input, parent: None }]
@@ -527,6 +528,8 @@ pub struct CodexServerOptions {
     pub user_hooks: bool,
     pub windows: bool,
     pub spawn: Spawner,
+    /// What Faber's tool store hands over (`crate::tools`), for a project's server outside Isolated: its skill root and servers.
+    pub tools: crate::tools::Delivery,
 }
 
 /// The settings that go into the thread's `config` (R140): web search always, and the two Codex-only choices when the person
@@ -575,11 +578,14 @@ pub struct CodexThread {
     pub conversations: bool,
     /// Faber's checks, as for `ClaudeLaunch::verify`.
     pub verify: bool,
+    /// The plan, the status and the closing box, as for `ClaudeLaunch::progress`.
+    pub progress: bool,
 }
 
 enum ServerCommand {
     Open { key: u64, thread: CodexThread, sink: EventSink },
     Session(u64, SessionCommand),
+    Tools(crate::tools::Delivery),
     Retire,
 }
 
@@ -590,6 +596,29 @@ enum Waiting {
     Other(u64, &'static str),
     /// A `turn/steer`; its tag tells the engine which message it was.
     Steer(u64, String),
+}
+
+fn skill_commands(result: &Value, cwd: &std::path::Path) -> Option<Vec<crate::model::Command>> {
+    let entry = result["data"].as_array()?.iter().find(|entry| entry["cwd"].as_str().is_some_and(|s| std::path::Path::new(s) == cwd))?;
+    let skills = entry["skills"].as_array()?;
+    Some(
+        skills
+            .iter()
+            .filter_map(|skill| {
+                if skill["enabled"].as_bool() != Some(true) {
+                    return None;
+                }
+                let name = skill["name"].as_str().filter(|name| !name.is_empty())?;
+                let note = skill["shortDescription"]
+                    .as_str()
+                    .filter(|s| !s.trim().is_empty())
+                    .or_else(|| skill["description"].as_str().map(|s| s.split_inclusive(['.', '!', '?']).next().unwrap_or(s)))
+                    .map(|s| s.trim().chars().take(120).collect::<String>())
+                    .filter(|s| !s.is_empty());
+                Some(crate::model::Command { name: name.into(), skill: true, note })
+            })
+            .collect(),
+    )
 }
 
 /// A conversation's side of the shared process.
@@ -646,6 +675,13 @@ fn turn_params(thread: &str, effort: Option<&str>, turn: &UserTurn) -> Value {
     params
 }
 
+/// The catalog's servers (`crate::tools`) beside the person's own, each under its own key so no other server is replaced.
+pub fn add_servers(params: &mut Value, servers: &[crate::tools::Launch]) {
+    for s in servers {
+        params["config"][format!("mcp_servers.{}", s.name)] = json!({ "command": s.command, "args": s.args, "env": s.env });
+    }
+}
+
 pub fn thread_params(area: Area, t: &CodexThread) -> (&'static str, Value) {
     let mut params = codex_thread(area, t.model.as_deref(), t.permissions);
     if let Some(instructions) = &t.instructions {
@@ -654,6 +690,8 @@ pub fn thread_params(area: Area, t: &CodexThread) -> (&'static str, Value) {
         // boundary as user turns, with their existing working folder read-only and no workspace writes.
         params.remove("sandbox");
         params.insert("config".into(), crate::permissions::sandbox_config(&t.cwd, false).into());
+        // A quick question on the side (R250) too: on Windows the shell cannot start under that read-only profile ("MXC launcher:
+        // failed to create the process security environment", Codex 0.162), so it answers from Faber's record alone.
         params["config"]["features.shell_tool"] = false.into();
         params.remove("dynamicTools");
         params.insert("approvalPolicy".into(), "never".into());
@@ -676,7 +714,7 @@ pub fn thread_params(area: Area, t: &CodexThread) -> (&'static str, Value) {
             crate::helper::Helper::Is => {
                 params.insert("ephemeral".into(), true.into());
             }
-            crate::helper::Helper::Off => {}
+            crate::helper::Helper::Off | crate::helper::Helper::Aside => {}
         }
         // R161 step 7: Faber's own browser, where it is offered.
         if t.browse {
@@ -696,6 +734,12 @@ pub fn thread_params(area: Area, t: &CodexThread) -> (&'static str, Value) {
             if let Some(tools) = tools.as_array_mut() {
                 tools.push(crate::verify::codex_tool());
                 tools.push(crate::map::codex_tool());
+            }
+        }
+        if t.progress {
+            let tools = params.entry("dynamicTools").or_insert_with(|| json!([]));
+            if let Some(tools) = tools.as_array_mut() {
+                tools.extend(crate::progress::codex_tools());
             }
         }
     }
@@ -753,6 +797,12 @@ impl CodexServer {
         Session::from_fn(move |cmd| drop(server.send(ServerCommand::Session(key, cmd))))
     }
 
+    /// The catalog's tools as the store sees them now (`crate::tools`): a store that could not be made clean takes them away
+    /// from a server already running. The skill root is sent again only when it changes; servers go with each new thread.
+    pub fn tools(&self, tools: crate::tools::Delivery) {
+        let _ = self.tx.send(ServerCommand::Tools(tools));
+    }
+
     /// Stops the process once its last conversation closes; new conversations go to a server with the new settings.
     pub fn retire(&self) {
         let _ = self.tx.send(ServerCommand::Retire);
@@ -789,6 +839,7 @@ async fn serve(started: std::io::Result<proc::Proc>, opts: CodexServerOptions, m
     let mut confirmed = VecDeque::new();
     let mut next_id = 0u64;
     let (mut ready, mut retired, mut stopping) = (false, false, false);
+    let mut tools = opts.tools.clone();
     let (command_tx, mut command_rx) = unbounded_channel::<(Value, bool, String)>();
 
     macro_rules! request {
@@ -813,7 +864,8 @@ async fn serve(started: std::io::Result<proc::Proc>, opts: CodexServerOptions, m
                     stop!();
                 }
             } else {
-                let (method, params) = thread_params(area, &$t.params);
+                let (method, mut params) = thread_params(area, &$t.params);
+                add_servers(&mut params, &tools.servers);
                 request!(method, params, Waiting::Thread($key));
             }
         }};
@@ -884,6 +936,12 @@ async fn serve(started: std::io::Result<proc::Proc>, opts: CodexServerOptions, m
                 };
                 let method = msg["method"].as_str();
                 let params = &msg["params"];
+                if let Some(key) = msg["id"].as_str().and_then(|id| id.strip_prefix("faber-commands-")).and_then(|key| key.parse::<u64>().ok()) {
+                    if let Some(t) = threads.get(&key) && let Some(commands) = skill_commands(&msg["result"], &t.params.cwd) {
+                        (t.sink)(EngineEvent::Commands(commands));
+                    }
+                    continue;
+                }
                 match (method, msg.get("id")) {
                     // An answer to one of Faber's requests.
                     (None, Some(id)) => {
@@ -920,6 +978,11 @@ async fn serve(started: std::io::Result<proc::Proc>, opts: CodexServerOptions, m
                         match kind {
                             Waiting::Initialize => {
                                 let _ = proc::write_line(&mut *stdin, &json!({ "method": "initialized" })).await;
+                                // The catalog's skills (`crate::tools`), before any thread opens; its answer needs nothing.
+                                if let Some(root) = &tools.skills {
+                                    let set = json!({ "id": "faber-skills", "method": "skills/extraRoots/set", "params": { "extraRoots": [root] } });
+                                    let _ = proc::write_line(&mut *stdin, &set).await;
+                                }
                                 ready = true;
                                 for key in std::mem::take(&mut pending) {
                                     let Some(t) = threads.get(&key) else { continue };
@@ -935,6 +998,8 @@ async fn serve(started: std::io::Result<proc::Proc>, opts: CodexServerOptions, m
                                 (t.sink)(EngineEvent::Started { session_id: id.clone(), model: shown });
                                 by_id.insert(id.clone(), key);
                                 t.id = Some(id.clone());
+                                let _ = proc::write_line(&mut *stdin, &json!({"id":format!("faber-commands-{key}"), "method":"skills/list",
+                                    "params":{"cwds":[t.params.cwd]}})).await;
                                 for turn in std::mem::take(&mut t.queued) {
                                     t.watch.begin();
                                     t.state.base = t.state.total;
@@ -996,6 +1061,20 @@ async fn serve(started: std::io::Result<proc::Proc>, opts: CodexServerOptions, m
                                 }
                                 None => {
                                     let _ = proc::write_line(&mut *stdin, &json!({"id":id,"result":{"success":false,"contentItems":[{"type":"inputText","text":"Faber's project map is not available here."}]}})).await;
+                                }
+                            }
+                            continue;
+                        }
+                        if method == "item/tool/call" && let Some(tool) = params["tool"].as_str().and_then(crate::progress::tool_of) {
+                            // The plan, the status or the closing box: the engine writes it down and answers at once.
+                            match thread.filter(|t| t.params.progress && !t.blocked && !t.closing) {
+                                Some(t) => {
+                                    let call = s(&params["callId"]);
+                                    t.helpers.insert(call.clone(), id.clone());
+                                    (t.sink)(EngineEvent::ProgressCall { id: call, tool, input: params["arguments"].clone() });
+                                }
+                                None => {
+                                    let _ = proc::write_line(&mut *stdin, &json!({"id":id,"result":{"success":false,"contentItems":[{"type":"inputText","text":"This tool is not available here."}]}})).await;
                                 }
                             }
                             continue;
@@ -1246,10 +1325,10 @@ async fn serve(started: std::io::Result<proc::Proc>, opts: CodexServerOptions, m
                         };
                         let _ = ack.send(delivery);
                     }
-                    SessionCommand::HelperReply { id, ok, text } => {
+                    SessionCommand::HelperReply { id, ok, text, pictures } => {
                         let Some(t) = threads.get_mut(&key) else { continue };
                         let Some(request) = t.helpers.remove(&id) else { continue };
-                        let _ = proc::write_line(&mut *stdin, &json!({"id":request,"result":{"success":ok,"contentItems":[{"type":"inputText","text":text}]}})).await;
+                        let _ = proc::write_line(&mut *stdin, &json!({"id":request,"result":crate::helper::dynamic_result(ok, &text, &pictures)})).await;
                     }
                     SessionCommand::Interrupt => {
                         if let Some(t) = threads.get_mut(&key) { for job in t.commands.drain(..) { job.abort(); } }
@@ -1291,6 +1370,15 @@ async fn serve(started: std::io::Result<proc::Proc>, opts: CodexServerOptions, m
                         }
                     }
                 },
+                Some(ServerCommand::Tools(next)) => {
+                    let changed = next.skills != tools.skills;
+                    tools = next;
+                    // Before `initialized`, the first set carries the new value by itself.
+                    if changed && ready {
+                        let set = json!({ "id": "faber-skills", "method": "skills/extraRoots/set", "params": { "extraRoots": tools.skills.iter().collect::<Vec<_>>() } });
+                        let _ = proc::write_line(&mut *stdin, &set).await;
+                    }
+                }
                 Some(ServerCommand::Retire) => {
                     retired = true;
                     if threads.is_empty() {

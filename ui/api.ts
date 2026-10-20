@@ -18,6 +18,19 @@ export type Effort = 'low' | 'medium' | 'high';
 export const DEFAULT_EFFORT: Effort = 'medium';
 export type Area = 'chat' | 'project';
 export type Status = 'streaming' | 'done' | 'stopped' | 'error';
+/** Message hits use UTF-16 offsets, matching JavaScript string slices. */
+export interface MessageHit {
+  conversationId: string;
+  area: Area;
+  title: string;
+  messageIndex: number;
+  snippet: string;
+  highlights: { start: number; end: number }[];
+}
+export interface MessageSearch {
+  ready: boolean;
+  hits: MessageHit[];
+}
 export interface Image {
   mediaType: string;
   base64: string;
@@ -108,9 +121,37 @@ export interface Message {
   /** On the newest reply of a conversation that went on by itself for half an hour or more: what it did while the person was away. */
   away?: { minutes: number; turns: number; switches: number; answered: number };
   /** Questions Faber answered with their first choice because nobody answered them while "keep going" was on. */
-  autoAnswers?: { question: string; answer: string }[];
+  autoAnswers?: { question: string; answer: string; others?: string[] }[];
   /** On a project reply that changed files: Faber's own run of the fast checks once it ended (R146). */
   checks?: Checks;
+  /** On a reply: when its words, thinking or tools last changed, in milliseconds. "Updated 3 min ago" counts from it. */
+  movedAt?: number;
+  /** On a reply: when the agent said all it will say, in milliseconds. Set while the reply still streams, it is finished for the
+   * person while the CLI closes its turn. */
+  finishedAt?: number;
+  /** On a reply: what the agent said it is doing now, in a few words (task 017). */
+  now?: string;
+  /** On a reply: the closing box of the task it ended. */
+  wrapUp?: WrapUp;
+}
+/** A project agent's plan for the request (engine `Plan`): it belongs to the conversation. */
+export interface Plan {
+  steps: { text: string; state: 'pending' | 'active' | 'done' }[];
+  at: number;
+}
+/** "3 of 7": a plan's steps done and in all. */
+export interface PlanCount {
+  done: number;
+  total: number;
+}
+/** The closing box of a task (engine `WrapUp`): a recap, and maybe one question with its replies, the recommendation first. */
+export interface WrapUp {
+  recap: string;
+  ask?: string;
+  actions?: string[];
+  done?: boolean;
+  /** The reply Faber gave for the person while Keep going ran and nobody answered. */
+  answered?: string;
 }
 export type ChecksState = 'running' | 'passed' | 'failed' | 'needsYou';
 export interface Checks {
@@ -163,6 +204,8 @@ export interface Conversation {
   keepGoing?: { turns: number; failed: number };
   /** How full its own agent's context is, once the CLI has said so (the topbar's meter). */
   context?: ContextFill;
+  /** The agent's plan for the request. */
+  plan?: Plan;
   /** When it was archived: it is off the sidebar and its composer gives way to a line that brings it back. */
   archivedAt?: number;
   messages: Message[];
@@ -183,6 +226,19 @@ export interface Summary {
   archived?: boolean;
   /** The conversation whose agent started this one, which the sidebar shows it under. */
   startedBy?: string;
+  /** Its last run ended and nobody has opened it since: the running column's done card and the sidebar's dot. */
+  ended?: Ended;
+  /** How far the agent's plan has come. */
+  plan?: PlanCount;
+}
+/** How a run ended that nobody saw end (engine `Ended`). */
+export interface Ended {
+  at: number;
+  kind: 'done' | 'needsYou' | 'failed';
+  /** From its first turn to its end, in milliseconds. */
+  workMs: number;
+  /** The last line the agent wrote. */
+  line?: string;
 }
 export interface WorkCopy {
   path: string;
@@ -322,9 +378,17 @@ export interface RunningItem {
   /** "Keep going" is on: it runs on its own. */
   keepGoing?: boolean;
   /** "Keep going" waits to send the next turn, for a reason of its own (a quota wait is `waitUntil`), until `until` (seconds). */
-  keepWait?: { why: 'retry' | 'rest' | 'busy' | 'start'; until: number };
+  keepWait?: { why: 'retry' | 'rest' | 'busy' | 'start' | 'question'; until: number };
   /** How far a conversation that goes on by itself has come: turns of work, when it began (ms, 0 unknown), the last line it wrote. */
   keepProgress?: { turns: number; since: number; last?: string };
+  /** Faber asks git whether the last reply changed files, before its checks would start. */
+  weighing?: boolean;
+  /** The agent finished and only the CLI's turn is closing, with nothing else running: the screen leaves the row out. */
+  settled?: boolean;
+  /** How far the agent's plan has come. */
+  plan?: PlanCount;
+  /** What the agent said it is doing now, on the reply under way. */
+  now?: string;
 }
 /** The running list in the engine's order, with a revision that grows by one with every list the engine sends. */
 export interface RunningList {
@@ -372,6 +436,18 @@ export interface Attachment {
   base64: string;
 }
 export type AccountStatus = 'signedIn' | 'signedOut' | 'unknown';
+/** One skill of Faber's catalog (src-tauri/src/tools.rs). */
+export interface ToolRow {
+  id: string;
+  job: string;
+  license: string;
+  repo: string;
+  home: string;
+  installed: boolean;
+  /** A tool server (an npm package Node runs) rather than a skill. */
+  server: boolean;
+}
+
 export interface CheckResult {
   vendor: Vendor;
   installed: boolean;
@@ -385,14 +461,62 @@ export interface SetupProgressEvent {
   error?: string;
   detail?: string;
 }
+/** An entry of a working folder offered by `@` in the composer (parity T4): its path from the folder, `/` between parts. */
+export interface Mention {
+  path: string;
+  dir: boolean;
+}
+/** A command or skill reported by an agent, offered by `/` without starting a process. */
+export interface Command {
+  vendor: Vendor;
+  name: string;
+  skill: boolean;
+  note?: string | null;
+}
+/** Git's current changes in a conversation's working copy, against its starting branch. */
+export interface FileChange {
+  path: string;
+  added: number;
+  removed: number;
+  binary: boolean;
+  countsKnown?: boolean;
+  tooLarge?: boolean;
+  status: 'modified' | 'added' | 'deleted';
+}
+export interface ChangeList {
+  files: FileChange[];
+  incomplete: boolean;
+  next?: string;
+}
+/** One file, read only when opened; oversized patches keep their counts in FileChange. */
+export interface ChangePatch {
+  text: string;
+  tooLarge: boolean;
+  binary: boolean;
+  error?: string | null;
+}
+/** A quick question on the side of a conversation (R250), as the engine keeps it until the turn after it ends. */
+export interface Aside {
+  id: string;
+  question: string;
+  answer: string;
+  vendor: Vendor;
+  model?: string | null;
+  state: 'running' | 'done' | 'stopped' | 'failed';
+  /** A translation key when it failed. */
+  error?: string | null;
+}
 export type AppEvent =
+  | { type: 'commands'; conversationId: string; vendor: Vendor }
   | { type: 'message'; conversationId: string; message: Message }
+  | { type: 'asides'; conversationId: string; asides: Aside[] }
   | { type: 'queue'; conversationId: string; queued: QueuedTurn[] }
   | ({ type: 'quota' } & QuotaReading)
   | ({ type: 'running' } & RunningList)
   | { type: 'usage'; vendors: VendorUsage[] }
   | { type: 'list' }
   | { type: 'context'; conversationId: string; context?: ContextFill }
+  | { type: 'plan'; conversationId: string; plan?: Plan }
   | { type: 'halted'; conversationId: string; title: string; why: string; vendor?: Vendor }
   | SetupProgressEvent;
 
@@ -457,6 +581,8 @@ export const api = {
     invoke<void>('route_draft', { req, text }),
   interrupt: (id: string) => invoke<void>('interrupt', { id }),
   keepGoing: (id: string, on: boolean) => invoke<void>('keep_going', { id, on }),
+  /** The person has the conversation open on a visible window: the done card and the dot of its last run go. */
+  seen: (id: string) => invoke<void>('seen', { id }),
   /** Archives a conversation, or brings an archived one back. */
   archive: (id: string, on: boolean) => invoke<void>('archive', { id, on }),
   answer: (id: string, turnId: string, requestId: string, allow: boolean, always = false) =>
@@ -464,12 +590,31 @@ export const api = {
   /** The choices for a question the assistant asked: each question's text to the label picked (several joined by a comma). */
   answerQuestion: (id: string, turnId: string, requestId: string, answers: Record<string, string>) =>
     invoke<void>('answer_question', { id, turnId, requestId, answers }),
+  searchMessages: (query: string, area: Area) => invoke<MessageSearch>('search_messages', { query, area }),
+  promptHistory: (conversationId: string | undefined, area: Area, projectId?: string, signal?: AbortSignal) => {
+    if (signal?.aborted) return Promise.resolve([]);
+    const requestId = crypto.randomUUID();
+    const args = { requestId, conversationId, area, projectId };
+    const cancel = () => { void invoke<string[]>('prompt_history', { ...args, cancel: true }).catch(() => {}); };
+    signal?.addEventListener('abort', cancel, { once: true });
+    return invoke<string[]>('prompt_history', args).finally(() => signal?.removeEventListener('abort', cancel));
+  },
   rename: (id: string, title: string) => invoke<void>('rename', { id, title }),
   /** Refused with `error.copy.unsaved` while its copy holds work found nowhere else, unless `discard`. */
   remove: (id: string, discard = false) => invoke<void>('remove', { id, discard }),
   removeQueued: (id: string, turnId: string) => invoke<void>('remove_queued', { id, turnId }),
+  editQueued: (id: string, turnId: string, text: string) => invoke<void>('edit_queued', { id, turnId, text }),
   sendQueued: (id: string, turnId: string) => invoke<void>('send_queued', { id, turnId }),
   tellHelper: (id: string, callId: string, text: string) => invoke<void>('tell_helper', { id, callId, text }),
+  /** `@` in the composer: the working folder's entries that match `query`, at most 50; a new chat has none. */
+  mentions: (id: string | undefined, projectId: string | undefined, query: string) => invoke<Mention[]>('mentions', { id, projectId, query }),
+  commands: (id?: string, vendor?: Vendor) => invoke<Command[]>('commands', { id, vendor }),
+  changes: (id: string, cursor?: string) => invoke<ChangeList>('changes', { id, cursor }),
+  changePatch: (id: string, path: string) => invoke<ChangePatch>('change_patch', { id, path }),
+  /** A quick question on the side (R250); refused with an `error.aside.*` key, `error.quotaOut` or `error.billedPerUse`. */
+  askAside: (id: string, question: string, model?: string) => invoke<string>('ask_aside', { id, question, model }),
+  stopAside: (asideId: string) => invoke<void>('stop_aside', { asideId }),
+  asides: (id: string) => invoke<Aside[]>('asides', { id }),
   unfollowPr: (id: string) => invoke<void>('unfollow_pr', { id }),
   removeProject: (id: string) => invoke<void>('remove_project', { id }),
   showProject: (id: string) => invoke<void>('show_project', { id }),
@@ -509,6 +654,10 @@ export const api = {
   setupCheck: (vendor: Vendor) => invoke<CheckResult>('setup_check', { vendor }),
   setupInstall: (vendor: Vendor) => invoke<void>('setup_install', { vendor }),
   setupSignIn: (vendor: Vendor) => invoke<void>('setup_sign_in', { vendor }),
+  /** The catalog's skills (R247) and whether each is installed; installing downloads it from its own repository. */
+  toolsList: () => invoke<ToolRow[]>('tools_list'),
+  toolsInstall: (id: string) => invoke<void>('tools_install', { id }),
+  toolsRemove: (id: string) => invoke<void>('tools_remove', { id }),
   updateStatus: () => invoke<UpdateStatus>('update_status'),
   /** The first frame is painted: the shell may show the window (it stays hidden until then). */
   screenReady: () => invoke<void>('screen_ready'),
