@@ -106,8 +106,9 @@ check('composer: images show thumbnails and files small cards, each with its own
     const transfer = new DataTransfer();
     for (const file of [image('one.png'), image('two.png'), new File(['%PDF-1.4'], 'doc.pdf', { type: 'application/pdf' }), new File(['hello notes'], 'notes.txt', { type: 'text/plain' })]) transfer.items.add(file);
     form.dispatchEvent(new DragEvent('drop', { dataTransfer: transfer, bubbles: true, cancelable: true }));
-    await settle(150);
     const thumbs = () => [...root.querySelectorAll<HTMLElement>('.attach-row .thumb')];
+    // Reading the dropped files is asynchronous, and slower in WebKit: wait for them instead of a fixed time.
+    for (let i = 0; i < 100 && thumbs().length < 4; i++) await settle(20);
     const nameOf = (el: HTMLElement) => el.querySelector('img')?.alt ?? el.querySelector('b')!.textContent;
     equal(thumbs().map(nameOf).join(), 'one.png,two.png,doc.pdf,notes.txt');
     equal(thumbs().filter((el) => el.querySelector('img')).length, 2, 'the pictures are thumbnails');
