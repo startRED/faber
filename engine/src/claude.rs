@@ -219,6 +219,12 @@ fn allow_response(tool: &str, input: &Value, reply: Option<&Value>) -> Value {
     response
 }
 
+/// What a compaction Faber asks for keeps (`/compact <instructions>`, checked on 2.1.302): the summary is all the next turn
+/// knows, so the person's words and what is left must survive it, and the file contents and command output it already
+/// acted on may go. The CLI's own compaction near its limit keeps its default.
+pub const COMPACT_FOCUS: &str = "Keep the person's requests word for word, the plan and what is left of it, decisions and why, open problems, \
+the files changed and the commands that check them. Drop file contents and command output already acted on.";
+
 /// How full a conversation gets before Claude Code compacts it. All three models hold 1M and the CLI compacts near 967K,
 /// deep into context rot. Haiku thrashes at 100K (the base context eats the room, measured), so it compacts at 150K (R158);
 /// Opus and Sonnet are starting points to measure, not proven optima. Unknown models keep the CLI's own.
@@ -809,7 +815,7 @@ pub fn start_claude(opts: ClaudeOptions, on_event: EventSink) -> Session {
                     // The CLI's own command, as a line of its own: it compacts and answers with a result like any turn.
                     Some(SessionCommand::Compact) => {
                         if watch.stopping() { continue; }
-                        let turn = UserTurn::text("/compact");
+                        let turn = UserTurn::text(format!("/compact {COMPACT_FOCUS}"));
                         watch.begin();
                         request_began = None;
                         turn_sent_ms = unix_ms();

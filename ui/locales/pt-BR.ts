@@ -1122,6 +1122,7 @@ export const ptBR: Messages = {
   'notes.124.new': 'Você pode editar uma mensagem que espera na fila sem mudar a posição dela.',
   'notes.125.fixed': 'Se uma mensagem sair da fila durante a edição, suas alterações vão pra caixa de mensagem sem apagar o rascunho.',
   'notes.126.new': 'Dá pra recuperar mensagens anteriores com a seta pra cima ou buscar com Ctrl+R na caixa de mensagem, sem perder seu rascunho.',
+  'notes.127.better': 'No Continuar sozinho, o agente agora resume a conversa longa entre uma tarefa e outra e para de reler tudo a cada passo. O trabalho segue sozinho.',
   'update.checking': 'Procurando atualização…',
   'update.downloading': 'Baixando atualização…',
   'update.downloadingPercent': 'Baixando atualização… {percent}%',

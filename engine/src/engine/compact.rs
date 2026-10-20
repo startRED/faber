@@ -6,6 +6,11 @@
 //! Faber asks the CLI to compact (`Session::compact`); the conversation counts as at work meanwhile (`Conversation::compacting`),
 //! so what the person writes and what Faber sends by itself wait in the queue. When the CLI says it ended, the agent's own
 //! `next` is sent to it as a message Faber writes (`wake.compacted`), ahead of whatever waited, and the conversation goes on.
+//!
+//! Under Keep going Faber also compacts by itself, at the moments a careful person would, before it sends the next turn
+//! (`compact_at_boundary`): when the reply closed a task and the context is already large, or when it is large whatever
+//! the reply did. It compacts while the prompt cache is still warm (the turn just ended), where reading the context costs a
+//! tenth of the plain price. Every later turn rereads the whole context, and that reading is most of what a long run costs.
 use super::*;
 use crate::model::ContextFill;
 use crate::sibling;
@@ -14,6 +19,30 @@ use crate::sibling;
 pub(super) struct Plan {
     /// Everything it needs to continue; sent back to it word for word.
     next: Option<String>,
+}
+
+/// After a reply that closed a task (its closing box), Faber compacts once the context holds a quarter of its window...
+const TASK_END_SHARE: u64 = 4;
+/// ...and never below this many tokens, where the summary would save little (a model's base context alone is ~40K).
+const FLOOR: u64 = 80_000;
+/// At any other turn Keep going sends, from three fifths of the window.
+const ANY_TURN_SHARE: (u64, u64) = (3, 5);
+
+/// What Keep going knows before its next turn.
+#[derive(Clone, Copy)]
+struct Moment {
+    fill: ContextFill,
+    /// The reply closed a task with its closing box.
+    closed_task: bool,
+}
+
+/// Whether Keep going compacts before its next turn.
+fn boundary_due(m: Moment) -> bool {
+    let point = match m.closed_task {
+        true => (m.fill.window / TASK_END_SHARE).max(FLOOR),
+        false => m.fill.window / ANY_TURN_SHARE.1 * ANY_TURN_SHARE.0,
+    };
+    m.fill.used >= point
 }
 
 impl Core {
@@ -89,6 +118,38 @@ impl Core {
         l.session.compact();
         self.list_changed();
         true
+    }
+
+    /// Keep going is about to send its next turn after `reply_id`: when the context is large enough (`boundary_due`), Faber
+    /// compacts it first, with no `next` of its own, and the end of the compaction goes on with the turn (`compaction_ended`
+    /// calls `go_on`). Once per turn Faber sent, so a compaction that failed is not asked again in a loop; never before the
+    /// check turn, which rereads the original request. True while it compacts.
+    pub(super) fn compact_at_boundary(&mut self, conv: &str, reply_id: &str) -> bool {
+        let Some(c) = self.convs.get(conv) else { return false };
+        let Some(kg) = c.keep_going.as_ref() else { return false };
+        let turns = kg.turns;
+        if kg.checked || self.boundary.get(conv) == Some(&turns) || self.compacts.contains_key(conv) {
+            return false;
+        }
+        let Some(fill) = c.context else { return false };
+        let reply = c.messages.iter().rev().find(|m| m.role == Role::Assistant).filter(|m| m.id == reply_id);
+        let closed_task = reply.and_then(|m| m.wrap_up.as_ref()).is_some_and(|w| !w.done);
+        if !boundary_due(Moment { fill, closed_task }) {
+            return false;
+        }
+        // The compaction runs on the session that holds the context, so it must be one Faber may spend on unattended (a
+        // known subscription with room), whatever AI the next turn would go to.
+        let Some(l) = self.live.get(conv) else { return false };
+        if self.room(l.vendor, l.running.as_deref().or(l.model.as_deref())).is_err() {
+            return false;
+        }
+        self.compacts.insert(conv.to_string(), Plan { next: None });
+        if self.compact_due(conv) {
+            self.boundary.insert(conv.to_string(), turns);
+            return true;
+        }
+        self.compacts.remove(conv);
+        false
     }
 
     /// The CLI is compacting this conversation's context.
@@ -192,5 +253,24 @@ impl Core {
             None => self.tell_parent(conv),
         }
         self.close_when_idle(conv);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn at(used: u64, window: u64, closed_task: bool) -> bool {
+        boundary_due(Moment { fill: ContextFill { used, window }, closed_task })
+    }
+
+    #[test]
+    fn keep_going_compacts_after_a_task_at_a_quarter_and_otherwise_at_three_fifths() {
+        assert!(!at(99_999, 400_000, true));
+        assert!(at(100_000, 400_000, true), "Opus: a quarter of its 400K point once a task closed");
+        assert!(!at(239_999, 400_000, false));
+        assert!(at(240_000, 400_000, false), "three fifths at any turn");
+        // A small context is mostly the model's own base: never worth a summary.
+        assert!(!at(79_999, 150_000, true) && at(80_000, 150_000, true));
     }
 }

@@ -342,6 +342,9 @@ struct Core {
     installing: bool,
     /// Compactions the agents asked for, done once their turn ends (`compact.rs`).
     compacts: HashMap<String, compact::Plan>,
+    /// The Keep going turn at which Faber last compacted a conversation by itself, so a compaction that failed is not
+    /// asked again before the next turn (`compact::compact_at_boundary`).
+    boundary: HashMap<String, u32>,
     /// A new conversation still being typed: its CLI starts before the first message is sent.
     draft: Option<String>,
     /// Streaming text goes to the screen at most ~30 times a second; the message waiting per conversation.
@@ -457,6 +460,7 @@ impl Engine {
                 live: HashMap::new(),
                 installing: false,
                 compacts: HashMap::new(),
+                boundary: HashMap::new(),
                 draft: None,
                 pending: HashMap::new(),
                 next_sid: 0,

@@ -1135,6 +1135,7 @@ export const es: Messages = {
   'notes.124.new': 'Puedes editar un mensaje en cola sin cambiar su lugar.',
   'notes.125.fixed': 'Si un mensaje sale de la cola mientras lo editas, tus cambios vuelven al cuadro de mensaje sin borrar tu borrador.',
   'notes.126.new': 'Puedes recuperar mensajes anteriores con la flecha arriba o buscarlos con Ctrl+R en la caja de mensaje, sin perder tu borrador.',
+  'notes.127.better': 'Con Seguir solo, el agente ahora resume una conversación larga entre tareas y deja de releerla entera en cada paso. El trabajo sigue solo.',
   'update.checking': 'Buscando una actualización…',
   'update.downloading': 'Descargando actualización…',
   'update.downloadingPercent': 'Descargando actualización… {percent} %',

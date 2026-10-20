@@ -1135,6 +1135,7 @@ export const de: Messages = {
   'notes.124.new': 'Du kannst eine wartende Nachricht bearbeiten, ohne ihren Platz in der Warteschlange zu ändern.',
   'notes.125.fixed': 'Startet eine Nachricht während der Bearbeitung, landen deine Änderungen im Nachrichtenfeld, ohne deinen Entwurf zu ersetzen.',
   'notes.126.new': 'Mit der Pfeiltaste nach oben holst du frühere Nachrichten zurück; Strg+R durchsucht sie im Nachrichtenfeld. Dein Entwurf bleibt erhalten.',
+  'notes.127.better': 'Bei Selbst weitermachen fasst der Agent ein langes Gespräch jetzt zwischen zwei Aufgaben zusammen und liest es nicht mehr bei jedem Schritt ganz neu. Die Arbeit läuft von selbst weiter.',
   'update.checking': 'Suche nach einem Update…',
   'update.downloading': 'Update wird heruntergeladen…',
   'update.downloadingPercent': 'Update wird heruntergeladen… {percent} %',

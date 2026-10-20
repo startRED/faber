@@ -170,6 +170,11 @@ async fn tool(agent: &mut Pipe, n: u64, args: Value) -> (bool, String) {
     panic!("{request} was never answered");
 }
 
+/// The line Faber sends to compact: the CLI's command with what the summary must keep.
+fn compact_line() -> String {
+    format!("/compact {}", faber_engine::claude::COMPACT_FOCUS)
+}
+
 /// What Claude Code says when the conversation was compacted on request (`/compact`), recorded from 2.1.302.
 async fn compacts(agent: &mut Pipe, after: u64) {
     agent.say(json!({ "type": "system", "subtype": "status", "status": "compacting" })).await;
@@ -242,7 +247,7 @@ async fn the_agent_compacts_itself_when_its_turn_ends_and_gets_its_own_next_word
     agent.say(response(Value::Null, 2, 150_000, 5_000)).await;
     agent.say(result(1_000_000)).await;
     until_turns(&agent, 2).await;
-    assert_eq!(turns(&agent)[1], "/compact", "the CLI is asked once the turn ended");
+    assert_eq!(turns(&agent)[1], compact_line(), "the CLI is asked once the turn ended");
     // While it compacts, the conversation is at work: the person's message waits behind it.
     let queued = SendRequest {
         conversation_id: Some(id.clone()),
@@ -284,7 +289,7 @@ async fn a_compaction_without_next_sends_no_turn_and_a_failed_turn_compacts_noth
     assert!(ok);
     answers(&mut agent, "One topic is done.", true).await;
     until_turns(&agent, 2).await;
-    assert_eq!(turns(&agent)[1], "/compact");
+    assert_eq!(turns(&agent)[1], compact_line());
     compacts(&mut agent, 900).await;
     until(&engine, &id, |c| !c.compacting).await;
     tokio::time::sleep(Duration::from_millis(100)).await;
@@ -530,5 +535,70 @@ async fn codex_reports_its_context_compacts_on_request_and_continues_with_next()
     assert!(seen.contains(&Some(ContextFill { used: 40_000, window: 258_400 })), "{seen:?}");
     assert!(seen.contains(&Some(ContextFill { used: 13_808, window: 258_400 })), "{seen:?}");
     assert_eq!(c.context, Some(ContextFill { used: 13_808, window: 258_400 }));
+    engine.shutdown();
+}
+
+/// The agent calls one of Faber's progress tools (`wrap_up` here) and Faber answers it.
+async fn progress(agent: &mut Pipe, request: &str, tool: &str, input: Value) {
+    let call = json!({ "jsonrpc": "2.0", "id": 7, "method": "tools/call", "params": { "name": tool, "arguments": input } });
+    agent
+        .say(json!({ "type": "control_request", "request_id": request,
+        "request": { "subtype": "mcp_message", "server_name": "faber", "message": call } }))
+        .await;
+    for _ in 0..300 {
+        if agent.lines.lock().unwrap().iter().any(|m| m["response"]["request_id"] == request) {
+            return;
+        }
+        tokio::time::sleep(Duration::from_millis(10)).await;
+    }
+    panic!("Faber never answered the {tool} call");
+}
+
+/// A Keep going turn whose main thread held `read` tokens, closing a task with a box or not.
+async fn kept_turn(agent: &mut Pipe, n: usize, read: u64, closes: bool) {
+    agent.say(response(Value::Null, 2, read, 0)).await;
+    if closes {
+        progress(agent, &format!("w{n}"), "wrap_up", json!({ "recap": "The login page is fixed and checked." })).await;
+    }
+    agent.say(result(1_000_000)).await;
+}
+
+/// Under Keep going Faber compacts by itself between tasks, like a careful person: after a reply that closed a task with a
+/// context of a quarter of its window, it asks the CLI to compact before it sends the next turn, and the turn follows the
+/// summary. A small context, or a reply that closed nothing below three fifths, goes straight on. A compaction that failed
+/// is not asked again before the next turn.
+#[tokio::test]
+async fn keep_going_compacts_a_large_context_between_tasks_before_its_next_turn() {
+    let (dir, project) = (tempfile::tempdir().unwrap(), crate::support::work_folder());
+    let (engine, _rx, mut agent, id) = started(dir.path(), project.path()).await;
+    engine.set_keep_going_pace(0.001);
+    engine.keep_going(&id, true).unwrap();
+    let keep_going = |t: &str| t.starts_with("The person is away");
+
+    // Small: on at once.
+    kept_turn(&mut agent, 1, 200_000, true).await;
+    until_turns(&agent, 2).await;
+    assert!(keep_going(&turns(&agent)[1]), "{:?}", turns(&agent));
+    // Large, but the reply closed nothing: on at once too.
+    kept_turn(&mut agent, 2, 400_000, false).await;
+    until_turns(&agent, 3).await;
+    assert!(keep_going(&turns(&agent)[2]), "{:?}", turns(&agent));
+
+    // A task closed with a quarter of the window held: compacted first, then the next turn.
+    kept_turn(&mut agent, 3, 300_000, true).await;
+    until_turns(&agent, 4).await;
+    assert_eq!(turns(&agent)[3], compact_line());
+    compacts(&mut agent, 9_000).await;
+    until_turns(&agent, 5).await;
+    assert!(keep_going(&turns(&agent)[4]), "{:?}", turns(&agent));
+    assert_eq!(engine.open(&id).unwrap().context.map(|c| c.used), Some(9_000));
+
+    // A compaction that fails goes on with the turn, and is not asked again in a loop.
+    kept_turn(&mut agent, 4, 700_000, false).await;
+    until_turns(&agent, 6).await;
+    assert_eq!(turns(&agent)[5], compact_line());
+    agent.say(json!({ "type": "result", "subtype": "error_during_execution", "is_error": true, "total_cost_usd": 0.0, "usage": {} })).await;
+    until_turns(&agent, 7).await;
+    assert!(keep_going(&turns(&agent)[6]), "{:?}", turns(&agent));
     engine.shutdown();
 }

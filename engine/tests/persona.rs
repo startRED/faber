@@ -31,3 +31,11 @@ fn persona_puts_economy_before_speed_as_r10_says() {
     assert!(quality < economy && economy < speed, "{text}");
     assert!(!text.contains("then speed, then cost"));
 }
+
+/// Every turn rereads the whole context, so the agent is told to keep its own small (R260).
+#[test]
+fn persona_asks_the_agent_to_keep_its_own_context_small() {
+    let text = persona(&PersonaInput { name: Some("Erick") });
+    assert!(text.contains("Keep your own context small"), "{text}");
+    assert!(text.contains("subagent when you can start one"));
+}

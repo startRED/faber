@@ -1135,6 +1135,7 @@ export const fr: Messages = {
   'notes.124.new': 'Vous pouvez modifier un message en attente sans changer sa place dans la file.',
   'notes.125.fixed': 'Si un message quitte la file pendant la modification, vos changements reviennent dans le champ du message sans effacer votre brouillon.',
   'notes.126.new': 'Retrouvez vos anciens messages avec la flèche haut ou cherchez-les avec Ctrl+R dans la zone de message, sans perdre votre brouillon.',
+  'notes.127.better': "Avec Continuer seul, l'agent résume maintenant une longue conversation entre deux tâches et ne la relit plus en entier à chaque étape. Le travail continue tout seul.",
   'update.checking': 'Recherche d’une mise à jour…',
   'update.downloading': 'Téléchargement de la mise à jour…',
   'update.downloadingPercent': 'Téléchargement de la mise à jour… {percent} %',

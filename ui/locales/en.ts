@@ -1015,6 +1015,7 @@ export const en = {
   'notes.124.new': 'You can edit a waiting message in the queue without changing its place.',
   'notes.125.fixed': 'If a queued message starts before you finish editing, your changes return to the message box without replacing your draft.',
   'notes.126.new': 'You can recall earlier messages with Up or search them with Ctrl+R in the message box, keeping your draft.',
+  'notes.127.better': 'Keep going now has the agent summarize a long conversation between tasks, so it stops rereading all of it at every step. The work goes on by itself.',
   'update.checking': 'Looking for an update…',
   'update.downloading': 'Downloading update…',
   'update.downloadingPercent': 'Downloading update… {percent}%',
