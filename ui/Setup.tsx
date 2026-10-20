@@ -22,10 +22,25 @@ export interface SetupProps {
   onFinish: (result: 'done' | 'skipped') => void;
 }
 
+// An install outlives this screen: the shell keeps running it after Close. What it reached lives here, for the whole app,
+// so the cards opened again show it still installing (first-user review, 2026-10-19) instead of "Not installed".
+const [progresses, setProgresses] = createSignal<Partial<Record<Vendor, SetupProgress>>>({});
+let listening = false;
+
+/** Keeps the step an install reached; the shell's setup events land here. */
+export function noteSetupProgress(e: SetupProgress) {
+  setProgresses((prev) => ({ ...prev, [e.vendor]: e }));
+}
+
+const underway = (v: Vendor) => {
+  const step = progresses()[v]?.step;
+  return step !== undefined && step !== 'done' && step !== 'failed';
+};
+
 export function Setup(props: SetupProps) {
-  const [selected, setSelected] = createSignal<Subscription[]>([]);
+  // An AI still installing from an earlier visit is picked already, so its card shows where the install is.
+  const [selected, setSelected] = createSignal<Subscription[]>((['claude', 'codex'] as const).filter(underway));
   const [checks, setChecks] = createSignal<Partial<Record<Vendor, Check>>>({});
-  const [progresses, setProgresses] = createSignal<Partial<Record<Vendor, SetupProgress>>>({});
   const [waitings, setWaitings] = createSignal<Partial<Record<Vendor, boolean>>>({});
   const [errors, setErrors] = createSignal<Partial<Record<Vendor, { key: string; detail?: string }>>>({});
 
@@ -43,7 +58,7 @@ export function Setup(props: SetupProps) {
   };
 
   const installVendor = async (v: Vendor) => {
-    setProgresses((prev) => ({ ...prev, [v]: { type: 'setup', vendor: v, step: 'prerequisite' } }));
+    noteSetupProgress({ type: 'setup', vendor: v, step: 'prerequisite' });
     setErrors((prev) => ({ ...prev, [v]: undefined }));
     try {
       await api.setupInstall(v);
@@ -80,9 +95,15 @@ export function Setup(props: SetupProps) {
       }
     };
     window.addEventListener('focus', onFocus);
+    if (!listening) {
+      listening = true;
+      void api.on((e) => {
+        if (e.type === 'setup') noteSetupProgress(e);
+      });
+    }
+    for (const v of selected()) if (v !== 'none') void checkVendor(v);
     const unlisten = api.on((e) => {
       if (e.type === 'setup') {
-        setProgresses((prev) => ({ ...prev, [e.vendor]: e }));
         if (e.step === 'done') {
           void checkVendor(e.vendor);
         }

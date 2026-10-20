@@ -5,7 +5,7 @@ import { en } from '../../ui/locales/en.ts';
 import { es } from '../../ui/locales/es.ts';
 import { fr } from '../../ui/locales/fr.ts';
 import { ptBR } from '../../ui/locales/pt-BR.ts';
-import { Setup } from '../../ui/Setup.tsx';
+import { noteSetupProgress, Setup } from '../../ui/Setup.tsx';
 import { continuePatch, firstRunStep, lookDue, setupCard, setupPatch, shouldOpenSetup, toggleSubscription, type Subscription } from '../../ui/setup.ts';
 import { check, deepEqual, doesNotMatch, equal, notEqual, ok } from './check.ts';
 
@@ -180,4 +180,21 @@ check('setup: the AI that is picked is filled and ticked, and the other ones are
     equal(now.filter((b) => b.querySelector('.tick')).length, 1);
     ok(!/ChatGPT/.test(host.textContent!), 'no ChatGPT on the cards');
   } finally { dispose(); host.remove(); }
+});
+
+check('setup: closing the cards while an AI installs and opening them again shows it still installing', () => {
+  noteSetupProgress({ type: 'setup', vendor: 'codex', step: 'download' });
+  const host = document.createElement('div');
+  document.body.append(host);
+  const dispose = render(() => createComponent(Setup, { mode: 'manage', onFinish: () => {} }), host);
+  try {
+    const codex = [...host.querySelectorAll<HTMLButtonElement>('.pick')].find((b) => b.textContent!.includes('Codex'))!;
+    equal(codex.getAttribute('aria-pressed'), 'true', 'the AI still installing is picked already');
+    ok(host.querySelector('.setup-card[data-vendor="codex"] .setup-badge.installing'), 'its card says it is installing');
+    ok(host.querySelector('.setup-card[data-vendor="codex"] .setup-step'), 'with the step it reached');
+  } finally {
+    dispose();
+    host.remove();
+    noteSetupProgress({ type: 'setup', vendor: 'codex', step: 'done' });
+  }
 });

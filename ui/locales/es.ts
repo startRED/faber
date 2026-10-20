@@ -1067,6 +1067,7 @@ export const es: Messages = {
   'notes.110.new': 'En un proyecto, el agente ahora muestra su plan debajo de la respuesta, marcando cada paso, y termina con un resumen corto y una pregunta que respondes con un botón.',
   'notes.111.better': 'Con Seguir solo activado, una pregunta final que nadie responde en diez minutos recibe la respuesta recomendada, y el recuadro dice cuál eligió Faber.',
   'notes.112.new': 'El catálogo de Faber tiene 13 skills más para el agente de tus proyectos: bases de datos, pagos, inicio de sesión, Cloudflare y apps móviles.',
+  'notes.113.fixed': 'Cerrar las cuentas mientras una IA se instala ya no la hace parecer sin instalar: al abrirlas de nuevo, la instalación sigue a la vista.',
   'update.checking': 'Buscando una actualización…',
   'update.downloading': 'Descargando actualización…',
   'update.downloadingPercent': 'Descargando actualización… {percent} %',

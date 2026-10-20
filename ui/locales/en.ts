@@ -947,6 +947,7 @@ export const en = {
   'notes.110.new': 'In a project, the agent now shows its plan under its answer, ticking off each step, and ends with a short recap and one question you answer with a button.',
   'notes.111.better': 'With Keep going on, a closing question nobody answers in ten minutes gets its recommended reply, and the box says which one Faber chose.',
   'notes.112.new': 'Faber’s catalog has 13 more skills for a project’s agent, for databases, payments, sign-in, Cloudflare and mobile apps.',
+  'notes.113.fixed': 'Closing the account cards while an AI installs no longer makes it look not installed: opened again, they show it still installing.',
   'update.checking': 'Looking for an update…',
   'update.downloading': 'Downloading update…',
   'update.downloadingPercent': 'Downloading update… {percent}%',

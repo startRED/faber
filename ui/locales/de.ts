@@ -1067,6 +1067,7 @@ export const de: Messages = {
   'notes.110.new': 'In einem Projekt zeigt der Agent jetzt seinen Plan unter der Antwort, hakt jeden Schritt ab und endet mit einer kurzen Zusammenfassung und einer Frage, die du mit einem Knopf beantwortest.',
   'notes.111.better': 'Mit Selbst weitermachen bekommt eine Abschlussfrage, die zehn Minuten niemand beantwortet, die empfohlene Antwort, und das Feld sagt, welche Faber gewählt hat.',
   'notes.112.new': 'Fabers Katalog hat 13 weitere Skills für den Agenten deiner Projekte: Datenbanken, Zahlungen, Anmeldung, Cloudflare und mobile Apps.',
+  'notes.113.fixed': 'Wer die Konten schließt, während eine KI installiert wird, sieht sie nicht mehr als nicht installiert: Beim erneuten Öffnen läuft die Installation sichtbar weiter.',
   'update.checking': 'Suche nach einem Update…',
   'update.downloading': 'Update wird heruntergeladen…',
   'update.downloadingPercent': 'Update wird heruntergeladen… {percent} %',
