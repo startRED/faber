@@ -644,6 +644,26 @@ impl Message {
     }
 }
 
+/// The versions of one message of the open conversation (parity T7): the conversations that took another way at it.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Versions {
+    /// The message in the open conversation.
+    pub message_id: String,
+    /// Which of `list` it is.
+    pub at: usize,
+    /// Every version, in the order they were written.
+    pub list: Vec<VersionAt>,
+}
+
+/// One version: the conversation that shows it and the message there.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct VersionAt {
+    pub conversation_id: String,
+    pub message_id: String,
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct BranchOf {

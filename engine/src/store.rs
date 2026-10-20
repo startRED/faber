@@ -6,7 +6,7 @@
 //! former is empty, and a damaged safety file is never read as no data.
 
 use crate::ledger::Ledger;
-use crate::model::{Conversation, Project, Settings, Summary};
+use crate::model::{BranchOf, Conversation, Project, Settings, Summary};
 use crate::recents::Recents;
 use serde::Serialize;
 use serde::de::DeserializeOwned;
@@ -194,6 +194,26 @@ impl Store {
             .collect();
         list.sort_by_key(|c| std::cmp::Reverse(c.updated_at));
         list
+    }
+
+    /// Which conversation branched from which (child, parent). Only the files that mention a branch are parsed, and only for
+    /// that.
+    pub fn branch_links(&self) -> Vec<(String, String)> {
+        #[derive(serde::Deserialize)]
+        #[serde(rename_all = "camelCase")]
+        struct Link {
+            id: String,
+            branch_of: Option<BranchOf>,
+        }
+        fs::read_dir(&self.conversations)
+            .into_iter()
+            .flatten()
+            .flatten()
+            .filter(|e| e.path().extension().is_some_and(|x| x == "json"))
+            .filter_map(|e| fs::read_to_string(e.path()).ok().filter(|text| text.contains("\"branchOf\"")))
+            .filter_map(|text| serde_json::from_str::<Link>(&text).ok())
+            .filter_map(|l| Some((l.id, l.branch_of?.conversation_id)))
+            .collect()
     }
 
     /// The ids of conversations saved with "keep going" on. A file that does not mention it is not parsed, so looking at every

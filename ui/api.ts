@@ -187,6 +187,17 @@ export interface QueuedTurn {
   sending?: boolean;
   wake?: Message['wake'];
 }
+/** One version of a message: the conversation that shows it and the message there (parity T7). */
+export interface VersionAt {
+  conversationId: string;
+  messageId: string;
+}
+/** The versions of one message of the open conversation, in the order they were written; `at` is this one. */
+export interface Versions {
+  messageId: string;
+  at: number;
+  list: VersionAt[];
+}
 export interface Conversation {
   id: string;
   title: string;
@@ -587,6 +598,8 @@ export const api = {
   open: (id: string) => invoke<Conversation | null>('open', { id }),
   send: (req: SendRequest) => invoke<string>('send', { req }),
   branch: (req: { conversationId: string; messageId: string; text: string; choice: Choice }) => invoke<string>('branch', { req }),
+  branchHere: (conversationId: string, messageId: string) => invoke<string>('branch_here', { conversationId, messageId }),
+  versions: (id: string) => invoke<Versions[]>('versions', { id }),
   warm: (req: { conversationId?: string; area: Area; projectId?: string; choice: Choice }) => invoke<void>('warm', { req }),
   routeDraft: (req: { conversationId?: string; area: Area; projectId?: string; choice: Choice }, text: string) =>
     invoke<void>('route_draft', { req, text }),

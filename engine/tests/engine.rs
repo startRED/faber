@@ -3412,3 +3412,85 @@ async fn r161_a_claude_helper_told_during_its_last_words_answers_in_a_second_tur
     assert!(report.starts_with("Retries above 5 aren't dangerous in themselves"), "the second turn's words: {report}");
     assert!(!report.contains("The config check found nothing risky"), "the first turn's words were not the last: {report}");
 }
+
+/// Parity T7: an edit and a retry of the same message are its versions, each a conversation with its own answer, in the order
+/// they were written; a fresh start reads which conversation branched from which back from the files.
+#[tokio::test]
+async fn an_edit_and_a_retry_are_versions_of_the_same_message_each_with_its_own_answer() {
+    let dir = tempfile::tempdir().unwrap();
+    let (e, mut rx) = engine(dir.path(), Vendor::Claude, fake(fixture("claude", "chat")).spawn);
+    let pick = || choice("claude", Some("haiku"));
+    let id = e.send(ask(Area::Chat, SKY, pick())).unwrap();
+    finished(&mut rx, |_| {}).await;
+    assert!(e.versions(&id).is_empty(), "one version only");
+    let first = |conv: &str| e.open(conv).unwrap().messages[0].id.clone();
+    let edit = e.branch(BranchRequest { conversation_id: id.clone(), message_id: first(&id), text: SKY.into(), choice: pick() }).unwrap();
+    finished(&mut rx, |_| {}).await;
+    let retry =
+        e.branch(BranchRequest { conversation_id: edit.clone(), message_id: first(&edit), text: SKY.into(), choice: pick() }).unwrap();
+    finished(&mut rx, |_| {}).await;
+    e.shutdown();
+    let order = vec![id.clone(), edit.clone(), retry.clone()];
+    let check = |e: &Engine| {
+        for (n, conv) in order.iter().enumerate() {
+            let v = e.versions(conv);
+            assert_eq!(v.len(), 1, "{v:?}");
+            assert_eq!((v[0].at, &v[0].message_id), (n, &e.open(conv).unwrap().messages[0].id));
+            assert_eq!(v[0].list.iter().map(|x| x.conversation_id.clone()).collect::<Vec<_>>(), order);
+            assert_eq!(e.open(conv).unwrap().messages.len(), 2, "each version keeps its own answer");
+        }
+    };
+    check(&e);
+    let (again, _rx) = engine(dir.path(), Vendor::Claude, fake(fixture("claude", "chat")).spawn);
+    check(&again);
+    // The middle version goes: the other two stay versions of each other, after a restart too.
+    again.remove_with(&edit, true).unwrap();
+    again.shutdown();
+    let (later, _rx) = engine(dir.path(), Vendor::Claude, fake(fixture("claude", "chat")).spawn);
+    let v = later.versions(&retry);
+    assert_eq!(
+        v.iter().flat_map(|v| v.list.iter().map(|x| x.conversation_id.clone())).collect::<Vec<_>>(),
+        vec![id.clone(), retry.clone()]
+    );
+}
+
+/// "Branch from here" on an answer keeps every message up to it and sends nothing; a message edited later in the branch is
+/// a version there, while the messages before it, shared by the whole family, have one version.
+#[tokio::test]
+async fn branch_from_here_keeps_the_answer_sends_nothing_and_a_middle_edit_is_a_version() {
+    let dir = tempfile::tempdir().unwrap();
+    let (e, mut rx) = engine(dir.path(), Vendor::Claude, fake(fixture("claude", "chat")).spawn);
+    let pick = || choice("claude", Some("haiku"));
+    let id = e.send(ask(Area::Chat, SKY, pick())).unwrap();
+    finished(&mut rx, |_| {}).await;
+    let source = e.open(&id).unwrap();
+    let here = e.branch_here(&id, &source.messages[1].id).unwrap();
+    tokio::time::sleep(Duration::from_millis(100)).await;
+    let branch = e.open(&here).unwrap();
+    let ids = |c: &faber_engine::model::Conversation| c.messages.iter().map(|m| m.id.clone()).collect::<Vec<_>>();
+    assert_eq!(ids(&branch), ids(&source), "nothing is sent until the person writes");
+    assert_eq!(branch.branch_of.as_ref().map(|b| b.message_id.clone()), Some(source.messages[1].id.clone()));
+    assert!(e.versions(&here).is_empty());
+    e.shutdown();
+    // The person went on in the branch and then edited that newer message: written as the files would hold it.
+    let file = |id: &str| dir.path().join("conversations").join(format!("{id}.json"));
+    let mut went_on = read_json(&file(&here));
+    let mut said = went_on["messages"][0].clone();
+    let mut answer = went_on["messages"][1].clone();
+    let at = said["at"].as_u64().unwrap();
+    (said["id"], said["at"], answer["id"]) = (json!("middle"), json!(at + 10), json!("middle-answer"));
+    went_on["messages"].as_array_mut().unwrap().extend([said.clone(), answer.clone()]);
+    std::fs::write(file(&here), went_on.to_string()).unwrap();
+    let mut edited = went_on.clone();
+    let messages = edited["messages"].as_array_mut().unwrap();
+    (messages[2]["id"], messages[2]["at"], messages[3]["id"]) = (json!("middle-2"), json!(at + 20), json!("middle-2-answer"));
+    (edited["id"], edited["branchOf"]) = (json!("edit-1"), json!({ "conversationId": here, "messageId": "middle" }));
+    std::fs::write(file("edit-1"), edited.to_string()).unwrap();
+    let (e, _rx) = engine(dir.path(), Vendor::Claude, fake(fixture("claude", "chat")).spawn);
+    let v = e.versions(&here);
+    assert_eq!(v.len(), 1, "{v:?}");
+    assert_eq!((v[0].message_id.as_str(), v[0].at), ("middle", 0));
+    assert_eq!(v[0].list.iter().map(|x| x.conversation_id.as_str()).collect::<Vec<_>>(), vec![here.as_str(), "edit-1"]);
+    assert_eq!(e.versions("edit-1")[0].at, 1);
+    assert!(e.versions(&id).is_empty(), "the source has no message at that place");
+}

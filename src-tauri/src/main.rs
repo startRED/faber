@@ -298,6 +298,22 @@ async fn branch(faber: State<'_, Faber>, req: BranchRequest) -> Res<String> {
     tauri::async_runtime::spawn_blocking(move || engine.branch(req)).await.map_err(|_| "error.copy.failed".to_string())?
 }
 
+/// "Branch from here" on an answer: a new conversation with every message up to it, where nothing is sent yet.
+#[tauri::command]
+async fn branch_here(faber: State<'_, Faber>, conversation_id: String, message_id: String) -> Res<String> {
+    let engine = faber.engine.clone();
+    tauri::async_runtime::spawn_blocking(move || engine.branch_here(&conversation_id, &message_id))
+        .await
+        .map_err(|_| "error.copy.failed".to_string())?
+}
+
+/// The messages of a conversation that have other versions; the other conversations of its family are read from disk.
+#[tauri::command]
+async fn versions(faber: State<'_, Faber>, id: String) -> Res<Vec<faber_engine::model::Versions>> {
+    let engine = faber.engine.clone();
+    tauri::async_runtime::spawn_blocking(move || engine.versions(&id)).await.map_err(|_| "error.messageGone".to_string())
+}
+
 #[tauri::command]
 fn set_clock(faber: State<'_, Faber>, utc_offset: i64) {
     faber.engine.set_utc_offset(utc_offset);
@@ -1101,6 +1117,8 @@ fn main() {
                 prompt_history,
                 send,
                 branch,
+                branch_here,
+                versions,
                 warm,
                 set_clock,
                 quota_attention,

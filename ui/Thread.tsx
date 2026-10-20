@@ -1,5 +1,17 @@
 import { createEffect, createMemo, createResource, createSignal, For, Index, on, onCleanup, Show, type Accessor } from 'solid-js';
-import { api, errorText, type Checks, type Choice, type Follow, type Message, type Plan, type QueuedTurn, type VendorUsage } from './api.ts';
+import {
+  api,
+  errorText,
+  type Checks,
+  type Choice,
+  type Follow,
+  type Message,
+  type Plan,
+  type QueuedTurn,
+  type VendorUsage,
+  type VersionAt,
+  type Versions,
+} from './api.ts';
 import { Asks, Parkeds } from './Ask.tsx';
 import { copyItem, openMenu } from './contextmenu.ts';
 import { keep, kept, recoverQueuedDraft, release, useDraft } from './unsent.ts';
@@ -172,6 +184,11 @@ interface Shared {
   /** What the composer has chosen now: the model a retry goes to. */
   choice?: Choice;
   onBranch: OnBranch;
+  /** "Branch from here" on an answer: a new conversation with every message up to it. */
+  onBranchHere?: (messageId: string) => void;
+  /** The messages with other versions, and opening one (the message keeps its place there). */
+  versions?: Versions[];
+  onVersion?: (to: VersionAt, messageIndex: number, by: number) => void;
   usage?: VendorUsage[];
   /** Faber asks git whether the last reply changed files (the running row's `weighing`). */
   weighing?: boolean;
@@ -367,7 +384,11 @@ function Answer(props: Shared & { m: Accessor<Message>; messages?: Message[]; pr
       tabindex="-1"
       aria-label={t('answer.label')}
       onContextMenu={(e) =>
-        openMenu(e, [copyItem(m().text), ...(!working() && props.prompt ? [{ id: 'redo', label: retry(), run: () => props.onBranch(props.prompt!.id, props.prompt!.text) }] : [])])
+        openMenu(e, [
+          copyItem(m().text),
+          ...(!working() && props.prompt ? [{ id: 'redo', label: retry(), run: () => props.onBranch(props.prompt!.id, props.prompt!.text) }] : []),
+          ...(!working() && props.onBranchHere ? [{ id: 'branch', label: t('answer.branchHere'), run: () => props.onBranchHere!(m().id) }] : []),
+        ])
       }
     >
       <div class="model" title={headerTitle() || undefined}>
@@ -611,7 +632,50 @@ function FollowLine(props: { conversationId: string; f: Follow }) {
 
 // A message Faber sent by itself (R200): what it is about, as one quiet line; the words the agent got are its tooltip.
 // The user's message; "Edit" sends the new text as a branch, keeping the original conversation as it was.
-function Mine(props: { editKey: string; m: Accessor<Message>; onBranch: OnBranch; messageIndex: number }) {
+/** The arrows between the versions of a message (parity T7); each version is a conversation of its own, opened at the same
+ * place. The left and right arrow keys walk them too while focus is on them. */
+function VersionArrows(props: { v: Versions; onGo: (to: VersionAt, by: number) => void }) {
+  const count = () => props.v.list.length;
+  const step = (by: number) => {
+    const to = props.v.list[props.v.at + by];
+    if (to) props.onGo(to, by);
+  };
+  const key = (e: KeyboardEvent) => {
+    const by = e.key === 'ArrowLeft' ? -1 : e.key === 'ArrowRight' ? 1 : 0;
+    if (!by || e.ctrlKey || e.metaKey || e.altKey) return;
+    e.preventDefault();
+    step(by);
+  };
+  return (
+    <div class="versions" role="group" aria-label={t('mine.versionOf', { at: props.v.at + 1, count: count() })} onKeyDown={key}>
+      <button type="button" class="iconbtn" title={t('mine.versionBack')} aria-label={t('mine.versionBack')} disabled={props.v.at === 0} onClick={() => step(-1)}>
+        <Icon name="left" small />
+      </button>
+      <span aria-hidden="true">
+        {props.v.at + 1}/{count()}
+      </span>
+      <button
+        type="button"
+        class="iconbtn"
+        title={t('mine.versionNext')}
+        aria-label={t('mine.versionNext')}
+        disabled={props.v.at === count() - 1}
+        onClick={() => step(1)}
+      >
+        <Icon name="right" small />
+      </button>
+    </div>
+  );
+}
+
+function Mine(props: {
+  editKey: string;
+  m: Accessor<Message>;
+  onBranch: OnBranch;
+  messageIndex: number;
+  versions?: Versions;
+  onVersion?: (to: VersionAt, messageIndex: number, by: number) => void;
+}) {
   // One editor lives and dies with its (conversation, message) key (the parent re-creates it when the key changes), so
   // what it writes can never land on another message's saved edit.
   const key = () => props.editKey;
@@ -642,6 +706,7 @@ function Mine(props: { editKey: string; m: Accessor<Message>; onBranch: OnBranch
               <Icon name="edit" small />
             </button>
           </div>
+          <Show when={props.versions}>{(v) => <VersionArrows v={v()} onGo={(to, by) => props.onVersion?.(to, props.messageIndex, by)} />}</Show>
         </div>
       }
     >
@@ -880,7 +945,16 @@ export function Thread(props: Shared & { messages: Message[]; queued?: QueuedTur
             {/* A message Faber sent by itself takes no row: the reply's header carries it (`woke` in Answer). */}
             <Show when={!m().wake}>
               <Show when={`edit.${props.conversationId}.${m().id}`} keyed>
-                {(editKey) => <Mine editKey={editKey} m={m} onBranch={props.onBranch} messageIndex={props.from + i} />}
+                {(editKey) => (
+                  <Mine
+                    editKey={editKey}
+                    m={m}
+                    onBranch={props.onBranch}
+                    messageIndex={props.from + i}
+                    versions={props.versions?.find((v) => v.messageId === m().id)}
+                    onVersion={props.onVersion}
+                  />
+                )}
               </Show>
             </Show>
           </Show>

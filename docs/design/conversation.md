@@ -80,6 +80,7 @@ above an answer. The window widths, the sidebar and the running column are in [l
   again. A tick that changed only the tools builds no text. Everything that reaches the page passes DOMPurify.
 
 - [Queued messages and editing](queue.md).
+- [Branches and versions](branch.md).
 
 ## Work log
 

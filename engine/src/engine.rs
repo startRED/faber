@@ -56,6 +56,7 @@ mod stuck_watch;
 mod unbounded;
 mod usage_view;
 mod verifying;
+mod versions;
 pub use pr_watch::{PrReader, gh_reader};
 pub use usage_view::{VendorUsage, WindowUsage};
 pub use verifying::{FIX, MAX_FIXES};
@@ -347,6 +348,8 @@ struct Core {
     installing: bool,
     /// Compactions the agents asked for, done once their turn ends (`compact.rs`).
     compacts: HashMap<String, compact::Plan>,
+    /// Which conversation branched from which (`versions.rs`), read at the first look.
+    links: Option<Vec<(String, String)>>,
     /// The Keep going turn at which Faber last compacted a conversation by itself, so a compaction that failed is not
     /// asked again before the next turn (`compact::compact_at_boundary`).
     boundary: HashMap<String, u32>,
@@ -465,6 +468,7 @@ impl Engine {
                 live: HashMap::new(),
                 installing: false,
                 compacts: HashMap::new(),
+                links: None,
                 boundary: HashMap::new(),
                 draft: None,
                 pending: HashMap::new(),
@@ -701,6 +705,10 @@ impl Engine {
     }
     pub fn open(&self, id: &str) -> Option<Conversation> {
         self.with(|c| c.load(id).cloned())
+    }
+    /// The messages of a conversation that have other versions (parity T7).
+    pub fn versions(&self, id: &str) -> Vec<crate::model::Versions> {
+        self.with(|c| c.versions(id))
     }
     pub fn export_conversation(&self, id: &str, words: &crate::export::Words) -> Result<(String, String), &'static str> {
         // Export a saved snapshot without retaining another conversation in the engine's live cache.
@@ -3041,7 +3049,9 @@ impl Core {
 
     // Edit a message or redo an answer with another model: a new conversation keeps everything before that message,
     // with the chat workspace copied, and sends the new text. The original stays as it was.
-    fn branch(&mut self, req: BranchRequest, copy: Option<(String, crate::project::copy::WorkCopy)>) -> Result<String, String> {
+    /// A branch keeps the messages before `req.message_id` and sends `req.text` there; `here` keeps that message too and
+    /// sends nothing ("Branch from here").
+    fn branch(&mut self, req: BranchRequest, copy: Option<(String, crate::project::copy::WorkCopy)>, here: bool) -> Result<String, String> {
         if self.installing {
             return Err("error.update.activeOperations".into());
         }
@@ -3061,7 +3071,7 @@ impl Core {
         c.title = format!("↳ {}", source.title.trim_start_matches("↳ "));
         c.branch_of = Some(BranchOf { conversation_id: source.id.clone(), message_id: req.message_id.clone() });
         c.working_folder = source.working_folder.clone();
-        c.messages = source.messages[..at]
+        c.messages = source.messages[..if here { at + 1 } else { at }]
             .iter()
             .cloned()
             .map(|mut m| {
@@ -3073,6 +3083,22 @@ impl Core {
             .collect();
         if source.area == Area::Chat && source.working_folder.is_none() && from.is_dir() {
             copy_dir(&from, &to);
+        }
+        // A project keeps attached files under its conversation; the messages kept carry their names, so the files come too.
+        if source.area == Area::Project {
+            let (from, to) = (self.opts.data_dir.join("attachments").join(&source.id), self.opts.data_dir.join("attachments").join(&id));
+            let names: Vec<String> = self.convs[&id].messages.iter().flat_map(|m| m.attachments.iter().flatten().cloned()).collect();
+            if !names.is_empty() && std::fs::create_dir_all(&to).is_ok() {
+                for name in names {
+                    let _ = std::fs::copy(from.join(&name), to.join(&name));
+                }
+            }
+        }
+        self.note_branch(&id, &source.id);
+        if here {
+            self.save(&id);
+            self.list_changed();
+            return Ok(id);
         }
         // The resend carries what the selected message carried: its images and attached files. A chat workspace copy already
         // holds the files, so they are taken out of it and saved again under the same names by the send.
@@ -3185,6 +3211,7 @@ impl Core {
             l.session.close();
         }
         if self.store.get(id).is_some() || self.convs.contains_key(id) {
+            self.keep_family(id);
             self.store.remove(id);
             self.convs.remove(id);
             let _ = std::fs::remove_dir_all(self.scratch_of(id));

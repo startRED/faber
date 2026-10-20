@@ -77,6 +77,7 @@ pub fn scenarios() -> Vec<Scenario> {
             run: recap_on_demand,
         },
         Scenario { name: "editing a message sends it as a branch and keeps the original conversation", run: edits_as_a_branch },
+        Scenario { name: "a retry is a version of the message and the arrows walk the versions (task 200)", run: walks_versions },
         Scenario { name: "deleting a conversation asks once, then removes it", run: deletes_after_asking },
         Scenario { name: "the sidebar footer shows the name the person gave, above the accounts", run: shows_the_name },
         Scenario { name: "with no AI installed, the app says what to do", run: says_what_to_do },
@@ -1172,6 +1173,52 @@ fn edits_queued(ctx: &mut Ctx) -> Result {
     ensure(!output.contains("sent user") && !output.contains("recorded user"), || {
         format!("the fake CLI received different words: {output}")
     })
+}
+
+/// Parity T7: a retry is the message's second version; the arrows under it walk the versions by mouse and by keyboard, each
+/// opening its own conversation, and "Branch from here" on an answer opens one more where nothing is sent.
+fn walks_versions(ctx: &mut Ctx) -> Result {
+    start_settings(ctx, "en")?;
+    let launch = claude_chat(ctx);
+    let mut app = ctx.launch(launch)?;
+    let page = &mut app.page;
+    ask(page, QUESTION)?;
+    let actions = page.named("article", "answer.label")?.css(".actions");
+    page.wait_visible(&actions)?;
+    let retry = page.text_of("answer.retry")?.split('{').next().unwrap_or_default().trim().to_string();
+    page.right_click(&css("article.ai"))?;
+    page.click(&css(".cmenu [role=menuitem]").has_text(&retry))?;
+    page.wait_for("two conversations in the list", "document.querySelectorAll('.list .item').length === 2")?;
+    page.wait_visible(&actions)?;
+    let count = "document.querySelector('.versions span')?.textContent";
+    page.wait_for("the retry to be version 2 of 2", &format!("{count} === '2/2'"))?;
+    let back = page.named("button", "mine.versionBack")?;
+    page.click(&back)?;
+    page.wait_for("the first version to open", &format!("{count} === '1/2'"))?;
+    let next = page.named("button", "mine.versionNext")?;
+    page.press_on(&next, "ArrowRight")?;
+    page.wait_for("the arrow key to open the second version", &format!("{count} === '2/2'"))?;
+    // Focus stays on the arrows, so the keys keep walking.
+    page.wait_for("focus to come back to the arrows", "!!document.activeElement?.closest('.versions')")?;
+    page.press("ArrowLeft")?;
+    page.wait_for("the arrow keys to walk back", &format!("{count} === '1/2'"))?;
+    page.wait_for("focus to come back to the arrows", "!!document.activeElement?.closest('.versions')")?;
+    page.press("ArrowRight")?;
+    page.wait_for("and forth again", &format!("{count} === '2/2'"))?;
+    ctx.shot(&mut app, "versions")?;
+    let page = &mut app.page;
+    let here = page.text_of("answer.branchHere")?;
+    page.wait_visible(&actions)?;
+    page.right_click(&css("article.ai .model"))?;
+    page.wait_visible(&css(".cmenu [role=menuitem]").has_text(&here))?;
+    page.click(&css(".cmenu [role=menuitem]").has_text(&here))?;
+    page.wait_for("three conversations in the list", "document.querySelectorAll('.list .item').length === 3")?;
+    // The newest conversation is the branch, and it is the open one; its question still has two versions, since it holds the
+    // retried one.
+    page.wait_for("the branch to open", "document.querySelector('.list .item')?.getAttribute('aria-current') === 'true'")?;
+    page.wait_for("its question to show its versions", &format!("{count} === '2/2'"))?;
+    same(page.count(&css(".you"))?, 1, "the branch holds the question")?;
+    same(page.count(&css("article.ai"))?, 1, "and its answer, with nothing sent")
 }
 
 #[cfg(test)]

@@ -28,7 +28,7 @@ Size: S small, M medium, L large. Wave: 1 next, 2 after, 3 later or with its pha
 | # | Gap | Who has it | Faber today | Way | Size | Wave |
 |---|---|---|---|---|---|---|
 | T6 | Earlier prompts with the up arrow, and a search over them | both CLIs | None | Composer | S | 2 |
-| T7 | Branch from any point without editing, and arrows between the versions of an edited or retried message | claude.ai, ChatGPT, `/branch`, `/fork` | Editing branches into a new conversation | Extends Branch | M | 2 |
+| T7 | Branch from any point without editing, and arrows between the versions of an edited or retried message | claude.ai, ChatGPT, `/branch`, `/fork` | Done: "Branch from here" on an answer, and arrows between the versions, each its own conversation | Extends Branch | M | 2 |
 | T8 | Voice: dictate into the box | all four | None | The system's own speech input, no service | M | 3 |
 | T9 | Talk out loud with the AI (voice mode) | claude.ai, ChatGPT, Codex realtime | None | Owner's call (cost, phase) | L | 3 |
 | T10 | A global key that opens a small box to ask from anywhere (Quick Entry) | Claude app | Tray only | Owner's call (a second window) | M | 3 |

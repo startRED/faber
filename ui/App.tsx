@@ -18,6 +18,7 @@ import {
   type Summary,
   type UpdateStatus,
   type Vendor,
+  type Versions,
   STOPS,
 } from './api.ts';
 import { inOrder, refreshed, saveAndApply, watchSystem, windowHidden } from './appearance.ts';
@@ -103,6 +104,29 @@ export function App(props: { initial: AppState; update?: UpdateStatus; inbox: { 
   const [heardContext, setHeardContext] = createSignal<Record<string, ContextFill | undefined>>({});
   const contextOf = (c: Conversation) => (c.id in heardContext() ? heardContext()[c.id] : c.context);
   const [searchIndex, setSearchIndex] = createSignal<number>();
+  // The messages of the open conversation that have other versions (parity T7), asked when it opens.
+  const [versions, setVersions] = createSignal<Versions[]>([]);
+  // Only the newest ask's answer is kept; a step through the versions gives focus back to the arrows it came from.
+  let versionsAsk = 0;
+  let versionFocus: { index: number; by: number } | undefined;
+  const askVersions = (id: string) => {
+    const ask = ++versionsAsk;
+    void api
+      .versions(id)
+      .then((list) => {
+        if (ask !== versionsAsk || place().id !== id) return;
+        setVersions(list);
+        const want = versionFocus;
+        versionFocus = undefined;
+        if (want)
+          requestAnimationFrame(() => {
+            const arrows = [...(thread?.querySelectorAll<HTMLButtonElement>(`[data-message-index="${want.index}"] .versions button`) ?? [])];
+            const same = arrows[want.by < 0 ? 0 : 1];
+            (same && !same.disabled ? same : arrows.find((b) => !b.disabled))?.focus({ preventScroll: true });
+          });
+      })
+      .catch(() => {});
+  };
   let searchFrame: number | undefined;
   let searchMark: HTMLElement | undefined;
   let searchTimer: ReturnType<typeof setTimeout> | undefined;
@@ -417,6 +441,17 @@ export function App(props: { initial: AppState; update?: UpdateStatus; inbox: { 
     return open && current()?.id === open.conversationId ? open : undefined;
   };
   const sideChanges = () => changesOpen() && changesOpen() === current()?.id ? changesOpen() : undefined;
+  // A conversation deleted, archived or branched changes the list, and with it the versions of the open one.
+  createEffect(
+    on(
+      () => state().conversations,
+      () => {
+        const id = current()?.id;
+        if (id && !loading()) askVersions(id);
+      },
+      { defer: true },
+    ),
+  );
   createEffect(on(openedAgent, (open) => open && (showSite(undefined), showAside(undefined), setChangesOpen(undefined)), { defer: true }));
   createEffect(on(openedSite, (open) => open && (showAgent(undefined), showAside(undefined), setChangesOpen(undefined)), { defer: true }));
   createEffect(on(openedAside, (open) => open && (showAgent(undefined), showSite(undefined), setChangesOpen(undefined)), { defer: true }));
@@ -483,6 +518,7 @@ export function App(props: { initial: AppState; update?: UpdateStatus; inbox: { 
     setUntil(undefined);
     setFrom(Math.max(0, (current()?.messages.length ?? 0) - PAGE));
     planHeard.plan = undefined;
+    setVersions([]);
     setPlace(next);
     remember('faber.place', next);
     const token = opening.begin(next.id);
@@ -509,6 +545,7 @@ export function App(props: { initial: AppState; update?: UpdateStatus; inbox: { 
     const plan = heard?.id === done.conversation?.id ? heard : undefined;
     setCurrent(done.conversation && plan ? { ...done.conversation, plan: plan.plan } : done.conversation);
     setSearchIndex(target);
+    if (done.conversation) askVersions(done.conversation.id);
     if (target !== undefined) searchFrame = requestAnimationFrame(() => {
       searchMark = thread?.querySelector<HTMLElement>(`[data-message-index="${target}"]`) ?? undefined;
       if (!searchMark) return;
@@ -786,6 +823,20 @@ export function App(props: { initial: AppState; update?: UpdateStatus; inbox: { 
     try {
       const id = await api.branch({ conversationId: c.id, messageId, text, choice: picked });
       remember(`faber.choice.${id}`, picked);
+      await go({ ...at, id });
+    } catch (err) {
+      fail(err);
+    }
+  };
+  // "Branch from here" on an answer: the new conversation opens with nothing sent, the composer's choice kept for it.
+  const branchHere = async (messageId: string) => {
+    const c = current();
+    if (!c) return;
+    const at = place();
+    setError(undefined);
+    try {
+      const id = await api.branchHere(c.id, messageId);
+      remember(`faber.choice.${id}`, picked());
       await go({ ...at, id });
     } catch (err) {
       fail(err);
@@ -1343,6 +1394,12 @@ ${copy().path}`}>
                                     options={options()}
                                     choice={picked()}
                                     onBranch={(messageId, text, chosen) => void branch(messageId, text, chosen ?? picked())}
+                                    onBranchHere={(messageId) => void branchHere(messageId)}
+                                    versions={versions()}
+                                    onVersion={(to, index, by) => {
+                                      versionFocus = { index, by };
+                                      void go({ ...place(), id: to.conversationId }, index);
+                                    }}
                                     plan={c().plan}
                                     onReply={(text) => void send({ text, images: [], files: [] })}
                                   />
