@@ -8,6 +8,10 @@ import { Sidebar } from '../../ui/Sidebar.tsx';
 import { check, deepEqual, equal, ok } from './check.ts';
 
 const settle = () => new Promise((resolve) => setTimeout(resolve, 30));
+// Waits for a state instead of a fixed time, so a slow runner cannot fail the check.
+const until = async (done: () => unknown, limit = 4000) => {
+  for (let waited = 0; waited < limit && !done(); waited += 20) await settle();
+};
 
 for (const area of ['chat', 'project'] as const) {
   check(`pin: ${area} menu preserves keyboard focus, names groups, pins newest first, searches and unpins`, async () => {
@@ -66,7 +70,7 @@ for (const area of ['chat', 'project'] as const) {
       before.focus({ preventScroll: true });
       equal(document.activeElement, before, `the conversation's ${from} control has focus before Shift+F10`);
       before.dispatchEvent(new KeyboardEvent('keydown', { bubbles: true, cancelable: true, key: 'F10', shiftKey: true }));
-      await settle();
+      await until(() => document.querySelector('.cmenu:not(.leaving)'));
       const panel = document.querySelector<HTMLElement>('.cmenu:not(.leaving)');
       ok(panel, 'Shift+F10 opens a menu on the focused conversation');
       const entries = [...panel.querySelectorAll<HTMLButtonElement>('[role=menuitem]')];
