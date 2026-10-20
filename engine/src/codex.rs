@@ -372,7 +372,7 @@ impl Subagents {
                 EngineEvent::Tool { id, name, input, parent } => {
                     Some(EngineEvent::Tool { id, name, input, parent: parent.or(Some(call.clone())) })
                 }
-                result @ EngineEvent::ToolResult { .. } => Some(result),
+                result @ (EngineEvent::ToolResult { .. } | EngineEvent::Background(_)) => Some(result),
                 _ => None,
             })
             .collect();
@@ -409,7 +409,55 @@ pub fn parse_codex_notification(msg: &Value, state: &mut CodexTurnState) -> Vec<
         .then(|| usage["last"]["totalTokens"].as_u64().or(usage["last"]["inputTokens"].as_u64()))
         .flatten()
         .map(|used| EngineEvent::Context { used: Some(used), window: usage["modelContextWindow"].as_u64() });
-    context.into_iter().chain(parse_notification(msg, state)).collect()
+    context.into_iter().chain(parse_notification(msg, state)).chain(command_news(msg)).collect()
+}
+
+fn command_key(thread: &str, item: &str) -> String {
+    json!([thread, item]).to_string()
+}
+
+fn command_news(msg: &Value) -> Vec<EngineEvent> {
+    use crate::background::{State, Update};
+    let p = &msg["params"];
+    let Some(thread) = p["threadId"].as_str() else { return vec![] };
+    if msg["method"] == "item/commandExecution/outputDelta" {
+        return p["itemId"]
+            .as_str()
+            .zip(p["delta"].as_str())
+            .map(|(item, text)| {
+                EngineEvent::Background(Update::Output { id: command_key(thread, item), text: text.into(), replace: false })
+            })
+            .into_iter()
+            .collect();
+    }
+    let item = &p["item"];
+    if item["type"] != "commandExecution" || !matches!(msg["method"].as_str(), Some("item/started" | "item/completed")) {
+        return vec![];
+    }
+    let Some(id) = item["id"].as_str() else { return vec![] };
+    let id = command_key(thread, id);
+    let mut events = Vec::new();
+    if let Some(command) = item["command"].as_str() {
+        // 0.162.1 reports an opaque PTY handle, not a PID; its native items have no published scoped stop request.
+        events.push(EngineEvent::Background(Update::Start {
+            id: id.clone(),
+            command: command.into(),
+            stoppable: false,
+            turn_ended: false,
+        }));
+    }
+    if let Some(text) = item["aggregatedOutput"].as_str() {
+        events.push(EngineEvent::Background(Update::Output { id: id.clone(), text: text.into(), replace: true }));
+    }
+    if msg["method"] == "item/completed" && (item["exitCode"].is_number() || reported_terminal(item).is_none()) {
+        let state = match item["status"].as_str() {
+            Some("interrupted") => State::Stopped,
+            Some("completed") if item["exitCode"].is_null() || item["exitCode"] == 0 => State::Done,
+            _ => State::Failed,
+        };
+        events.push(EngineEvent::Background(Update::End { id, state }));
+    }
+    events
 }
 
 fn parse_notification(msg: &Value, state: &mut CodexTurnState) -> Vec<EngineEvent> {
@@ -1581,8 +1629,12 @@ async fn serve(
                                 // reaches no other reply.
                                 let current = turn.is_some() && turn == t.turn;
                                 if let Some(done) = used && current { t.state.add_subagent(&done); }
-                                if current && !t.blocked {
-                                    for event in events { (t.sink)(event); }
+                                for mut event in events {
+                                    // A child's original root turn can have ended even while another turn runs.
+                                    if let EngineEvent::Background(crate::background::Update::Start { turn_ended, .. }) = &mut event {
+                                        *turn_ended = !current;
+                                    }
+                                    if matches!(event, EngineEvent::Background(_)) || (current && !t.blocked) { (t.sink)(event); }
                                 }
                             }
                             if threads.get(&key).is_some_and(|t| t.stop_children) { stop_native!(key); }
@@ -1638,7 +1690,10 @@ async fn serve(
                                 }
                                 let tracked = subagents.track(key, params["turnId"].as_str(), &msg);
                                 if method != Some("turn/completed") { t.publish_writers(key, &subagents); }
-                                for event in parse_codex_notification(&msg, &mut t.state).into_iter().chain(tracked) {
+                                for mut event in parse_codex_notification(&msg, &mut t.state).into_iter().chain(tracked) {
+                                    if let EngineEvent::Background(crate::background::Update::Start { turn_ended, .. }) = &mut event {
+                                        *turn_ended = params["turnId"].as_str().is_some_and(|turn| t.turn.as_deref() != Some(turn));
+                                    }
                                     if !t.blocked { (t.sink)(event); }
                                 }
                                 t.publish_writers(key, &subagents);
@@ -1680,6 +1735,7 @@ async fn serve(
                     refresh_writers!(key);
                 }
                 Some(ServerCommand::Session(key, cmd)) => match cmd {
+                    SessionCommand::StopBackground { ack, .. } => { let _ = ack.send(Delivery::Unknown); }
                     SessionCommand::Send(turn) => {
                         let Some(t) = threads.get_mut(&key) else { continue };
                         if t.blocked || t.closing { continue; }

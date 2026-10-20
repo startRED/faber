@@ -1,6 +1,7 @@
 //! Claude Code driver: one long-lived `claude -p` process per conversation, spoken to in stream-json over stdio.
 
 mod background;
+mod commands;
 
 use crate::events::{Delivery, EngineEvent, Session, SessionCommand, UserTurn};
 use crate::model::{Area, Permissions, Tuning, WebSearch};
@@ -690,6 +691,9 @@ pub fn start_claude(opts: ClaudeOptions, on_event: EventSink) -> Session {
         let mut control_id = 0u32;
         // The id of the `get_context_usage` request still waiting for its answer.
         let mut usage_request: Option<String> = None;
+        let mut commands = commands::Commands::default();
+        let mut command_reads: HashMap<String, (String, bool)> = HashMap::new();
+        let mut command_stops: HashMap<String, tokio::sync::oneshot::Sender<Delivery>> = HashMap::new();
         let mut watch = proc::TurnWatch::default();
         let mut queued: Vec<UserTurn> = vec![];
         // Lines not yet echoed back, in order, with their words: the tag of one the person wrote while a turn ran, none for a
@@ -754,6 +758,40 @@ pub fn start_claude(opts: ClaudeOptions, on_event: EventSink) -> Session {
                                 }
                                 continue;
                             }
+                            if msg["type"] == "control_response" {
+                                let response = &msg["response"];
+                                if let Some(request) = response["request_id"].as_str() {
+                                    if let Some((task, dirty)) = command_reads.remove(request) {
+                                        if let Some(output) = response["response"]["output"].as_str() {
+                                            on_event(EngineEvent::Background(crate::background::Update::Output { id: task.clone(), text: output.into(), replace: true }));
+                                        }
+                                        if dirty {
+                                            control_id += 1;
+                                            let id = format!("faber-{control_id}");
+                                            let request = json!({"type":"control_request","request_id":id,"request":{"subtype":"get_task_output","task_id":task}});
+                                            if proc::write_line(&mut *stdin, &request).await.is_ok() { command_reads.insert(id, (task, false)); }
+                                        }
+                                        continue;
+                                    }
+                                    if let Some(ack) = command_stops.remove(request) {
+                                        let _ = ack.send(if response["subtype"] == "success" { Delivery::Delivered } else { Delivery::WriteFailed });
+                                        continue;
+                                    }
+                                }
+                            }
+                            // A task edge requests its latest tail once. No timer, file watching or model turn.
+                            let final_read = commands.read_event(&msg);
+                            let news = commands.observe(&msg);
+                            for update in news { on_event(EngineEvent::Background(update)); }
+                            if let Some(task) = final_read.or_else(|| commands.read_event(&msg)) {
+                                if let Some((_, dirty)) = command_reads.values_mut().find(|(id, _)| *id == task) { *dirty = true; }
+                                else if command_reads.len() < crate::background::MAX_COMMANDS {
+                                    control_id += 1;
+                                    let id = format!("faber-{control_id}");
+                                    let request = json!({"type":"control_request","request_id":id,"request":{"subtype":"get_task_output","task_id":task}});
+                                    if proc::write_line(&mut *stdin, &request).await.is_ok() { command_reads.insert(id, (task, false)); }
+                                }
+                            }
                             writers.observe(&msg);
                             if msg["type"] == "result" || (msg["type"] == "system" &&
                                 matches!(msg["subtype"].as_str(), Some("init" | "task_started" | "task_notification")))
@@ -778,7 +816,11 @@ pub fn start_claude(opts: ClaudeOptions, on_event: EventSink) -> Session {
                                 request_began = Some(turn_sent_ms);
                             }
                             let finished = background.ends_reply(&msg, watch.stopping());
-                            if finished { watch.finish(); }
+                            if finished {
+                                // Bash tasks may be announced after their original reply has ended.
+                                commands.end_turn();
+                                watch.finish();
+                            }
                             if replay && msg["type"] == "user" && msg["isReplay"] == true {
                                 let said = words(&msg["message"]["content"]);
                                 if let Some((Some(tag), _)) = unread.iter().position(|(_, w)| *w == said).and_then(|at| unread.remove(at)) {
@@ -903,6 +945,15 @@ pub fn start_claude(opts: ClaudeOptions, on_event: EventSink) -> Session {
                     }
                 }
                 cmd = rx.recv(), if !closed => match cmd {
+                    Some(SessionCommand::StopBackground { id: task, ack }) => {
+                        if !commands.contains(&task) { let _ = ack.send(Delivery::Unknown); continue; }
+                        if command_stops.len() >= crate::background::MAX_COMMANDS { let _ = ack.send(Delivery::WriteFailed); continue; }
+                        control_id += 1;
+                        let id = format!("faber-{control_id}");
+                        let request = json!({"type":"control_request","request_id":id,"request":{"subtype":"stop_task","task_id":task}});
+                        if proc::write_line(&mut *stdin, &request).await.is_ok() { command_stops.insert(id, ack); }
+                        else { let _ = ack.send(Delivery::WriteFailed); }
+                    }
                     Some(SessionCommand::Send(turn)) => {
                         if watch.stopping() { queued.push(turn); continue; }
                         watch.begin();

@@ -66,3 +66,7 @@ path = "tests/install_memory.rs"
 [[test]]
 name = "rewind_cost"
 path = "tests/rewind_cost.rs"
+
+[[test]]
+name = "background_cost"
+path = "tests/background_cost.rs"

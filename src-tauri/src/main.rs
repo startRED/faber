@@ -472,6 +472,16 @@ fn compact_now(faber: State<'_, Faber>, id: String) -> Res<()> {
 fn context_parts(faber: State<'_, Faber>, id: String) -> bool {
     faber.engine.context_parts(&id)
 }
+
+#[tauri::command]
+fn background_commands(faber: State<'_, Faber>) -> faber_engine::background::List {
+    faber.engine.background_commands()
+}
+
+#[tauri::command]
+async fn stop_background(faber: State<'_, Faber>, id: String) -> Res<()> {
+    faber.engine.stop_background(&id).await.map_err(str::to_string)
+}
 /// At most one git listing runs and one waits; a newer request replaces the waiting one.
 #[tauri::command]
 async fn changes(faber: State<'_, Faber>, id: String, cursor: Option<String>) -> Res<faber_engine::changes::ChangeList> {
@@ -1191,6 +1201,8 @@ fn main() {
                 commands,
                 compact_now,
                 context_parts,
+                background_commands,
+                stop_background,
                 changes,
                 change_patch,
                 rewind_points,

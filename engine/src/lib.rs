@@ -2,6 +2,7 @@
 //! The app shell (Tauri) only calls into it; nothing here knows about windows or screens.
 
 pub mod account;
+pub mod background;
 pub mod browser;
 pub mod budget;
 pub mod cadence;

@@ -18,6 +18,8 @@ mod account;
 mod auto;
 #[path = "auto_archive.rs"]
 mod auto_archive;
+#[path = "background.rs"]
+mod background;
 #[path = "budget.rs"]
 mod budget;
 #[path = "cache_health.rs"]
@@ -116,7 +118,7 @@ fn every_test_file_is_listed() {
     let mut missing = Vec::new();
     for entry in std::fs::read_dir(&dir).unwrap() {
         let name = entry.unwrap().file_name().into_string().unwrap();
-        let alone = ["all.rs", "install_memory.rs", "rewind_cost.rs"].contains(&name.as_str());
+        let alone = ["all.rs", "install_memory.rs", "rewind_cost.rs", "background_cost.rs"].contains(&name.as_str());
         if name.ends_with(".rs") && !alone && !this.contains(&format!("#[path = \"{name}\"]")) {
             missing.push(name);
         }

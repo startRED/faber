@@ -62,7 +62,6 @@ Size: S small, M medium, L large. Wave: 1 next, 2 after, 3 later or with its pha
 
 | # | Gap | Who has it | Faber today | Way | Size | Wave |
 |---|---|---|---|---|---|---|
-| P1 | Terminal pane: the commands running in the background, their output, stop one (`/tasks`, `/ps`) | Claude app, both CLIs | "Open in terminal" opens a console | A view in the running column | M | 2 |
 | P2 | Open a file at a line from the reply | Claude app file pane | File cards for attachments | Extends file cards | M | 2 |
 | P3 | Each conversation in its own copy of the project, on its own branch (`--worktree`) | Claude Code, Claude app, Codex | Separate copies for some conversations | Extends the separate copy | M | 2 |
 | P4 | Watch the pull request: CI, review comments, fix on red | Claude app (Auto-fix) | Followed pull requests notify | Extends the tray notice | M | 3 |

@@ -1,7 +1,8 @@
 import { createSignal, For, Show } from 'solid-js';
-import type { Conversation, FileChange, Project, RunningItem, Summary } from './api.ts';
+import type { BackgroundCommand, Conversation, FileChange, Project, RunningItem, Summary } from './api.ts';
 import { AgentChat } from './AgentChat.tsx';
 import { Changes } from './Changes.tsx';
+import { Commands } from './Commands.tsx';
 import { Asks, Parkeds } from './Ask.tsx';
 import { Icon, VendorMark } from './Glyphs.tsx';
 import { Grip } from './Grip.tsx';
@@ -42,6 +43,10 @@ export function Running(props: {
   onAside?: () => void;
   changes?: { id: string; files: FileChange[]; loading: boolean; incomplete?: boolean; loadingMore?: boolean; onMore?: () => void; onReview?: (security: boolean) => void };
   onChanges?: () => void;
+  background?: BackgroundCommand[];
+  conversations?: Summary[];
+  commands?: boolean;
+  onCommands?: () => void;
   onBack?: () => void;
   /** The open subagent fills the stage as a full thread (the column sits over the work area), and the control in its head that swaps the two. */
   wide?: boolean;
@@ -57,6 +62,7 @@ export function Running(props: {
   everyWhileShown(15_000, () => setNow(Date.now()));
   const blocks = () => blocksOf(props.items, props.done);
   const rows = () => props.items.length + (props.done?.length ?? 0);
+  const commandCount = () => props.background?.filter((item) => item.state === 'running').length ?? 0;
   const ended = (c: Summary) => c.ended!;
   const endWords = (c: Summary) => (ended(c).kind === 'done' ? t('run.done') : ended(c).kind === 'failed' ? t('run.doneFailed') : t('run.needsYou'));
   const worked = (c: Summary) => {
@@ -92,7 +98,7 @@ export function Running(props: {
       <Show
         when={props.agent}
         fallback={
-          <Show when={props.site} fallback={<Show when={props.aside} fallback={<Show when={props.changes} fallback={<>
+          <Show when={props.site} fallback={<Show when={props.aside} fallback={<Show when={props.changes} fallback={<Show when={props.commands} fallback={<>
             <div class="rc-head">
               <button class="iconbtn" aria-label={t('run.close')} title={t('run.close')} onClick={() => props.onClose()}>
                 <Icon name="close" />
@@ -101,6 +107,11 @@ export function Running(props: {
                 {t('run.title')}
               </h2>
               <span class="n num">{rows()}</span>
+              <Show when={props.onCommands}>
+                <button class="btn ghost rc-commands" onClick={props.onCommands}>
+                  {t('commands.title')}<Show when={commandCount()}>{' '}<span class="num">{commandCount()}</span></Show>
+                </button>
+              </Show>
               <Show when={props.onChanges}>
                 <button class="btn ghost rc-changes" onClick={() => props.onChanges!()}>{t('changes.title')}</button>
               </Show>
@@ -202,6 +213,8 @@ export function Running(props: {
               </Show>
             </div>
           </>}>
+            <Commands items={props.background ?? []} conversations={props.conversations ?? []} onBack={() => props.onBack?.()} onClose={props.onClose} />
+          </Show>}>
             {(changes) => <Changes id={changes().id} files={changes().files} loading={changes().loading} incomplete={changes().incomplete} loadingMore={changes().loadingMore} onMore={changes().onMore} onReview={changes().onReview} onBack={() => props.onBack?.()} onClose={props.onClose} />}
           </Show>}>
             {(aside) => <QuickQuestion conversation={aside().conversation} options={aside().options} onBack={() => props.onBack?.()} onClose={props.onClose} onTell={(text) => props.onTell?.(text)} />}

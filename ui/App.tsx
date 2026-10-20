@@ -139,6 +139,7 @@ export function App(props: { initial: AppState; update?: UpdateStatus; inbox: { 
   };
   onCleanup(clearSearch);
   const [changesOpen, setChangesOpen] = createSignal<string>();
+  const [backgroundOpen, setBackgroundOpen] = createSignal(false);
   // A stable key avoids reading git on every streamed token; a turn ending reads the list again.
   const changesKey = createMemo(() => {
     const c = current();
@@ -288,7 +289,7 @@ export function App(props: { initial: AppState; update?: UpdateStatus; inbox: { 
       setState((current) => {
         const next = refreshed(current, s);
         // A row that did not change stays the same object, so the sidebar keeps its node.
-        return { ...next, conversations: keepRows(current.conversations, next.conversations), projects: keepRows(current.projects, next.projects) };
+        return { ...next, background: current.background && (!next.background || current.background.revision > next.background.revision) ? current.background : next.background, conversations: keepRows(current.conversations, next.conversations), projects: keepRows(current.projects, next.projects) };
       });
     });
   const fail = (err: unknown) => setError(failureText(err));
@@ -399,6 +400,7 @@ export function App(props: { initial: AppState; update?: UpdateStatus; inbox: { 
     showSite(undefined);
     showAside(undefined);
     setChangesOpen(undefined);
+    setBackgroundOpen(false);
     if (!columnOpen()) return;
     // Closed while it was waiting for the typing to stop, or after it: the questions seen stay seen.
     autoOpen.seen(waitingKeys(items()));
@@ -456,9 +458,9 @@ export function App(props: { initial: AppState; update?: UpdateStatus; inbox: { 
       { defer: true },
     ),
   );
-  createEffect(on(openedAgent, (open) => open && (showSite(undefined), showAside(undefined), setChangesOpen(undefined)), { defer: true }));
-  createEffect(on(openedSite, (open) => open && (showAgent(undefined), showAside(undefined), setChangesOpen(undefined)), { defer: true }));
-  createEffect(on(openedAside, (open) => open && (showAgent(undefined), showSite(undefined), setChangesOpen(undefined)), { defer: true }));
+  createEffect(on(openedAgent, (open) => open && (showSite(undefined), showAside(undefined), setChangesOpen(undefined), setBackgroundOpen(false)), { defer: true }));
+  createEffect(on(openedSite, (open) => open && (showAgent(undefined), showAside(undefined), setChangesOpen(undefined), setBackgroundOpen(false)), { defer: true }));
+  createEffect(on(openedAside, (open) => open && (showAgent(undefined), showSite(undefined), setChangesOpen(undefined), setBackgroundOpen(false)), { defer: true }));
   createEffect(on(() => openedAgent() ?? openedSite() ?? openedAside() ?? (changesOpen() ? { conversationId: changesOpen() } : undefined), (open) => {
     if (!open) return;
     // One of another conversation is never shown (`sideAgent`); it goes when the conversation on screen changes.
@@ -607,6 +609,7 @@ export function App(props: { initial: AppState; update?: UpdateStatus; inbox: { 
     // The restored conversation is already opening (`go` above), so what the inbox held since the page started is kept for
     // its snapshot and nothing is lost between the two.
     props.inbox.take((e) => {
+      if (e.type === 'background') setState((s) => !s.background || e.revision > s.background.revision ? { ...s, background: { revision: e.revision, items: e.items } } : s);
       if (e.type === 'commands' && (e.conversationId === current()?.id || !commandVendor() || e.vendor === commandVendor())) {
         setCommandsVersion((n) => n + 1);
       }
@@ -1043,6 +1046,21 @@ export function App(props: { initial: AppState; update?: UpdateStatus; inbox: { 
       items={items()}
       done={done()}
       projects={state().projects}
+      conversations={state().conversations}
+      background={state().background?.items ?? []}
+      commands={backgroundOpen()}
+      onCommands={() => {
+        showAgent(undefined);
+        showSite(undefined);
+        showAside(undefined);
+        setChangesOpen(undefined);
+        setBackgroundOpen(true);
+        if (!byUser()) {
+          closeSide(false);
+          setByUser(true);
+        }
+        queueMicrotask(() => column?.querySelector<HTMLElement>('button')?.focus());
+      }}
       modal={trapped()}
       onOpen={openRunning}
       onOpenDone={(c) => {
@@ -1065,6 +1083,7 @@ export function App(props: { initial: AppState; update?: UpdateStatus; inbox: { 
         showAgent(undefined);
         showSite(undefined);
         showAside(undefined);
+        setBackgroundOpen(false);
         setChangesOpen(current()?.id);
       } : undefined}
       onAside={canAside() ? () => showAside({ conversationId: current()?.id }) : undefined}
@@ -1073,6 +1092,7 @@ export function App(props: { initial: AppState; update?: UpdateStatus; inbox: { 
         showSite(undefined);
         showAside(undefined);
         setChangesOpen(undefined);
+        setBackgroundOpen(false);
         // The back button is gone with the subagent or the page: focus stays in the column, on the list's first control.
         queueMicrotask(() => column?.querySelector<HTMLElement>('button')?.focus());
       }}

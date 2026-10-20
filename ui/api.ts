@@ -443,10 +443,23 @@ export interface AppState {
   look: Look;
   models: ModelInfo[];
   running: RunningList;
+  background?: BackgroundList;
   quotas: QuotaReading[];
   usage?: VendorUsage[];
   version: string;
 }
+/** Kept only in memory; the engine caps each conversation at 32 commands and each output at 20 lines / 8 KB. */
+export interface BackgroundCommand {
+  id: string;
+  conversationId: string;
+  vendor: Vendor;
+  command: string;
+  started: number;
+  output: string;
+  state: 'running' | 'done' | 'stopped' | 'failed';
+  stoppable: boolean;
+}
+export interface BackgroundList { revision: number; items: BackgroundCommand[] }
 export interface SavedSettings {
   settings: Settings;
   look: Look;
@@ -593,6 +606,7 @@ export interface Aside {
   error?: string | null;
 }
 export type AppEvent =
+  | ({ type: 'background' } & BackgroundList)
   | { type: 'commands'; conversationId: string; vendor: Vendor }
   | { type: 'message'; conversationId: string; message: Message }
   | { type: 'asides'; conversationId: string; asides: Aside[] }
@@ -660,6 +674,8 @@ const LOAD = crypto.getRandomValues(new Uint32Array(1))[0];
 // Typed calls into the engine (the commands registered in src-tauri/src/main.rs and src-tauri/src/setup.rs).
 export const api = {
   state: () => invoke<AppState>('state'),
+  backgroundCommands: () => invoke<BackgroundList>('background_commands'),
+  stopBackground: (id: string) => invoke<void>('stop_background', { id }),
   open: (id: string) => invoke<Conversation | null>('open', { id }),
   send: (req: SendRequest) => invoke<string>('send', { req }),
   branch: (req: { conversationId: string; messageId: string; text: string; choice: Choice }) => invoke<string>('branch', { req }),

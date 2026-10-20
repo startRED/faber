@@ -5,6 +5,14 @@ engine's side is the Running column row of [product-map.md](../product-map.md)).
 rest of the shell are in [layout.md](layout.md).
 
 - With nothing running it says "Nothing running" once and has no footer sentence.
+- "Commands" in the list's head replaces the list with the agent's commands, like an opened helper, with the same back
+  arrow, title, close button, modal focus rules and Curioso empty state. Its count appears only while commands run.
+  The other side views close when it opens. Each row uses the running list's head and quiet conversation name, the
+  literal command in the data face, its state in words and a quiet Stop where the AI supports stopping it. The last
+  20 output lines (at most 8 KiB) are plain wrapped text, never HTML; at most 32 rows per conversation stay in memory.
+  A stop failure says so on its row and leaves retry available; an acknowledgement waits for the AI's end event.
+  Finished rows leave when the conversation's turn ends, or immediately when they finish after it. The list updates
+  by events, with no polling, new motion, console or terminal; closing the view releases its output elements.
 - A project conversation with changed files has one "Changes" control in the list's head. It replaces the list, like a
   helper or a page, with a back arrow, title and close. Each file is a disclosure with the work log's `+N −N` counts;
   opening it closes the previous file and reads only its patch, so at most one patch stays mounted in total. Added and

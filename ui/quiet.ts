@@ -92,6 +92,7 @@ export function heldKey(e: AppEvent): string | undefined {
     case 'quota':
       return `quota:${e.vendor}:${e.window}`;
     case 'running':
+    case 'background':
     case 'usage':
     case 'list':
       return e.type;
@@ -100,9 +101,9 @@ export function heldKey(e: AppEvent): string | undefined {
   }
 }
 
-/** The running list with the higher revision wins, as in the store; every other event, the one that came last. */
+/** Lists keep their higher revision; every other event, the one that came last. */
 const keep = (held: AppEvent, next: AppEvent): AppEvent =>
-  held.type === 'running' && next.type === 'running' && held.revision > next.revision ? held : next;
+  ((held.type === 'running' && next.type === 'running') || (held.type === 'background' && next.type === 'background')) && held.revision > next.revision ? held : next;
 
 /**
  * Hands events to `deliver` as they come, except while held: then they wait, one per key (`heldKey`) in the place the first

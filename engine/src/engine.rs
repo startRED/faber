@@ -65,6 +65,10 @@ pub use verifying::{FIX, MAX_FIXES};
 #[derive(Debug, Clone, PartialEq, Serialize)]
 #[serde(tag = "type", rename_all = "camelCase", rename_all_fields = "camelCase")]
 pub enum AppEvent {
+    Background {
+        revision: u64,
+        items: Vec<crate::background::Command>,
+    },
     Commands {
         conversation_id: String,
         vendor: Vendor,
@@ -183,6 +187,7 @@ pub struct WarmRequest {
 
 #[derive(Debug, Clone, Serialize)]
 pub struct AppState {
+    pub background: crate::background::List,
     pub conversations: Vec<Summary>,
     pub projects: Vec<Project>,
     pub vendors: Vec<Vendor>,
@@ -330,6 +335,8 @@ fn settle(m: &mut Message) {
 }
 
 struct Core {
+    background: crate::background::Commands,
+    background_pending: bool,
     opts: EngineOptions,
     store: Store,
     emit: Emit,
@@ -463,6 +470,8 @@ impl Engine {
         let rewind = rewind::State::new(&opts.data_dir);
         let core = Arc::new_cyclic(|me| {
             Mutex::new(Core {
+                background: Default::default(),
+                background_pending: false,
                 opts,
                 store,
                 emit,
@@ -702,6 +711,19 @@ impl Engine {
     }
     pub fn state(&self) -> AppState {
         self.with(|c| c.state())
+    }
+
+    pub fn background_commands(&self) -> crate::background::List {
+        self.with(|c| c.background.list())
+    }
+
+    pub async fn stop_background(&self, id: &str) -> Result<(), &'static str> {
+        let (session, native) = self.with(|c| c.background.stop(id)).ok_or("error.backgroundGone")?;
+        match tokio::time::timeout(Duration::from_secs(5), session.stop_background(&native)).await {
+            Ok(Ok(crate::events::Delivery::Delivered)) => Ok(()),
+            Ok(Ok(crate::events::Delivery::Unknown)) => Err("error.backgroundGone"),
+            _ => Err("error.backgroundStop"),
+        }
     }
     pub fn settings(&self) -> Settings {
         self.with(|c| c.store.settings())
@@ -1403,6 +1425,7 @@ impl Core {
         let mut quotas: Vec<QuotaReading> = self.quotas.values().cloned().collect();
         quotas.sort_by(|a, b| (a.vendor, &a.window).cmp(&(b.vendor, &b.window)));
         AppState {
+            background: self.background.list(),
             conversations: self.store.list().into_iter().filter(|c| !c.title.is_empty()).collect(),
             projects: self.store.projects(),
             vendors: self.vendors(),
@@ -1411,6 +1434,21 @@ impl Core {
             quotas,
             usage: self.usage(),
         }
+    }
+
+    fn emit_background(&mut self) {
+        if std::mem::replace(&mut self.background_pending, true) {
+            return;
+        }
+        let me = self.me.clone();
+        self.opts.runtime.spawn(async move {
+            tokio::time::sleep(Duration::from_millis(33)).await;
+            let Some(core) = me.upgrade() else { return };
+            let mut core = core.lock().unwrap_or_else(|e| e.into_inner());
+            core.background_pending = false;
+            let list = core.background.list();
+            (core.emit)(AppEvent::Background { revision: list.revision, items: list.items });
+        });
     }
 
     /// Whether the person's "Always allow" for this tool in this conversation still counts: it must have been made under the
@@ -1591,6 +1629,23 @@ impl Core {
 
     fn handle(&mut self, conv: &str, sid: u64, event: EngineEvent) {
         let current = self.live.get(conv).is_some_and(|entry| entry.sid == sid);
+        if let EngineEvent::Background(update) = event {
+            let owner = self
+                .live
+                .get(conv)
+                .filter(|l| l.sid == sid)
+                .map(|l| (l.vendor, l.session.clone()))
+                .or_else(|| self.background.session(conv, sid));
+            if let Some((vendor, session)) = owner
+                && self.background.update(conv, sid, vendor, &session, update, now())
+            {
+                self.emit_background();
+            }
+            return;
+        }
+        if matches!(event, EngineEvent::WriterExit { confirmed: true }) && self.background.exited(conv, sid) {
+            self.emit_background();
+        }
         // A replaced session still owns its writers; no other late event may reach the new reply.
         if matches!(event, EngineEvent::Writers { .. } | EngineEvent::WriterExit { .. })
             && (current || self.rewind_tracks_session(conv, sid))
@@ -1645,6 +1700,7 @@ impl Core {
             }
         }
         match event {
+            EngineEvent::Background(_) => unreachable!("handled before reply events"),
             EngineEvent::Writers { .. } | EngineEvent::WriterExit { .. } | EngineEvent::Cursor { .. } => return,
             EngineEvent::Commands(commands) => {
                 if let Some(c) = self.convs.get_mut(conv) {
@@ -2014,6 +2070,11 @@ impl Core {
     }
 
     fn finish(&mut self, conv: &str, turn_id: Option<String>) {
+        if let Some(sid) = self.live.get(conv).map(|l| l.sid)
+            && self.background.end_turn(conv, sid)
+        {
+            self.emit_background();
+        }
         self.unwatch(conv);
         self.stop_helpers(conv, true);
         // Claude Code takes a line handed to its turn at the turn's next step; one still unread when the turn ends is the next

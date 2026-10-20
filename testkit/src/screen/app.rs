@@ -112,6 +112,10 @@ pub fn scenarios() -> Vec<Scenario> {
             name: "conversation changes: thirty 3990-line files stay within the memory budget while switching and after closing",
             run: changes_memory,
         },
+        Scenario {
+            name: "background commands: thirty-two capped outputs open in the column and one stops without a message",
+            run: background_commands_memory,
+        },
     ]
 }
 
@@ -1022,6 +1026,95 @@ fn changes_memory(ctx: &mut Ctx) -> Result {
     );
     ctx.notes.push(numbers.clone());
     ensure(peak <= BUDGET_MB && closed <= BUDGET_MB, || format!("{numbers}; over the {BUDGET_MB} MB budget"))
+}
+
+fn background_commands_memory(ctx: &mut Ctx) -> Result {
+    start_settings(ctx, "en")?;
+    let output = format!("{}\n", "x".repeat(407)).repeat(19) + &"x".repeat(440);
+    same(output.len(), 8192, "the recorded output reaches the byte cap")?;
+    same(output.lines().count(), 20, "the recorded output reaches the line cap")?;
+    let mut recording = vec![
+        json!({ "dir": "in", "msg": { "type": "user", "message": { "role": "user", "content": "Start background commands" }, "parent_tool_use_id": null, "session_id": "" } }),
+        json!({ "dir": "out", "msg": { "type": "system", "subtype": "init", "session_id": "commands-budget", "model": "claude-haiku-5-5" } }),
+    ];
+    for i in 0..32 {
+        recording.extend([
+            json!({ "dir": "out", "msg": { "type": "assistant", "message": { "role": "assistant", "content": [{ "type": "tool_use", "id": format!("bash-{i}"), "name": "Bash", "input": { "command": format!("node task-{i}.js"), "run_in_background": true } }] } } }),
+            json!({ "dir": "out", "msg": { "type": "system", "subtype": "task_started", "task_type": "local_bash", "task_id": format!("task-{i}"), "tool_use_id": format!("bash-{i}") } }),
+            json!({ "dir": "in", "msg": { "type": "control_request", "request_id": format!("faber-{}", i + 1), "request": { "subtype": "get_task_output", "task_id": format!("task-{i}") } } }),
+            json!({ "dir": "out", "msg": { "type": "control_response", "response": { "subtype": "success", "request_id": format!("faber-{}", i + 1), "response": { "output": output } } } }),
+        ]);
+    }
+    recording.extend([
+        json!({ "dir": "in", "msg": { "type": "control_request", "request_id": "faber-33", "request": { "subtype": "stop_task", "task_id": "task-0" } } }),
+        json!({ "dir": "out", "msg": { "type": "control_response", "response": { "subtype": "success", "request_id": "faber-33", "response": {} } } }),
+        json!({ "dir": "out", "msg": { "type": "system", "subtype": "task_notification", "task_id": "task-0", "tool_use_id": "bash-0", "status": "stopped" } }),
+        json!({ "dir": "in", "msg": { "type": "control_request", "request_id": "faber-34", "request": { "subtype": "get_task_output", "task_id": "task-0" } } }),
+        json!({ "dir": "out", "msg": { "type": "control_response", "response": { "subtype": "success", "request_id": "faber-34", "response": { "output": output } } } }),
+    ]);
+    // Each output read gates the next start, so the control ids and the fully loaded 32-command snapshot are deterministic.
+    let path = ctx.sb.sandbox.join("background-commands.jsonl");
+    let text = recording.iter().map(serde_json::Value::to_string).collect::<Vec<_>>().join("\n");
+    std::fs::write(&path, text).map_err(|e| e.to_string())?;
+    let mut app = ctx.launch(Launch { claude: CliSlot::Fake, recording: Some(path), ..Launch::default() })?;
+    let model = app.page.labelled("composer.model")?;
+    app.page.select_option(&model, "Claude Haiku")?;
+    let (baseline, webview) = ctx.memory_mb(app.id)?;
+    ensure(webview, || "the memory reading must include WebView2".into())?;
+    ask(&mut app.page, "Start background commands")?;
+    app.page.click(&css(".run-btn"))?;
+    app.page.wait_for("all background commands to start", "document.querySelector('.rc-commands .num')?.textContent === '32'")?;
+    let (loaded, _) = ctx.memory_mb(app.id)?;
+    let cpu_before = ctx.cpu_ms(app.id)?;
+    let started = Instant::now();
+    app.page.click(&css(".rc-commands"))?;
+    app.page.wait_count(&css(".command-output"), 32)?;
+    app.page.wait_for(
+        "all capped command output to arrive",
+        "[...document.querySelectorAll('.command-output')].every(p => p.textContent.length === 8192 && p.textContent.split('\\n').length === 20 && p.childElementCount === 0)",
+    )?;
+    let (opened, _) = ctx.memory_mb(app.id)?;
+    let messages = app.page.eval("[...document.querySelectorAll('.mine .you')].map(e => e.textContent)")?;
+    same(messages.clone(), json!(["Start background commands"]), "only the person's original message exists before Stop")?;
+    let row = css(".command-row").has_text("node task-0.js");
+    app.page.click(&row.clone().css(".command-stop"))?;
+    app.page.wait_count(&css(".command-stop"), 31)?;
+    let stopped = app.page.text_of("commands.stopped")?;
+    same(app.page.inner_text(&row.css(".verb"))?, stopped, "the selected command is confirmed stopped by the CLI")?;
+    same(app.page.eval("[...document.querySelectorAll('.mine .you')].map(e => e.textContent)")?, messages, "Stop adds no message")?;
+    same(app.page.count(&css(".command-row"))?, 32, "the finished command stays until its turn ends")?;
+    let cpu_ms = ctx.cpu_ms(app.id)? - cpu_before;
+    let open_ms = started.elapsed().as_secs_f64() * 1000.0;
+    let resting_cpu = ctx.cpu_ms(app.id)?;
+    let resting = Instant::now();
+    pause(1.0);
+    let idle_cpu_ms = ctx.cpu_ms(app.id)? - resting_cpu;
+    let resting_ms = resting.elapsed().as_secs_f64() * 1000.0;
+    let mut peak = baseline.max(loaded).max(opened).max(ctx.memory_mb(app.id)?.0);
+    for (width, height) in [(720, 800), (1280, 800), (1920, 1080)] {
+        super::shell::set_size(&mut app.page, width, height)?;
+        let fits = app.page.eval("(() => { const c = document.querySelector('#running'); return c.scrollWidth <= c.clientWidth && [...c.querySelectorAll('.command-output, .command-line')].every(e => e.scrollWidth <= e.clientWidth); })()")?;
+        same(fits.as_bool(), Some(true), "command lines and output wrap inside the running column")?;
+        ctx.shot(&mut app, &format!("background-commands-{width}x{height}"))?;
+        peak = peak.max(ctx.memory_mb(app.id)?.0);
+    }
+    app.page.click(&css("#running .side-head .back"))?;
+    app.page.wait_gone(&css(".commands-view"))?;
+    same(app.page.count(&css(".command-output"))?, 0, "Back releases every output element")?;
+    app.page.wait_for("only running commands counted", "document.querySelector('.rc-commands .num')?.textContent === '31'")?;
+    let (closed, _) = ctx.memory_mb(app.id)?;
+    let numbers = format!(
+        "Background commands 32 x 8192 bytes / 20 lines: baseline {baseline:.1} MB, loaded {loaded:.1} MB, opened {opened:.1} MB, sampled peak {peak:.1} MB, after Back {closed:.1} MB; open and Stop {cpu_ms:.0} ms CPU ({:.1}% of one core over {open_ms:.0} ms); no events {idle_cpu_ms:.0} ms CPU ({:.1}% over {resting_ms:.0} ms)",
+        cpu_ms / open_ms * 100.0,
+        idle_cpu_ms / resting_ms * 100.0
+    );
+    ctx.notes.push(numbers.clone());
+    ensure(peak <= BUDGET_MB && closed <= BUDGET_MB, || format!("{numbers}; over the {BUDGET_MB} MB budget"))?;
+    ctx.close(app.id)?;
+    let log = ctx.output(app.id);
+    ensure(!log.contains("sent user") && !log.contains("recorded user"), || {
+        format!("the fake CLI received an unexpected agent message: {log}")
+    })
 }
 
 fn thousand_messages(ctx: &mut Ctx) -> Result {

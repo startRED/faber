@@ -240,6 +240,26 @@ impl Core {
     /// person sees only the agent: the agent hears what was refused and can do it itself, where the person approves it.
     fn helper_event(&mut self, call: &str, hsid: u64, event: EngineEvent) {
         self.rewind_helper_event(call, hsid, &event);
+        if let EngineEvent::Background(update) = event {
+            let owner = self
+                .helpers
+                .get(call)
+                .filter(|h| h.hsid == hsid)
+                .map(|h| (h.conv.clone(), h.vendor, h.session.clone()))
+                .or_else(|| self.background.owner(hsid));
+            if let Some((conv, vendor, session)) = owner
+                && self.background.update(&conv, hsid, vendor, &session, update, now())
+            {
+                self.emit_background();
+            }
+            return;
+        }
+        if matches!(event, EngineEvent::WriterExit { confirmed: true })
+            && let Some((conv, ..)) = self.background.owner(hsid)
+            && self.background.exited(&conv, hsid)
+        {
+            self.emit_background();
+        }
         let Some(h) = self.helpers.get_mut(call).filter(|h| h.hsid == hsid) else { return };
         let (conv, sid, vendor) = (h.conv.clone(), h.sid, h.vendor);
         match event {
@@ -310,6 +330,9 @@ impl Core {
 
     fn end_helper(&mut self, call: &str, ok: bool, error: Option<&str>, cost: Option<f64>, incomplete: bool) {
         let Some(h) = self.helpers.remove(call) else { return };
+        if self.background.end_turn(&h.conv, h.hsid) {
+            self.emit_background();
+        }
         self.rewind_helper_retire(call, h.hsid);
         h.session.close();
         self.note_span(h.vendor, h.started, &h.model, cost, incomplete);

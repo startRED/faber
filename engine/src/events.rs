@@ -33,6 +33,7 @@ pub fn terminal_reason(raw: &str) -> &'static str {
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum EngineEvent {
+    Background(crate::background::Update),
     /// This session has ended; true means every process it owns was confirmed stopped.
     WriterExit {
         confirmed: bool,
@@ -239,6 +240,10 @@ pub enum Delivery {
 /// What the engine can ask of a live CLI session.
 #[derive(Debug)]
 pub enum SessionCommand {
+    StopBackground {
+        id: String,
+        ack: tokio::sync::oneshot::Sender<Delivery>,
+    },
     Send(UserTurn),
     /// Adds a message to the turn that is running. `tag` names it in `Injected` and `SteerFailed`.
     Steer {
@@ -284,6 +289,11 @@ impl std::fmt::Debug for Session {
 }
 
 impl Session {
+    pub fn stop_background(&self, id: &str) -> tokio::sync::oneshot::Receiver<Delivery> {
+        let (ack, delivered) = tokio::sync::oneshot::channel();
+        (self.send)(SessionCommand::StopBackground { id: id.into(), ack });
+        delivered
+    }
     pub(crate) fn new(tx: tokio::sync::mpsc::UnboundedSender<SessionCommand>) -> Self {
         Self::from_fn(move |cmd| drop(tx.send(cmd)))
     }

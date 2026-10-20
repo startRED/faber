@@ -320,11 +320,17 @@ svg.i.sm { width: 14px; height: 14px; }
 /* The quick question on the side (R250): its button in the list's head, each question with its answer, and the box. */
 .rc-head .rc-aside { order: 2; margin-left: auto; height: var(--h-sm); }
 .rc-head:has(.rc-aside) .iconbtn { margin-left: 0; }
-.rc-head .rc-changes { order: 2; height: var(--h-sm); }
-.rc-head:has(.rc-changes) { flex-wrap: wrap; }
-.rc-head:has(.rc-changes) h2 { flex: 1; }
-.rc-head:has(.rc-changes) .iconbtn { margin-left: 0; }
-.rc-head:has(.rc-changes) .rc-aside { margin-left: 0; }
+.rc-head :is(.rc-changes, .rc-commands) { order: 2; height: var(--h-sm); }
+.rc-head:has(.rc-changes, .rc-commands) { flex-wrap: wrap; }
+.rc-head:has(.rc-changes, .rc-commands) h2 { flex: 1; }
+.rc-head:has(.rc-changes, .rc-commands) .iconbtn { margin-left: 0; }
+.rc-head:has(.rc-changes, .rc-commands) .rc-aside { margin-left: 0; }
+.commands-view, .command-row { min-width: 0; }
+.command-row .command-stop { height: var(--h-sm); margin-left: auto; }
+.command-row .command-conversation { font-size: var(--fs-xs); overflow-wrap: anywhere; }
+.command-line, .command-output { margin: 0; font-family: var(--font-data); font-size: var(--fs-xs); white-space: pre-wrap; overflow-wrap: anywhere; }
+.command-output { color: var(--ink-2); }
+.command-row .bad { margin: 0; }
 .changes-view { min-width: 0; }
 .changes-head { flex-wrap: wrap; }
 .changes-review { order: 4; display: flex; flex-wrap: wrap; gap: 8px; width: 100%; }

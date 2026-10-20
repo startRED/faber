@@ -102,6 +102,7 @@ pub const SOLO: &[(&str, &str)] = &[
     ("after the six looks were applied in turn, Faber stays within its memory budget", "memory"),
     ("a conversation with a thousand messages opens quickly and stays within the budget", "time to open, memory"),
     ("conversation changes: thirty 3990-line files stay within the memory budget while switching and after closing", "processor, memory"),
+    ("background commands: thirty-two capped outputs open in the column and one stops without a message", "processor, memory"),
     ("homes: idle life costs the processor little, and nothing while the window is hidden", "processor, window state"),
     ("homes: the Chat home and the Projects home look alive, and stand still with reduced motion", "animations running, window state"),
     ("C5.4: the open guide and the look step, with no conversation, use at most 400 MB", "memory"),

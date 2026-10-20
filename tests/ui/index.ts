@@ -31,6 +31,7 @@ import './donecard.check.ts';
 import './foot.check.ts';
 import './checks.check.ts';
 import './changes.check.ts';
+import './commands.check.ts';
 import './idle.check.ts';
 import './hints.check.ts';
 import './i18n.check.ts';
