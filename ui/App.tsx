@@ -505,9 +505,6 @@ export function App(props: { initial: AppState; update?: UpdateStatus; inbox: { 
     const plan = heard?.id === done.conversation?.id ? heard : undefined;
     setCurrent(done.conversation && plan ? { ...done.conversation, plan: plan.plan } : done.conversation);
     setSearchIndex(target);
-    // Consume the reveal as soon as the run blocks have heard it, not on a frame: a window that draws no frame (minimised,
-    // hidden, a slow machine) would keep it, and the next automatic turn would unfold its new run block by itself.
-    queueMicrotask(() => setSearchIndex(undefined));
     if (target !== undefined) {
       // Focus and scroll happen on the next frame, with a timer beside it: a window that draws no frame (hidden, minimised,
       // a slow runner) must still reach the message. The message may also be a moment from the screen, so it is looked for
@@ -528,6 +525,10 @@ export function App(props: { initial: AppState; update?: UpdateStatus; inbox: { 
         mark.scrollIntoView({ block: 'center', behavior: smooth ? 'smooth' : 'instant' });
         lastScrollTop = thread?.scrollTop ?? 0;
         searchTimer = setTimeout(() => mark.classList.remove('search-focus'), 1800);
+        // The reveal is consumed once the message is reached (a run block that holds it consumes it as it opens), so the next
+        // automatic turn cannot unfold its new run block by itself. Never earlier: the message may sit in a run that only
+        // opens when it hears the reveal.
+        setSearchIndex(undefined);
       };
       searchFrame = requestAnimationFrame(() => show(0));
       searchFallback = setTimeout(() => show(20), 50);
@@ -1336,6 +1337,7 @@ ${copy().path}`}>
                                     from={from()}
                                     until={until()}
                                     searchIndex={searchIndex()}
+                                    onRevealed={() => setSearchIndex(undefined)}
                                     conversationId={c().id}
                                     options={options()}
                                     choice={picked()}

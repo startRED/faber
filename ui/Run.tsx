@@ -105,13 +105,14 @@ function reasons(messages: Message[], run: Run): string {
 /** One header over a run: the loop icon, how long it worked on its own and how many turns, and the plan's progress on the
  * newest run, in the work log's disclosure. Opened, it shows the earlier turns, each with its work log folded; only the
  * newest turn stays open below it. The earlier turns are drawn only while shown, so a long run keeps a small screen. */
-export function RunBlock(props: { messages: Message[]; run: Run; plan?: Plan; earlier: (at: number) => JSX.Element; reveal?: number; from?: number }) {
+export function RunBlock(props: { messages: Message[]; run: Run; plan?: Plan; earlier: (at: number) => JSX.Element; reveal?: number; onRevealed?: () => void; from?: number }) {
   const [open, setOpen] = createSignal(false);
   let details!: HTMLDetailsElement;
   createEffect(on(() => props.reveal, (at) => {
     if (at !== undefined && props.run.replies.slice(0, -1).includes(at)) {
       details.open = true;
       setOpen(true);
+      props.onRevealed?.();
     }
   }));
   const first = () => props.messages[props.run.replies[0]! - 1];

@@ -835,7 +835,7 @@ function Narration(props: { text: string }) {
   );
 }
 
-export function Thread(props: Shared & { messages: Message[]; queued?: QueuedTurn[]; busy?: boolean; onError?: (err: unknown) => void; onQueuedRecovered?: (id: string, text: string) => void; from: number; until?: number; searchIndex?: number }) {
+export function Thread(props: Shared & { messages: Message[]; queued?: QueuedTurn[]; busy?: boolean; onError?: (err: unknown) => void; onQueuedRecovered?: (id: string, text: string) => void; from: number; until?: number; searchIndex?: number; onRevealed?: () => void }) {
   const queuedIds = createMemo(() => (props.queued ?? []).map((q) => q.id));
   const prompt = (at: number) => (props.messages[at - 1]?.role === 'user' ? props.messages[at - 1] : undefined);
   // Turns Faber sent by itself, one after another, read as one run (task 018): its earlier turns fold under one header.
@@ -861,7 +861,7 @@ export function Thread(props: Shared & { messages: Message[]; queued?: QueuedTur
             fallback={
               <Show when={!hidden().has(props.from + i)}>
                 <Show when={runs().get(props.from + i)}>
-                  {(run) => <RunBlock messages={props.messages} run={run()} plan={props.plan} earlier={earlier} reveal={props.searchIndex} from={props.from} />}
+                  {(run) => <RunBlock messages={props.messages} run={run()} plan={props.plan} earlier={earlier} reveal={props.searchIndex} onRevealed={props.onRevealed} from={props.from} />}
                 </Show>
                 {/* The newest turn of a run is drawn even with nothing of its own when it holds the run's answers. */}
                 <Show when={drawn(m(), props.from + i) || answered(props.from + i)?.length}>
