@@ -7,6 +7,7 @@ import { Icon, VendorMark } from './Glyphs.tsx';
 import { Pic } from './ImageViewer.tsx';
 import { QuotaCard } from './QuotaCard.tsx';
 import { PlanList, WrapUpBox } from './Plan.tsx';
+import { AnswersCard, answeredIn, folded, RunBlock, runsOf, type Answered } from './Run.tsx';
 import { html, Markdown, openLinks } from './markdown.tsx';
 import { agentMeta, ChangedLines, openedAgent, SourceList, showAgent, tellAbout, ToolChip } from './AgentChat.tsx';
 import { untilReset } from './Sidebar.tsx';
@@ -135,7 +136,7 @@ interface Shared {
   onReply?: (text: string) => void;
 }
 
-function Answer(props: Shared & { m: Accessor<Message>; messages?: Message[]; prompt?: Message; last?: boolean }) {
+function Answer(props: Shared & { m: Accessor<Message>; messages?: Message[]; prompt?: Message; last?: boolean; answered?: Answered[] }) {
   // A turn Faber started by itself: its message takes no row (Faber's own plumbing never does, the 2026-10-19 design), so the
   // reply's header carries it as a small loop mark whose tooltip says what Faber asked.
   const woke = () => props.prompt?.wake;
@@ -216,6 +217,8 @@ function Answer(props: Shared & { m: Accessor<Message>; messages?: Message[]; pr
   // The pages the agent opened in Faber's browser and the apps it started on this computer, each a card beside the files.
   const sites = createMemo(() => [...sitesOf(own()), ...appsOf(own())]);
   const pageSteps = createMemo(() => stepsOf(own()));
+  // The questions Faber answered for the person, as one card (task 018): a run's on its newest reply.
+  const answered = createMemo(() => props.answered ?? answeredIn([m()]));
   // Read only on a reply that says what happened while the person was away.
   const awayPages = createMemo(() => {
     const away = m().away;
@@ -329,7 +332,7 @@ function Answer(props: Shared & { m: Accessor<Message>; messages?: Message[]; pr
         </Show>
       </div>
       {/* After half an hour on its own, "keep going" tells at the top of the newest reply what happened while the person was away. */}
-      <Show when={m().away || m().autoAnswers?.length}>
+      <Show when={m().away || answered().length}>
         <div class="away-lines">
           <Show when={m().away}>{(away) => <AwayLine away={away()} />}</Show>
           <Show when={awayPages().length}>
@@ -337,14 +340,9 @@ function Answer(props: Shared & { m: Accessor<Message>; messages?: Message[]; pr
               <For each={awayPages()}>{(step) => <AwayPage conversationId={props.conversationId} step={step} />}</For>
             </ul>
           </Show>
-          <For each={m().autoAnswers}>
-            {(a) => (
-              <p class="woke">
-                <Icon name="loop" small />
-                {t('away.chose', { question: a.question, answer: a.answer })}
-              </p>
-            )}
-          </For>
+          <Show when={answered().length}>
+            <AnswersCard answers={answered()} onReply={props.onReply} />
+          </Show>
         </div>
       </Show>
       <Show when={m().pace}>{(pace) => <p class="pace">{t(`reason.pace.${pace().kind}`, { vendor: vendorName(pace().vendor), other: m().vendor ? vendorName(m().vendor!) : t('model.auto') })}</p>}</Show>
@@ -359,7 +357,7 @@ function Answer(props: Shared & { m: Accessor<Message>; messages?: Message[]; pr
                 <For each={thinking()}>{(part) => <p>{part.title ? <b>{part.text}</b> : part.text}</p>}</For>
               </div>
             </Show>
-            <For each={narration()}>{(text) => <div class="md" onClick={openLinks} innerHTML={html(text)} />}</For>
+            <For each={narration()}>{(text) => <Narration text={text} />}</For>
             <Show when={own().length}>
               <div class="tools">
                 <For each={own()}>{(tool) => <ToolChip tool={tool} />}</For>
@@ -684,8 +682,41 @@ function AwayLine(props: { away: NonNullable<Message['away']> }) {
   );
 }
 
+const PARAGRAPHS = /\n{2,}/;
+const BLANK = '\n\n';
+/** The agent's words between its steps, in the work log: the last two paragraphs, the earlier ones under "N more". */
+function Narration(props: { text: string }) {
+  const [all, setAll] = createSignal(false);
+  const parts = createMemo(() => (props.text.includes('```') ? [props.text] : props.text.split(PARAGRAPHS)));
+  const hidden = () => (all() || parts().length < 3 ? 0 : parts().length - 2);
+  return (
+    <>
+      <Show when={hidden()}>
+        <button type="button" class="more-narration" onClick={() => setAll(true)}>
+          {t('narration.more', { n: hidden() })}
+        </button>
+      </Show>
+      <div class="md" onClick={openLinks} innerHTML={html(parts().slice(hidden()).join(BLANK))} />
+    </>
+  );
+}
+
 export function Thread(props: Shared & { messages: Message[]; queued?: QueuedTurn[]; busy?: boolean; onError?: (err: unknown) => void; from: number }) {
   const prompt = (at: number) => (props.messages[at - 1]?.role === 'user' ? props.messages[at - 1] : undefined);
+  // Turns Faber sent by itself, one after another, read as one run (task 018): its earlier turns fold under one header.
+  const runs = createMemo(() => runsOf(props.messages));
+  const hidden = createMemo(() => folded(runs()));
+  // The questions Faber answered in a run, on its newest reply.
+  const answered = (at: number) => {
+    const run = runs().get(at);
+    return run ? answeredIn(run.replies.map((r) => props.messages[r]!)) : undefined;
+  };
+  const drawn = (m: Message, at: number) => !(prompt(at)?.wake && m.status !== 'streaming' && empty(m));
+  const earlier = (at: number) => (
+    <Show when={drawn(props.messages[at]!, at)}>
+      <Answer {...props} m={() => props.messages[at]!} prompt={prompt(at)} last={false} answered={[]} />
+    </Show>
+  );
   return (
     <>
       <Index each={props.messages.slice(props.from)}>
@@ -693,8 +724,20 @@ export function Thread(props: Shared & { messages: Message[]; queued?: QueuedTur
           <Show
             when={m().role === 'user'}
             fallback={
-              <Show when={!(prompt(props.from + i)?.wake && m().status !== 'streaming' && empty(m()))}>
-                <Answer {...props} m={m} prompt={prompt(props.from + i)} last={props.from + i === props.messages.length - 1} />
+              <Show when={!hidden().has(props.from + i)}>
+                <Show when={runs().get(props.from + i)}>
+                  {(run) => <RunBlock messages={props.messages} run={run()} plan={props.plan} earlier={earlier} />}
+                </Show>
+                {/* The newest turn of a run is drawn even with nothing of its own when it holds the run's answers. */}
+                <Show when={drawn(m(), props.from + i) || answered(props.from + i)?.length}>
+                  <Answer
+                    {...props}
+                    m={m}
+                    prompt={prompt(props.from + i)}
+                    last={props.from + i === props.messages.length - 1}
+                    answered={answered(props.from + i)}
+                  />
+                </Show>
               </Show>
             }
           >

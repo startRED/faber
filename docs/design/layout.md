@@ -122,6 +122,8 @@ The numbers above are the usual widths. The person can change them, and the shel
   where a message waits in the queue. More words after that undo it. The age ticks once a minute on the newest reply only,
   never while the window is hidden; older replies run no timer. A reply from before the times were kept, a stop and an error
   say nothing here. Nothing animates.
+- In the work log, what the agent wrote between its steps shows its last two paragraphs; earlier ones wait under a quiet
+  "1 more" link in the third ink (R251). A code block keeps the narration whole. The answer itself never folds.
 - The caret blinks only while words arrive; a reply at work after its words shows its step under them, in the status
   line's style. Faber's plumbing takes no row: its own message is a loop mark after the next reply's model (R241; the
   product map's Work log and Faber's own message say the rest).
@@ -133,7 +135,7 @@ The numbers above are the usual widths. The person can change them, and the shel
   the actions row, with one box on a hairline: the recap, then at most one question in the semibold weight and its one
   or two replies as buttons, the recommendation the primary one. Only the newest reply, once it is done, offers the
   buttons; a click sends the button's words as the person's message. A question Faber answered while Keep going ran
-  shows "You were away, so Faber answered “…”" with the loop icon instead of buttons. Nothing in the plan or the box
+  keeps no buttons: the reply's answers card says what it chose ([keep-going.md](keep-going.md)). Nothing in the plan or the box
   moves; both wrap at 720 px.
 - There is no permission sentence over a conversation: the mode is a Settings matter.
 - Keep going (R199): the chip, its quiet lines, its quota warning and what it shows on coming back are in

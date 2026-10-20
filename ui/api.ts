@@ -108,7 +108,7 @@ export interface Message {
   /** On the newest reply of a conversation that went on by itself for half an hour or more: what it did while the person was away. */
   away?: { minutes: number; turns: number; switches: number; answered: number };
   /** Questions Faber answered with their first choice because nobody answered them while "keep going" was on. */
-  autoAnswers?: { question: string; answer: string }[];
+  autoAnswers?: { question: string; answer: string; others?: string[] }[];
   /** On a project reply that changed files: Faber's own run of the fast checks once it ended (R146). */
   checks?: Checks;
   /** On a reply: when its words, thinking or tools last changed, in milliseconds. "Updated 3 min ago" counts from it. */

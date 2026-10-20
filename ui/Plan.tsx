@@ -39,7 +39,7 @@ export function PlanList(props: { plan: Plan; now?: string }) {
 }
 
 /** The closing box of a task: the recap, and one question whose buttons reply for the person, the recommendation first. A
- * question Faber answered for them while Keep going ran says which reply it chose instead of its buttons. */
+ * question Faber answered for them while Keep going ran keeps no buttons: the reply's answers card says what it chose. */
 export function WrapUpBox(props: { box: WrapUp; open: boolean; onReply?: (text: string) => void }) {
   return (
     <section class="wrap-up" aria-label={t('wrap.label')}>
@@ -48,15 +48,7 @@ export function WrapUpBox(props: { box: WrapUp; open: boolean; onReply?: (text: 
         {(ask) => (
           <div class="wrap-ask">
             <p class="q">{ask()}</p>
-            <Show
-              when={!props.box.answered}
-              fallback={
-                <p class="woke">
-                  <Icon name="loop" small />
-                  {t('wrap.chose', { answer: props.box.answered! })}
-                </p>
-              }
-            >
+            <Show when={!props.box.answered}>
               <Show when={props.open && props.onReply}>
                 <div class="wrap-actions">
                   <For each={props.box.actions ?? []}>

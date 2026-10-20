@@ -378,9 +378,19 @@ export function App(props: { initial: AppState; update?: UpdateStatus; inbox: { 
     consider();
   });
 
-  // The conversation the user is in: opening it asks the engine for a snapshot and the answer takes a while.
+  // A page whose messages fold into a run (task 018) may not fill the window, and a list that cannot scroll never asks for
+  // the page above it: it takes pages until it scrolls or nothing is left.
+  const fillPage = (): void => {
+    requestAnimationFrame(() => {
+      if (!thread || from() === 0 || thread.scrollHeight > thread.clientHeight) return;
+      setFrom((f) => Math.max(0, f - PAGE));
+      fillPage();
+    });
+  };
+
   // A plan that changed while its conversation was opening: the snapshot may be older (task 017).
   const planHeard: { plan?: { id: string; plan?: Plan } } = {};
+  // The conversation the user is in: opening it asks the engine for a snapshot and the answer takes a while.
   const go = async (next: Place) => {
     planHeard.plan = undefined;
     setPlace(next);
@@ -401,6 +411,7 @@ export function App(props: { initial: AppState; update?: UpdateStatus; inbox: { 
     if (done.stale) return;
     setLoading(false);
     setFrom(Math.max(0, (done.conversation?.messages.length ?? 0) - PAGE));
+    fillPage();
     const heard = planHeard.plan as { id: string; plan?: Plan } | undefined;
     const plan = heard?.id === done.conversation?.id ? heard : undefined;
     setCurrent(done.conversation && plan ? { ...done.conversation, plan: plan.plan } : done.conversation);

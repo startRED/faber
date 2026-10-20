@@ -61,12 +61,12 @@ check('closing box: the recap, one question, and buttons that reply for the pers
     setOpen(false);
     await settle();
     equal(view.root.querySelector('.wrap-actions'), null);
-    // A question Faber answered while the person was away says which reply it chose.
+    // A question Faber answered while the person was away offers no buttons: the reply's answers card says what it chose.
     setOpen(true);
     setB({ ...box, answered: 'Yes' });
     await settle();
     equal(view.root.querySelector('.wrap-actions'), null);
-    equal(view.root.querySelector('.wrap-ask .woke')!.textContent, t('wrap.chose', { answer: 'Yes' }));
+    equal(view.root.querySelector('.wrap-ask .q')!.textContent, box.ask);
   } finally {
     view.done();
   }

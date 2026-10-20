@@ -541,6 +541,9 @@ pub struct WrapUp {
 pub struct AutoAnswer {
     pub question: String,
     pub answer: String,
+    /// The question's other choices, so the person can change the answer later (task 018's "Change").
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub others: Vec<String>,
 }
 
 impl Message {

@@ -235,6 +235,12 @@ check('thread: while an answer streams every paragraph stays in the answer, and 
     everything('when the next step starts');
     setMessage(reply(after, before.length, 'done'));
     equal(answer().trim(), 'All done.', 'when the answer ends only the final text shows');
+    // The narration's last two paragraphs show in the activity; the earlier ones wait under "2 more" (task 018).
+    for (const paragraph of said.slice(2)) ok(folded().includes(paragraph), `the narration "${paragraph}" is inside the activity`);
+    ok(!folded().includes(said[0]!), 'the earliest paragraph waits under more');
+    const more = root.querySelector<HTMLButtonElement>('.activity-body .more-narration')!;
+    equal(more.textContent!.trim(), t('narration.more', { n: 2 }));
+    more.click();
     for (const paragraph of said) ok(folded().includes(paragraph), `the narration "${paragraph}" is inside the activity`);
   } finally {
     dispose();

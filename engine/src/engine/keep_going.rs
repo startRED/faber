@@ -255,10 +255,15 @@ fn first_choices(input: &serde_json::Value) -> Option<(serde_json::Value, Vec<Au
     let mut chosen = vec![];
     for q in input.get("questions")?.as_array()? {
         let question = q.get("question")?.as_str()?.to_string();
-        let first = q.get("options")?.as_array()?.first()?;
-        let label = first.get("label").and_then(|l| l.as_str()).or_else(|| first.as_str())?.to_string();
+        let labels: Vec<String> = q
+            .get("options")?
+            .as_array()?
+            .iter()
+            .filter_map(|o| o.get("label").and_then(|l| l.as_str()).or_else(|| o.as_str()).map(str::to_string))
+            .collect();
+        let (label, others) = labels.split_first()?;
         answers.insert(question.clone(), serde_json::Value::String(label.clone()));
-        chosen.push(AutoAnswer { question, answer: label });
+        chosen.push(AutoAnswer { question, answer: label.clone(), others: others.to_vec() });
     }
     (!chosen.is_empty()).then_some((serde_json::Value::Object(answers), chosen))
 }
@@ -958,7 +963,8 @@ mod tests {
         let (answers, chosen) = first_choices(&input).unwrap();
         assert_eq!(answers, serde_json::json!({ "Which database?": "SQLite", "Which port?": "8080" }));
         assert_eq!(chosen.len(), 2);
-        assert_eq!(chosen[0], AutoAnswer { question: "Which database?".into(), answer: "SQLite".into() });
+        assert_eq!(chosen[0], AutoAnswer { question: "Which database?".into(), answer: "SQLite".into(), others: vec!["Postgres".into()] });
+        assert_eq!(chosen[1].others, vec!["9090".to_string()], "the other choices are kept for a change of mind");
         assert_eq!(first_choices(&serde_json::json!({ "questions": [{ "question": "Name?", "options": [] }] })), None);
         assert_eq!(first_choices(&serde_json::json!({})), None);
     }
