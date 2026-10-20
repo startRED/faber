@@ -46,7 +46,6 @@ Size: S small, M medium, L large. Wave: 1 next, 2 after, 3 later or with its pha
 | # | Gap | Who has it | Faber today | Way | Size | Wave |
 |---|---|---|---|---|---|---|
 | C1 | What fills the context, and "compact now" from the meter (`/context`, `/compact`) | Claude Code, Codex, Claude app | Meter (R221); the agent compacts in Projects; Claude Code's `/context` and `/compact` are reachable from the `/` menu | Extends Context meter | S | 2 |
-| C2 | A recap of a long conversation on demand (`/recap`) | both CLIs | Closing box per task | Extends the quick question on the side ([following.md](following.md) item 10) | S | 2 |
 | C3 | Usage over days and weeks, per model and area (`/usage` stats, `/insights`) | Claude Code, Codex | Quota now and spend today | Extends Accounts and limits | M | 3 |
 
 ## Finding and keeping

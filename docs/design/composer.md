@@ -7,8 +7,10 @@ listed in the Composer row of [product-map.md](../product-map.md); placement fol
 
 - `@` in a conversation with a working folder lists matching files and folders over the box, on the context menu's
   surface, left-aligned with the text, with no motion; the entry the arrows reach is highlighted and kept in view, and a
-  long path ends in an ellipsis. `/` at the start opens the same list for the agent's commands and skills (`/btw` first
-  in an open conversation); a pick inserts the CLI's spelling without sending. Both lists follow the caret and ignore
+  long path ends in an ellipsis. `/` at the start opens the same list for the agent's commands and skills (`/btw` and
+  `/recap` first in an open conversation); a pick inserts the CLI's spelling without sending. Faber's `/recap` is
+  labelled "Recap" and instead opens the quick question and asks at once, inserting nothing (R266).
+  Both lists follow the caret and ignore
   older answers and non-main mouse buttons. A pending request or populated list keeps its arrow keys; a completed
   file or command request with no results releases Up to history, even while its unmatched token remains in the box.
 - In both areas, Up in an empty box or with the caret on its first visual line recalls earlier messages, unless an `@` or `/`

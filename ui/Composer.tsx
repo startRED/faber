@@ -58,11 +58,12 @@ interface Props {
   onHistory?: (signal: AbortSignal) => Promise<string[]>;
   /** An announcement from the engine invalidates an open or pending `/` query. */
   commandsVersion?: number;
-  /** The conversation can answer a quick question on the side; `/btw` is Faber's first command. */
+  /** The open conversation offers Faber's `/btw` and `/recap` before the agent's commands. */
   canAside?: boolean;
+  onRecap?: () => void;
 }
 
-type Completion = { path: string; dir: boolean; command?: Command; aside?: boolean; history?: boolean };
+type Completion = { path: string; dir: boolean; command?: Command; aside?: 'btw' | 'recap'; history?: boolean };
 type Trigger = { at: number; query: string; kind: 'mention' | 'command' | 'history' };
 
 /** The `@` being typed at the caret: where it starts and what follows it, or undefined. A path with a space is written
@@ -336,10 +337,14 @@ export function Composer(props: Props) {
         ? loadHistory().then((list) => list.filter((text) => text.toLowerCase().includes(query)).map((path) => ({ path, dir: false, history: true })))
         : found.kind === 'mention' ? ask!(found.query) : (commands?.() ?? Promise.resolve([])).catch(() => []).then((commands) => {
         const list: Completion[] = commands
-          .filter((c) => props.vendors.includes(c.vendor) && c.name.toLowerCase().includes(query))
+          .filter((c) => props.vendors.includes(c.vendor) && c.name.toLowerCase().includes(query)
+            && !(canAside && ['btw', 'recap'].includes(c.name.toLowerCase())))
           .sort((a, b) => Number(b.name.toLowerCase().startsWith(query)) - Number(a.name.toLowerCase().startsWith(query)))
           .map((command) => ({ path: `${command.vendor === 'claude' ? '/' : '$'}${command.name}`, dir: false, command }));
-        if (canAside && 'btw'.includes(query)) list.unshift({ path: '/btw', dir: false, aside: true });
+        if (canAside) {
+          if ('recap'.includes(query)) list.unshift({ path: '/recap', dir: false, aside: 'recap' });
+          if ('btw'.includes(query)) list.unshift({ path: '/btw', dir: false, aside: 'btw' });
+        }
         return list.slice(0, 50);
       });
       void request.then(answered, () => answered([]));
@@ -369,6 +374,13 @@ export function Composer(props: Props) {
     if (m.aside && !props.canAside) return closeMentions();
     const now = triggerAt(field);
     if (now?.at !== mention.at || now.query !== mention.query || now.kind !== mention.kind) return closeMentions();
+    if (m.aside === 'recap') {
+      const text = field.value.slice(0, mention.at) + field.value.slice(field.selectionStart);
+      closeMentions();
+      editDraft((d) => ({ ...d, text }));
+      props.onRecap?.();
+      return;
+    }
     const at = mention.at;
     if (m.command && props.choice.vendor === 'auto') {
       const choice = props.options.find((o) => o.choice.vendor === m.command!.vendor)?.choice;
@@ -613,7 +625,7 @@ export function Composer(props: Props) {
               >
                 <Icon name={m.command || m.aside ? 'terminal' : m.dir ? 'folder' : 'sheet'} small />
                 <span>{m.path}</span>
-                <Show when={m.aside || m.command?.note}><span class="mention-note">{m.aside ? t('aside.title') : m.command!.note}</span></Show>
+                <Show when={m.aside || m.command?.note}><span class="mention-note">{m.aside ? t(m.aside === 'recap' ? 'aside.recap' : 'aside.title') : m.command!.note}</span></Show>
                 <Show when={m.command && mixedCommands()}>
                   <span class="mention-vendor">{t('composer.commandAgent', { name: vendorName(m.command!.vendor) })}</span>
                 </Show>

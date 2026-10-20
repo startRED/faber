@@ -48,8 +48,13 @@ rest of the shell are in [layout.md](layout.md).
   in the conversation's box opens it the same way, from any width (over the stage below 1,100 px). Each question sits in
   the same bubble as a subagent's brief, its answer below it as a reply, and a quiet "Send to the agent" under a finished
   one; while it runs, "Looking…" and a quiet Stop. The box is the side chat's (Enter asks, Shift+Enter breaks the line),
-  with the model picker beside Ask when the conversation's AI has more than one model. Nothing in it moves but the
-  list's own entrance (`animateList`).
+  with the model picker beside Ask when the conversation's AI has more than one model. It is offered in any open
+  conversation, working or idle (R267); before the first answer the panel says to ask then and has no box.
+  "Recap" beside the box asks at once, disabled while another side question runs. It asks in the person's language
+  for a few short lines on what was requested, decided and done, and what remains open. Faber's `/recap` next to
+  `/btw` in the composer's list opens this same panel and asks without inserting anything; sending `/recap` alone
+  does the same (R266). The recap is an ordinary read-only side question with the same model and quota rules;
+  the conversation and its session stay untouched (R265). Nothing in it moves but the list's own entrance (`animateList`).
 
 ## Known limits
 

@@ -717,8 +717,9 @@ export function App(props: { initial: AppState; update?: UpdateStatus; inbox: { 
 
   const send = async (draft: Draft) => {
     setQueuedNotice(undefined);
-    // `/btw <question>` asks on the side (R250): it opens the quick question with it, and the conversation never sees it.
-    const side = draft.images.length || draft.files.length ? undefined : btw(draft.text);
+    // Faber's side questions never reach the conversation, including the fixed recap question.
+    const side = draft.images.length || draft.files.length ? undefined
+      : /^\/recap$/i.test(draft.text.trim()) ? t('aside.recapQuestion') : btw(draft.text);
     if (side !== undefined) {
       showAside({ conversationId: current()?.id, question: answered(current()) ? side : undefined });
       // Before the agent has answered there is nothing to ask about: the words go back in the box, and the tab says when.
@@ -958,6 +959,7 @@ export function App(props: { initial: AppState; update?: UpdateStatus; inbox: { 
         }}
         commandsVersion={commandsVersion()}
         canAside={canAside()}
+        onRecap={() => showAside({ conversationId: current()?.id, question: answered(current()) ? t('aside.recapQuestion') : undefined })}
         onRestore={(f) => {
           restore = f;
           queueMicrotask(() => current() && restoreRejected(current()!.id, current()!.messages.at(-1)));
