@@ -270,6 +270,45 @@ async fn mentions(
         .unwrap_or_default())
 }
 
+/// At most one git listing runs and one waits; a newer request replaces the waiting one.
+#[tauri::command]
+async fn changes(faber: State<'_, Faber>, id: String, cursor: Option<String>) -> Res<faber_engine::changes::ChangeList> {
+    static LISTING: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
+    static WAITING: std::sync::Mutex<Option<tokio::sync::oneshot::Sender<()>>> = std::sync::Mutex::new(None);
+    let (replaced, gone) = tokio::sync::oneshot::channel();
+    if let Some(older) = lock(&WAITING).replace(replaced) {
+        let _ = older.send(());
+    }
+    let _one = tokio::select! {
+        biased;
+        _ = gone => return Ok(faber_engine::changes::ChangeList::default()),
+        one = LISTING.lock() => one,
+    };
+    let engine = faber.engine.clone();
+    Ok(tauri::async_runtime::spawn_blocking(move || engine.changes_page(&id, cursor.as_deref())).await.unwrap_or_default())
+}
+
+#[tauri::command]
+async fn change_patch(faber: State<'_, Faber>, id: String, path: String) -> Res<faber_engine::changes::ChangePatch> {
+    // The newest read waiting for each (conversation, file); a newer one answers the older with nothing.
+    type Waiting = std::collections::HashMap<(String, String), tokio::sync::oneshot::Sender<()>>;
+    static READING: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
+    static WAITING: std::sync::LazyLock<std::sync::Mutex<Waiting>> = std::sync::LazyLock::new(|| std::sync::Mutex::new(Waiting::new()));
+    let key = (id.clone(), path.clone());
+    let (replaced, gone) = tokio::sync::oneshot::channel();
+    if let Some(older) = lock(&WAITING).insert(key.clone(), replaced) {
+        let _ = older.send(());
+    }
+    let _one = tokio::select! {
+        biased;
+        _ = gone => return Ok(faber_engine::changes::ChangePatch::default()),
+        one = READING.lock() => one,
+    };
+    lock(&WAITING).remove(&key);
+    let engine = faber.engine.clone();
+    Ok(tauri::async_runtime::spawn_blocking(move || engine.change_patch(&id, &path)).await.unwrap_or_default())
+}
+
 /// A quick question on the side of a conversation (R250); `model` is the tab's own pick, or the conversation's.
 #[tauri::command]
 async fn ask_aside(faber: State<'_, Faber>, id: String, question: String, model: Option<String>) -> Res<String> {
@@ -858,6 +897,8 @@ fn main() {
                 send_queued,
                 tell_helper,
                 mentions,
+                changes,
+                change_patch,
                 ask_aside,
                 stop_aside,
                 asides,

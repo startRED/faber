@@ -161,6 +161,8 @@ The numbers above are the usual widths. The person can change them, and the shel
 
 ### Work log
 
+- The chips' line counts extend into the project's "Changes" view in the running column: git supplies the conversation's
+  whole change, including files changed by commands, so its totals can differ from the tool-input counts below.
 - The work log and a helper's row share one disclosure style (`.disclosure`: a quiet card, a chevron, the hover).
 - Each step is a quiet chip: a verb in the ink color ("Reading", "Running") and what it acts on in the mono face, cut
   in the middle. A tool Faber does not know keeps its own name; an MCP tool reads "Using a tool" with its server's name.
@@ -203,4 +205,6 @@ projects. Faber has no worktree creation for projects, so an environment has no 
 
 ### Running column
 
-Its rows, cards and when it opens by itself: [running.md](running.md).
+Its rows, cards, file changes and when it opens by itself: [running.md](running.md). "Changes" replaces the running list
+inside that same column, with a way back; it never adds a second column. Like the other side views, opening it makes an
+automatically opened overlay modal. At most one file's patch stays open, and a partial list offers continuation.

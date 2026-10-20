@@ -1,4 +1,4 @@
-import { createEffect, createMemo, createSignal, Match, on, onCleanup, onMount, Show, Switch } from 'solid-js';
+import { createEffect, createMemo, createResource, createSignal, Match, on, onCleanup, onMount, Show, Switch } from 'solid-js';
 import { Ambient } from './Ambient.tsx';
 import { Hole } from './Hole.tsx';
 import {
@@ -92,6 +92,32 @@ export function App(props: { initial: AppState; update?: UpdateStatus; inbox: { 
   // with another conversation's project.
   const [place, setPlace] = createSignal<Place>({ area: saved?.area ?? 'chat', projectId: saved?.projectId });
   const [current, setCurrent] = createSignal<Conversation>();
+  const [changesOpen, setChangesOpen] = createSignal<string>();
+  // A stable key avoids reading git on every streamed token; a turn ending reads the list again.
+  const changesKey = createMemo(() => {
+    const c = current();
+    if (c?.area !== 'project') return undefined;
+    const reply = c.messages.findLast((m) => m.role === 'assistant');
+    return `${c.id}\0${reply?.id ?? ''}\0${reply?.status ?? ''}`;
+  });
+  const [changes, { mutate: setChanges }] = createResource(changesKey, (key) => api.changes(key.split('\0')[0]!).catch(() => ({ files: [], incomplete: true, next: '' })).then((list) => ({ key, ...list })));
+  const [loadingMoreChanges, setLoadingMoreChanges] = createSignal(false);
+  const changeList = () => {
+    const list = changes();
+    return list && list.key === changesKey() ? list : undefined;
+  };
+  const moreChanges = async () => {
+    const list = changeList();
+    if (!list || loadingMoreChanges()) return;
+    setLoadingMoreChanges(true);
+    try {
+      const page = await api.changes(list.key.split('\0')[0]!, list.next);
+      if (list.key !== changesKey()) return;
+      const files = [...new Map([...list.files, ...page.files].map((file) => [file.path, file])).values()];
+      setChanges({ ...page, files, key: list.key });
+    } catch { /* Keep the partial list and its continuation available for another try. */ }
+    finally { setLoadingMoreChanges(false); }
+  };
   const [choice, setChoice] = createSignal<Choice>({ vendor: 'auto' });
   const [quotas, setQuotas] = createSignal(seedQuotas(props.initial.quotas));
   const clock = useClock();
@@ -299,6 +325,7 @@ export function App(props: { initial: AppState; update?: UpdateStatus; inbox: { 
     showAgent(undefined);
     showSite(undefined);
     showAside(undefined);
+    setChangesOpen(undefined);
     if (!columnOpen()) return;
     // Closed while it was waiting for the typing to stop, or after it: the questions seen stay seen.
     autoOpen.seen(waitingKeys(items()));
@@ -340,10 +367,11 @@ export function App(props: { initial: AppState; update?: UpdateStatus; inbox: { 
     const open = openedAside();
     return open && current()?.id === open.conversationId ? open : undefined;
   };
-  createEffect(on(openedAgent, (open) => open && (showSite(undefined), showAside(undefined)), { defer: true }));
-  createEffect(on(openedSite, (open) => open && (showAgent(undefined), showAside(undefined)), { defer: true }));
-  createEffect(on(openedAside, (open) => open && (showAgent(undefined), showSite(undefined)), { defer: true }));
-  createEffect(on(() => openedAgent() ?? openedSite() ?? openedAside(), (open) => {
+  const sideChanges = () => changesOpen() && changesOpen() === current()?.id ? changesOpen() : undefined;
+  createEffect(on(openedAgent, (open) => open && (showSite(undefined), showAside(undefined), setChangesOpen(undefined)), { defer: true }));
+  createEffect(on(openedSite, (open) => open && (showAgent(undefined), showAside(undefined), setChangesOpen(undefined)), { defer: true }));
+  createEffect(on(openedAside, (open) => open && (showAgent(undefined), showSite(undefined), setChangesOpen(undefined)), { defer: true }));
+  createEffect(on(() => openedAgent() ?? openedSite() ?? openedAside() ?? (changesOpen() ? { conversationId: changesOpen() } : undefined), (open) => {
     if (!open) return;
     // One of another conversation is never shown (`sideAgent`); it goes when the conversation on screen changes.
     if (current()?.id !== open.conversationId) return;
@@ -359,6 +387,7 @@ export function App(props: { initial: AppState; update?: UpdateStatus; inbox: { 
     if (openedAgent() && openedAgent()!.conversationId !== id) showAgent(undefined);
     if (openedSite() && openedSite()!.conversationId !== id) showSite(undefined);
     if (openedAside() && openedAside()!.conversationId !== id) showAside(undefined);
+    if (changesOpen() !== id) setChangesOpen(undefined);
   }, { defer: true }));
   // The window changes width while the column is open: it becomes a modal dialog or stops being one, and its element is
   // drawn again, so focus goes where the new state wants it.
@@ -875,11 +904,19 @@ export function App(props: { initial: AppState; update?: UpdateStatus; inbox: { 
       agent={sideAgent()}
       site={sideSite()}
       aside={sideAside() && { conversation: current(), options: options() }}
+      changes={sideChanges() ? { id: sideChanges()!, files: changeList()?.files ?? [], incomplete: changeList()?.incomplete ?? false, loading: changes.loading, loadingMore: loadingMoreChanges(), onMore: () => void moreChanges() } : undefined}
+      onChanges={changeList()?.files.length || changeList()?.incomplete ? () => {
+        showAgent(undefined);
+        showSite(undefined);
+        showAside(undefined);
+        setChangesOpen(current()?.id);
+      } : undefined}
       onAside={current() ? () => showAside({ conversationId: current()?.id }) : undefined}
       onBack={() => {
         showAgent(undefined);
         showSite(undefined);
         showAside(undefined);
+        setChangesOpen(undefined);
         // The back button is gone with the subagent or the page: focus stays in the column, on the list's first control.
         queueMicrotask(() => column?.querySelector<HTMLElement>('button')?.focus());
       }}

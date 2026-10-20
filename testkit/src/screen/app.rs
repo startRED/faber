@@ -98,6 +98,10 @@ pub fn scenarios() -> Vec<Scenario> {
         },
         Scenario { name: "after the six looks were applied in turn, Faber stays within its memory budget", run: memory_after_every_look },
         Scenario { name: "a conversation with a thousand messages opens quickly and stays within the budget", run: thousand_messages },
+        Scenario {
+            name: "conversation changes: thirty 3990-line files stay within the memory budget while switching and after closing",
+            run: changes_memory,
+        },
     ]
 }
 
@@ -938,6 +942,76 @@ fn memory_after_every_look(ctx: &mut Ctx) -> Result {
     let (mb, _) = ctx.memory_mb(app.id)?;
     ctx.notes.push(format!("after the six looks: {mb:.0} MB"));
     ensure(mb <= BUDGET_MB, || format!("{mb:.0} MB is over the {BUDGET_MB} MB budget"))
+}
+
+fn changes_memory(ctx: &mut Ctx) -> Result {
+    let fixture = super::projects_ui::fixture(ctx)?;
+    let repo = ctx.sb.sandbox.join("repo");
+    let copy = ctx.sb.data.join("copies/changed-project");
+    std::fs::create_dir_all(copy.parent().ok_or("the copy has no parent")?).map_err(|e| e.to_string())?;
+    let git = faber_engine::cli::find_cli("git").ok_or("git is unavailable")?;
+    super::projects::git(
+        &git.command,
+        &repo,
+        &["worktree", "add", "-b", "faber/changes-budget", copy.to_str().ok_or("the copy path is not UTF-8")?],
+    )?;
+    // Match the DOM check: one hunk header and 3,989 added lines, just below the patch cap.
+    let text: String = (0..3989).map(|i| format!("line {i}\n")).collect();
+    let mut tools = vec![];
+    for i in 0..30 {
+        let path = format!("file-{i:02}.txt");
+        std::fs::write(copy.join(&path), &text).map_err(|e| e.to_string())?;
+        tools.push(json!({ "id": format!("edit-{i}"), "name": "Write", "input": { "file_path": path }, "ok": true }));
+    }
+    let mut recorded: serde_json::Value =
+        serde_json::from_slice(&std::fs::read(ctx.paths.fixtures.join("conversation-changes.json")).map_err(|e| e.to_string())?)
+            .map_err(|e| e.to_string())?;
+    let conversation = &mut recorded["conversation"];
+    conversation["projectId"] = json!("demo");
+    conversation["messages"][1]["tools"] = json!(tools);
+    conversation["copy"] = json!({
+        "root": repo.to_string_lossy(), "path": copy.to_string_lossy(),
+        "branch": "faber/changes-budget", "base": "refs/heads/owner"
+    });
+    let folder = ctx.sb.data.join("conversations");
+    std::fs::create_dir_all(&folder).map_err(|e| e.to_string())?;
+    std::fs::write(folder.join("changed-project.json"), conversation.to_string()).map_err(|e| e.to_string())?;
+
+    let mut launch = claude_chat(ctx);
+    launch.git_bin = fixture.git_bin;
+    let mut app = ctx.launch(launch)?;
+    let projects = app.page.named("button", "area.projects")?;
+    app.page.click(&projects)?;
+    app.page.click(&css(".prow .item").has_text("Demo"))?;
+    app.page.click(&css(".proj-chats .item").has_text("Update the greeting"))?;
+    app.page.click(&css(".run-btn"))?;
+    app.page.click(&css(".rc-changes"))?;
+    app.page.wait_count(&css(".change-file"), 30)?;
+    let (baseline, webview) = ctx.memory_mb(app.id)?;
+    ensure(webview, || "the memory reading must include WebView2".into())?;
+    let mut peak = baseline;
+    let cpu_before = ctx.cpu_ms(app.id)?;
+    let started = Instant::now();
+    for i in 1..=30 {
+        let row = format!(".change-file:nth-child({i})");
+        app.page.click(&css(&format!("{row} > summary")))?;
+        app.page.wait_count(&css(&format!("{row}[open] .patch-line")), 3990)?;
+        same(app.page.count(&css(".change-patch"))?, 1, "only the current file's patch stays mounted")?;
+        peak = peak.max(ctx.memory_mb(app.id)?.0);
+    }
+    let cpu_ms = ctx.cpu_ms(app.id)? - cpu_before;
+    let switch_ms = started.elapsed().as_secs_f64() * 1000.0;
+    let close = app.page.named("button", "run.close")?;
+    app.page.click(&close)?;
+    app.page.wait_gone(&css(".changes-view"))?;
+    same(app.page.count(&css(".patch-line"))?, 0, "closing Changes releases every patch line")?;
+    let (closed, _) = ctx.memory_mb(app.id)?;
+    let numbers = format!(
+        "Changes 30 x 3990 lines: before {baseline:.1} MB, sampled peak {peak:.1} MB, after closing {closed:.1} MB; switching {cpu_ms:.0} ms CPU ({:.1}% of one core over {switch_ms:.0} ms)",
+        cpu_ms / switch_ms * 100.0
+    );
+    ctx.notes.push(numbers.clone());
+    ensure(peak <= BUDGET_MB && closed <= BUDGET_MB, || format!("{numbers}; over the {BUDGET_MB} MB budget"))
 }
 
 fn thousand_messages(ctx: &mut Ctx) -> Result {

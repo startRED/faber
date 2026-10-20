@@ -1,0 +1,307 @@
+import { createComponent, createSignal } from 'solid-js';
+import { render } from 'solid-js/web';
+import { App } from '../../ui/App.tsx';
+import { api, type AppEvent, type AppState, type Conversation, type FileChange } from '../../ui/api.ts';
+import { Changes } from '../../ui/Changes.tsx';
+import { store } from '../../ui/running.ts';
+import { t, useLanguage } from '../../ui/i18n.ts';
+import { animateDetails } from '../../ui/motion.ts';
+import recorded from '../fixtures/conversation-changes.json';
+import { check, deepEqual, equal, ok } from './check.ts';
+
+const look = {
+  vars: {}, scheme: 'dark', motion: 'none', checks: [], notices: [], effects: { ambient: false, texture: false, glow: false },
+  appearance: { base: 'sala', ground: 'sala', accent: '#ffffff', textFont: 'archivo', headingFont: 'narrow', textSize: 14, density: 1, corners: 1, motion: 'none', effects: { ambient: false, texture: false, glow: false } },
+};
+
+check('conversation changes: full motion cannot reopen A after opening B and closing B during A entrance', async () => {
+  const preference = Object.getOwnPropertyDescriptor(MediaQueryList.prototype, 'matches')!;
+  Object.defineProperty(MediaQueryList.prototype, 'matches', { ...preference, get(this: MediaQueryList) {
+    return this.media === '(prefers-reduced-motion: reduce)' ? false : preference.get!.call(this);
+  } });
+  const host = document.createElement('div');
+  host.dataset.motion = 'full';
+  document.body.append(host);
+  const before = api.changePatch;
+  api.changePatch = async () => ({ text: '@@ -1 +1 @@\n-old\n+new\n', tooLarge: false, binary: false });
+  const files = ['a.txt', 'b.txt'].map((path): FileChange => ({ path, added: 1, removed: 1, binary: false, status: 'modified' }));
+  const dispose = render(() => {
+    animateDetails(host);
+    return createComponent(Changes, { id: 'motion-review', files, loading: false, onBack: () => {}, onClose: () => {} });
+  }, host);
+  const settle = () => new Promise((resolve) => setTimeout(resolve, 10));
+  try {
+    // An earlier window-size check can temporarily suspend all full-motion entrances.
+    await new Promise((resolve) => setTimeout(resolve, 260));
+    const [a, b] = [...host.querySelectorAll<HTMLDetailsElement>('.change-file')];
+    a!.querySelector('summary')!.click();
+    const entrance = a!.getAnimations()[0]!;
+    ok(entrance, 'the check must exercise full motion');
+    entrance.pause();
+    await settle();
+    b!.querySelector('summary')!.click();
+    await settle();
+    equal(a!.open, false, 'opening B closes A before its entrance finishes');
+    b!.querySelector('summary')!.click();
+    for (const animation of b!.getAnimations()) animation.finish();
+    await settle();
+    // Simulate the late entrance completion that used to resurrect A.
+    if (entrance.playState !== 'idle') entrance.finish();
+    await settle();
+    equal(host.querySelectorAll('.change-file[open]').length, 0);
+    equal(host.querySelector('.change-patch'), null, 'no hidden or resurrected patch remains mounted');
+    equal(entrance.playState, 'idle', 'closing A cancels its entrance');
+  } finally {
+    dispose(); host.remove(); api.changePatch = before;
+    Object.defineProperty(MediaQueryList.prototype, 'matches', preference);
+  }
+});
+
+check('conversation changes: failed and timed-out patch reads show a retry instead of an empty change', async () => {
+  useLanguage('en');
+  const before = api.changePatch;
+  const settle = () => new Promise((resolve) => setTimeout(resolve, 30));
+  try {
+    for (const rejected of [false, true]) {
+      const host = document.createElement('div');
+      host.dataset.motion = 'none';
+      document.body.append(host);
+      let reads = 0;
+      api.changePatch = async () => {
+        if (++reads === 1) {
+          if (rejected) throw new Error('transport failed');
+          return { text: '', binary: false, tooLarge: false, error: 'error.changes.read' };
+        }
+        return { text: '@@ -1 +1 @@\n-old\n+loaded\n', binary: false, tooLarge: false };
+      };
+      const dispose = render(() => createComponent(Changes, {
+        id: 'failed-review', files: [{ path: 'report.txt', added: 1, removed: 1, binary: false, status: 'modified' }], loading: false, onBack: () => {}, onClose: () => {},
+      }), host);
+      try {
+        host.querySelector('summary')!.click();
+        await settle();
+        ok(host.textContent!.includes(t('error.changes.read')));
+        ok(!host.textContent!.includes(t('changes.empty')), 'an error must never claim there are no changes');
+        const retry = [...host.querySelectorAll<HTMLButtonElement>('button')].find((button) => button.textContent === t('changes.retry'));
+        ok(retry, 'the same open file offers a retry');
+        retry.click();
+        await settle();
+        equal(reads, 2);
+        ok(host.querySelector('.patch-line.add')!.textContent!.includes('+loaded'));
+        ok(!host.textContent!.includes(t('error.changes.read')));
+      } finally {
+        dispose(); host.remove();
+      }
+    }
+  } finally {
+    api.changePatch = before;
+  }
+});
+
+check('conversation changes: at 720 px, the auto-opened column becomes modal, pages files and loads lines lazily', async () => {
+  const settle = () => new Promise((resolve) => setTimeout(resolve, 30));
+  const host = document.createElement('div');
+  document.body.append(host);
+  const before = { open: api.open, state: api.state, warm: api.warm, routeDraft: api.routeDraft, setClock: api.setClock, setShellTexts: api.setShellTexts, changes: api.changes, changePatch: api.changePatch };
+  const storage = localStorage.getItem('faber.place');
+  const width = Object.getOwnPropertyDescriptor(window, 'innerWidth')!;
+  Object.defineProperty(window, 'innerWidth', { configurable: true, value: 720 });
+  window.dispatchEvent(new Event('resize'));
+  const c = structuredClone(recorded.conversation) as Conversation;
+  const initial = {
+    conversations: [{ id: c.id, title: c.title, area: c.area, projectId: 'p1', updatedAt: c.updatedAt }],
+    projects: [{ id: 'p1', name: 'Greeting', path: 'E:/greeting' }], vendors: ['claude'],
+    settings: { setup: 'done', tutorialDone: true, language: 'en', appearance: { base: 'sala' } },
+    running: { revision: 0, items: [{ conversationId: c.id, turnId: 'waiting', title: c.title, area: 'project', projectId: 'p1', state: 'needsYou', since: 0, permissions: [{ requestId: 'pending', tool: 'Bash', input: {} }] }] }, quotas: [], usage: [], models: [], version: 'test', look,
+  } as AppState;
+  let listReads = 0;
+  let files = recorded.changes as FileChange[];
+  const patchReads: string[] = [];
+  api.open = async () => c;
+  api.state = async () => initial;
+  api.warm = async () => {}; api.routeDraft = async () => {};
+  api.setClock = async () => {}; api.setShellTexts = async () => {};
+  const cursors: Array<string | undefined> = [];
+  api.changes = async (id, cursor) => {
+    equal(id, c.id); listReads++; cursors.push(cursor);
+    return cursor === 'next' ? { files, incomplete: false } : { files: files.slice(0, 1), incomplete: files.length > 1, next: files.length > 1 ? 'next' : undefined };
+  };
+  api.changePatch = async (id, path) => {
+    equal(id, c.id);
+    patchReads.push(path);
+    return { text: recorded.patches[path as keyof typeof recorded.patches], binary: false, tooLarge: false };
+  };
+  localStorage.setItem('faber.place', JSON.stringify({ area: 'project', projectId: 'p1', id: c.id }));
+  // The column reads the running list from its store, which main.tsx fills from the snapshot.
+  const revision = store.list().revision;
+  store.offer({ revision: revision + 1, items: initial.running.items });
+  let hear!: (event: AppEvent) => void;
+  const dispose = render(() => createComponent(App, { initial, inbox: { take: (listener?: (event: AppEvent) => void) => { if (listener) hear = listener; } } }), host);
+  const disclosures = () => [...host.querySelectorAll<HTMLDetailsElement>('.change-file')];
+  try {
+    await settle();
+    const automatic = host.querySelector<HTMLElement>('#running');
+    ok(automatic, 'the pending request opens the column without a click');
+    equal(automatic.getAttribute('aria-modal'), null, 'the automatic column does not capture focus');
+    ok(!host.querySelector<HTMLElement>('.dock')!.inert, 'the composer is reachable before opening a side view');
+    const control = host.querySelector<HTMLButtonElement>('.rc-changes');
+    ok(control, 'a project conversation with changes offers the single control in the column head');
+    equal(control!.closest('.rc-head')?.parentElement?.id, 'running');
+    control!.click();
+    await settle();
+    const modal = host.querySelector<HTMLElement>('#running')!;
+    equal(modal.getAttribute('aria-modal'), 'true', 'Changes uses the same modal transition as the other side views');
+    ok(modal.contains(document.activeElement), 'focus moves inside the column');
+    for (const selector of ['.thread', '.dock', '.topbar', '.side']) ok(host.querySelector<HTMLElement>(selector)!.inert, `${selector} stays behind the modal`);
+    const back = modal.querySelector<HTMLButtonElement>('.back')!;
+    back.focus();
+    const tab = new KeyboardEvent('keydown', { key: 'Tab', shiftKey: true, bubbles: true, cancelable: true });
+    back.dispatchEvent(tab);
+    ok(tab.defaultPrevented && modal.contains(document.activeElement) && document.activeElement !== back, 'Shift+Tab wraps inside the existing focus trap');
+    equal(host.querySelectorAll('#running').length, 1, 'the existing column is reused');
+    equal(host.querySelector('.rc-body:not(.changes-view)'), null, 'the running list makes way for the changes');
+    equal(disclosures().length, 1, 'the files already found stay visible on an incomplete page');
+    ok(host.textContent!.includes(t('changes.incomplete')));
+    host.querySelector<HTMLButtonElement>('.changes-more')!.click();
+    await settle();
+    deepEqual(cursors, [undefined, 'next'], 'Show more sends the continuation instead of repeating the first page');
+    equal(disclosures().length, 2, 'continuation appends and deduplicates files already found');
+    equal(host.querySelector('.changes-more'), null, 'a complete list needs no continuation');
+    for (const f of files) {
+      const row = disclosures().find((d) => d.querySelector('summary')!.textContent!.includes(f.path));
+      ok(row, `${f.path} is listed`);
+      ok(row!.querySelector('.delta')!.textContent!.includes(`+${f.added}`), 'the added count is visible');
+      if (f.removed) ok(row!.querySelector('.delta')!.textContent!.includes(`−${f.removed}`), 'the removed count is visible');
+    }
+    deepEqual(patchReads, [], 'listing the files reads no patches');
+    const source = disclosures().find((d) => d.textContent!.includes('src/greeting.ts'))!;
+    source.querySelector('summary')!.click();
+    await settle();
+    deepEqual(patchReads, ['src/greeting.ts'], 'only the opened file is read');
+    ok(source.querySelector('.patch-line.del')!.textContent!.includes("-export const greeting = 'Hello';"));
+    ok(source.querySelector('.patch-line.add')!.textContent!.includes("+export const greeting = 'Welcome';"));
+    equal(source.querySelector('script'), null, 'patches are text');
+    source.querySelector('summary')!.click();
+    await settle();
+    equal(source.querySelector('.change-patch'), null, 'closing releases the patch DOM');
+    source.querySelector('summary')!.click();
+    await settle();
+    deepEqual(patchReads, ['src/greeting.ts', 'src/greeting.ts'], 'a reopened file is read afresh');
+    host.querySelector<HTMLButtonElement>('.changes-view .back, .side-head .back')!.click();
+    await settle();
+    ok(host.querySelector('.rc-body'), 'back returns to the running list');
+    equal(host.querySelector('.change-patch'), null);
+    const beforeTurn = listReads;
+    files = [];
+    hear({ type: 'message', conversationId: c.id, message: { id: 'r2', role: 'assistant', at: Date.now(), text: '', status: 'streaming' } });
+    hear({ type: 'message', conversationId: c.id, message: { id: 'r2', role: 'assistant', at: Date.now(), text: 'No changes left.', status: 'done' } });
+    await settle();
+    ok(listReads > beforeTurn, 'the end of a turn refreshes git counts');
+    equal(host.querySelector('.rc-changes'), null, 'nothing changed leaves no control');
+  } finally {
+    dispose(); host.remove(); Object.assign(api, before);
+    store.offer({ revision: revision + 2, items: [] });
+    Object.defineProperty(window, 'innerWidth', width);
+    window.dispatchEvent(new Event('resize'));
+    if (storage === null) localStorage.removeItem('faber.place'); else localStorage.setItem('faber.place', storage);
+  }
+});
+
+check('conversation changes: opening thirty 3990-line files keeps only one patch and measures its DOM budget', async () => {
+  const host = document.createElement('div');
+  document.body.append(host);
+  const before = api.changePatch;
+  const files = Array.from({ length: 30 }, (_, i): FileChange => ({ path: `file-${i}.txt`, added: 3989, removed: 0, binary: false, status: 'modified' }));
+  const lineCount = 3990;
+  const text = `@@ -0,0 +1,3989 @@\n${Array.from({ length: lineCount - 1 }, (_, i) => `+line ${i}`).join('\n')}\n`;
+  let reads = 0;
+  api.changePatch = async () => { reads++; return { text, tooLarge: false, binary: false }; };
+  const dispose = render(() => createComponent(Changes, { id: 'large-review', files, loading: false, onBack: () => {}, onClose: () => {} }), host);
+  const settle = () => new Promise((resolve) => setTimeout(resolve, 30));
+  const countNodes = () => {
+    const walker = document.createTreeWalker(host, NodeFilter.SHOW_ALL);
+    let count = 0;
+    while (walker.nextNode()) count++;
+    return count;
+  };
+  const baseline = { elements: host.querySelectorAll('*').length, nodes: countNodes() };
+  let peakElements = 0;
+  let peakNodes = 0;
+  const started = performance.now();
+  try {
+    const rows = [...host.querySelectorAll<HTMLDetailsElement>('.change-file')];
+    for (const row of rows) {
+      row.querySelector('summary')!.click();
+      await settle();
+      equal(host.querySelectorAll('.change-file[open]').length, 1, 'opening a new file closes the previous disclosure');
+      equal(host.querySelectorAll('.change-patch').length, 1);
+      equal(host.querySelectorAll('.patch-line').length, lineCount, 'line DOM does not accumulate across files');
+      peakElements = Math.max(peakElements, host.querySelectorAll('*').length);
+      peakNodes = Math.max(peakNodes, countNodes());
+      ok(peakElements <= baseline.elements + lineCount + 2, `only the current patch adds elements: ${peakElements}`);
+      ok(peakNodes <= baseline.nodes + 4 * lineCount + 50, `text and comment nodes stay bounded too: ${peakNodes}`);
+    }
+    equal(reads, 30, 'all thirty files were opened, not just the last one');
+    console.info(`Conversation changes DOM: 30 x ${lineCount} lines; peak ${peakElements} elements, ${peakNodes} total nodes; ${Math.round(performance.now() - started)} ms including settling.`);
+    rows.at(-1)!.querySelector('summary')!.click();
+    await settle();
+    equal(host.querySelectorAll('.patch-line').length, 0, 'closing the final file releases every patch line');
+    equal(host.querySelectorAll('*').length, baseline.elements);
+  } finally {
+    dispose(); host.remove(); api.changePatch = before;
+  }
+});
+
+check('conversation changes: loading, empty, binary and capped files have words without invented counts', async () => {
+  useLanguage('en');
+  const host = document.createElement('div');
+  host.style.width = '300px';
+  document.body.append(host);
+  const before = api.changePatch;
+  const [loading, setLoading] = createSignal(true);
+  const [incomplete, setIncomplete] = createSignal(false);
+  const [files, setFiles] = createSignal<FileChange[]>([]);
+  api.changePatch = async (_id, path) => path === 'small/after-budget.txt'
+    ? { text: '@@ -0,0 +1 @@\n+small\n', binary: false, tooLarge: false }
+    : { text: '', binary: false, tooLarge: true };
+  const dispose = render(() => createComponent(Changes, {
+    id: 'capped', get files() { return files(); }, get loading() { return loading(); }, get incomplete() { return incomplete(); }, onBack: () => {}, onClose: () => {},
+  }), host);
+  const settle = () => new Promise((resolve) => setTimeout(resolve, 30));
+  try {
+    ok(host.textContent!.includes(t('changes.loading')));
+    setLoading(false);
+    ok(host.textContent!.includes(t('changes.empty')));
+    setIncomplete(true);
+    ok(host.textContent!.includes(t('changes.incomplete')));
+    ok(!host.textContent!.includes(t('changes.empty')), 'an incomplete list never claims there are no changes');
+    ok(host.querySelector('.changes-more'), 'an empty partial page still lets the person continue');
+    setIncomplete(false);
+    setFiles([
+      { path: 'long/path/image.png', added: 0, removed: 0, binary: true, status: 'modified' },
+      { path: 'large/new.txt', added: 0, removed: 0, binary: false, countsKnown: false, status: 'added' },
+      { path: 'large/tracked.txt', added: 5000, removed: 2, binary: false, status: 'modified', tooLarge: true },
+      { path: 'large/patch.txt', added: 6000, removed: 0, binary: false, status: 'modified' },
+      { path: 'small/after-budget.txt', added: 0, removed: 0, binary: false, countsKnown: false, tooLarge: false, status: 'added' },
+    ]);
+    const rows = [...host.querySelectorAll<HTMLDetailsElement>('.change-file')];
+    ok(rows[0]!.textContent!.includes(t('changes.binary')));
+    equal(rows[0]!.querySelector('.delta'), null, 'binary has no line numbers');
+    ok(rows[1]!.textContent!.includes(t('changes.countsUnknown')));
+    equal(rows[1]!.querySelector('.delta'), null, 'capped untracked files never claim zero lines');
+    rows[2]!.querySelector('summary')!.click();
+    await settle();
+    ok(rows[2]!.textContent!.includes(t('changes.tooLarge')));
+    ok(rows[2]!.textContent!.includes('+5000'), 'tracked counts remain when its patch is too large');
+    equal(host.querySelector('.change-patch'), null, 'a capped patch keeps no line DOM');
+    rows[3]!.querySelector('summary')!.click();
+    await settle();
+    ok(rows[3]!.textContent!.includes(t('changes.tooLarge')), 'the patch response can also report its cap');
+    rows[4]!.querySelector('summary')!.click();
+    await settle();
+    equal(rows[4]!.querySelector('.delta'), null, 'unknown counts never invent zero lines');
+    ok(rows[4]!.querySelector('.patch-line.add')!.textContent!.includes('+small'), 'a small file beyond the counting budget still opens');
+  } finally {
+    dispose(); host.remove(); api.changePatch = before;
+  }
+});

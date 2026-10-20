@@ -6,6 +6,7 @@
     38972570674
   ],
   "seconds": {
+    "conversation changes: thirty 3990-line files stay within the memory budget while switching and after closing": 26,
     "C5.1: installed signed-in Claude connects without reinstalling and answers the first question": 8,
     "C5.2: missing ChatGPT installs from loopback, signs in and answers without reopening": 9,
     "C5.3: None persists, shows connection guidance and never reopens setup automatically": 10,

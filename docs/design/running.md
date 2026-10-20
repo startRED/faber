@@ -5,6 +5,17 @@ engine's side is the Running column row of [product-map.md](../product-map.md)).
 rest of the shell are in [layout.md](layout.md).
 
 - With nothing running it says "Nothing running" once and has no footer sentence.
+- A project conversation with changed files has one "Changes" control in the list's head. It replaces the list, like a
+  helper or a page, with a back arrow, title and close. Each file is a disclosure with the work log's `+N −N` counts;
+  opening it closes the previous file and reads only its patch, so at most one patch stays mounted in total. Added and
+  removed lines carry their signs and a quiet background, code and paths wrap, and nothing in the patch moves.
+  Closing a file cancels its entrance, so switching quickly cannot reopen it. Loading, empty, binary and too-large
+  files have plain words; a failed or timed-out patch says it could not load and offers "Try again" within that open
+  file, never the empty state; a new file past
+  the counting limit says its count is unavailable. A partial list keeps the files found, says files are still missing
+  in one quiet line and offers "Show more files"; it never claims nothing changed. Closing a file releases its patch;
+  ending a turn refreshes the list. Agent, page, quick-question and changes views exclude one another. Opening Changes
+  in a column that opened by itself uses the other side views' transition: over the stage it becomes modal and traps focus.
 - A run that ended while nobody looked keeps a calm card in its block (R242): no fill, a thin line around it, a check
   and "done" (amber when it needs the person), the time it worked and its last line. A click opens it, its × clears it;
   nothing else moves. The sidebar row shows a 6 px accent dot until the conversation is seen.
@@ -39,3 +50,7 @@ rest of the shell are in [layout.md](layout.md).
   one; while it runs, "Looking…" and a quiet Stop. The box is the side chat's (Enter asks, Shift+Enter breaks the line),
   with the model picker beside Ask when the conversation's AI has more than one model. Nothing in it moves but the
   list's own entrance (`animateList`).
+
+## Known limits
+
+Changes uses git's path-based reads for tracked-file counts, like git status; the list shows only names and counts locally, and must use pinned reads if it ever shows content.

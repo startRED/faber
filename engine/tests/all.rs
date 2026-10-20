@@ -17,6 +17,8 @@ mod auto_archive;
 mod budget;
 #[path = "cache_health.rs"]
 mod cache_health;
+#[path = "changes.rs"]
+mod changes;
 #[path = "claude_session.rs"]
 mod claude_session;
 #[path = "codex_session.rs"]

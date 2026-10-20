@@ -36,6 +36,7 @@ mod auto;
 mod auto_archive;
 mod browse;
 mod by_itself;
+mod changes;
 mod compact;
 mod copies;
 mod ended;

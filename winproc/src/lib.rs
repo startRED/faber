@@ -9,6 +9,11 @@
 pub use imp::{job_active_processes, job_cpu_cap, job_peak_memory, job_terminate, process_ended, resume_process};
 
 #[cfg(windows)]
+mod files;
+#[cfg(windows)]
+pub use files::open_plain_file;
+
+#[cfg(windows)]
 mod imp {
     use std::io;
     use windows_sys::Win32::Foundation::{CloseHandle, INVALID_HANDLE_VALUE};

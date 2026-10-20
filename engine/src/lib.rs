@@ -5,6 +5,7 @@ pub mod account;
 pub mod browser;
 pub mod budget;
 pub mod cadence;
+pub mod changes;
 pub mod claude;
 pub mod cli;
 pub mod codex;

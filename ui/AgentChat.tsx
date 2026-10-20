@@ -33,7 +33,7 @@ export const toggleAgentWide = () => setWide((on) => !on);
 
 /** A path or command that may wrap after each slash, so a long one breaks between folders before it breaks inside a name. The
  * text stays the same for a screen reader and for copying. */
-function Breakable(props: { text: string }) {
+export function Breakable(props: { text: string }) {
   return <For each={props.text.split(/(?<=[/\\])/)}>{(part) => <>{part}<wbr /></>}</For>;
 }
 
@@ -71,7 +71,7 @@ export function ToolChip(props: { tool: ToolUse; full?: boolean }) {
 }
 
 /** How many lines an edit added and removed, said in words for a screen reader. */
-export function Delta(props: { change: Change }) {
+export function Delta(props: { change: Pick<Change, 'added' | 'removed'> }) {
   const said = () => [props.change.added && t('tool.added', { n: props.change.added }), props.change.removed && t('tool.removed', { n: props.change.removed })].filter(Boolean).join(', ');
   return (
     <em class="delta" role="img" aria-label={said()} title={said()}>
