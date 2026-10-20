@@ -114,7 +114,7 @@ export function toggleSubscription(
 /**
  * Computes the card state according to the setup contract:
  * - checking: check is not yet available
- * - notInstalled: not installed, action is ['install'] or ['officialPage'] based on canInstall
+ * - notInstalled: not installed, action is ['install'] or ['officialPage'] based on canInstall, both after a failed install
  * - installing: installation in progress
  * - signedOut: installed but not signed in, action is ['signIn']
  * - waiting: sign-in initiated, waiting for completion, action is ['checkAgain']
@@ -153,7 +153,8 @@ export function setupCard(
   }
 
   if (!check.installed) {
-    const actions = check.canInstall ? ['install'] : ['officialPage'];
+    // After a failed install, trying again stays first and the official page is the way around it.
+    const actions = !check.canInstall ? ['officialPage'] : error ? ['install', 'officialPage'] : ['install'];
     return { status: 'notInstalled', actions, error };
   }
 

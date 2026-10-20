@@ -116,10 +116,11 @@ export function Setup(props: SetupProps) {
   });
 
   const first = () => props.mode === 'firstRun';
+  // "None for now" only means something in the first run; opened later, Close already says it.
   const choices: [Subscription, string][] = [
     ['claude', t('setup.claude')],
     ['codex', t('setup.chatgpt')],
-    ['none', t('setup.none')],
+    ...(first() ? [['none', t('setup.none')] as [Subscription, string]] : []),
   ];
 
   return (

@@ -8,6 +8,7 @@ import { ptBR } from '../../ui/locales/pt-BR.ts';
 import { noteSetupProgress, Setup } from '../../ui/Setup.tsx';
 import { continuePatch, firstRunStep, lookDue, setupCard, setupPatch, shouldOpenSetup, toggleSubscription, type Subscription } from '../../ui/setup.ts';
 import { check, deepEqual, doesNotMatch, equal, notEqual, ok } from './check.ts';
+import { t } from '../../ui/i18n.ts';
 
 const languages: Record<string, Record<string, string | { one: string; other: string }>> = { en, 'pt-BR': ptBR, es, fr, de };
 function text(messages: Record<string, unknown>, key: string): string {
@@ -168,7 +169,7 @@ check('setup: the AI that is picked is filled and ticked, and the other ones are
   const dispose = render(() => createComponent(Setup, { mode: 'manage', onFinish: () => {} }), host);
   try {
     const picks = [...host.querySelectorAll<HTMLButtonElement>('.pick')];
-    equal(picks.length, 3);
+    equal(picks.length, 2, 'opened later, the cards offer the two AIs and no "None for now": Close says it');
     ok(picks.every((b) => b.getAttribute('aria-pressed') === 'false' && !b.querySelector('.tick')), 'nothing is picked at first');
     const codex = picks.find((b) => b.textContent!.includes('Codex'))!;
     ok(codex, 'Codex is called Codex');
@@ -178,7 +179,9 @@ check('setup: the AI that is picked is filled and ticked, and the other ones are
     equal(on.length, 1);
     ok(on[0]!.querySelector('.tick svg, .tick .i'), 'the picked AI shows a check, not only a colour');
     equal(now.filter((b) => b.querySelector('.tick')).length, 1);
-    ok(!/ChatGPT/.test(host.textContent!), 'no ChatGPT on the cards');
+    // The AI is Codex everywhere; only the line naming the plan it runs on says ChatGPT.
+    const names = [...host.querySelectorAll('.pick, .setup-card h2')].map((e) => e.textContent).join(' ');
+    ok(!/ChatGPT/.test(names), `no ChatGPT as a name on the cards: ${names}`);
   } finally { dispose(); host.remove(); }
 });
 
@@ -196,5 +199,31 @@ check('setup: closing the cards while an AI installs and opening them again show
     dispose();
     host.remove();
     noteSetupProgress({ type: 'setup', vendor: 'codex', step: 'done' });
+  }
+});
+
+check('setup first run: "None for now" sits beside the two AIs, and the line says which plan each one uses', () => {
+  const host = document.createElement('div');
+  document.body.append(host);
+  const dispose = render(() => createComponent(Setup, { mode: 'firstRun', onFinish: () => {} }), host);
+  try {
+    const picks = [...host.querySelectorAll<HTMLButtonElement>('.pick')];
+    equal(picks.length, 3);
+    equal(picks[2]!.textContent!.trim(), t('setup.none'));
+    const line = host.querySelector('.sub')?.textContent ?? '';
+    ok(line.includes('Pro') && line.includes('ChatGPT'), `the line names the plans: ${line}`);
+  } finally {
+    dispose();
+    host.remove();
+  }
+});
+
+check('setup: a failed install says what to do and offers the official page beside trying again', () => {
+  const check = { vendor: 'claude', installed: false, canInstall: true, account: 'unknown' } as unknown as Parameters<typeof setupCard>[0]['check'];
+  deepEqual(setupCard({ check }, (k) => k).actions, ['install'], 'before any failure, one action');
+  const failed = setupCard({ check, error: { key: 'error.setup.download' } }, (k) => k);
+  deepEqual(failed.actions, ['install', 'officialPage']);
+  for (const key of ['error.setup.download', 'error.setup.install'] as const) {
+    ok(en[key].includes('official page'), `the message says how to go on: ${en[key]}`);
   }
 });
