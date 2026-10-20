@@ -26,6 +26,7 @@ pub mod persona;
 pub mod proc;
 pub mod progress;
 pub mod project;
+mod prompt_history;
 pub mod recents;
 pub mod route;
 pub mod router;

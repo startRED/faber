@@ -93,11 +93,7 @@ The numbers above are the usual widths. The person can change them, and the shel
 - "Pick up where you left off" lists up to three conversations of both areas under the suggestions: those that need the
   person first, then the most recently updated.
 - The composer keeps its model picker, "AI: choose for me".
-- `@` in a conversation with a working folder lists matching files and folders over the box, on the context menu's
-  surface, left-aligned with the text, with no motion; the entry the arrows reach is highlighted and kept in view, and a
-  long path ends in an ellipsis. `/` at the start opens the same list for the agent's commands and skills (`/btw` first
-  in an open conversation); a pick inserts the CLI's spelling without sending. Both lists follow the caret and ignore
-  older answers and non-main mouse buttons.
+- File mentions, commands and earlier messages share the list over the box ([composer.md](composer.md)).
 - Auto chooses both the model and its effort. A manual model adds an adjacent low, medium or high effort choice,
   defaulting to medium (R102). Each conversation remembers its choice. Changes apply to the next message only (the
   composer does not repeat it), and each answer keeps the effort actually used and shows it in its header. Both CLI drivers always receive that effort.

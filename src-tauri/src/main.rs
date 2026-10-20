@@ -167,10 +167,99 @@ async fn search_messages(faber: State<'_, Faber>, query: String, area: faber_eng
         .map_err(|_| "error.store.read".to_string())?
 }
 
+#[derive(Default)]
+struct PromptReads {
+    active: Option<(String, Arc<AtomicBool>)>,
+    // A blur may arrive before its read starts on the async worker. Retain only recent request ids, never prompt text.
+    cancelled: std::collections::VecDeque<String>,
+}
+
+impl PromptReads {
+    fn start(&mut self, id: String) -> Option<Arc<AtomicBool>> {
+        if self.cancelled.contains(&id) {
+            return None;
+        }
+        let cancelled = Arc::new(AtomicBool::new(false));
+        if let Some((_, old)) = self.active.replace((id, cancelled.clone())) {
+            old.store(true, Ordering::Relaxed);
+        }
+        Some(cancelled)
+    }
+
+    fn cancel(&mut self, id: String) {
+        if self.active.as_ref().is_some_and(|(active, _)| *active == id)
+            && let Some((_, token)) = self.active.take()
+        {
+            token.store(true, Ordering::Relaxed);
+        }
+        self.cancelled.push_back(id);
+        if self.cancelled.len() > 32 {
+            self.cancelled.pop_front();
+        }
+    }
+
+    fn finish(&mut self, id: &str) {
+        if self.active.as_ref().is_some_and(|(active, _)| active == id) {
+            self.active = None;
+        }
+    }
+}
+
+#[tauri::command]
+async fn prompt_history(
+    faber: State<'_, Faber>,
+    request_id: String,
+    cancel: Option<bool>,
+    conversation_id: Option<String>,
+    area: faber_engine::model::Area,
+    project_id: Option<String>,
+) -> Res<Vec<String>> {
+    static READS: std::sync::LazyLock<Mutex<PromptReads>> = std::sync::LazyLock::new(|| Mutex::new(PromptReads::default()));
+    if cancel == Some(true) {
+        lock(&READS).cancel(request_id);
+        return Ok(vec![]);
+    }
+    let Some(cancelled) = lock(&READS).start(request_id.clone()) else { return Ok(vec![]) };
+    let engine = faber.engine.clone();
+    let result = tauri::async_runtime::spawn_blocking(move || {
+        engine.prompt_history_cancellable(conversation_id.as_deref(), area, project_id.as_deref(), &cancelled).map_err(str::to_string)
+    })
+    .await;
+    lock(&READS).finish(&request_id);
+    result.map_err(|_| "error.store.read".to_string())?
+}
+
 #[cfg(test)]
 mod search_queue_tests {
-    use super::{Ordering, SearchQueue};
+    use super::{Ordering, PromptReads, SearchQueue};
     use std::future::Future;
+
+    #[test]
+    fn prompt_history_cancels_superseded_reads_and_only_the_blurred_request() {
+        let mut reads = PromptReads::default();
+        let first = reads.start("first".into()).unwrap();
+        let second = reads.start("second".into()).unwrap();
+        assert!(first.load(Ordering::Relaxed));
+        reads.cancel("first".into());
+        reads.finish("first");
+        assert!(!second.load(Ordering::Relaxed));
+        reads.cancel("second".into());
+        assert!(second.load(Ordering::Relaxed));
+    }
+
+    #[test]
+    fn prompt_history_a_blur_before_worker_start_prevents_the_read_with_bounded_request_ids() {
+        let mut reads = PromptReads::default();
+        for id in 0..40 {
+            reads.cancel(id.to_string());
+        }
+        assert_eq!(reads.cancelled.len(), 32);
+        assert!(reads.start("39".into()).is_none());
+        let token = reads.start("new".into()).unwrap();
+        reads.finish("new");
+        assert!(reads.active.is_none());
+        assert!(!token.load(Ordering::Relaxed));
+    }
     use std::task::{Context, Poll, Waker};
 
     #[tokio::test]
@@ -958,6 +1047,7 @@ fn main() {
                 state,
                 open,
                 search_messages,
+                prompt_history,
                 send,
                 branch,
                 warm,

@@ -5,6 +5,8 @@
 
 // Shared by the files below, which `use crate::support` and `use crate::loopback`.
 mod loopback;
+#[path = "prompt_history.rs"]
+mod prompt_history;
 mod support;
 
 #[path = "account.rs"]

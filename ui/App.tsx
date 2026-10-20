@@ -947,6 +947,7 @@ export function App(props: { initial: AppState; update?: UpdateStatus; inbox: { 
           if (!loading() && picked().vendor === 'auto') void api.routeDraft({ conversationId: current()?.id, ...target(), choice: picked() }, text);
         }}
         onReady={(f) => (fill = f)}
+        onHistory={(signal) => api.promptHistory(current()?.id, area(), area() === 'project' ? projectId() : undefined, signal)}
         onMention={current() || (area() === 'project' && projectId()) ? (query) => api.mentions(current()?.id, area() === 'project' ? projectId() : undefined, query) : undefined}
         onCommands={() => {
           const vendor = commandVendor();

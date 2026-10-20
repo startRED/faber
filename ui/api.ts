@@ -591,6 +591,14 @@ export const api = {
   answerQuestion: (id: string, turnId: string, requestId: string, answers: Record<string, string>) =>
     invoke<void>('answer_question', { id, turnId, requestId, answers }),
   searchMessages: (query: string, area: Area) => invoke<MessageSearch>('search_messages', { query, area }),
+  promptHistory: (conversationId: string | undefined, area: Area, projectId?: string, signal?: AbortSignal) => {
+    if (signal?.aborted) return Promise.resolve([]);
+    const requestId = crypto.randomUUID();
+    const args = { requestId, conversationId, area, projectId };
+    const cancel = () => { void invoke<string[]>('prompt_history', { ...args, cancel: true }).catch(() => {}); };
+    signal?.addEventListener('abort', cancel, { once: true });
+    return invoke<string[]>('prompt_history', args).finally(() => signal?.removeEventListener('abort', cancel));
+  },
   rename: (id: string, title: string) => invoke<void>('rename', { id, title }),
   /** Refused with `error.copy.unsaved` while its copy holds work found nowhere else, unless `discard`. */
   remove: (id: string, discard = false) => invoke<void>('remove', { id, discard }),

@@ -29,6 +29,8 @@ The visual direction lives in this folder, one page per part ([docs/README.md](.
 
 ## Rules for every screen
 
+The shared message box's lists and earlier messages live in [composer.md](composer.md).
+
 - Every text on screen lives in `ui/locales/`, written by hand in each language.
 - Choice buttons use `aria-pressed`, or native radio groups. Switches are native checkboxes. "Open file" is a real
   button. Theme thumbnails are `aria-hidden`, and each theme card is named by its name and its description.

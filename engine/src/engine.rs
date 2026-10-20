@@ -511,6 +511,21 @@ impl Engine {
         self.with(|c| c.store.search()).query(query, area)
     }
 
+    /// The blocking read runs outside the engine lock, as sidebar search does.
+    pub fn prompt_history(&self, conversation_id: Option<&str>, area: Area, project_id: Option<&str>) -> Result<Vec<String>, &'static str> {
+        self.with(|c| c.store.search()).prompt_history(conversation_id, area, project_id)
+    }
+
+    pub fn prompt_history_cancellable(
+        &self,
+        conversation_id: Option<&str>,
+        area: Area,
+        project_id: Option<&str>,
+        cancelled: &std::sync::atomic::AtomicBool,
+    ) -> Result<Vec<String>, &'static str> {
+        self.with(|c| c.store.search()).prompt_history_cancellable(conversation_id, area, project_id, cancelled)
+    }
+
     pub fn search_messages_cancellable(
         &self,
         query: &str,

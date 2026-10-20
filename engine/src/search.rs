@@ -24,6 +24,7 @@ struct Index {
     documents: BTreeMap<String, Arc<Document>>,
     touched: HashSet<String>,
     ready: bool,
+    building: bool,
     failed: bool,
     pending: BTreeSet<String>,
     stopped: bool,
@@ -33,6 +34,7 @@ struct Index {
 
 struct Document {
     area: Area,
+    project_id: Option<String>,
     updated: u64,
     words: Box<str>,
     complete: bool,
@@ -153,6 +155,7 @@ fn document(c: &Conversation) -> Document {
     }
     Document {
         area: c.area,
+        project_id: c.project_id.clone(),
         updated: c.updated_at,
         words: distinct.into_iter().collect::<Vec<_>>().join("\n").into_boxed_str(),
         complete,
@@ -178,19 +181,64 @@ impl Index {
             self.payload -= old.words.len();
             self.documents.insert(
                 id,
-                Arc::new(Document { words: "".into(), complete: false, area: old.area, updated: old.updated, revision: old.revision }),
+                Arc::new(Document {
+                    words: "".into(),
+                    complete: false,
+                    area: old.area,
+                    project_id: old.project_id.clone(),
+                    updated: old.updated,
+                    revision: old.revision,
+                }),
             );
         }
     }
 }
 
 impl Search {
+    /// Uses sidebar metadata, without building or retaining an index of prompts.
+    pub fn prompt_history(&self, conversation_id: Option<&str>, area: Area, project_id: Option<&str>) -> Result<Vec<String>, &'static str> {
+        self.prompt_history_cancellable(conversation_id, area, project_id, &AtomicBool::new(false))
+    }
+
+    pub fn prompt_history_cancellable(
+        &self,
+        conversation_id: Option<&str>,
+        area: Area,
+        project_id: Option<&str>,
+        cancelled: &AtomicBool,
+    ) -> Result<Vec<String>, &'static str> {
+        let index = self.state.lock().unwrap_or_else(|e| e.into_inner());
+        if !index.ready {
+            drop(index);
+            let candidates = crate::prompt_history::recent_files(&self.directory, conversation_id, cancelled)?;
+            return crate::prompt_history::read(&self.directory, candidates, area, project_id, cancelled);
+        }
+        if index.failed {
+            return Err("error.store.read");
+        }
+        let mut documents: Vec<_> = index
+            .documents
+            .iter()
+            .filter(|(_, doc)| doc.area == area && (area != Area::Project || doc.project_id.as_deref() == project_id))
+            .map(|(id, doc)| (id.clone(), doc.updated))
+            .collect();
+        drop(index);
+        documents.sort_unstable_by(|(a, left), (b, right)| {
+            (Some(a.as_str()) != conversation_id)
+                .cmp(&(Some(b.as_str()) != conversation_id))
+                .then_with(|| right.cmp(left))
+                .then_with(|| a.cmp(b))
+        });
+        crate::prompt_history::read(&self.directory, documents.into_iter().map(|(id, _)| id), area, project_id, cancelled)
+    }
+
     pub fn new(directory: PathBuf) -> Self {
         Self { directory, state: Arc::default(), wake: Arc::default() }
     }
 
     /// One engine-lifetime worker outside the engine lock, at the platform's background priority.
     pub fn start(&self) -> std::io::Result<std::sync::mpsc::Receiver<()>> {
+        self.state.lock().unwrap_or_else(|e| e.into_inner()).building = true;
         let search = self.clone();
         let (ready, built) = std::sync::mpsc::channel();
         let spawned = std::thread::Builder::new().name("conversation-index".into()).spawn(move || {
@@ -258,6 +306,7 @@ impl Search {
         let mut index = self.state.lock().unwrap_or_else(|e| e.into_inner());
         index.touched = HashSet::new();
         index.ready = true;
+        index.building = false;
         self.wake.notify_all();
     }
 
@@ -272,10 +321,17 @@ impl Search {
         index.revision += 1;
         let revision = index.revision;
         // Only metadata crosses the save path. Pending records remain searchable through the file fallback.
-        if let Some(old) = index
-            .documents
-            .insert(c.id.clone(), Arc::new(Document { area: c.area, updated: c.updated_at, words: "".into(), complete: false, revision }))
-        {
+        if let Some(old) = index.documents.insert(
+            c.id.clone(),
+            Arc::new(Document {
+                area: c.area,
+                project_id: c.project_id.clone(),
+                updated: c.updated_at,
+                words: "".into(),
+                complete: false,
+                revision,
+            }),
+        ) {
             index.payload -= old.words.len();
         }
         index.pending.insert(c.id.clone());
@@ -420,6 +476,29 @@ mod tests {
             "id": id, "title": "A title", "area": "chat", "createdAt": 1, "updatedAt": 1,
             "messages": texts.iter().enumerate().map(|(i, text)| Message::new(i.to_string(), Role::User, (*text).into(), 1)).collect::<Vec<_>>()
         })).unwrap()
+    }
+
+    #[test]
+    fn prompt_history_cold_read_never_waits_for_the_sidebar_index() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = Store::new(dir.path());
+        store.save(&conversation("saved", &["available before indexing"]));
+        let search = Search::new(dir.path().join("conversations"));
+        // Freeze initialization: no worker can ever make this index ready.
+        search.state.lock().unwrap().building = true;
+        let cancelled = Arc::new(AtomicBool::new(false));
+        let timeout = cancelled.clone();
+        let (finished, receive) = std::sync::mpsc::channel();
+        let watchdog = std::thread::spawn(move || {
+            if receive.recv_timeout(std::time::Duration::from_secs(2)).is_err() {
+                timeout.store(true, Ordering::Relaxed);
+            }
+        });
+        let history = search.prompt_history_cancellable(None, Area::Chat, None, &cancelled).unwrap();
+        let _ = finished.send(());
+        watchdog.join().unwrap();
+        assert_eq!(history, ["available before indexing"], "first Up cannot depend on the sidebar worker finishing");
+        assert!(!search.query("", Area::Chat).unwrap().ready);
     }
 
     #[test]
