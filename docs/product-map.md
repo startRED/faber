@@ -236,7 +236,7 @@ the real keep-awake and autostart), `FABER_HIDDEN`, `FABER_CDP_PORT`, `FABER_CHE
 
 The fixed list the screen may call (`generate_handler!` in `src-tauri/src/main.rs`; `setup_*` live in
 `src-tauri/src/setup.rs`), typed in `ui/api.ts`. Commands return error keys (`error.*`, `reason.*`), never
-sentences. Test builds add `report_checks`.
+sentences. Test builds add `report_checks` and `checks_progress`.
 
 | Group | Commands |
 | :--- | :--- |

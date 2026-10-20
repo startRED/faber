@@ -10,6 +10,41 @@ use serde_json::Value;
 use std::path::Path;
 use std::time::{Duration, Instant};
 
+/// The most a run may take however alive it is: the progress note only ends a wait early, it never lengthens it forever.
+const RUN_CEILING: Duration = Duration::from_secs(20 * 60);
+
+/// Waits for the report, and for the page's progress notes in the meantime. Every note that differs from the last restarts the
+/// `quiet` allowance, so a run that is slow but moving never times out, while a page stuck inside one check, or one that
+/// never starts, fails after `quiet` and says where it stopped.
+struct Wait {
+    quiet: Duration,
+    ceiling: Instant,
+    note: String,
+    moved: Instant,
+}
+
+impl Wait {
+    fn new(now: Instant, quiet: Duration, ceiling: Duration) -> Wait {
+        Wait { quiet, ceiling: now + ceiling, note: String::new(), moved: now }
+    }
+
+    /// The failure message when the wait is over, nothing while the run may go on.
+    fn over(&mut self, now: Instant, note: &str) -> Option<String> {
+        if note != self.note {
+            self.note = note.to_string();
+            self.moved = now;
+        }
+        let at = if self.note.is_empty() { "before its first check".to_string() } else { format!("at check {}", self.note) };
+        if now >= self.ceiling {
+            Some(format!("the checks did not finish within {} s ({at})", RUN_CEILING.as_secs()))
+        } else if now.duration_since(self.moved) >= self.quiet {
+            Some(format!("no checks report and no progress for {} s, stopped {at}", self.quiet.as_secs()))
+        } else {
+            None
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub struct Check {
     pub name: String,
@@ -61,8 +96,8 @@ pub fn run(paths: &Paths, filter: Option<&str>) -> Vec<Outcome> {
     // The `ui` suite never lets the engine look for a CLI: it cannot redirect `/usr/local/bin` on macOS or Linux.
     let launch = Launch { claude: CliSlot::Off, codex: CliSlot::Off, checks_out: Some(out.clone()), ..Launch::default() };
     let mut result = ctx.spawn(launch).and_then(|id| {
-        let timeout = startup();
-        let deadline = Instant::now() + timeout;
+        let progress = out.with_extension("progress");
+        let mut wait = Wait::new(Instant::now(), startup(), RUN_CEILING);
         loop {
             if let Some(text) = read_report(&out) {
                 return parse_report(&text);
@@ -74,8 +109,9 @@ pub fn run(paths: &Paths, filter: Option<&str>) -> Vec<Outcome> {
                     None => Err(format!("the app exited without a checks report ({status}). {}", ctx.output(id))),
                 };
             }
-            if Instant::now() >= deadline {
-                return Err(format!("no checks report after {} s. {}", timeout.as_secs(), ctx.output(id)));
+            let note = std::fs::read_to_string(&progress).unwrap_or_default();
+            if let Some(why) = wait.over(Instant::now(), note.trim()) {
+                return Err(format!("{why}. {}", ctx.output(id)));
             }
             std::thread::sleep(Duration::from_millis(100));
         }
@@ -111,6 +147,26 @@ mod tests {
         assert_eq!(checks.len(), 2);
         assert_eq!(checks[0], Check { name: "i18n: keys".into(), ok: true, message: String::new(), ms: 3.5 });
         assert!(!checks[1].ok && checks[1].message == "bad");
+    }
+
+    #[test]
+    fn a_slow_run_that_keeps_moving_never_times_out_but_a_stuck_one_does() {
+        let start = Instant::now();
+        let at = |s: u64| start + Duration::from_secs(s);
+        let mut wait = Wait::new(start, Duration::from_secs(90), Duration::from_secs(1200));
+        assert_eq!(wait.over(at(89), ""), None);
+        assert!(wait.over(at(90), "").unwrap().contains("before its first check"));
+        let mut wait = Wait::new(start, Duration::from_secs(90), Duration::from_secs(1200));
+        // 400 s in, a check every 60 s: alive, so no verdict.
+        for (i, s) in (60..=420).step_by(60).enumerate() {
+            assert_eq!(wait.over(at(s), &format!("{}/400 a check", i + 1)), None);
+        }
+        assert_eq!(wait.over(at(500), "7/400 a check"), None);
+        let why = wait.over(at(510), "7/400 a check").unwrap();
+        assert!(why.contains("no progress for 90 s") && why.contains("at check 7/400 a check"), "{why}");
+        // Moving forever still ends at the ceiling.
+        let mut wait = Wait::new(start, Duration::from_secs(90), Duration::from_secs(1200));
+        assert!(wait.over(at(1200), "9/400 x").unwrap().contains("did not finish within 1200 s"));
     }
 
     #[test]

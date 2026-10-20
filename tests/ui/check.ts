@@ -11,10 +11,14 @@ export function check(name: string, run: () => void | Promise<void>): void {
   registry.push({ name, run });
 }
 
-/** Runs every registered check, in the order they were registered, and reports each one. */
-export async function runAll(): Promise<Result[]> {
+/**
+ * Runs every registered check, in the order they were registered, and reports each one. `onStart` hears each check just
+ * before it runs, so a runner can tell a slow page from a stuck one.
+ */
+export async function runAll(onStart?: (index: number, total: number, name: string) => void): Promise<Result[]> {
   const results: Result[] = [];
-  for (const { name, run } of registry) {
+  for (const [index, { name, run }] of registry.entries()) {
+    onStart?.(index, registry.length, name);
     // Every check starts in English: the language the system starts with (a Portuguese PC), or one a check before it left, must not decide which pass.
     useLanguage('en');
     const started = performance.now();

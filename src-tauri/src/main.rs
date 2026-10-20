@@ -779,6 +779,16 @@ async fn report_checks(app: AppHandle, json: String) -> Res<()> {
     Ok(())
 }
 
+/// Test builds only: the checks page says which check starts, and the shell keeps that note next to the report
+/// (`FABER_CHECKS_OUT` with the extension `progress`). The runner resets its wait whenever the note changes, so a run that
+/// is slow but alive never times out while a page stuck inside one check still does.
+#[cfg(feature = "test-hooks")]
+#[tauri::command]
+fn checks_progress(note: String) -> Res<()> {
+    let out = PathBuf::from(std::env::var_os("FABER_CHECKS_OUT").ok_or("FABER_CHECKS_OUT is not set")?);
+    std::fs::write(out.with_extension("progress"), note).map_err(|e| e.to_string())
+}
+
 /// Uses setup module to detect CLIs on this computer.
 fn detect_clis() -> BTreeMap<Vendor, Cli> {
     setup::detect_clis()
@@ -1116,7 +1126,9 @@ fn main() {
                 tools::tools_install,
                 tools::tools_remove,
                 #[cfg(feature = "test-hooks")]
-                report_checks
+                report_checks,
+                #[cfg(feature = "test-hooks")]
+                checks_progress
             ];
             // Only the screen calls Faber: a web page in the browser pane (R161 step 7) is refused before any command runs.
             move |invoke: tauri::ipc::Invoke| {

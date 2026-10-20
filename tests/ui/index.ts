@@ -12,7 +12,7 @@ import { LANGUAGES, t } from '../../ui/i18n.ts';
 import type { Key } from '../../ui/locales/en.ts';
 import { runAll, type Result } from './check.ts';
 import { mojibake } from '../ux/mojibake.ts';
-import { crash, report } from './crash.ts';
+import { crash, progress, report } from './crash.ts';
 import './appearance.check.ts';
 import './check.check.ts';
 import './composer.check.ts';
@@ -109,5 +109,5 @@ window.__faberText = textFor;
 window.__faberMojibake = mojibake;
 
 if (new URLSearchParams(location.search).has('checks')) {
-  runAll().then(report, (error: unknown) => crash(String(error)));
+  runAll(progress).then(report, (error: unknown) => crash(String(error)));
 }
