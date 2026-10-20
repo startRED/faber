@@ -97,7 +97,7 @@ own inks.
   spring-like settle), `--ease-in` (exits) and `--ease-spring`. No chrome animation, including its stagger, exceeds
   300 ms. Travel is 24 px for the running column, up to 6 px for content and a 0.97 scale for cards and menus. Cards use
   a 2 px arrival blur; only the scrim has a backdrop blur.
-- New items rise up to 6 px over 200 to 240 ms; exits take 180 ms. Buttons respond in 140 to 240 ms. The "running" dot pulses every 1.6 to 2 s.
+- New items rise up to 6 px over 200 to 240 ms; exits take 80 ms. Hover and colour feedback takes 60 to 70 ms; buttons respond in 60 to 240 ms. The "running" dot pulses every 1.6 to 2 s.
   Workshop only fades and never moves anything vertically.
 - Frequency decides whether something moves at all. Anything the user does dozens of times a minute (a keystroke, a
   shortcut, a tab or row switch, a row hover) changes instantly or with a 150 ms fade of colour or opacity at most;

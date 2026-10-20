@@ -1,5 +1,6 @@
 import { createComponent } from 'solid-js';
 import { render } from 'solid-js/web';
+import themes from '../../src-tauri/src/themes.json';
 import { api } from '../../ui/api.ts';
 import { watchSystem } from '../../ui/appearance.ts';
 import { useClock } from '../../ui/clock.ts';
@@ -154,4 +155,32 @@ check('motion: a timing token reads in milliseconds whether the browser hands it
   } finally {
     el.remove();
   }
+});
+
+check('feel: hover and colour feedback answers within 80ms in every look, exits take 80ms and no text is drawn at weight 600', () => {
+  // Compared with a calmer desktop app on 2026-10-20: feedback at 140 ms and exits at 180 ms read as lag, and 600 as heavy.
+  const fast: string[] = [];
+  const walk = (node: unknown, path: string) => {
+    if (!node || typeof node !== 'object') return;
+    for (const [key, value] of Object.entries(node)) {
+      if (key === 'dur-fast') fast.push(`${path}=${String(value)}`);
+      else walk(value, `${path}/${key}`);
+    }
+  };
+  walk(themes, '');
+  ok(fast.length >= 4, `every look sets dur-fast (${fast.join(', ')})`);
+  const el = document.createElement('div');
+  document.body.append(el);
+  try {
+    for (const entry of fast) {
+      el.style.setProperty('--dur-test', entry.split('=')[1]!);
+      ok(millis(el, '--dur-test', 999) <= 80, `${entry} answers within 80ms`);
+    }
+  } finally {
+    el.remove();
+  }
+  equal(millis(document.documentElement, '--dur-exit', 999), 80, 'exits take 80ms');
+  const heavy: string[] = [];
+  for (const sheet of document.styleSheets) for (const rule of sheet.cssRules) if (rule instanceof CSSStyleRule && rule.style.fontWeight === '600') heavy.push(rule.selectorText);
+  equal(heavy.join(', '), '', 'no rule sets weight 600; strong text uses 580');
 });

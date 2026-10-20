@@ -1274,6 +1274,7 @@ export const es: Messages = {
   'notes.136.new': 'Puedes elegir respuestas breves, explicadas o a tu manera para las dos IA en Ajustes.',
   'notes.137.new': 'Puedes pedir una revisión desde Cambios en una conversación de proyecto e incluir la seguridad si lo deseas.',
   'notes.138.new': 'Puedes volver a antes de un mensaje y restaurar archivos, la conversación o ambos, y rehacer desde el mismo menú.',
+  'notes.139.better': 'Los botones y las filas responden al puntero casi el doble de rápido, los menús se cierran antes y el texto en negrita pesa un poco menos.',
   'update.checking': 'Buscando una actualización…',
   'update.downloading': 'Descargando actualización…',
   'update.downloadingPercent': 'Descargando actualización… {percent} %',

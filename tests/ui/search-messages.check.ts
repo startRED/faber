@@ -278,6 +278,8 @@ check('search-messages: clicking a hit opens its old message, unfolds its run an
         await settle(220);
         root.querySelector<HTMLButtonElement>('.message-hit')!.click();
         await settle(60);
+        // The reveal is consumed on the next frame, which a hidden window may hold back past the wait above.
+        await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
         const revealed = root.querySelector('[data-message-index="3"]')?.closest<HTMLDetailsElement>('.run-block');
         ok(revealed?.open, 'search reveals the earlier answer in the active run');
         const activeThread = root.querySelector<HTMLElement>('.thread')!;

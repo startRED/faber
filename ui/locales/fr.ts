@@ -1274,6 +1274,7 @@ export const fr: Messages = {
   'notes.136.new': 'Vous pouvez choisir des réponses courtes, expliquées ou à votre façon pour les deux IA dans les réglages.',
   'notes.137.new': 'Vous pouvez demander une vérification depuis Modifications dans une conversation de projet, avec la sécurité si vous le souhaitez.',
   'notes.138.new': 'Vous pouvez revenir avant un message pour restaurer les fichiers, la conversation ou les deux, puis rétablir depuis le même menu.',
+  'notes.139.better': 'Les boutons et les lignes réagissent au pointeur presque deux fois plus vite, les menus se ferment plus tôt et le texte en gras est un peu plus léger à lire.',
   'update.checking': 'Recherche d’une mise à jour…',
   'update.downloading': 'Téléchargement de la mise à jour…',
   'update.downloadingPercent': 'Téléchargement de la mise à jour… {percent} %',

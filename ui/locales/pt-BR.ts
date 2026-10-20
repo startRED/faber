@@ -1261,6 +1261,7 @@ export const ptBR: Messages = {
   'notes.136.new': 'Você pode escolher respostas curtas, explicadas ou do seu jeito para as duas IAs nas Configurações.',
   'notes.137.new': 'Você pode pedir uma revisão em Alterações numa conversa de projeto e incluir segurança se quiser.',
   'notes.138.new': 'Você pode voltar pra antes de uma mensagem e restaurar arquivos, a conversa ou os dois, e refazer pelo mesmo menu.',
+  'notes.139.better': 'Botões e linhas respondem ao mouse quase duas vezes mais rápido, os menus fecham antes e o texto em negrito ficou um pouco mais leve de ler.',
   'update.checking': 'Procurando atualização…',
   'update.downloading': 'Baixando atualização…',
   'update.downloadingPercent': 'Baixando atualização… {percent}%',

@@ -1274,6 +1274,7 @@ export const de: Messages = {
   'notes.136.new': 'Du kannst in den Einstellungen für beide KIs kurze, erklärte Antworten oder deinen eigenen Stil wählen.',
   'notes.137.new': 'Du kannst unter Änderungen im Projektgespräch eine Prüfung anfordern und dabei auch die Sicherheit prüfen lassen.',
   'notes.138.new': 'Du kannst vor eine Nachricht zurückgehen, Dateien, die Unterhaltung oder beides wiederherstellen und den Schritt im selben Menü wiederholen.',
+  'notes.139.better': 'Schaltflächen und Zeilen reagieren fast doppelt so schnell auf den Mauszeiger, Menüs schließen früher und fetter Text liest sich etwas leichter.',
   'update.checking': 'Suche nach einem Update…',
   'update.downloading': 'Update wird heruntergeladen…',
   'update.downloadingPercent': 'Update wird heruntergeladen… {percent} %',

@@ -1154,6 +1154,7 @@ export const en = {
   'notes.136.new': 'You can choose short, explained, or your own reply style for both AIs in Settings.',
   'notes.137.new': 'You can ask for a review from Changes in a project conversation, including security if you choose.',
   'notes.138.new': 'You can go back before a message to restore files, the conversation, or both, then redo from the same menu.',
+  'notes.139.better': 'Buttons and rows answer your pointer about twice as fast, menus close sooner, and bold text is a little lighter to read.',
   'update.checking': 'Looking for an update…',
   'update.downloading': 'Downloading update…',
   'update.downloadingPercent': 'Downloading update… {percent}%',
