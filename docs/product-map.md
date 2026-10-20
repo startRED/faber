@@ -140,7 +140,7 @@ closed). There is no "Learn more" link. The version ("Faber 1.2.3") closes the l
   for Chat and Projects (a menu of five modes, each with its one line; "Full access" by default), Web search, Your CLI
   hooks (only acts in the guarded modes; in "Full access" it shows on and locked, with "In Full access your own hooks always run."), Chat working folder (with Recents; acts on the open chat
   while it has no message; the row exists only when Settings was opened from Chat, where its control does), and a folded
-  "Codex" group (reasoning summary, answer length; Codex only, closed by default). *Notifications and system*: Notify me,
+  "Codex" group (reasoning summary only, closed by default). Reply style sits just before it for both AIs. *Notifications and system*: Notify me,
   Play a sound, and on Windows keep the computer awake while Faber works and start with Windows. *Updates*: Receive
   previews (off by default, R156).
 - **Projects**: first *Skills for projects*, one card closed like a project's that says how many are on ("2 of 21 on") and
@@ -168,7 +168,7 @@ the other subscription or waiting (the quota card, just in time, per message); p
 ## Every setting
 
 `settings.json` in the data folder holds the struct `Settings` of `engine/src/model.rs`; `ui/api.ts` mirrors it by hand.
-The only writer is the `save_settings` command; the merge in `Core::save_settings` (`engine/src/engine.rs`) builds a full
+The writer is the `save_settings` command (loading old `verbosity` rewrites it once as `replyStyle`: low to short, high to explained, medium/default to default, then drops the old key; an existing new choice wins); the merge in `Core::save_settings` (`engine/src/engine.rs`) builds a full
 `Settings`, so a new field does not compile until it is merged. A patch sets a value and never clears one (an empty
 `userName` is the only way back to none). There is no "settings changed" event: Rust readers read the file when they need
 it, and the screen takes the saved settings from the answer of `save_settings`.
@@ -188,7 +188,8 @@ choice a person makes anywhere else (a work screen, a banner) is an incoherence.
 | `permissions` | `ask`, `acceptEdits`, `plan`, `auto`, `dontAsk` (`dontAsk`) | Settings > General (How the AI works); the composer chip in Chat | The engine at every turn; the status line in a conversation |
 | `webSearch` | `off`, `cached` (Codex only), `live` (`live`) | Settings > General (How the AI works) | The engine at every turn, for Chat and the person's own project sessions |
 | `reasoningSummary` | `default`, `auto`, `concise`, `detailed`, `none` (`default`: the model's own) | Settings > General > Codex (Codex only) | The engine at every Codex turn |
-| `verbosity` | `default`, `low`, `medium`, `high` (`default`: the model's own) | Settings > General > Codex (Codex only) | The engine at every Codex turn |
+| `replyStyle` | `default` (the AI's own way), `short`, `explained`, `own` | Settings > General (How the AI works), both AIs | Both CLIs through `PersonaInput`: Claude Code's `--append-system-prompt`, Codex's `developerInstructions`; Codex also gets `model_verbosity` low/high for short/explained, otherwise unset. Chat and Projects follow the existing permission-change path: from the next turn of an idle conversation, after the running turn otherwise. Idle sessions close and affected Codex servers retire; the next launch resumes history with a new Claude Code process or a fresh Codex app-server, because a loaded Codex backend ignores resume overrides. Shared-path defects are tracked in task 320 below. Internal titles, quick questions, recaps and helpers keep their fixed style |
+| `replyStyleText` | Trimmed plain text, at most 400 Unicode characters (empty); control characters removed except newline and tab; retained across style changes | The same row, a text box only for `own`; leaving it or closing Settings saves the edit, including Escape while focused | Passed after cleaning and bounding only when `replyStyle` is `own`; default adds no style instruction |
 | `grantsEpoch` | A random token (none). Internal state: a person never sets it | None; only the engine writes it, when a stricter mode replaces the old one | The engine, to drop an "Always allow" made under a looser mode |
 | `userHooks` | true, false (false) | Settings > General (How the AI works) | The engine; acts only in the guarded modes (not "Full access") |
 | `notifications` | true, false (true) | Settings > General (Notifications and system) | The tray |
@@ -288,6 +289,7 @@ checks in `tests/ui/index.ts`, real-app scenarios in `testkit/src/screen/mod.rs`
 | Keep awake, start with Windows | Done on Windows | tests inside `src-tauri/src/awake.rs`, `autostart.rs` |
 | Public self-update | Done, on two channels (R156): stable reads the latest release's `latest.json` and previews (opt-in) the `preview-channel` release's, which every release replaces with its newest build; checks at start and every 6 h; installs on quit or, on Windows, at the first moment no conversation or CLI install runs and the window is hidden (R141: it also installs at start, before the first input and with no unsent draft; "What's new" shows once after) | tests inside `src-tauri/src/update.rs`; `engine/tests/running.rs` (`is_working`) |
 | First run, account cards, tutorial | Done | `tests/ui/setup.check.ts`, `tutorial.check.ts`, `homes.check.ts`; `testkit/src/screen/setup.rs`, `first_run.rs` |
+| Reply style (parity X5) | Done; extends Settings > General for both AIs | `engine/tests/engine.rs` (`reply_style_reaches_each_cli_in_chat_and_projects`, `reply_style_words_are_trimmed_bounded_and_kept_when_switching`, `reply_style_migrates_old_verbosity_once_and_bounds_loaded_words`, `reply_style_replaces_a_warm_claude_before_the_next_turn`, `reply_style_in_the_same_engine_reopens_codex_backend_and_keeps_peer_turns`, `reply_style_in_the_same_engine_reopens_claude_and_keeps_peer_turns`); `tests/ui/settings.check.ts` (`reply_style`) |
 | Settings, looks, theme files | Done | `tests/ui/settings.check.ts`, `appearance.check.ts`; `testkit/src/screen/settings.rs` |
 | Skills for projects, Tools for projects (the catalog, steps 1 to 3: skills and tool servers) | Done; command-line tools and the agent finding a tool by itself come next | `engine/src/tools.rs` (tests), `engine/tests/tools.rs`, `claude_session.rs` (`the_catalog_s_skills_reach_a_project_s_agent_as_one_plugin_and_nowhere_else`), `codex_session.rs` (`the_catalog_s_skill_root_is_set_once_before_the_first_thread_opens_and_its_servers_go_with_each_thread`), `claude_session.rs` (`the_catalog_s_servers_join_faber_s_own_in_one_config_only_in_full_access`); `tests/ui/skills.check.ts` |
 | Five languages | Done; names (Faber, Claude, Codex, the JSON file type) stay the same in every language; part of de, es, fr and pt-BR still awaits a native speaker's review | `tests/ui/i18n.check.ts`, `mojibake.check.ts`; `engine/tests/locales.rs` (no unused text) |
@@ -315,6 +317,7 @@ one. Delete a line in the commit that fixes it. The weekly coherence pass (`test
 lines and the removal of fixed ones.
 
 6. (fixed by R160: a project opens a chat, not a mission start card.)
+7. Settings changes (permissions and reply style): retiring during project checks can drop a scheduled compaction and its continuation; a retired Codex server can remain open after its last work, including an automatic Keep going halt. Deferred by the lead to [task 320](tasks/320-settings-change-retire.md).
 
 ## Worked example: adding a setting
 

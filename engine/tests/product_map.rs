@@ -32,7 +32,8 @@ fn settings_keys() -> Vec<String> {
         autostart: Some(true),
         web_search: Some(Default::default()),
         reasoning_summary: Some(Default::default()),
-        verbosity: Some(Default::default()),
+        reply_style: Some(Default::default()),
+        reply_style_text: Some(String::new()),
         grants_epoch: Some(String::new()),
         previews: Some(true),
     };

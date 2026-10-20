@@ -2758,7 +2758,7 @@ async fn r140_auto_on_a_claude_that_lists_no_auto_runs_accept_edits_and_the_repl
 
 #[tokio::test]
 async fn r140_a_codex_chat_thread_carries_the_mode_and_the_settings() {
-    use faber_engine::model::{ReasoningSummary, Verbosity, WebSearch};
+    use faber_engine::model::{ReasoningSummary, ReplyStyle, WebSearch};
     let data = tempfile::tempdir().unwrap();
     let f = fake(fixture("codex", "chat"));
     let (engine, mut rx) = engine(data.path(), Vendor::Codex, f.spawn.clone());
@@ -2767,7 +2767,7 @@ async fn r140_a_codex_chat_thread_carries_the_mode_and_the_settings() {
             permissions: Some(Permissions::Auto),
             web_search: Some(WebSearch::Cached),
             reasoning_summary: Some(ReasoningSummary::Concise),
-            verbosity: Some(Verbosity::High),
+            reply_style: Some(ReplyStyle::Explained),
             ..Settings::default()
         })
         .unwrap();
@@ -3493,4 +3493,433 @@ async fn branch_from_here_keeps_the_answer_sends_nothing_and_a_middle_edit_is_a_
     assert_eq!(v[0].list.iter().map(|x| x.conversation_id.as_str()).collect::<Vec<_>>(), vec![here.as_str(), "edit-1"]);
     assert_eq!(e.versions("edit-1")[0].at, 1);
     assert!(e.versions(&id).is_empty(), "the source has no message at that place");
+}
+
+#[tokio::test]
+async fn reply_style_reaches_each_cli_in_chat_and_projects() {
+    use faber_engine::model::ReplyStyle;
+    let short = "Keep replies short and direct, without leaving out necessary facts or warnings.";
+    let explained = "Explain replies with enough detail and examples to make the reasoning easy to follow.";
+    let own = "Responda com exemplos de jogos.\nSem enrolar.";
+    for vendor in Vendor::ALL {
+        for area in [Area::Chat, Area::Project] {
+            for (style, words, verbosity) in [
+                (ReplyStyle::Default, "", None),
+                (ReplyStyle::Short, short, Some("low")),
+                (ReplyStyle::Explained, explained, Some("high")),
+                (ReplyStyle::Own, own, None),
+            ] {
+                let dir = tempfile::tempdir().unwrap();
+                let folder = project_folder();
+                let f = fake(fixture(vendor.name(), "chat"));
+                let (engine, mut rx) = engine(dir.path(), vendor, f.spawn.clone());
+                engine
+                    .save_settings(Settings { reply_style: Some(style), reply_style_text: Some(own.into()), ..Settings::default() })
+                    .unwrap();
+                let project_id = (area == Area::Project).then(|| engine.add_project(&folder.path().to_string_lossy()).unwrap().id);
+                engine.send(SendRequest { project_id, ..ask(area, SKY, choice(vendor.name(), None)) }).unwrap();
+                finished(&mut rx, |_| {}).await;
+                engine.shutdown();
+                if vendor == Vendor::Claude {
+                    let args = f.args.lock().unwrap();
+                    let prompt = appended(&args[0]).unwrap();
+                    for candidate in [short, explained, own] {
+                        assert_eq!(prompt.contains(candidate), candidate == words, "{area:?} {style:?}: {prompt}");
+                    }
+                } else {
+                    for candidate in [short, explained, own] {
+                        // The wire holds JSON-escaped newlines, just as the actual app-server request does.
+                        let escaped = serde_json::to_string(candidate).unwrap();
+                        assert_eq!(
+                            f.wire.lines_with(&escaped[1..escaped.len() - 1]),
+                            usize::from(candidate == words),
+                            "{area:?} {style:?}"
+                        );
+                    }
+                    for length in ["low", "high", "medium"] {
+                        assert_eq!(
+                            f.wire.lines_with(&format!("\"model_verbosity\":\"{length}\"")),
+                            usize::from(verbosity == Some(length)),
+                            "{style:?}"
+                        );
+                    }
+                }
+            }
+        }
+    }
+}
+
+#[tokio::test]
+async fn reply_style_words_are_trimmed_bounded_and_kept_when_switching() {
+    use faber_engine::model::ReplyStyle;
+    let dir = tempfile::tempdir().unwrap();
+    let (engine, _) = engine(dir.path(), Vendor::Claude, fake(vec![]).spawn);
+    let words = format!("  {}  ", "🎮".repeat(401));
+    let saved = engine
+        .save_settings(Settings { reply_style: Some(ReplyStyle::Own), reply_style_text: Some(words), ..Settings::default() })
+        .unwrap();
+    assert_eq!(saved.reply_style_text.as_deref(), Some("🎮".repeat(400).as_str()));
+    for style in [ReplyStyle::Short, ReplyStyle::Explained, ReplyStyle::Default, ReplyStyle::Own] {
+        let saved = engine.save_settings(Settings { reply_style: Some(style), ..Settings::default() }).unwrap();
+        assert_eq!(saved.reply_style_text.as_deref(), Some("🎮".repeat(400).as_str()));
+    }
+    assert_eq!(read_json(&dir.path().join("settings.json"))["replyStyleText"], "🎮".repeat(400));
+    let cleared = engine.save_settings(Settings { reply_style_text: Some(" \n ".into()), ..Settings::default() }).unwrap();
+    assert_eq!(cleared.reply_style_text.as_deref(), Some(""));
+    engine.shutdown();
+}
+
+#[tokio::test]
+async fn reply_style_migrates_old_verbosity_once_and_bounds_loaded_words() {
+    use faber_engine::model::ReplyStyle;
+    for (old, expected) in
+        [("low", ReplyStyle::Short), ("high", ReplyStyle::Explained), ("medium", ReplyStyle::Default), ("default", ReplyStyle::Default)]
+    {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("settings.json");
+        std::fs::write(&path, json!({"verbosity": old, "replyStyleText": format!("  {}  ", "é".repeat(401))}).to_string()).unwrap();
+        let (engine, _) = engine(dir.path(), Vendor::Claude, fake(vec![]).spawn);
+        let saved = engine.state().settings;
+        assert_eq!(saved.reply_style, Some(expected), "{old}");
+        assert_eq!(saved.reply_style_text.as_deref(), Some("é".repeat(400).as_str()));
+        let disk = read_json(&path);
+        assert!(disk.get("verbosity").is_none());
+        assert_eq!(disk["replyStyle"], serde_json::to_value(expected).unwrap());
+        engine.shutdown();
+    }
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::write(dir.path().join("settings.json"), r#"{"verbosity":"high","replyStyle":"own","replyStyleText":"  My words.  "}"#)
+        .unwrap();
+    let (engine, _) = engine(dir.path(), Vendor::Claude, fake(vec![]).spawn);
+    assert_eq!(engine.state().settings.reply_style, Some(ReplyStyle::Own), "a new choice wins over an old key");
+    assert_eq!(engine.state().settings.reply_style_text.as_deref(), Some("My words."));
+    engine.shutdown();
+}
+
+#[tokio::test]
+async fn reply_style_control_characters_are_removed_from_saved_and_migrated_words() {
+    use faber_engine::model::ReplyStyle;
+    let controls: String = ('\u{0}'..='\u{9f}').filter(|c| c.is_control() && !matches!(c, '\n' | '\t')).collect();
+    let words = format!(" \0 a{controls}b\n\tc \0 ");
+    for migrated in [false, true] {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("settings.json");
+        if migrated {
+            std::fs::write(&path, json!({"verbosity": "low", "replyStyleText": words}).to_string()).unwrap();
+        }
+        let (engine, _) = engine(dir.path(), Vendor::Claude, fake(vec![]).spawn);
+        let settings = if migrated {
+            engine.state().settings
+        } else {
+            engine
+                .save_settings(Settings {
+                    reply_style: Some(ReplyStyle::Own),
+                    reply_style_text: Some(words.clone()),
+                    ..Settings::default()
+                })
+                .unwrap()
+        };
+        assert_eq!(settings.reply_style_text.as_deref(), Some("ab\n\tc"), "migrated={migrated}");
+        assert_eq!(read_json(&path)["replyStyleText"], "ab\n\tc");
+        assert!(std::ffi::CString::new(settings.tuning().reply_style_text).is_ok(), "a launch argument must not contain NUL");
+        engine.shutdown();
+    }
+}
+
+#[tokio::test]
+async fn reply_style_replaces_a_warm_claude_before_the_next_turn() {
+    use faber_engine::model::ReplyStyle;
+    let dir = tempfile::tempdir().unwrap();
+    let f = fake(fixture("claude", "chat"));
+    let (engine, _) = engine(dir.path(), Vendor::Claude, f.spawn.clone());
+    let warm = || engine.warm(WarmRequest { conversation_id: None, area: Area::Chat, project_id: None, choice: choice("claude", None) });
+    warm();
+    for style in [ReplyStyle::Short, ReplyStyle::Explained, ReplyStyle::Own, ReplyStyle::Default] {
+        engine
+            .save_settings(Settings { reply_style: Some(style), reply_style_text: Some("Use my words.".into()), ..Settings::default() })
+            .unwrap();
+        warm();
+    }
+    engine.shutdown();
+    let args = f.args.lock().unwrap();
+    assert_eq!(args.len(), 5);
+    assert!(appended(&args[1]).unwrap().contains("Keep replies short"));
+    assert!(appended(&args[2]).unwrap().contains("Explain replies"));
+    assert!(appended(&args[3]).unwrap().ends_with("Use my words."));
+    assert_eq!(appended(&args[0]), appended(&args[4]));
+}
+
+#[test]
+fn reply_style_invalid_legacy_values_keep_settings_fail_closed() {
+    use faber_engine::store::Store;
+    for old in [json!("typo"), json!(42), json!(true), json!({})] {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join("settings.json"), json!({"verbosity": old}).to_string()).unwrap();
+        let settings = Store::new(dir.path()).settings();
+        assert_eq!(settings.permissions, Some(Permissions::Ask));
+        assert!(settings.grants_epoch.is_some(), "unreadable settings revoke remembered grants");
+    }
+}
+
+#[test]
+fn reply_style_migration_rejects_duplicate_settings_fields() {
+    use faber_engine::store::Store;
+    for text in [
+        r#"{"permissions":"ask","permissions":"dontAsk","verbosity":"high"}"#,
+        r#"{"permissions":"ask","permissions":"dontAsk"}"#,
+        r#"{"verbosity":"low","verbosity":"high"}"#,
+        r#"{"replyStyle":"short","replyStyle":"explained","verbosity":"high"}"#,
+    ] {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("settings.json");
+        std::fs::write(&path, text).unwrap();
+        let settings = Store::new(dir.path()).settings();
+        assert_eq!(settings.permissions, Some(Permissions::Ask));
+        assert!(settings.grants_epoch.is_some());
+        assert_eq!(std::fs::read_to_string(path).unwrap(), text, "ambiguous settings are never rewritten");
+    }
+}
+
+#[test]
+fn reply_style_migration_keeps_the_recovery_epoch_after_restart() {
+    use faber_engine::store::Store;
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("settings.json");
+    std::fs::write(&path, "{").unwrap();
+    let store = Store::new(dir.path());
+    let revoked = store.settings().grants_epoch.unwrap();
+    std::fs::write(&path, r#"{"verbosity":"high","permissions":"ask"}"#).unwrap();
+    assert_eq!(store.settings().grants_epoch.as_deref(), Some(revoked.as_str()));
+    drop(store);
+    assert_eq!(Store::new(dir.path()).settings().grants_epoch.as_deref(), Some(revoked.as_str()));
+}
+
+#[tokio::test]
+async fn reply_style_changes_on_resume_without_changing_the_conversations_name() {
+    use faber_engine::model::ReplyStyle;
+    for vendor in Vendor::ALL {
+        let dir = tempfile::tempdir().unwrap();
+        let f = fake(fixture(vendor.name(), "chat"));
+        let (first, mut rx) = engine(dir.path(), vendor, f.spawn.clone());
+        first
+            .save_settings(Settings { reply_style: Some(ReplyStyle::Short), user_name: Some("Erick".into()), ..Settings::default() })
+            .unwrap();
+        let id = first.send(ask(Area::Chat, SKY, choice(vendor.name(), None))).unwrap();
+        finished(&mut rx, |_| {}).await;
+        first.shutdown();
+        if vendor == Vendor::Codex {
+            let path = dir.path().join("conversations").join(format!("{id}.json"));
+            let mut saved = read_json(&path);
+            saved["sessions"]["codex"] = "01a1251a-252b-7031-bcb9-dd0b0adfc7ce".into();
+            std::fs::write(&path, saved.to_string()).unwrap();
+        }
+        let g = fake(fixture(vendor.name(), "resume"));
+        let (second, mut rx) = engine(dir.path(), vendor, g.spawn.clone());
+        second
+            .save_settings(Settings {
+                reply_style: Some(ReplyStyle::Own),
+                reply_style_text: Some("Use my own reply style.".into()),
+                user_name: Some("Maria".into()),
+                ..Settings::default()
+            })
+            .unwrap();
+        second
+            .send(SendRequest {
+                conversation_id: Some(id),
+                ..ask(Area::Chat, "What single word did you reply with last time? Answer with only that word.", choice(vendor.name(), None))
+            })
+            .unwrap();
+        finished(&mut rx, |_| {}).await;
+        second.shutdown();
+        if vendor == Vendor::Claude {
+            let args = g.args.lock().unwrap();
+            assert!(args[0].contains(&"--resume".into()));
+            let prompt = appended(&args[0]).unwrap();
+            assert!(prompt.contains("called Erick.") && prompt.ends_with("Use my own reply style."));
+            assert!(!prompt.contains("Keep replies short") && !prompt.contains("called Maria."));
+        } else {
+            assert_eq!(g.wire.lines_with("thread/resume"), 1);
+            assert_eq!(g.wire.lines_with("Use my own reply style."), 1);
+            assert_eq!(g.wire.lines_with("called Erick."), 1);
+            assert_eq!(g.wire.lines_with("called Maria."), 0);
+            assert_eq!(g.wire.lines_with("model_verbosity"), 0);
+        }
+    }
+}
+
+async fn reply_style_rpc(pipe: &support::Pipe, method: &str, index: usize) -> serde_json::Value {
+    tokio::time::timeout(Duration::from_secs(3), async {
+        loop {
+            let found = pipe.lines.lock().unwrap().iter().filter(|m| m["method"] == method).nth(index).cloned();
+            if let Some(message) = found {
+                return message;
+            }
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+    })
+    .await
+    .unwrap_or_else(|_| panic!("missing {method} request {index}"))
+}
+
+async fn reply_style_codex_boot(pipe: &mut support::Pipe) {
+    let init = reply_style_rpc(pipe, "initialize", 0).await;
+    pipe.say(json!({"id":init["id"],"result":{}})).await;
+}
+
+async fn reply_style_codex_thread(pipe: &mut support::Pipe, method: &str, index: usize, id: &str) -> serde_json::Value {
+    let request = reply_style_rpc(pipe, method, index).await;
+    pipe.say(json!({"id":request["id"],"result":{"thread":{"id":id}}})).await;
+    let turn = reply_style_rpc(pipe, "turn/start", index).await;
+    assert_eq!(turn["params"]["threadId"], id);
+    pipe.say(json!({"id":turn["id"],"result":{"turn":{"id":format!("turn-{id}")}}})).await;
+    request
+}
+
+async fn reply_style_codex_done(pipe: &mut support::Pipe, id: &str, text: &str) {
+    pipe.say(
+        json!({"method":"item/agentMessage/delta","params":{"threadId":id,"turnId":format!("turn-{id}"),"itemId":"answer","delta":text}}),
+    )
+    .await;
+    pipe.say(json!({"method":"turn/completed","params":{"threadId":id,"turn":{"id":format!("turn-{id}"),"status":"completed"}}})).await;
+}
+
+#[tokio::test]
+async fn reply_style_in_the_same_engine_reopens_codex_backend_and_keeps_peer_turns() {
+    use faber_engine::model::ReplyStyle;
+    for area in [Area::Chat, Area::Project] {
+        let dir = tempfile::tempdir().unwrap();
+        let folder = project_folder();
+        let (spawn, made) = pipes();
+        let (app, mut rx) = engine(dir.path(), Vendor::Codex, spawn);
+        app.save_settings(Settings { reply_style: Some(ReplyStyle::Short), ..Settings::default() }).unwrap();
+        let project_id = (area == Area::Project).then(|| app.add_project(&folder.path().to_string_lossy()).unwrap().id);
+        let request =
+            |id| SendRequest { conversation_id: id, project_id: project_id.clone(), ..ask(area, "Reply.", choice("codex", None)) };
+        let main = app.send(request(None)).unwrap();
+        let mut old = next_pipe(&made).await;
+        reply_style_codex_boot(&mut old).await;
+        let started = reply_style_codex_thread(&mut old, "thread/start", 0, "main").await;
+        assert_eq!(started["params"]["config"]["model_verbosity"], "low");
+        reply_style_codex_done(&mut old, "main", "First reply.").await;
+        finished(&mut rx, |_| {}).await;
+        let peer = app.send(request(None)).unwrap();
+        reply_style_codex_thread(&mut old, "thread/start", 1, "peer").await;
+        let own = "Use my own words.";
+        let mut backends = Vec::new();
+        for (style, text, verbosity) in [
+            (ReplyStyle::Explained, "Explain replies with enough detail", Some("high")),
+            (ReplyStyle::Own, own, None),
+            (ReplyStyle::Default, "", None),
+        ] {
+            app.save_settings(Settings { reply_style: Some(style), reply_style_text: Some(own.into()), ..Settings::default() }).unwrap();
+            app.send(request(Some(main.clone()))).unwrap();
+            // Resuming in the old process would reuse its loaded, subscribed backend and ignore these overrides.
+            assert_eq!(made.lock().unwrap().len(), 1, "{area:?} {style:?}: the backend must reopen in a fresh server");
+            let mut new = next_pipe(&made).await;
+            reply_style_codex_boot(&mut new).await;
+            let resumed = reply_style_codex_thread(&mut new, "thread/resume", 0, "main").await;
+            assert_eq!(resumed["params"]["threadId"], "main", "history stays in the same thread");
+            let instructions = resumed["params"]["developerInstructions"].as_str().unwrap();
+            if style == ReplyStyle::Default {
+                assert!(!instructions.contains("Explain replies") && !instructions.contains(own));
+            } else {
+                assert!(instructions.contains(text), "{instructions}");
+            }
+            assert!(!instructions.contains("Keep replies short"));
+            assert_eq!(resumed["params"]["config"]["model_verbosity"].as_str(), verbosity);
+            assert!(!old.closed.load(std::sync::atomic::Ordering::SeqCst));
+            assert!(!old.lines.lock().unwrap().iter().any(|m| m["method"] == "turn/interrupt"));
+            assert_eq!(app.open(&peer).unwrap().messages.last().unwrap().status, Some(Status::Streaming));
+            reply_style_codex_done(&mut new, "main", "New style.").await;
+            assert_eq!(finished(&mut rx, |_| {}).await.text, "New style.");
+            backends.push(new);
+        }
+        reply_style_codex_done(&mut old, "peer", "Peer kept working.").await;
+        assert_eq!(finished(&mut rx, |_| {}).await.text, "Peer kept working.");
+        // Its old turn finished untouched; its own next turn must also leave the stale backend behind.
+        app.send(request(Some(peer))).unwrap();
+        assert!(made.lock().unwrap().is_empty(), "the current server can host the peer too");
+        let current = backends.last_mut().unwrap();
+        let resumed = reply_style_codex_thread(current, "thread/resume", 1, "peer").await;
+        assert_eq!(resumed["params"]["threadId"], "peer");
+        assert!(!resumed["params"]["developerInstructions"].as_str().unwrap().contains("Keep replies short"));
+        assert!(resumed["params"]["config"].get("model_verbosity").is_none());
+        reply_style_codex_done(current, "peer", "Peer now uses the new style.").await;
+        assert_eq!(finished(&mut rx, |_| {}).await.text, "Peer now uses the new style.");
+        app.shutdown();
+    }
+}
+
+async fn reply_style_claude_done(pipe: &mut support::Pipe, text: &str) {
+    pipe.say(json!({"type":"stream_event","parent_tool_use_id":null,"event":{"type":"content_block_delta","delta":{"type":"text_delta","text":text}}})).await;
+    pipe.say(json!({"type":"result","subtype":"success","is_error":false,"total_cost_usd":0.0,"usage":{}})).await;
+}
+
+#[tokio::test]
+async fn reply_style_in_the_same_engine_reopens_claude_and_keeps_peer_turns() {
+    use faber_engine::model::ReplyStyle;
+    for area in [Area::Chat, Area::Project] {
+        let dir = tempfile::tempdir().unwrap();
+        let folder = project_folder();
+        let (spawn, made) = pipes();
+        let args = Arc::new(Mutex::new(Vec::new()));
+        let seen = args.clone();
+        let tracked: Spawner = Arc::new(move |bin, argv, cwd| {
+            seen.lock().unwrap().push(argv.to_vec());
+            spawn(bin, argv, cwd)
+        });
+        let (app, mut rx) = engine(dir.path(), Vendor::Claude, tracked);
+        app.save_settings(Settings { reply_style: Some(ReplyStyle::Short), ..Settings::default() }).unwrap();
+        let project_id = (area == Area::Project).then(|| app.add_project(&folder.path().to_string_lossy()).unwrap().id);
+        let request = |id| SendRequest {
+            conversation_id: id,
+            project_id: project_id.clone(),
+            ..ask(area, "Reply.", choice("claude", Some("haiku")))
+        };
+        let main = app.send(request(None)).unwrap();
+        let mut old = next_pipe(&made).await;
+        old.say(json!({"type":"system","subtype":"init","session_id":"main","model":"haiku"})).await;
+        reply_style_claude_done(&mut old, "First reply.").await;
+        finished(&mut rx, |_| {}).await;
+        let peer = app.send(request(None)).unwrap();
+        let mut active = next_pipe(&made).await;
+        active.say(json!({"type":"system","subtype":"init","session_id":"peer","model":"haiku"})).await;
+        active.say(json!({"type":"stream_event","parent_tool_use_id":null,"event":{"type":"content_block_delta","delta":{"type":"text_delta","text":"Peer "}}})).await;
+        until(&app, &peer, |c| c.sessions.contains_key(&Vendor::Claude)).await;
+        let own = "Use my own words.";
+        let mut backends = Vec::new();
+        for (style, text) in
+            [(ReplyStyle::Explained, "Explain replies with enough detail"), (ReplyStyle::Own, own), (ReplyStyle::Default, "")]
+        {
+            app.save_settings(Settings { reply_style: Some(style), reply_style_text: Some(own.into()), ..Settings::default() }).unwrap();
+            app.send(request(Some(main.clone()))).unwrap();
+            let mut new = next_pipe(&made).await;
+            let argv = args.lock().unwrap().last().unwrap().clone();
+            assert!(argv.windows(2).any(|a| a == ["--resume", "main"]));
+            let instructions = appended(&argv).unwrap();
+            if style == ReplyStyle::Default {
+                assert!(!instructions.contains("Explain replies") && !instructions.contains(own));
+            } else {
+                assert!(instructions.contains(text));
+            }
+            assert!(!instructions.contains("Keep replies short"));
+            assert!(!active.closed.load(std::sync::atomic::Ordering::SeqCst));
+            assert_eq!(app.open(&peer).unwrap().messages.last().unwrap().status, Some(Status::Streaming));
+            new.say(json!({"type":"system","subtype":"init","session_id":"main","model":"haiku"})).await;
+            reply_style_claude_done(&mut new, "New style.").await;
+            assert_eq!(finished(&mut rx, |_| {}).await.text, "New style.");
+            backends.push(new);
+        }
+        reply_style_claude_done(&mut active, "kept working.").await;
+        assert_eq!(finished(&mut rx, |_| {}).await.text, "Peer kept working.");
+        app.send(request(Some(peer))).unwrap();
+        let mut next = next_pipe(&made).await;
+        let argv = args.lock().unwrap().last().unwrap().clone();
+        assert!(argv.windows(2).any(|a| a == ["--resume", "peer"]));
+        assert!(!appended(&argv).unwrap().contains("Keep replies short"));
+        next.say(json!({"type":"system","subtype":"init","session_id":"peer","model":"haiku"})).await;
+        reply_style_claude_done(&mut next, "Peer now uses the new style.").await;
+        assert_eq!(finished(&mut rx, |_| {}).await.text, "Peer now uses the new style.");
+        app.shutdown();
+    }
 }

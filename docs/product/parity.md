@@ -78,7 +78,7 @@ Size: S small, M medium, L large. Wave: 1 next, 2 after, 3 later or with its pha
 | X2 | See, add and remove skills and plugins (`/skills`, `/plugin`) | both CLIs, both apps | Catalog skills for the agent (R247) | Extends the catalog | M | 2 |
 | X3 | Memory: what the AI learned, edit or delete it, per project (`/memory`, claude.ai, ChatGPT) | all four | Planned (following.md, learning) | Already in the roadmap | M | 2 |
 | X4 | Instructions and knowledge files for a group of chats | claude.ai, ChatGPT projects | Projects read AGENTS.md; Chat has none | Owner chose it (2026-10-20): a group of chats in Chat | M | 2 |
-| X5 | Reply style: concise, explanatory, a custom one (`/output-style`, styles, personality) | all four | Codex length only | Settings, passed to each CLI | S | 2 |
+| X5 | Reply style: concise, explanatory, a custom one (`/output-style`, styles, personality) | all four | Done: shared reply style in Settings | Settings, passed through each CLI's persona instructions; Codex also gets length | S | 2 |
 | X6 | Hooks: see which run and where they come from (`/hooks`) | both CLIs | One switch | Extends the hooks row | S | 3 |
 
 ## Making things

@@ -354,7 +354,7 @@ pub fn claude_args(launch: &ClaudeLaunch) -> Vec<String> {
     }
     if launch.instructions.is_none() && !aside {
         args.push("--append-system-prompt".into());
-        args.push(persona(&PersonaInput { name: launch.user_name.as_deref() }));
+        args.push(persona(&PersonaInput { name: launch.user_name.as_deref(), tuning: &launch.tuning }));
         // R161: Faber's own MCP server, answered by this driver over stdio, holds the helper tool and the browser.
         // The catalog's servers join it in the same config, where Faber offers its tools.
         let servers = if offers_servers(launch.area, launch.permissions) { launch.tools.servers.as_slice() } else { &[] };

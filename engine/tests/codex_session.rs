@@ -1586,7 +1586,7 @@ fn r140_every_guarded_mode_starts_the_server_the_way_ask_does() {
 
 #[test]
 fn r140_web_search_defaults_to_live_and_summary_and_verbosity_to_the_models_own() {
-    use faber_engine::model::{ReasoningSummary, Tuning, Verbosity, WebSearch};
+    use faber_engine::model::{ReasoningSummary, ReplyStyle, Tuning, WebSearch};
     for permissions in [Permissions::Ask, Permissions::AcceptEdits, Permissions::Plan, Permissions::Auto, Permissions::FullAccess] {
         for resume in [None, Some("t1".to_string())] {
             let t = CodexThread { resume, ..mode_thread(permissions, faber_engine::model::Settings::default().tuning()) };
@@ -1600,8 +1600,8 @@ fn r140_web_search_defaults_to_live_and_summary_and_verbosity_to_the_models_own(
             assert_eq!(params["config"]["web_search"], name);
         }
     }
-    let chosen = Tuning { web: WebSearch::Live, summary: ReasoningSummary::Detailed, verbosity: Verbosity::Low };
-    let (_, params) = thread_params(Area::Chat, &mode_thread(Permissions::Auto, chosen));
+    let chosen = Tuning { web: WebSearch::Live, summary: ReasoningSummary::Detailed, reply_style: ReplyStyle::Short, ..Default::default() };
+    let (_, params) = thread_params(Area::Chat, &mode_thread(Permissions::Auto, chosen.clone()));
     assert_eq!(params["config"], json!({"web_search": "live", "model_reasoning_summary": "detailed", "model_verbosity": "low"}));
     for (summary, name) in [
         (ReasoningSummary::Auto, "auto"),
@@ -1612,16 +1612,17 @@ fn r140_web_search_defaults_to_live_and_summary_and_verbosity_to_the_models_own(
         let (_, params) = thread_params(Area::Chat, &mode_thread(Permissions::FullAccess, Tuning { summary, ..Default::default() }));
         assert_eq!(params["config"]["model_reasoning_summary"], name);
     }
-    for (verbosity, name) in [(Verbosity::Low, "low"), (Verbosity::Medium, "medium"), (Verbosity::High, "high")] {
-        let (_, params) = thread_params(Area::Chat, &mode_thread(Permissions::FullAccess, Tuning { verbosity, ..Default::default() }));
+    for (reply_style, name) in [(ReplyStyle::Short, "low"), (ReplyStyle::Explained, "high")] {
+        let (_, params) = thread_params(Area::Chat, &mode_thread(Permissions::FullAccess, Tuning { reply_style, ..Default::default() }));
         assert_eq!(params["config"]["model_verbosity"], name);
     }
 }
 
 #[test]
 fn r140_every_isolated_or_internal_codex_thread_has_web_search_disabled_and_takes_no_setting() {
-    use faber_engine::model::{ReasoningSummary, Tuning, Verbosity, WebSearch};
-    let chosen = Tuning { web: WebSearch::Live, summary: ReasoningSummary::Detailed, verbosity: Verbosity::High };
+    use faber_engine::model::{ReasoningSummary, ReplyStyle, Tuning, WebSearch};
+    let chosen =
+        Tuning { web: WebSearch::Live, summary: ReasoningSummary::Detailed, reply_style: ReplyStyle::Explained, ..Default::default() };
     let keys = |params: &serde_json::Value| {
         ["web_search", "model_reasoning_summary", "model_verbosity"]
             .map(|k| params["config"].get(k).and_then(|v| v.as_str().map(String::from)))
@@ -1629,7 +1630,7 @@ fn r140_every_isolated_or_internal_codex_thread_has_web_search_disabled_and_take
     let closed = [Some("disabled".to_string()), None, None];
     for area in [Area::Chat, Area::Project] {
         for resume in [None, Some("t1".to_string())] {
-            let isolated = CodexThread { resume: resume.clone(), ..mode_thread(Permissions::Isolated, chosen) };
+            let isolated = CodexThread { resume: resume.clone(), ..mode_thread(Permissions::Isolated, chosen.clone()) };
             assert_eq!(keys(&thread_params(area, &isolated).1), closed, "{area:?} isolated");
             for permissions in [
                 Permissions::Ask,
@@ -1639,7 +1640,8 @@ fn r140_every_isolated_or_internal_codex_thread_has_web_search_disabled_and_take
                 Permissions::FullAccess,
                 Permissions::Isolated,
             ] {
-                let side = CodexThread { resume: resume.clone(), instructions: Some("Route.".into()), ..mode_thread(permissions, chosen) };
+                let side =
+                    CodexThread { resume: resume.clone(), instructions: Some("Route.".into()), ..mode_thread(permissions, chosen.clone()) };
                 let (_, side) = thread_params(area, &side);
                 assert_eq!(keys(&side), closed, "{area:?} side question under {permissions:?}");
                 assert_eq!(side["approvalPolicy"], "never", "a side question never asks, whatever the mode");
@@ -1845,5 +1847,20 @@ fn tools(skills: Option<&str>) -> faber_engine::tools::Delivery {
             args: vec!["C:/data/tools/servers/measure/run.js".into(), "--headless".into()],
             env: [("NO_STATS".to_string(), "1".to_string())].into(),
         }],
+    }
+}
+
+#[test]
+fn reply_style_does_not_replace_an_internal_codex_tasks_fixed_instructions() {
+    use faber_engine::model::{ReplyStyle, Settings, Tuning};
+    let plain = CodexThread { instructions: Some("Answer in one word.".into()), ..mode_thread(Permissions::Ask, Tuning::default()) };
+    for style in [ReplyStyle::Default, ReplyStyle::Short, ReplyStyle::Explained, ReplyStyle::Own] {
+        let tuning =
+            Settings { reply_style: Some(style), reply_style_text: Some("My custom style.".into()), ..Default::default() }.tuning();
+        let (_, params) = thread_params(Area::Chat, &CodexThread { tuning, ..plain.clone() });
+        assert_eq!(params["baseInstructions"], "Answer in one word.");
+        assert!(params.get("developerInstructions").is_none());
+        assert!(params["config"].get("model_verbosity").is_none());
+        assert_eq!(params["config"]["web_search"], "disabled");
     }
 }

@@ -61,7 +61,13 @@ impl Core {
 
     fn launch_helper(&mut self, conv: &str, call: &str, input: &serde_json::Value) -> Result<(), &'static str> {
         let l = self.live.get(conv).ok_or("the conversation is gone")?;
-        let (sid, vendor, permissions, tuning, cwd) = (l.sid, helper::other(l.vendor), l.permissions, l.tuning, l.cwd.clone());
+        let (sid, vendor, permissions, tuning, cwd) = (
+            l.sid,
+            helper::other(l.vendor),
+            l.permissions,
+            Tuning { web: l.tuning.web, summary: l.tuning.summary, ..Default::default() },
+            l.cwd.clone(),
+        );
         if self.convs.get(conv).map(|c| c.area) != Some(Area::Project) {
             return Err("helpers work only in projects");
         }

@@ -8,12 +8,29 @@
 use crate::ledger::Ledger;
 use crate::model::{BranchOf, Conversation, Project, Settings, Summary};
 use crate::recents::Recents;
-use serde::Serialize;
 use serde::de::DeserializeOwned;
+use serde::{Deserialize, Serialize};
 use std::fs;
 use std::io::{self, Write};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
+
+/// Keep typed deserialization, including duplicate-field rejection, while reading the removed setting.
+#[derive(Default, Deserialize)]
+struct SettingsFile {
+    #[serde(flatten)]
+    settings: Settings,
+    verbosity: Option<LegacyVerbosity>,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "lowercase")]
+enum LegacyVerbosity {
+    Default,
+    Low,
+    Medium,
+    High,
+}
 
 /// Why a file could not be saved or read, as a key the screen translates. A failed save leaves the old file as it was.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -272,14 +289,29 @@ impl Store {
     /// build wrote) is never read as that: it asks before every change.
     pub fn settings(&self) -> Settings {
         let mut recovery = self.recovery_epoch.lock().unwrap_or_else(|e| e.into_inner());
-        match read_checked(&self.settings) {
-            Ok(found) => {
-                let mut settings: Settings = found.unwrap_or_default();
-                if let Some(epoch) = recovery.clone() {
-                    settings.grants_epoch = Some(epoch);
-                }
-                settings
+        let read = read_checked::<SettingsFile>(&self.settings).map(|found| {
+            let SettingsFile { mut settings, verbosity } = found.unwrap_or_default();
+            let migrated = verbosity.is_some();
+            if let Some(old) = verbosity {
+                use crate::model::ReplyStyle;
+                settings.reply_style.get_or_insert(match old {
+                    LegacyVerbosity::Low => ReplyStyle::Short,
+                    LegacyVerbosity::High => ReplyStyle::Explained,
+                    LegacyVerbosity::Default | LegacyVerbosity::Medium => ReplyStyle::Default,
+                });
             }
+            settings.reply_style_text = settings.reply_style_text.as_deref().map(crate::model::clean_reply_style_text);
+            if let Some(epoch) = recovery.clone() {
+                settings.grants_epoch = Some(epoch);
+            }
+            if migrated {
+                // A read-only disk may defer the rewrite until the person's next successful save.
+                let _ = self.write(&self.settings, &settings);
+            }
+            settings
+        });
+        match read {
+            Ok(settings) => settings,
             // No earlier grant counts either: a new epoch, kept in memory and written by the next save.
             Err(_) => Settings {
                 permissions: Some(crate::model::Permissions::Ask),

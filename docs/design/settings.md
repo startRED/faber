@@ -18,14 +18,25 @@ How the Settings screen, the first-run steps and the tutorial look and behave.
   mode menu is a select-only combobox whose open list shows each choice with its own line. Text fields share one class,
   `.field`. Under 960 px the control slot moves under the name.
 - General has, in groups: *You* (language, name); *How the AI works* (Permissions as a menu of the five modes, Web search,
-  CLI hooks, Chat working folder with the recent folders where its control exists, and a closed "Codex" fold with
-  reasoning summary and answer length); *Notifications and system* (Notify me, Play a sound, and on Windows keep the
+  CLI hooks, Chat working folder with the recent folders where its control exists, Reply style for both AIs, and a closed "Codex" fold with
+  reasoning summary only); *Notifications and system* (Notify me, Play a sound, and on Windows keep the
   computer awake while Faber works and start Faber at sign-in); *Updates* (one switch, "Receive previews", off by default,
   with one short line; it acts at the next update check and turning it off never installs an older version). "Don't ask" is the default for new and
   existing settings; "Ask before commands" preserves the previous behavior. Choices save at once and stay at the saved
   value if the save fails. R107 applies the same default to Chat. Chat uses its chosen canonical folder
   (fixed before the first message), or private per-conversation scratch; deletion/draft cleanup never removes a chosen
   folder. General explains the rule and offers the folder choice.
+- Reply style is one select row for both AIs in General, before the Codex fold: AI's own way (default), Short, Explained,
+  My own words. My own words opens a three-line text field below the row, named by the row's label, limited to 400
+  characters. Leaving the field or closing Settings (including Escape while typing) saves trimmed plain text;
+  switching away keeps it for next time. Failed saves restore
+  the saved choice or text. The short line says it applies from the next message in Chat and Projects; the closed "?"
+  explains the limit and that a running reply keeps its style. Like a permission change, a reply-style change applies
+  from the next turn of an idle conversation, after the running turn otherwise. The existing settings-change path
+  closes idle sessions and retires affected Codex servers; the next launch resumes the history with the latest style
+  through a new Claude Code process or a fresh Codex app-server. No new motion or restart prompt. Pending compaction
+  loss during project checks and retired-server cleanup in that shared path are deferred to
+  [task 320](../tasks/320-settings-change-retire.md).
 - Projects starts with *Skills for projects*: one card closed like a project's, its head the name, how many are on ("2 of
   21 on") and the chevron. Open, it shows one quiet line, then a switch per skill of the catalog: its name as its
   repository spells it, one line of what it does and its licence, the repository behind the "?". While one installs or
@@ -66,8 +77,8 @@ How the Settings screen, the first-run steps and the tutorial look and behave.
 
   Web search (Off, Cached, Live; Live by default in the saved Chat settings, Off for any launch nobody chose for): Codex `web_search` in the thread config; Claude Code allows
   WebSearch and WebFetch (Live), only WebSearch and denies WebFetch (Cached, which it lacks), or denies both (Off).
-  Cached is offered only while Codex is connected. Codex reasoning summary and verbosity go into the thread config as
-  `model_reasoning_summary` and `model_verbosity` and stay unset (the model's own) until chosen.
+  Cached is offered only while Codex is connected. Codex reasoning summary uses `model_reasoning_summary`; reply style
+  also sets `model_verbosity` to low for Short and high for Explained, otherwise leaving the model's own length.
 - R121 (it replaces the next item for the two choices on screen): "Don't ask" is full access. No approval cards, commands
   run without Faber's sandbox and with network, WebFetch and WebSearch work, any folder can be the working folder, and the
   person's own MCP servers, plugins and hooks stay on, as in the CLI itself. Claude Code runs in bypass mode with Read and

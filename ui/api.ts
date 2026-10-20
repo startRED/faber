@@ -341,7 +341,7 @@ export type PermissionMode = 'ask' | 'acceptEdits' | 'plan' | 'auto' | 'dontAsk'
 export const PERMISSION_MODES: PermissionMode[] = ['ask', 'acceptEdits', 'plan', 'auto', 'dontAsk'];
 export type WebSearch = 'off' | 'cached' | 'live';
 export type ReasoningSummary = 'default' | 'auto' | 'concise' | 'detailed' | 'none';
-export type Verbosity = 'default' | 'low' | 'medium' | 'high';
+export type ReplyStyle = 'default' | 'short' | 'explained' | 'own';
 export interface Settings {
   appearance?: Appearance;
   userHooks?: boolean;
@@ -350,7 +350,8 @@ export interface Settings {
   webSearch?: WebSearch;
   /** Codex only; missing means the model's own. */
   reasoningSummary?: ReasoningSummary;
-  verbosity?: Verbosity;
+  replyStyle?: ReplyStyle;
+  replyStyleText?: string;
   notifications?: boolean;
   notificationSound?: boolean;
   language?: string;

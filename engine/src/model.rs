@@ -1015,9 +1015,12 @@ pub struct Settings {
     /// Codex only; missing means the model's own.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub reasoning_summary: Option<ReasoningSummary>,
-    /// Codex only; missing means the model's own.
+    /// Shared reply style; missing leaves the AI's own way.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub verbosity: Option<Verbosity>,
+    pub reply_style: Option<ReplyStyle>,
+    /// The person's own words, kept when another style is selected.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reply_style_text: Option<String>,
     /// Attention notifications and their chime are both on unless explicitly disabled.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub notifications: Option<bool>,
@@ -1208,23 +1211,32 @@ pub enum ReasoningSummary {
     Hidden,
 }
 
-/// Codex's answer length. `Default` leaves the model's own.
+/// How the person wants replies in Chat and Projects.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
-pub enum Verbosity {
+pub enum ReplyStyle {
     #[default]
     Default,
-    Low,
-    Medium,
-    High,
+    Short,
+    Explained,
+    Own,
+}
+
+pub fn clean_reply_style_text(text: &str) -> String {
+    text.trim_matches(|c: char| c.is_whitespace() || c.is_control())
+        .chars()
+        .filter(|c| !c.is_control() || matches!(c, '\n' | '\t'))
+        .take(400)
+        .collect()
 }
 
 /// What a launch takes from the settings besides the mode. Never reaches a project role.
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Hash)]
 pub struct Tuning {
     pub web: WebSearch,
     pub summary: ReasoningSummary,
-    pub verbosity: Verbosity,
+    pub reply_style: ReplyStyle,
+    pub reply_style_text: String,
 }
 
 impl Settings {
@@ -1233,7 +1245,8 @@ impl Settings {
             // Live is the default for the person's chat settings (R140); `Tuning::default()` is Off.
             web: self.web_search.unwrap_or(WebSearch::Live),
             summary: self.reasoning_summary.unwrap_or_default(),
-            verbosity: self.verbosity.unwrap_or_default(),
+            reply_style: self.reply_style.unwrap_or_default(),
+            reply_style_text: self.reply_style_text.as_deref().map(clean_reply_style_text).unwrap_or_default(),
         }
     }
 }

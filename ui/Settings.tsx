@@ -1,5 +1,5 @@
-import { createEffect, createSignal, For, type JSX, Match, on, Show, Switch } from 'solid-js';
-import { type Appearance, type Look, PERMISSION_MODES, type PermissionMode, type Project, type ReasoningSummary, type Settings as Saved, type Vendor, type VendorUsage, type Verbosity, type WebSearch } from './api.ts';
+import { createEffect, createSignal, For, type JSX, Match, on, onCleanup, Show, Switch } from 'solid-js';
+import { type Appearance, type Look, PERMISSION_MODES, type PermissionMode, type Project, type ReasoningSummary, type Settings as Saved, type Vendor, type VendorUsage, type ReplyStyle, type WebSearch } from './api.ts';
 import { AccountsSection } from './Accounts.tsx';
 import { AppearanceSection } from './Appearance.tsx';
 import { Fold, Group, Opt, PickMenu, Segmented, Toggle } from './controls.tsx';
@@ -42,7 +42,7 @@ const MORE = {
 } as const;
 const WEB = [['off', 'set.webSearch.off'], ['cached', 'set.webSearch.cached'], ['live', 'set.webSearch.live']] as const;
 const SUMMARY = [['default', 'set.default'], ['auto', 'set.summary.auto'], ['concise', 'set.summary.concise'], ['detailed', 'set.summary.detailed'], ['none', 'set.summary.none']] as const;
-const VERBOSITY = [['default', 'set.default'], ['low', 'set.verbosity.low'], ['medium', 'set.verbosity.medium'], ['high', 'set.verbosity.high']] as const;
+const REPLY_STYLE = [['default', 'set.replyStyle.default'], ['short', 'set.replyStyle.short'], ['explained', 'set.replyStyle.explained'], ['own', 'set.replyStyle.own']] as const;
 
 interface Props {
   /** The look on the page. */
@@ -112,6 +112,12 @@ export function Settings(props: Props) {
   );
   const isWindows = () => navigator.userAgent.includes('Windows');
   const save = (patch: Saved) => props.onSave(patch);
+  let replyStyleDraft: string | undefined;
+  onCleanup(() => {
+    // Escape removes Settings without blurring the field, so its change event may never run.
+    const words = replyStyleDraft?.trim();
+    if (words !== undefined && words !== (props.saved.replyStyleText ?? '')) void save({ replyStyleText: words });
+  });
   return (
     <div class="settings" data-screen="settings" data-surface="settings">
       <nav class="s-nav nav" aria-label={t('set.label')}>
@@ -219,6 +225,33 @@ export function Settings(props: Props) {
               <Show when={props.onChatFolder}>
                 <ChatFolder {...props} />
               </Show>
+              <Opt id="set-reply-style" label={t('set.replyStyle')} hint={t('set.replyStyle.line')} more={t('set.replyStyle.more')}>
+                <Select
+                  label={t('set.replyStyle')}
+                  value={props.saved.replyStyle ?? 'default'}
+                  options={REPLY_STYLE.map(([v, key]): [ReplyStyle, string] => [v, t(key)])}
+                  onPick={(replyStyle) => save({ replyStyle })}
+                />
+              </Opt>
+              <Show when={props.saved.replyStyle === 'own'}>
+                <div class="st-extra">
+                  <textarea
+                    class="field"
+                    rows={3}
+                    maxLength={400}
+                    aria-labelledby="set-reply-style-name"
+                    aria-describedby="set-reply-style-hint"
+                    placeholder={t('set.replyStyle.words')}
+                    value={props.saved.replyStyleText ?? ''}
+                    onInput={(e) => { replyStyleDraft = e.currentTarget.value; }}
+                    onChange={async (e) => {
+                      const field = e.currentTarget;
+                      replyStyleDraft = undefined;
+                      if (!(await save({ replyStyleText: field.value.trim() }))) field.value = props.saved.replyStyleText ?? '';
+                    }}
+                  />
+                </div>
+              </Show>
               <Show when={props.vendors.includes('codex')}>
                 <Fold id="set-codex" title={vendorName('codex')} hint={t('set.codexExtras.line')}>
                   <p class="hint st-note">{t('set.codexExtras.more')}</p>
@@ -228,14 +261,6 @@ export function Settings(props: Props) {
                       value={(props.saved.reasoningSummary ?? 'default') as ReasoningSummary}
                       options={SUMMARY.map(([v, key]): [ReasoningSummary, string] => [v, t(key)])}
                       onPick={(reasoningSummary) => save({ reasoningSummary })}
-                    />
-                  </Opt>
-                  <Opt id="set-verbosity" label={t('set.verbosity')}>
-                    <Select
-                      label={t('set.verbosity')}
-                      value={(props.saved.verbosity ?? 'default') as Verbosity}
-                      options={VERBOSITY.map(([v, key]): [Verbosity, string] => [v, t(key)])}
-                      onPick={(verbosity) => save({ verbosity })}
                     />
                   </Opt>
                 </Fold>

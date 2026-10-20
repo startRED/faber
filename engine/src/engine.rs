@@ -1426,7 +1426,8 @@ impl Core {
             permissions: patch.permissions.or(before.permissions),
             web_search: patch.web_search.or(before.web_search),
             reasoning_summary: patch.reasoning_summary.or(before.reasoning_summary),
-            verbosity: patch.verbosity.or(before.verbosity),
+            reply_style: patch.reply_style.or(before.reply_style),
+            reply_style_text: patch.reply_style_text.map(|text| clean_reply_style_text(&text)).or(before.reply_style_text),
             notifications: patch.notifications.or(before.notifications),
             notification_sound: patch.notification_sound.or(before.notification_sound),
             language: patch.language.or(before.language),
@@ -1481,7 +1482,7 @@ impl Core {
         if settings.user_name != before.user_name {
             self.drop_draft();
         }
-        // Idle CLIs restart on their next turn when permissions change; hooks remain a Projects choice.
+        // Idle CLIs restart on their next turn when permissions or tuning change; hooks remain a Projects choice.
         let tuned = settings.tuning() != before_tuning;
         if settings.user_hooks != before.user_hooks || settings.permissions != before.permissions || tuned {
             let idle: Vec<String> = self
@@ -1505,7 +1506,8 @@ impl Core {
                 .codex
                 .keys()
                 .filter(|(area, _, p)| {
-                    *p != Permissions::Isolated && (*area == Area::Project || settings.permissions != before.permissions)
+                    // A loaded Codex thread ignores resume overrides: use a fresh server without stopping its active peers.
+                    *p != Permissions::Isolated && (*area == Area::Project || settings.permissions != before.permissions || tuned)
                 })
                 .copied()
                 .collect();
@@ -2765,7 +2767,7 @@ impl Core {
                         instructions: None,
                         user_name,
                         flags,
-                        tuning,
+                        tuning: tuning.clone(),
                         tools: self.tools_for(area, permissions),
                     },
                     spawn,
@@ -2787,7 +2789,7 @@ impl Core {
                     instructions: None,
                     user_name,
                     permissions,
-                    tuning,
+                    tuning: tuning.clone(),
                 },
                 sink,
             ),

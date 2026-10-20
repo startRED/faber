@@ -3,7 +3,7 @@
 
 use crate::claude::EventSink;
 use crate::events::{Delivery, EngineEvent, Session, SessionCommand, UserTurn};
-use crate::model::{Area, Permissions, ReasoningSummary, Tuning, Verbosity, WebSearch};
+use crate::model::{Area, Permissions, ReasoningSummary, ReplyStyle, Tuning, WebSearch};
 use crate::persona::{PersonaInput, persona};
 use crate::proc::{self, Spawner};
 use crate::signals::{codex_account, codex_signals};
@@ -534,7 +534,7 @@ pub struct CodexServerOptions {
 
 /// The settings that go into the thread's `config` (R140): web search always, and the two Codex-only choices when the person
 /// made one. Only the person's own Chat and project sessions get them: an internal question never does.
-fn apply_tuning(params: &mut Map<String, Value>, tuning: Tuning) {
+fn apply_tuning(params: &mut Map<String, Value>, tuning: &Tuning) {
     let web = match tuning.web {
         WebSearch::Off => "disabled",
         WebSearch::Cached => "cached",
@@ -548,11 +548,10 @@ fn apply_tuning(params: &mut Map<String, Value>, tuning: Tuning) {
         ReasoningSummary::Detailed => config["model_reasoning_summary"] = "detailed".into(),
         ReasoningSummary::Hidden => config["model_reasoning_summary"] = "none".into(),
     }
-    match tuning.verbosity {
-        Verbosity::Default => {}
-        Verbosity::Low => config["model_verbosity"] = "low".into(),
-        Verbosity::Medium => config["model_verbosity"] = "medium".into(),
-        Verbosity::High => config["model_verbosity"] = "high".into(),
+    match tuning.reply_style {
+        ReplyStyle::Default | ReplyStyle::Own => {}
+        ReplyStyle::Short => config["model_verbosity"] = "low".into(),
+        ReplyStyle::Explained => config["model_verbosity"] = "high".into(),
     }
     params.insert("config".into(), config);
 }
@@ -701,9 +700,9 @@ pub fn thread_params(area: Area, t: &CodexThread) -> (&'static str, Value) {
         params.insert("ephemeral".into(), true.into());
     } else {
         // Developer instructions sit beside Codex's own, so a project keeps its default prompt.
-        params.insert("developerInstructions".into(), persona(&PersonaInput { name: t.user_name.as_deref() }).into());
+        params.insert("developerInstructions".into(), persona(&PersonaInput { name: t.user_name.as_deref(), tuning: &t.tuning }).into());
         if t.permissions != Permissions::Isolated {
-            apply_tuning(&mut params, t.tuning);
+            apply_tuning(&mut params, &t.tuning);
         }
         // R161: the helper tool beside any tool the mode already gave; a helper itself leaves no history to resume.
         match t.helper {

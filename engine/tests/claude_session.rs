@@ -1250,19 +1250,19 @@ fn r140_the_web_setting_never_reaches_the_isolated_mode_or_a_side_question() {
     let off = Tuning { web: WebSearch::Off, ..Default::default() };
     for area in [Area::Chat, Area::Project] {
         let isolated = ClaudeLaunch { permissions: Permissions::Isolated, ..launch(area) };
-        assert_eq!(claude_args(&isolated), claude_args(&ClaudeLaunch { tuning: off, ..isolated.clone() }), "{area:?}");
+        assert_eq!(claude_args(&isolated), claude_args(&ClaudeLaunch { tuning: off.clone(), ..isolated.clone() }), "{area:?}");
         let side = ClaudeLaunch { instructions: Some("Route.".into()), permissions: Permissions::Auto, ..launch(area) };
-        assert_eq!(claude_args(&side), claude_args(&ClaudeLaunch { tuning: off, ..side.clone() }), "{area:?}");
+        assert_eq!(claude_args(&side), claude_args(&ClaudeLaunch { tuning: off.clone(), ..side.clone() }), "{area:?}");
         assert!(!claude_args(&side).contains(&"--permission-mode".into()));
     }
 }
 
 #[test]
 fn r140_old_saved_settings_load_as_before_and_the_new_ones_are_stored_by_name() {
-    use faber_engine::model::{ReasoningSummary, Settings, Verbosity, WebSearch};
+    use faber_engine::model::{ReasoningSummary, ReplyStyle, Settings, WebSearch};
     let old: Settings = serde_json::from_str(r#"{"permissions":"ask","userHooks":true}"#).unwrap();
     assert_eq!(old.permissions, Some(Permissions::Ask));
-    assert_eq!((old.web_search, old.reasoning_summary, old.verbosity), (None, None, None));
+    assert_eq!((old.web_search, old.reasoning_summary, old.reply_style), (None, None, None));
     assert_eq!(
         old.tuning(),
         faber_engine::model::Tuning { web: WebSearch::Live, ..Default::default() },
@@ -1277,10 +1277,10 @@ fn r140_old_saved_settings_load_as_before_and_the_new_ones_are_stored_by_name() 
         assert_eq!(serde_json::from_str::<Permissions>(&format!("\"{name}\"")).unwrap(), mode);
     }
     let new: Settings =
-        serde_json::from_str(r#"{"webSearch":"cached","reasoningSummary":"none","verbosity":"high","permissions":"auto"}"#).unwrap();
+        serde_json::from_str(r#"{"webSearch":"cached","reasoningSummary":"none","replyStyle":"explained","permissions":"auto"}"#).unwrap();
     assert_eq!(
-        (new.web_search, new.reasoning_summary, new.verbosity),
-        (Some(WebSearch::Cached), Some(ReasoningSummary::Hidden), Some(Verbosity::High))
+        (new.web_search, new.reasoning_summary, new.reply_style),
+        (Some(WebSearch::Cached), Some(ReasoningSummary::Hidden), Some(ReplyStyle::Explained))
     );
     let saved = serde_json::to_value(Settings::default()).unwrap();
     assert!(saved.get("webSearch").is_none() && saved.get("reasoningSummary").is_none() && saved.get("verbosity").is_none());
@@ -1440,4 +1440,13 @@ fn the_catalog_s_servers_join_faber_s_own_in_one_config_only_in_full_access() {
         let config = config(area, permissions);
         assert!(config.as_ref().is_none_or(|c| c["mcpServers"].get("measure").is_none()), "{area:?} {permissions:?}: {config:?}");
     }
+}
+
+#[test]
+fn reply_style_does_not_replace_an_internal_claude_tasks_fixed_instructions() {
+    use faber_engine::model::{ReplyStyle, Settings};
+    let tuning =
+        Settings { reply_style: Some(ReplyStyle::Own), reply_style_text: Some("My custom style.".into()), ..Default::default() }.tuning();
+    let plain = ClaudeLaunch { instructions: Some("Answer in one word.".into()), ..launch(Area::Chat) };
+    assert_eq!(claude_args(&plain), claude_args(&ClaudeLaunch { tuning, ..plain.clone() }));
 }

@@ -1,7 +1,8 @@
 import { createComponent, createSignal } from 'solid-js';
 import { render } from 'solid-js/web';
 import themes from '../../src-tauri/src/themes.json';
-import { api, type Appearance, type CheckResult, type Look, type QuotaReading, type Settings as Saved, type Vendor, type VendorUsage } from '../../ui/api.ts';
+import { api, type AppState, type Appearance, type CheckResult, type Look, type QuotaReading, type Settings as Saved, type Vendor, type VendorUsage } from '../../ui/api.ts';
+import { App } from '../../ui/App.tsx';
 import { AppearanceSection } from '../../ui/Appearance.tsx';
 import { previewer } from '../../ui/appearance.ts';
 import { Mini } from '../../ui/FirstRun.tsx';
@@ -527,7 +528,7 @@ check('R140: the permission menu lists five modes with one plain line each, and 
     equal(fold.getAttribute('aria-expanded'), 'true');
     const choices = (id: string) => [...view.host.querySelectorAll<HTMLOptionElement>(`[data-opt="${id}"] select option`)].map((o) => o.textContent);
     deepEqual(choices('set-summary'), [en['set.default'], en['set.summary.auto'], en['set.summary.concise'], en['set.summary.detailed'], en['set.summary.none']]);
-    deepEqual(choices('set-verbosity'), [en['set.default'], en['set.verbosity.low'], en['set.verbosity.medium'], en['set.verbosity.high']]);
+    equal(view.host.querySelector('[data-opt="set-verbosity"]'), null, 'answer length is replaced by the shared reply style');
     equal(view.host.querySelector<HTMLSelectElement>('[data-opt="set-summary"] select')!.value, 'default');
     equal(view.host.textContent!.includes(en['set.webSearch.more']), false, 'the web details are closed too');
     view.host.querySelector<HTMLButtonElement>('#set-web-q')!.click();
@@ -540,9 +541,8 @@ check('R140: the permission menu lists five modes with one plain line each, and 
       list.dispatchEvent(new Event('change', { bubbles: true }));
     };
     choose('set-summary', 'detailed');
-    choose('set-verbosity', 'low');
     await tick();
-    deepEqual(patches.slice(1), [{ webSearch: 'off' }, { reasoningSummary: 'detailed' }, { verbosity: 'low' }]);
+    deepEqual(patches.slice(1), [{ webSearch: 'off' }, { reasoningSummary: 'detailed' }]);
   } finally { view.stop(); }
 });
 
@@ -834,4 +834,107 @@ check('settings: the first-run answers change later in General: experience saves
     equal(tours, 1);
     ok(en['first.foot'].includes('Settings'), 'the first run says where its answers change');
   } finally { view.stop(); }
+});
+
+check('reply_style: one shared Settings row saves each choice and restores the person’s words', async () => {
+  useLanguage('en');
+  const [saved, setSaved] = createSignal<Saved>({});
+  const [vendors, setVendors] = createSignal<Vendor[]>([]);
+  let refuse = false;
+  const view = mount(() => createComponent(Settings, {
+    look: look(), get saved() { return saved(); }, get vendors() { return vendors(); }, quotas: {}, now: 0,
+    onClose: () => {}, onOpenSetup: () => {},
+    onSave: async (patch) => {
+      if (refuse) return false;
+      setSaved({ ...saved(), ...patch });
+      return true;
+    },
+  }));
+  const pick = () => view.host.querySelector<HTMLSelectElement>('[data-opt="set-reply-style"] select')!;
+  const words = () => view.host.querySelector<HTMLTextAreaElement>('textarea[aria-labelledby="set-reply-style-name"]');
+  const choose = async (style: string) => {
+    pick().value = style;
+    pick().dispatchEvent(new Event('change', { bubbles: true }));
+    await tick();
+  };
+  try {
+    equal(pick().value, 'default', 'no account is needed to choose a style');
+    deepEqual([...pick().options].map((o) => o.textContent), [en['set.replyStyle.default'], en['set.replyStyle.short'], en['set.replyStyle.explained'], en['set.replyStyle.own']]);
+    for (const style of ['short', 'explained', 'default', 'own'] as const) {
+      await choose(style);
+      equal(saved().replyStyle, style);
+      equal(Boolean(words()), style === 'own');
+    }
+    equal(words()!.maxLength, 400);
+    words()!.value = '  Explain with game examples.  ';
+    words()!.dispatchEvent(new Event('change', { bubbles: true }));
+    await tick();
+    equal(saved().replyStyleText, 'Explain with game examples.');
+    await choose('short');
+    await choose('own');
+    equal(words()!.value, 'Explain with game examples.');
+    refuse = true;
+    await choose('explained');
+    equal(pick().value, 'own', 'a failed save restores the chosen style');
+    words()!.value = 'A refused edit';
+    words()!.dispatchEvent(new Event('change', { bubbles: true }));
+    await tick();
+    equal(words()!.value, 'Explain with game examples.', 'a refused edit restores the saved words');
+    for (const connected of [['claude'], ['codex'], ['claude', 'codex']] as Vendor[][]) {
+      setVendors(connected);
+      await tick();
+      equal(view.host.querySelectorAll('[data-opt="set-reply-style"]').length, 1);
+      equal(pick().value, 'own');
+      equal(view.host.querySelector('[data-opt="set-verbosity"]'), null);
+    }
+  } finally { view.stop(); }
+});
+
+check('reply_style: Escape saves the focused words before Settings closes and reopening restores them', async () => {
+  const original = { saveSettings: api.saveSettings, setClock: api.setClock, recents: api.recents };
+  const place = localStorage.getItem('faber.place');
+  const initial: AppState = {
+    vendors: [], models: [], quotas: [], projects: [], conversations: [], version: '0.0.0', running: { revision: 0, items: [] },
+    settings: { setup: 'done', tutorialDone: true, language: 'en', appearance: { base: 'sala' }, replyStyleText: 'Earlier words.' },
+    look: look({ motion: 'none', effects: { ambient: false, texture: false, glow: false } }),
+  };
+  let stored = initial.settings;
+  api.setClock = async () => {};
+  api.recents = async () => ({ folders: [], environments: [] });
+  api.saveSettings = async (patch) => {
+    stored = { ...stored, ...patch };
+    return { settings: stored, look: initial.look };
+  };
+  localStorage.setItem('faber.place', JSON.stringify({ area: 'chat' }));
+  const view = mount(() => createComponent(App, { initial, inbox: { take: () => {} } }));
+  const open = async () => {
+    window.dispatchEvent(new KeyboardEvent('keydown', { key: ',', ctrlKey: true, bubbles: true, cancelable: true }));
+    await tick();
+    ok(view.host.querySelector('[data-screen="settings"]'));
+  };
+  try {
+    await tick();
+    await open();
+    const select = view.host.querySelector<HTMLSelectElement>('[data-opt="set-reply-style"] select')!;
+    select.value = 'own';
+    select.dispatchEvent(new Event('change', { bubbles: true }));
+    await tick();
+    const field = view.host.querySelector<HTMLTextAreaElement>('textarea[aria-labelledby="set-reply-style-name"]')!;
+    field.focus();
+    field.value = 'Explain with game examples.';
+    field.dispatchEvent(new InputEvent('input', { data: field.value, inputType: 'insertText', bubbles: true }));
+    equal(document.activeElement, field);
+    // No blur or change: the real App Escape handler removes Settings while this field still has focus.
+    field.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }));
+    await tick();
+    equal(view.host.querySelector('[data-screen="settings"]'), null);
+    equal(stored.replyStyleText, 'Explain with game examples.');
+    await open();
+    equal(view.host.querySelector<HTMLTextAreaElement>('textarea[aria-labelledby="set-reply-style-name"]')!.value, 'Explain with game examples.');
+  } finally {
+    view.stop();
+    Object.assign(api, original);
+    if (place === null) localStorage.removeItem('faber.place');
+    else localStorage.setItem('faber.place', place);
+  }
 });
