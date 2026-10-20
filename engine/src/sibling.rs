@@ -33,22 +33,28 @@ you read later with `read`. Say who you are and what you need in one or two sent
 step once everything the person asked here is done and verified and nothing waits on them; never while work is left.\n\
 - `context`: how many tokens your own context holds, of how many it can, and the share.\n\
 - `compact`: compacts your own context: the CLI replaces what was said so far with a summary, and the details are gone. \
-Faber does it the moment you end your current turn, so end the turn right after this call. Good times: you finished one topic \
-and the next is unrelated, a large phase of work is done and its details are no longer needed, or your context passes about \
-60%. Never in the middle of a step whose details you still need. Pass `next` with everything you need to continue (the goal, \
-what is done, what is left, the files and decisions that matter): it is not summarized, Faber sends it to you word for word \
-once the compaction ended, and you continue from it by yourself. Without `next` the conversation waits for the person.";
+Faber does it the moment you end your current turn, so end the turn right after this call. Good times: a large phase of work \
+is done and its details are no longer needed, or your context passes about 60%. Never in the middle of a step whose details you \
+still need. Pass `next` with everything you need to continue (the goal, what is done, what is left, the files and decisions that \
+matter): it is not summarized, Faber sends it to you word for word once the compaction ended, and you continue from it by \
+yourself. Without `next` the conversation waits for the person.\n\
+- `clear` with `next`: starts your context fresh, which costs nothing and leaves no summary behind. Faber does it the moment \
+you end your current turn: your next turn starts a new session holding only the person's requests in this conversation, word \
+for word, and your `next`; the person still sees everything. Use it instead of `compact` when the task you take next has \
+nothing to do with what this conversation did so far, or after two failed attempts at the same problem, where a clean start with \
+a better plan beats more of the same. `next` is your handoff note: what is done, what is left, the files and decisions that \
+matter, the commands that check the work, and what you tried that failed. Keep long notes in a file and name it.";
 
 fn schema() -> Value {
     json!({
         "type": "object",
         "properties": {
-            "action": { "type": "string", "enum": ["start", "read", "list", "ask", "archive", "context", "compact"] },
+            "action": { "type": "string", "enum": ["start", "read", "list", "ask", "archive", "context", "compact", "clear"] },
             "title": { "type": "string", "description": "start: a few words naming the work; it becomes the conversation's title." },
             "brief": { "type": "string", "description": "start: everything the new conversation needs to do the work on its own." },
             "id": { "type": "string", "description": "read, ask: the other conversation's id." },
             "message": { "type": "string", "description": "ask: your question for the other conversation's agent." },
-            "next": { "type": "string", "description": "compact: everything you need to continue after the compaction; sent to you word for word." }
+            "next": { "type": "string", "description": "compact, clear: everything you need to continue afterwards; sent to you word for word." }
         },
         "additionalProperties": false
     })
@@ -74,9 +80,10 @@ pub enum Request {
     Archive,
     Context,
     Compact { next: Option<String> },
+    Clear { next: String },
 }
 
-/// The most of `next` a compaction carries.
+/// The most of `next` a compaction or a clear carries.
 const MAX_NEXT: usize = 8000;
 
 /// Reads a call's input. Without an action, a brief starts and an id reads; a call with both is refused, so a typo never
@@ -94,6 +101,13 @@ pub fn request(input: &Value) -> Result<Request, &'static str> {
             }
             return Ok(Request::Compact { next });
         }
+        Some("clear") => {
+            let next = text("next").ok_or("clear needs next: the handoff note your fresh context starts from")?;
+            if next.chars().count() > MAX_NEXT {
+                return Err("next is longer than 8000 characters: shorten it, or write the details to a file and name the file in next");
+            }
+            return Ok(Request::Clear { next });
+        }
         Some("ask") => {
             let id = text("id").ok_or("ask needs the id of the conversation to ask")?;
             let message = text("message").ok_or("the message was empty")?;
@@ -101,7 +115,7 @@ pub fn request(input: &Value) -> Result<Request, &'static str> {
         }
         Some("read") => return text("id").map(|id| Request::Read { id }).ok_or("read needs an id"),
         Some("start") | None => {}
-        Some(_) => return Err("the action is not one of start, read, list, ask, archive, context or compact"),
+        Some(_) => return Err("the action is not one of start, read, list, ask, archive, context, compact or clear"),
     }
     match (text("id"), text("brief")) {
         (Some(_), Some(_)) => Err("pass either an id to read or a title and brief to start, not both"),
@@ -246,6 +260,51 @@ pub fn compact_failed_prompt(next: &str) -> String {
     format!("Faber could not compact the conversation, so your context is unchanged. Continue: {next}")
 }
 
+/// The answer to a `clear` call.
+pub const CLEAR_PLANNED: &str = "A fresh context is scheduled: Faber ends this session the moment you end your current turn, and your next turn starts a new one with the person's requests and your `next`. End your turn now with at most one short sentence, and start no other work.";
+
+/// The most of the person's own words a fresh context carries; the newest come first when they are more.
+const MAX_REQUESTS: usize = 6000;
+
+/// The first turn of a fresh context: the person's requests in the conversation, oldest first and word for word (the newest
+/// ones when they are more than `MAX_REQUESTS`), and the agent's own handoff note.
+pub fn cleared_prompt(requests: &[&str], next: &str) -> String {
+    let mut kept = Vec::new();
+    let mut room = MAX_REQUESTS;
+    for r in requests.iter().rev() {
+        let n = r.chars().count();
+        if n > room {
+            if kept.is_empty() {
+                kept.push(format!("{}…", r.chars().take(room).collect::<String>()));
+            }
+            break;
+        }
+        room -= n;
+        kept.push(r.to_string());
+    }
+    kept.reverse();
+    let requests = match kept.is_empty() {
+        true => String::new(),
+        false => format!(
+            "The person's requests in this conversation, word for word, oldest first:
+
+{}
+
+",
+            kept.join(
+                "
+
+---
+
+"
+            )
+        ),
+    };
+    format!(
+        "Faber started your context fresh: nothing said earlier in this conversation is in it any more, though the person still sees it all. {requests}Your handoff note: {next}"
+    )
+}
+
 /// The answer to an archive.
 pub const ARCHIVED: &str = "This conversation is archived: it left the sidebar, and the person can bring it back. End your turn now.";
 
@@ -281,6 +340,10 @@ mod tests {
         assert_eq!(request(&json!({"action":"compact","next":whole})), Ok(Request::Compact { next: Some(whole) }));
         assert!(request(&json!({"action":"compact","next":"a".repeat(MAX_NEXT + 1)})).is_err());
         assert_eq!(request(&json!({"action":"compact"})), Ok(Request::Compact { next: None }));
+        // A fresh context starts from nothing but the note, so a clear without one is refused.
+        assert!(request(&json!({"action":"clear"})).is_err());
+        assert_eq!(request(&json!({"action":"clear","next":" Do B. "})), Ok(Request::Clear { next: "Do B.".into() }));
+        assert!(request(&json!({"action":"clear","next":"a".repeat(MAX_NEXT + 1)})).is_err());
         assert_eq!(
             request(&json!({"action":"compact","next":" Finish the docs. "})),
             Ok(Request::Compact { next: Some("Finish the docs.".into()) })
@@ -318,6 +381,29 @@ mod tests {
         assert!(compact_planned(true).contains("word for word") && compact_planned(false).contains("waits for the person"));
         assert_eq!(compacted_prompt("Do X."), "The conversation was compacted. Continue: Do X.");
         assert!(DESCRIPTION.contains("60%") && DESCRIPTION.contains("word for word"));
+    }
+
+    #[test]
+    fn a_fresh_context_carries_the_persons_requests_word_for_word_and_the_note() {
+        let p = cleared_prompt(&["Fix the login.", "Then write the docs."], "Login fixed in auth.rs; docs left.");
+        assert!(
+            p.contains(
+                "Fix the login.
+
+---
+
+Then write the docs."
+            ) && p.ends_with("Your handoff note: Login fixed in auth.rs; docs left."),
+            "{p}"
+        );
+        assert!(!cleared_prompt(&[], "n").contains("requests"));
+        // Too many words: the newest requests stay whole, the oldest go.
+        let old = "o".repeat(MAX_REQUESTS);
+        let p = cleared_prompt(&[&old, "New one."], "n");
+        assert!(p.contains("New one.") && !p.contains("ooo"), "{p}");
+        // One request longer than all the room is cut, never dropped.
+        let p = cleared_prompt(&[&"x".repeat(MAX_REQUESTS + 10)], "n");
+        assert!(p.contains(&format!("{}…", "x".repeat(MAX_REQUESTS))));
     }
 
     #[test]

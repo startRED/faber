@@ -404,6 +404,7 @@ fn seed(dir: &Path, long: bool) -> Conversation {
         plan: None,
         stopped: false,
         context: None,
+        fresh_after: None,
         reported: (None, None),
         compacting: false,
         messages: vec![

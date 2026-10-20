@@ -292,7 +292,7 @@ pub(crate) fn attachment_place(area: Area, data_dir: &Path, conversation: &str, 
 
 /// This vendor already answered in the conversation, yet has no session to continue: the session was lost.
 fn session_was_lost(c: &Conversation, vendor: Vendor) -> bool {
-    c.resumable(vendor).is_none() && c.messages.iter().any(|m| m.role == Role::Assistant && m.vendor == Some(vendor))
+    c.resumable(vendor).is_none() && c.context_messages().iter().any(|m| m.role == Role::Assistant && m.vendor == Some(vendor))
 }
 
 fn now() -> u64 {
@@ -2534,8 +2534,8 @@ impl Core {
             None => fallback.clone(),
         };
         let data_dir = self.opts.data_dir.clone();
-        let joining_late = c.resumable(pick.vendor).is_none() && !c.messages.is_empty();
-        let history = c.messages.clone();
+        let joining_late = c.resumable(pick.vendor).is_none() && !c.context_messages().is_empty();
+        let history = c.context_messages().to_vec();
         let at = now();
         let resent = joining_late && session_was_lost(c, pick.vendor);
         let area = c.area;
@@ -3001,6 +3001,7 @@ impl Core {
             ended: None,
             plan: None,
             context: None,
+            fresh_after: None,
             messages: vec![],
             rewind_notice: None,
             rewind_summary: None,
@@ -3089,10 +3090,10 @@ impl Core {
             c.title = req.text.split_whitespace().collect::<Vec<_>>().join(" ").chars().take(60).collect();
         }
         let data_dir = self.opts.data_dir.clone();
-        let joining_late = c.resumable(pick.vendor).is_none() && !c.messages.is_empty();
+        let joining_late = c.resumable(pick.vendor).is_none() && !c.context_messages().is_empty();
         let resent = joining_late && session_was_lost(c, pick.vendor);
         let area = c.area;
-        let history = c.messages.clone();
+        let history = c.context_messages().to_vec();
         // Attached files are saved where the model can open them with its own tools (PDFs, spreadsheets, archives...).
         let name = |p: &Path| p.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
         let shown: Vec<String> = saved

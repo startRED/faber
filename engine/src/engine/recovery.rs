@@ -118,7 +118,9 @@ impl Core {
         let Some(t) = self.transfers.get(conv).filter(|t| Some(t.reply.as_str()) == turn).cloned() else { return false };
         let Some(c) = self.convs.get(conv) else { return false };
         let at = c.messages.iter().position(|m| m.id == t.reply).unwrap_or(0);
-        let history = &c.messages[..at.saturating_sub(1)];
+        // Only what the agent's context held: never what it left behind with `clear`.
+        let from = (c.messages.len() - c.context_messages().len()).min(at.saturating_sub(1));
+        let history = &c.messages[from..at.saturating_sub(1)];
         let (area, data_dir) = (c.area, self.opts.data_dir.clone());
         let resent = !history.is_empty();
         let text = if resent { with_history(history, &t.text, &|n| attachment_place(area, &data_dir, conv, n)) } else { t.text.clone() };
@@ -301,7 +303,8 @@ impl Core {
             return Ok(());
         }
         let c = self.convs.get(id).ok_or("error.conversationGone")?;
-        let history = &c.messages[..c.messages.len().saturating_sub(2)];
+        let held = c.context_messages();
+        let history = &held[..held.len().saturating_sub(2)];
         match handover::plan(history) {
             Plan::Full(all) => {
                 let text = handover::with_full(&all, &t.text, &partial);

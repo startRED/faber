@@ -779,3 +779,38 @@ async fn keep_going_compacts_a_large_context_between_tasks_before_its_next_turn(
     assert!(keep_going(&turns(&agent)[6]), "{:?}", turns(&agent));
     engine.shutdown();
 }
+
+#[tokio::test]
+async fn the_agent_clears_its_context_and_a_new_session_starts_from_the_persons_requests_and_its_note() {
+    let (dir, project) = (tempfile::tempdir().unwrap(), crate::support::work_folder());
+    let (engine, mut rx, mut agent, id, made) = started_with(dir.path(), project.path(), Duration::from_secs(120), 3).await;
+    agent.say(response(Value::Null, 2, 150_000, 5_000)).await;
+    let (ok, text) = tool(&mut agent, 1, json!({ "action": "clear" })).await;
+    assert!(!ok && text.contains("handoff note"), "a fresh context starts from the note alone, so one is needed: {text}");
+    let next = "The login page is fixed and checked (auth.rs, cargo t --filter login). Next: the rest of the list, from item 2.";
+    let (ok, text) = tool(&mut agent, 2, json!({ "action": "clear", "next": next })).await;
+    assert!(ok && text.contains("fresh context is scheduled"), "{text}");
+    tokio::time::sleep(Duration::from_millis(60)).await;
+    assert_eq!(turns(&agent).len(), 1, "the turn is not cut");
+
+    agent.say(response(Value::Null, 2, 150_000, 5_000)).await;
+    agent.say(result(1_000_000)).await;
+    let fresh = next_pipe(&made).await;
+    until_turns(&fresh, 1).await;
+    assert!(agent.closed.load(std::sync::atomic::Ordering::SeqCst), "the old session ends");
+    assert_eq!(turns(&agent).len(), 1, "nothing more goes to the old session, not even a /compact");
+    let first = &turns(&fresh)[0];
+    assert!(first.starts_with("Faber started your context fresh"), "{first}");
+    assert!(first.contains("Fix the login page, then the rest of the list"), "the person's request, word for word: {first}");
+    assert!(first.ends_with(&format!("Your handoff note: {next}")), "{first}");
+    assert!(!first.contains("Earlier in this conversation"), "the old conversation is never sent again: {first}");
+
+    let c = engine.open(&id).unwrap();
+    let old_reply = &c.messages[1];
+    assert_eq!(c.fresh_after.as_deref(), Some(old_reply.id.as_str()));
+    assert!(c.sessions.is_empty() && c.context.is_none(), "{:?} {:?}", c.sessions, c.context);
+    assert!(c.messages.iter().any(|m| m.wake.as_ref().is_some_and(|w| w.why == "wake.cleared")), "a quiet line says so");
+    assert!(context_events(&mut rx).contains(&None), "the meter empties");
+    assert_eq!(c.messages.len(), 4, "the person still sees the whole conversation");
+    engine.shutdown();
+}

@@ -16,7 +16,7 @@ use crate::model::{AutoAnswer, Away, KeepGoing, KeepWait, Wake, WrapUp};
 /// instructions say where its task list is.
 pub const CONTINUE: &str = "The person is away and asked you to keep going on your own until their whole request is done. \
 Continue with the next item of your plan, or take the next task from the project's task list as its instructions describe, do it, \
-and check it the way the project says. Do not stop to propose work or to ask for a go-ahead: decide what is yours to decide. \
+and check it the way the project says. When the task you take next has nothing to do with what this conversation did so far, start it on a fresh context with your conversation tool's clear, when you have it. Do not stop to propose work or to ask for a go-ahead: decide what is yours to decide. \
 Waiting on CI, a queue, a build, a monitor or a review is never a reason to stop: check it again, or do the next item meanwhile. \
 Stop only when the whole request is done and verified, or when only the person can decide something; in that case ask it with your \
 question tool when you have one, and say exactly what you need. When the whole request is done and verified, call your wrap_up tool \

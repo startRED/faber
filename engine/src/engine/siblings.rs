@@ -59,6 +59,10 @@ impl Core {
                 Ok(text) => (true, text),
                 Err(why) => (false, format!("Nothing was scheduled: {why}.")),
             },
+            Ok(Request::Clear { next }) => match self.plan_clear(conv, next) {
+                Ok(()) => (true, sibling::CLEAR_PLANNED.to_string()),
+                Err(why) => (false, format!("Nothing was scheduled: {why}.")),
+            },
             Ok(Request::Archive) => match self.set_archived(conv, true) {
                 Ok(()) => (true, sibling::ARCHIVED.to_string()),
                 Err(_) => (false, "Nothing was archived: the conversation is gone.".to_string()),

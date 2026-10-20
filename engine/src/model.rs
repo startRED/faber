@@ -404,7 +404,7 @@ impl FollowState {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Wake {
-    /// An i18n key (`wake.keepGoing`, `wake.checksFailed`, `wake.conflict`, `wake.asked`, `wake.compacted`).
+    /// An i18n key (`wake.keepGoing`, `wake.checksFailed`, `wake.conflict`, `wake.asked`, `wake.compacted`, `wake.cleared`).
     pub why: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub pr: Option<u64>,
@@ -772,6 +772,10 @@ pub struct Conversation {
     /// How full the context of the conversation's own agent is, as its CLI last said (`engine/src/engine/compact.rs`).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub context: Option<ContextFill>,
+    /// The agent started its context fresh (`clear`, `engine/src/engine/compact.rs`): the id of the last message its old one
+    /// held. No CLI is ever given what came before it again, also when another AI joins later (`context_messages`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub fresh_after: Option<String>,
     /// The agent's plan for the request (`crate::progress::plan`).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub plan: Option<Plan>,
@@ -1277,6 +1281,13 @@ impl Conversation {
         self.sessions.get(&vendor).or_else(|| self.tentative.get(&vendor))
     }
 
+    /// The messages the agent's current context holds: all of them, or those after its last `clear`. A message it names that
+    /// is gone (an edit cut the conversation there) gives them all back, so an AI joining late never misses one.
+    pub fn context_messages(&self) -> &[Message] {
+        let start = self.fresh_after.as_ref().and_then(|id| self.messages.iter().position(|m| &m.id == id)).map_or(0, |at| at + 1);
+        &self.messages[start..]
+    }
+
     /// Forgets every session of the vendor.
     pub fn forget_session(&mut self, vendor: Vendor) {
         self.sessions.remove(&vendor);
@@ -1287,6 +1298,20 @@ impl Conversation {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_cleared_context_holds_only_the_messages_after_it_and_a_gone_mark_gives_them_all() {
+        let mut c: Conversation = serde_json::from_value(serde_json::json!({
+            "id": "c", "title": "", "area": "project", "createdAt": 0, "updatedAt": 0, "messages": []
+        }))
+        .unwrap();
+        c.messages = ["a", "b", "c"].map(|id| Message::new(id.into(), Role::User, id.into(), 0)).to_vec();
+        assert_eq!(c.context_messages().len(), 3);
+        c.fresh_after = Some("b".into());
+        assert_eq!(c.context_messages().iter().map(|m| m.id.as_str()).collect::<Vec<_>>(), ["c"]);
+        c.fresh_after = Some("gone".into());
+        assert_eq!(c.context_messages().len(), 3);
+    }
 
     #[test]
     fn the_screen_is_sent_every_switch_and_the_file_keeps_only_what_the_person_changed() {

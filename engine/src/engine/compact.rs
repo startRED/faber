@@ -11,6 +11,12 @@
 //! (`compact_at_boundary`): when the reply closed a task and the context is already large, or when it is large whatever
 //! the reply did. It compacts while the prompt cache is still warm (the turn just ended), where reading the context costs a
 //! tenth of the plain price. Every later turn rereads the whole context, and that reading is most of what a long run costs.
+//!
+//! The agent may instead start its context fresh (`clear`), when the task it takes next has nothing to do with what the
+//! conversation did so far: at the same moment Faber ends the CLI session and forgets every session of the conversation, so
+//! the next turn starts a new one, which costs nothing and carries no summary. That turn is a message Faber writes
+//! (`wake.cleared`) with the person's own requests, word for word, and the agent's handoff note; no CLI is ever given what
+//! came before it again (`Conversation::fresh_after`). The person still sees the whole conversation.
 use super::*;
 use crate::model::ContextFill;
 use crate::sibling;
@@ -19,6 +25,9 @@ use crate::sibling;
 pub(super) struct Plan {
     /// Everything it needs to continue; sent back to it word for word.
     next: Option<String>,
+    /// A fresh context (`clear`) instead of a summary: the reply whose turn asked for it. It survives the process, so it
+    /// happens only after that very reply; any other turn first (one that failed outside `end_turn`) drops it.
+    fresh: Option<String>,
 }
 
 /// After a reply that closed a task (its closing box), Faber compacts once the context holds a quarter of its window...
@@ -90,8 +99,22 @@ impl Core {
             return Err("it is being compacted already");
         }
         let answer = sibling::compact_planned(next.is_some());
-        self.compacts.insert(conv.to_string(), Plan { next });
+        self.compacts.insert(conv.to_string(), Plan { next, fresh: None });
         Ok(answer)
+    }
+
+    /// The agent called `clear`: its context starts fresh when its turn ends.
+    pub(super) fn plan_clear(&mut self, conv: &str, next: String) -> Result<(), &'static str> {
+        if !self.live.contains_key(conv) {
+            return Err("this conversation has no running agent");
+        }
+        if self.convs.get(conv).is_some_and(|c| c.compacting) {
+            return Err("it is being compacted already");
+        }
+        let reply = self.convs.get(conv).and_then(|c| c.messages.last()).filter(|m| m.role == Role::Assistant).map(|m| m.id.clone());
+        let Some(reply) = reply else { return Err("this conversation has no turn under way") };
+        self.compacts.insert(conv.to_string(), Plan { next: Some(next), fresh: Some(reply) });
+        Ok(())
     }
 
     /// The person pressed "Compact now" in the context meter: the same compaction the agent asks for, with no `next`, done
@@ -123,7 +146,7 @@ impl Core {
         if !self.live.contains_key(conv) {
             self.launch(conv, &pick)?;
         }
-        self.compacts.insert(conv.to_string(), Plan { next: None });
+        self.compacts.insert(conv.to_string(), Plan { next: None, fresh: None });
         if !self.compact_due(conv) {
             self.compacts.remove(conv);
             return Err("error.compact.busy".into());
@@ -149,15 +172,15 @@ impl Core {
         if self.rewind_blocked(conv) {
             return false;
         }
-        if !self.compacts.contains_key(conv) {
-            return false;
-        }
-        let Some(l) = self.live.get(conv) else {
-            self.compacts.remove(conv);
-            return false;
-        };
-        if l.turn.is_some() {
-            return false;
+        let Some(fresh) = self.compacts.get(conv).map(|p| p.fresh.clone()) else { return false };
+        // A fresh context needs no process (an idle one may have closed during Faber's checks), only the end of the turn.
+        match self.live.get(conv).map(|l| l.turn.is_some()) {
+            None if fresh.is_none() => {
+                self.compacts.remove(conv);
+                return false;
+            }
+            Some(true) => return false,
+            _ => {}
         }
         let Some(c) = self.convs.get_mut(conv) else { return false };
         if c.compacting {
@@ -166,6 +189,14 @@ impl Core {
         if verifying::checking(c) || c.messages.last().is_none_or(|m| m.status != Some(Status::Done)) {
             return false;
         }
+        if let Some(reply) = fresh {
+            match c.messages.last().is_some_and(|m| m.id == reply) {
+                true => self.clear(conv),
+                false => drop(self.compacts.remove(conv)),
+            }
+            return false;
+        }
+        let (Some(l), Some(c)) = (self.live.get(conv), self.convs.get_mut(conv)) else { return false };
         c.compacting = true;
         self.rewind.bump(conv);
         l.session.compact();
@@ -196,7 +227,7 @@ impl Core {
         if self.room(l.vendor, l.running.as_deref().or(l.model.as_deref())).is_err() {
             return false;
         }
-        self.compacts.insert(conv.to_string(), Plan { next: None });
+        self.compacts.insert(conv.to_string(), Plan { next: None, fresh: None });
         if self.compact_due(conv) {
             self.boundary.insert(conv.to_string(), turns);
             return true;
@@ -205,16 +236,55 @@ impl Core {
         false
     }
 
+    /// The agent's context starts fresh, at once: its session ends, every session of the conversation is forgotten, and the
+    /// first turn of the new one waits first in the queue, so whatever goes on after a turn (the queue, Keep going) sends it.
+    fn clear(&mut self, conv: &str) {
+        let Some(Plan { next: Some(next), .. }) = self.compacts.remove(conv) else { return };
+        if let Some(l) = self.retire(conv) {
+            l.session.close();
+        }
+        let Some(c) = self.convs.get_mut(conv) else { return };
+        let requests: Vec<&str> = c.messages.iter().filter(|m| m.role == Role::User && m.wake.is_none()).map(|m| m.text.as_str()).collect();
+        let text = sibling::cleared_prompt(&requests, &next);
+        c.fresh_after = c.messages.last().map(|m| m.id.clone());
+        c.sessions.clear();
+        c.tentative.clear();
+        c.reported = (None, None);
+        c.context = None;
+        let choice = c.choice.clone().unwrap_or(Choice { vendor: "auto".into(), model: None, effort: None });
+        c.queued.insert(
+            0,
+            QueuedTurn {
+                id: new_id(),
+                text,
+                images: None,
+                attachments: None,
+                choice,
+                at: now(),
+                sending: false,
+                wake: Some(Wake::of("wake.cleared")),
+            },
+        );
+        c.updated_at = now();
+        self.save(conv);
+        self.emit_queue(conv);
+        (self.emit)(AppEvent::Context { conversation_id: conv.to_string(), context: None });
+        self.list_changed();
+    }
+
     /// The CLI is compacting this conversation's context.
     pub(super) fn compacting(&self, conv: &str) -> bool {
         self.convs.get(conv).is_some_and(|c| c.compacting)
     }
 
-    /// Takes a session out of the live ones. A compaction that ran on it is over with it: nothing would ever hear its end.
+    /// Takes a session out of the live ones. A compaction that ran on it is over with it: nothing would ever hear its end. A
+    /// fresh context the agent asked for needs no session and stays planned; a Stop or a failed turn drops it.
     pub(super) fn retire(&mut self, conv: &str) -> Option<Live> {
         let live = self.live.remove(conv)?;
         self.rewind_retire(conv, &live);
-        self.compacts.remove(conv);
+        if self.compacts.get(conv).is_some_and(|p| p.fresh.is_none()) {
+            self.compacts.remove(conv);
+        }
         if let Some(c) = self.convs.get_mut(conv).filter(|c| c.compacting) {
             c.compacting = false;
             self.list_changed();
