@@ -2556,8 +2556,11 @@ async fn r250_a_quick_question_on_the_side_leaves_the_turn_its_queue_and_its_ses
     assert_eq!(said["message"]["content"], "why that file?", "the fork knows the rest: {said}");
 
     // Every read goes through the working folder's policy, whatever the conversation's mode: a secret in the folder never.
+    // The agent is given the folder's canonical spelling: a CI temp folder can be spelled with an 8.3 name (RUNNER~1), and the
+    // policy refuses any `~` in a path.
+    let folder = faber_engine::permissions::working_root(dir.path()).unwrap();
     for (request, file) in [("r1", ".env"), ("r2", "parser.rs")] {
-        let path = dir.path().join(file).to_string_lossy().into_owned();
+        let path = folder.join(file).to_string_lossy().into_owned();
         side.say(json!({ "type": "control_request", "request_id": request, "request": { "subtype": "can_use_tool", "tool_name": "Read", "input": { "file_path": path } } })).await;
     }
     for _ in 0..300 {

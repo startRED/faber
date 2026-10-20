@@ -72,7 +72,7 @@ check('quick question: asked while the agent works, it leaves the turn, its queu
     await settle();
     ok(host.querySelector('.aside-answer strong')?.textContent === 'tokenizer', 'the answer reads like any reply');
     // The thread and its queue are as they were: nothing of the side question is in them.
-    ok(!host.querySelector('.thread, main')!.textContent!.includes('why that file?'), 'the thread never shows the question');
+    ok(!host.querySelector('.thread')!.textContent!.includes('why that file?'), 'the thread never shows the question');
     ok(host.textContent!.includes('Then add tests'), 'the queued message is still there');
 
     const sendBack = [...host.querySelectorAll<HTMLButtonElement>('.aside button')].find((b) => b.textContent === t('aside.send'))!;

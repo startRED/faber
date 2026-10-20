@@ -530,7 +530,9 @@ fn tracked_growth_after_metadata_is_capped_by_the_safe_read() {
 
 #[test]
 fn listing_file_and_byte_caps_keep_found_changes_and_continue_without_losing_names() {
-    for long in [false, true] {
+    // macOS refuses paths over 1024 bytes (PATH_MAX), so the listing rightly skips the long names below there: the byte cap
+    // is checked on the other systems, the file cap everywhere.
+    for long in [false, true].into_iter().filter(|long| !(*long && cfg!(target_os = "macos"))) {
         let root = tempfile::tempdir().unwrap();
         let mut git = Git::default();
         let total = if long { 1950 } else { 2101 };
