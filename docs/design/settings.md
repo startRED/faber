@@ -27,7 +27,7 @@ How the Settings screen, the first-run steps and the tutorial look and behave.
   (fixed before the first message), or private per-conversation scratch; deletion/draft cleanup never removes a chosen
   folder. General explains the rule and offers the folder choice.
 - Projects starts with *Skills for projects*: one card closed like a project's, its head the name, how many are on ("2 of
-  8 on") and the chevron. Open, it shows one quiet line, then a switch per skill of the catalog: its name as its
+  21 on") and the chevron. Open, it shows one quiet line, then a switch per skill of the catalog: its name as its
   repository spells it, one line of what it does and its licence, the repository behind the "?". While one installs or
   goes the line says so and every switch waits; a failure turns the switch back and shows the save-error toast; the card
   is absent when the list cannot be read. The projects follow, each in its own closed card.

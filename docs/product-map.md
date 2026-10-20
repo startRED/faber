@@ -138,7 +138,7 @@ closed). There is no "Learn more" link. The version ("Faber 1.2.3") closes the l
   "Codex" group (reasoning summary, answer length; Codex only, closed by default). *Notifications and system*: Notify me,
   Play a sound, and on Windows keep the computer awake while Faber works and start with Windows. *Updates*: Receive
   previews (off by default, R156).
-- **Projects**: first *Skills for projects*, one card closed like a project's that says how many are on ("2 of 8 on") and
+- **Projects**: first *Skills for projects*, one card closed like a project's that says how many are on ("2 of 21 on") and
   opens to one switch per skill of Faber's catalog (its name, one line and its licence; the "?" names its repository); on
   downloads it from that repository at the pinned commit and checks its files, off removes it, for every project's agent
   (step 1 of the catalog, R247). Then per project, closed until opened, in the same cards and rows: checks (confirm, edit, view) and "A separate copy for each

@@ -22,7 +22,7 @@ check('skills: one closed card says how many are on and opens to one switch per 
     const rows = [...root.querySelectorAll('.st-opt')];
     for (const row of rows) {
       const hint = row.querySelector('.st-hint')?.textContent ?? '';
-      ok(/ · (MIT|Apache-2\.0)$/.test(hint), `the licence closes the line: ${hint}`);
+      ok(/ · (MIT|Apache-2\.0|BSD-3-Clause)$/.test(hint), `the licence closes the line: ${hint}`);
       ok(!/tools\./.test(hint), `no raw key: ${hint}`);
     }
     equal(root.querySelector('[data-opt="set-skill-systematic-debugging"] .st-name')?.textContent?.trim(), 'systematic-debugging?');
