@@ -399,6 +399,9 @@ export const fr: Messages = {
   "answer.cost": "{cost} en valeur d’API",
   'money.usd': '{amount} $ US',
   'answer.tokens': '{input} en entrée · {output} en sortie',
+  'answer.live.thinking': 'Réfléchit',
+  'answer.live.working': 'Travaille',
+  'answer.live.writing': 'Écrit',
   // Handwritten wording; native-speaker review pending (English is the source).
   'answer.cacheWarm': 'cache chaud jusqu’à {time}',
   'answer.copied': 'Copié',
@@ -1206,6 +1209,7 @@ export const fr: Messages = {
   'notes.134.new': 'Cliquez sur le compteur de contexte en haut pour voir ce qui remplit la mémoire de l’IA et la compacter tout de suite. L’IA repart d’un résumé.',
   'notes.135.new': 'Faites un clic droit sur une réponse et choisissez « Créer une branche ici » pour essayer une autre voie à partir de là. Un message modifié ou réessayé montre des flèches pour passer d’une version à l’autre.',
   'notes.136.new': 'Vous pouvez choisir des réponses courtes, expliquées ou à votre façon pour les deux IA dans les réglages.',
+  'notes.137.better': "Pendant qu'une réponse s'exécute, un anneau tourne à côté du mot qui dit ce qu'elle fait et des secondes écoulées. Rien ne s'arrête : cela montre seulement que le travail avance.",
   'update.checking': 'Recherche d’une mise à jour…',
   'update.downloading': 'Téléchargement de la mise à jour…',
   'update.downloadingPercent': 'Téléchargement de la mise à jour… {percent} %',

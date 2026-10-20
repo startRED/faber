@@ -399,6 +399,9 @@ export const de: Messages = {
   "answer.cost": "{cost} als API-Wert",
   'money.usd': '{amount} US$',
   'answer.tokens': '{input} Eingabe · {output} Ausgabe',
+  'answer.live.thinking': 'Denkt nach',
+  'answer.live.working': 'Arbeitet',
+  'answer.live.writing': 'Schreibt',
   // Handwritten wording; native-speaker review pending (English is the source).
   'answer.cacheWarm': 'Cache warm bis {time}',
   'answer.copied': 'Kopiert',
@@ -1206,6 +1209,7 @@ export const de: Messages = {
   'notes.134.new': 'Klick oben auf die Kontextanzeige, um zu sehen, was das Gedächtnis der KI füllt, und es sofort zu verdichten. Die KI macht mit einer Zusammenfassung weiter.',
   'notes.135.new': 'Klick mit der rechten Maustaste auf eine Antwort und wähle „Ab hier abzweigen“, um von dort einen anderen Weg zu probieren. Eine bearbeitete oder wiederholte Nachricht zeigt Pfeile, um zwischen ihren Versionen zu wechseln.',
   'notes.136.new': 'Du kannst in den Einstellungen für beide KIs kurze, erklärte Antworten oder deinen eigenen Stil wählen.',
+  'notes.137.better': 'Während eine Antwort läuft, dreht sich ein Ring neben dem Wort für ihre Tätigkeit und den bisherigen Sekunden. Nichts hält an: Es zeigt nur, dass die Arbeit lebt.',
   'update.checking': 'Suche nach einem Update…',
   'update.downloading': 'Update wird heruntergeladen…',
   'update.downloadingPercent': 'Update wird heruntergeladen… {percent} %',
