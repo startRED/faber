@@ -38,6 +38,7 @@ use serde::Serialize;
 use serde_json::{Map, Value};
 use std::collections::{BTreeMap, HashSet};
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 use tauri::window::Color;
@@ -121,6 +122,77 @@ async fn state(app: AppHandle, faber: State<'_, Faber>) -> Res<FullState> {
 #[tauri::command]
 async fn open(faber: State<'_, Faber>, id: String) -> Res<Option<Conversation>> {
     Ok(faber.engine.open(&id))
+}
+
+struct SearchRequest {
+    replaced: tokio::sync::oneshot::Sender<()>,
+    cancelled: Arc<AtomicBool>,
+}
+
+struct SearchQueue {
+    scanning: tokio::sync::Mutex<()>,
+    latest: Mutex<Option<SearchRequest>>,
+}
+
+impl SearchQueue {
+    const fn new() -> Self {
+        Self { scanning: tokio::sync::Mutex::const_new(()), latest: Mutex::new(None) }
+    }
+
+    async fn acquire(&self) -> Option<(tokio::sync::MutexGuard<'_, ()>, Arc<AtomicBool>)> {
+        let (replaced, gone) = tokio::sync::oneshot::channel();
+        let cancelled = Arc::new(AtomicBool::new(false));
+        if let Some(older) = lock(&self.latest).replace(SearchRequest { replaced, cancelled: cancelled.clone() }) {
+            older.cancelled.store(true, Ordering::Relaxed);
+            let _ = older.replaced.send(());
+        }
+        tokio::select! {
+            biased;
+            _ = gone => None,
+            one = self.scanning.lock() => Some((one, cancelled)),
+        }
+    }
+}
+
+#[tauri::command]
+async fn search_messages(faber: State<'_, Faber>, query: String, area: faber_engine::model::Area) -> Res<faber_engine::search::Results> {
+    // As with mentions: one scan runs and only the latest waits. Superseded scans stop between conversation files.
+    static SEARCHES: SearchQueue = SearchQueue::new();
+    let Some((_one, cancelled)) = SEARCHES.acquire().await else {
+        return Ok(faber_engine::search::Results { ready: true, hits: vec![] });
+    };
+    let engine = faber.engine.clone();
+    tauri::async_runtime::spawn_blocking(move || engine.search_messages_cancellable(&query, area, &cancelled).map_err(str::to_string))
+        .await
+        .map_err(|_| "error.store.read".to_string())?
+}
+
+#[cfg(test)]
+mod search_queue_tests {
+    use super::{Ordering, SearchQueue};
+    use std::future::Future;
+    use std::task::{Context, Poll, Waker};
+
+    #[tokio::test]
+    async fn searches_cancel_the_running_scan_and_replace_only_the_waiting_query() {
+        let queue = SearchQueue::new();
+        let (running, cancelled) = queue.acquire().await.unwrap();
+        let mut context = Context::from_waker(Waker::noop());
+        let mut waiting = std::pin::pin!(queue.acquire());
+        assert!(waiting.as_mut().poll(&mut context).is_pending());
+        assert!(cancelled.load(Ordering::Relaxed), "the running scan must stop before reading another file");
+
+        let mut newest = std::pin::pin!(queue.acquire());
+        assert!(newest.as_mut().poll(&mut context).is_pending(), "the newer scan must wait for the running scan");
+        assert!(matches!(waiting.as_mut().poll(&mut context), Poll::Ready(None)), "the replaced query must give up without scanning");
+        drop(running);
+
+        let (running, cancelled) = newest.await.unwrap();
+        assert!(!cancelled.load(Ordering::Relaxed), "only the latest query gets to scan");
+        drop(running);
+        let (_, cancelled) = queue.acquire().await.unwrap();
+        assert!(!cancelled.load(Ordering::Relaxed), "an idle queue must admit the next query");
+    }
 }
 
 #[tauri::command]
@@ -875,6 +947,7 @@ fn main() {
                 site_picture,
                 state,
                 open,
+                search_messages,
                 send,
                 branch,
                 warm,

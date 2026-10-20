@@ -18,6 +18,19 @@ export type Effort = 'low' | 'medium' | 'high';
 export const DEFAULT_EFFORT: Effort = 'medium';
 export type Area = 'chat' | 'project';
 export type Status = 'streaming' | 'done' | 'stopped' | 'error';
+/** Message hits use UTF-16 offsets, matching JavaScript string slices. */
+export interface MessageHit {
+  conversationId: string;
+  area: Area;
+  title: string;
+  messageIndex: number;
+  snippet: string;
+  highlights: { start: number; end: number }[];
+}
+export interface MessageSearch {
+  ready: boolean;
+  hits: MessageHit[];
+}
 export interface Image {
   mediaType: string;
   base64: string;
@@ -569,6 +582,7 @@ export const api = {
   /** The choices for a question the assistant asked: each question's text to the label picked (several joined by a comma). */
   answerQuestion: (id: string, turnId: string, requestId: string, answers: Record<string, string>) =>
     invoke<void>('answer_question', { id, turnId, requestId, answers }),
+  searchMessages: (query: string, area: Area) => invoke<MessageSearch>('search_messages', { query, area }),
   rename: (id: string, title: string) => invoke<void>('rename', { id, title }),
   /** Refused with `error.copy.unsaved` while its copy holds work found nowhere else, unless `discard`. */
   remove: (id: string, discard = false) => invoke<void>('remove', { id, discard }),

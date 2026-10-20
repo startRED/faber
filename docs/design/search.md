@@ -1,7 +1,42 @@
 # Search
 
-How the command box (Ctrl+K) and find in a conversation (Ctrl+F) look and move. The rest of the shell is in
+How the sidebar search, command box (Ctrl+K) and find in a conversation (Ctrl+F) look and move. The rest of the shell is in
 [layout.md](layout.md).
+
+## Sidebar search
+
+The existing search field filters titles and project names immediately, including archived conversations. After a
+180 ms pause it also searches the messages of the open area only, up to 30 hits below the title matches. Each row
+shows the conversation title and about 80 characters around the first match; matching words are bold and underlined,
+so colour is never the only cue. Text wraps inside the sidebar, including at 720 px and in the longest language.
+The group says "In messages", "Searching messages…" while the index or query is pending, "Nothing matches" when no
+message matches (title matches stay above), and "Messages could not be searched. Try again." after a failed query; every word is localized.
+Clearing the field removes the result rows, and a stale reply or one from the other area cannot replace newer results.
+Opening a conversation in the same area keeps the current results without restarting the search.
+Refreshing the conversation list keeps matching message rows mounted by conversation and message, preserving focus.
+Archived message hits carry the same archived label as title hits.
+There is no polling after the index is ready, or while the window is hidden.
+
+A click opens the conversation at that message and loads a bounded page around it. It unfolds the run once per search
+navigation, consumed by the app once the message is revealed, so later manual folding survives the next automatic
+turn recreating the run. It focuses the message with a static outline for 1.8 seconds. Scrolling centres the message smoothly only with full motion;
+reduced and no motion scroll instantly. No text animates. Continuing to scroll loads the next page, and sending a
+message returns to the newest page. These are the same controls and behaviour in Chat and Projects.
+
+The engine's volatile index covers every user message and completed final answer, never tools, thinking, attachments
+or Faber's own prompts. Per conversation it keeps only distinct words, lowercased and folded for common Latin accents,
+split on non-letters/digits, 2 to 32 characters each: one sorted newline-delimited string, with no message text or
+positions. A safety net keeps at most 20,000 distinct words in lexical order, independent of message age.
+All word payloads together stay within 16 MiB; oldest conversations lose their word set first. Incomplete word sets
+(including the per-conversation safety net and pending updates) fall back to reading the file, preserving coverage. Query words
+are folded and split the same way; binary prefix searches select conversations containing every query word.
+Candidates are read newest first from the store on a blocking worker, outside the engine lock. The first user message
+or final answer containing all query prefixes supplies the original snippet and message index, one hit per conversation,
+up to 30 hits; stale candidates that no longer match are skipped. Title matching is unchanged.
+The index builds on one engine-lifetime background-priority worker. Saves queue only metadata, at most one pending
+update per conversation; the worker reads and folds the file, then swaps the entry only if no newer save or removal
+superseded it. It sleeps without polling and stops with the engine. One search runs and only the latest waits; a newer
+query replaces the waiter and cancels the running scan between files. No index file, process or idle timer is added.
 
 ## Search and commands, and find
 

@@ -30,6 +30,7 @@ pub mod recents;
 pub mod route;
 pub mod router;
 pub mod screens;
+pub mod search;
 pub mod sibling;
 pub mod signals;
 pub mod store;

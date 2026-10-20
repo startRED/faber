@@ -1,4 +1,4 @@
-import { createSignal, For, Index, Show, type JSX } from 'solid-js';
+import { createEffect, createSignal, For, Index, on, Show, type JSX } from 'solid-js';
 import type { Message, Plan } from './api.ts';
 import { openMenu } from './contextmenu.ts';
 import { Icon } from './Glyphs.tsx';
@@ -105,8 +105,15 @@ function reasons(messages: Message[], run: Run): string {
 /** One header over a run: the loop icon, how long it worked on its own and how many turns, and the plan's progress on the
  * newest run, in the work log's disclosure. Opened, it shows the earlier turns, each with its work log folded; only the
  * newest turn stays open below it. The earlier turns are drawn only while shown, so a long run keeps a small screen. */
-export function RunBlock(props: { messages: Message[]; run: Run; plan?: Plan; earlier: (at: number) => JSX.Element }) {
+export function RunBlock(props: { messages: Message[]; run: Run; plan?: Plan; earlier: (at: number) => JSX.Element; reveal?: number; from?: number }) {
   const [open, setOpen] = createSignal(false);
+  let details!: HTMLDetailsElement;
+  createEffect(on(() => props.reveal, (at) => {
+    if (at !== undefined && props.run.replies.slice(0, -1).includes(at)) {
+      details.open = true;
+      setOpen(true);
+    }
+  }));
   const first = () => props.messages[props.run.replies[0]! - 1];
   const newest = () => props.messages[props.run.replies.at(-1)!];
   const time = () => {
@@ -122,14 +129,14 @@ export function RunBlock(props: { messages: Message[]; run: Run; plan?: Plan; ea
   const title = () =>
     [t('run.block.title', { time: time(), turns: t('run.block.turns', { n: props.run.replies.length }) }), plan()].filter(Boolean).join(' · ');
   return (
-    <details class="run-block disclosure" onToggle={(e) => setOpen(e.currentTarget.open)}>
+    <details class="run-block disclosure" ref={(el) => (details = el)} onToggle={(e) => setOpen(e.currentTarget.open)}>
       <summary title={reasons(props.messages, props.run) || undefined}>
         <Icon name="loop" small />
         <span class="run-title">{title()}</span>
       </summary>
       <Show when={open()}>
         <div class="run-earlier">
-          <For each={props.run.replies.slice(0, -1)}>{(at) => props.earlier(at)}</For>
+          <For each={props.run.replies.slice(0, -1).filter((at) => at >= (props.from ?? 0))}>{(at) => props.earlier(at)}</For>
         </div>
       </Show>
     </details>

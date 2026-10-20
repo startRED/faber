@@ -4,9 +4,21 @@
 //! other call. With the Windows API files of the shell (awake, autostart, tray, pane), this is the only unsafe code in Faber.
 //!
 //! The test runner reads the system's process list here too (`processes`): one call, where WMI took 100 ms or more.
+//! The index worker also uses the safe background-priority wrapper, on Windows and macOS.
+
+/// Puts this dedicated worker in macOS's background quality-of-service class until it exits.
+#[cfg(target_os = "macos")]
+pub fn background_thread() -> std::io::Result<()> {
+    unsafe extern "C" {
+        fn pthread_set_qos_class_self_np(qos_class: u32, relative_priority: i32) -> i32;
+    }
+    // SAFETY: this call changes only the calling thread's scheduling, using QOS_CLASS_BACKGROUND and no relative offset.
+    let error = unsafe { pthread_set_qos_class_self_np(0x09, 0) };
+    if error == 0 { Ok(()) } else { Err(std::io::Error::from_raw_os_error(error)) }
+}
 
 #[cfg(windows)]
-pub use imp::{job_active_processes, job_cpu_cap, job_peak_memory, job_terminate, process_ended, resume_process};
+pub use imp::{background_thread, job_active_processes, job_cpu_cap, job_peak_memory, job_terminate, process_ended, resume_process};
 
 #[cfg(windows)]
 mod files;
@@ -25,6 +37,17 @@ mod imp {
     };
 
     const STILL_ACTIVE: u32 = 259;
+
+    /// Puts the current dedicated worker at idle CPU and background I/O priority, for the rest of its lifetime.
+    pub fn background_thread() -> io::Result<()> {
+        use windows_sys::Win32::System::Threading::{GetCurrentThread, SetThreadPriority, THREAD_MODE_BACKGROUND_BEGIN};
+        // SAFETY: the pseudo handle names this thread, and the mode affects only this thread until it exits.
+        if unsafe { SetThreadPriority(GetCurrentThread(), THREAD_MODE_BACKGROUND_BEGIN) } == 0 {
+            Err(io::Error::last_os_error())
+        } else {
+            Ok(())
+        }
+    }
 
     /// How many processes the job object `job` (a handle) still has running.
     pub fn job_active_processes(job: isize) -> io::Result<u32> {

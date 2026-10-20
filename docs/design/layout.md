@@ -59,6 +59,9 @@ The numbers above are the usual widths. The person can change them, and the shel
 
 ### Sidebar
 
+Its one search field also finds message text below title matches and opens the selected message; see
+[search.md](search.md#sidebar-search) for its result rows, states and motion.
+
 - At the top: "New conversation" (Ctrl N), then the two areas, Chat and Projects, the latter with a count.
 - The sidebar lists only the open area's items (R168): Chat lists the chats and no Projects block, not even an empty
   one; Projects lists the projects with their conversations and the add-folder control, and no chats. Rows keep their DOM
@@ -79,8 +82,8 @@ The numbers above are the usual widths. The person can change them, and the shel
   (C010). The bar is amber only when the engine says the quota is nearly used. The line opens Settings > Accounts and limits.
   A vendor with no reading yet, or a weekly reading past its reset, shows "—". The version is not on the sidebar: it is the
   tooltip of the Settings button.
-- Search filters conversation titles and project names on screen; full-text search comes in Phase 2. The percentage and
-  "stopped" tails come with the progress view in Phase 3.
+- Search filters titles and project names, then finds message text below them. The percentage and "stopped" tails
+  come with the progress view in Phase 3.
 
 ### The new conversation screen
 

@@ -110,7 +110,7 @@ input, textarea { caret-color: var(--accent); }
 /* A conversation an agent started, under the one that started it: indented, with a hairline guide on its left. */
 .crow.child { padding-left: 14px; }
 .crow.child::before { content: ''; position: absolute; left: 6px; top: 6px; bottom: 6px; width: 1px; background: var(--line-2); }
-.item .tag-quiet { flex: none; margin-left: auto; font-size: var(--fs-xs); color: var(--ink-3); }
+.item .tag-quiet, .hit-heading .tag-quiet { flex: none; margin-left: auto; font-size: var(--fs-xs); color: var(--ink-3); }
 .item .unseen { flex: none; width: 6px; height: 6px; margin-left: auto; border-radius: 50%; background: var(--accent); }
 
 .crow:hover .item, .crow:focus-within .item, .prow:hover .item, .prow:focus-within .item { padding-right: 30px; }
@@ -118,6 +118,15 @@ input, textarea { caret-color: var(--accent); }
 .crow .x.confirm { color: var(--ink); font-weight: 600; }
 .crow:hover .x, .crow:focus-within .x { opacity: 1; }
 .side-empty { display: grid; gap: 6px; justify-items: start; padding: 4px 10px 0; color: var(--ink-3); font-size: var(--fs-sm); }
+/* Message emphasis remains visible without colour. */
+.message-hits { display: grid; gap: 4px; min-width: 0; }
+.message-hit { display: grid; gap: 4px; width: 100%; min-width: 0; padding: 8px 10px; border-radius: var(--r-xs); text-align: left; }
+.message-hit:hover, .message-hit:focus-visible { background: var(--s3); }
+.hit-heading { display: flex; align-items: baseline; gap: 8px; min-width: 0; }
+.hit-title { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: var(--fs-sm); }
+.hit-snippet { color: var(--ink-2); font-size: var(--fs-xs); overflow-wrap: anywhere; }
+.hit-snippet mark { background: transparent; color: inherit; font-weight: 600; text-decoration: underline; }
+.search-focus { outline: 2px solid var(--accent); outline-offset: 6px; }
 .side-foot { flex: none; border-top: 1px solid var(--line); padding-top: 10px; display: grid; gap: 4px; }
 /* The connected accounts, one thin line each: the vendor's mark, how much of its weekly quota window is used (R177), and the share. The
    rest (window, reset, age, "still counting") is the tooltip. Amber only when the engine says the quota is nearly used. */
@@ -1004,8 +1013,8 @@ html[data-ambient='on'] .ambient.bare .amb-drift { display: block; }
 /* Short feedback shares the theme's curve; exits finish sooner. Native selects keep their keyboard behavior. */
 :is(button, select, .plus, .x) { transition: background-color var(--dur-fast) var(--ease), color var(--dur-fast) var(--ease), box-shadow var(--dur-fast) var(--ease), opacity var(--dur-fast) var(--ease), transform var(--dur-fast) var(--ease); }
 /* A press gives way on buttons, never on rows a person runs down (R246): a list that shrinks under each click flickers. */
-button:active:not(:disabled, .item, .rrow) { transform: translateY(1px) scale(.98); }
-[data-base='oficina'] button:active:not(:disabled, .item, .rrow) { transform: scale(.98); }
+button:active:not(:disabled, .item, .rrow, .message-hit) { transform: translateY(1px) scale(.98); }
+[data-base='oficina'] button:active:not(:disabled, .item, .rrow, .message-hit) { transform: scale(.98); }
 :is(.ask, .toast, .ri.need, .coach, .agent-stuck, .dv-card, .notes, .notes-group h2, .notes-group li, .ask .note.err, .ask-more) { animation-duration: var(--dur-ui); }
 .tour-ring { transition-duration: var(--dur-ui); }
 [data-motion-list] > :is(.ask, .toast, .ri.need, .coach) { animation: none; }

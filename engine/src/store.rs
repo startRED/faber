@@ -99,6 +99,7 @@ fn read<T: DeserializeOwned>(path: &Path) -> Option<T> {
 
 pub struct Store {
     conversations: PathBuf,
+    search: crate::search::Search,
     projects: PathBuf,
     settings: PathBuf,
     recents: PathBuf,
@@ -112,6 +113,12 @@ pub struct Store {
     recovery_epoch: std::sync::Mutex<Option<String>>,
 }
 
+impl Drop for Store {
+    fn drop(&mut self) {
+        self.search.stop();
+    }
+}
+
 impl Store {
     pub fn new(data_dir: &Path) -> Self {
         Store::with_disk(data_dir, Arc::new(RealDisk))
@@ -122,6 +129,7 @@ impl Store {
         let conversations = data_dir.join("conversations");
         let _ = fs::create_dir_all(&conversations);
         Store {
+            search: crate::search::Search::new(conversations.clone()),
             conversations,
             projects: data_dir.join("projects.json"),
             settings: data_dir.join("settings.json"),
@@ -209,13 +217,19 @@ impl Store {
     }
 
     pub fn save(&self, conversation: &Conversation) {
-        let _ = self.write(&self.file(&conversation.id), conversation);
+        if self.write(&self.file(&conversation.id), conversation).is_ok() {
+            self.search.saved(conversation);
+        }
     }
 
     pub fn remove(&self, id: &str) {
-        if self.get(id).is_some() {
-            let _ = fs::remove_file(self.file(id));
+        if self.get(id).is_some() && fs::remove_file(self.file(id)).is_ok() {
+            self.search.removed(id);
         }
+    }
+
+    pub fn search(&self) -> crate::search::Search {
+        self.search.clone()
     }
 
     /// The project list for the sidebar: a damaged file shows no projects.

@@ -136,7 +136,7 @@ interface Shared {
   onReply?: (text: string) => void;
 }
 
-function Answer(props: Shared & { m: Accessor<Message>; messages?: Message[]; prompt?: Message; last?: boolean; answered?: Answered[] }) {
+function Answer(props: Shared & { m: Accessor<Message>; messages?: Message[]; prompt?: Message; last?: boolean; answered?: Answered[]; messageIndex?: number }) {
   // A turn Faber started by itself: its message takes no row (Faber's own plumbing never does, the 2026-10-19 design), so the
   // reply's header carries it as a small loop mark whose tooltip says what Faber asked.
   const woke = () => props.prompt?.wake;
@@ -313,6 +313,8 @@ function Answer(props: Shared & { m: Accessor<Message>; messages?: Message[]; pr
   return (
     <article
       class="ai"
+      data-message-index={props.messageIndex}
+      tabindex="-1"
       aria-label={t('answer.label')}
       onContextMenu={(e) =>
         openMenu(e, [copyItem(m().text), ...(!working() && props.prompt ? [{ id: 'redo', label: retry(), run: () => props.onBranch(props.prompt!.id, props.prompt!.text) }] : [])])
@@ -542,7 +544,7 @@ function FollowLine(props: { conversationId: string; f: Follow }) {
 
 // A message Faber sent by itself (R200): what it is about, as one quiet line; the words the agent got are its tooltip.
 // The user's message; "Edit" sends the new text as a branch, keeping the original conversation as it was.
-function Mine(props: { editKey: string; m: Accessor<Message>; onBranch: OnBranch }) {
+function Mine(props: { editKey: string; m: Accessor<Message>; onBranch: OnBranch; messageIndex: number }) {
   // One editor lives and dies with its (conversation, message) key (the parent re-creates it when the key changes), so
   // what it writes can never land on another message's saved edit.
   const key = () => props.editKey;
@@ -558,6 +560,8 @@ function Mine(props: { editKey: string; m: Accessor<Message>; onBranch: OnBranch
       fallback={
         <div
           class="mine"
+          data-message-index={props.messageIndex}
+          tabindex="-1"
           onContextMenu={(e) => openMenu(e, [copyItem(props.m().text), { id: 'edit', label: t('mine.edit'), run: () => setEditing(props.m().text) }])}
         >
           <Show when={props.m().attachments?.length}>
@@ -586,6 +590,8 @@ function Mine(props: { editKey: string; m: Accessor<Message>; onBranch: OnBranch
     >
       <form
         class="you editing"
+        data-message-index={props.messageIndex}
+        tabindex="-1"
         onSubmit={(e) => {
           e.preventDefault();
           const text = editing() ?? '';
@@ -701,11 +707,11 @@ function Narration(props: { text: string }) {
   );
 }
 
-export function Thread(props: Shared & { messages: Message[]; queued?: QueuedTurn[]; busy?: boolean; onError?: (err: unknown) => void; from: number }) {
+export function Thread(props: Shared & { messages: Message[]; queued?: QueuedTurn[]; busy?: boolean; onError?: (err: unknown) => void; from: number; until?: number; searchIndex?: number }) {
   const prompt = (at: number) => (props.messages[at - 1]?.role === 'user' ? props.messages[at - 1] : undefined);
   // Turns Faber sent by itself, one after another, read as one run (task 018): its earlier turns fold under one header.
   const runs = createMemo(() => runsOf(props.messages));
-  const hidden = createMemo(() => folded(runs()));
+  const hidden = createMemo(() => folded(new Map([...runs()].filter(([last]) => last < (props.until ?? Infinity)))));
   // The questions Faber answered in a run, on its newest reply.
   const answered = (at: number) => {
     const run = runs().get(at);
@@ -714,19 +720,19 @@ export function Thread(props: Shared & { messages: Message[]; queued?: QueuedTur
   const drawn = (m: Message, at: number) => !(prompt(at)?.wake && m.status !== 'streaming' && empty(m));
   const earlier = (at: number) => (
     <Show when={drawn(props.messages[at]!, at)}>
-      <Answer {...props} m={() => props.messages[at]!} prompt={prompt(at)} last={false} answered={[]} />
+      <Answer {...props} m={() => props.messages[at]!} prompt={prompt(at)} last={false} answered={[]} messageIndex={at} />
     </Show>
   );
   return (
     <>
-      <Index each={props.messages.slice(props.from)}>
+      <Index each={props.messages.slice(props.from, props.until)}>
         {(m, i) => (
           <Show
             when={m().role === 'user'}
             fallback={
               <Show when={!hidden().has(props.from + i)}>
                 <Show when={runs().get(props.from + i)}>
-                  {(run) => <RunBlock messages={props.messages} run={run()} plan={props.plan} earlier={earlier} />}
+                  {(run) => <RunBlock messages={props.messages} run={run()} plan={props.plan} earlier={earlier} reveal={props.searchIndex} from={props.from} />}
                 </Show>
                 {/* The newest turn of a run is drawn even with nothing of its own when it holds the run's answers. */}
                 <Show when={drawn(m(), props.from + i) || answered(props.from + i)?.length}>
@@ -736,6 +742,7 @@ export function Thread(props: Shared & { messages: Message[]; queued?: QueuedTur
                     prompt={prompt(props.from + i)}
                     last={props.from + i === props.messages.length - 1}
                     answered={answered(props.from + i)}
+                    messageIndex={props.from + i}
                   />
                 </Show>
               </Show>
@@ -744,7 +751,7 @@ export function Thread(props: Shared & { messages: Message[]; queued?: QueuedTur
             {/* A message Faber sent by itself takes no row: the reply's header carries it (`woke` in Answer). */}
             <Show when={!m().wake}>
               <Show when={`edit.${props.conversationId}.${m().id}`} keyed>
-                {(editKey) => <Mine editKey={editKey} m={m} onBranch={props.onBranch} />}
+                {(editKey) => <Mine editKey={editKey} m={m} onBranch={props.onBranch} messageIndex={props.from + i} />}
               </Show>
             </Show>
           </Show>

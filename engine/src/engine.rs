@@ -411,6 +411,7 @@ pub struct Engine {
 impl Engine {
     pub fn new(opts: EngineOptions, emit: Emit) -> Engine {
         let mut store = Store::new(&opts.data_dir);
+        let search = store.search();
         // A crash can leave an unsaved draft behind. Visible records keep their scratch; orphan UUID folders do not.
         let scratch = opts.data_dir.join("chat");
         if scratch.symlink_metadata().is_ok_and(|m| !m.file_type().is_symlink()) {
@@ -487,7 +488,22 @@ impl Engine {
                 git: None,
             })
         });
+        let _ = search.start();
         Engine { core, runtime }
+    }
+
+    /// Clones the index handle under the lock, then does the search outside it, on a blocking worker.
+    pub fn search_messages(&self, query: &str, area: Area) -> Result<crate::search::Results, &'static str> {
+        self.with(|c| c.store.search()).query(query, area)
+    }
+
+    pub fn search_messages_cancellable(
+        &self,
+        query: &str,
+        area: Area,
+        cancelled: &std::sync::atomic::AtomicBool,
+    ) -> Result<crate::search::Results, &'static str> {
+        self.with(|c| c.store.search()).query_cancellable(query, area, cancelled)
     }
 
     fn with<T>(&self, f: impl FnOnce(&mut Core) -> T) -> T {
@@ -951,6 +967,7 @@ impl Engine {
             c.close_spare();
             c.save_ledger(true);
             c.store.release_budget();
+            c.store.search().stop();
         })
     }
 }

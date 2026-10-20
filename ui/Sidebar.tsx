@@ -1,6 +1,8 @@
-import { createEffect, createMemo, createSignal, For, on, Show } from 'solid-js';
+import { createEffect, createMemo, createSignal, For, on, onCleanup, Show } from 'solid-js';
+import { createStore, reconcile } from 'solid-js/store';
 import { UpdateLine } from './UpdateStage.tsx';
-import { api, type Area, type Project, type RunningItem, type Summary, type UpdateStatus, type Vendor, type VendorUsage } from './api.ts';
+import { api, type Area, type MessageHit, type Project, type RunningItem, type Summary, type UpdateStatus, type Vendor, type VendorUsage } from './api.ts';
+import { windowHidden } from './appearance.ts';
 import { openMenu } from './contextmenu.ts';
 import { Icon, VendorMark } from './Glyphs.tsx';
 import { percent, t } from './i18n.ts';
@@ -90,6 +92,7 @@ interface Props {
   onNewIn: (id: string) => void;
   onAddProject: () => void;
   onOpen: (conversation: Summary) => void;
+  onMessage?: (hit: MessageHit) => void;
   /** Deletes a conversation; `'unsaved'` when its copy holds work found nowhere else, which needs `discard`. */
   onRemove: (id: string, discard?: boolean) => Promise<'unsaved' | undefined> | void;
   /** Opens Settings; the quota of a vendor opens it at the usage limits. */
@@ -108,9 +111,40 @@ export function Sidebar(props: Props) {
   // A delete refused because the conversation's copy holds work found nowhere else: the same row asks once more.
   const [losing, setLosing] = createSignal<string>();
   const [renaming, setRenaming] = createSignal<string>();
-  // The search box filters the titles on screen; it never leaves the window and nothing is asked of the engine.
+  // Titles filter immediately; message text is searched after a short pause.
   const [query, setQuery] = createSignal('');
   const searching = () => query().trim() !== '';
+  const [hits, setHits] = createStore<(MessageHit & { key: string })[]>([]);
+  const [waiting, setWaiting] = createSignal(false);
+  const [searchFailed, setSearchFailed] = createSignal(false);
+  const searchArea = createMemo(() => props.place.area);
+  let previousSearch: { text: string; area: Area } | undefined;
+  createEffect(() => {
+    const text = query().trim();
+    const area = searchArea();
+    const conversations = props.conversations;
+    const hidden = windowHidden();
+    let cancelled = false;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    if (!text || previousSearch?.text !== text || previousSearch.area !== area) setHits([]);
+    previousSearch = { text, area };
+    setSearchFailed(false);
+    setWaiting(!!text);
+    const search = async () => {
+      try {
+        const result = await api.searchMessages(text, area);
+        if (cancelled) return;
+        setHits(reconcile(result.hits.filter((hit) => hit.area === area && conversations.some((c) => c.id === hit.conversationId))
+          .map((hit) => ({ ...hit, key: `${hit.conversationId}:${hit.messageIndex}` })), { key: 'key' }));
+        setWaiting(!result.ready);
+        if (!result.ready) timer = setTimeout(() => void search(), 700);
+      } catch {
+        if (!cancelled) { setWaiting(false); setSearchFailed(true); }
+      }
+    };
+    if (text && !hidden) timer = setTimeout(() => void search(), 180);
+    onCleanup(() => { cancelled = true; clearTimeout(timer); });
+  });
   // The projects whose conversations show. The project the user is in starts open.
   const [open, setOpen] = createSignal<ReadonlySet<string>>(new Set(props.place.projectId ? [props.place.projectId] : []));
   const toggle = (id: string, on: boolean) =>
@@ -140,7 +174,7 @@ export function Sidebar(props: Props) {
   const expanded = (p: Project) => showsChats(open().has(p.id), searching(), inProject(p).length);
   // Each area lists only its own: Chat its conversations, Projects its projects with theirs.
   const inChat = () => props.place.area === 'chat';
-  const nothing = () => searching() && (inChat() ? chats().length === 0 : projects().length === 0);
+  const nothing = () => searching() && !waiting() && !searchFailed() && hits.length === 0;
   // The first click asks, the second deletes. When the copy holds unsaved work the row asks a third time, saying so.
   const remove = (id: string) => {
     if (losing() === id) {
@@ -308,9 +342,6 @@ export function Sidebar(props: Props) {
           </Show>
         </section>
         </Show>
-        <Show when={nothing()}>
-          <div class="side-empty">{t('side.noMatch')}</div>
-        </Show>
         <Show when={inChat()}>
           <div class="list" ref={(el) => animateList(el, true)}>
             {/* The groups are keyed by their name and the rows by their conversation, so a refresh builds again only what changed. */}
@@ -323,6 +354,31 @@ export function Sidebar(props: Props) {
               )}
             </For>
           </div>
+        </Show>
+        <Show when={searching()}>
+          <section class="message-hits" aria-labelledby="side-message-hits" aria-busy={waiting()}>
+            <div class="group-h" id="side-message-hits">{t('side.messages')}</div>
+            <Show when={waiting()}><div class="side-empty" role="status">{t('side.searching')}</div></Show>
+            <Show when={searchFailed()}><div class="side-empty" role="status">{t('side.searchFailed')}</div></Show>
+            <For each={hits}>{(hit) => (
+              <button type="button" class="message-hit" onClick={() => props.onMessage?.(hit)}>
+                <span class="hit-heading">
+                  <span class="hit-title">{hit.title}</span>
+                  <Show when={props.conversations.find((c) => c.id === hit.conversationId)?.archived}>
+                    <span class="tag-quiet">{t('archive.tag')}</span>
+                  </Show>
+                </span>
+                <span class="hit-snippet">
+                  <For each={hit.highlights}>{(range, i) => <>
+                    {hit.snippet.slice(i() ? hit.highlights[i() - 1]!.end : 0, range.start)}
+                    <mark>{hit.snippet.slice(range.start, range.end)}</mark>
+                  </>}</For>
+                  {hit.snippet.slice(hit.highlights.at(-1)?.end ?? 0)}
+                </span>
+              </button>
+            )}</For>
+            <Show when={nothing()}><div class="side-empty" role="status">{t('side.noMatch')}</div></Show>
+          </section>
         </Show>
       </div>
       <div class="side-foot">

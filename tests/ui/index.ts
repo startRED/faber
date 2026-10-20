@@ -43,6 +43,7 @@ import './notes.check.ts';
 import './opening.check.ts';
 import './palette.check.ts';
 import './find.check.ts';
+import './search-messages.check.ts';
 import './review-answer.check.ts';
 import './run.check.ts';
 import './review-motion.check.ts';

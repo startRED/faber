@@ -92,6 +92,18 @@ export function App(props: { initial: AppState; update?: UpdateStatus; inbox: { 
   // with another conversation's project.
   const [place, setPlace] = createSignal<Place>({ area: saved?.area ?? 'chat', projectId: saved?.projectId });
   const [current, setCurrent] = createSignal<Conversation>();
+  const [searchIndex, setSearchIndex] = createSignal<number>();
+  let searchFrame: number | undefined;
+  let searchMark: HTMLElement | undefined;
+  let searchTimer: ReturnType<typeof setTimeout> | undefined;
+  const clearSearch = () => {
+    if (searchFrame !== undefined) cancelAnimationFrame(searchFrame);
+    clearTimeout(searchTimer);
+    searchMark?.classList.remove('search-focus');
+    searchMark = undefined;
+    setSearchIndex(undefined);
+  };
+  onCleanup(clearSearch);
   const [changesOpen, setChangesOpen] = createSignal<string>();
   // A stable key avoids reading git on every streamed token; a turn ending reads the list again.
   const changesKey = createMemo(() => {
@@ -169,6 +181,7 @@ export function App(props: { initial: AppState; update?: UpdateStatus; inbox: { 
   // The choices of step 2 while the person is back at step 1, so going back and forward loses nothing.
   const [kept, setKept] = createSignal<{ appearance: Appearance; experience?: Experience; name: string }>();
   const [from, setFrom] = createSignal(0);
+  const [until, setUntil] = createSignal<number>();
   // True from the moment the user picks a conversation until its snapshot is in: the screen still shows the old
   // conversation then, so nothing may be sent or warmed for either.
   const [loading, setLoading] = createSignal(false);
@@ -429,7 +442,10 @@ export function App(props: { initial: AppState; update?: UpdateStatus; inbox: { 
   // A plan that changed while its conversation was opening: the snapshot may be older (task 017).
   const planHeard: { plan?: { id: string; plan?: Plan } } = {};
   // The conversation the user is in: opening it asks the engine for a snapshot and the answer takes a while.
-  const go = async (next: Place) => {
+  const go = async (next: Place, messageIndex?: number) => {
+    clearSearch();
+    setUntil(undefined);
+    setFrom(Math.max(0, (current()?.messages.length ?? 0) - PAGE));
     planHeard.plan = undefined;
     setPlace(next);
     remember('faber.place', next);
@@ -448,11 +464,27 @@ export function App(props: { initial: AppState; update?: UpdateStatus; inbox: { 
     const done = opening.finish(token, snapshot);
     if (done.stale) return;
     setLoading(false);
-    setFrom(Math.max(0, (done.conversation?.messages.length ?? 0) - PAGE));
+    const target = messageIndex !== undefined && messageIndex >= 0 && messageIndex < (done.conversation?.messages.length ?? 0) ? messageIndex : undefined;
+    stick = target === undefined;
+    setUntil(target === undefined ? undefined : Math.min(done.conversation!.messages.length, target + PAGE));
+    setFrom(Math.min(target ?? Infinity, Math.max(0, (done.conversation?.messages.length ?? 0) - PAGE)));
     fillPage();
     const heard = planHeard.plan as { id: string; plan?: Plan } | undefined;
     const plan = heard?.id === done.conversation?.id ? heard : undefined;
     setCurrent(done.conversation && plan ? { ...done.conversation, plan: plan.plan } : done.conversation);
+    setSearchIndex(target);
+    if (target !== undefined) searchFrame = requestAnimationFrame(() => {
+      searchMark = thread?.querySelector<HTMLElement>(`[data-message-index="${target}"]`) ?? undefined;
+      if (!searchMark) return;
+      searchMark.classList.add('search-focus');
+      searchMark.focus({ preventScroll: true });
+      const smooth = searchMark.closest<HTMLElement>('[data-motion]')?.dataset.motion === 'full' && !matchMedia('(prefers-reduced-motion: reduce)').matches;
+      searchMark.scrollIntoView({ block: 'center', behavior: smooth ? 'smooth' : 'instant' });
+      lastScrollTop = thread?.scrollTop ?? 0;
+      searchTimer = setTimeout(() => searchMark?.classList.remove('search-focus'), 1800);
+      // Consume the reveal in App: the next automatic turn can recreate its RunBlock.
+      setSearchIndex(undefined);
+    });
     setChoice(next.id ? recall<Choice>(`faber.choice.${next.id}`, done.conversation?.choice ?? { vendor: 'auto' }) : { vendor: 'auto' });
     if (done.conversation) queueMicrotask(() => restoreRejected(done.conversation!.id, done.conversation!.messages.at(-1)));
   };
@@ -619,9 +651,15 @@ export function App(props: { initial: AppState; update?: UpdateStatus; inbox: { 
   );
 
   const onScroll = (el: HTMLDivElement) => {
-    if (el.scrollHeight - el.scrollTop - el.clientHeight < 40) stick = true;
+    const below = el.scrollHeight - el.scrollTop - el.clientHeight;
+    const end = until();
+    if (below < 40 && (end === undefined || end >= (current()?.messages.length ?? 0))) stick = true;
     else if (el.scrollTop < lastScrollTop - 1) stick = false;
     lastScrollTop = el.scrollTop;
+    if (below < 400 && end !== undefined) {
+      const next = end + PAGE;
+      setUntil(next < (current()?.messages.length ?? 0) ? next : undefined);
+    }
     if (el.scrollTop < 400 && from() > 0) {
       // The earlier messages appear above; keep what the user is reading in place.
       const before = el.scrollHeight;
@@ -663,6 +701,9 @@ export function App(props: { initial: AppState; update?: UpdateStatus; inbox: { 
     const alongside = engineBusy();
     let accepted = false;
     setError(undefined);
+    clearSearch();
+    setUntil(undefined);
+    setFrom(Math.max(0, (current()?.messages.length ?? 0) - PAGE));
     stick = true;
     try {
       const id = await api.send({
@@ -1085,6 +1126,13 @@ export function App(props: { initial: AppState; update?: UpdateStatus; inbox: { 
                 onNewIn={(id) => (closeSide(false), void fresh({ area: 'project', projectId: id }))}
                 onAddProject={() => void addProject().catch(fail)}
                 onOpen={openSummary}
+                onMessage={(hit) => {
+                  const c = state().conversations.find((c) => c.id === hit.conversationId);
+                  if (!c) return;
+                  closeSettings();
+                  closeSide(false);
+                  void go(openPlace(place(), c), hit.messageIndex);
+                }}
                 onRemove={remove}
                 onSettings={(at) => (closeSide(false), openSettings(at))}
                 onError={(err) => setSaveError(failureText(err))}
@@ -1222,6 +1270,8 @@ ${copy().path}`}>
                                     onError={fail}
                                     usage={state().usage ?? []}
                                     from={from()}
+                                    until={until()}
+                                    searchIndex={searchIndex()}
                                     conversationId={c().id}
                                     options={options()}
                                     choice={picked()}
