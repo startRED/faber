@@ -43,6 +43,7 @@ that changes them updates this page too. Last full audit: 2026-10-16.
 | Helper, subagent | A short-lived agent the assistant starts by itself for a piece of the work: a subagent of its own CLI (Claude Code's `Agent` tool, Codex's `spawn_agent`), or the other AI through Faber's helper tool (R161); on screen both are a "helper". | `ui/worklog.ts`, `engine/src/claude.rs`, `engine/src/codex.rs` (`Subagents`), `engine/src/helper.rs` |
 | Preview, stable | The two update channels (R156): stable is the weekly release everyone gets; a preview is the newest build, a few days early, for people who turn on "Receive previews" in Settings. | `src-tauri/src/update.rs`, `scripts/channel.mjs`, `.github/workflows/` |
 | Cache warm | In the tooltip of the latest answer's cost: until when the vendor's prompt cache keeps the next message cheaper. | `ui/Thread.tsx`, `ui/running.ts` |
+| Live pulse | Above a streaming answer: a turning ring around the mark, one word for what it does now (thinking, working, writing) and the seconds since it began. Still under reduced or no motion. | `ui/Thread.tsx`, `ui/styles.css` |
 
 ## Screens and surfaces
 

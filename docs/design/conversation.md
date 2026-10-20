@@ -115,3 +115,6 @@ above an answer. The window widths, the sidebar and the running column are in [l
   The clock ticks every 15 s only while such a step runs and the window shows; the time is hidden from a screen reader,
   since a live region that changed that often would keep talking.
 
+- While a reply works, a pulse line sits above the status line: the mark in an 18 px ring whose top arc turns
+  (`--dur-spin`, `transform` only), one word (thinking, working, writing) and the seconds, in tabular figures. One 1 s
+  clock runs only while it works and the window shows. A screen reader skips it; reduced motion stills the ring.

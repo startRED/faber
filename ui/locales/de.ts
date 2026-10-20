@@ -399,6 +399,9 @@ export const de: Messages = {
   "answer.cost": "{cost} als API-Wert",
   'money.usd': '{amount} US$',
   'answer.tokens': '{input} Eingabe · {output} Ausgabe',
+  'answer.live.thinking': 'Denkt nach',
+  'answer.live.working': 'Arbeitet',
+  'answer.live.writing': 'Schreibt',
   // Handwritten wording; native-speaker review pending (English is the source).
   'answer.cacheWarm': 'Cache warm bis {time}',
   'answer.copied': 'Kopiert',

@@ -1,0 +1,12 @@
+{
+  "notes": {
+    "better": {
+      "en": "While an answer runs, a ring turns beside the word for what it is doing and the seconds so far. Nothing stops: it only shows the work is alive.",
+      "pt-BR": "Enquanto uma resposta roda, um anel gira ao lado da palavra do que ela faz e dos segundos até agora. Nada para: só mostra que o trabalho está vivo.",
+      "es": "Mientras una respuesta se ejecuta, un anillo gira junto a la palabra de lo que hace y los segundos transcurridos. Nada se detiene: solo muestra que el trabajo sigue vivo.",
+      "fr": "Pendant qu'une réponse s'exécute, un anneau tourne à côté du mot qui dit ce qu'elle fait et des secondes écoulées. Rien ne s'arrête : cela montre seulement que le travail avance.",
+      "de": "Während eine Antwort läuft, dreht sich ein Ring neben dem Wort für ihre Tätigkeit und den bisherigen Sekunden. Nichts hält an: Es zeigt nur, dass die Arbeit lebt."
+    }
+  },
+  "decisions": []
+}

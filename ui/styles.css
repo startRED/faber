@@ -12,7 +12,7 @@
   /* One timing family. The theme sets --dur-fast, --dur-ui, --dur-move, --dur-arrive and --ease; these complete it. */
   --dur-exit: 180ms; --ease-in: cubic-bezier(.4, 0, 1, 1); --ease-spring: cubic-bezier(.2, .9, .25, 1.02);
   /* Scenes that loop or play once (the home's effects, the blinking caret, Curioso waking): not interface timing. */
-  --dur-wake: 1100ms; --dur-blink: 1s; --dur-pulse: 3.2s; --dur-weave: 9s; --dur-weave-slow: 12s; --dur-drift: 32s;
+  --dur-wake: 1100ms; --dur-blink: 1s; --dur-spin: 900ms; --dur-pulse: 3.2s; --dur-weave: 9s; --dur-weave-slow: 12s; --dur-drift: 32s;
   --motion-slide: 24px; --motion-rise: var(--arrive-y, 6px); --motion-scale: .97;
   --motion-blur: 2px; --motion-backdrop: 8px; --motion-stagger: 18ms;
 }
@@ -484,6 +484,11 @@ details.thinking div { white-space: pre-wrap; padding: 6px 0 0 12px; border-left
 .activity-thinking { display: grid; gap: 4px; color: var(--ink-3); }
 .activity-thinking p { margin: 0; white-space: pre-wrap; }
 .activity-thinking b { font-weight: 600; color: var(--ink-2); }
+/* A running reply's pulse: Curioso inside a ring that turns, the word for what it does now, and the seconds. Only transform moves. */
+.live-line { display: flex; align-items: center; gap: 6px; color: var(--ink-3); font-size: var(--fs-sm); font-variant-numeric: tabular-nums; }
+.live-line .spin { position: relative; display: grid; place-items: center; width: 18px; height: 18px; color: var(--ink-2); }
+.live-line .spin::before { content: ''; position: absolute; inset: 0; border-radius: 50%; border: 1.5px solid var(--line-3); border-top-color: var(--accent); animation: spin var(--dur-spin) linear infinite; }
+@keyframes spin { to { transform: rotate(360deg); } }
 .activity-latest { display: flex; min-width: 0; white-space: nowrap; color: var(--ink-3); font-size: var(--fs-sm); }
 /* The step is cut, never its time. */
 .activity-latest .step { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
@@ -1115,7 +1120,7 @@ html.resizing :is(.shell, .main, .side, .fold, .tour-ring) { transition: none !i
   select option:is(:hover, :focus-visible, :checked) { background: var(--s3); color: var(--ink); }
   @starting-style { select:open::picker(select) { opacity: 0; transform: translateY(var(--motion-rise)) scale(var(--motion-scale)); } }
 }
-:is([data-motion='reduced'], [data-motion='none']) :is(.cursor, .live, .live::after, .run-dot, .loom-row, .loom-shuttle, .flow-trace, .amb-drift, .g-caret, .run-btn .i, .peek svg) { animation: none !important; }
+:is([data-motion='reduced'], [data-motion='none']) :is(.cursor, .live-line .spin::before, .live,.live::after, .run-dot, .loom-row, .loom-shuttle, .flow-trace, .amb-drift, .g-caret, .run-btn .i, .peek svg) { animation: none !important; }
 :is([data-motion='reduced'], [data-motion='none']) :is(.loom-shuttle, .flow-trace) { opacity: 0; }
 [data-motion='reduced'] { --arrive-y: 0px; }
 /* Reduced and none are instant, including native pickers and theme snapshots. */

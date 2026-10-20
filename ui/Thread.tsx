@@ -17,6 +17,7 @@ import { copyItem, openMenu } from './contextmenu.ts';
 import { keep, kept, recoverQueuedDraft, release, useDraft } from './unsent.ts';
 import { Icon, VendorMark } from './Glyphs.tsx';
 import { QuotaCard } from './QuotaCard.tsx';
+import { Mark } from './Mark.tsx';
 import { PlanList, WrapUpBox } from './Plan.tsx';
 import { AnswersCard, answeredIn, folded, RunBlock, runsOf, type Answered } from './Run.tsx';
 import { html, Markdown, openLinks, pressImage } from './markdown.tsx';
@@ -335,6 +336,20 @@ function Answer(props: Shared & { m: Accessor<Message>; messages?: Message[]; pr
     const timer = setInterval(() => setClock(Date.now()), 15_000);
     onCleanup(() => clearInterval(timer));
   });
+  // The whole reply's clock: one second timer while it streams and the window shows, so the person sees it is alive. The
+  // text is aria-hidden; the status region below says what it is doing.
+  const [beat, setBeat] = createSignal(Date.now());
+  createEffect(() => {
+    if (!streaming() || windowHidden()) return;
+    setBeat(Date.now());
+    const timer = setInterval(() => setBeat(Date.now()), 1000);
+    onCleanup(() => clearInterval(timer));
+  });
+  const liveWord = () => (finalText().trim() ? 'writing' : tools().at(-1)?.ok === undefined && tools().length ? 'working' : 'thinking');
+  const liveFor = () => {
+    const e = elapsed(m().at, beat());
+    return t(e.key, { n: e.n });
+  };
   const longFor = () => {
     const since = runningSince();
     if (since === undefined || clock() - since < LONG) return '';
@@ -442,6 +457,13 @@ function Answer(props: Shared & { m: Accessor<Message>; messages?: Message[]; pr
       <Show when={agents().length}>
         <div class="agents" role="list" aria-label={t('agent.label')}>
           <Index each={agents()}>{(step) => <AgentRow step={step} streaming={working()} conversationId={props.conversationId} messageId={m().id} />}</Index>
+        </div>
+      </Show>
+      <Show when={working() && !waiting().length && !m().waitUntil}>
+        <div class="live-line" aria-hidden="true">
+          <span class="spin"><Mark size={10} /></span>
+          <span>{t(`answer.live.${liveWord()}`)}</span>
+          <span class="num">· {liveFor()}</span>
         </div>
       </Show>
       <Show when={(steps() || agents().length) && working() && latest() && !finalText().trim()}>
