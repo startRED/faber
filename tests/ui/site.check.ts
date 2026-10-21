@@ -713,7 +713,9 @@ check('page in the browser: the address field takes a bare name as https, a loca
 
 check('page in the browser: with no page yet the pane shows only its address field, and Enter opens what was typed in this conversation', async () => {
   useLanguage('en');
-  const [siteOpen, sitePlace, sitePark, onSite, siteStep] = [api.siteOpen, api.sitePlace, api.sitePark, api.onSite, api.siteStep];
+  const [siteOpen, sitePlace, sitePark, onSite, siteStep, openLink] = [api.siteOpen, api.sitePlace, api.sitePark, api.onSite, api.siteStep, api.openLink];
+  const outside: string[] = [];
+  api.openLink = async (url) => void outside.push(url);
   const opened: string[][] = [];
   const stepped: string[][] = [];
   api.siteStep = async (id, step) => (stepped.push([id, step]), true);
@@ -749,6 +751,7 @@ check('page in the browser: with no page yet the pane shows only its address fie
     equal(root.querySelector('.side-meta')!.textContent, "Open any web page here. This conversation's agent can read it too.");
     equal(placed, 0, 'nothing is placed before there is a page');
     equal(root.querySelector('[aria-label="Back"]'), null, 'no history to step through yet');
+    equal(root.querySelector('.site-external'), null, 'and no page to take out of Faber');
     const field = root.querySelector<HTMLInputElement>('.site-address')!;
     const type = (text: string) => {
       field.value = text;
@@ -767,13 +770,15 @@ check('page in the browser: with no page yet the pane shows only its address fie
     ok(placed > 0, 'and places the browser over its box');
     for (const label of ['Back', 'Forward', 'Reload the page']) root.querySelector<HTMLButtonElement>(`[aria-label="${label}"]`)!.click();
     deepEqual(stepped, [['c1', 'back'], ['c1', 'forward'], ['c1', 'reload']], 'the head steps through the page of this conversation only');
+    root.querySelector<HTMLButtonElement>('.site-external')!.click();
+    deepEqual(outside, ['https://example.com/'], 'the page opens where it is in the person’s own browser');
     refuse = true;
     type('example.org');
     await frames();
     ok(root.querySelector('[role="alert"]'), 'a page the browser refused is said');
   } finally {
     showSite(undefined);
-    Object.assign(api, { siteOpen, sitePlace, sitePark, onSite, siteStep });
+    Object.assign(api, { siteOpen, sitePlace, sitePark, onSite, siteStep, openLink });
     dispose();
     root.remove();
   }

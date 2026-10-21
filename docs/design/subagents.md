@@ -71,7 +71,7 @@ line), and "See the page" opens it the same way. "See the page" opens it
 in the running column, the subagent's place: a head with the title and close (once a link or redirect leaves the
 card's site, the title is the site the page is on now; no back arrow, since the topbar's pane buttons and the run button
 pick what the column shows), Back, Forward and Reload as quiet icon buttons, then an address field in the data font with where the page is (Enter opens what was typed, Esc
-puts the address back), a meta line with the site it is on now,
+puts the address back) and, once there is a page, a quiet icon button that opens it in the person's own browser, a meta line with the site it is on now,
 and under it a box that fills the rest of the column, in the third surface with the hairline edge, over which the page
 itself is drawn by a second webview of the same window. The box is measured and the page placed again when it changes
 size, when the window does and once the column has slid in; when the box goes, the page moves out of the window, where

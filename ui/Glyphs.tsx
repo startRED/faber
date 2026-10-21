@@ -54,6 +54,8 @@ const PATHS = {
   end: ['M12 5v14', 'm19 12-7 7-7-7', 'M5 21h14'],
   // The buttons of the topbar that pick what the right column shows: the conversation's changes and Faber's browser.
   changes: ['M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8Z', 'M9 11h6', 'M12 8v6', 'M9 17h6'],
+  // The page in the person's own browser, out of Faber.
+  external: ['M15 3h6v6', 'M10 14 21 3', 'M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6'],
   globe: ['M3 12a9 9 0 1 0 18 0 9 9 0 1 0-18 0', 'M3 12h18', 'M12 3c2.5 2.6 3.8 5.6 3.8 9s-1.3 6.4-3.8 9c-2.5-2.6-3.8-5.6-3.8-9s1.3-6.4 3.8-9Z'],
 } as const;
 

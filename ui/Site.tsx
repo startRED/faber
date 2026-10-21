@@ -427,6 +427,12 @@ export function SitePane(props: { site: OpenSite; onClose: () => void }) {
           onFocus={(e) => e.currentTarget.select()}
           onKeyDown={addressKeys}
         />
+        {/* Where the page is now, in the person's own browser with their own sign-ins; Faber's pane stays as it is. */}
+        <Show when={!blank()}>
+          <button class="iconbtn site-external" aria-label={t('site.external')} title={t('site.external')} onClick={() => void api.openLink(live()).catch(() => {})}>
+            <Icon name="external" />
+          </button>
+        </Show>
       </div>
       <Show when={refused()}>
         <p class="side-meta bad" role="alert">{t('site.refused')}</p>
