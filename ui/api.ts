@@ -530,7 +530,9 @@ export type AccountStatus = 'signedIn' | 'signedOut' | 'unknown';
 /** One skill of Faber's catalog (src-tauri/src/tools.rs). */
 export interface ToolRow {
   id: string;
+  cliName?: string | null;
   job: string;
+  tier?: 'recommended' | 'more';
   license: string;
   repo: string;
   home: string;

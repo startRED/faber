@@ -15,12 +15,83 @@ fn zip_of(files: &[(&str, &[u8])]) -> Vec<u8> {
 
 const SKILL: &[u8] = b"---\nname: careful\ndescription: Be careful.\n---\nBe careful.";
 
+#[test]
+fn curated_catalog_has_checked_metadata_locales_and_a_bounded_size() {
+    use faber_engine::tools::{Tier, catalog};
+    let source = include_str!("../src/tools.json");
+    let file: serde_json::Value = serde_json::from_str(source).unwrap();
+    let entries: Vec<_> = file["skills"].as_array().unwrap().iter().chain(file["servers"].as_array().unwrap()).collect();
+    let items = catalog();
+    assert_eq!(items.len(), entries.len(), "no item silently disappears while parsing");
+    assert_eq!(file["skills"].as_array().unwrap().len(), 114, "21 original and 93 fully audited new skills");
+    assert_eq!(file["servers"].as_array().unwrap().len(), 1, "mcp-debugger lacks project path containment");
+    assert!(source.len() <= 36 * 1024, "metadata budget: {} bytes", source.len());
+    let locales = [
+        include_str!("../../ui/locales/en.ts"),
+        include_str!("../../ui/locales/pt-BR.ts"),
+        include_str!("../../ui/locales/es.ts"),
+        include_str!("../../ui/locales/fr.ts"),
+        include_str!("../../ui/locales/de.ts"),
+    ];
+    let mut counts = std::collections::BTreeMap::new();
+    let mut ids = std::collections::HashSet::new();
+    let mut recommended = 0;
+    for (entry, item) in entries.iter().zip(items) {
+        assert!(ids.insert(&item.id), "unique id: {}", item.id);
+        assert_eq!(entry["id"].as_str(), Some(item.id.as_str()));
+        assert!(matches!(item.license.as_str(), "MIT" | "Apache-2.0" | "BSD-3-Clause" | "Apache-2.0 AND OFL-1.1"));
+        assert_eq!(item.commit.len(), 40, "full commit: {}", item.id);
+        assert_eq!(item.digest.len(), 64, "digest: {}", item.id);
+        assert!(item.commit.bytes().chain(item.digest.bytes()).all(|b| b.is_ascii_hexdigit()));
+        let limit = match item.job.as_str() {
+            "games" => 32,
+            "game-design" => 23,
+            "marketing" => 11,
+            "debugging" | "testing" | "lean" | "design" | "architecture" | "plan" | "mcp" | "skills" | "performance" | "database"
+            | "payments" | "platform" | "mobile" | "auth" | "measure" | "documents" => 14,
+            unknown => panic!("unknown job: {unknown}"),
+        };
+        let count = counts.entry(&item.job).or_insert(0);
+        *count += 1;
+        assert!(*count <= limit, "{} exceeds its {limit}-item budget", item.job);
+        if let Some(tier) = entry.get("tier") {
+            assert!(matches!(tier.as_str(), Some("recommended" | "more")));
+        } else {
+            assert_eq!(item.tier, Tier::More, "legacy entries have no implicit recommendation");
+        }
+        recommended += usize::from(item.tier == Tier::Recommended);
+        if let Some(name) = &item.cli_name {
+            assert_ne!(name, &item.id);
+            assert!(name.bytes().all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'-'), "CLI name: {}", item.id);
+        }
+        for locale in locales {
+            for key in [format!("tools.{}", item.id), format!("catalog.job.{}", item.job)] {
+                assert!(locale.contains(&format!("'{key}':")) || locale.contains(&format!("\"{key}\":")), "missing {key}");
+            }
+        }
+    }
+    assert_eq!(recommended, 10, "only general coding and everyday entry points belong in Good start");
+    for id in ["systematic-debugging", "test-driven-development", "ponytail", "design-taste-frontend", "skill-creator"] {
+        assert_eq!(faber_engine::tools::find(id).unwrap().tier, Tier::Recommended, "{id} stays easy to find");
+    }
+    for entry in &entries {
+        if matches!(entry["job"].as_str(), Some("marketing" | "games" | "game-design" | "mobile")) || entry["id"] == "ponytail-debt" {
+            assert_eq!(entry["tier"], "more", "area picks are not general recommendations");
+        }
+    }
+    let mut invalid = entries[22].clone();
+    invalid["tier"] = "automatic".into();
+    assert!(serde_json::from_value::<Item>(invalid).is_err(), "unknown tiers never enter the engine");
+}
+
 fn item() -> Item {
     let dir = tempfile::tempdir().unwrap();
     std::fs::write(dir.path().join("SKILL.md"), SKILL).unwrap();
     Item {
         id: "careful".into(),
+        cli_name: None,
         job: "debugging".into(),
+        tier: Default::default(),
         license: "MIT".into(),
         repo: "owner/repo".into(),
         commit: "0123".into(),
@@ -92,7 +163,9 @@ async fn a_server_downloads_from_npm_s_path_and_installs_only_with_the_catalog_s
     std::fs::write(dir.path().join("run.js"), b"run()").unwrap();
     let measure = |version: &str| Item {
         id: "measure".into(),
+        cli_name: None,
         job: "measure".into(),
+        tier: Default::default(),
         license: "Apache-2.0".into(),
         repo: "owner/measure".into(),
         commit: "0123".into(),

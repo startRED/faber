@@ -38,7 +38,9 @@ pub async fn set_mcp_server(faber: State<'_, Faber>, project_id: String, name: S
 #[serde(rename_all = "camelCase")]
 pub struct ToolRow {
     id: String,
+    cli_name: Option<String>,
     job: String,
+    tier: faber_engine::tools::Tier,
     license: String,
     repo: String,
     home: String,
@@ -61,7 +63,9 @@ pub async fn tools_list(faber: State<'_, Faber>) -> Res<Vec<ToolRow>> {
             .iter()
             .map(|i| ToolRow {
                 id: i.id.clone(),
+                cli_name: i.cli_name.clone(),
                 job: i.job.clone(),
+                tier: i.tier,
                 license: i.license.clone(),
                 repo: i.repo.clone(),
                 home: i.home(),

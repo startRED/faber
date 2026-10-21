@@ -76,6 +76,7 @@ one is never touched again, and its boxes say nothing.
 | superpowers/specs/2026-10-17-agent-pane-webview-spike.md | Spike done: go for step 7 of "Watching the agent work", with the five rules in its Recommendation |
 | superpowers/specs/2026-10-19-legible-agent-runs-design.md | Approved (Erick, 2026-10-19), tasks 016 to 020 queued: a finished reply looks finished, a done card, the plan, status and closing-box tools, one block per Keep going run, plain words with a technical tab |
 | superpowers/specs/2026-10-20-rewind-design.md | Approved (Erick's three answers, 2026-10-20; seventh fresh review), task 090 in progress: go back to before a message, files, conversation or both, with redo |
+| research/2026-10-21/catalog-list.md | Catalog step 2 curation completed locally; proof results and remaining native validation |
 | research/ | Measurements, probes and reviews of the day in their name; model names and prices in them go stale fast. The UX, notification and screen-flake reviews of 2026-10-12 live here; their conclusions are in design/ and product/ |
 
 A new spec or plan goes to `superpowers/specs` or `superpowers/plans` with the date in its name and a `Status:` line at the

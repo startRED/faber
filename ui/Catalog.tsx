@@ -1,4 +1,4 @@
-import { createMemo, createSignal, For, onCleanup, onMount, Show } from 'solid-js';
+import { createEffect, createMemo, createSignal, For, onCleanup, onMount, Show } from 'solid-js';
 import { createStore, reconcile } from 'solid-js/store';
 import { api, type Project, type ToolRow, type Vendor } from './api.ts';
 import { Toggle } from './controls.tsx';
@@ -11,7 +11,12 @@ import { keysOf, pressed } from './keys.ts';
 import { Peek } from './Mark.tsx';
 
 const PAGE = 48;
-const starters = new Set(['systematic-debugging', 'ponytail', 'design-taste-frontend']);
+// Preserve the legacy catalog's jobs while presenting a few broad groups.
+const jobs: Record<string, string> = {
+  debugging: 'code', testing: 'code', lean: 'code', architecture: 'code', mcp: 'code', skills: 'code', performance: 'code',
+  payments: 'services', platform: 'services', auth: 'services', measure: 'services',
+};
+const job = (row: ToolRow) => jobs[row.job] ?? row.job;
 type Filter = 'all' | 'skills' | 'servers' | 'installed';
 const words = (key: string, fallback: string) => key in en ? t(key as Key) : fallback;
 
@@ -60,20 +65,35 @@ export function Catalog(props: { projects: Project[]; projectId?: string; vendor
   };
   window.addEventListener('keydown', key);
   onCleanup(() => { gone = true; window.removeEventListener('keydown', key); });
+  const starters = createMemo(() => {
+    const recommended = rows.filter((row) => row.tier === 'recommended');
+    const seen = new Set<string>();
+    const first = recommended.filter((row) => {
+      const group = job(row);
+      if (seen.has(group)) return false;
+      seen.add(group); return true;
+    });
+    return [...first, ...recommended.filter((row) => !first.includes(row))].slice(0, 12);
+  });
   const matching = createMemo(() => {
     const text = query().trim().toLocaleLowerCase();
-    return rows.filter((row) => (filter() !== 'skills' || !row.server) && (filter() !== 'servers' || row.server)
+    const list = filter() === 'all' && !text ? [...starters(), ...rows.filter((row) => !starters().includes(row))] : rows;
+    return list.filter((row) => (filter() !== 'skills' || !row.server) && (filter() !== 'servers' || row.server)
       && (filter() !== 'installed' || row.installed)
-      && (!text || `${row.id} ${row.repo} ${words(`tools.${row.id}`, row.id)} ${words(`catalog.job.${row.job}`, row.job)}`.toLocaleLowerCase().includes(text)));
+      && (!text || `${row.id} ${row.repo} ${words(`tools.${row.id}`, row.id)} ${words(`catalog.job.${row.job}`, row.job)} ${words(`catalog.job.${job(row)}`, job(row))}`.toLocaleLowerCase().includes(text)));
+  });
+  createEffect(() => {
+    const last = Math.max(0, Math.ceil(matching().length / PAGE) - 1);
+    if (page() > last) setPage(last);
   });
   const visible = () => matching().slice(page() * PAGE, (page() + 1) * PAGE);
   const groups = createMemo(() => {
     const list = visible();
-    const good = filter() === 'all' && !query().trim() && page() === 0 ? list.filter((r) => starters.has(r.id)) : [];
+    const good = filter() === 'all' && !query().trim() && page() === 0 ? list.filter((r) => starters().includes(r)) : [];
     return [
       ...(good.length ? [{ name: t('catalog.goodStart'), rows: good }] : []),
-      ...[...new Set(list.filter((r) => !good.includes(r)).map((r) => r.job))].map((job) => ({
-        name: words(`catalog.job.${job}`, t('catalog.other')), rows: list.filter((r) => r.job === job && !good.includes(r)),
+      ...[...new Set(list.filter((r) => !good.includes(r)).map(job))].map((group) => ({
+        name: words(`catalog.job.${group}`, t('catalog.other')), rows: list.filter((r) => job(r) === group && !good.includes(r)),
       })),
     ];
   });
@@ -140,9 +160,11 @@ export function Catalog(props: { projects: Project[]; projectId?: string; vendor
           {(row) => <article class="catalog-detail" aria-busy={busy()}>
             <button class="btn" onClick={back}><Icon name="left" small />{t('catalog.back')}</button>
             <h1 ref={(el) => (detail = el)} tabindex="-1">{row().id}</h1>
+            <Show when={row().cliName && row().cliName !== row().id}><p>{t('catalog.cliName', { name: row().cliName! })}</p></Show>
             <p class="catalog-description">{words(`tools.${row().id}`, row().id)}</p>
             <p class="catalog-state">{state(row())}</p>
             <h2>{t('catalog.when')}</h2><p>{t(row().server ? 'catalog.whenServer' : 'catalog.whenSkill')}</p>
+            <Show when={words(`tools.${row().id}.needs`, '')}>{(needs) => <p>{needs()}</p>}</Show>
             <h2>{t('catalog.access')}</h2><p>{t(row().server ? 'catalog.accessServer' : 'catalog.accessSkill')}</p>
             <dl><dt>{t('catalog.source')}</dt><dd><button class="link" onClick={() => void api.openLink(row().home).catch((e) => setError(failureText(e)))}>{row().repo}<Icon name="external" small /></button></dd><dt>{t('catalog.license')}</dt><dd>{row().license}</dd><dt>{t('catalog.version')}</dt><dd class="catalog-version">{row().version}</dd></dl>
             <p class="hint">{t('catalog.safeInstall')}</p>

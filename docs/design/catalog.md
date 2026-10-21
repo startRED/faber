@@ -7,8 +7,13 @@ controls out of Settings > Projects. It is not a work area: no conversation, com
 
 Search is the main action, focused with the shared Ctrl+F (Command+F on macOS) from `ui/keys.ts`, also named in the
 shortcut sheet. All, Skills, Tool servers and Installed are native pressed buttons;
-Plugins joins when plugin installation ships. A short Good start group contains debugging, simple code and interface
-design; remaining cards are grouped by the catalog's job, with plain names in all five languages. Each item appears
+Plugins joins when plugin installation ships; the twenty inventoried plugins have no placeholder cards. The catalog has
+114 skills and one unchanged server. Good start offers debugging, simple code and interface design, plus general everyday skills.
+Its ten recommended-tier entries include the original debugging, test-driven development, ponytail and interface
+design entry points; area-specific tools and ponytail-debt stay under their job groups. Its picks move to the front before paging, so
+recommendations outside the first source page are reachable and no item repeats on a later page. The ten plain groups
+are code, interface design, planning, data, web services/payments, mobile apps, notes/research/writing, marketing,
+building games and game design. Legacy job identifiers stay intact; browsing merges their narrower groups. Each item appears
 once. Cards name the item, describe its job, name owner/repo and licence, and state whether it is installed/on/off or
 needs Node. Search includes the name, job, description and repository. Empty searches and first-run installs have calm
 plain words. Installed search matches personal/project skills, plugin records and reported servers as well as catalog
@@ -16,6 +21,7 @@ cards; its empty state waits for the full selected snapshot. Download failures k
 uses the local catalog even offline. The sidebar keeps New conversation in place while Catalog is open, so tabs never
 jump under the pointer. The command box includes Go to Catalog and calls the same navigation as the sidebar. Its running
 action returns to the previous work area and shows the column, including when it was already open behind Catalog.
+When removal empties the last Installed page, the list returns to its last remaining page instead of leaving a blank list.
 
 Cards use the look's surface, ink, line and radius tokens. Hover changes surface and border only; press changes the same
 properties, with no travel, scaling or blur. Reduced/no motion removes the transition. At 720 px cards become one column,
@@ -25,7 +31,9 @@ focus trap and Escape close. Heading focus enters the same-tab detail; Back and 
 ## Detail and actions
 
 Detail names what the item does, when the agent can use it, access implications, source repository, licence and pinned
-commit/package version. Repository and Node download links open through the existing checked system-browser command.
+commit/package version. New items with prerequisites name them in the five locales, under usage and before Install;
+these are requirements for use, not a second installer. When the pinned SKILL.md name differs from the card id,
+one localized “Name in the AI tool” line shows it before installation. Repository and Node download links open through the existing checked system-browser command.
 Skills guide the agent's existing file, command, network and browser powers; they create no new sandbox. The current
 server controls a headless Chrome browser, with Faber's telemetry/update/file-navigation denies preserved.
 
@@ -72,7 +80,8 @@ folder entries/depth and manifest bytes before building its snapshot. CPU work i
 open/project/action. Filesystem commands run on blocking workers rather than the window's command thread. Inventory
 returns an unavailable state within two seconds; one scanner owns its permit until it actually finishes, even after
 timeout, so retries cannot accumulate stalled readers. Disk cost includes disabled items and the latest Undo copy.
-Actual working-set/CPU
+Metadata is capped at 36 KiB; stored job limits are 32 for building games, 11 for marketing, 23 for game design
+and 14 for any remaining job, checked in engine tests. Only metadata and localized words ship. Actual working-set/CPU
 measurements and the native screen suite belong to the lead's unsandboxed validation; no measured saving is claimed.
 
 Checks: `tests/ui/catalog.check.ts`, `engine/tests/tools.rs`, `engine/tests/tool_inventory.rs`, and existing MCP checks.

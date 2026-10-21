@@ -14,10 +14,16 @@ use std::sync::{Mutex, OnceLock};
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct Item {
-    /// The skill's folder name, which is also its name in both CLIs.
+    /// The skill's folder name in Faber's store.
     pub id: String,
+    /// The pinned SKILL.md name when it differs from the catalog id.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cli_name: Option<String>,
     /// What it is for, as a key of the screen's words (`tools.job.<job>`).
     pub job: String,
+    /// Browsing recommendation only; it never installs or enables a tool.
+    #[serde(default)]
+    pub tier: Tier,
     /// The SPDX licence of its repository, shown before it installs.
     pub license: String,
     /// `owner/name` on GitHub.
@@ -43,6 +49,14 @@ pub struct Server {
     pub entry: String,
     pub args: Vec<String>,
     pub env: BTreeMap<String, String>,
+}
+
+#[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub enum Tier {
+    Recommended,
+    #[default]
+    More,
 }
 
 impl Item {
@@ -857,7 +871,9 @@ mod tests {
     fn item(digest: &str) -> Item {
         Item {
             id: "tidy".into(),
+            cli_name: None,
             job: "debugging".into(),
+            tier: Tier::More,
             license: "MIT".into(),
             repo: "owner/repo".into(),
             commit: "abc".into(),
@@ -1049,7 +1065,9 @@ mod tests {
         std::fs::write(d.path().join("package.json"), b"{}").unwrap();
         Item {
             id: "measure".into(),
+            cli_name: None,
             job: "measure".into(),
+            tier: Tier::More,
             license: "Apache-2.0".into(),
             repo: "owner/measure".into(),
             commit: "def".into(),

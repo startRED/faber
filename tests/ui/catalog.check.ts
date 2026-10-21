@@ -1,6 +1,7 @@
 import { createComponent } from 'solid-js';
 import { render } from 'solid-js/web';
 import themes from '../../src-tauri/src/themes.json';
+import catalog from '../../engine/src/tools.json';
 import { api, type AppState, type ToolInventoryList, type ToolRow, type Vendor } from '../../ui/api.ts';
 import { App } from '../../ui/App.tsx';
 import { Catalog } from '../../ui/Catalog.tsx';
@@ -11,8 +12,8 @@ import { check, deepEqual, equal, ok } from './check.ts';
 const tick = () => new Promise<void>((resolve) => setTimeout(resolve, 25));
 const project = { id: 'catalog-project', name: 'Fixture project', path: 'C:/fixture/project' };
 const sample = (): ToolRow[] => [
-  { id: 'systematic-debugging', job: 'debugging', license: 'MIT', repo: 'fixture/debugging', home: 'https://github.com/fixture/debugging', version: 'abc123', installed: false, server: false },
-  { id: 'ponytail', job: 'lean', license: 'MIT', repo: 'fixture/simple', home: 'https://github.com/fixture/simple', version: 'def456', installed: true, enabled: false, server: false },
+  { id: 'systematic-debugging', job: 'debugging', tier: catalog.skills.find((row) => row.id === 'systematic-debugging')!.tier as ToolRow['tier'], license: 'MIT', repo: 'fixture/debugging', home: 'https://github.com/fixture/debugging', version: 'abc123', installed: false, server: false },
+  { id: 'ponytail', job: 'lean', tier: catalog.skills.find((row) => row.id === 'ponytail')!.tier as ToolRow['tier'], license: 'MIT', repo: 'fixture/simple', home: 'https://github.com/fixture/simple', version: 'def456', installed: true, enabled: false, server: false },
   { id: 'chrome-devtools', job: 'measure', license: 'Apache-2.0', repo: 'fixture/browser', home: 'https://github.com/fixture/browser', version: '1.0.0', installed: false, server: true, nodeAvailable: true },
 ];
 const sources: ToolInventoryList[] = [{ vendor: 'claude', rows: [
@@ -71,6 +72,69 @@ check('catalog: search covers translated descriptions and jobs without case, and
     await tap(button(view.root, 'catalog.installed')); equal(cards(view.root).length, 1); equal(cards(view.root)[0].dataset.catalogCard, 'ponytail');
     equal(button(view.root, 'catalog.installed').getAttribute('aria-pressed'), 'true');
     equal(view.calls.list, 1, 'browsing does not reread the store');
+  } finally { view.close(); }
+});
+
+check('catalog: the full curated list pages without duplicates and searches beyond the first page in five languages', async () => {
+  const rows: ToolRow[] = [...catalog.skills, ...catalog.servers].map((item, index) => ({
+    ...item, tier: 'tier' in item ? item.tier as ToolRow['tier'] : 'more',
+    server: 'server' in item, installed: index < 49, home: `https://github.com/${item.repo}`,
+  }));
+  const view = await panel({ rows });
+  try {
+    ok(rows.length > 100, 'exercise the shipped catalog rather than a short synthetic list');
+    const good = [...view.root.querySelectorAll('.catalog-group')].find((group) => group.querySelector('h2')?.textContent === t('catalog.goodStart'))!;
+    const suggestions = cards(good);
+    equal(suggestions.length, 10);
+    ok(suggestions.every((card) => rows.find((row) => row.id === card.dataset.catalogCard)?.tier === 'recommended'));
+    deepEqual(suggestions.map((card) => card.dataset.catalogCard).sort(), [
+      'systematic-debugging', 'test-driven-development', 'ponytail', 'design-taste-frontend',
+      'improve-codebase-architecture', 'grill-me', 'skill-creator', 'emil-design-eng',
+      'break-ui', 'humanizer',
+    ].sort(), 'Good start keeps general coding and everyday skills, including the original entry points');
+    const seen: string[] = [];
+    const pages = Math.ceil(rows.length / 48);
+    for (let page = 0; page < pages; page++) {
+      const pageCards = cards(view.root);
+      equal(pageCards.length, Math.min(48, rows.length - page * 48));
+      seen.push(...pageCards.map((card) => card.dataset.catalogCard!));
+      equal(button(view.root, 'catalog.previous').disabled, page === 0);
+      equal(button(view.root, 'catalog.next').disabled, page === pages - 1);
+      if (page < pages - 1) await tap(button(view.root, 'catalog.next'));
+    }
+    equal(new Set(seen).size, rows.length, 'each item appears on exactly one page');
+    deepEqual([...seen].sort(), rows.map((row) => row.id).sort());
+    const target = rows.find((row) => row.id === 'flutter-apply-architecture-best-practices')!;
+    for (const language of ['en', 'pt-BR', 'es', 'fr', 'de'] as const) {
+      useLanguage(language);
+      for (const query of [target.id.toUpperCase(), t(`tools.${target.id}` as Key).toUpperCase()]) {
+        search(view.root, query); await tick();
+        equal(cards(view.root).length, 1);
+        equal(cards(view.root)[0].dataset.catalogCard, target.id, 'search reaches items beyond the first page');
+        equal(view.root.querySelector('.catalog-pages'), null, 'search resets pagination');
+      }
+    }
+    search(view.root, ''); await tap(button(view.root, 'catalog.skills'));
+    equal(cards(view.root).length, 48);
+    await tap(button(view.root, 'catalog.servers'));
+    equal(cards(view.root).length, 1); equal(cards(view.root)[0].dataset.catalogCard, 'chrome-devtools');
+    await tap(button(view.root, 'catalog.all'));
+    search(view.root, target.id); await tick(); await tap(cards(view.root)[0]);
+    ok(view.root.textContent?.includes(t(`tools.${target.id}.needs` as Key)), 'prerequisites are readable before installation');
+    await tap(button(view.root, 'catalog.back'));
+    search(view.root, 'pm-sql-queries'); await tick(); await tap(cards(view.root)[0]);
+    ok(view.root.textContent?.includes(t('catalog.cliName', { name: 'sql-queries' })), 'details show the pinned name used by the AI tool');
+    await tap(button(view.root, 'catalog.back'));
+    search(view.root, '');
+    await tap(button(view.root, 'catalog.installed')); await tap(button(view.root, 'catalog.next'));
+    equal(cards(view.root).length, 1);
+    await tap(cards(view.root)[0]);
+    await tap(button(view.root, 'catalog.remove')); await tap(button(view.root, 'catalog.remove'));
+    await tap(button(view.root, 'catalog.back'));
+    equal(cards(view.root).length, 48, 'removing the last item on a page returns to the remaining page');
+    equal(view.root.querySelector('.catalog-pages'), null);
+    equal(view.calls.list, 1, 'filtering and paging keep the one local snapshot');
+    equal(view.calls.inventory, 2, 'only entering Installed and the removal refresh external discovery');
   } finally { view.close(); }
 });
 
