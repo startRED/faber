@@ -1133,6 +1133,7 @@ export function App(props: { initial: AppState; update?: UpdateStatus; inbox: { 
         commandsVersion={commandsVersion()}
         canAside={canAside()}
         onRecap={() => showAside({ conversationId: current()?.id, question: answered(current()) ? t('aside.recapQuestion') : undefined })}
+        canResearch={state().settings.webSearch !== 'off' && state().vendors.length > 0}
         onRestore={(f) => {
           restore = f;
           queueMicrotask(() => current() && restoreRejected(current()!.id, current()!.messages.at(-1)));

@@ -28,7 +28,7 @@ points nowhere; a page that grows past the limit splits by topic, and its row he
 | [design/README.md](design/README.md) | Before any screen change: the design in short, rules for every screen, the first frame, the screen cards |
 | [design/looks.md](design/looks.md) | Themes, presets, colour, type, motion, the one grammar, idle cost, effects |
 | [design/brand.md](design/brand.md) | The mark, the app icon, empty states, brand rules |
-| [design/conversation.md](design/conversation.md) | An open conversation: the answers and their bar, your messages, the viewer, the work log |
+| [design/conversation.md](design/conversation.md) | An open conversation: the answers and their bar, your messages, the viewer, linked research reports and the work log |
 | [design/layout.md](design/layout.md) | Window widths, titlebar, the homes, the running column |
 | [design/chat-groups.md](design/chat-groups.md) | Chat groups, shared instructions and knowledge files |
 | [design/sidebar.md](design/sidebar.md) | Sidebar area lists, pinning, export, archive and footer |

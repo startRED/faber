@@ -719,6 +719,8 @@ pub struct CodexThread {
     pub instructions: Option<String>,
     /// How the user wants to be called; see `ClaudeLaunch::user_name`.
     pub user_name: Option<String>,
+    /// Fixed research instruction alongside the ordinary persona.
+    pub research: Option<crate::persona::Research>,
     /// The person's Chat group words, passed unchanged beside Faber's persona.
     pub group_instructions: Option<String>,
     pub permissions: Permissions,
@@ -1017,7 +1019,7 @@ pub fn thread_params(area: Area, t: &CodexThread) -> (&'static str, Value) {
         params.insert("ephemeral".into(), true.into());
     } else {
         // Developer instructions sit beside Codex's own, so a project keeps its default prompt.
-        let mut words = persona(&PersonaInput { name: t.user_name.as_deref(), tuning: &t.tuning });
+        let mut words = persona(&PersonaInput { name: t.user_name.as_deref(), tuning: &t.tuning, research: t.research });
         if let Some(instructions) = &t.group_instructions {
             words.push_str("\n\nThe person's instructions for this chat group:\n");
             words.push_str(instructions);
@@ -2192,6 +2194,7 @@ mod rewind_tests {
                 effort: None,
                 resume: None,
                 instructions: None,
+                research: None,
                 group_instructions: None,
                 user_name: None,
                 permissions: Permissions::Ask,

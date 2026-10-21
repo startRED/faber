@@ -13,6 +13,14 @@ listed in the Composer row of [product-map.md](../product-map.md); placement fol
   Both lists follow the caret and ignore
   older answers and non-main mouse buttons. A pending request or populated list keeps its arrow keys; a completed
   file or command request with no results releases Up to history, even while its unmatched token remains in the box.
+- `/research` in that same list starts web research in Chat or Projects, with either AI or Auto. Picking it inserts
+  `/research ` without sending or changing Auto; the person adds their question. It is absent when web search is off
+  or no AI is connected; account or installed-tool limitations are left to the CLI to explain. Sending switches to
+  the shared Plan mode and asks for a short numbered research plan, without searching yet. The existing plan card
+  offers Keep planning (then write edits in this composer) or Approve and run with its ordinary permission choice.
+  Approval starts one normal turn, paced by Auto, whose report is the reply's usual Markdown with linked claims and
+  a Sources list ([conversation.md](conversation.md#answers)). No new surface, motion, timer, setting or research loop
+  (`tests/ui/research.check.ts`, `engine/tests/engine.rs`: `research_claude_plan_edit_approve_report`, `research_codex_plan_edit_approve_report`).
 - In both areas, Up in an empty box or with the caret on its first visual line recalls earlier messages, unless an `@` or `/`
   list is open. A temporary mirror copies the textarea's typography, wrapping and content width (excluding its scrollbar);
   the browser's text range measures the caret's line. It is removed in the same call, with no cache or idle work.

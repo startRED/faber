@@ -29,7 +29,7 @@ The visual direction lives in this folder, one page per part ([docs/README.md](.
 
 ## Rules for every screen
 
-The shared message box's lists and earlier messages live in [composer.md](composer.md).
+The shared message box's lists and earlier messages live in [composer.md](composer.md); replies and plan approval in [conversation.md](conversation.md).
 
 - Every text on screen lives in `ui/locales/`, written by hand in each language.
 - Choice buttons use `aria-pressed`, or native radio groups. Switches are native checkboxes. "Open file" is a real

@@ -27,6 +27,8 @@ pub struct ClaudeLaunch {
     /// How the user wants to be called, told to the model once, when the conversation starts (and again, unchanged, each time
     /// it resumes). Ignored for a side question, which has instructions of its own.
     pub user_name: Option<String>,
+    /// Fixed research instruction alongside the ordinary persona.
+    pub research: Option<crate::persona::Research>,
     /// The person's Chat group words, passed unchanged beside Faber's persona.
     pub group_instructions: Option<String>,
     /// What the installed CLI is known to accept (see `ClaudeFlags`); the default passes none of the newer flags.
@@ -362,7 +364,7 @@ pub fn claude_args(launch: &ClaudeLaunch) -> Vec<String> {
     }
     if launch.instructions.is_none() && !aside {
         args.push("--append-system-prompt".into());
-        let mut words = persona(&PersonaInput { name: launch.user_name.as_deref(), tuning: &launch.tuning });
+        let mut words = persona(&PersonaInput { name: launch.user_name.as_deref(), tuning: &launch.tuning, research: launch.research });
         if let Some(instructions) = &launch.group_instructions {
             words.push_str("\n\nThe person's instructions for this chat group:\n");
             words.push_str(instructions);
@@ -1167,6 +1169,7 @@ mod allow_tests {
             user_hooks: false,
             permissions: Permissions::Ask,
             instructions: None,
+            research: None,
             group_instructions: None,
             user_name: None,
             flags: Default::default(),

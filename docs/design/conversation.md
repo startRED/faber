@@ -69,6 +69,11 @@ above an answer. The window widths, the sidebar and the running column are in [l
   them (menu motion), and it puts them in the message box as a quote. Scrolled up, a "Jump to latest" button floats at
   the foot of the thread and scrolls down smoothly.
 - There is no permission sentence over a conversation: the mode is a Settings matter.
+- A report requested with `/research` uses this same reply, with Markdown links beside its claims and a Sources list
+  at the end. Its planning step uses the shared plan approval card above; Keep planning leaves edits to the composer.
+  Retry keeps the report's approved research context; a later ordinary message uses ordinary instructions,
+  without interrupting another Codex conversation underway.
+  Web searches remain ordinary work-log chips. There is no separate report surface (`tests/ui/research.check.ts`).
 - Keep going (R199): the chip, its quiet lines, its quota warning and what it shows on coming back are in
   [keep-going.md](keep-going.md).
 - A project reply that opened, queued or pushed a pull request ends with one pace-style line (R200): its words ("Following

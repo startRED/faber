@@ -452,6 +452,7 @@ mod tests {
                 resumed: false,
                 permissions: Permissions::Ask,
                 tuning: Default::default(),
+                research: None,
                 retiring: false,
                 was_idle: false,
                 runs: Permissions::Ask,

@@ -180,7 +180,7 @@ impl Core {
 
     /// Sends the agent's brief as the new conversation's first message.
     fn launch_sibling(&mut self, id: &str, req: SendRequest) -> Result<(), String> {
-        match self.send(req) {
+        match self.send(req, None) {
             Ok(_) => {
                 // The agent's brief is never the person's own turn, whatever model it runs: billing stops it like a helper. A
                 // message the person writes to the conversation later is theirs.

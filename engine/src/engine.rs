@@ -55,6 +55,7 @@ mod plan;
 mod pr_watch;
 mod quota_watch;
 mod recovery;
+mod research;
 mod rewind;
 mod siblings;
 mod stuck_watch;
@@ -240,6 +241,7 @@ struct Live {
     permissions: Permissions,
     /// What the web and Codex settings were when the process started (R140).
     tuning: Tuning,
+    research: Option<crate::persona::Research>,
     /// A settings change replaces this session once its scheduled work ends.
     retiring: bool,
     /// Arms the idle timer once per idle period when the running state is refreshed.
@@ -1619,15 +1621,12 @@ impl Core {
                 .codex
                 .keys()
                 .filter(|(area, _, p)| {
-                    // A loaded Codex thread ignores resume overrides: use a fresh server without stopping its active peers.
                     *p != Permissions::Isolated && (*area == Area::Project || settings.permissions != before.permissions || tuned)
                 })
                 .copied()
                 .collect();
             for key in stale {
-                if let Some(server) = self.codex.remove(&key) {
-                    server.retire();
-                }
+                self.retire_codex_server(key);
             }
         }
         (self.emit)(AppEvent::Settings { settings: settings.clone() });
@@ -2478,7 +2477,8 @@ impl Core {
         // Steering waits behind nothing: a message that is already queued would be passed by one sent straight in. A reply whose
         // agent already finished takes nothing in: the message waits for the CLI to close the turn and goes out as the next one.
         let finished = c.messages.last().is_some_and(|m| m.role == Role::Assistant && m.finished_at.is_some());
-        let steer = !finished
+        let steer = research::question(&item.text).is_none()
+            && !finished
             && !c.stopped
             && c.queued.iter().all(|q| q.sending)
             && self.live.get(id).is_some_and(|l| l.turn.is_some() && [l.vendor.name(), "auto"].contains(&item.choice.vendor.as_str()));
@@ -2526,7 +2526,7 @@ impl Core {
                 }
             })
             .collect();
-        recovery::with_attachments(&item.text, area, &shown)
+        recovery::with_attachments(research::question(&item.text).unwrap_or(&item.text), area, &shown)
     }
 
     /// The CLI took the oldest message handed to the running turn in (or the one named): it joins the conversation, and the
@@ -2643,6 +2643,7 @@ impl Core {
         if text.trim().is_empty() {
             return Err("error.queueEmpty".into());
         }
+        self.validate_research(text)?;
         let c = self.convs.get_mut(id).ok_or("error.conversationGone")?;
         let item = c.queued.iter_mut().find(|q| q.id == turn_id && !q.sending).ok_or("error.queueChanged")?;
         item.text = text.into();
@@ -2681,7 +2682,7 @@ impl Core {
                 c.send_after_stop = Some(item.id.clone());
             }
             // One for the other AI cannot go into this turn: it goes first among those that wait.
-            if !stopped && [vendor, "auto"].contains(&item.choice.vendor.as_str()) {
+            if !stopped && research::question(&item.text).is_none() && [vendor, "auto"].contains(&item.choice.vendor.as_str()) {
                 self.steer(id, &mut item);
             }
             if let Some(c) = self.convs.get_mut(id) {
@@ -2784,6 +2785,10 @@ impl Core {
         self.save(id);
         self.list_changed();
         self.emit_message(id, &question_id);
+        if let Err(error) = self.prepare_research(&item.text) {
+            self.fail_reply(id, &reply_id, error.clone());
+            return Err(error);
+        }
         let images = item.images.unwrap_or_default();
         let attachments_len = item.attachments.as_ref().map_or(0, |a| a.len());
         self.transfers.insert(
@@ -2895,6 +2900,19 @@ impl Core {
             tools.servers.clear();
         }
         tools
+    }
+
+    /// A loaded Codex thread ignores resume overrides: use a fresh server without stopping its active peers.
+    fn retire_codex_server(&mut self, key: (Area, bool, Permissions)) {
+        if let Some(server) = self.codex.remove(&key) {
+            // Its peers keep scheduled work, then close through the settings change's ordinary idle path.
+            for (id, live) in &mut self.live {
+                if live.vendor == Vendor::Codex && live.permissions == key.2 && self.convs.get(id).is_some_and(|c| c.area == key.0) {
+                    live.retiring = true;
+                }
+            }
+            server.retire();
+        }
     }
 
     /// The shared Codex process for an area, hooks choice and permissions, started again if it died.
@@ -3034,6 +3052,7 @@ impl Core {
         let cli = self.opts.clis.get(&pick.vendor).cloned();
         let settings = self.store.settings();
         let (permissions, tuning) = (settings.permissions(), settings.tuning());
+        let research = self.convs.get(conv).and_then(|c| research::phase(&c.messages, permissions));
         let flags = match &cli {
             Some(cli) if pick.vendor == Vendor::Claude => self.claude_flags_for(cli),
             _ => Default::default(),
@@ -3059,6 +3078,7 @@ impl Core {
                 && l.effort == pick.effort
                 && Some(&l.cli) == cli.as_ref()
                 && l.permissions == permissions
+                && l.research == research
                 && l.tuning == tuning
                 && l.runs == runs
                 && l.cwd == cwd
@@ -3067,8 +3087,14 @@ impl Core {
                 l.used = self.tick; // most recently used
                 return Ok(());
             }
+            let research_backend = (l.vendor == Vendor::Codex && l.research != research)
+                .then_some((settings.user_hooks() && l.permissions.guarded(), l.permissions));
             if let Some(l) = self.retire(conv) {
                 l.session.retire();
+            }
+            if let Some((user_hooks, permissions)) = research_backend {
+                let area = self.convs.get(conv).ok_or("error.conversationGone")?.area;
+                self.retire_codex_server((area, user_hooks, permissions));
             }
         }
         let c = self.convs.get(conv).ok_or("error.conversationGone")?;
@@ -3144,6 +3170,7 @@ impl Core {
                         user_hooks,
                         permissions,
                         instructions: None,
+                        research,
                         group_instructions,
                         user_name,
                         flags,
@@ -3167,6 +3194,7 @@ impl Core {
                     effort,
                     resume,
                     instructions: None,
+                    research,
                     group_instructions,
                     user_name,
                     permissions,
@@ -3195,6 +3223,7 @@ impl Core {
                 resumed,
                 permissions,
                 tuning,
+                research,
                 retiring: false,
                 was_idle: false,
                 runs,
@@ -3279,10 +3308,11 @@ impl Core {
         id
     }
 
-    fn send(&mut self, req: SendRequest) -> Result<String, String> {
+    fn send(&mut self, req: SendRequest, wake: Option<Wake>) -> Result<String, String> {
         if self.installing {
             return Err("error.update.activeOperations".into());
         }
+        self.validate_research(&req.text)?;
         let req = self.own_cli(req);
         let fallback = pick_model(&req.choice, &self.vendors(), self.codex_recommended.as_deref()).ok_or("error.noSubscription")?;
         let existing = req.conversation_id.as_deref().and_then(|id| self.load(id).map(|c| c.id.clone()));
@@ -3305,6 +3335,7 @@ impl Core {
             return self.enqueue(id, req);
         }
         // Decided under the lock that takes the draft, so the copy is made for the conversation the message goes to.
+        self.prepare_research(&req.text)?;
         let plan = self.copy_plan(&req);
         let draft = self.draft.clone().filter(|d| self.convs.get(d).is_some_and(|c| c.area == req.area && c.project_id == req.project_id));
         let id = match existing {
@@ -3365,8 +3396,9 @@ impl Core {
             .iter()
             .map(|p| if c.area == Area::Chat { format!("attachments/{}", name(p)) } else { p.to_string_lossy().into_owned() })
             .collect();
-        let text = recovery::with_attachments(&req.text, c.area, &shown);
+        let text = recovery::with_attachments(research::question(&req.text).unwrap_or(&req.text), c.area, &shown);
         let mut question = Message::new(new_id(), Role::User, req.text.clone(), at);
+        question.wake = wake;
         question.images = (!req.images.is_empty()).then(|| req.images.clone());
         question.attachments = Some(saved.iter().map(|p| name(p)).collect());
         let mut reply = Message::new(new_id(), Role::Assistant, String::new(), at);
@@ -3506,6 +3538,10 @@ impl Core {
         // The resend carries what the selected message carried: its images and attached files. A chat workspace copy already
         // holds the files, so they are taken out of it and saved again under the same names by the send.
         let picked = &source.messages[at];
+        // Retry keeps research approval metadata, without treating edited prompts or ordinary plan retries as research.
+        let wake = picked.wake.clone().filter(|_| {
+            req.text == picked.text && research::phase(&source.messages[..=at], Permissions::Ask) == Some(crate::persona::Research::Report)
+        });
         let images = picked.images.clone().unwrap_or_default();
         let kept =
             if source.area == Area::Chat { from.join("attachments") } else { self.opts.data_dir.join("attachments").join(&source.id) };
@@ -3522,15 +3558,18 @@ impl Core {
             })
             .collect();
         self.save(&id);
-        self.send(SendRequest {
-            conversation_id: Some(id),
-            area: source.area,
-            project_id: source.project_id,
-            text: req.text,
-            images,
-            files,
-            choice: req.choice,
-        })
+        self.send(
+            SendRequest {
+                conversation_id: Some(id),
+                area: source.area,
+                project_id: source.project_id,
+                text: req.text,
+                images,
+                files,
+                choice: req.choice,
+            },
+            wake,
+        )
     }
 
     // Starts the CLI before the user finishes typing, so the first word arrives sooner.
@@ -3874,6 +3913,7 @@ mod tool_in_tests {
                         resumed: false,
                         permissions: Permissions::Ask,
                         tuning: Default::default(),
+                        research: None,
                         retiring: false,
                         was_idle: false,
                         runs: Permissions::Ask,

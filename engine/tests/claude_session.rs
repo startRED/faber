@@ -57,6 +57,7 @@ fn launch(area: Area) -> ClaudeLaunch {
         resume: None,
         user_hooks: false,
         instructions: None,
+        research: None,
         user_name: None,
         group_instructions: None,
         permissions: Permissions::Ask,

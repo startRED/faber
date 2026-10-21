@@ -162,6 +162,7 @@ mod tests {
                     cwd: ".".into(),
                     permissions: crate::model::Permissions::Ask,
                     tuning: Default::default(),
+                    research: None,
                     retiring: false,
                     was_idle: false,
                     runs: crate::model::Permissions::Ask,

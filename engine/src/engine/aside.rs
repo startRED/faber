@@ -107,6 +107,7 @@ impl Core {
                         user_hooks: false,
                         // Every read is checked by the driver with the working-folder policy (see `claude_args`).
                         permissions: Permissions::Isolated,
+                        research: None,
                         user_name: None,
                         group_instructions: None,
                         flags: self.claude_flags_for(&cli),
@@ -132,6 +133,7 @@ impl Core {
                     effort,
                     resume: None,
                     instructions: Some(RECORDED.to_string()),
+                    research: None,
                     user_name: None,
                     group_instructions: None,
                     permissions: Permissions::Isolated,

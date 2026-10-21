@@ -62,9 +62,11 @@ interface Props {
   /** The open conversation offers Faber's `/btw` and `/recap` before the agent's commands. */
   canAside?: boolean;
   onRecap?: () => void;
+  /** Web search is enabled; other capability limits are known only to the CLI. */
+  canResearch?: boolean;
 }
 
-type Completion = { path: string; dir: boolean; command?: Command; aside?: 'btw' | 'recap'; history?: boolean };
+type Completion = { path: string; dir: boolean; command?: Command; aside?: 'btw' | 'recap'; research?: boolean; history?: boolean };
 type Trigger = { at: number; query: string; kind: 'mention' | 'command' | 'history' };
 
 /** The `@` being typed at the caret: where it starts and what follows it, or undefined. A path with a space is written
@@ -345,6 +347,7 @@ export function Composer(props: Props) {
             && !(canAside && ['btw', 'recap'].includes(c.name.toLowerCase())))
           .sort((a, b) => Number(b.name.toLowerCase().startsWith(query)) - Number(a.name.toLowerCase().startsWith(query)))
           .map((command) => ({ path: `${command.vendor === 'claude' ? '/' : '$'}${command.name}`, dir: false, command }));
+        if (props.canResearch && 'research'.includes(query)) list.unshift({ path: '/research', dir: false, research: true });
         if (canAside) {
           if ('recap'.includes(query)) list.unshift({ path: '/recap', dir: false, aside: 'recap' });
           if ('btw'.includes(query)) list.unshift({ path: '/btw', dir: false, aside: 'btw' });
@@ -355,10 +358,11 @@ export function Composer(props: Props) {
     }, 60);
   };
   // Refresh only when these values change, not when their callers reread a streaming conversation or a model choice.
+  const researchAvailable = createMemo(() => !!props.canResearch);
   const asideAvailable = createMemo(() => !!props.canAside);
   const commandVendor = createMemo(() => props.choice.vendor);
   const commandsVersion = createMemo(() => props.commandsVersion);
-  createEffect(on(() => [asideAvailable(), commandVendor(), commandsVersion()], () => {
+  createEffect(on(() => [asideAvailable(), researchAvailable(), commandVendor(), commandsVersion()], () => {
     if (mention?.kind !== 'command' || !field) return;
     closeMentions();
     lookForMention(field);
@@ -393,7 +397,7 @@ export function Composer(props: Props) {
     }
     field.focus();
     field.setSelectionRange(at, field.selectionStart ?? field.value.length);
-    const words = m.command || m.aside ? `${m.path} ` : mentionText(m.path, m.dir);
+    const words = m.command || m.aside || m.research ? `${m.path} ` : mentionText(m.path, m.dir);
     if (!document.execCommand('insertText', false, words)) {
       const text = field.value;
       field.value = text.slice(0, field.selectionStart) + words + text.slice(field.selectionEnd);
@@ -627,9 +631,9 @@ export function Composer(props: Props) {
                 }}
                 onMouseMove={() => setActive(i())}
               >
-                <Icon name={m.command || m.aside ? 'terminal' : m.dir ? 'folder' : 'sheet'} small />
+                <Icon name={m.command || m.aside || m.research ? 'terminal' : m.dir ? 'folder' : 'sheet'} small />
                 <span>{m.path}</span>
-                <Show when={m.aside || m.command?.note}><span class="mention-note">{m.aside ? t(m.aside === 'recap' ? 'aside.recap' : 'aside.title') : m.command!.note}</span></Show>
+                <Show when={m.aside || m.research || m.command?.note}><span class="mention-note">{m.aside ? t(m.aside === 'recap' ? 'aside.recap' : 'aside.title') : m.research ? t('composer.research') : m.command!.note}</span></Show>
                 <Show when={m.command && mixedCommands()}>
                   <span class="mention-vendor">{t('composer.commandAgent', { name: vendorName(m.command!.vendor) })}</span>
                 </Show>

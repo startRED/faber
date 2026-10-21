@@ -52,7 +52,7 @@ impl Engine {
     /// Sends a message. A project conversation's copy is made after the message is recorded, away from the lock, and the
     /// answer starts once it is there (`Core::hold_for_copy`), so the screen never waits for git.
     pub fn send(&self, req: SendRequest) -> Result<String, String> {
-        self.with(|c| c.send(req))
+        self.with(|c| c.send(req, None))
     }
 
     /// Edits a message or redoes an answer as a new conversation; in a project it gets a copy of its own, from the

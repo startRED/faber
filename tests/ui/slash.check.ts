@@ -21,7 +21,7 @@ check('slash: App uses each AI\'s own or last list, refreshes on announcements a
   const initial = {
     conversations: [{ id: conversation.id, title: conversation.title, area: conversation.area, updatedAt: 1 }], projects: [],
     vendors: ['claude', 'codex'], models: [{ id: 'test-model', label: 'Test model', isDefault: true }],
-    settings: { setup: 'done', tutorialDone: true, language: 'en', appearance: { base: 'sala' } },
+    settings: { setup: 'done', tutorialDone: true, language: 'en', webSearch: 'off', appearance: { base: 'sala' } },
     running: { revision: 0, items: [] }, quotas: [], usage: [], version: 'test',
     look: {
       vars: {}, scheme: 'dark', motion: 'none', checks: [], notices: [], effects: { ambient: false, texture: false, glow: false },

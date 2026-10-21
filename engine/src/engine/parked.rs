@@ -122,6 +122,7 @@ mod tests {
                     resumed: false,
                     permissions: Permissions::FullAccess,
                     tuning: Default::default(),
+                    research: None,
                     retiring: false,
                     was_idle: false,
                     runs: Permissions::FullAccess,

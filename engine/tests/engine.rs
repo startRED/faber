@@ -589,6 +589,236 @@ async fn archiving_a_pinned_conversation_removes_its_pin_and_unarchive_does_not_
     engine.shutdown();
 }
 
+/// Task 300: fake recordings exercise the real persona, queue and plan approval paths for both drivers.
+async fn research_plan_edit_approve_report(vendor: Vendor, area: Area) -> (tempfile::TempDir, faber_engine::model::Conversation) {
+    let dir = tempfile::tempdir().unwrap();
+    let planning = fake(fixture(vendor.name(), "research-plan"));
+    let report = fake(fixture(vendor.name(), "research-report"));
+    let (first, next) = (planning.spawn.clone(), report.spawn.clone());
+    let calls = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+    let count = calls.clone();
+    let spawn: Spawner =
+        Arc::new(
+            move |bin, args, cwd| {
+                if count.fetch_add(1, std::sync::atomic::Ordering::SeqCst) == 0 { first(bin, args, cwd) } else { next(bin, args, cwd) }
+            },
+        );
+    let (engine, _) = engine(dir.path(), vendor, spawn);
+    engine.save_settings(Settings { permissions: Some(Permissions::Ask), ..Settings::default() }).unwrap();
+    let folder = project_folder();
+    let project_id = (area == Area::Project).then(|| engine.add_project(&folder.path().to_string_lossy()).unwrap().id);
+    let request = |id: Option<String>, text: &str| SendRequest {
+        conversation_id: id,
+        project_id: project_id.clone(),
+        ..ask(area, text, choice(vendor.name(), None))
+    };
+    let id = engine.send(request(None, "/research Which batteries last longer?")).unwrap();
+    let has_card = |c: &faber_engine::model::Conversation| {
+        c.messages.last().is_some_and(|m| m.permissions.iter().flatten().any(|p| p.tool == "ExitPlanMode"))
+    };
+    let initial = until(&engine, &id, has_card).await;
+    assert_eq!(engine.settings().permissions, Some(Permissions::Plan));
+    assert!(initial.messages[0].text.starts_with("/research "), "the person's command is kept unchanged");
+    let reply = initial.messages.last().unwrap();
+    let card = &reply.permissions.as_ref().unwrap()[0];
+    assert_eq!(card.input["mode"], "ask", "research cannot loosen the card's default");
+    engine.approve_plan(&id, &reply.id, &card.request_id, None).await.unwrap();
+    until(&engine, &id, |c| c.messages.last().is_some_and(|m| m.status == Some(Status::Done))).await;
+    assert_eq!(calls.load(std::sync::atomic::Ordering::SeqCst), 1, "Keep planning starts no research turn");
+    engine.send(request(Some(id.clone()), "Compare cold-weather tests and official specifications instead.")).unwrap();
+    let edited = until(&engine, &id, |c| c.messages.len() == 4 && has_card(c)).await;
+    let reply = edited.messages.last().unwrap();
+    let card = &reply.permissions.as_ref().unwrap()[0];
+    let shown = if vendor == Vendor::Claude { card.input["plan"].as_str().unwrap() } else { &reply.text };
+    assert!(shown.contains("cold-weather battery tests"), "the edited plan reaches the same card");
+    engine.approve_plan(&id, &reply.id, &card.request_id, Some(Permissions::Ask)).await.unwrap();
+    let done = until(&engine, &id, |c| c.messages.len() == 6 && c.messages.last().is_some_and(|m| m.status == Some(Status::Done))).await;
+    assert_eq!(engine.settings().permissions, Some(Permissions::Ask));
+    let answer = done.messages.last().unwrap();
+    assert!(answer.text.contains("[Test lab](https://example.org/tests)"));
+    assert!(answer.text.contains("[Manufacturer](https://example.org/specs)"));
+    assert!(answer.text.contains("## Sources"));
+    assert_eq!(
+        answer
+            .tools
+            .as_ref()
+            .unwrap()
+            .iter()
+            .filter(|t| t.name == if vendor == Vendor::Claude { "WebSearch" } else { "webSearch" })
+            .count(),
+        2
+    );
+    assert_eq!(calls.load(std::sync::atomic::Ordering::SeqCst), 2, "only planning and approved research sessions");
+    if vendor == Vendor::Claude {
+        for (f, phase) in [(&planning, "Do not search yet."), (&report, "Search the web over many steps")] {
+            let args = f.args.lock().unwrap();
+            let persona = args[0].windows(2).find(|pair| pair[0] == "--append-system-prompt").unwrap();
+            assert!(persona[1].contains(phase));
+            assert!(persona[1].contains("You are Faber"));
+        }
+        assert!(planning.args.lock().unwrap()[0].windows(2).any(|pair| pair == ["--permission-mode", "plan"]));
+        assert!(report.args.lock().unwrap()[0].windows(2).any(|pair| pair == ["--permission-mode", "default"]));
+    } else {
+        for (f, phase) in [(&planning, "Do not search yet."), (&report, "Search the web over many steps")] {
+            let wire = f.wire.messages();
+            let thread = wire.iter().find(|m| m["method"] == "thread/start" || m["method"] == "thread/resume").unwrap();
+            let persona = thread["params"]["developerInstructions"].as_str().unwrap();
+            assert!(persona.contains(phase));
+            assert!(persona.contains("You are Faber"));
+        }
+        let plans: Vec<_> = planning.wire.messages().into_iter().filter(|m| m["method"] == "turn/start").collect();
+        assert_eq!(plans.len(), 2);
+        assert!(plans.iter().all(|m| m["params"]["collaborationMode"]["mode"] == "plan"));
+        assert_eq!(
+            report.wire.messages().into_iter().find(|m| m["method"] == "turn/start").unwrap()["params"]["collaborationMode"]["mode"],
+            "default"
+        );
+    }
+    assert!(planning.mismatches.lock().unwrap().is_empty(), "{:?}", planning.mismatches.lock().unwrap());
+    assert!(report.mismatches.lock().unwrap().is_empty(), "{:?}", report.mismatches.lock().unwrap());
+    engine.shutdown();
+    let (reopened, _) = self::engine(dir.path(), vendor, fake(vec![]).spawn);
+    assert_eq!(reopened.open(&id).unwrap().messages.last().unwrap().text, answer.text, "ordinary replies retain source links on disk");
+    reopened.shutdown();
+    (dir, done)
+}
+
+async fn research_retry_report_keeps_instructions(vendor: Vendor) {
+    let (dir, source) = research_plan_edit_approve_report(vendor, Area::Chat).await;
+    let prompt = &source.messages[4];
+    let text = faber_engine::engine::with_history(&source.messages[..4], &prompt.text, &str::to_owned);
+    let mut recording = fixture(vendor.name(), "research-report");
+    for entry in &mut recording {
+        if entry.msg["method"] == "thread/resume" {
+            entry.msg["method"] = "thread/start".into();
+        }
+        if entry.input && entry.msg["type"] == "user" {
+            entry.msg["message"]["content"] = text.clone().into();
+        }
+        if entry.msg["method"] == "turn/start" {
+            entry.msg["params"]["input"][0]["text"] = text.clone().into();
+        }
+    }
+    let f = fake(recording);
+    let (engine, _) = engine(dir.path(), vendor, f.spawn.clone());
+    let id = engine
+        .branch(BranchRequest {
+            conversation_id: source.id.clone(),
+            message_id: prompt.id.clone(),
+            text: prompt.text.clone(),
+            choice: choice(vendor.name(), None),
+        })
+        .unwrap();
+    let retried = until(&engine, &id, |c| c.messages.last().is_some_and(|m| m.status == Some(Status::Done))).await;
+    let persona = if vendor == Vendor::Claude {
+        f.args.lock().unwrap()[0].windows(2).find(|a| a[0] == "--append-system-prompt").unwrap()[1].clone()
+    } else {
+        f.wire.messages().iter().find(|m| m["method"] == "thread/start").unwrap()["params"]["developerInstructions"]
+            .as_str()
+            .unwrap()
+            .to_string()
+    };
+    assert!(persona.contains("Search the web over many steps"), "Retry must keep the research instruction for {vendor:?}");
+    assert!(persona.contains("Sources list"), "Retry must keep the citation instruction for {vendor:?}");
+    assert_eq!(retried.messages[4].wake, prompt.wake);
+    assert_eq!(engine.settings().permissions, Some(Permissions::Ask), "Retry cannot loosen permissions");
+    assert!(retried.messages.last().unwrap().text.contains("[Test lab](https://example.org/tests)"));
+    assert!(f.mismatches.lock().unwrap().is_empty(), "{:?}", f.mismatches.lock().unwrap());
+    engine.shutdown();
+
+    // A restart must retain the retry's context, without making a later ordinary message another research turn.
+    let mut recording = fixture(vendor.name(), "chat");
+    for entry in &mut recording {
+        if entry.msg["method"] == "thread/start" {
+            entry.msg["method"] = "thread/resume".into();
+        }
+    }
+    let f = fake(recording);
+    let (engine, _) = self::engine(dir.path(), vendor, f.spawn.clone());
+    engine.send(SendRequest { conversation_id: Some(id.clone()), ..ask(Area::Chat, SKY, choice(vendor.name(), None)) }).unwrap();
+    let ordinary =
+        until(&engine, &id, |c| c.messages.len() == 8 && c.messages.last().is_some_and(|m| m.status == Some(Status::Done))).await;
+    let persona = if vendor == Vendor::Claude {
+        f.args.lock().unwrap()[0].windows(2).find(|a| a[0] == "--append-system-prompt").unwrap()[1].clone()
+    } else {
+        f.wire.messages().iter().find(|m| m["method"] == "thread/resume").unwrap()["params"]["developerInstructions"]
+            .as_str()
+            .unwrap()
+            .to_string()
+    };
+    assert!(!persona.contains("Search the web over many steps"));
+    assert!(!persona.contains("Do not search yet."));
+    assert!(ordinary.messages[6].wake.is_none());
+    assert_eq!(engine.open(&source.id).unwrap().messages, source.messages, "Retry leaves the original report untouched");
+    assert!(f.mismatches.lock().unwrap().is_empty(), "{:?}", f.mismatches.lock().unwrap());
+    engine.shutdown();
+}
+
+#[tokio::test]
+async fn research_retry_claude_report_keeps_instructions_and_follow_up_is_ordinary() {
+    research_retry_report_keeps_instructions(Vendor::Claude).await;
+}
+
+#[tokio::test]
+async fn research_retry_codex_report_keeps_instructions_and_follow_up_is_ordinary() {
+    research_retry_report_keeps_instructions(Vendor::Codex).await;
+}
+
+#[tokio::test]
+async fn research_claude_plan_edit_approve_report() {
+    research_plan_edit_approve_report(Vendor::Claude, Area::Chat).await;
+    research_plan_edit_approve_report(Vendor::Claude, Area::Project).await;
+}
+
+#[tokio::test]
+async fn research_codex_plan_edit_approve_report() {
+    research_plan_edit_approve_report(Vendor::Codex, Area::Chat).await;
+    research_plan_edit_approve_report(Vendor::Codex, Area::Project).await;
+}
+
+#[tokio::test]
+async fn research_requires_a_question_and_enabled_web_search_without_starting_a_cli() {
+    let dir = tempfile::tempdir().unwrap();
+    let f = fake(vec![]);
+    let (engine, _) = engine(dir.path(), Vendor::Claude, f.spawn.clone());
+    assert_eq!(engine.send(ask(Area::Chat, "/research ", choice("claude", None))), Err("error.research.question".into()));
+    engine.save_settings(Settings { web_search: Some(faber_engine::model::WebSearch::Off), ..Settings::default() }).unwrap();
+    assert_eq!(engine.send(ask(Area::Chat, "/research batteries", choice("claude", None))), Err("error.research.searchOff".into()));
+    assert!(f.args.lock().unwrap().is_empty());
+    engine.shutdown();
+}
+
+#[tokio::test]
+async fn research_send_now_keeps_its_own_turn_and_invalid_queued_requests_are_refused() {
+    for vendor in Vendor::ALL {
+        for chosen in [vendor.name(), "auto"] {
+            let dir = tempfile::tempdir().unwrap();
+            let f = fake(fixture(vendor.name(), "steer"));
+            let (engine, _) = engine(dir.path(), vendor, f.spawn.clone());
+            engine.save_settings(Settings { permissions: Some(Permissions::Ask), ..Settings::default() }).unwrap();
+            let text = if vendor == Vendor::Claude { SLEEP } else { COUNT };
+            let id = engine.send(ask(Area::Chat, text, choice(vendor.name(), None))).unwrap();
+            let request = |text: &str| SendRequest { conversation_id: Some(id.clone()), ..ask(Area::Chat, text, choice(chosen, None)) };
+            assert_eq!(engine.send(request("/research ")), Err("error.research.question".into()));
+            engine.send(request("/research batteries")).unwrap();
+            let q = engine.open(&id).unwrap().queued[0].id.clone();
+            engine.send_queued(&id, &q).unwrap();
+            assert!(!engine.open(&id).unwrap().queued[0].sending, "Send now cannot inject research into the ordinary running turn");
+            assert_eq!(engine.settings().permissions, Some(Permissions::Ask), "Plan only starts when the queued turn starts");
+            assert_eq!(engine.edit_queued(&id, &q, "/research "), Err("error.research.question".into()));
+            engine.save_settings(Settings { web_search: Some(faber_engine::model::WebSearch::Off), ..Settings::default() }).unwrap();
+            assert_eq!(engine.send(request("/research another question")), Err("error.research.searchOff".into()));
+            engine.interrupt(&id);
+            // A setting changed while this valid request waited. Its normal error reply must show the refusal, never silently requeue it.
+            assert_eq!(engine.send_queued(&id, &q), Err("error.research.searchOff".into()));
+            let rejected = engine.open(&id).unwrap();
+            assert!(rejected.queued.is_empty());
+            assert_eq!(rejected.messages.last().unwrap().error.as_deref(), Some("error.research.searchOff"));
+            engine.shutdown();
+        }
+    }
+}
+
 #[tokio::test]
 async fn slash_init_populates_the_conversation_and_vendor_fallback_without_saving_it() {
     let mut entries = fixture("claude", "chat");
@@ -2578,6 +2808,7 @@ async fn stop_leaves_no_worker(parent_script: &str, why: &str) {
                 user_hooks: false,
                 permissions: Permissions::FullAccess,
                 instructions: None,
+                research: None,
                 user_name: None,
                 group_instructions: None,
                 flags: Default::default(),
@@ -4047,6 +4278,79 @@ async fn reply_style_codex_done(pipe: &mut support::Pipe, id: &str, text: &str) 
     )
     .await;
     pipe.say(json!({"method":"turn/completed","params":{"threadId":id,"turn":{"id":format!("turn-{id}"),"status":"completed"}}})).await;
+}
+
+#[tokio::test]
+async fn research_codex_follow_up_reopens_backend_without_interrupting_active_peer() {
+    for area in [Area::Chat, Area::Project] {
+        let dir = tempfile::tempdir().unwrap();
+        let folder = project_folder();
+        let (spawn, made) = pipes();
+        let (app, mut rx) = engine(dir.path(), Vendor::Codex, spawn);
+        app.save_settings(Settings { permissions: Some(Permissions::Ask), ..Settings::default() }).unwrap();
+        let project_id = (area == Area::Project).then(|| app.add_project(&folder.path().to_string_lossy()).unwrap().id);
+        let request = |id, text: &str| SendRequest {
+            conversation_id: id,
+            project_id: project_id.clone(),
+            ..ask(area, text, choice("codex", Some("gpt-6-luna")))
+        };
+        let main = app.send(request(None, "/research Which batteries last longer?")).unwrap();
+        let mut plan = next_pipe(&made).await;
+        reply_style_codex_boot(&mut plan).await;
+        reply_style_codex_thread(&mut plan, "thread/start", 0, "main").await;
+        plan.say(json!({"method":"item/completed","params":{"threadId":"main","turnId":"turn-main",
+            "item":{"type":"plan","id":"plan-item","text":"1. Compare independent battery tests."}}}))
+            .await;
+        plan.say(json!({"method":"turn/completed","params":{"threadId":"main","turn":{"id":"turn-main","status":"completed"}}})).await;
+        let planned =
+            until(&app, &main, |c| c.messages.last().is_some_and(|m| m.permissions.iter().flatten().any(|p| p.tool == "ExitPlanMode")))
+                .await;
+        let reply = planned.messages.last().unwrap();
+        let card = &reply.permissions.as_ref().unwrap()[0];
+        app.approve_plan(&main, &reply.id, &card.request_id, Some(Permissions::Ask)).await.unwrap();
+        let mut report = next_pipe(&made).await;
+        reply_style_codex_boot(&mut report).await;
+        let resumed = reply_style_codex_thread(&mut report, "thread/resume", 0, "main").await;
+        assert!(resumed["params"]["developerInstructions"].as_str().unwrap().contains("Search the web over many steps"));
+        let answer = "Battery report [Test lab](https://example.org/tests).\n\n## Sources\n- [Test lab](https://example.org/tests)";
+        reply_style_codex_done(&mut report, "main", answer).await;
+        until(&app, &main, |c| c.messages.last().is_some_and(|m| m.status == Some(Status::Done) && m.text == answer)).await;
+        // Drain the plan and report events before the two ordinary replies below.
+        while rx.try_recv().is_ok() {}
+        let peer = app.send(request(None, "Keep working on a separate question.")).unwrap();
+        assert!(made.lock().unwrap().is_empty(), "the peer must share the report's server");
+        let started = reply_style_rpc(&report, "thread/start", 0).await;
+        report.say(json!({"id":started["id"],"result":{"thread":{"id":"peer"}}})).await;
+        let turn = reply_style_rpc(&report, "turn/start", 1).await;
+        assert_eq!(turn["params"]["threadId"], "peer");
+        report.say(json!({"id":turn["id"],"result":{"turn":{"id":"turn-peer"}}})).await;
+
+        app.send(request(Some(main.clone()), SKY)).unwrap();
+        assert_eq!(made.lock().unwrap().len(), 1, "{area:?}: ordinary instructions need a fresh backend for the loaded thread");
+        let mut ordinary = next_pipe(&made).await;
+        reply_style_codex_boot(&mut ordinary).await;
+        let resumed = reply_style_codex_thread(&mut ordinary, "thread/resume", 0, "main").await;
+        assert_eq!(resumed["params"]["threadId"], "main", "the conversation keeps its history");
+        let instructions = resumed["params"]["developerInstructions"].as_str().unwrap();
+        assert!(instructions.contains("You are Faber"));
+        assert!(!instructions.contains("Search the web over many steps") && !instructions.contains("Do not search yet."));
+        assert_eq!(reply_style_rpc(&ordinary, "turn/start", 0).await["params"]["input"][0]["text"], SKY);
+        assert!(!report.closed.load(std::sync::atomic::Ordering::SeqCst));
+        assert!(!report.lines.lock().unwrap().iter().any(|m| m["method"] == "turn/interrupt"));
+        assert_eq!(app.open(&peer).unwrap().messages.last().unwrap().status, Some(Status::Streaming));
+        reply_style_codex_done(&mut ordinary, "main", "Ordinary reply.").await;
+        assert_eq!(finished(&mut rx, |_| {}).await.text, "Ordinary reply.");
+        reply_style_codex_done(&mut report, "peer", "Peer kept working.").await;
+        assert_eq!(finished(&mut rx, |_| {}).await.text, "Peer kept working.");
+        tokio::time::timeout(Duration::from_secs(3), async {
+            while !report.closed.load(std::sync::atomic::Ordering::SeqCst) {
+                tokio::time::sleep(Duration::from_millis(10)).await;
+            }
+        })
+        .await
+        .expect("the retired research server closes after its peer finishes, without shutdown or another message");
+        app.shutdown();
+    }
 }
 
 #[tokio::test]

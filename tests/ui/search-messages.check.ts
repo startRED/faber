@@ -278,9 +278,11 @@ check('search-messages: clicking a hit opens its old message, unfolds its run an
         type(root, 'café');
         await until(() => root.querySelector('.message-hit'));
         root.querySelector<HTMLButtonElement>('.message-hit')!.click();
-        // The reveal is consumed on a later frame, which a hidden window may hold back.
-        await until(() => root.querySelector('[data-message-index="3"]')?.closest<HTMLDetailsElement>('.run-block')?.open);
-        const revealed = root.querySelector('[data-message-index="3"]')?.closest<HTMLDetailsElement>('.run-block');
+        // App consumes the reveal in the frame that focuses and marks the hit, after RunBlock opens.
+        await until(() => root.querySelector('[data-message-index="3"].search-focus') === document.activeElement);
+        const revealedMessage = root.querySelector('[data-message-index="3"].search-focus');
+        ok(revealedMessage && revealedMessage === document.activeElement, 'search navigation finishes and consumes its reveal before the run is collapsed');
+        const revealed = revealedMessage.closest<HTMLDetailsElement>('.run-block');
         ok(revealed?.open, 'search reveals the earlier answer in the active run');
         const activeThread = root.querySelector<HTMLElement>('.thread')!;
         activeThread.scrollTop = activeThread.scrollHeight;

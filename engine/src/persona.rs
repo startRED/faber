@@ -3,6 +3,7 @@ use crate::model::ReplyStyle;
 
 pub const VERSION: u32 = 4;
 pub struct PersonaInput<'a> {
+    pub research: Option<Research>,
     pub name: Option<&'a str>,
     pub tuning: &'a crate::model::Tuning,
 }
@@ -35,5 +36,28 @@ pub fn persona(p: &PersonaInput<'_>) -> String {
         text.push('\n');
         text.push_str(style);
     }
+    if let Some(research) = p.research {
+        text.push(' ');
+        text.push_str(research.instruction());
+    }
     text
+}
+
+/// Research uses the ordinary persona path and plan approval, with no extra agent or loop.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Research {
+    Plan,
+    Report,
+}
+impl Research {
+    pub fn instruction(self) -> &'static str {
+        match self {
+            Self::Plan => {
+                "The person requested deep research. Write a short numbered research plan: the questions to answer and the kinds of sources to consult. Do not search yet. Present the plan for the person's edits or approval using the normal Plan-mode completion. This plan is requested explicitly, so show it even though ordinary plans are not restated."
+            }
+            Self::Report => {
+                "The person approved the research plan. Search the web over many steps using your own web search, following the approved plan and the person's edits. End with a report whose factual claims cite their sources as Markdown links, with a Sources list of links at the end. Distinguish evidence from inference and say what could not be verified. Keep the granted permission mode; this instruction grants no extra permissions."
+            }
+        }
+    }
 }
