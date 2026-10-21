@@ -50,6 +50,7 @@ pub use groups::{ChatGroup, GroupFile};
 mod install_gate;
 mod keep_going;
 mod kits;
+mod look;
 mod mcp_servers;
 mod move_chat;
 mod parked;
@@ -2238,6 +2239,7 @@ impl Core {
                 let missing = cost.is_none() || ((native.is_none() || vendor == Vendor::Codex) && incomplete);
                 self.note_turn(conv, cost, missing);
                 let can_run = crate::route::candidates(&self.vendors(), &self.codex_models);
+                let mut looked = None;
                 if let Some(m) = self.turn(conv) {
                     m.status = Some(if ok { Status::Done } else { Status::Stopped });
                     m.took = ok.then(|| now().saturating_sub(m.at));
@@ -2263,6 +2265,10 @@ impl Core {
                     }
                     m.nudge = nudge::of(m, area, &can_run);
                     m.look = crate::look::of(m);
+                    looked = ok.then(|| m.id.clone());
+                }
+                if let Some(reply) = looked {
+                    self.look_around(conv, &reply);
                 }
                 // A limit hit again after a move goes to recovery when keep going is on, which moves again (up to `MAX_MOVES`).
                 let unattended = self.convs.get(conv).is_some_and(|c| c.keep_going.is_some());

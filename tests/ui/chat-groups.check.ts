@@ -83,8 +83,10 @@ for (const focus of ['destination', 'another control', 'another control then bod
       const row = root.querySelector<HTMLButtonElement>('[data-chat-group-id=source] .crow .item')!;
       row.focus({ preventScroll: true });
       row.dispatchEvent(new KeyboardEvent('keydown', { key: 'F10', shiftKey: true, bubbles: true, cancelable: true }));
-      await settle();
-      const move = [...document.querySelectorAll<HTMLButtonElement>('.cmenu:not(.leaving) [role=menuitem]')].find((el) => el.textContent === t('menu.moveToGroup'));
+      // The menu opens on its own frame, which a busy machine takes longer than one pause to draw.
+      const item = () => [...document.querySelectorAll<HTMLButtonElement>('.cmenu:not(.leaving) [role=menuitem]')].find((el) => el.textContent === t('menu.moveToGroup'));
+      for (const end = performance.now() + 2000; !item() && performance.now() < end;) await settle();
+      const move = item();
       ok(move, 'the chat keyboard menu offers Move to group'); move.focus(); move.click(); await settle();
       const picker = root.querySelector<HTMLSelectElement>('.crow select')!;
       equal(document.activeElement, picker, 'the keyboard action focuses the destination picker');

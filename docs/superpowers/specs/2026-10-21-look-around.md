@@ -1,6 +1,6 @@
 # Look around: the same mistake elsewhere
 
-Status: in progress. Steps 1 and 2 are in review; steps 3 and 4 are planned.
+Status: in progress. Steps 1 and 2 landed (R369), step 3 landed (R386), step 4 is planned.
 
 Asked by the owner on 2026-10-21 (direction, "um senso comum mas sem ser uma regra que atrapalha em outras coisas e só
 usado onde importa"); the details are the AI's (owner delegated).
@@ -66,12 +66,16 @@ Rules it keeps:
   around" row beside Step up; Chat conversation; Features: a "Look around" row); `docs/design/conversation.md` (answers);
   `tests/ui/look.check.ts`. A fake-CLI fixture with a red-then-green turn, which would prove end to end that the engine
   sets `look`, comes with step 3.
-- [ ] **3. Evidence before the click.** A second sign, `look.sameText`, for every kind of file: the text a change
-  removed (Claude's `Edit` `old_string`, Codex's removed diff lines; at least one line of 12 characters or more that is
-  not only punctuation) still appears in other tracked files of the folder. A bounded read after the turn (git's file
-  list, at most 2,000 files and 8 MB, 300 ms, on a blocking worker, never on the turn's path), whose places (at most 8,
-  `file:line`) go into the request and the tooltip ("The same text is in 3 more places"). This is what reaches writing,
-  data and configuration, where no check runs. Its cost is measured on Faber's own repository and stated in the commit.
+- [x] **3. Evidence before the click.** A second sign, `look.sameText`, for every kind of file: the lines a change
+  removed (Claude's `Edit` and `MultiEdit` `old_string`, Codex's `-` diff lines; not kept by the same change, not
+  written anywhere else by the reply, so moved text never counts; at least 12 characters with a letter or digit; from
+  changes of at most 10 removed lines; at most 5) still appear in other files of the folder. As built, a walk of the
+  folder replaces git's file list, since the engine starts no process for it: hidden folders, links and dependency or
+  build folders (`node_modules`, `target`, `dist`…) are skipped, and so are files over 512 KB, anything but a plain file, or files not UTF-8 text,
+  within 2,000 files, 20,000 names (folders count), 8 MB and 300 ms on a blocking thread, never on the turn's path. A text in more than 8 places is a
+  common line and is dropped. The places (at most 8, `path:line`) go into the tooltip's count and the request. Measured
+  on Faber's own folder (`look::tests::measure_the_search_on_this_repository`, release build): 76 ms warm, 265 ms
+  cold; nothing stays in memory after it. The fake-CLI test (`engine/tests/look.rs`) proves both signs end to end.
 - [ ] **4. Measure, then quiet it if needed.** Count, in the local `cache-health.jsonl`-style log that never leaves the
   PC, how often each sign is offered and used, per area. After a week of the owner's use: a sign used under one time in
   ten is narrowed or removed. Telemetry stays off.

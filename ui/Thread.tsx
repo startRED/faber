@@ -138,11 +138,20 @@ function hideStop(text: string, streaming: boolean): string {
 }
 
 // The picker names Claude models by alias ("opus"), so the full id of the next rung is matched to its entry.
-/** Look around: starts the box with the request, a blank line apart from a draft already there, and only once. */
-function lookAround() {
-  const ask = t('look.ask');
+/** Look around: starts the box with the request (and the places Faber found, when it found some), a blank line apart
+ * from a draft already there, and only once. */
+function lookAround(look: NonNullable<Message['look']>) {
+  const places = look.places ?? [];
+  const ask = places.length ? `${t('look.ask')} ${t('look.askPlaces', { places: places.join(', ') })}` : t('look.ask');
   const draft = document.querySelector<HTMLTextAreaElement>('.composer textarea')?.value ?? '';
   startMessage(draft.startsWith(ask) || !draft.trim() ? ask : `${ask}\n\n`);
+}
+
+/** Why "Look around" is offered and what it does, with how many places Faber found. */
+function lookTitle(look: NonNullable<Message['look']>): string {
+  const n = look.places?.length ?? 0;
+  const why = fromEngine(look.reason, { n });
+  return look.reason === 'look.fixed' && n ? `${why} ${t('look.found', { n })}` : why;
 }
 
 function rung(nudge: NonNullable<Message['nudge']>, options: Option[]): Choice {
@@ -601,7 +610,7 @@ function Answer(props: Shared & { m: Accessor<Message>; messages?: Message[]; pr
               with the request, as "Continue with a helper" does, and never shows beside a step up or a closing question. */}
           <Show when={props.last && props.onReply && !m().nudge && m().look} keyed>
             {(look) => (
-              <button type="button" class="nudge" title={fromEngine(look.reason)} onClick={lookAround}>
+              <button type="button" class="nudge" title={lookTitle(look)} onClick={() => lookAround(look)}>
                 {t('answer.look')}
               </button>
             )}

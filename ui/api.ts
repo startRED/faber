@@ -123,7 +123,7 @@ export interface Message {
   /** The next rung up, offered when the turn's own tools show it stopped early. */
   nudge?: { reason: string; vendor: Vendor; model: string; effort: Effort };
   /** A reply that went from red to green: the offer to look for the same mistake elsewhere (`engine/src/look.rs`). */
-  look?: { reason: string };
+  look?: { reason: string; places?: string[] };
   /** The pull request this reply opened or pushed, followed until its checks pass or it closes. */
   follow?: Follow;
   /** A message Faber sent by itself, and why (`wake.keepGoing`, `wake.checksFailed`, `wake.conflict`): drawn as a quiet line, not as the person's words. */

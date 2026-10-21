@@ -81,3 +81,25 @@ check('look around: a reply that fixed something offers to look for the same mis
     readOnly.close();
   }
 });
+
+check('look around: the places Faber found go into the tooltip and the request, for a fix or for text still elsewhere', async () => {
+  const places = ['src/b.rs:2', 'src/deep/c.rs:3'];
+  const fixed = mount([question(), answer({ look: { reason: 'look.fixed', places } })], () => {});
+  try {
+    const button = offers(fixed.root)[0]!;
+    equal(button.title, `${t('look.fixed')} ${t('look.found', { n: 2 })}`, 'the fix says how many more places hold the line');
+    button.click();
+    equal(fixed.box.value, `${t('look.ask')} ${t('look.askPlaces', { places: 'src/b.rs:2, src/deep/c.rs:3' })}`);
+  } finally {
+    fixed.close();
+  }
+
+  const same = mount([question(), answer({ look: { reason: 'look.sameText', places: ['notes/later.md:3'] } })], () => {});
+  try {
+    const button = offers(same.root)[0]!;
+    equal(button.title, t('look.sameText', { n: 1 }), 'text still elsewhere has its own words, in the singular for one place');
+    ok(button.title !== t('look.sameText', { n: 2 }));
+  } finally {
+    same.close();
+  }
+});
