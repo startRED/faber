@@ -814,7 +814,7 @@ check('visual answers: Chat and Projects at 720 px reuse the resizable running p
         equal(host.querySelector('.dock'), null, 'no connected AI keeps the composer hidden');
         ok(host.querySelector<HTMLElement>('.thread')!.inert, 'the conversation stays behind the modal');
         equal(host.querySelector('.visual-version')!.textContent, t('visual.version', { at: 2, count: 2 }));
-        equal(host.querySelectorAll('iframe').length, 1);
+        await until(() => host.querySelectorAll('iframe').length === 1, 'the opened version gets its frame');
         const newest = host.querySelector('iframe')!;
         const browsingContext = newest.contentWindow;
         host.querySelector<HTMLButtonElement>('.visual-prev')!.click();
@@ -839,7 +839,7 @@ check('visual answers: Chat and Projects at 720 px reuse the resizable running p
         showVisual({ conversationId: c.id, answerId: 'v1:0' });
         await settle();
         equal(host.querySelector('.commands-view'), null, 'opening a visual releases the Commands view');
-        equal(host.querySelectorAll('iframe').length, 1);
+        await until(() => host.querySelectorAll('iframe').length === 1, 'the visual reopens in one frame after Commands');
         showFile('chart.ts:2');
         await until(() => host.querySelector('.file-line.mark'));
         equal(openedVisual(), undefined, 'opening a named file clears the visual selection');
@@ -850,7 +850,7 @@ check('visual answers: Chat and Projects at 720 px reuse the resizable running p
         await settle();
         equal(openedFile(), undefined, 'opening a visual clears the named file selection');
         equal(host.querySelector('.file-view'), null, 'opening a visual releases the file view');
-        equal(host.querySelectorAll('iframe').length, 1);
+        await until(() => host.querySelectorAll('iframe').length === 1, 'the visual reopens in one frame after a file');
         showVisual({ conversationId: c.id, answerId: 'pending-answer' });
         showFile('chart.ts:2');
         await until(() => host.querySelector('.file-line.mark'));
