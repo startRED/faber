@@ -74,8 +74,9 @@ fixed rules.
 
 People ask models for less than they can do, and a specific, hard goal gets more out of people and models than "do
 your best" (Locke and Latham's goal-setting research; [Rieseberg,
-2026-10-13](https://felixrieseberg.com/how-to-be-more-ambitious-a-tutorial-for-humans-with-models/)). Four proposals
-for the lead agent:
+2026-10-13](https://felixrieseberg.com/how-to-be-more-ambitious-a-tutorial-for-humans-with-models/)). The person never
+learns these techniques or writes in a special way: they ask in plain words, and the lead applies them by itself (owner's
+direction, 2026-10-21). Five proposals for the lead agent:
 
 - **Standing goals.** A project can keep goals that never finish, such as "no crashes", "opens in under 2 s" or "every
   check passes". The lead watches them and starts a mission by itself when one breaks, within the project's daily cost
@@ -92,6 +93,9 @@ for the lead agent:
 - **Hard targets, and "impossible" needs evidence.** A proof states an ambitious, specific target, never "as good as
   possible". A worker that calls a target impossible shows the measurement that proves it; without one, the lead tries
   another path or the other vendor before it narrows the target.
+- **A team named by verbs.** For big work the lead restates the job as what it must achieve ("connect people to
+  jobs", not "a recruiting app"), picks the fields that achieve it, and adds a worker from each, plus one that looks
+  for holes. A brief asks a worker to do what that professional does, never to play one.
 
 ### Normal and autonomous modes
 
