@@ -2,6 +2,8 @@
 
 Chat and Projects, the lead agent that picks its own path, its modes, its toolbox and the guardrails code enforces.
 
+Catalog is a separate browsing and management tab beside Chat and Projects, not a third work area. It has no composer or conversation, and its manual controls preserve the existing tool delivery boundaries. Automatic tool choice for Chat, child sessions and subagents is still planned.
+
 ## Two areas
 
 - **Chat** works like claude.ai and ChatGPT, and must beat them. It has many conversations. Each one works in a hidden

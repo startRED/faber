@@ -61,6 +61,7 @@ import { createAutoOpen, doneCards, openPlace, type Place, placeOfRunning, shown
 import { type Keep, type Section, Settings } from './Settings.tsx';
 import { Setup } from './Setup.tsx';
 import { continuePatch, type FirstStep, firstRunStep, lookDue, setupPatch } from './setup.ts';
+import { Catalog } from './Catalog.tsx';
 import { Sidebar } from './Sidebar.tsx';
 import { keepRows, seedQuotas, withQuota } from './sidebar.ts';
 import { ToEnd } from './Floating.tsx';
@@ -216,6 +217,7 @@ export function App(props: { initial: AppState; update?: UpdateStatus; inbox: { 
   // The text of the last refused or failed save of settings; the page stays as it was.
   const [saveError, setSaveError] = createSignal<string>();
   const [settingsOpen, setSettingsOpen] = createSignal(false);
+  const [catalogOpen, setCatalogOpen] = createSignal(false);
   // The section a link into Settings names (the quota in the sidebar names the accounts and limits), and what Settings kept while
   // the account cards were open from it: closing them brings Settings back as it was.
   const [settingsAt, setSettingsAt] = createSignal<Section>();
@@ -376,7 +378,7 @@ export function App(props: { initial: AppState; update?: UpdateStatus; inbox: { 
   // see (not hidden, no game in front). The engine keeps the mark, so a restart keeps both.
   const onScreen = () => {
     const id = place().id;
-    const covered = windowHidden() || settingsOpen() || setupOpen() || !!step() || loading();
+    const covered = windowHidden() || catalogOpen() || settingsOpen() || setupOpen() || !!step() || loading();
     return !id || covered || current()?.id !== id ? undefined : id;
   };
   const done = createMemo(() => doneCards(state().conversations, every(), onScreen()));
@@ -422,8 +424,8 @@ export function App(props: { initial: AppState; update?: UpdateStatus; inbox: { 
   const [columnOpen, setColumnOpen] = createSignal(false);
   const [byUser, setByUser] = createSignal(false);
   const docked = () => width() === 'wide';
-  // The column is on screen when it is open and focus mode is off.
-  const colShown = () => columnOpen() && !focus();
+  // The column belongs to the work area, outside focus mode and Catalog.
+  const colShown = () => columnOpen() && !focus() && !catalogOpen();
   const runLimits = createMemo(() => limitsOf('run', win(), widths().side, docked()));
   // What the column really measures: the width the person dragged it to, or until then the room the window leaves beside the
   // reading column, inside what the window leaves it. A drag that ends on the usual width goes back to following the window.
@@ -439,6 +441,7 @@ export function App(props: { initial: AppState; update?: UpdateStatus; inbox: { 
   // An input method is composing text: the column waits for it to end.
   let composing = false;
   const openColumn = (user: boolean) => {
+    if (user) setCatalogOpen(false);
     // Something that opens the column shows it: focus mode steps aside.
     const hidden = focus();
     setFocus(false);
@@ -599,6 +602,7 @@ export function App(props: { initial: AppState; update?: UpdateStatus; inbox: { 
   const planHeard: { plan?: { id: string; plan?: Plan } } = {};
   // The conversation the user is in: opening it asks the engine for a snapshot and the answer takes a while.
   const go = async (next: Place, messageIndex?: number) => {
+    setCatalogOpen(false);
     clearSearch();
     setUntil(undefined);
     setFrom(Math.max(0, (current()?.messages.length ?? 0) - PAGE));
@@ -771,24 +775,24 @@ export function App(props: { initial: AppState; update?: UpdateStatus; inbox: { 
       if (pressed(e, 'settings')) openSettings();
       if (pressed(e, 'focus')) {
         e.preventDefault();
-        if (inShell) toggleFocus();
+        if (inShell && !catalogOpen()) toggleFocus();
       }
       if (pressed(e, 'running')) {
         e.preventDefault();
         // Settings and the account cards replace the shell: the column is not on screen to toggle.
-        if (inShell) toggleColumn();
+        if (inShell && !catalogOpen()) toggleColumn();
       }
       if (pressed(e, 'aside')) {
         e.preventDefault();
-        if (inShell && canAside()) toggleAside();
+        if (inShell && !catalogOpen() && canAside()) toggleAside();
       }
       if (pressed(e, 'changes')) {
         e.preventDefault();
-        if (inShell && current()?.id === place().id && hasChanges()) toggleChanges();
+        if (inShell && !catalogOpen() && current()?.id === place().id && hasChanges()) toggleChanges();
       }
       if (pressed(e, 'browser')) {
         e.preventDefault();
-        if (inShell && canBrowse()) void toggleSite();
+        if (inShell && !catalogOpen() && canBrowse()) void toggleSite();
       }
       if (e.key === 'Escape') {
         if (sideOverlay() && inShell) return closeSide();
@@ -1355,7 +1359,7 @@ export function App(props: { initial: AppState; update?: UpdateStatus; inbox: { 
         >
           <div
             class="shell"
-            data-screen={`${area() === 'chat' ? 'chat' : 'project'}.${newChat() ? 'new' : 'thread'}`}
+            data-screen={catalogOpen() ? 'catalog' : `${area() === 'chat' ? 'chat' : 'project'}.${newChat() ? 'new' : 'thread'}`}
             classList={{ docked: colShown() && docked() && !wide(), focus: focus() }}
             style={{ '--side-w': `${widths().side}px`, '--run-w': `${runWidth()}px` }}
             inert={tourOpen() || notesOpen() || startScreen()}
@@ -1390,6 +1394,8 @@ export function App(props: { initial: AppState; update?: UpdateStatus; inbox: { 
                 remindConnect={state().settings.setup === 'skipped' && state().vendors.length === 1}
                 onConnect={openSetup}
                 place={place()}
+                catalogOpen={catalogOpen()}
+                onCatalog={() => { closeSide(false); setFocus(false); setCatalogOpen(true); }}
                 running={items()}
                 quotas={quotas()}
                 usage={state().usage ?? []}
@@ -1423,6 +1429,10 @@ export function App(props: { initial: AppState; update?: UpdateStatus; inbox: { 
               <button class="scrim" tabindex="-1" aria-label={t('side.hide')} onClick={() => closeSide()} />
             </Show>
             <main class="main" inert={sideOverlay()}>
+              <Show when={!catalogOpen()} fallback={<>
+                <Show when={narrow()}><div class="topbar"><button class="iconbtn menu" ref={(el) => (menuButton = el)} aria-label={t('side.show')} aria-expanded={sideOverlay()} onClick={openSide}><Icon name="menu" /></button></div></Show>
+                <Catalog projects={state().projects} projectId={projectId()} vendors={state().vendors} />
+              </>}>
               <div class="topbar" classList={{ bare: newChat() }} inert={trapped()}>
                 <Show when={narrow()}>
                   <button class="iconbtn menu" ref={(el) => (menuButton = el)} aria-label={t('side.show')} aria-expanded={sideOverlay()} onClick={openSide}>
@@ -1677,6 +1687,7 @@ ${copy().path}`}>
                 <Show when={colShown() && (!docked() || wide())}>{runningColumn()}</Show>
               </div>
               <Find enabled={!newChat() && !needsProject() && !loading() && !!current()?.messages.length && !(colShown() && wide())} root={() => thread} />
+              </Show>
             </main>
             <Show when={colShown() && docked() && !wide()}>{runningColumn()}</Show>
           </div>
@@ -1708,6 +1719,7 @@ ${copy().path}`}>
         onProject={(id) => (closeSettings(), closeSide(false), void fresh({ area: 'project', projectId: id }))}
         onNew={() => (closeSettings(), closeSide(false), void fresh(place()).then(() => document.querySelector<HTMLElement>('.composer textarea')?.focus()))}
         onArea={switchArea}
+        onCatalog={() => { closeSettings(); closeSide(false); setFocus(false); setCatalogOpen(true); }}
         onSettings={(at) => (settingsOpen() ? (closeSettings(), queueMicrotask(() => openSettings(at))) : openSettings(at))}
         onRunning={() => (closeSettings(), toggleColumn())}
         onAddProject={() => (closeSettings(), void addProject().catch(fail))}

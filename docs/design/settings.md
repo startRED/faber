@@ -46,12 +46,7 @@ How the Settings screen looks and behaves. The first run and the tutorial are in
   commands announced after replacement: their output and Stop still belong to that driver;
   an old thread waiting for that shared server to close does not keep the current idle session alive.
   No new motion or restart prompt.
-- Projects starts with *Skills for projects*: one card closed like a project's, its head the name, how many are on ("2 of
-  21 on") and the chevron. Open, it shows one quiet line, then a switch per skill of the catalog: its name as its
-  repository spells it, one line of what it does and its licence, the repository behind the "?". While one installs or
-  goes the line says so and every switch waits; a failure turns the switch back and shows the save-error toast; the card
-  is absent when the list cannot be read. *Tools for projects* follows, the same card for the catalog's tool servers, its
-  quiet line saying each one runs on this computer with Node.js. While this card is open, its project picker shows each connected AI's last reported tool-server list, grouped by AI: name, source, state and reading time. Only catalog entries have a switch; the short line below each says it applies when the conversation next starts. Your own setup and project entries are read-only. Before a report, installed catalog servers appear and one calm line says the rest appears when the agent next starts. The list and picker unmount on close, with no polling or new process. Switches use the existing keyboard-accessible controls and roll back on save failure. Saving keeps the same switch and its keyboard focus, including while the save is pending; Space can reverse it again once saving ends. The projects follow, each in its own closed card.
+- Projects contains only each project's own closed card: checks and separate copies. Skills and tool servers are managed in the sidebar's [Catalog](catalog.md) tab; the old catalog cards are removed (R344 supersedes R247 placement).
 - R140 (Chat; the person's own project sessions take the same modes, and mission roles never do): the Permissions choice is a
   menu of five modes, each with one plain line and its long text behind the closed "?" of the row, which is not in the page
   while closed. The composer of Chat carries the same choice as a chip. Mode by CLI (the CLI that lacks a mode runs the

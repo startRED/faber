@@ -12,6 +12,7 @@ as the change it governs.
 | :--- | :--- | :--- | :--- |
 | The work (a conversation, a project goal) | The area's screen: hero, composer, a short "continue" list, one quiet status line (C011) | Switches, option rows, command lists or long explanations on that screen |
 | A setting | Settings, in its sections (General, Projects, Appearance, Accounts and limits, Privacy): one row per option with one short line, the longer text behind the "?" of the row (C011) | A work screen; a new section when an existing one fits |
+| Browsing or managing catalog tools | Catalog, its own sidebar tab (R344 supersedes R247 placement); item details and reversible actions in the same tab | Catalog cards in Settings; a conversation or composer in Catalog |
 | A choice everyone must make before Faber is usable | A first-run step (today: accounts, appearance) | A new step for anything a good default covers |
 | A one-time consent or confirmation | Just in time, when the action first needs it, then never again (C011) | The first run; a banner that stays |
 | Teaching | A tutorial card, for beginners only (R18). After that people ask Faber about Faber; there is no help page | Tips that keep coming back |

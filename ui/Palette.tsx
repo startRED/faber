@@ -33,6 +33,7 @@ interface Props {
   onProject: (id: string) => void;
   onNew: () => void;
   onArea: (area: Area) => void;
+  onCatalog: () => void;
   onSettings: (section?: Section) => void;
   onRunning: () => void;
   onAddProject: () => void;
@@ -53,6 +54,7 @@ export function Palette(props: Props) {
     { id: 'new', kind: 'action', label: t('side.new'), icon: 'plus', run: props.onNew },
     { id: 'chat', kind: 'action', label: t('palette.goArea', { area: t('area.chat') }), icon: 'chat', run: () => props.onArea('chat') },
     { id: 'projects', kind: 'action', label: t('palette.goArea', { area: t('area.projects') }), icon: 'folder', run: () => props.onArea('project') },
+    { id: 'catalog', kind: 'action', label: t('palette.goArea', { area: t('area.catalog') }), icon: 'plug', run: props.onCatalog },
     { id: 'settings', kind: 'action', label: t('settings.open'), icon: 'sliders', run: () => props.onSettings() },
     ...SECTIONS.map(([id, key, icon]): Item => ({ id: `settings-${id}`, kind: 'action', label: t('palette.settings', { section: t(key) }), icon, run: () => props.onSettings(id) })),
     { id: 'running', kind: 'action', label: t('run.toggle'), icon: 'panel', run: props.onRunning },

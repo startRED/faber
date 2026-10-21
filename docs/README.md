@@ -40,6 +40,7 @@ points nowhere; a page that grows past the limit splits by topic, and its row he
 | [design/keep-going.md](design/keep-going.md) | Keep going: the chip, the quiet lines, the quota warning, the running row and the summary on coming back |
 | [design/search.md](design/search.md) | Sidebar message search, the command box (Ctrl+K) and find in a conversation (Ctrl+F) |
 | [design/subagents.md](design/subagents.md) | A reply's subagent and helper rows, their running-column view, the stuck signs and the pages opened in Faber's browser |
+| [design/catalog.md](design/catalog.md) | Catalog browsing, installation, on/off, Undo and per-source inventory |
 | [design/settings.md](design/settings.md) | The Settings screen |
 | [design/first-run.md](design/first-run.md) | The first run and the tutorial |
 | [design/projects.md](design/projects.md) | The Projects screens, what a project stores, and how its checks run |

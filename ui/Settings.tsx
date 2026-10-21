@@ -11,7 +11,6 @@ import { vendorName } from './models.ts';
 import { animateList } from './motion.ts';
 import { ProjectsSection } from './ProjectSettings.tsx';
 import { Recents } from './Recents.tsx';
-import { SkillsCard } from './Skills.tsx';
 import type { Quotas } from './sidebar.ts';
 
 // Settings: five sections, one grammar. A group is a card, an option is one row (its name and one line at the left, its
@@ -286,8 +285,6 @@ export function Settings(props: Props) {
           </Match>
           <Match when={section() === 'projects'}>
             <div class="psets">
-              <SkillsCard onError={props.onError} />
-              <SkillsCard servers onError={props.onError} />
               <ProjectsSection projects={props.projects ?? []} />
             </div>
           </Match>

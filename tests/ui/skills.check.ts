@@ -1,53 +1,60 @@
 import { createComponent } from 'solid-js';
 import { render } from 'solid-js/web';
-import { SkillsCard } from '../../ui/Skills.tsx';
+import { api } from '../../ui/api.ts';
+import { Catalog } from '../../ui/Catalog.tsx';
+import { t } from '../../ui/i18n.ts';
 import { check, equal, ok } from './check.ts';
 
-check('skills: one closed card says how many are on and opens to one switch per skill, each with its words and its licence', async () => {
+async function catalog() {
+  const clearRemoved = api.toolsClearRemoved;
+  api.toolsClearRemoved = async () => {};
   const root = document.createElement('div');
   root.dataset.motion = 'none';
   document.body.append(root);
-  const dispose = render(() => createComponent(SkillsCard, {}), root);
+  const dispose = render(() => createComponent(Catalog, { projects: [], vendors: [] }), root);
+  for (let i = 0; i < 100 && !root.querySelector('[data-catalog-card]'); i++) await new Promise((resolve) => setTimeout(resolve, 20));
+  const filter = (label: string) => {
+    const button = [...root.querySelectorAll<HTMLButtonElement>('.catalog-filters button')].find((el) => el.textContent === label);
+    ok(button, `catalog filter ${label}`); button.click();
+  };
+  return { root, filter, close: () => { dispose(); root.remove(); api.toolsClearRemoved = clearRemoved; } };
+}
+
+check('skills: the shipped catalog has translated descriptions, licences and an install action for each skill', async () => {
+  const view = await catalog();
   try {
-    for (let i = 0; i < 100 && !root.querySelector('.pset-head'); i++) await new Promise((r) => setTimeout(r, 20));
-    const head = root.querySelector<HTMLButtonElement>('.pset-head')!;
-    equal(head.getAttribute('aria-expanded'), 'false');
-    equal(root.querySelector('[role=switch]'), null, 'closed, the card is one row');
-    ok(/^0\D+\d+/.test(head.querySelector('.s')?.textContent ?? ''), `it counts what is on: ${head.textContent}`);
-    head.click();
-    await new Promise((r) => setTimeout(r, 20));
-    const switches = [...root.querySelectorAll<HTMLInputElement>('input[role=switch]')];
-    ok(switches.length >= 8, `the shipped catalog lists its skills (${switches.length})`);
-    ok(switches.every((s) => !s.checked), 'a fresh test profile has nothing installed');
-    const rows = [...root.querySelectorAll('.st-opt')];
-    for (const row of rows) {
-      const hint = row.querySelector('.st-hint')?.textContent ?? '';
-      ok(/ · (MIT|Apache-2\.0|BSD-3-Clause)$/.test(hint), `the licence closes the line: ${hint}`);
-      ok(!/tools\./.test(hint), `no raw key: ${hint}`);
+    view.filter(t('catalog.skills'));
+    const cards = [...view.root.querySelectorAll<HTMLButtonElement>('[data-catalog-card]')];
+    ok(cards.length >= 8, `the shipped catalog lists its skills (${cards.length})`);
+    for (const card of cards) {
+      ok(/(?:MIT|Apache-2\.0|BSD-3-Clause)$/.test(card.querySelector('.catalog-origin')?.textContent ?? ''), `the licence is visible: ${card.textContent}`);
+      const description = card.querySelector('.catalog-description')?.textContent ?? '';
+      ok(description && description !== card.dataset.catalogCard && !description.includes('tools.'), `translated description: ${description}`);
+      ok(card.textContent?.includes(t('catalog.notInstalled')), 'a fresh test profile has nothing installed');
     }
-    equal(root.querySelector('[data-opt="set-skill-systematic-debugging"] .st-name')?.textContent?.trim(), 'systematic-debugging?');
-  } finally {
-    dispose();
-    root.remove();
-  }
+    const debugging = cards.find((card) => card.dataset.catalogCard === 'systematic-debugging');
+    ok(debugging); debugging.click();
+    equal(view.root.querySelector('.catalog-detail h1')?.textContent, 'systematic-debugging');
+    ok([...view.root.querySelectorAll('button')].some((el) => el.textContent === t('catalog.install')));
+    equal(view.root.querySelector('[role=switch]'), null, 'installing and enabling are separate actions');
+  } finally { view.close(); }
 });
 
-check('skills: tool servers have their own closed card, apart from the skills, each with its words and its licence', async () => {
-  const root = document.createElement('div');
-  root.dataset.motion = 'none';
-  document.body.append(root);
-  const dispose = render(() => createComponent(SkillsCard, { servers: true }), root);
+check('skills: the servers filter uses the same catalog and shows the pinned server source and licence', async () => {
+  const view = await catalog();
   try {
-    for (let i = 0; i < 100 && !root.querySelector('.pset-head'); i++) await new Promise((r) => setTimeout(r, 20));
-    equal(root.querySelector('[data-skills]')?.getAttribute('data-skills'), 'servers');
-    root.querySelector<HTMLButtonElement>('.pset-head')!.click();
-    await new Promise((r) => setTimeout(r, 20));
-    const row = root.querySelector('[data-opt="set-server-chrome-devtools"]');
-    ok(row, 'the measurement server is listed');
-    ok((row?.querySelector('.st-hint')?.textContent ?? '').endsWith(' · Apache-2.0'), `its line ends with its licence: ${row?.textContent}`);
-    equal(root.querySelector('[data-opt^="set-skill-"]'), null, 'no skill in the servers card');
-  } finally {
-    dispose();
-    root.remove();
-  }
+    view.filter(t('catalog.servers'));
+    const shipped = (await api.toolsList()).filter((item) => item.server);
+    const cards = [...view.root.querySelectorAll<HTMLButtonElement>('[data-catalog-card]')];
+    equal(cards.length, shipped.length);
+    ok(cards.length > 0, 'the shipped catalog has a server');
+    for (const card of cards) {
+      const item = shipped.find((row) => row.id === card.dataset.catalogCard);
+      ok(item, 'no skill appears in the servers filter');
+      ok(card.querySelector('.catalog-origin')?.textContent?.endsWith(item.license));
+    }
+    cards.find((card) => card.dataset.catalogCard === 'chrome-devtools')!.click();
+    ok(view.root.querySelector('.catalog-detail dl')?.textContent?.includes('Apache-2.0'));
+    equal(view.root.querySelector('.catalog-version')?.textContent, shipped.find((item) => item.id === 'chrome-devtools')?.version);
+  } finally { view.close(); }
 });

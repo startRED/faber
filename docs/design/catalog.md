@@ -1,0 +1,91 @@
+# Catalog
+
+A browsing and management tab beside Chat and Projects (R344). It extends the pinned skill/server store, moving its
+controls out of Settings > Projects. It is not a work area: no conversation, composer, project instructions or AI picker.
+
+## Browsing
+
+Search is the main action, focused with the shared Ctrl+F (Command+F on macOS) from `ui/keys.ts`, also named in the
+shortcut sheet. All, Skills, Tool servers and Installed are native pressed buttons;
+Plugins joins when plugin installation ships. A short Good start group contains debugging, simple code and interface
+design; remaining cards are grouped by the catalog's job, with plain names in all five languages. Each item appears
+once. Cards name the item, describe its job, name owner/repo and licence, and state whether it is installed/on/off or
+needs Node. Search includes the name, job, description and repository. Empty searches and first-run installs have calm
+plain words. Installed search matches personal/project skills, plugin records and reported servers as well as catalog
+cards; its empty state waits for the full selected snapshot. Download failures keep a retry beside the error; browsing
+uses the local catalog even offline. The sidebar keeps New conversation in place while Catalog is open, so tabs never
+jump under the pointer. The command box includes Go to Catalog and calls the same navigation as the sidebar. Its running
+action returns to the previous work area and shows the column, including when it was already open behind Catalog.
+
+Cards use the look's surface, ink, line and radius tokens. Hover changes surface and border only; press changes the same
+properties, with no travel, scaling or blur. Reduced/no motion removes the transition. At 720 px cards become one column,
+filters wrap, and long names, pins and paths wrap. The ordinary narrow sidebar remains a modal dialog with its existing
+focus trap and Escape close. Heading focus enters the same-tab detail; Back and Escape return focus to the card.
+
+## Detail and actions
+
+Detail names what the item does, when the agent can use it, access implications, source repository, licence and pinned
+commit/package version. Repository and Node download links open through the existing checked system-browser command.
+Skills guide the agent's existing file, command, network and browser powers; they create no new sandbox. The current
+server controls a headless Chrome browser, with Faber's telemetry/update/file-navigation denies preserved.
+
+Install checks the original source's pinned files and never executes shipped scripts. Install, Remove and installed
+on/off are separate actions. Turning off retains checked files outside every CLI skill root. Remove asks in place,
+with Cancel, then offers Undo. Undo restores the previous on/off state locally after a pin/digest check. The screen saves
+the removed item and its on/off choice together only after successful removal; a failed removal of another item leaves
+that Undo unchanged. Retry recognizes when recovery completed that exact restore, even during another store action or
+session launch, and updates the screen. A small completed receipt remains until the next successful removal, Catalog
+entry or engine restart; it retains no removed files and is checked against the restored copy before acknowledgement. An intent
+record precedes the file move; interrupted restores complete before launch pruning or cleanup, and a failed ledger
+save leaves the recoverable copy and intent in place. Only the latest removal retains Undo; opening Catalog or restarting
+the engine expires unreachable copies after recovery. Disabled copies are checked by name, ledger and folder type on
+launch; their files are hashed when enabling. Future project conversations follow the saved choice and existing
+permission boundaries. Moving files on Off or Remove may also affect ongoing work. This does not promise automatic
+selection or catalog delivery to Chat, which are later steps.
+
+An installed server's detail offers the project picker and existing per-project MCP preference. It reads/writes the same
+projects.json field, reports each connected CLI's last known state, and never treats global availability as a second
+project preference. A server must be installed and globally on for its project switch to be available. Off or Remove
+shows that switch off and disabled while preserving both its saved project preference and last reported session state;
+turning it on or undoing removal shows that same preference again.
+
+## Installed sources and limits
+
+Installed includes the catalog plus each CLI's known personal/project skill folders and plugin installation records,
+with source and location. Personal/project installs are read-only. Faber never starts a CLI, opens skill bodies, follows
+plugin install paths or reads broad home configuration. A linked personal skill appears by the link's own name and path,
+marked Linked, not inspected, without resolving or opening its target. Project links and linked roots remain refused.
+Display paths omit Windows verbatim prefixes; plugin rows say Plugin record instead of exposing a manifest filename.
+Unknown external enablement is left unknown. Unsupported
+sources/overrides and unsafe/unreadable records are stated. In particular, Codex plugin state cannot be inferred from
+its cache. Project MCP names/statuses still come from the existing live-session snapshot rules (R334 through R337).
+
+The installed Codex 0.162.1 protocol has plugin reports, but they are not passive: even a local-only `plugin/list`
+can start catalog refresh tasks, while `plugin/installed` starts bundle synchronization. Opening Installed must not
+update tools (R50), so Faber leaves this state explicitly unreported instead of calling either method or reading broad
+home configuration. The screen explains why those plugins are absent. Evidence:
+[versioned plugin request processor](https://github.com/openai/codex/blob/rust-v0.162.1/codex-rs/app-server/src/request_processors/plugins.rs#L733).
+
+The tab and its resources unmount on close. There is no interval, background process, network on browse, kept card DOM
+or per-frame work. Catalog pages draw at most 48 cards; inventory pages draw at most 48 rows per CLI. Discovery bounds
+folder entries/depth and manifest bytes before building its snapshot. CPU work is finite filtering and one snapshot per
+open/project/action. Filesystem commands run on blocking workers rather than the window's command thread. Inventory
+returns an unavailable state within two seconds; one scanner owns its permit until it actually finishes, even after
+timeout, so retries cannot accumulate stalled readers. Disk cost includes disabled items and the latest Undo copy.
+Actual working-set/CPU
+measurements and the native screen suite belong to the lead's unsandboxed validation; no measured saving is claimed.
+
+Checks: `tests/ui/catalog.check.ts`, `engine/tests/tools.rs`, `engine/tests/tool_inventory.rs`, and existing MCP checks.
+Cards checked in code review: C007 (localized UTF-8), C009 (shared context menu policy), C011 (management placement).
+Catalog is not a C005 work home; no composer is added to satisfy that card. Visual screenshots remain to be verified.
+
+## Cost statement for the pull request
+
+No new process, background timer or persistent catalog DOM. While open, render at most 48 catalog cards and 48 inventory
+rows per AI page; keep one bounded metadata snapshot and at most one inventory worker. A timed-out filesystem call may
+retain that one worker until the OS returns, without polling or queuing retries. Closed, the tab releases its nodes and
+listeners. Disk hashing for disabled tools moves from every session start to activation; active-tool verification and
+restore verification retain their safety checks. Startup/entry cleanup expires the previous visit's Undo files. Native
+working-set/processor measurements were not available in this sandbox, so no measured MB or CPU improvement is claimed.
+Undo metadata is one item id and its prior on/off choice; a restore attempt adds a bounded receipt read before the
+existing checks. Completed receipts add no per-session hashing or writes. No background work or process is added.

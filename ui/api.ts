@@ -517,8 +517,17 @@ export interface ToolRow {
   repo: string;
   home: string;
   installed: boolean;
+  enabled?: boolean;
+  version?: string;
+  nodeAvailable?: boolean;
   /** A tool server (an npm package Node runs) rather than a skill. */
   server: boolean;
+}
+
+export interface ToolInventoryList {
+  vendor: Vendor;
+  rows: { name: string; kind: 'skill' | 'plugin' | 'server'; source: 'catalog' | 'user' | 'project'; location: string; linked?: boolean; enabled?: boolean; catalogId?: string }[];
+  issues: { source: 'user' | 'project'; kind: 'skill' | 'plugin'; reason: 'unavailable' | 'unreadable' | 'limited' | 'unsupported' }[];
 }
 
 export interface McpServerRow {
@@ -871,8 +880,12 @@ export const api = {
   setupInstall: (vendor: Vendor) => invoke<void>('setup_install', { vendor }),
   setupSignIn: (vendor: Vendor) => invoke<void>('setup_sign_in', { vendor }),
   /** The catalog's skills (R247) and whether each is installed; installing downloads it from its own repository. */
+  toolsInventory: (projectId?: string) => invoke<ToolInventoryList[]>('tools_inventory', { projectId }),
   toolsList: () => invoke<ToolRow[]>('tools_list'),
   toolsInstall: (id: string) => invoke<void>('tools_install', { id }),
+  toolsClearRemoved: () => invoke<void>('tools_clear_removed'),
+  toolsRestore: (id: string) => invoke<void>('tools_restore', { id }),
+  toolsSetEnabled: (id: string, enabled: boolean) => invoke<void>('tools_set_enabled', { id, enabled }),
   toolsRemove: (id: string) => invoke<void>('tools_remove', { id }),
   mcpServers: (projectId: string) => invoke<McpServerList[]>('mcp_servers', { projectId }),
   setMcpServer: (projectId: string, name: string, enabled: boolean) => invoke<void>('set_mcp_server', { projectId, name, enabled }),

@@ -469,6 +469,9 @@ pub struct Engine {
 
 impl Engine {
     pub fn new(opts: EngineOptions, emit: Emit) -> Engine {
+        if let Err(error) = crate::tools::Store::new(&opts.data_dir).clear_removed() {
+            eprintln!("tools: Undo recovery or cleanup failed: {error}");
+        }
         let mut store = Store::new(&opts.data_dir);
         let search = store.search();
         // A crash can leave an unsaved draft behind. Visible records keep their scratch; orphan UUID folders do not.

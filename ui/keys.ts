@@ -30,7 +30,7 @@ export interface Shortcut {
 export const SHORTCUTS = {
   new: { group: 'anywhere', label: 'side.new', caps: ['ctrl', 'N'], ctrl: 'n', loose: true },
   palette: { group: 'anywhere', label: 'palette.label', caps: ['ctrl', 'K'], ctrl: 'k' },
-  find: { group: 'anywhere', label: 'find.label', caps: ['ctrl', 'F'], ctrl: 'f' },
+  find: { group: 'anywhere', label: 'keys.find', caps: ['ctrl', 'F'], ctrl: 'f' },
   settings: { group: 'anywhere', label: 'settings.open', caps: ['ctrl', ','], ctrl: ',', loose: true },
   running: { group: 'anywhere', label: 'run.toggle', caps: ['ctrl', '.'], ctrl: '.', loose: true },
   // Loose: a semicolon takes Shift on German and Spanish keyboards.

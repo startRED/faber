@@ -80,7 +80,7 @@ Engine (Rust crate inside the app today; a separate process later, so work survi
 
 ## Curated catalog and live manifest
 
-The catalog screens and the catalog step in the first run arrive in Phase 3, with the lead agent's toolbox.
+The Catalog browsing tab is built (R344), separate from the two work areas. It manages the existing pinned skills and tool server; full curation, plugin installation, first-run packs and automatic task-specific choice remain later work. It unmounts on close, never polls or starts a CLI to browse, and pages the DOM at 48 cards and 48 inventory rows per CLI. Off and removed copies stay outside CLI roots; enabling checks disabled files, and local Undo journals the move and recovers it before pruning. The latest removal is retained only until the next Catalog visit or engine restart. Filesystem commands use blocking workers; inventory has a two-second deadline and one outstanding reader. Personal/project discovery reads bounded known skill folders and installation manifests only, showing unsupported overrides instead of guessing live CLI state.
 
 - **Faber recommends only tools it has vetted.** A vetted tool works, is safe, has a license that allows the use, is
   maintained and improves the result. The agent may find and install any other tool. That tool is marked "not vetted",

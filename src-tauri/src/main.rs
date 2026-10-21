@@ -1450,10 +1450,14 @@ fn main() {
                 setup::setup_install,
                 setup::setup_sign_in,
                 tools::tools_list,
+                tools::tools_inventory,
                 tools::mcp_servers,
                 tools::set_mcp_server,
                 tools::tools_install,
                 tools::tools_remove,
+                tools::tools_set_enabled,
+                tools::tools_restore,
+                tools::tools_clear_removed,
                 #[cfg(feature = "test-hooks")]
                 report_checks,
                 #[cfg(feature = "test-hooks")]

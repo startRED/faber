@@ -122,7 +122,7 @@ pub struct Launch {
 }
 
 /// Faber's tool store: `<data>/tools/plugin/skills/<id>/` with the plugin's manifest beside them, `<data>/tools/servers/<id>/`,
-/// and `installed.json` saying which commit each one came from.
+/// disabled copies in `<data>/tools/disabled/<id>/`, and `installed.json` saying which commit each one came from.
 #[derive(Debug, Clone)]
 pub struct Store {
     root: PathBuf,
@@ -130,6 +130,28 @@ pub struct Store {
     items: Vec<Item>,
     /// Node for the servers; `None` looks it up on PATH when a server is installed.
     node: Option<PathBuf>,
+}
+
+#[derive(Serialize, Deserialize)]
+struct Removed {
+    commit: String,
+    enabled: bool,
+    #[serde(default)]
+    restoring: bool,
+    #[serde(default)]
+    restored: bool,
+}
+
+impl Removed {
+    fn write(&self, dir: &Path) -> io::Result<()> {
+        let part = dir.join(format!(".state-{}", uuid::Uuid::new_v4()));
+        std::fs::write(&part, serde_json::to_vec(self).map_err(io::Error::other)?)?;
+        let saved = std::fs::rename(&part, dir.join("state.json"));
+        if saved.is_err() {
+            let _ = std::fs::remove_file(part);
+        }
+        saved
+    }
 }
 
 impl Store {
@@ -153,6 +175,12 @@ impl Store {
     fn servers(&self) -> PathBuf {
         self.root.join("servers")
     }
+    fn removed(&self) -> PathBuf {
+        self.root.join("removed")
+    }
+    fn disabled(&self) -> PathBuf {
+        self.root.join("disabled")
+    }
     fn dir(&self, item: &Item) -> PathBuf {
         match item.server {
             Some(_) => self.servers().join(&item.id),
@@ -170,10 +198,45 @@ impl Store {
         let present = |id: &String| {
             self.items.iter().find(|i| &i.id == id).is_some_and(|i| {
                 let marker = i.server.as_ref().map_or("SKILL.md", |s| s.entry.as_str());
-                self.dir(i).join(marker).is_file()
+                [self.dir(i), self.disabled().join(id)].iter().any(|dir| dir.join(marker).is_file())
             })
         };
         ledger.into_iter().filter(|(id, _)| valid_id(id) && present(id)).collect()
+    }
+
+    /// Whether an installed copy is in the launch roots. Callers use installed() for ledger membership.
+    pub fn enabled(&self, id: &str) -> bool {
+        valid_id(id)
+            && !self.disabled().join(id).exists()
+            && self.items.iter().find(|i| i.id == id).is_some_and(|i| {
+                let marker = i.server.as_ref().map_or("SKILL.md", |s| s.entry.as_str());
+                self.dir(i).join(marker).is_file()
+            })
+    }
+
+    /// Moves a checked local copy into or out of the launch roots; enabling never downloads or executes it.
+    pub fn set_enabled(&self, id: &str, enabled: bool) -> Result<(), String> {
+        if !valid_id(id) {
+            return Err(format!("Invalid tool id: {id}"));
+        }
+        let _store = lock();
+        let item = self.items.iter().find(|i| i.id == id).ok_or("Unknown tool")?;
+        self.prune().ok_or("The tool store cannot be checked")?;
+        if !self.installed().contains_key(id) {
+            return Err("The tool is not installed".into());
+        }
+        let active = self.dir(item);
+        let disabled = self.disabled().join(id);
+        if enabled && disabled.exists() && !digest(&disabled).is_ok_and(|got| got == item.digest) {
+            self.discard(&disabled).map_err(|e| e.to_string())?;
+            return Err("The disabled tool does not match the catalog".into());
+        }
+        let (from, to) = if enabled { (disabled, active) } else { (active, disabled) };
+        if from.exists() {
+            std::fs::create_dir_all(to.parent().ok_or("Invalid tool folder")?).map_err(|e| e.to_string())?;
+            std::fs::rename(from, to).map_err(|e| e.to_string())?;
+        }
+        Ok(())
     }
 
     pub fn delivery(&self) -> Delivery {
@@ -183,7 +246,7 @@ impl Store {
             return Delivery::default();
         };
         let installed = self.installed();
-        let on = |i: &&Item| checked.contains(&i.id) && installed.contains_key(&i.id);
+        let on = |i: &&Item| checked.contains(&i.id) && installed.contains_key(&i.id) && !self.disabled().join(&i.id).exists();
         let skill = self.items.iter().filter(on).any(|i| i.server.is_none());
         let mut servers = self.items.iter().filter(on).filter_map(|i| Some((i, i.server.as_ref()?))).peekable();
         // A server needs Node; without it the CLIs get no server rather than one that fails at every start.
@@ -208,13 +271,14 @@ impl Store {
     fn prune(&self) -> Option<std::collections::HashSet<String>> {
         // The store's own folders must be folders: a link there would point the CLIs at files the check never saw.
         let linked = |p: PathBuf| std::fs::symlink_metadata(p).is_ok_and(|m| !m.is_dir());
-        if [self.root.clone(), self.plugin(), self.skills(), self.servers()].into_iter().any(linked) {
+        if [self.root.clone(), self.plugin(), self.skills(), self.servers(), self.disabled(), self.removed()].into_iter().any(linked) {
             return None;
         }
+        self.recover_restores().ok()?;
         let ledger = self.installed();
         let mut clean = true;
         let mut checked = std::collections::HashSet::new();
-        for (parent, server) in [(self.skills(), false), (self.servers(), true)] {
+        for (parent, server) in [(self.skills(), Some(false)), (self.servers(), Some(true)), (self.disabled(), None)] {
             // A folder that cannot be listed could hide a changed tool: nothing is handed over.
             let entries = entries(&parent)?;
             for entry in entries {
@@ -225,9 +289,14 @@ impl Store {
                     continue;
                 }
                 // shortcut: a catalog that pins a newer commit drops the old copy here; reinstall it on update once one exists.
-                let item = self.items.iter().find(|i| i.id == name && i.server.is_some() == server);
-                if ledger.contains_key(&name) && item.is_some_and(|i| digest(&entry.path()).is_ok_and(|got| got == i.digest)) {
-                    checked.insert(name);
+                let item = self.items.iter().find(|i| i.id == name && server.is_none_or(|s| i.server.is_some() == s));
+                if ledger.contains_key(&name)
+                    && (server.is_none() || !self.disabled().join(&name).exists())
+                    && item.is_some_and(|i| server.is_none() || digest(&entry.path()).is_ok_and(|got| got == i.digest))
+                {
+                    if server.is_some() {
+                        checked.insert(name);
+                    }
                 } else {
                     clean &= self.discard(&entry.path()).is_ok();
                 }
@@ -283,6 +352,20 @@ impl Store {
         }
         // One change to the store at a time, from unpacking to the ledger: what goes live is what was checked.
         let _store = lock();
+        if [
+            self.root.clone(),
+            self.plugin(),
+            self.skills(),
+            self.servers(),
+            self.disabled(),
+            self.removed(),
+            self.plugin().join(".claude-plugin"),
+        ]
+        .iter()
+        .any(|p| std::fs::symlink_metadata(p).is_ok_and(|m| !m.is_dir()))
+        {
+            return Err("The tool store contains a linked or invalid directory".into());
+        }
         let dest = self.dir(item);
         std::fs::create_dir_all(dest.parent().unwrap_or(&self.root)).map_err(|e| e.to_string())?;
         let staging = self.root.join(format!(".staging-{}", uuid::Uuid::new_v4()));
@@ -308,6 +391,8 @@ impl Store {
                 }
                 self.write_manifest().map_err(|e| e.to_string())?;
             }
+            self.discard(&self.removed().join(&item.id)).map_err(|e| e.to_string())?;
+            self.discard(&self.disabled().join(&item.id)).map_err(|e| e.to_string())?;
             self.discard(&dest).map_err(|e| e.to_string())?;
             std::fs::rename(&staging, &dest).map_err(|e| e.to_string())?;
             let mut ledger = self.installed();
@@ -322,18 +407,146 @@ impl Store {
         result
     }
 
-    /// Removes a skill: its folder leaves the skill root first, so the ledger never lists less than the CLIs would load.
+    /// Quarantines one installed copy outside the launch roots, retaining its state for Undo.
     pub fn remove(&self, id: &str) -> Result<(), String> {
         if !valid_id(id) {
-            return Err(format!("Invalid skill id: {id}"));
+            return Err(format!("Invalid tool id: {id}"));
         }
         let _store = lock();
-        for parent in [self.skills(), self.servers()] {
-            self.discard(&parent.join(id)).map_err(|e| e.to_string())?;
-        }
+        let item = self.items.iter().find(|i| i.id == id).ok_or("Unknown tool")?;
+        self.prune().ok_or("The tool store cannot be checked")?;
         let mut ledger = self.installed();
-        ledger.remove(id);
-        self.write_ledger(&ledger).map_err(|e| e.to_string())
+        let Some(commit) = ledger.remove(id) else { return Ok(()) };
+        let enabled = !self.disabled().join(id).exists();
+        let source = if enabled { self.dir(item) } else { self.disabled().join(id) };
+        let removed = self.removed().join(id);
+        if std::fs::symlink_metadata(self.removed()).is_ok_and(|m| !m.is_dir()) {
+            return Err("The removed tools folder is not a plain directory".into());
+        }
+        self.discard(&removed).map_err(|e| e.to_string())?;
+        std::fs::create_dir_all(&removed).map_err(|e| e.to_string())?;
+        Removed { commit, enabled, restoring: false, restored: false }.write(&removed).map_err(|e| e.to_string())?;
+        let files = removed.join("files");
+        std::fs::rename(&source, &files).map_err(|e| e.to_string())?;
+        self.write_ledger(&ledger).map_err(|e| {
+            let _ = std::fs::rename(&files, &source);
+            e.to_string()
+        })?;
+        // The screen keeps only the latest Undo. Older copies expire once this removal succeeds.
+        for entry in entries(&self.removed()).unwrap_or_default() {
+            if entry.file_name() != id {
+                let _ = self.discard(&entry.path());
+            }
+        }
+        Ok(())
+    }
+
+    /// Restores only the catalog's unchanged files and pinned version; never downloads or executes a removed tool.
+    pub fn restore(&self, id: &str) -> Result<(), String> {
+        if !valid_id(id) {
+            return Err(format!("Invalid tool id: {id}"));
+        }
+        let _store = lock();
+        let item = self.items.iter().find(|i| i.id == id).ok_or("Unknown tool")?;
+        let removed = self.removed().join(id);
+        self.prune().ok_or("The tool store cannot be checked")?;
+        let installed = self.installed();
+        if installed.contains_key(id) {
+            // Another launch or action may have completed this Undo before the person pressed Retry.
+            let receipt = std::fs::symlink_metadata(&removed)
+                .is_ok_and(|m| m.is_dir())
+                .then(|| small_file(&removed.join("state.json")).and_then(|b| serde_json::from_slice::<Removed>(&b).ok()))
+                .flatten();
+            if receipt.is_some_and(|state| {
+                let dest = if state.enabled { self.dir(item) } else { self.disabled().join(id) };
+                state.restored
+                    && !state.restoring
+                    && state.commit == item.commit
+                    && installed.get(id) == Some(&state.commit)
+                    && state.enabled == self.enabled(id)
+                    && !removed.join("files").exists()
+                    && std::fs::symlink_metadata(&dest).is_ok_and(|m| m.is_dir())
+                    && digest(&dest).is_ok_and(|got| got == item.digest)
+            }) {
+                return Ok(());
+            }
+            return Err("The tool is already installed".into());
+        }
+        let files = removed.join("files");
+        if [self.removed(), removed.clone(), files.clone()].iter().any(|p| !std::fs::symlink_metadata(p).is_ok_and(|m| m.is_dir())) {
+            return Err("The removed tool is not a plain directory".into());
+        }
+        let mut state: Removed = small_file(&removed.join("state.json"))
+            .and_then(|b| serde_json::from_slice(&b).ok())
+            .ok_or("The removed tool has no valid state")?;
+        if state.commit != item.commit || !digest(&files).is_ok_and(|got| got == item.digest) {
+            return Err("The removed tool does not match the catalog".into());
+        }
+        // The intent stays beside the files until both their move and the ledger save complete.
+        state.restoring = true;
+        state.write(&removed).map_err(|e| e.to_string())?;
+        self.recover_restores()?;
+        self.installed().contains_key(id).then_some(()).ok_or_else(|| "The removed tool could not be restored".into())
+    }
+
+    /// Completes a journaled Undo before pruning can discard its moved, not-yet-ledgered copy.
+    fn recover_restores(&self) -> Result<(), String> {
+        if [self.root.clone(), self.plugin(), self.skills(), self.servers(), self.disabled(), self.removed()]
+            .iter()
+            .any(|p| std::fs::symlink_metadata(p).is_ok_and(|m| !m.is_dir()))
+        {
+            return Err("The tool store contains a linked or invalid directory".into());
+        }
+        if !self.removed().exists() {
+            return Ok(());
+        }
+        for item in &self.items {
+            let removed = self.removed().join(&item.id);
+            if !std::fs::symlink_metadata(&removed).is_ok_and(|m| m.is_dir()) {
+                continue;
+            }
+            let Some(mut state) = small_file(&removed.join("state.json")).and_then(|b| serde_json::from_slice::<Removed>(&b).ok()) else {
+                continue;
+            };
+            if state.restored || !state.restoring {
+                continue;
+            }
+            let files = removed.join("files");
+            let dest = if state.enabled { self.dir(item) } else { self.disabled().join(&item.id) };
+            let pending = std::fs::symlink_metadata(&files).is_ok();
+            let copy = if pending { &files } else { &dest };
+            if !std::fs::symlink_metadata(copy).is_ok_and(|m| m.is_dir())
+                || state.commit != item.commit
+                || !digest(copy).is_ok_and(|got| got == item.digest)
+            {
+                // Keep an invalid or obsolete interrupted copy quarantined, never in a launch root.
+                if !pending && std::fs::symlink_metadata(&dest).is_ok() {
+                    std::fs::rename(&dest, &files).map_err(|e| e.to_string())?;
+                }
+                state.restoring = false;
+                state.write(&removed).map_err(|e| e.to_string())?;
+                continue;
+            }
+            if pending {
+                std::fs::create_dir_all(dest.parent().ok_or("Invalid tool folder")?).map_err(|e| e.to_string())?;
+                std::fs::rename(&files, &dest).map_err(|e| e.to_string())?;
+            }
+            let mut ledger = self.installed();
+            ledger.insert(item.id.clone(), state.commit.clone());
+            self.write_ledger(&ledger).map_err(|e| e.to_string())?;
+            state.restoring = false;
+            state.restored = true;
+            state.write(&removed).map_err(|e| e.to_string())?;
+        }
+        let _ = std::fs::remove_dir(self.removed());
+        Ok(())
+    }
+
+    /// Expires Undo when Catalog opens or the engine restarts, after finishing any interrupted restore.
+    pub fn clear_removed(&self) -> Result<(), String> {
+        let _store = lock();
+        self.recover_restores()?;
+        self.discard(&self.removed()).map_err(|e| e.to_string())
     }
 
     /// The plugin's own manifest, so Claude Code names the skills `faber:<id>`.

@@ -69,6 +69,7 @@ import './agents.check.ts';
 import './site.check.ts';
 import './skills.check.ts';
 import './mcp-servers.check.ts';
+import './catalog.check.ts';
 import './worklog.check.ts';
 import './quota.check.ts';
 import './recents.check.ts';

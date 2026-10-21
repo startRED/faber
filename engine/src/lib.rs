@@ -42,6 +42,7 @@ pub mod sibling;
 pub mod signals;
 pub mod store;
 pub mod stuck;
+pub mod tool_inventory;
 pub mod tools;
 pub mod usage;
 pub mod verify;

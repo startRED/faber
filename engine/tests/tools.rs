@@ -120,4 +120,329 @@ async fn a_server_downloads_from_npm_s_path_and_installs_only_with_the_catalog_s
     assert_eq!(store.delivery().servers.len(), 1);
     let leftovers: Vec<_> = std::fs::read_dir(data.path().join("tools")).unwrap().flatten().map(|e| e.file_name()).collect();
     assert_eq!(leftovers.len(), 2, "only the servers and the ledger stay: {leftovers:?}");
+    store.set_enabled("measure", false).unwrap();
+    assert!(store.installed().contains_key("measure") && !store.enabled("measure"));
+    assert!(store.delivery().servers.is_empty());
+    assert!(!data.path().join("tools/servers/measure").exists());
+    store.remove("measure").unwrap();
+    assert!(store.installed().is_empty());
+    store.restore("measure").unwrap();
+    assert!(!store.enabled("measure"));
+    assert!(store.delivery().servers.is_empty());
+    store.set_enabled("measure", true).unwrap();
+    assert_eq!(store.delivery().servers.len(), 1);
+}
+
+#[test]
+fn installed_skills_switch_off_and_on_from_local_files_and_removal_can_be_undone() {
+    let data = tempfile::tempdir().unwrap();
+    let archive = data.path().join("skill.zip");
+    std::fs::write(&archive, zip_of(&[("skills/careful/SKILL.md", SKILL)])).unwrap();
+    let mut other = item();
+    other.id = "other".into();
+    let catalog = vec![item(), other.clone()];
+    let store = Store::with_catalog(data.path(), catalog.clone());
+    store.install_from(&item(), &archive).unwrap();
+    store.install_from(&other, &archive).unwrap();
+    std::fs::remove_file(&archive).unwrap();
+    assert!(store.enabled("careful"));
+    store.set_enabled("careful", false).unwrap();
+    let reopened = Store::with_catalog(data.path(), catalog);
+    assert_eq!(reopened.installed().get("careful").map(String::as_str), Some("0123"));
+    assert!(!reopened.enabled("careful"));
+    let delivery = reopened.delivery();
+    let skills = delivery.skills.unwrap();
+    assert!(!skills.join("careful").exists(), "an off skill is absent even when another skill keeps the root in use");
+    assert!(skills.join("other/SKILL.md").is_file());
+    assert!(data.path().join("tools/disabled/careful/SKILL.md").is_file());
+    reopened.set_enabled("careful", false).unwrap();
+    reopened.set_enabled("careful", true).unwrap();
+    reopened.set_enabled("careful", true).unwrap();
+    assert!(reopened.enabled("careful") && skills.join("careful/SKILL.md").is_file());
+    assert!(!data.path().join("tools/disabled/careful").exists());
+
+    for enabled in [true, false] {
+        reopened.set_enabled("careful", enabled).unwrap();
+        reopened.remove("careful").unwrap();
+        assert!(!reopened.installed().contains_key("careful"));
+        assert!(!skills.join("careful").exists());
+        reopened.restore("careful").unwrap();
+        assert_eq!(reopened.enabled("careful"), enabled, "Undo preserves the original switch");
+        assert_eq!(reopened.installed().get("careful").map(String::as_str), Some("0123"));
+    }
+    assert!(reopened.set_enabled("../careful", true).is_err());
+    assert!(reopened.set_enabled("missing", true).is_err());
+}
+
+#[test]
+fn tampered_disabled_or_removed_files_never_become_available_again() {
+    let data = tempfile::tempdir().unwrap();
+    let archive = data.path().join("skill.zip");
+    std::fs::write(&archive, zip_of(&[("skills/careful/SKILL.md", SKILL)])).unwrap();
+    let store = Store::with_catalog(data.path(), vec![item()]);
+    store.install_from(&item(), &archive).unwrap();
+    store.set_enabled("careful", false).unwrap();
+    std::fs::write(data.path().join("tools/disabled/careful/SKILL.md"), b"changed").unwrap();
+    assert!(store.delivery().plugin.is_none());
+    assert!(store.installed().contains_key("careful"), "launch never hashes or discards disabled content");
+    assert_eq!(std::fs::read(data.path().join("tools/disabled/careful/SKILL.md")).unwrap(), b"changed");
+    assert!(store.set_enabled("careful", true).is_err());
+    assert!(store.installed().is_empty() && store.delivery().plugin.is_none());
+
+    store.install_from(&item(), &archive).unwrap();
+    store.remove("careful").unwrap();
+    std::fs::write(data.path().join("tools/removed/careful/files/SKILL.md"), b"changed").unwrap();
+    assert!(store.restore("careful").is_err());
+    assert!(store.installed().is_empty() && store.delivery().plugin.is_none());
+    assert!(store.restore("../careful").is_err());
+
+    store.install_from(&item(), &archive).unwrap();
+    store.remove("careful").unwrap();
+    let mut newer = item();
+    newer.commit = "new-pin".into();
+    let updated = Store::with_catalog(data.path(), vec![newer]);
+    assert!(updated.restore("careful").is_err(), "Undo never restores a tool pinned by an older catalog");
+    assert!(updated.installed().is_empty());
+}
+
+#[test]
+fn an_off_skill_is_not_loaded_if_its_valid_files_are_copied_back_into_the_live_root() {
+    let data = tempfile::tempdir().unwrap();
+    let archive = data.path().join("skill.zip");
+    std::fs::write(&archive, zip_of(&[("skills/careful/SKILL.md", SKILL)])).unwrap();
+    let mut other = item();
+    other.id = "other".into();
+    let store = Store::with_catalog(data.path(), vec![item(), other.clone()]);
+    store.install_from(&item(), &archive).unwrap();
+    store.install_from(&other, &archive).unwrap();
+    store.set_enabled("careful", false).unwrap();
+    let planted = data.path().join("tools/plugin/skills/careful");
+    std::fs::create_dir_all(&planted).unwrap();
+    std::fs::write(planted.join("SKILL.md"), SKILL).unwrap();
+    assert!(store.delivery().skills.is_some());
+    assert!(!planted.exists(), "launch removes a duplicate of a disabled item from the shared root");
+    assert!(!store.enabled("careful"));
+}
+
+#[test]
+fn an_interrupted_restore_is_completed_before_launch_pruning_or_startup_cleanup() {
+    for enabled in [true, false] {
+        for moved in [true, false] {
+            for startup in [true, false] {
+                let data = tempfile::tempdir().unwrap();
+                let archive = data.path().join("skill.zip");
+                std::fs::write(&archive, zip_of(&[("skills/careful/SKILL.md", SKILL)])).unwrap();
+                let store = Store::with_catalog(data.path(), vec![item()]);
+                store.install_from(&item(), &archive).unwrap();
+                store.set_enabled("careful", enabled).unwrap();
+                store.remove("careful").unwrap();
+                let removed = data.path().join("tools/removed/careful");
+                let state = removed.join("state.json");
+                let mut intent: serde_json::Value = serde_json::from_slice(&std::fs::read(&state).unwrap()).unwrap();
+                intent["restoring"] = true.into();
+                std::fs::write(&state, serde_json::to_vec(&intent).unwrap()).unwrap();
+                let dest = data.path().join(if enabled { "tools/plugin/skills/careful" } else { "tools/disabled/careful" });
+                // Simulate termination after the restore intent, or after its only copy moved but before the ledger save.
+                if moved {
+                    std::fs::rename(removed.join("files"), &dest).unwrap();
+                }
+                assert!(!store.installed().contains_key("careful"));
+                let reopened = Store::with_catalog(data.path(), vec![item()]);
+                if startup {
+                    reopened.clear_removed().unwrap();
+                }
+                let delivery = reopened.delivery();
+                assert!(reopened.installed().contains_key("careful"));
+                assert_eq!(reopened.enabled("careful"), enabled);
+                assert_eq!(delivery.plugin.is_some(), enabled);
+                assert_eq!(std::fs::read(dest.join("SKILL.md")).unwrap(), SKILL);
+                assert!(!removed.join("files").exists(), "the completed restore retains no payload copy");
+                assert_eq!(removed.exists(), !startup, "startup expires the completed Undo receipt");
+            }
+        }
+    }
+}
+
+#[test]
+fn a_failed_recovery_ledger_save_leaves_the_moved_copy_for_another_attempt() {
+    let data = tempfile::tempdir().unwrap();
+    let archive = data.path().join("skill.zip");
+    std::fs::write(&archive, zip_of(&[("skills/careful/SKILL.md", SKILL)])).unwrap();
+    let store = Store::with_catalog(data.path(), vec![item()]);
+    store.install_from(&item(), &archive).unwrap();
+    store.remove("careful").unwrap();
+    let removed = data.path().join("tools/removed/careful");
+    let state = removed.join("state.json");
+    let mut intent: serde_json::Value = serde_json::from_slice(&std::fs::read(&state).unwrap()).unwrap();
+    intent["restoring"] = true.into();
+    std::fs::write(&state, serde_json::to_vec(&intent).unwrap()).unwrap();
+    let dest = data.path().join("tools/plugin/skills/careful");
+    std::fs::rename(removed.join("files"), &dest).unwrap();
+    let ledger = data.path().join("tools/installed.json");
+    std::fs::remove_file(&ledger).unwrap();
+    std::fs::create_dir(&ledger).unwrap();
+    assert!(store.clear_removed().is_err());
+    assert!(store.delivery().plugin.is_none(), "a failed recovery never reaches ordinary destructive pruning");
+    assert_eq!(std::fs::read(dest.join("SKILL.md")).unwrap(), SKILL);
+    assert!(state.is_file(), "the recovery intent survives the failed save");
+    std::fs::remove_dir(&ledger).unwrap();
+    std::fs::write(&ledger, b"{}").unwrap();
+    assert!(store.delivery().plugin.is_some());
+    assert!(store.installed().contains_key("careful"));
+}
+
+#[test]
+fn only_the_latest_removal_retains_an_undo_copy_and_catalog_entry_clears_it() {
+    let data = tempfile::tempdir().unwrap();
+    let archive = data.path().join("skill.zip");
+    std::fs::write(&archive, zip_of(&[("skills/careful/SKILL.md", SKILL)])).unwrap();
+    let mut other = item();
+    other.id = "other".into();
+    let store = Store::with_catalog(data.path(), vec![item(), other.clone()]);
+    store.install_from(&item(), &archive).unwrap();
+    store.install_from(&other, &archive).unwrap();
+    store.remove("careful").unwrap();
+    assert!(data.path().join("tools/removed/careful/files").is_dir());
+    store.remove("other").unwrap();
+    assert!(!data.path().join("tools/removed/careful").exists());
+    assert!(data.path().join("tools/removed/other/files").is_dir());
+    assert!(store.restore("careful").is_err());
+    store.clear_removed().unwrap();
+    assert!(!data.path().join("tools/removed").exists());
+    assert!(store.restore("other").is_err());
+}
+
+#[test]
+fn retrying_restore_after_its_ledger_save_failed_succeeds_and_preserves_the_switch() {
+    for enabled in [true, false] {
+        for tampered in [false, true] {
+            let data = tempfile::tempdir().unwrap();
+            let archive = data.path().join("skill.zip");
+            std::fs::write(&archive, zip_of(&[("skills/careful/SKILL.md", SKILL)])).unwrap();
+            let store = Store::with_catalog(data.path(), vec![item()]);
+            store.install_from(&item(), &archive).unwrap();
+            store.set_enabled("careful", enabled).unwrap();
+            store.remove("careful").unwrap();
+            let ledger = data.path().join("tools/installed.json");
+            std::fs::remove_file(&ledger).unwrap();
+            std::fs::create_dir(&ledger).unwrap();
+            assert!(store.restore("careful").is_err(), "the actual Undo moves the copy before its ledger save fails");
+            let dest = data.path().join(if enabled { "tools/plugin/skills/careful" } else { "tools/disabled/careful" });
+            assert_eq!(std::fs::read(dest.join("SKILL.md")).unwrap(), SKILL);
+            assert!(!data.path().join("tools/removed/careful/files").exists());
+            std::fs::remove_dir(&ledger).unwrap();
+            std::fs::write(&ledger, b"{}").unwrap();
+            if tampered {
+                std::fs::write(dest.join("SKILL.md"), b"changed after the failed Undo").unwrap();
+                assert!(store.restore("careful").is_err(), "Retry still checks the moved copy against its digest");
+                assert!(store.installed().is_empty());
+                assert!(!dest.exists(), "the changed copy is quarantined rather than delivered");
+            } else {
+                store.restore("careful").expect("Retry succeeds when pruning completes the pending Undo");
+                assert_eq!(store.installed().get("careful").map(String::as_str), Some("0123"));
+                assert_eq!(store.enabled("careful"), enabled);
+                assert_eq!(store.delivery().plugin.is_some(), enabled);
+                store.clear_removed().unwrap();
+                assert!(store.restore("careful").is_err(), "an installed item without a receipt is not a pending Undo");
+            }
+        }
+    }
+}
+
+#[test]
+fn an_uncompleted_invalid_undo_intent_does_not_turn_an_unrelated_install_into_retry_success() {
+    let data = tempfile::tempdir().unwrap();
+    let archive = data.path().join("skill.zip");
+    std::fs::write(&archive, zip_of(&[("skills/careful/SKILL.md", SKILL)])).unwrap();
+    let store = Store::with_catalog(data.path(), vec![item()]);
+    store.install_from(&item(), &archive).unwrap();
+    let removed = data.path().join("tools/removed/careful");
+    std::fs::create_dir_all(removed.join("files")).unwrap();
+    std::fs::write(removed.join("files/SKILL.md"), b"changed pending copy").unwrap();
+    let intent = serde_json::json!({ "commit": "0123", "enabled": true, "restoring": true });
+    std::fs::write(removed.join("state.json"), serde_json::to_vec(&intent).unwrap()).unwrap();
+    assert!(store.restore("careful").is_err(), "pruning did not complete this pending Undo");
+    assert!(removed.exists());
+    assert!(store.enabled("careful") && store.delivery().plugin.is_some(), "the existing verified installation is preserved");
+}
+
+#[test]
+fn restore_retry_acknowledges_recovery_completed_by_a_launch_or_another_item_action() {
+    for enabled in [true, false] {
+        for another_item in [false, true] {
+            let data = tempfile::tempdir().unwrap();
+            let archive = data.path().join("skill.zip");
+            std::fs::write(&archive, zip_of(&[("skills/careful/SKILL.md", SKILL)])).unwrap();
+            let mut other = item();
+            other.id = "other".into();
+            let store = Store::with_catalog(data.path(), vec![item(), other.clone()]);
+            store.install_from(&item(), &archive).unwrap();
+            store.set_enabled("careful", enabled).unwrap();
+            store.remove("careful").unwrap();
+            let ledger = data.path().join("tools/installed.json");
+            std::fs::remove_file(&ledger).unwrap();
+            std::fs::create_dir(&ledger).unwrap();
+            assert!(store.restore("careful").is_err());
+            let dest = data.path().join(if enabled { "tools/plugin/skills/careful" } else { "tools/disabled/careful" });
+            assert_eq!(std::fs::read(dest.join("SKILL.md")).unwrap(), SKILL);
+            std::fs::remove_dir(&ledger).unwrap();
+            std::fs::write(&ledger, b"{}").unwrap();
+            if another_item {
+                store.install_from(&other, &archive).unwrap();
+                store.set_enabled("other", false).unwrap();
+            } else {
+                store.delivery();
+            }
+            let removed = data.path().join("tools/removed/careful");
+            let receipt = removed.join("state.json");
+            let saved = std::fs::read(&receipt).unwrap();
+            let modified = std::fs::metadata(&receipt).unwrap().modified().unwrap();
+            assert!(!removed.join("files").exists(), "the completed Undo retains a receipt, not another payload");
+            store.delivery();
+            assert_eq!(std::fs::read(&receipt).unwrap(), saved);
+            assert_eq!(std::fs::metadata(&receipt).unwrap().modified().unwrap(), modified, "launch does not rewrite a completed receipt");
+            store.restore("careful").expect("Retry acknowledges the exact recovered Undo even after another action");
+            assert_eq!(store.installed().get("careful").map(String::as_str), Some("0123"));
+            assert_eq!(store.enabled("careful"), enabled);
+            if !another_item {
+                store.install_from(&other, &archive).unwrap();
+            }
+            store.remove("other").unwrap();
+            assert!(!removed.exists(), "the next successful removal expires the older Undo receipt");
+            assert!(store.restore("careful").is_err());
+        }
+    }
+}
+
+#[test]
+fn completed_undo_receipts_reject_changed_pins_switches_flags_and_destination_files() {
+    for enabled in [true, false] {
+        for tamper in 0..5 {
+            let data = tempfile::tempdir().unwrap();
+            let archive = data.path().join("skill.zip");
+            std::fs::write(&archive, zip_of(&[("skills/careful/SKILL.md", SKILL)])).unwrap();
+            let store = Store::with_catalog(data.path(), vec![item()]);
+            store.install_from(&item(), &archive).unwrap();
+            store.set_enabled("careful", enabled).unwrap();
+            store.remove("careful").unwrap();
+            store.restore("careful").unwrap();
+            store.delivery();
+            let receipt = data.path().join("tools/removed/careful/state.json");
+            let mut state: serde_json::Value = serde_json::from_slice(&std::fs::read(&receipt).unwrap()).unwrap();
+            let dest = data.path().join(if enabled { "tools/plugin/skills/careful" } else { "tools/disabled/careful" });
+            match tamper {
+                0 => state["commit"] = "another-pin".into(),
+                1 => state["enabled"] = (!enabled).into(),
+                2 => state["restored"] = false.into(),
+                3 => state["restoring"] = true.into(),
+                _ => std::fs::write(dest.join("SKILL.md"), b"changed after recovery").unwrap(),
+            }
+            std::fs::write(&receipt, serde_json::to_vec(&state).unwrap()).unwrap();
+            if tamper == 4 && !enabled {
+                store.delivery();
+                assert!(dest.join("SKILL.md").is_file(), "completed receipts never hash disabled files during launches");
+            }
+            assert!(store.restore("careful").is_err(), "Retry validates the receipt and the restored files again");
+        }
+    }
 }

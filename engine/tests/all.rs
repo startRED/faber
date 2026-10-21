@@ -13,6 +13,8 @@ mod mcp_servers;
 #[path = "prompt_history.rs"]
 mod prompt_history;
 mod support;
+#[path = "tool_inventory.rs"]
+mod tool_inventory;
 
 #[path = "account.rs"]
 mod account;

@@ -37,6 +37,7 @@ function mount(root: HTMLElement, calls: string[], enabled: () => boolean = () =
         onProject: (id) => calls.push(`project ${id}`),
         onNew: () => calls.push('new'),
         onArea: (area) => calls.push(`area ${area}`),
+        onCatalog: () => calls.push('catalog'),
         onSettings: (section) => calls.push(`settings ${section ?? ''}`),
         onRunning: () => calls.push('running'),
         onAddProject: () => calls.push('add'),
@@ -134,6 +135,21 @@ check('palette: Ctrl+K opens one box (recent conversations, then actions), typin
     dispose();
     root.remove();
   }
+});
+
+check('palette: Catalog uses the same browse action as the sidebar', async () => {
+  const root = stage();
+  const calls: string[] = [];
+  const dispose = mount(root, calls);
+  try {
+    ctrlK(); await settle();
+    type(t('area.catalog'));
+    equal(options().length, 1);
+    press({ key: 'Enter' }, box()!);
+    deepEqual(calls, ['catalog']);
+    await settle(300);
+    equal(document.querySelector('.pal-scrim'), null);
+  } finally { dispose(); root.remove(); }
 });
 
 check('palette: Ctrl+K again closes it, a click outside closes it, and Ctrl N, Ctrl F wait under it', async () => {
