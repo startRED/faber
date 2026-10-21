@@ -1,4 +1,4 @@
-import { type Accessor, createEffect, createResource, createSignal, Index, on, onCleanup, onMount, Show } from 'solid-js';
+import { type Accessor, createEffect, createResource, createSignal, For, Index, on, onCleanup, onMount, Show } from 'solid-js';
 import { api, type Message, type ToolUse } from './api.ts';
 import { Icon } from './Glyphs.tsx';
 import { t } from './i18n.ts';
@@ -276,6 +276,13 @@ function SiteLooks(props: { conversationId: string; looks: SiteLook[] }) {
   );
 }
 
+/** The person's steps in the pane's head, in the order a browser puts them. */
+const STEPS = [
+  ['back', 'left', 'site.back'],
+  ['forward', 'right', 'site.forward'],
+  ['reload', 'retry', 'site.reload'],
+] as const;
+
 /** What the person typed in the address field, as an address the browser loads: a bare name gets https. The shell still
  * refuses anything but a web page (`allowed` in src-tauri/src/pane/mod.rs). */
 export function addressOf(typed: string): string | undefined {
@@ -396,6 +403,16 @@ export function SitePane(props: { site: OpenSite; onClose: () => void }) {
         </button>
       </div>
       <div class="site-bar">
+        {/* Only the live page steps: while a step's picture stands in for it, the page is out of sight. */}
+        <Show when={!blank() && !picked()}>
+          <For each={STEPS}>
+            {([step, icon, label]) => (
+              <button class="iconbtn" aria-label={t(label)} title={t(label)} onClick={() => void api.siteStep(props.site.conversationId, step).catch(() => false)}>
+                <Icon name={icon} />
+              </button>
+            )}
+          </For>
+        </Show>
         <input
           class="field site-address"
           type="text"

@@ -117,6 +117,8 @@ struct State {
     reported: Option<String>,
     /// The sites the person went to while the pane was theirs, since the agent's last call (`went_to`).
     visited: Vec<String>,
+    /// The sites the pane's pages were on since it was made, the latest `MAX_ORIGINS`: what `fresh_for` clears.
+    origins: Vec<String>,
     /// Pages Faber loaded (the agent's, or a card's) that have not finished: that many next finishes are not sites the
     /// person went to. A load that never finishes leaves one more skipped: the list can fall short, never say more.
     skip_finish: u32,
@@ -193,6 +195,15 @@ async fn when_idle<T>(acting: &tokio::sync::Mutex<()>, then: impl FnOnce() -> T)
     then()
 }
 
+/// The address as the pane loads it, or why it never does.
+fn checked(url: &str) -> Result<Url, String> {
+    let parsed: Url = url.parse().map_err(|_| "the address is not valid".to_string())?;
+    if !allowed(&parsed) {
+        return Err("only web pages open in Faber's browser".into());
+    }
+    Ok(parsed)
+}
+
 /// The full address the owner last read, or the sentence that sends the agent to read first.
 fn bound(reported: Option<&str>) -> Result<&str, String> {
     reported.ok_or_else(|| "read the page first; click and type only run on a page you have read".to_string())
@@ -217,10 +228,7 @@ impl Pane {
 
     /// Loads `url` in the pane, making it first if it is closed. Answers the count of started pages to wait past.
     fn load(self: &Arc<Self>, url: &str) -> Result<u64, String> {
-        let parsed: Url = url.parse().map_err(|_| "the address is not valid".to_string())?;
-        if !allowed(&parsed) {
-            return Err("only web pages open in Faber's browser".into());
-        }
+        let parsed = checked(url)?;
         let before = self.loads.borrow().0;
         // A page Faber loads is the agent's or a card's, never one the person went to.
         crate::lock(&self.state).skip_finish += 1;
@@ -234,18 +242,25 @@ impl Pane {
         }
         let window = self.app.get_window("main").ok_or("Faber's window is closed")?;
         let (loads, app, pane) = (self.loads.clone(), self.app.clone(), Arc::downgrade(self));
+        let seen = pane.clone();
         let builder = WebviewBuilder::new(LABEL, WebviewUrl::External(parsed))
             .incognito(true)
             .on_navigation(allowed)
             .on_new_window(|_, _| NewWindowResponse::Deny)
             .on_download(|_, _| false)
             .on_page_load(move |_, payload| match payload.event() {
-                PageLoadEvent::Started => loads.send_modify(|(started, _)| *started += 1),
+                PageLoadEvent::Started => {
+                    loads.send_modify(|(started, _)| *started += 1);
+                    if let Some(pane) = seen.upgrade() {
+                        stored_by(&mut crate::lock(&pane.state).origins, payload.url());
+                    }
+                }
                 PageLoadEvent::Finished => {
                     loads.send_modify(|(started, finished)| *finished = *started);
                     // A page that finished while the person had the pane is one they went to: the agent hears its site next time.
                     if let Some(pane) = pane.upgrade() {
                         let mut s = crate::lock(&pane.state);
+                        stored_by(&mut s.origins, payload.url());
                         if s.skip_finish > 0 {
                             s.skip_finish -= 1;
                         } else if s.shown {
@@ -277,6 +292,7 @@ impl Pane {
                     if left.is_zero() && !s.shown {
                         s.idle_watch = false;
                         s.visited.clear();
+                        s.origins.clear();
                         Err(s.webview.take())
                     } else {
                         Ok(left.max(Duration::from_secs(1)))
@@ -301,6 +317,7 @@ impl Pane {
             s.shown = false;
             s.reported = None;
             s.visited.clear();
+            s.origins.clear();
             (s.size, s.emulated) = (None, false);
             s.webview.take()
         };
@@ -371,7 +388,12 @@ impl Pane {
         if same && owner.as_deref() == Some(conversation) {
             return true;
         }
+        // An address the pane never loads leaves another conversation's page as it was.
+        if checked(url).is_err() {
+            return false;
+        }
         let _turn = self.opening.lock().await;
+        self.fresh_for(conversation).await;
         let shown = self.load(url).is_ok();
         if shown {
             let mut s = crate::lock(&self.state);
@@ -382,6 +404,57 @@ impl Pane {
             s.reported = None;
         }
         shown
+    }
+
+    /// A page that passes to another conversation gets a pane of its own: one conversation's history (and anything the
+    /// person signed in to there) is never a Back away from another's agent. The private pane forgets its data once its last
+    /// view is gone, which may come only after the next one is made, so the cookies and what every site it was on stored go
+    /// first.
+    async fn fresh_for(&self, conversation: &str) {
+        let origins = {
+            let s = crate::lock(&self.state);
+            if !s.owner.as_deref().is_some_and(|owner| owner != conversation) {
+                return;
+            }
+            s.origins.clone()
+        };
+        for origin in origins {
+            let _ = self.call("Storage.clearDataForOrigin", json!({ "origin": origin, "storageTypes": "all" })).await;
+        }
+        let _ = self.call("Network.clearBrowserCookies", json!({})).await;
+        self.close();
+    }
+
+    /// The person goes back, forward or loads the page again from the pane's head, only on the page of the conversation
+    /// they look at. The history holds only pages the pane already let in, one conversation's own since `fresh_for`; a step
+    /// that changes the document passes `allowed` again (one inside the same document cannot change the site), and the
+    /// steps are the person's own going somewhere, so the agent hears of them like any other page they went to.
+    pub async fn step(self: &Arc<Self>, conversation: &str, step: &str) -> bool {
+        let _turn = self.opening.lock().await;
+        {
+            // Checked once the turn is ours: another conversation may have opened its page while this step waited, and a
+            // pane out of sight (a step's picture stands in for it) is not the person's to move.
+            let s = crate::lock(&self.state);
+            if s.owner.as_deref() != Some(conversation) || !s.shown {
+                return false;
+            }
+        }
+        self.touch();
+        match step {
+            "reload" => self.call("Page.reload", json!({})).await.is_ok(),
+            "back" | "forward" => {
+                let Ok(history) = self.call("Page.getNavigationHistory", json!({})).await else {
+                    return false;
+                };
+                let at = history["currentIndex"].as_i64().unwrap_or(-1) + if step == "back" { -1 } else { 1 };
+                let entry = usize::try_from(at).ok().and_then(|at| history["entries"].get(at));
+                let Some(id) = entry.and_then(|e| e["id"].as_i64()) else {
+                    return false;
+                };
+                self.call("Page.navigateToHistoryEntry", json!({ "entryId": id })).await.is_ok()
+            }
+            _ => false,
+        }
     }
 
     /// One DevTools call, with a deadline: a page that holds it longer closes with the pane, which opens fresh next time.
@@ -554,6 +627,12 @@ impl Pane {
         let before = self.loads.borrow().0;
         let action = match &request {
             Request::Open(url) => {
+                checked(url)?;
+                // Under `acting`, so the person cannot take the pane between this look and the load: a page they took is never
+                // closed or moved under their hands.
+                let _acting = self.acting.lock().await;
+                self.person_took_it(taken)?;
+                self.fresh_for(&conversation).await;
                 self.load(url)?;
                 let mut s = crate::lock(&self.state);
                 if !mine {
@@ -711,6 +790,21 @@ impl Pane {
 
 /// The most sites the agent hears the person went to: the latest of them.
 const MAX_VISITED: usize = 5;
+/// The sites a pane remembers to clear: more than a person or an agent visits in five minutes of one conversation.
+const MAX_ORIGINS: usize = 64;
+
+/// Keeps the site of a page the pane was on, once, the latest last.
+fn stored_by(origins: &mut Vec<String>, url: &Url) {
+    if !matches!(url.scheme(), "http" | "https") {
+        return;
+    }
+    let origin = url.origin().ascii_serialization();
+    origins.retain(|o| *o != origin);
+    origins.push(origin);
+    if origins.len() > MAX_ORIGINS {
+        origins.remove(0);
+    }
+}
 
 /// Notes a site the person went to, for the agent and so for its vendor: only the site's own name (`docs.github.com` is
 /// `github.com`, since a subdomain can be a token or a tenant), only for web pages with a plain name, never a local address
@@ -802,6 +896,25 @@ mod tests {
         }
         assert_eq!(visited.len(), MAX_VISITED);
         assert_eq!(visited.last().map(String::as_str), Some("s8.org"));
+    }
+
+    #[test]
+    fn every_site_a_pane_was_on_is_kept_for_clearing_once_the_latest_last() {
+        let mut origins = Vec::new();
+        for url in ["https://bank.example/login", "http://localhost:3000/", "https://bank.example/home", "about:blank", "https://docs.rs/x"]
+        {
+            stored_by(&mut origins, &url.parse().unwrap());
+        }
+        assert_eq!(
+            origins,
+            ["http://localhost:3000", "https://bank.example", "https://docs.rs"],
+            "each site once, no page that stores nothing"
+        );
+        for n in 0..MAX_ORIGINS {
+            stored_by(&mut origins, &format!("https://s{n}.org/").parse().unwrap());
+        }
+        assert_eq!(origins.len(), MAX_ORIGINS);
+        assert_eq!(origins.last().map(String::as_str), Some(format!("https://s{}.org", MAX_ORIGINS - 1).as_str()));
     }
 
     #[test]

@@ -876,6 +876,17 @@ async fn site_open(app: AppHandle, id: String, url: String) -> bool {
     false
 }
 
+/// The person goes back, forward or reloads in the browser pane, on that conversation's page only.
+#[tauri::command]
+async fn site_step(app: AppHandle, id: String, step: String) -> bool {
+    #[cfg(windows)]
+    if let Some(pane) = app.try_state::<Arc<pane::Pane>>().map(|p| p.inner().clone()) {
+        return pane.step(&id, &step).await;
+    }
+    let _ = (app, id, step);
+    false
+}
+
 /// The picture the browser took for a call, as a data URL, so the page never reads the disk itself.
 #[tauri::command]
 async fn site_picture(faber: State<'_, Faber>, id: String, call: String) -> Res<Option<String>> {
@@ -1230,6 +1241,7 @@ fn main() {
                 site_place,
                 site_park,
                 site_open,
+                site_step,
                 site_picture,
                 state,
                 open,

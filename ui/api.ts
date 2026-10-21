@@ -769,6 +769,8 @@ export const api = {
   sitePlace: (boxId: number, x: number, y: number, width: number, height: number) => invoke<boolean>('site_place', { load: LOAD, boxId, x, y, width, height }),
   sitePark: (boxId: number) => invoke<void>('site_park', { load: LOAD, boxId }),
   siteOpen: (id: string, url: string) => invoke<boolean>('site_open', { id, url }),
+  /** Back, forward or reload in Faber's browser, on that conversation's page only. */
+  siteStep: (id: string, step: 'back' | 'forward' | 'reload') => invoke<boolean>('site_step', { id, step }),
   sitePicture: (id: string, call: string) => invoke<string | null>('site_picture', { id, call }),
   /** Where the page in Faber's browser is now, at every page it finishes loading. */
   onSite: (listener: (url: string) => void) => listen<string>('faber:site', (e) => listener(e.payload)),
