@@ -194,8 +194,8 @@ app, or another process's window covers its whole monitor (a borderless game). F
 - The first screen of a project (where a new session starts) in Dark Room also shows a black hole drawn in monospace
   characters on one canvas (ui/Hole.tsx, --amb-hole and --hole-colors): the whole shadow, centred in the room from 150 px right of the column with its arc clear of every edge (14% to 22% of the height), an amber disk sweeping in from the lower left that reaches 3.6 radii and fades from 2.6, so the scene keeps to the room beside the column instead of filling the stage,
   with fibres that turn faster near the hole, the far side of the disk bent over the top as a cool arc, a photon ring, a
-  dim glow, a small planet below it and stars. It has no hard edge beside the column of words: behind the column it keeps 6% of its light, comes up to full
-  from 40 px left of the column's edge to 240 px right of it and dims the hole a little more within 320 px, across the
+  dim glow, a small planet below it and stars. It has no hard edge beside the column of words: behind the column and for 40 px right of its edge it keeps 6% of its light (so the end of the composer and of the rules sits on the faint part with a clear gap), comes up to full
+  at 300 px right of it and dims the hole a little more within 320 px, across the
   whole height, so words that scroll in the column always sit on the same veil. The veil follows the edge of the words, not only the window: when the column's words change (a list opens, a longer name shows) it is laid again, once a frame at most and only when that edge moved. The project screens show no beam of light. With less than 400 px of room it does not show or run.
   Ten times a second it works out again only the cells the hole can reach and repaints those that changed; stars
   twinkle every 700 ms and now and then one shoots across. A click on an empty spot sends a ring of the accent for

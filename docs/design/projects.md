@@ -14,8 +14,8 @@ mission board and the local build card left the bundle with their 30 s poll (R17
 - With no project open, the small "Open a project" screen (`ui/Projects.tsx`): the empty state with its one button, the
   recent folders and saved environments, and at most three project conversations to pick up.
 - With a project open, the new-conversation screen of Chat (`welcome-grid project`) scoped to the folder, in one column:
-  Curioso, the project and its folder in short form as one quiet line in the interface size (the last two folder names,
-  the full path on hover; the sidebar and the crumb already name it), the greeting "What should we tackle?", the shared
+  Curioso, then the folder in short form as one quiet line in the interface size (the last two folder names,
+  the full path on hover; the sidebar and the crumb already name the project, so the page says it only to screen readers), the greeting "What should we tackle?", the shared
   composer, and under it at most three of this project's own conversations to pick up, each saying only when. No
   suggestions (the composer's hints show what to ask) and no second column. No beam of light: a project screen is a place
   to work; in Dark Room the black hole keeps to the room on the right, so no words sit on its bright part. The sidebar

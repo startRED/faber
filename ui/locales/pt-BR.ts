@@ -1667,6 +1667,7 @@ export const ptBR: Messages = {
   'notes.161.new': 'Você encontra skills pra jogos, marketing, pesquisa e outras tarefas no Catálogo, com sugestões pra começar.',
   'notes.162.new': 'Você pode abrir páginas e desenhos que o agente salva em arquivos, com as versões anteriores guardadas na conversa.',
   'notes.163.new': 'As conversas de projeto mostram os problemas em palavras simples e guardam os registros em Detalhes técnicos.',
+  'notes.164.better': 'As Configurações não repetem mais o nome da seção acima dos cartões, e a coluna cresce e fica centralizada numa janela larga. A linha Memória da página do projeto fica alinhada com o resto.',
   'update.checking': 'Procurando atualização…',
   'update.downloading': 'Baixando atualização…',
   'update.downloadingPercent': 'Baixando atualização… {percent}%',

@@ -61,7 +61,8 @@ export function Welcome(props: {
             <>
               <Peek />
               <header class="p-header">
-                <h2>{p().name}</h2>
+                {/* The sidebar and the crumb already show the name, so only screen readers get it here. */}
+                <h2 class="sr-only">{p().name}</h2>
                 <div class="p-meta">
                   <span title={p().path}>{tail(p().path)}</span>
                 </div>

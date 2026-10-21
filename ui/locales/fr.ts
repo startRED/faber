@@ -1680,6 +1680,7 @@ export const fr: Messages = {
   'notes.161.new': 'Vous trouvez des skills pour les jeux, le marketing, la recherche et d’autres tâches dans Catalogue, avec des suggestions pour commencer.',
   'notes.162.new': 'Vous pouvez ouvrir les pages et dessins enregistrés par l’agent et retrouver leurs versions précédentes dans la conversation.',
   'notes.163.new': 'Les conversations de projet expliquent les problèmes en mots simples et gardent les traces du travail dans Détails techniques.',
+  'notes.164.better': 'Les Réglages ne répètent plus le nom de la section au-dessus des cartes, et la colonne s’élargit et se centre dans une grande fenêtre. La ligne Mémoire de la page du projet s’aligne sur le reste.',
   'update.checking': 'Recherche d’une mise à jour…',
   'update.downloading': 'Téléchargement de la mise à jour…',
   'update.downloadingPercent': 'Téléchargement de la mise à jour… {percent} %',

@@ -23,13 +23,13 @@ const BUSY = 'button, a, input, textarea, select, label, [contenteditable], .com
 /** The light the owner picked on the prototype (115%). */
 const BRIGHT = 1.15;
 /** No hard edge where the column of words ends: the scene runs behind it at FLOOR of its light, and comes up to full
- * from FROM px left of the column's edge to TO px right of it. The hole itself is dimmed a little more within CALM px.
+ * from FROM px to TO px right of the column's edge (the end of the composer and of the rules stays on the floor, with a clear gap after it). The hole itself is dimmed a little more within CALM px.
  * It is a band across the whole height, so words that scroll in the column always sit on the same veil. */
-const [FLOOR, FROM, TO, CALM] = [0.06, 40, 240, 320];
+const [FLOOR, FROM, TO, CALM] = [0.06, 40, 300, 320];
 /** The shadow keeps this far right of the column, so its arc sits where the scene is nearly at full light. */
 const SIDE = 150;
 /** How much of its light the scene keeps at `x` px, for a column of words ending at `edge` px. */
-export const veil = (x: number, edge: number) => FLOOR + (1 - FLOOR) * smooth(edge - FROM, edge + TO, x);
+export const veil = (x: number, edge: number) => FLOOR + (1 - FLOOR) * smooth(edge + FROM, edge + TO, x);
 /** Less room than this right of the column and the scene does not show at all, nor run: a sliver of it reads as broken. */
 const ROOM = 400;
 /** How far the arc around the shadow reaches across and up, in radii, and the margin it keeps from the stage's edges, in px. */

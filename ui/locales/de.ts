@@ -1680,6 +1680,7 @@ export const de: Messages = {
   'notes.161.new': 'Im Katalog findest du Skills für Spiele, Marketing, Recherche und weitere Aufgaben sowie Vorschläge für den Einstieg.',
   'notes.162.new': 'Du kannst vom Agenten gespeicherte Seiten und Zeichnungen öffnen und frühere Versionen im Gespräch wieder aufrufen.',
   'notes.163.new': 'Projektgespräche zeigen Probleme in einfachen Worten; die Arbeitsnachweise stehen unter Technische Details.',
+  'notes.164.better': 'Die Einstellungen wiederholen den Namen des Bereichs nicht mehr über den Karten, und die Spalte wächst und wird in einem breiten Fenster zentriert. Die Zeile Gedächtnis auf der Projektseite sitzt jetzt auf derselben Kante wie der Rest.',
   'update.checking': 'Suche nach einem Update…',
   'update.downloading': 'Update wird heruntergeladen…',
   'update.downloadingPercent': 'Update wird heruntergeladen… {percent} %',

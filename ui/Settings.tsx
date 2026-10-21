@@ -140,9 +140,8 @@ export function Settings(props: Props) {
           the new one arrives; nothing runs under reduced or no motion. */}
       <div class="s-main" classList={{ wide: section() === 'appearance' }} ref={(el) => { main = el; animateList(el); }}>
         <Show when={section()} keyed>
-          <header class="s-head">
-            <h2 class="display">{title()}</h2>
-          </header>
+          {/* The sidebar's active item already names the section, so its title is only for screen readers. */}
+          <h2 class="sr-only">{title()}</h2>
         </Show>
         <Switch>
           <Match when={section() === 'general'}>

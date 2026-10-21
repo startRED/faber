@@ -8,7 +8,7 @@ How the Settings screen looks and behaves. The first run and the tutorial are in
   Accounts and limits and Privacy, and "Faber <version>" once at the bottom of the list. Ctrl comma opens it on General,
   the quota of a vendor in the sidebar opens it on Accounts and limits, and Esc or Back closes it. Switching sections is
   a short cross-fade (the owner, 2026-10-17, reversing R169): the old section leaves as an inert copy while the new one
-  arrives, the new section opens scrolled to its top, and with reduced or no motion it is instant. All sections share one content width, 720 px (`--st-w`).
+  arrives, the new section opens scrolled to its top, and with reduced or no motion it is instant. All sections share one content width (`--st-w`: 720 px, growing with the window to 820 px, centred right of the list; the Appearance section keeps its own two columns), and the section title is not drawn again above the cards (the list names it; screen readers still get the heading).
 - One grammar for every section (`ui/controls.tsx`). A group is a card (`--s1` with an inset `--line`, `--r-md`) under a
   small title; inside it every option is one row: the name and one short line (one line, 70 characters at most) at the left
   and the control at the right, rows divided by hairlines. The longer text of an option unfolds under its row from a small

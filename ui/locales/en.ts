@@ -1560,6 +1560,7 @@ export const en = {
   'notes.161.new': 'You can find skills for games, marketing, research and more in Catalog, with suggestions to get started.',
   'notes.162.new': 'You can open pages and drawings the agent saves as files, with earlier versions kept in the conversation.',
   'notes.163.new': 'Project conversations keep problems visible in plain words, with work records in Technical details.',
+  'notes.164.better': "Settings no longer repeats the section's name above the cards, and its column grows and centres in a wide window. The project page's Memory line sits on the same edge as the rest.",
   'update.checking': 'Looking for an update…',
   'update.downloading': 'Downloading update…',
   'update.downloadingPercent': 'Downloading update… {percent}%',

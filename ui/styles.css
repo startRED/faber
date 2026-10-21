@@ -211,7 +211,7 @@ input, textarea { caret-color: var(--accent); }
 .try .chip { transition: color var(--dur-fast), box-shadow var(--dur-fast); }
 .try .chip:hover { color: var(--ink); box-shadow: inset 0 0 0 1px var(--control-line); }
 .resume { margin-top: 32px; }
-.resume h2 { margin: 0; padding-bottom: 10px; border-bottom: 1px solid var(--line); font: 600 var(--fs-sm) var(--font-ui); color: var(--ink-2); }
+.resume h2 { margin: 0; padding-bottom: 10px; border-bottom: 1px solid var(--line); font: 400 var(--fs-sm) var(--font-ui); color: var(--ink-2); }
 .rrow { display: grid; gap: 4px; width: 100%; padding: calc(12px * var(--dens)) 0; border-bottom: 1px solid var(--line); text-align: left; }
 .rrow .t { transition: color var(--dur-fast) var(--ease); }
 .rrow:hover .t { color: var(--accent); }
@@ -816,10 +816,12 @@ select.pill option { background: var(--s2); color: var(--ink); }
 /* Settings */
 .s-main { overflow-y: auto; overflow-x: hidden; padding: 28px 36px 36px; display: flex; flex-direction: column; gap: 18px; }
 .s-main > * { flex: none; max-width: var(--st-w); }
+/* The column sits in the middle of the room right of the list, so a wide window has no empty band on one side only. */
+.s-main:not(.wide) > :not(.sr-only) { width: 100%; margin-inline: auto; }
 .s-main h2 { font-size: var(--fs-h2); }
 /* Settings: one grammar for every section. A group is a card; an option is a row with its name and one line at the left and its
    control at the right; the longer text unfolds under the row from the "?" beside the name. One width for every section. */
-.settings { --st-w: 720px; }
+.settings { --st-w: clamp(720px, 44vw, 820px); }
 .settings .s-nav { display: flex; flex-direction: column; }
 .s-version { margin: auto 0 0; padding: 12px 10px 4px; font-size: var(--fs-xs); color: var(--ink-3); }
 .st-group { display: grid; gap: 8px; align-content: start; }
@@ -1292,13 +1294,12 @@ html.away-win :is(.amb, .amb *) { animation-play-state: paused !important; }
 
 .projects-stage.home { padding-top: clamp(32px, 7vh, 72px); }
 .projects-stage.home > .welcome-grid { max-width: 640px; }
-/* The project and its folder are one quiet line under Curioso's ledge: the sidebar and the crumb already name it, so it
-   never competes with the greeting. */
+/* The project's folder is one quiet line under Curioso's ledge: the sidebar and the crumb already name the project, so the
+   header never says it a third time. */
 .welcome-grid .p-header { display: flex; flex-wrap: wrap; align-items: baseline; gap: 2px 10px; margin: 14px 0 22px; }
-.welcome-grid .p-header h2 { margin: 0; font: 600 var(--fs-ui) var(--font-ui); color: var(--ink); }
 .welcome-grid .p-meta { font-size: var(--fs-sm); color: var(--ink-3); }
 .p-resume { margin-top: 44px; }
-.p-resume h3 { margin: 0; padding-bottom: 10px; border-bottom: 1px solid var(--line); font: 600 var(--fs-sm) var(--font-ui); color: var(--ink-2); }
+.p-resume h3 { margin: 0; padding-bottom: 10px; border-bottom: 1px solid var(--line); font: 400 var(--fs-sm) var(--font-ui); color: var(--ink-2); }
 .proof-cmds { display: grid; gap: 6px; max-height: 240px; overflow-y: auto; padding: 10px 12px; border-radius: var(--r-sm); box-shadow: inset 0 0 0 1px var(--line); scrollbar-width: thin; }
 .more { min-height: var(--h-sm); font-size: var(--fs-xs); color: var(--ink-2); text-decoration: underline; text-underline-offset: 2px; }
 .more:hover { color: var(--ink); }
@@ -1488,6 +1489,9 @@ html.away-win :is(.amb, .amb *) { animation-play-state: paused !important; }
 
 /* The project memory fold holds only the page of entries being read. */
 .project-memory { margin-top: 24px; min-width: 0; }
+/* The fold button sits on the column edge like the rule above it and the terminal sessions below it, and speaks as quietly as the latter. */
+.project-memory > .btn:hover { background: none; }
+.project-memory > .btn { padding-inline: 0; min-height: var(--h-sm); height: auto; font-weight: 400; }
 .memory-body { margin-top: 12px; }
 .memory-head, .memory-actions { display: flex; align-items: baseline; gap: 12px; flex-wrap: wrap; }
 .memory-head .hint { flex: 1; }

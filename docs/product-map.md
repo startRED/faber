@@ -169,7 +169,7 @@ A project's checks are confirmed in Settings > Projects, not in the first run.
 
 ## Settings screen
 
-Five sections, in this order, all at one width (720 px). Nothing else is a Settings section. Every section speaks one grammar: a
+Five sections, in this order, all at one width (720 px in a small window, up to 820 px in a wide one, centred; the active section is named once, in the list). Nothing else is a Settings section. Every section speaks one grammar: a
 group is a card, an option is one row (its name and one short line at the left, its control at the right), and a longer
 text unfolds under the row from a small "?" beside the name (keyboard reachable, closed by default, not in the page while
 closed). There is no "Learn more" link. The version ("Faber 1.2.3") closes the list of sections, once.
