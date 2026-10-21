@@ -16,6 +16,513 @@ use tokio::sync::mpsc::UnboundedReceiver;
 const SKY: &str = "In one sentence: why is the sky blue?";
 const TWO_WRITES: &str = "Create a.txt containing 'one'. Then create b.txt containing 'two'. Use the Write tool for each, one at a time.";
 
+fn memory_folder() -> tempfile::TempDir {
+    // macOS's usual /var temp alias is a link; fixtures use a physical parent unless testing a link explicitly.
+    tempfile::tempdir_in(std::env::temp_dir().canonicalize().unwrap()).unwrap()
+}
+
+fn memory_fixture(root: &Path) -> serde_json::Value {
+    let fixture: serde_json::Value = serde_json::from_str(include_str!("../../tests/fixtures/project-memory/files.json")).unwrap();
+    for path in fixture["files"].as_array().unwrap() {
+        let path = root.join(path.as_str().unwrap());
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        std::fs::write(path, fixture["text"].as_str().unwrap()).unwrap();
+    }
+    fixture
+}
+
+#[test]
+fn project_memory_lists_and_edits_a_project_under_a_linked_parent() {
+    use faber_engine::project::memory::{Edit, edit, list};
+    let base = memory_folder();
+    let physical = base.path().join("physical");
+    let project = physical.join("project");
+    let linked = base.path().join("linked");
+    std::fs::create_dir_all(&project).unwrap();
+    let fixture = memory_fixture(&project);
+    #[cfg(windows)]
+    junction::create(&physical, &linked).unwrap();
+    #[cfg(unix)]
+    std::os::unix::fs::symlink(&physical, &linked).unwrap();
+    let selected = linked.join("project");
+    let result = (|| {
+        let files = list(&selected)?;
+        assert_eq!(files.files.len(), fixture["files"].as_array().unwrap().len());
+        for path in ["CLAUDE.md", "src/override/AGENTS.override.md"] {
+            let file = files.files.iter().find(|file| file.path == path).unwrap();
+            let entry = &file.entries[0];
+            edit(
+                &selected,
+                &Edit {
+                    path: file.path.clone(),
+                    revision: file.revision.clone(),
+                    start: entry.start,
+                    end: entry.end,
+                    text: Some("Changed through the selected project.".into()),
+                },
+            )?;
+            assert!(std::fs::read_to_string(project.join(path)).unwrap().contains("Changed through the selected project."));
+        }
+        Ok::<_, &str>(())
+    })();
+    #[cfg(windows)]
+    junction::delete(&linked).unwrap();
+    #[cfg(unix)]
+    std::fs::remove_file(&linked).unwrap();
+    result.unwrap();
+}
+
+#[test]
+fn project_memory_review_rejects_replaced_roots_ancestors_and_project_identity() {
+    use faber_engine::project::memory::{Edit, edit, list};
+    for ancestor in [false, true] {
+        for linked in [false, true] {
+            let base = memory_folder();
+            let parent = base.path().join("parent");
+            let project = parent.join("project");
+            std::fs::create_dir_all(&project).unwrap();
+            std::fs::write(project.join("CLAUDE.md"), "Keep local.\n").unwrap();
+            let file = list(&project).unwrap().files.remove(0);
+            let request = Edit { path: file.path, revision: file.revision, start: 0, end: file.entries[0].end, text: None };
+            let target = if ancestor { &parent } else { &project };
+            let moved = base.path().join("moved");
+            std::fs::rename(target, &moved).unwrap();
+            let outside = memory_folder();
+            let replacement = if linked { outside.path() } else { target.as_path() };
+            let replacement_project = if ancestor { replacement.join("project") } else { replacement.to_path_buf() };
+            std::fs::create_dir_all(&replacement_project).unwrap();
+            std::fs::write(replacement_project.join("CLAUDE.md"), "Keep local.\n").unwrap();
+            if linked {
+                #[cfg(windows)]
+                junction::create(replacement, target).unwrap();
+                #[cfg(unix)]
+                std::os::unix::fs::symlink(replacement, target).unwrap();
+            }
+            let result = edit(&project, &request);
+            let contents = std::fs::read(replacement_project.join("CLAUDE.md")).unwrap();
+            if linked {
+                #[cfg(windows)]
+                junction::delete(target).unwrap();
+                #[cfg(unix)]
+                std::fs::remove_file(target).unwrap();
+            }
+            assert_eq!(
+                result,
+                Err(if linked && !ancestor { "error.memory.refused" } else { "error.memory.changed" }),
+                "ancestor={ancestor}, linked={linked}"
+            );
+            assert_eq!(contents, b"Keep local.\n");
+        }
+    }
+}
+
+#[test]
+fn project_memory_review_refuses_read_only_files_before_edit_or_delete() {
+    use faber_engine::project::memory::{Edit, edit, list};
+    for text in [None, Some("Changed.".into())] {
+        let root = memory_folder();
+        let path = root.path().join("CLAUDE.md");
+        std::fs::write(&path, "Keep local.\n").unwrap();
+        let file = list(root.path()).unwrap().files.remove(0);
+        let original = std::fs::metadata(&path).unwrap().permissions();
+        let mut readonly = original.clone();
+        readonly.set_readonly(true);
+        std::fs::set_permissions(&path, readonly).unwrap();
+        let result = edit(root.path(), &Edit { path: file.path, revision: file.revision, start: 0, end: file.entries[0].end, text });
+        std::fs::set_permissions(&path, original).unwrap();
+        assert_eq!(result, Err("error.memory.readOnly"));
+        assert_eq!(std::fs::read(&path).unwrap(), b"Keep local.\n");
+        assert_eq!(std::fs::read_dir(root.path()).unwrap().count(), 1);
+    }
+}
+
+#[test]
+fn project_memory_review_codex_uses_only_first_nonempty_file_per_folder() {
+    use faber_engine::project::memory::{Edit, edit, list};
+    let root = memory_folder();
+    for folder in ["", "nested"] {
+        let dir = root.path().join(folder);
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join("AGENTS.md"), "Base instructions.\n").unwrap();
+        std::fs::write(dir.join("AGENTS.override.md"), " \r\n\t").unwrap();
+    }
+    let before = list(root.path()).unwrap();
+    assert_eq!(before.files.iter().map(|f| f.path.as_str()).collect::<Vec<_>>(), ["AGENTS.md", "nested/AGENTS.md"]);
+    let stale = &before.files[0];
+    for folder in ["", "nested"] {
+        std::fs::write(root.path().join(folder).join("AGENTS.override.md"), "Override instructions.\n").unwrap();
+    }
+    let after = list(root.path()).unwrap();
+    assert_eq!(after.files.iter().map(|f| f.path.as_str()).collect::<Vec<_>>(), ["AGENTS.override.md", "nested/AGENTS.override.md"]);
+    assert_eq!(
+        edit(
+            root.path(),
+            &Edit { path: stale.path.clone(), revision: stale.revision.clone(), start: 0, end: stale.entries[0].end, text: None }
+        ),
+        Err("error.memory.changed")
+    );
+    assert_eq!(std::fs::read_to_string(root.path().join("AGENTS.md")).unwrap(), "Base instructions.\n");
+}
+
+#[test]
+fn project_memory_reads_every_project_file_kind_and_nested_entry_from_fixtures() {
+    let root = memory_folder();
+    let fixture = memory_fixture(root.path());
+    let list = faber_engine::project::memory::list(root.path()).unwrap();
+    assert!(!list.incomplete);
+    assert_eq!(list.files.len(), fixture["files"].as_array().unwrap().len());
+    for file in list.files {
+        let actual: Vec<_> = file.entries.iter().map(|e| json!({"line": e.line, "text": e.text})).collect();
+        assert_eq!(json!(actual), fixture["entries"], "{}", file.path);
+        let expected = if file.path.starts_with(".faber/") {
+            "faber"
+        } else if file.path.contains("AGENTS") {
+            "codex"
+        } else {
+            "claude"
+        };
+        assert_eq!(file.source, expected);
+        assert!(!file.too_large);
+        assert!(!file.revision.is_empty());
+    }
+}
+
+#[test]
+fn project_memory_edits_and_deletes_both_clis_preserving_every_other_byte_and_line_ending() {
+    use faber_engine::project::memory::{Edit, edit, list};
+    for newline in ["\r\n", "\n"] {
+        let root = memory_folder();
+        let fixture = memory_fixture(root.path());
+        let text = fixture["text"].as_str().unwrap().replace("\r\n", newline);
+        for path in fixture["files"].as_array().unwrap() {
+            let path = path.as_str().unwrap();
+            std::fs::write(root.path().join(path), &text).unwrap();
+            let file = list(root.path()).unwrap().files.into_iter().find(|f| f.path == path).unwrap();
+            let entry = &file.entries[1];
+            let request = Edit {
+                path: path.into(),
+                revision: file.revision,
+                start: entry.start,
+                end: entry.end,
+                text: Some("- Use the runner.\n  Save the result.".into()),
+            };
+            edit(root.path(), &request).unwrap();
+            let old = fixture["entries"][1]["text"].as_str().unwrap().replace("\r\n", newline) + newline;
+            let new = format!("- Use the runner.{newline}  Save the result.{newline}");
+            let expected = text.replacen(&old, &new, 1);
+            assert_eq!(std::fs::read(root.path().join(path)).unwrap(), expected.as_bytes(), "edit {path}");
+            let file = list(root.path()).unwrap().files.into_iter().find(|f| f.path == path).unwrap();
+            let entry = &file.entries[1];
+            edit(root.path(), &Edit { revision: file.revision, start: entry.start, end: entry.end, text: None, ..request }).unwrap();
+            assert_eq!(std::fs::read(root.path().join(path)).unwrap(), expected.replacen(&new, "", 1).as_bytes(), "delete {path}");
+            assert_eq!(
+                std::fs::read_dir(root.path().join(path).parent().unwrap())
+                    .unwrap()
+                    .filter(|e| e.as_ref().unwrap().file_name().to_string_lossy().ends_with(".tmp"))
+                    .count(),
+                0
+            );
+        }
+    }
+}
+
+#[test]
+fn project_memory_refuses_changed_files_forged_ranges_and_oversized_edits() {
+    use faber_engine::project::memory::{Edit, MAX_BYTES, edit, list};
+    let root = memory_folder();
+    memory_fixture(root.path());
+    for path in ["CLAUDE.md", "AGENTS.md"] {
+        let file = list(root.path()).unwrap().files.into_iter().find(|f| f.path == path).unwrap();
+        let entry = &file.entries[0];
+        let mut request = Edit { path: path.into(), revision: file.revision, start: entry.start, end: entry.end, text: None };
+        request.start += 1;
+        assert_eq!(edit(root.path(), &request), Err("error.memory.refused"));
+        request.start -= 1;
+        request.text = Some("x".repeat(MAX_BYTES + 1));
+        assert_eq!(edit(root.path(), &request), Err("error.memory.refused"));
+        request.text = None;
+        let changed = "Someone else changed this.\r\n";
+        std::fs::write(root.path().join(path), changed).unwrap();
+        assert_eq!(edit(root.path(), &request), Err("error.memory.changed"));
+        request.text = Some("overwrite".into());
+        assert_eq!(edit(root.path(), &request), Err("error.memory.changed"));
+        assert_eq!(std::fs::read_to_string(root.path().join(path)).unwrap(), changed);
+    }
+}
+
+#[test]
+fn project_memory_preserves_bom_mixed_newlines_blank_separators_and_no_final_newline() {
+    use faber_engine::project::memory::{Edit, edit, list};
+    let root = memory_folder();
+    let text = "\u{feff}# Rules\r\n\r\nA paragraph.\n\n- One.\r\n\r\n- Last.";
+    std::fs::write(root.path().join("CLAUDE.md"), text).unwrap();
+    let file = list(root.path()).unwrap().files.remove(0);
+    assert_eq!(file.entries.len(), 3);
+    let first = &file.entries[0];
+    edit(
+        root.path(),
+        &Edit {
+            path: file.path.clone(),
+            revision: file.revision,
+            start: first.start,
+            end: first.end,
+            text: Some("Changed paragraph.".into()),
+        },
+    )
+    .unwrap();
+    let expected = text.replace("A paragraph.", "Changed paragraph.");
+    assert_eq!(std::fs::read_to_string(root.path().join("CLAUDE.md")).unwrap(), expected);
+    let file = list(root.path()).unwrap().files.remove(0);
+    let last = file.entries.last().unwrap();
+    edit(
+        root.path(),
+        &Edit { path: file.path, revision: file.revision, start: last.start, end: last.end, text: Some("- Changed last.".into()) },
+    )
+    .unwrap();
+    assert_eq!(std::fs::read_to_string(root.path().join("CLAUDE.md")).unwrap(), expected.replace("- Last.", "- Changed last."));
+}
+
+#[test]
+fn project_memory_size_cap_lists_the_file_name_without_splitting_or_editing_it() {
+    use faber_engine::project::memory::{Edit, MAX_BYTES, edit, list};
+    let root = memory_folder();
+    for path in ["CLAUDE.md", "AGENTS.override.md"] {
+        std::fs::write(root.path().join(path), "x".repeat(MAX_BYTES + 1)).unwrap();
+    }
+    let files = list(root.path()).unwrap().files;
+    assert_eq!(files.len(), 2);
+    for file in files {
+        assert!(file.too_large);
+        assert!(file.entries.is_empty());
+        assert!(file.revision.is_empty());
+        assert_eq!(
+            edit(root.path(), &Edit { path: file.path, revision: file.revision, start: 0, end: 1, text: None }),
+            Err("error.memory.changed")
+        );
+    }
+    std::fs::write(root.path().join("CLAUDE.md"), "x".repeat(MAX_BYTES)).unwrap();
+    assert!(!list(root.path()).unwrap().files.into_iter().find(|f| f.path == "CLAUDE.md").unwrap().too_large);
+}
+
+#[test]
+fn project_memory_many_short_entries_are_bounded_and_keep_their_original_line_numbers() {
+    let root = memory_folder();
+    std::fs::create_dir(root.path().join(".github")).unwrap();
+    std::fs::write(root.path().join(".github/AGENTS.md"), "- a\n".repeat(20_000)).unwrap();
+    let list = faber_engine::project::memory::list(root.path()).unwrap();
+    assert!(list.incomplete);
+    let entries = &list.files[0].entries;
+    assert_eq!(entries.len(), 4096);
+    assert_eq!(entries.last().unwrap().line, 4096);
+}
+
+#[test]
+#[ignore = "isolated project memory resident-memory and processor measurement"]
+fn project_memory_cost() {
+    use sysinfo::{ProcessRefreshKind, ProcessesToUpdate, System};
+    fn usage(system: &mut System, pid: sysinfo::Pid) -> (u64, u64) {
+        system.refresh_processes_specifics(ProcessesToUpdate::Some(&[pid]), true, ProcessRefreshKind::nothing().with_memory().with_cpu());
+        let p = system.process(pid).unwrap();
+        (p.memory(), p.accumulated_cpu_time())
+    }
+    let root = memory_folder();
+    let fixture: serde_json::Value = serde_json::from_str(include_str!("../../tests/fixtures/project-memory/files.json")).unwrap();
+    for n in 0..64 {
+        let dir = root.path().join(format!("part-{n}"));
+        std::fs::create_dir(&dir).unwrap();
+        std::fs::write(dir.join(if n % 2 == 0 { "CLAUDE.md" } else { "AGENTS.md" }), fixture["text"].as_str().unwrap().repeat(16)).unwrap();
+    }
+    let pid = sysinfo::get_current_pid().unwrap();
+    let mut system = System::new();
+    let (baseline, cpu) = usage(&mut system, pid);
+    let done = Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let finished = done.clone();
+    let sampler = std::thread::spawn(move || {
+        let mut system = System::new();
+        let mut peak = baseline;
+        while !finished.load(std::sync::atomic::Ordering::Relaxed) {
+            peak = peak.max(usage(&mut system, pid).0);
+            std::thread::sleep(Duration::from_millis(1));
+        }
+        peak
+    });
+    let start = std::time::Instant::now();
+    let list = faber_engine::project::memory::list(root.path()).unwrap();
+    let elapsed = start.elapsed();
+    assert!(!list.incomplete);
+    assert_eq!(list.files.len(), 64);
+    assert_eq!(list.files.iter().map(|file| file.entries.len()).sum::<usize>(), 3072);
+    let payload = serde_json::to_vec(&list).unwrap().len();
+    let (after, cpu_after) = usage(&mut system, pid);
+    done.store(true, std::sync::atomic::Ordering::Relaxed);
+    let peak = sampler.join().unwrap().max(after);
+    println!(
+        "PROJECT MEMORY COST: 64 files / 3072 entries; {:.2} ms wall; {} ms process CPU; resident baseline {baseline} B, sampled peak {peak} B, growth {} B; response {payload} B; no CLI, watcher or timer",
+        elapsed.as_secs_f64() * 1000.0,
+        cpu_after.saturating_sub(cpu),
+        peak.saturating_sub(baseline)
+    );
+    assert!(peak < 400 * 1024 * 1024);
+}
+
+#[test]
+fn project_memory_never_reads_cli_profiles_imports_or_old_faber_private_files() {
+    use faber_engine::project::memory::{Edit, edit, list};
+    let root = memory_folder();
+    let fixture = memory_fixture(root.path());
+    let outside = memory_folder();
+    std::fs::write(outside.path().join("AGENTS.md"), "must never be read").unwrap();
+    for path in [
+        ".codex/AGENTS.md",
+        ".codex/memories/AGENTS.md",
+        ".claude/projects/private/CLAUDE.md",
+        ".claude/worktrees/secret/CLAUDE.md",
+        ".faber/missions/secret.md",
+        ".faber/verify/run.md",
+    ] {
+        let full = root.path().join(path);
+        std::fs::create_dir_all(full.parent().unwrap()).unwrap();
+        std::fs::write(full, [0xff, 0x00]).unwrap(); // Reading this as an instruction would fail UTF-8.
+        assert_eq!(
+            edit(root.path(), &Edit { path: path.into(), revision: String::new(), start: 0, end: 1, text: None }),
+            Err("error.memory.refused")
+        );
+    }
+    let imported = format!("@{}\n", outside.path().join("AGENTS.md").display());
+    std::fs::write(root.path().join("CLAUDE.md"), &imported).unwrap();
+    let files = list(root.path()).unwrap().files;
+    assert_eq!(files.len(), fixture["files"].as_array().unwrap().len());
+    assert_eq!(files.iter().find(|f| f.path == "CLAUDE.md").unwrap().entries[0].text, imported.trim());
+    for path in ["../AGENTS.md", "/AGENTS.md", "C:/AGENTS.md", ".claude.json", ".claude/auth.json"] {
+        assert_eq!(
+            edit(root.path(), &Edit { path: path.into(), revision: String::new(), start: 0, end: 1, text: None }),
+            Err("error.memory.refused")
+        );
+    }
+}
+
+#[cfg(any(windows, unix))]
+#[test]
+fn project_memory_refuses_outside_links_before_read_or_write() {
+    use faber_engine::project::memory::{Edit, edit, list};
+    let root = memory_folder();
+    let outside = memory_folder();
+    std::fs::write(root.path().join("CLAUDE.md"), "A valid revision.\n").unwrap();
+    let revision = list(root.path()).unwrap().files.remove(0).revision;
+    std::fs::remove_file(root.path().join("CLAUDE.md")).unwrap();
+    let path = outside.path().join("AGENTS.md");
+    std::fs::write(&path, [0xff, 0]).unwrap();
+    #[cfg(windows)]
+    junction::create(outside.path(), root.path().join("linked")).unwrap();
+    #[cfg(unix)]
+    std::os::unix::fs::symlink(outside.path(), root.path().join("linked")).unwrap();
+    assert!(list(root.path()).unwrap().files.is_empty());
+    assert_eq!(
+        edit(root.path(), &Edit { path: "linked/AGENTS.md".into(), revision: revision.clone(), start: 0, end: 1, text: None }),
+        Err("error.memory.refused")
+    );
+    #[cfg(unix)]
+    std::os::unix::fs::symlink(&path, root.path().join("AGENTS.md")).unwrap();
+    #[cfg(windows)]
+    std::fs::hard_link(&path, root.path().join("AGENTS.md")).unwrap();
+    assert_eq!(list(root.path()).unwrap_err(), "error.memory.refused");
+    assert_eq!(edit(root.path(), &Edit { path: "AGENTS.md".into(), revision, start: 0, end: 1, text: None }), Err("error.memory.refused"));
+    assert_eq!(std::fs::read(&path).unwrap(), [0xff, 0]);
+    #[cfg(windows)]
+    junction::delete(root.path().join("linked")).unwrap();
+}
+
+#[tokio::test]
+async fn project_memory_engine_commands_accept_parent_components_in_a_project_path() {
+    use faber_engine::project::memory::Edit;
+    let base = memory_folder();
+    let root = base.path().join("project");
+    std::fs::create_dir_all(root.join("child")).unwrap();
+    std::fs::create_dir(base.path().join("hop")).unwrap();
+    // Joining onto a Windows verbatim PathBuf erases `..`; keep the supplied spelling in a string.
+    let parent = base.path().to_str().unwrap().trim_start_matches(r"\\?\");
+    for selected in [format!("{parent}/hop/../project"), format!("{parent}/project/child/.."), format!("{parent}/./project")] {
+        let data = memory_folder();
+        memory_fixture(&root);
+        let spawn: Spawner = Arc::new(|_, _, _| panic!("memory must never launch a CLI"));
+        let (engine, _rx) = engine(data.path(), Vendor::Claude, spawn);
+        let project = engine.add_project(&selected).unwrap();
+        assert_eq!(project.path, selected);
+        let listed = engine.project_memory(&project.id).expect("an added project path must support memory listing");
+        let file = listed.files.into_iter().find(|file| file.path == "CLAUDE.md").unwrap();
+        engine
+            .edit_project_memory(
+                &project.id,
+                &Edit {
+                    path: file.path,
+                    revision: file.revision,
+                    start: file.entries[0].start,
+                    end: file.entries[0].end,
+                    text: Some("Edited through the selected path.".into()),
+                },
+            )
+            .expect("the same added project path must support memory editing");
+        let listed = engine.project_memory(&project.id).unwrap();
+        assert_eq!(listed.files.iter().find(|file| file.path == "CLAUDE.md").unwrap().entries[0].text, "Edited through the selected path.");
+        assert!(std::fs::read_to_string(root.join("CLAUDE.md")).unwrap().contains("Edited through the selected path."));
+        engine.shutdown();
+    }
+}
+
+#[tokio::test]
+#[cfg(windows)]
+async fn project_memory_engine_commands_accept_a_short_project_root_name() {
+    use faber_engine::project::memory::Edit;
+    let base = memory_folder();
+    let root = base.path().join("MEMORY-PROJECT-LONG-FOLDER");
+    std::fs::create_dir(&root).unwrap();
+    let selected = base.path().join("MEMORY~1");
+    if selected.canonicalize().ok() != Some(root.canonicalize().unwrap()) {
+        eprintln!("8.3 names are unavailable for this temporary folder");
+        return;
+    }
+    let data = memory_folder();
+    memory_fixture(&root);
+    let spawn: Spawner = Arc::new(|_, _, _| panic!("memory must never launch a CLI"));
+    let (engine, _rx) = engine(data.path(), Vendor::Claude, spawn);
+    let project = engine.add_project(selected.to_str().unwrap()).unwrap();
+    let listed = engine.project_memory(&project.id).unwrap();
+    let file = listed.files.into_iter().find(|file| file.path == "CLAUDE.md").unwrap();
+    engine
+        .edit_project_memory(
+            &project.id,
+            &Edit { path: file.path, revision: file.revision, start: file.entries[0].start, end: file.entries[0].end, text: None },
+        )
+        .unwrap();
+    assert_eq!(engine.project_memory(&project.id).unwrap().files.iter().find(|file| file.path == "CLAUDE.md").unwrap().entries.len(), 2);
+    assert_eq!(
+        faber_engine::project::memory::list(&root).unwrap().files.iter().find(|file| file.path == "CLAUDE.md").unwrap().entries.len(),
+        2
+    );
+    engine.shutdown();
+}
+
+#[tokio::test]
+async fn project_memory_engine_commands_use_only_the_selected_project_and_never_launch_a_cli() {
+    use faber_engine::project::memory::Edit;
+    let data = memory_folder();
+    let root = support::work_folder();
+    memory_fixture(root.path());
+    let spawn: Spawner = Arc::new(|_, _, _| panic!("memory must never launch a CLI"));
+    let (engine, _rx) = engine(data.path(), Vendor::Claude, spawn);
+    let project = engine.add_project(root.path().to_str().unwrap()).unwrap();
+    let file = engine.project_memory(&project.id).unwrap().files.remove(0);
+    engine
+        .edit_project_memory(
+            &project.id,
+            &Edit { path: file.path, revision: file.revision, start: file.entries[0].start, end: file.entries[0].end, text: None },
+        )
+        .unwrap();
+    assert_eq!(engine.project_memory(&project.id).unwrap().files[0].entries.len(), 2);
+    assert_eq!(engine.project_memory("missing").unwrap_err(), "error.project.notFound");
+    engine.shutdown();
+}
+
 #[test]
 fn visual_runtime_hash_authorizes_only_the_fixed_loader_and_never_a_host_nonce() {
     use base64::Engine as _;

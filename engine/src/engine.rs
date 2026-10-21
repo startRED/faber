@@ -972,6 +972,14 @@ impl Engine {
     pub fn projects_checked(&self) -> Result<Vec<Project>, String> {
         self.with(|c| c.store.projects_checked().map_err(|e| e.key().to_string()))
     }
+    pub fn project_memory(&self, id: &str) -> Result<crate::project::memory::MemoryList, String> {
+        let project = self.project(id)?;
+        crate::project::memory::list(Path::new(&project.path)).map_err(str::to_string)
+    }
+    pub fn edit_project_memory(&self, id: &str, edit: &crate::project::memory::Edit) -> Result<(), String> {
+        let project = self.project(id)?;
+        crate::project::memory::edit(Path::new(&project.path), edit).map_err(str::to_string)
+    }
     pub fn update_project(&self, before: &Project, project: &Project) -> Result<(), String> {
         self.with(|c| {
             let mut projects = c.store.projects_checked().map_err(|e| e.key().to_string())?;

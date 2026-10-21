@@ -31,6 +31,40 @@ mission board and the local build card left the bundle with their 30 s poll (R17
   with Auto in the picker; opening it again opens the same conversation, archived or not. Its earlier turns stay in the CLI: the conversation shows what is said from then on.
   Claude Code has no list to ask, so its sessions come from its history files of that folder only (parity F5).
 
+### Memory
+
+The project page extends its existing single column with one quiet Memory fold below the pick-up list
+(`ui/ProjectMemory.tsx`); it remains available with no AI connected. It is the project’s work, not a setting.
+Opening it reads the files; Refresh reads again, and closing it drops the list and its editors. Nothing polls or
+watches. The shared Collapse follows the look’s normal/reduced/no-motion rules; entries and text never animate.
+
+Each row shows the source, relative file and original line, then literal Markdown text. Paths and paragraphs wrap at
+720 px; only 50 rows mount first, with Show more. A file over 256 KiB shows its path and a short reason without entries.
+An empty list and a failed read are distinct, and Refresh retries. A partial scan says it is partial.
+For Codex, each folder shows only the first nonempty instruction file it reads: `AGENTS.override.md`, then `AGENTS.md`.
+
+Edit opens a labelled textarea in place, focused on opening, with Save and Cancel. Escape from anywhere in the form
+cancels except during text composition or a save. Delete asks on the row first; confirmation requires a separate gesture
+at least 500 ms later and releasing the key that armed it, as in the shared context menu. Cancel leaves the file alone. During a
+write the actions wait. A changed-file refusal keeps the draft and asks the person to reopen the file. Read-only files get
+a plain refusal, and a replaced project folder or ancestor also refuses a stale save. One quiet line
+says that changes apply on the AI’s next launch in this folder; another says that separate copies and private home memory are outside this project-folder list. The list
+shows sources, not a claim that every nested instruction is active in every session. Faber creates no new instruction files or memory store.
+
+Projects under linked parent folders work normally. Links from the project root down to a memory file are refused;
+the root identity recorded on reading must still match before a save opens any memory file.
+An absolute project path containing dot or parent components, or a Windows short name, lists and edits normally;
+these project address forms do not relax the checks on relative memory-file paths or private folders.
+Private CLI configuration folders and their linked targets stay excluded, using metadata only without listing or reading their contents.
+
+An open memory editor joins the shared draft protection, even when its text is empty: an unattended update cannot
+restart Faber while it is open or saving, including when minimized (C004). Cancel or a completed save releases it;
+a failed save keeps the editor protected. A pending write stays protected even if the fold closes or the project changes.
+
+A save checks the revision and then replaces the file in one atomic operation: an interruption leaves the old or new
+file under its instruction name. Windows refuses in-place writers through replacement. Another atomic save after the
+final check, or a previously opened writer on Unix, remains the accepted normal editor window (project-memory R333).
+
 ### Separate copies
 
 A project conversation works in a separate copy of the repository (R201, `engine/src/project/copy.rs`): a git

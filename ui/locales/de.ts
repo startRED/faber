@@ -1063,6 +1063,30 @@ export const de: Messages = {
   // Native speaker must translate (needs native review).
   // Native speaker must translate (needs native review).
   // Native speaker must translate (needs native review).
+  "memory.title": "Gedächtnis",
+  "memory.scope": "Nur dieser Projektordner. Separate Kopien und die privaten Anmeldeordner deiner KI bleiben außen vor.",
+  "memory.nextLaunch": "Änderungen gelten, wenn die KI das nächste Mal in diesem Ordner startet. Anweisungen aus Unterordnern gelten dort.",
+  "memory.refresh": "Aktualisieren",
+  "memory.loading": "Gedächtnis wird gelesen…",
+  "memory.empty": "Dieses Projekt hat noch keine Gedächtniseinträge.",
+  "memory.incomplete": "Die Liste ist unvollständig, weil das Leselimit des Projekts erreicht wurde.",
+  "memory.source.claude": "Claude Code",
+  "memory.source.codex": "Codex",
+  "memory.source.faber": "Faber",
+  "memory.tooLarge": "Diese Datei ist größer als 256 KB. Ihre Einträge werden nicht angezeigt.",
+  "memory.noEntries": "Diese Datei enthält weder Absätze noch Listeneinträge auf oberster Ebene.",
+  "memory.edit": "Bearbeiten",
+  "memory.delete": "Löschen",
+  "memory.confirmDelete": "Diesen Eintrag löschen?",
+  "memory.cancel": "Abbrechen",
+  "memory.editText": "Text des Eintrags",
+  "memory.save": "Speichern",
+  "memory.more": "Mehr anzeigen",
+  "error.memory.read": "Das Gedächtnis dieses Projekts konnte nicht gelesen werden.",
+  "error.memory.changed": "Die Datei wurde geändert; öffne sie erneut.",
+  "error.memory.refused": "Diese Datei oder dieser Eintrag lässt sich hier nicht ändern.",
+  "error.memory.readOnly": "Diese Datei ist schreibgeschützt und kann nicht geändert werden.",
+  "error.memory.write": "Der Gedächtniseintrag konnte nicht gespeichert werden.",
   "error.project.notFound": "Projekt nicht gefunden",
   // Native speaker must translate (needs native review).
   // Native speaker must translate (needs native review).
@@ -1364,6 +1388,7 @@ export const de: Messages = {
   'notes.152.new': 'Sitzungen, die du in einem Terminal mit Claude Code gestartet hast, erscheinen jetzt auch im Projekt, neben denen von Codex.',
   'notes.153.new': 'Du kannst Chats in der Chat-Seitenleiste zu Gruppen mit gemeinsamen Anweisungen und Dateien zusammenfassen.',
   'notes.154.new': 'Du kannst im Menü / eine Webrecherche starten, den Plan ändern oder genehmigen und einen Bericht mit Quellenlinks erhalten.',
+  'notes.155.new': 'In der Liste Gedächtnis kannst du lesen, bearbeiten und löschen, was jede KI in den Gedächtnisdateien deines Projekts festhält.',
   'update.checking': 'Suche nach einem Update…',
   'update.downloading': 'Update wird heruntergeladen…',
   'update.downloadingPercent': 'Update wird heruntergeladen… {percent} %',

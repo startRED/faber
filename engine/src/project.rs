@@ -10,6 +10,7 @@ pub mod checks;
 pub mod copy;
 pub mod git;
 pub mod lease;
+pub mod memory;
 pub mod proof;
 pub mod remote;
 

@@ -1063,6 +1063,30 @@ export const fr: Messages = {
   // Native speaker must translate (needs native review).
   // Native speaker must translate (needs native review).
   // Native speaker must translate (needs native review).
+  "memory.title": "Mémoire",
+  "memory.scope": "Uniquement ce dossier de projet. Les copies séparées et les dossiers privés de connexion de vos IA restent à part.",
+  "memory.nextLaunch": "Les changements prennent effet au prochain démarrage de l’IA dans ce dossier. Les consignes d’un sous-dossier s’y appliquent.",
+  "memory.refresh": "Actualiser",
+  "memory.loading": "Lecture de la mémoire…",
+  "memory.empty": "Ce projet ne contient pas encore d’entrée de mémoire.",
+  "memory.incomplete": "La liste est incomplète car le projet a atteint la limite de lecture.",
+  "memory.source.claude": "Claude Code",
+  "memory.source.codex": "Codex",
+  "memory.source.faber": "Faber",
+  "memory.tooLarge": "Ce fichier dépasse 256 Ko. Ses entrées ne sont pas affichées.",
+  "memory.noEntries": "Ce fichier ne contient ni paragraphe ni élément de liste de premier niveau.",
+  "memory.edit": "Modifier",
+  "memory.delete": "Supprimer",
+  "memory.confirmDelete": "Supprimer cette entrée ?",
+  "memory.cancel": "Annuler",
+  "memory.editText": "Texte de l’entrée",
+  "memory.save": "Enregistrer",
+  "memory.more": "Afficher la suite",
+  "error.memory.read": "Impossible de lire la mémoire de ce projet.",
+  "error.memory.changed": "Le fichier a changé ; ouvrez-le à nouveau.",
+  "error.memory.refused": "Ce fichier ou cette entrée ne peut pas être modifié ici.",
+  "error.memory.readOnly": "Ce fichier est en lecture seule et ne peut pas être modifié.",
+  "error.memory.write": "Impossible d’enregistrer l’entrée de mémoire.",
   "error.project.notFound": "Projet introuvable",
   // Native speaker must translate (needs native review).
   // Native speaker must translate (needs native review).
@@ -1364,6 +1388,7 @@ export const fr: Messages = {
   'notes.152.new': 'Les sessions lancées dans un terminal avec Claude Code apparaissent maintenant aussi dans le projet, à côté de celles de Codex.',
   'notes.153.new': 'Vous pouvez regrouper vos chats avec des instructions et des fichiers communs dans la barre latérale de Chat.',
   'notes.154.new': 'Depuis le menu /, vous pouvez préparer une recherche, modifier ou approuver son plan et recevoir un rapport avec les liens des sources.',
+  'notes.155.new': 'Vous pouvez consulter, modifier et supprimer ce que chaque IA garde dans les fichiers du projet depuis la liste Mémoire.',
   'update.checking': 'Recherche d’une mise à jour…',
   'update.downloading': 'Téléchargement de la mise à jour…',
   'update.downloadingPercent': 'Téléchargement de la mise à jour… {percent} %',

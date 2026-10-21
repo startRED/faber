@@ -33,6 +33,7 @@ import './donecard.check.ts';
 import './foot.check.ts';
 import './checks.check.ts';
 import './changes.check.ts';
+import './project-memory.check.ts';
 import './visual-answers.check.ts';
 import './commands.check.ts';
 import './idle.check.ts';

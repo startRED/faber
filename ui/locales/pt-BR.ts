@@ -1060,6 +1060,30 @@ export const ptBR: Messages = {
   // Native speaker must translate (needs native review).
   // Native speaker must translate (needs native review).
   // Native speaker must translate (needs native review).
+  "memory.title": "Memória",
+  "memory.scope": "Só esta pasta do projeto. Cópias separadas e pastas privadas de login das IAs ficam de fora.",
+  "memory.nextLaunch": "As mudanças valem na próxima vez que a IA iniciar nesta pasta. Instruções de subpastas valem nas próprias subpastas.",
+  "memory.refresh": "Atualizar",
+  "memory.loading": "Lendo a memória…",
+  "memory.empty": "Este projeto ainda não tem entradas de memória.",
+  "memory.incomplete": "A lista está incompleta porque o projeto atingiu o limite de leitura.",
+  "memory.source.claude": "Claude Code",
+  "memory.source.codex": "Codex",
+  "memory.source.faber": "Faber",
+  "memory.tooLarge": "Este arquivo tem mais de 256 KB. As entradas não são exibidas.",
+  "memory.noEntries": "Este arquivo não tem parágrafos nem itens de lista no primeiro nível.",
+  "memory.edit": "Editar",
+  "memory.delete": "Excluir",
+  "memory.confirmDelete": "Excluir esta entrada?",
+  "memory.cancel": "Cancelar",
+  "memory.editText": "Texto da entrada",
+  "memory.save": "Salvar",
+  "memory.more": "Mostrar mais",
+  "error.memory.read": "Não deu pra ler a memória deste projeto.",
+  "error.memory.changed": "O arquivo mudou; abra de novo.",
+  "error.memory.refused": "Este arquivo ou esta entrada não pode ser alterado aqui.",
+  "error.memory.readOnly": "Este arquivo é só de leitura e não pode ser alterado.",
+  "error.memory.write": "Não deu pra salvar a entrada de memória.",
   "error.project.notFound": "Projeto não encontrado",
   // Native speaker must translate (needs native review).
   // Native speaker must translate (needs native review).
@@ -1351,6 +1375,7 @@ export const ptBR: Messages = {
   'notes.152.new': 'As sessões que você abriu no terminal com o Claude Code agora também aparecem no projeto, junto com as do Codex.',
   'notes.153.new': 'Você pode reunir chats em grupos com instruções e arquivos em comum pela barra lateral do Chat.',
   'notes.154.new': 'Você pode pedir uma pesquisa pelo menu /, ajustar ou aprovar o plano e receber um relatório com links das fontes.',
+  'notes.155.new': 'Você pode ver, editar e excluir o que cada IA guarda nos arquivos de memória do projeto, na lista Memória.',
   'update.checking': 'Procurando atualização…',
   'update.downloading': 'Baixando atualização…',
   'update.downloadingPercent': 'Baixando atualização… {percent}%',

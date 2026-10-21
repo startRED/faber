@@ -719,6 +719,31 @@ export interface RecentsView {
 const LOAD = crypto.getRandomValues(new Uint32Array(1))[0];
 
 // Typed calls into the engine (the commands registered in src-tauri/src/main.rs and src-tauri/src/setup.rs).
+export interface MemoryEntry {
+  start: number;
+  end: number;
+  line: number;
+  text: string;
+}
+export interface MemoryFile {
+  path: string;
+  source: 'claude' | 'codex' | 'faber';
+  revision: string;
+  tooLarge: boolean;
+  entries: MemoryEntry[];
+}
+export interface MemoryList {
+  files: MemoryFile[];
+  incomplete: boolean;
+}
+export interface MemoryEdit {
+  path: string;
+  revision: string;
+  start: number;
+  end: number;
+  text: string | null;
+}
+
 export const api = {
   state: () => invoke<AppState>('state'),
   createChatGroup: (name: string) => invoke<ChatGroup>('create_chat_group', { name }),
@@ -849,6 +874,8 @@ export const api = {
   saveNotesSeen: (id: number) => invoke<void>('save_notes_seen', { id }),
   projectCopies: (projectId: string, on: boolean) => invoke<void>('project_copies', { projectId, on }),
   projectProof: (projectId: string) => invoke<ProofView>('project_proof', { projectId }),
+  projectMemory: (projectId: string) => invoke<MemoryList>('project_memory', { projectId }),
+  editProjectMemory: (projectId: string, edit: MemoryEdit) => invoke<void>('edit_project_memory', { projectId, edit }),
   projectProofConfirm: (projectId: string, commands: string[], setup: string[], declared: string[]) =>
     invoke<ProofView>('project_proof_confirm', { projectId, commands, setup, declared }),
   on: (listener: (event: AppEvent) => void) => listen<AppEvent>('faber:event', (e) => listener(e.payload)),

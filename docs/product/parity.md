@@ -72,7 +72,6 @@ Size: S small, M medium, L large. Wave: 1 next, 2 after, 3 later or with its pha
 |---|---|---|---|---|---|---|
 | X1 | See and switch MCP servers and connectors, with their status (`/mcp`, apps) | all four | None on screen | The catalog, MCP part | M | 2 |
 | X2 | See, add and remove skills and plugins (`/skills`, `/plugin`) | both CLIs, both apps | Catalog skills for the agent (R247) | Extends the catalog | M | 2 |
-| X3 | Memory: what the AI learned, edit or delete it, per project (`/memory`, claude.ai, ChatGPT) | all four | Planned (following.md, learning) | Already in the roadmap | M | 2 |
 | X5 | Reply style: concise, explanatory, a custom one (`/output-style`, styles, personality) | all four | Done: shared reply style in Settings | Settings, passed through each CLI's persona instructions; Codex also gets length | S | 2 |
 | X6 | Hooks: see which run and where they come from (`/hooks`) | both CLIs | One switch | Extends the hooks row | S | 3 |
 

@@ -1485,6 +1485,19 @@ html.away-win :is(.amb, .amb *) { animation-play-state: paused !important; }
 .keys-row dd { display: flex; flex: none; gap: 4px; margin: 0; }
 .keys-or { color: var(--ink-3); font-size: var(--fs-xs); }
 .keys-row kbd { font: 500 var(--fs-xs) var(--font-data); color: var(--ink-3); border: 1px solid var(--line-2); border-radius: 5px; padding: 1px 6px; white-space: nowrap; }
+
+/* The project memory fold holds only the page of entries being read. */
+.project-memory { margin-top: 24px; min-width: 0; }
+.memory-body { margin-top: 12px; }
+.memory-head, .memory-actions { display: flex; align-items: baseline; gap: 12px; flex-wrap: wrap; }
+.memory-head .hint { flex: 1; }
+.memory-entries { list-style: none; padding: 0; margin: 12px 0; }
+.memory-entry { border-top: 1px solid var(--line-2); padding: 12px 0; min-width: 0; }
+.memory-from { color: var(--ink-2); font-size: .85em; overflow-wrap: anywhere; }
+.memory-text { white-space: pre-wrap; overflow-wrap: anywhere; margin: 8px 0; }
+.memory-entry textarea { width: 100%; min-height: 96px; resize: vertical; box-sizing: border-box; font: inherit; }
+.memory-actions .danger { color: var(--danger); }
+.memory-actions .btn { white-space: normal; height: auto; min-height: var(--h-sm); }
 /* Group pages keep file bytes out of the DOM; only their names are drawn. */
 .chat-group-page {
   grid-column: 1;
