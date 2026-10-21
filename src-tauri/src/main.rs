@@ -1441,6 +1441,8 @@ fn main() {
                 setup::setup_install,
                 setup::setup_sign_in,
                 tools::tools_list,
+                tools::mcp_servers,
+                tools::set_mcp_server,
                 tools::tools_install,
                 tools::tools_remove,
                 #[cfg(feature = "test-hooks")]

@@ -2850,7 +2850,7 @@ async fn the_catalog_s_skill_root_is_set_once_before_the_first_thread_opens_and_
     let start = &messages[at("thread/start")]["params"]["config"];
     assert_eq!(
         start["mcp_servers.measure"],
-        json!({"command":"C:/node/node.exe","args":["C:/data/tools/servers/measure/run.js","--headless"],"env":{"NO_STATS":"1"}}),
+        json!({"command":"C:/node/node.exe","args":["C:/data/tools/servers/measure/run.js","--headless"],"env":{"NO_STATS":"1"},"enabled":true}),
         "{start}"
     );
     assert!(start.get("mcp_servers").is_none(), "the person's own servers are left as they are: {start}");
@@ -2885,6 +2885,7 @@ fn tools(skills: Option<&str>) -> faber_engine::tools::Delivery {
             args: vec!["C:/data/tools/servers/measure/run.js".into(), "--headless".into()],
             env: [("NO_STATS".to_string(), "1".to_string())].into(),
         }],
+        disabled_servers: vec![],
     }
 }
 
@@ -2901,4 +2902,65 @@ fn reply_style_does_not_replace_an_internal_codex_tasks_fixed_instructions() {
         assert!(params["config"].get("model_verbosity").is_none());
         assert_eq!(params["config"]["web_search"], "disabled");
     }
+}
+
+/// The 0.162.1 app-server schema's paginated status list; the catalog never reads an account's own configuration.
+#[tokio::test(start_paused = true)]
+async fn mcp_servers_codex_lists_only_on_request_and_keeps_project_launch_choices_separate() {
+    let f = fake(fixture("codex", "mcp-servers"));
+    let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
+    let server = CodexServer::start(CodexServerOptions {
+        permissions: Permissions::FullAccess,
+        cli: faber_engine::cli::Cli { command: "codex".into(), prefix: vec![] },
+        cwd: ".".into(),
+        area: Area::Project,
+        user_hooks: false,
+        windows: true,
+        spawn: f.spawn.clone(),
+        tools: tools(None),
+    });
+    let sink = Arc::new(move |e| drop(tx.send(e)));
+    let on = server.open_with_tools(mode_thread(Permissions::FullAccess, Default::default()), sink.clone(), tools(None));
+    let mut disabled = tools(None);
+    disabled.disabled_servers.push("measure".into());
+    let off = server.open_with_tools(mode_thread(Permissions::FullAccess, Default::default()), sink, disabled);
+    for _ in 0..2 {
+        assert!(matches!(rx.recv().await, Some(EngineEvent::Started { .. })));
+    }
+    tokio::time::advance(Duration::from_secs(600)).await;
+    tokio::task::yield_now().await;
+    let messages = f.wire.messages();
+    assert!(!messages.iter().any(|m| m["method"] == "mcpServerStatus/list"), "the closed catalog never asks for status");
+    assert!(!messages.iter().any(|m| m["method"] == "config/read"), "this list never requests account config");
+    let starts = messages.iter().filter(|m| m["method"] == "thread/start").collect::<Vec<_>>();
+    assert_eq!(starts.len(), 2);
+    assert_eq!(starts[0]["params"]["config"]["mcp_servers.measure"]["enabled"], true);
+    assert_eq!(starts[1]["params"]["config"]["mcp_servers.measure"]["enabled"], false);
+    assert_eq!(starts[1]["params"]["config"]["mcp_servers.measure"]["command"], "C:/node/node.exe");
+    assert!(starts.iter().all(|m| m["params"]["config"].get("mcp_servers").is_none()), "own servers stay configured");
+
+    let rows = tokio::time::timeout(Duration::from_secs(3), on.mcp_status()).await.unwrap().unwrap().unwrap();
+    assert_eq!(
+        rows,
+        vec![
+            faber_engine::mcp_servers::Reported { name: "measure".into(), status: Some("failed".into()) },
+            faber_engine::mcp_servers::Reported { name: "own".into(), status: Some("connected".into()) },
+            faber_engine::mcp_servers::Reported { name: "project".into(), status: Some("disabled".into()) },
+        ]
+    );
+    assert!(tokio::time::timeout(Duration::from_secs(3), off.mcp_status()).await.unwrap().unwrap().is_none());
+    assert!(rx.try_recv().is_err(), "an unsupported status query is never a conversation error");
+    let messages = f.wire.messages();
+    let requests = messages.iter().filter(|m| m["method"] == "mcpServerStatus/list").collect::<Vec<_>>();
+    assert_eq!(requests.len(), 3);
+    for (i, request) in requests.iter().enumerate() {
+        assert_eq!(request["params"]["threadId"], if i < 2 { "thread-on" } else { "thread-off" });
+        assert_eq!(request["params"]["detail"], "toolsAndAuthOnly");
+        assert_eq!(request["params"]["limit"], 100);
+    }
+    assert_eq!(requests[1]["params"]["cursor"], "second-page");
+    assert!(f.mismatches.lock().unwrap().is_empty(), "{:?}", f.mismatches.lock().unwrap());
+    on.close();
+    off.close();
+    server.retire();
 }

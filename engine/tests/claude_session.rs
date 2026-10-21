@@ -1614,6 +1614,7 @@ fn the_catalog_s_skills_reach_a_project_s_agent_as_one_plugin_and_nowhere_else()
         plugin: Some("C:/data/tools/plugin".into()),
         skills: Some("C:/data/tools/plugin/skills".into()),
         servers: vec![],
+        ..Default::default()
     };
     let flags = ClaudeFlags { plugin_dir: true, ..NEWER };
     let args = |area: Area, permissions: Permissions, flags: ClaudeFlags, tools: &faber_engine::tools::Delivery| {

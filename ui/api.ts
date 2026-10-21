@@ -520,6 +520,18 @@ export interface ToolRow {
   server: boolean;
 }
 
+export interface McpServerRow {
+  name: string;
+  source: 'catalog' | 'project' | 'user';
+  status?: string;
+  enabled?: boolean;
+}
+export interface McpServerList {
+  vendor: Vendor;
+  readAt?: number;
+  rows: McpServerRow[];
+}
+
 export interface CheckResult {
   vendor: Vendor;
   installed: boolean;
@@ -860,6 +872,8 @@ export const api = {
   toolsList: () => invoke<ToolRow[]>('tools_list'),
   toolsInstall: (id: string) => invoke<void>('tools_install', { id }),
   toolsRemove: (id: string) => invoke<void>('tools_remove', { id }),
+  mcpServers: (projectId: string) => invoke<McpServerList[]>('mcp_servers', { projectId }),
+  setMcpServer: (projectId: string, name: string, enabled: boolean) => invoke<void>('set_mcp_server', { projectId, name, enabled }),
   updateStatus: () => invoke<UpdateStatus>('update_status'),
   /** The first frame is painted: the shell may show the window (it stays hidden until then). */
   screenReady: () => invoke<void>('screen_ready'),

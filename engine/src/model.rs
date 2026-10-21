@@ -860,6 +860,9 @@ pub struct Project {
     /// acts only in a git repository with a commit; elsewhere conversations work in the folder.
     #[serde(rename = "separateCopies", default = "separate_by_default")]
     pub separate_copies: bool,
+    /// Catalog servers turned off for this project's next CLI launch; never written to a CLI's configuration.
+    #[serde(rename = "disabledMcpServers", default, skip_serializing_if = "std::collections::BTreeSet::is_empty")]
+    pub disabled_mcp_servers: std::collections::BTreeSet<String>,
     /// Fields written by a newer Faber, kept as they were so this version never drops them.
     #[serde(flatten)]
     pub extra: crate::project::Extra,
@@ -871,7 +874,14 @@ fn separate_by_default() -> bool {
 
 impl Project {
     pub fn new(id: String, name: String, path: String) -> Self {
-        Project { id, name, path, separate_copies: separate_by_default(), extra: Default::default() }
+        Project {
+            id,
+            name,
+            path,
+            separate_copies: separate_by_default(),
+            disabled_mcp_servers: Default::default(),
+            extra: Default::default(),
+        }
     }
 }
 

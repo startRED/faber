@@ -2,6 +2,7 @@ import { createResource, createSignal, For, Show } from 'solid-js';
 import { api, type ToolRow } from './api.ts';
 import { Collapse, Toggle } from './controls.tsx';
 import { Icon } from './Glyphs.tsx';
+import { McpServers } from './McpServers.tsx';
 import { t } from './i18n.ts';
 import type { Key } from './locales/en.ts';
 
@@ -20,12 +21,14 @@ export function SkillsCard(props: { servers?: boolean; onError?: (error: unknown
   );
   const [open, setOpen] = createSignal(false);
   const [busy, setBusy] = createSignal<string>();
+  const [revision, setRevision] = createSignal(0);
   const on = () => rows()?.filter((r) => r.installed).length ?? 0;
   const flip = async (row: ToolRow, next: boolean): Promise<boolean> => {
     setBusy(row.id);
     try {
       await (next ? api.toolsInstall(row.id) : api.toolsRemove(row.id));
       mutate((list) => list?.map((r) => (r.id === row.id ? { ...r, installed: next } : r)));
+      setRevision((value) => value + 1);
       return true;
     } catch (err) {
       props.onError?.(err);
@@ -58,6 +61,9 @@ export function SkillsCard(props: { servers?: boolean; onError?: (error: unknown
                 />
               )}
             </For>
+            <Show when={props.servers && open()}>
+              <McpServers revision={revision()} onError={props.onError} />
+            </Show>
           </div>
         </Collapse>
       </section>

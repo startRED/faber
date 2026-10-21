@@ -7,6 +7,16 @@ use tauri::State;
 
 type Res<T> = Result<T, String>;
 
+#[tauri::command]
+pub async fn mcp_servers(faber: State<'_, Faber>, project_id: String) -> Res<Vec<faber_engine::mcp_servers::List>> {
+    faber.engine.mcp_servers(&project_id).await
+}
+
+#[tauri::command]
+pub fn set_mcp_server(faber: State<'_, Faber>, project_id: String, name: String, enabled: bool) -> Res<()> {
+    faber.engine.set_mcp_server(&project_id, &name, enabled)
+}
+
 /// One row of the list: the catalog's entry and whether this computer has it.
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]

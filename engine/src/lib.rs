@@ -22,6 +22,7 @@ pub mod install;
 pub mod learn;
 pub mod ledger;
 pub mod map;
+pub mod mcp_servers;
 pub mod mention;
 pub mod model;
 pub mod nudge;

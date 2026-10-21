@@ -1046,6 +1046,88 @@ fn conversation_export_contains_each_messages_markdown_scope() {
 }
 
 #[tokio::test]
+async fn mcp_servers_latest_project_session_is_memory_only_and_choices_survive_reopening() {
+    let dir = support::tempdir();
+    let folder = project_folder();
+    std::fs::write(folder.path().join(".mcp.json"), r#"{"mcpServers":{"project-reader":{"command":"ignored"}}}"#).unwrap();
+    let f = fake(fixture("claude", "mcp-servers"));
+    let (engine, mut rx) = engine(dir.path(), Vendor::Claude, f.spawn.clone());
+    engine.set_time_source(Arc::new(|| 1_800_000_000.0));
+    let project = engine.add_project(&folder.path().to_string_lossy()).unwrap();
+    let before = engine.mcp_servers(&project.id).await.unwrap();
+    assert_eq!(before[0].read_at, None);
+    assert!(before[0].rows.is_empty(), "project names alone never invent a CLI report");
+    assert!(f.args.lock().unwrap().is_empty(), "opening the catalog never starts a CLI");
+    let mut request = ask(Area::Project, "List my tools.", choice("claude", None));
+    request.project_id = Some(project.id.clone());
+    let id = engine.send(request).unwrap();
+    finished(&mut rx, |_| {}).await;
+    let list = engine.mcp_servers(&project.id).await.unwrap();
+    assert_eq!(list[0].read_at, Some(1_800_000_000.0));
+    assert_eq!(list[0].rows.iter().find(|r| r.name == "project-reader").unwrap().source, "project");
+    let own = list[0].rows.iter().find(|r| r.name == "personal-reader").unwrap();
+    assert_eq!((own.source, own.status.as_deref(), own.enabled), ("user", Some("needs-auth"), None));
+    assert!(list[0].rows.iter().all(|r| r.name != "faber"));
+    let text = std::fs::read_to_string(dir.path().join("conversations").join(format!("{id}.json"))).unwrap();
+    assert!(!text.contains("personal-reader"), "the CLI report is never saved");
+    let starts = f.args.lock().unwrap().len();
+    assert_eq!(engine.set_mcp_server(&project.id, "personal-reader", false), Err("error.tools.unknown".into()));
+    engine.set_mcp_server(&project.id, "faber-chrome-devtools", false).unwrap();
+    assert_eq!(f.args.lock().unwrap().len(), starts, "a switch does not restart a session");
+    let other = project_folder();
+    let other = engine.add_project(&other.path().to_string_lossy()).unwrap();
+    assert!(engine.project(&other.id).unwrap().disabled_mcp_servers.is_empty());
+    engine.shutdown();
+    let (again, _) = self::engine(dir.path(), Vendor::Claude, fake(vec![]).spawn);
+    assert!(again.project(&project.id).unwrap().disabled_mcp_servers.contains("faber-chrome-devtools"));
+    assert_eq!(again.mcp_servers(&project.id).await.unwrap()[0].read_at, None);
+    again.set_mcp_server(&project.id, "faber-chrome-devtools", true).unwrap();
+    assert!(again.project(&project.id).unwrap().disabled_mcp_servers.is_empty());
+    assert!(f.mismatches.lock().unwrap().is_empty(), "{:?}", f.mismatches.lock().unwrap());
+    again.shutdown();
+}
+
+#[tokio::test]
+async fn mcp_servers_codex_project_list_uses_its_thread_report_and_project_names() {
+    let dir = support::tempdir();
+    let folder = project_folder();
+    std::fs::create_dir(folder.path().join(".codex")).unwrap();
+    std::fs::write(folder.path().join(".codex/config.toml"), "[mcp_servers.project]\ncommand='ignored'\n").unwrap();
+    let mut recording = fixture("codex", "chat");
+    recording.truncate(recording.iter().position(|e| e.input && e.msg["id"] == 4).unwrap());
+    let status_recording = fixture("codex", "mcp-servers");
+    recording.push(Entry { input: true, msg: json!({"id":4,"method":"mcpServerStatus/list"}) });
+    let mut result = status_recording.iter().find(|e| e.msg["id"] == 4 && !e.input).unwrap().msg.clone();
+    result["result"]["data"].as_array_mut().unwrap().push(json!({"name":"project","runtimeStatus":"disabled"}));
+    result["result"]["nextCursor"] = serde_json::Value::Null;
+    recording.push(Entry { input: false, msg: result });
+    let f = fake(recording);
+    let (engine, mut rx) = engine(dir.path(), Vendor::Codex, f.spawn.clone());
+    engine.set_time_source(Arc::new(|| 1_800_000_001.0));
+    let project = engine.add_project(&folder.path().to_string_lossy()).unwrap();
+    let mut request = ask(Area::Project, SKY, choice("codex", None));
+    request.project_id = Some(project.id.clone());
+    engine.send(request).unwrap();
+    finished(&mut rx, |_| {}).await;
+    assert!(!f.wire.messages().iter().any(|m| m["method"] == "mcpServerStatus/list"));
+    let lists = engine.mcp_servers(&project.id).await.unwrap();
+    let list = &lists[0];
+    assert_eq!(
+        (list.vendor, list.read_at),
+        (Vendor::Codex, Some(1_800_000_001.0)),
+        "wire: {:?}; mismatches: {:?}",
+        f.wire.messages(),
+        f.mismatches.lock().unwrap()
+    );
+    let project = list.rows.iter().find(|r| r.name == "project").unwrap();
+    assert_eq!((project.source, project.status.as_deref(), project.enabled), ("project", Some("disabled"), None));
+    let own = list.rows.iter().find(|r| r.name == "own").unwrap();
+    assert_eq!((own.source, own.status.as_deref(), own.enabled), ("user", Some("connected"), None));
+    assert!(f.mismatches.lock().unwrap().is_empty(), "{:?}", f.mismatches.lock().unwrap());
+    engine.shutdown();
+}
+
+#[tokio::test]
 async fn pin_is_stored_survives_reopening_and_unpin_removes_the_stored_value() {
     let dir = support::tempdir();
     let (first, mut rx) = engine(dir.path(), Vendor::Claude, fake(fixture("claude", "chat")).spawn);

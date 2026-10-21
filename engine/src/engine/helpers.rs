@@ -106,6 +106,8 @@ impl Core {
         });
         let shown = model.clone().unwrap_or_else(|| vendor.name().to_string());
         let effort = Some(effort);
+        let project = self.convs.get(conv).and_then(|c| c.project_id.as_deref());
+        let tools = self.tools_for_project(Area::Project, permissions, project);
         let session = match vendor {
             Vendor::Claude => {
                 let flags = self.claude_flags_for(&cli);
@@ -139,7 +141,7 @@ impl Core {
                     sink,
                 )
             }
-            Vendor::Codex => self.codex_server(Area::Project, user_hooks, permissions, &cli).open(
+            Vendor::Codex => self.codex_server(Area::Project, user_hooks, permissions, &cli).open_with_tools(
                 CodexThread {
                     leave_plan: false,
                     cwd,
@@ -159,6 +161,7 @@ impl Core {
                     verify: false,
                 },
                 sink,
+                tools,
             ),
         };
         self.rewind_helper_session(call, hsid, session.clone());

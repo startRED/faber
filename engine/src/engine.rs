@@ -49,6 +49,7 @@ mod helpers;
 pub use groups::{ChatGroup, GroupFile};
 mod install_gate;
 mod keep_going;
+mod mcp_servers;
 mod parked;
 mod pick_up;
 mod plan;
@@ -398,6 +399,7 @@ struct Core {
     codex_models: Vec<String>,
     /// The last advertised list per AI, used before a conversation has its own. Never saved.
     commands: BTreeMap<Vendor, Vec<Command>>,
+    mcp_servers: HashMap<(String, Vendor), mcp_servers::Reading>,
     /// The latest reading of each quota window, per vendor. Auto prices the models by the share used.
     quotas: HashMap<(Vendor, String), QuotaReading>,
     /// The running list as last emitted.
@@ -512,6 +514,7 @@ impl Engine {
                 codex_recommended: None,
                 codex_models: vec![],
                 commands: BTreeMap::new(),
+                mcp_servers: HashMap::new(),
                 quotas,
                 running: Running::default(),
                 guess: None,
@@ -1068,6 +1071,7 @@ impl Engine {
             }
             projects.retain(|p| p.id != id);
             c.store.save_projects(&projects).map_err(|_| "error.store.write".to_string())?;
+            c.mcp_servers.retain(|(project, _), _| project != id);
             c.list_changed();
             Ok(())
         })
@@ -1747,6 +1751,7 @@ impl Core {
             event,
             EngineEvent::Started { .. }
                 | EngineEvent::Commands(_)
+                | EngineEvent::McpServers(_)
                 | EngineEvent::TurnStarted
                 | EngineEvent::Quota { .. }
                 | EngineEvent::Signals(_)
@@ -1804,6 +1809,10 @@ impl Core {
             }
         }
         match event {
+            EngineEvent::McpServers(servers) => {
+                self.note_mcp_servers(conv, sid, servers);
+                return;
+            }
             EngineEvent::Background(_) => unreachable!("handled before reply events"),
             EngineEvent::Writers { .. } | EngineEvent::WriterExit { .. } | EngineEvent::Cursor { .. } => return,
             EngineEvent::Commands(commands) => {
@@ -3151,6 +3160,15 @@ impl Core {
         let leave_plan = c.codex_plan && permissions != Permissions::Plan;
         // The conversation's own name, fixed when it began: a rename in Settings never reaches a conversation under way.
         let user_name = c.user_name.clone();
+        let project_id = c.project_id.clone();
+        let project_tools = self.tools_for_project(area, permissions, project_id.as_deref());
+        if let Some(project) = project_id.as_deref().and_then(|id| self.store.projects().into_iter().find(|p| p.id == id)) {
+            let added = project_tools.servers.iter().map(|s| s.name.clone()).collect();
+            self.mcp_servers.insert(
+                (project.id, pick.vendor),
+                mcp_servers::Reading { sid, conversation: conv.into(), added, servers: vec![], read_at: None, cwd: cwd.clone() },
+            );
+        }
         let (model, effort) = (pick.model.clone(), Some(pick.effort.clone()));
         let helper = self.offers_helper(area, pick.vendor);
         // Codex keeps dynamic tools with its thread; register project capabilities once and gate calls by the live mode.
@@ -3183,14 +3201,14 @@ impl Core {
                         user_name,
                         flags,
                         tuning: tuning.clone(),
-                        tools: self.tools_for(area, permissions),
+                        tools: project_tools,
                     },
                     spawn,
                     sandbox: self.opts.clis.get(&Vendor::Codex).cloned(),
                 },
                 sink,
             ),
-            Vendor::Codex => self.codex_server(area, user_hooks, permissions, &cli).open(
+            Vendor::Codex => self.codex_server(area, user_hooks, permissions, &cli).open_with_tools(
                 CodexThread {
                     helper,
                     browse,
@@ -3210,6 +3228,7 @@ impl Core {
                     tuning: tuning.clone(),
                 },
                 sink,
+                project_tools,
             ),
         };
         self.live.insert(

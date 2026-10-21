@@ -106,6 +106,8 @@ pub struct Delivery {
     pub plugin: Option<PathBuf>,
     pub skills: Option<PathBuf>,
     pub servers: Vec<Launch>,
+    /// Per-project catalog choices, passed only to this launch, never to a CLI file.
+    pub disabled_servers: Vec<String>,
 }
 
 /// One server as both CLIs start it: Node, the package's script and Faber's arguments, and the environment Faber sets.
@@ -196,7 +198,7 @@ impl Store {
                 Some(Launch { name: format!("faber-{}", i.id), command: node.clone()?, args: args.collect(), env: s.env.clone() })
             })
             .collect();
-        Delivery { plugin: skill.then(|| self.plugin()), skills: skill.then(|| self.skills()), servers }
+        Delivery { plugin: skill.then(|| self.plugin()), skills: skill.then(|| self.skills()), servers, disabled_servers: vec![] }
     }
 
     /// Before the CLIs get the store, it is made to hold exactly what was checked: a skill folder the ledger does not list (an

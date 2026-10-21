@@ -740,7 +740,7 @@ pub struct CodexThread {
 }
 
 enum ServerCommand {
-    Open { key: u64, thread: CodexThread, sink: EventSink },
+    Open { key: u64, thread: Box<CodexThread>, sink: EventSink, tools: Option<crate::tools::Delivery> },
     Session(u64, SessionCommand),
     Tools(crate::tools::Delivery),
     Retire,
@@ -753,6 +753,12 @@ enum Waiting {
     Other(u64, &'static str),
     /// A `turn/steer`; its tag tells the engine which message it was.
     Steer(u64, String),
+    McpStatus {
+        thread: String,
+        reply: tokio::sync::oneshot::Sender<Option<Vec<crate::mcp_servers::Reported>>>,
+        rows: Vec<crate::mcp_servers::Reported>,
+        cursors: HashSet<String>,
+    },
     NativeStop(u64, String, String, String),
     NativeGone(u64, String, String, String, usize),
 }
@@ -785,6 +791,7 @@ struct Thread {
     early_completion: Vec<Value>,
     sink: EventSink,
     params: CodexThread,
+    tools: Option<crate::tools::Delivery>,
     id: Option<String>,
     turn: Option<String>,
     queued: Vec<UserTurn>,
@@ -998,7 +1005,8 @@ fn start_params(thread: &str, settings: &mut CodexThread, model: &str, turn: &Us
 /// The catalog's servers (`crate::tools`) beside the person's own, each under its own key so no other server is replaced.
 pub fn add_servers(params: &mut Value, servers: &[crate::tools::Launch]) {
     for s in servers {
-        params["config"][format!("mcp_servers.{}", s.name)] = json!({ "command": s.command, "args": s.args, "env": s.env });
+        params["config"][format!("mcp_servers.{}", s.name)] =
+            json!({ "command": s.command, "args": s.args, "env": s.env, "enabled": true });
     }
 }
 
@@ -1115,8 +1123,19 @@ impl CodexServer {
 
     /// Opens a conversation as a thread. The session behaves as if it had the process to itself.
     pub fn open(&self, thread: CodexThread, sink: EventSink) -> Session {
+        self.open_inner(thread, sink, None)
+    }
+
+    /// Uses the project's catalog choices for this launch, leaving already open conversations alone.
+    pub fn open_with_tools(&self, thread: CodexThread, sink: EventSink, tools: crate::tools::Delivery) -> Session {
+        self.open_inner(thread, sink, Some(tools))
+    }
+
+    fn open_inner(&self, thread: CodexThread, sink: EventSink, tools: Option<crate::tools::Delivery>) -> Session {
         let key = self.next.fetch_add(1, Ordering::Relaxed);
-        if let Err(SendError(ServerCommand::Open { sink, .. })) = self.tx.send(ServerCommand::Open { key, thread, sink }) {
+        if let Err(SendError(ServerCommand::Open { sink, .. })) =
+            self.tx.send(ServerCommand::Open { key, thread: Box::new(thread), sink, tools })
+        {
             sink(EngineEvent::Error { message: "Codex stopped.".into(), fatal: true });
             sink(EngineEvent::WriterExit { confirmed: true });
         }
@@ -1237,7 +1256,13 @@ async fn serve(
                 }
             } else {
                 let (method, mut params) = thread_params(area, &$t.params);
-                add_servers(&mut params, &tools.servers);
+                let delivery = $t.tools.as_ref().unwrap_or(&tools);
+                add_servers(&mut params, &delivery.servers);
+                for name in &delivery.disabled_servers {
+                    if let Some(server) = params["config"].get_mut(format!("mcp_servers.{name}")) {
+                        server["enabled"] = false.into();
+                    }
+                }
                 request!(method, params, Waiting::Thread($key));
             }
         }};
@@ -1394,6 +1419,27 @@ async fn serve(
                     // An answer to one of Faber's requests.
                     (None, Some(id)) => {
                         let Some(kind) = id.as_u64().and_then(|id| waiting.remove(&id)) else { continue };
+                        if let Waiting::McpStatus { thread, reply, mut rows, mut cursors } = kind {
+                            if reply.is_closed() { continue; }
+                            let result = &msg["result"];
+                            let Some(data) = result["data"].as_array().filter(|data| msg["error"].is_null() && rows.len() + data.len() <= 256) else {
+                                let _ = reply.send(None);
+                                continue;
+                            };
+                            rows.extend(crate::mcp_servers::reported(data, "runtimeStatus"));
+                            if let Some(cursor) = result["nextCursor"].as_str() {
+                                if cursor.len() > 1024 || cursors.len() >= 16 || !cursors.insert(cursor.into()) {
+                                    let _ = reply.send(None);
+                                } else {
+                                    request!("mcpServerStatus/list", json!({"threadId":thread,"detail":"toolsAndAuthOnly","limit":100,"cursor":cursor}), Waiting::McpStatus { thread:thread.clone(), reply, rows, cursors });
+                                }
+                            } else if result["nextCursor"].is_null() {
+                                let _ = reply.send(Some(rows));
+                            } else {
+                                let _ = reply.send(None);
+                            }
+                            continue;
+                        }
                         if let Some(error) = msg.get("error") {
                             if matches!(kind, Waiting::Other(_, SUBAGENT_STOP)) {
                                 continue;
@@ -1412,6 +1458,7 @@ async fn serve(
                                 Waiting::Thread(key) => (vec![key], "thread", true),
                                 Waiting::Other(key, m) => (vec![key], m, false),
                                 Waiting::Steer(..) => unreachable!("handled above"),
+                                Waiting::McpStatus { .. } => unreachable!("handled above"),
                                 Waiting::NativeStop(key, ..) | Waiting::NativeGone(key, ..) => (vec![key], "thread/backgroundTerminals/terminate", false),
                             };
                             for t in keys.iter().filter_map(|k| threads.get(k)) {
@@ -1514,6 +1561,7 @@ async fn serve(
                             }
                             // Accepted: the message is in the turn once Codex reports it as a user message (`Injected`).
                             Waiting::Steer(..) | Waiting::Other(..) => {}
+                            Waiting::McpStatus { .. } => unreachable!("handled above"),
                         }
                     }
                     // A request from Codex: approvals reach the user; anything else is declined politely.
@@ -1795,9 +1843,9 @@ async fn serve(
                 }
             }
             cmd = rx.recv(), if !stopping => match cmd {
-                Some(ServerCommand::Open { key, thread, sink }) => {
+                Some(ServerCommand::Open { key, thread, sink, tools }) => {
                     let state = CodexTurnState::new(thread.resume.is_some());
-                    let t = Thread { sink, params: thread, id: None, turn: None, queued: vec![], compact: false, state, approvals: HashMap::new(), helpers: HashMap::new(), watch: proc::TurnWatch::default(), interrupt_pending: false, blocked: false, closing: false, stop_children: false, early_completion: vec![], commands: HashMap::new(), unconfirmed_commands: HashMap::new(), owns_server: !no_process, server_writers: false, native_commands: Default::default(), stop_reported: false };
+                    let t = Thread { sink, params: *thread, tools, id: None, turn: None, queued: vec![], compact: false, state, approvals: HashMap::new(), helpers: HashMap::new(), watch: proc::TurnWatch::default(), interrupt_pending: false, blocked: false, closing: false, stop_children: false, early_completion: vec![], commands: HashMap::new(), unconfirmed_commands: HashMap::new(), owns_server: !no_process, server_writers: false, native_commands: Default::default(), stop_reported: false };
                     if ready {
                         open_thread!(key, &t);
                     } else {
@@ -1808,6 +1856,14 @@ async fn serve(
                     refresh_writers!(key);
                 }
                 Some(ServerCommand::Session(key, cmd)) => match cmd {
+                    SessionCommand::McpStatus { reply } => {
+                        waiting.retain(|_, pending| !matches!(pending, Waiting::McpStatus { reply, .. } if reply.is_closed()));
+                        if let Some(thread) = threads.get(&key).filter(|t| !t.closing && !t.blocked).and_then(|t| t.id.clone()) {
+                            request!("mcpServerStatus/list", json!({"threadId":thread,"detail":"toolsAndAuthOnly","limit":100}), Waiting::McpStatus { thread:thread.clone(), reply, rows:vec![], cursors:HashSet::new() });
+                        } else {
+                            let _ = reply.send(None);
+                        }
+                    }
                     SessionCommand::StopBackground { ack, .. } => { let _ = ack.send(Delivery::Unknown); }
                     SessionCommand::Send(turn) => {
                         let Some(t) = threads.get_mut(&key) else { continue };
@@ -2225,6 +2281,7 @@ mod rewind_tests {
             server_writers: false,
             native_commands: Default::default(),
             stop_reported: false,
+            tools: None,
         }
     }
 
@@ -2416,7 +2473,7 @@ mod rewind_tests {
             let init = read(&mut output).await;
             write(&mut input, json!({"id":init["id"],"result":{}})).await;
             assert_eq!(read(&mut output).await["method"], "initialized");
-            tx.send(ServerCommand::Open { key: 1, thread: thread(sink.clone()).params, sink }).unwrap();
+            tx.send(ServerCommand::Open { key: 1, thread: Box::new(thread(sink.clone()).params), sink, tools: None }).unwrap();
             let open = read(&mut output).await;
             write(&mut input, json!({"id":open["id"],"result":{"thread":{"id":"owner"}}})).await;
             while !matches!(events.recv().await.unwrap(), EngineEvent::Started { .. }) {}
@@ -2525,7 +2582,7 @@ mod rewind_tests {
             write(&mut input, json!({"id":init["id"],"result":{}})).await;
             assert_eq!(read(&mut output).await["method"], "initialized");
             for (key, id) in [(1, "owner"), (2, "peer")] {
-                tx.send(ServerCommand::Open { key, thread: thread(sink.clone()).params, sink: sink.clone() }).unwrap();
+                tx.send(ServerCommand::Open { key, thread: Box::new(thread(sink.clone()).params), sink: sink.clone(), tools: None }).unwrap();
                 let open = read(&mut output).await;
                 write(&mut input, json!({"id":open["id"],"result":{"thread":{"id":id}}})).await;
                 while !matches!(events.recv().await.unwrap(), EngineEvent::Started { .. }) {}
@@ -2634,7 +2691,7 @@ mod rewind_tests {
                 write(&mut input, json!({"id":init["id"],"result":{}})).await;
                 assert_eq!(read(&mut output).await["method"], "initialized");
                 for (key, id) in [(1, "owner"), (2, "peer")] {
-                    tx.send(ServerCommand::Open { key, thread: thread(sink(key)).params, sink: sink(key) }).unwrap();
+                    tx.send(ServerCommand::Open { key, thread: Box::new(thread(sink(key)).params), sink: sink(key), tools: None }).unwrap();
                     let open = read(&mut output).await;
                     write(&mut input, json!({"id":open["id"],"result":{"thread":{"id":id}}})).await;
                     while !matches!(events.recv().await.unwrap(), (k, EngineEvent::Started { .. }) if k == key) {}
@@ -2654,7 +2711,7 @@ mod rewind_tests {
                 while !matches!(events.recv().await.unwrap(), (1, EngineEvent::Error { .. })) {}
                 let mut next = thread(sink(3)).params;
                 next.effort = Some("high".into());
-                tx.send(ServerCommand::Open { key: 3, thread: next, sink: sink(3) }).unwrap();
+                tx.send(ServerCommand::Open { key: 3, thread: Box::new(next), sink: sink(3), tools: None }).unwrap();
                 let open = read(&mut output).await;
                 write(&mut input, json!({"id":open["id"],"result":{"thread":{"id":replacement}}})).await;
                 while !matches!(events.recv().await.unwrap(), (3, EngineEvent::Started { .. })) {}
@@ -2715,7 +2772,7 @@ mod rewind_tests {
             assert_eq!(init["method"], "initialize");
             write(&mut input, json!({"id":init["id"],"result":{}})).await;
             assert_eq!(read(&mut output).await["method"], "initialized");
-            tx.send(ServerCommand::Open { key: 1, thread: thread(sink.clone()).params, sink }).unwrap();
+            tx.send(ServerCommand::Open { key: 1, thread: Box::new(thread(sink.clone()).params), sink, tools: None }).unwrap();
             let open = read(&mut output).await;
             write(&mut input, json!({"id":open["id"],"result":{"thread":{"id":"owner"}}})).await;
             while !matches!(events.recv().await.unwrap(), EngineEvent::Started { .. }) {}

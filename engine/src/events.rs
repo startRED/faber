@@ -33,6 +33,7 @@ pub fn terminal_reason(raw: &str) -> &'static str {
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum EngineEvent {
+    McpServers(Vec<crate::mcp_servers::Reported>),
     Background(crate::background::Update),
     /// This session has ended; true means every process it owns was confirmed stopped.
     WriterExit {
@@ -240,6 +241,9 @@ pub enum Delivery {
 /// What the engine can ask of a live CLI session.
 #[derive(Debug)]
 pub enum SessionCommand {
+    McpStatus {
+        reply: tokio::sync::oneshot::Sender<Option<Vec<crate::mcp_servers::Reported>>>,
+    },
     StopBackground {
         id: String,
         ack: tokio::sync::oneshot::Sender<Delivery>,
@@ -291,6 +295,11 @@ impl std::fmt::Debug for Session {
 }
 
 impl Session {
+    pub fn mcp_status(&self) -> tokio::sync::oneshot::Receiver<Option<Vec<crate::mcp_servers::Reported>>> {
+        let (reply, receive) = tokio::sync::oneshot::channel();
+        (self.send)(SessionCommand::McpStatus { reply });
+        receive
+    }
     pub fn stop_background(&self, id: &str) -> tokio::sync::oneshot::Receiver<Delivery> {
         let (ack, delivered) = tokio::sync::oneshot::channel();
         (self.send)(SessionCommand::StopBackground { id: id.into(), ack });

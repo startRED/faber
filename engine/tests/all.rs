@@ -8,6 +8,8 @@
 
 // Shared by the files below, which `use crate::support` and `use crate::loopback`.
 mod loopback;
+#[path = "mcp_servers.rs"]
+mod mcp_servers;
 #[path = "prompt_history.rs"]
 mod prompt_history;
 mod support;

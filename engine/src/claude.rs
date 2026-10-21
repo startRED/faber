@@ -372,7 +372,12 @@ pub fn claude_args(launch: &ClaudeLaunch) -> Vec<String> {
         args.push(words);
         // R161: Faber's own MCP server, answered by this driver over stdio, holds the helper tool and the browser.
         // The catalog's servers join it in the same config, where Faber offers its tools.
-        let servers = if offers_servers(launch.area, launch.permissions) { launch.tools.servers.as_slice() } else { &[] };
+        let servers: Vec<_> = launch
+            .tools
+            .servers
+            .iter()
+            .filter(|s| offers_servers(launch.area, launch.permissions) && !launch.tools.disabled_servers.contains(&s.name))
+            .collect();
         if !servers.is_empty() {
             let mut config: Value =
                 serde_json::from_str(if mcp_tools(launch).any() { crate::helper::CLAUDE_MCP_CONFIG } else { r#"{"mcpServers":{}}"# })
@@ -487,6 +492,9 @@ pub fn parse_claude_message(msg: &Value) -> Vec<EngineEvent> {
                     })
                     .collect();
                 events.push(EngineEvent::Commands(commands));
+            }
+            if let Some(servers) = msg["mcp_servers"].as_array() {
+                events.push(EngineEvent::McpServers(crate::mcp_servers::reported(servers, "status")));
             }
             events
         }
@@ -966,6 +974,7 @@ pub fn start_claude(opts: ClaudeOptions, on_event: EventSink) -> Session {
                     }
                 }
                 cmd = rx.recv(), if !closed => match cmd {
+                    Some(SessionCommand::McpStatus { reply }) => { let _ = reply.send(None); }
                     Some(SessionCommand::StopBackground { id: task, ack }) => {
                         if !commands.contains(&task) { let _ = ack.send(Delivery::Unknown); continue; }
                         if command_stops.len() >= crate::background::MAX_COMMANDS { let _ = ack.send(Delivery::WriteFailed); continue; }

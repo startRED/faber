@@ -8,6 +8,7 @@ pub mod chat_groups;
 pub mod containment;
 pub mod first_run;
 pub mod homes;
+pub mod mcp_servers;
 pub mod menus;
 pub mod permissions;
 pub mod projects;
@@ -49,6 +50,7 @@ pub fn all() -> Vec<Scenario> {
         .chain(first_run::scenarios())
         .chain(homes::scenarios())
         .chain(menus::scenarios())
+        .chain(mcp_servers::scenarios())
         .chain(chat_groups::scenarios())
         .chain(sentinel::scenarios());
     #[cfg(windows)]
