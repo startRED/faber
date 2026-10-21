@@ -794,6 +794,11 @@ export interface MemoryEdit {
   text: string | null;
 }
 
+/** A Firefox profile Faber's browser can bring sign-ins from; 'default' names the one Firefox made itself. */
+export type CookieProfile = { id: string; name: string; lastUsed: boolean };
+/** A site with cookies in that profile: the screen gets names and counts, never a cookie. */
+export type CookieSite = { name: string; cookies: number; kind: 'money' | 'email' | 'signin' | null };
+
 export const api = {
   state: () => invoke<AppState>('state'),
   createChatGroup: (name: string) => invoke<ChatGroup>('create_chat_group', { name }),
@@ -900,6 +905,11 @@ export const api = {
   /** Back, forward or reload in Faber's browser, on that conversation's page only. */
   siteStep: (id: string, step: 'back' | 'forward' | 'reload') => invoke<boolean>('site_step', { id, step }),
   sitePicture: (id: string, call: string) => invoke<string | null>('site_picture', { id, call }),
+  cookieProfiles: () => invoke<CookieProfile[]>('cookie_profiles'),
+  cookieSites: (profile: string) => invoke<{ ticket: string; sites: CookieSite[] }>('cookie_sites', { profile }),
+  cookieImport: (id: string, ticket: string, sites: string[]) => invoke<number>('cookie_import', { id, ticket, sites }),
+  cookieHeld: (id: string) => invoke<string[]>('cookie_held', { id }),
+  cookieForget: (id: string) => invoke<void>('cookie_forget', { id }),
   /** Where the page in Faber's browser is now, at every page it finishes loading. */
   onSite: (listener: (url: string) => void) => listen<string>('faber:site', (e) => listener(e.payload)),
   openTerminal: (id: string) => invoke<boolean>('open_terminal', { id }),

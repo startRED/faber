@@ -1071,6 +1071,99 @@ async fn site_step(app: AppHandle, id: String, step: String) -> bool {
     false
 }
 
+/// A Firefox profile the person may bring sign-ins from: its id (never a path), its name and whether it is the one used last.
+#[derive(serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+struct CookieProfile {
+    id: String,
+    name: String,
+    last_used: bool,
+}
+
+/// A site with cookies in that profile, for the person to pick: no cookie crosses into the screen.
+#[derive(serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+struct CookieSite {
+    name: String,
+    cookies: u32,
+    kind: Option<&'static str>,
+}
+
+#[derive(serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+struct CookieSites {
+    ticket: String,
+    sites: Vec<CookieSite>,
+}
+
+/// The Firefox profiles on this computer whose sign-ins the browser pane can bring over (Windows only: elsewhere none).
+#[tauri::command]
+async fn cookie_profiles() -> Vec<CookieProfile> {
+    #[cfg(windows)]
+    let found = tauri::async_runtime::spawn_blocking(pane::firefox::profiles).await.unwrap_or_default();
+    #[cfg(not(windows))]
+    let found: Vec<CookieProfile> = Vec::new();
+    #[cfg(windows)]
+    let found = found.into_iter().map(|p| CookieProfile { id: p.id, name: p.name, last_used: p.last_used }).collect();
+    found
+}
+
+/// The sites with cookies in the profile `profile`, under a ticket the import names.
+#[tauri::command]
+async fn cookie_sites(app: AppHandle, profile: String) -> Res<CookieSites> {
+    #[cfg(windows)]
+    if let Some(pane) = app.try_state::<Arc<pane::Pane>>().map(|p| p.inner().clone()) {
+        let (ticket, sites) = pane.list_sites(profile).await.map_err(str::to_string)?;
+        let sites = sites
+            .into_iter()
+            .map(|s| CookieSite {
+                name: s.name,
+                cookies: s.cookies,
+                kind: s.kind.map(|k| match k {
+                    pane::firefox::Kind::Money => "money",
+                    pane::firefox::Kind::Email => "email",
+                    pane::firefox::Kind::SignIn => "signin",
+                }),
+            })
+            .collect();
+        return Ok(CookieSites { ticket, sites });
+    }
+    let _ = (app, profile);
+    Err("error.cookies.missing".into())
+}
+
+/// Brings the person's sign-ins on the sites they picked into conversation `id`'s pages; answers how many sites came over.
+#[tauri::command]
+async fn cookie_import(app: AppHandle, id: String, ticket: String, sites: Vec<String>) -> Res<usize> {
+    #[cfg(windows)]
+    if let Some(pane) = app.try_state::<Arc<pane::Pane>>().map(|p| p.inner().clone()) {
+        return pane.import(&id, &ticket, &sites).await.map_err(str::to_string);
+    }
+    let _ = (app, id, ticket, sites);
+    Err("error.cookies.missing".into())
+}
+
+/// The sites whose sign-ins conversation `id` holds.
+#[tauri::command]
+async fn cookie_held(app: AppHandle, id: String) -> Vec<String> {
+    #[cfg(windows)]
+    if let Some(pane) = app.try_state::<Arc<pane::Pane>>() {
+        return pane.held_sites(&id);
+    }
+    let _ = (app, id);
+    Vec::new()
+}
+
+/// Forgets the sign-ins conversation `id` holds and signs its page out of them.
+#[tauri::command]
+async fn cookie_forget(app: AppHandle, id: String) {
+    #[cfg(windows)]
+    if let Some(pane) = app.try_state::<Arc<pane::Pane>>().map(|p| p.inner().clone()) {
+        pane.forget(&id).await;
+    }
+    let _ = (app, id);
+}
+
 /// The picture the browser took for a call, as a data URL, so the page never reads the disk itself.
 #[tauri::command]
 async fn site_picture(faber: State<'_, Faber>, id: String, call: String) -> Res<Option<String>> {
@@ -1440,6 +1533,11 @@ fn main() {
                 site_open,
                 site_step,
                 site_picture,
+                cookie_profiles,
+                cookie_sites,
+                cookie_import,
+                cookie_held,
+                cookie_forget,
                 state,
                 open,
                 create_chat_group,

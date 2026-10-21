@@ -5,7 +5,8 @@ import { useLanguage } from '../../ui/i18n.ts';
 import { Running } from '../../ui/Running.tsx';
 import { addressOf, appsOf, awaySites, cornersOf, covered, looksOf, openedSite, showSite, siteOf, sitesOf, stepsOf, type OpenSite } from '../../ui/Site.tsx';
 import { Thread } from '../../ui/Thread.tsx';
-import { check, deepEqual, equal, ok } from './check.ts';
+import { Cookies } from '../../ui/Cookies.tsx';
+import { check, deepEqual, equal, matches, ok } from './check.ts';
 import act from '../../src-tauri/src/pane/act.js';
 
 // A page the agent opened in Faber's browser (R161 step 7; docs/product-map.md, "Page in Faber's browser").
@@ -808,6 +809,68 @@ check('page in the browser: with no page yet the pane shows only its address fie
   } finally {
     showSite(undefined);
     Object.assign(api, { siteOpen, sitePlace, sitePark, onSite, siteStep, openLink });
+    dispose();
+    root.remove();
+  }
+});
+
+check('sign-ins from Firefox: the person picks the profile and the sites, and only names and counts reach the screen', async () => {
+  useLanguage('en');
+  const saved = { cookieProfiles: api.cookieProfiles, cookieSites: api.cookieSites, cookieImport: api.cookieImport, cookieHeld: api.cookieHeld, cookieForget: api.cookieForget };
+  const asked: string[] = [];
+  let held: string[] = ['old.example'];
+  api.cookieProfiles = async () => [{ id: 'firefox/a', name: 'default', lastUsed: true }];
+  api.cookieHeld = async () => held;
+  api.cookieForget = async (id) => (asked.push(`forget ${id}`), void (held = []));
+  api.cookieSites = async (profile) => (asked.push(`list ${profile}`), { ticket: 't1', sites: [{ name: 'mybank.example', cookies: 3, kind: 'money' }, { name: 'docs.example', cookies: 9, kind: null }, { name: 'news.example', cookies: 2, kind: null }] });
+  api.cookieImport = async (id, ticket, sites) => (asked.push(`import ${id} ${ticket} ${sites.join(',')}`), sites.length);
+  const root = document.createElement('div');
+  document.body.append(root);
+  let closed = 0;
+  const frame = () => new Promise((done) => requestAnimationFrame(() => requestAnimationFrame(done)));
+  const dispose = render(() => createComponent(Cookies, { conversationId: 'c1', onClose: () => closed++ }), root);
+  try {
+    await frame();
+    const dialog = document.querySelector<HTMLDialogElement>('dialog.cookies')!;
+    ok(dialog?.open, 'a modal dialog, which the browser pane steps aside for');
+    matches(dialog.textContent!, /From Firefox, Default profile\./, 'one profile is named, Firefox’s own as the default one');
+    matches(dialog.textContent!, /Passwords never do/, 'it says passwords never come over');
+    matches(dialog.textContent!, /what the agent reads on those sites goes to its AI/, 'and what does leave the computer');
+    matches(dialog.textContent!, /signed in on 1 site from Firefox/, 'a conversation that holds sign-ins says so');
+    const button = (words: string) => [...dialog.querySelectorAll('button')].find((b) => b.textContent!.trim() === words)!;
+    button('Forget them').click();
+    await frame();
+    equal(asked.at(-1), 'forget c1', 'Forget is for this conversation');
+    equal(dialog.querySelector('.cookies-held'), null, 'and the line goes');
+    button('Continue').click();
+    await frame();
+    equal(asked.at(-1), 'list firefox/a', 'the last used profile, by its id, never a path');
+    deepEqual([...dialog.querySelectorAll('.cookies-site')].map((s) => s.textContent), ['mybank.example', 'docs.example', 'news.example'], 'in the shell’s order');
+    equal(dialog.querySelector('.cookies-kind')!.textContent, 'Bank or payments', 'a bank is marked');
+    matches(dialog.textContent!, /2 of 3 selected/, 'every site starts picked but the bank, which the person ticks themselves');
+    ok(!dialog.querySelector<HTMLInputElement>('.cookies-sites input')!.checked, 'the bank is listed first, unticked');
+    const filter = dialog.querySelector<HTMLInputElement>('input[type=search]')!;
+    filter.value = 'news';
+    filter.dispatchEvent(new Event('input', { bubbles: true }));
+    await frame();
+    const all = dialog.querySelector<HTMLInputElement>('.cookies-all input')!;
+    all.click();
+    await frame();
+    matches(dialog.textContent!, /1 of 3 selected/, 'Select all acts on what the filter shows');
+    filter.value = '';
+    filter.dispatchEvent(new Event('input', { bubbles: true }));
+    await frame();
+    ok(all.indeterminate, 'and shows a mixed state when only some are picked');
+    dialog.querySelector<HTMLInputElement>('.cookies-sites input')!.click();
+    await frame();
+    button('Bring over').click();
+    await frame();
+    equal(asked.at(-1), 'import c1 t1 docs.example,mybank.example', 'the ticket of the list and the picked names');
+    matches(dialog.textContent!, /Signed in on 2 sites\./, 'it says how many');
+    button('Done').click();
+    equal(closed, 1);
+  } finally {
+    Object.assign(api, saved);
     dispose();
     root.remove();
   }

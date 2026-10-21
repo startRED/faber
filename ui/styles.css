@@ -375,12 +375,12 @@ svg.i.sm { width: 14px; height: 14px; }
 .change-content { padding: 0 12px 12px; }
 
 /* A just-in-time confirmation shares Changes' file preview, with no work or timers while it is closed. */
-.rewind-confirm { width: min(640px, calc(100vw - 32px)); max-height: calc(100dvh - 48px); margin: auto; padding: 24px; overflow: auto; color: var(--ink); background: var(--s2); border: 1px solid var(--line-2); border-radius: var(--r-lg); box-shadow: var(--lift-shadow); font-size: var(--fs-ui); overflow-wrap: anywhere; }
-.rewind-confirm[open] { display: grid; gap: 14px; animation: arrive var(--dur-ui) var(--ease) both; }
+.rewind-confirm, .cookies { width: min(640px, calc(100vw - 32px)); max-height: calc(100dvh - 48px); margin: auto; padding: 24px; overflow: auto; color: var(--ink); background: var(--s2); border: 1px solid var(--line-2); border-radius: var(--r-lg); box-shadow: var(--lift-shadow); font-size: var(--fs-ui); overflow-wrap: anywhere; }
+.rewind-confirm[open], .cookies[open] { display: grid; gap: 14px; animation: arrive var(--dur-ui) var(--ease) both; }
 .rewind-confirm.leaving { animation: arrive var(--dur-exit) var(--ease-in) both reverse; }
-.rewind-confirm::backdrop { background: color-mix(in srgb, var(--bg) 78%, transparent); }
-.rewind-confirm h2 { margin: 0; font-size: var(--fs-h2); }
-.rewind-confirm p { margin: 0; }
+.rewind-confirm::backdrop, .cookies::backdrop { background: color-mix(in srgb, var(--bg) 78%, transparent); }
+.rewind-confirm h2, .cookies h2 { margin: 0; font-size: var(--fs-h2); }
+.rewind-confirm p, .cookies p { margin: 0; }
 .rewind-scopes { display: flex; flex-wrap: wrap; gap: 10px 18px; min-width: 0; margin: 0; padding: 0; border: 0; }
 .rewind-scopes legend { margin-bottom: 10px; font-size: var(--fs-sm); color: var(--ink-2); }
 .rewind-scopes label { display: flex; align-items: center; gap: 6px; font-size: var(--fs-sm); }
@@ -395,7 +395,7 @@ svg.i.sm { width: 14px; height: 14px; }
 .rewind-running { display: grid; justify-items: start; gap: 8px; padding-top: 10px; border-top: 1px solid var(--line); font-size: var(--fs-sm); }
 .rewind-running .stop-ask { flex-wrap: wrap; }
 .rewind-limits p { margin: 0; padding: 0 12px 12px; font-size: var(--fs-sm); color: var(--ink-2); }
-.rewind-actions { display: flex; flex-wrap: wrap; justify-content: end; gap: 8px; }
+.rewind-actions, .cookies-actions { display: flex; flex-wrap: wrap; justify-content: end; gap: 8px; }
 .rewind-coverage { margin-top: 6px; }
 .change-patch { margin: 0; font-family: var(--font-data); font-size: var(--fs-xs); color: var(--ink-2); }
 .patch-line { display: block; white-space: pre-wrap; overflow-wrap: anywhere; }
@@ -636,6 +636,18 @@ details.thinking div { white-space: pre-wrap; padding: 6px 0 0 12px; border-left
 .site-empty { display: grid; justify-items: center; gap: 10px; max-width: 280px; padding: 24px; color: var(--ink-3); font-size: var(--fs-sm); text-align: center; text-wrap: balance; }
 .site-empty svg.i { width: 22px; height: 22px; color: var(--ink-2); }
 .site-empty p { margin: 0; }
+/* Bringing sign-ins from Firefox: the rewind dialog's surface, a short list of sites with the sensitive ones marked. */
+.cookies { width: min(520px, calc(100vw - 32px)); }
+.cookies-from { display: grid; gap: 6px; }
+.cookies-points { display: grid; gap: 6px; margin: 0; padding-left: 18px; }
+.cookies-held { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px; }
+.cookies-state:empty { display: none; }
+.cookies-all { display: flex; align-items: center; gap: 8px; }
+.cookies-sites { max-height: min(45vh, 360px); margin: 0; padding: 4px; overflow: auto; list-style: none; border: 1px solid var(--line); border-radius: var(--r-md); }
+.cookies-sites label { display: flex; align-items: center; gap: 8px; min-height: 32px; padding: 0 8px; border-radius: var(--r-sm); }
+.cookies-sites label:hover { background: var(--s3); }
+.cookies-site { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.cookies-kind { flex: none; padding: 1px 8px; color: var(--amber-ink); font-size: var(--fs-sm); background: var(--amber-soft); border-radius: var(--r-pill); }
 /* The address field of Faber's browser, under the head: where the page is, and where the person goes next. */
 .site-bar { display: flex; align-items: center; gap: 4px; padding: 0 12px 8px 18px; }
 .field.site-address { flex: 1; min-width: 0; max-width: none; height: var(--h-sm); padding: 0 10px; font-family: var(--font-data); font-size: var(--fs-xs); }

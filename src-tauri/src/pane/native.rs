@@ -13,10 +13,10 @@ use webview2_com::CallDevToolsProtocolMethodCompletedHandler;
 use windows_core::HSTRING;
 
 #[cfg(windows)]
-type Slot = Arc<Mutex<Option<oneshot::Sender<Result<String, String>>>>>;
+type Slot<T = String> = Arc<Mutex<Option<oneshot::Sender<Result<T, String>>>>>;
 
 #[cfg(windows)]
-fn answer(slot: &Slot, result: Result<String, String>) {
+fn answer<T>(slot: &Slot<T>, result: Result<T, String>) {
     if let Some(tx) = crate::lock(slot).take() {
         let _ = tx.send(result);
     }
@@ -40,6 +40,39 @@ pub fn devtools(webview: &tauri::Webview, method: &str, params: String) -> onesh
         // them; the strings outlive the call, and WebView2 keeps its own reference to the handler until it completes.
         let called = unsafe { platform.controller().CoreWebView2() }
             .and_then(|core| unsafe { core.CallDevToolsProtocolMethod(&method, &HSTRING::from(params), &handler) });
+        if let Err(e) = called {
+            answer(&tx, Err(e.message()));
+        }
+    });
+    if let Err(e) = queued {
+        answer(&failed, Err(e.to_string()));
+    }
+    rx
+}
+
+/// Clears everything the pane's private profile holds (cookies, every site's storage, cache, history), the data any other
+/// private pane made meanwhile would share, and answers once WebView2 says it is gone.
+#[cfg(windows)]
+pub fn clear_all(webview: &tauri::Webview) -> oneshot::Receiver<Result<(), String>> {
+    use webview2_com::ClearBrowsingDataCompletedHandler;
+    use webview2_com::Microsoft::Web::WebView2::Win32::{ICoreWebView2_13, ICoreWebView2Profile2};
+    use windows_core::Interface;
+    let (tx, rx) = oneshot::channel();
+    let tx: Slot<()> = Arc::new(Mutex::new(Some(tx)));
+    let failed = tx.clone();
+    let queued = webview.with_webview(move |platform| {
+        let done = tx.clone();
+        let handler = ClearBrowsingDataCompletedHandler::create(Box::new(move |result: windows_core::Result<()>| {
+            answer(&done, result.map_err(|e| e.message()));
+            Ok(())
+        }));
+        // SAFETY: as in `devtools`: live COM objects on the thread that owns them, and WebView2 keeps its own reference to
+        // the handler until it completes.
+        let called = unsafe { platform.controller().CoreWebView2() }
+            .and_then(|core| core.cast::<ICoreWebView2_13>())
+            .and_then(|core| unsafe { core.Profile() })
+            .and_then(|profile| profile.cast::<ICoreWebView2Profile2>())
+            .and_then(|profile| unsafe { profile.ClearBrowsingDataAll(&handler) });
         if let Err(e) = called {
             answer(&tx, Err(e.message()));
         }

@@ -14,6 +14,7 @@
 //! The agent acts by the words a person sees (`act.js`, run inside the page); on a page that asks for a login, a captcha
 //! or a payment it may read and scroll but never click or type.
 
+pub(crate) mod firefox;
 pub(crate) mod native;
 
 use base64::Engine as _;
@@ -133,8 +134,6 @@ struct State {
     reported: Option<String>,
     /// The sites the person went to while the pane was theirs, since the agent's last call (`went_to`).
     visited: Vec<String>,
-    /// The sites the pane's pages were on since it was made, the latest `MAX_ORIGINS`: what `fresh_for` clears.
-    origins: Vec<String>,
     /// Pages Faber loaded (the agent's, or a card's) that have not finished: that many next finishes are not sites the
     /// person went to. A load that never finishes leaves one more skipped: the list can fall short, never say more.
     skip_finish: u32,
@@ -142,7 +141,37 @@ struct State {
     size: Option<Viewport>,
     /// The page is drawn at a size of the agent's, not the pane's: the person taking the pane gets the pane's own back.
     emulated: bool,
+    /// The sign-ins the person brought over from their own browser, per conversation (`bring_in`), and whether this pane
+    /// already has its owner's. Only in this process: never written anywhere, gone when Faber quits.
+    held: Vec<Held>,
+    brought: bool,
+    /// The sites last listed for the person to pick from, which an import may only choose among.
+    listing: Option<Listing>,
 }
+
+/// Sign-ins the person brought over in one conversation: its pages get them, no other conversation's do (R195, R308).
+struct Held {
+    conversation: String,
+    sites: Vec<String>,
+    cookies: Vec<firefox::Cookie>,
+}
+
+/// A list of sites shown to the person, by a random name the screen sends back with what they picked.
+struct Listing {
+    ticket: String,
+    profile: String,
+    sites: Vec<firefox::Site>,
+    at: Instant,
+}
+
+/// How long the person has to pick sites from a list before it must be read again.
+const LISTING: Duration = Duration::from_secs(5 * 60);
+/// The longest the pane spends setting brought-over sign-ins, so a page the person or the agent waits for is never held up.
+const SETTING: Duration = Duration::from_secs(8);
+/// The longest a new pane waits for its private data to be cleared before it gives up and closes.
+const CLEARING: Duration = Duration::from_secs(10);
+/// At most this many conversations hold sign-ins at once; the oldest import goes first.
+const MAX_HELD: usize = 8;
 
 /// The screen's boxes the pane is placed over, named by numbers that only grow while the screen lives. A box that let the
 /// pane go places it no more, and a box older than the one that has it cannot move or take it away. Each load of the screen
@@ -225,6 +254,39 @@ fn bound(reported: Option<&str>) -> Result<&str, String> {
     reported.ok_or_else(|| "read the page first; click and type only run on a page you have read".to_string())
 }
 
+/// A cookie as the DevTools call sets it: one stored for a domain keeps it (its subdomains get it too), one stored for its
+/// host alone is set by address, so it stays that host's. None for a host or path that is not one: the address is built
+/// from both, and a path like `@other.example/` would move the cookie to another site.
+fn cookie_param(cookie: &firefox::Cookie) -> Option<Value> {
+    let host = cookie.host.strip_prefix('.').unwrap_or(&cookie.host);
+    let plain_host = !host.is_empty() && host.bytes().all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'.' || b == b'-');
+    let plain_path = cookie.path.starts_with('/') && cookie.path.bytes().all(|b| b.is_ascii_graphic() && !matches!(b, b'?' | b'#' | b'\\'));
+    if !plain_host || !plain_path {
+        return None;
+    }
+    let mut param = json!({
+        "name": cookie.name, "value": cookie.value, "path": cookie.path,
+        "secure": cookie.secure, "httpOnly": cookie.http_only, "expires": cookie.expires,
+    });
+    if cookie.host.starts_with('.') {
+        param["domain"] = json!(cookie.host);
+    } else {
+        let url = Url::parse(&format!("{}://{host}{}", if cookie.secure { "https" } else { "http" }, cookie.path)).ok()?;
+        if url.host_str() != Some(host) {
+            return None;
+        }
+        param["url"] = json!(url.as_str());
+    }
+    if let Some(same_site) = cookie.same_site {
+        param["sameSite"] = json!(same_site);
+    }
+    Some(param)
+}
+
+fn unix_now() -> i64 {
+    std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| i64::try_from(d.as_secs()).unwrap_or(i64::MAX))
+}
+
 impl Pane {
     pub fn new(app: AppHandle) -> Arc<Pane> {
         Arc::new(Pane {
@@ -243,8 +305,11 @@ impl Pane {
         crate::lock(&self.state).webview.clone()
     }
 
-    /// Loads `url` in the pane, making it first if it is closed. Answers the count of started pages to wait past.
-    fn load(self: &Arc<Self>, url: &str) -> Result<u64, String> {
+    /// Loads `url` in the pane for `conversation`, making the pane first if it is closed. Answers the count of started pages
+    /// to wait past. A pane is made blank: before its first page it clears all the private data a closed one may still share
+    /// (cookies, every site's storage; one conversation's sign-ins never reach the next one's, R308), waits until WebView2
+    /// says it is gone, and takes the sign-ins `conversation` holds.
+    async fn load(self: &Arc<Self>, url: &str, conversation: &str) -> Result<u64, String> {
         let parsed = checked(url)?;
         let before = self.loads.borrow().0;
         // A page Faber loads is the agent's or a card's, never one the person went to.
@@ -259,25 +324,19 @@ impl Pane {
         }
         let window = self.app.get_window("main").ok_or("Faber's window is closed")?;
         let (loads, app, pane) = (self.loads.clone(), self.app.clone(), Arc::downgrade(self));
-        let seen = pane.clone();
-        let builder = WebviewBuilder::new(LABEL, WebviewUrl::External(parsed))
+        let blank = Url::parse("about:blank").map_err(|e| e.to_string())?;
+        let builder = WebviewBuilder::new(LABEL, WebviewUrl::External(blank))
             .incognito(true)
             .on_navigation(allowed)
             .on_new_window(|_, _| NewWindowResponse::Deny)
             .on_download(|_, _| false)
             .on_page_load(move |_, payload| match payload.event() {
-                PageLoadEvent::Started => {
-                    loads.send_modify(|(started, _)| *started += 1);
-                    if let Some(pane) = seen.upgrade() {
-                        stored_by(&mut crate::lock(&pane.state).origins, payload.url());
-                    }
-                }
+                PageLoadEvent::Started => loads.send_modify(|(started, _)| *started += 1),
                 PageLoadEvent::Finished => {
                     loads.send_modify(|(started, finished)| *finished = *started);
                     // A page that finished while the person had the pane is one they went to: the agent hears its site next time.
                     if let Some(pane) = pane.upgrade() {
                         let mut s = crate::lock(&pane.state);
-                        stored_by(&mut s.origins, payload.url());
                         if s.skip_finish > 0 {
                             s.skip_finish -= 1;
                         } else if s.shown {
@@ -289,9 +348,32 @@ impl Pane {
                 }
             });
         let webview = window.add_child(builder, PARKED, SIZE).map_err(|e| e.to_string())?;
-        let mut s = crate::lock(&self.state);
-        s.webview = Some(webview);
-        s.made += 1;
+        let made = {
+            let mut s = crate::lock(&self.state);
+            s.webview = Some(webview.clone());
+            s.made += 1;
+            s.made
+        };
+        // Until its first page, a pane whose making stops (an error, or the call that made it given up) closes.
+        let making = Making { pane: self, made, done: false };
+        if !clear_new(&webview).await {
+            // Never a page on data that may be another conversation's: the next open makes a new pane and tries again.
+            return Err("Faber's browser could not start fresh; try again".into());
+        }
+        let held = {
+            let mut s = crate::lock(&self.state);
+            s.brought = true;
+            s.held.iter().find(|h| h.conversation == conversation).map(|h| h.cookies.clone())
+        };
+        if let Some(cookies) = held {
+            self.set_cookies(&cookies).await;
+        }
+        if crate::lock(&self.state).made != made {
+            return Err("the browser closed".into());
+        }
+        let before = self.loads.borrow().0;
+        webview.navigate(parsed).map_err(|e| e.to_string())?;
+        making.finish();
         Ok(before)
     }
 
@@ -311,9 +393,9 @@ impl Pane {
                     if left.is_zero() && !s.shown {
                         s.idle_watch = false;
                         s.visited.clear();
-                        s.origins.clear();
                         // The next pane is a new page: it gets its corners again.
                         (s.rounded, s.round_script) = (None, None);
+                        s.brought = false;
                         Err(s.webview.take())
                     } else {
                         Ok(left.max(Duration::from_secs(1)))
@@ -338,9 +420,9 @@ impl Pane {
             s.shown = false;
             s.reported = None;
             s.visited.clear();
-            s.origins.clear();
             (s.size, s.emulated) = (None, false);
             (s.rounded, s.round_script) = (None, None);
+            s.brought = false;
             s.webview.take()
         };
         self.looking.send_replace(false);
@@ -470,7 +552,9 @@ impl Pane {
         }
         let _turn = self.opening.lock().await;
         self.fresh_for(conversation).await;
-        let shown = self.load(url).is_ok();
+        // A pane already there takes the conversation's sign-ins before the page asks for anything.
+        self.bring_in(conversation).await;
+        let shown = self.load(url, conversation).await.is_ok();
         if shown {
             let mut s = crate::lock(&self.state);
             if s.owner.as_deref() != Some(conversation) {
@@ -482,22 +566,173 @@ impl Pane {
         shown
     }
 
+    /// Puts the sign-ins the person brought over in `conversation` into the pane, once per pane and only while its page is
+    /// that conversation's. Answers how many cookies the pane took.
+    async fn bring_in(&self, conversation: &str) -> usize {
+        let cookies = {
+            let mut s = crate::lock(&self.state);
+            if s.brought || s.webview.is_none() || s.owner.as_deref() != Some(conversation) {
+                return 0;
+            }
+            let Some(held) = s.held.iter().find(|h| h.conversation == conversation) else { return 0 };
+            let cookies = held.cookies.clone();
+            s.brought = true;
+            cookies
+        };
+        self.set_cookies(&cookies).await
+    }
+
+    /// Sets `cookies` in the pane on view, a batch at a time, for at most `SETTING` in all, every call included: a call
+    /// still running then is given up, and the pane keeps what it took. Answers how many it took.
+    async fn set_cookies(&self, cookies: &[firefox::Cookie]) -> usize {
+        let Some(webview) = self.webview() else { return 0 };
+        let deadline = Instant::now() + SETTING;
+        let send = |method: &'static str, params: Value| {
+            let left = deadline.saturating_duration_since(Instant::now());
+            let webview = webview.clone();
+            async move {
+                let answer = tokio::time::timeout(left, native::devtools(&webview, method, params.to_string())).await;
+                match answer {
+                    Ok(Ok(Ok(json))) => serde_json::from_str::<Value>(&json).ok(),
+                    _ => None,
+                }
+            }
+        };
+        let mut set = 0;
+        for batch in cookies.chunks(200) {
+            if Instant::now() >= deadline {
+                break;
+            }
+            let params: Vec<Value> = batch.iter().filter_map(cookie_param).collect();
+            if send("Network.setCookies", json!({ "cookies": params })).await.is_some() {
+                set += params.len();
+                continue;
+            }
+            // The browser refuses a whole batch for one cookie it does not like: the rest go one by one.
+            for one in params {
+                if Instant::now() >= deadline {
+                    break;
+                }
+                if send("Network.setCookie", one).await.is_some_and(|a| a["success"].as_bool() != Some(false)) {
+                    set += 1;
+                }
+            }
+        }
+        set
+    }
+
+    /// The sites of a Firefox profile that hold cookies, for the person to pick from: names, counts and kinds, never a
+    /// cookie. Kept under a new ticket, which the import has to name, for `LISTING`.
+    pub async fn list_sites(&self, profile: String) -> Result<(String, Vec<firefox::Site>), &'static str> {
+        let (profile, sites) = tokio::task::spawn_blocking(move || {
+            let profile = firefox::profiles().into_iter().find(|p| p.id == profile).ok_or("error.cookies.missing")?;
+            firefox::sites(&profile, unix_now()).map(|sites| (profile.id, sites))
+        })
+        .await
+        .map_err(|_| "error.cookies.locked")??;
+        let ticket = uuid::Uuid::new_v4().to_string();
+        let listing = Listing { ticket: ticket.clone(), profile, sites: sites.clone(), at: Instant::now() };
+        crate::lock(&self.state).listing = Some(listing);
+        Ok((ticket, sites))
+    }
+
+    /// Brings the person's sign-ins on the `picked` sites of listing `ticket` into `conversation`'s pages: the page on view
+    /// now loads again with them, and every page the conversation opens later gets them, until Faber quits or the person
+    /// forgets them. No other conversation's pages ever get them. Answers how many sites came over.
+    pub async fn import(&self, conversation: &str, ticket: &str, picked: &[String]) -> Result<usize, &'static str> {
+        // The list stays until an import from it is done, so one that failed (Firefox still open) can be tried again.
+        let (profile, sites, hosts) = {
+            let s = crate::lock(&self.state);
+            let listing = s.listing.as_ref().filter(|l| l.ticket == ticket && l.at.elapsed() < LISTING).ok_or("error.cookies.stale")?;
+            let sites: Vec<&firefox::Site> = listing.sites.iter().filter(|site| picked.contains(&site.name)).collect();
+            if sites.is_empty() {
+                return Err("error.cookies.stale");
+            }
+            let hosts: Vec<String> = sites.iter().flat_map(|site| site.hosts.iter().cloned()).collect();
+            (listing.profile.clone(), sites.iter().map(|site| site.name.clone()).collect::<Vec<_>>(), hosts)
+        };
+        let cookies = tokio::task::spawn_blocking(move || {
+            let profile = firefox::profiles().into_iter().find(|p| p.id == profile).ok_or("error.cookies.missing")?;
+            firefox::cookies(&profile, &hosts, unix_now())
+        })
+        .await
+        .map_err(|_| "error.cookies.locked")??;
+        if cookies.is_empty() {
+            return Err("error.cookies.none");
+        }
+        // After the agent's call in flight, so its page never changes under it.
+        let _turn = self.opening.lock().await;
+        let count = sites.len();
+        {
+            let mut s = crate::lock(&self.state);
+            let mut held = match s.held.iter().position(|h| h.conversation == conversation) {
+                Some(at) => s.held.remove(at),
+                None => Held { conversation: conversation.to_string(), sites: Vec::new(), cookies: Vec::new() },
+            };
+            held.cookies.retain(|old| !cookies.iter().any(|new| (&new.host, &new.name, &new.path) == (&old.host, &old.name, &old.path)));
+            held.cookies.extend(cookies);
+            held.sites.retain(|site| !sites.contains(site));
+            held.sites.extend(sites);
+            s.held.push(held);
+            if s.held.len() > MAX_HELD {
+                s.held.remove(0);
+            }
+            // Another conversation's live page keeps what it has; this one's takes the new ones.
+            if s.owner.as_deref() == Some(conversation) {
+                s.brought = false;
+            }
+            if s.listing.as_ref().is_some_and(|l| l.ticket == ticket) {
+                s.listing = None;
+            }
+        }
+        if self.bring_in(conversation).await > 0 {
+            let _ = self.call("Page.reload", json!({})).await;
+        }
+        Ok(count)
+    }
+
+    /// The sites whose sign-ins `conversation` holds, for the screen to name.
+    pub fn held_sites(&self, conversation: &str) -> Vec<String> {
+        crate::lock(&self.state).held.iter().find(|h| h.conversation == conversation).map(|h| h.sites.clone()).unwrap_or_default()
+    }
+
+    /// Forgets the sign-ins brought over in `conversation`. Its page on view is signed out of everything, not only of the
+    /// cookies that came over: sites renew their sessions with new cookies and keep more in their storage.
+    pub async fn forget(&self, conversation: &str) {
+        let _turn = self.opening.lock().await;
+        let webview = {
+            let mut s = crate::lock(&self.state);
+            s.held.retain(|h| h.conversation != conversation);
+            if s.owner.as_deref() != Some(conversation) {
+                return;
+            }
+            s.webview.clone()
+        };
+        let Some(webview) = webview else { return };
+        let cleared = tokio::time::timeout(CLEARING, native::clear_all(&webview)).await;
+        if matches!(cleared, Ok(Ok(Ok(())))) {
+            let _ = self.call("Page.reload", json!({})).await;
+        } else {
+            // Never a page still signed in after the person said to forget: it closes, and the next one starts clean.
+            self.close();
+        }
+    }
+
     /// A page that passes to another conversation gets a pane of its own: one conversation's history (and anything the
-    /// person signed in to there) is never a Back away from another's agent. The private pane forgets its data once its last
-    /// view is gone, which may come only after the next one is made, so the cookies and what every site it was on stored go
-    /// first.
+    /// person signed in to there) is never a Back away from another's agent. The old pane's private data goes now, while
+    /// its page still runs, and all of it again before the new pane's first page (`load`), since private panes made one
+    /// after another may share it.
     async fn fresh_for(&self, conversation: &str) {
-        let origins = {
+        let webview = {
             let s = crate::lock(&self.state);
             if !s.owner.as_deref().is_some_and(|owner| owner != conversation) {
                 return;
             }
-            s.origins.clone()
+            s.webview.clone()
         };
-        for origin in origins {
-            let _ = self.call("Storage.clearDataForOrigin", json!({ "origin": origin, "storageTypes": "all" })).await;
+        if let Some(webview) = webview {
+            let _ = tokio::time::timeout(CLEARING, native::clear_all(&webview)).await;
         }
-        let _ = self.call("Network.clearBrowserCookies", json!({})).await;
         self.close();
     }
 
@@ -700,7 +935,7 @@ impl Pane {
             (s.owner.as_deref() == Some(conversation.as_str()), s.taken, s.reported.clone())
         };
         let mut loads = self.loads.subscribe();
-        let before = self.loads.borrow().0;
+        let mut before = self.loads.borrow().0;
         let action = match &request {
             Request::Open(url) => {
                 checked(url)?;
@@ -709,13 +944,16 @@ impl Pane {
                 let _acting = self.acting.lock().await;
                 self.person_took_it(taken)?;
                 self.fresh_for(&conversation).await;
-                self.load(url)?;
-                let mut s = crate::lock(&self.state);
-                if !mine {
-                    s.visited.clear();
+                self.bring_in(&conversation).await;
+                before = self.load(url, &conversation).await?;
+                {
+                    let mut s = crate::lock(&self.state);
+                    if !mine {
+                        s.visited.clear();
+                    }
+                    s.owner = Some(conversation.clone());
+                    s.reported = None;
                 }
-                s.owner = Some(conversation);
-                s.reported = None;
                 None
             }
             _ if self.webview().is_none() => return Err("no page is open; open one with its address first".into()),
@@ -866,20 +1104,45 @@ impl Pane {
 
 /// The most sites the agent hears the person went to: the latest of them.
 const MAX_VISITED: usize = 5;
-/// The sites a pane remembers to clear: more than a person or an agent visits in five minutes of one conversation.
-const MAX_ORIGINS: usize = 64;
 
-/// Keeps the site of a page the pane was on, once, the latest last.
-fn stored_by(origins: &mut Vec<String>, url: &Url) {
-    if !matches!(url.scheme(), "http" | "https") {
-        return;
+/// A pane being made: closed if its making stops before its first page, unless a newer one took its place.
+struct Making<'a> {
+    pane: &'a Pane,
+    made: u64,
+    done: bool,
+}
+
+impl Making<'_> {
+    fn finish(mut self) {
+        self.done = true;
     }
-    let origin = url.origin().ascii_serialization();
-    origins.retain(|o| *o != origin);
-    origins.push(origin);
-    if origins.len() > MAX_ORIGINS {
-        origins.remove(0);
+}
+
+impl Drop for Making<'_> {
+    fn drop(&mut self) {
+        if !self.done && crate::lock(&self.pane.state).made == self.made {
+            self.pane.close();
+        }
     }
+}
+
+/// Clears all the private data of a pane just made, which panes made one after another may share, and answers whether
+/// WebView2 said it went within `CLEARING`; the browser may need a moment before it answers.
+async fn clear_new(webview: &Webview) -> bool {
+    let deadline = Instant::now() + CLEARING;
+    loop {
+        let left = deadline.saturating_duration_since(Instant::now());
+        match tokio::time::timeout(left, native::clear_all(webview)).await {
+            Ok(Ok(Ok(()))) => break,
+            Err(_) => return false,
+            Ok(_) if Instant::now() + Duration::from_millis(100) >= deadline => return false,
+            Ok(_) => tokio::time::sleep(Duration::from_millis(100)).await,
+        }
+    }
+    // Cookies a second time, through the page's own channel, which answers only once its store has none.
+    let left = deadline.saturating_duration_since(Instant::now());
+    let cleared = tokio::time::timeout(left, native::devtools(webview, "Network.clearBrowserCookies", "{}".into())).await;
+    matches!(cleared, Ok(Ok(Ok(_))))
 }
 
 /// A DevTools call for a look only, on the pane it was meant for: a page that holds it gives up after `LOOK_CALL` and keeps
@@ -985,25 +1248,6 @@ mod tests {
     }
 
     #[test]
-    fn every_site_a_pane_was_on_is_kept_for_clearing_once_the_latest_last() {
-        let mut origins = Vec::new();
-        for url in ["https://bank.example/login", "http://localhost:3000/", "https://bank.example/home", "about:blank", "https://docs.rs/x"]
-        {
-            stored_by(&mut origins, &url.parse().unwrap());
-        }
-        assert_eq!(
-            origins,
-            ["http://localhost:3000", "https://bank.example", "https://docs.rs"],
-            "each site once, no page that stores nothing"
-        );
-        for n in 0..MAX_ORIGINS {
-            stored_by(&mut origins, &format!("https://s{n}.org/").parse().unwrap());
-        }
-        assert_eq!(origins.len(), MAX_ORIGINS);
-        assert_eq!(origins.last().map(String::as_str), Some(format!("https://s{}.org", MAX_ORIGINS - 1).as_str()));
-    }
-
-    #[test]
     fn boxes_that_let_go_place_no_more_and_an_older_one_cannot_take_the_pane_from_a_newer() {
         let mut b = Boxes::default();
         assert!(b.park(7, 0), "a screen just loaded makes its load the one that counts");
@@ -1069,6 +1313,27 @@ mod tests {
     fn the_actions_are_one_function_the_page_can_call() {
         let f = act_function();
         assert!(f.starts_with("(request) => {") && f.ends_with('}'), "{f}");
+    }
+
+    #[test]
+    fn a_cookie_s_host_and_path_never_move_it_to_another_site() {
+        let cookie = |host: &str, path: &str| firefox::Cookie {
+            name: "sid".into(),
+            value: "v".into(),
+            host: host.into(),
+            path: path.into(),
+            secure: true,
+            http_only: true,
+            same_site: Some("Lax"),
+            expires: 1.0,
+        };
+        assert_eq!(cookie_param(&cookie("mail.example", "/inbox")).unwrap()["url"], "https://mail.example/inbox");
+        assert_eq!(cookie_param(&cookie(".example", "/")).unwrap()["domain"], ".example");
+        for (host, path) in
+            [("trusted.example", "@attacker.example/"), ("trusted.example", "/?x"), ("a.example@b.example", "/"), ("trusted.example", "")]
+        {
+            assert!(cookie_param(&cookie(host, path)).is_none(), "{host} {path}");
+        }
     }
 
     #[test]

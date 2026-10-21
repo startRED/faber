@@ -45,6 +45,8 @@ winsafe = { version = "0.0.29", features = ["gui"] }
 # The browser pane drives its page through WebView2's own DevTools call (pane/native.rs); the same versions Tauri uses.
 webview2-com = "0.39"
 windows-core = "0.62"
+# Reads Firefox's cookie database (pane/firefox.rs); links the SQLite Windows ships (winsqlite3.dll), nothing is bundled.
+rusqlite = { version = "0.30", default-features = false, features = ["winsqlite3"] }
 
 [target.'cfg(target_os = "macos")'.dependencies]
 # Already supplied by Tauri; compile a child-frame URL blocker into WKWebView's network process.

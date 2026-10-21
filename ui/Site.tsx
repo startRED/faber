@@ -1,6 +1,7 @@
 import { type Accessor, createEffect, createResource, createSignal, For, Index, on, onCleanup, onMount, Show } from 'solid-js';
 import { api, type Message, type ToolUse } from './api.ts';
 import { appliedLook } from './appearance.ts';
+import { Cookies, cookieProfiles } from './Cookies.tsx';
 import { Icon } from './Glyphs.tsx';
 import { t } from './i18n.ts';
 
@@ -474,6 +475,8 @@ export function SitePane(props: { site: OpenSite; onClose: () => void }) {
     setLive(to);
     if (blank() || hostOf(to) !== hostOf(props.site.url)) showSite({ conversationId: props.site.conversationId, url: to, title: '' });
   };
+  const [profiles] = createResource(cookieProfiles);
+  const [signingIn, setSigningIn] = createSignal(false);
   const addressKeys = (e: KeyboardEvent) => {
     if (e.key === 'Enter') {
       e.preventDefault();
@@ -526,7 +529,16 @@ export function SitePane(props: { site: OpenSite; onClose: () => void }) {
             <Icon name="external" />
           </button>
         </Show>
+        {/* The person's own sign-ins, from their Firefox, for this conversation's pages: only where a profile exists. */}
+        <Show when={profiles()?.length}>
+          <button class="iconbtn" aria-label={t('cookies.open')} title={t('cookies.open')} onClick={() => setSigningIn(true)}>
+            <Icon name="user" />
+          </button>
+        </Show>
       </div>
+      <Show when={signingIn()}>
+        <Cookies conversationId={props.site.conversationId} onClose={() => setSigningIn(false)} />
+      </Show>
       <Show when={refused()}>
         <p class="side-meta bad" role="alert">{t('site.refused')}</p>
       </Show>

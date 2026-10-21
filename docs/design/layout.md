@@ -110,7 +110,10 @@ the stage, the frame between them and every corner as round as the stage's; a lo
 browser shows its page in a rounded box under the address field, with nothing repeating the site: the address names it.
 The pane is a native rectangle, so the shell draws the box's corners over the page in the card's colour, smooth, and gives
 the page the screen's thin scrollbars (`src-tauri/src/pane/round.js`, in a world of its own the page's scripts never see,
-`site_round`). With no page yet the box stays, calm, with a globe and what it is for in its middle. Like the other side views, opening it makes an
+`site_round`). With no page yet the box stays, calm, with a globe and what it is for in its middle. Where Firefox keeps a profile, the
+head ends with a person icon, "Sign in with your Firefox": a dialog on the rewind dialog's surface (the page steps aside
+for it like for any layer) with one primary action per step, Continue, then Bring over; the site list scrolls inside a
+hairline box, sensitive sites marked with an amber pill, never a colour alone. Like the other side views, opening it makes an
 automatically opened overlay modal. At most one file's patch stays open, and a partial list offers continuation.
 
 A project conversation also opens "Technical details" in this same slot, from one quiet plain line under the thread
