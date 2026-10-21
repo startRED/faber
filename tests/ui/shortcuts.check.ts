@@ -71,6 +71,11 @@ check('shortcuts: a key keeps the modifiers it always took', () => {
   ok(pressed(key(',', { ctrlKey: true, shiftKey: true }), 'settings'), 'a comma typed with Shift still opens Settings');
   ok(!pressed(key('k', { ctrlKey: true, shiftKey: true }), 'palette'), 'Ctrl+Shift+K is not Ctrl+K');
   ok(pressed(key('k', { metaKey: true }), 'palette'), '⌘K on a Mac');
+  // A key that takes Shift is another key without it.
+  ok(pressed(key('D', { ctrlKey: true, shiftKey: true }), 'changes'), 'Ctrl+Shift+D is the changes');
+  ok(!pressed(key('d', { ctrlKey: true }), 'changes'), 'Ctrl+D is not');
+  ok(pressed(key('B', { ctrlKey: true, shiftKey: true }), 'browser'), 'Ctrl+Shift+B is the browser');
+  ok(!pressed(key('B', { ctrlKey: true, shiftKey: true }), 'focus'), 'and never focus mode, which is Ctrl+B alone');
 });
 
 /** The statements that handle a Ctrl key by themselves instead of asking `pressed` (ui/keys.ts): such a key would work

@@ -1316,6 +1316,7 @@ export const fr: Messages = {
   'notes.142.better': "Un fichier que l'IA cite dans sa réponse, comme src/app.ts:42, s'ouvre maintenant à côté de la conversation, à cette ligne, mise en évidence.",
   'notes.143.new': 'Vous pouvez approuver un plan et lancer le travail en une seule étape, en choisissant les autorisations de toutes les conversations.',
   'notes.144.new': "Les boutons en haut d'une conversation ouvrent Question rapide (Ctrl+;), Modifications et le navigateur de Faber, désormais avec un champ d'adresse, à part de ce qui tourne.",
+  'notes.145.new': 'Ctrl+Maj+D ouvre les modifications de la conversation et Ctrl+Maj+B le navigateur de Faber, comme les boutons du haut.',
   'update.checking': 'Recherche d’une mise à jour…',
   'update.downloading': 'Téléchargement de la mise à jour…',
   'update.downloadingPercent': 'Téléchargement de la mise à jour… {percent} %',

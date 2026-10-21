@@ -23,6 +23,8 @@ export interface Shortcut {
   /** Shift and Alt do not matter (the keys that always took them: Ctrl+Shift+N opens a conversation too, and a comma
    * typed with Shift on some layouts still opens Settings). */
   loose?: true;
+  /** Shift is part of the key (Ctrl+Shift+D), and the same key without it is another one or none. */
+  shift?: true;
 }
 
 export const SHORTCUTS = {
@@ -33,6 +35,9 @@ export const SHORTCUTS = {
   running: { group: 'anywhere', label: 'run.toggle', caps: ['ctrl', '.'], ctrl: '.', loose: true },
   // Loose: a semicolon takes Shift on German and Spanish keyboards.
   aside: { group: 'anywhere', label: 'aside.title', caps: ['ctrl', ';'], ctrl: ';', loose: true },
+  // The topbar's other two pane buttons, with Shift: Ctrl+D and Ctrl+B alone are taken or too easy to hit.
+  changes: { group: 'anywhere', label: 'changes.title', caps: ['ctrl', 'shift', 'D'], ctrl: 'd', shift: true },
+  browser: { group: 'anywhere', label: 'site.browser', caps: ['ctrl', 'shift', 'B'], ctrl: 'b', shift: true },
   focus: { group: 'anywhere', label: 'keys.focus', caps: ['ctrl', 'B'], ctrl: 'b' },
   menu: { group: 'anywhere', label: 'keys.menu', caps: ['shift', 'f10'], also: ['menukey'] },
   sheet: { group: 'anywhere', label: 'keys.title', caps: ['?'] },
@@ -63,10 +68,11 @@ export function keysOf(id: ShortcutId): string {
   return mac ? caps.join('') : caps.join(' ');
 }
 
-/** Whether this key press is that Ctrl shortcut: Ctrl (or ⌘) and the key, with no Alt and no Shift unless it is loose. */
+/** Whether this key press is that Ctrl shortcut: Ctrl (or ⌘) and the key, with no Alt, and Shift only where the key takes it
+ * (or anything where it is loose). */
 export function pressed(e: KeyboardEvent, id: ShortcutId): boolean {
   const s: Shortcut = SHORTCUTS[id];
-  return !!s.ctrl && (e.ctrlKey || e.metaKey) && (!!s.loose || (!e.altKey && !e.shiftKey)) && e.key.toLowerCase() === s.ctrl;
+  return !!s.ctrl && (e.ctrlKey || e.metaKey) && (!!s.loose || (!e.altKey && e.shiftKey === !!s.shift)) && e.key.toLowerCase() === s.ctrl;
 }
 
 /** The browser's own reload, caret browsing, print, save, view-source and find: Faber has no use for them, so they do

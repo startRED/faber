@@ -701,6 +701,14 @@ export function App(props: { initial: AppState; update?: UpdateStatus; inbox: { 
         e.preventDefault();
         if (inShell && canAside()) toggleAside();
       }
+      if (pressed(e, 'changes')) {
+        e.preventDefault();
+        if (inShell && current()?.id === place().id && hasChanges()) toggleChanges();
+      }
+      if (pressed(e, 'browser')) {
+        e.preventDefault();
+        if (inShell && canBrowse()) void toggleSite();
+      }
       if (e.key === 'Escape') {
         if (sideOverlay() && inShell) return closeSide();
         // A column the user opened over the stage is modal; one that opened itself answers Esc only while focus is in it.
@@ -1401,12 +1409,12 @@ ${copy().path}`}>
                         <Icon name="chat" />
                       </button>
                       <Show when={hasChanges()}>
-                        <button class="iconbtn pane-changes" aria-pressed={!!sideChanges() && colShown()} aria-label={t('changes.title')} title={t('changes.title')} onClick={toggleChanges}>
+                        <button class="iconbtn pane-changes" aria-pressed={!!sideChanges() && colShown()} aria-label={t('changes.title')} title={`${t('changes.title')} (${keysOf('changes')})`} onClick={toggleChanges}>
                           <Icon name="changes" />
                         </button>
                       </Show>
                       <Show when={canBrowse()}>
-                        <button class="iconbtn pane-site" aria-pressed={!!sideSite() && colShown()} aria-label={t('site.browser')} title={t('site.browser')} onClick={() => void toggleSite()}>
+                        <button class="iconbtn pane-site" aria-pressed={!!sideSite() && colShown()} aria-label={t('site.browser')} title={`${t('site.browser')} (${keysOf('browser')})`} onClick={() => void toggleSite()}>
                           <Icon name="globe" />
                         </button>
                       </Show>

@@ -3,7 +3,7 @@ import type { Area, Project, Summary } from './api.ts';
 import { keepFocusIn } from './focus.ts';
 import { Icon } from './Glyphs.tsx';
 import { t } from './i18n.ts';
-import { pressed } from './keys.ts';
+import { pressed, pressedAny } from './keys.ts';
 import { openShortcuts } from './Shortcuts.tsx';
 import type { Key } from './locales/en.ts';
 import { keepForExit } from './motion.ts';
@@ -123,7 +123,7 @@ export function Palette(props: Props) {
       // A right-click menu over the box (Cut, Copy, Paste) owns the keys until it closes.
       if (!open() || document.querySelector('.cmenu:not(.leaving)')) return;
       // The shortcuts of the screen underneath wait until the box is closed.
-      if ((['new', 'settings', 'running', 'find', 'focus'] as const).some((id) => pressed(e, id))) return swallow();
+      if (pressedAny(e)) return swallow();
       const count = rows().length;
       if (e.key === 'Escape') {
         swallow();

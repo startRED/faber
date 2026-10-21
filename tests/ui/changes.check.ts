@@ -305,6 +305,17 @@ check('conversation changes: at 720 px, the auto-opened column becomes modal, pa
     ok(control!.closest('.topbar'), 'the control sits in the topbar, apart from the running list');
     equal(host.querySelector('#running .rc-head button:not(.iconbtn, .rc-commands)'), null, 'the running list head holds no other view but the commands');
     equal(control!.getAttribute('aria-pressed'), 'false');
+    // Its key opens and closes the same view; Ctrl+D alone is not it.
+    const ctrlD = (shiftKey: boolean) => window.dispatchEvent(new KeyboardEvent('keydown', { key: shiftKey ? 'D' : 'd', ctrlKey: true, shiftKey, bubbles: true, cancelable: true }));
+    ctrlD(false);
+    await settle();
+    equal(control!.getAttribute('aria-pressed'), 'false', 'Ctrl+D alone opens nothing');
+    ctrlD(true);
+    await settle();
+    equal(control!.getAttribute('aria-pressed'), 'true', 'Ctrl+Shift+D opens the changes');
+    ctrlD(true);
+    await settle();
+    equal(control!.getAttribute('aria-pressed'), 'false', 'and Ctrl+Shift+D closes them');
     control!.click();
     await settle();
     const modal = host.querySelector<HTMLElement>('#running')!;

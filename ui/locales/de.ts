@@ -1316,6 +1316,7 @@ export const de: Messages = {
   'notes.142.better': 'Eine Datei, die die KI in ihrer Antwort nennt, etwa src/app.ts:42, öffnet sich jetzt neben der Unterhaltung an dieser Zeile, und die Zeile ist markiert.',
   'notes.143.new': 'Du kannst einen Plan genehmigen und die Arbeit in einem Schritt starten und dabei die Berechtigungen für alle Unterhaltungen wählen.',
   'notes.144.new': 'Schaltflächen oben in einer Unterhaltung öffnen Kurze Frage (Strg+;), Änderungen und den Browser von Faber, jetzt mit Adressfeld, getrennt von dem, was läuft.',
+  'notes.145.new': 'Strg+Umschalt+D öffnet die Änderungen der Unterhaltung und Strg+Umschalt+B den Browser von Faber, wie die Schaltflächen oben.',
   'update.checking': 'Suche nach einem Update…',
   'update.downloading': 'Update wird heruntergeladen…',
   'update.downloadingPercent': 'Update wird heruntergeladen… {percent} %',

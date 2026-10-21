@@ -1303,6 +1303,7 @@ export const ptBR: Messages = {
   'notes.142.better': 'Um arquivo que a IA cita na resposta, como src/app.ts:42, agora abre ao lado da conversa já nessa linha, com a linha marcada.',
   'notes.143.new': 'Você pode aprovar um plano e iniciar o trabalho de uma vez, escolhendo as permissões de todas as conversas.',
   'notes.144.new': 'Botões no topo da conversa abrem a Pergunta rápida (Ctrl+;), as Alterações e o navegador do Faber, agora com campo de endereço, separados do que está rodando.',
+  'notes.145.new': 'Ctrl+Shift+D abre as alterações da conversa e Ctrl+Shift+B o navegador do Faber, como os botões no topo.',
   'update.checking': 'Procurando atualização…',
   'update.downloading': 'Baixando atualização…',
   'update.downloadingPercent': 'Baixando atualização… {percent}%',

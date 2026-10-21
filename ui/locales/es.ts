@@ -1316,6 +1316,7 @@ export const es: Messages = {
   'notes.142.better': 'Un archivo que la IA nombra en su respuesta, como src/app.ts:42, ahora se abre junto a la conversación en esa línea, con la línea marcada.',
   'notes.143.new': 'Puedes aprobar un plan e iniciar el trabajo en un solo paso, eligiendo los permisos de todas las conversaciones.',
   'notes.144.new': 'Los botones de arriba de una conversación abren Pregunta rápida (Ctrl+;), Cambios y el navegador de Faber, ahora con campo de dirección, aparte de lo que se ejecuta.',
+  'notes.145.new': 'Ctrl+Mayús+D abre los cambios de la conversación y Ctrl+Mayús+B el navegador de Faber, como los botones de arriba.',
   'update.checking': 'Buscando una actualización…',
   'update.downloading': 'Descargando actualización…',
   'update.downloadingPercent': 'Descargando actualización… {percent} %',

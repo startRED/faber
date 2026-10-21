@@ -1196,6 +1196,7 @@ export const en = {
   'notes.142.better': 'A file the AI names in its reply, like src/app.ts:42, now opens beside the conversation at that line, with the line marked.',
   'notes.143.new': 'You can approve a plan and start work in one step, choosing the permission mode for all conversations.',
   'notes.144.new': "Buttons at the top of a conversation open Quick question (Ctrl+;), Changes and Faber's browser, now with an address field, apart from what is running.",
+  'notes.145.new': "Ctrl+Shift+D opens a conversation's changes and Ctrl+Shift+B Faber's browser, like the buttons at the top.",
   'update.checking': 'Looking for an update…',
   'update.downloading': 'Downloading update…',
   'update.downloadingPercent': 'Downloading update… {percent}%',
