@@ -85,9 +85,9 @@ impl Engine {
         let project = self.project(project_id)?;
         let installed: BTreeSet<_> = self
             .with(|c| c.catalog_store())
-            .installed()
+            .installed_resources()
             .into_keys()
-            .filter(|id| crate::tools::find(id).is_some_and(|i| i.server.is_some()))
+            .filter(|id| crate::tools::plugins::find_resource(id).is_some_and(|i| i.server.is_some()))
             .map(|id| format!("faber-{id}"))
             .collect();
         let snapshots = self.with(|core| {
@@ -119,7 +119,7 @@ impl Engine {
     }
 
     pub fn set_mcp_server(&self, project_id: &str, name: &str, enabled: bool) -> Result<(), String> {
-        if !crate::tools::catalog().iter().any(|i| i.server.is_some() && name == format!("faber-{}", i.id)) {
+        if !crate::tools::plugins::resources().iter().any(|i| i.server.is_some() && name == format!("faber-{}", i.id)) {
             return Err("error.tools.unknown".into());
         }
         let before = self.project(project_id)?;

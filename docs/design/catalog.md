@@ -6,9 +6,9 @@ controls out of Settings > Projects. It is not a work area: no conversation, com
 ## Browsing
 
 Search is the main action, focused with the shared Ctrl+F (Command+F on macOS) from `ui/keys.ts`, also named in the
-shortcut sheet. All, Skills, Tool servers and Installed are native pressed buttons;
-Plugins joins when plugin installation ships; the twenty inventoried plugins have no placeholder cards. The catalog has
-114 skills and one unchanged server. Good start offers debugging, simple code and interface design, plus general everyday skills.
+shortcut sheet. All, Skills, Tool servers and Installed are native pressed buttons; Plugins joins them only when the
+catalog lists a plugin, so while it ships none no pill leads to an empty list. The catalog has 114 skills, one unchanged
+server and zero plugins; the twenty rejected candidates have no placeholder cards. Good start offers debugging, simple code and interface design, plus general everyday skills.
 Its ten recommended-tier entries include the original debugging, test-driven development, ponytail and interface
 design entry points; area-specific tools and ponytail-debt stay under their job groups. Its picks move to the front before paging, so
 recommendations outside the first source page are reachable and no item repeats on a later page. The ten plain groups
@@ -37,6 +37,26 @@ one localized “Name in the AI tool” line shows it before installation. Repos
 Skills guide the agent's existing file, command, network and browser powers; they create no new sandbox. The current
 server controls a headless Chrome browser, with Faber's telemetry/update/file-navigation denies preserved.
 
+A plugin is one checked item containing skills, slash-command prompts, subagent definitions and/or R253-portable
+servers. Its card summarizes the parts and names delivery limits; its detail lists each part and its access. Commands
+guide the project agent within its current permissions; subagents inherit those permissions; servers need Full access.
+The Claude Code limit line appears only for a plugin that has a command or subagent, with Claude connected and its flags
+already read. A plugin's parts have no intent words of their own: a task that matches the plugin's job loads all its skills
+and servers together, within the same six-item budget as other items.
+A bundled server requires Node before Install, like a standalone server. Plugins stay out of the Skills filter.
+Install, On/Off, Remove and Undo apply to the whole plugin through the existing store, lock, ledger and journal;
+parts never acquire independent installation rows or switches. Installed opens the parent plugin detail.
+
+Projects receives checked commands and agents in Claude Code's existing private session plugin, alongside skills,
+when the installed CLI declares its plugin flag. Otherwise the card and detail say that commands and agents are
+unavailable and skills use the existing instruction fallback. Codex skills keep their existing delivery; subagents
+use checked role TOML files through per-session agent configuration. Codex gets no plugin slash-command prompts,
+which the card and detail say plainly. Faber never writes personal command/agent folders or CLI configuration.
+Chat receives only task-picked catalog skill text, including plugin skills; plugin commands and agents stay in Projects.
+Bundled servers use the existing project picker and saved preferences with namespaced identities. Turning the parent
+off disables their project switches without replacing saved choices. Every plugin source folder and delivered part is
+checked again before use; hooks, binaries, shipped scripts, postinstall and unsupported parts keep a candidate out.
+
 Install checks the original source's pinned files and never executes shipped scripts. Install, Remove and installed
 on/off are separate actions. Turning off retains checked files outside every CLI skill root. Remove asks in place,
 with Cancel, then offers Undo. Undo restores the previous on/off state locally after a pin/digest check. The screen saves
@@ -50,7 +70,7 @@ the engine expires unreachable copies after recovery. Disabled copies are checke
 launch; their files are hashed when enabling. Future sessions in Chat and Projects follow the saved choice and existing
 permission boundaries. The session kit selects verified installed instructions and servers for each task; Claude
 Projects also discovers descriptions of all enabled catalog skills. Chat receives only selected catalog instructions,
-never personal/plugin skills; servers there need an explicit file-free, setup-free catalog review and Full access.
+never personal or external plugin skills; servers there need an explicit file-free, setup-free catalog review and Full access.
 Moving files on Off or Remove may also affect ongoing work.
 
 Every shipped item has one hand-written `catalog.name.*` name in each of the five locales. Cards, details, installed
@@ -102,7 +122,8 @@ Metadata is capped at 36 KiB; stored job limits are 32 for building games, 11 fo
 and 14 for any remaining job, checked in engine tests. Only metadata and localized words ship. Actual working-set/CPU
 measurements and the native screen suite belong to the lead's unsandboxed validation; no measured saving is claimed.
 
-Checks: `tests/ui/catalog.check.ts`, `tests/ui/kits.check.ts`, `engine/tests/locales.rs` (every shipped name in every locale),
+Checks: `tests/ui/catalog.check.ts`, `tests/ui/plugins.check.ts`, `engine/tests/plugins.rs`,
+`engine/src/tools/plugins.rs`, `engine/src/tools/plugin_delivery.rs`, `tests/ui/kits.check.ts`, `engine/tests/locales.rs` (every shipped name in every locale),
 `engine/src/engine/kits.rs` (native resume and oversize discovery), `engine/tests/tools.rs`, `engine/tests/tool_inventory.rs`, and existing MCP checks.
 Cards checked in code review: C007 (localized UTF-8), C009 (shared context menu policy), C011 (management placement).
 Catalog is not a C005 work home; no composer is added to satisfy that card. Visual screenshots remain to be verified.

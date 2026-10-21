@@ -97,7 +97,10 @@ fn the_check_finds_keys_quoted_either_way_and_starts_built_at_run_time() {
 #[test]
 fn every_shipped_catalog_item_has_one_display_name_in_every_locale() {
     let catalog: serde_json::Value = serde_json::from_str(include_str!("../src/tools.json")).unwrap();
-    let items: Vec<_> = ["skills", "servers"].into_iter().flat_map(|kind| catalog[kind].as_array().unwrap()).collect();
+    let items: Vec<_> = ["skills", "servers", "plugins"]
+        .into_iter()
+        .flat_map(|kind| catalog.get(kind).and_then(|list| list.as_array()).into_iter().flatten())
+        .collect();
     assert!(items.len() > 100, "check the expanded shipped catalog");
     for locale in ["en", "pt-BR", "es", "fr", "de"] {
         let text = std::fs::read_to_string(repo(&format!("ui/locales/{locale}.ts"))).unwrap();
@@ -107,6 +110,9 @@ fn every_shipped_catalog_item_has_one_display_name_in_every_locale() {
             let id = item["id"].as_str().unwrap();
             let key = format!("catalog.name.{id}");
             assert_eq!(locale_keys.iter().filter(|found| **found == key).count(), 1, "{locale}: missing or duplicate name for {id}");
+            if item.get("parts").is_some() {
+                assert!(locale_keys.contains(&format!("tools.{id}")), "{locale}: a plugin needs its hand-written description: {id}");
+            }
             let line = text.lines().find(|line| line.contains(&format!("'{key}':"))).unwrap();
             let value = line.split_once(':').unwrap().1.trim().trim_end_matches(',').trim_matches(['\'', '"']);
             assert!(!value.trim().is_empty(), "{locale}: empty name for {id}");

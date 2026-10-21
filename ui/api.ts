@@ -552,6 +552,9 @@ export interface ToolRow {
   enabled?: boolean;
   version?: string;
   nodeAvailable?: boolean;
+  pluginParts?: { id: string; kind: 'skill' | 'command' | 'agent' | 'server' }[];
+  claudePluginsAvailable?: boolean;
+  requiresNode?: boolean;
   /** A tool server (an npm package Node runs) rather than a skill. */
   server: boolean;
 }

@@ -50,7 +50,10 @@ export function t(key: Key, vars: Record<string, string | number> = {}): string 
 /** Catalog cards, inventory and session reports share the same hand-written names. */
 export function catalogName(id: string): string {
   const key = `catalog.name.${id}`;
-  return key in en ? t(key as Key) : id.replaceAll('-', ' ');
+  if (key in en) return t(key as Key);
+  // A plugin's skill or server is named by its own id: the plugin's name, then the part.
+  const [plugin, part] = id.split('--');
+  return part ? `${catalogName(plugin)} · ${part.replaceAll('-', ' ')}` : id.replaceAll('-', ' ');
 }
 
 /** Whether `n` takes the singular form. Zero counts as plural everywhere ("0 steps"), though Portuguese and French grammar put it

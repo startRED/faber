@@ -17,8 +17,23 @@ const jobs: Record<string, string> = {
   payments: 'services', platform: 'services', auth: 'services', measure: 'services',
 };
 const job = (row: ToolRow) => jobs[row.job] ?? row.job;
-type Filter = 'all' | 'skills' | 'servers' | 'installed';
+type Filter = 'all' | 'skills' | 'plugins' | 'servers' | 'installed';
 const words = (key: string, fallback: string) => key in en ? t(key as Key) : fallback;
+const plugin = (row: ToolRow) => !!row.pluginParts?.length;
+const needsNode = (row: ToolRow) => (row.server || row.requiresNode) && row.nodeAvailable === false;
+const partsSummary = (row: ToolRow) => (['skill', 'command', 'agent', 'server'] as const).flatMap((kind) => {
+  const n = row.pluginParts?.filter((part) => part.kind === kind).length ?? 0;
+  return n ? [t(`catalog.parts.${kind}`, { n })] : [];
+}).join(' · ');
+
+function PluginLimits(props: { row: ToolRow; claude: boolean }) {
+  const limits = () => [
+    props.row.pluginParts?.some((part) => part.kind === 'command') && t('catalog.pluginCodexCommands'),
+    props.row.pluginParts?.some((part) => part.kind === 'command' || part.kind === 'agent') && t('catalog.pluginProjectsOnly'),
+    props.claude && props.row.claudePluginsAvailable === false && props.row.pluginParts?.some((part) => part.kind === 'command' || part.kind === 'agent') && t('catalog.pluginClaudeUnavailable'),
+  ].filter(Boolean).join(' ');
+  return <Show when={plugin(props.row) && limits()}>{(text) => <span class="catalog-description">{text()}</span>}</Show>;
+}
 
 /** Browse only while open: no CLI launch, polling or hidden card tree. */
 export function Catalog(props: { projects: Project[]; projectId?: string; vendors: Vendor[] }) {
@@ -108,7 +123,8 @@ export function Catalog(props: { projects: Project[]; projectId?: string; vendor
   const matching = createMemo(() => {
     const text = query().trim().toLocaleLowerCase();
     const list = filter() === 'all' && !text ? [...starters(), ...rows.filter((row) => !starters().includes(row))] : rows;
-    return list.filter((row) => (filter() !== 'skills' || !row.server) && (filter() !== 'servers' || row.server)
+    return list.filter((row) => (filter() !== 'skills' || (!row.server && !plugin(row))) && (filter() !== 'servers' || row.server)
+      && (filter() !== 'plugins' || plugin(row))
       && (filter() !== 'installed' || row.installed || row.status)
       && (!text || `${row.id} ${catalogName(row.id)} ${row.repo} ${words(`tools.${row.id}`, row.id)} ${words(`catalog.job.${row.job}`, row.job)} ${words(`catalog.job.${job(row)}`, job(row))}`.toLocaleLowerCase().includes(text)));
   });
@@ -129,9 +145,10 @@ export function Catalog(props: { projects: Project[]; projectId?: string; vendor
   });
   const item = () => rows.find((r) => r.id === selected());
   const status = (id: string) => rows.find((row) => row.id === id)?.status ?? undefined;
-  const serverStatus = (name: string) => status(name.replace(/^faber-/, ''));
-  const available = (name: string) => rows.some((r) => `faber-${r.id}` === name && r.installed && r.enabled !== false && !r.status);
-  const state = (row: ToolRow) => row.status ? fromEngine(row.status) : row.server && row.nodeAvailable === false ? t('catalog.needsNode') : t(row.installed ? row.enabled === false ? 'catalog.off' : 'catalog.on' : 'catalog.notInstalled');
+  const hasServer = (row: ToolRow, name: string) => (row.server && `faber-${row.id}` === name) || row.pluginParts?.some((part) => part.kind === 'server' && `faber-${row.id}--${part.id}` === name);
+  const serverStatus = (name: string) => rows.find((row) => hasServer(row, name))?.status ?? undefined;
+  const available = (name: string) => rows.some((r) => hasServer(r, name) && r.installed && r.enabled !== false && !r.status);
+  const state = (row: ToolRow) => row.status ? fromEngine(row.status) : needsNode(row) ? t('catalog.needsNode') : t(row.installed ? row.enabled === false ? 'catalog.off' : 'catalog.on' : 'catalog.notInstalled');
   const open = (row: ToolRow, button: HTMLElement) => {
     returnCard = button;
     setSelected(row.id);
@@ -181,12 +198,13 @@ export function Catalog(props: { projects: Project[]; projectId?: string; vendor
             <label class="field catalog-search"><Icon name="search" /><input ref={(el) => (search = el)} type="search" aria-label={t('catalog.search')} placeholder={t('catalog.search')} value={query()} onInput={(e) => { setQuery(e.currentTarget.value); setPage(0); }} /><kbd>{keysOf('find')}</kbd></label>
           </header>
           <div class="catalog-filters" role="group" aria-label={t('catalog.filter')}>
-            <For each={['all', 'skills', 'servers', 'installed'] as const}>{(kind) => <button class="pill" aria-pressed={filter() === kind} onClick={() => { setFilter(kind); setPage(0); }}>{t(`catalog.${kind}`)}</button>}</For>
+            <For each={['all', 'skills', ...(rows.some(plugin) ? ['plugins' as const] : []), 'servers', 'installed'] as const}>{(kind) => <button class="pill" aria-pressed={filter() === kind} onClick={() => { setFilter(kind); setPage(0); }}>{t(`catalog.${kind}`)}</button>}</For>
           </div>
           <Show when={loading()}><div class="catalog-empty" role="status"><Peek /><p>{t('catalog.loading')}</p></div></Show>
           <Show when={filter() !== 'installed' && !loading() && !matching().length && !error()}><div class="catalog-empty" role="status"><Peek /><p>{t(query().trim() ? 'catalog.noMatch' : 'catalog.empty')}</p></div></Show>
           <For each={groups()}>{(group) => <section class="catalog-group"><h2>{group.name}</h2><div class="catalog-grid"><For each={group.rows}>{(row) => <button class="catalog-card" data-catalog-card={row.id} onClick={(e) => open(row, e.currentTarget)}>
             <span class="catalog-name">{catalogName(row.id)}</span><span class="catalog-description">{words(`tools.${row.id}`, row.id)}</span><span class="catalog-origin">{row.repo} · {row.license}</span><span class="catalog-state">{state(row)}</span>
+            <Show when={plugin(row)}><span class="catalog-description">{partsSummary(row)}</span><PluginLimits row={row} claude={props.vendors.includes('claude')} /></Show>
           </button>}</For></div></section>}</For>
           <Show when={matching().length > PAGE}><nav class="catalog-pages" aria-label={t('catalog.pages')}><button class="btn" disabled={!page()} onClick={() => setPage(page() - 1)}>{t('catalog.previous')}</button><span aria-live="polite">{t('catalog.page', { n: page() + 1, total: Math.ceil(matching().length / PAGE) })}</span><button class="btn" disabled={(page() + 1) * PAGE >= matching().length} onClick={() => setPage(page() + 1)}>{t('catalog.next')}</button></nav></Show>
           <Show when={filter() === 'installed'}><CatalogInventory query={query()} catalogMatches={matching().length} status={status} serverStatus={serverStatus} available={available} revision={revision()} projectId={projectId()} projects={props.projects} onProject={setProjectChoice} onOpen={(id) => { const row = rows.find((r) => r.id === id); if (row) open(row, search!); }} /></Show>
@@ -197,20 +215,26 @@ export function Catalog(props: { projects: Project[]; projectId?: string; vendor
             <Show when={row().cliName && row().cliName !== row().id}><p>{t('catalog.cliName', { name: row().cliName! })}</p></Show>
             <p class="catalog-description">{words(`tools.${row().id}`, row().id)}</p>
             <p class="catalog-state">{state(row())}</p>
-            <h2>{t('catalog.when')}</h2><p>{t(row().server ? 'catalog.whenServer' : 'catalog.whenSkill')}</p>
+            <h2>{t('catalog.when')}</h2><p>{t(plugin(row()) ? 'catalog.whenPlugin' : row().server ? 'catalog.whenServer' : 'catalog.whenSkill')}</p>
+            <PluginLimits row={row()} claude={props.vendors.includes('claude')} />
             <Show when={words(`tools.${row().id}.needs`, '')}>{(needs) => <p>{needs()}</p>}</Show>
-            <h2>{t('catalog.access')}</h2><p>{t(row().server ? 'catalog.accessServer' : 'catalog.accessSkill')}</p>
+            <h2>{t('catalog.access')}</h2>
+            <Show when={plugin(row())} fallback={<p>{t(row().server ? 'catalog.accessServer' : 'catalog.accessSkill')}</p>}>
+              <h3>{t('catalog.pluginParts')}</h3>
+              <ul class="catalog-source-list"><For each={row().pluginParts}>{(part) => <li data-plugin-part={part.id}><div><span>{part.id} · {t(`catalog.part.${part.kind}`)}</span><p class="hint">{t(part.kind === 'skill' ? 'catalog.accessSkill' : part.kind === 'server' ? 'catalog.accessPluginServer' : part.kind === 'command' ? 'catalog.accessCommand' : 'catalog.accessAgent')}</p></div></li>}</For></ul>
+            </Show>
             <dl><dt>{t('catalog.source')}</dt><dd><button class="link" onClick={() => void api.openLink(row().home).catch((e) => setError(failureText(e)))}>{row().repo}<Icon name="external" small /></button></dd><dt>{t('catalog.license')}</dt><dd>{row().license}</dd><dt>{t('catalog.version')}</dt><dd class="catalog-version">{row().version}</dd></dl>
             <p class="hint">{t('catalog.safeInstall')}</p>
-            <Show when={row().server && row().nodeAvailable === false}><p>{t('catalog.nodeHelp')}</p><button class="link" onClick={() => void api.openLink('https://nodejs.org/en/download').catch((e) => setError(failureText(e)))}>{t('catalog.getNode')}</button></Show>
-            <Show when={row().installed} fallback={<button class="btn primary" disabled={busy() || (row().server && row().nodeAvailable === false)} onClick={() => void change(row().id, 'install')}>{t(busy() ? 'catalog.working' : 'catalog.install')}</button>}>
-              <Show when={row().status}><button class="btn primary" disabled={busy() || (row().server && row().nodeAvailable === false)} onClick={() => void change(row().id, 'install')}>{t(busy() ? 'catalog.working' : 'catalog.install')}</button></Show>
+            <Show when={needsNode(row())}><p>{t(plugin(row()) ? 'catalog.pluginNodeHelp' : 'catalog.nodeHelp')}</p><button class="link" onClick={() => void api.openLink('https://nodejs.org/en/download').catch((e) => setError(failureText(e)))}>{t('catalog.getNode')}</button></Show>
+            <Show when={row().installed} fallback={<button class="btn primary" disabled={busy() || !!needsNode(row())} onClick={() => void change(row().id, 'install')}>{t(busy() ? 'catalog.working' : 'catalog.install')}</button>}>
+              <Show when={row().status}><button class="btn primary" disabled={busy() || !!needsNode(row())} onClick={() => void change(row().id, 'install')}>{t(busy() ? 'catalog.working' : 'catalog.install')}</button></Show>
               <Toggle id="catalog-enabled" label={t('catalog.enabled')} hint={t('catalog.nextConversation')} checked={!row().status && row().enabled !== false} disabled={!!row().status} onChange={(next) => change(row().id, 'toggle', next)} />
               <Show when={confirming()} fallback={<button class="btn danger" disabled={busy()} onClick={() => setConfirming(true)}>{t('catalog.remove')}</button>}>
                 <div class="catalog-notice"><span>{t('catalog.confirmRemove', { name: catalogName(row().id) })}</span><button class="btn" disabled={busy()} onClick={() => setConfirming(false)}>{t('catalog.cancel')}</button><button class="btn danger" disabled={busy()} onClick={() => void change(row().id, 'remove')}>{t('catalog.remove')}</button></div>
               </Show>
             </Show>
             <Show when={row().server && row().installed}><h2>{t('catalog.projectServers')}</h2><p class="hint">{t('catalog.projectChoice')}</p><McpServers status={serverStatus} globallyEnabled={row().enabled !== false && !row().status} revision={revision()} projectId={projectId()} projects={props.projects} serverName={`faber-${row().id}`} onError={(e) => { setError(failureText(e)); setRetry(() => () => { setError(undefined); setRevision((v) => v + 1); }); }} /></Show>
+            <Show when={plugin(row()) && row().installed && row().pluginParts?.some((part) => part.kind === 'server')}><h2>{t('catalog.projectServers')}</h2><p class="hint">{t('catalog.projectChoice')}</p><McpServers status={serverStatus} globallyEnabled={row().enabled !== false && !row().status} revision={revision()} projectId={projectId()} projects={props.projects} serverNames={row().pluginParts?.filter((part) => part.kind === 'server').map((part) => `faber-${row().id}--${part.id}`)} onError={(e) => { setError(failureText(e)); setRetry(() => () => { setError(undefined); setRevision((v) => v + 1); }); }} /></Show>
           </article>}
         </Show>
       </div>

@@ -42,7 +42,8 @@ Engine (Rust crate inside the app today; a separate process later, so work survi
   language unless the user picks one in Settings. Every text is written by hand, never machine-translated; a new
   language needs a native speaker to review it.
 - **The user's own setup comes along.** Projects use the skills, MCP servers and plugins already configured in each
-  CLI, and Faber's catalog installs into that same configuration, so a tool works the same inside and outside Faber.
+  CLI. Faber's checked catalog store stays private: its resources reach a session through the existing launch
+  inputs, without changing the person's CLI setup or installing into personal command/agent folders.
   The user's hooks are off by default (they can rewrite answers or block steps) and can be turned on in Settings.
 - **Use everything each CLI has.** Each driver declares, per CLI version, what exists: resume, fork, MCP, skills,
   plugins, hooks, subagents, plan mode, sandbox, web search, image generation, computer use, review, quota readout.
@@ -80,7 +81,27 @@ Engine (Rust crate inside the app today; a separate process later, so work survi
 
 ## Curated catalog and live manifest
 
-The Catalog browsing tab is built (R344), separate from the two work areas. It manages the existing pinned skills and tool server; full curation, plugin installation, first-run packs and automatic task-specific choice remain later work. It unmounts on close, never polls or starts a CLI to browse, and pages the DOM at 48 cards and 48 inventory rows per CLI. Off and removed copies stay outside CLI roots; enabling checks disabled files, and local Undo journals the move and recovers it before pruning. The latest removal is retained only until the next Catalog visit or engine restart. Filesystem commands use blocking workers; inventory has a two-second deadline and one outstanding reader. Personal/project discovery reads bounded known skill folders and installation manifests only, showing unsupported overrides instead of guessing live CLI state.
+The Catalog browsing tab is built (R344), separate from the two work areas. It manages 114 pinned skills, one tool server and checked plugin delivery; no plugin candidate passes the current audit, so none ships and the Plugins filter has no placeholder cards. Session kits choose installed skills and servers per task; first-run packs and the broader catalog/live-manifest proposals below remain later work. It unmounts on close, never polls or starts a CLI to browse, and pages the DOM at 48 cards and 48 inventory rows per CLI. Off and removed copies stay outside CLI roots; enabling checks disabled files, and local Undo journals the move and recovers it before pruning. The latest removal is retained only until the next Catalog visit or engine restart. Filesystem commands use blocking workers; inventory has a two-second deadline and one outstanding reader. Personal/project discovery reads bounded known skill folders and installation manifests only, showing unsupported overrides instead of guessing live CLI state.
+
+A plugin groups checked skills, slash-command prompts, subagent definitions and R253-portable npm servers under
+one catalog id. Commit and whole-folder digest pins cover the original source and every part; server packages retain
+their pinned version and digest. The existing store lock, ledger, selection, journal and Undo govern the parent as one
+item, including recovery and launch-time checks. Faber runs no shipped plugin scripts. Hooks, binaries, postinstall,
+dependencies, unsupported delivery and unchecked parts keep the whole candidate out. The twenty original candidates
+remain excluded with individual evidence in [the audit](../research/2026-10-21/catalog-list.md).
+
+Claude Projects receives commands and agents alongside skills in its existing private session plugin when supported.
+Codex uses its existing skill delivery and per-session agent configuration pointing to checked role TOML files;
+custom slash-command prompts cannot be delivered within this boundary, so cards and details disclose their absence.
+No personal CLI command/agent folder or configuration is written. Chat takes only selected skill instructions, including
+plugin skills, and receives no plugin commands or agents. Servers follow the existing delivery and Full access gate;
+plugin resources reuse the kit selector. Native definitions add only task instructions, never a permission or model override.
+A Codex role is a Faber-written file holding only instructions (Codex documents no inline role instructions) and is compared
+byte for byte at launch; Codex reads it again when a subagent spawns, so a rewrite after the thread started by something
+with write access to the shared kit folder is the same integrity limit as for skills Codex reads lazily.
+The implementation is `engine/src/tools/plugins.rs` and `engine/src/tools/plugin_delivery.rs`; local-fixture lifecycle
+and delivery checks are `engine/tests/plugins.rs` and `tests/ui/plugins.check.ts`. No extra process or idle work is added;
+native full-app memory and processor measurements remain the lead's validation.
 
 - **Faber recommends only tools it has vetted.** A vetted tool works, is safe, has a license that allows the use, is
   maintained and improves the result. The agent may find and install any other tool. That tool is marked "not vetted",

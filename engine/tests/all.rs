@@ -78,6 +78,8 @@ mod persona;
 mod plain_words;
 #[path = "plan.rs"]
 mod plan;
+#[path = "plugins.rs"]
+mod plugins;
 #[path = "pr_watch.rs"]
 mod pr_watch;
 #[path = "product_map.rs"]

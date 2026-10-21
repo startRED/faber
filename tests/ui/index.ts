@@ -75,6 +75,7 @@ import './skills.check.ts';
 import './kits.check.ts';
 import './mcp-servers.check.ts';
 import './catalog.check.ts';
+import './plugins.check.ts';
 import './worklog.check.ts';
 import './quota.check.ts';
 import './recents.check.ts';

@@ -310,7 +310,13 @@ pub fn inventory(data: &Path, home: Option<&Path>, project: Option<&Path>) -> Ve
             for item in crate::tools::catalog().iter().filter(|item| installed.contains_key(&item.id)) {
                 list.rows.push(Row {
                     name: item.id.clone(),
-                    kind: if item.server.is_some() { "server" } else { "skill" },
+                    kind: if store.plugin_definition(&item.id).is_some() {
+                        "plugin"
+                    } else if item.server.is_some() {
+                        "server"
+                    } else {
+                        "skill"
+                    },
                     source: "catalog",
                     location: item.home(),
                     enabled: Some(store.enabled(&item.id)),

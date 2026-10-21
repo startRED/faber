@@ -52,11 +52,25 @@ pub struct ToolRow {
     node_available: bool,
     /// A tool server (an npm package Node runs) rather than a skill.
     server: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    plugin_parts: Option<Vec<PluginPartRow>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    claude_plugins_available: Option<bool>,
+    requires_node: bool,
+}
+
+#[derive(Serialize)]
+struct PluginPartRow {
+    id: String,
+    kind: faber_engine::tools::plugins::PartKind,
 }
 
 #[tauri::command]
 pub async fn tools_list(faber: State<'_, Faber>) -> Res<Vec<ToolRow>> {
     let data = faber.data_dir.clone();
+    // Unknown until the startup probe has read the CLI: the default flags mean "not read yet" (or no Claude Code).
+    let flags = faber.engine.claude_flags();
+    let claude_plugins_available = (flags != Default::default()).then_some(flags.plugin_dir);
     tauri::async_runtime::spawn_blocking(move || {
         let store = Store::new(&data);
         let statuses = store.checked_statuses();
@@ -78,6 +92,12 @@ pub async fn tools_list(faber: State<'_, Faber>) -> Res<Vec<ToolRow>> {
                 version: i.server.as_ref().map_or_else(|| i.commit.clone(), |s| s.version.clone()),
                 node_available,
                 server: i.server.is_some(),
+                plugin_parts: store
+                    .plugin_definition(&i.id)
+                    .map(|plugin| plugin.parts.iter().map(|part| PluginPartRow { id: part.id.clone(), kind: part.kind }).collect()),
+                claude_plugins_available: store.plugin_definition(&i.id).and(claude_plugins_available),
+                requires_node: i.server.is_some()
+                    || store.plugin_definition(&i.id).is_some_and(|plugin| plugin.parts.iter().any(|part| part.server.is_some())),
             })
             .collect()
     })
@@ -92,7 +112,12 @@ pub async fn tools_install(faber: State<'_, Faber>, id: String) -> Res<()> {
     let _running = crate::update::SetupRunning::begin()?;
     let item = find(&id).ok_or("error.tools.unknown")?.clone();
     // A server runs under Node, which neither CLI brings: without it the switch would install a tool nothing can start.
-    if item.server.is_some() && faber_engine::cli::find_cli("node").is_none() {
+    let requires_node = item.server.is_some()
+        || faber_engine::tools::plugins::catalog()
+            .iter()
+            .find(|plugin| plugin.item.id == id)
+            .is_some_and(|plugin| plugin.parts.iter().any(|part| part.server.is_some()));
+    if requires_node && faber_engine::cli::find_cli("node").is_none() {
         return Err("error.tools.node".into());
     }
     let data_dir = faber.data_dir.clone();

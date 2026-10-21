@@ -33,6 +33,7 @@ pub struct PreparedText {
     chat: bool,
     project: bool,
     description_ids: Vec<String>,
+    plugin_ids: Vec<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -145,6 +146,8 @@ pub struct Lease {
     _lock: std::fs::File,
     server_identity: String,
     ready: Weak<ReadyCache>,
+    plugins: Vec<super::plugins::Definition>,
+    agents: Vec<super::plugin_delivery::Agent>,
 }
 
 /// The sibling marker survives a crash without changing the payload's content digest.
@@ -176,6 +179,8 @@ impl Drop for TemporaryCopy {
 #[derive(Serialize, Deserialize)]
 struct SnapshotState {
     items: Vec<Item>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    plugins: Vec<super::plugins::Definition>,
 }
 
 #[derive(Debug)]
@@ -212,6 +217,7 @@ impl Delivery {
         let mut damaged = Vec::new();
         let mut excluded = Vec::new();
         let mut io_failed = false;
+        let mut invalid_plugins = Vec::new();
         let Some(root) = self.lease.as_ref().map(|lease| &lease.root) else {
             checked.plugin = None;
             checked.skills = None;
@@ -219,6 +225,21 @@ impl Delivery {
             checked.skill_ids = Some(vec![]);
             return (checked, vec![], false);
         };
+        // Every kit folder is re-checked, with or without plugins: a file nothing placed drops the folder.
+        let plugins = self.lease.as_ref().map_or(&[][..], |lease| lease.plugins.as_slice());
+        let native_intact = super::plugin_delivery::intact(root, plugins);
+        for plugin in plugins {
+            let source_intact = self.catalog_root.as_ref().is_some_and(|store| super::plugins::verify_definition(store, plugin));
+            if !native_intact || !source_intact {
+                invalid_plugins.push(plugin.item.id.clone());
+                checked.plugin = None;
+                if self.catalog_root.as_ref().is_some_and(|store| super::plugin_delivery::source_changed(store, plugin)) {
+                    damaged.push(plugin.item.id.clone());
+                } else {
+                    io_failed = true;
+                }
+            }
+        }
         if checked.plugin.is_some() {
             let plain = |path: &Path| std::fs::symlink_metadata(path).is_ok_and(|metadata| metadata.is_dir());
             let names = |path: &Path| {
@@ -227,6 +248,7 @@ impl Delivery {
             let expected_skills = text.items.iter().filter(|item| item.server.is_none()).map(|item| item.id.clone().into()).collect();
             let manifest = root.join(".claude-plugin");
             if !plain(root)
+                || !native_intact
                 || !plain(&root.join("skills"))
                 || !plain(&manifest)
                 || names(&root.join("skills")) != Some(expected_skills)
@@ -234,7 +256,10 @@ impl Delivery {
                 || small_file(&manifest.join("plugin.json")).is_none_or(|bytes| bytes != manifest_bytes())
                 || super::entries(root).is_none_or(|entries| {
                     entries.iter().any(|entry| {
-                        !matches!(entry.file_name().to_str(), Some(".lease" | ".catalog.json" | ".claude-plugin" | "skills" | "servers"))
+                        !matches!(
+                            entry.file_name().to_str(),
+                            Some(".lease" | ".catalog.json" | ".claude-plugin" | "skills" | "servers" | "commands" | "agents")
+                        )
                     })
                 })
             {
@@ -248,7 +273,16 @@ impl Delivery {
             } else {
                 text.description_ids.contains(&item.id) || self.skill_ids.as_ref().is_none_or(|ids| ids.contains(&item.id))
             };
-            if !used {
+            let plugin_invalid = invalid_plugins.iter().any(|parent| item.id.starts_with(&format!("{parent}--")));
+            if !used && !plugin_invalid {
+                continue;
+            }
+            if plugin_invalid {
+                excluded.push(item.id.clone());
+                checked.servers.retain(|server| server.name != format!("faber-{}", item.id));
+                if let Some(ids) = checked.skill_ids.as_mut() {
+                    ids.retain(|id| id != &item.id);
+                }
                 continue;
             }
             let path = root.join(if item.server.is_some() { "servers" } else { "skills" }).join(&item.id);
@@ -261,7 +295,7 @@ impl Delivery {
                 Err(io::Error::other("Not a plain resource folder"))
             };
             match actual {
-                Ok(actual) if actual == item.digest => continue,
+                Ok(actual) if actual == item.digest && !plugin_invalid => continue,
                 Ok(_) => {
                     if self.catalog_root.as_ref().is_some_and(|root| source_digest(root, item).is_ok_and(|actual| actual != item.digest)) {
                         damaged.push(item.id.clone());
@@ -280,13 +314,17 @@ impl Delivery {
                 checked.plugin = None;
             }
         }
-        if checked.skill_ids.as_ref().is_some_and(Vec::is_empty) && text.description_ids.iter().all(|id| excluded.contains(id)) {
+        if checked.skill_ids.as_ref().is_some_and(Vec::is_empty)
+            && text.description_ids.iter().all(|id| excluded.contains(id))
+            && text.plugin_ids.iter().all(|id| invalid_plugins.contains(id))
+        {
             checked.skills = None;
             checked.plugin = None;
         }
         if let Some(prepared) = checked.prepared.as_mut() {
             let prepared = Arc::make_mut(prepared);
             prepared.description_ids.retain(|id| !excluded.contains(id));
+            prepared.plugin_ids.retain(|id| !invalid_plugins.contains(id));
             let selected = checked.skill_ids.clone().unwrap_or_default();
             let instructions = selected
                 .iter()
@@ -308,6 +346,10 @@ impl Delivery {
             let mut data = ready.data.lock().unwrap_or_else(|e| e.into_inner());
             let previous = (data.failed_items.clone(), data.error.clone());
             data.failed_items.extend(damaged.iter().cloned());
+            for parent in &damaged {
+                data.failed_items
+                    .extend(text.items.iter().filter(|item| item.id.starts_with(&format!("{parent}--"))).map(|item| item.id.clone()));
+            }
             if io_failed {
                 data.error = Some("error.tools.snapshot".into());
                 data.attempted = None;
@@ -337,6 +379,22 @@ impl Delivery {
             .and_then(|text| text.server_identity.clone())
             .or_else(|| self.lease.as_ref().map(|lease| lease.server_identity.clone()))
             .or_else(|| self.servers.is_empty().then(|| "servers:none".into()))
+    }
+    /// Per-thread role definitions never reach Chat or Faber internal requests.
+    pub fn codex_agent_overrides(&self) -> Vec<(String, serde_json::Value)> {
+        let Some(text) = self.prepared.as_ref().filter(|text| text.project) else { return vec![] };
+        let Some(lease) = &self.lease else { return vec![] };
+        lease
+            .agents
+            .iter()
+            .filter(|agent| text.plugin_ids.iter().any(|id| agent.name.starts_with(&format!("faber-{id}--"))))
+            .flat_map(|agent| {
+                [
+                    (format!("agents.{}.config_file", agent.name), serde_json::json!(agent.path)),
+                    (format!("agents.{}.description", agent.name), serde_json::json!(agent.description)),
+                ]
+            })
+            .collect()
     }
     /// Stable identity of the verified metadata and files, independent of this lease's lifetime.
     pub fn identity(&self) -> Option<String> {
@@ -483,7 +541,7 @@ fn short_description(text: &str, limit: usize) -> String {
 }
 
 /// The pinned catalog uses plain/quoted scalars and indented or folded/literal continuations.
-fn checked_description(body: &str, fallback: &str) -> String {
+pub(super) fn checked_description(body: &str, fallback: &str) -> String {
     let mut lines = body.trim_start_matches('\u{feff}').lines();
     if lines.next().map(str::trim) != Some("---") {
         return short_description(fallback, DESCRIPTION_LIMIT);
@@ -546,10 +604,11 @@ impl Store {
     }
 
     fn refresh_ready_inventory_with_force(&self, force: bool) {
-        let installed = self.installed();
-        let selection = self
-            .read_selection()
-            .unwrap_or_else(|| Selection { disabled: self.items.iter().map(|item| item.id.clone()).collect(), ..Default::default() });
+        let installed = self.installed_resources();
+        let selection = self.resource_selection().unwrap_or_else(|| Selection {
+            disabled: self.items.iter().chain(self.resource_catalog()).map(|item| item.id.clone()).collect(),
+            ..Default::default()
+        });
         let mut data = self.ready.data.lock().unwrap_or_else(|e| e.into_inner());
         if force || data.installed != installed || data.selection != selection {
             data.generation += 1;
@@ -614,7 +673,7 @@ impl Store {
                 && eligible(item, area, permissions, disabled)
         };
         report.suggested = self
-            .items
+            .resource_catalog()
             .iter()
             .find(|item| {
                 explicit.contains(&item.job)
@@ -622,7 +681,11 @@ impl Store {
                     && eligible(item, area, permissions, disabled)
                     && !data.installed.contains_key(&item.id)
                     && !data.selection.disabled.contains(&item.id)
-                    && !self.items.iter().filter(enabled).any(|other| other.job == item.job && matches_task(other, request, &stacks))
+                    && !self
+                        .resource_catalog()
+                        .iter()
+                        .filter(enabled)
+                        .any(|other| other.job == item.job && matches_task(other, request, &stacks))
             })
             .map(|item| item.id.clone());
         let Some(entry) = data.entry.as_ref().filter(|entry| entry.generation == data.generation) else {
@@ -630,15 +693,13 @@ impl Store {
         };
         let current = |item: &&Item| {
             enabled(item)
-                && self.items.iter().any(|trusted| trusted == *item)
+                && self.resource_catalog().iter().any(|trusted| trusted == *item)
                 && (item.server.is_none() || entry.delivery.servers.iter().any(|server| server.name == format!("faber-{}", item.id)))
         };
         // A plugin exposes all descriptions, so stale snapshots cannot be partly filtered for Claude.
-        if entry
-            .items
-            .iter()
-            .any(|item| !self.items.contains(item) || !data.installed.contains_key(&item.id) || data.selection.disabled.contains(&item.id))
-        {
+        if entry.items.iter().any(|item| {
+            !self.resource_catalog().contains(item) || !data.installed.contains_key(&item.id) || data.selection.disabled.contains(&item.id)
+        }) {
             return (empty(), report);
         }
         let mut items: Vec<_> = entry
@@ -677,7 +738,11 @@ impl Store {
             items.iter().copied().filter(|item| item.server.is_none()).collect()
         };
         delivery.skill_ids = Some(description_items.iter().map(|item| item.id.clone()).collect());
-        if delivery.skill_ids.as_ref().is_none_or(Vec::is_empty) && !(area == Area::Project && !discovery_ids.is_empty()) {
+        if delivery.skill_ids.as_ref().is_none_or(Vec::is_empty)
+            && !(area == Area::Project
+                && (!discovery_ids.is_empty()
+                    || entry.delivery.lease.as_ref().is_some_and(|lease| super::plugin_delivery::has_native_parts(&lease.plugins))))
+        {
             delivery.skills = None;
             delivery.plugin = None;
         }
@@ -702,6 +767,11 @@ impl Store {
             texts: entry.texts.clone(),
             chat: area == Area::Chat,
             project: area == Area::Project,
+            plugin_ids: if area == Area::Project {
+                delivery.lease.as_ref().map(|lease| lease.plugins.iter().map(|plugin| plugin.item.id.clone()).collect()).unwrap_or_default()
+            } else {
+                vec![]
+            },
             description_ids: if area == Area::Project {
                 discovery_ids
             } else {
@@ -777,7 +847,7 @@ impl Store {
     }
 
     pub fn catalog_server_ids(&self, ids: &[String]) -> Vec<String> {
-        self.items.iter().filter(|item| item.server.is_some() && ids.contains(&item.id)).map(|item| item.id.clone()).collect()
+        self.resource_catalog().iter().filter(|item| item.server.is_some() && ids.contains(&item.id)).map(|item| item.id.clone()).collect()
     }
 
     /// Current trusted server metadata also detects revocation when no snapshot is ready yet.
@@ -785,7 +855,7 @@ impl Store {
         let data = self.ready.data.lock().unwrap_or_else(|e| e.into_inner());
         server_key(
             &self
-                .items
+                .resource_catalog()
                 .iter()
                 .filter(|item| {
                     item.server.is_some()
@@ -819,10 +889,11 @@ impl Store {
             delivery.catalog_ready = false;
             return false;
         }
-        let servers: Vec<_> = self.items.iter().filter(|item| item.server.is_some() && ids.contains(&item.id)).collect();
+        let servers: Vec<_> = self.resource_catalog().iter().filter(|item| item.server.is_some() && ids.contains(&item.id)).collect();
         if !servers.iter().all(|item| {
             data.installed.contains_key(&item.id)
                 && !data.selection.disabled.contains(&item.id)
+                && !data.failed_items.contains(&item.id)
                 && eligible(item, area, permissions, disabled)
                 && entry.items.contains(item)
                 && entry.delivery.servers.iter().any(|launch| launch.name == format!("faber-{}", item.id))
@@ -891,10 +962,10 @@ impl Store {
     }
 
     fn prepare_catalog(&self) {
-        let (generation, items) = {
+        let (generation, items, plugins) = {
             let data = self.ready.data.lock().unwrap_or_else(|e| e.into_inner());
             let items: Vec<_> = self
-                .items
+                .resource_catalog()
                 .iter()
                 .filter(|item| data.installed.contains_key(&item.id) && !data.selection.disabled.contains(&item.id))
                 .cloned()
@@ -902,12 +973,41 @@ impl Store {
             if data.attempted.as_ref().is_some_and(|(generation, previous)| *generation == data.generation && previous == &items) {
                 return;
             }
-            (data.generation, items)
+            let plugins = self
+                .plugins
+                .iter()
+                .filter(|plugin| data.installed.contains_key(&plugin.item.id) && !data.selection.disabled.contains(&plugin.item.id))
+                .cloned()
+                .collect::<Vec<_>>();
+            (data.generation, items, plugins)
         };
         let mut failed = BTreeSet::new();
         let mut checked = Vec::new();
         let mut source_error = None;
+        let plugins: Vec<_> = plugins
+            .into_iter()
+            .filter(|plugin| {
+                if super::plugins::verify_definition(&self.root, plugin) {
+                    return true;
+                }
+                if super::plugin_delivery::source_changed(&self.root, plugin) {
+                    failed.insert(plugin.item.id.clone());
+                    failed.extend(
+                        self.resource_catalog()
+                            .iter()
+                            .filter(|item| item.id.starts_with(&format!("{}--", plugin.item.id)))
+                            .map(|item| item.id.clone()),
+                    );
+                } else {
+                    source_error = Some(io::Error::other("The plugin source could not be checked"));
+                }
+                false
+            })
+            .collect();
         for item in &items {
+            if failed.contains(&item.id) {
+                continue;
+            }
             match source_digest(&self.root, item) {
                 Ok(actual) if actual == item.digest => checked.push(item),
                 Ok(_) => {
@@ -923,7 +1023,7 @@ impl Store {
             Err(error)
         } else {
             loop {
-                let result = self.snapshot(&checked, generation);
+                let result = self.snapshot(&checked, generation, &plugins);
                 let invalid =
                     result.as_ref().err().and_then(|error| error.get_ref()?.downcast_ref::<InvalidItem>()).map(|error| error.0.clone());
                 let Some(id) = invalid else { break result };
@@ -989,7 +1089,8 @@ impl Store {
     pub fn mark_failed_items(&self, ids: &[String]) {
         let mut data = self.ready.data.lock().unwrap_or_else(|e| e.into_inner());
         let previous = data.failed_items.clone();
-        data.failed_items.extend(ids.iter().filter(|id| self.items.iter().any(|item| item.id == **id)).cloned());
+        data.failed_items
+            .extend(ids.iter().filter(|id| self.items.iter().chain(self.resource_catalog()).any(|item| item.id == **id)).cloned());
         let changed = previous != data.failed_items;
         drop(data);
         if changed {
@@ -1065,12 +1166,12 @@ impl Store {
         permissions: Permissions,
         disabled_servers: &[String],
     ) -> Choice {
-        let Some(selection) = self.read_selection() else { return Choice::default() };
-        let installed = self.installed();
+        let Some(selection) = self.resource_selection() else { return Choice::default() };
+        let installed = self.installed_resources();
         let (jobs, _) = labels(request, cwd);
         let stacks = stack_labels(request, cwd);
         let mut items: Vec<_> = self
-            .items
+            .resource_catalog()
             .iter()
             .filter(|i| {
                 eligible(i, area, permissions, disabled_servers)
@@ -1112,8 +1213,8 @@ impl Store {
 
     /// An OS lock distinguishes abandoned copies from live sessions, including other Engine instances.
     pub fn sweep_kits(&self) {
-        let installed = self.installed();
-        let selection = self.read_selection();
+        let installed = self.installed_resources();
+        let selection = self.resource_selection();
         let parent = self.root.join("kits");
         if !std::fs::symlink_metadata(&self.root).is_ok_and(|m| m.is_dir()) {
             return;
@@ -1167,12 +1268,21 @@ impl Store {
                     let Some(selection) = &selection else { return false };
                     state.items.len()
                         == self
-                            .items
+                            .resource_catalog()
                             .iter()
                             .filter(|item| installed.contains_key(&item.id) && !selection.disabled.contains(&item.id))
                             .count()
+                        && state.plugins
+                            == self
+                                .plugins
+                                .iter()
+                                .filter(|plugin| installed.contains_key(&plugin.item.id) && !selection.disabled.contains(&plugin.item.id))
+                                .cloned()
+                                .collect::<Vec<_>>()
                         && state.items.iter().all(|item| {
-                            installed.contains_key(&item.id) && !selection.disabled.contains(&item.id) && self.items.contains(item)
+                            installed.contains_key(&item.id)
+                                && !selection.disabled.contains(&item.id)
+                                && self.resource_catalog().contains(item)
                         })
                 });
             if current {
@@ -1199,8 +1309,8 @@ impl Store {
         kit_guard(&self.root)
     }
 
-    fn snapshot(&self, picked: &[&Item], generation: u64) -> io::Result<Delivery> {
-        if picked.is_empty() {
+    fn snapshot(&self, picked: &[&Item], generation: u64, plugins: &[super::plugins::Definition]) -> io::Result<Delivery> {
+        if picked.is_empty() && plugins.is_empty() {
             return Ok(Delivery { catalog_ready: true, catalog_root: Some(self.root.clone()), ..Default::default() });
         }
         for path in [self.root.clone(), self.plugin(), self.skills(), self.servers()] {
@@ -1211,7 +1321,8 @@ impl Store {
         let mut picked = picked.to_vec();
         picked.sort_by(|a, b| a.id.cmp(&b.id));
         let state =
-            serde_json::to_vec(&SnapshotState { items: picked.iter().map(|item| (*item).clone()).collect() }).map_err(io::Error::other)?;
+            serde_json::to_vec(&SnapshotState { items: picked.iter().map(|item| (*item).clone()).collect(), plugins: plugins.to_vec() })
+                .map_err(io::Error::other)?;
         let mut hash = Sha256::new();
         hash.update(b"faber-catalog-snapshot-v4\0");
         hash.update(&state);
@@ -1245,7 +1356,7 @@ impl Store {
                 let mut remaining = SNAPSHOT_LIMIT;
                 for item in &picked {
                     let target = staging.join(if item.server.is_some() { "servers" } else { "skills" }).join(&item.id);
-                    copy_checked(&self.dir(item), &target, &mut remaining)?;
+                    copy_checked(&self.resource_source(item), &target, &mut remaining)?;
                     if digest(&target)? != item.digest {
                         if source_digest(&self.root, item)? != item.digest {
                             return Err(io::Error::other(InvalidItem(item.id.clone())));
@@ -1253,7 +1364,9 @@ impl Store {
                         return Err(io::Error::other("The catalog snapshot changed during preparation"));
                     }
                 }
-                if picked.iter().any(|item| item.server.is_none()) {
+                super::plugin_delivery::copy_parts(&self.root, staging, plugins, &mut remaining)?;
+                if picked.iter().any(|item| item.server.is_none()) || super::plugin_delivery::has_native_parts(plugins) {
+                    std::fs::create_dir_all(staging.join("skills"))?;
                     std::fs::create_dir(staging.join(".claude-plugin"))?;
                     std::fs::write(staging.join(".claude-plugin/plugin.json"), manifest_bytes())?;
                 }
@@ -1312,8 +1425,18 @@ impl Store {
                 delivery.skills = Some(root.join("skills"));
             }
         }
-        delivery.lease =
-            Some(Arc::new(Lease { root, _lock: file, server_identity: server_key(&picked), ready: Arc::downgrade(&self.ready) }));
+        if super::plugin_delivery::has_native_parts(plugins) {
+            delivery.plugin = Some(root.clone());
+        }
+        let agents = super::plugin_delivery::agents(&root, plugins)?;
+        delivery.lease = Some(Arc::new(Lease {
+            root,
+            _lock: file,
+            server_identity: server_key(&picked),
+            ready: Arc::downgrade(&self.ready),
+            plugins: plugins.to_vec(),
+            agents,
+        }));
         Ok(delivery)
     }
 }
@@ -1331,6 +1454,20 @@ fn server_key(items: &[&Item]) -> String {
 }
 
 fn source_digest(root: &Path, item: &Item) -> io::Result<String> {
+    if let Some(path) = super::plugins::resource_source(root, item) {
+        let relative = path.strip_prefix(root).map_err(io::Error::other)?;
+        let mut parent = root.to_path_buf();
+        if !std::fs::symlink_metadata(&parent)?.is_dir() {
+            return Err(io::Error::other("Not a plain catalog source root"));
+        }
+        for component in relative.components() {
+            parent.push(component);
+            if !std::fs::symlink_metadata(&parent)?.is_dir() {
+                return Err(io::Error::other("Not a plain plugin resource path"));
+            }
+        }
+        return digest(&path);
+    }
     let mut folders = vec![root.to_path_buf()];
     let parent = if item.server.is_some() {
         root.join("servers")
@@ -1378,6 +1515,8 @@ fn kit_guard(store: &Path) -> io::Result<std::fs::File> {
 }
 
 fn snapshot_intact(root: &Path, picked: &[&Item], state: &[u8]) -> bool {
+    let Ok(saved) = serde_json::from_slice::<SnapshotState>(state) else { return false };
+    let native = super::plugin_delivery::has_native_parts(&saved.plugins);
     let plain_dir = |path: &Path| std::fs::symlink_metadata(path).is_ok_and(|m| m.is_dir());
     let names =
         |path: &Path| super::entries(path).map(|entries| entries.into_iter().map(|entry| entry.file_name()).collect::<BTreeSet<_>>());
@@ -1390,7 +1529,7 @@ fn snapshot_intact(root: &Path, picked: &[&Item], state: &[u8]) -> bool {
     }
     for (name, server) in [("skills", false), ("servers", true)] {
         let items: Vec<_> = picked.iter().filter(|item| item.server.is_some() == server).collect();
-        if items.is_empty() {
+        if items.is_empty() && !(name == "skills" && native) {
             continue;
         }
         expected.insert(name.into());
@@ -1415,7 +1554,14 @@ fn snapshot_intact(root: &Path, picked: &[&Item], state: &[u8]) -> bool {
             }
         }
     }
-    names(root) == Some(expected) && tree_bytes(&root.join("skills")).saturating_add(tree_bytes(&root.join("servers"))) <= SNAPSHOT_LIMIT
+    for (kind, directory) in [(super::plugins::PartKind::Command, "commands"), (super::plugins::PartKind::Agent, "agents")] {
+        if !super::plugin_delivery::names(&saved.plugins, kind).is_empty() {
+            expected.insert(directory.into());
+        }
+    }
+    names(root) == Some(expected)
+        && super::plugin_delivery::intact(root, &saved.plugins)
+        && ["skills", "servers", "commands", "agents"].iter().map(|name| tree_bytes(&root.join(name))).sum::<u64>() <= SNAPSHOT_LIMIT
 }
 
 fn eligible(item: &Item, area: Area, permissions: Permissions, disabled_servers: &[String]) -> bool {
@@ -1766,6 +1912,24 @@ mod tests {
     }
 
     #[test]
+    fn launch_drops_a_kit_that_holds_a_native_part_no_plugin_placed() {
+        let tmp = tempfile::tempdir().unwrap();
+        let store = store(tmp.path(), &[("debug", "debugging", 100)]);
+        let (kit, _) = store.kit("debug", None, Area::Project, Permissions::Ask, &[]);
+        let root = kit.plugin.as_ref().unwrap();
+        for folder in ["commands", "agents"] {
+            std::fs::create_dir(root.join(folder)).unwrap();
+            std::fs::write(root.join(folder).join("planted.md"), "---\nallowed-tools: Bash\n---\nrun it").unwrap();
+            for vendor in [Vendor::Claude, Vendor::Codex] {
+                let (checked, damaged, io_failed) = kit.verified_for_launch(vendor);
+                assert!(checked.plugin.is_none() && io_failed && damaged.is_empty(), "{folder} planted without any plugin");
+            }
+            std::fs::remove_dir_all(root.join(folder)).unwrap();
+        }
+        assert!(kit.verified_for_launch(Vendor::Claude).0.plugin.is_some());
+    }
+
+    #[test]
     fn launch_rejects_linked_snapshot_roots_even_when_their_contents_are_trusted() {
         for part in ["", "skills", "skills/debug", ".claude-plugin"] {
             let tmp = tempfile::tempdir().unwrap();
@@ -1792,6 +1956,8 @@ mod tests {
                 _lock: std::fs::File::open(original.join(".lease")).unwrap(),
                 server_identity: "servers:none".into(),
                 ready: Arc::downgrade(&store.ready),
+                plugins: vec![],
+                agents: vec![],
             }));
             for vendor in [Vendor::Claude, Vendor::Codex] {
                 let (checked, damaged, io_failed) = linked.verified_for_launch(vendor);

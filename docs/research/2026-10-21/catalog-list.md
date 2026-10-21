@@ -271,3 +271,187 @@ Logs are E:/Temp/faber-tools/c77e-fix-{lint-final,typecheck-final,docs-final,doc
 A fresh read-only source/code/coherence review found no exclusion or code blocker; its raw-data Python prerequisite
 correction is applied in all five locales. No native app, screen, full-app memory/CPU or live external integration was
 run. No commit was made; 04801ffd and its body are unchanged.
+
+## Plugin delivery preflight (catalog-plugins)
+
+Status at the first preflight: blocked before implementation at 0678303a. Superseded by the lead's private-session delivery decision below. The task explicitly says to stop and report a part that needs a
+folder outside those the skill store already uses. No plugin, alternate installer, CLI-home write, product change,
+release note or new product decision was made. The kits lane's owned files are unchanged.
+
+The existing implementation does **not** install catalog files in the user's CLI skill folders. `Store::skills` in
+`engine/src/tools.rs` writes `<data>/tools/plugin/skills/<id>/`; `Store::servers` writes `<data>/tools/servers/<id>/`.
+`install_from` requires `SKILL.md` or a pinned npm entry, and `prune` removes everything beside `skills/` and Faber's
+own `.claude-plugin/` manifest. The kits snapshot's `Delivery::verified_for_launch` in `engine/src/tools/kits.rs`
+also refuses additional root entries. Claude receives that private plugin; current Codex session kits deliver checked
+instructions, not personal skill-root writes. The task's description of writing each CLI's own agent/command folders
+therefore cannot be satisfied by the existing delivery path unchanged.
+
+Official documentation checked on 2026-10-21:
+
+- [Codex subagents](https://developers.openai.com/codex/subagents), redirected to
+  [Custom agents](https://learn.chatgpt.com/docs/agent-configuration/subagents#custom-agents): custom agents are standalone
+  TOML files in `~/.codex/agents/` or project `.codex/agents/`. These are outside the current store's delivery roots.
+- [Codex custom prompts](https://developers.openai.com/codex/custom-prompts), redirected to
+  [Custom Prompts](https://learn.chatgpt.com/docs/custom-prompts): Markdown slash prompts require `~/.codex/prompts/`,
+  explicit invocation and a restart. They are deprecated in favor of skills; the docs do not make a private skill
+  snapshot a native prompt folder. No prompt was converted to a skill or silently omitted.
+- [Codex skills](https://developers.openai.com/codex/skills), redirected to
+  [Build skills](https://learn.chatgpt.com/docs/build-skills): repository/user discovery uses `.agents/skills/`, with
+  plugins as a distribution option. This does not authorize writing new agent/prompt roots or changing CLI settings.
+
+Supporting native commands or agents needs an explicit delivery-scope decision before building: either permit the
+necessary additional roots within the existing store's checked delivery, or narrow the plugin parts delivered to each
+CLI. This report makes neither decision for the owner. It does not claim those parts are unsupported by Codex.
+
+### Recovered twenty-candidate inventory
+
+The prior report mentioned twenty plugins but omitted their identities. Recovered from the earlier curation's local
+`E:/Temp/faber-tools/catalog-pins.json` (`plugins`) and cross-checked against `catalog-candidates.json`. The table preserves
+the prior pins and recorded reasons, **not a fresh whole-folder R362 audit or a verified digest**. No original source was
+downloaded for this preflight and no upstream code ran. Zero candidates are admitted; all twenty remain withheld pending
+delivery and the requested whole-folder audit. A prior exclusion is not reversed by having plugin packaging.
+
+| Candidate | Original source at the prior commit | Prior reason or audit status |
+| :--- | :--- | :--- |
+| code-lsp-plugins | [anthropics/claude-plugins-official](https://github.com/anthropics/claude-plugins-official/tree/d1adba47161a271799de7b548225d929310046bd/.claude-plugin/marketplace.json) | Language-server configurations require external language servers; not a checked skill/server bundle. |
+| code-modernization | [plugins/code-modernization](https://github.com/anthropics/claude-plugins-official/tree/d1adba47161a271799de7b548225d929310046bd/plugins/code-modernization) | Hooks and scripts; agent/command parts also need delivery work. |
+| stitch-skills | [google-labs-code/stitch-skills](https://github.com/google-labs-code/stitch-skills/tree/0337446dadde6f8c94210444e2aa9d546126480f) (`plugins/stitch-build`, `stitch-design`, `stitch-utilities`) | Selected skills set `allowed-tools`; external MCP and sign-in prerequisite. |
+| trailofbits-security-lenses | [trailofbits/skills](https://github.com/trailofbits/skills/tree/a3131740a39291e42fd15b9eac07e0b393ad71b1/plugins) (`differential-review`, `insecure-defaults`, `sharp-edges`, `variant-analysis`, `fp-check`) | Prior curation rejected CC-BY-SA terms; inventory also records hooks/scripts. No new license conclusion. |
+| security-guidance | [plugins/security-guidance](https://github.com/anthropics/claude-plugins-official/tree/d1adba47161a271799de7b548225d929310046bd/plugins/security-guidance) | Hooks and scripts. |
+| security-scan-team | [plugins/claude-security](https://github.com/anthropics/claude-plugins-official/tree/d1adba47161a271799de7b548225d929310046bd/plugins/claude-security) | Prior inventory records proprietary terms plus agents, commands and scripts. |
+| document-skills-office | [anthropics/skills](https://github.com/anthropics/skills/tree/dbd4588f9e1033efb41dad4bef2f7947c8993d44/skills) | Prior inventory records all-rights-reserved terms and bundled scripts; not admitted. |
+| knowledge-work-plugins | [small-business](https://github.com/anthropics/knowledge-work-plugins/tree/bc8f6922cfeea215a202cdcc9f0d299a990889a8/small-business) | Hybrid skills, agents and MCP manifest; portability not checked. |
+| financial-services | [anthropics/financial-services](https://github.com/anthropics/financial-services/tree/574ed3624aebd0418c7e96cd101262f30210ab26) | Hooks and mixed agent/command/MCP packages; paid-data prerequisites recorded. |
+| legal-practice-plugins | [anthropics/claude-for-legal](https://github.com/anthropics/claude-for-legal/tree/4a6c651889c97cc9140580363c73e0eb17379c2b) | Hooks and MCP manifests in the prior inventory. |
+| unity-agent-plugin | [Unity-Technologies/unity-agent-plugin](https://github.com/Unity-Technologies/unity-agent-plugin/tree/421acb1d365cbab6506b7d77ce09a71602edbce1/skills) | No plugin-specific skip reason in the old cache; engine-only license and individual skill exclusions above remain. Whole bundle not audited. |
+| universal-modder | [rehan-remade/universal-modder](https://github.com/rehan-remade/universal-modder/tree/c1dff21663665dd17af289744a301b66e369605e) | CLI binary, MCP, hooks and scripts. |
+| elevenlabs-skills | [elevenlabs/skills](https://github.com/elevenlabs/skills/tree/269e5f0e5a4cf296a8a38beb166245b89d5e2c1c/skills) | Prior audit records automatic CLI installation in useful skills. |
+| expo-skills | [plugins/expo](https://github.com/expo/skills/tree/55ec65cd16499f20f14fb10fe99a2e62901b00a1/plugins/expo) | Hooks and MCP configuration. |
+| flutter-skills | [flutter/skills](https://github.com/flutter/skills/tree/6e590650bb4bab87f33187423dc10113d04d4836/skills) | No plugin-specific skip reason in the old cache; retained individual skills do not approve the whole bundle. Installer exclusions above remain. |
+| android-skills | [android/skills](https://github.com/android/skills/tree/a3f56b8fc83039c407e20a7b4789c2b6ea192d57) | No plugin-specific skip reason in the old cache; retained individual skills do not approve the whole bundle. Installer exclusions above remain. |
+| firebase-mcp-and-skills | [firebase/agent-skills](https://github.com/firebase/agent-skills/tree/92eed24c0976a79a66d5b8038e9eda8b441ef92d) | Agent and MCP configuration; R253 portability not established. |
+| render-skills-and-tools | [render-oss/skills](https://github.com/render-oss/skills/tree/8675173fe30232384d51c8763d1eea4db0350419) | Hooks and remote MCP configuration. |
+| sentry-plugin | [getsentry/plugin-claude](https://github.com/getsentry/plugin-claude/tree/0d42f6a5b013580110ea55c00f699782c03a99b0) | Hosted MCP configuration; R253 requires a checked dependency-free npm server. |
+| posthog-skills-and-mcp | [PostHog/skills](https://github.com/PostHog/skills/tree/b6951f6ee5fa21856939456a35ab33d3733b9b8e/skills/posthog) | Hooks in the `all` plugin and external hosted integration. |
+
+Historical: at this first preflight nothing had been built, so no product page, test or word changed. The delivery that
+followed is described in the next section, and its proofs are in the last one.
+
+Preflight validation uses `CARGO_TARGET_DIR=E:/Temp/faber-target/c77e-plugins`; logs are
+`E:/Temp/faber-tools/c77e-plugins-{lint,typecheck,docs,docs-exported,build,fmt,clippy,engine}.log`.
+
+| Requested proof | Preflight result |
+| :--- | :--- |
+| npm run lint | Pass; pre-existing optional-chain warning in `ui/App.tsx:1686`. |
+| npm run typecheck | Pass. |
+| npm run docs | Blocked: `spawnSync git EPERM`. The unchanged exported validator passed with the exact file list captured by git: 40 living pages, zero problems. |
+| npm run build | Blocked: Vite's `externalize-deps` cannot spawn its Windows path-resolution helper (`EPERM`). |
+| cargo fmt --all --check | Pass. |
+| cargo clippy -q --workspace --all-targets -- -D warnings | Pass. |
+| cargo test -q -p faber-engine | 502 passed, 1 failed, 8 ignored. The unchanged `rewind::validation_tests::rewind_unfinished_redo_is_discoverable_even_without_files_done_or_live_expiry` fails at `engine/src/rewind.rs:1856` with `error.rewind.storage`, the same named failure recorded above. Integration suites are not reached. |
+
+The inventory check confirms all twenty ids and their full original commit pins appear in this report. A fresh read-only
+review checked the preflight against the store, the candidate cache and the official docs and found no blocker in the
+report; it did not re-audit upstream folders. `git diff --check` passed. No commit was made.
+
+## Checked portable plugin delivery (catalog-plugins)
+
+Status: store, Catalog controls and native session delivery are integrated with the landed session kits. The earlier preflight is historical,
+not the current delivery decision. The lead explicitly authorized delivery only from Faber's own checked store: no
+personal skill, agent or prompt folder and no CLI configuration is written.
+
+A plugin is one pinned original-source folder plus declared skill, command, agent and portable-server parts. The original
+folder uses R247's canonical tree digest; each skill uses that same tree algorithm, each standalone Markdown/JSON part
+uses SHA-256 of its raw bytes, and each npm package has its own original-source version, commit and tree digest. Root
+and part metadata, names, file types and exact layouts are checked. Native command/agent definitions cannot grant tools,
+change models or permissions, execute inline shell expansions, or depend on another plugin-root layout. Shipped binaries,
+scripts, hooks, package lifecycle scripts, unlisted native parts and non-portable MCP definitions are refused.
+
+All parts publish through the existing staged install, lock and parent ledger entry. Off, Remove, journal recovery and
+Undo move/check that same parent folder. Skills and servers expand to virtual namespaced resources for the existing kit
+selector; children never get a second installer, ledger or selector. Tool servers remain Full-access-only.
+
+The documented building blocks for the lead's session decision are the [Codex configuration reference](https://learn.chatgpt.com/docs/config-file/config-reference):
+`agents.<name>.config_file` accepts a role TOML layer and `agents.<name>.description` supplies role guidance. The
+[app-server protocol](https://developers.openai.com/codex/app-server) provides per-thread configuration overrides, which
+Faber already uses for MCP. Applying these two documented mechanisms to named agent roles is an integration inference,
+not a live CLI result. A checked agent's instruction body can become a deterministic TOML layer containing only
+`developer_instructions`, stored in the same private snapshot, with its original description and no permission override.
+This is separate from the documented personal/project agent discovery folders.
+[Custom prompts](https://learn.chatgpt.com/docs/custom-prompts) require the personal prompts folder and explicit
+invocation; no corresponding per-thread prompt override is documented. Codex therefore receives plugin skills, supported
+agent roles and eligible servers, with commands explicitly marked unavailable on the card/detail. No prompt is silently
+converted into a skill. Claude uses the same private plugin folder with namespaced `commands/` and `agents/`; a missing
+installed `--plugin-dir` capability is stated on the card/detail. Chat receives only the kit's picked skill text, with
+no plugin commands or subagents. Native role refresh on a real resumed CLI thread still needs the lead's integration
+validation; no real CLI or model was called by these tests.
+
+### Twenty original bundles: exclusion evidence
+
+Re-fetched the exact original GitHub commits, inspected the complete declared source scopes, dotfiles and supporting
+files, and checked concrete blockers against the new delivery rules. ElevenLabs' old `skills/` inventory path does not
+exist at its pin; its actual root layout was inspected instead. Flutter's root manifest was included, beyond the old
+skills-only scope. The code-LSP candidate is a marketplace index, so its one-file scope does not approve the indexed
+external packages. Every bundle has a concrete blocker below. None is admitted; previously rejected individual skills
+are not revived as bundles. The existing 114 skills and one server keep their pins.
+
+This is fail-fast exclusion evidence, not a positive security approval: after a decisive blocker, remaining operational
+instructions were not all normalized individually. Searching every file is discovery; absence of a keyword is never a
+pass. Full archive SHA-256 values below identify what was fetched, not R247 canonical unpacked-tree digests. No upstream
+code ran, no prerequisites installed, and no candidate endpoint was contacted beyond its original GitHub archive.
+
+| Candidate | Files in inspected scope | Concrete blocker at its original pin |
+| :--- | ---: | :--- |
+| code-lsp-plugins | 1 | External language-server binary requirement. [.claude-plugin/marketplace.json:863,866-868](https://github.com/anthropics/claude-plugins-official/blob/d1adba47161a271799de7b548225d929310046bd/.claude-plugin/marketplace.json#L863) |
+| code-modernization | 107 | Requires command hooks, including telemetry. [plugins/code-modernization/hooks/hooks.json:8-9](https://github.com/anthropics/claude-plugins-official/blob/d1adba47161a271799de7b548225d929310046bd/plugins/code-modernization/hooks/hooks.json#L8) |
+| stitch-skills | 81 | Host-specific allowed-tools and external Stitch MCP. [plugins/stitch-build/skills/react-components/SKILL.md:7-12](https://github.com/google-labs-code/stitch-skills/blob/0337446dadde6f8c94210444e2aa9d546126480f/plugins/stitch-build/skills/react-components/SKILL.md#L7) |
+| trailofbits-security-lenses | 123 | Requires prompt hook; selected source is CC-BY-SA-4.0. [plugins/fp-check/hooks/hooks.json:3-10](https://github.com/trailofbits/skills/blob/a3131740a39291e42fd15b9eac07e0b393ad71b1/plugins/fp-check/hooks/hooks.json#L3) |
+| security-guidance | 56 | Requires command hooks and hook bootstrap. [plugins/security-guidance/hooks/hooks.json:8-10](https://github.com/anthropics/claude-plugins-official/blob/d1adba47161a271799de7b548225d929310046bd/plugins/security-guidance/hooks/hooks.json#L8) |
+| security-scan-team | 46 | Requires shell command hooks. [plugins/claude-security/hooks/hooks.json:9-10](https://github.com/anthropics/claude-plugins-official/blob/d1adba47161a271799de7b548225d929310046bd/plugins/claude-security/hooks/hooks.json#L9) |
+| document-skills-office | 439 | Office skill terms prohibit third-party distribution. [skills/docx/LICENSE.txt:1,13-21](https://github.com/anthropics/skills/blob/dbd4588f9e1033efb41dad4bef2f7947c8993d44/skills/docx/LICENSE.txt#L1) |
+| knowledge-work-plugins | 214 | Contains hosted MCP endpoint. [small-business/.mcp.json:2-5](https://github.com/anthropics/knowledge-work-plugins/blob/bc8f6922cfeea215a202cdcc9f0d299a990889a8/small-business/.mcp.json#L2) |
+| financial-services | 363 | Vertical plugin contains hosted MCP endpoint. [plugins/vertical-plugins/financial-analysis/.mcp.json:4-5](https://github.com/anthropics/financial-services/blob/574ed3624aebd0418c7e96cd101262f30210ab26/plugins/vertical-plugins/financial-analysis/.mcp.json#L4) |
+| legal-practice-plugins | 315 | Legal plugin contains hosted MCP endpoint. [commercial-legal/.mcp.json:4-5](https://github.com/anthropics/claude-for-legal/blob/4a6c651889c97cc9140580363c73e0eb17379c2b/commercial-legal/.mcp.json#L4) |
+| unity-agent-plugin | 216 | Useful CLI skill runs mutable remote installer. [skills/unity-cli/SKILL.md:67,72](https://github.com/Unity-Technologies/unity-agent-plugin/blob/421acb1d365cbab6506b7d77ce09a71602edbce1/skills/unity-cli/SKILL.md#L67) |
+| universal-modder | 781 | Requires command hook (also declares hosted MCP). [hooks/hooks.json:8-9](https://github.com/rehan-remade/universal-modder/blob/c1dff21663665dd17af289744a301b66e369605e/hooks/hooks.json#L8) |
+| elevenlabs-skills | 75 | Hosted MCP and automatic mutable CLI installation. [agents/SKILL.md:13,21](https://github.com/elevenlabs/skills/blob/269e5f0e5a4cf296a8a38beb166245b89d5e2c1c/agents/SKILL.md#L13) |
+| expo-skills | 131 | Requires command hook and hosted MCP. [plugins/expo/hooks/hooks.json:8-10](https://github.com/expo/skills/blob/55ec65cd16499f20f14fb10fe99a2e62901b00a1/plugins/expo/hooks/hooks.json#L8) |
+| flutter-skills | 109 | Plugin manifest configures non-R253 Dart MCP. [.claude-plugin/plugin.json:18-22](https://github.com/flutter/skills/blob/6e590650bb4bab87f33187423dc10113d04d4836/.claude-plugin/plugin.json#L18) |
+| android-skills | 412 | Reference requires installing another skill through Android CLI. [testing/testing-setup/references/android/studio/preview/compose-screenshot-testing-with-testsuites.md:23-25](https://github.com/android/skills/blob/a3f56b8fc83039c407e20a7b4789c2b6ea192d57/testing/testing-setup/references/android/studio/preview/compose-screenshot-testing-with-testsuites.md#L23) |
+| firebase-mcp-and-skills | 113 | Server manifest uses npx to fetch and run package at runtime. [.mcp.json:4-10](https://github.com/firebase/agent-skills/blob/92eed24c0976a79a66d5b8038e9eda8b441ef92d/.mcp.json#L4) |
+| render-skills-and-tools | 143 | Contains hosted MCP endpoint. [.mcp.json:4-5](https://github.com/render-oss/skills/blob/8675173fe30232384d51c8763d1eea4db0350419/.mcp.json#L4) |
+| sentry-plugin | 222 | Plugin manifest wires hosted MCP endpoint. [.claude-plugin/plugin.json:18-21](https://github.com/getsentry/plugin-claude/blob/0d42f6a5b013580110ea55c00f699782c03a99b0/.claude-plugin/plugin.json#L18) |
+| posthog-skills-and-mcp | 1446 | Selected all plugin requires command hook. [skills/posthog/all/hooks/hooks.json:7-9](https://github.com/PostHog/skills/blob/b6951f6ee5fa21856939456a35ab33d3733b9b8e/skills/posthog/all/hooks/hooks.json#L7) |
+
+| Original candidate archive | Downloaded bytes | Archive SHA-256 (not the store tree digest) |
+| :--- | ---: | :--- |
+| code-lsp-plugins | 8259115 | `c77425c59df334c2a25a5a9c0050286a39acf7d57c8e4d3732767e4eb5c94ffd` |
+| code-modernization | 8259115 | `c77425c59df334c2a25a5a9c0050286a39acf7d57c8e4d3732767e4eb5c94ffd` |
+| stitch-skills | 227622 | `30c0e72dd7612c291050082b6299d69fb9d8b391f1043fd06490a8e2b20e944d` |
+| trailofbits-security-lenses | 4070446 | `bb695b9a489f38682e9acc192d2c44b27970cac461fd511d0279af2249948fd7` |
+| security-guidance | 8259115 | `c77425c59df334c2a25a5a9c0050286a39acf7d57c8e4d3732767e4eb5c94ffd` |
+| security-scan-team | 8259115 | `c77425c59df334c2a25a5a9c0050286a39acf7d57c8e4d3732767e4eb5c94ffd` |
+| document-skills-office | 4343662 | `2f81fe0297244f9e4fa7673f17a0196009657a08bd1094e9e673c70163ce7d6e` |
+| knowledge-work-plugins | 3377609 | `31d74c403bc26d5b3a0a1dccac30a341fbf95c84b7ca20c7f15616b995bab6de` |
+| financial-services | 976940 | `9ac1bd211ef4c377778c8531cae5813fe20737c74e6a0fe9633bc9ce5f3c2e83` |
+| legal-practice-plugins | 1395242 | `891f16b9bcc9b53fcb3ea54c660ea06ea8d0fab9400ac6e46f319006f34ab73d` |
+| unity-agent-plugin | 845751 | `06e5ce799ed625cd388e288b6997a26b89430358f05c72d055b962144dc9fa41` |
+| universal-modder | 28493111 | `460f67aafbfa89c9420f8e60c156f3c2114fa777134846a3be4f991610c8f40d` |
+| elevenlabs-skills | 521156 | `c919f332ab412470c9d94f504d589ab9092ad0af0a24ee6597a0e10ef6cb51f0` |
+| expo-skills | 3489454 | `1e0474718324a14d2f42ce7cde374dcb1302e3e74963d8637a8aa90d2f6d365b` |
+| flutter-skills | 240480 | `2b63c84e5e132b90f3be08557277353fdd53ce967cd39edb0f4105efdce57bf0` |
+| android-skills | 1288466 | `2d712a3bc6a87c4258809d345649be0d2b6aa23521ce43ce0210a95fc037a2ef` |
+| firebase-mcp-and-skills | 235160 | `14cacc977556480f282918e6962761ef3453c39780fed7c980a420386225f5a6` |
+| render-skills-and-tools | 344820 | `bf661c40c2af11125e106c97fa110024a60eac02a221ae6f0ab0452676cab0ab` |
+| sentry-plugin | 429549 | `a83923b6eac3e3773883b6fafbef4aac3195c140c418132a38c12e6b8c31d205` |
+| posthog-skills-and-mcp | 8606217 | `90fc8b13f9e70d7ad7a16418c24843334482f5da34ccf7ea09182ed64ff92e6c` |
+
+### Proofs of the delivered state (after two reviews)
+
+| Proof | Result |
+| :--- | :--- |
+| npm run lint, typecheck, docs, build | Pass (the `ui/App.tsx:1686` warning is older). |
+| cargo fmt --all --check, cargo t --claims, cargo clippy -q --workspace --all-targets -- -D warnings | Pass. |
+| cargo test -q -p faber-engine | 506 unit and 944 integration tests pass, 0 fail. |
+| cargo t --all --filter catalog / plugins | 58 / 24 pass, 0 fail (screen part not run in this sandbox). |
+| Not checked | A real Claude Code or Codex run (the `agents.<name>.config_file` thread override is documented but not run live), memory and processor of the full app. |

@@ -11,6 +11,8 @@ use std::path::{Path, PathBuf};
 use std::sync::{Mutex, OnceLock};
 
 pub mod kits;
+mod plugin_delivery;
+pub mod plugins;
 
 /// One skill of the catalog.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -92,6 +94,8 @@ struct CatalogFile {
     skills: Vec<Item>,
     #[serde(default)]
     servers: Vec<Item>,
+    #[serde(default)]
+    plugins: Vec<plugins::Definition>,
 }
 
 /// The catalog that ships with this version of Faber: its skills, then its servers.
@@ -100,7 +104,12 @@ pub fn catalog() -> &'static [Item] {
     CATALOG.get_or_init(|| {
         let file = serde_json::from_str::<CatalogFile>(include_str!("tools.json"));
         file.map(|c| {
-            c.skills.into_iter().filter(|i| i.server.is_none()).chain(c.servers.into_iter().filter(|i| i.server.is_some())).collect()
+            c.skills
+                .into_iter()
+                .filter(|i| i.server.is_none())
+                .chain(c.servers.into_iter().filter(|i| i.server.is_some()))
+                .chain(c.plugins.into_iter().map(|p| p.item))
+                .collect()
         })
         .unwrap_or_default()
     })
@@ -156,6 +165,8 @@ pub struct Store {
     root: PathBuf,
     /// The catalog the store trusts: its digests decide what may stay at every launch.
     items: Vec<Item>,
+    resources: Vec<Item>,
+    plugins: Vec<plugins::Definition>,
     /// Node for the servers; `None` looks it up on PATH when a server is installed.
     node: Option<PathBuf>,
     ready: std::sync::Arc<kits::ReadyCache>,
@@ -185,19 +196,35 @@ impl Removed {
 
 impl Store {
     pub fn new(data_dir: &Path) -> Self {
-        Store::with_catalog(data_dir, catalog().to_vec())
+        Store::with_plugins(data_dir, catalog().to_vec(), plugins::catalog().to_vec())
     }
     /// A store that trusts another catalog (tests).
     pub fn with_catalog(data_dir: &Path, items: Vec<Item>) -> Self {
+        Self::with_plugins(data_dir, items, vec![])
+    }
+    /// A catalog with checked composite items (tests and the shipped catalog).
+    pub fn with_plugins(data_dir: &Path, mut items: Vec<Item>, plugins: Vec<plugins::Definition>) -> Self {
+        for plugin in &plugins {
+            if !items.iter().any(|item| item.id == plugin.item.id) {
+                items.push(plugin.item.clone());
+            }
+        }
         let root = data_dir.join("tools");
-        let ready = kits::ReadyCache::for_root(&root, &items, None);
-        let store = Store { root, items, node: None, ready };
+        let resources = plugins::expand(&items, &plugins);
+        let mut trust_items = resources.clone();
+        trust_items.extend(plugins.iter().map(|definition| {
+            let mut item = definition.item.clone();
+            item.digest = crate::hex(&Sha256::digest(serde_json::to_vec(definition).unwrap_or_default()));
+            item
+        }));
+        let ready = kits::ReadyCache::for_root(&root, &trust_items, None);
+        let store = Store { root, items, resources, plugins, node: None, ready };
         store.refresh_ready_inventory();
         store
     }
     /// A store that starts its servers with this Node (tests).
     pub fn with_node(self, node: PathBuf) -> Self {
-        let ready = kits::ReadyCache::for_root(&self.root, &self.items, Some(&node));
+        let ready = kits::ReadyCache::for_root(&self.root, &self.trust_items(), Some(&node));
         let store = Store { node: Some(node), ready, ..self };
         store.refresh_ready_inventory();
         store
@@ -218,9 +245,13 @@ impl Store {
         self.root.join("disabled")
     }
     fn dir(&self, item: &Item) -> PathBuf {
-        match item.server {
-            Some(_) => self.servers().join(&item.id),
-            None => self.skills().join(&item.id),
+        if self.plugin_definition(&item.id).is_some() {
+            self.root.join("plugins").join(&item.id)
+        } else {
+            match item.server {
+                Some(_) => self.servers().join(&item.id),
+                None => self.skills().join(&item.id),
+            }
         }
     }
     fn ledger(&self) -> PathBuf {
@@ -233,8 +264,14 @@ impl Store {
         let ledger: BTreeMap<String, String> = small_file(&self.ledger()).and_then(|b| serde_json::from_slice(&b).ok()).unwrap_or_default();
         let present = |id: &String| {
             self.items.iter().find(|i| &i.id == id).is_some_and(|i| {
-                let marker = i.server.as_ref().map_or("SKILL.md", |s| s.entry.as_str());
-                [self.dir(i), self.disabled().join(id)].iter().any(|dir| dir.join(marker).is_file())
+                let marker = if self.plugin_definition(&i.id).is_some() {
+                    "source"
+                } else {
+                    i.server.as_ref().map_or("SKILL.md", |s| s.entry.as_str())
+                };
+                [self.dir(i), self.disabled().join(id)]
+                    .iter()
+                    .any(|dir| if self.plugin_definition(&i.id).is_some() { dir.join(marker).is_dir() } else { dir.join(marker).is_file() })
             })
         };
         ledger.into_iter().filter(|(id, _)| valid_id(id) && present(id)).collect()
@@ -246,8 +283,12 @@ impl Store {
             && !self.selection().disabled.contains(id)
             && !self.disabled().join(id).exists()
             && self.items.iter().find(|i| i.id == id).is_some_and(|i| {
-                let marker = i.server.as_ref().map_or("SKILL.md", |s| s.entry.as_str());
-                self.dir(i).join(marker).is_file()
+                let marker = if self.plugin_definition(&i.id).is_some() {
+                    "source"
+                } else {
+                    i.server.as_ref().map_or("SKILL.md", |s| s.entry.as_str())
+                };
+                if self.plugin_definition(&i.id).is_some() { self.dir(i).join(marker).is_dir() } else { self.dir(i).join(marker).is_file() }
             })
     }
 
@@ -265,7 +306,7 @@ impl Store {
         }
         let active = self.dir(item);
         let disabled = self.disabled().join(id);
-        if enabled && disabled.exists() && !digest(&disabled).is_ok_and(|got| got == item.digest) {
+        if enabled && disabled.exists() && !self.verify_item(&disabled, item) {
             self.discard(&disabled).map_err(|e| e.to_string())?;
             return Err("The disabled tool does not match the catalog".into());
         }
@@ -331,14 +372,19 @@ impl Store {
     fn prune(&self) -> Option<std::collections::HashSet<String>> {
         // The store's own folders must be folders: a link there would point the CLIs at files the check never saw.
         let linked = |p: PathBuf| std::fs::symlink_metadata(p).is_ok_and(|m| !m.is_dir());
-        if [self.root.clone(), self.plugin(), self.skills(), self.servers(), self.disabled(), self.removed()].into_iter().any(linked) {
+        if [self.root.clone(), self.plugin(), self.skills(), self.servers(), self.root.join("plugins"), self.disabled(), self.removed()]
+            .into_iter()
+            .any(linked)
+        {
             return None;
         }
         self.recover_restores().ok()?;
         let ledger = self.installed();
         let mut clean = true;
         let mut checked = std::collections::HashSet::new();
-        for (parent, server) in [(self.skills(), Some(false)), (self.servers(), Some(true)), (self.disabled(), None)] {
+        for (parent, server) in
+            [(self.skills(), Some(false)), (self.servers(), Some(true)), (self.root.join("plugins"), Some(false)), (self.disabled(), None)]
+        {
             // A folder that cannot be listed could hide a changed tool: nothing is handed over.
             let entries = entries(&parent)?;
             for entry in entries {
@@ -349,10 +395,15 @@ impl Store {
                     continue;
                 }
                 // shortcut: a catalog that pins a newer commit drops the old copy here; reinstall it on update once one exists.
-                let item = self.items.iter().find(|i| i.id == name && server.is_none_or(|s| i.server.is_some() == s));
+                let item = self.items.iter().find(|i| {
+                    i.id == name
+                        && (server.is_none()
+                            || (i.server.is_some() == server.unwrap_or(false)
+                                && (parent == self.root.join("plugins")) == self.plugin_definition(&i.id).is_some()))
+                });
                 if ledger.contains_key(&name)
                     && (server.is_none() || !self.disabled().join(&name).exists())
-                    && item.is_some_and(|i| server.is_none() || digest(&entry.path()).is_ok_and(|got| got == i.digest))
+                    && item.is_some_and(|i| server.is_none() || self.verify_item(&entry.path(), i))
                 {
                     if server.is_some() {
                         checked.insert(name);
@@ -413,6 +464,11 @@ impl Store {
     /// Unpacks `item` from the repository archive at `zip`, checks its digest and only then puts it in place. On any failure the
     /// store is as it was.
     pub fn install_from(&self, item: &Item, zip: &Path) -> Result<(), String> {
+        self.install_sources(item, zip, &BTreeMap::new())
+    }
+
+    /// Installs the source and each pinned package as one checked item, under the ordinary ledger and lock.
+    pub fn install_sources(&self, item: &Item, zip: &Path, packages: &BTreeMap<String, PathBuf>) -> Result<(), String> {
         if !valid_id(&item.id) {
             return Err(format!("Invalid skill id: {}", item.id));
         }
@@ -423,6 +479,7 @@ impl Store {
             self.plugin(),
             self.skills(),
             self.servers(),
+            self.root.join("plugins"),
             self.disabled(),
             self.removed(),
             self.plugin().join(".claude-plugin"),
@@ -436,34 +493,29 @@ impl Store {
         std::fs::create_dir_all(dest.parent().unwrap_or(&self.root)).map_err(|e| e.to_string())?;
         let temporary = kits::TemporaryCopy::new(&self.root, ".staging-").map_err(|e| e.to_string())?;
         let staging = &temporary.path;
-        let extracted = match &item.server {
-            Some(_) => extract_package(zip, staging),
-            None => extract_skill(zip, &item.path, staging),
+        let definition = self.plugin_definition(&item.id);
+        let extracted = if let Some(plugin) = definition {
+            self.validate_plugin_aliases(plugin)?;
+            plugins::extract(plugin, zip, packages, staging)
+        } else {
+            match &item.server {
+                Some(_) => extract_package(zip, staging),
+                None => extract_skill(zip, &item.path, staging),
+            }
         };
         let result = extracted.and_then(|()| {
-            let got = digest(staging).map_err(|e| e.to_string())?;
-            if got != item.digest {
-                return Err(format!("The files of {} do not match the catalog (got {got})", item.id));
+            if !self.verify_item(staging, item) {
+                return Err(format!("The files of {} do not match the catalog", item.id));
             }
-            if let Some(server) = &item.server {
-                if !staging.join(&server.entry).is_file() {
-                    return Err(format!("{} has no {}", item.id, server.entry));
-                }
-            } else {
-                let Ok(skill) = std::fs::read_to_string(staging.join("SKILL.md")) else {
-                    return Err(format!("{} has no SKILL.md", item.id));
-                };
-                if let Some(key) = widening_key(&skill) {
-                    return Err(format!("{} sets {key}, which would widen what the agent may do", item.id));
-                }
+            if definition.is_none() && item.server.is_none() {
+                let skill = std::fs::read_to_string(staging.join("SKILL.md")).map_err(|_| format!("{} has no SKILL.md", item.id))?;
+                standalone_skill(&skill).map_err(|why| format!("{} {why}", item.id))?;
                 self.write_manifest().map_err(|e| e.to_string())?;
             }
             self.discard(&self.removed().join(&item.id)).map_err(|e| e.to_string())?;
             self.discard(&self.disabled().join(&item.id)).map_err(|e| e.to_string())?;
             // Reinstalling identical verified bytes need not rename files a background snapshot is reading.
-            if !std::fs::symlink_metadata(&dest).is_ok_and(|metadata| metadata.is_dir())
-                || !digest(&dest).is_ok_and(|actual| actual == item.digest)
-            {
+            if !std::fs::symlink_metadata(&dest).is_ok_and(|metadata| metadata.is_dir()) || !self.verify_item(&dest, item) {
                 self.discard(&dest).map_err(|e| format!("Could not replace the catalog item: {e}"))?;
                 retry_busy(|| std::fs::rename(staging, &dest)).map_err(|e| format!("Could not publish catalog files: {e}"))?;
             }
@@ -546,7 +598,7 @@ impl Store {
                     && state.enabled == self.enabled(id)
                     && !removed.join("files").exists()
                     && std::fs::symlink_metadata(&dest).is_ok_and(|m| m.is_dir())
-                    && digest(&dest).is_ok_and(|got| got == item.digest)
+                    && self.verify_item(&dest, item)
             }) {
                 self.refresh_ready();
                 return Ok(());
@@ -560,7 +612,7 @@ impl Store {
         let mut state: Removed = small_file(&removed.join("state.json"))
             .and_then(|b| serde_json::from_slice(&b).ok())
             .ok_or("The removed tool has no valid state")?;
-        if state.commit != item.commit || !digest(&files).is_ok_and(|got| got == item.digest) {
+        if state.commit != item.commit || !self.verify_item(&files, item) {
             return Err("The removed tool does not match the catalog".into());
         }
         // The intent stays beside the files until both their move and the ledger save complete.
@@ -576,7 +628,7 @@ impl Store {
 
     /// Completes a journaled Undo before pruning can discard its moved, not-yet-ledgered copy.
     fn recover_restores(&self) -> Result<(), String> {
-        if [self.root.clone(), self.plugin(), self.skills(), self.servers(), self.disabled(), self.removed()]
+        if [self.root.clone(), self.plugin(), self.skills(), self.servers(), self.root.join("plugins"), self.disabled(), self.removed()]
             .iter()
             .any(|p| std::fs::symlink_metadata(p).is_ok_and(|m| !m.is_dir()))
         {
@@ -600,10 +652,7 @@ impl Store {
             let dest = if state.enabled { self.dir(item) } else { self.disabled().join(&item.id) };
             let pending = std::fs::symlink_metadata(&files).is_ok();
             let copy = if pending { &files } else { &dest };
-            if !std::fs::symlink_metadata(copy).is_ok_and(|m| m.is_dir())
-                || state.commit != item.commit
-                || !digest(copy).is_ok_and(|got| got == item.digest)
-            {
+            if !std::fs::symlink_metadata(copy).is_ok_and(|m| m.is_dir()) || state.commit != item.commit || !self.verify_item(copy, item) {
                 // Keep an invalid or obsolete interrupted copy quarantined, never in a launch root.
                 if !pending && std::fs::symlink_metadata(&dest).is_ok() {
                     retry_busy(|| std::fs::rename(&dest, &files)).map_err(|e| e.to_string())?;
@@ -718,15 +767,141 @@ fn portable_name(name: &str) -> bool {
         && !name.chars().any(|c| c.is_control() || matches!(c, '<' | '>' | ':' | '"' | '|' | '?' | '*' | '\\'))
 }
 
-/// A key of a skill's front matter that changes what the agent may do on its own: `allowed-tools` approves tools in the
-/// guarded modes and `hooks` runs commands. The catalog never takes a skill that sets one.
+/// Every line break a YAML reader honours (`\n`, `\r\n` and a bare `\r`) as `\n`, so a check sees the lines the CLI will.
+pub(crate) fn yaml_newlines(text: &str) -> String {
+    text.replace("\r\n", "\n").replace('\r', "\n")
+}
+
+/// What follows the opening line of a front matter, as Claude Code's reader (`^---\s*\n`) opens it: after a BOM, a first
+/// line of `---` plus any trailing white space, with `\n`, `\r\n` and a bare `\r` as line breaks. Faber opens on every text
+/// that reader opens on (Rust's white space plus the BOM covers JavaScript's `\s`), so no check skips a block the CLI reads.
+pub(crate) fn front_matter(text: &str) -> Option<String> {
+    let text = yaml_newlines(text.trim_start_matches('\u{feff}'));
+    let (first, rest) = text.split_once('\n')?;
+    (first.trim_end_matches(|c: char| c.is_whitespace() || c == '\u{feff}') == "---").then(|| rest.to_owned())
+}
+
+/// Reads one front-matter line (line breaks already normalized): `Ok(true)` when it closes the block as Claude Code's reader
+/// does (`^---[ \t]*$`). Any other line that begins with white space and `---`, or holds a control character other than a
+/// tab or a line separator (U+2028, U+2029 and U+0085 included), is refused: another reader could close or split there.
+pub(crate) fn front_line(line: &str) -> Result<bool, String> {
+    if line.chars().any(|c| (c.is_control() && c != '\t') || matches!(c, '\u{2028}' | '\u{2029}')) {
+        return Err("has front matter with a control or line separator character".into());
+    }
+    if line.strip_prefix("---").is_some_and(|rest| rest.trim_matches([' ', '\t']).is_empty()) {
+        return Ok(true);
+    }
+    if line.trim_start().starts_with("---") {
+        return Err("has a front matter line that only looks like its end".into());
+    }
+    Ok(false)
+}
+
+/// A key of a plugin file's front matter that changes what the agent may do on its own: `allowed-tools` approves tools in
+/// the guarded modes and `hooks` runs commands. This is a plain scan for the plugin path, whose parts also pass the
+/// allowlist of `plugins::prompt`; a standalone catalog skill goes through `standalone_skill` instead.
 fn widening_key(skill: &str) -> Option<&'static str> {
-    let front = skill.replace("\r\n", "\n");
-    let front = front.strip_prefix("---\n")?.split("\n---").next()?.to_string();
-    // Only top-level keys count: an indented line belongs to the value above it. A quoted key is the same key.
+    let front = front_matter(skill)?;
+    let front = front.split("\n---").next()?.to_string();
+    // Only top-level keys count: an indented line below a key is a value. A quoted key is the same key.
     let keys = front.lines().filter(|l| !l.starts_with([' ', '\t'])).filter_map(|l| l.split(':').next());
     let keys = keys.map(|k| k.trim().trim_matches(['"', '\'']).to_ascii_lowercase()).collect::<Vec<_>>();
     ["allowed-tools", "hooks"].into_iter().find(|w| keys.iter().any(|k| k == w))
+}
+
+/// The keys a standalone catalog skill may set. Each only describes the skill or limits how it starts; `allowed-tools`,
+/// `hooks`, `model`, `context`, `agent`, `shell` and every other key that changes what the agent may do are absent.
+const SKILL_KEYS: [&str; 8] =
+    ["name", "description", "license", "metadata", "version", "compatibility", "disable-model-invocation", "argument-hint"];
+
+/// What an indented line below a key may be.
+#[derive(Clone, Copy, PartialEq)]
+enum Below {
+    Nothing,
+    /// A `description: |` or `>` block: any text.
+    Block,
+    /// A plain `description` that goes on over several lines.
+    Plain,
+    /// `metadata:` with no value on its line: a map of anything, which cannot add a top-level key.
+    Map,
+}
+
+/// Admits a standalone catalog skill only when its front matter is the simple form and says nothing that widens what the
+/// agent may do (an allowlist, so a YAML shape this does not read is refused rather than missed). The simple form:
+/// unindented `key: value` lines whose key is plain or simply quoted and listed in `SKILL_KEYS`, each once; a value that is
+/// a plain or closed quoted scalar (never a flow map or list, tag, anchor, alias, directive or explicit key); a
+/// `description` block scalar or plain continuation; and a `metadata:` map. Indentation is spaces. The body is not
+/// checked: three shipped skills quote `!`, `@/` or shell lines in their documentation, which a body check would refuse.
+fn standalone_skill(skill: &str) -> Result<(), String> {
+    if let Some(front) = front_matter(skill) {
+        let mut keys: Vec<&str> = Vec::new();
+        let (mut below, mut floor, mut closed) = (Below::Nothing, None::<usize>, false);
+        for line in front.lines() {
+            if front_line(line)? {
+                closed = true;
+                break;
+            }
+            if line.trim().is_empty() {
+                continue;
+            }
+            if line.starts_with(' ') {
+                let text = line.trim_start_matches(' ');
+                let indent = line.len() - text.len();
+                if text.starts_with('\t') || below == Below::Nothing || floor.is_some_and(|floor| indent < floor) {
+                    return Err("has front matter below a value that is not the simple form".into());
+                }
+                floor.get_or_insert(indent);
+                let goes_on = text.contains(": ") || text.ends_with(':') || text.contains(" #") || text.starts_with('#');
+                if below == Below::Plain && goes_on {
+                    return Err("has a description line that is not the simple form".into());
+                }
+                continue;
+            }
+            if line.starts_with('#') {
+                continue;
+            }
+            let simple = |key: &str| {
+                key.starts_with(|c: char| c.is_ascii_alphanumeric() || c == '_')
+                    && key.chars().all(|c| c.is_ascii_alphanumeric() || matches!(c, '_' | '-' | '.'))
+            };
+            let (raw, value) = line.split_once(':').ok_or("has a front matter line that is not `key: value`")?;
+            let raw = raw.trim_end_matches([' ', '\t']);
+            let key = match raw.chars().next() {
+                Some(quote @ ('"' | '\'')) => raw.strip_prefix(quote).and_then(|r| r.strip_suffix(quote)).unwrap_or(""),
+                _ => raw,
+            };
+            if !simple(key) || !(value.is_empty() || value.starts_with([' ', '\t'])) {
+                return Err("has a front matter key that is not the simple form".into());
+            }
+            if !SKILL_KEYS.contains(&key) {
+                return Err(format!("sets {key}, which would widen what the agent may do"));
+            }
+            if keys.contains(&key) {
+                return Err(format!("sets {key} twice"));
+            }
+            keys.push(key);
+            let value = value.trim();
+            let block = key == "description" && matches!(value, ">" | ">-" | ">+" | "|" | "|-" | "|+");
+            let quoted = value.starts_with(['"', '\'']);
+            if !block && value.starts_with(['{', '[', '!', '&', '*', '|', '>', '%', '@', '`', '?', '#']) {
+                return Err(format!("has a {key} value that is not a plain or quoted text"));
+            }
+            if quoted && !(value.len() > 1 && value.ends_with(&value[..1])) {
+                return Err(format!("has a {key} value that goes on over several lines"));
+            }
+            floor = None;
+            below = match key {
+                "description" if block => Below::Block,
+                "description" if !quoted => Below::Plain,
+                "metadata" if value.is_empty() => Below::Map,
+                _ => Below::Nothing,
+            };
+        }
+        if !closed {
+            return Err("has front matter that never closes".into());
+        }
+    }
+    Ok(())
 }
 
 /// A skill id names a folder: lowercase letters, digits and dashes only.
@@ -938,28 +1113,58 @@ impl<W: Write> Write for Capped<W> {
 
 /// Downloads `item`'s archive into the store's own temporary file and installs it. `loopback` replaces GitHub in tests.
 pub async fn install(store: &Store, item: &Item, loopback: Option<&str>) -> Result<(), String> {
+    if let Some(definition) = store.plugin_definition(&item.id) {
+        definition.validate()?;
+        if definition.item != *item {
+            return Err("The plugin source does not match the catalog".into());
+        }
+    }
     let loopback = match loopback {
         Some(raw) => Some(crate::install::loopback_origin(raw).ok_or("The test source is not a loopback address")?),
         None => None,
     };
     let loopback = loopback.as_deref();
     std::fs::create_dir_all(&store.root).map_err(|e| e.to_string())?;
-    let part = store.root.join(format!(".download-{}", uuid::Uuid::new_v4()));
-    let url = match loopback {
-        Some(origin) => item.archive_path(origin),
-        None => item.archive_url(),
-    };
-    let downloaded =
-        crate::install::download_with(&url, &part, loopback, crate::install::IDLE_TIMEOUT, |p| std::fs::File::create(p).map(Capped::new))
-            .await;
-    let result = match downloaded {
-        Ok(_) => {
-            let (store, item, part) = (store.clone(), item.clone(), part.clone());
-            tokio::task::spawn_blocking(move || store.install_from(&item, &part)).await.map_err(|e| e.to_string())?
+    let mut downloads = Vec::new();
+    let mut packages = BTreeMap::new();
+    let mut sources = vec![(None, item.clone())];
+    if let Some(definition) = store.plugin_definition(&item.id) {
+        sources.extend(definition.parts.iter().filter_map(|part| part.server.clone().map(|server| (Some(part.id.clone()), server))));
+    }
+    let mut result = Ok(());
+    for (id, source) in sources {
+        let part = store.root.join(format!(".download-{}", uuid::Uuid::new_v4()));
+        let url = match loopback {
+            Some(origin) => source.archive_path(origin),
+            None => source.archive_url(),
+        };
+        downloads.push(part.clone());
+        match crate::install::download_with(&url, &part, loopback, crate::install::IDLE_TIMEOUT, |path| {
+            std::fs::File::create(path).map(Capped::new)
+        })
+        .await
+        {
+            Ok(_) => {
+                if let Some(id) = id {
+                    packages.insert(id, part);
+                }
+            }
+            Err(error) => {
+                result = Err(error.to_string());
+                break;
+            }
         }
-        Err(e) => Err(e.to_string()),
-    };
-    let _ = std::fs::remove_file(&part);
+    }
+    if result.is_ok() {
+        let (store, item, first) = (store.clone(), item.clone(), downloads[0].clone());
+        result = tokio::task::spawn_blocking(move || store.install_sources(&item, &first, &packages))
+            .await
+            .map_err(|e| e.to_string())
+            .and_then(|installed| installed);
+    }
+    for path in downloads {
+        let _ = std::fs::remove_file(path);
+    }
     result
 }
 
@@ -1183,8 +1388,26 @@ mod tests {
         assert_eq!(
             widening_key("---\r\nname: a\r\ndescription: |\r\n  hooks: are mentioned\r\n---\r\n"),
             None,
-            "an indented line is a value"
+            "an indented line below a key is a value"
         );
+        assert_eq!(
+            widening_key("---\nname: a\rallowed-tools: Bash\n---\nbody"),
+            Some("allowed-tools"),
+            "a bare carriage return is a line break to a YAML reader"
+        );
+        assert_eq!(widening_key("---\rname: a\rhooks:\r  x: y\r---\r"), Some("hooks"));
+        // Claude Code opens on `---` plus trailing white space, and after a BOM: the check must read the same block.
+        for text in [
+            "--- \nname: a\nallowed-tools: Bash\n---\n",
+            "---\t\nname: a\nallowed-tools: Bash\n---\n",
+            "---  \r\nname: a\r\nallowed-tools: Bash\r\n---\r\n",
+            "--- \rname: a\rallowed-tools: Bash\r---\r",
+            "---\u{a0}\nname: a\nallowed-tools: Bash\n---\n",
+            "\u{feff}--- \t\r\nname: a\r\nallowed-tools: Bash\r\n---\r\n",
+        ] {
+            assert_eq!(widening_key(text), Some("allowed-tools"), "{text:?}");
+        }
+        assert_eq!(widening_key("---x\nallowed-tools: Bash\n---\n"), None, "the CLI does not open on this line either");
         let twice = archive(tmp.path(), &[("skills/tidy/SKILL.md", b"x"), ("skills/tidy/skill.md", b"y")]);
         assert!(store.install_from(&item(&expected()), &twice).unwrap_err().contains("case"));
         let granting = archive(tmp.path(), &[("skills/tidy/SKILL.md", b"---\nname: tidy\nallowed-tools: Bash\n---\n")]);
@@ -1195,6 +1418,82 @@ mod tests {
             digest(d.path()).unwrap()
         };
         assert!(store.install_from(&it, &granting).unwrap_err().contains("allowed-tools"));
+        // Indented keys hide from the plain scan (`widening_key`) but not from the allowlist the install runs.
+        let indented: &[u8] = b"---\n  name: tidy\n  allowed-tools: Bash\n---\n";
+        let hidden = archive(tmp.path(), &[("skills/tidy/SKILL.md", indented)]);
+        it.digest = {
+            let d = tempfile::tempdir().unwrap();
+            std::fs::write(d.path().join("SKILL.md"), indented).unwrap();
+            digest(d.path()).unwrap()
+        };
+        assert_eq!(widening_key(std::str::from_utf8(indented).unwrap()), None);
+        assert!(store.install_from(&it, &hidden).is_err());
+    }
+
+    #[test]
+    fn a_standalone_skill_is_admitted_only_in_the_simple_form() {
+        let simple = [
+            "---\nname: a\ndescription: Tidies a repo: fast.\n---\nbody @src/main.rs",
+            "---\nname: a\ndescription: >-\n  Folded text\n  with hooks: and allowed-tools: in it\n\n  more\nlicense: MIT\n---\n",
+            "---\r\nname: 'a'\r\n\"description\": \"Quoted.\"\r\nargument-hint: '[file]'\r\n---\r\n",
+            "---\nname: a\ndescription: plain text that\n  goes on here\nmetadata:\n  author: me\n  keywords:\n    - hooks\n    - x: y\n---\n",
+            "---\nname: a\n# a comment\n\ndescription: x\ndisable-model-invocation: true\nversion: 2.2.0\ncompatibility: any\n---\n",
+            "no front matter at all",
+        ];
+        for text in simple {
+            assert_eq!(standalone_skill(text), Ok(()), "{text:?}");
+        }
+        for key in ["allowed-tools", "hooks"] {
+            let refused = [
+                format!("---\nname: a\n{key}: Bash(*)\n---\n"),
+                format!("---\nname: a\n\"{key}\": Bash(*)\n---\n"),
+                format!("---\n  name: a\n  {key}: Bash(*)\n---\n"),
+                format!("---\n# note\n\n  name: a\n  {key}: Bash(*)\n---\n"),
+                format!("---\n\tname: a\n\t{key}: Bash(*)\n---\n"),
+                format!("---\n{{name: a, {key}: Bash(*)}}\n---\n"),
+                format!("---\nname: a\n\"{}\": Bash(*)\n---\n", key.replace('-', "\\x2d")),
+                format!("---\nname: a\n? {key}\n: Bash(*)\n---\n"),
+                format!("---\nname: a\n!!str {key}: Bash(*)\n---\n"),
+                format!("---\nname: a\n<<: {{{key}: Bash}}\n---\n"),
+                format!("---\nname: a\n<<:\n  {key}: Bash\n---\n"),
+                format!("---\nname: a\n&k {key}: Bash(*)\n---\n"),
+                format!("---\nname: a\nmetadata: {{x: 1}}\n{key}: Bash\n---\n"),
+                format!("---\nname: a\n{key}: Bash\n{key}: Bash\n---\n"),
+                format!("---\nname: a\ndescription: x\n  {key}: Bash\n---\n"),
+                format!("---\nname: a\nmetadata: text\n  {key}: Bash\n---\n"),
+                format!("---\nname: a\ndescription: |\n    text\n  {key}: Bash\n---\n"),
+                format!("---\nname: a\ndescription: \"open\n  {key}: Bash\"\n---\n"),
+                format!("---\rname: a\r{key}: Bash\r---\r"),
+            ];
+            for text in &refused {
+                assert!(standalone_skill(text).is_err(), "{text:?}");
+            }
+        }
+        for text in [
+            "---\nname: a\n---x\n",
+            "---\nname: a\n  ---\n",
+            "---\nname: a\n---\u{a0}\n",
+            "---\nname: a\ndescription: x\u{2028}allowed-tools: Bash\n---\n",
+            "---\nname: a\ndescription: x\u{2029}y\n---\n",
+            "---\nname: a\ndescription: x\u{85}y\n---\n",
+            "---\nname: a\ndescription: x\u{1b}y\n---\n",
+        ] {
+            assert!(standalone_skill(text).is_err(), "{text:?}");
+        }
+        assert_eq!(standalone_skill("---\nname: a\ndescription: x\n--- \t\r\nbody"), Ok(()));
+        for text in [
+            "---\nname: a\nmodel: opus\n---\n",
+            "---\nname: a\nuser-invocable: true\n---\n",
+            "---\nname: a\n---x\n",
+            "---\nname: a\n",
+            "---\nname: a\n-\n---\n",
+            "---\nname: a\n...\n---\n",
+            "---\nname: a\n%TAG ! x\n---\n",
+            "---\nname: a\ndescription: *alias\n---\n",
+            "---\nname: a\ndescription: !!str x\n---\n",
+        ] {
+            assert!(standalone_skill(text).is_err(), "{text:?}");
+        }
     }
 
     #[test]

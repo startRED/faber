@@ -1274,6 +1274,9 @@ async fn serve(
                     params["developerInstructions"] = format!("{words}\n\n{instructions}").into();
                 }
                 add_servers(&mut params, &delivery.servers);
+                for (key, value) in delivery.codex_agent_overrides() {
+                    params["config"][key] = value;
+                }
                 for name in &delivery.disabled_servers {
                     if let Some(server) = params["config"].get_mut(format!("mcp_servers.{name}")) {
                         server["enabled"] = false.into();
