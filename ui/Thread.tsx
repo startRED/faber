@@ -24,7 +24,7 @@ import { html, openLinks, pressImage } from './markdown.tsx';
 import { PieceReply } from './VisualPiece.tsx';
 import { VisualFiles } from './VisualAnswer.tsx';
 import type { VisualAnswer } from './api.ts';
-import { agentMeta, ChangedLines, openedAgent, SourceList, showAgent, tellAbout, ToolChip } from './AgentChat.tsx';
+import { agentMeta, ChangedLines, openedAgent, SourceList, showAgent, startMessage, tellAbout, ToolChip } from './AgentChat.tsx';
 import { untilReset } from './Sidebar.tsx';
 import { appsOf, AwayPage, awaySites, SiteCard, sitesOf, stepsOf } from './Site.tsx';
 import { Quote } from './Floating.tsx';
@@ -138,6 +138,13 @@ function hideStop(text: string, streaming: boolean): string {
 }
 
 // The picker names Claude models by alias ("opus"), so the full id of the next rung is matched to its entry.
+/** Look around: starts the box with the request, a blank line apart from a draft already there, and only once. */
+function lookAround() {
+  const ask = t('look.ask');
+  const draft = document.querySelector<HTMLTextAreaElement>('.composer textarea')?.value ?? '';
+  startMessage(draft.startsWith(ask) || !draft.trim() ? ask : `${ask}\n\n`);
+}
+
 function rung(nudge: NonNullable<Message['nudge']>, options: Option[]): Choice {
   const entry = options.find((o) => o.choice.vendor === nudge.vendor && (o.choice.model === nudge.model || o.choice.model === nudge.model.split('-')[1]));
   return { ...(entry?.choice ?? { vendor: nudge.vendor, model: nudge.model }), effort: nudge.effort };
@@ -576,6 +583,15 @@ function Answer(props: Shared & { m: Accessor<Message>; messages?: Message[]; pr
                 onClick={() => props.onBranch(props.prompt!.id, props.prompt!.text, rung(nudge, props.options))}
               >
                 {t('answer.nudge')}
+              </button>
+            )}
+          </Show>
+          {/* Look around (R369): a reply that fixed something offers to find the same mistake elsewhere. It only starts the box
+              with the request, as "Continue with a helper" does, and never shows beside a step up or a closing question. */}
+          <Show when={props.last && props.onReply && !m().nudge && m().look} keyed>
+            {(look) => (
+              <button type="button" class="nudge" title={fromEngine(look.reason)} onClick={lookAround}>
+                {t('answer.look')}
               </button>
             )}
           </Show>

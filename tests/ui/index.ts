@@ -49,6 +49,7 @@ import './mojibake.check.ts';
 import './motion.check.ts';
 import './appear.check.ts';
 import './nudge.check.ts';
+import './look.check.ts';
 import './notes.check.ts';
 import './opening.check.ts';
 import './palette.check.ts';

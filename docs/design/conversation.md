@@ -57,7 +57,8 @@ above an answer. The window widths, the sidebar and the running column are in [l
   by the quota card, never also in the header or the red note.
 - Under the answer, one line that never wraps, at a 760 px column or a 720 px window: four icon buttons from
   `ui/Glyphs.tsx` (copy, read aloud, retry, open in terminal, each with a tooltip and an accessible name), a short
-  "Retry stronger" when a step up is offered, then the time it was sent, how long it took and the cost in the faint data
+  "Retry stronger" when a step up is offered (or, on the newest answer after a fix, "Look around" in the same
+  style; never both), then the time it was sent, how long it took and the cost in the faint data
   style. The tokens and how long the cache stays warm are the cost's tooltip; the whole date is the time's. There is no
   model select under an answer: a retry (and the right-click Redo, which names the model) uses the composer's current
   choice. Edit and Retry keep earlier generated-file cards usable for Save, Show and previews, including when a Chat

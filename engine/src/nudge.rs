@@ -203,7 +203,7 @@ pub(crate) fn edited(tool: &ToolUse) -> Vec<&str> {
     }
 }
 
-fn is_source(path: &str) -> bool {
+pub(crate) fn is_source(path: &str) -> bool {
     path.rsplit_once('.').is_some_and(|(_, ext)| SOURCE.iter().any(|s| ext.eq_ignore_ascii_case(s)))
 }
 

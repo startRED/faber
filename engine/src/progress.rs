@@ -42,7 +42,9 @@ const WRAP_UP_DESCRIPTION: &str = "Closes a task with a quiet box at the end of 
 call, when the task the person asked for ends or stops. recap: 2 to 3 short sentences in the person's language and in everyday \
 words, saying what is now true, then what is not done or not verified; no next-steps list. ask: at most one short question, \
 only when the next move is the person's to make, with actions: one or two replies of 1 to 3 words, your recommendation first. \
-done: true when the person's whole request is finished and verified. Then end your turn without repeating the recap in text.";
+done: true when the person's whole request is finished and verified. When the task fixed a mistake, first look where the same \
+kind of mistake could also be (other callers, sibling code, copies of the same text); if you find it, name the places in the \
+recap and make fixing them your ask, and never fix them unasked. Then end your turn without repeating the recap in text.";
 
 fn plan_schema() -> Value {
     json!({
@@ -265,6 +267,17 @@ mod tests {
         let w = wrap_up(&json!({ "recap": "Done.", "ask": "Ship it?" })).unwrap();
         assert_eq!((w.ask, w.actions.len(), w.done), (None, 0, false), "a question with no button is no question");
         assert!(wrap_up(&json!({ "recap": " " })).is_err());
+    }
+
+    #[test]
+    fn the_closing_box_asks_about_the_same_mistake_elsewhere_only_after_a_fix() {
+        // Look around (R369): scoped to the close of a fix, never a rule for every turn, and never a fix unasked.
+        for words in ["When the task fixed a mistake", "same kind of mistake", "make fixing them your ask", "never fix them unasked"] {
+            assert!(WRAP_UP_DESCRIPTION.contains(words), "{words}");
+        }
+        let tuning = crate::model::Tuning::default();
+        let persona = crate::persona::persona(&crate::persona::PersonaInput { name: None, tuning: &tuning, research: None });
+        assert!(!persona.contains("same kind of mistake"), "the persona weighs on every turn of both areas");
     }
 
     #[test]

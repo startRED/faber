@@ -302,6 +302,9 @@ pub struct Message {
     /// The next rung, offered when the turn's own tools show it stopped early (see `nudge`).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub nudge: Option<crate::nudge::Nudge>,
+    /// A reply that went from red to green, marked for the offer to look for the same mistake elsewhere (see `look`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub look: Option<crate::look::Look>,
     /// The pull request this reply opened or pushed, followed until its checks pass or it closes (`crate::follow`).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub follow: Option<Follow>,
@@ -682,6 +685,7 @@ impl Message {
             rewind: None,
             recovery: None,
             nudge: None,
+            look: None,
             follow: None,
             wake: None,
             halt: None,

@@ -2211,6 +2211,7 @@ impl Core {
                         m.permissions = None;
                     }
                     m.nudge = nudge::of(m, area, &can_run);
+                    m.look = crate::look::of(m);
                 }
                 // A limit hit again after a move goes to recovery when keep going is on, which moves again (up to `MAX_MOVES`).
                 let unattended = self.convs.get(conv).is_some_and(|c| c.keep_going.is_some());
