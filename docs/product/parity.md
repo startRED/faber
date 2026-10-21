@@ -53,7 +53,7 @@ Size: S small, M medium, L large. Wave: 1 next, 2 after, 3 later or with its pha
 | F2 | Pin or star a conversation | claude.ai, Claude app | Archive only | Extends the conversation row's menu | S | 2 |
 | F3 | Move a chat into a project | claude.ai, ChatGPT | Planned for phase 2 | Already in the roadmap | M | 2 |
 | F4 | Export a conversation to a file (Markdown, HTML) | Claude Code `/export`, Codex, claude.ai | None | Right-click menu, the native save picker | S | 2 |
-| F5 | Pick up a session started in the terminal, and bring setup over from another tool (`/resume`, `/import`) | both CLIs | None | List the CLI's own sessions of the folder | M | 2 |
+| F5 | Pick up a session started in the terminal, and bring setup over from another tool (`/resume`, `/import`) | both CLIs | Done for Codex: the project home lists its terminal sessions of the folder; Claude Code has no list to ask | List the CLI's own sessions of the folder | M | 2 |
 | F6 | A temporary chat that leaves no history | ChatGPT | None | A Chat mode deleted on close | S | 3 |
 | F7 | Groups in the sidebar, two conversations side by side, pop a conversation out | Claude app, Codex app | One window, one conversation | Owner's call (R125: a second webview costs memory) | M | 3 |
 

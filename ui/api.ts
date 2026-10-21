@@ -284,6 +284,15 @@ export interface WorkCopy {
   branch: string;
 }
 
+/** A session the person started with a CLI in a terminal, as that CLI lists it (parity F5). */
+export interface CliSession {
+  vendor: Vendor;
+  id: string;
+  title: string;
+  model?: string;
+  updatedAt: number;
+}
+
 export interface Project {
   id: string;
   name: string;
@@ -707,6 +716,8 @@ export const api = {
   open: (id: string) => invoke<Conversation | null>('open', { id }),
   send: (req: SendRequest) => invoke<string>('send', { req }),
   branch: (req: { conversationId: string; messageId: string; text: string; choice: Choice }) => invoke<string>('branch', { req }),
+  cliSessions: (projectId: string) => invoke<CliSession[]>('cli_sessions', { projectId }),
+  pickUp: (projectId: string, session: CliSession) => invoke<string>('pick_up', { projectId, session }),
   branchHere: (conversationId: string, messageId: string) => invoke<string>('branch_here', { conversationId, messageId }),
   versions: (id: string) => invoke<Versions[]>('versions', { id }),
   visualAnswers: (id: string) => invoke<VisualAnswer[]>('visual_answers', { id }),

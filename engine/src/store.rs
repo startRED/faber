@@ -246,6 +246,18 @@ impl Store {
             .collect()
     }
 
+    /// The ids of conversations whose file mentions `text`, read without parsing.
+    pub fn mentioning(&self, text: &str) -> Vec<String> {
+        fs::read_dir(&self.conversations)
+            .into_iter()
+            .flatten()
+            .flatten()
+            .filter(|e| e.path().extension().is_some_and(|x| x == "json"))
+            .filter(|e| fs::read_to_string(e.path()).is_ok_and(|t| t.contains(text)))
+            .filter_map(|e| e.path().file_stem().map(|id| id.to_string_lossy().into_owned()))
+            .collect()
+    }
+
     pub fn get(&self, id: &str) -> Option<Conversation> {
         // Ids are UUIDs; anything else could point outside the folder.
         if !id.chars().all(|c| c.is_ascii_alphanumeric() || c == '-') {

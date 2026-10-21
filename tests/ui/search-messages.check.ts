@@ -213,14 +213,15 @@ check('search-messages: clicking a hit opens its old message, unfolds its run an
       const dispose = render(() => createComponent(App, { initial, inbox: { take: (listener) => { receive = listener; } } }), root);
       try {
         type(root, 'café');
-        await settle(240);
+        await until(() => root.querySelector('.message-hit'));
         const button = root.querySelector<HTMLButtonElement>('.message-hit');
         ok(button, `${area}: the existing search returns the message hit`);
         scrolled = undefined;
         button.click();
         await until(() => root.querySelector('[data-message-index="3"]') === document.activeElement);
         const target = root.querySelector<HTMLElement>('[data-message-index="3"]');
-        ok(target, 'an old message outside the latest page is mounted');
+        const mounted = [...root.querySelectorAll<HTMLElement>('[data-message-index]')].map((el) => el.dataset.messageIndex);
+        ok(target, `${area}, ${motion}: an old message outside the latest page is mounted (mounted: ${mounted.join(',') || 'none'}; screen: ${root.querySelector('.welcome, .thread')?.className ?? 'neither'}; error: ${root.querySelector('[role=alert]')?.textContent ?? 'none'})`);
         ok(target.textContent?.includes('mentions café'));
         ok(target.closest<HTMLDetailsElement>('.run-block')?.open, 'a hit folded into a run becomes visible');
         ok(target.classList.contains('search-focus'), 'the message gets a static outline');
@@ -249,22 +250,22 @@ check('search-messages: clicking a hit opens its old message, unfolds its run an
         textarea.value = 'Continue from here';
         textarea.dispatchEvent(new Event('input', { bubbles: true }));
         root.querySelector<HTMLButtonElement>('.composer button[type="submit"]')!.click();
-        await settle(60);
+        await until(() => root.querySelector('[data-message-index="101"]'));
         ok(root.querySelector('[data-message-index="101"]')?.textContent?.includes('The newest answer'), 'sending leaves the search page and shows the new answer');
         equal(root.querySelector('.search-focus'), null, 'sending clears the old search marker');
         equal(root.querySelector('[data-message-index="3"]'), null, 'sending returns to the latest page without retaining the old history');
         api.searchMessages = async () => ({ ready: true, hits: [{ ...hit(area), messageIndex: 100, snippet: 'Continue from here', highlights: [{ start: 0, end: 8 }] }] });
         type(root, 'continue');
-        await settle(220);
+        await until(() => root.querySelector('.message-hit')?.textContent?.includes('Continue'));
         root.querySelector<HTMLButtonElement>('.message-hit')!.click();
-        await settle(60);
+        await until(() => root.querySelector('[data-message-index="100"].search-focus'));
         ok(root.querySelector('[data-message-index="100"].search-focus'), 'a hit in the person’s own words opens its message too');
         root.querySelector<HTMLButtonElement>('[data-message-index="100"] .edit')!.click();
         const edit = root.querySelector<HTMLTextAreaElement>('.you.editing textarea')!;
         edit.value = 'An unfinished edit';
         edit.dispatchEvent(new Event('input', { bubbles: true }));
         root.querySelector<HTMLButtonElement>('.message-hit')!.click();
-        await settle(60);
+        await until(() => root.querySelector('.you.editing.search-focus'));
         ok(root.querySelector('.you.editing.search-focus'), 'an open edit keeps its search anchor');
         equal(root.querySelector<HTMLTextAreaElement>('.you.editing textarea')!.value, 'An unfinished edit', 'searching never loses an unsent edit');
         root.querySelector<HTMLButtonElement>('.you.editing .actions button[type="button"]')!.click();
@@ -275,11 +276,10 @@ check('search-messages: clicking a hit opens its old message, unfolds its run an
         conversation.messages = conversation.messages.slice(0, 6);
         api.searchMessages = async () => ({ ready: true, hits: [hit(area)] });
         type(root, 'café');
-        await settle(220);
+        await until(() => root.querySelector('.message-hit'));
         root.querySelector<HTMLButtonElement>('.message-hit')!.click();
-        await settle(60);
-        // The reveal is consumed on the next frame, which a hidden window may hold back past the wait above.
-        await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+        // The reveal is consumed on a later frame, which a hidden window may hold back.
+        await until(() => root.querySelector('[data-message-index="3"]')?.closest<HTMLDetailsElement>('.run-block')?.open);
         const revealed = root.querySelector('[data-message-index="3"]')?.closest<HTMLDetailsElement>('.run-block');
         ok(revealed?.open, 'search reveals the earlier answer in the active run');
         const activeThread = root.querySelector<HTMLElement>('.thread')!;
@@ -299,7 +299,7 @@ check('search-messages: clicking a hit opens its old message, unfolds its run an
         equal(root.querySelectorAll('.run-block').length, 1, 'the mounted run includes all automatic replies');
         equal(regrouped.open, false, 'the mounted run stays folded after its search navigation was consumed');
         root.querySelector<HTMLButtonElement>('.message-hit')!.click();
-        await settle(60);
+        await until(() => root.querySelector('[data-message-index="3"]')?.closest<HTMLDetailsElement>('.run-block')?.open);
         ok(root.querySelector('[data-message-index="3"]')?.closest<HTMLDetailsElement>('.run-block')?.open, 'a fresh search navigation reveals the regrouped answer again');
       } finally { dispose(); root.remove(); }
     }

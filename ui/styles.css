@@ -218,6 +218,10 @@ input, textarea { caret-color: var(--accent); }
 .rrow .t { font-weight: 500; font-size: var(--fs-ui); overflow-wrap: anywhere; }
 .rrow .s { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; font-size: var(--fs-sm); color: var(--ink-2); }
 .rrow.ask .t { color: var(--amber-ink); }
+.resume.terminal:has(> .from-terminal) { margin-top: 20px; }
+.from-terminal { display: inline-flex; align-items: center; gap: 6px; min-height: var(--h-sm); font-size: var(--fs-sm); color: var(--ink-2); transition: color var(--dur-fast) var(--ease); }
+.from-terminal:hover { color: var(--ink); }
+.resume.terminal > .s { margin: 0; padding: calc(12px * var(--dens)) 0; font-size: var(--fs-sm); color: var(--ink-2); }
 
 /* The meaning marks. Colour, shape and word go together: a square for Claude, a diamond for Codex, a plain dot while Auto
    is still choosing. Amber is always a speech bubble with the words "needs you". */

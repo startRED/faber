@@ -281,6 +281,28 @@ async fn r_next_with_separate_copies_off_a_new_conversation_works_in_the_project
     s.engine.shutdown();
 }
 
+/// Parity F5: a session picked up from a terminal goes on in the folder it ran in, even while the project keeps copies.
+#[tokio::test]
+async fn a_session_picked_up_from_a_terminal_works_in_the_project_folder() {
+    let s = setup();
+    let session = faber_engine::model::CliSession {
+        vendor: Vendor::Claude,
+        id: "terminal-1".into(),
+        title: "Look around".into(),
+        model: None,
+        updated_at: 1,
+    };
+    let id = s.engine.pick_up(&s.project, session).unwrap();
+    s.engine.send(SendRequest { conversation_id: Some(id.clone()), ..ask(&s.project, "Go on") }).unwrap();
+    assert!(s.engine.open(&id).unwrap().copy.is_none());
+    agent_started(&s.cwds, 1).await;
+    // No copy is made: only the file lists the turn reads before it starts.
+    assert!(s.git.lock().unwrap().calls.iter().all(|args| args.first().is_some_and(|a| a == "ls-files")), "no copy");
+    let cwd = s.cwds.lock().unwrap()[0].clone();
+    assert_eq!(cwd.canonicalize().unwrap(), s.folder.path().canonicalize().unwrap());
+    s.engine.shutdown();
+}
+
 #[tokio::test]
 async fn r_next_a_copy_with_unsaved_work_is_deleted_only_when_the_person_says_so() {
     let s = setup();

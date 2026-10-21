@@ -3,7 +3,7 @@
 
 use crate::claude::EventSink;
 use crate::events::{Delivery, EngineEvent, Session, SessionCommand, UserTurn};
-use crate::model::{Area, Permissions, ReasoningSummary, ReplyStyle, Tuning, WebSearch};
+use crate::model::{Area, CliSession, Permissions, ReasoningSummary, ReplyStyle, Tuning, Vendor, WebSearch};
 use crate::persona::{PersonaInput, persona};
 use crate::proc::{self, Spawner};
 use crate::signals::{codex_account, codex_signals};
@@ -2077,6 +2077,51 @@ pub async fn read_codex_limits(bin: &str, cwd: &Path, windows: bool, spawn: Spaw
     let _ = tokio::time::timeout(timeout, ask).await;
     proc::stop(&mut *stdin, &mut child, &mut job).await;
     events
+}
+
+/// Asks a short-lived `codex app-server` for the sessions started in a terminal in `folder`, newest first. Faber's own
+/// sessions come from the app server and are left out. Gives an empty list on any failure.
+pub async fn list_codex_threads(bin: &str, folder: &Path, windows: bool, spawn: Spawner, timeout: Duration) -> Vec<CliSession> {
+    let Ok(p) = spawn(bin, &codex_args(Area::Chat, windows, false, Permissions::Isolated), folder) else { return vec![] };
+    let mut stdin = p.stdin;
+    let mut child = p.child;
+    let mut job = p.contained;
+    let mut lines = BufReader::new(p.stdout).lines();
+    let ask = async {
+        let init = json!({ "id": 1, "method": "initialize", "params": { "clientInfo": { "name": "faber", "title": "Faber", "version": "0.0.0" } } });
+        let _ = proc::write_line(&mut *stdin, &init).await;
+        while let Ok(Some(line)) = lines.next_line().await {
+            let Ok(msg) = serde_json::from_str::<Value>(&line) else { continue };
+            if msg["id"] == 1 {
+                let _ = proc::write_line(&mut *stdin, &json!({ "method": "initialized" })).await;
+                let params = json!({ "cwd": folder.to_string_lossy(), "limit": 30, "sourceKinds": ["cli"] });
+                let _ = proc::write_line(&mut *stdin, &json!({ "id": 2, "method": "thread/list", "params": params })).await;
+            } else if msg["id"] == 2 {
+                return msg["result"]["data"]
+                    .as_array()
+                    .into_iter()
+                    .flatten()
+                    .filter(|t| t["ephemeral"] != true && t["id"].is_string())
+                    .map(|t| CliSession {
+                        vendor: Vendor::Codex,
+                        id: s(&t["id"]),
+                        title: [&t["name"], &t["preview"]]
+                            .into_iter()
+                            .filter_map(|v| v.as_str())
+                            .map(|v| v.split_whitespace().collect::<Vec<_>>().join(" "))
+                            .find(|v| !v.is_empty())
+                            .unwrap_or_default(),
+                        model: t["model"].as_str().map(String::from),
+                        updated_at: t["updatedAt"].as_u64().unwrap_or(0) * 1000,
+                    })
+                    .collect();
+            }
+        }
+        vec![]
+    };
+    let threads = tokio::time::timeout(timeout, ask).await.unwrap_or_default();
+    proc::stop(&mut *stdin, &mut child, &mut job).await;
+    threads
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize)]

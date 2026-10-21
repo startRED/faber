@@ -47,6 +47,7 @@ mod helpers;
 mod install_gate;
 mod keep_going;
 mod parked;
+mod pick_up;
 mod plan;
 mod pr_watch;
 mod quota_watch;
@@ -826,6 +827,10 @@ impl Engine {
                 c.stop_waiting(id);
             }
         })
+    }
+    /// Opens a session started in a terminal as a project conversation (parity F5). Gives the conversation's id.
+    pub fn pick_up(&self, project_id: &str, session: crate::model::CliSession) -> Result<String, String> {
+        self.with(|c| c.pick_up(project_id, session))
     }
     pub fn rename(&self, id: &str, title: &str) {
         self.with(|c| c.rename(id, title))
@@ -3255,6 +3260,7 @@ impl Core {
         if self.installing {
             return Err("error.update.activeOperations".into());
         }
+        let req = self.own_cli(req);
         let fallback = pick_model(&req.choice, &self.vendors(), self.codex_recommended.as_deref()).ok_or("error.noSubscription")?;
         let existing = req.conversation_id.as_deref().and_then(|id| self.load(id).map(|c| c.id.clone()));
         if existing.as_ref().is_some_and(|id| self.rewind_blocked(id)) {
