@@ -1592,6 +1592,8 @@ export const ptBR: Messages = {
   // Native speaker must translate (needs native review).
   'reason.budget.other': 'O Faber está esperando sua cota permitir o próximo passo.',
   'reason.other': 'O Faber parou aqui por um motivo que ainda não sabe descrever. Os detalhes estão no log.',
+  'reason.silent': "Esta resposta ficou 15 minutos em silêncio, então o Faber a parou. O que ela escreveu até aqui foi mantido; envie uma mensagem para continuar.",
+  'reason.silent.unconfirmed': "Esta resposta ficou 15 minutos em silêncio. O Faber tentou pará-la, mas não confirmou que ela parou. Espere e confira de novo.",
   // Native speaker must translate (needs native review).
   // Native speaker must translate (needs native review).
   // Native speaker must translate (needs native review).
@@ -1875,6 +1877,7 @@ export const ptBR: Messages = {
   'notes.171.better': 'Olhar em volta agora também aparece quando uma correção deixa as mesmas palavras em outros arquivos, e diz em quantos lugares.',
   'notes.172.new': 'Detalhes técnicos lista os ajudantes e o trabalho em segundo plano que ainda rodam, cada um com seu estado, e os números de pull request conhecidos mostram o último estado.',
   'notes.173.fixed': 'Com o Auto, uma conversa nova de projeto mostra o seu branch no topo assim que você envia, como já fazia com um modelo escolhido.',
+  'notes.174.fixed': 'Uma resposta que trava por 15 minutos agora termina com um aviso, e o que ela escreveu fica. Suas outras conversas continuam.',
   'update.checking': 'Procurando atualização…',
   'update.downloading': 'Baixando atualização…',
   'update.downloadingPercent': 'Baixando atualização… {percent}%',

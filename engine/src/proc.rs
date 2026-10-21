@@ -794,6 +794,19 @@ mod tests {
         assert!(contained.is_none(), "release the job only after its members are confirmed gone");
     }
 
+    /// Rule 5 of models.md: stopping ends the whole owned tree (a job on Windows, the process group elsewhere, both behind
+    /// `Containment`), not the CLI alone, and is confirmed only once no member is left.
+    #[tokio::test]
+    async fn stopping_ends_the_whole_owned_tree_and_confirms_it_only_when_no_member_is_left() {
+        let ended = Arc::new(AtomicBool::new(false));
+        let (ends, asks) = (ended.clone(), ended.clone());
+        let mut contained =
+            Some(Containment::scripted(move || Ok(asks.load(Ordering::SeqCst)), move || ends.store(true, Ordering::SeqCst)));
+        assert!(stop(&mut tokio::io::sink(), &mut None, &mut contained).await);
+        assert!(ended.load(Ordering::SeqCst), "the members were ended");
+        assert!(contained.is_none());
+    }
+
     #[tokio::test]
     async fn rewind_an_unknown_tree_query_keeps_ownership_for_a_retry() {
         let unknown = Arc::new(AtomicBool::new(true));

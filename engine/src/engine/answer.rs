@@ -353,7 +353,7 @@ impl Core {
 }
 
 #[cfg(test)]
-mod tests {
+pub(super) mod tests {
     use super::*;
     use crate::cli::Cli;
     use crate::events::SessionCommand;
@@ -395,7 +395,7 @@ mod tests {
         Stub { session, asked, held }
     }
 
-    fn engine(dir: &Path) -> (Engine, Arc<Mutex<Vec<AppEvent>>>) {
+    pub(in crate::engine) fn engine(dir: &Path) -> (Engine, Arc<Mutex<Vec<AppEvent>>>) {
         let events = Arc::new(Mutex::new(Vec::new()));
         let sink = events.clone();
         let opts = EngineOptions {
@@ -414,7 +414,7 @@ mod tests {
 
     /// A chat whose replies are `turns`, each a message id with the (request id, tool) pairs it waits on. The last is
     /// the turn in flight, on a live `session`.
-    fn seed(engine: &Engine, session: Session, turns: &[(&str, &[(&str, &str)])]) -> String {
+    pub(in crate::engine) fn seed(engine: &Engine, session: Session, turns: &[(&str, &[(&str, &str)])]) -> String {
         engine.with(|c| {
             let id = c.blank(Area::Chat, None);
             let revision = c.store.settings().permissions_revision;

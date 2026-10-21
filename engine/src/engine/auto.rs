@@ -14,6 +14,10 @@ pub(super) const ROUTE_BUDGET: Duration = Duration::from_secs(30);
 /// The router itself gives up at the same point, drafts included.
 const ASK_LIMIT: Duration = ROUTE_BUDGET;
 
+/// How many times the draft of one message is routed while the person types it. The route of the sent message is never
+/// counted: it is asked for when the message leaves, or its draft's answer is reused.
+const DRAFT_ROUTES: u8 = 2;
+
 /// A route for a request, ready or on its way.
 pub(super) struct Guess {
     request: String,
@@ -130,10 +134,22 @@ impl Core {
         let id = self.draft_for(&req);
         let Some(route) = self.next_route(&id) else { return };
         let only = route.map(|p| p.vendor);
+        // A new route for the draft, other than the pending one this replaces, spends one of the message's routes.
+        let replaces = self.next_draft.as_ref().is_some_and(|d| d.warm == id);
+        let spent = self.draft_routes.get(&id).copied().unwrap_or(0);
         match &self.guess {
             Some(g) if g.request == text && g.only == only => {}
-            Some(g) if g.result.is_none() => self.next_draft = Some(Draft { request: text, warm: id, only }),
-            _ => self.start_guess(text, 0, Some(id), only),
+            _ if spent >= DRAFT_ROUTES && !replaces => {}
+            Some(g) if g.result.is_none() => {
+                self.next_draft = Some(Draft { request: text, warm: id.clone(), only });
+                if !replaces {
+                    self.draft_routes.insert(id, spent + 1);
+                }
+            }
+            _ => {
+                self.draft_routes.insert(id.clone(), spent + 1);
+                self.start_guess(text, 0, Some(id), only);
+            }
         }
     }
 
@@ -483,6 +499,55 @@ mod tests {
                 assert!(core.live.is_empty(), "a guessed draft route waits for its baseline in either area");
             }
         });
+        engine.shutdown();
+    }
+
+    // Rule 3: the live process keeps what it was asked for, the account default included; the name the CLI reports never counts.
+    #[tokio::test]
+    async fn auto_keeps_the_model_the_live_process_was_asked_for_even_when_that_is_the_default() {
+        let dir = tempfile::tempdir().unwrap();
+        let (engine, _) = super::super::answer::tests::engine(dir.path());
+        let id = super::super::answer::tests::seed(&engine, Session::from_fn(|_| {}), &[("t1", &[])]);
+        engine.with(|c| {
+            let m = c.convs.get_mut(&id).unwrap().messages.last_mut().unwrap();
+            (m.model, m.effort, m.status) = (Some("the-name-the-cli-reported".into()), Some("medium".into()), Some(Status::Done));
+            let before = same_as_before(&c.convs[&id], c.live.get(&id)).unwrap();
+            assert_eq!(before.model, None, "asked for the default: the next message asks for the default too");
+            c.live.get_mut(&id).unwrap().model = Some("asked".into());
+            assert_eq!(same_as_before(&c.convs[&id], c.live.get(&id)).unwrap().model.as_deref(), Some("asked"));
+            // No process (after a restart): the last reply's model is all there is.
+            assert_eq!(same_as_before(&c.convs[&id], None).unwrap().model.as_deref(), Some("the-name-the-cli-reported"));
+        });
+        engine.shutdown();
+    }
+
+    // A draft's route count starts again when Send is pressed, also when the message waits in the queue, and goes with a removed
+    // conversation.
+    #[tokio::test]
+    async fn the_draft_count_starts_again_when_a_message_is_sent_queued_or_not_and_goes_with_the_conversation() {
+        let dir = tempfile::tempdir().unwrap();
+        let (engine, _) = super::super::answer::tests::engine(dir.path());
+        let id = super::super::answer::tests::seed(&engine, Session::from_fn(|_| {}), &[("t1", &[])]);
+        engine.with(|c| {
+            c.opts.clis.insert(Vendor::Claude, crate::cli::Cli { command: "fake".into(), prefix: vec![] });
+            c.draft_routes.insert(id.clone(), 2)
+        });
+        let choice = crate::router::Choice { vendor: "claude".into(), model: None, effort: None };
+        let req = SendRequest {
+            conversation_id: Some(id.clone()),
+            area: Area::Chat,
+            project_id: None,
+            text: "next".into(),
+            images: vec![],
+            files: vec![],
+            choice,
+        };
+        engine.send(req).unwrap();
+        assert_eq!(engine.open(&id).unwrap().queued.len(), 1, "the reply is still running, so the message waits");
+        assert!(engine.with(|c| c.draft_routes.is_empty()), "pressing Send was enough");
+        engine.with(|c| c.draft_routes.insert(id.clone(), 1));
+        engine.remove(&id);
+        assert!(engine.with(|c| c.draft_routes.is_empty()), "nothing is kept for a removed conversation");
         engine.shutdown();
     }
 }

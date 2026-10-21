@@ -36,7 +36,8 @@ name. Auto aims to pick a model that does the task well, without waste and quick
 - Routing runs on the first message of a conversation, and on the next ones while only an easy model was needed (a
   greeting first). Those stay with their subscription, so the CLI keeps the history, and only move up. Once a message
   needed more, the conversation stays with that model. A sent message waits at most 30 s for its route; past it, the
-  turn starts with the everyday default. The answer shows the chosen model and the reason.
+  turn starts with the everyday default. The answer shows the chosen model and the reason. While the person types, the
+  draft is routed at most twice per message, and sending it starts the count again (done, `engine/src/engine/auto.rs`).
 - The router also says how the work can be checked: by a machine (a test, an exit code, a number to recount), at a
   glance, or blind (the person cannot tell a wrong answer from a right one). A blind medium request in code, math or
   research gets the hard bar, as math always did, because the model's own checking matters most where nobody else can
@@ -44,8 +45,7 @@ name. Auto aims to pick a model that does the task well, without waste and quick
 - An answer whose last check failed, or whose code changed with nothing checking it, offers one step up: the same
   model one effort higher, else the next model at medium. It runs as a new branch, so a conversation's model and effort
   never change (done, `engine/src/nudge.rs`).
-- **Still to build.** The table learns from what the user approves or redoes. The draft is routed at most twice per
-  message while the user types; today it is routed at every pause.
+- **Still to build.** The table learns from what the user approves or redoes.
 - **Quota pacing** (built; [spec](../superpowers/specs/2026-10-11-auto-quota-pacing-design.md)). Auto
   reads each window against its reset time, the weekday and the plan (detected at start and watched while open, on a
   shared account), and spends quota that would expire on quality: one rung up when a vendor has spare quota.
@@ -66,11 +66,17 @@ phase.
    in the middle of one without need.** The prompt cache is the biggest saving. A change of model always starts a new
    cache, and a change of tools or system prompt invalidates everything after it. A change of effort kept the Claude cache
    through `--resume` and cost Codex nothing measurable (13/10/2026, [quota-pacing.md](quota-pacing.md#cache-and-router-measured-on-13102026)). Facts that change travel as
-   text inside the next message, never as a system-prompt edit.
+   text inside the next message, never as a system-prompt edit. A change has need when the person made it (the model
+   picker, the permission mode, a setting), when Codex's catalog tool servers were revoked or changed, when a plan limit
+   moves the conversation to the other AI (rule 4's hand-over), or once when Auto met an easy request first (a greeting)
+   and the next one needed more; nothing else changes them
+   (`engine/tests/auto.rs`, `a_second_message_keeps_the_process_the_model_and_the_effort_of_the_first`).
 4. **Hand work to another model through a written summary or a diff, not the conversation.** Thinking blocks are tied to
    the model that wrote them.
 5. **Interrupt gracefully before killing, watch for silence, and kill the whole process tree on Windows.** The stop uses
-   the CLI's control-protocol interrupt, waits for the result, then kills the tree.
+   the CLI's control-protocol interrupt, waits for the result, then kills the tree (a job object on Windows, the process
+   group elsewhere). An answer whose CLI says nothing for 15 minutes, with no step running and no question waiting, is
+   stopped the same way and ends with `reason.silent` (`engine/src/engine/silence.rs`, R396).
 6. **Read the CLI's start-up capabilities, the result subtype and the terminal reason, and map them to `reason.*`
    keys.** Faber detects features from the `capabilities` list in `system/init`, never by comparing version strings, and never
    shows a raw reason string.
@@ -81,14 +87,12 @@ phase.
 9. **Keep each Haiku request under 100K tokens and each GPT-6 request under 272K.** Above those points the whole request
    is billed more.
 
-Rules 1, 8 and 9 hold today. The engine that already drives the CLIs has known legacy exceptions to the others. They are
+Rules 1, 3, 5, 8 and 9 hold today (rule 5's silence watch covers an answer; a tool step it reports as running, a helper's own process and a quick question are not watched). The engine that already drives the CLIs has known legacy exceptions to the others. They are
 known defects of the old code, no new code may add to them, and each phase closes some:
 
 | Rule | What the engine does today | Closed in |
 | :--- | :--- | :--- |
 | 2 | A session may start on the account's default model or effort (Chat passes `--permission-mode` for each permission choice; Projects has no direct sessions, and mission roles run isolated) | Phase 2 |
-| 3 | Auto's move up changes the model inside a conversation | Phase 2 (check the hand-over) |
 | 4 | There is no lead agent yet, so there is no hand-over | Phase 3 |
-| 5 | Interrupt waits 5 s for the CLI to stop (`engine/src/proc.rs`), and only mission roles are watched for 2 min of silence; a Chat answer that goes silent is not, and off Windows stopping ends the CLI alone, not its tree (on Windows its job object ends the whole tree) | Phase 2 |
 | 6 | `terminal_reason` or `subtype` is passed on as a raw string, and `capabilities` from `system/init` is not read | Phase 2 |
 | 7 | The engine keeps no running budget | Phase 3 |

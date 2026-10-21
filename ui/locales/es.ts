@@ -1595,6 +1595,8 @@ export const es: Messages = {
   // Native speaker must translate (needs native review).
   'reason.budget.other': 'Faber está esperando a que tu cuota permita el siguiente paso.',
   'reason.other': 'Faber se detuvo aquí por un motivo que todavía no sabe describir. Los detalles están en el registro.',
+  'reason.silent': "Esta respuesta se quedó en silencio 15 minutos, así que Faber la detuvo. Lo que escribió hasta ahora se conserva; envía un mensaje para seguir.",
+  'reason.silent.unconfirmed': "Esta respuesta se quedó en silencio 15 minutos. Faber intentó detenerla, pero no ha confirmado que se detuvo. Espera y vuelve a comprobar.",
   // Native speaker must translate (needs native review).
   // Native speaker must translate (needs native review).
   // Native speaker must translate (needs native review).
@@ -1888,6 +1890,7 @@ export const es: Messages = {
   'notes.171.better': 'Mirar alrededor ahora también aparece cuando una corrección deja las mismas palabras en otros archivos, y dice en cuántos sitios.',
   'notes.172.new': 'Detalles técnicos muestra los ayudantes y el trabajo en segundo plano que siguen en curso, cada uno con su estado, y los números de pull request conocidos indican su último estado.',
   'notes.173.fixed': 'Con Auto, una conversación nueva de proyecto muestra su rama arriba en cuanto envías, igual que con un modelo elegido.',
+  'notes.174.fixed': 'Una respuesta que se cuelga durante 15 minutos ahora se detiene con un aviso, y lo que escribió se conserva. Tus otras conversaciones siguen.',
   'update.checking': 'Buscando una actualización…',
   'update.downloading': 'Descargando actualización…',
   'update.downloadingPercent': 'Descargando actualización… {percent} %',

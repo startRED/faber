@@ -1595,6 +1595,8 @@ export const fr: Messages = {
   // Native speaker must translate (needs native review).
   'reason.budget.other': 'Faber attend que votre quota permette l’étape suivante.',
   'reason.other': 'Faber s’est arrêté ici pour une raison qu’il ne sait pas encore décrire. Les détails sont dans le journal.',
+  'reason.silent': "Cette réponse est restée muette pendant 15 minutes, alors Faber l’a arrêtée. Ce qu’elle avait écrit est conservé ; envoyez un message pour continuer.",
+  'reason.silent.unconfirmed': "Cette réponse est restée muette pendant 15 minutes. Faber a essayé de l’arrêter, mais n’a pas confirmé qu’elle s’est arrêtée. Patientez et vérifiez de nouveau.",
   // Native speaker must translate (needs native review).
   // Native speaker must translate (needs native review).
   // Native speaker must translate (needs native review).
@@ -1888,6 +1890,7 @@ export const fr: Messages = {
   'notes.171.better': 'Regarder ailleurs apparaît aussi quand une correction laisse les mêmes mots dans d’autres fichiers, et indique à combien d’endroits.',
   'notes.172.new': 'Détails techniques liste les aides et les tâches d’arrière-plan encore en cours, chacune avec son état, et les numéros de pull request connus affichent leur dernier état.',
   'notes.173.fixed': "Avec Auto, une nouvelle conversation de projet affiche sa branche en haut dès l'envoi, comme avec un modèle choisi.",
+  'notes.174.fixed': 'Une réponse qui reste bloquée 15 minutes s’arrête maintenant avec un message, et ce qu’elle a écrit est conservé. Vos autres conversations continuent.',
   'update.checking': 'Recherche d’une mise à jour…',
   'update.downloading': 'Téléchargement de la mise à jour…',
   'update.downloadingPercent': 'Téléchargement de la mise à jour… {percent} %',

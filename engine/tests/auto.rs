@@ -283,3 +283,72 @@ async fn r121_the_codex_router_starts_its_own_isolated_process_while_conversatio
     assert_ne!(args[0], args[1]);
     engine.shutdown();
 }
+
+/// Task 3 of the model rules: a draft is routed at most twice while the person types it, and sending starts the count again.
+#[tokio::test]
+async fn a_draft_is_routed_at_most_twice_while_typing_and_sending_starts_the_count_again() {
+    let dir = tempfile::tempdir().unwrap();
+    let calls = Calls::default();
+    let (engine, mut rx) = engine(dir.path(), Vendor::Codex, fake(fixture("codex", "chat")).spawn, router("chat", "easy", calls.clone()));
+    let typing = |id: Option<&str>| WarmRequest {
+        conversation_id: id.map(String::from),
+        area: Area::Chat,
+        project_id: None,
+        choice: Choice { vendor: "auto".into(), model: None, effort: None },
+    };
+    // Four pauses in the same message, each with other words: the router hears the first two only.
+    for words in ["Why", "Why is the", "Why is the sky", "Why is the sky blue at noon"] {
+        engine.route_draft(typing(None), words.into());
+        tokio::time::sleep(Duration::from_millis(100)).await;
+    }
+    assert_eq!(calls.lock().unwrap().len(), 2, "two routes for one message while typing");
+    let id = engine.send(auto(SKY)).unwrap();
+    finished(&mut rx).await;
+    let sent = calls.lock().unwrap().len();
+    // The next message of the same conversation (still easy) is a new message: two more routes.
+    for words in ["And", "And at", "And at sunset", "And at sunset, then"] {
+        engine.route_draft(typing(Some(&id)), words.into());
+        tokio::time::sleep(Duration::from_millis(100)).await;
+    }
+    engine.shutdown();
+    assert_eq!(calls.lock().unwrap().len() - sent, 2, "sending reset the count");
+}
+
+/// Rule 3 of models.md: with nothing asked for, a conversation keeps its process, model and effort from one message to the next.
+#[tokio::test]
+async fn a_second_message_keeps_the_process_the_model_and_the_effort_of_the_first() {
+    let dir = tempfile::tempdir().unwrap();
+    let calls = Calls::default();
+    let f = fake(support::claude_two_turns("req"));
+    let (engine, _rx) = engine(dir.path(), Vendor::Claude, f.spawn.clone(), router("code", "medium", calls.clone()));
+    // Each turn of the recording asks to write a file: answer it, then wait for the reply to end.
+    let turn = |engine: &Engine, id: String, reply: usize| {
+        let engine = engine.clone();
+        async move {
+            for _ in 0..250 {
+                if let Some(m) = engine.open(&id).and_then(|c| c.messages.get(reply).cloned()) {
+                    if let Some(p) = m.permissions.as_ref().and_then(|p| p.first()) {
+                        let _ = engine.answer(&id, &m.id, &p.request_id, true, false).await;
+                    }
+                    if m.status == Some(Status::Done) {
+                        return m;
+                    }
+                }
+                tokio::time::sleep(Duration::from_millis(20)).await;
+            }
+            engine.open(&id).unwrap().messages[reply].clone()
+        }
+    };
+    let id = engine.send(auto("first")).unwrap();
+    let one = turn(&engine, id.clone(), 1).await;
+    engine.send(SendRequest { conversation_id: Some(id.clone()), ..auto("second") }).unwrap();
+    let two = turn(&engine, id.clone(), 3).await;
+    assert_eq!(f.mismatches.lock().unwrap().clone(), Vec::<String>::new(), "args {:?}", f.args.lock().unwrap());
+    assert_eq!(two.status, Some(Status::Done), "args {:?}", f.args.lock().unwrap());
+    engine.shutdown();
+    let launches = f.args.lock().unwrap().clone();
+    assert_eq!(launches.len(), 1, "one process served both messages: nothing was started again, so no flag changed");
+    assert_eq!(calls.lock().unwrap().len(), 1, "only the first message was routed");
+    assert_eq!((one.model.clone(), one.effort.clone()), (two.model.clone(), two.effort.clone()));
+    assert!(flag(&launches[0], "--model").is_some() && flag(&launches[0], "--effort").is_some());
+}

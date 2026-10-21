@@ -62,6 +62,7 @@ mod recovery;
 mod research;
 mod rewind;
 mod siblings;
+mod silence;
 mod stuck_watch;
 mod unbounded;
 mod usage_view;
@@ -473,6 +474,13 @@ struct Core {
     asking: HashMap<String, aside::Asking>,
     /// The subagents of each running reply, followed for signs of being stuck.
     watched: HashMap<String, stuck_watch::Watched>,
+    /// When each running reply last heard from its CLI, and the one check that looks for silence (`silence.rs`).
+    heard: HashMap<String, silence::Heard>,
+    listening: bool,
+    /// When the silence check last looked (`silence.rs`).
+    looked: f64,
+    /// How many times each draft was routed while the person typed it (`route_draft`); sending the message resets it.
+    draft_routes: HashMap<String, u8>,
     /// The pull request each project conversation follows, by conversation (R200), and what reads one.
     follows: HashMap<String, pr_watch::Watch>,
     pr_reader: PrReader,
@@ -592,6 +600,10 @@ impl Engine {
                 asides: HashMap::new(),
                 asking: HashMap::new(),
                 watched: HashMap::new(),
+                heard: HashMap::new(),
+                listening: false,
+                looked: 0.0,
+                draft_routes: HashMap::new(),
                 follows: HashMap::new(),
                 pr_reader,
                 browser: None,
@@ -906,37 +918,7 @@ impl Engine {
     }
     pub fn interrupt(&self, id: &str) {
         // One lock for all of it: the end of Faber's checks waits for it, and never sends a turn in between.
-        self.with(|c| {
-            c.kit_checks.retain(|_, check| check.owner != id);
-            c.release_codex_preparation(id);
-            if !c.live.contains_key(id)
-                && let Some(conv) = c.convs.get_mut(id)
-            {
-                conv.compacting = false;
-            }
-            if let Some(conv) = c.convs.get_mut(id) {
-                conv.stopped = true;
-                conv.send_after_stop = None;
-                conv.queued.retain(|q| q.wake.as_ref().is_none_or(|w| w.why != "wake.approvedPlan"));
-            }
-            c.save(id);
-            c.emit_queue(id);
-            c.keep_going_off(id);
-            c.compacts.remove(id);
-            let compacting = c.convs.get(id).is_some_and(|c| c.compacting);
-            let active = c.live.get(id).is_some_and(|l| l.turn.is_some() || compacting);
-            if let Some(l) = c.live.get(id) {
-                // Helpers and commands can outlive the main turn; its driver still owns their stop.
-                l.session.interrupt();
-            }
-            c.rewind_stop_retired(id);
-            c.stop_helpers(id, false);
-            if !active {
-                // Faber's checks of the reply that just ended stop too; the reply then keeps no row.
-                c.stop_checks(id);
-                c.stop_waiting(id, true);
-            }
-        })
+        self.with(|c| c.interrupt(id, true))
     }
     /// Opens a session started in a terminal as a project conversation (parity F5). Gives the conversation's id.
     pub fn pick_up(&self, project_id: &str, session: crate::model::CliSession) -> Result<String, String> {
@@ -1807,6 +1789,43 @@ impl Core {
         }
     }
 
+    /// The person's Stop (`by_person`), and Faber's own when a reply goes silent (`silence.rs`): the CLI is stopped the same
+    /// way, but nobody pressed Stop, so the conversation is not marked stopped, its waiting messages stay, and Keep going sees a
+    /// turn that failed.
+    fn interrupt(&mut self, id: &str, by_person: bool) {
+        self.kit_checks.retain(|_, check| check.owner != id);
+        self.release_codex_preparation(id);
+        if !self.live.contains_key(id)
+            && let Some(conv) = self.convs.get_mut(id)
+        {
+            conv.compacting = false;
+        }
+        if by_person && let Some(conv) = self.convs.get_mut(id) {
+            conv.stopped = true;
+            conv.send_after_stop = None;
+            conv.queued.retain(|q| q.wake.as_ref().is_none_or(|w| w.why != "wake.approvedPlan"));
+        }
+        self.save(id);
+        self.emit_queue(id);
+        if by_person {
+            self.keep_going_off(id);
+        }
+        self.compacts.remove(id);
+        let compacting = self.convs.get(id).is_some_and(|c| c.compacting);
+        let active = self.live.get(id).is_some_and(|l| l.turn.is_some() || compacting);
+        if let Some(l) = self.live.get(id) {
+            // Helpers and commands can outlive the main turn; its driver still owns their stop.
+            l.session.interrupt();
+        }
+        self.rewind_stop_retired(id);
+        self.stop_helpers(id, false);
+        if !active {
+            // Faber's checks of the reply that just ended stop too; the reply then keeps no row.
+            self.stop_checks(id);
+            self.stop_waiting(id, true);
+        }
+    }
+
     fn turn(&mut self, conv: &str) -> Option<&mut Message> {
         let id = self.live.get(conv)?.turn.clone()?;
         self.convs.get_mut(conv)?.messages.iter_mut().find(|m| m.id == id)
@@ -1851,6 +1870,10 @@ impl Core {
         let entry = self.live.get(conv).expect("session checked above");
         let (vendor, resumed) = (entry.vendor, entry.resumed);
         let turn_id = entry.turn.clone();
+        // An account-wide notice may reach any thread's sink: it is no word from this answer.
+        if !matches!(event, EngineEvent::Quota { .. } | EngineEvent::Signals(_)) {
+            self.hear(conv, sid);
+        }
         // A turn ran on the session: from here on it is the conversation's session for this vendor.
         if !matches!(
             event,
@@ -2235,6 +2258,8 @@ impl Core {
                         "resumed": resumed,
                     }));
                 }
+                // A reply Faber cut for its silence says so only if it really ended stopped: one that finished in the grace is fine.
+                let silent = !ok && self.silenced(conv);
                 self.unwatch(conv);
                 let missing = cost.is_none() || ((native.is_none() || vendor == Vendor::Codex) && incomplete);
                 self.note_turn(conv, cost, missing);
@@ -2242,6 +2267,9 @@ impl Core {
                 let mut looked = None;
                 if let Some(m) = self.turn(conv) {
                     m.status = Some(if ok { Status::Done } else { Status::Stopped });
+                    if silent {
+                        m.error = Some(silence::KEY.into());
+                    }
                     m.took = ok.then(|| now().saturating_sub(m.at));
                     // Only a turn that ended well is done: a failed one may still be waited on or moved, and works again then.
                     if ok {
@@ -2312,8 +2340,9 @@ impl Core {
                     }
                     return self.finish(conv, turn_id);
                 }
+                // The process Faber cut for its silence says why, not that the interrupt timed out (`silence.rs`).
+                let mut message = if fatal && self.silenced(conv) { silence::said(&message).to_string() } else { message };
                 // The CLI no longer has the session this launch resumed (a warm-up that never ran a turn, or a cleaned-up history).
-                let mut message = message;
                 if fatal && resumed && recovery::session_lost(&message) {
                     // Only a session that never took a turn may be replaced silently: not one whose turn was accepted, and not
                     // a reply that already holds work (partial text, tool actions, a retry after the quota ran out).
@@ -2723,6 +2752,7 @@ impl Core {
             l.answer_started = false;
             l.break_pending = false;
         }
+        self.listen(conv);
         // A plan limit now continues this reply, not the one the turn began in.
         if let Some(t) = self.transfers.get_mut(conv) {
             (t.reply, t.request, t.text, t.images) = (reply_id.clone(), text.clone(), text, item.images.unwrap_or_default());
@@ -3246,6 +3276,7 @@ impl Core {
             };
             l.session.send(UserTurn { text, images });
         }
+        self.listen(id);
         self.push(id, Some(reply_id), true);
         Ok(())
     }
@@ -3700,6 +3731,8 @@ impl Core {
                     .get(id)
                     .is_some_and(|c| verifying::checking(c) || c.messages.last().is_some_and(|m| m.status == Some(Status::Streaming))))
         {
+            // Pressing Send empties the box, queued or not: the next draft is routed afresh (`route_draft`).
+            self.draft_routes.remove(id);
             return self.enqueue(id, req);
         }
         // Decide research mode under the lock that takes the draft; start() plans its copy from the actual conversation id.
@@ -3733,6 +3766,7 @@ impl Core {
         };
         let at = now();
         let auto = req.choice.vendor == "auto";
+        self.draft_routes.remove(&id);
         let route = if auto { self.next_route(&id) } else { None };
         let c = self.convs.get_mut(&id).ok_or("error.conversationGone")?;
         c.choice = Some(Choice { effort: (!auto).then(|| req.choice.effort.unwrap_or_default()), ..req.choice.clone() });
@@ -4029,6 +4063,7 @@ impl Core {
             return;
         }
         if let Some(old) = self.draft.take() {
+            self.draft_routes.remove(&old);
             self.kit_checks.retain(|_, check| check.owner != old);
             if let Some(l) = self.retire(&old) {
                 l.session.close();
@@ -4098,6 +4133,7 @@ impl Core {
             self.keep_family(id);
             self.rewind_forget(id);
             self.store.remove(id);
+            self.draft_routes.remove(id);
             self.convs.remove(id);
             self.try_seal_rewind(id);
             let _ = std::fs::remove_dir_all(self.scratch_of(id));
@@ -4154,14 +4190,17 @@ fn spawner(base: &Spawner, cli: &Cli) -> Spawner {
     Arc::new(move |_bin, args, cwd| base(&command, &prefix.iter().chain(args).cloned().collect::<Vec<_>>(), cwd))
 }
 
-/// Auto keeps a conversation on the model its first message was routed to.
+/// Auto keeps a conversation on the model its first message was routed to. A live process keeps the model and the effort it was
+/// asked for: the reply shows the model the CLI says it runs, which may be spelled differently, and asking for that spelling
+/// would restart the process on a model flag nobody changed (rule 3 of `docs/product/models.md`).
 fn same_as_before(c: &Conversation, live: Option<&Live>) -> Option<Pick> {
     let last = c.messages.iter().rev().find(|m| m.role == Role::Assistant && m.vendor.is_some())?;
     let vendor = last.vendor?;
-    let effort =
-        live.filter(|l| l.vendor == vendor).map_or_else(|| last.effort.clone().unwrap_or_else(|| "medium".into()), |l| l.effort.clone());
+    let live = live.filter(|l| l.vendor == vendor);
+    let effort = live.map_or_else(|| last.effort.clone().unwrap_or_else(|| "medium".into()), |l| l.effort.clone());
+    let model = live.map_or_else(|| last.model.clone(), |l| l.model.clone());
     let reason = last.reason.clone().filter(|r| r != "reason.routing").unwrap_or_else(|| "reason.autoDefault".into());
-    Some(Pick { vendor, model: last.model.clone(), effort, reason, pace: None })
+    Some(Pick { vendor, model, effort, reason, pace: None })
 }
 
 /// A control character or an invisible formatting one (zero-width space, direction marks and overrides, line separators):

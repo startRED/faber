@@ -1595,6 +1595,8 @@ export const de: Messages = {
   // Native speaker must translate (needs native review).
   'reason.budget.other': 'Faber wartet, bis dein Kontingent den nächsten Schritt erlaubt.',
   'reason.other': 'Faber hat hier aus einem Grund angehalten, den es noch nicht beschreiben kann. Die Details stehen im Protokoll.',
+  'reason.silent': "Diese Antwort war 15 Minuten lang still, deshalb hat Faber sie angehalten. Was bis dahin geschrieben war, bleibt erhalten; schick eine Nachricht, um weiterzumachen.",
+  'reason.silent.unconfirmed': "Diese Antwort war 15 Minuten lang still. Faber hat versucht, sie anzuhalten, hat aber nicht bestätigt, dass sie angehalten wurde. Warte und prüfe es noch einmal.",
   // Native speaker must translate (needs native review).
   // Native speaker must translate (needs native review).
   // Native speaker must translate (needs native review).
@@ -1888,6 +1890,7 @@ export const de: Messages = {
   'notes.171.better': 'Woanders nachsehen erscheint jetzt auch, wenn eine Korrektur dieselben Wörter in anderen Dateien zurücklässt, und sagt, an wie vielen Stellen.',
   'notes.172.new': 'Technische Details listet die Helfer und die Hintergrundarbeit, die noch laufen, jeweils mit ihrem Zustand, und bekannte Pull-Request-Nummern zeigen ihren letzten Zustand.',
   'notes.173.fixed': 'Mit Auto zeigt ein neues Projektgespräch seinen Branch oben, sobald du sendest, wie schon mit einem gewählten Modell.',
+  'notes.174.fixed': 'Eine Antwort, die 15 Minuten hängt, endet jetzt mit einer Meldung, und was sie geschrieben hat, bleibt. Deine anderen Unterhaltungen laufen weiter.',
   'update.checking': 'Suche nach einem Update…',
   'update.downloading': 'Update wird heruntergeladen…',
   'update.downloadingPercent': 'Update wird heruntergeladen… {percent} %',
