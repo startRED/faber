@@ -29,8 +29,8 @@ permissions or remote effects, and going back waits until overlapping work is id
 
 ### Not built yet
 
-Moving a chat to a project, native CLI continuation after going back, rich rewind diffs and configurable history limits
-are not built. The existing Changes preview supplies rewind's file list.
+Native CLI continuation after going back, rich rewind diffs and configurable history limits are not built (moving a
+chat to a project is, task 270). The existing Changes preview supplies rewind's file list.
 
 ## Universal by design
 

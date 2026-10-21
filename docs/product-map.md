@@ -411,7 +411,7 @@ checks in `tests/ui/index.ts`, real-app scenarios in `testkit/src/screen/mod.rs`
 | Keyboard shortcuts (K1) | Done in both areas | `tests/ui/shortcuts.check.ts` (the list opens with ? and closes with Esc, and a Ctrl key handled outside `ui/keys.ts` fails it), `tests/ui/i18n.check.ts` |
 | Keep going (R199) | Done in Projects | `engine/tests/keep_going.rs`, tests inside `engine/src/engine/keep_going.rs` and `src-tauri/src/tray/decide.rs`; `tests/ui/keepgoing.check.ts` |
 | Permissions, cards, held-back requests | Done (five modes, R140; plan approval, R297) | `testkit/src/screen/permissions.rs`, `approve_plan.rs` (`approve-plan`); `engine/tests/project_security.rs`, `engine.rs`, `approve_plan_review.rs` (`r160_codex_project_started_in_plan_keeps_tools_for_approved_full_access_and_gates_plan_calls`), `codex_session.rs` (`r160`); tests in `engine/src/engine/answer.rs` (`r160_keep_planning_keeps_the_card_until_claude_confirms_delivery`); `tests/ui/thread.check.ts`, `approve-plan.check.ts` |
-| Faber's browser (R161 step 7) | Pages the agent reads and acts on, on Windows; the person's turn for logins, captchas and payments; the recorded log and the app pane are planned | `engine/src/browser.rs` (unit tests), `engine/tests/claude_session.rs`, `codex_session.rs`; `tests/ui/site.check.ts` |
+| Faber's browser (R161 step 7) | Pages the agent reads and acts on, on Windows; the person's turn for logins, captchas and payments; the recorded log of every step (R225) and the card that opens the agent's app beside the chat | `engine/src/browser.rs` (unit tests), `engine/tests/claude_session.rs`, `codex_session.rs`; `tests/ui/site.check.ts` |
 | Faber's checks (R203, verifier V1 of R190) | The agent's `verify` tool, fast and full, in Projects, and Faber's own fast checks of each reply that changed files with at most two fix turns (R146, R204); the file watcher, the graph from `cargo metadata`, admission by free RAM, the game guard, the results journal and the GitHub status are later steps | Unit tests in `engine/src/verify.rs`, `engine/src/verify/`; `engine/tests/verify.rs` (the tool, and on Windows no process left behind); `tests/ui/worklog.check.ts`; `engine/tests/verify.rs` and `tests/ui/checks.check.ts` (Faber decides done) |
 | Faber's project map (R146) | The agent's `map` tool: an index of what the project's code has and lookups by kind and words, each entry with its file and line | Unit tests in `engine/src/map.rs` (each extractor on its own files), `engine/src/helper.rs` (listed and called only where offered), `engine/tests/product_map.rs` (the map of Faber's own code finds the same commands, settings, screen files and storage keys the product map is checked against), `tests/ui/worklog.check.ts` (the row) |
 | A project conversation follows its pull request and wakes on red CI (R200) | Done for GitHub through gh | `engine/tests/pr_watch.rs`, unit tests in `engine/src/follow.rs`; `tests/ui/follow.check.ts`; tests inside `src-tauri/src/tray/decide.rs` |
@@ -440,8 +440,7 @@ checks in `tests/ui/index.ts`, real-app scenarios in `testkit/src/screen/mod.rs`
 | This map | Done | `engine/tests/product_map.rs`; the trap tasks and the weekly coherence pass in `testkit/coherence/` (R151) |
 
 Not built yet, so nothing may assume it: command-line tools and the live manifest, the toolbox, Livre, the remaining visual
-answers, the benchmark, asking Faber about Faber, the what's-new screen
-(R142), installing updates when Faber opens (R141), Equilibrado on screen.
+answers, the benchmark, asking Faber about Faber, Equilibrado on screen.
 
 ## Portable catalog plugins
 
