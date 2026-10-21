@@ -27,6 +27,8 @@ pub fn work_folder() -> tempfile::TempDir {
     std::fs::create_dir_all(&build).unwrap();
     [build, std::env::temp_dir()]
         .into_iter()
+        // Resolve parent components and temporary aliases in the same plain form the engine uses.
+        .filter_map(|root| faber_engine::permissions::checked_folder(&root))
         .map(|root| tempfile::tempdir_in(root).unwrap())
         .find(|dir| {
             faber_engine::permissions::checked_folder(dir.path()).is_some()

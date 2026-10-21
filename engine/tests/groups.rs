@@ -81,6 +81,131 @@ async fn chat_groups_enforce_the_file_count_below_the_byte_limit() {
 }
 
 #[tokio::test]
+async fn move_chat_to_project_leaves_its_group_and_launches_without_group_context() {
+    for vendor in [Vendor::Claude, Vendor::Codex] {
+        let dir = support::tempdir();
+        let folder = support::work_folder();
+        let fake = support::fake(support::fixture(vendor.name(), "chat"));
+        let app = engine(dir.path(), vendor, fake.spawn);
+        let group = app.create_chat_group("Glossary").unwrap();
+        app.save_chat_group(&group.id, None, Some("Use the group glossary exactly.")).unwrap();
+        let group = app.add_chat_group_files(&group.id, &[file("glossary.txt", b"group knowledge")]).unwrap();
+        let chat = app.new_group_chat(&group.id).unwrap();
+        let project = app.add_project(&folder.path().to_string_lossy()).unwrap();
+        app.move_to_project(&chat.id, &project.id).unwrap();
+        let store = faber_engine::store::Store::new(dir.path());
+        let groups = store.chat_groups().unwrap();
+        assert!(groups[0].conversation_ids.is_empty(), "moving to a project also durably leaves the Chat group");
+        assert_eq!(groups[0].instructions, "Use the group glossary exactly.");
+        let knowledge = dir.path().join("chat-groups").join(&group.id).join(&group.files[0].id);
+        assert_eq!(std::fs::read(&knowledge).unwrap(), b"group knowledge");
+        app.send(SendRequest {
+            conversation_id: Some(chat.id.clone()),
+            area: Area::Project,
+            project_id: Some(project.id),
+            text: "In one sentence: why is the sky blue?".into(),
+            images: vec![],
+            files: vec![],
+            choice: Choice { vendor: vendor.name().into(), model: None, effort: None },
+        })
+        .unwrap();
+        tokio::time::timeout(Duration::from_secs(5), async {
+            while !fake.wire.messages().iter().any(|m| m["type"] == "user" || m["method"] == "turn/start") {
+                tokio::time::sleep(Duration::from_millis(5)).await;
+            }
+        })
+        .await
+        .expect("the first project turn starts");
+        let args = fake.args.lock().unwrap();
+        assert!(!args.iter().flatten().any(|s| s.contains("Use the group glossary exactly.")));
+        let wire = format!("{:?}", fake.wire.messages());
+        assert!(!wire.contains("Use the group glossary exactly.") && !wire.contains("glossary.txt") && !wire.contains("group-"), "{wire}");
+        assert!(fake.mismatches.lock().unwrap().is_empty());
+        drop(args);
+        app.shutdown();
+    }
+}
+
+#[tokio::test]
+async fn move_chat_to_project_group_write_failure_keeps_the_chat_and_membership() {
+    let dir = support::tempdir();
+    let folder = support::work_folder();
+    let app = engine(dir.path(), Vendor::Claude, support::fake(vec![]).spawn);
+    let group = app.create_chat_group("Work").unwrap();
+    let chat = app.new_group_chat(&group.id).unwrap();
+    let project = app.add_project(&folder.path().to_string_lossy()).unwrap();
+    let store = faber_engine::store::Store::new(dir.path());
+    let before = store.chat_groups().unwrap();
+    for blocker in [dir.path().join("chat-groups.json.tmp"), dir.path().join("conversations").join(format!("{}.json.tmp", chat.id))] {
+        std::fs::create_dir_all(blocker.join("held")).unwrap();
+        assert_eq!(app.move_to_project(&chat.id, &project.id).unwrap_err(), "error.store.write");
+        assert_eq!(store.get(&chat.id).unwrap(), chat);
+        assert_eq!(app.open(&chat.id).unwrap().area, Area::Chat);
+        // Remove the deterministic disk fault before checking recovery of either failed write.
+        std::fs::remove_dir_all(&blocker).unwrap();
+        assert_eq!(store.chat_groups().unwrap(), before);
+    }
+    app.move_to_project(&chat.id, &project.id).unwrap();
+    assert!(store.chat_groups().unwrap()[0].conversation_ids.is_empty());
+    app.shutdown();
+}
+
+#[tokio::test]
+async fn move_chat_to_project_group_commit_recovers_after_interruption() {
+    let dir = support::tempdir();
+    let folder = support::work_folder();
+    let app = engine(dir.path(), Vendor::Claude, support::fake(vec![]).spawn);
+    let group = app.create_chat_group("Work").unwrap();
+    let chat = app.new_group_chat(&group.id).unwrap();
+    let project = app.add_project(&folder.path().to_string_lossy()).unwrap();
+    let before = app.state().groups;
+    app.shutdown();
+    let journal = dir.path().join("chat-group-move.json");
+    let groups_file = dir.path().join("chat-groups.json");
+    let mut after = before.clone();
+    after[0].conversation_ids.clear();
+    for committed in [false, true] {
+        let store = faber_engine::store::Store::new(dir.path());
+        let mut record = chat.clone();
+        if committed {
+            record.area = Area::Project;
+            record.project_id = Some(project.id.clone());
+            record.project_start_pending = true;
+        }
+        store.save_checked(&record).unwrap();
+        std::fs::write(&journal, json!({"conversationId":chat.id,"groups":before}).to_string()).unwrap();
+        std::fs::write(&groups_file, serde_json::to_vec(&after).unwrap()).unwrap();
+        drop(store);
+        let store = faber_engine::store::Store::new(dir.path());
+        if !committed {
+            let blocker = dir.path().join("chat-groups.json.tmp");
+            std::fs::create_dir_all(blocker.join("held")).unwrap();
+            let app = engine(dir.path(), Vendor::Claude, support::fake(vec![]).spawn);
+            assert_eq!(app.state().groups, before, "a blocked rollback still publishes the journal's coherent membership");
+            assert_eq!(app.open(&chat.id).unwrap().area, Area::Chat);
+            app.rename(&chat.id, "Still in Work");
+            assert_eq!(store.get(&chat.id).unwrap().title, "Still in Work", "ordinary Chat saves remain available during recovery");
+            let mut moved = chat.clone();
+            moved.area = Area::Project;
+            assert_eq!(store.save_checked(&moved).unwrap_err(), faber_engine::store::Fault::Write);
+            assert!(journal.is_file(), "area and membership mutations stay blocked until recovery can finish");
+            let attachment = dir.path().join("chat").join(&chat.id).join("attachments").join("notes.txt");
+            std::fs::create_dir_all(attachment.parent().unwrap()).unwrap();
+            std::fs::write(&attachment, b"keep these notes").unwrap();
+            assert_eq!(app.remove_with(&chat.id, false).unwrap_err(), "error.store.write");
+            assert!(store.get(&chat.id).is_some(), "a refused deletion retains its conversation record");
+            assert_eq!(std::fs::read(&attachment).unwrap(), b"keep these notes", "a refused deletion retains its files too");
+            app.shutdown();
+            std::fs::remove_dir_all(blocker).unwrap();
+        }
+        assert_eq!(store.chat_groups().unwrap(), if committed { after.clone() } else { before.clone() });
+        assert_eq!(store.get(&chat.id).unwrap().area, if committed { Area::Project } else { Area::Chat });
+        assert!(!journal.exists(), "recovery finishes before any later membership write");
+        assert_eq!(serde_json::from_slice::<Value>(&std::fs::read(&groups_file).unwrap()).unwrap(), json!(store.chat_groups().unwrap()));
+    }
+}
+
+#[tokio::test]
 async fn chat_groups_only_accept_shared_image_types_and_keep_svg_as_text() {
     let dir = support::tempdir();
     let app = engine(dir.path(), Vendor::Claude, support::fake(vec![]).spawn);

@@ -1,7 +1,7 @@
 import { createComputed, createEffect, createMemo, createSignal, createUniqueId, For, type JSX, on, onCleanup, Show } from 'solid-js';
 import { createStore, reconcile } from 'solid-js/store';
 import { UpdateLine } from './UpdateStage.tsx';
-import { api, type Area, type ChatGroup, type MessageHit, type Project, type RunningItem, type Summary, type UpdateStatus, type Vendor, type VendorUsage } from './api.ts';
+import { api, type Area, type ChatGroup, type Conversation, type MessageHit, type Project, type RunningItem, type Summary, type UpdateStatus, type Vendor, type VendorUsage } from './api.ts';
 import { windowHidden } from './appearance.ts';
 import { openMenu } from './contextmenu.ts';
 import { Icon, VendorMark } from './Glyphs.tsx';
@@ -106,6 +106,7 @@ interface Props {
   onNewIn: (id: string) => void;
   onAddProject: () => void;
   onOpen: (conversation: Summary) => void;
+  onMoved?: (conversation: Conversation) => void;
   onMessage?: (hit: MessageHit) => void;
   /** Deletes a conversation; `'unsaved'` when its copy holds work found nowhere else, which needs `discard`. */
   onRemove: (id: string, discard?: boolean) => Promise<'unsaved' | undefined> | void;
@@ -121,6 +122,36 @@ interface Props {
 /** The sidebar: new conversation, the two areas, the projects with their conversations, the chats by day, and at the
  * bottom Settings and the quota of each connected vendor. */
 export function Sidebar(props: Props) {
+  let cancelRowFocus: (() => void) | undefined;
+  let disposed = false;
+  onCleanup(() => { disposed = true; cancelRowFocus?.(); });
+  const followRowFocus = (list: Element, id: string) => {
+    cancelRowFocus?.();
+    if (disposed || !props.conversations.some((c) => c.id === id)) return;
+    let stopped = false;
+    const stop = () => {
+      if (stopped) return;
+      stopped = true;
+      observer.disconnect();
+      document.removeEventListener('focusin', stop);
+      cancelRowFocus = undefined;
+    };
+    const restore = () => {
+      if (stopped) return;
+      if (!list.isConnected || document.activeElement !== document.body) return stop();
+      const title = list.querySelector<HTMLButtonElement>(`[data-conversation-id="${CSS.escape(id)}"] .item`);
+      if (!title) return;
+      stop();
+      title.focus({ preventScroll: true });
+      title.scrollIntoView({ block: 'nearest' });
+    };
+    // A moved row may arrive in a later snapshot. Observe only until it exists or the person chooses another focus.
+    const observer = new MutationObserver(restore);
+    observer.observe(list, { childList: true, subtree: true });
+    document.addEventListener('focusin', stop);
+    cancelRowFocus = stop;
+    queueMicrotask(restore);
+  };
   const [confirming, setConfirming] = createSignal<string>();
   // A delete refused because the conversation's copy holds work found nowhere else: the same row asks once more.
   const [losing, setLosing] = createSignal<string>();
@@ -242,15 +273,7 @@ export function Sidebar(props: Props) {
       // Focus on any control of the row (its title or its ×) goes back to the recreated row's title.
       if (!rowEl || !rowEl.contains(document.activeElement)) return;
       const list = rowEl.closest('.side-scroll');
-      // Regrouping replaces the focused row. Wait for its replacement without taking focus from another control.
-      queueMicrotask(() => {
-        if (list?.isConnected && document.activeElement === document.body) {
-          const title = list.querySelector<HTMLButtonElement>(`[data-conversation-id="${CSS.escape(row.c.id)}"] .item`);
-          title?.focus({ preventScroll: true });
-          // The row may have moved out of view (pinned to the top, or unpinned far below): bring it back in.
-          title?.scrollIntoView({ block: 'nearest' });
-        }
-      });
+      if (list) followRowFocus(list, row.c.id);
     });
     return (
     <div
@@ -271,6 +294,17 @@ export function Sidebar(props: Props) {
             { id: 'move-group', label: t('menu.moveToGroup'), disabled: groups().filter((g) => g.id !== membership(row.c.id)?.id).length === 0, run: () => setMoving(row.c.id) },
             ...(membership(row.c.id) ? [{ id: 'ungroup', label: t('menu.removeFromGroup'), run: () => changeGroup(api.moveChatToGroup(row.c.id)) }] : []),
           ] : []),
+          ...(row.c.area === 'chat' && !row.c.archived && props.projects.length ? [{
+            id: 'move', label: t('menu.moveToProject'),
+            run: () => openMenu(e, props.projects.map((p) => ({
+              id: p.id, label: p.name,
+              run: () => void api.moveToProject(row.c.id, p.id).then((c) => {
+                setQuery('');
+                toggle(p.id, true);
+                props.onMoved?.(c);
+              }, (err) => props.onError?.(err)),
+            })), rowEl?.querySelector('.item') ?? null),
+          }] : []),
           row.c.archived
             ? { id: 'unarchive', label: t('menu.unarchive'), run: () => void api.archive(row.c.id, false).catch((err) => props.onError?.(err)) }
             : { id: 'archive', label: t('menu.archive'), run: () => void api.archive(row.c.id, true).catch((err) => props.onError?.(err)) },

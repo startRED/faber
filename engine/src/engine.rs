@@ -50,6 +50,7 @@ pub use groups::{ChatGroup, GroupFile};
 mod install_gate;
 mod keep_going;
 mod mcp_servers;
+mod move_chat;
 mod parked;
 mod pick_up;
 mod plan;
@@ -284,9 +285,7 @@ pub fn with_history(history: &[Message], text: &str, place: &dyn Fn(&str) -> Str
         .iter()
         .map(|m| {
             let mut line = crate::handover::transcript(std::slice::from_ref(m));
-            for file in m.attachments.iter().flatten() {
-                line += &format!("\n[attached file: {}]", place(file));
-            }
+            line += &attachment_notes(std::slice::from_ref(m), place);
             match m.images.as_ref().map_or(0, |i| i.len()) {
                 0 => {}
                 n => line += &format!("\n[{n} image(s) sent here are not included]"),
@@ -296,6 +295,10 @@ pub fn with_history(history: &[Message], text: &str, place: &dyn Fn(&str) -> Str
         .collect::<Vec<_>>()
         .join("\n\n");
     format!("Earlier in this conversation, with another assistant:\n\n{lines}\n\nNow the user says:\n{text}")
+}
+
+pub(super) fn attachment_notes(history: &[Message], place: &dyn Fn(&str) -> String) -> String {
+    history.iter().flat_map(|m| m.attachments.iter().flatten()).map(|file| format!("\n[attached file: {}]", place(file))).collect()
 }
 
 /// Where a stored attachment can be opened: the working folder's own `attachments` in Chat, the data folder's in Projects.
@@ -441,7 +444,6 @@ struct Core {
     transfers: HashMap<String, recovery::Transfer>,
     /// First messages whose separate copy is still being made, by conversation.
     copying: HashMap<String, copies::Held>,
-    credit: Option<(String, String, Vendor)>,
     /// Helpers at work (R161), by the agent's tool call that started each.
     helpers: HashMap<String, helpers::Run>,
     /// The quick questions on the side (R250), by conversation, and the ones still asking, by question.
@@ -539,7 +541,6 @@ impl Engine {
                 keep_pace: 1.0,
                 transfers: HashMap::new(),
                 copying: HashMap::new(),
-                credit: None,
                 helpers: HashMap::new(),
                 asides: HashMap::new(),
                 asking: HashMap::new(),
@@ -835,7 +836,7 @@ impl Engine {
             if !active {
                 // Faber's checks of the reply that just ended stop too; the reply then keeps no row.
                 c.stop_checks(id);
-                c.stop_waiting(id);
+                c.stop_waiting(id, true);
             }
         })
     }
@@ -1127,10 +1128,9 @@ impl Engine {
             }
             let ids: Vec<_> = c.convs.keys().cloned().collect();
             for id in ids {
-                c.stop_waiting(&id);
+                c.stop_waiting(&id, false);
             }
             c.transfers.clear();
-            c.credit = None;
             for (_, l) in c.live.drain() {
                 l.session.close();
             }
@@ -2594,7 +2594,8 @@ impl Core {
         }
         // A plan limit now continues this reply, not the one the turn began in.
         if let Some(t) = self.transfers.get_mut(conv) {
-            (t.reply, t.text, t.images) = (reply_id.clone(), text, item.images.unwrap_or_default());
+            (t.reply, t.request, t.text, t.images) = (reply_id.clone(), text.clone(), text, item.images.unwrap_or_default());
+            t.approved = None;
         }
         self.save(conv);
         self.list_changed();
@@ -2774,9 +2775,13 @@ impl Core {
         let data_dir = self.opts.data_dir.clone();
         let joining_late = c.resumable(pick.vendor).is_none() && !c.context_messages().is_empty();
         let history = c.context_messages().to_vec();
+        let text = if joining_late {
+            with_history(&history, &model_text, &|n| attachment_place(c.area, &data_dir, id, n))
+        } else {
+            model_text.clone()
+        };
         let at = now();
         let resent = joining_late && session_was_lost(c, pick.vendor);
-        let area = c.area;
         let mut question = Message::new(item.id.clone(), Role::User, item.text.clone(), at);
         question.images = item.images.clone();
         question.attachments = item.attachments.clone();
@@ -2813,16 +2818,16 @@ impl Core {
             recovery::Transfer {
                 reply: reply_id.clone(),
                 pick: pick.clone(),
-                text: model_text.clone(),
+                request: model_text,
+                text: text.clone(),
                 images: images.clone(),
                 by_hand,
+                approved: None,
                 retried: false,
                 moving: false,
                 check: "glance",
             },
         );
-        let text =
-            if joining_late { with_history(&history, &model_text, &|n| attachment_place(area, &data_dir, id, n)) } else { model_text };
         if let Some(before) = route {
             let only = before.as_ref().map(|p| p.vendor);
             let route = self.route_for(&item.text, images.len() + attachments_len, only);
@@ -2898,6 +2903,9 @@ impl Core {
 
     /// Ends a reply that never got a CLI: it shows the error and leaves the running list.
     pub(super) fn fail_reply(&mut self, id: &str, reply_id: &str, error: String) {
+        if let Some(t) = self.transfers.get_mut(id).filter(|t| t.reply == reply_id) {
+            t.approved = None;
+        }
         if let Some(m) = self.convs.get_mut(id).and_then(|c| c.messages.iter_mut().find(|m| m.id == reply_id)) {
             m.status = Some(Status::Error);
             m.error = Some(error.clone());
@@ -2971,41 +2979,19 @@ impl Core {
         })
     }
 
-    /// Hands a turn to the conversation's CLI, starting the CLI if needed.
+    /// Every turn prepares its separate copy, then its rewind baseline, before starting the CLI.
     fn start(&mut self, id: &str, reply_id: &str, pick: &Pick, text: String, images: Vec<Image>, by_hand: bool) -> Result<(), String> {
         if self.rewind_blocked(id) {
             return Err("error.rewind.busy".into());
         }
-        // The conversation's copy is still being made: nothing starts before it, wherever the turn comes from (a first
-        // message, Auto's route, a queued message sent now). The latest turn is the one that starts once it is attached.
-        if let Some(held) = self.copying.get_mut(id) {
-            held.reply = reply_id.to_string();
-            held.tail = Some(copies::Tail { pick: pick.clone(), text, images, by_hand });
-            self.push(id, Some(reply_id), true);
-            return Ok(());
-        }
-        if self.capture_rewind(id, reply_id, pick, text.clone(), images.clone(), by_hand) {
-            return Ok(());
-        }
+        // A sibling's send is marked unattended before either off-lock preparation can resume it.
+        let by_hand = by_hand && self.transfers.get(id).filter(|t| t.reply == reply_id).is_none_or(|t| t.by_hand);
         if let Some(kg) = self.convs.get_mut(id).and_then(|c| c.keep_going.as_mut()) {
             kg.waiting = None;
         }
         self.note_away(id, reply_id);
-        let approved = self.credit.as_ref().is_some_and(|(c, r, v)| c == id && r == reply_id && *v == pick.vendor);
+        let approved = self.transfers.get(id).is_some_and(|t| t.reply == reply_id && t.approved == Some(pick.vendor));
         self.gate_turn_approved(pick, by_hand, approved)?;
-        if self.convs.get(id).is_some_and(|c| c.rewind_notice.is_some())
-            && let Some(live) = self.retire(id)
-        {
-            live.session.close();
-        }
-        self.launch(id, pick)?;
-        let text = if let Some(summary) = self.convs.get_mut(id).and_then(|c| c.rewind_summary.take()) {
-            format!("{summary}\n\n{text}")
-        } else {
-            text
-        };
-        let rewind_notice = self.convs.get_mut(id).and_then(|c| c.rewind_notice.take());
-        self.credit = None;
         if let Some(m) = self.convs.get_mut(id).and_then(|c| c.messages.iter_mut().find(|m| m.id == reply_id)) {
             m.vendor = Some(pick.vendor);
             m.model = pick.model.clone();
@@ -3018,6 +3004,48 @@ impl Core {
             m.status = Some(Status::Streaming);
             m.finished_at = None;
             m.permissions = None;
+        }
+        if let Some(held) = self.copying.get_mut(id) {
+            held.reply = reply_id.to_string();
+            held.tail = Some(copies::Tail { pick: pick.clone(), text, images, by_hand });
+            self.save(id);
+            self.push(id, Some(reply_id), true);
+            return Ok(());
+        }
+        let plan = self.copy_plan(id);
+        if let Some(plan) = &plan {
+            self.name_copy(id, plan);
+        }
+        if let Some(c) = self.convs.get_mut(id)
+            && c.project_start_pending
+        {
+            c.project_start_pending = false;
+            self.save(id);
+        }
+        if let Some(plan) = plan {
+            // Publish the typing reply before git can create even the copy's directory.
+            self.save(id);
+            self.push(id, Some(reply_id), true);
+            self.hold_for_copy(id, reply_id, plan, copies::Tail { pick: pick.clone(), text, images, by_hand });
+            return Ok(());
+        }
+        // The baseline belongs to the final copy folder, not the person's checkout, and startup must wait for it too.
+        if self.capture_rewind(id, reply_id, pick, text.clone(), images.clone(), by_hand) {
+            return Ok(());
+        }
+        if self.convs.get(id).is_some_and(|c| c.rewind_notice.is_some())
+            && let Some(live) = self.retire(id)
+        {
+            live.session.close();
+        }
+        self.launch(id, pick)?;
+        let text = if let Some(summary) = self.convs.get_mut(id).and_then(|c| c.rewind_summary.take()) {
+            format!("{summary}\n\n{text}")
+        } else {
+            text
+        };
+        let rewind_notice = self.convs.get_mut(id).and_then(|c| c.rewind_notice.take());
+        if let Some(m) = self.convs.get_mut(id).and_then(|c| c.messages.iter_mut().find(|m| m.id == reply_id)) {
             m.mode = self.live.get(id).and_then(|l| l.permissions.fallback_note(l.runs));
             if rewind_notice.is_some() {
                 m.note = rewind_notice;
@@ -3034,6 +3062,9 @@ impl Core {
         }
         self.begin_unbounded(pick.vendor)?;
         self.note_before(id);
+        if let Some(t) = self.transfers.get_mut(id).filter(|t| t.reply == reply_id) {
+            t.approved = None;
+        }
         self.rewind.bump(id);
         if let Some(l) = self.live.get_mut(id) {
             l.started = started;
@@ -3299,6 +3330,7 @@ impl Core {
             area,
             project_id,
             working_folder: None,
+            project_start_pending: area == Area::Project,
             copy: None,
             sessions: BTreeMap::new(),
             tentative: BTreeMap::new(),
@@ -3340,9 +3372,16 @@ impl Core {
             return Err("error.update.activeOperations".into());
         }
         self.validate_research(&req.text)?;
-        let req = self.own_cli(req);
+        let mut req = self.own_cli(req);
         let fallback = pick_model(&req.choice, &self.vendors(), self.codex_recommended.as_deref()).ok_or("error.noSubscription")?;
-        let existing = req.conversation_id.as_deref().and_then(|id| self.load(id).map(|c| c.id.clone()));
+        let existing = req.conversation_id.as_deref().and_then(|id| {
+            self.load(id).map(|c| {
+                // A send queued behind a move may still carry the screen's old area and project.
+                req.area = c.area;
+                req.project_id = c.project_id.clone();
+                c.id.clone()
+            })
+        });
         if existing.as_ref().is_some_and(|id| self.rewind_blocked(id)) {
             return Err("error.rewind.busy".into());
         }
@@ -3361,9 +3400,8 @@ impl Core {
         {
             return self.enqueue(id, req);
         }
-        // Decided under the lock that takes the draft, so the copy is made for the conversation the message goes to.
+        // Decide research mode under the lock that takes the draft; start() plans its copy from the actual conversation id.
         self.prepare_research(&req.text)?;
-        let plan = self.copy_plan(&req);
         let draft = self.draft.clone().filter(|d| self.convs.get(d).is_some_and(|c| c.area == req.area && c.project_id == req.project_id));
         let id = match existing {
             Some(id) => id,
@@ -3391,10 +3429,6 @@ impl Core {
             }
             files
         };
-        // Named on the conversation before its first message is saved, so a restart can never find the message without it.
-        if let Some(plan) = &plan {
-            self.name_copy(&id, plan);
-        }
         let at = now();
         let auto = req.choice.vendor == "auto";
         let route = if auto { self.next_route(&id) } else { None };
@@ -3424,6 +3458,13 @@ impl Core {
             .map(|p| if c.area == Area::Chat { format!("attachments/{}", name(p)) } else { p.to_string_lossy().into_owned() })
             .collect();
         let text = recovery::with_attachments(research::question(&req.text).unwrap_or(&req.text), c.area, &shown);
+        // Prepare the whole turn before recovery, routing or a copy can hold it.
+        let request = text.clone();
+        let text = if joining_late && !is_cli_command(pick.vendor, &text) {
+            with_history(&history, &text, &|n| attachment_place(area, &data_dir, &id, n))
+        } else {
+            text
+        };
         let mut question = Message::new(new_id(), Role::User, req.text.clone(), at);
         question.wake = wake;
         question.images = (!req.images.is_empty()).then(|| req.images.clone());
@@ -3454,32 +3495,16 @@ impl Core {
             recovery::Transfer {
                 reply: reply_id.clone(),
                 pick: pick.clone(),
+                request,
                 text: text.clone(),
                 images: req.images.clone(),
                 by_hand: !auto,
+                approved: None,
                 retried: false,
                 moving: false,
                 check: "glance",
             },
         );
-        let text = if joining_late && !is_cli_command(pick.vendor, &text) {
-            with_history(&history, &text, &|n| attachment_place(area, &data_dir, &id, n))
-        } else {
-            text
-        };
-        // Git can take seconds: the message shows now, the copy is made away from the lock, and what starts the answer waits.
-        match self.copying.get_mut(&id) {
-            // The copy of an answer stopped meanwhile is still being made: this message takes its place and waits for it.
-            Some(held) => {
-                held.reply = reply_id.clone();
-                held.tail = None;
-            }
-            None => {
-                if let Some(plan) = plan {
-                    self.hold_for_copy(&id, &reply_id, plan);
-                }
-            }
-        }
         if let Some(before) = route {
             let only = before.as_ref().map(|p| p.vendor);
             let route = self.route_for(&req.text, req.images.len() + req.files.len(), only);
@@ -3516,20 +3541,21 @@ impl Core {
         let source = self.load(&req.conversation_id).cloned().ok_or("error.messageGone")?;
         let group = if source.area == Area::Chat { self.group_for(&source.id)? } else { None };
         let at = source.messages.iter().position(|m| m.id == req.message_id).ok_or("error.messageGone")?;
-        let id = match copy {
-            Some((id, copy)) => {
-                let id = self.blank_as(id, source.area, source.project_id.clone());
-                self.convs.get_mut(&id).expect("just created").copy = Some(copy);
-                id
-            }
-            None => self.blank(source.area, source.project_id.clone()),
-        };
+        let (id, copy) = copy.map_or_else(|| (new_id(), None), |(id, copy)| (id, Some(copy)));
+        if source.area == Area::Project
+            && let Err(error) = self.copy_project_attachments(&source, &id, &source.messages[..at])
+        {
+            let _ = std::fs::remove_dir_all(self.opts.data_dir.join("attachments").join(&id));
+            return Err(error);
+        }
+        let id = self.blank_as(id, source.area, source.project_id.clone());
         let from = self.workspace_of(&source.id);
         if let Some(group) = group {
             self.move_chat_to_group(&id, Some(&group.id))?;
         }
         let to = self.workspace_of(&id);
         let c = self.convs.get_mut(&id).expect("just created");
+        c.copy = copy;
         c.title = format!("↳ {}", source.title.trim_start_matches("↳ "));
         c.branch_of = Some(BranchOf { conversation_id: source.id.clone(), message_id: req.message_id.clone() });
         c.working_folder = source.working_folder.clone();
@@ -3543,7 +3569,8 @@ impl Core {
                 m
             })
             .collect();
-        if source.area == Area::Chat && source.working_folder.is_none() && from.is_dir() {
+        // A moved project's earlier file cards still belong to its Chat workspace.
+        if source.working_folder.is_none() && from.is_dir() {
             copy_dir(&from, &to);
         }
         // A project keeps attached files under its conversation; the messages kept carry their names, so the files come too.
@@ -3680,6 +3707,7 @@ impl Core {
     }
 
     fn remove(&mut self, id: &str) -> Result<(), String> {
+        self.store.recover_group_move().map_err(|e| e.key())?;
         self.rewind_delete_allowed(id)?;
         if let Ok(mut groups) = self.store.chat_groups() {
             let changed = groups.iter().any(|g| g.conversation_ids.iter().any(|chat| chat == id));
@@ -3691,6 +3719,7 @@ impl Core {
             }
         }
         self.note_turn(id, None, true);
+        self.transfers.remove(id);
         self.stop_helpers(id, true);
         self.close_asides(Some(id));
         self.asides.remove(id);

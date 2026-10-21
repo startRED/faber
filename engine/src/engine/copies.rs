@@ -1,4 +1,4 @@
-//! A project conversation's own copy (R201, `crate::project::copy`): made before its first message is sent and used as
+//! A project conversation's own copy (R201, `crate::project::copy`): made before its first turn starts and used as
 //! the agent's folder from then on, removed with the conversation, and removed once at start when its work is merged.
 //! Git runs outside the engine's lock, since a checkout can take seconds; the lock only reads what to do and records it.
 use super::*;
@@ -172,13 +172,14 @@ impl Core {
             && (self.copying.contains_key(id)
                 || self.convs.get(id).is_some_and(|c| {
                     c.area == Area::Project
-                        && c.copy.is_none()
-                        && c.messages.is_empty()
-                        && self.project_of(c.project_id.as_deref()).is_some_and(|p| p.separate_copies)
+                        && (c.copy.as_ref().is_some_and(|copy| copy.root.is_empty())
+                            || (c.copy.is_none()
+                                && (c.messages.is_empty() || c.project_start_pending)
+                                && self.project_of(c.project_id.as_deref()).is_some_and(|p| p.separate_copies)))
                 }))
     }
 
-    /// The copy is named on the conversation before its first message is saved: whatever happens meanwhile, a restart
+    /// The copy is named and saved before its first project turn starts: whatever happens meanwhile, a restart
     /// included, the conversation's next message makes this copy and nothing runs in the project folder. A record without a
     /// repository (`root`) is only that name, until `attach_copy` replaces it.
     pub(super) fn name_copy(&mut self, id: &str, plan: &Plan) {
@@ -190,10 +191,9 @@ impl Core {
         }
     }
 
-    /// The message is recorded and its copy is made on a blocking thread; `tail` is what starts the answer, filled in as
-    /// soon as it is known (at once for a chosen model, when the route is back for Auto).
-    pub(super) fn hold_for_copy(&mut self, id: &str, reply: &str, plan: Plan) {
-        self.copying.insert(id.to_string(), Held { reply: reply.to_string(), tail: None });
+    /// The message is recorded and its copy is made on a blocking thread; `tail` starts the answer once it is attached.
+    pub(super) fn hold_for_copy(&mut self, id: &str, reply: &str, plan: Plan, tail: Tail) {
+        self.copying.insert(id.to_string(), Held { reply: reply.to_string(), tail: Some(tail) });
         let (me, runtime, id) = (self.me.clone(), self.opts.runtime.clone(), id.to_string());
         self.opts.runtime.spawn_blocking(move || {
             let made = Engine::make_copy(Some(plan));
@@ -245,6 +245,8 @@ impl Core {
         match tail {
             _ if failed => self.fail_reply(id, &reply, "error.copy.failed".into()),
             Some(Tail { pick, text, images, by_hand }) => {
+                // An agent's brief may have been marked unattended after send returned, while git worked.
+                let by_hand = by_hand && self.transfers.get(id).is_none_or(|t| t.by_hand);
                 if let Err(error) = self.dispatch(id, &reply, &pick, text, images, by_hand) {
                     self.fail_reply(id, &reply, error);
                 }
@@ -255,38 +257,27 @@ impl Core {
         stray
     }
 
-    /// What a send needs made first: a copy for a project conversation's first message, while the project keeps separate
-    /// copies, or the copy of a conversation that was removed once merged. A conversation that began in the folder stays
-    /// there.
-    pub(super) fn copy_plan(&mut self, req: &SendRequest) -> Option<Plan> {
-        if req.area != Area::Project || self.installing {
+    /// What the common session entrance must make before the first project turn, or restore after a merged copy retired.
+    pub(super) fn copy_plan(&self, id: &str) -> Option<Plan> {
+        let c = self.convs.get(id)?;
+        if c.area != Area::Project || self.installing {
             return None;
         }
         let run = self.git.clone()?;
-        let id = match req.conversation_id.as_deref() {
-            Some(id) => self.load(id)?.id.clone(),
-            None => self.draft_for(&WarmRequest {
-                conversation_id: None,
-                area: req.area,
-                project_id: req.project_id.clone(),
-                choice: req.choice.clone(),
-            }),
-        };
-        let c = self.convs.get(&id)?;
         let project = self.project_of(c.project_id.as_deref())?;
         let branch = match &c.copy {
             // A placeholder (no `root`) is a copy not finished: it is made again.
             Some(copy) if !copy.root.is_empty() && Path::new(&copy.path).is_dir() => return None,
             Some(copy) => copy.branch.clone(),
             // A conversation an agent started has its title already: a better name than the brief.
-            // A session picked up from a terminal (parity F5) goes on in the folder it ran in.
-            None if c.messages.is_empty() && c.sessions.is_empty() && project.separate_copies => {
-                copy::branch_for(if c.title.is_empty() { &req.text } else { &c.title }, &id)
+            // A session picked up from a terminal (parity F5) goes on in the folder it ran in; a moved chat has none left.
+            None if (c.messages.is_empty() || c.project_start_pending) && c.sessions.is_empty() && project.separate_copies => {
+                copy::branch_for(&c.title, id)
             }
             None => return None,
         };
         let data = self.opts.data_dir.clone();
-        Some(Plan { run, folder: PathBuf::from(project.path), data, id, branch, from: None })
+        Some(Plan { run, folder: PathBuf::from(project.path), data, id: id.to_string(), branch, from: None })
     }
 
     fn copy_plan_branch(&mut self, req: &BranchRequest) -> Option<Plan> {

@@ -729,9 +729,12 @@ pub struct Conversation {
     pub area: Area,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub project_id: Option<String>,
-    /// Chat's canonical folder, chosen before its first message. None uses Faber-owned scratch.
+    /// Chat's canonical folder, retained as the source of its file cards after a move. Project sessions use `copy` or the project.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub working_folder: Option<String>,
+    /// No project turn has started yet: the common session entrance applies the project's current copy rule.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub project_start_pending: bool,
     /// A project conversation's own copy, made at its first message (R201). None works in the project folder.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub copy: Option<crate::project::copy::WorkCopy>,

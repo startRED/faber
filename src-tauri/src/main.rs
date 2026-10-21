@@ -547,6 +547,14 @@ async fn pin(faber: State<'_, Faber>, id: String, on: bool) -> Res<()> {
 }
 
 #[tauri::command]
+async fn move_to_project(faber: State<'_, Faber>, id: String, project_id: String) -> Res<Conversation> {
+    let engine = faber.engine.clone();
+    tauri::async_runtime::spawn_blocking(move || engine.move_to_project(&id, &project_id))
+        .await
+        .map_err(|_| "error.store.write".to_string())?
+}
+
+#[tauri::command]
 async fn keep_going(faber: State<'_, Faber>, id: String, on: bool) -> Res<()> {
     faber.engine.keep_going(&id, on)
 }
@@ -1374,6 +1382,7 @@ fn main() {
                 seen,
                 archive,
                 pin,
+                move_to_project,
                 answer,
                 answer_question,
                 approve_plan,

@@ -1400,6 +1400,10 @@ export function App(props: { initial: AppState; update?: UpdateStatus; inbox: { 
                 onNewIn={(id) => (closeSide(false), void fresh({ area: 'project', projectId: id }))}
                 onAddProject={() => void addProject().catch(fail)}
                 onOpen={openSummary}
+                onMoved={(c) => {
+                  void refresh();
+                  if (place().id === c.id) void go({ area: 'project', projectId: c.projectId, id: c.id });
+                }}
                 onMessage={(hit) => {
                   const c = state().conversations.find((c) => c.id === hit.conversationId);
                   if (!c) return;

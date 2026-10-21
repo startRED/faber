@@ -114,50 +114,7 @@ impl Core {
             files: vec![],
             choice,
         };
-        // Git can take seconds, so the copy is made away from the lock and the brief follows it; the call is answered now.
-        if let Some(plan) = self.copy_plan(&req) {
-            let (me, runtime, child) = (self.me.clone(), self.opts.runtime.clone(), id.clone());
-            // A copy that came back for nothing (the conversation is gone, the person wrote to it first, Faber is
-            // closing) is removed again, and an empty conversation left waiting goes with it.
-            self.opts.runtime.spawn_blocking(move || {
-                let made = Engine::make_copy(Some(plan));
-                let Some(core) = me.upgrade() else { return };
-                let engine = Engine { core, runtime };
-                let stray = engine.with(|c| {
-                    let waiting = !c.closing && c.convs.get(&child).is_some_and(|c| c.messages.is_empty());
-                    let (made, failed) = match made {
-                        Ok(made) => (made, false),
-                        Err(_) => (None, true),
-                    };
-                    if !waiting {
-                        // The person's own send may have taken this very copy meanwhile (its folder is the conversation's):
-                        // then it stays.
-                        return made
-                            .filter(|(id, copy)| !c.convs.get(id).and_then(|c| c.copy.as_ref()).is_some_and(|had| had.path == copy.path));
-                    }
-                    if let Some((id, copy)) = made
-                        && let Some(back) = c.attach_copy(&id, copy)
-                    {
-                        return Some(back);
-                    }
-                    // Billing may have changed while git worked: the brief goes only if the rules still allow it, under
-                    // the same lock as its send. A copy git could not make sends nothing.
-                    if !failed && c.sibling_allowed(&ai).is_ok() && c.launch_sibling(&child, req).is_ok() {
-                        return None;
-                    }
-                    if !c.convs.get(&child).is_some_and(|c| c.messages.is_empty()) {
-                        return None;
-                    }
-                    let copy = c.convs.get(&child).and_then(|c| c.copy.clone()).map(|copy| (child.clone(), copy));
-                    if c.remove(&child).is_err() {
-                        return None;
-                    }
-                    copy
-                });
-                engine.drop_copy(stray);
-            });
-            return Ok((id, true));
-        }
+        // The common start path makes its copy off the lock and removes any copy that no longer belongs.
         match self.launch_sibling(&id, req) {
             Ok(()) => Ok((id, true)),
             // Saved with its first message before it failed: it stays, with the error in its reply, and the agent is told.

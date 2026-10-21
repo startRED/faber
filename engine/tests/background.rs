@@ -247,6 +247,60 @@ async fn background_claude_late_task_start_keeps_its_bash_calls_original_turn() 
 }
 
 #[tokio::test]
+async fn move_chat_to_project_refuses_background_writers_after_the_reply_until_the_command_finishes() {
+    let (spawn, mut input, mut output) = support::controlled();
+    let folder = support::tempdir();
+    let destination = support::work_folder();
+    let (engine, mut rx) = engine(folder.path(), Vendor::Claude, spawn);
+    let project = engine.add_project(&destination.path().to_string_lossy()).unwrap();
+    let conversation = engine.send(request("claude")).unwrap();
+    assert_eq!(support::read_message(&mut input).await["type"], "user");
+    support::emit(&mut output, json!({"type":"system","subtype":"init","session_id":"moving-task-session","model":"test"})).await;
+    let recorded = fixture("claude");
+    support::emit(&mut output, recorded[4].clone()).await;
+    support::emit(&mut output, json!({"type":"result","subtype":"success","is_error":false,"usage":{}})).await;
+    tokio::time::timeout(Duration::from_secs(3), async {
+        while let Some(event) = rx.recv().await {
+            if let AppEvent::Message { message, .. } = event
+                && message.status == Some(faber_engine::model::Status::Done)
+            {
+                return;
+            }
+        }
+        panic!("the original reply never finished");
+    })
+    .await
+    .unwrap();
+    let before = engine.open(&conversation).unwrap();
+    let store = faber_engine::store::Store::new(folder.path());
+    // The task has not announced its row yet, but its background Bash call still owns a writer.
+    assert!(engine.background_commands().items.is_empty());
+    assert_eq!(engine.move_to_project(&conversation, &project.id), Err("error.moveChat.busy".into()));
+    assert_eq!(engine.open(&conversation).unwrap(), before);
+    assert_eq!(store.get(&conversation).unwrap(), before);
+    support::emit(&mut output, recorded[5].clone()).await;
+    claude_output(&mut input, &mut output, "natural-task", "still running\n").await;
+    rows(&mut rx, |items| items.len() == 1 && items[0].output == "still running\n").await;
+    assert_eq!(engine.move_to_project(&conversation, &project.id), Err("error.moveChat.busy".into()));
+    assert_eq!(engine.open(&conversation).unwrap(), before);
+    assert_eq!(store.get(&conversation).unwrap(), before);
+    // Stop requests cancellation; only the command's completion confirms that it no longer writes.
+    engine.interrupt(&conversation);
+    let interrupt = support::read_message(&mut input).await;
+    assert_eq!(interrupt["request"]["subtype"], "interrupt");
+    assert_eq!(engine.move_to_project(&conversation, &project.id), Err("error.moveChat.busy".into()));
+    assert_eq!(engine.background_commands().items[0].state, State::Running);
+    support::emit(&mut output, recorded[6].clone()).await;
+    claude_output(&mut input, &mut output, "natural-task", "finished\n").await;
+    rows(&mut rx, |items| items.is_empty()).await;
+    let finished = engine.open(&conversation).unwrap();
+    let moved = engine.move_to_project(&conversation, &project.id).unwrap();
+    assert_eq!(moved.area, Area::Project);
+    assert_eq!(moved.messages, finished.messages);
+    engine.shutdown();
+}
+
+#[tokio::test]
 async fn background_claude_caps_output_and_commands_from_real_wire_events() {
     let (spawn, mut input, mut output) = support::controlled();
     let folder = support::tempdir();

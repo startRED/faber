@@ -111,7 +111,7 @@ check('right-click: a chat offers Rename, Export, Archive and Delete, Delete ask
     const row = [...root.querySelectorAll('.crow')].find((r) => r.textContent?.includes('Plan the trip'))!;
     equal(rightClick(row), false);
     await settle();
-    deepEqual(labels(), [t('menu.rename'), t('menu.pin'), t('menu.export'), t('menu.moveToGroup'), t('menu.archive'), t('menu.delete')]);
+    deepEqual(labels(), [t('menu.rename'), t('menu.pin'), t('menu.export'), t('menu.moveToGroup'), t('menu.moveToProject'), t('menu.archive'), t('menu.delete')]);
     ok(entry(t('menu.delete')).classList.contains('danger'), 'Delete is last and in the danger colour');
     entry(t('menu.delete')).click();
     await settle();
@@ -204,6 +204,108 @@ check('conversation export: both areas save their own row, cancel silently and s
     deepEqual(errors, [{ key: 'error.export.write' }, { key: 'error.export.write' }], 'only failed saves say anything');
   } finally {
     api.exportConversation = original;
+  }
+});
+
+check('move chat to project: the keyboard picker names projects, refuses busy chats and moves the pinned row at once', async () => {
+  const root = stage();
+  root.style.width = '720px';
+  const [rows, setRows] = createSignal<Summary[]>([{ ...chats[0]!, pinnedAt: 10 }]);
+  const [place, setPlace] = createSignal<{ area: Area; id?: string; projectId?: string }>({ area: 'chat', id: 'c1' });
+  const [available, setAvailable] = createSignal(projects);
+  const [grouped, setGrouped] = createSignal(false);
+  const errors: unknown[] = [];
+  const calls: [string, string][] = [];
+  const original = api.moveToProject;
+  let busy = true;
+  api.moveToProject = async (id, projectId) => {
+    calls.push([id, projectId]);
+    if (busy) throw { key: 'error.moveChat.busy' };
+    return { id, title: 'Plan the trip', area: 'project', projectId, pinnedAt: 10, sessions: {}, createdAt: 1, updatedAt: 2, messages: [] };
+  };
+  const dispose = render(() => [
+    createComponent(Sidebar, {
+      get conversations() { return rows(); }, get projects() { return available(); }, get place() { return place(); },
+      get groups() { return [{ id: 'g1', name: 'Trips', instructions: '', files: [], conversationIds: grouped() ? ['c1'] : [] }]; },
+      vendors: [], version: '0', running: [], quotas: {}, now: Date.now(),
+      onNew: () => {}, onArea: () => {}, onProject: () => {}, onNewIn: () => {}, onAddProject: () => {},
+      onOpen: () => {}, onRemove: () => {}, onSettings: () => {}, onError: (err) => errors.push(err),
+      onMoved: (c) => { setRows([{ ...rows()[0]!, area: c.area, projectId: c.projectId }]); setPlace({ area: c.area, id: c.id, projectId: c.projectId }); },
+    }),
+    createComponent(ContextMenuHost, {}),
+  ], root);
+  const open = async () => {
+    const row = root.querySelector<HTMLButtonElement>('.crow .item')!;
+    row.focus({ preventScroll: true });
+    key(row, { key: 'F10', shiftKey: true });
+    await settle();
+  };
+  try {
+    await open();
+    ok(entry(t('menu.moveToProject')), 'the Chat row offers Move to project');
+    ok(!entry(t('menu.removeFromGroup')), 'an outside chat has no Remove from group');
+    clickOutside(); await settle();
+    setGrouped(true);
+    root.querySelector<HTMLButtonElement>('[data-chat-group-id="g1"] .prow .item')!.click();
+    await settle();
+    await open();
+    deepEqual(labels(), [t('menu.rename'), t('menu.unpin'), t('menu.export'), t('menu.moveToGroup'), t('menu.removeFromGroup'), t('menu.moveToProject'), t('menu.archive'), t('menu.delete')], 'both moves share the Chat menu in the agreed order');
+    clickOutside(); await settle();
+    setGrouped(false);
+    setAvailable([]);
+    await open();
+    ok(!entry(t('menu.moveToProject')), 'with no projects there is no dead-end action');
+    clickOutside(); await settle();
+    setAvailable([...projects, { id: 'p2', name: 'A second project', path: 'X:/second' }]);
+    setAvailable(Array.from({ length: 40 }, (_, i) => ({ id: `many-${i}`, name: i ? `Project ${i}` : 'A very long project name '.repeat(12), path: 'X:/many' })));
+    await open();
+    entry(t('menu.moveToProject')).click(); await settle();
+    const picker = menus()[0]!;
+    ok(picker.getBoundingClientRect().bottom <= innerHeight, 'a long project list stays inside the window');
+    ok(entries()[0]!.getBoundingClientRect().right <= picker.getBoundingClientRect().right, 'long project names wrap inside the picker');
+    key(document.activeElement!, { key: 'End' }); await settle();
+    equal(document.activeElement, entries().at(-1), 'the keyboard reaches the last project');
+    picker.dispatchEvent(new Event('scroll'));
+    await settle(); equal(menus().length, 1, 'scrolling the projects never dismisses the picker');
+    key(document.activeElement!, { key: 'Escape' }); await settle();
+    equal(menus().length, 0, 'Escape cancels without moving');
+    setAvailable([...projects, { id: 'p2', name: 'A second project', path: 'X:/second' }]);
+    for (const refused of [true, false]) {
+      busy = refused;
+      await open();
+      entry(t('menu.moveToProject')).click();
+      await settle();
+      deepEqual(labels(), ['Garden', 'A second project'], 'the picker contains project names, in the existing menu');
+      equal(document.activeElement, entry('Garden'), 'the keyboard reaches the first project');
+      key(document.activeElement!, { key: 'ArrowDown' });
+      equal(document.activeElement, entry('A second project'));
+      entry('Garden').click();
+      await settle();
+      equal(menus().length, 0);
+      if (refused) {
+        deepEqual(errors, [{ key: 'error.moveChat.busy' }]);
+        equal(place().area, 'chat');
+        equal(root.querySelector('.crow .item > span')?.textContent, 'Plan the trip');
+      }
+    }
+    deepEqual(calls, [['c1', 'p1'], ['c1', 'p1']]);
+    deepEqual(place(), { area: 'project', id: 'c1', projectId: 'p1' }, 'the open chat follows its project');
+    equal(root.querySelectorAll('.crow').length, 1, 'the moved row appears once');
+    equal(root.querySelector('.proj-chats .crow .item > span')?.textContent, 'Plan the trip');
+    equal(root.querySelector('.crow .item')?.getAttribute('aria-current'), 'true');
+    ok([...root.querySelectorAll('.group-h')].some((el) => el.textContent === t('side.pinned')), 'the moved row keeps its pin');
+    await open();
+    ok(!entry(t('menu.moveToProject')), 'a project conversation cannot move back');
+    clickOutside(); await settle();
+    setRows([{ ...chats[0]!, archived: true }]); setPlace({ area: 'chat' });
+    const search = root.querySelector<HTMLInputElement>('input[type=search]')!;
+    search.value = 'trip'; search.dispatchEvent(new InputEvent('input', { bubbles: true }));
+    await settle(); await open();
+    ok(!entry(t('menu.moveToProject')), 'an archived Chat row cannot move');
+    clickOutside();
+  } finally {
+    api.moveToProject = original;
+    dispose(); root.remove();
   }
 });
 
@@ -348,12 +450,15 @@ check('right-click: the keyboard opens the menu on a focused row, arrows move, E
     item.focus();
     key(item, { key: 'F10', shiftKey: true });
     await settle();
-    deepEqual(labels(), [t('menu.rename'), t('menu.pin'), t('menu.export'), t('menu.moveToGroup'), t('menu.archive'), t('menu.delete')]);
+    deepEqual(labels(), [t('menu.rename'), t('menu.pin'), t('menu.export'), t('menu.moveToGroup'), t('menu.moveToProject'), t('menu.archive'), t('menu.delete')]);
     equal(document.activeElement, entry(t('menu.rename')), 'the first item takes focus');
     key(document.activeElement!, { key: 'ArrowDown' });
     equal(document.activeElement, entry(t('menu.pin')));
     key(document.activeElement!, { key: 'ArrowDown' });
     equal(document.activeElement, entry(t('menu.export')));
+    ok(entry(t('menu.moveToGroup')).disabled, 'without groups the unavailable move stays visible and arrows skip it');
+    key(document.activeElement!, { key: 'ArrowDown' });
+    equal(document.activeElement, entry(t('menu.moveToProject')));
     key(document.activeElement!, { key: 'ArrowDown' });
     equal(document.activeElement, entry(t('menu.archive')));
     key(document.activeElement!, { key: 'ArrowDown' });

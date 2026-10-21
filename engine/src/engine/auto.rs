@@ -378,13 +378,18 @@ impl Core {
         }
     }
 
-    /// Stop on an answer still waiting for its route: there is no CLI to interrupt yet, so it simply stops.
-    pub(super) fn stop_waiting(&mut self, id: &str) {
-        let Some(m) = self.convs.get_mut(id).and_then(|c| c.messages.last_mut()).filter(|m| m.status == Some(Status::Streaming)) else {
+    /// Stops a wait with no active CLI. Only the person's Stop cancels explicit recovery; closing preserves it.
+    pub(super) fn stop_waiting(&mut self, id: &str, stop_recovery: bool) {
+        let recovery = stop_recovery && self.transfers.get(id).is_some_and(|t| self.pending_turn(id, &t.reply).is_ok());
+        let Some(m) =
+            self.convs.get_mut(id).and_then(|c| c.messages.last_mut()).filter(|m| m.status == Some(Status::Streaming) || recovery)
+        else {
             return;
         };
         m.status = Some(Status::Stopped);
         m.wait_until = None;
+        m.error = None;
+        m.recovery = None;
         m.permissions = None;
         self.transfers.remove(id);
         let reply_id = m.id.clone();

@@ -1046,6 +1046,48 @@ fn conversation_export_contains_each_messages_markdown_scope() {
 }
 
 #[tokio::test]
+async fn move_chat_to_project_edit_keeps_default_folder_file_cards_in_the_new_conversation() {
+    let data = project_folder();
+    let folder = project_folder();
+    let mut record: faber_engine::model::Conversation =
+        serde_json::from_str(include_str!("../../tests/fixtures/conversation-export.json")).unwrap();
+    record.working_folder = None;
+    for m in &mut record.messages {
+        m.attachments = None;
+    }
+    record.messages[1].files = Some(vec![
+        faber_engine::model::FileInfo { path: "report.txt".into(), size: 6 },
+        faber_engine::model::FileInfo { path: "picture.png".into(), size: 7 },
+    ]);
+    let source = data.path().join("chat").join(&record.id);
+    std::fs::create_dir_all(&source).unwrap();
+    std::fs::write(source.join("report.txt"), "report").unwrap();
+    std::fs::write(source.join("picture.png"), b"picture").unwrap();
+    faber_engine::store::Store::new(data.path()).save_checked(&record).unwrap();
+    let (engine, _) = engine(data.path(), Vendor::Claude, fake(vec![]).spawn);
+    let project = engine.add_project(&folder.path().to_string_lossy()).unwrap();
+    engine.move_to_project(&record.id, &project.id).unwrap();
+    let branch = engine
+        .branch(BranchRequest {
+            conversation_id: record.id.clone(),
+            message_id: record.messages[2].id.clone(),
+            text: "Edit after moving".into(),
+            choice: choice("claude", None),
+        })
+        .unwrap();
+    assert_eq!(engine.open(&branch).unwrap().messages[1].files, record.messages[1].files);
+    for name in ["report.txt", "picture.png"] {
+        let file = engine.workspace_file(&branch, name).expect("Save, Show and previews follow inherited file cards");
+        assert_eq!(std::fs::read(file).unwrap(), std::fs::read(source.join(name)).unwrap());
+    }
+    engine.remove(&record.id);
+    for name in ["report.txt", "picture.png"] {
+        assert!(engine.workspace_file(&branch, name).is_some(), "removing the source does not remove the branch's files");
+    }
+    engine.shutdown();
+}
+
+#[tokio::test]
 async fn mcp_servers_latest_project_session_is_memory_only_and_choices_survive_reopening() {
     let dir = support::tempdir();
     let folder = project_folder();
@@ -1125,6 +1167,270 @@ async fn mcp_servers_codex_project_list_uses_its_thread_report_and_project_names
     assert_eq!((own.source, own.status.as_deref(), own.enabled), ("user", Some("connected"), None));
     assert!(f.mismatches.lock().unwrap().is_empty(), "{:?}", f.mismatches.lock().unwrap());
     engine.shutdown();
+}
+
+#[tokio::test]
+async fn move_chat_to_project_edit_copies_every_inherited_attachment_before_publishing() {
+    for missing in [false, true] {
+        let data = project_folder();
+        let folder = project_folder();
+        let mut record: faber_engine::model::Conversation =
+            serde_json::from_str(include_str!("../../tests/fixtures/conversation-export.json")).unwrap();
+        record.working_folder = None;
+        for m in &mut record.messages {
+            m.attachments = None;
+        }
+        record.messages[0].attachments = Some(vec!["notes.txt".into()]);
+        let old = data.path().join("chat").join(&record.id).join("attachments");
+        std::fs::create_dir_all(&old).unwrap();
+        std::fs::write(old.join("notes.txt"), "Keep these earlier notes").unwrap();
+        faber_engine::store::Store::new(data.path()).save_checked(&record).unwrap();
+        let (spawn, made) = pipes();
+        let (engine, _) = engine(data.path(), Vendor::Claude, spawn);
+        let project = engine.add_project(&folder.path().to_string_lossy()).unwrap();
+        engine.move_to_project(&record.id, &project.id).unwrap();
+        let kept = data.path().join("attachments").join(&record.id).join("notes.txt");
+        if missing {
+            std::fs::remove_file(&kept).unwrap();
+        }
+        let edited = engine.branch(BranchRequest {
+            conversation_id: record.id.clone(),
+            message_id: record.messages[2].id.clone(),
+            text: "Edit the later message".into(),
+            choice: choice("claude", None),
+        });
+        if missing {
+            assert!(edited.is_err(), "an inherited attachment that cannot be copied must refuse the branch");
+            assert_eq!(engine.state().conversations.len(), 1, "no incomplete branch is published");
+        } else {
+            let id = edited.unwrap();
+            let target = data.path().join("attachments").join(&id).join("notes.txt");
+            assert_eq!(std::fs::read_to_string(&target).unwrap(), "Keep these earlier notes");
+            let agent = next_pipe(&made).await;
+            for _ in 0..200 {
+                if agent.lines.lock().unwrap().iter().any(|m| m["type"] == "user") {
+                    break;
+                }
+                tokio::time::sleep(Duration::from_millis(10)).await;
+            }
+            let lines = agent.lines.lock().unwrap();
+            let prompt = lines.iter().find(|m| m["type"] == "user").unwrap()["message"]["content"].as_str().unwrap();
+            assert!(prompt.contains(target.to_string_lossy().as_ref()), "the fresh session sees the new attachment location");
+            drop(lines);
+            engine.remove(&record.id);
+            assert!(!kept.exists());
+            assert_eq!(std::fs::read_to_string(target).unwrap(), "Keep these earlier notes", "the branch owns its attachment");
+        }
+        engine.shutdown();
+    }
+}
+
+#[tokio::test]
+async fn move_chat_to_project_keeps_generated_file_cards_reachable_after_reopening() {
+    for chosen_folder in [false, true] {
+        let data = project_folder();
+        let old_folder = project_folder();
+        let project_folder = project_folder();
+        let mut record = export_sample("Generated a report and a picture");
+        record.area = Area::Chat;
+        record.project_id = None;
+        record.working_folder = chosen_folder.then(|| old_folder.path().to_string_lossy().into_owned());
+        record.messages[0].files = Some(vec![
+            faber_engine::model::FileInfo { path: "report.txt".into(), size: 6 },
+            faber_engine::model::FileInfo { path: "picture.png".into(), size: 7 },
+        ]);
+        let source = if chosen_folder { old_folder.path().to_path_buf() } else { data.path().join("chat").join(&record.id) };
+        std::fs::create_dir_all(&source).unwrap();
+        std::fs::write(source.join("report.txt"), "report").unwrap();
+        std::fs::write(source.join("picture.png"), b"picture").unwrap();
+        let store = faber_engine::store::Store::new(data.path());
+        store.save_checked(&record).unwrap();
+        let (mover, _) = engine(data.path(), Vendor::Claude, fake(vec![]).spawn);
+        let project = mover.add_project(&project_folder.path().to_string_lossy()).unwrap();
+        assert!(mover.workspace_file(&record.id, "report.txt").is_some(), "the card resolves before moving");
+        mover.move_to_project(&record.id, &project.id).unwrap();
+        for name in ["report.txt", "picture.png"] {
+            let file = mover.workspace_file(&record.id, name).expect("Save, Show and image previews still resolve their source");
+            assert_eq!(file.canonicalize().unwrap(), source.join(name).canonicalize().unwrap());
+            assert_eq!(std::fs::read(file).unwrap(), std::fs::read(source.join(name)).unwrap());
+        }
+        mover.shutdown();
+        let (reopened, _) = engine(data.path(), Vendor::Claude, fake(vec![]).spawn);
+        assert_eq!(reopened.open(&record.id).unwrap().messages[0].files, record.messages[0].files);
+        for name in ["report.txt", "picture.png"] {
+            assert_eq!(
+                reopened.workspace_file(&record.id, name).unwrap().canonicalize().unwrap(),
+                source.join(name).canonicalize().unwrap()
+            );
+        }
+        reopened.shutdown();
+    }
+}
+
+#[tokio::test]
+async fn move_chat_to_project_preserves_the_record_and_starts_fresh_with_history_for_each_cli() {
+    for vendor in [Vendor::Claude, Vendor::Codex] {
+        let data = support::tempdir();
+        let folder = project_folder();
+        let (first, mut rx) = engine(data.path(), vendor, fake(fixture(vendor.name(), "chat")).spawn);
+        let id = first.send(ask(Area::Chat, SKY, choice(vendor.name(), None))).unwrap();
+        finished(&mut rx, |_| {}).await;
+        first.rename(&id, "Trip notes");
+        first.pin(&id, true).unwrap();
+        let project = first.add_project(&folder.path().to_string_lossy()).unwrap();
+        first.shutdown();
+        let store = faber_engine::store::Store::new(data.path());
+        let mut before = store.get(&id).unwrap();
+        assert!(before.sessions.contains_key(&vendor));
+        before.messages[0].attachments = Some(vec!["notes.txt".into()]);
+        let chosen = project_folder();
+        if vendor == Vendor::Codex {
+            before.working_folder = Some(chosen.path().to_string_lossy().into_owned());
+        }
+        store.save_checked(&before).unwrap();
+        let attachments =
+            before.working_folder.as_ref().map_or_else(|| data.path().join("chat").join(&id), |path| path.into()).join("attachments");
+        std::fs::create_dir_all(&attachments).unwrap();
+        std::fs::write(attachments.join("notes.txt"), "keep these notes").unwrap();
+        let expected = faber_engine::engine::with_history(&before.messages, SKY, &|name| {
+            data.path().join("attachments").join(&id).join(name).to_string_lossy().into_owned()
+        });
+        let mut entries = fixture(vendor.name(), "chat");
+        for entry in &mut entries {
+            if entry.input && entry.msg["type"] == "user" {
+                entry.msg["message"]["content"] = expected.clone().into();
+            }
+            if entry.input && entry.msg["method"] == "turn/start" {
+                entry.msg["params"]["input"][0]["text"] = expected.clone().into();
+            }
+        }
+        let f = fake(entries);
+        let seen = Arc::new(Mutex::new(Vec::new()));
+        let (seen_in, inner) = (seen.clone(), f.spawn.clone());
+        let spawn: Spawner = Arc::new(move |bin, args, cwd| {
+            seen_in.lock().unwrap().push(cwd.to_path_buf());
+            inner(bin, args, cwd)
+        });
+        let (mover, mut rx) = engine(data.path(), vendor, spawn);
+        let temporary_record = data.path().join("conversations").join(format!("{id}.json.tmp"));
+        std::fs::create_dir(&temporary_record).unwrap();
+        assert_eq!(mover.move_to_project(&id, &project.id), Err("error.store.write".into()));
+        assert_eq!(store.get(&id).unwrap(), before, "copied attachments never publish a half-moved record");
+        assert_eq!(mover.open(&id).unwrap().area, Area::Chat);
+        assert!(attachments.join("notes.txt").is_file(), "a refused move keeps its original attachment");
+        std::fs::remove_dir(&temporary_record).unwrap();
+        let moved = mover.move_to_project(&id, &project.id).unwrap();
+        assert_eq!(moved.area, Area::Project);
+        assert_eq!(moved.project_id, Some(project.id.clone()));
+        assert_eq!(moved.working_folder, before.working_folder, "file cards retain their Chat source, independently of project sessions");
+        assert_eq!(moved.messages, before.messages);
+        assert_eq!(moved.title, before.title);
+        assert_eq!(moved.pinned_at, before.pinned_at);
+        assert_eq!(moved.updated_at, before.updated_at);
+        assert!(moved.sessions.is_empty() && moved.tentative.is_empty() && moved.cost_base.is_empty());
+        assert_eq!(store.get(&id).unwrap(), moved, "one complete record survives reopening");
+        let summary = mover.state().conversations.into_iter().find(|c| c.id == id).unwrap();
+        assert_eq!((summary.area, summary.project_id), (Area::Project, Some(project.id.clone())));
+        assert!(std::iter::from_fn(|| rx.try_recv().ok()).any(|e| matches!(e, AppEvent::List)));
+        assert_eq!(std::fs::read_to_string(data.path().join("attachments").join(&id).join("notes.txt")).unwrap(), "keep these notes");
+        assert!(attachments.join("notes.txt").is_file());
+        mover
+            .send(SendRequest {
+                conversation_id: Some(id.clone()),
+                project_id: Some(project.id),
+                ..ask(Area::Project, SKY, choice(vendor.name(), None))
+            })
+            .unwrap();
+        let reply = finished(&mut rx, |_| {}).await;
+        assert_eq!(reply.status, Some(Status::Done));
+        let wire: Vec<String> = f.wire.messages().iter().map(ToString::to_string).collect();
+        assert!(wire.iter().any(|line| line.contains("Earlier in this conversation") && line.contains("notes.txt")), "{wire:?}");
+        assert!(!wire.iter().any(|line| line.contains("thread/resume")));
+        assert!(!f.args.lock().unwrap().iter().flatten().any(|arg| arg == "--resume"));
+        if vendor == Vendor::Claude {
+            assert_eq!(seen.lock().unwrap()[0].canonicalize().unwrap(), folder.path().canonicalize().unwrap());
+        } else {
+            let start: serde_json::Value = wire
+                .iter()
+                .filter_map(|line| serde_json::from_str(line).ok())
+                .find(|v: &serde_json::Value| v["method"] == "thread/start")
+                .unwrap();
+            assert_eq!(Path::new(start["params"]["cwd"].as_str().unwrap()).canonicalize().unwrap(), folder.path().canonicalize().unwrap());
+            assert!(start.to_string().contains("verify"), "the new thread has project tools");
+        }
+        assert!(f.mismatches.lock().unwrap().is_empty(), "{:?}", f.mismatches.lock().unwrap());
+        mover.shutdown();
+    }
+}
+
+#[tokio::test]
+async fn move_chat_to_project_refuses_work_queue_questions_and_failed_writes_without_changing_the_record() {
+    let data = support::tempdir();
+    let folder = project_folder();
+    let (spawn, pipes) = pipes();
+    let (first, mut rx) = engine(data.path(), Vendor::Claude, spawn);
+    first.save_settings(Settings { permissions: Some(Permissions::Ask), ..Settings::default() }).unwrap();
+    let project = first.add_project(&folder.path().to_string_lossy()).unwrap();
+    let id = first.send(ask(Area::Chat, "first", choice("claude", None))).unwrap();
+    let mut pipe = next_pipe(&pipes).await;
+    pipe.say(json!({"type":"system","subtype":"init","session_id":"busy-chat","model":"test"})).await;
+    let before = first.open(&id).unwrap();
+    assert_eq!(first.move_to_project(&id, &project.id), Err("error.moveChat.busy".into()));
+    assert_eq!(first.open(&id).unwrap(), before);
+    pipe.say(json!({"type":"control_request","request_id":"q","request":{"subtype":"can_use_tool","tool_name":"Write","input":{"file_path":"x.txt","content":"x"}}})).await;
+    loop {
+        let event = tokio::time::timeout(Duration::from_secs(3), rx.recv()).await.unwrap().unwrap();
+        if matches!(event, AppEvent::Message { ref message, .. } if message.permissions.as_ref().is_some_and(|p| !p.is_empty())) {
+            break;
+        }
+    }
+    assert_eq!(first.move_to_project(&id, &project.id), Err("error.moveChat.busy".into()));
+    first.interrupt(&id);
+    pipe.say(json!({"type":"result","subtype":"success","is_error":false,"total_cost_usd":0.0,"usage":{}})).await;
+    finished(&mut rx, |_| {}).await;
+    first.move_to_project(&id, &project.id).unwrap();
+    first.shutdown();
+    let store = faber_engine::store::Store::new(data.path());
+    let mut idle = store.get(&id).unwrap();
+    idle.area = Area::Chat;
+    idle.project_id = None;
+    idle.messages.last_mut().unwrap().status = Some(Status::Stopped);
+    for field in ["queued", "quota", "archived", "project", "write"] {
+        let mut record = serde_json::to_value(&idle).unwrap();
+        match field {
+            "queued" => record["queued"] = json!([{"id":"q","text":"later","choice":{"vendor":"claude"},"at":1}]),
+            "quota" => record["keepGoing"] = json!({"since":1,"turns":0,"failed":0,"work":0,"waitUntil":9999999999u64}),
+            "archived" => record["archivedAt"] = json!(1),
+            "project" => record["area"] = json!("project"),
+            _ => {}
+        }
+        let record: faber_engine::model::Conversation = serde_json::from_value(record).unwrap();
+        store.save_checked(&record).unwrap();
+        let (mover, _) = engine(data.path(), Vendor::Claude, fake(vec![]).spawn);
+        let loaded = mover.open(&id).unwrap();
+        let temp = data.path().join("conversations").join(format!("{id}.json.tmp"));
+        if field == "write" {
+            std::fs::create_dir(&temp).unwrap();
+        }
+        let expected = match field {
+            "archived" | "project" => "error.moveChat.unavailable",
+            "write" => "error.store.write",
+            _ => "error.moveChat.busy",
+        };
+        assert_eq!(mover.move_to_project(&id, &project.id), Err(expected.into()), "{field}");
+        assert_eq!(mover.open(&id).unwrap(), loaded, "{field}: memory stays unchanged");
+        assert_eq!(store.get(&id).unwrap(), record, "{field}: disk stays unchanged");
+        if field == "write" {
+            std::fs::remove_dir(&temp).unwrap();
+        }
+        mover.shutdown();
+    }
+    store.save_checked(&idle).unwrap();
+    let (mover, _) = engine(data.path(), Vendor::Claude, fake(vec![]).spawn);
+    assert_eq!(mover.move_to_project(&id, "missing"), Err("error.projectGone".into()));
+    mover.move_to_project(&id, &project.id).unwrap();
+    assert_eq!(store.get(&id).unwrap().area, Area::Project, "a stopped chat moves normally");
+    mover.shutdown();
 }
 
 #[tokio::test]

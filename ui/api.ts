@@ -221,6 +221,7 @@ export interface Conversation {
   area: Area;
   projectId?: string;
   workingFolder?: string;
+  projectStartPending?: boolean;
   /** A project conversation's own copy (a git worktree on its own branch), made at its first message. */
   copy?: WorkCopy;
   sessions: Partial<Record<Vendor, string>>;
@@ -785,6 +786,7 @@ export const api = {
   /** Archives a conversation, or brings an archived one back. */
   archive: (id: string, on: boolean) => invoke<void>('archive', { id, on }),
   pin: (id: string, on: boolean) => invoke<void>('pin', { id, on }),
+  moveToProject: (id: string, projectId: string) => invoke<Conversation>('move_to_project', { id, projectId }),
   answer: (id: string, turnId: string, requestId: string, allow: boolean, always = false) =>
     invoke<void>('answer', { id, turnId, requestId, allow, always }),
   approvePlan: (id: string, turnId: string, requestId: string, mode?: PermissionMode) => invoke<void>('approve_plan', { id, turnId, requestId, mode: mode ?? null }),

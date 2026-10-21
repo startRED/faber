@@ -70,7 +70,7 @@ for (const area of ['chat', 'project'] as const) {
       const panel = document.querySelector<HTMLElement>('.cmenu:not(.leaving)');
       ok(panel, 'Shift+F10 opens a menu on the focused conversation');
       const entries = [...panel.querySelectorAll<HTMLButtonElement>('[role=menuitem]')];
-      deepEqual(entries.map((el) => el.textContent), [t('menu.rename'), t(`menu.${action}`), t('menu.export'), ...(area === 'chat' ? [t('menu.moveToGroup')] : []), t('menu.archive'), t('menu.delete')]);
+      deepEqual(entries.map((el) => el.textContent), [t('menu.rename'), t(`menu.${action}`), t('menu.export'), ...(area === 'chat' ? [t('menu.moveToGroup'), t('menu.moveToProject')] : []), t('menu.archive'), t('menu.delete')]);
       const item = entries.find((el) => el.textContent === t(`menu.${action}`));
       ok(item, `the menu offers ${action}`);
       item.focus({ preventScroll: true });

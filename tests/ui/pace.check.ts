@@ -1,14 +1,82 @@
-import { createComponent } from 'solid-js';
+import { createComponent, createSignal } from 'solid-js';
 import { render } from 'solid-js/web';
 import { api, type AppState, type Conversation, type Message } from '../../ui/api.ts';
 import { App } from '../../ui/App.tsx';
+import { ContextMenuHost } from '../../ui/ContextMenu.tsx';
+import { installContextMenu } from '../../ui/contextmenu.ts';
 import { Composer, type Draft } from '../../ui/Composer.tsx';
 import { QuotaCard } from '../../ui/QuotaCard.tsx';
-import { useLanguage } from '../../ui/i18n.ts';
+import { t, useLanguage } from '../../ui/i18n.ts';
 import { vendorName } from '../../ui/models.ts';
 import { Settings } from '../../ui/Settings.tsx';
 import { Thread } from '../../ui/Thread.tsx';
 import { check, equal, ok } from './check.ts';
+
+check('move chat to project: App restores keyboard focus after its delayed refresh unless the person moved focus', async () => {
+  installContextMenu();
+  const before = { open: api.open, state: api.state, moveToProject: api.moveToProject, setClock: api.setClock, setShellTexts: api.setShellTexts, notesSeen: api.notesSeen };
+  const storage = localStorage.getItem('faber.place');
+  const tick = () => new Promise((resolve) => setTimeout(resolve, 30));
+  try {
+    for (const focusElsewhere of [false, true]) {
+      const c: Conversation = { id: 'moving-open-chat', title: 'Trip notes', area: 'chat', createdAt: 1, updatedAt: 1, sessions: {}, messages: [] };
+      const moved: Conversation = { ...c, area: 'project', projectId: 'garden' };
+      const initial = { conversations: [{ id: c.id, title: c.title, area: c.area, updatedAt: 1 }], projects: [{ id: 'garden', name: 'Garden', path: 'X:/garden' }], vendors: ['claude'],
+        settings: { setup: 'done', tutorialDone: true, language: 'en', appearance: { base: 'sala' } }, running: { revision: 0, items: [] }, quotas: [], usage: [], models: [], version: 'test',
+        look: { vars: {}, scheme: 'dark', motion: 'none', checks: [], notices: [], effects: { ambient: false, texture: false, glow: false },
+          appearance: { base: 'sala', ground: 'sala', accent: '#ffffff', textFont: 'archivo', headingFont: 'narrow', textSize: 14, density: 1, corners: 1, motion: 'none', effects: { ambient: false, texture: false, glow: false } } }
+      } as AppState;
+      let moving = false;
+      let finishRefresh: ((s: AppState) => void) | undefined;
+      api.open = async () => moving ? moved : c;
+      api.moveToProject = async () => { moving = true; return moved; };
+      api.state = () => new Promise<AppState>((resolve) => { finishRefresh = resolve; });
+      api.setClock = async () => {}; api.setShellTexts = async () => {}; api.notesSeen = async () => Number.MAX_SAFE_INTEGER;
+      localStorage.setItem('faber.place', JSON.stringify({ area: 'chat', id: c.id }));
+      const host = document.createElement('div');
+      // Keep the fixture in view: focus scrolling would dismiss the keyboard menu, especially in WebKit.
+      host.style.cssText = 'position:fixed;inset:0';
+      document.body.append(host);
+      const elsewhere = document.createElement('input'); document.body.append(elsewhere);
+      const dispose = render(() => [createComponent(App, { initial, inbox: { take: () => {} } }), createComponent(ContextMenuHost, {})], host);
+      try {
+        await tick();
+        const row = host.querySelector<HTMLButtonElement>('.crow .item')!;
+        ok(row, 'the open Chat row exists'); row.focus({ preventScroll: true });
+        equal(document.activeElement, row, 'the Chat row has focus before its keyboard menu opens');
+        row.dispatchEvent(new KeyboardEvent('keydown', { key: 'F10', shiftKey: true, bubbles: true, cancelable: true }));
+        await tick();
+        // The page's first ContextMenuHost draws the menu, including when it belongs to this test's App.
+        const entry = (label: string) => {
+          const items = [...document.querySelectorAll<HTMLButtonElement>('.cmenu:not(.leaving) [role=menuitem]')];
+          const item = items.find((b) => b.textContent === label);
+          ok(item, `menu offers ${label}: ${items.map((b) => b.textContent).join(', ')}`);
+          return item;
+        };
+        entry(t('menu.moveToProject')).click(); await tick();
+        entry('Garden').click(); await tick();
+        ok(finishRefresh, 'App requested an asynchronous refresh');
+        ok(!host.querySelector('.crow'), 'the area changed before the row snapshot arrived');
+        if (focusElsewhere) {
+          elsewhere.focus({ preventScroll: true });
+          equal(document.activeElement, elsewhere, 'the person moved focus to another control');
+          // Hidden Chromium can change activeElement without emitting focusin.
+          elsewhere.dispatchEvent(new FocusEvent('focusin', { bubbles: true }));
+          elsewhere.blur();
+        }
+        finishRefresh({ ...initial, conversations: [{ ...initial.conversations[0]!, area: 'project', projectId: 'garden' }] });
+        await tick();
+        const destination = host.querySelector<HTMLButtonElement>('.proj-chats .crow .item');
+        ok(destination, 'the refreshed project has the moved row');
+        equal(document.activeElement, focusElsewhere ? document.body : destination,
+          focusElsewhere ? 'the row must not reclaim focus after the person focused and blurred another control' : 'delayed focus follows the moved row');
+      } finally { dispose(); host.remove(); elsewhere.remove(); }
+    }
+  } finally {
+    Object.assign(api, before);
+    if (storage === null) localStorage.removeItem('faber.place'); else localStorage.setItem('faber.place', storage);
+  }
+});
 
 check('pace: quota reasons, manual effort and grouped activity coexist without hiding the answer', () => {
   useLanguage('en');
@@ -57,6 +125,30 @@ check('pace: Settings separates own USD from shared quota and marks the daily li
     await tick();
     ok(host.textContent!.includes('whole account'));
   } finally { dispose(); host.remove(); }
+});
+
+check('move chat to project: errored quota recovery offers Stop before the chat can move', async () => {
+  const original = api.interrupt;
+  const calls: string[] = [];
+  try {
+    for (const error of ['error.quotaOut', 'error.quotaWait']) {
+      const [message, setMessage] = createSignal<Message>({ id: 'reply', role: 'assistant', text: '', at: 1, status: 'error', vendor: 'claude', error });
+      api.interrupt = async (id) => { calls.push(id); setMessage((m) => ({ ...m, status: 'stopped', error: undefined })); };
+      const host = document.createElement('div');
+      // Solid's delegated click handler lives on document, so the card must be mounted there.
+      document.body.append(host);
+      const dispose = render(() => createComponent(QuotaCard, { id: 'conversation', get m() { return message(); }, usage: [] }), host);
+      try {
+        const stop = [...host.querySelectorAll('button')].find((b) => b.textContent === t('composer.stop'));
+        ok(stop, `${error}: Stop is reachable even when the reply is an error`);
+        stop.click();
+        await Promise.resolve();
+        equal(message().status, 'stopped');
+        ok(![...host.querySelectorAll('button')].some((b) => b.textContent === t('composer.stop')), 'the stopped recovery has no live action');
+      } finally { dispose(); host.remove(); }
+    }
+    equal(JSON.stringify(calls), JSON.stringify(['conversation', 'conversation']));
+  } finally { api.interrupt = original; }
 });
 
 check('pace: paid credits require two clicks and name one vendor and one reply', async () => {

@@ -15,7 +15,9 @@ storage, so New conversation and Ctrl+N start an outside chat. Moving a chat wit
 row once the destination group has it; focusing another control meanwhile cancels that restoration, even after blur
 (`tests/ui/chat-groups.check.ts`, `chat groups: deleting` and `chat groups: keyboard Move to group`).
 When a refresh replaces a focused conversation row, focus follows its replacement after regrouping, unless the person
-has already moved to another control. Pin and Unpin remain usable from the keyboard in both areas.
+has already moved to another control, even if they then leave that control. Moving an open Chat row by keyboard waits
+for the destination row in the later project snapshot; its area can change before that snapshot arrives. Pin and Unpin
+remain usable from the keyboard in both areas.
 
 - At the top: "New conversation" (Ctrl N), then the two areas, Chat and Projects, the latter with a count.
 - The sidebar lists only the open area's items (R168): Chat lists the chats and no Projects block, not even an empty
@@ -34,6 +36,18 @@ has already moved to another control. Pin and Unpin remain usable from the keybo
   unfinished Markdown cannot consume the next turn. Only http, https, mailto and schemeless message links stay clickable;
   other destinations and raw HTML are literal text. It leaves out tools, the work log and
   internal metadata; a failed save uses the usual error line.
+- An unarchived Chat row also offers Move to project between Export and Archive, only when projects exist. It opens a
+  short picker of project names using the same menu surface, keyboard navigation, focus return and reduced-motion
+  behaviour. Long names wrap and a long list scrolls inside the window, without dismissing the picker. A busy
+  conversation, quota recovery (even an errored reply), queued message or pending question uses the usual calm line: Stop it first.
+  Background commands and unconfirmed writers keep the conversation busy after its reply ends; a Stop request waits for confirmed completion.
+  A restore in progress instead asks the person to try again when it ends. A successful
+  move puts the row under its project, keeping its title and pin; if open, it stays open in Projects with that project
+  expanded. It leaves its Chat group, whose instructions and files stay with the group. Earlier file cards keep
+  their source folder for Save, Show and image previews. The next turn uses the
+  project's folder, checks and tools, applying the separate-copy setting as it is at that first project turn, whether
+  sent by the person, Keep going or another conversation. Warm-up waits for the sent message's file baseline. Archived
+  rows and project conversations have no move action. No new screen or animation.
 - Pin and Unpin extend the conversation row's right-click menu in both areas. A short Pinned group uses the existing
   group heading and rows: above Today, This week and Earlier in Chat, and first inside each project's expanded list.
   Pinned rows are flat, newest pin first, and appear only once. Unpin returns the row to its normal order and nesting;

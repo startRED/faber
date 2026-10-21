@@ -8,9 +8,14 @@ use crate::route::{Asked, CHECKS, KINDS, LEVELS, ROUTER};
 pub(super) struct Transfer {
     pub reply: String,
     pub pick: Pick,
+    /// The request without history, used when a fresh session needs a newly built handover.
+    pub request: String,
+    /// The complete initial turn, including any first-request history and attachment locations.
     pub text: String,
     pub images: Vec<Image>,
     pub by_hand: bool,
+    /// One reply's one-vendor consent, in memory only, consumed when its turn is actually sent.
+    pub approved: Option<Vendor>,
     pub retried: bool,
     pub moving: bool,
     /// The router's `check` for this request (`route::CHECKS`); `glance` when no verdict was read.
@@ -60,10 +65,14 @@ impl Engine {
             {
                 return Err("error.permission.stale".into());
             }
-            c.credit = Some((id.into(), reply.into(), vendor));
+            c.transfers.get_mut(id).expect("pending turn checked above").approved = Some(vendor);
             let text = c.continuation(id, &t);
             let result = c.start(id, reply, &t.pick, text, t.images, t.by_hand);
-            c.credit = None;
+            if result.is_err()
+                && let Some(t) = c.transfers.get_mut(id).filter(|t| t.reply == reply)
+            {
+                t.approved = None;
+            }
             result
         })
     }
@@ -123,7 +132,7 @@ impl Core {
         let history = &c.messages[from..at.saturating_sub(1)];
         let (area, data_dir) = (c.area, self.opts.data_dir.clone());
         let resent = !history.is_empty();
-        let text = if resent { with_history(history, &t.text, &|n| attachment_place(area, &data_dir, conv, n)) } else { t.text.clone() };
+        let text = if resent { with_history(history, &t.request, &|n| attachment_place(area, &data_dir, conv, n)) } else { t.text.clone() };
         if let Some(m) = self.convs.get_mut(conv).and_then(|c| c.messages.iter_mut().find(|m| m.id == t.reply)) {
             m.note = resent.then(|| "note.historyResent".to_string());
         }
@@ -145,20 +154,21 @@ impl Core {
         }
         let Some(q) = c.messages.iter().rev().find(|m| m.role == Role::User) else { return };
         let Some(vendor) = m.vendor else { return };
+        let shown = q
+            .attachments
+            .as_deref()
+            .unwrap_or_default()
+            .iter()
+            .map(|name| {
+                if c.area == Area::Chat {
+                    format!("attachments/{name}")
+                } else {
+                    self.opts.data_dir.join("attachments").join(&c.id).join(name).to_string_lossy().into_owned()
+                }
+            })
+            .collect::<Vec<_>>();
+        let request = with_attachments(&q.text, c.area, &shown);
         let saved = m.recovery.clone().unwrap_or_else(|| {
-            let shown = q
-                .attachments
-                .as_deref()
-                .unwrap_or_default()
-                .iter()
-                .map(|name| {
-                    if c.area == Area::Chat {
-                        format!("attachments/{name}")
-                    } else {
-                        self.opts.data_dir.join("attachments").join(&c.id).join(name).to_string_lossy().into_owned()
-                    }
-                })
-                .collect::<Vec<_>>();
             // Older files have no dispatch intent: require explicit recovery and preserve any saved effort.
             Recovery {
                 pick: Pick {
@@ -168,7 +178,7 @@ impl Core {
                     reason: m.reason.clone().unwrap_or_else(|| "reason.chosen".into()),
                     pace: m.pace.clone(),
                 },
-                text: with_attachments(&q.text, c.area, &shown),
+                text: request.clone(),
                 by_hand: true,
                 retried: false,
                 check: "glance".into(),
@@ -179,9 +189,11 @@ impl Core {
             Transfer {
                 reply: m.id.clone(),
                 pick: saved.pick,
+                request,
                 text: saved.text,
                 images: q.images.clone().unwrap_or_default(),
                 by_hand: saved.by_hand,
+                approved: None,
                 retried: saved.retried,
                 moving: false,
                 check: CHECKS.into_iter().find(|c| *c == saved.check).unwrap_or("glance"),
@@ -192,7 +204,7 @@ impl Core {
         }
     }
 
-    fn pending_turn(&self, id: &str, reply: &str) -> Result<&Transfer, String> {
+    pub(super) fn pending_turn(&self, id: &str, reply: &str) -> Result<&Transfer, String> {
         let t = self.transfers.get(id).filter(|t| t.reply == reply).ok_or("error.permission.stale")?;
         let m = self.convs.get(id).and_then(|c| c.messages.last()).filter(|m| m.id == reply).ok_or("error.permission.stale")?;
         if self.live.get(id).is_some_and(|l| l.turn.is_some())
@@ -305,9 +317,10 @@ impl Core {
         let c = self.convs.get(id).ok_or("error.conversationGone")?;
         let held = c.context_messages();
         let history = &held[..held.len().saturating_sub(2)];
+        let files = attachment_notes(history, &|name| attachment_place(c.area, &self.opts.data_dir, id, name));
         match handover::plan(history) {
             Plan::Full(all) => {
-                let text = handover::with_full(&all, &t.text, &partial);
+                let text = handover::with_full(&(all + &files), &t.request, &partial);
                 self.resume_move(id, &t.reply, pick, text, false);
             }
             Plan::Summarise(prompt) => {
@@ -345,7 +358,8 @@ impl Core {
                     match answer.filter(|a| !a.trim().is_empty()) {
                         Some(summary) => {
                             let summary = summary.split_whitespace().take(handover::SUMMARY_WORDS).collect::<Vec<_>>().join(" ");
-                            let text = handover::with_summary(&summary, &t.text, &partial);
+                            // File locations are kept outside the prose summary so its word cap cannot discard them.
+                            let text = handover::with_summary(&(summary + &files), &t.request, &partial);
                             c.resume_move(&id, &reply, pick, text, true);
                         }
                         None => c.move_failed(&id, &reply),
@@ -536,9 +550,11 @@ mod tests {
                 Transfer {
                     reply: "reply".into(),
                     pick,
+                    request: "question".into(),
                     text: "question".into(),
                     images: vec![],
                     by_hand: true,
+                    approved: None,
                     retried,
                     moving: false,
                     check: "glance",

@@ -19,6 +19,191 @@ use support::{Fake, fake, fixture};
 const WHEN: u64 = 1_791_620_000;
 
 #[tokio::test]
+async fn move_chat_to_project_other_ai_keeps_attachment_locations_in_full_handover() {
+    moved_attachment_handover(false).await;
+}
+
+#[tokio::test]
+async fn move_chat_to_project_other_ai_keeps_attachment_locations_in_summarized_handover() {
+    moved_attachment_handover(true).await;
+}
+
+async fn moved_attachment_handover(long: bool) {
+    let dir = support::work_folder();
+    let folder = support::work_folder();
+    let mut before = seed(dir.path(), long);
+    before.messages[0].attachments = Some(vec!["notes.txt".into()]);
+    let attachments = dir.path().join("chat").join(&before.id).join("attachments");
+    std::fs::create_dir_all(&attachments).unwrap();
+    std::fs::write(attachments.join("notes.txt"), "Earlier decisions").unwrap();
+    Store::new(dir.path()).save_checked(&before).unwrap();
+    let (spawn, made) = support::pipes();
+    let engine = Engine::new(
+        EngineOptions {
+            data_dir: dir.path().into(),
+            clis: Vendor::ALL.into_iter().map(|v| (v, Cli { command: v.name().into(), prefix: vec![] })).collect(),
+            spawn,
+            windows: false,
+            claude_env_billed: false,
+            max_warm: 3,
+            idle: Duration::from_secs(120),
+            runtime: tokio::runtime::Handle::current(),
+            ask: None,
+        },
+        Arc::new(|_| {}),
+    );
+    engine.set_time_source(Arc::new(|| WHEN as f64));
+    engine.set_codex_models(vec!["gpt-6.1-sol".into(), "gpt-6-luna".into()], Some("gpt-6.1-sol".into()));
+    for v in Vendor::ALL {
+        engine.note_account_events(
+            v,
+            vec![EngineEvent::Signals(Signals { billing: Some(Billing::Subscription), paid_fallback: Some(false), ..Default::default() })],
+        );
+    }
+    let project = engine.add_project(&folder.path().to_string_lossy()).unwrap();
+    engine.move_to_project(&before.id, &project.id).unwrap();
+    engine.note_account_events(Vendor::Claude, vec![quota("seven_day", 172800, 1.0)]);
+    engine.send(request(Some(&before.id), "claude")).unwrap();
+    let blocked = reply(&engine, &before.id, Status::Error).await;
+    engine.move_turn(&before.id, &blocked.id).unwrap();
+    let mut agent = support::next_pipe(&made).await;
+    let next = async |agent: &support::Pipe, method: &str| {
+        for _ in 0..200 {
+            if let Some(m) = agent.lines.lock().unwrap().iter().find(|m| m["method"] == method).cloned() {
+                return m;
+            }
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+        panic!("no {method}: {:?}", agent.lines.lock().unwrap());
+    };
+    let init = next(&agent, "initialize").await;
+    agent.say(json!({"id":init["id"],"result":{}})).await;
+    if long {
+        let config = next(&agent, "config/read").await;
+        agent.say(json!({"id":config["id"],"result":{"config":{}}})).await;
+    }
+    let start = next(&agent, "thread/start").await;
+    agent.say(json!({"id":start["id"],"result":{"thread":{"id":"handover"}}})).await;
+    let turn = next(&agent, "turn/start").await;
+    let prompt = if long {
+        agent.say(json!({"id":turn["id"],"result":{"turn":{"id":"summary"}}})).await;
+        agent.say(json!({"method":"item/completed","params":{"threadId":"handover","turnId":"summary","item":{"id":"summary-answer","type":"agentMessage","text":"Keep the earlier decisions."}}})).await;
+        agent.say(json!({"method":"turn/completed","params":{"threadId":"handover","turn":{"id":"summary","status":"completed"}}})).await;
+        let mut project_agent = support::next_pipe(&made).await;
+        let init = next(&project_agent, "initialize").await;
+        project_agent.say(json!({"id":init["id"],"result":{}})).await;
+        let project = next(&project_agent, "thread/start").await;
+        project_agent.say(json!({"id":project["id"],"result":{"thread":{"id":"project"}}})).await;
+        next(&project_agent, "turn/start").await
+    } else {
+        turn
+    };
+    let location = dir.path().join("attachments").join(&before.id).join("notes.txt").to_string_lossy().into_owned();
+    assert!(
+        prompt["params"]["input"][0]["text"].as_str().unwrap().contains(&location),
+        "the other AI must receive the attachment location, summarized={long}: {prompt}"
+    );
+    engine.shutdown();
+}
+
+#[tokio::test]
+async fn move_chat_to_project_quota_wait_keeps_history_and_attachment_locations_for_each_cli() {
+    for vendor in Vendor::ALL {
+        for reopened in [false, true] {
+            let dir = support::work_folder();
+            let folder = support::work_folder();
+            let mut before: Conversation = serde_json::from_str(include_str!("../../tests/fixtures/conversation-export.json")).unwrap();
+            before.working_folder = None;
+            for m in &mut before.messages {
+                m.attachments = None;
+            }
+            before.messages[0].attachments = Some(vec!["notes.txt".into()]);
+            let attachments = dir.path().join("chat").join(&before.id).join("attachments");
+            std::fs::create_dir_all(&attachments).unwrap();
+            std::fs::write(attachments.join("notes.txt"), "Earlier project decisions").unwrap();
+            Store::new(dir.path()).save_checked(&before).unwrap();
+            let expected = faber_engine::engine::with_history(&before.messages, &request(None, vendor.name()).text, &|name| {
+                dir.path().join("attachments").join(&before.id).join(name).to_string_lossy().into_owned()
+            });
+            let mut entries = fixture(vendor.name(), "chat");
+            for e in &mut entries {
+                if e.input && e.msg["type"] == "user" {
+                    e.msg["message"]["content"] = json!(expected);
+                }
+                if e.input && e.msg["method"] == "turn/start" {
+                    e.msg["params"]["input"][0]["text"] = json!(expected);
+                }
+            }
+            let make = || sources(dir.path(), &[vendor], fake(entries.clone()), fake(entries.clone()));
+            let r = make();
+            let project = r.engine.add_project(&folder.path().to_string_lossy()).unwrap();
+            r.engine.move_to_project(&before.id, &project.id).unwrap();
+            r.engine.note_account_events(vendor, vec![quota("five_hour", 600, 1.0)]);
+            let id = r.engine.send(request(Some(&before.id), vendor.name())).unwrap();
+            let blocked = reply(&r.engine, &id, Status::Error).await;
+            assert_eq!(blocked.error.as_deref(), Some("error.quotaOut"));
+            let r = if reopened {
+                r.engine.shutdown();
+                let back = make();
+                back.engine.open(&id).unwrap();
+                back.engine.note_account_events(vendor, vec![quota("five_hour", 600, 1.0)]);
+                back
+            } else {
+                r
+            };
+            r.engine.wait_turn(&id, &blocked.id).unwrap();
+            r.time.store(WHEN + 601, Ordering::SeqCst);
+            r.engine.set_utc_offset(0);
+            reply(&r.engine, &id, Status::Done).await;
+            let running = if vendor == Vendor::Claude { &r.claude } else { &r.codex };
+            let messages = running.wire.messages();
+            let turn = messages
+                .iter()
+                .find_map(|m| match vendor {
+                    Vendor::Claude if m["type"] == "user" => m["message"]["content"].as_str(),
+                    Vendor::Codex if m["method"] == "turn/start" => m["params"]["input"][0]["text"].as_str(),
+                    _ => None,
+                })
+                .expect("the recovered turn reaches its fresh session");
+            assert_eq!(turn, expected, "vendor={vendor:?}, reopened={reopened}");
+            assert!(running.mismatches.lock().unwrap().is_empty());
+            r.engine.shutdown();
+        }
+    }
+}
+
+#[tokio::test]
+async fn move_chat_to_project_refuses_quota_recovery_until_stopped_including_after_restart() {
+    for vendor in ["claude", "auto"] {
+        let dir = support::tempdir();
+        let folder = support::work_folder();
+        let r = rig(dir.path(), &[Vendor::Claude], fake(vec![]));
+        let project = r.engine.add_project(&folder.path().to_string_lossy()).unwrap();
+        r.engine.note_account_events(Vendor::Claude, vec![quota("seven_day", 7 * 3600, 1.0)]);
+        let id = r.engine.send(request(None, vendor)).unwrap();
+        let blocked = reply(&r.engine, &id, Status::Error).await;
+        assert_eq!(blocked.error.as_deref(), Some(if vendor == "claude" { "error.quotaOut" } else { "error.quotaWait" }));
+        let before = r.engine.open(&id).unwrap();
+        assert_eq!(r.engine.move_to_project(&id, &project.id), Err("error.moveChat.busy".into()), "live {vendor}");
+        assert_eq!(r.engine.open(&id).unwrap(), before);
+        r.engine.shutdown();
+        drop(r);
+        let back = rig(dir.path(), &[Vendor::Claude], fake(vec![]));
+        back.engine.open(&id).unwrap();
+        assert_eq!(back.engine.move_to_project(&id, &project.id), Err("error.moveChat.busy".into()), "reopened {vendor}");
+        back.engine.interrupt(&id);
+        assert_eq!(back.engine.open(&id).unwrap().messages.last().unwrap().status, Some(Status::Stopped));
+        assert!(back.engine.wait_turn(&id, &blocked.id).is_err(), "stopping revokes the recovery");
+        back.engine.shutdown();
+        let later = rig(dir.path(), &[Vendor::Claude], fake(vec![]));
+        assert_eq!(later.engine.move_to_project(&id, &project.id).unwrap().area, Area::Project, "Stop survives reopening");
+        assert!(later.engine.approve_credits(&id, &blocked.id, Vendor::Claude).is_err());
+        assert!(later.claude.args.lock().unwrap().is_empty(), "no recovery starts in the destination");
+        later.engine.shutdown();
+    }
+}
+
+#[tokio::test]
 async fn restarting_cancels_a_queued_wait_instead_of_freezing_or_resending_it() {
     let dir = tempfile::tempdir().unwrap();
     let r = rig(dir.path(), &[Vendor::Claude], fake(vec![]));
@@ -376,6 +561,7 @@ fn seed(dir: &Path, long: bool) -> Conversation {
     let c = Conversation {
         commands: BTreeMap::new(),
         working_folder: None,
+        project_start_pending: false,
         copy: None,
         choice: None,
         id: "seeded".into(),

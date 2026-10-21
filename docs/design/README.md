@@ -36,7 +36,7 @@ The shared message box's lists and earlier messages live in [composer.md](compos
   button. Theme thumbnails are `aria-hidden`, and each theme card is named by its name and its description.
 - Areas whose content can grow scroll; they never cut content off.
 - Right-click is Faber's own (R123, `ui/contextmenu.ts`, `ui/ContextMenu.tsx`). The browser's menu never shows, and its
-  reload, print, save and view-source shortcuts do nothing. A menu opens only on a conversation (Rename, Pin or Unpin when not archived, Export, Move to group and Remove from group in Chat, Archive or Unarchive, Delete), a Chat group (Rename, Delete), a project (New
+  reload, print, save and view-source shortcuts do nothing. A menu opens only on a conversation (Rename, Pin or Unpin when not archived, Export, Move to group, Remove from group when assigned and Move to project (project-name picker) in Chat, Archive or Unarchive, Delete), a Chat group (Rename, Delete), a project (New
   conversation in this project, Open folder, Remove from Faber), a message (Copy; Edit and Go back before this message on yours;
   Redo on a saved restore; Retry with the chosen model on an answer),
   selected text (Copy) and a text field (Cut, Copy, Paste, Select all, with the ones that cannot apply disabled); anywhere

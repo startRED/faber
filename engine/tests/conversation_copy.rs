@@ -231,6 +231,233 @@ async fn gone(path: &Path) -> bool {
 }
 
 #[tokio::test]
+async fn move_chat_to_project_prepares_the_copy_for_keep_going() {
+    automatic_first_project_turn(false).await;
+}
+
+#[tokio::test]
+async fn move_chat_to_project_prepares_the_copy_for_another_conversations_ask() {
+    automatic_first_project_turn(true).await;
+}
+
+async fn automatic_first_project_turn(asked: bool) {
+    let data = support::work_folder();
+    let folder = support::work_folder();
+    let cwds: Arc<Mutex<Vec<PathBuf>>> = Arc::default();
+    let seen = cwds.clone();
+    let (inner, made) = support::pipes();
+    let spawn: Spawner = Arc::new(move |bin, args, cwd| {
+        seen.lock().unwrap().push(cwd.to_path_buf());
+        inner(bin, args, cwd)
+    });
+    let engine = Engine::new(
+        EngineOptions {
+            data_dir: data.path().into(),
+            clis: BTreeMap::from([(Vendor::Claude, Cli { command: "claude".into(), prefix: vec![] })]),
+            spawn,
+            windows: false,
+            claude_env_billed: false,
+            max_warm: 3,
+            idle: Duration::from_secs(120),
+            runtime: tokio::runtime::Handle::current(),
+            ask: None,
+        },
+        Arc::new(|_| {}),
+    );
+    engine.note_account_events(
+        Vendor::Claude,
+        vec![faber_engine::events::EngineEvent::Signals(faber_engine::signals::Signals {
+            billing: Some(faber_engine::budget::Billing::Subscription),
+            ..Default::default()
+        })],
+    );
+    let git = Git(Arc::new(Mutex::new(Repo { root: folder.path().into(), ..Repo::default() })));
+    engine.set_git(Arc::new(move || Some(Box::new(git.clone()) as Box<dyn Executor + Send>)));
+    let project = engine.add_project(&folder.path().to_string_lossy()).unwrap().id;
+    let mut record: faber_engine::model::Conversation =
+        serde_json::from_str(include_str!("../../tests/fixtures/conversation-export.json")).unwrap();
+    record.working_folder = None;
+    record.choice = Some(ask(&project, "").choice);
+    for m in &mut record.messages {
+        m.attachments = None;
+    }
+    let id = record.id.clone();
+    faber_engine::store::Store::new(data.path()).save_checked(&record).unwrap();
+    engine.move_to_project(&id, &project).unwrap();
+    let _asking = if asked {
+        engine.send(ask(&project, "Ask the other conversation")).unwrap();
+        let mut agent = support::next_pipe(&made).await;
+        agent.say(serde_json::json!({"type":"system","subtype":"init","session_id":"parent","model":"claude-haiku-5-5"})).await;
+        agent.say(serde_json::json!({"type":"control_request","request_id":"ask","request":{"subtype":"mcp_message","server_name":"faber",
+                "message":{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"conversation","arguments":{"action":"ask","id":id,"message":"What remains?"},"_meta":{"claudecode/toolUseId":"ask"}}}}})).await;
+        Some(agent)
+    } else {
+        engine.keep_going(&id, true).unwrap();
+        None
+    };
+    let target = support::next_pipe(&made).await;
+    let current = engine.open(&id).unwrap();
+    let copy = current.copy.expect("an automatic first project turn must prepare its separate copy");
+    assert!(!copy.root.is_empty(), "the copy is made before starting its session");
+    assert!(!current.project_start_pending);
+    assert_eq!(cwds.lock().unwrap().last(), Some(&copy.folder()), "never in the person's checkout, asked={asked}");
+    for _ in 0..200 {
+        if target.lines.lock().unwrap().iter().any(|m| m["type"] == "user") {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(10)).await;
+    }
+    let lines = target.lines.lock().unwrap();
+    let first = lines.iter().find(|m| m["type"] == "user").expect("the turn reaches its agent");
+    assert!(first.to_string().contains("Earlier in this conversation"), "the first turn also carries Chat's history");
+    drop(lines);
+    engine.shutdown();
+}
+
+#[tokio::test]
+async fn move_chat_to_project_resolves_a_stale_chat_send_before_copies_and_attachments() {
+    for attached in [false, true] {
+        let data = support::work_folder();
+        let folder = support::work_folder();
+        let cwds: Arc<Mutex<Vec<PathBuf>>> = Arc::default();
+        let git = Arc::new(Mutex::new(Repo { root: folder.path().into(), ..Repo::default() }));
+        let engine = start(data.path(), &cwds, Git(git));
+        let project = engine.add_project(&folder.path().to_string_lossy()).unwrap();
+        let mut record: faber_engine::model::Conversation =
+            serde_json::from_str(include_str!("../../tests/fixtures/conversation-export.json")).unwrap();
+        record.working_folder = None;
+        for m in &mut record.messages {
+            m.attachments = None;
+        }
+        let id = record.id.clone();
+        faber_engine::store::Store::new(data.path()).save_checked(&record).unwrap();
+        engine.move_to_project(&id, &project.id).unwrap();
+        let mut req = SendRequest {
+            conversation_id: Some(id.clone()),
+            area: Area::Chat,
+            project_id: None,
+            ..ask(&project.id, "A message sent before the move finished")
+        };
+        if attached {
+            req.files.push(faber_engine::workspace::Attachment { name: "late.txt".into(), base64: "bm90ZXM=".into() });
+        }
+        engine.send(req).unwrap();
+        let accepted = engine.open(&id).unwrap();
+        assert!(accepted.copy.is_some(), "a stale Chat area must still name the required project copy, attached={attached}");
+        assert!(!accepted.project_start_pending, "the marker is consumed only with the copy already named");
+        ready(&engine, &id).await;
+        let current = engine.open(&id).unwrap();
+        let copy = current.copy.unwrap();
+        agent_started_in(&cwds, &copy.folder()).await;
+        assert_eq!(current.area, Area::Project);
+        assert_eq!(current.project_id.as_deref(), Some(project.id.as_str()));
+        assert_eq!(*cwds.lock().unwrap(), vec![copy.folder()], "nothing starts in the person's checkout");
+        assert!(!folder.path().join("attachments").exists(), "the stale area must not save attachments in the checkout");
+        if attached {
+            assert_eq!(std::fs::read(data.path().join("attachments").join(&id).join("late.txt")).unwrap(), b"notes");
+            assert_eq!(current.messages[record.messages.len()].attachments.as_deref(), Some(["late.txt".to_string()].as_slice()));
+        }
+        engine.shutdown();
+    }
+}
+
+#[tokio::test]
+async fn move_chat_to_project_uses_the_current_copy_rule_at_its_first_project_turn_and_warmup() {
+    for enabled_at_move in [false, true] {
+        let s = setup();
+        let store = faber_engine::store::Store::new(s.data.path());
+        let mut projects = store.projects();
+        projects[0].separate_copies = enabled_at_move;
+        store.save_projects(&projects).unwrap();
+        let mut record: faber_engine::model::Conversation =
+            serde_json::from_str(include_str!("../../tests/fixtures/conversation-export.json")).unwrap();
+        record.working_folder = None;
+        for m in &mut record.messages {
+            m.attachments = None;
+        }
+        let id = record.id.clone();
+        store.save_checked(&record).unwrap();
+        s.engine.move_to_project(&id, &s.project).unwrap();
+        s.engine.shutdown();
+        projects[0].separate_copies = !enabled_at_move;
+        store.save_projects(&projects).unwrap();
+        let reopened = start(s.data.path(), &s.cwds, Git(s.git.clone()));
+        reopened.warm(WarmRequest {
+            conversation_id: Some(id.clone()),
+            area: Area::Project,
+            project_id: Some(s.project.clone()),
+            choice: ask(&s.project, "").choice,
+        });
+        if !enabled_at_move {
+            assert!(s.cwds.lock().unwrap().is_empty(), "enabling copies after a move must block checkout warmup");
+            sent(&reopened, SendRequest { conversation_id: Some(id.clone()), ..ask(&s.project, "Continue") }).await;
+            let copy = reopened.open(&id).unwrap().copy.unwrap();
+            for _ in 0..200 {
+                if !s.cwds.lock().unwrap().is_empty() {
+                    break;
+                }
+                tokio::time::sleep(Duration::from_millis(10)).await;
+            }
+            assert_eq!(*s.cwds.lock().unwrap(), vec![copy.folder()]);
+        } else {
+            assert!(s.cwds.lock().unwrap().is_empty(), "project warmup must wait for the first rewind baseline even without copies");
+            reopened.send(SendRequest { conversation_id: Some(id.clone()), ..ask(&s.project, "Continue") }).unwrap();
+            agent_started(&s.cwds, 1).await;
+            assert_eq!(s.cwds.lock().unwrap()[0].canonicalize().unwrap(), s.folder.path());
+            assert!(reopened.open(&id).unwrap().copy.is_none());
+            assert!(!s.git.lock().unwrap().calls.iter().any(|args| args.starts_with(&["worktree".into(), "add".into()])));
+        }
+        reopened.shutdown();
+    }
+}
+
+#[tokio::test]
+async fn move_chat_to_project_makes_its_separate_copy_only_at_the_next_turn_even_after_restart() {
+    let s = setup();
+    // A settled Chat record, with earlier messages, is enough: the next turn must still get its first project copy.
+    let mut record: faber_engine::model::Conversation =
+        serde_json::from_str(include_str!("../../tests/fixtures/conversation-export.json")).unwrap();
+    record.area = Area::Chat;
+    record.project_id = None;
+    record.working_folder = None;
+    record.copy = None;
+    record.queued.clear();
+    record.keep_going = None;
+    record.archived_at = None;
+    for m in &mut record.messages {
+        m.attachments = None;
+        m.permissions = None;
+    }
+    let id = record.id.clone();
+    faber_engine::store::Store::new(s.data.path()).save_checked(&record).unwrap();
+    s.engine.open(&id).unwrap();
+    let moved = s.engine.move_to_project(&id, &s.project).unwrap();
+    assert!(moved.copy.is_none() && moved.project_start_pending, "the copy rule waits for the first project turn");
+    assert!(s.cwds.lock().unwrap().is_empty(), "moving starts neither git nor a CLI");
+    s.engine.warm(WarmRequest {
+        conversation_id: Some(id.clone()),
+        area: Area::Project,
+        project_id: Some(s.project.clone()),
+        choice: ask(&s.project, "").choice,
+    });
+    assert!(s.cwds.lock().unwrap().is_empty(), "warming never starts in the person's checkout");
+    s.engine.shutdown();
+    let reopened = start(s.data.path(), &s.cwds, Git(s.git.clone()));
+    sent(&reopened, SendRequest { conversation_id: Some(id.clone()), ..ask(&s.project, "Continue the work") }).await;
+    let copy = reopened.open(&id).unwrap().copy.unwrap();
+    assert!(!copy.root.is_empty());
+    assert_eq!(reopened.open(&id).unwrap().messages.len(), record.messages.len() + 2);
+    for _ in 0..200 {
+        if !s.cwds.lock().unwrap().is_empty() {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(10)).await;
+    }
+    assert_eq!(*s.cwds.lock().unwrap(), vec![copy.folder()]);
+    reopened.shutdown();
+}
+
+#[tokio::test]
 async fn r_next_each_project_conversation_works_in_a_copy_of_its_own_on_a_faber_branch() {
     let s = setup();
     let first = sent(&s.engine, ask(&s.project, "Fix the login page")).await;
@@ -473,10 +700,36 @@ async fn r_next_a_conversation_the_agent_starts_works_in_a_copy_of_its_own() {
     let child = engine.state().conversations.into_iter().find(|c| c.title == "Docs page").expect("the new conversation is listed").id;
     let (own, theirs) = (engine.open(&parent).unwrap().copy.unwrap(), engine.open(&child).unwrap().copy.expect("a copy of its own"));
     assert!(theirs.branch.starts_with("faber/docs-page-") && theirs.path != own.path, "{own:?} {theirs:?}");
-    let cwds = cwds.lock().unwrap().clone();
-    assert_eq!(cwds.len(), 2, "{cwds:?}");
-    assert_eq!(cwds[1].canonicalize().unwrap(), PathBuf::from(&theirs.path).canonicalize().unwrap(), "never the project folder");
+    let started = cwds.lock().unwrap().clone();
+    assert_eq!(started.len(), 2, "{started:?}");
+    assert_eq!(started[1].canonicalize().unwrap(), PathBuf::from(&theirs.path).canonicalize().unwrap(), "never the project folder");
     sibling.say(serde_json::json!({"type":"system","subtype":"init","session_id":"s2","model":"claude-haiku-5-5"})).await;
+    // A slow child checkout cannot hold the engine lock or leave a stray copy after its conversation is removed.
+    let (release, gate) = std::sync::mpsc::channel();
+    let copying = Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let entered = copying.clone();
+    git.lock().unwrap().on_add = Some(Box::new(move || {
+        entered.store(true, std::sync::atomic::Ordering::SeqCst);
+        let _ = gate.recv_timeout(Duration::from_secs(10));
+    }));
+    agent.say(serde_json::json!({"type":"control_request","request_id":"r2","request":{"subtype":"mcp_message","server_name":"faber",
+        "message":{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"conversation","arguments":{"title":"Discarded docs","brief":"Check the docs."},"_meta":{"claudecode/toolUseId":"toolu_discard"}}}}})).await;
+    for _ in 0..300 {
+        if copying.load(std::sync::atomic::Ordering::SeqCst)
+            && agent.lines.lock().unwrap().iter().any(|m| m["type"] == "control_response" && m["response"]["request_id"] == "r2")
+        {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(10)).await;
+    }
+    assert!(copying.load(std::sync::atomic::Ordering::SeqCst), "the child copy started");
+    assert!(agent.lines.lock().unwrap().iter().any(|m| m["response"]["request_id"] == "r2"), "the call answers while git still waits");
+    let discarded = engine.state().conversations.into_iter().find(|c| c.title == "Discarded docs").unwrap().id;
+    let stray = engine.open(&discarded).unwrap().copy.unwrap();
+    engine.remove_with(&discarded, true).unwrap();
+    release.send(()).unwrap();
+    assert!(gone(Path::new(&stray.path)).await, "the common copy callback removes the discarded child's checkout");
+    assert_eq!(cwds.lock().unwrap().len(), 2, "the discarded brief starts no agent");
     engine.shutdown();
 }
 
@@ -509,6 +762,76 @@ fn slow() -> Slow {
     let engine = start_seen(data.path(), &cwds, Git(git.clone()), events);
     let project = engine.add_project(&folder.path().to_string_lossy()).unwrap().id;
     Slow { setup: Setup { engine, git, cwds, project, folder, data }, release, early }
+}
+
+#[tokio::test]
+async fn move_chat_to_project_paid_consent_waits_for_its_copy_and_cancel_revokes_it() {
+    use faber_engine::{
+        budget::{Billing, Reach},
+        events::EngineEvent,
+        signals::Signals,
+    };
+    for (cancel, wait_first) in [(false, false), (false, true), (true, false), (true, true)] {
+        let Slow { setup: s, release, .. } = slow();
+        s.engine.set_time_source(Arc::new(|| 1_791_620_000.0));
+        s.engine.note_account_events(
+            Vendor::Claude,
+            vec![
+                EngineEvent::Signals(Signals {
+                    billing: Some(Billing::Subscription),
+                    paid_fallback: Some(true),
+                    reach: Some(Reach::Out(Some(1_791_620_600.0))),
+                    ..Default::default()
+                }),
+                EngineEvent::Quota { window: "five_hour".into(), used: 1.0, resets_at: 1_791_620_600.0 },
+            ],
+        );
+        let mut record: faber_engine::model::Conversation =
+            serde_json::from_str(include_str!("../../tests/fixtures/conversation-export.json")).unwrap();
+        record.working_folder = None;
+        for m in &mut record.messages {
+            m.attachments = None;
+        }
+        faber_engine::store::Store::new(s.data.path()).save_checked(&record).unwrap();
+        let id = record.id.clone();
+        s.engine.move_to_project(&id, &s.project).unwrap();
+        s.engine.send(SendRequest { conversation_id: Some(id.clone()), ..ask(&s.project, "Continue in the project") }).unwrap();
+        let blocked = s.engine.open(&id).unwrap().messages.last().unwrap().clone();
+        assert_eq!(blocked.error.as_deref(), Some("error.quotaOut"));
+        if wait_first {
+            s.engine.wait_turn(&id, &blocked.id).unwrap();
+        }
+        s.engine.approve_credits(&id, &blocked.id, Vendor::Claude).unwrap();
+        assert!(s.cwds.lock().unwrap().is_empty(), "no agent before its copy");
+        if cancel {
+            s.engine.interrupt(&id);
+        }
+        release.send(()).unwrap();
+        ready(&s.engine, &id).await;
+        for _ in 0..200 {
+            let current = s.engine.open(&id).unwrap();
+            if cancel || current.messages.last().unwrap().status == Some(Status::Error) || !s.cwds.lock().unwrap().is_empty() {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+        let current = s.engine.open(&id).unwrap();
+        assert_eq!(s.cwds.lock().unwrap().len(), usize::from(!cancel), "consent must survive until actual dispatch, cancel={cancel}");
+        if !cancel {
+            assert!(only_in_copy(&s.cwds.lock().unwrap(), s.data.path(), &id));
+        }
+        assert_eq!(current.messages.last().unwrap().status, Some(if cancel { Status::Stopped } else { Status::Streaming }));
+        assert!(s.engine.approve_credits(&id, &blocked.id, Vendor::Claude).is_err(), "approval cannot be replayed");
+        s.engine.interrupt(&id);
+        let next =
+            s.engine.send(SendRequest { conversation_id: cancel.then(|| id.clone()), ..ask(&s.project, "A different turn") }).unwrap();
+        assert_eq!(
+            s.engine.open(&next).unwrap().messages.last().unwrap().error.as_deref(),
+            Some("error.quotaOut"),
+            "the next reply got no consent"
+        );
+        s.engine.shutdown();
+    }
 }
 
 #[tokio::test]

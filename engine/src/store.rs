@@ -131,6 +131,14 @@ pub struct Store {
     recovery_epoch: std::sync::Mutex<Option<String>>,
 }
 
+/// The conversation replacement commits the move; until then group membership must roll back after a crash.
+#[derive(Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct GroupMove {
+    conversation_id: String,
+    groups: Vec<crate::engine::ChatGroup>,
+}
+
 impl Drop for Store {
     fn drop(&mut self) {
         self.search.stop();
@@ -272,14 +280,26 @@ impl Store {
         let _ = self.save_checked(conversation);
     }
 
-    /// Rewind acknowledges a conversation cursor only after its durable save succeeds.
+    /// Replaces the record durably before publishing it to search or acknowledging a rewind cursor.
     pub fn save_checked(&self, conversation: &Conversation) -> Result<(), Fault> {
+        if let Some((pending, area)) = self.read_group_move()?
+            && pending.conversation_id == conversation.id
+            && area != conversation.area
+        {
+            self.recover_group_move()?;
+        }
         self.write(&self.file(&conversation.id), conversation)?;
         self.search.saved(conversation);
         Ok(())
     }
 
     pub fn remove(&self, id: &str) {
+        let Ok(pending) = self.read_group_move() else {
+            return;
+        };
+        if pending.is_some_and(|(pending, _)| pending.conversation_id == id) && self.recover_group_move().is_err() {
+            return;
+        }
         if self.get(id).is_some() && fs::remove_file(self.file(id)).is_ok() {
             self.search.removed(id);
         }
@@ -305,7 +325,15 @@ impl Store {
     }
 
     pub fn chat_groups(&self) -> Result<Vec<crate::engine::ChatGroup>, Fault> {
-        let groups: Vec<crate::engine::ChatGroup> = read_checked(&self.chat_groups)?.unwrap_or_default();
+        let pending = self.read_group_move()?;
+        let groups: Vec<crate::engine::ChatGroup> = match &pending {
+            Some((pending, crate::model::Area::Chat)) => pending.groups.clone(),
+            _ => read_checked(&self.chat_groups)?.unwrap_or_default(),
+        };
+        if pending.is_some() {
+            // A blocked rollback still reads the old membership; mutations must finish recovery first.
+            let _ = self.recover_group_move();
+        }
         if groups.iter().any(|g| {
             uuid::Uuid::parse_str(&g.id).is_err()
                 || g.files.len() > 10
@@ -331,7 +359,59 @@ impl Store {
     }
 
     pub fn save_chat_groups(&self, groups: &[crate::engine::ChatGroup]) -> Result<(), Fault> {
+        self.recover_group_move()?;
         self.write(&self.chat_groups, &groups)
+    }
+
+    /// Remove membership and replace the area under one commit point, without touching the group's knowledge files.
+    pub(crate) fn move_chat_to_project(&self, conversation: &Conversation) -> Result<(), Fault> {
+        self.recover_group_move()?;
+        let groups = self.chat_groups()?;
+        if !groups.iter().any(|g| g.conversation_ids.contains(&conversation.id)) {
+            return self.save_checked(conversation);
+        }
+        let journal = self.chat_groups.with_file_name("chat-group-move.json");
+        self.write(&journal, &GroupMove { conversation_id: conversation.id.clone(), groups: groups.clone() })?;
+        let mut after = groups;
+        for group in &mut after {
+            group.conversation_ids.retain(|id| id != &conversation.id);
+        }
+        if let Err(error) = self.write(&self.chat_groups, &after) {
+            // Atomic replacement failed: both original files are untouched.
+            let _ = fs::remove_file(journal);
+            return Err(error);
+        }
+        if let Err(error) = self.write(&self.file(&conversation.id), conversation) {
+            // Keep the journal if rollback also fails, so the next reader retries before using membership.
+            let _ = self.recover_group_move();
+            return Err(error);
+        }
+        // Area is now committed; recovery can only finish cleanup, never put this conversation back in its group.
+        let _ = fs::remove_file(journal);
+        self.search.saved(conversation);
+        Ok(())
+    }
+
+    fn read_group_move(&self) -> Result<Option<(GroupMove, crate::model::Area)>, Fault> {
+        let journal = self.chat_groups.with_file_name("chat-group-move.json");
+        let Some(pending) = read_checked::<GroupMove>(&journal)? else {
+            return Ok(None);
+        };
+        if uuid::Uuid::parse_str(&pending.conversation_id).is_err() {
+            return Err(Fault::Corrupt);
+        }
+        let conversation = read_checked::<Conversation>(&self.file(&pending.conversation_id))?.ok_or(Fault::Corrupt)?;
+        Ok(Some((pending, conversation.area)))
+    }
+
+    pub(crate) fn recover_group_move(&self) -> Result<(), Fault> {
+        let Some((pending, area)) = self.read_group_move()? else {
+            return Ok(());
+        };
+        if area == crate::model::Area::Chat {
+            self.write(&self.chat_groups, &pending.groups)?;
+        }
+        fs::remove_file(self.chat_groups.with_file_name("chat-group-move.json")).map_err(|e| Fault::of_write(&e))
     }
 
     /// A missing file is the defaults (full access). A file that cannot be read or understood (a hand edit, or values a newer

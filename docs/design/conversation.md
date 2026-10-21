@@ -20,7 +20,10 @@ above an answer. The window widths, the sidebar and the running column are in [l
   "Retry stronger" when a step up is offered, then the time it was sent, how long it took and the cost in the faint data
   style. The tokens and how long the cache stays warm are the cost's tooltip; the whole date is the time's. There is no
   model select under an answer: a retry (and the right-click Redo, which names the model) uses the composer's current
-  choice.
+  choice. Edit and Retry keep earlier generated-file cards usable for Save, Show and previews, including when a Chat
+  conversation moved into a project; the new conversation keeps its own copy of the earlier default Chat folder.
+  Every inherited project attachment is copied before the new conversation appears, even one from an earlier message;
+  a failed copy refuses the edit rather than publishing broken references. Deleting the original leaves these copies intact.
 - That line is a hover bar (R264; the owner, 2026-10-17). It is in the layout the whole time, so nothing moves when it
   shows, but it is transparent until the pointer is on the message or the keyboard is inside it, and it fades in and
   slides down 4 px with `--dur-ui` and `--ease` (out with `--dur-exit` and `--ease-in`). The last answer is no
@@ -69,6 +72,11 @@ above an answer. The window widths, the sidebar and the running column are in [l
   them (menu motion), and it puts them in the message box as a quote. Scrolled up, a "Jump to latest" button floats at
   the foot of the thread and scrolls down smoothly.
 - There is no permission sentence over a conversation: the mode is a Settings matter.
+- A reply waiting on quota offers Stop on its quota card, including when it ended with a recoverable quota error.
+  Stop cancels that recovery before the conversation can move into a project. Closing Faber preserves explicit recovery.
+  After a move, Wait keeps the earlier messages and attachment locations for the fresh project session. Switching to
+  another AI keeps those locations in a full handover or alongside its summary, outside the summary's word limit.
+  Approval to use paid credits belongs to that reply and AI until its turn is sent, including while its separate copy is made; Stop revokes it.
 - A report requested with `/research` uses this same reply, with Markdown links beside its claims and a Sources list
   at the end. Its planning step uses the shared plan approval card above; Keep planning leaves edits to the composer.
   Retry keeps the report's approved research context; a later ordinary message uses ordinary instructions,

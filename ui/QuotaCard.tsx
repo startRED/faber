@@ -47,7 +47,7 @@ export function QuotaCard(props: { id: string; m: Message; usage: VendorUsage[] 
           <button class="btn secondary" disabled={sending()} onClick={() => setConfirming(false)}>{t('mine.cancel')}</button>
         </Show>
       </Show>
-      <Show when={props.m.status === 'streaming'}>
+      <Show when={pending()}>
         <Show when={stopping() && helpers()} fallback={<button ref={(el) => (stopButton = el)} class="btn secondary" onClick={() => (helpers() ? setStopping(true) : void api.interrupt(props.id))}>{t('composer.stop')}</button>}>
           <StopAsk helpers={helpers()} onStop={() => void api.interrupt(props.id)} onKeep={() => setStopping(false)} back={() => stopButton} />
         </Show>

@@ -154,5 +154,5 @@ export function installContextMenu(): void {
   window.addEventListener('pointerdown', (e) => e.target instanceof Element && !e.target.closest('.cmenu') && closeMenu(), true);
   window.addEventListener('blur', () => closeMenu());
   window.addEventListener('resize', () => closeMenu());
-  window.addEventListener('scroll', () => closeMenu(), true);
+  window.addEventListener('scroll', (e) => { if (!(e.target instanceof Element && e.target.closest('.cmenu'))) closeMenu(); }, true);
 }

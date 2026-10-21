@@ -1263,11 +1263,11 @@ html.away-win :is(.amb, .amb *) { animation-play-state: paused !important; }
 
 /* Right-click menus (ui/ContextMenu.tsx): the look of the native pickers above, drawn by the page. Reduced and no motion are
    covered by the rules above that switch every animation off. */
-.cmenu { position: fixed; z-index: 60; display: grid; gap: 1px; min-width: 184px; max-width: min(320px, calc(100vw - 16px)); padding: 4px; border-radius: var(--r-md); background: var(--s2); color: var(--ink); box-shadow: var(--lift-shadow), inset 0 0 0 1px var(--line-2); outline: none; animation: cmenu-in var(--dur-ui) var(--ease-spring) both; }
+.cmenu { position: fixed; z-index: 60; display: grid; gap: 1px; min-width: 184px; max-width: min(320px, calc(100vw - 16px)); max-height: calc(100vh - 16px); overflow-y: auto; padding: 4px; border-radius: var(--r-md); background: var(--s2); color: var(--ink); box-shadow: var(--lift-shadow), inset 0 0 0 1px var(--line-2); outline: none; animation: cmenu-in var(--dur-ui) var(--ease-spring) both; }
 .cmenu.leaving { pointer-events: none; animation: cmenu-out var(--dur-exit) var(--ease-in) both; }
 @keyframes cmenu-in { from { opacity: 0; transform: translateY(var(--motion-rise)) scale(var(--motion-scale)); } }
 @keyframes cmenu-out { to { opacity: 0; transform: scale(var(--motion-scale)); } }
-.cm-item { display: block; width: 100%; padding: 8px 12px; border-radius: var(--r-xs); color: var(--ink-2); font-size: var(--fs-sm); text-align: left; white-space: nowrap; }
+.cm-item { display: block; width: 100%; min-width: 0; padding: 8px 12px; border-radius: var(--r-xs); color: var(--ink-2); font-size: var(--fs-sm); text-align: left; white-space: normal; overflow-wrap: anywhere; }
 .cm-item:is(:hover, :focus-visible):not(:disabled) { background: var(--s3); color: var(--ink); outline: none; }
 .cm-item:disabled { color: var(--ink-3); opacity: 0.55; }
 .cm-item.danger { color: var(--danger); }

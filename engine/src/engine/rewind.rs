@@ -660,18 +660,21 @@ impl Core {
         }
     }
 
-    fn rewind_deleted_settled(&mut self, conv: &str) -> bool {
-        if !self.rewind.deleted_folders.contains_key(conv) {
-            return false;
-        }
-        let active = self.rewind.writers.get(conv).is_some_and(|(writers, unknown)| !writers.is_empty() || *unknown)
+    pub(super) fn rewind_writers_active(&self, conv: &str) -> bool {
+        self.rewind.writers.get(conv).is_some_and(|(writers, unknown)| !writers.is_empty() || *unknown)
             || self.helpers_in(conv)
             || self.rewind.helper_writers.values().any(|(owner, _, _)| owner == conv)
             || self.rewind.unconfirmed_checks.contains(conv)
             || self.rewind.pending.contains(conv)
             || self.copying.contains_key(conv)
-            || self.rewind.preparing_steers.values().any(|owner| owner == conv);
-        if !active {
+            || self.rewind.preparing_steers.values().any(|owner| owner == conv)
+    }
+
+    fn rewind_deleted_settled(&mut self, conv: &str) -> bool {
+        if !self.rewind.deleted_folders.contains_key(conv) {
+            return false;
+        }
+        if !self.rewind_writers_active(conv) {
             let folder = self.rewind.deleted_folders.remove(conv).flatten();
             let survivors: Vec<String> = self
                 .convs
@@ -1014,6 +1017,100 @@ impl Core {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[tokio::test]
+    async fn move_chat_to_project_refuses_unconfirmed_writers_without_blocking_another_chat() {
+        let data = tempfile::tempdir().unwrap();
+        let folder = tempfile::tempdir().unwrap();
+        let engine = Engine::new(
+            EngineOptions {
+                data_dir: data.path().into(),
+                clis: Default::default(),
+                spawn: Arc::new(|_, _, _| panic!("moving must not launch a process")),
+                windows: cfg!(windows),
+                claude_env_billed: false,
+                max_warm: 0,
+                idle: Duration::from_secs(60),
+                runtime: tokio::runtime::Handle::current(),
+                ask: None,
+            },
+            Arc::new(|_| {}),
+        );
+        let project = engine.add_project(&folder.path().to_string_lossy()).unwrap();
+        let (id, other) = engine.with(|core| {
+            let id = core.blank(Area::Chat, None);
+            let other = core.blank(Area::Chat, None);
+            for chat in [&id, &other] {
+                core.convs.get_mut(chat).unwrap().working_folder = Some(folder.path().to_string_lossy().into_owned());
+                core.save(chat);
+            }
+            core.rewind.session_folders.insert((id.clone(), 1), folder.path().into());
+            core.handle(&id, 1, EngineEvent::Writers { active: vec![], unknown: true });
+            (id, other)
+        });
+        let before = serde_json::to_value(engine.open(&id).unwrap()).unwrap();
+        assert_eq!(engine.move_to_project(&id, &project.id).unwrap_err(), "error.moveChat.busy");
+        engine.with(|core| core.handle(&id, 1, EngineEvent::WriterExit { confirmed: false }));
+        assert_eq!(engine.move_to_project(&id, &project.id).unwrap_err(), "error.moveChat.busy");
+        assert_eq!(serde_json::to_value(engine.open(&id).unwrap()).unwrap(), before);
+        engine.with(|core| assert_eq!(serde_json::to_value(core.store.get(&id).unwrap()).unwrap(), before));
+        assert_eq!(engine.move_to_project(&other, &project.id).unwrap().area, Area::Project, "only the owning chat is busy");
+        engine.with(|core| core.handle(&id, 1, EngineEvent::WriterExit { confirmed: true }));
+        assert_eq!(engine.move_to_project(&id, &project.id).unwrap().area, Area::Project);
+        engine.shutdown();
+    }
+
+    #[tokio::test]
+    async fn move_chat_to_project_waits_for_rewind_admission_to_reopen() {
+        let data = tempfile::tempdir().unwrap();
+        let folder = tempfile::tempdir().unwrap();
+        let destination = tempfile::tempdir().unwrap();
+        let engine = Engine::new(
+            EngineOptions {
+                data_dir: data.path().into(),
+                clis: Default::default(),
+                spawn: Arc::new(|_, _, _| panic!("moving must not launch a process")),
+                windows: cfg!(windows),
+                claude_env_billed: false,
+                max_warm: 0,
+                idle: Duration::from_secs(60),
+                runtime: tokio::runtime::Handle::current(),
+                ask: None,
+            },
+            Arc::new(|_| {}),
+        );
+        let project = engine.add_project(&destination.path().to_string_lossy()).unwrap();
+        let id = engine.with(|core| {
+            let id = core.blank(Area::Chat, None);
+            let c = core.convs.get_mut(&id).unwrap();
+            c.working_folder = Some(folder.path().to_string_lossy().into_owned());
+            c.messages.push(Message::new("earlier".into(), Role::User, "Keep this message".into(), 1));
+            core.save(&id);
+            id
+        });
+        let before = serde_json::to_value(engine.open(&id).unwrap()).unwrap();
+        let restoring = engine.clone();
+        let target = id.clone();
+        let (entered, ready) = tokio::sync::oneshot::channel();
+        let (release, gate) = std::sync::mpsc::channel();
+        let worker = tokio::task::spawn_blocking(move || {
+            // Hold the same admission as restore/redo while their disk work runs outside the engine lock.
+            let (_admission, _history, _conversation) = restoring.rewind_admission(&target).unwrap();
+            entered.send(()).unwrap();
+            let _ = gate.recv_timeout(Duration::from_secs(10));
+        });
+        ready.await.unwrap();
+        let result = engine.move_to_project(&id, &project.id);
+        let after = serde_json::to_value(engine.open(&id).unwrap()).unwrap();
+        release.send(()).unwrap();
+        worker.await.unwrap();
+        assert_eq!(result.unwrap_err(), "error.rewind.busy");
+        assert_eq!(after, before, "moving cannot change the folder or record while a rewind can still publish its snapshot");
+        let moved = engine.move_to_project(&id, &project.id).unwrap();
+        assert_eq!(moved.area, Area::Project);
+        assert_eq!(moved.messages[0].id, "earlier");
+        engine.shutdown();
+    }
 
     #[tokio::test]
     async fn rewind_deletion_checks_unreadable_recovery_before_any_side_effect() {
