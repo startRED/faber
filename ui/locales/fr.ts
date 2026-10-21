@@ -1887,6 +1887,7 @@ export const fr: Messages = {
   'notes.170.fixed': 'Les fiches du Catalogue affichent le nom de chaque outil dans votre langue.',
   'notes.171.better': 'Regarder ailleurs apparaît aussi quand une correction laisse les mêmes mots dans d’autres fichiers, et indique à combien d’endroits.',
   'notes.172.new': 'Détails techniques liste les aides et les tâches d’arrière-plan encore en cours, chacune avec son état, et les numéros de pull request connus affichent leur dernier état.',
+  'notes.173.fixed': "Avec Auto, une nouvelle conversation de projet affiche sa branche en haut dès l'envoi, comme avec un modèle choisi.",
   'update.checking': 'Recherche d’une mise à jour…',
   'update.downloading': 'Téléchargement de la mise à jour…',
   'update.downloadingPercent': 'Téléchargement de la mise à jour… {percent} %',

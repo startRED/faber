@@ -125,6 +125,10 @@ pub fn scenarios() -> Vec<Scenario> {
             name: "background commands: thirty-two capped outputs open in the column and one stops without a message",
             run: background_commands_memory,
         },
+        Scenario {
+            name: "each project conversation works in a copy of its own, its branch in the crumb, and the copy goes with it",
+            run: copy_per_conversation,
+        },
     ]
 }
 
@@ -965,6 +969,69 @@ fn memory_after_every_look(ctx: &mut Ctx) -> Result {
     let (mb, _) = ctx.memory_mb(app.id)?;
     ctx.notes.push(format!("after the six looks: {mb:.0} MB"));
     ensure(mb <= BUDGET_MB, || format!("{mb:.0} MB is over the {BUDGET_MB} MB budget"))
+}
+
+/// Parity P3: two new conversations in one project, each in its own copy on its own branch, named in the crumb with the copy's
+/// folder as its tooltip; deleting one removes its copy and leaves the other's.
+fn copy_per_conversation(ctx: &mut Ctx) -> Result {
+    let fixture = super::projects_ui::fixture(ctx)?;
+    let mut launch = claude_chat(ctx);
+    launch.git_bin = fixture.git_bin;
+    let mut app = ctx.launch(launch)?;
+    let page = &mut app.page;
+    let projects = page.named("button", "area.projects")?;
+    page.click(&projects)?;
+    page.click(&css(".prow .item").has_text("Demo"))?;
+    page.wait_visible(&css(".welcome-grid .p-header h2").has_text("Demo"))?;
+    let mut copies = vec![];
+    for question in ["Fix the first thing", "Fix the second thing"] {
+        if !copies.is_empty() {
+            page.click(&css("button.newchat"))?;
+            page.wait_visible(&css(".welcome-grid .p-header h2").has_text("Demo"))?;
+        }
+        // A chosen model starts at once; Auto would wait for its routing question, which this recording does not hold.
+        let model = page.labelled("composer.model")?;
+        page.select_option(&model, "Claude Haiku")?;
+        ask(page, question)?;
+        let crumb = css("[data-testid=crumb-copy]");
+        page.wait_visible(&crumb)?;
+        let branch = page.inner_text(&crumb)?;
+        let tip = page.attr(&crumb, "title")?.unwrap_or_default();
+        // The app sees its data folder through the sandbox; the same copy is found here by its name.
+        let shown = std::path::PathBuf::from(tip.lines().last().unwrap_or_default());
+        let named = shown.parent().and_then(|p| p.file_name()).is_some_and(|n| n == "copies");
+        let path = ctx.sb.data.join("copies").join(shown.file_name().unwrap_or_default());
+        // The crumb names the copy as soon as it is planned; the checkout lands a moment later.
+        for _ in 0..40 {
+            if path.is_dir() {
+                break;
+            }
+            pause(0.25);
+        }
+        ensure(branch.starts_with("faber/fix-the-"), || format!("the crumb names the copy's branch: {branch}"))?;
+        ensure(named && path.is_dir(), || format!("the tooltip is the copy's folder, which exists: {tip}"))?;
+        copies.push((branch, path));
+        // The copy is what this checks, not the answer: the reply is stopped so the conversation can go.
+        let stop = page.named("button", "composer.stop")?;
+        page.click(&stop)?;
+        page.wait_gone(&stop)?;
+    }
+    ensure(copies[0].0 != copies[1].0 && copies[0].1 != copies[1].1, || format!("each conversation has its own: {copies:?}"))?;
+    let first = css(".proj-chats .crow").has_text("Fix the first thing");
+    page.hover(&first.clone().css(".item"))?;
+    let x = first.css(".x");
+    page.click(&x)?;
+    page.click(&x)?;
+    page.wait_gone(&css(".proj-chats .crow").has_text("Fix the first thing"))?;
+    for _ in 0..40 {
+        if !copies[0].1.exists() {
+            break;
+        }
+        pause(0.25);
+    }
+    ensure(!copies[0].1.exists(), || format!("the deleted conversation's copy is gone: {:?}", copies[0].1))?;
+    ensure(copies[1].1.is_dir(), || format!("the other copy stays: {:?}", copies[1].1))?;
+    ctx.shot(&mut app, "copy-per-conversation")
 }
 
 fn changes_memory(ctx: &mut Ctx) -> Result {

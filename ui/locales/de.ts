@@ -1887,6 +1887,7 @@ export const de: Messages = {
   'notes.170.fixed': 'Die Katalogkarten zeigen den Namen jedes Werkzeugs in deiner Sprache.',
   'notes.171.better': 'Woanders nachsehen erscheint jetzt auch, wenn eine Korrektur dieselben Wörter in anderen Dateien zurücklässt, und sagt, an wie vielen Stellen.',
   'notes.172.new': 'Technische Details listet die Helfer und die Hintergrundarbeit, die noch laufen, jeweils mit ihrem Zustand, und bekannte Pull-Request-Nummern zeigen ihren letzten Zustand.',
+  'notes.173.fixed': 'Mit Auto zeigt ein neues Projektgespräch seinen Branch oben, sobald du sendest, wie schon mit einem gewählten Modell.',
   'update.checking': 'Suche nach einem Update…',
   'update.downloading': 'Update wird heruntergeladen…',
   'update.downloadingPercent': 'Update wird heruntergeladen… {percent} %',

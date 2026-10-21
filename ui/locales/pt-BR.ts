@@ -1874,6 +1874,7 @@ export const ptBR: Messages = {
   'notes.170.fixed': 'Os cartões do Catálogo mostram o nome de cada ferramenta no seu idioma.',
   'notes.171.better': 'Olhar em volta agora também aparece quando uma correção deixa as mesmas palavras em outros arquivos, e diz em quantos lugares.',
   'notes.172.new': 'Detalhes técnicos lista os ajudantes e o trabalho em segundo plano que ainda rodam, cada um com seu estado, e os números de pull request conhecidos mostram o último estado.',
+  'notes.173.fixed': 'Com o Auto, uma conversa nova de projeto mostra o seu branch no topo assim que você envia, como já fazia com um modelo escolhido.',
   'update.checking': 'Procurando atualização…',
   'update.downloading': 'Baixando atualização…',
   'update.downloadingPercent': 'Baixando atualização… {percent}%',

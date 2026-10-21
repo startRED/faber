@@ -60,7 +60,7 @@ Size: S small, M medium, L large. Wave: 1 next, 2 after, 3 later or with its pha
 
 | # | Gap | Who has it | Faber today | Way | Size | Wave |
 |---|---|---|---|---|---|---|
-| P3 | Each conversation in its own copy of the project, on its own branch (`--worktree`) | Claude Code, Claude app, Codex | Separate copies for some conversations | Extends the separate copy | M | 2 |
+| P3 | Each conversation in its own copy of the project, on its own branch (`--worktree`) | Claude Code, Claude app, Codex | Done: every new project conversation, its branch in the crumb | Extends the separate copy | M | 2 |
 | P4 | Watch the pull request: CI, review comments, fix on red | Claude app (Auto-fix) | Followed pull requests notify | Extends the tray notice | M | 3 |
 | P5 | Background work started by the agent, kept after the reply (`Ctrl+B`, `/background`) | Claude Code | A reply waits for the subagents its agent left in the background; no `/background` | Owner's call (process cost) | M | 3 |
 | P6 | Work in a folder on another machine over SSH | Claude app | This PC only | The CLI runs there, Faber drives it | L | 3 |

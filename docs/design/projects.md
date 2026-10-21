@@ -78,7 +78,10 @@ branch or its upstream, which a merge, a fast-forward and a squash all satisfy. 
 branch holds, refuse the delete with `error.copy.unsaved` until the person discards them: the row's × then asks once more,
 "Discard changes?", with the reason as its label and tooltip, and only that click discards. The topbar crumb adds
 "› faber/…", the branch, in the extra-small data font and the crumb's quiet ink, cut before the title is; the copy's
-folder is its tooltip.
+folder is its tooltip. While the switch is on (the default), every new conversation of the project gets one (parity P3).
+A copy costs the disk of the project's checked-out files, since git's history is shared with the project folder and not
+copied (11.6 MB for Faber's own 688 files on 2026-10-20), plus whatever the agent builds or installs in it, such as a
+dependency or build folder, which can reach gigabytes; all of it goes with the conversation, or once its work is merged.
 
 ### What is stored
 

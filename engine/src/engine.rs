@@ -3787,6 +3787,11 @@ impl Core {
         c.messages.push(question);
         c.messages.push(reply);
         c.updated_at = at;
+        // Named now, not when Auto's route is back: the screen opens the conversation right after this returns and shows
+        // the branch from that snapshot; no event carries the copy later.
+        if let Some(plan) = self.copy_plan(&id) {
+            self.name_copy(&id, &plan);
+        }
         self.clear_older_plan_cards(&id, &reply_id);
         self.save(&id);
         self.list_changed();

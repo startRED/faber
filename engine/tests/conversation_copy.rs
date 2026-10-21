@@ -494,6 +494,18 @@ async fn r_next_each_project_conversation_works_in_a_copy_of_its_own_on_a_faber_
 }
 
 #[tokio::test]
+async fn r_next_with_auto_the_copy_is_named_when_the_message_is_sent_not_when_the_route_is_back() {
+    let s = setup();
+    let mut req = ask(&s.project, "Fix the login page");
+    req.choice = Choice { vendor: "auto".into(), model: None, effort: None };
+    let id = s.engine.send(req).unwrap();
+    // The screen opens the conversation as soon as send returns and has no later event for the copy.
+    let copy = s.engine.open(&id).unwrap().copy.expect("the crumb needs the copy at once");
+    assert!(copy.branch.starts_with("faber/fix-the-login-page-"), "{copy:?}");
+    s.engine.shutdown();
+}
+
+#[tokio::test]
 async fn r_next_with_separate_copies_off_a_new_conversation_works_in_the_project_folder() {
     let s = setup();
     let before = s.engine.project(&s.project).unwrap();

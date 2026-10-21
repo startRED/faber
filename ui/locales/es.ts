@@ -1887,6 +1887,7 @@ export const es: Messages = {
   'notes.170.fixed': 'Las tarjetas del Catálogo muestran el nombre de cada herramienta en tu idioma.',
   'notes.171.better': 'Mirar alrededor ahora también aparece cuando una corrección deja las mismas palabras en otros archivos, y dice en cuántos sitios.',
   'notes.172.new': 'Detalles técnicos muestra los ayudantes y el trabajo en segundo plano que siguen en curso, cada uno con su estado, y los números de pull request conocidos indican su último estado.',
+  'notes.173.fixed': 'Con Auto, una conversación nueva de proyecto muestra su rama arriba en cuanto envías, igual que con un modelo elegido.',
   'update.checking': 'Buscando una actualización…',
   'update.downloading': 'Descargando actualización…',
   'update.downloadingPercent': 'Descargando actualización… {percent} %',

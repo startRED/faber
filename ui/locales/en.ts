@@ -1767,6 +1767,7 @@ export const en = {
   'notes.170.fixed': "Catalog cards show each tool's name in your language.",
   'notes.171.better': 'Look around now also appears when a fix leaves the same words in other files, and says how many places.',
   'notes.172.new': 'Technical details lists the helpers and background work still running, each with its state, and known pull request numbers show their latest state.',
+  'notes.173.fixed': 'With Auto, a new project conversation shows its branch at the top as soon as you send, as it does with a chosen model.',
   'update.checking': 'Looking for an update…',
   'update.downloading': 'Downloading update…',
   'update.downloadingPercent': 'Downloading update… {percent}%',
