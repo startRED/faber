@@ -292,7 +292,7 @@ fn c5_3(ctx: &mut Ctx, none: bool) -> Result {
 }
 
 /// Three samples of the app and its WebView2 children together, noted by name and held to the budget.
-fn measure(ctx: &mut Ctx, app: &Opened, what: &str) -> Result {
+pub(super) fn measure(ctx: &mut Ctx, app: &Opened, what: &str) -> Result<f64> {
     let mut samples = Vec::new();
     for _ in 0..3 {
         let (mb, webview) = ctx.memory_mb(app.id)?;
@@ -303,7 +303,15 @@ fn measure(ctx: &mut Ctx, app: &Opened, what: &str) -> Result {
     let most = samples.iter().copied().fold(0.0, f64::max);
     let shown: Vec<String> = samples.iter().map(|mb| format!("{mb:.1}")).collect();
     ctx.notes.push(format!("{what}: {} MB", shown.join(", ")));
-    ensure(most <= BUDGET_MB, || format!("{what}: {} MB; limit {BUDGET_MB} MB", shown.join(", ")))
+    let processes = crate::proctree::private_processes(app.pid)?;
+    let webviews = processes.iter().filter(|(row, _)| row.name.to_lowercase().contains("msedgewebview2")).count();
+    let parts: Vec<_> = processes
+        .iter()
+        .map(|(row, mb)| format!("{} pid={} parent={} born={}: {mb:.1} MB", row.name, row.pid, row.parent, row.born))
+        .collect();
+    ctx.notes.push(format!("{what}: {webviews} WebView2 processes; app and children [{}]", parts.join("; ")));
+    ensure(most <= BUDGET_MB, || format!("{what}: {} MB; limit {BUDGET_MB} MB", shown.join(", ")))?;
+    Ok(most)
 }
 
 fn c5_4(ctx: &mut Ctx) -> Result {

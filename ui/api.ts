@@ -199,6 +199,21 @@ export interface Versions {
   at: number;
   list: VersionAt[];
 }
+/** Pages and drawings projected from the saved reply text; no second version history. */
+export interface VisualVersion {
+  messageId: string;
+  block: number;
+  start: number;
+  end: number;
+  kind: 'html' | 'svg';
+  source: string;
+}
+export interface VisualAnswer {
+  id: string;
+  name?: string;
+  kind: 'html' | 'svg';
+  versions: VisualVersion[];
+}
 export interface Conversation {
   id: string;
   title: string;
@@ -694,6 +709,7 @@ export const api = {
   branch: (req: { conversationId: string; messageId: string; text: string; choice: Choice }) => invoke<string>('branch', { req }),
   branchHere: (conversationId: string, messageId: string) => invoke<string>('branch_here', { conversationId, messageId }),
   versions: (id: string) => invoke<Versions[]>('versions', { id }),
+  visualAnswers: (id: string) => invoke<VisualAnswer[]>('visual_answers', { id }),
   warm: (req: { conversationId?: string; area: Area; projectId?: string; choice: Choice }) => invoke<void>('warm', { req }),
   routeDraft: (req: { conversationId?: string; area: Area; projectId?: string; choice: Choice }, text: string) =>
     invoke<void>('route_draft', { req, text }),

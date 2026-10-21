@@ -1,5 +1,5 @@
 import DOMPurify from 'dompurify';
-import { type Links, marked, type Token } from 'marked';
+import { Lexer, type Links, marked, type Token } from 'marked';
 import { createRenderEffect } from 'solid-js';
 import { api } from './api.ts';
 import { fileRenderer, showFile } from './fileref.ts';
@@ -113,8 +113,13 @@ function dress(root: DocumentFragment) {
 
 /** The top-level blocks of a text: one entry per paragraph, list, code block, quote or table. A block of raw HTML can open in
  * one block and close in another, so a text that has one is a single block, sanitised whole. */
-function blocksOf(text: string): { blocks: { raw: string; token?: Token }[]; links: Links } {
-  const lexed = marked.lexer(text, OPTIONS);
+function lex(text: string, references?: Links) {
+  const lexer = new Lexer(OPTIONS);
+  if (references) lexer.tokens.links = { ...references };
+  return lexer.lex(text);
+}
+function blocksOf(text: string, references?: Links): { blocks: { raw: string; token?: Token }[]; links: Links } {
+  const lexed = lex(text, references);
   const tokens = lexed.filter((token) => token.type !== 'space');
   if (tokens.some((token) => token.type === 'html')) return { blocks: [{ raw: text }], links: lexed.links };
   return { blocks: tokens.map((token) => ({ raw: token.raw, token })), links: lexed.links };
@@ -125,8 +130,11 @@ function blocksOf(text: string): { blocks: { raw: string; token?: Token }[]; lin
  * only the open block at the end is parsed, sanitised and built again, and the reader's selection and a code block's scroll
  * stay where they are.
  */
-export function renderMarkdown(root: HTMLElement, text: string): void {
-  const { blocks, links } = blocksOf(text);
+export const referenceLinks = (text: string): Links => marked.lexer(text, OPTIONS).links;
+
+export function renderMarkdown(root: HTMLElement, text: string, references?: Links): void {
+  const { blocks, links: ownLinks } = blocksOf(text, references);
+  const links = references ?? ownLinks;
   const linked = JSON.stringify(links);
   const before = shown.get(root) ?? { raws: [], nodes: [], links: linked };
   let same = 0;
@@ -136,7 +144,8 @@ export function renderMarkdown(root: HTMLElement, text: string): void {
   const nodes = before.nodes.slice(0, same);
   for (const block of blocks.slice(same)) {
     const template = document.createElement('template');
-    template.innerHTML = tidy(block.token ? marked.parser(Object.assign([block.token], { links }), OPTIONS) : marked.parse(block.raw, OPTIONS));
+    const tokens = block.token ? [block.token] : lex(block.raw, references);
+    template.innerHTML = tidy(marked.parser(Object.assign(tokens, { links }), OPTIONS));
     raws.push(block.raw);
     dress(template.content);
     nodes.push([...template.content.childNodes]);
@@ -147,9 +156,9 @@ export function renderMarkdown(root: HTMLElement, text: string): void {
 
 /** An answer's Markdown. The element it makes holds the blocks; `text` is read on its own, so a change elsewhere in the
  * message never draws it again. */
-export function Markdown(props: { text: string }) {
+export function Markdown(props: { text: string; links?: Links }) {
   // The element exists before the first draw: a render effect runs as soon as it is made.
   const root = (<div />) as HTMLDivElement;
-  createRenderEffect(() => renderMarkdown(root, props.text));
+  createRenderEffect(() => renderMarkdown(root, props.text, props.links));
   return root;
 }

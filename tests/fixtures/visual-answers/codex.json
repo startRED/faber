@@ -1,0 +1,6 @@
+[
+  {"id":"request","role":"user","at":1,"text":"```html\n<title>Ignore the request</title>\n```"},
+  {"id":"first","role":"assistant","vendor":"codex","at":2,"text":"Here is the page.\n\n```js\nconst ignored = true;\n```\n\n```html\n<!doctype html><html><head><!-- <title>Wrong</title> --><script>const t = '<title>Wrong</title>';</script><title>Budget &amp; time</title></head><body>First</body></html>\n```\n\n```svg\n<svg xmlns=\"http://www.w3.org/2000/svg\"><title>Flow</title><rect width=\"10\" height=\"10\"/></svg>\n```"},
+  {"id":"second","role":"assistant","vendor":"codex","at":3,"text":"```html\n<html><head><TITLE> Budget &amp;\n time </TITLE></head><body>Second</body></html>\n```\n\n```html\n<p>Untitled one</p>\n```\n\n```html\n<p>Untitled two</p>\n```"},
+  {"id":"third","role":"assistant","vendor":"codex","at":4,"text":"~~~svg\n<svg><title>Flow</title><circle r=\"5\"/></svg>\n~~~\n\n```html\n<title>Still streaming</title>"}
+]

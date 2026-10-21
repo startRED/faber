@@ -15,6 +15,8 @@ import { planWords } from './Plan.tsx';
 import { QuickQuestion } from './QuickQuestion.tsx';
 import type { Option } from './models.ts';
 import { SitePane, type OpenSite } from './Site.tsx';
+import { VisualPane, type OpenVisual } from './VisualAnswer.tsx';
+import type { VisualAnswer } from './api.ts';
 import { vendorName } from './models.ts';
 import { animateList } from './motion.ts';
 import { untilReset } from './Sidebar.tsx';
@@ -39,6 +41,7 @@ export function Running(props: {
   agent?: { step: AgentStep; streaming: boolean; helpable: boolean };
   /** A page of Faber's browser the person opened from a reply, shown the same way. */
   site?: OpenSite;
+  visual?: { answer: VisualAnswer; open: OpenVisual };
   /** The quick question on the side (R250), opened from the topbar, Ctrl+; or `/btw`, shown the same way. */
   aside?: { conversation?: Conversation; options: Option[] };
   /** A file a reply named (parity P2), shown the same way. */
@@ -101,7 +104,7 @@ export function Running(props: {
       <Show
         when={props.agent}
         fallback={
-          <Show when={props.site} fallback={<Show when={props.aside} fallback={<Show when={props.file} fallback={<Show when={props.changes} fallback={<Show when={props.commands} fallback={<>
+          <Show when={props.visual} fallback={<Show when={props.site} fallback={<Show when={props.aside} fallback={<Show when={props.file} fallback={<Show when={props.changes} fallback={<Show when={props.commands} fallback={<>
             <div class="rc-head">
               <button class="iconbtn" aria-label={t('run.close')} title={t('run.close')} onClick={() => props.onClose()}>
                 <Icon name="close" />
@@ -218,6 +221,7 @@ export function Running(props: {
           </Show>}>
             {(site) => <SitePane site={site()} onClose={props.onClose} />}
           </Show>
+          }>{(visual) => <VisualPane answer={visual().answer} open={visual().open} onBack={() => props.onBack?.()} onClose={props.onClose} />}</Show>
         }
       >
         {(agent) => <AgentChat step={agent().step} streaming={agent().streaming} helpable={agent().helpable} onBack={() => props.onBack?.()} onTell={(text) => props.onTell?.(text)} onClose={props.onClose} wide={props.wide} onWide={props.onWide} />}

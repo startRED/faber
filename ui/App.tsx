@@ -19,6 +19,7 @@ import {
   type UpdateStatus,
   type Vendor,
   type Versions,
+  type VisualAnswer,
   STOPS,
 } from './api.ts';
 import { inOrder, refreshed, saveAndApply, watchSystem, windowHidden } from './appearance.ts';
@@ -48,6 +49,7 @@ import { Projects } from './Projects.tsx';
 import { createOpening, upsert } from './opening.ts';
 import { Running } from './Running.tsx';
 import { agentWide, openedAgent, showAgent, startMessage, toggleAgentWide } from './AgentChat.tsx';
+import { openedVisual, showVisual } from './VisualAnswer.tsx';
 import { openedSite, showSite, sitesOf } from './Site.tsx';
 import { openedFile, showFile } from './fileref.ts';
 import { answered, btw, heardAsides, openedAside, showAside } from './QuickQuestion.tsx';
@@ -102,6 +104,33 @@ export function App(props: { initial: AppState; update?: UpdateStatus; inbox: { 
   // with another conversation's project.
   const [place, setPlace] = createSignal<Place>({ area: saved?.area ?? 'chat', projectId: saved?.projectId });
   const [current, setCurrent] = createSignal<Conversation>();
+  const [visuals, setVisuals] = createSignal<{ id: string; answers: VisualAnswer[] }>();
+  const visualAnswers = () => visuals()?.id === current()?.id ? visuals()!.answers : [];
+  // Ask only when fence markers or the reply's state change, never for each word or tool tick. The engine decides what closed.
+  let visualTimer: ReturnType<typeof setTimeout> | undefined;
+  let visualAsk = 0;
+  const visualKey = createMemo(() => {
+    const c = current();
+    if (!c) return '';
+    const replies = c.messages.filter((m) => m.role === 'assistant').map((m) => {
+      const fences = m.text.match(/`{3,}|~{3,}/g)?.join(',') ?? '';
+      return `${m.id}:${fences}:${m.status}`;
+    });
+    return `${c.id}\0${replies.join('|')}`;
+  });
+  createEffect(() => {
+    if (!visualKey()) return;
+    if (visualTimer !== undefined) return;
+    visualTimer = setTimeout(() => {
+      visualTimer = undefined;
+      const id = current()?.id;
+      const ask = ++visualAsk;
+      if (id) void api.visualAnswers(id).then((answers) => {
+        if (ask === visualAsk && current()?.id === id) setVisuals({ id, answers });
+      }).catch(() => {});
+    }, 180);
+  });
+  onCleanup(() => { clearTimeout(visualTimer); visualAsk++; });
   // The last context each conversation reported. A first message's report can come while its conversation is still
   // opening, before it is current; kept here, the meter shows it once it is.
   const [heardContext, setHeardContext] = createSignal<Record<string, ContextFill | undefined>>({});
@@ -401,6 +430,7 @@ export function App(props: { initial: AppState; update?: UpdateStatus; inbox: { 
   const closeColumn = () => {
     showAgent(undefined);
     showSite(undefined);
+    showVisual(undefined);
     showAside(undefined);
     showFile(undefined);
     setChangesOpen(undefined);
@@ -441,6 +471,12 @@ export function App(props: { initial: AppState; update?: UpdateStatus; inbox: { 
     const open = openedSite();
     return open && current()?.id === open.conversationId ? open : undefined;
   };
+  const sideVisual = createMemo(() => {
+    const open = openedVisual();
+    if (!open || current()?.id !== open.conversationId) return undefined;
+    const answer = visualAnswers().find((a) => a.id === open.answerId);
+    return answer && { answer, open };
+  });
   // The quick question on the side (R250), of the conversation on screen, or of none yet (it says to ask once it has started).
   const sideAside = () => {
     const open = openedAside();
@@ -470,11 +506,12 @@ export function App(props: { initial: AppState; update?: UpdateStatus; inbox: { 
     const id = current()?.id;
     return open && id ? { conversationId: id, at: open.ref, open } : undefined;
   }, undefined, { equals: (a, b) => a?.open === b?.open && a?.conversationId === b?.conversationId });
-  createEffect(on(openedAgent, (open) => open && (showSite(undefined), showAside(undefined), showFile(undefined), setChangesOpen(undefined), setBackgroundOpen(false)), { defer: true }));
-  createEffect(on(openedSite, (open) => open && (showAgent(undefined), showAside(undefined), showFile(undefined), setChangesOpen(undefined), setBackgroundOpen(false)), { defer: true }));
-  createEffect(on(openedAside, (open) => open && (showAgent(undefined), showSite(undefined), showFile(undefined), setChangesOpen(undefined), setBackgroundOpen(false)), { defer: true }));
-  createEffect(on(openedFile, (open) => open && (showAgent(undefined), showSite(undefined), showAside(undefined), setChangesOpen(undefined), setBackgroundOpen(false)), { defer: true }));
-  createEffect(on(() => openedAgent() ?? openedSite() ?? openedAside() ?? sideFile() ?? (changesOpen() ? { conversationId: changesOpen() } : undefined), (open) => {
+  createEffect(on(openedAgent, (open) => open && (showSite(undefined), showVisual(undefined), showAside(undefined), showFile(undefined), setChangesOpen(undefined), setBackgroundOpen(false)), { defer: true }));
+  createEffect(on(openedSite, (open) => open && (showAgent(undefined), showVisual(undefined), showAside(undefined), showFile(undefined), setChangesOpen(undefined), setBackgroundOpen(false)), { defer: true }));
+  createEffect(on(openedAside, (open) => open && (showAgent(undefined), showSite(undefined), showVisual(undefined), showFile(undefined), setChangesOpen(undefined), setBackgroundOpen(false)), { defer: true }));
+  createEffect(on(openedVisual, (open) => open && (showAgent(undefined), showSite(undefined), showAside(undefined), showFile(undefined), setChangesOpen(undefined), setBackgroundOpen(false)), { defer: true }));
+  createEffect(on(openedFile, (open) => open && (showAgent(undefined), showSite(undefined), showVisual(undefined), showAside(undefined), setChangesOpen(undefined), setBackgroundOpen(false)), { defer: true }));
+  createEffect(on(() => openedAgent() ?? openedSite() ?? openedAside() ?? openedVisual() ?? sideFile() ?? (changesOpen() ? { conversationId: changesOpen() } : undefined), (open) => {
     if (!open) return;
     // One of another conversation is never shown (`sideAgent`); it goes when the conversation on screen changes.
     if (current()?.id !== open.conversationId) return;
@@ -489,6 +526,7 @@ export function App(props: { initial: AppState; update?: UpdateStatus; inbox: { 
   createEffect(on(() => current()?.id, (id) => {
     if (openedAgent() && openedAgent()!.conversationId !== id) showAgent(undefined);
     if (openedSite() && openedSite()!.conversationId !== id) showSite(undefined);
+    if (openedVisual() && openedVisual()!.conversationId !== id) showVisual(undefined);
     if (openedAside() && openedAside()!.conversationId !== id) showAside(undefined);
     if (changesOpen() !== id) setChangesOpen(undefined);
     showFile(undefined);
@@ -1076,6 +1114,7 @@ export function App(props: { initial: AppState; update?: UpdateStatus; inbox: { 
     if (sideChanges() && colShown()) return closeColumn();
     showAgent(undefined);
     showSite(undefined);
+    showVisual(undefined);
     showAside(undefined);
     showFile(undefined);
     setBackgroundOpen(false);
@@ -1106,6 +1145,7 @@ export function App(props: { initial: AppState; update?: UpdateStatus; inbox: { 
       onCommands={() => {
         showAgent(undefined);
         showSite(undefined);
+        showVisual(undefined);
         showAside(undefined);
         showFile(undefined);
         setChangesOpen(undefined);
@@ -1126,6 +1166,7 @@ export function App(props: { initial: AppState; update?: UpdateStatus; inbox: { 
       onClose={closeColumn}
       agent={sideAgent()}
       site={sideSite()}
+      visual={sideVisual()}
       aside={sideAside() && { conversation: current(), options: options() }}
       file={sideFile()}
       changes={sideChanges() ? { id: sideChanges()!, files: changeList()?.files ?? [], incomplete: changeList()?.incomplete ?? false, loading: changes.loading, loadingMore: loadingMoreChanges(), onMore: () => void moreChanges(), onReview: canReview() ? (security) => {
@@ -1138,6 +1179,7 @@ export function App(props: { initial: AppState; update?: UpdateStatus; inbox: { 
       onBack={() => {
         showAgent(undefined);
         showSite(undefined);
+        showVisual(undefined);
         showAside(undefined);
         showFile(undefined);
         setChangesOpen(undefined);
@@ -1501,6 +1543,7 @@ ${copy().path}`}>
                                     onBranch={(messageId, text, chosen) => void branch(messageId, text, chosen ?? picked())}
                                     onBranchHere={(messageId) => void branchHere(messageId)}
                                     versions={versions()}
+                                    visuals={visualAnswers()}
                                     onVersion={(to, index, by) => {
                                       versionFocus = { index, by };
                                       void go({ ...place(), id: to.conversationId }, index);

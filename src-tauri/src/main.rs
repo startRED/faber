@@ -71,6 +71,32 @@ pub(crate) struct Faber {
 
 type Res<T> = Result<T, String>;
 
+fn screen_navigation_allowed(url: &tauri::Url) -> bool {
+    // WebKit also reports child navigations: the sandbox's page and its empty disposal document stay local.
+    matches!(url.as_str(), "about:srcdoc" | "about:blank")
+        || url.scheme() == "tauri"
+        || url.host_str() == Some("tauri.localhost")
+        || (cfg!(debug_assertions) && url.host_str() == Some("localhost"))
+}
+
+#[cfg(test)]
+#[test]
+fn visual_frame_disposal_allows_only_the_exact_empty_document_beside_the_existing_screen_urls() {
+    for local in ["about:blank", "about:srcdoc", "tauri://localhost/index.html", "http://tauri.localhost/index.html"] {
+        assert!(screen_navigation_allowed(&tauri::Url::parse(local).unwrap()), "{local}");
+    }
+    for refused in [
+        "about:blank#page",
+        "about:blank?url=https://example.com",
+        "https://example.com/",
+        "file:///C:/page.html",
+        "data:text/html,hello",
+        "javascript:alert(1)",
+    ] {
+        assert!(!screen_navigation_allowed(&tauri::Url::parse(refused).unwrap()), "{refused}");
+    }
+}
+
 #[derive(Serialize)]
 struct FullState {
     #[serde(flatten)]
@@ -358,6 +384,13 @@ async fn branch_here(faber: State<'_, Faber>, conversation_id: String, message_i
 async fn versions(faber: State<'_, Faber>, id: String) -> Res<Vec<faber_engine::model::Versions>> {
     let engine = faber.engine.clone();
     tauri::async_runtime::spawn_blocking(move || engine.versions(&id)).await.map_err(|_| "error.messageGone".to_string())
+}
+
+/// Pages and drawings, with the versions already held in the conversation's saved replies.
+#[tauri::command]
+async fn visual_answers(faber: State<'_, Faber>, id: String) -> Res<Vec<faber_engine::visual::VisualAnswer>> {
+    let engine = faber.engine.clone();
+    tauri::async_runtime::spawn_blocking(move || engine.visual_answers(&id)).await.map_err(|_| "error.messageGone".to_string())
 }
 
 #[tauri::command]
@@ -1130,7 +1163,6 @@ fn save_notes_seen(faber: State<'_, Faber>, id: u32) -> Res<()> {
 }
 
 fn create_window(app: &AppHandle, hidden: bool, data_dir: &Path) -> tauri::Result<tauri::WebviewWindow> {
-    let handle = app.clone();
     app.state::<Faber>().revealed.store(hidden, std::sync::atomic::Ordering::SeqCst);
     // The first paint already has the theme's own colour.
     let [r, g, b] = look::frame_color(&look::stored(app.state::<Faber>().engine.settings().appearance.as_ref()));
@@ -1141,6 +1173,7 @@ fn create_window(app: &AppHandle, hidden: bool, data_dir: &Path) -> tauri::Resul
     #[cfg(not(feature = "test-hooks"))]
     let url = WebviewUrl::default();
     let mut builder = WebviewWindowBuilder::new(app, "main", url)
+        .initialization_script_for_all_frames(include_str!("visual.js"))
         .title("Faber")
         .inner_size(1280.0, 800.0)
         .min_inner_size(720.0, 480.0)
@@ -1152,16 +1185,8 @@ fn create_window(app: &AppHandle, hidden: bool, data_dir: &Path) -> tauri::Resul
         // A file dragged over the window reaches the page as an ordinary drop (the composer's box, and the whole window's "Drop to attach"),
         // as it does on macOS and Linux. With Tauri's own drag and drop handler on, Windows keeps those events to itself.
         .disable_drag_drop_handler()
-        // The page never leaves Faber; a web link that slips through opens in the browser instead.
-        .on_navigation(move |url| {
-            let inside = url.scheme() == "tauri"
-                || url.host_str() == Some("tauri.localhost")
-                || (cfg!(debug_assertions) && url.host_str() == Some("localhost"));
-            if !inside && matches!(url.scheme(), "http" | "https") {
-                let _ = handle.opener().open_url(url.as_str(), None::<&str>);
-            }
-            inside
-        });
+        // Only the screen's explicit open_link command opens a browser; an authored frame never may.
+        .on_navigation(screen_navigation_allowed);
     // The top bar of the page is the title bar (ui/WindowControls.tsx); macOS keeps its traffic lights over it.
     #[cfg(target_os = "macos")]
     {
@@ -1251,6 +1276,7 @@ fn main() {
                 branch,
                 branch_here,
                 versions,
+                visual_answers,
                 warm,
                 set_clock,
                 quota_attention,

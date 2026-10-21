@@ -5,6 +5,18 @@ engine's side is the Running column row of [product-map.md](../product-map.md)).
 rest of the shell are in [layout.md](layout.md).
 
 - With nothing running it says "Nothing running" once and has no footer sentence.
+- A visual answer opens from its reply card in the same pane slot as a browser page: the existing back arrow, the
+  answer's name and close in the head. It excludes the browser, agent, Changes, Commands, quick-question and file views.
+  Its left edge uses the column's existing resize and saved width, including its keyboard controls and 720 px overlay rules.
+  Version arrows in the head surround a quiet "2 of 3"; opening an answer normally starts at its latest version, while
+  an older reply's card opens that exact version. At either end the unavailable arrow is disabled. Switching versions
+  is instant, also with reduced or no motion. The frame fills the pane below one calm line, "This page runs offline."
+  The isolated frame permits scripts but no network or access to Faber; there is no network switch in step 1. Only one
+  frame exists while this pane is open. Versions navigate that same frame by changing srcdoc, with a fresh page state.
+  Closing or leaving drops its reference, sets src to about:blank, removes srcdoc and removes the frame, including its
+  running scripts. The sandbox and blocking policy remain the same on every version; the shell also permits that exact
+  empty disposal address without loosening its CSP.
+  Escape inside the page, including a focused input, closes the pane. Right-click never opens the browser's menu.
 - "Commands" in the list's head replaces the list with the agent's commands, like an opened helper, with the same back
   arrow, title, close button, modal focus rules and Curioso empty state. Its count appears only while commands run.
   The other side views, the topbar's included, close when it opens. Each row uses the running list's head and quiet conversation name, the
@@ -22,8 +34,9 @@ rest of the shell are in [layout.md](layout.md).
   file, never the empty state; a new file past
   the counting limit says its count is unavailable. A partial list keeps the files found, says files are still missing
   in one quiet line and offers "Show more files"; it never claims nothing changed. Closing a file releases its patch;
-  ending a turn refreshes the list. Agent, page, quick-question, changes and file views exclude one another. Opening Changes
-  in a column that opened by itself uses the other side views' transition: over the stage it becomes modal and traps focus.
+  ending a turn refreshes the list. Agent, browser page, visual answer, Commands, quick-question, Changes and file views
+  exclude one another. Opening Changes in a column that opened by itself uses the other side views' transition: over the
+  stage it becomes modal and traps focus.
 - With changed files, the Changes head offers "Review" as its main action and a quieter "Review with security" beside it
   (R279). The actions wrap in a narrow column; they use the existing button states and reduced-motion rules. Each sends
   its localized request to the conversation's own agent through the message box's send path, so it queues while busy and
@@ -101,5 +114,18 @@ rest of the shell are in [layout.md](layout.md).
   the conversation and its session stay untouched (R265). Nothing in it moves but the list's own entrance (`animateList`).
 
 ## Known limits
+
+Visual answers keep external scripts, eval and event attributes generated later by scripts blocked; generated controls
+use `addEventListener`. A fixed loader authorized by its hash runs the initial page's scripts and converted event
+listeners; no host nonce exists or enters the page. The loader waits for the browser's own page load (inline modules
+do not emit script load events), then delivers one bubbling `DOMContentLoaded` followed by one window `load`,
+so their own startup handlers initialize normally.
+Native document accessors keep named forms from replacing the serialized root or its first blocking policy.
+Static and dynamically inserted links, speculation rules and nested browsing contexts are removed or made inert before
+connection. The native guard disables WebRTC, and the host's frame
+policy also blocks a visual navigating itself to another page. The opaque frame can send only validated Escape and
+context-menu dismissal messages; their origin, exact shape and currently mounted source frame must match.
+Sandbox HTML insertion omits custom sanitizers and declarative shadow-root options; `execCommand('insertHTML')` does
+not retain the browser's undo history. Explicit `attachShadow` still works, with the same offline guard.
 
 Changes uses git's path-based reads for tracked-file counts, like git status; the list shows only names and counts locally, and must use pinned reads if it ever shows content.

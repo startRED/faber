@@ -43,6 +43,7 @@ pub mod stuck;
 pub mod tools;
 pub mod usage;
 pub mod verify;
+pub mod visual;
 pub mod workspace;
 
 pub use account::AccountStatus;

@@ -1,4 +1,5 @@
 import { defineConfig } from 'vite';
+import { readFileSync } from 'node:fs';
 import solid from 'vite-plugin-solid';
 import { woff2OnlyPlugin } from './scripts/woff2-only.mjs';
 
@@ -6,7 +7,17 @@ import { woff2OnlyPlugin } from './scripts/woff2-only.mjs';
 export default defineConfig({
   root: 'ui',
   base: './',
-  plugins: [solid()],
+  plugins: [solid(), {
+    name: 'visual-runtime',
+    transformIndexHtml: {
+      order: 'post',
+      handler: (html) => ({
+        html: html.replace(/(<script\b[^>]*\btype=)["']module["']/g, '$1"application/faber-module"')
+          .replace(/<link\b[^>]*\brel=["']modulepreload["'][^>]*>/g, ''),
+        tags: [{ tag: 'script', children: readFileSync(new URL('./ui/visual-runtime.js', import.meta.url), 'utf8').replace(/\r\n?/g, '\n'), injectTo: 'body' as const }],
+      }),
+    },
+  }],
   // The webview reads woff2: the woff copies Fontsource lists as a fallback are left out of the build.
   css: { postcss: { plugins: [woff2OnlyPlugin()] } },
   clearScreen: false,

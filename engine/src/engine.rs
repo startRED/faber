@@ -756,6 +756,10 @@ impl Engine {
     pub fn versions(&self, id: &str) -> Vec<crate::model::Versions> {
         self.with(|c| c.versions(id))
     }
+    /// Visual answers and their versions, derived from the messages without another stored history.
+    pub fn visual_answers(&self, id: &str) -> Vec<crate::visual::VisualAnswer> {
+        self.with(|c| c.load(id).map(|conversation| crate::visual::detect(&conversation.messages)).unwrap_or_default())
+    }
     pub fn export_conversation(&self, id: &str, words: &crate::export::Words) -> Result<(String, String), &'static str> {
         // Export a saved snapshot without retaining another conversation in the engine's live cache.
         let (conversation, folder) = self

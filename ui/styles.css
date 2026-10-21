@@ -290,6 +290,19 @@ svg.i.sm { width: 14px; height: 14px; }
 .side-head .iconbtn.back { order: 0; margin-left: -6px; }
 .side-head h2 { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .side-head .iconbtn:last-child { margin-left: 0; }
+/* Visual answers extend the column's pane and grip; no extra motion or retained frame. */
+.visual-pane { display: flex; flex: 1; flex-direction: column; min-width: 0; min-height: 0; }
+.visual-toolbar { display: flex; align-items: center; gap: 4px; flex-wrap: wrap; padding: 0 12px 10px; font-size: var(--fs-sm); }
+.visual-toolbar .side-meta { margin-left: auto; }
+.visual-frame { flex: 1; width: 100%; min-height: 0; border: 0; background: white; }
+.md .visual-card { margin: 0 0 14px; border: 1px solid var(--line); border-radius: var(--r-md); overflow: hidden; }
+.visual-card-head { display: flex; align-items: center; gap: 12px; padding: 12px; }
+.visual-card-head > span { flex: 1; min-width: 0; }
+.visual-card-head b { display: block; overflow-wrap: anywhere; font-weight: 580; }
+.visual-card-head small { display: block; color: var(--ink-3); font-size: var(--fs-sm); }
+.visual-card-head > .i { flex-shrink: 0; color: var(--ink-3); }
+.visual-card details > summary { padding: 4px 12px 10px; color: var(--ink-3); font-size: var(--fs-sm); cursor: pointer; }
+.visual-card .codeblock { border-radius: 0; margin: 0; }
 .side-body { gap: 12px; font-size: var(--fs-sm); }
 .side-meta { margin: 0; color: var(--ink-3); }
 .side-body[data-state='stuck'] .side-meta, .side-body .agent-why { color: var(--amber-ink); }

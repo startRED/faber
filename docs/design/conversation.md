@@ -6,6 +6,11 @@ above an answer. The window widths, the sidebar and the running column are in [l
 
 ## Answers
 
+- Closed HTML and SVG blocks in either area's replies become a quiet card in place of the code: the page or drawing's
+  name, its kind and Open. A title names it; an untitled one says Page or Drawing in the screen's language. See code
+  opens the existing code block view, with its copy button. Until the closing fence arrives, the block stays code.
+  Open shows that version in the running column's pane ([running.md](running.md)); the card has no live frame of its
+  own. No motion on the name or code; card controls have the usual quiet hover and keyboard focus.
 - The header is the vendor's mark, the model's name and its effort in the quiet header ink ("· high effort"; the owner,
   2026-10-17), nothing else (Auto shows its reason beside the name only while it is still choosing). Auto's reason is its
   tooltip. The pace line stays (C002). A wait for quota is told once,

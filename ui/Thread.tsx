@@ -21,7 +21,9 @@ import { QuotaCard } from './QuotaCard.tsx';
 import { PlanList, WrapUpBox } from './Plan.tsx';
 import { Rewind } from './Rewind.tsx';
 import { AnswersCard, answeredIn, folded, RunBlock, runsOf, type Answered } from './Run.tsx';
-import { html, Markdown, openLinks, pressImage } from './markdown.tsx';
+import { html, openLinks, pressImage } from './markdown.tsx';
+import { VisualReply } from './VisualAnswer.tsx';
+import type { VisualAnswer } from './api.ts';
 import { agentMeta, ChangedLines, openedAgent, SourceList, showAgent, tellAbout, ToolChip } from './AgentChat.tsx';
 import { untilReset } from './Sidebar.tsx';
 import { appsOf, AwayPage, awaySites, SiteCard, sitesOf, stepsOf } from './Site.tsx';
@@ -181,6 +183,7 @@ function AgentRow(props: { step: Accessor<AgentStep>; streaming: boolean; conver
 type OnBranch =(messageId: string, text: string, choice?: Choice) => void;
 
 interface Shared {
+  visuals?: VisualAnswer[];
   conversationId: string;
   options: Option[];
   /** What the composer has chosen now: the model a retry goes to. */
@@ -268,11 +271,15 @@ function Answer(props: Shared & { m: Accessor<Message>; messages?: Message[]; pr
   const finalText = createMemo(() => text().slice(boundary()));
   const narration = createMemo(() => {
     if (!boundary()) return [];
-    const paragraphs = text().slice(0, boundary()).trimEnd().split(/\n{2,}/);
+    // Visual ranges refer to the saved text: keep its spacing intact inside the work log too.
+    const hasVisual = props.visuals?.some((a) => a.versions.some((v) => v.messageId === m().id && v.end <= boundary()));
+    const prefix = text().slice(0, boundary()).trimEnd();
+    const paragraphs = prefix.split(/\n{2,}/);
     const last = paragraphs.at(-1)?.trim();
     const answer = finalText().trimStart();
-    if (last && answer.startsWith(last) && (answer.length === last.length || /\s/.test(answer[last.length]!))) paragraphs.pop();
-    const rest = paragraphs.join('\n\n').trim();
+    const duplicate = last && answer.startsWith(last) && (answer.length === last.length || /\s/.test(answer[last.length]!));
+    if (duplicate) paragraphs.pop();
+    const rest = hasVisual ? (duplicate ? prefix.slice(0, prefix.lastIndexOf(last!)).trimEnd() : prefix) : paragraphs.join('\n\n').trim();
     return rest ? [rest] : [];
   });
   const thinkingText = createMemo(() => m().thinking ?? '');
@@ -432,7 +439,7 @@ function Answer(props: Shared & { m: Accessor<Message>; messages?: Message[]; pr
                 <For each={thinking()}>{(part) => <p>{part.title ? <b>{part.text}</b> : part.text}</p>}</For>
               </div>
             </Show>
-            <For each={narration()}>{(text) => <Narration text={text} />}</For>
+            <For each={narration()}>{(text) => <Narration text={text} conversationId={props.conversationId} messageId={m().id} visuals={props.visuals} />}</For>
             <Show when={own().length}>
               <div class="tools">
                 <For each={own()}>{(tool) => <ToolChip tool={tool} />}</For>
@@ -475,7 +482,7 @@ function Answer(props: Shared & { m: Accessor<Message>; messages?: Message[]; pr
       <Asks conversationId={props.conversationId} turnId={m().id} permissions={waiting()} surface="ask" />
       <Parkeds parked={m().parked ?? []} more={m().parkedMore} surface="ask" />
       <div class="md" aria-busy={working()} onClick={openLinks} onKeyDown={pressImage}>
-        <Markdown text={finalText()} />
+        <VisualReply text={finalText()} offset={boundary()} messageId={m().id} conversationId={props.conversationId} answers={props.visuals ?? []} />
         <Show when={working() && !waiting().length && !m().waitUntil && !runningStep() && (typing() || !finalText().trim())}>
           <span class="cursor" aria-hidden="true" />
         </Show>
@@ -892,7 +899,7 @@ function AwayLine(props: { away: NonNullable<Message['away']> }) {
 const PARAGRAPHS = /\n{2,}/;
 const BLANK = '\n\n';
 /** The agent's words between its steps, in the work log: the last two paragraphs, the earlier ones under "N more". */
-function Narration(props: { text: string }) {
+function Narration(props: { text: string; conversationId: string; messageId: string; visuals?: VisualAnswer[] }) {
   const [all, setAll] = createSignal(false);
   const parts = createMemo(() => (props.text.includes('```') ? [props.text] : props.text.split(PARAGRAPHS)));
   const hidden = () => (all() || parts().length < 3 ? 0 : parts().length - 2);
@@ -903,7 +910,10 @@ function Narration(props: { text: string }) {
           {t('narration.more', { n: hidden() })}
         </button>
       </Show>
-      <div class="md" onClick={openLinks} innerHTML={html(parts().slice(hidden()).join(BLANK))} />
+      <Show when={props.visuals?.some((a) => a.versions.some((v) => v.messageId === props.messageId && v.end <= props.text.length))}
+        fallback={<div class="md" onClick={openLinks} innerHTML={html(parts().slice(hidden()).join(BLANK))} />}>
+        <div class="md" onClick={openLinks} onKeyDown={pressImage}><VisualReply text={props.text} offset={0} conversationId={props.conversationId} messageId={props.messageId} answers={props.visuals ?? []} /></div>
+      </Show>
     </>
   );
 }

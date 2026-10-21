@@ -112,6 +112,11 @@ pub fn scenarios() -> Vec<Scenario> {
             name: "conversation changes: thirty 3990-line files stay within the memory budget while switching and after closing",
             run: changes_memory,
         },
+        Scenario { name: "visual answers: pane memory before opening, while open and after closing", run: visual_answers_pane_memory },
+        Scenario {
+            name: "visual answers: one open frame stays within the memory budget while switching versions and after closing",
+            run: visual_answers_memory,
+        },
         Scenario {
             name: "a file a reply names opens at its line in the running column, and one outside the folder does not",
             run: file_at_a_line,
@@ -1028,6 +1033,214 @@ fn changes_memory(ctx: &mut Ctx) -> Result {
         cpu_ms / switch_ms * 100.0
     );
     ctx.notes.push(numbers.clone());
+    ensure(peak <= BUDGET_MB && closed <= BUDGET_MB, || format!("{numbers}; over the {BUDGET_MB} MB budget"))
+}
+
+// Weak references prove DOM disposal; process identities and working sets show Chromium's delayed teardown separately.
+fn visual_frames_collected(ctx: &mut Ctx, app: &mut Opened, baseline: f64, before: &[crate::proctree::ProcRow], what: &str) -> Result<f64> {
+    let started = Instant::now();
+    let mut closed;
+    let mut retained;
+    loop {
+        app.page.cdp.call("HeapProfiler.collectGarbage", json!({}))?;
+        let label = format!("{what} +{:.1}s", started.elapsed().as_secs_f64());
+        closed = super::setup::measure(ctx, app, &label)?;
+        let rows = crate::proctree::live_tree(&crate::proctree::snapshot()?, app.pid);
+        let extra: Vec<_> = rows
+            .iter()
+            .filter(|row| row.name.to_lowercase().contains("msedgewebview2") && !crate::proctree::same_process(row, before))
+            .map(|row| row.pid)
+            .collect();
+        retained = app.page.eval(
+            "window.__visualFrames.flatMap((ref,i)=>{const frame=ref.deref();return frame?[{i,connected:frame.isConnected,srcdocBytes:frame.srcdoc.length}]:[]})",
+        )?;
+        ctx.notes.push(format!("{label}: extra WebView2 pids {extra:?}; remaining frame references: {retained}"));
+        if (started.elapsed() >= Duration::from_secs(2) && closed <= baseline + 15.0 && retained == json!([]) && extra.is_empty())
+            || started.elapsed() >= Duration::from_secs(15)
+        {
+            break;
+        }
+        pause(1.0);
+    }
+    let dom = app.page.cdp.call("Memory.getDOMCounters", json!({}))?;
+    ctx.notes.push(format!("{what}: renderer DOM counters {dom}"));
+    let numbers = format!(
+        "{what}: {closed:.1} MB, before opening {baseline:.1} MB, retained difference {:.1} MB after {:.1}s; remaining frame references: {retained}",
+        closed - baseline,
+        started.elapsed().as_secs_f64()
+    );
+    ctx.notes.push(numbers.clone());
+    ensure(retained == json!([]), || format!("{numbers}; retired frames must be collectible"))?;
+    ensure(closed <= baseline + 15.0, || format!("{numbers}; exceeds the 15 MB post-close margin after collection"))?;
+    Ok(closed)
+}
+
+fn visual_answers_pane_memory(ctx: &mut Ctx) -> Result {
+    start_settings(ctx, "en")?;
+    let conversation = json!({
+        "id": "visual-pane-memory", "title": "Visual pane memory", "area": "chat", "sessions": {},
+        "createdAt": 1, "updatedAt": 1,
+        "messages": [{ "id": "visual-page", "role": "assistant", "vendor": "claude", "at": 1, "status": "done",
+            "text": "```html\n<title>Memory chart</title><h1>Memory chart</h1><svg viewBox=\"0 0 300 160\"><rect x=\"20\" y=\"20\" width=\"80\" height=\"120\" fill=\"teal\"/></svg>\n```" }]
+    });
+    let folder = ctx.sb.data.join("conversations");
+    std::fs::create_dir_all(&folder).map_err(|e| e.to_string())?;
+    std::fs::write(folder.join("visual-pane-memory.json"), conversation.to_string()).map_err(|e| e.to_string())?;
+    let mut app = ctx.launch(no_cli())?;
+    app.page.click(&css(".list .item").has_text("Visual pane memory"))?;
+    app.page.wait_count(&css(".visual-card"), 1)?;
+    same(app.page.count(&css("iframe"))?, 0, "a closed visual pane keeps no frame")?;
+    app.page.cdp.call("HeapProfiler.collectGarbage", json!({}))?;
+    pause(0.5);
+    let before_processes = crate::proctree::live_tree(&crate::proctree::snapshot()?, app.pid);
+    let baseline = super::setup::measure(ctx, &app, "visual answer before opening")?;
+    let dom = app.page.cdp.call("Memory.getDOMCounters", json!({}))?;
+    ctx.notes.push(format!("visual answer before opening: renderer DOM counters {dom}"));
+    // Wait for the opaque frame's real load in its parent, without reading across the sandbox boundary.
+    app.page.eval("document.addEventListener('load',function ready(e){if(e.target instanceof HTMLIFrameElement && e.target.matches('.visual-frame')){document.removeEventListener('load',ready,true);document.body.dataset.visualMemoryReady='yes';}},true)")?;
+    app.page.click(&css(".visual-open"))?;
+    app.page.wait_count(&css(".visual-frame"), 1)?;
+    app.page.wait_for("the visual page to finish loading", "document.body.dataset.visualMemoryReady==='yes'")?;
+    app.page.eval("window.__visualFrames=[new WeakRef(document.querySelector('.visual-frame'))];void 0")?;
+    super::setup::measure(ctx, &app, "visual answer while open")?;
+    let close = app.page.named("button", "run.close")?;
+    app.page.click(&close)?;
+    app.page.wait_gone(&css(".visual-pane"))?;
+    same(app.page.count(&css("iframe"))?, 0, "closing the visual pane removes its frame")?;
+    visual_frames_collected(ctx, &mut app, baseline, &before_processes, "visual answer after closing")?;
+    Ok(())
+}
+
+fn visual_answers_memory(ctx: &mut Ctx) -> Result {
+    start_settings(ctx, "en")?;
+    let messages: Vec<_> = (1..=2)
+        .map(|version| {
+            let source = format!(
+                "```html\n<!doctype html><html><head><title>Budget chart</title></head><body data-version=\"{version}\"><h1>Budget chart</h1><svg viewBox=\"0 0 300 160\"><rect x=\"20\" y=\"20\" width=\"80\" height=\"{}\" fill=\"teal\"/></svg><button onclick=\"this.textContent=Number(this.textContent)+1\">0</button></body></html>\n```",
+                version * 50
+            ).replace("</body>", r#"<input style="position:fixed;inset:0;width:100%;height:100%;box-sizing:border-box" aria-label="Visual input"><script>
+              const input=document.querySelector('input');
+              const counter=document.querySelector('button');
+              document.addEventListener('focusin',e=>parent.postMessage({visualTestFocus:document.body.dataset.version+':'+e.target.tagName},'*'));
+              counter.addEventListener('click',()=>setTimeout(()=>parent.postMessage({visualTestCounter:counter.textContent,version:document.body.dataset.version},'*'),0));
+              input.addEventListener('input',()=>parent.postMessage({visualTestInput:input.value,version:document.body.dataset.version,focused:document.activeElement===input},'*'));
+              addEventListener('contextmenu',e=>parent.postMessage({visualTestMenu:e.defaultPrevented,trusted:e.isTrusted},'*'));
+              parent.postMessage({visualTestReady:document.body.dataset.version},'*');
+            </script></body>"#);
+            json!({ "id": format!("visual-{version}"), "role": "assistant", "text": source,
+                "at": version, "vendor": "claude", "model": "claude-haiku-5-5", "status": "done" })
+        })
+        .collect();
+    let conversation = json!({
+        "id": "visual-budget", "title": "Visual memory", "area": "chat", "sessions": {},
+        "createdAt": 1, "updatedAt": 2, "messages": messages
+    });
+    let folder = ctx.sb.data.join("conversations");
+    std::fs::create_dir_all(&folder).map_err(|e| e.to_string())?;
+    std::fs::write(folder.join("visual-budget.json"), conversation.to_string()).map_err(|e| e.to_string())?;
+    let mut app = ctx.launch(claude_chat(ctx))?;
+    app.page.click(&css(".list .item").has_text("Visual memory"))?;
+    app.page.wait_count(&css(".visual-card"), 2)?;
+    same(app.page.count(&css("iframe"))?, 0, "closed visual answers keep no frame alive")?;
+    app.page.cdp.call("HeapProfiler.collectGarbage", json!({}))?;
+    pause(0.5);
+    let before_processes = crate::proctree::live_tree(&crate::proctree::snapshot()?, app.pid);
+    let baseline = super::setup::measure(ctx, &app, "visual versions before opening")?;
+    let dom = app.page.cdp.call("Memory.getDOMCounters", json!({}))?;
+    ctx.notes.push(format!("visual versions before opening: renderer DOM counters {dom}"));
+    let before_idle = ctx.cpu_ms(app.id)?;
+    let idle_started = Instant::now();
+    pause(2.0);
+    let idle_cpu = (ctx.cpu_ms(app.id)? - before_idle) / idle_started.elapsed().as_secs_f64() / 10.0;
+    app.page.eval("window.__visualLoads=0;document.addEventListener('load',e=>{if(e.target===document.querySelector('.visual-frame'))window.__visualLoads++;},true)")?;
+    app.page.click(&css(".visual-card .visual-open").last())?;
+    app.page.wait_visible(&css(".visual-pane"))?;
+    app.page.wait_count(&css(".visual-frame"), 1)?;
+    app.page.wait_for("the first visual version to load", "window.__visualLoads===1")?;
+    app.page.eval("window.__visualFrames=[new WeakRef(document.querySelector('.visual-frame'))];void 0")?;
+    let before_open = ctx.cpu_ms(app.id)?;
+    let open_started = Instant::now();
+    pause(2.0);
+    let open_cpu = (ctx.cpu_ms(app.id)? - before_open) / open_started.elapsed().as_secs_f64() / 10.0;
+    let opened = super::setup::measure(ctx, &app, "visual versions while open")?;
+    let mut peak = opened.max(baseline);
+    let cpu_before = ctx.cpu_ms(app.id)?;
+    let switch_started = Instant::now();
+    let mut loads = 1;
+    for _ in 0..10 {
+        for (control, version) in [(".visual-prev", 1), (".visual-next", 2)] {
+            loads += 1;
+            app.page.click(&css(control))?;
+            app.page.wait_for(
+                "the chosen visual version to load in the same frame",
+                &format!("window.__visualLoads==={loads} && document.querySelector('.visual-frame')?.getAttribute('srcdoc')?.includes('data-version=\"{version}\"')"),
+            )?;
+            same(app.page.count(&css("iframe"))?, 1, "switching versions keeps only one frame mounted")?;
+            same(
+                app.page.eval("document.querySelector('.visual-frame')===window.__visualFrames[0].deref()")?,
+                json!(true),
+                "every version reuses the original frame",
+            )?;
+            peak = peak.max(super::setup::measure(ctx, &app, &format!("visual version switch {} to {version}", loads - 1))?);
+        }
+    }
+    let switch_ms = switch_started.elapsed().as_secs_f64() * 1000.0;
+    let switch_cpu = ctx.cpu_ms(app.id)? - cpu_before;
+    let close = app.page.named("button", "run.close")?;
+    app.page.click(&close)?;
+    app.page.wait_gone(&css(".visual-pane"))?;
+    same(app.page.count(&css("iframe"))?, 0, "closing the visual answer removes its frame")?;
+    let numbers = format!(
+        "visual answers: before {baseline:.1} MB, open {opened:.1} MB, sampled peak {peak:.1} MB; processor of one core idle {idle_cpu:.1}%, open {open_cpu:.1}%; twenty version switches {switch_cpu:.0} ms CPU ({:.1}% of one core over {switch_ms:.0} ms)",
+        switch_cpu / switch_ms * 100.0
+    );
+    ctx.notes.push(numbers.clone());
+    let closed = visual_frames_collected(ctx, &mut app, baseline, &before_processes, "visual versions after closing")?;
+    // Real browser input must cross the opaque frame, including the modal pane at the minimum window width.
+    super::shell::set_size(&mut app.page, 720, 600)?;
+    app.page.eval("window.addEventListener('message',e=>{if(e.source!==document.querySelector('.visual-frame')?.contentWindow)return; if(e.data?.visualTestReady)document.body.dataset.visualReadyVersion=e.data.visualTestReady; if(e.data?.visualTestFocus)document.body.dataset.visualFocused=e.data.visualTestFocus; if(e.data?.visualTestCounter)document.body.dataset.visualCounter=e.data.version+':'+e.data.visualTestCounter; if(e.data?.visualTestInput && e.data.focused)document.body.dataset.visualTyped=e.data.version+':'+e.data.visualTestInput; if(e.data?.visualTestMenu===true && e.data.trusted)document.body.dataset.visualMenuBlocked='yes';})")?;
+    app.page.click(&css(".visual-card .visual-open").last())?;
+    app.page.wait_visible(&css(".visual-frame"))?;
+    app.page.eval("window.__visualFrames.push(new WeakRef(document.querySelector('.visual-frame')));void 0")?;
+    // Visible belongs to the outer iframe, not its asynchronous document or that document's input listeners.
+    loads += 1;
+    app.page.wait_for(
+        "the reopened visual document to load and install its input handlers",
+        &format!("window.__visualLoads==={loads} && document.body.dataset.visualReadyVersion==='2'"),
+    )?;
+    same(app.page.eval("document.querySelector('#running').getAttribute('aria-modal')")?, json!("true"), "the 720 px pane is modal")?;
+    app.page.click(&css(".visual-frame"))?;
+    app.page.wait_for("the reopened page input to receive real mouse focus", "document.body.dataset.visualFocused==='2:INPUT'")?;
+    app.page.eval("delete document.body.dataset.visualReadyVersion;delete document.body.dataset.visualFocused;delete document.body.dataset.visualCounter;delete document.body.dataset.visualTyped")?;
+    app.page.press_on(&css(".visual-prev"), "ArrowLeft")?;
+    loads += 1;
+    app.page.wait_for(
+        "the keyboard-selected version to load its own input handlers",
+        &format!("window.__visualLoads==={loads} && document.body.dataset.visualReadyVersion==='1'"),
+    )?;
+    same(
+        app.page.eval("document.querySelector('.visual-frame')===window.__visualFrames[1].deref()")?,
+        json!(true),
+        "the keyboard version switch reuses the reopened frame",
+    )?;
+    app.page.press_on(&css(".visual-next"), "Tab")?;
+    // The page's counter precedes its input in DOM order, even though the input covers it in this pointer fixture.
+    app.page.wait_for("Tab to enter the new version at its first control", "document.body.dataset.visualFocused==='1:BUTTON'")?;
+    app.page.press("Enter")?;
+    app.page.wait_for("Enter to activate the new version's counter", "document.body.dataset.visualCounter==='1:1'")?;
+    app.page.press("Tab")?;
+    app.page.wait_for("the next Tab to reach the new version's input", "document.body.dataset.visualFocused==='1:INPUT'")?;
+    app.page.press("Space")?;
+    app.page.wait_for("the new document to receive the Space key as text", "document.body.dataset.visualTyped==='1: '")?;
+    app.page.right_click(&css(".visual-frame"))?;
+    app.page.wait_for(
+        "the real native context menu to be canceled inside the visual frame",
+        "document.body.dataset.visualMenuBlocked==='yes'",
+    )?;
+    app.page.press("Escape")?;
+    app.page.wait_gone(&css(".visual-pane"))?;
+    same(app.page.count(&css("iframe"))?, 0, "Escape from the page input removes the frame at 720 px")?;
+    visual_frames_collected(ctx, &mut app, baseline, &before_processes, "visual answer after Escape at 720 px")?;
     ensure(peak <= BUDGET_MB && closed <= BUDGET_MB, || format!("{numbers}; over the {BUDGET_MB} MB budget"))
 }
 

@@ -134,6 +134,24 @@ pub fn private_mb(root: u32) -> Result<f64, String> {
     Ok(tree_sum(root, |entry| entry.2)? as f64 / (1024.0 * 1024.0))
 }
 
+/// One private-working-set sample per live process of the app, with the same identity and tree rules as `private_mb`.
+#[cfg(windows)]
+pub fn private_processes(root: u32) -> Result<Vec<(ProcRow, f64)>, String> {
+    let list = native()?;
+    let rows: Vec<_> = list.iter().map(|(row, _, _)| row.clone()).collect();
+    let tree = live_tree(&rows, root);
+    Ok(list
+        .into_iter()
+        .filter(|(row, _, _)| same_process(row, &tree))
+        .map(|(row, _, bytes)| (row, bytes as f64 / (1024.0 * 1024.0)))
+        .collect())
+}
+
+#[cfg(not(windows))]
+pub fn private_processes(_root: u32) -> Result<Vec<(ProcRow, f64)>, String> {
+    Err("private working sets are read from the system's process list, which is only read on Windows".into())
+}
+
 /// The processor time, in milliseconds, the app and its whole tree have used so far. Windows only, from the same list;
 /// two readings a few seconds apart give the cost of what ran between them.
 #[cfg(windows)]
@@ -279,5 +297,9 @@ mod tests {
     fn the_private_working_set_of_this_process_is_a_real_number() {
         let mb = private_mb(std::process::id()).unwrap();
         assert!(mb > 1.0 && mb < 4096.0, "{mb}");
+        let parts = private_processes(std::process::id()).unwrap();
+        let (me, mb) = parts.iter().find(|(row, _)| row.pid == std::process::id()).unwrap();
+        assert_eq!(me.born, current_birth().unwrap());
+        assert!(*mb > 1.0 && *mb < 4096.0, "{parts:?}");
     }
 }

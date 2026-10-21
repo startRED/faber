@@ -16,6 +16,118 @@ use tokio::sync::mpsc::UnboundedReceiver;
 const SKY: &str = "In one sentence: why is the sky blue?";
 const TWO_WRITES: &str = "Create a.txt containing 'one'. Then create b.txt containing 'two'. Use the Write tool for each, one at a time.";
 
+#[test]
+fn visual_runtime_hash_authorizes_only_the_fixed_loader_and_never_a_host_nonce() {
+    use base64::Engine as _;
+    use sha2::{Digest, Sha256};
+    let runtime = include_str!("../../ui/visual-runtime.js").replace("\r\n", "\n").replace('\r', "\n");
+    let digest = base64::engine::general_purpose::STANDARD.encode(Sha256::digest(runtime.as_bytes()));
+    let config: serde_json::Value = serde_json::from_str(include_str!("../../src-tauri/tauri.conf.json")).unwrap();
+    let security = &config["app"]["security"];
+    let csp = security["csp"].as_str().unwrap();
+    let script = csp.split(';').find(|line| line.trim_start().starts_with("script-src ")).unwrap();
+    assert!(script.contains(&format!("'sha256-{digest}'")), "the exact loader bytes must be authorized in the built app");
+    assert!(script.contains("'strict-dynamic'"));
+    assert!(!script.contains("'unsafe-inline'") && !script.contains("nonce-"), "no reusable host authorization reaches a child policy");
+    assert_eq!(
+        security["dangerousDisableAssetCspModification"],
+        json!(["script-src"]),
+        "Tauri must not add a host nonce to the inherited policy"
+    );
+    assert!(!include_str!("../../ui/index.html").contains("__TAURI_SCRIPT_NONCE__"));
+}
+
+fn visual_fixture(vendor: Vendor) -> Vec<Message> {
+    let text = match vendor {
+        Vendor::Claude => include_str!("../../tests/fixtures/visual-answers/claude.json"),
+        Vendor::Codex => include_str!("../../tests/fixtures/visual-answers/codex.json"),
+    };
+    serde_json::from_str(text).unwrap()
+}
+
+#[test]
+fn visual_answers_detect_closed_pages_and_drawings_and_keep_versions_for_both_clis() {
+    use faber_engine::visual::{VisualKind, detect};
+    for vendor in [Vendor::Claude, Vendor::Codex] {
+        let messages = visual_fixture(vendor);
+        let answers = detect(&messages);
+        assert_eq!(answers.len(), 4, "{vendor:?}: user blocks and the unclosed streaming fence are excluded");
+        assert_eq!(answers[0].id, "first:1", "nonvisual code fences count toward the stable block locator");
+        assert_eq!(answers[0].name.as_deref(), Some("Budget & time"), "HTML entities and whitespace are decoded");
+        assert_eq!(answers[0].kind, VisualKind::Html);
+        assert_eq!(answers[0].versions.len(), 2);
+        assert_eq!(answers[0].versions.iter().map(|version| version.message_id.as_str()).collect::<Vec<_>>(), ["first", "second"]);
+        assert!(answers[0].versions[0].source.contains("<body>First</body>"));
+        assert!(answers[0].versions[1].source.contains("<body>Second</body>"));
+        assert_eq!(answers[1].name.as_deref(), Some("Flow"));
+        assert_eq!(answers[1].kind, VisualKind::Svg);
+        assert_eq!(answers[1].versions.len(), 2, "tilde fences retain drawing versions too");
+        assert_eq!(answers[1].versions[1].message_id, "third");
+        assert_eq!(answers[2].name, None);
+        assert_eq!(answers[3].name, None);
+        assert_ne!(answers[2].id, answers[3].id, "each unnamed block is a distinct answer");
+        assert_eq!(answers[2].versions.len(), 1);
+    }
+}
+
+#[test]
+fn visual_answers_wait_for_the_matching_fence_and_preserve_source() {
+    use faber_engine::visual::{VisualKind, detect};
+    let mut messages = visual_fixture(Vendor::Claude);
+    messages.truncate(1);
+    messages[0].role = Role::Assistant;
+    for text in ["```html\n<p>open</p>", "````html\n<p>short closer</p>\n```", "~~~svg\n<svg/>\n```", "```html"] {
+        messages[0].text = text.into();
+        assert!(detect(&messages).is_empty(), "not closed: {text}");
+        messages[0].text.clear();
+    }
+    for text in ["```html\r\n<p>complete</p>\r\n```", "> ```html\n> <p>complete</p>\n> ```", "- ```html\n  <p>complete</p>\n  ```"] {
+        messages[0].text = text.into();
+        let answers = detect(&messages);
+        assert_eq!(answers.len(), 1, "closed, including nested markdown: {text}");
+        assert_eq!(answers[0].versions[0].source, "<p>complete</p>\n");
+    }
+    messages[0].text = "```html\n<title>One</title>\n```\n\n```svg\n<svg><title>One</title></svg>\n```".into();
+    let answers = detect(&messages);
+    assert_eq!(answers.len(), 1);
+    assert_eq!(answers[0].versions[1].kind, VisualKind::Svg, "the same name may change format between versions");
+    let prefix = "Olá 🦀\n\n";
+    let fence = "```html\n<p>Olá 🦀</p>\n```";
+    messages[0].text = format!("{prefix}{fence}\n\nAfter");
+    let answers = detect(&messages);
+    let version = &answers[0].versions[0];
+    assert_eq!(version.start, prefix.encode_utf16().count());
+    assert_eq!(version.end, prefix.encode_utf16().count() + fence.encode_utf16().count());
+}
+
+#[tokio::test]
+async fn visual_answers_read_saved_messages_in_chat_and_projects_without_another_stored_history() {
+    for vendor in [Vendor::Claude, Vendor::Codex] {
+        for area in [Area::Chat, Area::Project] {
+            let data = support::tempdir();
+            let mut conversation: faber_engine::model::Conversation =
+                serde_json::from_str(include_str!("../../tests/fixtures/conversation-export.json")).unwrap();
+            conversation.id = "visual-fixture".into();
+            conversation.area = area;
+            conversation.messages = visual_fixture(vendor);
+            let folder = data.path().join("conversations");
+            std::fs::create_dir_all(&folder).unwrap();
+            let file = folder.join("visual-fixture.json");
+            let saved = serde_json::to_string(&conversation).unwrap();
+            std::fs::write(&file, &saved).unwrap();
+            let (first, _) = engine(data.path(), vendor, fake(vec![]).spawn);
+            let answers = first.visual_answers("visual-fixture");
+            assert_eq!(answers.len(), 4);
+            assert!(first.visual_answers("missing").is_empty());
+            first.shutdown();
+            let (reopened, _) = engine(data.path(), vendor, fake(vec![]).spawn);
+            assert_eq!(reopened.visual_answers("visual-fixture"), answers, "{vendor:?} {area:?}: versions survive reopening");
+            assert_eq!(std::fs::read_to_string(file).unwrap(), saved, "detection never writes a duplicate history");
+            reopened.shutdown();
+        }
+    }
+}
+
 fn export_words() -> faber_engine::export::Words {
     faber_engine::export::Words { you: "You".into(), auto: "Auto".into(), attachments: "Attachments".into(), files: "Files changed".into() }
 }
