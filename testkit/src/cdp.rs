@@ -15,6 +15,9 @@ pub const DEFAULT_WAIT: Duration = Duration::from_secs(15);
 /// The longest one protocol call may take, events and all.
 pub const CALL_LIMIT: Duration = Duration::from_secs(30);
 
+/// A browser-visible HTTPS origin answered from a loopback fixture by the trusted runner, never by the internet.
+pub const HTTPS_FIXTURE_ORIGIN: &str = "https://visual-fixture.example";
+
 pub struct Cdp {
     socket: WebSocket<Limited>,
     next: u64,
@@ -22,6 +25,7 @@ pub struct Cdp {
     deadline: Option<Instant>,
     frame: Value,
     loaded: Option<String>,
+    https_fixture: Option<SocketAddr>,
 }
 
 /// The time left until `deadline`. Zero is an error too, because a socket timeout of zero means "no timeout".
@@ -100,6 +104,130 @@ impl Cdp {
         std::mem::replace(&mut self.deadline, deadline)
     }
 
+    /// Intercepts only the fixture's HTTPS origin after browser policy checks. The browser keeps its real CSP and native
+    /// request filter; only the runner reads the local server. Opaque frames can have their own DevTools session.
+    pub fn serve_https_fixture(&mut self, origin: &str) -> Result<(), String> {
+        let address: SocketAddr = origin
+            .strip_prefix("http://")
+            .ok_or("the fixture must be loopback HTTP")?
+            .parse()
+            .map_err(|e| format!("the fixture address: {e}"))?;
+        if !address.ip().is_loopback() {
+            return Err("the fixture must be loopback HTTP".into());
+        }
+        self.https_fixture = Some(address);
+        self.call(
+            "Fetch.enable",
+            json!({ "patterns": [{ "urlPattern": format!("{HTTPS_FIXTURE_ORIGIN}/*"), "requestStage": "Request" }] }),
+        )?;
+        self.call(
+            "Target.setAutoAttach",
+            json!({ "autoAttach": true, "waitForDebuggerOnStart": true, "flatten": true,
+            "filter": [{ "type": "iframe", "exclude": false }, { "exclude": true }] }),
+        )?;
+        Ok(())
+    }
+
+    // These commands must not wait inside read(): a nested call would consume the original call's answer.
+    fn fixture_command(&mut self, method: &str, params: Value, session: &Value) -> Result<(), String> {
+        self.next += 1;
+        let mut command = json!({ "id": self.next, "method": method, "params": params });
+        if let Some(session) = session.as_str() {
+            command["sessionId"] = json!(session);
+        }
+        self.socket.send(Message::text(command.to_string())).map_err(|e| format!("DevTools fixture command: {e}"))
+    }
+
+    fn fixture_event(&mut self, event: &Value, deadline: Instant) -> Result<(), String> {
+        let Some(address) = self.https_fixture else { return Ok(()) };
+        let params = &event["params"];
+        if event["method"] == "Target.attachedToTarget" {
+            let session = &params["sessionId"];
+            self.fixture_command(
+                "Fetch.enable",
+                json!({ "patterns": [{ "urlPattern": format!("{HTTPS_FIXTURE_ORIGIN}/*"), "requestStage": "Request" }] }),
+                session,
+            )?;
+            return self.fixture_command("Runtime.runIfWaitingForDebugger", json!({}), session);
+        }
+        if event["method"] != "Fetch.requestPaused" {
+            return Ok(());
+        }
+        let path = params["request"]["url"]
+            .as_str()
+            .and_then(|url| url.strip_prefix(HTTPS_FIXTURE_ORIGIN))
+            .filter(|path| path.starts_with('/') && !path.contains(['\r', '\n']))
+            .ok_or("an unexpected request reached the HTTPS fixture interceptor")?;
+        let resource = match path {
+            "/missing.js" | "/missing.svg" | "/missing.css" => Some((404, "text/plain", "")),
+            "/fast.svg" => Some((200, "image/svg+xml", "<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"1\" height=\"1\"/>")),
+            "/fast.css" => Some((200, "text/css", "body { color: rgb(1, 2, 3); }")),
+            "/import.css" => Some((200, "text/css", "#cssProbe { --visual-import: Ready; }")),
+            "/integrity.js" => Some((200, "text/javascript", "window.visualIntegrityRan=true;")),
+            "/metadata.js" => Some((
+                200,
+                "text/javascript",
+                "{const s=document.currentScript;window.visualMetadata=s.id==='metadata-script'&&s.dataset.chart==='budget'&&s.crossOrigin==='anonymous'&&!s.hasAttribute('nonce')&&Array.from(s.attributes).every(a=>!a.name.startsWith('data-faber-'));}",
+            )),
+            _ => None,
+        };
+        if let Some((status, kind, body)) = resource {
+            return self.fixture_command(
+                "Fetch.fulfillRequest",
+                json!({ "requestId": params["requestId"], "responseCode": status,
+                "responseHeaders": [{ "name": "Content-Type", "value": kind }, { "name": "Access-Control-Allow-Origin", "value": "*" },
+                    { "name": "Cache-Control", "value": "no-store" }], "body": base64::engine::general_purpose::STANDARD.encode(body) }),
+                &event["sessionId"],
+            );
+        }
+        if path == "/classic-no-cors.js" {
+            return self.fixture_command(
+                "Fetch.fulfillRequest",
+                json!({ "requestId": params["requestId"], "responseCode": 200,
+                    "responseHeaders": [{ "name": "Content-Type", "value": "text/javascript" },
+                        { "name": "Cache-Control", "value": "no-store" }],
+                    "body": base64::engine::general_purpose::STANDARD.encode("window.visualNoCorsClassic=true;") }),
+                &event["sessionId"],
+            );
+        }
+        let mut stream =
+            TcpStream::connect_timeout(&address, left(deadline, "the HTTPS fixture")?).map_err(|e| format!("fixture connect: {e}"))?;
+        stream.set_read_timeout(Some(left(deadline, "the HTTPS fixture")?)).map_err(|e| e.to_string())?;
+        stream.set_write_timeout(Some(left(deadline, "the HTTPS fixture")?)).map_err(|e| e.to_string())?;
+        write!(stream, "GET {path} HTTP/1.1\r\nHost: fixture\r\nConnection: close\r\n\r\n").map_err(|e| format!("fixture request: {e}"))?;
+        let mut raw = Vec::new();
+        stream.read_to_end(&mut raw).map_err(|e| format!("fixture response: {e}"))?;
+        let split = raw.windows(4).position(|bytes| bytes == b"\r\n\r\n").ok_or("the fixture response has no headers")?;
+        if !raw.starts_with(b"HTTP/1.1 200 ") {
+            return Err(format!("the HTTPS fixture refused {path}"));
+        }
+        // The public fixture's root redirects normally; the private target is never intercepted or answered here.
+        if path == "/" {
+            return self.fixture_command(
+                "Fetch.fulfillRequest",
+                json!({ "requestId": params["requestId"], "responseCode": 302,
+                "responseHeaders": [{ "name": "Location", "value": format!("https://{address}/releases/latest") },
+                    { "name": "Access-Control-Allow-Origin", "value": "*" }, { "name": "Cache-Control", "value": "no-store" }],
+                "body": "" }),
+                &event["sessionId"],
+            );
+        }
+        let kind = if path == "/codex.zip" { "text/javascript" } else { "application/json" };
+        if path == "/codex.zip" {
+            // Give an incorrectly eager inline module time to run while the later classic script is still loading.
+            std::thread::sleep(Duration::from_millis(100));
+            left(deadline, "the delayed HTTPS script fixture")?;
+        }
+        self.fixture_command(
+            "Fetch.fulfillRequest",
+            json!({ "requestId": params["requestId"], "responseCode": 200,
+            "responseHeaders": [{ "name": "Content-Type", "value": kind }, { "name": "Access-Control-Allow-Origin", "value": "*" },
+                { "name": "Cache-Control", "value": "no-store" }],
+            "body": base64::engine::general_purpose::STANDARD.encode(&raw[split + 4..]) }),
+            &event["sessionId"],
+        )
+    }
+
     /// One protocol call. Load events are retained even when they arrive before the reply. The whole call shares one
     /// deadline, so a page that never stops sending events cannot keep it from ending.
     pub fn call(&mut self, method: &str, params: Value) -> Result<Value, String> {
@@ -138,6 +266,7 @@ impl Cdp {
             })?;
             let Message::Text(text) = message else { continue };
             let reply: Value = serde_json::from_str(text.as_str()).map_err(|e| format!("DevTools sent bad JSON: {e}"))?;
+            self.fixture_event(&reply, deadline)?;
             let params = &reply["params"];
             match reply["method"].as_str() {
                 Some("Page.frameNavigated") if params["frame"]["parentId"].is_null() && !params["frame"]["id"].is_null() => {
@@ -512,7 +641,7 @@ fn open(url: &str, deadline: Instant) -> Result<Cdp, String> {
     let addr: SocketAddr = host.parse().map_err(|e| format!("the DevTools address {host}: {e}"))?;
     let stream = TcpStream::connect_timeout(&addr, left(deadline, "the DevTools socket")?).map_err(|e| e.to_string())?;
     let (socket, _) = tungstenite::client(url, Limited { stream, deadline }).map_err(|e| format!("DevTools handshake: {e}"))?;
-    Ok(Cdp { socket, next: 0, deadline: None, frame: Value::Null, loaded: None })
+    Ok(Cdp { socket, next: 0, deadline: None, frame: Value::Null, loaded: None, https_fixture: None })
 }
 
 #[cfg(test)]
@@ -579,6 +708,17 @@ mod tests {
                                 socket.send(Message::text(json!({ "method": "Page.lifecycleEvent", "params": { "frameId": "main", "loaderId": "first", "name": "load" } }).to_string())).unwrap();
                                 json!({})
                             }
+                            "Target.setAutoAttach" => {
+                                socket
+                                    .send(Message::text(
+                                        json!({ "method": "Target.attachedToTarget", "params": {
+                                    "sessionId": "visual-frame-session", "targetInfo": { "type": "iframe" }
+                                } })
+                                        .to_string(),
+                                    ))
+                                    .unwrap();
+                                json!({})
+                            }
                             "Runtime.evaluate" => match inner(request["params"]["expression"].as_str().unwrap()) {
                                 Wrapped("late") => {
                                     let done = request["id"].as_u64().unwrap() > 6;
@@ -598,6 +738,36 @@ mod tests {
                                     json!({ "result": { "type": "object" }, "exceptionDetails": { "text": "Uncaught", "exception": { "description": "Error: boom" } } })
                                 }
                                 Plain("1 + 1") => json!({ "result": { "type": "number", "value": 2 } }),
+                                Plain(
+                                    fixture @ ("fixture"
+                                    | "fixture-redirect"
+                                    | "fixture-missing"
+                                    | "fixture-image"
+                                    | "fixture-stylesheet"
+                                    | "fixture-missing-image"
+                                    | "fixture-missing-stylesheet"
+                                    | "fixture-no-cors"),
+                                ) => {
+                                    let path = match fixture {
+                                        "fixture" => "/releases/latest",
+                                        "fixture-redirect" => "/",
+                                        "fixture-image" => "/fast.svg",
+                                        "fixture-stylesheet" => "/fast.css",
+                                        "fixture-missing-image" => "/missing.svg",
+                                        "fixture-missing-stylesheet" => "/missing.css",
+                                        "fixture-no-cors" => "/classic-no-cors.js",
+                                        _ => "/missing.js",
+                                    };
+                                    socket
+                                        .send(Message::text(
+                                            json!({ "method": "Fetch.requestPaused", "sessionId": "visual-frame-session", "params": {
+                                        "requestId": "fixture-request", "request": { "url": format!("{HTTPS_FIXTURE_ORIGIN}{path}") }
+                                    } })
+                                            .to_string(),
+                                        ))
+                                        .unwrap();
+                                    json!({ "result": { "type": "boolean", "value": true } })
+                                }
                                 Plain(_) => json!({ "result": { "type": "undefined" } }),
                             },
                             "Page.captureScreenshot" => json!({ "data": "iVBORw0KGgo=" }),
@@ -642,6 +812,107 @@ mod tests {
         let methods: Vec<String> = seen.lock().unwrap().iter().map(|r| r["method"].as_str().unwrap().to_string()).collect();
         assert_eq!(methods[0], "Emulation.setFocusEmulationEnabled", "an offscreen window must be told it has focus");
         assert!(seen.lock().unwrap()[1]["params"]["awaitPromise"] == json!(true));
+    }
+
+    #[test]
+    fn https_fixture_replies_in_the_child_session_without_consuming_the_outer_call() {
+        let server = crate::server::Server::start(b"unused".to_vec()).unwrap();
+        let (port, seen) = mock();
+        let mut cdp = Cdp::connect(port, Duration::from_secs(5)).unwrap();
+        assert!(cdp.serve_https_fixture("http://8.8.8.8:80").is_err());
+        assert!(cdp.serve_https_fixture("https://127.0.0.1:80").is_err());
+        cdp.serve_https_fixture(&server.origin).unwrap();
+        assert_eq!(cdp.eval("fixture").unwrap(), json!(true));
+        // Drain the separate fulfillment acknowledgment before inspecting what the stand-in received.
+        assert_eq!(cdp.eval("1 + 1").unwrap(), json!(2));
+        let seen = seen.lock().unwrap();
+        let response = seen.iter().find(|request| request["method"] == "Fetch.fulfillRequest").unwrap();
+        assert_eq!(response["sessionId"], "visual-frame-session");
+        assert_eq!(response["params"]["requestId"], "fixture-request");
+        let body = base64::engine::general_purpose::STANDARD.decode(response["params"]["body"].as_str().unwrap()).unwrap();
+        assert_eq!(serde_json::from_slice::<Value>(&body).unwrap()["tag_name"], "setup-replay");
+        assert_eq!(server.requests(), ["/releases/latest"]);
+        assert!(
+            seen.iter()
+                .any(|request| request["method"] == "Runtime.runIfWaitingForDebugger" && request["sessionId"] == "visual-frame-session")
+        );
+    }
+
+    #[test]
+    fn https_fixture_redirect_leaves_the_private_destination_to_the_browser_and_native_filter() {
+        let server = crate::server::Server::start(b"unused".to_vec()).unwrap();
+        let (port, seen) = mock();
+        let mut cdp = Cdp::connect(port, Duration::from_secs(5)).unwrap();
+        cdp.serve_https_fixture(&server.origin).unwrap();
+        assert_eq!(cdp.eval("fixture-redirect").unwrap(), json!(true));
+        cdp.eval("1 + 1").unwrap();
+        let seen = seen.lock().unwrap();
+        let response = seen.iter().find(|request| request["method"] == "Fetch.fulfillRequest").unwrap();
+        assert_eq!(response["params"]["responseCode"], 302);
+        let location =
+            response["params"]["responseHeaders"].as_array().unwrap().iter().find(|header| header["name"] == "Location").unwrap();
+        assert_eq!(location["value"], format!("{}/releases/latest", server.origin.replacen("http:", "https:", 1)));
+        assert_eq!(server.requests(), ["/"], "the runner never follows the redirect itself");
+    }
+
+    #[test]
+    fn https_fixture_can_fail_a_child_script_without_contacting_any_server() {
+        let server = crate::server::Server::start(b"unused".to_vec()).unwrap();
+        let (port, seen) = mock();
+        let mut cdp = Cdp::connect(port, Duration::from_secs(5)).unwrap();
+        cdp.serve_https_fixture(&server.origin).unwrap();
+        assert_eq!(cdp.eval("fixture-missing").unwrap(), json!(true));
+        cdp.eval("1 + 1").unwrap();
+        let seen = seen.lock().unwrap();
+        let response = seen.iter().find(|request| request["method"] == "Fetch.fulfillRequest").unwrap();
+        assert_eq!(response["sessionId"], "visual-frame-session");
+        assert_eq!(response["params"]["responseCode"], 404);
+        assert_eq!(response["params"]["body"], "");
+        assert!(server.requests().is_empty());
+    }
+
+    #[test]
+    fn https_fixture_answers_fast_image_and_stylesheet_loads_and_errors_without_a_server_request() {
+        let server = crate::server::Server::start(b"unused".to_vec()).unwrap();
+        let (port, seen) = mock();
+        let mut cdp = Cdp::connect(port, Duration::from_secs(5)).unwrap();
+        cdp.serve_https_fixture(&server.origin).unwrap();
+        for (expression, status, kind, content) in [
+            ("fixture-image", 200, "image/svg+xml", "<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"1\" height=\"1\"/>"),
+            ("fixture-stylesheet", 200, "text/css", "body { color: rgb(1, 2, 3); }"),
+            ("fixture-missing-image", 404, "text/plain", ""),
+            ("fixture-missing-stylesheet", 404, "text/plain", ""),
+        ] {
+            assert_eq!(cdp.eval(expression).unwrap(), json!(true));
+            cdp.eval("1 + 1").unwrap();
+            let seen = seen.lock().unwrap();
+            let response = seen.iter().rfind(|request| request["method"] == "Fetch.fulfillRequest").unwrap();
+            assert_eq!(response["sessionId"], "visual-frame-session");
+            assert_eq!(response["params"]["responseCode"], status);
+            let headers = response["params"]["responseHeaders"].as_array().unwrap();
+            assert_eq!(headers.iter().find(|header| header["name"] == "Content-Type").unwrap()["value"], kind);
+            let body = base64::engine::general_purpose::STANDARD.decode(response["params"]["body"].as_str().unwrap()).unwrap();
+            assert_eq!(body, content.as_bytes());
+        }
+        assert!(server.requests().is_empty());
+    }
+
+    #[test]
+    fn https_fixture_classic_script_can_omit_cors_authorization() {
+        let server = crate::server::Server::start(b"unused".to_vec()).unwrap();
+        let (port, seen) = mock();
+        let mut cdp = Cdp::connect(port, Duration::from_secs(5)).unwrap();
+        cdp.serve_https_fixture(&server.origin).unwrap();
+        assert_eq!(cdp.eval("fixture-no-cors").unwrap(), json!(true));
+        cdp.eval("1 + 1").unwrap();
+        let seen = seen.lock().unwrap();
+        let response = seen.iter().find(|request| request["method"] == "Fetch.fulfillRequest").unwrap();
+        assert_eq!(response["params"]["responseCode"], 200);
+        let headers = response["params"]["responseHeaders"].as_array().unwrap();
+        assert!(!headers.iter().any(|header| header["name"] == "Access-Control-Allow-Origin"));
+        let bytes = base64::engine::general_purpose::STANDARD.decode(response["params"]["body"].as_str().unwrap()).unwrap();
+        assert_eq!(bytes, b"window.visualNoCorsClassic=true;");
+        assert!(server.requests().is_empty());
     }
 
     #[test]

@@ -1,11 +1,58 @@
 //! Visual answers are derived from reply text; the conversation already keeps their history.
 
-use crate::model::{Message, Role};
+use crate::model::{Message, Role, WebSearch};
 use html5ever::tokenizer::{BufferQueue, TagKind, Token, TokenSink, TokenSinkResult, Tokenizer, states::RawKind};
 use pulldown_cmark::{CodeBlockKind, Event, Parser, Tag, TagEnd};
 use serde::Serialize;
 use std::cell::RefCell;
 use std::collections::HashMap;
+
+/// Cached search belongs to the CLI; only the person's live-web choice grants a page network access.
+pub fn network(web: Option<WebSearch>) -> bool {
+    web.unwrap_or(WebSearch::Live) == WebSearch::Live
+}
+
+/// URL-level filtering, not a DNS firewall: the WebViews do not expose the resolved destination before connecting.
+pub fn public_https(url: &reqwest::Url) -> bool {
+    if url.scheme() != "https" || !url.username().is_empty() || url.password().is_some() {
+        return false;
+    }
+    let Some(host) = url.host_str() else { return false };
+    let host = host.trim_end_matches('.');
+    if let Ok(ip) = host.trim_matches(['[', ']']).parse::<std::net::IpAddr>() {
+        return match ip {
+            std::net::IpAddr::V4(ip) => {
+                !ip.is_private()
+                    && !ip.is_loopback()
+                    && !ip.is_link_local()
+                    && !ip.is_unspecified()
+                    && !ip.is_broadcast()
+                    && !ip.is_multicast()
+                    && ip.octets()[0] != 0
+                    && ip.octets()[0] < 240
+                    && !(ip.octets()[0] == 100 && (64..=127).contains(&ip.octets()[1]))
+            }
+            std::net::IpAddr::V6(ip) => {
+                if let Some(ip) = ip.to_ipv4_mapped() {
+                    return public_https(&reqwest::Url::parse(&format!("https://{ip}/")).expect("an IPv4 address is a URL host"));
+                }
+                let segments = ip.segments();
+                !ip.is_loopback()
+                    && !ip.is_unspecified()
+                    && !ip.is_unique_local()
+                    && !ip.is_unicast_link_local()
+                    && !ip.is_multicast()
+                    && segments[0] & 0xffc0 != 0xfec0
+                    && segments[..6] != [0; 6]
+                    && segments[..6] != [0x64, 0xff9b, 0, 0, 0, 0]
+            }
+        };
+    }
+    host.contains('.')
+        && !["localhost", "local", "internal", "lan", "home", "tauri.localhost", "ipc.localhost"]
+            .iter()
+            .any(|suffix| host == *suffix || host.ends_with(&format!(".{suffix}")))
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "lowercase")]

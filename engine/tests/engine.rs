@@ -16,6 +16,81 @@ use tokio::sync::mpsc::UnboundedReceiver;
 const SKY: &str = "In one sentence: why is the sky blue?";
 const TWO_WRITES: &str = "Create a.txt containing 'one'. Then create b.txt containing 'two'. Use the Write tool for each, one at a time.";
 
+#[tokio::test]
+async fn visual_answers_network_uses_the_saved_web_choice_without_a_second_permission() {
+    use faber_engine::model::WebSearch;
+    let data = support::tempdir();
+    let (engine, _) = engine(data.path(), Vendor::Claude, fake(vec![]).spawn);
+    assert!(engine.visual_network(), "the existing Settings default is live");
+    for (web, live) in [(WebSearch::Off, false), (WebSearch::Cached, false), (WebSearch::Live, true), (WebSearch::Off, false)] {
+        engine.save_settings(Settings { web_search: Some(web), ..Default::default() }).unwrap();
+        assert_eq!(engine.visual_network(), live, "{web:?}");
+    }
+    engine.shutdown();
+}
+
+#[test]
+fn visual_answers_network_refuses_local_private_and_non_https_urls() {
+    use faber_engine::visual::public_https;
+    for url in [
+        "https://example.com/data",
+        "https://cdn.example.com/app.js",
+        "https://8.8.8.8/",
+        "https://100.63.255.255/",
+        "https://100.128.0.1/",
+        "https://[2606:4700:4700::1111]/",
+        "https://[::ffff:8.8.8.8]/",
+    ] {
+        assert!(public_https(&reqwest::Url::parse(url).unwrap()), "{url}");
+    }
+    for url in [
+        "http://example.com/",
+        "file:///C:/private.txt",
+        "tauri://localhost/",
+        "ipc://localhost/",
+        "https://tauri.localhost/",
+        "https://ipc.localhost/",
+        "https://localhost/",
+        "https://LOCALHOST./",
+        "https://x.localhost/",
+        "https://router/",
+        "https://router./",
+        "https://router.local/",
+        "https://service.internal/",
+        "https://127.0.0.1/",
+        "https://127.255.0.1/",
+        "https://127.1/",
+        "https://2130706433/",
+        "https://0x7f000001/",
+        "https://10.2.3.4/",
+        "https://172.16.0.1/",
+        "https://172.31.255.255/",
+        "https://192.168.1.1/",
+        "https://169.254.1.1/",
+        "https://100.64.0.1/",
+        "https://100.127.255.255/",
+        "https://240.0.0.1/",
+        "https://255.255.255.254/",
+        "https://0.0.0.0/",
+        "https://[::1]/",
+        "https://[::]/",
+        "https://[::ffff:127.0.0.1]/",
+        "https://[fc00::1]/",
+        "https://[fe80::1]/",
+        "https://[fec0::1]/",
+        "https://[feff:ffff::1]/",
+        "https://[64:ff9b::7f00:1]/",
+        "https://[64:ff9b::808:808]/",
+        "https://[::7f00:1]/",
+        "https://[::808:808]/",
+        "https://[::ffff:100.64.0.1]/",
+        "https://[::ffff:240.0.0.1]/",
+        "https://user:pass@example.com/",
+    ] {
+        assert!(!public_https(&reqwest::Url::parse(url).unwrap()), "{url}");
+    }
+}
+
 fn memory_folder() -> tempfile::TempDir {
     // macOS's usual /var temp alias is a link; fixtures use a physical parent unless testing a link explicitly.
     tempfile::tempdir_in(std::env::temp_dir().canonicalize().unwrap()).unwrap()
@@ -542,6 +617,20 @@ fn visual_runtime_hash_authorizes_only_the_fixed_loader_and_never_a_host_nonce()
         "Tauri must not add a host nonce to the inherited policy"
     );
     assert!(!include_str!("../../ui/index.html").contains("__TAURI_SCRIPT_NONCE__"));
+}
+
+#[test]
+fn visual_answers_keep_the_screen_resource_policy_closed_and_authorize_only_the_separate_page_loader() {
+    use base64::Engine as _;
+    use sha2::{Digest, Sha256};
+    let config: serde_json::Value = serde_json::from_str(include_str!("../../src-tauri/tauri.conf.json")).unwrap();
+    let base = "default-src 'self' ipc: http://ipc.localhost; script-src 'self' 'sha256-OqD9rZ9UZGQqUOZZMHLYDUSUW8UkTyWyKLMPuNd+Ecs=' 'strict-dynamic'; frame-src faber-visual://localhost http://faber-visual.localhost; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self' data:; media-src data: blob:";
+    assert_eq!(config["app"]["security"]["csp"], base, "visual access must never widen the screen's resource policy");
+    let runtime = include_str!("../../ui/visual-page-runtime.js").replace("\r\n", "\n").replace('\r', "\n");
+    let digest = base64::engine::general_purpose::STANDARD.encode(Sha256::digest(runtime.as_bytes()));
+    let protocol = include_str!("../../src-tauri/src/visual_page.rs");
+    assert!(protocol.contains(&format!("'sha256-{digest}'")), "the independent page header authorizes the exact visual loader");
+    assert!(!base.contains(&digest), "the visual loader never gains authority in the screen");
 }
 
 fn visual_fixture(vendor: Vendor) -> Vec<Message> {

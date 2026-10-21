@@ -10,13 +10,47 @@ rest of the shell are in [layout.md](layout.md).
   Its left edge uses the column's existing resize and saved width, including its keyboard controls and 720 px overlay rules.
   Version arrows in the head surround a quiet "2 of 3"; opening an answer normally starts at its latest version, while
   an older reply's card opens that exact version. At either end the unavailable arrow is disabled. Switching versions
-  is instant, also with reduced or no motion. The frame fills the pane below one calm line, "This page runs offline."
-  The isolated frame permits scripts but no network or access to Faber; there is no network switch in step 1. Only one
-  frame exists while this pane is open. Versions navigate that same frame by changing srcdoc, with a fresh page state.
-  Closing or leaving drops its reference, sets src to about:blank, removes srcdoc and removes the frame, including its
-  running scripts. The sandbox and blocking policy remain the same on every version; the shell also permits that exact
-  empty disposal address without loosening its CSP.
+  is instant, also with reduced or no motion. The frame fills the pane below one calm line: "This page runs offline."
+  or "This page can use the web." It follows Settings' existing web choice: Live permits HTTPS resources and fetches;
+  Off and Cached stay offline (Cached is the AI's search cache, not a live connection). The choice is read on opening
+  and on each version switch; saving Settings leaves an open page and its input alone. There is no second switch or prompt.
+  The isolated frame permits scripts but no access to Faber, its storage or commands. Only one
+  frame exists while this pane is open. Versions navigate that same frame to a single-use URL on Faber's visual-page
+  origin, with a fresh page state. Only the document the screen just prepared is served, at most 8 MiB and once; its
+  bytes leave the native pending slot on delivery. Fetch Metadata can be absent in native callbacks; supplied
+  non-frame destinations are refused, and exact single-use URLs, no CORS grant and the sandbox protect the bytes. Closing invalidates the pane's lease (late preparations are refused),
+  drops its reference, sets src to about:blank and removes the frame, including its scripts. Every version keeps the
+  opaque sandbox and its own response-header CSP, including the fixed visual loader's hash. The screen's resource CSP
+  and original loader stay exactly as before; only frame-src admits the visual origin, never remote sites. Ordinary
+  reply images, CSS, fonts and media stay blocked in both web settings. Live visual pages allow public HTTPS resources.
+  Their CSP blocks HTTP and Faber's asset, IPC and visual origins; the native filters block private HTTPS destinations.
+  Wry may overwrite a later WebView2 denial for its own custom protocols, so asset/IPC isolation relies on CSP and the
+  opaque sandbox, never that handler's 403. Child navigation cannot leave the visual origin or exact about:blank.
+  WebView2 shares Wry's filters with the Windows callback; it leaves every non-HTTPS response untouched,
+  including visual, asset and IPC protocols. macOS blocks visual URLs at the top frame, allowing only the pane's child.
+  Linux uses GTK's response policy to reject visual top documents while retaining offline child viewing; its
+  navigation readiness never grants network access. On macOS and Linux preparation waits up to five seconds for the guard, without polling; a failed installation shows the
+  existing page-opening failure instead of issuing a URL whose navigation would leave a blank frame.
+  WebSocket, WebSocketStream and WebTransport are unavailable on supported desktops because they bypass HTTPS resource interception.
+  These are not a DNS
+  firewall: a public name resolving privately is a platform limit ([map](../product-map.md#screens-and-surfaces)).
+  The shell also permits the exact empty disposal address.
   Escape inside the page, including a focused input, closes the pane. Right-click never opens the browser's menu.
+  Visual documents explicitly deny child frames and workers in CSP. WebView2 follows FrameCreated at every depth:
+  only the first child may navigate to a visual URL or about:blank, after its descendant guard installs; nested
+  navigation is always cancelled. This needs Frame7 support and fails closed without it. macOS blocks every other
+  child document in its compiled rule list. GTK rejects srcdoc, data/blob and external navigations, retaining shell resources
+  and its visual-top response guard. A GTK response policy may cover subresources, so it cannot safely refuse every
+  non-main response. These APIs expose
+  no ancestry for initial empty realms, so their exception is only the single-use visual URL, not arbitrary documents.
+  Native navigation APIs cannot prevent initial empty contexts, which can share the visual frame's opaque origin.
+  The visual frame itself locks iframe/frame contentWindow and contentDocument to null and window.open to null,
+  including existing named targets. ElementInternals.shadowRoot cleans a closed root before returning it. These
+  protections do not depend on child initialization. A fixed parser fixture bypasses cleaning and upgrades its
+  witnessed closed root's host. It avoids mXSS serialization: modern outerHTML escapes attribute angles.
+  WindowProxy indexed slots cannot be overwritten safely. The loader waits for the
+  native parser drain before authored replay; its hash policy blocks raw parser-time sibling scripts. A real-frame
+  check probes first-script window[0], frames[0] and named access. These checks still need a pass on each desktop.
 - "Commands" in the list's head replaces the list with the agent's commands, like an opened helper, with the same back
   arrow, title, close button, modal focus rules and Curioso empty state. Its count appears only while commands run.
   The other side views, the topbar's included, close when it opens. Each row uses the running list's head and quiet conversation name, the
@@ -115,15 +149,34 @@ rest of the shell are in [layout.md](layout.md).
 
 ## Known limits
 
-Visual answers keep external scripts, eval and event attributes generated later by scripts blocked; generated controls
-use `addEventListener`. A fixed loader authorized by its hash runs the initial page's scripts and converted event
-listeners; no host nonce exists or enters the page. The loader waits for the browser's own page load (inline modules
+Visual answers in Off/Cached block external scripts; Live allows public HTTPS scripts. Eval and event attributes
+generated later by scripts stay blocked; generated controls use `addEventListener`. A fixed visual loader authorized
+by its own response-header hash runs the initial page's scripts and converted event
+listeners. Non-script resource load/error handlers capture on Document (element load does not reach Window), while page
+lifecycle handlers stay on Window. They capture before the parser can finish resources, and deliver
+them after preceding classic scripts have supplied their functions, preserving target and currentTarget;
+other converted listeners install before the first authored script. A malformed resource handler cannot abort
+unrelated page startup. External classic and module load/error callbacks
+attach to the executed script before loading starts,
+with that script as their `this`. Authored `crossorigin` is preserved: ordinary classics work without CORS headers,
+explicit CORS remains enforced, and modules still require CORS. Integrity hashes and safe authored script metadata
+(including id and data attributes) survive replacement before fetching starts; nonces and internal markers do not.
+Resource completion order still belongs to the browser: event timestamps describe creation, not capture. An image may finish after a later script, but captured events
+are delivered as soon as their preceding classic definitions exist. No host nonce enters the page. The loader waits for the browser's own page load (inline modules
 do not emit script load events), then delivers one bubbling `DOMContentLoaded` followed by one window `load`,
 so their own startup handlers initialize normally.
-Native document accessors keep named forms from replacing the serialized root or its first blocking policy.
-Static and dynamically inserted links, speculation rules and nested browsing contexts are removed or made inert before
-connection. The native guard disables WebRTC, and the host's frame
-policy also blocks a visual navigating itself to another page. The opaque frame can send only validated Escape and
+Native document accessors keep named forms from replacing the serialized root; authored markup cannot replace the
+native response-header policy. Static and dynamic connection-hint links, speculation rules and nested browsing contexts
+are removed or made inert before connection; stylesheet-only links remain usable. Noscript is dropped, including
+templates, so enabling scripting cannot expose a different second parse. Every template loses shadowrootmode and the
+legacy shadowroot attribute recursively, keeping declarative open and closed trees from hiding parser-created realms.
+A document-start native observer also removes
+parser-created nested contexts, watches each discovered open root and roots returned by the locked attachShadow
+(including closed ones), drains pending records and disconnects at DOMContentLoaded; it does no idle work.
+Parser-created closed roots cannot be inspected by a Document observer; native document denial, response CSP and
+the all-frame startup guard remain independent of the cleaner's first parse. The native guard disables WebRTC peer and data-channel globals (including webkit aliases) in every web mode,
+WebSocket, WebSocketStream and WebTransport, with non-configurable globals and prototype constructors,
+and child navigation stays within single-use visual URLs or about:blank. The opaque frame can send only validated Escape and
 context-menu dismissal messages; their origin, exact shape and currently mounted source frame must match.
 Sandbox HTML insertion omits custom sanitizers and declarative shadow-root options; `execCommand('insertHTML')` does
 not retain the browser's undo history. Explicit `attachShadow` still works, with the same offline guard.

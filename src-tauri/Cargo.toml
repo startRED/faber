@@ -24,6 +24,7 @@ semver = "1"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 tempfile = "3"
+uuid = { version = "1", features = ["v4"] }
 # `unstable` gives the window a second webview, Faber's own browser pane (R161 step 7).
 tauri = { version = "2", features = ["tray-icon", "image-png", "unstable"] }
 tauri-plugin-dialog = "2"
@@ -36,6 +37,8 @@ tokio = { version = "1", features = ["io-util", "macros", "process", "rt-multi-t
 [target.'cfg(target_os = "linux")'.dependencies]
 # Already used by the notification plugin; its Linux builder cannot suppress the desktop's own sound.
 notify-rust = "4"
+# Tauri already enables v2_40; its response policy distinguishes top-level navigation from visual frames.
+webkit2gtk = { version = "2", features = ["v2_40"] }
 
 [target.'cfg(windows)'.dependencies]
 winsafe = { version = "0.0.29", features = ["gui"] }
@@ -43,7 +46,14 @@ winsafe = { version = "0.0.29", features = ["gui"] }
 webview2-com = "0.39"
 windows-core = "0.62"
 
-# Only the Windows API files (awake.rs, autostart.rs, tray/native.rs, pane/native.rs) opt in to FFI; the engine and testkit keep the
+[target.'cfg(target_os = "macos")'.dependencies]
+# Already supplied by Tauri; compile a child-frame URL blocker into WKWebView's network process.
+block2 = "0.6"
+objc2 = "0.6"
+objc2-foundation = { version = "0.3", default-features = false, features = ["NSString", "NSError", "NSObject"] }
+objc2-web-kit = { version = "0.3", default-features = false, features = ["block2", "WKContentRuleList", "WKContentRuleListStore", "WKUserContentController"] }
+
+# Only the native API files (awake.rs, autostart.rs, tray/native.rs, pane/native.rs) opt in to FFI; the engine and testkit keep the
 # workspace's forbid.
 [lints.rust]
 unsafe_code = "deny"
@@ -54,6 +64,10 @@ all = { level = "warn", priority = -1 }
 [target.'cfg(windows)'.dev-dependencies]
 # Standard Rust cannot create junctions on stable; the overlap guard in update.rs is tested with one.
 junction = "2"
+
+[dev-dependencies]
+# Already in the workspace's dependency graph; validate the actual WebKit URL rule ordering and patterns.
+regex = "1"
 
 [[example]]
 name = "pane-spike-host"

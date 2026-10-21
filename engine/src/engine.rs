@@ -776,6 +776,10 @@ impl Engine {
     pub fn visual_answers(&self, id: &str) -> Vec<crate::visual::VisualAnswer> {
         self.with(|c| c.load(id).map(|conversation| crate::visual::detect(&conversation.messages)).unwrap_or_default())
     }
+    /// Each opened page version snapshots the existing web setting, without a second permission or stored grant.
+    pub fn visual_network(&self) -> bool {
+        crate::visual::network(self.settings().web_search)
+    }
     pub fn visual_pieces(&self, id: &str, message_id: &str) -> Vec<crate::pieces::VisualPiece> {
         self.with(|c| {
             c.load(id)

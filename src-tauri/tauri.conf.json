@@ -12,7 +12,7 @@
   "app": {
     "windows": [],
     "security": {
-      "csp": "default-src 'self' ipc: http://ipc.localhost; script-src 'self' 'sha256-OqD9rZ9UZGQqUOZZMHLYDUSUW8UkTyWyKLMPuNd+Ecs=' 'strict-dynamic'; frame-src 'none'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self' data:; media-src data: blob:",
+      "csp": "default-src 'self' ipc: http://ipc.localhost; script-src 'self' 'sha256-OqD9rZ9UZGQqUOZZMHLYDUSUW8UkTyWyKLMPuNd+Ecs=' 'strict-dynamic'; frame-src faber-visual://localhost http://faber-visual.localhost; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self' data:; media-src data: blob:",
       "dangerousDisableAssetCspModification": [
         "script-src"
       ]

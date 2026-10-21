@@ -18,6 +18,7 @@ pub mod sentinel;
 pub mod settings;
 pub mod setup;
 pub mod shell;
+pub mod visual_network;
 
 use crate::app::{Ctx, Paths};
 use crate::page::{Page, css};
@@ -53,6 +54,7 @@ pub fn all() -> Vec<Scenario> {
         .chain(mcp_servers::scenarios())
         .chain(chat_groups::scenarios())
         .chain(sentinel::scenarios());
+    let all = all.chain(visual_network::scenarios());
     #[cfg(windows)]
     let all = all.chain(containment::scenarios());
     #[cfg(windows)]

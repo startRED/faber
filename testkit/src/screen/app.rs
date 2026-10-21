@@ -1052,7 +1052,7 @@ fn visual_frames_collected(ctx: &mut Ctx, app: &mut Opened, baseline: f64, befor
             .map(|row| row.pid)
             .collect();
         retained = app.page.eval(
-            "window.__visualFrames.flatMap((ref,i)=>{const frame=ref.deref();return frame?[{i,connected:frame.isConnected,srcdocBytes:frame.srcdoc.length}]:[]})",
+            "window.__visualFrames.flatMap((ref,i)=>{const frame=ref.deref();return frame?[{i,connected:frame.isConnected,srcdocBytes:frame.srcdoc.length,urlBytes:frame.src.length}]:[]})",
         )?;
         ctx.notes.push(format!("{label}: extra WebView2 pids {extra:?}; remaining frame references: {retained}"));
         if (started.elapsed() >= Duration::from_secs(2) && closed <= baseline + 15.0 && retained == json!([]) && extra.is_empty())
@@ -1152,6 +1152,7 @@ fn visual_answers_memory(ctx: &mut Ctx) -> Result {
     let idle_started = Instant::now();
     pause(2.0);
     let idle_cpu = (ctx.cpu_ms(app.id)? - before_idle) / idle_started.elapsed().as_secs_f64() / 10.0;
+    app.page.eval("window.addEventListener('message',e=>{if(e.source!==document.querySelector('.visual-frame')?.contentWindow)return; if(e.data?.visualTestReady)document.body.dataset.visualReadyVersion=e.data.visualTestReady; if(e.data?.visualTestFocus)document.body.dataset.visualFocused=e.data.visualTestFocus; if(e.data?.visualTestCounter)document.body.dataset.visualCounter=e.data.version+':'+e.data.visualTestCounter; if(e.data?.visualTestInput && e.data.focused)document.body.dataset.visualTyped=e.data.version+':'+e.data.visualTestInput; if(e.data?.visualTestMenu===true && e.data.trusted)document.body.dataset.visualMenuBlocked='yes';})")?;
     app.page.eval("window.__visualLoads=0;document.addEventListener('load',e=>{if(e.target===document.querySelector('.visual-frame'))window.__visualLoads++;},true)")?;
     app.page.click(&css(".visual-card .visual-open").last())?;
     app.page.wait_visible(&css(".visual-pane"))?;
@@ -1173,7 +1174,7 @@ fn visual_answers_memory(ctx: &mut Ctx) -> Result {
             app.page.click(&css(control))?;
             app.page.wait_for(
                 "the chosen visual version to load in the same frame",
-                &format!("window.__visualLoads==={loads} && document.querySelector('.visual-frame')?.getAttribute('srcdoc')?.includes('data-version=\"{version}\"')"),
+                &format!("window.__visualLoads==={loads} && document.body.dataset.visualReadyVersion==='{version}'"),
             )?;
             same(app.page.count(&css("iframe"))?, 1, "switching versions keeps only one frame mounted")?;
             same(
@@ -1198,7 +1199,6 @@ fn visual_answers_memory(ctx: &mut Ctx) -> Result {
     let closed = visual_frames_collected(ctx, &mut app, baseline, &before_processes, "visual versions after closing")?;
     // Real browser input must cross the opaque frame, including the modal pane at the minimum window width.
     super::shell::set_size(&mut app.page, 720, 600)?;
-    app.page.eval("window.addEventListener('message',e=>{if(e.source!==document.querySelector('.visual-frame')?.contentWindow)return; if(e.data?.visualTestReady)document.body.dataset.visualReadyVersion=e.data.visualTestReady; if(e.data?.visualTestFocus)document.body.dataset.visualFocused=e.data.visualTestFocus; if(e.data?.visualTestCounter)document.body.dataset.visualCounter=e.data.version+':'+e.data.visualTestCounter; if(e.data?.visualTestInput && e.data.focused)document.body.dataset.visualTyped=e.data.version+':'+e.data.visualTestInput; if(e.data?.visualTestMenu===true && e.data.trusted)document.body.dataset.visualMenuBlocked='yes';})")?;
     app.page.click(&css(".visual-card .visual-open").last())?;
     app.page.wait_visible(&css(".visual-frame"))?;
     app.page.eval("window.__visualFrames.push(new WeakRef(document.querySelector('.visual-frame')));void 0")?;

@@ -14,7 +14,7 @@
 //! The agent acts by the words a person sees (`act.js`, run inside the page); on a page that asks for a login, a captcha
 //! or a payment it may read and scroll but never click or type.
 
-mod native;
+pub(crate) mod native;
 
 use base64::Engine as _;
 use faber_engine::browser::{Browser, Look, MAX_CUT, MAX_TEXT, MAX_TITLE, MAX_URL, Page, Request, Turn};

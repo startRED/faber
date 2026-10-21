@@ -78,7 +78,8 @@ Size: S small, M medium, L large. Wave: 1 next, 2 after, 3 later or with its pha
 
 | # | Gap | Who has it | Faber today | Way | Size | Wave |
 |---|---|---|---|---|---|---|
-| M1 | Visual answers: a page or app beside the chat, with versions, and native pieces within the reply (artifacts, canvas, inline visuals) | all four | Begun: offline HTML/SVG reply blocks and versions plus ten inline pieces with saved controls; network grants, project files and Mermaid remain | Extends the reply and the running column's pane; task 310 lists the remaining steps | L | 2 |
+| M1 | Visual answers: a page or app beside the chat, with versions, and native pieces within the reply (artifacts, canvas, inline visuals) | all four | Begun: HTML/SVG reply blocks, versions and HTTPS through the existing web choice plus ten inline pieces with saved controls; project files and Mermaid remain | Extends the running column's pane; task 310 lists the remaining steps | L | 2 |
+| M2 | Deep research with a plan you can edit and a cited report | claude.ai, ChatGPT, `/deep-research`, Codex | Web search in a reply | A Faber power over both CLIs | M | 2 |
 | M3 | Create and edit images | ChatGPT, Codex | None | Codex's image tool; phase 6 | L | 3 |
 | M4 | Documents: Word, slides, sheets, PDF, ready to send | claude.ai, Codex templates | Only what a CLI skill writes | Catalog skills plus a file card | M | 3 |
 | M5 | Comments on a selected part of an answer for the AI to act on | ChatGPT canvas | None | With M1 | M | 3 |

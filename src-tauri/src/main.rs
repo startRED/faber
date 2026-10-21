@@ -16,6 +16,11 @@ mod terminal;
 mod tools;
 mod tray;
 mod update;
+#[cfg(target_os = "macos")]
+#[path = "pane/native.rs"]
+mod visual_native;
+mod visual_network;
+mod visual_page;
 
 #[cfg(windows)]
 use awake::WindowsPower;
@@ -72,28 +77,43 @@ pub(crate) struct Faber {
 type Res<T> = Result<T, String>;
 
 fn screen_navigation_allowed(url: &tauri::Url) -> bool {
-    // WebKit also reports child navigations: the sandbox's page and its empty disposal document stay local.
-    matches!(url.as_str(), "about:srcdoc" | "about:blank")
+    // WebKit reports children too; the native policy supplies the missing top-document distinction.
+    url.as_str() == "about:blank"
+        || (cfg!(any(target_os = "macos", target_os = "linux"))
+            && visual_network::navigation_ready()
+            && visual_page::navigation_allowed(url))
         || url.scheme() == "tauri"
         || url.host_str() == Some("tauri.localhost")
-        || (cfg!(debug_assertions) && url.host_str() == Some("localhost"))
+        || (cfg!(debug_assertions) && url.scheme() == "http" && url.host_str() == Some("localhost") && url.port() == Some(5173))
 }
 
 #[cfg(test)]
 #[test]
 fn visual_frame_disposal_allows_only_the_exact_empty_document_beside_the_existing_screen_urls() {
-    for local in ["about:blank", "about:srcdoc", "tauri://localhost/index.html", "http://tauri.localhost/index.html"] {
+    assert_eq!(screen_navigation_allowed(&tauri::Url::parse("http://localhost:5173/").unwrap()), cfg!(debug_assertions));
+    for local in ["about:blank", "tauri://localhost/index.html", "http://tauri.localhost/index.html"] {
         assert!(screen_navigation_allowed(&tauri::Url::parse(local).unwrap()), "{local}");
     }
     for refused in [
+        "about:srcdoc",
+        "blob:tauri://localhost/id",
         "about:blank#page",
         "about:blank?url=https://example.com",
         "https://example.com/",
         "file:///C:/page.html",
         "data:text/html,hello",
         "javascript:alert(1)",
+        "https://localhost:5173/",
+        "http://localhost:1234/",
     ] {
         assert!(!screen_navigation_allowed(&tauri::Url::parse(refused).unwrap()), "{refused}");
+    }
+    #[cfg(not(any(target_os = "macos", target_os = "linux")))]
+    for visual in [
+        "faber-visual://localhost/0123456789abcdef0123456789abcdef.html",
+        "http://faber-visual.localhost/0123456789abcdef0123456789abcdef.html",
+    ] {
+        assert!(!screen_navigation_allowed(&tauri::Url::parse(visual).unwrap()), "{visual}");
     }
 }
 
@@ -450,6 +470,38 @@ async fn versions(faber: State<'_, Faber>, id: String) -> Res<Vec<faber_engine::
 async fn visual_answers(faber: State<'_, Faber>, id: String) -> Res<Vec<faber_engine::visual::VisualAnswer>> {
     let engine = faber.engine.clone();
     tauri::async_runtime::spawn_blocking(move || engine.visual_answers(&id)).await.map_err(|_| "error.messageGone".to_string())
+}
+
+/// No authored page can call this command; the screen snapshots the saved choice for each opened version.
+#[cfg(feature = "test-hooks")]
+#[tauri::command]
+fn visual_policy(faber: State<'_, Faber>) -> bool {
+    visual_network::ready() && faber.engine.visual_network()
+}
+
+#[tauri::command]
+fn visual_open(pages: State<'_, visual_page::Pages>) -> String {
+    pages.open()
+}
+
+#[tauri::command]
+async fn visual_page(
+    faber: State<'_, Faber>,
+    pages: State<'_, visual_page::Pages>,
+    id: String,
+    revision: u64,
+    document: String,
+) -> Res<visual_page::Prepared> {
+    #[cfg(any(target_os = "macos", target_os = "linux"))]
+    if !visual_network::wait_navigation_ready(std::time::Duration::from_secs(5)).await {
+        return Err("visual.failed".to_string());
+    }
+    pages.prepare(&id, revision, document, visual_network::ready() && faber.engine.visual_network()).map_err(str::to_string)
+}
+
+#[tauri::command]
+fn visual_close(pages: State<'_, visual_page::Pages>, id: String) {
+    pages.close(&id);
 }
 
 #[tauri::command]
@@ -1327,6 +1379,7 @@ fn create_window(app: &AppHandle, hidden: bool, data_dir: &Path) -> tauri::Resul
         builder = builder.additional_browser_args(&args);
     }
     let window = builder.build()?;
+    visual_network::install(&window);
     if !hidden {
         // The failsafe: a screen that never reports its first paint still shows up.
         let handle = app.clone();
@@ -1354,6 +1407,9 @@ fn main() {
         }));
     }
     builder
+        .register_uri_scheme_protocol("faber-visual", |context, request| {
+            context.app_handle().state::<visual_page::Pages>().respond(context.webview_label(), request)
+        })
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_notification::init())
         .plugin(tauri_plugin_opener::init())
@@ -1383,6 +1439,11 @@ fn main() {
                 branch_here,
                 versions,
                 visual_answers,
+                #[cfg(feature = "test-hooks")]
+                visual_policy,
+                visual_open,
+                visual_page,
+                visual_close,
                 visual_pieces,
                 save_piece_value,
                 warm,
@@ -1489,6 +1550,7 @@ fn main() {
             }
         })
         .setup(move |app| {
+            app.manage(visual_page::Pages::default());
             let data_dir = data_dir(app.handle())?;
             std::fs::create_dir_all(&data_dir)?;
             app.manage(tray::Tray::default());

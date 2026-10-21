@@ -3,13 +3,32 @@ import { render } from 'solid-js/web';
 import { api, type AppState, type Conversation, type Message, type VisualAnswer } from '../../ui/api.ts';
 import { App } from '../../ui/App.tsx';
 import { Thread } from '../../ui/Thread.tsx';
-import { openedVisual, showVisual, VisualPane, visualDocument, VISUAL_CSP } from '../../ui/VisualAnswer.tsx';
+import { openedVisual, showVisual, VisualPane, visualDocument, VISUAL_CSP, VISUAL_LIVE_CSP } from '../../ui/VisualAnswer.tsx';
 import { openedSite, showSite } from '../../ui/Site.tsx';
 import { openedFile, showFile } from '../../ui/fileref.ts';
 import { store } from '../../ui/running.ts';
 import { t, useLanguage } from '../../ui/i18n.ts';
 import { menu, openMenu, closeMenu } from '../../ui/contextmenu.ts';
-import { check, deepEqual, equal, ok } from './check.ts';
+import { check as registerCheck, deepEqual, equal, ok } from './check.ts';
+
+// Every frame check uses the real single-use protocol, with an explicit saved permission.
+const prepared = new Map<string, { document: string; live: boolean }>();
+function check(name: string, run: () => void | Promise<void>) {
+  registerCheck(name, async () => {
+    const web = (await api.state()).settings.webSearch ?? 'live';
+    await api.saveSettings({ webSearch: 'off' });
+    const saved = api.visualPage;
+    api.visualPage = async (id, revision, document) => {
+      const page = await saved(id, revision, document);
+      prepared.set(page.url, { document, live: page.live });
+      return page;
+    };
+    try { await run(); } finally {
+      api.visualPage = saved; prepared.clear();
+      await api.saveSettings({ webSearch: web });
+    }
+  });
+}
 
 const settle = () => new Promise((resolve) => setTimeout(resolve, 30));
 async function until(test: () => unknown, what = 'the visual answer appeared before the deadline') {
@@ -17,10 +36,103 @@ async function until(test: () => unknown, what = 'the visual answer appeared bef
   while (!test() && performance.now() < end) await settle();
   ok(test(), what);
 }
+
+check('visual answers: live policy keeps the opaque sandbox, first policy and inert external scripts without a host nonce', () => {
+  const source = '<form name="documentElement"><script nonce="host" src="https://cdn.example.com/chart.js"></script></form><script src="http://example.com/plain.js"></script><script>window.ready=true</script>';
+  for (const live of [false, true]) {
+    const doc = new DOMParser().parseFromString(visualDocument(source, live), 'text/html');
+    equal(doc.head.firstElementChild!.getAttribute('content'), live ? VISUAL_LIVE_CSP : VISUAL_CSP);
+    equal(doc.querySelector('[nonce]'), null);
+    equal(doc.querySelector('script[src]'), null, 'only the fixed loader can start an external script');
+    equal(doc.querySelectorAll('[data-faber-src]').length, live ? 1 : 0);
+    if (live) equal(doc.querySelector('[data-faber-src]')!.getAttribute('type'), 'application/faber-script');
+    ok(!doc.documentElement.outerHTML.includes('plain.js'), 'plain HTTP is never replayed');
+    for (const directive of ["base-uri 'none'", "form-action 'none'", "frame-src 'none'", "object-src 'none'"]) {
+      ok(doc.head.firstElementChild!.getAttribute('content')!.includes(directive));
+    }
+  }
+});
+
+check('visual answers: web changes apply on the next opened version, keep one frame and do not reload an open page', async () => {
+  const host = document.createElement('div'); document.body.append(host);
+  let calls = 0;
+  const saved = api.visualPage;
+  api.visualPage = async (id, revision, document) => { calls++; return saved(id, revision, document); };
+  const a = answer();
+  const dispose = render(() => createComponent(VisualPane, { answer: a, open: { conversationId: 'policy', answerId: a.id }, onBack: () => {}, onClose: () => {} }), host);
+  try {
+    await until(() => host.querySelector('iframe'));
+    const frame = host.querySelector('iframe')!;
+    const offline = frame.src;
+    equal(frame.getAttribute('sandbox'), 'allow-scripts');
+    equal(prepared.get(offline)!.live, false);
+    await api.saveSettings({ webSearch: 'live' });
+    const live = await api.visualPolicy();
+    await settle();
+    equal(frame.src, offline, 'saving the setting leaves current page state intact');
+    equal(calls, 1);
+    host.querySelector<HTMLButtonElement>('.visual-prev')!.click();
+    await until(() => frame.src !== offline && prepared.get(frame.src)?.live === live);
+    equal(host.querySelector('iframe'), frame);
+    equal(frame.getAttribute('sandbox'), 'allow-scripts');
+    equal(host.querySelector('.side-meta')!.textContent, t(live ? 'visual.live' : 'visual.offline'));
+    await api.saveSettings({ webSearch: 'off' });
+    host.querySelector<HTMLButtonElement>('.visual-next')!.click();
+    await until(() => prepared.get(frame.src)?.live === false);
+    equal(host.querySelector('iframe'), frame);
+    equal(calls, 3);
+  } finally { dispose(); host.remove(); }
+  equal(host.querySelector('iframe'), null);
+});
+
+check('visual answers: Linux opens a real offline page even when Web search is Live', async () => {
+  if (!/Linux/.test(navigator.userAgent)) return;
+  const host = document.createElement('div'); document.body.append(host);
+  const probe = crypto.randomUUID();
+  let result: { ready: boolean; blocked: boolean } | undefined;
+  const listen = (e: MessageEvent) => {
+    if (e.origin === 'null' && e.source === host.querySelector('iframe')?.contentWindow && e.data?.probe === probe) result = e.data;
+  };
+  window.addEventListener('message', listen);
+  await api.saveSettings({ webSearch: 'live' });
+  const a = answer();
+  a.versions = [{ ...a.versions[0]!, source: `<p id="status">Waiting</p><script>
+    document.addEventListener('DOMContentLoaded',async()=>{
+      document.getElementById('status').textContent='Ready';
+      let blocked=false;try{await fetch('https://visual-fixture.example/linux');}catch{blocked=true;}
+      parent.postMessage({probe:${JSON.stringify(probe)},ready:document.getElementById('status').textContent==='Ready',blocked},'*');
+    });</script>` }];
+  const dispose = render(() => createComponent(VisualPane, { answer: a, open: { conversationId: 'linux', answerId: a.id }, onBack: () => {}, onClose: () => {} }), host);
+  try {
+    await until(() => result, 'Linux must render and execute the offline visual, including with saved Live');
+    equal(result!.ready, true); equal(result!.blocked, true);
+    equal(await api.visualPolicy(), false, 'the GTK navigation policy never enables live network access');
+    equal(prepared.get(host.querySelector('iframe')!.src)!.live, false);
+  } finally { dispose(); host.remove(); window.removeEventListener('message', listen); }
+});
 const source = (n: number) => `<!doctype html><html lang="en"><head><title>Budget chart</title></head><body data-version="${n}" style="margin:0"><p>Version ${n}</p><button onclick="this.textContent='Changed'">Change</button></body></html>`;
 const fence = (text: string) => `\`\`\`html\n${text}\n\`\`\``;
 const answer = (): VisualAnswer => ({ id: 'v1:0', name: 'Budget chart', kind: 'html', versions: [1, 2].map((n) => ({ messageId: `v${n}`, block: 0, start: 0, end: fence(source(n)).length, kind: 'html', source: source(n) })) });
 const messages = (): Message[] => [1, 2].map((n) => ({ id: `v${n}`, role: 'assistant', text: fence(source(n)), vendor: n === 1 ? 'claude' : 'codex', at: n, status: 'done' }));
+
+registerCheck('visual answers: the real native filter compiles before Live can be used on Windows and macOS', async () => {
+  if (!/Windows|Macintosh|Mac OS/.test(navigator.userAgent)) return;
+  const web = (await api.state()).settings.webSearch ?? 'live';
+  let id: string | undefined;
+  try {
+    await api.saveSettings({ webSearch: 'live' });
+    const until = performance.now() + 5000;
+    while (!(await api.visualPolicy()) && performance.now() < until) await settle();
+    ok(await api.visualPolicy(), 'the actual WebKit rule compilation or WebView2 guard installation must succeed');
+    id = await api.visualOpen();
+    const page = await api.visualPage(id, 1, visualDocument('<p>Native guard</p>', true));
+    equal(page.live, true, 'a failed native install cannot silently turn this test into an offline check');
+    ok(page.url.includes('faber-visual'));
+  } finally {
+    if (id) await api.visualClose(id);
+    await api.saveSettings({ webSearch: web });
+  }
+});
 
 check('visual answers: named forms cannot replace the serialized root or blocking policy and no host nonce enters the page', () => {
   const marker = document.createElement('meta');
@@ -45,6 +157,234 @@ check('visual answers: static connection hints and nested template hints are rem
   const made = visualDocument(`${links}<template>${links}<template>${links}</template></template><script type="speculationrules">{"prefetch":[{"source":"list","urls":["https://example.com"]}]}</script>`);
   ok(!/<link\b/i.test(made), 'templates cannot preserve a hint for later cloning');
   ok(!made.includes('speculationrules'), 'speculation rules cannot bypass the offline policy');
+});
+
+check('visual answers: scripting-dependent noscript markup is dropped, including named forms and nested templates', () => {
+  const payload = `<noscript><p title="</noscript><iframe id='noscript-frame'></iframe>">ignored</p></noscript>`;
+  for (const live of [false, true]) {
+    const made = visualDocument(`<body>${payload}<form name="parentNode"><input name="parentNode">${payload}</form><template>${payload}<template>${payload}</template></template>`, live);
+    ok(!/<noscript\b/i.test(made), 'nothing whose parsing changes with scripting survives serialization');
+    ok(!made.includes('noscript-frame'), 'the hidden second-parse frame is dropped with its noscript parent');
+    equal(new DOMParser().parseFromString(made, 'text/html').querySelector('iframe,frame,object,embed'), null);
+  }
+});
+
+check('visual answers: declarative open and closed shadows cannot hide a nested frame from the real parser', async () => {
+  for (const mode of ['open', 'closed']) {
+    const host = document.createElement('div'); document.body.append(host);
+    const probe = crypto.randomUUID();
+    let result: { frames: number; shadows: number; templates: number } | undefined;
+    const listen = (e: MessageEvent) => {
+      if (e.origin === 'null' && e.source === host.querySelector('iframe')?.contentWindow && e.data?.probe === probe) result = e.data;
+    };
+    window.addEventListener('message', listen);
+    const saved = api.visualPage;
+    // Keep the cleaner's template attributes, but restore nested contexts to exercise the real second parser too.
+    api.visualPage = (id, revision, document) => saved(id, revision, document.replaceAll('<p class="shadow-frame-probe"></p>',
+      '<script type="application/json"></script><iframe></iframe>'));
+    const a = answer();
+    a.versions = [{ ...a.versions[0]!, source: `<body>
+      <div><template shadowrootmode="${mode}"><p class="shadow-frame-probe"></p><template shadowroot="${mode}" shadowrootmode="${mode}"><p class="shadow-frame-probe"></p></template></template></div>
+      <div><template shadowroot="${mode}"><p class="shadow-frame-probe"></p></template></div>
+      <script>document.addEventListener('DOMContentLoaded',()=>{
+        let shadows=0,frames=window.length;
+        const walk=(root)=>{for(const el of root.querySelectorAll('*')){if(el.shadowRoot){shadows++;frames+=el.shadowRoot.querySelectorAll('iframe,frame').length;walk(el.shadowRoot);}}};
+        walk(document);
+        parent.postMessage({probe:${JSON.stringify(probe)},frames,shadows,templates:document.querySelectorAll('template').length},'*');
+      });</script>` }];
+    const dispose = render(() => createComponent(VisualPane, { answer: a, open: { conversationId: `shadow-${mode}`, answerId: a.id }, onBack: () => {}, onClose: () => {} }), host);
+    try {
+      await until(() => result, `the ${mode} declarative shadow probe reports from the actual frame`);
+      equal(result!.frames, 0, 'no nested browsing realm survives, including inside a closed tree');
+      equal(result!.shadows, 0, 'declarative templates stay inert instead of becoming hidden parser destinations');
+      equal(result!.templates, 2, 'the original templates remain available as inert page data');
+      ok(!/\sshadowroot(?:mode)?=/i.test(visualDocument(a.versions[0]!.source, true)), 'including nested and legacy template attributes');
+    } finally { api.visualPage = saved; dispose(); host.remove(); window.removeEventListener('message', listen); }
+  }
+});
+
+check('visual answers: the early native guard removes parser-created nested contexts and template clones in the real frame', async () => {
+  const host = document.createElement('div'); document.body.append(host);
+  const probe = crypto.randomUUID();
+  let result: { parser: number; cloned: number; transports: boolean; error?: string } | undefined;
+  const listen = (e: MessageEvent) => {
+    if (e.origin === 'null' && e.source === host.querySelector('iframe')?.contentWindow && e.data?.probe === probe) result = e.data;
+  };
+  window.addEventListener('message', listen);
+  const saved = api.visualPage;
+  // Bypass the detached cleaner only in this check: parser-created nodes must meet the native guard too.
+  api.visualPage = (id, revision, document) => saved(id, revision, document.replace('<p id="parser-guard-probe"></p>',
+    '<iframe></iframe><object></object><embed><svg><foreignObject><iframe></iframe></foreignObject></svg><template id="parser-template"><iframe></iframe><template><object></object><embed></template></template>'));
+  const a = answer();
+  a.versions = [{ ...a.versions[0]!, source: `<body><p id="parser-guard-probe"></p>
+    <noscript><p title="</noscript><iframe id='noscript-frame'></iframe>">ignored</p></noscript>
+    <template><noscript><p title="</noscript><iframe id='template-noscript-frame'></iframe>">ignored</p></noscript></template>
+    <script>document.addEventListener('DOMContentLoaded',()=>{
+      const report={probe:${JSON.stringify(probe)},parser:0,cloned:0,transports:false};
+      try {
+        const denied='iframe,frame,object,embed,noscript';
+        report.parser=document.querySelectorAll(denied).length;
+        for(const template of document.querySelectorAll('template')){
+          document.body.append(template.content.cloneNode(true));
+        }
+        report.cloned=document.querySelectorAll(denied).length;
+        report.transports=['WebSocket','WebSocketStream','WebTransport','RTCPeerConnection'].every(name=>window[name]===undefined);
+      }catch(error){report.error=String(error);}
+      parent.postMessage(report,'*');
+    });</script>` }];
+  const dispose = render(() => createComponent(VisualPane, { answer: a, open: { conversationId: 'parser-guard', answerId: a.id }, onBack: () => {}, onClose: () => {} }), host);
+  try {
+    await until(() => result, 'the parser-guard page reports from the actual opaque frame');
+    equal(result!.error, undefined);
+    equal(result!.parser, 0, 'HTML parser insertions cannot leave a nested browser realm');
+    equal(result!.cloned, 0, 'template contents cannot restore a nested browser realm');
+    equal(result!.transports, true, 'the remaining authored realm keeps all transport guards');
+  } finally { api.visualPage = saved; dispose(); host.remove(); window.removeEventListener('message', listen); }
+});
+
+check('visual answers: a parser-created closed shadow cannot supply an unguarded nested realm, including SVG and MathML contexts', async () => {
+  if (!('shadowRootMode' in HTMLTemplateElement.prototype) || typeof ElementInternals === 'undefined') return;
+  const host = document.createElement('div'); document.body.append(host);
+  const probe = crypto.randomUUID();
+  const name = `hidden-${probe}`;
+  let result: { rootBuilt: boolean; frameBuilt: boolean; access: boolean; named: boolean; cleaned: boolean; locked: boolean; visible: number; error?: string } | undefined;
+  const listen = (e: MessageEvent) => {
+    if (e.origin === 'null' && e.source === host.querySelector('iframe')?.contentWindow && e.data?.probe === probe) result = e.data;
+  };
+  window.addEventListener('message', listen);
+  const saved = api.visualPage;
+  api.visualPage = (id, revision, document) => {
+    ok(document.includes('<p id="mutation-probe"></p>'), 'the closed-shadow parser fixture has its insertion point');
+    // Inject fixed parser bytes after cleaning: modern outerHTML escapes attribute angles and defeats the old mXSS fixture.
+    const markup = `<x-visual-attack><template shadowrootmode="closed"><x-frame-witness></x-frame-witness><iframe name="${name}"></iframe></template></x-visual-attack>`;
+    // Register a witness before the body parser: capture the real iframe even if another defense detaches it.
+    const witness = `const proof=window.closedFrameProof={frames:[],constructed:0,connected:0};
+      customElements.define('x-frame-witness',class extends HTMLElement{
+        constructor(){super();proof.constructed++;}
+        connectedCallback(){
+          proof.connected++;
+          const root=this.getRootNode();proof.root=root;
+          const capture=(records)=>{for(const record of records)for(const node of record.addedNodes){if(node.localName==='iframe')proof.frames.push(node);}};
+          const observer=new MutationObserver(capture);observer.observe(root,{childList:true});
+          proof.drain=()=>{capture(observer.takeRecords());observer.disconnect();};
+        }
+      });`;
+    const made = document.replace('<p id="mutation-probe"></p>', markup
+      + '<svg><foreignObject><iframe srcdoc="nested"></iframe></foreignObject></svg><math><mtext><iframe srcdoc="nested"></iframe></mtext></math>');
+    return saved(id, revision, made.replace('<script>', `<script type="application/faber-events" data-faber-events>${witness}</script><script>`));
+  };
+  const a = answer();
+  // Define the witness before the parser reaches the body; authored startup still uses the real loader.
+  a.versions = [{ ...a.versions[0]!, source: `<head><script>
+    document.addEventListener('DOMContentLoaded',()=>{
+      const report={probe:${JSON.stringify(probe)},rootBuilt:false,frameBuilt:false,access:false,named:false,cleaned:false,locked:false,visible:document.querySelectorAll('iframe,frame,object,embed').length};
+      try {
+        const proof=window.closedFrameProof;proof.drain?.();
+        report.rootBuilt=proof.root instanceof ShadowRoot && proof.root.mode==='closed';
+        if(!report.rootBuilt)throw Error('parser witness missed the closed root: constructed='+proof.constructed+', connected='+proof.connected);
+        report.frameBuilt=proof.frames.length>0;
+        report.access=report.frameBuilt && proof.frames.every(frame=>frame.contentWindow===null && frame.contentDocument===null);
+        report.named=window.open('',${JSON.stringify(name)})===null;
+        report.locked=Object.getOwnPropertyDescriptor(window,'open').configurable===false;
+        report.locked=report.locked && Object.getOwnPropertyDescriptor(ElementInternals.prototype,'shadowRoot').configurable===false;
+        for(const Constructor of [HTMLIFrameElement,HTMLFrameElement]){
+          for(const key of ['contentWindow','contentDocument'])report.locked=report.locked && Object.getOwnPropertyDescriptor(Constructor.prototype,key).configurable===false;
+        }
+        customElements.define('x-visual-attack',class extends HTMLElement{
+          constructor(){super();proof.internals=this.attachInternals().shadowRoot;}
+        });
+        // Upgrade the exact host retained by the parser witness, rather than querying the document again.
+        if(proof.root.host.localName!=='x-visual-attack' || proof.root.host.namespaceURI!=='http://www.w3.org/1999/xhtml')throw Error('the witness must retain the actual HTML attack host');
+        customElements.upgrade(proof.root.host);
+        report.cleaned=proof.internals===proof.root && !proof.root.querySelector('iframe');
+      }catch(error){report.error=String(error);}
+      parent.postMessage(report,'*');
+    });</script></head><body><p id="mutation-probe"></p>` }];
+  const dispose = render(() => createComponent(VisualPane, { answer: a, open: { conversationId: 'closed-shadow-parser', answerId: a.id }, onBack: () => {}, onClose: () => {} }), host);
+  try {
+    await until(() => result, 'the closed-shadow parser probe reports from the actual visual frame');
+    equal(result!.error, undefined);
+    equal(result!.rootBuilt, true, 'the actual frame parser constructed the closed shadow root');
+    equal(result!.frameBuilt, true, 'the witness observed the actual iframe inside that closed tree');
+    equal(result!.access, true, 'frame accessors cannot expose its initial empty realm, even without child initialization');
+    equal(result!.named, true, 'opening an existing named child cannot expose its realm');
+    equal(result!.cleaned, true, 'ElementInternals cleans the closed root before returning it');
+    equal(result!.locked, true, 'the parent-realm access guards cannot be replaced');
+    equal(result!.visible, 0, 'SVG foreignObject and MathML parser-created frames are removed');
+  } finally { api.visualPage = saved; dispose(); host.remove(); window.removeEventListener('message', listen); }
+});
+
+check('visual answers: parser-created document frames expose no indexed or named child to the first authored script', async () => {
+  const host = document.createElement('div'); document.body.append(host);
+  const probe = crypto.randomUUID(), name = `parser-${probe}`;
+  let result: { built: boolean; indexed: boolean; frames: boolean; named: boolean; children: number; inline: boolean } | undefined;
+  const listen = (e: MessageEvent) => {
+    if (e.origin === 'null' && e.source === host.querySelector('iframe')?.contentWindow && e.data?.probe === probe) result = e.data;
+  };
+  window.addEventListener('message', listen);
+  const saved = api.visualPage;
+  api.visualPage = (id, revision, document) => {
+    // Bypass the detached cleaner to exercise the real parser and the native guard's last drain.
+    const markup = `<iframe name="${name}"></iframe><script>window.parserSiblingRan=true;</script>`;
+    const witness = `const proof=window.parserFrameProof={built:false};
+      const capture=(records)=>{for(const record of records)for(const node of record.addedNodes){
+        if(node instanceof HTMLIFrameElement && node.getAttribute('name')===${JSON.stringify(name)})proof.built=true;
+      }};
+      const observer=new MutationObserver(capture);observer.observe(document,{childList:true,subtree:true});
+      proof.drain=()=>{capture(observer.takeRecords());observer.disconnect();};`;
+    const made = document.replace('<p id="parser-probe"></p>', markup);
+    return saved(id, revision, made.replace('<script>', `<script type="application/faber-events" data-faber-events>${witness}</script><script>`));
+  };
+  const a = answer();
+  a.versions = [{ ...a.versions[0]!, source: `<head><script>
+    window.parserFrameProof.drain();
+    parent.postMessage({probe:${JSON.stringify(probe)},built:window.parserFrameProof.built,indexed:window[0]===undefined,
+      frames:window.frames[0]===undefined,named:window[${JSON.stringify(name)}]===undefined,
+      children:document.querySelectorAll('iframe,frame,object,embed').length,
+      inline:window.parserSiblingRan===true},'*');
+    </script></head><body><p id="parser-probe"></p>` }];
+  const dispose = render(() => createComponent(VisualPane, { answer: a, open: { conversationId: 'parser-access', answerId: a.id }, onBack: () => {}, onClose: () => {} }), host);
+  try {
+    await until(() => result, 'the very first authored script reports after the native parser drain');
+    equal(result!.built, true, 'the parser witness observed the actual named iframe node');
+    equal(result!.inline, false, 'the hash policy blocks an untrusted sibling inline script during parsing');
+    equal(result!.indexed, true, 'window[0] has no child realm');
+    equal(result!.frames, true, 'window.frames[0] has no child realm');
+    equal(result!.named, true, 'a named frame has no child realm');
+    equal(result!.children, 0, 'parser-created document frames are gone before authored replay');
+  } finally { api.visualPage = saved; dispose(); host.remove(); window.removeEventListener('message', listen); }
+});
+
+check('visual answers: meta refresh, window.open, workers and CSS requests cannot leave the offline frame', async () => {
+  const host = document.createElement('div'); document.body.append(host);
+  const probe = crypto.randomUUID();
+  let result: { popup: boolean; worker: boolean; shared: boolean; cssImport: boolean; cssUrl: boolean; refresh: boolean } | undefined;
+  const listen = (e: MessageEvent) => {
+    if (e.origin === 'null' && e.source === host.querySelector('iframe')?.contentWindow && e.data?.probe === probe) result = e.data;
+  };
+  window.addEventListener('message', listen);
+  const a = answer();
+  a.versions = [{ ...a.versions[0]!, source: `<meta http-equiv="refresh" content="0;url=data:text/html,unexpected"><p>Sandbox probes</p><script>
+    document.addEventListener('DOMContentLoaded',async()=>{
+      const violations=[];document.addEventListener('securitypolicyviolation',e=>violations.push({uri:e.blockedURI,directive:e.effectiveDirective}));
+      const style=document.createElement('style');style.textContent='@import url("https://visual-fixture.example/import.css");body{background-image:url("https://visual-fixture.example/background.svg")}';document.head.append(style);
+      const url=URL.createObjectURL(new Blob(['postMessage("unexpected");'],{type:'text/javascript'}));
+      const denied=async(name)=>{let worker;try{return await new Promise(resolve=>{worker=new window[name](url);const target=worker.port||worker;target.onmessage=()=>resolve(false);worker.onerror=e=>{e.preventDefault();resolve(true);};target.start?.();setTimeout(()=>resolve(false),500);});}catch{return true;}finally{worker?.terminate?.();worker?.port?.close();}};
+      const popup=window.open('about:blank')===null;
+      const worker=await denied('Worker'),shared=await denied('SharedWorker');URL.revokeObjectURL(url);
+      await new Promise(resolve=>setTimeout(resolve,50));
+      parent.postMessage({probe:${JSON.stringify(probe)},popup,worker,shared,
+        cssImport:violations.some(e=>e.uri.endsWith('/import.css')&&e.directive.startsWith('style-src')),
+        cssUrl:violations.some(e=>e.uri.endsWith('/background.svg')&&e.directive==='img-src'),
+        refresh:!document.querySelector('meta[http-equiv="refresh"]')&&location.protocol!=='data:'},'*');
+    });</script>` }];
+  const dispose = render(() => createComponent(VisualPane, { answer: a, open: { conversationId: 'browser-surfaces', answerId: a.id }, onBack: () => {}, onClose: () => {} }), host);
+  try {
+    await until(() => result, 'the actual frame reports all remaining browser-surface probes');
+    for (const name of ['popup', 'worker', 'shared', 'cssImport', 'cssUrl', 'refresh'] as const) equal(result![name], true, `${name} stays confined`);
+    const policy = prepared.get(host.querySelector('iframe')!.src)!.document;
+    for (const directive of ["frame-src 'none'", "child-src 'none'", "worker-src 'none'"]) ok(policy.includes(directive));
+  } finally { dispose(); host.remove(); window.removeEventListener('message', listen); }
 });
 
 check('visual answers: scripts cannot connect dynamic hints through DOM, HTML, templates, ranges or document writes', async () => {
@@ -89,6 +429,11 @@ check('visual answers: scripts cannot connect dynamic hints through DOM, HTML, t
       const shadowHost=document.createElement('div'); document.body.append(shadowHost);
       const shadow=shadowHost.attachShadow({mode:'open'}); shadow.innerHTML=markup;
       if(shadow.querySelector('link')) throw Error('shadow'); safe('shadow');
+      const closedHost=document.createElement('div');document.body.append(closedHost);
+      const closed=closedHost.attachShadow({mode:'closed'});closed.innerHTML=markup+'<iframe></iframe>';
+      if(closed.querySelector('link,iframe'))throw Error('closed shadow');
+      const attach=Object.getOwnPropertyDescriptor(Element.prototype,'attachShadow');
+      if(attach.configurable || attach.writable)throw Error('the shadow guard can be replaced');safe('closed shadow');
       const script=document.createElement('script'); script.type='application/json';
       script.textContent=JSON.stringify({prefetch:[{source:'list',urls:['https://example.com']}]}); document.body.append(script);
       script.type='speculationrules'; safe('script type setter');
@@ -106,7 +451,60 @@ check('visual answers: scripts cannot connect dynamic hints through DOM, HTML, t
   try {
     await until(() => result);
     equal(result!.error, undefined, result!.error);
-    equal(result!.cases.length, 23, 'every insertion path is checked synchronously, before an observer could remove a connected hint');
+    equal(result!.cases.length, 24, 'every insertion path is checked synchronously, before an observer could remove a connected hint');
+  } finally { dispose(); host.remove(); window.removeEventListener('message', listen); }
+});
+
+check('visual answers: a connected stylesheet cannot become a connection hint through reflected properties, attributes or tokens', async () => {
+  const host = document.createElement('div'); document.body.append(host);
+  const probe = crypto.randomUUID();
+  let result: { count: number; error?: string } | undefined;
+  const listen = (e: MessageEvent) => {
+    if (e.source === host.querySelector('iframe')?.contentWindow && e.data?.probe === probe) result = e.data;
+  };
+  window.addEventListener('message', listen);
+  const source = `<script>
+    let count=0,error;
+    try {
+      const link=document.createElement('link'); link.rel='stylesheet'; document.head.append(link);
+      if(link.localName!=='link' || !link.isConnected) throw Error('normal stylesheets must remain usable');
+      const changes=[
+        ()=>link.rel='preconnect',
+        ()=>link.setAttribute('rel','dns-prefetch'),
+        ()=>link.setAttributeNS(null,'rel','prerender'),
+        ()=>{const attr=document.createAttribute('rel'); attr.value='prefetch'; link.setAttributeNode(attr);},
+        ()=>{const attr=document.createAttribute('rel'); attr.value='modulepreload'; link.attributes.setNamedItem(attr);},
+        ()=>link.getAttributeNode('rel').value='preconnect',
+        ()=>link.getAttributeNode('rel').textContent='prefetch',
+        ()=>link.getAttributeNode('rel').nodeValue='dns-prefetch',
+        ()=>link.relList.value='preconnect',
+        ()=>link.relList='prefetch',
+        ()=>link.relList.add('stylesheet','preconnect'),
+        ()=>link.relList.replace('stylesheet','prerender'),
+        ()=>link.relList.toggle('modulepreload',true),
+        ()=>{let n=0;link.relList.add({toString(){return ++n===1?'stylesheet':'dns-prefetch';}});},
+        ()=>{let n=0;link.relList.replace('stylesheet',{toString(){return ++n===1?'stylesheet':'preconnect';}});},
+        ()=>{let n=0;link.relList.toggle({toString(){return ++n===1?'stylesheet':'prefetch';}},true);},
+        ()=>{let n=0;link.setAttributeNS(null,{toString(){return ++n===1?'title':'rel';}},'dns-prefetch');},
+        ()=>{WeakSet.prototype.has=()=>false;WeakSet.prototype.add=()=>{};link.relList.add('preconnect');},
+      ];
+      for(const change of changes) {
+        link.rel='stylesheet'; change();
+        if(!['','stylesheet'].includes(link.getAttribute('rel'))) throw Error('hint escaped at '+count);
+        count++;
+      }
+    } catch(e) {error=String(e);}
+    parent.postMessage({probe:${JSON.stringify(probe)},count,error},'*');
+  </script>`;
+  const a = answer(); a.versions = [{ ...a.versions[0]!, source }];
+  const dispose = render(() => createComponent(VisualPane, { answer: a, open: { conversationId: 'stylesheet', answerId: a.id }, onBack: () => {}, onClose: () => {} }), host);
+  try {
+    await until(() => result);
+    equal(result!.error, undefined);
+    equal(result!.count, 18);
+    const live = new DOMParser().parseFromString(visualDocument('<link rel="stylesheet" href="https://cdn.example.com/style.css"><link rel="stylesheet preconnect" href="https://example.com">', true), 'text/html');
+    equal(live.querySelectorAll('link').length, 1);
+    equal(live.querySelector('link')!.rel, 'stylesheet');
   } finally { dispose(); host.remove(); window.removeEventListener('message', listen); }
 });
 
@@ -138,6 +536,7 @@ check('visual answers: focused input Escape and right-click cross only the valid
   } }), host);
   try {
     await until(() => ready);
+    await until(() => host.querySelector('iframe'));
     const frame = host.querySelector('iframe')!;
     const send = (data: unknown, origin = 'null', source: MessageEventSource | null = frame.contentWindow) => window.dispatchEvent(new MessageEvent('message', { data, origin, source }));
     send({ type: 'faber-visual-escape' }, 'https://example.com');
@@ -270,9 +669,9 @@ check('visual answers: Chat and Projects at 720 px reuse the resizable running p
         equal(host.querySelector('iframe'), newest, 'a version switch reuses the frame');
         equal(newest.contentWindow, browsingContext, 'versions keep one browsing context');
         equal(newest.isConnected, true);
-        ok(host.querySelector('iframe')!.srcdoc.includes('data-version="1"'));
+        await until(() => prepared.get(newest.src)?.document.includes('data-version="1"'));
         host.querySelector<HTMLButtonElement>('.visual-next')!.click();
-        ok(host.querySelector('iframe')!.srcdoc.includes('data-version="2"'));
+        await until(() => prepared.get(newest.src)?.document.includes('data-version="2"'));
         const grip = host.querySelector<HTMLElement>('#running [role="separator"]')!;
         const oldWidth = Number(grip.getAttribute('aria-valuenow'));
         grip.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowLeft', bubbles: true }));
@@ -375,6 +774,8 @@ check('visual answers: one real frame navigates between versions with fresh glob
   </script>` }));
   const dispose = render(() => createComponent(VisualPane, { answer: a, open: { conversationId: 'reuse', answerId: a.id }, onBack: () => {}, onClose: () => {} }), host);
   try {
+    await until(() => host.querySelector('iframe'));
+    await until(() => host.querySelector('iframe'));
     const frame = host.querySelector('iframe')!;
     const browsingContext = frame.contentWindow;
     for (const version of [2, 1, 2]) {
@@ -387,7 +788,7 @@ check('visual answers: one real frame navigates between versions with fresh glob
       equal(host.querySelectorAll('iframe').length, 1);
       equal(frame.contentWindow, browsingContext);
       equal(frame.getAttribute('sandbox'), 'allow-scripts');
-      ok(frame.srcdoc.includes(VISUAL_CSP));
+      equal(prepared.get(frame.src)!.live, false);
       for (const flag of ['fresh', 'blocked', 'policy', 'rtc', 'isolated'] as const) ok(result![flag], `${flag} holds in version ${version}`);
     }
   } finally { dispose(); host.remove(); window.removeEventListener('message', listen); }
@@ -421,9 +822,10 @@ check('visual answers: real-frame DOMContentLoaded startup reaches Ready once an
     const a = answer(); a.versions = [{ ...a.versions[0]!, source: setup + page }];
     const dispose = render(() => createComponent(VisualPane, { answer: a, open: { conversationId: 'startup', answerId: a.id }, onBack: () => {}, onClose: () => {} }), host);
     try {
-      const frame = host.querySelector('iframe')!;
+      await until(() => host.querySelector('iframe'));
+    const frame = host.querySelector('iframe')!;
       equal(frame.getAttribute('sandbox'), 'allow-scripts');
-      ok(frame.srcdoc.includes(VISUAL_CSP));
+      equal(prepared.get(frame.src)!.live, false);
       await until(() => result, `${type || 'classic'} page delivers its startup and load report`);
       equal(result!.status, 'Ready', `${type || 'classic'} starts through its own DOMContentLoaded listener`);
       equal(result!.dom, 1); equal(result!.windowDom, 1); equal(result!.loads, 1); equal(result!.bodyLoads, 1);
@@ -436,6 +838,46 @@ check('visual answers: real-frame DOMContentLoaded startup reaches Ready once an
       equal(result!.loads, 1, 'the native and replayed load must not both reach the page');
     } finally { dispose(); host.remove(); window.removeEventListener('message', listen); }
   }
+});
+
+check('visual answers: real image loads reach converted resource handlers on Document before page load', async () => {
+  const host = document.createElement('div'); document.body.append(host);
+  const probe = crypto.randomUUID();
+  let result: { status: string; callbacks: number; loads: number } | undefined;
+  const listen = (e: MessageEvent) => {
+    if (e.origin === 'null' && e.source === host.querySelector('iframe')?.contentWindow && e.data?.probe === probe) result = e.data;
+  };
+  window.addEventListener('message', listen);
+  const a = answer();
+  a.versions = [{ ...a.versions[0]!, source: `<p id="status">Waiting</p><script>
+    window.callbacks=0;window.loads=0;
+    function loadedImage(event){window.callbacks++;document.getElementById('status').textContent=event.target===this && event.currentTarget===this?'Ready':'Wrong target';}
+    window.addEventListener('load',()=>{window.loads++;parent.postMessage({probe:${JSON.stringify(probe)},status:document.getElementById('status').textContent,callbacks:window.callbacks,loads:window.loads},'*');});
+    </script><img src="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='1' height='1'/%3E" onload="loadedImage.call(this,event)">` }];
+  const dispose = render(() => createComponent(VisualPane, { answer: a, open: { conversationId: 'resource-load', answerId: a.id }, onBack: () => {}, onClose: () => {} }), host);
+  try {
+    await until(() => result, 'the real frame reports its image and page load callbacks');
+    equal(result!.status, 'Ready'); equal(result!.callbacks, 1); equal(result!.loads, 1);
+  } finally { dispose(); host.remove(); window.removeEventListener('message', listen); }
+});
+
+check('visual answers: a malformed resource handler cannot stop the real page startup', async () => {
+  const host = document.createElement('div'); document.body.append(host);
+  const probe = crypto.randomUUID();
+  let ready = false;
+  const listen = (e: MessageEvent) => {
+    if (e.origin === 'null' && e.source === host.querySelector('iframe')?.contentWindow && e.data === probe) ready = true;
+  };
+  window.addEventListener('message', listen);
+  const a = answer();
+  a.versions = [{ ...a.versions[0]!, source: `<img src="data:,bad" onerror="if ("><p id="status">Waiting</p><script>
+    document.addEventListener('DOMContentLoaded',()=>{
+      document.getElementById('status').textContent='Ready';
+      parent.postMessage(${JSON.stringify(probe)},'*');
+    });</script>` }];
+  const dispose = render(() => createComponent(VisualPane, { answer: a, open: { conversationId: 'malformed', answerId: a.id }, onBack: () => {}, onClose: () => {} }), host);
+  try { await until(() => ready, 'a malformed handler must not abort unrelated startup scripts'); }
+  finally { dispose(); host.remove(); window.removeEventListener('message', listen); }
 });
 
 check('visual answers: the real frame runs offline, blocks fetch and Faber access, and descendants cannot restore WebRTC', async () => {
@@ -451,12 +893,14 @@ check('visual answers: the real frame runs offline, blocks fetch and Faber acces
   const navigation = new URL(`visual-navigation-${probe}`, location.href).href;
   let navigationBlocked = false;
   const violation = (e: SecurityPolicyViolationEvent) => {
-    if (e.effectiveDirective === 'frame-src' && e.originalPolicy.includes("frame-src 'none'") && e.blockedURI.startsWith(new URL(navigation).origin)) navigationBlocked = true;
+    if (e.effectiveDirective === 'frame-src' && e.originalPolicy.includes("frame-src faber-visual:") && e.blockedURI.startsWith(new URL(navigation).origin)) navigationBlocked = true;
   };
   document.addEventListener('securitypolicyviolation', violation);
   let result: Record<string, boolean> | undefined;
   const listen = (e: MessageEvent) => {
-    if (e.source === host.querySelector('iframe')?.contentWindow && e.data?.probe === probe) result = e.data;
+    if (e.source === host.querySelector('iframe')?.contentWindow && e.data?.probe === probe) {
+      if (e.data.navigationBlocked) navigationBlocked = true; else result = e.data;
+    }
   };
   window.addEventListener('message', listen);
   const script = `<button id="counter" onclick="this.textContent=Number(this.textContent)+1">0</button><script>
@@ -477,16 +921,19 @@ check('visual answers: the real frame runs offline, blocks fetch and Faber acces
       const interactive=document.querySelector('#counter').textContent==='1';
       parent.postMessage({probe:${JSON.stringify(probe)},fetchBlocked,fetchPolicy,parentBlocked,nativeDenied,rtcBlocked,nestedBlocked,interactive},'*');
       location.href=${JSON.stringify(navigation)};
+      setTimeout(()=>parent.postMessage({probe:${JSON.stringify(probe)},navigationBlocked:true},'*'),150);
     })();
   </script>`;
   const a = answer(); a.versions = [{ ...a.versions[0]!, source: script }];
   const dispose = render(() => createComponent(VisualPane, { answer: a, open: { conversationId: 'security', answerId: a.id }, onBack: () => {}, onClose: () => {} }), host);
   try {
+    await until(() => host.querySelector('iframe'));
     const frame = host.querySelector('iframe')!;
     equal(frame.getAttribute('sandbox'), 'allow-scripts');
-    equal(frame.getAttribute('src'), null);
+    ok(frame.src.includes('faber-visual'), 'the page has its own protocol origin');
+    equal(frame.getAttribute('srcdoc'), null);
     equal(frame.referrerPolicy, 'no-referrer');
-    ok(frame.srcdoc.includes(VISUAL_CSP));
+    equal(prepared.get(frame.src)!.live, false);
     await until(() => result);
     for (const name of ['fetchBlocked', 'fetchPolicy', 'parentBlocked', 'nativeDenied', 'rtcBlocked', 'nestedBlocked', 'interactive']) equal(result![name], true, name);
     await until(() => navigationBlocked);

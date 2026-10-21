@@ -81,6 +81,8 @@ How the Settings screen looks and behaves. The first run and the tutorial are in
 
   Web search (Off, Cached, Live; Live by default in the saved Chat settings, Off for any launch nobody chose for): Codex `web_search` in the thread config; Claude Code allows
   WebSearch and WebFetch (Live), only WebSearch and denies WebFetch (Cached, which it lacks), or denies both (Off).
+  Its existing help adds that visual pages go online only with Live. A page takes the choice when opened or switched
+  to another version; the reply itself always keeps the screen's closed resource policy.
   Cached is offered only while Codex is connected. Codex reasoning summary uses `model_reasoning_summary`; reply style
   also sets `model_verbosity` to low for Short and high for Explained, otherwise leaving the model's own length.
 - R121 (it replaces the next item for the two choices on screen): "Don't ask" is full access. No approval cards, commands

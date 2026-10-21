@@ -45,7 +45,12 @@ above an answer. The window widths, the sidebar and the running column are in [l
   name, its kind and Open. A title names it; an untitled one says Page or Drawing in the screen's language. See code
   opens the existing code block view, with its copy button. Until the closing fence arrives, the block stays code.
   Open shows that version in the running column's pane ([running.md](running.md)); the card has no live frame of its
-  own. No motion on the name or code; card controls have the usual quiet hover and keyboard focus.
+  own. Its page follows the web choice already in Settings when opened or switched to another version: Live allows
+  HTTPS resources, Off and Cached stay offline. Saving the choice does not reload an open page or lose its input.
+  The page uses its own single-use visual origin and response policy; the reply's own images, CSS, fonts and media
+  never gain web access. Web search's existing help says visual pages go online only with Live.
+  No permission question or setting appears on the reply. No motion on the name or code; card controls have the usual
+  quiet hover and keyboard focus.
 - The header is the vendor's mark, the model's name and its effort in the quiet header ink ("· high effort"; the owner,
   2026-10-17), nothing else (Auto shows its reason beside the name only while it is still choosing). Auto's reason is its
   tooltip. The pace line stays (C002). A wait for quota is told once,
