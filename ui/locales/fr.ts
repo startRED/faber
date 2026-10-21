@@ -1484,6 +1484,7 @@ export const fr: Messages = {
   'notes.156.new': "Le catalogue affiche les serveurs d'outils de chaque projet et leur état ; vous pouvez désactiver ceux ajoutés par Faber.",
   'notes.157.new': 'Vous pouvez déplacer une conversation de Chat vers un projet par clic droit, en gardant ses messages, son titre et son épinglage.',
   'notes.158.new': 'Vous pouvez découvrir, installer et gérer les skills et serveurs d’outils dans Catalogue, à côté de Chat et Projets.',
+  'notes.159.new': 'Les réponses peuvent maintenant afficher des tableaux, des graphiques, des listes à cocher et des curseurs utilisables sur place, et elles gardent vos choix.',
   'update.checking': 'Recherche d’une mise à jour…',
   'update.downloading': 'Téléchargement de la mise à jour…',
   'update.downloadingPercent': 'Téléchargement de la mise à jour… {percent} %',
@@ -1496,4 +1497,15 @@ export const fr: Messages = {
   'error.update.failed': 'La mise à jour n’a pas pu démarrer. Faber réessaiera plus tard.',
   'error.update.none': 'Aucune mise à jour n’attend.',
 'error.update.closing': 'Faber installe une mise à jour et se rouvre dans un instant. Réessaie à ce moment-là.',
+  'piece.data': "Données du graphique",
+  'piece.label': "Nom",
+  'piece.value': "Valeur",
+  'piece.result': "Résultat",
+  'piece.unavailable': "Indisponible pour cette valeur",
+  'piece.fill': "Utiliser dans le message",
+  'piece.saveFailed': "Cette modification n’a pas pu être enregistrée.",
+  'piece.discard': "Abandonner la modification",
+  'piece.retry': "Réessayer",
+  'piece.show': "Afficher {title}",
+
 };

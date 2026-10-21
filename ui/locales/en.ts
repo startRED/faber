@@ -1364,6 +1364,7 @@ export const en = {
   'notes.156.new': "You can see each project's tool servers and their status in the catalog, and switch off the ones Faber added.",
   'notes.157.new': 'You can move a chat into a project from its right-click menu, keeping its messages, title and pin.',
   'notes.158.new': 'You can browse, install and manage skills and tool servers in Catalog, their own tab beside Chat and Projects.',
+  'notes.159.new': 'Replies can now show tables, charts, checklists and sliders you can use right there, and they keep your choices.',
   'update.checking': 'Looking for an update…',
   'update.downloading': 'Downloading update…',
   'update.downloadingPercent': 'Downloading update… {percent}%',
@@ -1376,6 +1377,17 @@ export const en = {
   'error.update.failed': 'The update could not start. Faber will try again later.',
   'error.update.none': 'There is no update waiting.',
 'error.update.closing': 'Faber is installing an update and opens again in a moment. Try again then.',
+  'piece.data': "Chart data",
+  'piece.label': "Label",
+  'piece.value': "Value",
+  'piece.result': "Result",
+  'piece.unavailable': "Unavailable for this value",
+  'piece.fill': "Use in message",
+  'piece.saveFailed': "This change could not be saved.",
+  'piece.discard': "Discard change",
+  'piece.retry': "Try again",
+  'piece.show': "Show {title}",
+
 } as const;
 
 export type Key = keyof typeof en;

@@ -1,6 +1,7 @@
 //! A conversation's readable record, without CLI metadata or the work log.
 
-use crate::model::{Conversation, Role, Status, Vendor};
+use crate::model::{Conversation, Message, Role, Status, Vendor};
+use crate::pieces::{PieceData, SavedValue, detect, evaluate};
 use chrono::{DateTime, SecondsFormat, TimeZone};
 use serde::Deserialize;
 use std::fmt::Write;
@@ -49,7 +50,8 @@ pub fn markdown(conversation: &Conversation, words: &Words, zone: &impl TimeZone
                 text = &text[byte..];
             }
         }
-        out.push_str(&message::markdown(text, paths)?);
+        let text = piece_snapshots(message, &conversation.piece_values, text, paths)?;
+        out.push_str(&message::markdown(&text, paths)?);
         out.push('\n');
         let mut names: Vec<String> = message.attachments.iter().flatten().map(|name| heading(file_name(name))).collect();
         for (i, image) in message.images.iter().flatten().enumerate() {
@@ -71,6 +73,50 @@ pub fn markdown(conversation: &Conversation, words: &Words, zone: &impl TimeZone
         }
     }
     Ok(out)
+}
+
+fn piece_snapshots(message: &Message, saved: &[SavedValue], text: &str, paths: &Paths) -> Result<String, &'static str> {
+    let offset = message.text.len() - text.len();
+    let mut out = String::with_capacity(text.len());
+    let mut copied = 0;
+    for piece in detect(message, saved) {
+        let Some(start) = utf16_byte(&message.text, piece.start).and_then(|byte| byte.checked_sub(offset)) else { continue };
+        let Some(end) = utf16_byte(&message.text, piece.end).and_then(|byte| byte.checked_sub(offset)) else { continue };
+        let mut snapshot = serde_json::json!({"piece": piece.data});
+        if !piece.value.is_null() {
+            snapshot["value"] = piece.value.clone();
+        }
+        if let PieceData::Calculation { expression, .. } = &piece.data {
+            snapshot["result"] = serde_json::json!(piece.value.as_f64().and_then(|value| evaluate(expression, value)));
+        }
+        redact_piece(&mut snapshot, paths);
+        let snapshot = serde_json::to_string_pretty(&snapshot).map_err(|_| "error.export.read")?;
+        out.push_str(&text[copied..start]);
+        let _ = write!(out, "```json\n{snapshot}\n```\n");
+        copied = end;
+    }
+    out.push_str(&text[copied..]);
+    Ok(out)
+}
+
+fn utf16_byte(text: &str, boundary: usize) -> Option<usize> {
+    let mut units = 0;
+    for (byte, ch) in text.char_indices() {
+        if units == boundary {
+            return Some(byte);
+        }
+        units += ch.len_utf16();
+    }
+    (units == boundary).then_some(text.len())
+}
+
+fn redact_piece(value: &mut serde_json::Value, paths: &Paths) {
+    match value {
+        serde_json::Value::String(text) => *text = paths.redact(text),
+        serde_json::Value::Array(items) => items.iter_mut().for_each(|item| redact_piece(item, paths)),
+        serde_json::Value::Object(fields) => fields.values_mut().for_each(|value| redact_piece(value, paths)),
+        _ => {}
+    }
 }
 
 fn heading(text: &str) -> String {

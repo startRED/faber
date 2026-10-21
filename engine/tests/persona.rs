@@ -5,10 +5,31 @@ fn persona_is_static_bounded_and_has_no_scar_rules() {
         let p = PersonaInput { name, tuning: &Default::default(), research: None };
         let text = persona(&p);
         assert_eq!(text, persona(&p));
-        assert!(text.chars().count() <= 1800);
+        assert!(text.chars().count() <= 2800);
         assert!(text.contains("You are Faber"));
         assert!(text.contains("unverified"));
         assert!(!text.contains("scar rule"));
+    }
+}
+#[test]
+fn persona_teaches_one_small_piece_format_for_both_clis_without_html_execution() {
+    let text = persona(&PersonaInput { name: None, tuning: &Default::default(), research: None });
+    let schema = text.split("Text is the default.").nth(1).unwrap();
+    assert!(schema.len() <= 1000, "the inline schema stays short on every turn");
+    for required in [
+        "faber-piece",
+        "number",
+        "table",
+        "chart",
+        "calculation",
+        "checklist/steps",
+        "tabs/timeline",
+        "form",
+        "notice",
+        "No extra fields",
+        "Forms only fill",
+    ] {
+        assert!(schema.contains(required), "{required}");
     }
 }
 #[test]

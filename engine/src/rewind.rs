@@ -228,6 +228,8 @@ impl Snapshot {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub(crate) struct SavedConversation {
     messages: Vec<Message>,
+    #[serde(default)]
+    piece_values: Vec<crate::pieces::SavedValue>,
     sessions: BTreeMap<Vendor, String>,
     tentative: BTreeMap<Vendor, String>,
     choice: Option<Choice>,
@@ -240,6 +242,7 @@ impl SavedConversation {
     fn bindings(c: &Conversation) -> Self {
         Self {
             messages: Vec::new(),
+            piece_values: Vec::new(),
             sessions: c.sessions.clone(),
             tentative: c.tentative.clone(),
             choice: c.choice.clone(),
@@ -252,6 +255,7 @@ impl SavedConversation {
     pub(crate) fn take(c: &Conversation) -> Self {
         Self {
             messages: c.messages.clone(),
+            piece_values: c.piece_values.clone(),
             sessions: c.sessions.clone(),
             tentative: c.tentative.clone(),
             choice: c.choice.clone(),
@@ -263,6 +267,7 @@ impl SavedConversation {
     }
     pub(crate) fn apply(&self, c: &mut Conversation) {
         c.messages.clone_from(&self.messages);
+        c.piece_values.clone_from(&self.piece_values);
         // Native rewind semantics are unproved. Both restore and redo continue from saved messages.
         c.sessions.clear();
         c.tentative.clear();
@@ -1121,6 +1126,7 @@ impl History {
                 .position(|m| m.id == request.message_id && m.role == crate::model::Role::User)
                 .ok_or("error.rewind.message")?;
             after.messages.truncate(cut);
+            after.piece_values.retain(|entry| after.messages.iter().any(|message| message.id == entry.message_id));
             after.queued.clear();
             if let Some(point) = &point {
                 after.plan = point.saved.plan.clone();
@@ -1746,6 +1752,61 @@ impl History {
 #[cfg(test)]
 mod validation_tests {
     use super::*;
+
+    #[test]
+    fn rewind_choice_snapshot_roundtrip_recovers_a_pruned_later_choice_and_the_original_earlier_choice() {
+        let mut conversation: Conversation = serde_json::from_value(serde_json::json!({
+            "id": "3611dcb7-6387-47c6-8b25-1b6f20903171", "title": "Rewind", "area": "chat",
+            "createdAt": 1, "updatedAt": 1, "messages": []
+        }))
+        .unwrap();
+        for id in ["a", "b"] {
+            conversation.messages.push(Message::new(
+                id.into(),
+                crate::model::Role::Assistant,
+                "```faber-piece\n{\"type\":\"checklist\",\"title\":\"Before leaving\",\"items\":[\"Keys\"]}\n```".into(),
+                1,
+            ));
+            crate::pieces::save_value(&mut conversation, id, 0, serde_json::json!([true])).unwrap();
+        }
+        let before = serde_json::to_vec(&SavedConversation::take(&conversation)).unwrap();
+        conversation.messages.truncate(1);
+        crate::pieces::save_value(&mut conversation, "a", 0, serde_json::json!([false])).unwrap();
+        assert_eq!(conversation.piece_values.len(), 1, "editing A prunes B from the shortened live conversation");
+        assert_eq!(conversation.piece_values[0].value, serde_json::json!([false]));
+        let redone: SavedConversation = serde_json::from_slice(&before).unwrap();
+        redone.apply(&mut conversation);
+        assert_eq!(conversation.piece_values.len(), 2);
+        for message in &conversation.messages {
+            assert_eq!(crate::pieces::detect(message, &conversation.piece_values)[0].value, serde_json::json!([true]));
+        }
+    }
+
+    #[test]
+    fn rewind_choices_are_backward_compatible_and_file_capture_does_not_clone_them() {
+        let mut conversation: Conversation = serde_json::from_value(serde_json::json!({
+            "id": "3611dcb7-6387-47c6-8b25-1b6f20903171", "title": "Rewind", "area": "chat",
+            "createdAt": 1, "updatedAt": 1, "messages": []
+        }))
+        .unwrap();
+        conversation.messages.push(Message::new(
+            "piece".into(),
+            crate::model::Role::Assistant,
+            "```faber-piece\n{\"type\":\"checklist\",\"title\":\"Before leaving\",\"items\":[\"Keys\"]}\n```".into(),
+            1,
+        ));
+        crate::pieces::save_value(&mut conversation, "piece", 0, serde_json::json!([true])).unwrap();
+        assert!(SavedConversation::bindings(&conversation).piece_values.is_empty());
+        let saved = SavedConversation::take(&conversation);
+        conversation.piece_values.clear();
+        saved.apply(&mut conversation);
+        assert_eq!(conversation.piece_values[0].value, serde_json::json!([true]));
+        let mut legacy = serde_json::to_value(saved).unwrap();
+        legacy.as_object_mut().unwrap().remove("piece_values");
+        let legacy: SavedConversation = serde_json::from_value(legacy).unwrap();
+        legacy.apply(&mut conversation);
+        assert!(conversation.piece_values.is_empty(), "old rewind journals have no choices to restore");
+    }
 
     #[test]
     fn rewind_restore_and_redo_refuse_credentials_before_reading_bytes() {

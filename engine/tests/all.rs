@@ -44,6 +44,8 @@ mod compact;
 mod conversation_copy;
 #[path = "engine.rs"]
 mod engine;
+#[path = "export.rs"]
+mod export;
 #[path = "groups.rs"]
 mod groups;
 #[path = "handover.rs"]
@@ -118,6 +120,8 @@ mod turn_usage;
 mod usage_view;
 #[path = "verify.rs"]
 mod verify;
+#[path = "visual_pieces.rs"]
+mod visual_pieces;
 #[path = "waiting.rs"]
 mod waiting;
 #[path = "workspace.rs"]

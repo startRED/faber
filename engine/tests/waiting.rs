@@ -595,6 +595,7 @@ fn seed(dir: &Path, long: bool) -> Conversation {
         fresh_after: None,
         reported: (None, None),
         compacting: false,
+        piece_values: vec![],
         messages: vec![
             Message::new("first".into(), Role::User, if long { "x".repeat(30_000) } else { "Original question".into() }, 1),
             answer,

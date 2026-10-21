@@ -776,6 +776,33 @@ impl Engine {
     pub fn visual_answers(&self, id: &str) -> Vec<crate::visual::VisualAnswer> {
         self.with(|c| c.load(id).map(|conversation| crate::visual::detect(&conversation.messages)).unwrap_or_default())
     }
+    pub fn visual_pieces(&self, id: &str, message_id: &str) -> Vec<crate::pieces::VisualPiece> {
+        self.with(|c| {
+            c.load(id)
+                .and_then(|conversation| {
+                    conversation
+                        .messages
+                        .iter()
+                        .find(|message| message.id == message_id)
+                        .map(|message| crate::pieces::detect(message, &conversation.piece_values))
+                })
+                .unwrap_or_default()
+        })
+    }
+    pub fn save_piece_value(&self, id: &str, message_id: &str, block: usize, value: serde_json::Value) -> Result<(), String> {
+        self.with(|c| {
+            let conversation = c.load(id).ok_or("error.conversationGone")?;
+            let previous = conversation.piece_values.clone();
+            crate::pieces::save_value(conversation, message_id, block, value).map_err(str::to_string)?;
+            if let Err(fault) = c.save_checked(id) {
+                if let Some(conversation) = c.convs.get_mut(id) {
+                    conversation.piece_values = previous;
+                }
+                return Err(fault.key().to_string());
+            }
+            Ok(())
+        })
+    }
     pub fn export_conversation(&self, id: &str, words: &crate::export::Words) -> Result<(String, String), &'static str> {
         // Export a saved snapshot without retaining another conversation in the engine's live cache.
         let (conversation, folder) = self
@@ -1459,13 +1486,16 @@ impl Core {
     }
 
     fn save(&self, id: &str) {
+        let _ = self.save_checked(id);
+    }
+
+    fn save_checked(&self, id: &str) -> Result<(), crate::store::Fault> {
         if let Some(c) = self.convs.get(id) {
             if c.messages
                 .last()
                 .is_none_or(|m| !matches!(m.error.as_deref(), Some("error.quotaOut" | "error.quotaWait")) && m.recovery.is_none())
             {
-                self.store.save(c);
-                return;
+                return self.store.save_checked(c);
             }
             let mut saved = c.clone();
             if let Some(m) = saved.messages.last_mut() {
@@ -1485,8 +1515,9 @@ impl Core {
                         check: t.check.into(),
                     });
             }
-            self.store.save(&saved);
+            return self.store.save_checked(&saved);
         }
+        Ok(())
     }
 
     fn state(&self) -> AppState {
@@ -3357,6 +3388,7 @@ impl Core {
             context: None,
             fresh_after: None,
             messages: vec![],
+            piece_values: vec![],
             rewind_notice: None,
             rewind_summary: None,
             reported: (None, None),
@@ -3572,6 +3604,8 @@ impl Core {
                 m
             })
             .collect();
+        c.piece_values =
+            source.piece_values.iter().filter(|entry| c.messages.iter().any(|message| message.id == entry.message_id)).cloned().collect();
         // A moved project's earlier file cards still belong to its Chat workspace.
         if source.working_folder.is_none() && from.is_dir() {
             copy_dir(&from, &to);

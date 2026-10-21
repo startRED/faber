@@ -6,6 +6,41 @@ above an answer. The window widths, the sidebar and the running column are in [l
 
 ## Answers
 
+- Ten native visual pieces sit between the reply's paragraphs, where their closed `faber-piece` block stood: number,
+  table, chart, calculation slider, checklist, tabs, steps, options form, notice and timeline (R348). Text stays the
+  default; a piece must save reading effort. They share the reply's column, ink, spacing, borders and look tokens,
+  never a live frame or a separate setting. Large HTML/SVG answers keep the card and pane below.
+- The engine validates root-level JSON fences for both CLIs; fences inside lists and quotes stay ordinary code to
+  preserve the surrounding Markdown. An incomplete, malformed, oversized or unknown piece
+  stays an ordinary code block with its copy button. The person's checked items, selected tabs, steps, slider and form
+  values are saved with the conversation and tied to the source, so reopening restores them without browser storage.
+  A form's explicit action fills the existing composer and never sends; the person can edit before sending.
+- Discovery belongs to one conversation and message. Switching either disposes it; returned ranges must match the
+  current message and source before a piece can render. An old form never adopts another conversation's composer.
+  A failed save keeps its value and retry warning beyond the mounted reply, including after switching conversations.
+  The existing unsent journal retains pending choices until a successful engine save or explicit Discard change;
+  discard restores the last confirmed value. Pending writes remain owned by their original conversation and coalesce
+  to one in-flight request plus the latest choice. Confirmed values still live in the engine, not this retry journal.
+- Branching, editing and retrying copy choices belonging to retained messages. Rewind snapshots include choices, so
+  editing an earlier piece while later messages are hidden cannot erase their Redo values. Export writes each valid
+  piece as static JSON containing its content and current choice, plus the calculation result where applicable;
+  internal source hashes and work-log pieces stay out. Broken source keeps the normal code fallback.
+- Rewind and Redo refresh piece discovery even when the retained answer's source is unchanged, including expanded
+  earlier turns in an automatic run. Controls wait for the new snapshot before accepting another change. Confirmed
+  choices reconcile with the engine; unsaved edits stay intact, and Discard uses the newly restored confirmed choice
+  even when its controls were offscreen. Ordinary viewport remounts keep the latest local saved choice without reading
+  stale discovery defaults. Piece titles use `--fs-lead`; big-number values use `--fs-h2` inside the real `.md` reply.
+- Each control uses a visible label and native keyboard behaviour; tabs also have arrow-key navigation. Chart bars
+  use SVG and look tokens, with a semantic data table carrying the same values, so colour is never the only meaning.
+  Notices stay calm, without error styling (C001). Long labels wrap at 720 px; a table scrolls inside its piece.
+  No piece animates, polls or keeps a process or frame alive; reduced/no motion use this same static presentation.
+- A shared viewport observer mounts controls only within 200 px of the reading area. Distant pieces retain their
+  height and a labelled show button; a focused piece or an unsaved change stays mounted. Scrolling away and back
+  restores the latest choice. Input is capped at 12 pieces per reply, 8 KiB per block, 12 items and 12 by 6 table cells.
+  The screen check bounds a mounted piece to 180 elements and 512 total DOM nodes including text and renderer markers;
+  100 distant pieces retain only 100 small slots/buttons instead of up to 51,200 full-piece nodes. This is a structural
+  cost bound, not a measured app-memory result. There are no timers or idle calculation loops; arithmetic has at most
+  64 tokens and is recalculated only when its value changes. The lead measures app memory/CPU with the screen suite.
 - Closed HTML and SVG blocks in either area's replies become a quiet card in place of the code: the page or drawing's
   name, its kind and Open. A title names it; an untitled one says Page or Drawing in the screen's language. See code
   opens the existing code block view, with its copy button. Until the closing fence arrives, the block stays code.

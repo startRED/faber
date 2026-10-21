@@ -1,6 +1,6 @@
 import DOMPurify from 'dompurify';
 import { Lexer, type Links, marked, type Token } from 'marked';
-import { createRenderEffect } from 'solid-js';
+import { createContext, createRenderEffect, useContext, type Accessor } from 'solid-js';
 import { api } from './api.ts';
 import { fileRenderer, showFile } from './fileref.ts';
 import { iconMarkup } from './Glyphs.tsx';
@@ -156,9 +156,12 @@ export function renderMarkdown(root: HTMLElement, text: string, references?: Lin
 
 /** An answer's Markdown. The element it makes holds the blocks; `text` is read on its own, so a change elsewhere in the
  * message never draws it again. */
+export const MarkdownReferences = createContext<Accessor<Links>>();
+
 export function Markdown(props: { text: string; links?: Links }) {
   // The element exists before the first draw: a render effect runs as soon as it is made.
   const root = (<div />) as HTMLDivElement;
-  createRenderEffect(() => renderMarkdown(root, props.text, props.links));
+  const references = useContext(MarkdownReferences);
+  createRenderEffect(() => renderMarkdown(root, props.text, references?.() ?? props.links));
   return root;
 }

@@ -453,6 +453,20 @@ async fn visual_answers(faber: State<'_, Faber>, id: String) -> Res<Vec<faber_en
 }
 
 #[tauri::command]
+async fn visual_pieces(faber: State<'_, Faber>, id: String, message_id: String) -> Res<Vec<faber_engine::pieces::VisualPiece>> {
+    let engine = faber.engine.clone();
+    tauri::async_runtime::spawn_blocking(move || engine.visual_pieces(&id, &message_id)).await.map_err(|_| "error.messageGone".to_string())
+}
+
+#[tauri::command]
+async fn save_piece_value(faber: State<'_, Faber>, id: String, message_id: String, block: usize, value: serde_json::Value) -> Res<()> {
+    let engine = faber.engine.clone();
+    tauri::async_runtime::spawn_blocking(move || engine.save_piece_value(&id, &message_id, block, value))
+        .await
+        .map_err(|_| "error.store.write".to_string())?
+}
+
+#[tauri::command]
 fn set_clock(faber: State<'_, Faber>, utc_offset: i64) {
     faber.engine.set_utc_offset(utc_offset);
 }
@@ -1369,6 +1383,8 @@ fn main() {
                 branch_here,
                 versions,
                 visual_answers,
+                visual_pieces,
+                save_piece_value,
                 warm,
                 set_clock,
                 quota_attention,

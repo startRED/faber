@@ -296,6 +296,14 @@ export function Composer(props: Props) {
     if (historyMode()) leaveHistory(historyMode() === 'search');
     setDraft(change);
   };
+  const fillPiece = (event: Event) => {
+    const detail = (event as CustomEvent<{ conversationId: string; text: string }>).detail;
+    if (!detail || detail.conversationId !== props.draftKey || typeof detail.text !== 'string') return;
+    editDraft((current) => ({ ...current, text: current.text ? `${current.text}\n\n${detail.text}` : detail.text }));
+    field?.focus();
+  };
+  document.addEventListener('faber:piece-fill', fillPiece);
+  onCleanup(() => document.removeEventListener('faber:piece-fill', fillPiece));
   const keepEditingFocus = (event: MouseEvent) => {
     if (event.button === 0 && historyMode()) event.preventDefault();
   };

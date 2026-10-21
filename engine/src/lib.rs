@@ -28,6 +28,7 @@ pub mod model;
 pub mod nudge;
 pub mod permissions;
 pub mod persona;
+pub mod pieces;
 pub mod proc;
 pub mod progress;
 pub mod project;

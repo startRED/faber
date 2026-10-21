@@ -1484,6 +1484,7 @@ export const de: Messages = {
   'notes.156.new': 'Im Katalog siehst du die Werkzeugserver jedes Projekts und ihren Status und kannst die von Faber hinzugefügten ausschalten.',
   'notes.157.new': 'Du kannst eine Unterhaltung aus Chat per Rechtsklick in ein Projekt verschieben. Nachrichten, Titel und angehefteter Status bleiben erhalten.',
   'notes.158.new': 'Im Katalog neben Chat und Projekte kannst du Skills und Toolserver entdecken, installieren und verwalten.',
+  'notes.159.new': 'Antworten können jetzt Tabellen, Diagramme, Checklisten und Schieberegler zeigen, die du direkt dort nutzt, und sie behalten deine Auswahl.',
   'update.checking': 'Suche nach einem Update…',
   'update.downloading': 'Update wird heruntergeladen…',
   'update.downloadingPercent': 'Update wird heruntergeladen… {percent} %',
@@ -1496,4 +1497,15 @@ export const de: Messages = {
   'error.update.failed': 'Das Update konnte nicht starten. Faber versucht es später noch einmal.',
   'error.update.none': 'Es wartet kein Update.',
 'error.update.closing': 'Faber installiert ein Update und öffnet sich gleich wieder. Versuche es dann noch einmal.',
+  'piece.data': "Diagrammdaten",
+  'piece.label': "Name",
+  'piece.value': "Wert",
+  'piece.result': "Ergebnis",
+  'piece.unavailable': "Für diesen Wert nicht verfügbar",
+  'piece.fill': "In Nachricht übernehmen",
+  'piece.saveFailed': "Diese Änderung konnte nicht gespeichert werden.",
+  'piece.discard': "Änderung verwerfen",
+  'piece.retry': "Erneut versuchen",
+  'piece.show': "{title} anzeigen",
+
 };

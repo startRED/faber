@@ -800,6 +800,9 @@ pub struct Conversation {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub plan: Option<Plan>,
     pub messages: Vec<Message>,
+    /// Changes to typed inline pieces, bound to the original reply block's source digest.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub piece_values: Vec<crate::pieces::SavedValue>,
     /// Saved-message continuation after rewind; consumed by the next reply, never a native CLI resume.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub rewind_notice: Option<String>,

@@ -214,6 +214,24 @@ export interface VisualAnswer {
   kind: 'html' | 'svg';
   versions: VisualVersion[];
 }
+export type PieceData =
+  | { type: 'number'; title: string; items: { label: string; value: string }[] }
+  | { type: 'table'; title: string; columns: string[]; rows: string[][] }
+  | { type: 'chart'; title: string; items: { label: string; value: number }[] }
+  | { type: 'calculation'; title: string; label: string; min: number; max: number; step: number; value: number; expression: string }
+  | { type: 'checklist' | 'steps'; title: string; items: string[] }
+  | { type: 'tabs' | 'timeline'; title: string; items: { label: string; text: string }[] }
+  | { type: 'form'; title: string; options: string[] }
+  | { type: 'notice'; title: string; text: string };
+export type PieceValue = number | boolean[] | null;
+export interface VisualPiece {
+  messageId: string;
+  block: number;
+  start: number;
+  end: number;
+  data: PieceData;
+  value: PieceValue;
+}
 export interface Conversation {
   id: string;
   title: string;
@@ -785,6 +803,8 @@ export const api = {
   branchHere: (conversationId: string, messageId: string) => invoke<string>('branch_here', { conversationId, messageId }),
   versions: (id: string) => invoke<Versions[]>('versions', { id }),
   visualAnswers: (id: string) => invoke<VisualAnswer[]>('visual_answers', { id }),
+  visualPieces: (id: string, messageId: string) => invoke<VisualPiece[]>('visual_pieces', { id, messageId }),
+  savePieceValue: (id: string, messageId: string, block: number, value: PieceValue) => invoke<void>('save_piece_value', { id, messageId, block, value }),
   warm: (req: { conversationId?: string; area: Area; projectId?: string; choice: Choice }) => invoke<void>('warm', { req }),
   routeDraft: (req: { conversationId?: string; area: Area; projectId?: string; choice: Choice }, text: string) =>
     invoke<void>('route_draft', { req, text }),

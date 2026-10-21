@@ -22,7 +22,7 @@ import { PlanList, WrapUpBox } from './Plan.tsx';
 import { Rewind } from './Rewind.tsx';
 import { AnswersCard, answeredIn, folded, RunBlock, runsOf, type Answered } from './Run.tsx';
 import { html, openLinks, pressImage } from './markdown.tsx';
-import { VisualReply } from './VisualAnswer.tsx';
+import { PieceReply } from './VisualPiece.tsx';
 import type { VisualAnswer } from './api.ts';
 import { agentMeta, ChangedLines, openedAgent, SourceList, showAgent, tellAbout, ToolChip } from './AgentChat.tsx';
 import { untilReset } from './Sidebar.tsx';
@@ -183,6 +183,7 @@ function AgentRow(props: { step: Accessor<AgentStep>; streaming: boolean; conver
 type OnBranch =(messageId: string, text: string, choice?: Choice) => void;
 
 interface Shared {
+  pieceRevision?: number;
   visuals?: VisualAnswer[];
   conversationId: string;
   options: Option[];
@@ -272,7 +273,7 @@ function Answer(props: Shared & { m: Accessor<Message>; messages?: Message[]; pr
   const narration = createMemo(() => {
     if (!boundary()) return [];
     // Visual ranges refer to the saved text: keep its spacing intact inside the work log too.
-    const hasVisual = props.visuals?.some((a) => a.versions.some((v) => v.messageId === m().id && v.end <= boundary()));
+    const hasVisual = text().slice(0, boundary()).includes('faber-piece') || props.visuals?.some((a) => a.versions.some((v) => v.messageId === m().id && v.end <= boundary()));
     const prefix = text().slice(0, boundary()).trimEnd();
     const paragraphs = prefix.split(/\n{2,}/);
     const last = paragraphs.at(-1)?.trim();
@@ -439,7 +440,7 @@ function Answer(props: Shared & { m: Accessor<Message>; messages?: Message[]; pr
                 <For each={thinking()}>{(part) => <p>{part.title ? <b>{part.text}</b> : part.text}</p>}</For>
               </div>
             </Show>
-            <For each={narration()}>{(text) => <Narration text={text} conversationId={props.conversationId} messageId={m().id} visuals={props.visuals} />}</For>
+            <For each={narration()}>{(text) => <Narration text={text} conversationId={props.conversationId} messageId={m().id} visuals={props.visuals} pieceRevision={props.pieceRevision} />}</For>
             <Show when={own().length}>
               <div class="tools">
                 <For each={own()}>{(tool) => <ToolChip tool={tool} />}</For>
@@ -482,7 +483,7 @@ function Answer(props: Shared & { m: Accessor<Message>; messages?: Message[]; pr
       <Asks conversationId={props.conversationId} turnId={m().id} permissions={waiting()} surface="ask" />
       <Parkeds parked={m().parked ?? []} more={m().parkedMore} surface="ask" />
       <div class="md" aria-busy={working()} onClick={openLinks} onKeyDown={pressImage}>
-        <VisualReply text={finalText()} offset={boundary()} messageId={m().id} conversationId={props.conversationId} answers={props.visuals ?? []} />
+        <PieceReply text={finalText()} offset={boundary()} messageId={m().id} conversationId={props.conversationId} answers={props.visuals ?? []} revision={props.pieceRevision} />
         <Show when={working() && !waiting().length && !m().waitUntil && !runningStep() && (typing() || !finalText().trim())}>
           <span class="cursor" aria-hidden="true" />
         </Show>
@@ -899,7 +900,7 @@ function AwayLine(props: { away: NonNullable<Message['away']> }) {
 const PARAGRAPHS = /\n{2,}/;
 const BLANK = '\n\n';
 /** The agent's words between its steps, in the work log: the last two paragraphs, the earlier ones under "N more". */
-function Narration(props: { text: string; conversationId: string; messageId: string; visuals?: VisualAnswer[] }) {
+function Narration(props: { text: string; conversationId: string; messageId: string; visuals?: VisualAnswer[]; pieceRevision?: number }) {
   const [all, setAll] = createSignal(false);
   const parts = createMemo(() => (props.text.includes('```') ? [props.text] : props.text.split(PARAGRAPHS)));
   const hidden = () => (all() || parts().length < 3 ? 0 : parts().length - 2);
@@ -910,9 +911,9 @@ function Narration(props: { text: string; conversationId: string; messageId: str
           {t('narration.more', { n: hidden() })}
         </button>
       </Show>
-      <Show when={props.visuals?.some((a) => a.versions.some((v) => v.messageId === props.messageId && v.end <= props.text.length))}
+      <Show when={props.text.includes('faber-piece') || props.visuals?.some((a) => a.versions.some((v) => v.messageId === props.messageId && v.end <= props.text.length))}
         fallback={<div class="md" onClick={openLinks} innerHTML={html(parts().slice(hidden()).join(BLANK))} />}>
-        <div class="md" onClick={openLinks} onKeyDown={pressImage}><VisualReply text={props.text} offset={0} conversationId={props.conversationId} messageId={props.messageId} answers={props.visuals ?? []} /></div>
+        <div class="md" onClick={openLinks} onKeyDown={pressImage}><PieceReply text={props.text} offset={0} conversationId={props.conversationId} messageId={props.messageId} answers={props.visuals ?? []} revision={props.pieceRevision} /></div>
       </Show>
     </>
   );
@@ -942,7 +943,7 @@ export function Thread(props: Shared & { messages: Message[]; queued?: QueuedTur
   const drawn = (m: Message, at: number) => !(prompt(at)?.wake && m.status !== 'streaming' && empty(m));
   const earlier = (at: number) => (
     <Show when={drawn(props.messages[at]!, at)}>
-      <Answer {...props} m={() => props.messages[at]!} prompt={prompt(at)} last={false} answered={[]} messageIndex={at} />
+      <Answer {...props} pieceRevision={revision()} m={() => props.messages[at]!} prompt={prompt(at)} last={false} answered={[]} messageIndex={at} />
     </Show>
   );
   return (
@@ -965,6 +966,7 @@ export function Thread(props: Shared & { messages: Message[]; queued?: QueuedTur
                 <Show when={drawn(m(), props.from + i) || answered(props.from + i)?.length}>
                   <Answer
                     {...props}
+                    pieceRevision={revision()}
                     m={m}
                     prompt={prompt(props.from + i)}
                     last={props.from + i === props.messages.length - 1}

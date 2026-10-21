@@ -1174,6 +1174,7 @@ mod tests {
         let pack = format!("{:064x}", history.points.len() + 1);
         let saved = SavedConversation {
             messages: Vec::new(),
+            piece_values: Vec::new(),
             sessions: BTreeMap::new(),
             tentative: BTreeMap::new(),
             choice: None,

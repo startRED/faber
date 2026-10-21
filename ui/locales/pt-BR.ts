@@ -1471,6 +1471,7 @@ export const ptBR: Messages = {
   'notes.156.new': 'No catálogo você vê os servidores de ferramentas de cada projeto e o estado deles, e pode desligar os que o Faber adicionou.',
   'notes.157.new': 'Você pode mover uma conversa do Chat para um projeto pelo botão direito, mantendo mensagens, título e fixação.',
   'notes.158.new': 'Você pode explorar, instalar e gerenciar skills e servidores de ferramentas no Catálogo, uma aba ao lado de Chat e Projetos.',
+  'notes.159.new': 'As respostas agora podem trazer tabelas, gráficos, listas de tarefas e controles deslizantes que você usa ali mesmo, e suas escolhas ficam guardadas.',
   'update.checking': 'Procurando atualização…',
   'update.downloading': 'Baixando atualização…',
   'update.downloadingPercent': 'Baixando atualização… {percent}%',
@@ -1483,4 +1484,15 @@ export const ptBR: Messages = {
   'error.update.failed': 'A atualização não conseguiu começar. O Faber tenta de novo mais tarde.',
   'error.update.none': 'Não há atualização esperando.',
 'error.update.closing': 'O Faber está instalando uma atualização e abre de novo em instantes. Tente depois.',
+  'piece.data': "Dados do gráfico",
+  'piece.label': "Nome",
+  'piece.value': "Valor",
+  'piece.result': "Resultado",
+  'piece.unavailable': "Indisponível pra esse valor",
+  'piece.fill': "Usar na mensagem",
+  'piece.saveFailed': "Não deu pra salvar esta alteração.",
+  'piece.discard': "Descartar alteração",
+  'piece.retry': "Tentar de novo",
+  'piece.show': "Mostrar {title}",
+
 };

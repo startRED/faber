@@ -46,12 +46,23 @@ something finishes.
 Answers can contain visual pieces, such as checklists, charts and forms. Faber calls them "Visual answers", in both Chat
 and Projects.
 
-- They start with about 10 built-in pieces: big numbers, table, chart, slider or −/+ tied to a calculation, checklist,
-  tabs, steps or quiz, options form, notice and timeline. Free-form mini apps come later, and only if they are missed.
-- What the user checks or moves stays saved, even after the conversation closes.
+- Ten built-in pieces appear within the reply: big numbers, table, chart, slider tied to a calculation, checklist,
+  tabs, steps, options form, notice and timeline (R348). Large pages keep the shared pane beside the chat.
+- Both CLIs learn the same short `faber-piece` JSON fence format through Faber's existing persona instructions. The
+  engine accepts only known fields and bounded values in closed blocks; Faber's components draw them, never AI HTML.
+- What the user checks or moves stays saved with the conversation in the engine, bound to that piece's source, even
+  after the conversation closes. Branches retain choices for their copied messages, and rewind/Redo snapshots retain
+  choices with the messages they restore. Export includes the validated content, current choices and calculation result.
+  Browser storage is not their source of truth: its existing unsent journal only recovers failed or pending writes,
+  preserving the choice and warning across navigation until saved or explicitly discarded.
 - Text is the default; a piece appears only when it saves the reader effort.
 - A form never sends on its own. It only fills the composer.
-- A broken piece falls back to plain text.
+- A broken, unfinished or unknown piece stays a normal code block, with its source available to read and copy.
+- Only root-level fences become pieces; blocks inside lists or quotes stay code so the surrounding text keeps its
+  structure.
+- Calculations use Faber's bounded arithmetic parser, without running code. Charts use SVG and the current look's
+  colours, with a data table; native controls have labels and keyboard access. Pieces have no animation and fit a
+  720 px window, long labels, light and dark looks and forced colours.
 - Side-by-side comparison of options is part of visual answers: images, animations or live sites, whatever fits.
 - In a project, the agent's own work shows as pieces too: a site it opened, the app it is running, a test result, a
   changed file, each with a small picture and Open ([Watching the agent work](#watching-the-agent-work)).

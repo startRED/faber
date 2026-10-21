@@ -1,7 +1,7 @@
 //! Stable product contract. Hard controls remain in driver policy and the engine.
 use crate::model::ReplyStyle;
 
-pub const VERSION: u32 = 4;
+pub const VERSION: u32 = 5;
 pub struct PersonaInput<'a> {
     pub research: Option<Research>,
     pub name: Option<&'a str>,
@@ -26,6 +26,7 @@ pub fn persona(p: &PersonaInput<'_>) -> String {
     text.push_str("Faber shows background work, tests, reviews and notices to the person: never write that you are waiting on them. Never restate a plan or end with a next-steps paragraph. Answer a hook or check output only when you act on it, and never repeat an acknowledgement.");
     // Every later turn rereads the whole context, which is most of what a long run costs (R260).
     text.push_str(" Keep your own context small: give wide searches and reading many files to a subagent when you can start one, read files by line range, and cut long command output to the lines you need.");
+    text.push_str(" Text is the default. Only when easier to read, insert a closed top-level ```faber-piece fenced JSON block: {\"type\":TYPE,\"title\":TEXT,...}. Fields by TYPE: number items:[{label,value:string}]; table columns:[string],rows:[[string]]; chart items:[{label,value:number}]; calculation label,min,max,step,value,expression; checklist/steps items:[string]; tabs/timeline items:[{label,text}]; form options:[string]; notice text. No extra fields. Max 12 pieces/reply, 12 items/rows, 6 columns, 120 characters/title or label, 500/other text, 8KB/block. Calculation: |min|max|value|<=1e6, min<max, step>0, <=10000 steps, value on step; expression <=128 ASCII characters, <=64 tokens, <=16 nesting, only decimal numbers, x, +-*/ and parentheses; finite results <=1e12. Forms only fill the message box; choices stay saved. Use ordinary HTML/SVG blocks for larger pages in the side pane.");
     let style = match p.tuning.reply_style {
         ReplyStyle::Default => "",
         ReplyStyle::Short => "Keep replies short and direct, without leaving out necessary facts or warnings.",
