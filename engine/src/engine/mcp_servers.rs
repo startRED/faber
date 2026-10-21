@@ -152,9 +152,14 @@ impl Core {
             delivery.plugin = None;
         }
         let (request, cwd) = (request.to_string(), cwd.to_path_buf());
-        self.opts.runtime.spawn_blocking(move || {
-            store.prepare_kit_for(selection_vendor, &request, Some(&cwd), area, permissions, &disabled);
-        });
+        let prepare = move || store.prepare_kit_for(selection_vendor, &request, Some(&cwd), area, permissions, &disabled);
+        // A detached worker races the next try_lock in ready_kit_for and empties its kit; tests prepare in line.
+        #[cfg(test)]
+        if self.synchronous_kit_checks {
+            prepare();
+            return (delivery, report);
+        }
+        self.opts.runtime.spawn_blocking(prepare);
         (delivery, report)
     }
 

@@ -1422,6 +1422,8 @@ mod tests {
         let engine = engine(&folder, spawn);
         let catalog = engine.with(|core| {
             core.store.save_settings(&Settings { permissions: Some(Permissions::Plan), ..Default::default() }).unwrap();
+            // The worker below holds the store lock; the session's own preparation must stay detached.
+            core.synchronous_kit_checks = false;
             conversation(core, Area::Chat, None, &folder, "Debug this failure");
             core.catalog_store().clear_prepared_for_test();
             core.catalog_store()
@@ -1458,6 +1460,7 @@ mod tests {
         prepared.wait_prepared_for_test();
         engine.with(|core| {
             assert!(core.live["kit"].tool_kit.ids.is_empty(), "readiness never mutates the running session");
+            core.synchronous_kit_checks = true;
             core.retire("kit").unwrap().session.close();
             core.launch("kit", &pick(Vendor::Codex)).unwrap();
             assert_eq!(core.live["kit"].tool_kit.ids, ["debug"], "the prepared kit joins only the next session");
