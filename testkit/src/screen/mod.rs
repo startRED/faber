@@ -3,6 +3,7 @@
 
 pub mod app;
 pub mod approve_plan;
+pub mod chat_groups;
 #[cfg(windows)]
 pub mod containment;
 pub mod first_run;
@@ -48,6 +49,7 @@ pub fn all() -> Vec<Scenario> {
         .chain(first_run::scenarios())
         .chain(homes::scenarios())
         .chain(menus::scenarios())
+        .chain(chat_groups::scenarios())
         .chain(sentinel::scenarios());
     #[cfg(windows)]
     let all = all.chain(containment::scenarios());
@@ -95,6 +97,7 @@ impl Costs {
 /// When unsure, list it: a wrong entry costs a few seconds, a missing one costs a flaky run. A test fails when a name says
 /// "memory", "processor", "CPU", "MB", "budget", "frame", "focused", "quota" or "usage limits" and is not listed.
 pub const SOLO: &[(&str, &str)] = &[
+    ("chat groups: ten knowledge files survive reopening within the memory budget", "processor, memory"),
     ("with no CLI running, Faber stays within its memory budget", "memory"),
     ("with reduced motion on, the dust stays off and Faber stays within its memory budget", "memory"),
     (

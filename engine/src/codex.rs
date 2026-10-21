@@ -719,6 +719,8 @@ pub struct CodexThread {
     pub instructions: Option<String>,
     /// How the user wants to be called; see `ClaudeLaunch::user_name`.
     pub user_name: Option<String>,
+    /// The person's Chat group words, passed unchanged beside Faber's persona.
+    pub group_instructions: Option<String>,
     pub permissions: Permissions,
     /// Reset the app-server's sticky Plan collaboration mode once after resuming a thread approved to run.
     pub leave_plan: bool,
@@ -1015,7 +1017,12 @@ pub fn thread_params(area: Area, t: &CodexThread) -> (&'static str, Value) {
         params.insert("ephemeral".into(), true.into());
     } else {
         // Developer instructions sit beside Codex's own, so a project keeps its default prompt.
-        params.insert("developerInstructions".into(), persona(&PersonaInput { name: t.user_name.as_deref(), tuning: &t.tuning }).into());
+        let mut words = persona(&PersonaInput { name: t.user_name.as_deref(), tuning: &t.tuning });
+        if let Some(instructions) = &t.group_instructions {
+            words.push_str("\n\nThe person's instructions for this chat group:\n");
+            words.push_str(instructions);
+        }
+        params.insert("developerInstructions".into(), words.into());
         if t.permissions != Permissions::Isolated {
             apply_tuning(&mut params, &t.tuning);
         }
@@ -2185,6 +2192,7 @@ mod rewind_tests {
                 effort: None,
                 resume: None,
                 instructions: None,
+                group_instructions: None,
                 user_name: None,
                 permissions: Permissions::Ask,
                 leave_plan: false,

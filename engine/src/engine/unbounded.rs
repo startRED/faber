@@ -136,6 +136,8 @@ mod tests {
             c.live.insert(
                 id.clone(),
                 Live {
+                    group_files: None,
+                    group_context: None,
                     vendor: Vendor::Codex,
                     model: Some("gpt-6.1-sol".into()),
                     running: None,

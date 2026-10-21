@@ -435,6 +435,8 @@ mod tests {
                 conv.messages.push(reply);
             }
             let live = Live {
+                group_files: None,
+                group_context: None,
                 cwd: PathBuf::new(),
                 vendor: Vendor::Claude,
                 model: None,

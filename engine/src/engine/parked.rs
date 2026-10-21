@@ -105,6 +105,8 @@ mod tests {
             c.live.insert(
                 id.clone(),
                 Live {
+                    group_files: None,
+                    group_context: None,
                     cwd: PathBuf::new(),
                     vendor: Vendor::Claude,
                     model: None,

@@ -1,7 +1,7 @@
-import { createEffect, createMemo, createSignal, createUniqueId, For, type JSX, on, onCleanup, Show } from 'solid-js';
+import { createComputed, createEffect, createMemo, createSignal, createUniqueId, For, type JSX, on, onCleanup, Show } from 'solid-js';
 import { createStore, reconcile } from 'solid-js/store';
 import { UpdateLine } from './UpdateStage.tsx';
-import { api, type Area, type MessageHit, type Project, type RunningItem, type Summary, type UpdateStatus, type Vendor, type VendorUsage } from './api.ts';
+import { api, type Area, type ChatGroup, type MessageHit, type Project, type RunningItem, type Summary, type UpdateStatus, type Vendor, type VendorUsage } from './api.ts';
 import { windowHidden } from './appearance.ts';
 import { openMenu } from './contextmenu.ts';
 import { Icon, VendorMark } from './Glyphs.tsx';
@@ -24,7 +24,7 @@ function RenameBox(props: { title: string; onDone: (title?: string) => void }) {
   const finish = (title?: string, refocus = false) => {
     if (done) return;
     done = true;
-    const row = box?.closest('.crow');
+    const row = box?.closest('.crow, .prow');
     props.onDone(title);
     if (refocus) queueMicrotask(() => row?.querySelector<HTMLElement>('.item')?.focus());
   };
@@ -76,6 +76,10 @@ export function windowName(window: string): string {
 
 interface Props {
   conversations: Summary[];
+  groups?: ChatGroup[];
+  onGroup?: (id: string) => void;
+  onNewGroupChat?: (id: string) => void;
+  onGroupsChanged?: () => void;
   projects: Project[];
   vendors: Vendor[];
   version: string;
@@ -121,6 +125,35 @@ export function Sidebar(props: Props) {
   // A delete refused because the conversation's copy holds work found nowhere else: the same row asks once more.
   const [losing, setLosing] = createSignal<string>();
   const [renaming, setRenaming] = createSignal<string>();
+  const [newGroup, setNewGroup] = createSignal(false);
+  const [moving, setMoving] = createSignal<string>();
+  const [moveFocus, setMoveFocus] = createSignal<{ id: string; groupId: string }>();
+  let list: HTMLDivElement | undefined;
+  const [groupRows, setGroupRows] = createStore<ChatGroup[]>([]);
+  createComputed(() => setGroupRows(reconcile(props.groups ?? [], { key: 'id' })));
+  const groups = () => groupRows;
+  const membership = (id: string) => groups().find((g) => g.conversationIds.includes(id));
+  createEffect(() => {
+    const pending = moveFocus();
+    if (!pending) return;
+    const cancel = (event: FocusEvent) => { if (event.target !== document.body) setMoveFocus(undefined); };
+    document.addEventListener('focusin', cancel);
+    onCleanup(() => document.removeEventListener('focusin', cancel));
+    if (membership(pending.id)?.id !== pending.groupId) return;
+    // The destination's row is drawn after the membership arrives, possibly after the picker has already gone.
+    queueMicrotask(() => {
+      if (moveFocus() !== pending) return;
+      const target = list?.querySelector<HTMLButtonElement>(`[data-chat-group-id="${CSS.escape(pending.groupId)}"] [data-conversation-id="${CSS.escape(pending.id)}"] .item`);
+      if (!target) return;
+      setMoveFocus(undefined);
+      if (document.activeElement === document.body) {
+        target.focus({ preventScroll: true });
+        target.scrollIntoView({ block: 'nearest' });
+      }
+    });
+  });
+  const changed = () => props.onGroupsChanged?.();
+  const changeGroup = (job: Promise<unknown>) => void job.then(changed, (err) => props.onError?.(err));
   // Titles filter immediately; message text is searched after a short pause.
   const [query, setQuery] = createSignal('');
   const searching = () => query().trim() !== '';
@@ -170,6 +203,8 @@ export function Sidebar(props: Props) {
       () => props.place.id,
       (id) => {
         if (id && props.place.area === 'project' && props.place.projectId) toggle(props.place.projectId, true);
+        const group = id && membership(id);
+        if (group) toggle(group.id, true);
       },
     ),
   );
@@ -180,7 +215,7 @@ export function Sidebar(props: Props) {
   const projectRest = (p: Project) => inProject(p).filter((c) => searching() || c.pinnedAt === undefined);
   // A project shows when its name or one of its conversations holds the search, and then opens on those conversations.
   const projects = () => props.projects.filter((p) => !searching() || matches(p.name, query()) || inProject(p).length > 0);
-  const chats = createMemo(() => groupChats(props.conversations.filter((c) => c.area === 'chat' && listed(c)), props.now, !searching()));
+  const chats = createMemo(() => groupChats(props.conversations.filter((c) => c.area === 'chat' && (searching() || !membership(c.id)) && listed(c)), props.now, !searching()));
   // The one rule for a project showing its conversations: the user opened it, or the search found something in it. The
   // list and aria-expanded both read it, so they never disagree.
   const expanded = (p: Project) => showsChats(open().has(p.id), searching(), inProject(p).length);
@@ -221,8 +256,8 @@ export function Sidebar(props: Props) {
     <div
       ref={(el) => (rowEl = el)}
       class="crow"
+      classList={{ moving: moving() === row.c.id, child: row.child }}
       data-conversation-id={row.c.id}
-      classList={{ child: row.child }}
       onContextMenu={(e) =>
         openMenu(e, [
           { id: 'rename', label: t('menu.rename'), run: () => setRenaming(row.c.id) },
@@ -232,6 +267,10 @@ export function Sidebar(props: Props) {
             run: () => void api.pin(row.c.id, row.c.pinnedAt === undefined).catch((err) => props.onError?.(err)),
           }] : []),
           { id: 'export', label: t('menu.export'), run: () => void api.exportConversation(row.c.id, { you: t('export.you'), auto: t('model.auto'), attachments: t('export.attachments'), files: t('export.files') }).catch((err) => props.onError?.(err)) },
+          ...(row.c.area === 'chat' ? [
+            { id: 'move-group', label: t('menu.moveToGroup'), disabled: groups().filter((g) => g.id !== membership(row.c.id)?.id).length === 0, run: () => setMoving(row.c.id) },
+            ...(membership(row.c.id) ? [{ id: 'ungroup', label: t('menu.removeFromGroup'), run: () => changeGroup(api.moveChatToGroup(row.c.id)) }] : []),
+          ] : []),
           row.c.archived
             ? { id: 'unarchive', label: t('menu.unarchive'), run: () => void api.archive(row.c.id, false).catch((err) => props.onError?.(err)) }
             : { id: 'archive', label: t('menu.archive'), run: () => void api.archive(row.c.id, true).catch((err) => props.onError?.(err)) },
@@ -239,6 +278,26 @@ export function Sidebar(props: Props) {
         ])
       }
     >
+      <Show when={moving() === row.c.id}>
+        <select class="field sm" aria-label={t('menu.moveToGroup')} ref={(el) => queueMicrotask(() => el.focus())} onBlur={() => setMoving(undefined)} onKeyDown={(e) => {
+          if (e.key === 'Escape') { e.preventDefault(); setMoving(undefined); rowEl?.querySelector<HTMLButtonElement>('.item')?.focus(); }
+        }} onChange={(e) => {
+          const id = e.currentTarget.value;
+          const pending = id && document.activeElement === e.currentTarget ? { id: row.c.id, groupId: id } : undefined;
+          setMoveFocus(pending);
+          setMoving(undefined);
+          if (id) {
+            toggle(id, true);
+            void api.moveChatToGroup(row.c.id, id).then(changed, (err) => {
+              if (moveFocus() === pending) setMoveFocus(undefined);
+              props.onError?.(err);
+            });
+          }
+        }}>
+          <option value="">{t('group.choose')}</option>
+          <For each={groups().filter((g) => g.id !== membership(row.c.id)?.id)}>{(g) => <option value={g.id}>{g.name}</option>}</For>
+        </select>
+      </Show>
       <Show
         when={renaming() !== row.c.id}
         fallback={
@@ -298,7 +357,7 @@ export function Sidebar(props: Props) {
         <input type="search" placeholder={t('side.search')} aria-label={t('side.search')} value={query()} onInput={(e) => setQuery(e.currentTarget.value)} />
       </label>
       {/* Each keystroke of a search filters the list: rows change at once instead of sliding on every letter. */}
-      <div class="side-scroll" data-motion={query() ? 'none' : undefined} onMouseLeave={() => (setConfirming(undefined), setLosing(undefined))} ref={(el) => animateList(el, true)}>
+      <div class="side-scroll" data-motion={query() ? 'none' : undefined} onMouseLeave={() => (setConfirming(undefined), setLosing(undefined))} ref={(el) => { list = el; animateList(el, true); }}>
         <Show when={!inChat()}>
         <section class="projects" aria-labelledby="side-projects" ref={(el) => animateList(el, true)}>
           <div class="group-h">
@@ -385,6 +444,34 @@ export function Sidebar(props: Props) {
         </section>
         </Show>
         <Show when={inChat()}>
+          <section class="chat-groups" aria-labelledby="side-chat-groups">
+            <div class="group-h"><span id="side-chat-groups">{t('group.groups')}</span><button class="plus" data-action="new-group" aria-label={t('group.create')} title={t('group.create')} onClick={() => setNewGroup(true)}><Icon name="plus" small /></button></div>
+            <Show when={newGroup()}><RenameBox title="" onDone={(name) => {
+              setNewGroup(false);
+              if (name?.trim()) void api.createChatGroup(name).then((g) => { changed(); props.onGroup?.(g.id); toggle(g.id, true); }, (err) => props.onError?.(err));
+            }} /></Show>
+            <For each={groups().filter((g) => !searching() || matches(g.name, query()))}>{(g) => {
+              const here = () => props.place.groupId === g.id || !!props.place.id && g.conversationIds.includes(props.place.id);
+              const expanded = () => !searching() && open().has(g.id);
+              const shown = keepForExit(expanded);
+              const rows = () => props.conversations.filter((c) => c.area === 'chat' && g.conversationIds.includes(c.id) && listed(c));
+              const sections = createMemo(() => groupChats(rows(), props.now, !searching()));
+              return <div class="proj" data-chat-group-id={g.id}>
+                <div class="prow" onContextMenu={(e) => openMenu(e, [
+                  { id: 'rename', label: t('menu.rename'), run: () => setRenaming(g.id) },
+                  { id: 'delete', label: t('menu.delete'), danger: true, confirm: t('group.confirmDelete'), run: () => changeGroup(api.removeChatGroup(g.id)) },
+                ])}>
+                  <Show when={renaming() !== g.id} fallback={<RenameBox title={g.name} onDone={(name) => { setRenaming(undefined); if (name?.trim() && name.trim() !== g.name) changeGroup(api.saveChatGroup(g.id, name)); }} />}>
+                    <button class="item" aria-current={here() ? 'location' : undefined} aria-expanded={expanded()} onClick={() => { toggle(g.id, !(props.place.groupId === g.id && expanded())); props.onGroup?.(g.id); }}><Icon name="folder" small /><span class="t">{g.name}</span></button>
+                  </Show>
+                  <button class="plus" aria-label={t('group.newIn', { name: g.name })} title={t('group.newIn', { name: g.name })} onClick={() => { toggle(g.id, true); props.onNewGroupChat?.(g.id); }}><Icon name="plus" small /></button>
+                </div>
+                <div class="fold" classList={{ open: expanded() }} inert={!expanded()}><div class="fold-inner"><Show when={shown()}><div class="proj-chats" ref={animateList}>
+                  <For each={sections().map((section) => section.group)}>{(group) => <ConversationGroup label={t(`side.${group}` as Key)}><For each={sections().find((section) => section.group === group)?.chats ?? []}>{(c) => <Row c={c} />}</For></ConversationGroup>}</For>
+                </div></Show></div></div>
+              </div>;
+            }}</For>
+          </section>
           <div class="list" ref={(el) => animateList(el, true)}>
             {/* The groups are keyed by their name and the rows by their conversation, so a refresh builds again only what changed. */}
             <For each={chats().map((g) => g.group)}>

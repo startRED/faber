@@ -4,6 +4,16 @@ The area's conversation lists, pinning, export, archive and footer. Window width
 [layout.md](layout.md). Search details are in [search.md](search.md).
 
 Pinned and date groups share one labelled section with a semantic heading, styled like the existing quiet labels.
+Chat group rows are reconciled synchronously by id during a state refresh, including after a rename changes the group.
+The row keeps its rename draft and focus; Enter keeps focus on its button after the save refresh completes
+(`tests/ui/chat-groups.check.ts`, `chat groups: renaming keeps its draft and focus through enter`).
+Its Pinned and date sections are keyed by their names, so a chat's rename draft, selection and focus also survive a list
+refresh or the minute clock tick (`tests/ui/chat-groups.check.ts`, `chat groups: chat rename`).
+Escape and Enter in the group's rename box return focus to its row, as they do for a conversation.
+When a refreshed group list no longer contains the open group, its selection is cleared in the screen and browser
+storage, so New conversation and Ctrl+N start an outside chat. Moving a chat with the keyboard restores focus to its
+row once the destination group has it; focusing another control meanwhile cancels that restoration, even after blur
+(`tests/ui/chat-groups.check.ts`, `chat groups: deleting` and `chat groups: keyboard Move to group`).
 When a refresh replaces a focused conversation row, focus follows its replacement after regrouping, unless the person
 has already moved to another control. Pin and Unpin remain usable from the keyboard in both areas.
 
@@ -11,6 +21,7 @@ has already moved to another control. Pin and Unpin remain usable from the keybo
 - The sidebar lists only the open area's items (R168): Chat lists the chats and no Projects block, not even an empty
   one; Projects lists the projects with their conversations and the add-folder control, and no chats. Rows keep their DOM
   when the list refreshes, so a refresh moves nothing the person is pointing at.
+- Chat groups extend the same project row, expand/collapse and menu parts: a folder name opens its [short page](chat-groups.md), and its + starts a chat there. New group is the quiet + beside Groups; naming happens in the same inline rename box as chats. Groups precede the existing outside-chat lists. A group keeps its own Pinned and date sections; search lists matching chats once in the usual flat list, with matching group names above. The chat menu adds Move to group after Export, and Remove from group when assigned; moving uses an inline labelled group picker, with Escape to cancel. The group menu offers Rename and Delete; Delete asks once and keeps its chats outside the group.
 - Each project expands to show its conversations, and has a "+". When items in a project need the user, its tail shows
   the amber speech bubble and "{m} needs you". Amber always comes with these words, never with a number alone. When
   something only runs, the tail shows a pulsing dot.

@@ -1,3 +1,4 @@
+import { readAs } from './attachments.ts';
 import { createEffect, createMemo, createSignal, For, on, onCleanup, onMount, Show } from 'solid-js';
 import { DEFAULT_EFFORT, type Choice, type Command, type Effort, type Mention, PERMISSION_MODES, type PermissionMode, type Vendor } from './api.ts';
 import { Ghost } from './Ghost.tsx';
@@ -83,16 +84,6 @@ export function mentionText(path: string, dir: boolean): string {
 // Small text files go inside the message (no tool call needed); anything else is attached as a file.
 const INLINE_TEXT = 50_000;
 const TEXT = /\.(txt|md|csv|json|ya?ml|toml|xml|html?|css|[cm]?[jt]sx?|py|rb|go|rs|java|kt|c|h|cpp|cs|php|sh|ps1|sql|log|ini)$/i;
-
-function readAs(file: File, how: 'text' | 'dataUrl'): Promise<string> {
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onload = () => resolve(String(reader.result));
-    reader.onerror = () => reject(reader.error);
-    if (how === 'text') reader.readAsText(file);
-    else reader.readAsDataURL(file);
-  });
-}
 
 // A small text file written into the message: its name, and the exact words it added, so taking it away takes those words out.
 interface Inlined {

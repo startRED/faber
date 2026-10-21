@@ -2579,6 +2579,7 @@ async fn stop_leaves_no_worker(parent_script: &str, why: &str) {
                 permissions: Permissions::FullAccess,
                 instructions: None,
                 user_name: None,
+                group_instructions: None,
                 flags: Default::default(),
                 tuning: Default::default(),
                 tools: Default::default(),

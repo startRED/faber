@@ -111,7 +111,7 @@ check('right-click: a chat offers Rename, Export, Archive and Delete, Delete ask
     const row = [...root.querySelectorAll('.crow')].find((r) => r.textContent?.includes('Plan the trip'))!;
     equal(rightClick(row), false);
     await settle();
-    deepEqual(labels(), [t('menu.rename'), t('menu.pin'), t('menu.export'), t('menu.archive'), t('menu.delete')]);
+    deepEqual(labels(), [t('menu.rename'), t('menu.pin'), t('menu.export'), t('menu.moveToGroup'), t('menu.archive'), t('menu.delete')]);
     ok(entry(t('menu.delete')).classList.contains('danger'), 'Delete is last and in the danger colour');
     entry(t('menu.delete')).click();
     await settle();
@@ -238,7 +238,7 @@ check('archive: an archived chat leaves the sidebar, a search finds it marked, a
     deepEqual(titles(), ['Plan the trip', `Old trip notes${t('archive.tag')}`], 'a search finds it, marked');
     rightClick([...root.querySelectorAll('.crow')].find((r) => r.textContent?.includes('Old trip notes'))!);
     await settle();
-    deepEqual(labels(), [t('menu.rename'), t('menu.export'), t('menu.unarchive'), t('menu.delete')]);
+    deepEqual(labels(), [t('menu.rename'), t('menu.export'), t('menu.moveToGroup'), t('menu.unarchive'), t('menu.delete')]);
     entry(t('menu.unarchive')).click();
     await settle();
     deepEqual(archived, [['c1', true], ['c2', false]]);
@@ -348,7 +348,7 @@ check('right-click: the keyboard opens the menu on a focused row, arrows move, E
     item.focus();
     key(item, { key: 'F10', shiftKey: true });
     await settle();
-    deepEqual(labels(), [t('menu.rename'), t('menu.pin'), t('menu.export'), t('menu.archive'), t('menu.delete')]);
+    deepEqual(labels(), [t('menu.rename'), t('menu.pin'), t('menu.export'), t('menu.moveToGroup'), t('menu.archive'), t('menu.delete')]);
     equal(document.activeElement, entry(t('menu.rename')), 'the first item takes focus');
     key(document.activeElement!, { key: 'ArrowDown' });
     equal(document.activeElement, entry(t('menu.pin')));

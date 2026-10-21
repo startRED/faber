@@ -196,6 +196,50 @@ async fn open(faber: State<'_, Faber>, id: String) -> Res<Option<Conversation>> 
     Ok(faber.engine.open(&id))
 }
 
+#[tauri::command]
+async fn create_chat_group(faber: State<'_, Faber>, name: String) -> Res<faber_engine::engine::ChatGroup> {
+    faber.engine.create_chat_group(&name)
+}
+
+#[tauri::command]
+async fn save_chat_group(
+    faber: State<'_, Faber>,
+    id: String,
+    name: Option<String>,
+    instructions: Option<String>,
+) -> Res<faber_engine::engine::ChatGroup> {
+    faber.engine.save_chat_group(&id, name.as_deref(), instructions.as_deref())
+}
+
+#[tauri::command]
+async fn add_chat_group_files(
+    faber: State<'_, Faber>,
+    id: String,
+    files: Vec<faber_engine::workspace::Attachment>,
+) -> Res<faber_engine::engine::ChatGroup> {
+    faber.engine.add_chat_group_files(&id, &files)
+}
+
+#[tauri::command]
+async fn remove_chat_group_file(faber: State<'_, Faber>, id: String, file_id: String) -> Res<faber_engine::engine::ChatGroup> {
+    faber.engine.remove_chat_group_file(&id, &file_id)
+}
+
+#[tauri::command]
+async fn remove_chat_group(faber: State<'_, Faber>, id: String) -> Res<()> {
+    faber.engine.remove_chat_group(&id)
+}
+
+#[tauri::command]
+async fn move_chat_to_group(faber: State<'_, Faber>, conversation_id: String, group_id: Option<String>) -> Res<()> {
+    faber.engine.move_chat_to_group(&conversation_id, group_id.as_deref())
+}
+
+#[tauri::command]
+async fn new_group_chat(faber: State<'_, Faber>, group_id: String) -> Res<Conversation> {
+    faber.engine.new_group_chat(&group_id)
+}
+
 struct SearchRequest {
     replaced: tokio::sync::oneshot::Sender<()>,
     cancelled: Arc<AtomicBool>,
@@ -1285,6 +1329,13 @@ fn main() {
                 site_picture,
                 state,
                 open,
+                create_chat_group,
+                save_chat_group,
+                add_chat_group_files,
+                remove_chat_group_file,
+                remove_chat_group,
+                move_chat_to_group,
+                new_group_chat,
                 search_messages,
                 prompt_history,
                 send,

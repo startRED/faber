@@ -7,6 +7,11 @@ import { api, type AppState, type Area, type Command, type Conversation, type Me
 import { t } from '../../ui/i18n.ts';
 import { check, deepEqual, equal, ok } from './check.ts';
 
+const until = async (done: () => boolean) => {
+  const deadline = performance.now() + 4000;
+  while (!done() && performance.now() < deadline) await new Promise((resolve) => setTimeout(resolve, 20));
+};
+
 // The hidden test window does not deliver focus events; drive them as the idle checks do.
 function focusField(field: HTMLTextAreaElement) {
   field.focus();
@@ -102,12 +107,15 @@ check('prompt-history: drop, attach, paste and attachment removal commit the edi
         if (action === 'drop-while-typing') box.type('typed while the file was loading');
       }
       await box.settle();
+      const inlined = ['drop-text', 'attach-text', 'drop-while-typing'].includes(action);
+      // FileReader completion is independent of the time since the drop, especially in a hidden CI window.
+      if (inlined) await until(() => box.field.value.includes('file contents that must survive'));
       const edited = box.field.value;
-      if (['drop-text', 'attach-text', 'drop-while-typing'].includes(action)) {
-        ok(edited.includes('file contents that must survive'), action);
+      if (inlined) {
+        ok(edited.includes('file contents that must survive'), `${action}: the file contents arrive`);
       }
       if (action === 'paste-text') equal(edited, 'recalled prompt pasted text');
-      ok(edited.startsWith(action === 'drop-while-typing' ? 'typed while the file was loading' : 'recalled prompt'), action);
+      ok(edited.startsWith(action === 'drop-while-typing' ? 'typed while the file was loading' : 'recalled prompt'), `${action}: the current draft stays before the file contents`);
       box.press('Escape'); box.press('ArrowDown');
       equal(box.field.value, edited, `${action}: neither Escape nor Down may restore the old snapshot`);
       equal(localStorage.getItem('faber.unsent.history-regression'), edited, `${action}: the edited text is saved`);

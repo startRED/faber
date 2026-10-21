@@ -1210,6 +1210,8 @@ mod tests {
             core.live.insert(
                 b.clone(),
                 Live {
+                    group_files: None,
+                    group_context: None,
                     vendor: Vendor::Claude,
                     model: None,
                     running: None,

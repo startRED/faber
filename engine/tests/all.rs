@@ -40,6 +40,8 @@ mod compact;
 mod conversation_copy;
 #[path = "engine.rs"]
 mod engine;
+#[path = "groups.rs"]
+mod groups;
 #[path = "handover.rs"]
 mod handover;
 #[path = "install.rs"]

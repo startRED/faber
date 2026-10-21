@@ -27,6 +27,8 @@ pub struct ClaudeLaunch {
     /// How the user wants to be called, told to the model once, when the conversation starts (and again, unchanged, each time
     /// it resumes). Ignored for a side question, which has instructions of its own.
     pub user_name: Option<String>,
+    /// The person's Chat group words, passed unchanged beside Faber's persona.
+    pub group_instructions: Option<String>,
     /// What the installed CLI is known to accept (see `ClaudeFlags`); the default passes none of the newer flags.
     pub flags: ClaudeFlags,
     /// Web search from the settings (R140). Chat and the person's own project sessions only: a side question never reads it.
@@ -360,7 +362,12 @@ pub fn claude_args(launch: &ClaudeLaunch) -> Vec<String> {
     }
     if launch.instructions.is_none() && !aside {
         args.push("--append-system-prompt".into());
-        args.push(persona(&PersonaInput { name: launch.user_name.as_deref(), tuning: &launch.tuning }));
+        let mut words = persona(&PersonaInput { name: launch.user_name.as_deref(), tuning: &launch.tuning });
+        if let Some(instructions) = &launch.group_instructions {
+            words.push_str("\n\nThe person's instructions for this chat group:\n");
+            words.push_str(instructions);
+        }
+        args.push(words);
         // R161: Faber's own MCP server, answered by this driver over stdio, holds the helper tool and the browser.
         // The catalog's servers join it in the same config, where Faber offers its tools.
         let servers = if offers_servers(launch.area, launch.permissions) { launch.tools.servers.as_slice() } else { &[] };
@@ -1160,6 +1167,7 @@ mod allow_tests {
             user_hooks: false,
             permissions: Permissions::Ask,
             instructions: None,
+            group_instructions: None,
             user_name: None,
             flags: Default::default(),
             tuning: Default::default(),

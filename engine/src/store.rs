@@ -118,6 +118,7 @@ pub struct Store {
     conversations: PathBuf,
     search: crate::search::Search,
     projects: PathBuf,
+    chat_groups: PathBuf,
     settings: PathBuf,
     recents: PathBuf,
     budget: PathBuf,
@@ -149,6 +150,7 @@ impl Store {
             search: crate::search::Search::new(conversations.clone()),
             conversations,
             projects: data_dir.join("projects.json"),
+            chat_groups: data_dir.join("chat-groups.json"),
             settings: data_dir.join("settings.json"),
             recents: data_dir.join("recents.json"),
             budget: data_dir.join("budget.json"),
@@ -267,14 +269,14 @@ impl Store {
     }
 
     pub fn save(&self, conversation: &Conversation) {
-        if self.write(&self.file(&conversation.id), conversation).is_ok() {
-            self.search.saved(conversation);
-        }
+        let _ = self.save_checked(conversation);
     }
 
     /// Rewind acknowledges a conversation cursor only after its durable save succeeds.
     pub fn save_checked(&self, conversation: &Conversation) -> Result<(), Fault> {
-        self.write(&self.file(&conversation.id), conversation)
+        self.write(&self.file(&conversation.id), conversation)?;
+        self.search.saved(conversation);
+        Ok(())
     }
 
     pub fn remove(&self, id: &str) {
@@ -300,6 +302,36 @@ impl Store {
 
     pub fn save_projects(&self, projects: &[Project]) -> Result<(), Fault> {
         self.write(&self.projects, &projects)
+    }
+
+    pub fn chat_groups(&self) -> Result<Vec<crate::engine::ChatGroup>, Fault> {
+        let groups: Vec<crate::engine::ChatGroup> = read_checked(&self.chat_groups)?.unwrap_or_default();
+        if groups.iter().any(|g| {
+            uuid::Uuid::parse_str(&g.id).is_err()
+                || g.files.len() > 10
+                || g.instructions.chars().count() > 8000
+                || g.files.iter().try_fold(0usize, |size, f| size.checked_add(f.size)).is_none_or(|size| size > 5_000_000)
+                || g.files.iter().any(|f| uuid::Uuid::parse_str(&f.id).is_err())
+        }) {
+            return Err(Fault::Corrupt);
+        }
+        // A crash between staging a deletion and saving metadata keeps the old record: restore its bytes before use.
+        for group in &groups {
+            let dir = self.chat_groups_dir().join(&group.id);
+            restore_removal(&dir)?;
+            for file in &group.files {
+                restore_removal(&dir.join(&file.id))?;
+            }
+        }
+        Ok(groups)
+    }
+
+    pub fn chat_groups_dir(&self) -> PathBuf {
+        self.chat_groups.with_extension("")
+    }
+
+    pub fn save_chat_groups(&self, groups: &[crate::engine::ChatGroup]) -> Result<(), Fault> {
+        self.write(&self.chat_groups, &groups)
     }
 
     /// A missing file is the defaults (full access). A file that cannot be read or understood (a hand edit, or values a newer
@@ -424,6 +456,14 @@ impl Store {
         }
         replace(&*self.disk, &self.budget, serde_json::to_string(ledger).expect("plain data always serializes").as_bytes())
     }
+}
+
+fn restore_removal(path: &Path) -> Result<(), Fault> {
+    let staged = path.with_extension("removing");
+    if !path.exists() && staged.exists() {
+        fs::rename(staged, path).map_err(|e| Fault::of_write(&e))?;
+    }
+    Ok(())
 }
 
 // ponytail: size cap, rotate if it ever matters.

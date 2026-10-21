@@ -22,6 +22,7 @@ import './connect-more.check.ts';
 import './contextmenu.check.ts';
 import './rewind.check.ts';
 import './pin.check.ts';
+import './chat-groups.check.ts';
 import './hole.check.ts';
 import './effort.check.ts';
 import './first-frame.check.ts';

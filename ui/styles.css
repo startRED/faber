@@ -91,7 +91,7 @@ input, textarea { caret-color: var(--accent); }
 /* The "+" of a header shows when the pointer or the keyboard is near it, and takes no room otherwise. It hides with opacity,
    never visibility: a hidden button leaves the tab order, so the keyboard could not reach it to reveal it. */
 .group-h .plus { position: absolute; right: 0; top: -7px; opacity: 0; }
-.projects:hover .group-h .plus, .group-h:focus-within .plus, .group-h .plus:focus-visible { opacity: 1; }
+.projects:hover .group-h .plus, .chat-groups:hover .group-h .plus, .group-h:focus-within .plus, .group-h .plus:focus-visible { opacity: 1; }
 .plus:hover { background: var(--s3); color: var(--ink); }
 .list { display: grid; grid-template-columns: minmax(0, 1fr); gap: 16px; align-content: start; }
 .list > section, .proj, .crow { min-width: 0; }
@@ -1485,3 +1485,24 @@ html.away-win :is(.amb, .amb *) { animation-play-state: paused !important; }
 .keys-row dd { display: flex; flex: none; gap: 4px; margin: 0; }
 .keys-or { color: var(--ink-3); font-size: var(--fs-xs); }
 .keys-row kbd { font: 500 var(--fs-xs) var(--font-data); color: var(--ink-3); border: 1px solid var(--line-2); border-radius: 5px; padding: 1px 6px; white-space: nowrap; }
+/* Group pages keep file bytes out of the DOM; only their names are drawn. */
+.chat-group-page {
+  grid-column: 1;
+  grid-row: 1;
+  width: min(100%, 720px);
+  margin-inline: auto;
+  padding: 32px 24px;
+  overflow-y: auto;
+  min-height: 0;
+}
+.chat-group-page h1 { overflow-wrap: anywhere; }
+.group-instructions { display: grid; gap: 8px; margin-top: 24px; }
+.group-instructions textarea { width: 100%; min-height: 180px; resize: vertical; }
+.group-files-heading { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-top: 24px; }
+.group-files-heading h2 { font-size: inherit; }
+.group-files { padding: 0; list-style: none; }
+.group-files li { display: flex; align-items: center; gap: 8px; }
+.group-files li > span { flex: 1; min-width: 0; overflow-wrap: anywhere; }
+.chat-group-page > .primary { margin-top: 24px; }
+.crow.moving > .item { display: none; }
+.crow.moving > select { min-width: 0; flex: 1; }

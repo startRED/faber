@@ -43,7 +43,10 @@ mod ended;
 pub use aside::Aside;
 pub use copies::GitRunner;
 pub mod facts;
+#[path = "groups.rs"]
+mod groups;
 mod helpers;
+pub use groups::{ChatGroup, GroupFile};
 mod install_gate;
 mod keep_going;
 mod parked;
@@ -194,6 +197,7 @@ pub struct AppState {
     pub background: crate::background::List,
     pub conversations: Vec<Summary>,
     pub projects: Vec<Project>,
+    pub groups: Vec<ChatGroup>,
     pub vendors: Vec<Vendor>,
     pub settings: Settings,
     /// The running list as last emitted, with its revision.
@@ -213,6 +217,8 @@ pub struct TerminalCommand {
 }
 
 struct Live {
+    group_files: Option<(Vec<String>, Vec<Image>)>,
+    group_context: Option<(String, Vec<String>)>,
     vendor: Vendor,
     /// The model asked for (none = the account's default).
     model: Option<String>,
@@ -1473,6 +1479,7 @@ impl Core {
             background: self.background.list(),
             conversations: self.store.list().into_iter().filter(|c| !c.title.is_empty()).collect(),
             projects: self.store.projects(),
+            groups: self.store.chat_groups().unwrap_or_default(),
             vendors: self.vendors(),
             settings: self.store.settings(),
             running: self.running.clone(),
@@ -3006,6 +3013,13 @@ impl Core {
             l.by_hand = by_hand;
             l.approved = approved;
             l.break_pending |= self.convs.get(id).and_then(|c| c.messages.last()).is_some_and(|m| !m.text.is_empty());
+            let (text, images) = match l.group_files.take() {
+                Some((paths, mut group_images)) => {
+                    group_images.extend(images);
+                    (recovery::with_attachments(&text, Area::Chat, &paths), group_images)
+                }
+                None => (text, images),
+            };
             l.session.send(UserTurn { text, images });
         }
         self.push(id, Some(reply_id), true);
@@ -3037,6 +3051,8 @@ impl Core {
                 return Err(error);
             }
         };
+        let group = if self.convs.get(conv).is_some_and(|c| c.area == Area::Chat) { self.group_for(conv)? } else { None };
+        let group_context = group.as_ref().map(|g| (g.instructions.clone(), g.files.iter().map(|f| f.id.clone()).collect::<Vec<_>>()));
         if let Some(l) = self.live.get_mut(conv) {
             if l.vendor == pick.vendor
                 && l.model == pick.model
@@ -3046,6 +3062,7 @@ impl Core {
                 && l.tuning == tuning
                 && l.runs == runs
                 && l.cwd == cwd
+                && l.group_context == group_context
             {
                 l.used = self.tick; // most recently used
                 return Ok(());
@@ -3055,6 +3072,8 @@ impl Core {
             }
         }
         let c = self.convs.get(conv).ok_or("error.conversationGone")?;
+        let group_instructions = group.as_ref().map(|g| g.instructions.clone()).filter(|s| !s.is_empty());
+        let group_files = self.group_files(group.as_ref(), &cwd)?;
         let cwd_used = cwd.clone();
         let cli = cli.ok_or("error.notConnected")?;
         let spawn = spawner(&self.opts.spawn, &cli);
@@ -3125,6 +3144,7 @@ impl Core {
                         user_hooks,
                         permissions,
                         instructions: None,
+                        group_instructions,
                         user_name,
                         flags,
                         tuning: tuning.clone(),
@@ -3147,6 +3167,7 @@ impl Core {
                     effort,
                     resume,
                     instructions: None,
+                    group_instructions,
                     user_name,
                     permissions,
                     leave_plan,
@@ -3158,6 +3179,8 @@ impl Core {
         self.live.insert(
             conv.to_string(),
             Live {
+                group_files: Some(group_files),
+                group_context,
                 vendor: pick.vendor,
                 model: pick.model.clone(),
                 running: None,
@@ -3432,6 +3455,7 @@ impl Core {
             return Err("error.update.activeOperations".into());
         }
         let source = self.load(&req.conversation_id).cloned().ok_or("error.messageGone")?;
+        let group = if source.area == Area::Chat { self.group_for(&source.id)? } else { None };
         let at = source.messages.iter().position(|m| m.id == req.message_id).ok_or("error.messageGone")?;
         let id = match copy {
             Some((id, copy)) => {
@@ -3442,6 +3466,9 @@ impl Core {
             None => self.blank(source.area, source.project_id.clone()),
         };
         let from = self.workspace_of(&source.id);
+        if let Some(group) = group {
+            self.move_chat_to_group(&id, Some(&group.id))?;
+        }
         let to = self.workspace_of(&id);
         let c = self.convs.get_mut(&id).expect("just created");
         c.title = format!("↳ {}", source.title.trim_start_matches("↳ "));
@@ -3588,6 +3615,15 @@ impl Core {
 
     fn remove(&mut self, id: &str) -> Result<(), String> {
         self.rewind_delete_allowed(id)?;
+        if let Ok(mut groups) = self.store.chat_groups() {
+            let changed = groups.iter().any(|g| g.conversation_ids.iter().any(|chat| chat == id));
+            if changed {
+                for group in &mut groups {
+                    group.conversation_ids.retain(|chat| chat != id);
+                }
+                let _ = self.store.save_chat_groups(&groups);
+            }
+        }
         self.note_turn(id, None, true);
         self.stop_helpers(id, true);
         self.close_asides(Some(id));
@@ -3820,6 +3856,8 @@ mod tool_in_tests {
                 core.live.insert(
                     id.into(),
                     Live {
+                        group_files: None,
+                        group_context: None,
                         vendor,
                         model: None,
                         running: None,

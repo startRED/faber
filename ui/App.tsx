@@ -1,3 +1,4 @@
+import { ChatGroup } from './ChatGroup.tsx';
 import { createEffect, createMemo, createResource, createSignal, Match, on, onCleanup, onMount, Show, Switch } from 'solid-js';
 import { Ambient } from './Ambient.tsx';
 import { Hole } from './Hole.tsx';
@@ -7,6 +8,7 @@ import {
   type Appearance,
   type AppState,
   type Choice,
+  type ChatGroup as Group,
   type CliSession,
   type AppEvent,
   type ContextFill,
@@ -103,7 +105,7 @@ export function App(props: { initial: AppState; update?: UpdateStatus; inbox: { 
   const [state, setState] = createSignal<AppState>(props.initial);
   // The area, the project and the conversation the user is in, changed together so no screen ever shows a conversation
   // with another conversation's project.
-  const [place, setPlace] = createSignal<Place>({ area: saved?.area ?? 'chat', projectId: saved?.projectId });
+  const [place, setPlace] = createSignal<Place>({ area: saved?.area ?? 'chat', projectId: saved?.projectId, groupId: saved?.groupId });
   const [current, setCurrent] = createSignal<Conversation>();
   const [visuals, setVisuals] = createSignal<{ id: string; answers: VisualAnswer[] }>();
   const visualAnswers = () => visuals()?.id === current()?.id ? visuals()!.answers : [];
@@ -318,13 +320,36 @@ export function App(props: { initial: AppState; update?: UpdateStatus; inbox: { 
   const projectId = () => place().projectId;
   const refresh = () =>
     api.state().then((s) => {
+      const selected = place();
+      if (selected.groupId && !s.groups?.some((g) => g.id === selected.groupId)) {
+        const next = { ...selected, groupId: undefined };
+        setPlace(next);
+        remember('faber.place', next);
+      }
       store.offer(s.running);
       setState((current) => {
         const next = refreshed(current, s);
         // A row that did not change stays the same object, so the sidebar keeps its node.
-        return { ...next, background: current.background && (!next.background || current.background.revision > next.background.revision) ? current.background : next.background, conversations: keepRows(current.conversations, next.conversations), projects: keepRows(current.projects, next.projects) };
+        return {
+          ...next,
+          background: current.background && (!next.background || current.background.revision > next.background.revision) ? current.background : next.background,
+          conversations: keepRows(current.conversations, next.conversations),
+          projects: keepRows(current.projects, next.projects),
+          groups: keepRows(current.groups ?? [], next.groups ?? []),
+        };
       });
     });
+  const groupPage = () => area() === 'chat' && !place().id ? state().groups?.find((g) => g.id === place().groupId) : undefined;
+  const groupForChat = () => state().groups?.find((g) => g.conversationIds.includes(place().id ?? ''));
+  let groupReady: { id: string; wait: () => Promise<boolean> } | undefined;
+  const changeGroup = (group: Group) => setState((s) => ({ ...s, groups: (s.groups ?? []).map((g) => g.id === group.id ? group : g) }));
+  const newGroupChat = async (groupId: string) => {
+    if (groupReady?.id === groupId && !(await groupReady.wait())) return;
+    const conversation = await api.newGroupChat(groupId);
+    await refresh();
+    await go({ area: 'chat', id: conversation.id });
+    document.querySelector<HTMLTextAreaElement>('.composer textarea')?.focus();
+  };
   const fail = (err: unknown) => setError(failureText(err));
   // The sidebar's quota line still names the old usage section: accounts and their limits are one section now.
   const openSettings = (at?: Section | 'usage') => {
@@ -620,7 +645,10 @@ export function App(props: { initial: AppState; update?: UpdateStatus; inbox: { 
     setChoice(next.id ? recall<Choice>(`faber.choice.${next.id}`, done.conversation?.choice ?? { vendor: 'auto' }) : { vendor: 'auto' });
     if (done.conversation) queueMicrotask(() => restoreRejected(done.conversation!.id, done.conversation!.messages.at(-1)));
   };
-  const fresh = (next: Pick<Place, 'area' | 'projectId'>) => go({ ...next, id: undefined });
+  const fresh = (next: Pick<Place, 'area' | 'projectId' | 'groupId'>) => {
+    const group = next.area === 'chat' ? next.groupId ?? (next === place() ? groupForChat()?.id : undefined) : undefined;
+    return group ? newGroupChat(group) : go({ area: next.area, projectId: next.projectId, id: undefined });
+  };
   // A session started in a terminal (parity F5) becomes this project's conversation, or opens the one it already is.
   const pickUpSession = async (projectId: string, session: CliSession) => {
     setError(undefined);
@@ -1021,7 +1049,7 @@ export function App(props: { initial: AppState; update?: UpdateStatus; inbox: { 
   // With no AI, Projects says what Chat says ("No AI connected") instead of offering a folder nothing could work in.
   const needsProject = () => area() === 'project' && !project() && state().vendors.length > 0;
   // The new conversation of a chat with a connected AI is the one place the effects of a look appear.
-  const newChat = () => (area() === 'chat' || !!project()) && state().vendors.length > 0 && !current()?.messages.length && !current()?.rewindNotice;
+  const newChat = () => !groupPage() && (area() === 'chat' || !!project()) && state().vendors.length > 0 && !current()?.messages.length && !current()?.rewindNotice;
   // A new conversation the user is in, not a remembered one that is still on its way: the tutorial would open over it and
   // vanish when its messages arrive.
   const startsFresh = () => newChat() && !loading() && !place().id;
@@ -1344,6 +1372,10 @@ export function App(props: { initial: AppState; update?: UpdateStatus; inbox: { 
             >
               <Sidebar
                 conversations={state().conversations}
+                groups={state().groups}
+                onGroup={(groupId) => { closeSide(false); void go({ area: 'chat', groupId }); }}
+                onNewGroupChat={(id) => { closeSide(false); void newGroupChat(id).catch(fail); }}
+                onGroupsChanged={() => void refresh()}
                 projects={state().projects}
                 vendors={state().vendors}
                 version={state().version}
@@ -1360,7 +1392,7 @@ export function App(props: { initial: AppState; update?: UpdateStatus; inbox: { 
                 quotas={quotas()}
                 usage={state().usage ?? []}
                 now={clock()}
-                onNew={() => (closeSide(false), void fresh(place()))}
+                onNew={() => (closeSide(false), void fresh(place()).catch(fail))}
                 onArea={switchArea}
                 onProject={(id) => (closeSide(false), void fresh({ area: 'project', projectId: id }))}
                 onNewIn={(id) => (closeSide(false), void fresh({ area: 'project', projectId: id }))}
@@ -1406,7 +1438,7 @@ export function App(props: { initial: AppState; update?: UpdateStatus; inbox: { 
                 <div class="crumb">
                   <Switch>
                     <Match when={place().id}>
-                      {area() === 'chat' ? t('area.chat') : t('crumb.project')}
+                      {area() === 'chat' ? groupForChat()?.name ?? t('area.chat') : t('crumb.project')}
                       <span class="sep" aria-hidden="true">
                         {t('crumb.separator')}
                       </span>
@@ -1436,6 +1468,7 @@ ${copy().path}`}>
                     <Match when={area() === 'project'}>
                       <b>{t('crumb.project')}</b>
                     </Match>
+                    <Match when={groupPage()}>{t('area.chat')}</Match>
                     <Match when={true}>{t('crumb.new')}</Match>
                   </Switch>
                 </div>
@@ -1502,6 +1535,7 @@ ${copy().path}`}>
                 </div>
               </div>
               <div class="work" classList={{ under: colShown() && !docked() }} ref={(el) => { work = el; animateList(el); }}>
+                <Show when={groupPage()?.id} keyed fallback={
                 <Show
                   when={needsProject()}
                   fallback={
@@ -1633,6 +1667,7 @@ ${copy().path}`}>
                     onError={fail}
                   />
                 </Show>
+                }>{(id) => <ChatGroup group={state().groups?.find((g) => g.id === id)!} inert={trapped() || (colShown() && wide())} onChanged={changeGroup} onNew={() => newGroupChat(id)} onReady={(wait) => { groupReady = wait ? { id, wait } : undefined; }} />}</Show>
                 <Show when={colShown() && (!docked() || wide())}>{runningColumn()}</Show>
               </div>
               <Find enabled={!newChat() && !needsProject() && !loading() && !!current()?.messages.length && !(colShown() && wide())} root={() => thread} />

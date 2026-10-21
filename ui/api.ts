@@ -301,6 +301,14 @@ export interface Project {
   separateCopies?: boolean;
 }
 
+export interface ChatGroup {
+  id: string;
+  name: string;
+  instructions: string;
+  files: { id: string; name: string; size: number; mime?: string }[];
+  conversationIds: string[];
+}
+
 /** The checks Faber runs on a project's work (R137): the commands, where they were declared, and whether the owner confirmed them. */
 export interface ProofView {
   commands: string[];
@@ -462,6 +470,8 @@ export interface VendorUsage {
 export interface AppState {
   conversations: Summary[];
   projects: Project[];
+  // Absent in an older engine's state: no groups.
+  groups?: ChatGroup[];
   vendors: Vendor[];
   settings: Settings;
   look: Look;
@@ -711,6 +721,13 @@ const LOAD = crypto.getRandomValues(new Uint32Array(1))[0];
 // Typed calls into the engine (the commands registered in src-tauri/src/main.rs and src-tauri/src/setup.rs).
 export const api = {
   state: () => invoke<AppState>('state'),
+  createChatGroup: (name: string) => invoke<ChatGroup>('create_chat_group', { name }),
+  saveChatGroup: (id: string, name?: string, instructions?: string) => invoke<ChatGroup>('save_chat_group', { id, name, instructions }),
+  addChatGroupFiles: (id: string, files: Attachment[]) => invoke<ChatGroup>('add_chat_group_files', { id, files }),
+  removeChatGroupFile: (id: string, fileId: string) => invoke<ChatGroup>('remove_chat_group_file', { id, fileId }),
+  removeChatGroup: (id: string) => invoke<void>('remove_chat_group', { id }),
+  moveChatToGroup: (conversationId: string, groupId?: string) => invoke<void>('move_chat_to_group', { conversationId, groupId }),
+  newGroupChat: (groupId: string) => invoke<Conversation>('new_group_chat', { groupId }),
   backgroundCommands: () => invoke<BackgroundList>('background_commands'),
   stopBackground: (id: string) => invoke<void>('stop_background', { id }),
   open: (id: string) => invoke<Conversation | null>('open', { id }),

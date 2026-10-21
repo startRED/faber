@@ -58,6 +58,7 @@ fn launch(area: Area) -> ClaudeLaunch {
         user_hooks: false,
         instructions: None,
         user_name: None,
+        group_instructions: None,
         permissions: Permissions::Ask,
         flags: Default::default(),
         // The credential tests below are about the deny rules, not the web: the web is on, as the person's settings default.

@@ -108,7 +108,7 @@ export function createAutoOpen(quiet = QUIET_MS) {
 }
 
 /** Where the user is: the area, the project of a project conversation, and the conversation. */
-export type Place = { area: Area; projectId?: string; id?: string };
+export type Place = { area: Area; projectId?: string; groupId?: string; id?: string };
 
 /** The place of a conversation the user opens, from the place they are in. A project conversation sets the project; a chat
  * leaves the last project as it was, so the Projects area comes back to it. Area, project and id go in together. */
