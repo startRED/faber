@@ -32,6 +32,7 @@ impl Engine {
             // Keep the old folder for file cards; project sessions resolve their folder independently.
             moved.project_start_pending = true;
             moved.sessions.clear();
+            moved.session_kits.clear();
             moved.tentative.clear();
             moved.cost_base.clear();
             moved.commands.clear();

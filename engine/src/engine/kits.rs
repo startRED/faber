@@ -1,0 +1,2749 @@
+//! Task kits are selected in code before a native session starts.
+use super::*;
+
+const RESOURCE_PREFIX: &str =
+    "Current catalog resources for this session, replacing earlier catalog selections and paths (within current permissions):\n";
+
+const EMPTY_RESOURCES: &str =
+    "No catalog skill instructions apply to this session. Earlier catalog skill selections and paths no longer apply.";
+
+pub(super) fn resource_digest(resources: Option<&str>) -> String {
+    use sha2::Digest;
+    let mut hash = sha2::Sha256::new();
+    if let Some(resources) = resources {
+        hash.update(RESOURCE_PREFIX);
+        hash.update(resources);
+        hash.update("\n\n");
+    }
+    crate::hex(&hash.finalize())
+}
+
+pub(super) fn resume_resources(
+    resources: Option<String>,
+    saved: Option<&(String, Vec<String>, Option<String>)>,
+    resume: Option<&String>,
+    saved_digest: Option<&String>,
+) -> Option<String> {
+    if resources.is_none()
+        && saved.is_some_and(|(native, _, _)| Some(native) == resume)
+        && saved_digest.is_none_or(|old| old != &resource_digest(None))
+    {
+        Some(EMPTY_RESOURCES.into())
+    } else {
+        resources
+    }
+}
+
+pub(super) fn session_tool_identity(vendor: Vendor, delivery: &crate::tools::Delivery) -> Option<String> {
+    use sha2::Digest;
+    if vendor == Vendor::Codex {
+        return delivery.server_identity();
+    }
+    let snapshot = delivery.identity()?;
+    let servers: Vec<_> = delivery.servers.iter().map(|s| (&s.name, &s.command, &s.args, &s.env)).collect();
+    let launch = serde_json::to_vec(&(snapshot, delivery.plugin.is_some(), servers)).ok()?;
+    Some(crate::hex(&sha2::Sha256::digest(launch)))
+}
+
+pub(super) fn claude_resources(area: Area, delivery: &crate::tools::Delivery) -> Option<String> {
+    match area {
+        Area::Chat => delivery.skill_instructions(),
+        Area::Project => delivery.project_skill_descriptions(Vendor::Claude),
+    }
+}
+
+pub(super) fn resources_changed(
+    saved: Option<&(String, Vec<String>, Option<String>)>,
+    resume: Option<&String>,
+    ids: &[String],
+    identity: &Option<String>,
+    saved_digest: Option<&String>,
+    digest: &str,
+) -> bool {
+    !(saved.is_some_and(|(native, old_ids, old_identity)| Some(native) == resume && old_ids == ids && old_identity == identity)
+        && saved_digest.is_some_and(|old| old == digest))
+}
+
+pub(super) fn codex_resources(area: Area, delivery: &crate::tools::Delivery) -> Option<String> {
+    match (delivery.project_skill_descriptions(Vendor::Codex).filter(|_| area == Area::Project), delivery.skill_instructions()) {
+        (Some(index), Some(body)) => Some(format!("{index}\n\n{body}")),
+        (index, body) => index.or(body),
+    }
+}
+
+pub(super) fn with_resources(text: String, resources: Option<String>) -> String {
+    match resources {
+        Some(resources) => format!("{RESOURCE_PREFIX}{resources}\n\n{text}"),
+        None => text,
+    }
+}
+
+pub(super) fn record_native_kit(conversation: &mut Conversation, native: String, live: Option<&Live>, store: Option<&crate::tools::Store>) {
+    let Some(live) = live else { return };
+    let mut ids = live.tool_kit.ids.clone();
+    if live.vendor == Vendor::Codex
+        && let Some((_, old_ids, _)) = conversation.session_kits.get(&live.vendor)
+        && let Some(store) = store
+    {
+        let current = store.server_identity_for(old_ids, Area::Project, Permissions::FullAccess, &[]);
+        if current != "servers:none" && live.kit_identity.as_deref() == Some(current.as_str()) {
+            ids.extend(store.catalog_server_ids(old_ids));
+            ids.sort();
+            ids.dedup();
+        }
+    }
+    conversation.session_kits.insert(live.vendor, (native, ids, live.kit_identity.clone()));
+    if let Some(digest) = &live.kit_resource_digest {
+        conversation.session_resource_digests.insert(live.vendor, digest.clone());
+    } else {
+        conversation.session_resource_digests.remove(&live.vendor);
+    }
+}
+
+impl Core {
+    pub(super) fn session_tool_report(
+        &mut self,
+        conv: &str,
+        reply: &str,
+        mut kit: crate::tools::kits::Report,
+    ) -> Option<crate::tools::kits::Report> {
+        let previous = self.convs.get(conv).and_then(|c| {
+            c.messages.iter().rev().filter(|m| m.id != reply).filter_map(|m| m.tool_kit.as_ref()).find(|k| !k.ids.is_empty())
+        });
+        if previous.is_some_and(|old| old.ids == kit.ids) {
+            kit.ids.clear();
+        }
+        // Like notes-seen, a durable marker belongs to the app, not a conversation or editable setting.
+        if kit.suggested.is_some()
+            && std::fs::OpenOptions::new().write(true).create_new(true).open(self.opts.data_dir.join("catalog-hint-seen")).is_err()
+        {
+            kit.suggested = None;
+        }
+        (!kit.ids.is_empty() || kit.suggested.is_some() || kit.error.is_some()).then_some(kit)
+    }
+
+    pub(super) fn catalog_store(&self) -> crate::tools::Store {
+        if let Some(store) = &self.catalog_store {
+            return store.clone();
+        }
+        unreachable!("the engine retains its catalog store")
+    }
+
+    pub(super) fn choose_session_tools(
+        &mut self,
+        conv: &str,
+        vendor: Vendor,
+        permissions: Permissions,
+        cwd: &Path,
+    ) -> (crate::tools::Delivery, crate::tools::kits::Report) {
+        let c = &self.convs[conv];
+        let area = c.area;
+        let project = c.project_id.clone();
+        let request = c.messages.iter().rev().find(|m| m.role == Role::User).map(|m| m.text.clone()).unwrap_or_default();
+        self.session_tools(vendor, area, permissions, project.as_deref(), &request, cwd)
+    }
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub(super) enum SessionStart {
+    Prepare,
+    Turn,
+    Compact,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::tools::{Item, Store as ToolStore, digest};
+    use serde_json::{Value, json};
+    use std::io::Write;
+    use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
+
+    type Arguments = Arc<Mutex<Vec<(String, Vec<String>)>>>;
+    type Messages = Arc<Mutex<Vec<(String, Value)>>>;
+
+    fn fake() -> (Spawner, Arguments, Messages) {
+        fake_reply(false)
+    }
+
+    fn fake_reply(first_word: bool) -> (Spawner, Arguments, Messages) {
+        fake_backend(first_word, None)
+    }
+
+    fn fake_backend(first_word: bool, effective: Option<Messages>) -> (Spawner, Arguments, Messages) {
+        let args: Arguments = Arc::default();
+        let messages: Messages = Arc::default();
+        let (seen_args, seen_messages) = (args.clone(), messages.clone());
+        let spawn: Spawner = Arc::new(move |bin, argv, _| {
+            seen_args.lock().unwrap().push((bin.into(), argv.to_vec()));
+            let (stdin, incoming) = tokio::io::duplex(65536);
+            let (mut outgoing, stdout) = tokio::io::duplex(65536);
+            let (bin, messages, effective) = (bin.to_string(), seen_messages.clone(), effective.clone());
+            tokio::spawn(async move {
+                let mut threads = BTreeMap::<String, String>::new();
+                let mut lines = BufReader::new(incoming).lines();
+                while let Ok(Some(line)) = lines.next_line().await {
+                    let msg: Value = serde_json::from_str(&line).unwrap();
+                    messages.lock().unwrap().push((bin.clone(), msg.clone()));
+                    if first_word && msg["type"] == "user" {
+                        let words = json!({"type":"stream_event", "parent_tool_use_id":null,
+                            "event":{"type":"content_block_delta", "delta":{"type":"text_delta", "text":"first word"}}});
+                        if outgoing.write_all(format!("{words}\n").as_bytes()).await.is_err() {
+                            break;
+                        }
+                    }
+                    let result = match msg["method"].as_str() {
+                        Some("initialize") => Some(json!({})),
+                        Some("config/read") => Some(json!({"config":{}})),
+                        Some("thread/start" | "thread/resume") if effective.is_some() => {
+                            let id = msg["params"]["threadId"].as_str().map(str::to_owned).unwrap_or_else(|| format!("kit-{}", msg["id"]));
+                            // A loaded native thread ignores later resume instruction overrides.
+                            threads
+                                .entry(id.clone())
+                                .or_insert_with(|| msg["params"]["developerInstructions"].as_str().unwrap_or_default().into());
+                            Some(json!({"thread":{"id":id}}))
+                        }
+                        Some("thread/start" | "thread/resume") => Some(json!({"thread":{"id":format!("kit-{}", msg["id"])}})),
+                        Some("turn/start") => {
+                            if let Some(effective) = &effective {
+                                let id = msg["params"]["threadId"].as_str().unwrap();
+                                let text = msg["params"]["input"][0]["text"].as_str().unwrap();
+                                let resources = threads.get_mut(id).expect("turns use an already loaded thread");
+                                if text.starts_with("Current catalog resources for this session,") {
+                                    *resources = text.rsplit_once("\n\n").unwrap().0.into();
+                                }
+                                effective.lock().unwrap().push((id.into(), json!(resources)));
+                            }
+                            Some(json!({"turn":{"id":"turn"}}))
+                        }
+                        _ => None,
+                    };
+                    if let Some(result) = result {
+                        let answer = json!({"id":msg["id"],"result":result});
+                        if outgoing.write_all(format!("{answer}\n").as_bytes()).await.is_err() {
+                            break;
+                        }
+                        if msg["method"] == "turn/start" {
+                            let started = json!({"method":"turn/started", "params":{
+                                "threadId":msg["params"]["threadId"], "turn":{"id":"turn"}}});
+                            if outgoing.write_all(format!("{started}\n").as_bytes()).await.is_err() {
+                                break;
+                            }
+                            if first_word {
+                                let words = json!({"method":"item/agentMessage/delta", "params":{
+                                    "threadId":msg["params"]["threadId"], "turnId":"turn", "itemId":"answer", "delta":"first word"}});
+                                if outgoing.write_all(format!("{words}\n").as_bytes()).await.is_err() {
+                                    break;
+                                }
+                            }
+                        }
+                    }
+                }
+            });
+            Ok(crate::proc::Proc { stdin: Box::new(stdin), stdout: Box::new(stdout), stderr: None, child: None, contained: None })
+        });
+        (spawn, args, messages)
+    }
+
+    #[test]
+    fn resource_digest_tracks_the_exact_delivered_prefix_even_when_native_ids_match() {
+        use sha2::Digest;
+        let resources = "Catalog skill debug (supporting files: old-path):\ndebug instructions";
+        let prefix = with_resources(String::new(), Some(resources.into()));
+        let digest = resource_digest(Some(resources));
+        assert_eq!(digest, crate::hex(&sha2::Sha256::digest(prefix.as_bytes())));
+        assert_ne!(resource_digest(None), resource_digest(Some("")), "an empty prefix differs from no prefix");
+        let native = "native-history".to_string();
+        let ids = vec!["debug".to_string()];
+        let identity = Some("servers:none".to_string());
+        let saved = (native.clone(), ids.clone(), identity.clone());
+        assert!(!resources_changed(Some(&saved), Some(&native), &ids, &identity, Some(&digest), &digest));
+        let changed = resource_digest(Some(&resources.replace("old-path", "current-path")));
+        assert!(resources_changed(Some(&saved), Some(&native), &ids, &identity, Some(&digest), &changed));
+        assert!(resources_changed(Some(&saved), Some(&native), &ids, &identity, None, &digest), "older metadata refreshes once");
+    }
+
+    #[test]
+    fn empty_resource_replacement_distinguishes_fresh_known_empty_and_unknown_native_history() {
+        let native = "native-history".to_string();
+        let saved = (native.clone(), Vec::new(), Some("servers:none".into()));
+        let never_had_resources = resource_digest(None);
+        let cleared_resources = resource_digest(Some(EMPTY_RESOURCES));
+        assert!(resume_resources(None, None, None, None).is_none(), "a fresh thread needs no empty marker");
+        assert!(
+            resume_resources(None, None, Some(&native), None).is_none(),
+            "external native history has no earlier Faber catalog selection"
+        );
+        assert!(
+            resume_resources(None, Some(&saved), Some(&native), Some(&never_had_resources)).is_none(),
+            "known empty native history needs no marker"
+        );
+        assert_eq!(
+            resume_resources(None, Some(&saved), Some(&native), None).as_deref(),
+            Some(EMPTY_RESOURCES),
+            "unknown older history is cleared once"
+        );
+        assert_eq!(
+            resume_resources(None, Some(&saved), Some(&native), Some(&cleared_resources)).as_deref(),
+            Some(EMPTY_RESOURCES),
+            "the stable marker keeps its accepted digest"
+        );
+    }
+
+    fn catalog(dir: &Path) -> ToolStore {
+        catalog_version(dir, "")
+    }
+
+    #[tokio::test]
+    async fn catalog_hint_is_once_for_the_app_and_survives_settings_changes_and_reopening() {
+        let dir = tempfile::tempdir().unwrap();
+        let folder = dir.path().canonicalize().unwrap();
+        let (spawn, args, _) = fake();
+        let engine = engine(&folder, spawn);
+        let missing = || crate::tools::kits::Report { suggested: Some("systematic-debugging".into()), ..Default::default() };
+        engine.with(|core| {
+            conversation(core, Area::Chat, None, &folder, "Debug this failure");
+            let first = core.session_tool_report("kit", "reply", missing()).unwrap();
+            assert_eq!(first.suggested.as_deref(), Some("systematic-debugging"));
+            let mut second = core.convs["kit"].clone();
+            second.id = "other".into();
+            core.convs.insert(second.id.clone(), second);
+            assert!(core.session_tool_report("other", "reply", missing()).is_none(), "a new conversation does not repeat the hint");
+            core.save_settings(Settings { language: Some("de".into()), ..Default::default() }).unwrap();
+            assert!(folder.join("catalog-hint-seen").is_file(), "the marker persists independently of ordinary settings patches");
+            core.store = Store::new(&folder);
+            assert!(
+                core.session_tool_report("kit", "reply", missing()).is_none(),
+                "a freshly opened settings store retains the once-only hint"
+            );
+        });
+        assert!(args.lock().unwrap().is_empty(), "showing a hint starts no process");
+        engine.shutdown();
+    }
+
+    fn catalog_version(dir: &Path, version: &str) -> ToolStore {
+        catalog_items(dir, version, &[("debug", "debugging"), ("design", "design")])
+    }
+
+    fn catalog_items(dir: &Path, version: &str, entries: &[(&str, &str)]) -> ToolStore {
+        let entries: Vec<_> = entries.iter().map(|&(id, job)| (id, job, version)).collect();
+        catalog_items_versions(dir, &entries)
+    }
+
+    fn catalog_items_versions(dir: &Path, entries: &[(&str, &str, &str)]) -> ToolStore {
+        let mut items = Vec::new();
+        let mut archives = Vec::new();
+        for &(id, job, version) in entries {
+            let body = format!("---\nname: {id}\n---\n{id}_KIT_INSTRUCTIONS{version}");
+            let skill = tempfile::tempdir().unwrap();
+            std::fs::write(skill.path().join("SKILL.md"), &body).unwrap();
+            let item = Item {
+                id: id.into(),
+                job: job.into(),
+                license: "MIT".into(),
+                repo: "fixture/skills".into(),
+                commit: "1234".into(),
+                path: format!("skills/{id}"),
+                digest: digest(skill.path()).unwrap(),
+                server: None,
+                chat_safe: false,
+                cli_name: None,
+                tier: Default::default(),
+            };
+            let archive = dir.join(format!("{id}.zip"));
+            let mut zip = zip::ZipWriter::new(std::fs::File::create(&archive).unwrap());
+            zip.start_file(format!("fixture-1234/{}/SKILL.md", item.path), zip::write::SimpleFileOptions::default()).unwrap();
+            zip.write_all(body.as_bytes()).unwrap();
+            zip.finish().unwrap();
+            items.push(item);
+            archives.push(archive);
+        }
+        let catalog = ToolStore::with_catalog(dir, items.clone());
+        for (item, archive) in items.iter().zip(archives) {
+            catalog.install_from(item, &archive).unwrap();
+        }
+        prepare(&catalog, dir);
+        catalog
+    }
+
+    fn server_catalog(dir: &Path, version: &str) -> ToolStore {
+        server_catalog_scope(dir, version, false)
+    }
+
+    fn server_catalog_scope(dir: &Path, version: &str, chat_safe: bool) -> ToolStore {
+        let body = format!("console.log('{version}');");
+        let source = tempfile::tempdir().unwrap();
+        std::fs::write(source.path().join("server.js"), &body).unwrap();
+        let item = Item {
+            id: "browser".into(),
+            job: "measure".into(),
+            license: "MIT".into(),
+            repo: String::new(),
+            commit: version.into(),
+            path: String::new(),
+            digest: digest(source.path()).unwrap(),
+            chat_safe,
+            cli_name: None,
+            tier: Default::default(),
+            server: Some(crate::tools::Server {
+                package: "browser-fixture".into(),
+                version: "1.0.0".into(),
+                entry: "server.js".into(),
+                args: vec![],
+                env: BTreeMap::new(),
+            }),
+        };
+        let path = dir.join(format!("server-{version}.tgz"));
+        let gz = flate2::write::GzEncoder::new(std::fs::File::create(&path).unwrap(), flate2::Compression::fast());
+        let mut tar = tar::Builder::new(gz);
+        let mut header = tar::Header::new_gnu();
+        header.set_size(body.len() as u64);
+        header.set_mode(0o644);
+        header.set_cksum();
+        tar.append_data(&mut header, "package/server.js", body.as_bytes()).unwrap();
+        tar.into_inner().unwrap().finish().unwrap();
+        let mut items = vec![item.clone()];
+        for (id, job) in [("debug", "debugging"), ("design", "design")] {
+            let path = dir.join("tools/plugin/skills").join(id);
+            if path.is_dir() {
+                items.push(Item {
+                    id: id.into(),
+                    job: job.into(),
+                    license: "MIT".into(),
+                    repo: "fixture/skills".into(),
+                    commit: "1234".into(),
+                    path: format!("skills/{id}"),
+                    digest: digest(&path).unwrap(),
+                    server: None,
+                    chat_safe: false,
+                    cli_name: None,
+                    tier: Default::default(),
+                });
+            }
+        }
+        let store = ToolStore::with_catalog(dir, items).with_node("C:/node.exe".into());
+        store.install_from(&item, &path).unwrap();
+        store.prepare_kit_for(Vendor::Codex, "Measure lighthouse performance", Some(dir), Area::Project, Permissions::FullAccess, &[]);
+        store.wait_prepared_for_test();
+        store
+    }
+
+    fn prepare(store: &ToolStore, folder: &Path) {
+        // Preparing one task must cache resources, never that task's selection or permission scope.
+        store.prepare_kit_for(Vendor::Codex, "Debug this failure", Some(folder), Area::Chat, Permissions::FullAccess, &[]);
+        store.wait_prepared_for_test();
+    }
+
+    fn engine(dir: &Path, spawn: Spawner) -> Engine {
+        let engine = Engine::new(
+            EngineOptions {
+                data_dir: dir.into(),
+                clis: [Vendor::Claude, Vendor::Codex]
+                    .into_iter()
+                    .map(|vendor| (vendor, Cli { command: vendor.name().into(), prefix: vec![] }))
+                    .collect(),
+                spawn,
+                windows: false,
+                claude_env_billed: false,
+                max_warm: 3,
+                idle: Duration::from_secs(120),
+                runtime: tokio::runtime::Handle::current(),
+                ask: None,
+            },
+            Arc::new(|_| {}),
+        );
+        engine.with(|core| {
+            core.synchronous_kit_checks = true;
+            core.store.save_settings(&Settings { permissions: Some(Permissions::FullAccess), ..Default::default() }).unwrap();
+            core.claude_flags.plugin_dir = true;
+            core.catalog_store = Some(catalog(dir));
+            core.codex_models = crate::route::PROFILES.iter().filter(|p| p.vendor == Vendor::Codex).map(|p| p.model.into()).collect();
+            for vendor in [Vendor::Claude, Vendor::Codex] {
+                core.ledger.of_mut(vendor).billing = Billing::Subscription;
+            }
+        });
+        engine
+    }
+
+    fn conversation(core: &mut Core, area: Area, project: Option<&str>, folder: &Path, task: &str) {
+        let mut c: Conversation = serde_json::from_value(json!({
+            "id":"kit", "title":"Kit", "area":area, "projectId":project, "workingFolder":folder,
+            "createdAt":1, "updatedAt":1, "messages":[]
+        }))
+        .unwrap();
+        c.messages.push(Message::new("user".into(), Role::User, task.into(), 1));
+        c.messages.push(Message::new("reply".into(), Role::Assistant, String::new(), 1));
+        core.convs.insert("kit".into(), c);
+    }
+
+    fn pick(vendor: Vendor) -> Pick {
+        Pick { vendor, model: None, effort: "medium".into(), reason: "reason.manual".into(), pace: None }
+    }
+
+    async fn checked_signal(signal: &std::sync::mpsc::Receiver<()>) {
+        tokio::time::timeout(Duration::from_secs(3), async {
+            while signal.try_recv().is_err() {
+                tokio::task::yield_now().await;
+            }
+        })
+        .await
+        .expect("the off-lock launch check did not reach its gate");
+    }
+
+    async fn input_with(messages: &Messages, needle: &str) {
+        tokio::time::timeout(Duration::from_secs(3), async {
+            while !messages.lock().unwrap().iter().any(|(_, message)| message.to_string().contains(needle)) {
+                tokio::task::yield_now().await;
+            }
+        })
+        .await
+        .expect("the user turn was not sent");
+    }
+
+    #[tokio::test]
+    async fn production_launch_check_leaves_other_chats_responsive_and_composer_warm_cannot_replace_send() {
+        let dir = tempfile::tempdir().unwrap();
+        let folder = dir.path().canonicalize().unwrap();
+        let (spawn, args, messages) = fake();
+        let engine = engine(&folder, spawn);
+        let (started, entered) = std::sync::mpsc::channel();
+        let (finished, ended) = std::sync::mpsc::channel();
+        let gate = Arc::new(std::sync::Barrier::new(2));
+        engine.with(|core| {
+            conversation(core, Area::Chat, None, &folder, "Debug the failure");
+            core.convs.get_mut("kit").unwrap().working_folder = None;
+            let mut peer = core.convs["kit"].clone();
+            peer.id = "peer".into();
+            core.convs.insert("peer".into(), peer);
+            core.launch("peer", &pick(Vendor::Claude)).unwrap();
+            core.synchronous_kit_checks = false;
+            core.kit_check_hook = Some((started, gate.clone(), finished));
+            core.rewind.captured_for_test("reply");
+            core.start("kit", "reply", &pick(Vendor::Claude), "KIT_TURN".into(), vec![], true).unwrap();
+            assert!(!core.live.contains_key("kit"));
+        });
+        checked_signal(&entered).await;
+        engine.with(|core| {
+            core.rewind.captured_for_test("reply");
+            core.start("peer", "reply", &pick(Vendor::Claude), "PEER_TURN".into(), vec![], true).unwrap();
+            assert_eq!(core.kit_check_gate.available_permits(), 0, "hash buffers have one off-lock owner");
+        });
+        input_with(&messages, "PEER_TURN").await;
+        for vendor in ["codex", "claude"] {
+            engine.warm(WarmRequest {
+                conversation_id: Some("kit".into()),
+                area: Area::Chat,
+                project_id: None,
+                choice: Choice { vendor: vendor.into(), model: None, effort: None },
+            });
+        }
+        assert_eq!(args.lock().unwrap().len(), 1, "the waiting reply starts no CLI and keeps its continuation");
+        gate.wait();
+        checked_signal(&ended).await;
+        input_with(&messages, "KIT_TURN").await;
+        engine.with(|core| {
+            assert!(core.kit_checks.is_empty());
+            assert_eq!(core.live["kit"].tool_kit.ids, ["debug"]);
+        });
+        engine.shutdown();
+    }
+
+    #[tokio::test]
+    async fn production_launch_check_cancels_stopped_turns_and_rejects_tampering_before_spawn() {
+        for change in ["stop", "tamper", "switch"] {
+            let dir = tempfile::tempdir().unwrap();
+            let folder = dir.path().canonicalize().unwrap();
+            let (spawn, args, messages) = fake();
+            let engine = engine(&folder, spawn);
+            let (started, entered) = std::sync::mpsc::channel();
+            let (finished, ended) = std::sync::mpsc::channel();
+            let gate = Arc::new(std::sync::Barrier::new(2));
+            let source = engine.with(|core| {
+                conversation(core, Area::Chat, None, &folder, "Debug the failure");
+                core.synchronous_kit_checks = false;
+                core.kit_check_hook = Some((started, gate.clone(), finished));
+                core.rewind.captured_for_test("reply");
+                let source = core
+                    .catalog_store()
+                    .ready_kit_for(Vendor::Codex, "Debug", None, Area::Chat, Permissions::FullAccess, &[])
+                    .0
+                    .skills
+                    .unwrap()
+                    .join("debug/SKILL.md");
+                core.start("kit", "reply", &pick(Vendor::Claude), "CHECKED_TURN".into(), vec![], true).unwrap();
+                source
+            });
+            checked_signal(&entered).await;
+            if change == "stop" {
+                engine.interrupt("kit");
+            } else if change == "switch" {
+                engine.with(|core| core.catalog_store().set_enabled("debug", false).unwrap());
+            } else {
+                std::fs::write(source, "TAMPERED_INSTRUCTIONS").unwrap();
+            }
+            gate.wait();
+            checked_signal(&ended).await;
+            if change == "stop" {
+                tokio::task::yield_now().await;
+                assert!(args.lock().unwrap().is_empty());
+                engine.with(|core| assert!(core.kit_checks.is_empty() && !core.live.contains_key("kit")));
+            } else {
+                input_with(&messages, "CHECKED_TURN").await;
+                engine.with(|core| {
+                    assert!(core.live["kit"].tool_kit.ids.is_empty());
+                    let expected = (change == "tamper").then_some("error.tools.reinstall");
+                    assert_eq!(core.live["kit"].tool_kit.error.as_deref(), expected);
+                    assert_eq!(core.catalog_store().item_status("debug").as_deref(), expected);
+                });
+                assert!(!messages.lock().unwrap().iter().any(|(_, message)| message.to_string().contains("TAMPERED_INSTRUCTIONS")));
+                if change == "tamper" {
+                    engine.with(|core| {
+                        core.retire("kit").unwrap().session.close();
+                        let c = core.convs.get_mut("kit").unwrap();
+                        c.messages.extend([
+                            Message::new("design-request".into(), Role::User, "Design a layout".into(), 3),
+                            Message::new("design-reply".into(), Role::Assistant, String::new(), 4),
+                        ]);
+                        core.rewind.captured_for_test("design-reply");
+                        core.start("kit", "design-reply", &pick(Vendor::Claude), "HEALTHY_DESIGN_TURN".into(), vec![], true).unwrap();
+                    });
+                    input_with(&messages, "HEALTHY_DESIGN_TURN").await;
+                    engine.with(|core| {
+                        assert_eq!(core.live["kit"].tool_kit.ids, ["design"]);
+                        assert!(
+                            core.live["kit"].tool_kit.error.is_none(),
+                            "a prior launch's omitted bad item does not warn on later healthy work"
+                        );
+                        assert_eq!(core.catalog_store().item_status("debug").as_deref(), Some("error.tools.reinstall"));
+                    });
+                }
+            }
+            engine.shutdown();
+        }
+    }
+
+    #[tokio::test]
+    async fn production_launch_checks_bound_hashing_to_one_worker() {
+        let dir = tempfile::tempdir().unwrap();
+        let folder = dir.path().canonicalize().unwrap();
+        let (spawn, _, messages) = fake();
+        let engine = engine(&folder, spawn);
+        let (first, entered_first) = std::sync::mpsc::channel();
+        let (finished_first, ended_first) = std::sync::mpsc::channel();
+        let gate_first = Arc::new(std::sync::Barrier::new(2));
+        engine.with(|core| {
+            conversation(core, Area::Chat, None, &folder, "Debug the failure");
+            let mut second = core.convs["kit"].clone();
+            second.id = "second".into();
+            core.convs.insert("second".into(), second);
+            core.synchronous_kit_checks = false;
+            core.kit_check_hook = Some((first, gate_first.clone(), finished_first));
+            core.rewind.captured_for_test("reply");
+            core.start("kit", "reply", &pick(Vendor::Claude), "FIRST_CHECK".into(), vec![], true).unwrap();
+        });
+        checked_signal(&entered_first).await;
+        let (second, entered_second) = std::sync::mpsc::channel();
+        let (finished_second, ended_second) = std::sync::mpsc::channel();
+        let gate_second = Arc::new(std::sync::Barrier::new(2));
+        engine.with(|core| {
+            core.kit_check_hook = Some((second, gate_second.clone(), finished_second));
+            core.rewind.captured_for_test("reply");
+            core.start("second", "reply", &pick(Vendor::Claude), "SECOND_CHECK".into(), vec![], true).unwrap();
+        });
+        for _ in 0..100 {
+            tokio::task::yield_now().await;
+        }
+        assert!(entered_second.try_recv().is_err(), "the second worker cannot allocate a hash buffer before the first finishes");
+        engine.with(|core| assert_eq!(core.kit_checks.len(), 2, "both pending conversations remain reachable"));
+        gate_first.wait();
+        checked_signal(&ended_first).await;
+        checked_signal(&entered_second).await;
+        input_with(&messages, "FIRST_CHECK").await;
+        gate_second.wait();
+        checked_signal(&ended_second).await;
+        input_with(&messages, "SECOND_CHECK").await;
+        engine.shutdown();
+    }
+
+    #[tokio::test]
+    async fn core_keeps_a_session_kit_until_retirement_and_rechecks_switches_for_the_next_one() {
+        for vendor in [Vendor::Claude, Vendor::Codex] {
+            for area in [Area::Chat, Area::Project] {
+                let dir = tempfile::tempdir().unwrap();
+                let folder = dir.path().canonicalize().unwrap();
+                let (spawn, args, _) = fake();
+                let engine = engine(&folder, spawn);
+                let project = engine.add_project(&folder.to_string_lossy()).unwrap();
+                engine.with(|core| {
+                    conversation(core, area, Some(&project.id), &folder, "Debug this failure");
+                    let assembly_started = std::time::Instant::now();
+                    let (measured, _) = core.catalog_store().kit("Debug this failure", Some(&folder), area, Permissions::FullAccess, &[]);
+                    let assembly_time = assembly_started.elapsed();
+                    let bytes = measured.skill_instructions().unwrap().len();
+                    assert!(args.lock().unwrap().is_empty(), "assembling a kit adds no process");
+                    println!(
+                        "kit assembly {vendor:?}/{area:?}: {} us, {bytes} instruction bytes, 0 added processes",
+                        assembly_time.as_micros()
+                    );
+                    drop(measured);
+                    core.launch("kit", &pick(vendor)).unwrap();
+                    let first = core.live["kit"].sid;
+                    let expected = vec!["debug"];
+                    assert_eq!(core.live["kit"].tool_kit.ids, expected);
+                    core.catalog_store().set_enabled("debug", false).unwrap();
+                    core.convs.get_mut("kit").unwrap().messages[0].text = "Design a layout".into();
+                    core.launch("kit", &pick(vendor)).unwrap();
+                    assert_eq!(core.live["kit"].sid, first);
+                    assert_eq!(args.lock().unwrap().len(), 1, "reusing a session adds no process");
+                    assert_eq!(core.live["kit"].tool_kit.ids, expected, "mid-session tasks and catalog switches do not change its kit");
+                    core.retire("kit").unwrap().session.close();
+                    core.launch("kit", &pick(vendor)).unwrap();
+                    assert_ne!(core.live["kit"].sid, first);
+                    assert!(!core.live["kit"].tool_kit.ids.iter().any(|id| id == "debug"), "disabled tools never join a new session");
+                    assert!(core.live["kit"].tool_kit.ids.iter().all(|id| id == "design"), "a not-yet-ready replacement may be empty");
+                });
+                engine.shutdown();
+            }
+        }
+    }
+
+    #[tokio::test]
+    async fn moving_chat_to_a_project_discards_its_native_kit_and_picks_for_the_project_turn() {
+        for vendor in [Vendor::Claude, Vendor::Codex] {
+            let dir = tempfile::tempdir().unwrap();
+            let folder = dir.path().canonicalize().unwrap();
+            let (spawn, args, messages) = fake();
+            let engine = engine(&folder, spawn);
+            let project = engine.add_project(&folder.to_string_lossy()).unwrap();
+            engine.with(|core| {
+                conversation(core, Area::Chat, None, &folder, "Debug this failure");
+                let c = core.convs.get_mut("kit").unwrap();
+                c.sessions.insert(vendor, "previous-chat-session".into());
+                c.session_kits.insert(vendor, ("previous-chat-session".into(), vec!["debug".into()], Some("servers:none".into())));
+                core.save("kit");
+            });
+            let moved = engine.move_to_project("kit", &project.id).unwrap();
+            assert!(moved.sessions.is_empty() && moved.session_kits.is_empty());
+            engine.with(|core| {
+                core.convs.get_mut("kit").unwrap().messages.push(Message::new(
+                    "project-task".into(),
+                    Role::User,
+                    "Design a landing page".into(),
+                    2,
+                ));
+                core.launch("kit", &pick(vendor)).unwrap();
+                assert_eq!(core.live["kit"].tool_kit.ids, ["design"]);
+                assert!(!core.live["kit"].resumed);
+            });
+            if vendor == Vendor::Claude {
+                assert!(!args.lock().unwrap()[0].1.iter().any(|arg| arg == "--resume"));
+            } else {
+                until_message(&messages, "thread/start").await;
+                assert!(!messages.lock().unwrap().iter().any(|(_, msg)| msg["method"] == "thread/resume"));
+            }
+            engine.shutdown();
+        }
+    }
+
+    async fn until_message(messages: &Messages, method: &str) -> Value {
+        tokio::time::timeout(Duration::from_secs(2), async {
+            loop {
+                if let Some(msg) = messages.lock().unwrap().iter().find_map(|(_, msg)| (msg["method"] == method).then(|| msg.clone())) {
+                    break msg;
+                }
+                tokio::time::sleep(Duration::from_millis(1)).await;
+            }
+        })
+        .await
+        .unwrap_or_else(|_| panic!("no {method} on fake wire: {:?}", messages.lock().unwrap()))
+    }
+
+    async fn claude_input(messages: &Messages) -> String {
+        tokio::time::timeout(Duration::from_secs(2), async {
+            loop {
+                if let Some(text) = messages.lock().unwrap().iter().find_map(|(bin, msg)| {
+                    (bin == "claude" && msg["type"] == "user").then(|| msg["message"]["content"].as_str().unwrap_or_default().to_string())
+                }) {
+                    break text;
+                }
+                tokio::task::yield_now().await;
+            }
+        })
+        .await
+        .expect("the current catalog resources must reach the Claude user input")
+    }
+
+    #[tokio::test]
+    async fn claude_chat_receives_bounded_instructions_in_restricted_input_without_external_reads() {
+        for permissions in [Permissions::Ask, Permissions::FullAccess] {
+            let dir = tempfile::tempdir().unwrap();
+            let folder = dir.path().canonicalize().unwrap();
+            let (spawn, args, messages) = fake();
+            let engine = engine(&folder, spawn);
+            engine.with(|core| {
+                core.store.save_settings(&Settings { permissions: Some(permissions), ..Default::default() }).unwrap();
+                conversation(core, Area::Chat, None, &folder, "Debug this failing test");
+                core.rewind.captured_for_test("reply");
+                core.start("kit", "reply", &pick(Vendor::Claude), "Debug this failing test".into(), vec![], true).unwrap();
+                assert_eq!(core.live["kit"].tool_kit.ids, ["debug"]);
+            });
+            let text = claude_input(&messages).await;
+            assert!(text.contains("debug_KIT_INSTRUCTIONS"));
+            assert!(!text.contains("design_KIT_INSTRUCTIONS"));
+            assert!(!text.contains("SKILL.md"), "Chat never needs a catalog path outside its working folder");
+            assert!(text.len() < crate::tools::kits::CONTEXT_BUDGET + "Debug this failing test".len());
+            let recorded = args.lock().unwrap();
+            let argv = &recorded[0].1;
+            assert!(argv.windows(2).any(|a| a == ["--input-format", "stream-json"]));
+            assert!(!argv.iter().any(|a| a == "--plugin-dir" || a == "--add-dir" || a.starts_with("Read(")));
+            drop(recorded);
+            engine.shutdown();
+        }
+    }
+
+    #[tokio::test]
+    async fn resumed_claude_projects_receive_current_index_with_native_history_intact() {
+        let dir = tempfile::tempdir().unwrap();
+        let folder = dir.path().canonicalize().unwrap();
+        let (spawn, args, messages) = fake();
+        let engine = engine(&folder, spawn);
+        let project = engine.add_project(&folder.to_string_lossy()).unwrap();
+        engine.with(|core| {
+            conversation(core, Area::Project, Some(&project.id), &folder, "Design a landing page");
+            core.convs.get_mut("kit").unwrap().sessions.insert(Vendor::Claude, "native-history".into());
+            core.catalog_store().set_enabled("debug", false).unwrap();
+            prepare(&core.catalog_store(), &folder);
+            core.rewind.captured_for_test("reply");
+            core.start("kit", "reply", &pick(Vendor::Claude), "Design a landing page".into(), vec![], true).unwrap();
+        });
+        let text = claude_input(&messages).await;
+        assert!(text.contains("replacing earlier catalog selections and paths"));
+        assert!(text.contains("faber:design;"));
+        assert!(!text.contains("faber:debug;"));
+        assert!(!text.contains("design_KIT_INSTRUCTIONS"), "Projects keep descriptions-only native loading");
+        assert!(text.contains("native Skill tool"));
+        assert!(!text.contains("; Read ") && !text.contains("SKILL.md"), "a loaded native plugin never asks for an outside Read");
+        let recorded = args.lock().unwrap();
+        let argv = &recorded[0].1;
+        assert!(argv.windows(2).any(|a| a == ["--resume", "native-history"]));
+        let plugin = argv.windows(2).find(|a| a[0] == "--plugin-dir").unwrap();
+        assert!(Path::new(&plugin[1]).join("skills/design/SKILL.md").is_file());
+        assert!(!argv.windows(2).filter(|a| a[0] == "--append-system-prompt").any(|a| a[1].contains("faber:design;")));
+        drop(recorded);
+        engine.shutdown();
+    }
+
+    #[tokio::test]
+    async fn claude_native_resume_sends_resources_only_when_the_saved_kit_changes() {
+        for area in [Area::Chat, Area::Project] {
+            for change in ["unchanged", "ids", "snapshot", "missing-digest"] {
+                let dir = tempfile::tempdir().unwrap();
+                let folder = dir.path().canonicalize().unwrap();
+                let (spawn, args, messages) = fake();
+                let engine = engine(&folder, spawn);
+                let project = engine.add_project(&folder.to_string_lossy()).unwrap();
+                let task = if change == "ids" { "Design a landing page" } else { "Debug this failure" };
+                engine.with(|core| {
+                    conversation(core, area, Some(&project.id), &folder, "Debug this failure");
+                    let (delivery, report) = core.choose_session_tools("kit", Vendor::Claude, Permissions::FullAccess, &folder);
+                    let identity = session_tool_identity(Vendor::Claude, &delivery);
+                    let digest = resource_digest(claude_resources(area, &delivery).as_deref());
+                    drop(delivery);
+                    let c = core.convs.get_mut("kit").unwrap();
+                    c.sessions.insert(Vendor::Claude, "native-history".into());
+                    c.session_kits.insert(Vendor::Claude, ("native-history".into(), report.ids, identity));
+                    if change != "missing-digest" {
+                        c.session_resource_digests.insert(Vendor::Claude, digest);
+                    }
+                    c.messages.iter_mut().find(|m| m.role == Role::User).unwrap().text = task.into();
+                    if change == "snapshot" {
+                        core.catalog_store = Some(catalog_version(&folder, "_UPDATED"));
+                    }
+                    core.rewind.captured_for_test("reply");
+                    core.start("kit", "reply", &pick(Vendor::Claude), task.into(), vec![], true).unwrap();
+                });
+                let text = claude_input(&messages).await;
+                if change == "unchanged" {
+                    assert_eq!(text, task, "{area:?}: an idle native resume spends no repeated catalog prefix");
+                } else {
+                    assert!(
+                        text.contains("replacing earlier catalog selections and paths") && text.ends_with(task),
+                        "{area:?}/{change}: {text}"
+                    );
+                    if area == Area::Chat && change == "snapshot" {
+                        assert!(text.contains("debug_KIT_INSTRUCTIONS_UPDATED"));
+                    }
+                    if area == Area::Project {
+                        assert!(text.contains("native Skill tool") && !text.contains("SKILL.md"));
+                    }
+                }
+                assert!(args.lock().unwrap()[0].1.windows(2).any(|a| a == ["--resume", "native-history"]), "native history is preserved");
+                engine.shutdown();
+            }
+        }
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn claude_warmed_native_resume_sends_only_changed_resources() {
+        for change in ["unchanged", "ids", "snapshot"] {
+            let dir = tempfile::tempdir().unwrap();
+            let folder = dir.path().canonicalize().unwrap();
+            let (spawn, args, messages) = fake();
+            let engine = engine(&folder, spawn);
+            let task = if change == "ids" { "Design a landing page" } else { "Debug the next failure too" };
+            engine.with(|core| {
+                conversation(core, Area::Chat, None, &folder, "Debug the failure");
+                let (delivery, report) = core.choose_session_tools("kit", Vendor::Claude, Permissions::FullAccess, &folder);
+                let identity = session_tool_identity(Vendor::Claude, &delivery);
+                let digest = resource_digest(claude_resources(Area::Chat, &delivery).as_deref());
+                let c = core.convs.get_mut("kit").unwrap();
+                c.working_folder = None;
+                c.sessions.insert(Vendor::Claude, "native-history".into());
+                c.session_kits.insert(Vendor::Claude, ("native-history".into(), report.ids, identity));
+                c.session_resource_digests.insert(Vendor::Claude, digest);
+                c.messages.last_mut().unwrap().status = Some(Status::Done);
+                core.launch("kit", &pick(Vendor::Claude)).unwrap();
+                let sid = core.live["kit"].sid;
+                core.handle("kit", sid, EngineEvent::Started { session_id: "native-history".into(), model: "fixture".into() });
+                core.close_when_idle("kit");
+            });
+            tokio::task::yield_now().await;
+            tokio::time::advance(Duration::from_secs(120)).await;
+            for _ in 0..1000 {
+                if engine.with(|core| !core.live.contains_key("kit")) {
+                    break;
+                }
+                tokio::task::yield_now().await;
+            }
+            engine.with(|core| {
+                assert!(!core.live.contains_key("kit"), "the preceding native process retired during idle");
+                core.warm_launch("kit", &pick(Vendor::Claude));
+                assert!(core.live["kit"].prepared && core.live["kit"].resumed);
+                let c = core.convs.get_mut("kit").unwrap();
+                c.messages.iter_mut().find(|m| m.role == Role::User).unwrap().text = task.into();
+                if change == "snapshot" {
+                    core.catalog_store = Some(catalog_version(&folder, "_UPDATED"));
+                }
+                core.rewind.captured_for_test("reply");
+                core.start("kit", "reply", &pick(Vendor::Claude), task.into(), vec![], true).unwrap();
+            });
+            let text = claude_input(&messages).await;
+            if change == "unchanged" {
+                assert_eq!(text, task, "returning to a warmed native session does not repeat its saved instructions");
+            } else {
+                assert!(text.contains("replacing earlier catalog selections and paths") && text.ends_with(task), "{change}: {text}");
+                assert!(text.contains(if change == "ids" { "design_KIT_INSTRUCTIONS" } else { "debug_KIT_INSTRUCTIONS_UPDATED" }));
+            }
+            let recorded = args.lock().unwrap();
+            assert_eq!(recorded.len(), if change == "snapshot" { 3 } else { 2 });
+            assert!(recorded.iter().all(|(_, argv)| argv.windows(2).any(|part| part == ["--resume", "native-history"])));
+            drop(recorded);
+            engine.shutdown();
+        }
+    }
+
+    #[tokio::test]
+    async fn claude_projects_and_helpers_choose_discovery_from_actual_plugin_support() {
+        for helper in [false, true] {
+            for plugin_dir in [false, true] {
+                let dir = tempfile::tempdir().unwrap();
+                let folder = dir.path().canonicalize().unwrap();
+                let (spawn, args, messages) = fake();
+                let engine = engine(&folder, spawn);
+                let project = engine.add_project(&folder.to_string_lossy()).unwrap();
+                engine.with(|core| {
+                    core.claude_flags.plugin_dir = plugin_dir;
+                    conversation(core, Area::Project, Some(&project.id), &folder, "Design a landing page");
+                    if helper {
+                        core.launch("kit", &pick(Vendor::Codex)).unwrap();
+                        core.start_helper("kit", "child".into(), json!({"title":"Design", "brief":"Design a landing page"}));
+                        assert!(core.helpers.contains_key("child"));
+                    } else {
+                        core.rewind.captured_for_test("reply");
+                        core.start("kit", "reply", &pick(Vendor::Claude), "Design a landing page".into(), vec![], true).unwrap();
+                    }
+                });
+                let text = claude_input(&messages).await;
+                assert!(text.contains("faber:design;") && text.contains("faber:debug;"), "both paths discover all enabled skills");
+                assert!(!text.contains("design_KIT_INSTRUCTIONS"), "Projects keep instruction bodies lazy");
+                assert_eq!(text.contains("native Skill tool"), plugin_dir, "helper={helper}, plugin_dir={plugin_dir}: {text}");
+                assert_eq!(text.contains("SKILL.md"), !plugin_dir, "an older CLI must receive a usable Read path");
+                if !plugin_dir {
+                    assert!(text.contains("Read "));
+                }
+                let recorded = args.lock().unwrap();
+                let (_, argv) = recorded.iter().find(|(bin, _)| bin == "claude").unwrap();
+                assert_eq!(argv.iter().any(|arg| arg == "--plugin-dir"), plugin_dir);
+                drop(recorded);
+                engine.shutdown();
+            }
+        }
+    }
+
+    #[tokio::test]
+    async fn codex_projects_discover_oversize_enabled_skills_while_chat_uses_the_next_fitting_item() {
+        for area in [Area::Chat, Area::Project] {
+            for resumed in [false, true] {
+                let dir = tempfile::tempdir().unwrap();
+                let folder = dir.path().canonicalize().unwrap();
+                let (spawn, _, messages) = fake();
+                let engine = engine(&folder, spawn);
+                let project = engine.add_project(&folder.to_string_lossy()).unwrap();
+                engine.with(|core| {
+                    let version = "X".repeat(crate::tools::kits::CONTEXT_BUDGET + 100);
+                    core.catalog_store =
+                        Some(catalog_items_versions(&folder, &[("design-large", "design", &version), ("design-small", "design", "")]));
+                    conversation(core, area, Some(&project.id), &folder, "Design a landing page");
+                    if resumed {
+                        core.convs.get_mut("kit").unwrap().sessions.insert(Vendor::Codex, "native-history".into());
+                    }
+                    core.rewind.captured_for_test("reply");
+                    core.start("kit", "reply", &pick(Vendor::Codex), "Design a landing page".into(), vec![], true).unwrap();
+                    assert_eq!(core.live["kit"].tool_kit.ids, ["design-small"], "the oversize item never falsely appears as selected");
+                });
+                let thread = until_message(&messages, if resumed { "thread/resume" } else { "thread/start" }).await;
+                let text = if resumed {
+                    until_message(&messages, "turn/start").await["params"]["input"][0]["text"].as_str().unwrap().to_string()
+                } else {
+                    thread["params"]["developerInstructions"].as_str().unwrap().to_string()
+                };
+                assert!(text.contains("design-small_KIT_INSTRUCTIONS"));
+                assert!(!text.contains("design-large_KIT_INSTRUCTIONS"));
+                assert_eq!(
+                    text.contains("faber:design-large;"),
+                    area == Area::Project,
+                    "only Projects gets the full enabled description index"
+                );
+                if area == Area::Chat {
+                    assert!(text.len() < crate::tools::kits::CONTEXT_BUDGET + 512);
+                } else {
+                    assert!(text.contains("SKILL.md"), "a project can lazily read the oversize skill from its checked snapshot");
+                }
+                if resumed {
+                    assert_eq!(thread["params"]["threadId"], "native-history");
+                }
+                engine.shutdown();
+            }
+        }
+    }
+
+    #[tokio::test]
+    async fn codex_skill_boundary_resumes_native_history_and_delivers_full_selected_instructions() {
+        let dir = tempfile::tempdir().unwrap();
+        let folder = dir.path().canonicalize().unwrap();
+        let (spawn, args, messages) = fake();
+        let engine = engine(&folder, spawn);
+        engine.with(|core| {
+            conversation(core, Area::Chat, None, &folder, "Debug this failure");
+            let c = core.convs.get_mut("kit").unwrap();
+            c.sessions.insert(Vendor::Codex, "old-native-thread".into());
+            c.messages.insert(0, Message::new("earlier-user".into(), Role::User, "Keep the earlier requirement".into(), 1));
+            c.messages.insert(1, Message::new("earlier-answer".into(), Role::Assistant, "Earlier answer retained".into(), 1));
+            c.messages[1].tool_kit = Some(crate::tools::kits::Report { ids: vec!["design".into()], ..Default::default() });
+            core.rewind.captured_for_test("reply");
+            core.start("kit", "reply", &pick(Vendor::Codex), "Debug this failure".into(), vec![], true).unwrap();
+            assert_eq!(core.live["kit"].tool_kit.ids, ["debug"]);
+        });
+        let thread = until_message(&messages, "thread/resume").await;
+        let turn = until_message(&messages, "turn/start").await;
+        assert_eq!(thread["params"]["threadId"], "old-native-thread");
+        assert!(!messages.lock().unwrap().iter().any(|(_, msg)| msg["method"] == "thread/start"));
+        let sent = turn["params"]["input"][0]["text"].as_str().unwrap();
+        assert!(sent.contains("debug_KIT_INSTRUCTIONS") && sent.ends_with("Debug this failure"), "{sent}");
+        assert!(!sent.contains("Earlier answer retained") && !sent.contains("Earlier conversation"), "native history is not replayed");
+        assert!(!sent.contains("design_KIT_INSTRUCTIONS"));
+        assert_eq!(args.lock().unwrap().len(), 1, "new native threads share the existing app-server process");
+        engine.shutdown();
+    }
+
+    #[tokio::test]
+    async fn loaded_codex_project_refreshes_resources_after_switching_back_with_the_same_kit() {
+        let dir = tempfile::tempdir().unwrap();
+        let folder = dir.path().canonicalize().unwrap();
+        let effective: Messages = Arc::default();
+        let (spawn, args, messages) = fake_backend(true, Some(effective.clone()));
+        let engine = engine(&folder, spawn);
+        let project = engine.add_project(&folder.to_string_lossy()).unwrap();
+        let old_resources = engine.with(|core| {
+            let store = core.catalog_store();
+            store.set_enabled("design", false).unwrap();
+            prepare(&store, &folder);
+            conversation(core, Area::Project, Some(&project.id), &folder, "Debug this failure");
+            let (delivery, _) = core.choose_session_tools("kit", Vendor::Codex, Permissions::FullAccess, &folder);
+            let resources = codex_resources(Area::Project, &delivery).unwrap();
+            core.rewind.captured_for_test("reply");
+            core.start("kit", "reply", &pick(Vendor::Codex), "BEFORE_CATALOG_CHANGE".into(), vec![], true).unwrap();
+            resources
+        });
+        input_with(&messages, "BEFORE_CATALOG_CHANGE").await;
+        tokio::time::timeout(Duration::from_secs(3), async {
+            while !engine.with(|core| {
+                let c = &core.convs["kit"];
+                c.sessions.contains_key(&Vendor::Codex)
+                    && c.session_kits.contains_key(&Vendor::Codex)
+                    && c.session_resource_digests.contains_key(&Vendor::Codex)
+            }) {
+                tokio::task::yield_now().await;
+            }
+        })
+        .await
+        .expect("the accepted turn saves its actual native thread and kit");
+        let (native, saved_kit, server) = engine.with(|core| {
+            let native = core.convs["kit"].sessions[&Vendor::Codex].clone();
+            let saved_kit = core.convs["kit"].session_kits[&Vendor::Codex].clone();
+            let mut peer = core.convs["kit"].clone();
+            peer.id = "peer".into();
+            peer.sessions.clear();
+            peer.session_kits.clear();
+            core.convs.insert("peer".into(), peer);
+            core.launch("peer", &pick(Vendor::Codex)).unwrap();
+            let server = core.codex.values().next().unwrap().clone();
+            core.retire("kit").unwrap().session.close();
+            core.launch("kit", &pick(Vendor::Claude)).unwrap();
+            (native, saved_kit, server)
+        });
+        let current_resources = engine.with(|core| {
+            let store = core.catalog_store();
+            store.set_enabled("design", true).unwrap();
+            prepare(&store, &folder);
+            let (delivery, report) = core.choose_session_tools("kit", Vendor::Codex, Permissions::FullAccess, &folder);
+            assert_eq!(report.ids, saved_kit.1, "the unrelated skill never changes the selected kit");
+            assert_eq!(delivery.server_identity(), saved_kit.2, "the native server identity is unchanged");
+            let resources = codex_resources(Area::Project, &delivery).unwrap();
+            core.retire("kit").unwrap().session.close();
+            core.convs.get_mut("kit").unwrap().messages.push(Message::new("after".into(), Role::Assistant, String::new(), 2));
+            core.rewind.captured_for_test("after");
+            core.start("kit", "after", &pick(Vendor::Codex), "AFTER_CATALOG_CHANGE".into(), vec![], true).unwrap();
+            assert!(core.live["kit"].resumed);
+            assert!(core.live.contains_key("peer") && server.is_alive(), "the peer keeps the shared backend loaded across the switch");
+            resources
+        });
+        input_with(&messages, "AFTER_CATALOG_CHANGE").await;
+        assert_ne!(old_resources, current_resources, "the discovery index and snapshot paths changed");
+        assert!(current_resources.contains("faber:design;") && !old_resources.contains("faber:design;"));
+        let sent = {
+            let recorded = messages.lock().unwrap();
+            let resumed = recorded.iter().find(|(_, msg)| msg["method"] == "thread/resume").unwrap();
+            assert_eq!(resumed.1["params"]["threadId"], native, "native history survives the switch");
+            recorded.iter().rev().find(|(_, msg)| msg["method"] == "turn/start").unwrap().1["params"]["input"][0]["text"]
+                .as_str()
+                .unwrap()
+                .to_string()
+        };
+        assert_eq!(args.lock().unwrap().iter().filter(|(bin, _)| bin == "codex").count(), 1, "both native threads share the same backend");
+        {
+            let effective = effective.lock().unwrap();
+            let resources = effective.iter().rev().find(|(id, _)| id == &native).unwrap().1.as_str().unwrap();
+            assert!(
+                resources.contains(&current_resources),
+                "a loaded thread must see the current index and paths even when resume overrides are ignored: {resources}"
+            );
+            assert!(!resources.contains(&old_resources), "the previous resource paths must be replaced");
+        }
+        assert!(
+            sent.contains(&current_resources) && sent.ends_with("AFTER_CATALOG_CHANGE"),
+            "changed resources reach turn/start as a prefix"
+        );
+        let digest = resource_digest(Some(&current_resources));
+        tokio::time::timeout(Duration::from_secs(3), async {
+            while !engine.with(|core| core.convs["kit"].session_resource_digests.get(&Vendor::Codex) == Some(&digest)) {
+                tokio::task::yield_now().await;
+            }
+        })
+        .await
+        .expect("accepting the resumed turn persists its delivered resource digest");
+        engine.with(|core| {
+            assert_eq!(core.convs["kit"].session_kits[&Vendor::Codex], saved_kit);
+            core.retire("kit").unwrap().session.close();
+            core.convs.get_mut("kit").unwrap().messages.push(Message::new("unchanged".into(), Role::Assistant, String::new(), 3));
+            core.rewind.captured_for_test("unchanged");
+            core.start("kit", "unchanged", &pick(Vendor::Codex), "UNCHANGED_CATALOG".into(), vec![], true).unwrap();
+        });
+        input_with(&messages, "UNCHANGED_CATALOG").await;
+        let recorded = messages.lock().unwrap();
+        let turn = &recorded.iter().rev().find(|(_, msg)| msg["method"] == "turn/start").unwrap().1;
+        assert_eq!(
+            turn["params"]["input"][0]["text"], "UNCHANGED_CATALOG",
+            "a later unchanged native resume spends no repeated resource prefix"
+        );
+        drop(recorded);
+        engine.shutdown();
+    }
+
+    #[tokio::test]
+    async fn loaded_codex_thread_clears_removed_resources_once_and_keeps_native_history() {
+        let dir = tempfile::tempdir().unwrap();
+        let folder = dir.path().canonicalize().unwrap();
+        let effective: Messages = Arc::default();
+        let (spawn, args, messages) = fake_backend(true, Some(effective.clone()));
+        let engine = engine(&folder, spawn);
+        engine.with(|core| {
+            conversation(core, Area::Chat, None, &folder, "Debug this failure");
+            core.rewind.captured_for_test("reply");
+            core.start("kit", "reply", &pick(Vendor::Codex), "WITH_RESOURCES".into(), vec![], true).unwrap();
+        });
+        input_with(&messages, "WITH_RESOURCES").await;
+        tokio::time::timeout(Duration::from_secs(3), async {
+            while !engine.with(|core| {
+                let c = &core.convs["kit"];
+                c.sessions.contains_key(&Vendor::Codex)
+                    && c.session_kits.contains_key(&Vendor::Codex)
+                    && c.session_resource_digests.contains_key(&Vendor::Codex)
+            }) {
+                tokio::task::yield_now().await;
+            }
+        })
+        .await
+        .expect("the first accepted turn persists its native history and resources");
+        let (native, old_digest, server) = engine.with(|core| {
+            let c = &core.convs["kit"];
+            let native = c.sessions[&Vendor::Codex].clone();
+            let old_digest = c.session_resource_digests[&Vendor::Codex].clone();
+            let mut peer = c.clone();
+            peer.id = "peer".into();
+            peer.sessions.clear();
+            peer.session_kits.clear();
+            peer.session_resource_digests.clear();
+            core.convs.insert("peer".into(), peer);
+            core.launch("peer", &pick(Vendor::Codex)).unwrap();
+            let server = core.codex.values().next().unwrap().clone();
+            core.retire("kit").unwrap().session.close();
+            let store = core.catalog_store();
+            for id in ["debug", "design"] {
+                store.set_enabled(id, false).unwrap();
+            }
+            prepare(&store, &folder);
+            core.convs.get_mut("kit").unwrap().messages.push(Message::new("empty".into(), Role::Assistant, String::new(), 2));
+            core.rewind.captured_for_test("empty");
+            core.start("kit", "empty", &pick(Vendor::Codex), "NO_RESOURCES".into(), vec![], true).unwrap();
+            assert!(core.live["kit"].resumed && core.live["kit"].tool_kit.ids.is_empty());
+            assert!(core.live.contains_key("peer") && server.is_alive(), "the native backend stays loaded through its peer");
+            (native, old_digest, server)
+        });
+        input_with(&messages, "NO_RESOURCES").await;
+        let sent =
+            messages.lock().unwrap().iter().rev().find(|(_, msg)| msg["method"] == "turn/start").unwrap().1["params"]["input"][0]["text"]
+                .as_str()
+                .unwrap()
+                .to_string();
+        assert!(sent.starts_with(RESOURCE_PREFIX), "a loaded thread must receive an explicit empty resource replacement: {sent}");
+        let empty = sent.strip_prefix(RESOURCE_PREFIX).unwrap().strip_suffix("\n\nNO_RESOURCES").unwrap();
+        assert_eq!(empty, EMPTY_RESOURCES, "the replacement explicitly clears the old catalog instructions");
+        let digest = resource_digest(Some(empty));
+        assert_ne!(digest, old_digest);
+        tokio::time::timeout(Duration::from_secs(3), async {
+            while !engine.with(|core| core.convs["kit"].session_resource_digests.get(&Vendor::Codex) == Some(&digest)) {
+                tokio::task::yield_now().await;
+            }
+        })
+        .await
+        .expect("accepting the empty replacement persists its exact delivered digest");
+        {
+            let effective = effective.lock().unwrap();
+            let resources = effective.iter().rev().find(|(id, _)| id == &native).unwrap().1.as_str().unwrap();
+            assert!(
+                resources.contains(empty) && !resources.contains("debug_KIT_INSTRUCTIONS"),
+                "the loaded thread clears earlier resources despite ignoring resume overrides"
+            );
+        }
+        engine.with(|core| {
+            assert_eq!(core.convs["kit"].sessions[&Vendor::Codex], native);
+            assert_eq!(core.convs["kit"].session_kits[&Vendor::Codex].0, native);
+            assert!(core.convs["kit"].session_kits[&Vendor::Codex].1.is_empty());
+            core.retire("kit").unwrap().session.close();
+            core.convs.get_mut("kit").unwrap().messages.push(Message::new("still-empty".into(), Role::Assistant, String::new(), 3));
+            core.rewind.captured_for_test("still-empty");
+            core.start("kit", "still-empty", &pick(Vendor::Codex), "STILL_NO_RESOURCES".into(), vec![], true).unwrap();
+            assert!(core.live["kit"].resumed && server.is_alive());
+        });
+        input_with(&messages, "STILL_NO_RESOURCES").await;
+        let recorded = messages.lock().unwrap();
+        let turn = &recorded.iter().rev().find(|(_, msg)| msg["method"] == "turn/start").unwrap().1;
+        assert_eq!(turn["params"]["input"][0]["text"], "STILL_NO_RESOURCES", "the explicit empty marker is delivered only once");
+        let resumed: Vec<_> = recorded.iter().filter(|(_, msg)| msg["method"] == "thread/resume").collect();
+        assert_eq!(resumed.len(), 2);
+        assert!(resumed.iter().all(|(_, msg)| msg["params"]["threadId"] == native), "both resumes keep the original native history");
+        drop(recorded);
+        assert_eq!(args.lock().unwrap().iter().filter(|(bin, _)| bin == "codex").count(), 1, "resource clearing keeps the shared backend");
+        engine.shutdown();
+    }
+
+    #[tokio::test]
+    async fn codex_native_resume_sends_resources_only_when_the_saved_kit_changes() {
+        for area in [Area::Chat, Area::Project] {
+            for change in ["unchanged", "contents", "ids", "native-id", "missing-record", "missing-digest"] {
+                let dir = tempfile::tempdir().unwrap();
+                let folder = dir.path().canonicalize().unwrap();
+                let (spawn, _, messages) = fake();
+                let engine = engine(&folder, spawn);
+                let project = engine.add_project(&folder.to_string_lossy()).unwrap();
+                let task = if change == "ids" { "Design a landing page" } else { "Debug this failure" };
+                engine.with(|core| {
+                    conversation(core, area, Some(&project.id), &folder, "Debug this failure");
+                    let (delivery, report) = core.catalog_store().ready_kit_for(
+                        Vendor::Codex,
+                        "Debug this failure",
+                        Some(&folder),
+                        area,
+                        Permissions::FullAccess,
+                        &[],
+                    );
+                    let (delivery, damaged, io_error) = delivery.verified_for_launch(Vendor::Codex);
+                    assert!(damaged.is_empty() && !io_error, "{area:?}/{change}: the prior verified resource fixture is ready");
+                    let digest = resource_digest(codex_resources(area, &delivery).as_deref());
+                    let c = core.convs.get_mut("kit").unwrap();
+                    c.sessions.insert(Vendor::Codex, "native-history".into());
+                    if change != "missing-record" {
+                        let native = if change == "native-id" { "another-thread" } else { "native-history" };
+                        c.session_kits.insert(Vendor::Codex, (native.into(), report.ids, delivery.server_identity()));
+                        if change != "missing-digest" {
+                            c.session_resource_digests.insert(Vendor::Codex, digest);
+                        }
+                    }
+                    c.messages[0].text = task.into();
+                    let saved = serde_json::to_vec(c).unwrap();
+                    core.convs.insert("kit".into(), serde_json::from_slice(&saved).unwrap());
+                    if change == "contents" {
+                        core.catalog_store = Some(catalog_version(&folder, "_UPDATED"));
+                    }
+                    core.rewind.captured_for_test("reply");
+                    core.start("kit", "reply", &pick(Vendor::Codex), task.into(), vec![], true).unwrap();
+                    assert!(core.live["kit"].resumed);
+                    assert_eq!(
+                        core.live["kit"].tool_kit.ids,
+                        [if change == "ids" { "design" } else { "debug" }],
+                        "{area:?}/{change}: the current resource fixture is ready"
+                    );
+                });
+                let thread = until_message(&messages, "thread/resume").await;
+                assert_eq!(thread["params"]["threadId"], "native-history");
+                let instructions = thread["params"]["developerInstructions"].as_str().unwrap();
+                if area == Area::Chat {
+                    assert!(
+                        !instructions.contains("supporting files:"),
+                        "resuming Chat retains bounded instruction bodies without file paths"
+                    );
+                }
+                assert_eq!(instructions.contains("debug_KIT_INSTRUCTIONS_UPDATED"), change == "contents");
+                assert_eq!(instructions.contains("SKILL.md"), area == Area::Project, "{area:?}/{change}: {thread}");
+                let turn = until_message(&messages, "turn/start").await;
+                let sent = turn["params"]["input"][0]["text"].as_str().unwrap();
+                if change == "unchanged" {
+                    assert_eq!(sent, task, "{area:?}: a restored native kit spends no repeated catalog prefix");
+                } else {
+                    assert!(
+                        sent.contains("replacing earlier catalog selections and paths") && sent.ends_with(task),
+                        "{area:?}/{change}: {sent}"
+                    );
+                    assert!(sent.contains(match change {
+                        "ids" => "design_KIT_INSTRUCTIONS",
+                        "contents" => "debug_KIT_INSTRUCTIONS_UPDATED",
+                        _ => "debug_KIT_INSTRUCTIONS",
+                    }));
+                    assert_eq!(sent.contains("SKILL.md"), area == Area::Project);
+                }
+                assert!(!messages.lock().unwrap().iter().any(|(_, msg)| msg["method"] == "thread/start"));
+                engine.shutdown();
+            }
+        }
+    }
+
+    #[tokio::test]
+    async fn identical_codex_kits_resume_native_history_and_compact_never_opens_an_empty_thread() {
+        for compact in [false, true] {
+            let dir = tempfile::tempdir().unwrap();
+            let folder = dir.path().canonicalize().unwrap();
+            let (spawn, args, messages) = fake();
+            let engine = engine(&folder, spawn);
+            engine.with(|core| {
+                conversation(core, Area::Chat, None, &folder, "Debug this failure");
+                let c = core.convs.get_mut("kit").unwrap();
+                c.sessions.insert(Vendor::Codex, "saved-native-thread".into());
+                let last = c.messages.last_mut().unwrap();
+                last.vendor = Some(Vendor::Codex);
+                last.status = Some(Status::Done);
+                last.tool_kit = Some(crate::tools::kits::Report { ids: vec!["debug".into()], ..Default::default() });
+                if compact {
+                    core.catalog_store().set_enabled("debug", false).unwrap();
+                    core.compact_now("kit").unwrap();
+                } else {
+                    core.rewind.captured_for_test("reply");
+                    core.start("kit", "reply", &pick(Vendor::Codex), "Debug this failure".into(), vec![], true).unwrap();
+                }
+                assert_eq!(core.live["kit"].tool_kit.ids, ["debug"]);
+            });
+            let resumed = until_message(&messages, "thread/resume").await;
+            assert_eq!(resumed["params"]["threadId"], "saved-native-thread");
+            if compact {
+                until_message(&messages, "thread/compact/start").await;
+            } else {
+                let turn = until_message(&messages, "turn/start").await;
+                let sent = turn["params"]["input"][0]["text"].as_str().unwrap();
+                assert!(!sent.contains("Earlier conversation"), "native history is never replayed as text");
+                assert!(sent.ends_with("Debug this failure"));
+            }
+            assert!(!messages.lock().unwrap().iter().any(|(_, msg)| msg["method"] == "thread/start"));
+            assert_eq!(args.lock().unwrap().len(), 1);
+            engine.shutdown();
+        }
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn code_pick_never_calls_a_model_or_delays_dispatch() {
+        let dir = tempfile::tempdir().unwrap();
+        let folder = dir.path().canonicalize().unwrap();
+        let (spawn, args, messages) = fake();
+        let engine = engine(&folder, spawn);
+        let clock = tokio::time::Instant::now();
+        engine.with(|core| {
+            core.codex_models.clear();
+            core.warm_router();
+            let spare = core.spare.as_ref().expect("Auto's Claude router is prepared").asked.clone();
+            core.opts.ask = Some(Arc::new(|_| panic!("kit selection must never call a model")));
+            conversation(core, Area::Chat, None, &folder, "Debug this failure");
+            core.rewind.captured_for_test("reply");
+            core.start("kit", "reply", &pick(Vendor::Codex), "Debug this failure".into(), vec![], true).unwrap();
+            assert_eq!(core.live["kit"].tool_kit.ids, ["debug"]);
+            assert_eq!(core.live["kit"].tool_kit.method, "code");
+            assert!(Arc::ptr_eq(&core.spare.as_ref().expect("kit selection leaves Auto's spare alone").asked, &spare));
+            assert!(spare.lock().unwrap().is_none());
+            assert_eq!(clock.elapsed(), Duration::ZERO, "selection and queueing have no asynchronous wait");
+        });
+        until_message(&messages, "turn/start").await;
+        assert_eq!(args.lock().unwrap().len(), 2, "the already prepared router and the conversation only");
+        engine.shutdown();
+    }
+
+    #[tokio::test]
+    async fn cold_snapshot_preparation_never_holds_the_engine_lock_or_delays_a_turn() {
+        let dir = tempfile::tempdir().unwrap();
+        let folder = dir.path().canonicalize().unwrap();
+        let (spawn, _, messages) = fake();
+        let engine = engine(&folder, spawn);
+        let catalog = engine.with(|core| {
+            core.store.save_settings(&Settings { permissions: Some(Permissions::Plan), ..Default::default() }).unwrap();
+            conversation(core, Area::Chat, None, &folder, "Debug this failure");
+            core.catalog_store().clear_prepared_for_test();
+            core.catalog_store()
+        });
+        let (held, gate_held) = std::sync::mpsc::channel();
+        let (release, released) = std::sync::mpsc::channel();
+        let gate = std::thread::spawn(move || {
+            let _guard = crate::tools::lock();
+            held.send(()).unwrap();
+            let _ = released.recv_timeout(Duration::from_secs(2));
+        });
+        gate_held.recv_timeout(Duration::from_secs(2)).unwrap();
+        let (entered, worker_entered) = std::sync::mpsc::channel();
+        let root = folder.clone();
+        let prepared = catalog.clone();
+        let worker = tokio::task::spawn_blocking(move || {
+            entered.send(()).unwrap();
+            catalog.prepare_kit_for(Vendor::Codex, "Debug this failure", Some(&root), Area::Chat, Permissions::Plan, &[]);
+        });
+        worker_entered.recv_timeout(Duration::from_secs(2)).unwrap();
+        let started = std::time::Instant::now();
+        engine.with(|core| {
+            core.rewind.captured_for_test("reply");
+            core.start("kit", "reply", &pick(Vendor::Codex), "Debug this failure".into(), vec![], true).unwrap();
+            assert!(core.live["kit"].tool_kit.ids.is_empty(), "an unready scope starts without waiting for its snapshot");
+        });
+        assert!(started.elapsed() < Duration::from_secs(1), "synchronous snapshot I/O must not delay dispatch");
+        engine.with(|core| core.tick += 1);
+        until_message(&messages, "turn/start").await;
+        assert!(!worker.is_finished(), "the turn reaches the CLI while snapshot disk preparation remains blocked");
+        release.send(()).unwrap();
+        gate.join().unwrap();
+        worker.await.unwrap();
+        prepared.wait_prepared_for_test();
+        engine.with(|core| {
+            assert!(core.live["kit"].tool_kit.ids.is_empty(), "readiness never mutates the running session");
+            core.retire("kit").unwrap().session.close();
+            core.launch("kit", &pick(Vendor::Codex)).unwrap();
+            assert_eq!(core.live["kit"].tool_kit.ids, ["debug"], "the prepared kit joins only the next session");
+        });
+        engine.shutdown();
+    }
+
+    #[tokio::test]
+    #[ignore = "manual release-build fake-CLI first-word measurement"]
+    async fn release_first_word_with_a_blank_warmed_claude_catalog_session() {
+        let dir = tempfile::tempdir().unwrap();
+        let folder = dir.path().canonicalize().unwrap();
+        let (spawn, args, _) = fake_reply(true);
+        let engine = engine(&folder, spawn);
+        let store = if let Some(root) = std::env::var_os("FABER_KIT_BENCH_ROOT") {
+            ToolStore::new(Path::new(&root))
+        } else {
+            engine.with(|core| core.catalog_store())
+        };
+        store.prepare_kit_for(Vendor::Claude, "", None, Area::Chat, Permissions::Ask, &[]);
+        store.wait_prepared_for_test();
+        engine.with(|core| {
+            core.catalog_store = Some(store.clone());
+            conversation(core, Area::Chat, None, &folder, "");
+            for vendor in [Vendor::Claude, Vendor::Codex] {
+                let checked = std::time::Instant::now();
+                let (delivery, report) = core.session_tools(
+                    vendor,
+                    Area::Project,
+                    Permissions::FullAccess,
+                    None,
+                    "Design a website and measure devtools performance",
+                    &folder,
+                );
+                let (delivery, damaged, io_failed) = delivery.verified_for_launch(vendor);
+                assert!(damaged.is_empty() && !io_failed);
+                assert!(report.error.is_none());
+                eprintln!(
+                    "release full-folder launch check {vendor:?}/Project: {} us; {} selected ids; {} servers",
+                    checked.elapsed().as_micros(),
+                    report.ids.len(),
+                    delivery.servers.len()
+                );
+            }
+            let c = core.convs.get_mut("kit").unwrap();
+            c.messages.clear();
+            c.working_folder = None;
+            core.warm_launch("kit", &pick(Vendor::Claude));
+        });
+        let started = std::time::Instant::now();
+        engine.with(|core| {
+            core.convs.get_mut("kit").unwrap().messages.extend([
+                Message::new("sent".into(), Role::User, "Debug this failing test".into(), 1),
+                Message::new("answer".into(), Role::Assistant, String::new(), 2),
+            ]);
+            core.rewind.captured_for_test("answer");
+            core.start("kit", "answer", &pick(Vendor::Claude), "Debug this failing test".into(), vec![], true).unwrap();
+        });
+        let dispatch = started.elapsed();
+        tokio::time::timeout(Duration::from_secs(5), async {
+            while !engine.with(|core| core.convs["kit"].messages.last().unwrap().text.contains("first word")) {
+                tokio::task::yield_now().await;
+            }
+        })
+        .await
+        .unwrap();
+        assert_eq!(args.lock().unwrap().len(), 1, "the blank warmed process must serve the sent task");
+        eprintln!(
+            "release warmed Claude fake CLI ({} installed items): dispatch={} us, first_word={} us, 1 reused process",
+            store.installed().len(),
+            dispatch.as_micros(),
+            started.elapsed().as_micros()
+        );
+        engine.shutdown();
+    }
+
+    #[tokio::test]
+    #[ignore = "manual release-build fake-CLI first-word measurement"]
+    async fn release_first_word_with_ready_and_unready_catalog_kits() {
+        for ready in [false, true] {
+            let dir = tempfile::tempdir().unwrap();
+            let folder = dir.path().canonicalize().unwrap();
+            let (spawn, _, _) = fake_reply(true);
+            let engine = engine(&folder, spawn);
+            let store = if let Some(root) = std::env::var_os("FABER_KIT_BENCH_ROOT") {
+                ToolStore::new(Path::new(&root))
+            } else {
+                engine.with(|core| core.catalog_store())
+            };
+            store.prepare_kit_for(Vendor::Codex, "Debug this failure", Some(&folder), Area::Chat, Permissions::FullAccess, &[]);
+            store.wait_prepared_for_test();
+            let installed = store.installed().len();
+            engine.with(|core| {
+                core.catalog_store = Some(store);
+                if !ready {
+                    core.store.save_settings(&Settings { permissions: Some(Permissions::Plan), ..Default::default() }).unwrap();
+                    core.catalog_store().clear_prepared_for_test();
+                }
+                conversation(core, Area::Chat, None, &folder, "Debug this failure");
+                core.rewind.captured_for_test("reply");
+            });
+            let started = std::time::Instant::now();
+            engine.with(|core| {
+                core.start("kit", "reply", &pick(Vendor::Codex), "Debug this failure".into(), vec![], true).unwrap();
+                assert_eq!(core.live["kit"].tool_kit.ids.is_empty(), !ready);
+            });
+            let dispatch = started.elapsed();
+            tokio::time::timeout(Duration::from_secs(5), async {
+                while !engine.with(|core| core.convs["kit"].messages.last().unwrap().text.contains("first word")) {
+                    tokio::task::yield_now().await;
+                }
+            })
+            .await
+            .unwrap();
+            eprintln!(
+                "release fake CLI ({installed} installed catalog items), ready={ready}: dispatch={} us, first_word={} us, 0 model wait, 0 picker processes",
+                dispatch.as_micros(),
+                started.elapsed().as_micros()
+            );
+            engine.shutdown();
+        }
+    }
+
+    #[tokio::test]
+    async fn terminal_and_pre_update_threads_without_a_kit_record_resume_an_empty_pick() {
+        for old_history in [false, true] {
+            let dir = tempfile::tempdir().unwrap();
+            let folder = dir.path().canonicalize().unwrap();
+            let (spawn, _, messages) = fake();
+            let engine = engine(&folder, spawn);
+            engine.with(|core| {
+                conversation(core, Area::Chat, None, &folder, "Go on");
+                core.catalog_store().set_enabled("debug", false).unwrap();
+                core.catalog_store().set_enabled("design", false).unwrap();
+                let c = core.convs.get_mut("kit").unwrap();
+                c.sessions.insert(Vendor::Codex, "external-native-thread".into());
+                if old_history {
+                    let mut old = Message::new("old".into(), Role::Assistant, "Saved before kits".into(), 0);
+                    old.vendor = Some(Vendor::Codex);
+                    c.messages.insert(0, old);
+                }
+                core.rewind.captured_for_test("reply");
+                core.start("kit", "reply", &pick(Vendor::Codex), "Go on".into(), vec![], true).unwrap();
+                assert!(core.live["kit"].resumed);
+            });
+            let resumed = until_message(&messages, "thread/resume").await;
+            assert_eq!(resumed["params"]["threadId"], "external-native-thread");
+            let turn = until_message(&messages, "turn/start").await;
+            assert_eq!(turn["params"]["input"][0]["text"], "Go on");
+            assert!(!messages.lock().unwrap().iter().any(|(_, msg)| msg["method"] == "thread/start"));
+            engine.shutdown();
+        }
+    }
+
+    #[tokio::test]
+    async fn picked_up_node_terminal_with_ponytail_resumes_and_receives_full_skill_instructions() {
+        let dir = tempfile::tempdir().unwrap();
+        let folder = dir.path().canonicalize().unwrap();
+        std::fs::write(folder.join("package.json"), "{}").unwrap();
+        let (spawn, _, messages) = fake();
+        let engine = engine(&folder, spawn);
+        let project = engine.add_project(&folder.to_string_lossy()).unwrap();
+        engine.with(|core| {
+            core.catalog_store = Some(catalog_items(&folder, "", &[("ponytail", "lean")]));
+            let id = core
+                .pick_up(
+                    &project.id,
+                    CliSession {
+                        vendor: Vendor::Codex,
+                        id: "terminal-thread".into(),
+                        title: "Terminal".into(),
+                        model: None,
+                        updated_at: 1,
+                    },
+                )
+                .unwrap();
+            let mut c = core.convs.remove(&id).unwrap();
+            c.id = "kit".into();
+            assert!(c.session_kits.is_empty(), "terminal pickup has no Faber kit metadata");
+            c.messages.push(Message::new("user".into(), Role::User, "Go on".into(), 1));
+            c.messages.push(Message::new("reply".into(), Role::Assistant, String::new(), 1));
+            core.convs.insert("kit".into(), c);
+            core.rewind.captured_for_test("reply");
+            core.start("kit", "reply", &pick(Vendor::Codex), "Go on".into(), vec![], true).unwrap();
+            assert!(core.live["kit"].resumed);
+            assert_eq!(core.live["kit"].tool_kit.ids, ["ponytail"]);
+        });
+        assert_eq!(until_message(&messages, "thread/resume").await["params"]["threadId"], "terminal-thread");
+        let turn = until_message(&messages, "turn/start").await;
+        let sent = turn["params"]["input"][0]["text"].as_str().unwrap();
+        assert!(sent.contains("ponytail_KIT_INSTRUCTIONS") && sent.ends_with("Go on"));
+        assert!(!sent.contains("Earlier conversation") && !sent.contains("history"));
+        assert!(!messages.lock().unwrap().iter().any(|(_, m)| m["method"] == "thread/start"));
+        engine.shutdown();
+    }
+
+    #[tokio::test]
+    async fn unrelated_catalog_switch_and_new_skill_pick_preserve_the_native_thread() {
+        for (change_task, remove) in [(false, false), (false, true), (true, false)] {
+            let dir = tempfile::tempdir().unwrap();
+            let folder = dir.path().canonicalize().unwrap();
+            let (spawn, _, messages) = fake();
+            let engine = engine(&folder, spawn);
+            engine.with(|core| {
+                conversation(core, Area::Chat, None, &folder, "Debug this failure");
+                let (delivery, report) = core.choose_session_tools("kit", Vendor::Codex, Permissions::FullAccess, &folder);
+                let c = core.convs.get_mut("kit").unwrap();
+                c.sessions.insert(Vendor::Codex, "keep-native-thread".into());
+                c.session_kits.insert(Vendor::Codex, ("keep-native-thread".into(), report.ids, delivery.server_identity()));
+                c.session_resource_digests.insert(Vendor::Codex, resource_digest(codex_resources(Area::Chat, &delivery).as_deref()));
+                if change_task {
+                    c.messages[0].text = "Design a layout".into();
+                } else if remove {
+                    core.catalog_store().remove("design").unwrap();
+                } else {
+                    core.catalog_store().set_enabled("design", false).unwrap();
+                }
+                prepare(&core.catalog_store(), &folder);
+                core.rewind.captured_for_test("reply");
+                let request = if change_task { "Design a layout" } else { "Debug this failure" };
+                core.start("kit", "reply", &pick(Vendor::Codex), request.into(), vec![], true).unwrap();
+                assert!(core.live["kit"].resumed);
+                assert_eq!(core.live["kit"].tool_kit.ids, [if change_task { "design" } else { "debug" }]);
+            });
+            let resumed = until_message(&messages, "thread/resume").await;
+            assert_eq!(resumed["params"]["threadId"], "keep-native-thread");
+            let turn = until_message(&messages, "turn/start").await;
+            let sent = turn["params"]["input"][0]["text"].as_str().unwrap();
+            assert_eq!(sent.contains("design_KIT_INSTRUCTIONS"), change_task);
+            assert!(!sent.contains("debug_KIT_INSTRUCTIONS"), "unchanged Chat instruction text needs no repeated prefix");
+            assert_eq!(sent.contains("replacing earlier catalog selections and paths"), change_task);
+            assert_eq!(resumed["params"]["developerInstructions"].as_str().unwrap().contains("debug_KIT_INSTRUCTIONS"), !change_task);
+            assert!(!sent.contains("Earlier conversation"));
+            assert!(!messages.lock().unwrap().iter().any(|(_, m)| m["method"] == "thread/start"));
+            engine.shutdown();
+        }
+    }
+
+    #[tokio::test]
+    async fn restarting_with_an_unready_or_unmatched_server_kit_preserves_native_context_and_its_record() {
+        for cold in [false, true] {
+            let dir = tempfile::tempdir().unwrap();
+            let folder = dir.path().canonicalize().unwrap();
+            let (spawn, _, messages) = fake_reply(true);
+            let engine = engine(&folder, spawn);
+            let project = engine.add_project(&folder.to_string_lossy()).unwrap();
+            let identity = engine.with(|core| {
+                core.catalog_store = Some(server_catalog(&folder, "before"));
+                conversation(core, Area::Project, Some(&project.id), &folder, "Measure lighthouse performance");
+                let (tools, report) = core.choose_session_tools("kit", Vendor::Codex, Permissions::FullAccess, &folder);
+                let identity = tools.server_identity().unwrap();
+                let c = core.convs.get_mut("kit").unwrap();
+                c.sessions.insert(Vendor::Codex, "browser-native-thread".into());
+                let mut ids = report.ids;
+                ids.push("retired-skill".into());
+                c.session_kits.insert(Vendor::Codex, ("browser-native-thread".into(), ids, Some(identity.clone())));
+                c.messages[0].text = "Go on".into();
+                if cold {
+                    core.catalog_store().clear_prepared_for_test();
+                }
+                core.rewind.captured_for_test("reply");
+                core.start("kit", "reply", &pick(Vendor::Codex), "Go on".into(), vec![], true).unwrap();
+                assert!(core.live["kit"].resumed, "readiness and an unmatched continuation never discard native context");
+                assert_eq!(core.live["kit"].kit_identity.as_ref(), Some(&identity));
+                assert!(core.live["kit"].tool_kit.ids.is_empty(), "the report never claims old tools matched this task");
+                identity
+            });
+            assert_eq!(until_message(&messages, "thread/resume").await["params"]["threadId"], "browser-native-thread");
+            until_message(&messages, "turn/start").await;
+            tokio::time::timeout(Duration::from_secs(2), async {
+                while !engine.with(|core| core.convs["kit"].messages.last().unwrap().text.contains("first word")) {
+                    tokio::task::yield_now().await;
+                }
+            })
+            .await
+            .expect("accepted native turns persist the effective server identity");
+            let store = engine.with(|core| core.catalog_store());
+            store.prepare_kit_for(Vendor::Codex, "Go on", Some(&folder), Area::Project, Permissions::FullAccess, &[]);
+            store.wait_prepared_for_test();
+            engine.with(|core| {
+                let (_, ids, saved_identity) = &core.convs["kit"].session_kits[&Vendor::Codex];
+                assert_eq!(ids, &["browser"], "the native record keeps server ids separately from this task's visible report");
+                assert_eq!(saved_identity.as_ref(), Some(&identity));
+                core.retire("kit").unwrap().session.close();
+                core.launch("kit", &pick(Vendor::Codex)).unwrap();
+                assert!(core.live["kit"].resumed, "the next ready miss cannot flip the identity kept during a cold start");
+                assert_eq!(core.live["kit"].kit_identity.as_ref(), Some(&identity));
+                core.retire("kit").unwrap().session.close();
+                core.catalog_store().set_enabled("browser", false).unwrap();
+            });
+            store.prepare_kit_for(Vendor::Codex, "Go on", Some(&folder), Area::Project, Permissions::FullAccess, &[]);
+            store.wait_prepared_for_test();
+            engine.with(|core| {
+                core.launch("kit", &pick(Vendor::Codex)).unwrap();
+                assert!(!core.live["kit"].resumed, "a person's explicit server switch still revokes the old configuration");
+            });
+            engine.shutdown();
+        }
+    }
+
+    #[tokio::test]
+    async fn a_resumed_continuation_refreshes_server_paths_after_a_skill_snapshot_changes() {
+        let dir = tempfile::tempdir().unwrap();
+        let folder = dir.path().canonicalize().unwrap();
+        let (spawn, _, messages) = fake();
+        let engine = engine(&folder, spawn);
+        let project = engine.add_project(&folder.to_string_lossy()).unwrap();
+        let (old_script, identity, store) = engine.with(|core| {
+            core.catalog_store = Some(server_catalog(&folder, "before"));
+            conversation(core, Area::Project, Some(&project.id), &folder, "Go on");
+            let store = core.catalog_store();
+            let (tools, report) = store.ready_kit_for(
+                Vendor::Codex,
+                "Measure lighthouse performance",
+                Some(&folder),
+                Area::Project,
+                Permissions::FullAccess,
+                &[],
+            );
+            let identity = tools.server_identity().unwrap();
+            let c = core.convs.get_mut("kit").unwrap();
+            c.sessions.insert(Vendor::Codex, "unchanged-browser-thread".into());
+            c.session_kits.insert(Vendor::Codex, ("unchanged-browser-thread".into(), report.ids, Some(identity.clone())));
+            store.set_enabled("debug", false).unwrap();
+            (tools.servers[0].args[0].clone(), identity, store)
+        });
+        store.prepare_kit_for(Vendor::Codex, "Go on", Some(&folder), Area::Project, Permissions::FullAccess, &[]);
+        store.wait_prepared_for_test();
+        engine.with(|core| {
+            core.launch("kit", &pick(Vendor::Codex)).unwrap();
+            assert!(core.live["kit"].resumed, "a skill switch changes the snapshot, never the native server configuration");
+            assert_eq!(core.live["kit"].kit_identity.as_ref(), Some(&identity));
+            assert!(core.live["kit"].tool_kit.ids.is_empty());
+        });
+        let resumed = until_message(&messages, "thread/resume").await;
+        let script = resumed["params"]["config"]["mcp_servers.faber-browser"]["args"][0].as_str().unwrap();
+        assert_ne!(script, old_script, "the native resume replaces the old snapshot path");
+        assert!(Path::new(script).is_file(), "the refreshed server script exists in the current verified snapshot");
+        assert!(!messages.lock().unwrap().iter().any(|(_, msg)| msg["method"] == "thread/start"));
+        engine.shutdown();
+    }
+
+    #[tokio::test]
+    async fn explicitly_revoked_servers_never_resume_while_the_replacement_snapshot_is_pending() {
+        for action in ["disable", "remove", "project", "catalog"] {
+            let dir = tempfile::tempdir().unwrap();
+            let folder = dir.path().canonicalize().unwrap();
+            let (spawn, _, messages) = fake();
+            let engine = engine(&folder, spawn);
+            let project = engine.add_project(&folder.to_string_lossy()).unwrap();
+            engine.with(|core| {
+                core.catalog_store = Some(server_catalog(&folder, "before"));
+                conversation(core, Area::Project, Some(&project.id), &folder, "Go on");
+                let (tools, report) = core.catalog_store().ready_kit_for(
+                    Vendor::Codex,
+                    "Measure lighthouse performance",
+                    Some(&folder),
+                    Area::Project,
+                    Permissions::FullAccess,
+                    &[],
+                );
+                let c = core.convs.get_mut("kit").unwrap();
+                c.sessions.insert(Vendor::Codex, "revoked-native-thread".into());
+                c.session_kits.insert(Vendor::Codex, ("revoked-native-thread".into(), report.ids, tools.server_identity()));
+                match action {
+                    "disable" => core.catalog_store().set_enabled("browser", false).unwrap(),
+                    "remove" => core.catalog_store().remove("browser").unwrap(),
+                    "catalog" => core.catalog_store = Some(ToolStore::with_catalog(&folder, vec![])),
+                    _ => {
+                        let mut projects = core.store.projects();
+                        projects.iter_mut().find(|p| p.id == project.id).unwrap().disabled_mcp_servers.insert("faber-browser".into());
+                        core.store.save_projects(&projects).unwrap();
+                    }
+                }
+                core.catalog_store = Some(core.catalog_store().with_node("C:/unprepared-node.exe".into()));
+                let disabled = core.project_disabled_servers(Some(&project.id));
+                assert!(
+                    !core
+                        .catalog_store()
+                        .ready_kit_for(Vendor::Codex, "Go on", Some(&folder), Area::Project, Permissions::FullAccess, &disabled)
+                        .0
+                        .catalog_ready
+                );
+                core.launch("kit", &pick(Vendor::Codex)).unwrap();
+                assert!(!core.live["kit"].resumed, "{action} must revoke a known server before any background preparation finishes");
+            });
+            until_message(&messages, "thread/start").await;
+            assert!(!messages.lock().unwrap().iter().any(|(_, msg)| msg["method"] == "thread/resume"));
+            engine.shutdown();
+        }
+    }
+
+    #[tokio::test]
+    async fn only_a_changed_selected_server_replaces_the_native_thread() {
+        let dir = tempfile::tempdir().unwrap();
+        let folder = dir.path().canonicalize().unwrap();
+        let (spawn, _, messages) = fake_reply(true);
+        let engine = engine(&folder, spawn);
+        let project = engine.add_project(&folder.to_string_lossy()).unwrap();
+        engine.with(|core| {
+            core.catalog_store = Some(server_catalog(&folder, "before"));
+            conversation(core, Area::Project, Some(&project.id), &folder, "Measure lighthouse performance");
+            let (tools, report) = core.choose_session_tools("kit", Vendor::Codex, Permissions::FullAccess, &folder);
+            assert_eq!(report.ids, ["browser"]);
+            let c = core.convs.get_mut("kit").unwrap();
+            c.sessions.insert(Vendor::Codex, "old-server-thread".into());
+            c.session_kits.insert(Vendor::Codex, ("old-server-thread".into(), report.ids, tools.server_identity()));
+            c.messages.insert(0, Message::new("earlier".into(), Role::User, "Keep this requirement".into(), 1));
+            c.messages.iter_mut().rev().find(|m| m.role == Role::User).unwrap().text = "Go on".into();
+            core.catalog_store = Some(server_catalog(&folder, "after"));
+            core.rewind.captured_for_test("reply");
+            core.start("kit", "reply", &pick(Vendor::Codex), "Go on".into(), vec![], true).unwrap();
+            assert!(!core.live["kit"].resumed);
+        });
+        until_message(&messages, "thread/start").await;
+        let turn = until_message(&messages, "turn/start").await;
+        let sent = turn["params"]["input"][0]["text"].as_str().unwrap();
+        assert!(sent.contains("Keep this requirement"), "a genuine server reset carries the saved history");
+        assert!(!messages.lock().unwrap().iter().any(|(_, m)| m["method"] == "thread/resume"));
+        tokio::time::timeout(Duration::from_secs(2), async {
+            while !engine.with(|core| core.convs["kit"].messages.last().unwrap().text.contains("first word")) {
+                tokio::task::yield_now().await;
+            }
+        })
+        .await
+        .unwrap();
+        engine.with(|core| {
+            assert_eq!(
+                core.convs["kit"].session_kits[&Vendor::Codex].1,
+                ["browser"],
+                "restored effective servers are recorded even after a real reset"
+            );
+            core.retire("kit").unwrap().session.close();
+            core.launch("kit", &pick(Vendor::Codex)).unwrap();
+            assert!(core.live["kit"].resumed, "a trusted server update resets once, never on every continuation");
+        });
+        until_message(&messages, "thread/resume").await;
+        engine.shutdown();
+    }
+
+    #[tokio::test]
+    async fn saved_empty_native_kit_overrides_old_reports_and_never_applies_to_another_thread() {
+        for unknown_native_id in [false, true] {
+            let dir = tempfile::tempdir().unwrap();
+            let folder = dir.path().canonicalize().unwrap();
+            let (spawn, _, messages) = fake();
+            let engine = engine(&folder, spawn);
+            engine.with(|core| {
+                conversation(core, Area::Chat, None, &folder, "Debug this failure");
+                core.catalog_store().set_enabled("debug", false).unwrap();
+                core.catalog_store().set_enabled("design", false).unwrap();
+                let c = core.convs.get_mut("kit").unwrap();
+                c.sessions.insert(Vendor::Codex, if unknown_native_id { "another-native-thread" } else { "old-native-thread" }.into());
+                c.session_kits.insert(Vendor::Codex, ("old-native-thread".into(), vec![], None));
+                let last = c.messages.last_mut().unwrap();
+                last.vendor = Some(Vendor::Codex);
+                last.status = Some(Status::Done);
+                last.tool_kit = Some(crate::tools::kits::Report { ids: vec!["debug".into()], ..Default::default() });
+                let saved = serde_json::to_vec(c).unwrap();
+                let loaded: Conversation = serde_json::from_slice(&saved).unwrap();
+                assert_eq!(loaded.session_kits[&Vendor::Codex], ("old-native-thread".into(), vec![], None));
+                core.convs.insert("kit".into(), loaded);
+                assert!(
+                    !core.launch("kit", &pick(Vendor::Codex)).unwrap(),
+                    "an unknown native kit is empty too; neither an empty saved kit nor a historical report replaces native context"
+                );
+                assert!(core.live["kit"].tool_kit.ids.is_empty());
+            });
+            {
+                let resumed = until_message(&messages, "thread/resume").await;
+                assert_eq!(resumed["params"]["threadId"], if unknown_native_id { "another-native-thread" } else { "old-native-thread" });
+                assert!(!messages.lock().unwrap().iter().any(|(_, msg)| msg["method"] == "thread/start"));
+                engine.with(|core| {
+                    core.retire("kit").unwrap().session.close();
+                    core.catalog_store().set_enabled("debug", true).unwrap();
+                    prepare(&core.catalog_store(), &folder);
+                    assert!(!core.launch("kit", &pick(Vendor::Codex)).unwrap(), "adding skills preserves native context");
+                    assert_eq!(core.live["kit"].tool_kit.ids, ["debug"]);
+                });
+                assert!(!messages.lock().unwrap().iter().any(|(_, msg)| msg["method"] == "thread/start"));
+            }
+            engine.shutdown();
+        }
+    }
+
+    #[tokio::test]
+    async fn codex_native_context_survives_trusted_skill_updates() {
+        for changed in [false, true] {
+            let dir = tempfile::tempdir().unwrap();
+            let folder = dir.path().canonicalize().unwrap();
+            let (spawn, _, messages) = fake();
+            let engine = engine(&folder, spawn);
+            let old_identity = engine.with(|core| {
+                conversation(core, Area::Chat, None, &folder, "Debug this failure");
+                let (delivery, report) = core.choose_session_tools("kit", Vendor::Codex, Permissions::FullAccess, &folder);
+                let identity = delivery.server_identity().expect("verified kit has a server identity");
+                drop(delivery);
+                let c = core.convs.get_mut("kit").unwrap();
+                c.sessions.insert(Vendor::Codex, "saved-native-thread".into());
+                c.session_kits.insert(Vendor::Codex, ("saved-native-thread".into(), report.ids, Some(identity.clone())));
+                let (delivery, _) = core.checked_session_tools("kit", Vendor::Codex, Permissions::FullAccess, &folder).unwrap();
+                let digest = resource_digest(codex_resources(Area::Chat, &delivery).as_deref());
+                core.convs.get_mut("kit").unwrap().session_resource_digests.insert(Vendor::Codex, digest);
+                if changed {
+                    core.catalog_store = Some(catalog_version(&folder, "_UPDATED"));
+                }
+                assert!(!core.launch("kit", &pick(Vendor::Codex)).unwrap(), "skill content updates preserve native context");
+                assert_eq!(core.live["kit"].tool_kit.ids, ["debug"]);
+                assert_eq!(core.live["kit"].kit_identity.as_ref(), Some(&identity));
+                core.rewind.captured_for_test("reply");
+                core.start("kit", "reply", &pick(Vendor::Codex), "Debug this failure".into(), vec![], true).unwrap();
+                identity
+            });
+            let resumed = until_message(&messages, "thread/resume").await;
+            assert_eq!(resumed["params"]["developerInstructions"].as_str().unwrap().contains("debug_KIT_INSTRUCTIONS_UPDATED"), changed);
+            let turn = until_message(&messages, "turn/start").await;
+            let sent = turn["params"]["input"][0]["text"].as_str().unwrap();
+            if changed {
+                assert!(
+                    sent.starts_with(RESOURCE_PREFIX)
+                        && sent.contains("debug_KIT_INSTRUCTIONS_UPDATED")
+                        && sent.ends_with("Debug this failure")
+                );
+            } else {
+                assert_eq!(sent, "Debug this failure", "unchanged resources need no repeated prefix");
+            }
+            tokio::time::timeout(Duration::from_secs(2), async {
+                loop {
+                    if engine.with(|core| core.convs["kit"].session_kits[&Vendor::Codex].0 != "saved-native-thread") {
+                        break;
+                    }
+                    tokio::time::sleep(Duration::from_millis(1)).await;
+                }
+            })
+            .await
+            .expect("native turn acceptance must persist its catalog identity");
+            engine.with(|core| {
+                let (_, ids, saved_identity) = &core.convs["kit"].session_kits[&Vendor::Codex];
+                assert_eq!(ids, &["debug"]);
+                assert_eq!(saved_identity, &core.live["kit"].kit_identity, "accepted native turns persist the verified kit identity");
+                assert_eq!(saved_identity.as_ref(), Some(&old_identity));
+            });
+            engine.shutdown();
+        }
+    }
+
+    #[tokio::test]
+    async fn compacted_native_kit_does_not_reuse_old_contents_after_a_trusted_update() {
+        let dir = tempfile::tempdir().unwrap();
+        let folder = dir.path().canonicalize().unwrap();
+        let (spawn, _, messages) = fake();
+        let engine = engine(&folder, spawn);
+        engine.with(|core| {
+            conversation(core, Area::Chat, None, &folder, "Debug this failure");
+            let (delivery, report) = core.choose_session_tools("kit", Vendor::Codex, Permissions::FullAccess, &folder);
+            let old_identity = delivery.server_identity().unwrap();
+            let digest = resource_digest(codex_resources(Area::Chat, &delivery).as_deref());
+            drop(delivery);
+            let c = core.convs.get_mut("kit").unwrap();
+            c.sessions.insert(Vendor::Codex, "native-before-update".into());
+            c.session_kits.insert(Vendor::Codex, ("native-before-update".into(), report.ids, Some(old_identity.clone())));
+            c.session_resource_digests.insert(Vendor::Codex, digest.clone());
+            core.catalog_store = Some(catalog_version(&folder, "_UPDATED"));
+            assert!(
+                !core.launch_session("kit", &pick(Vendor::Codex), SessionStart::Compact).unwrap(),
+                "compaction resumes the native context even after its catalog files changed"
+            );
+            let compact_sid = core.live["kit"].sid;
+            assert!(core.live["kit"].resumed && core.live["kit"].prepared);
+            assert_eq!(core.live["kit"].tool_kit.ids, ["debug"]);
+            assert_eq!(core.live["kit"].kit_identity.as_ref(), Some(&old_identity));
+            core.handle("kit", compact_sid, EngineEvent::Started { session_id: "native-before-update".into(), model: "fixture".into() });
+            assert_eq!(
+                core.convs["kit"].session_resource_digests[&Vendor::Codex],
+                digest,
+                "compaction preserves the delivered resource digest"
+            );
+            assert!(!core.launch_session("kit", &pick(Vendor::Codex), SessionStart::Turn).unwrap());
+            assert_ne!(core.live["kit"].sid, compact_sid);
+            assert!(core.live["kit"].resumed);
+            assert_eq!(core.live["kit"].tool_kit.ids, ["debug"]);
+            assert_eq!(core.live["kit"].kit_identity.as_ref(), Some(&old_identity));
+            assert!(
+                core.live["kit"].kit_resources.as_deref().unwrap().contains("debug_KIT_INSTRUCTIONS_UPDATED"),
+                "compaction never marks the updated resources as already delivered"
+            );
+        });
+        let resumed = until_message(&messages, "thread/resume").await;
+        assert!(resumed["params"]["developerInstructions"].as_str().unwrap().contains("debug_KIT_INSTRUCTIONS_UPDATED"));
+        engine.shutdown();
+    }
+
+    #[tokio::test]
+    async fn claude_blank_or_previous_task_warmup_reuses_the_process_and_reports_the_sent_task() {
+        for earlier in [None, Some("Design a landing page")] {
+            for task in ["Debug this failing test", "Meu app trava ao abrir"] {
+                let dir = tempfile::tempdir().unwrap();
+                let folder = dir.path().canonicalize().unwrap();
+                let (spawn, args, messages) = fake();
+                let engine = engine(&folder, spawn);
+                let sid = engine.with(|core| {
+                    conversation(core, Area::Chat, None, &folder, earlier.unwrap_or_default());
+                    let c = core.convs.get_mut("kit").unwrap();
+                    c.working_folder = None;
+                    if earlier.is_none() {
+                        c.messages.clear();
+                    }
+                    core.warm_launch("kit", &pick(Vendor::Claude));
+                    assert!(core.live["kit"].prepared);
+                    let expected = if earlier.is_some() { vec!["design".to_string()] } else { Vec::new() };
+                    assert_eq!(core.live["kit"].tool_kit.ids, expected);
+                    core.live["kit"].sid
+                });
+                engine.with(|core| {
+                    core.convs.get_mut("kit").unwrap().messages.push(Message::new("sent".into(), Role::User, task.into(), 1));
+                    core.convs.get_mut("kit").unwrap().messages.push(Message::new("answer".into(), Role::Assistant, String::new(), 2));
+                    core.rewind.captured_for_test("answer");
+                    core.start("kit", "answer", &pick(Vendor::Claude), task.into(), vec![], true).unwrap();
+                    assert_eq!(core.live["kit"].sid, sid, "task-picked skill ids cannot discard a warmed process");
+                    assert_eq!(core.live["kit"].tool_kit.ids, ["debug"]);
+                    assert_eq!(core.convs["kit"].messages.last().unwrap().tool_kit.as_ref().unwrap().ids, ["debug"]);
+                });
+                assert_eq!(args.lock().unwrap().len(), 1, "Send creates no second process");
+                let text = claude_input(&messages).await;
+                assert!(text.contains("debug_KIT_INSTRUCTIONS"));
+                assert!(!text.contains("design_KIT_INSTRUCTIONS"), "warm-up must deliver the sent task's instructions");
+                engine.shutdown();
+            }
+        }
+    }
+
+    #[tokio::test]
+    async fn a_known_corrupt_server_revokes_native_configuration_even_while_preparation_is_unavailable() {
+        let dir = tempfile::tempdir().unwrap();
+        let folder = dir.path().canonicalize().unwrap();
+        let (spawn, _, _) = fake();
+        let engine = engine(&folder, spawn);
+        let project = engine.add_project(&folder.to_string_lossy()).unwrap();
+        let store = server_catalog(&folder, "one");
+        engine.with(|core| {
+            core.catalog_store = Some(store.clone());
+            conversation(core, Area::Project, Some(&project.id), &folder, "Measure lighthouse performance");
+            let (tools, report) = core.choose_session_tools("kit", Vendor::Codex, Permissions::FullAccess, &folder);
+            let c = core.convs.get_mut("kit").unwrap();
+            c.sessions.insert(Vendor::Codex, "old-browser-thread".into());
+            c.session_kits.insert(Vendor::Codex, ("old-browser-thread".into(), report.ids, tools.server_identity()));
+            c.messages[0].text = "Go on".into();
+        });
+        std::fs::write(folder.join("tools/servers/browser/server.js"), "corrupted server").unwrap();
+        store.set_enabled("debug", false).unwrap();
+        store.prepare_kit_for(Vendor::Codex, "Measure performance", Some(&folder), Area::Project, Permissions::FullAccess, &[]);
+        store.wait_prepared_for_test();
+        assert_eq!(store.checked_statuses().get("browser").map(String::as_str), Some("error.tools.reinstall"));
+        store.clear_prepared_for_test();
+        engine.with(|core| {
+            core.launch("kit", &pick(Vendor::Codex)).unwrap();
+            assert!(!core.live["kit"].resumed, "a known invalid server is a revocation, not a harmless readiness miss");
+        });
+        engine.shutdown();
+    }
+
+    #[tokio::test]
+    async fn a_changed_retained_server_cannot_reenter_a_resumed_native_thread() {
+        for damage in ["source", "snapshot", "unreadable"] {
+            let dir = tempfile::tempdir().unwrap();
+            let folder = dir.path().canonicalize().unwrap();
+            let (spawn, _, _) = fake();
+            let engine = engine(&folder, spawn);
+            let project = engine.add_project(&folder.to_string_lossy()).unwrap();
+            engine.with(|core| {
+                core.catalog_store = Some(server_catalog(&folder, "one"));
+                conversation(core, Area::Project, Some(&project.id), &folder, "Measure lighthouse performance");
+                let (tools, report) = core.choose_session_tools("kit", Vendor::Codex, Permissions::FullAccess, &folder);
+                let script = tools.servers[0].args[0].clone();
+                let c = core.convs.get_mut("kit").unwrap();
+                c.sessions.insert(Vendor::Codex, "saved-browser-thread".into());
+                c.session_kits.insert(Vendor::Codex, ("saved-browser-thread".into(), report.ids, tools.server_identity()));
+                c.messages[0].text = "Go on".into();
+                if damage == "snapshot" {
+                    std::fs::remove_file(&script).unwrap();
+                }
+                if damage == "unreadable" {
+                    std::fs::rename(Path::new(&script).parent().unwrap(), folder.join("hidden-server")).unwrap();
+                } else {
+                    std::fs::write(script, "changed server code").unwrap();
+                }
+                core.launch("kit", &pick(Vendor::Codex)).unwrap();
+                assert!(!core.live["kit"].resumed, "a retained server discovered damaged at this launch revokes the saved configuration");
+                assert_eq!(core.live["kit"].kit_identity.as_deref(), Some("servers:none"));
+                let expected = if damage == "source" { "error.tools.reinstall" } else { "error.tools.snapshot" };
+                assert_eq!(core.live["kit"].tool_kit.error.as_deref(), Some(expected));
+            });
+            engine.shutdown();
+        }
+    }
+
+    #[tokio::test]
+    async fn claude_warmup_still_restarts_for_an_actual_server_configuration_change() {
+        let dir = tempfile::tempdir().unwrap();
+        let folder = dir.path().canonicalize().unwrap();
+        let (spawn, args, _) = fake();
+        let engine = engine(&folder, spawn);
+        engine.with(|core| {
+            core.catalog_store = Some(server_catalog_scope(&folder, "one", true));
+            conversation(core, Area::Chat, None, &folder, "");
+            let c = core.convs.get_mut("kit").unwrap();
+            c.working_folder = None;
+            c.messages.clear();
+            core.warm_launch("kit", &pick(Vendor::Claude));
+            let warm_sid = core.live["kit"].sid;
+            core.convs.get_mut("kit").unwrap().messages.push(Message::new(
+                "sent".into(),
+                Role::User,
+                "Measure lighthouse performance".into(),
+                1,
+            ));
+            core.launch("kit", &pick(Vendor::Claude)).unwrap();
+            assert_ne!(core.live["kit"].sid, warm_sid, "a prepared process without a requested server cannot supply it");
+            assert_eq!(core.live["kit"].tool_kit.ids, ["browser"]);
+        });
+        assert_eq!(args.lock().unwrap().len(), 2);
+        engine.shutdown();
+    }
+
+    #[tokio::test]
+    async fn installed_catalog_items_do_not_disable_warm_process_preparation() {
+        for vendor in [Vendor::Claude, Vendor::Codex] {
+            for (off, guarded) in [(false, false), (true, false), (false, true)] {
+                let dir = tempfile::tempdir().unwrap();
+                let folder = dir.path().canonicalize().unwrap();
+                let (spawn, args, messages) = fake();
+                let engine = engine(&folder, spawn);
+                engine.with(|core| {
+                    conversation(core, Area::Chat, None, &folder, "Debug this failure");
+                    core.convs.get_mut("kit").unwrap().working_folder = None;
+                    if off {
+                        core.catalog_store().set_enabled("debug", false).unwrap();
+                        core.catalog_store().set_enabled("design", false).unwrap();
+                    }
+                    if guarded {
+                        core.store.save_settings(&Settings { permissions: Some(Permissions::Ask), ..Default::default() }).unwrap();
+                    }
+                    core.warm_launch("kit", &pick(vendor));
+                    if vendor == Vendor::Claude {
+                        assert!(core.live["kit"].prepared);
+                    } else {
+                        assert!(!core.codex.is_empty());
+                    }
+                });
+                for _ in 0..1000 {
+                    if !args.lock().unwrap().is_empty() {
+                        break;
+                    }
+                    tokio::task::yield_now().await;
+                }
+                assert_eq!(args.lock().unwrap().len(), 1, "a catalog install never suppresses preparation");
+                engine.with(|core| {
+                    core.rewind.captured_for_test("reply");
+                    core.start("kit", "reply", &pick(vendor), "Debug this failure".into(), vec![], true).unwrap();
+                    assert_eq!(args.lock().unwrap().len(), 1, "sending the warm kit adds no cold process");
+                });
+                if vendor == Vendor::Codex {
+                    until_message(&messages, "turn/start").await;
+                }
+                assert_eq!(args.lock().unwrap().len(), 1);
+                engine.shutdown();
+            }
+        }
+    }
+
+    #[tokio::test]
+    async fn kit_reports_appear_only_at_nonempty_session_boundaries() {
+        for vendor in [Vendor::Claude, Vendor::Codex] {
+            for empty in [false, true] {
+                let dir = tempfile::tempdir().unwrap();
+                let folder = dir.path().canonicalize().unwrap();
+                let (spawn, _, _) = fake();
+                let engine = engine(&folder, spawn);
+                engine.with(|core| {
+                    if empty {
+                        core.catalog_store().set_enabled("debug", false).unwrap();
+                        core.catalog_store().set_enabled("design", false).unwrap();
+                    }
+                    conversation(core, Area::Chat, None, &folder, "Debug this failure");
+                    core.rewind.captured_for_test("reply");
+                    core.start("kit", "reply", &pick(vendor), "Debug this failure".into(), vec![], true).unwrap();
+                    assert_eq!(core.convs["kit"].messages.last().unwrap().tool_kit.is_some(), !empty);
+                    core.convs.get_mut("kit").unwrap().messages.push(Message::new("second".into(), Role::Assistant, String::new(), 2));
+                    core.rewind.captured_for_test("second");
+                    core.start("kit", "second", &pick(vendor), "Again".into(), vec![], true).unwrap();
+                    assert!(core.convs["kit"].messages.last().unwrap().tool_kit.is_none(), "ordinary turns never repeat a kit report");
+                });
+                engine.shutdown();
+            }
+        }
+    }
+
+    #[tokio::test]
+    async fn idle_reopen_does_not_repeat_an_unchanged_conversations_kit_report() {
+        for vendor in [Vendor::Claude, Vendor::Codex] {
+            let dir = tempfile::tempdir().unwrap();
+            let folder = dir.path().canonicalize().unwrap();
+            let (spawn, _, _) = fake();
+            let engine = engine(&folder, spawn);
+            engine.with(|core| {
+                conversation(core, Area::Chat, None, &folder, "Debug this failure");
+                core.rewind.captured_for_test("reply");
+                core.start("kit", "reply", &pick(vendor), "Debug this failure".into(), vec![], true).unwrap();
+                assert!(core.convs["kit"].messages.last().unwrap().tool_kit.is_some());
+                core.retire("kit").unwrap().session.close();
+                core.convs.get_mut("kit").unwrap().messages.push(Message::new("second".into(), Role::Assistant, String::new(), 2));
+                core.rewind.captured_for_test("second");
+                core.start("kit", "second", &pick(vendor), "Again".into(), vec![], true).unwrap();
+                assert!(core.convs["kit"].messages.last().unwrap().tool_kit.is_none());
+            });
+            engine.shutdown();
+        }
+    }
+
+    #[tokio::test]
+    async fn abandoned_codex_preparation_closes_on_switch_or_cleanup_without_stopping_a_peer() {
+        for (switch, peer) in [(true, false), (false, false), (true, true), (false, true)] {
+            let dir = tempfile::tempdir().unwrap();
+            let folder = dir.path().canonicalize().unwrap();
+            let (spawn, _, messages) = fake();
+            let engine = engine(&folder, spawn);
+            let server = engine.with(|core| {
+                conversation(core, Area::Chat, None, &folder, "Debug this failure");
+                core.convs.get_mut("kit").unwrap().working_folder = None;
+                core.warm_launch("kit", &pick(Vendor::Codex));
+                let server = core.codex.values().next().unwrap().clone();
+                if peer {
+                    let mut other = core.convs["kit"].clone();
+                    other.id = "peer".into();
+                    core.convs.insert("peer".into(), other);
+                    core.launch("peer", &pick(Vendor::Codex)).unwrap();
+                }
+                if switch {
+                    core.warm_launch("kit", &pick(Vendor::Claude));
+                } else {
+                    assert!(core.retire("kit").is_none());
+                }
+                assert!(!core.codex_prepared.contains_key("kit"));
+                server
+            });
+            if peer {
+                until_message(&messages, "thread/start").await;
+                assert!(server.is_alive(), "abandoning a prepared conversation preserves another native thread");
+                engine.with(|core| assert!(core.live.contains_key("peer")));
+            } else {
+                tokio::time::timeout(Duration::from_secs(2), async {
+                    while server.is_alive() {
+                        tokio::time::sleep(Duration::from_millis(1)).await;
+                    }
+                })
+                .await
+                .expect("an unused prepared process must stop");
+            }
+            engine.shutdown();
+        }
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn unused_codex_preparation_expires_without_a_native_thread() {
+        let dir = tempfile::tempdir().unwrap();
+        let folder = dir.path().canonicalize().unwrap();
+        let (spawn, _, messages) = fake();
+        let engine = engine(&folder, spawn);
+        let server = engine.with(|core| {
+            conversation(core, Area::Chat, None, &folder, "Go on");
+            core.convs.get_mut("kit").unwrap().working_folder = None;
+            core.warm_launch("kit", &pick(Vendor::Codex));
+            core.codex.values().next().unwrap().clone()
+        });
+        until_message(&messages, "initialize").await;
+        tokio::time::advance(Duration::from_secs(120)).await;
+        for _ in 0..1000 {
+            if !server.is_alive() {
+                break;
+            }
+            tokio::task::yield_now().await;
+        }
+        assert!(!server.is_alive());
+        engine.with(|core| assert!(core.codex_prepared.is_empty()));
+        assert!(!messages.lock().unwrap().iter().any(|(_, msg)| msg["method"] == "thread/start"));
+        engine.shutdown();
+    }
+
+    #[tokio::test]
+    async fn a_debugging_preparation_serves_a_new_design_task_without_preparing_that_task() {
+        for request in ["Create a website", "Crie um site"] {
+            let dir = tempfile::tempdir().unwrap();
+            let folder = dir.path().canonicalize().unwrap();
+            let (spawn, _, messages) = fake();
+            let engine = engine(&folder, spawn);
+            engine.with(|core| {
+                conversation(core, Area::Chat, None, &folder, request);
+                core.rewind.captured_for_test("reply");
+                core.start("kit", "reply", &pick(Vendor::Codex), request.into(), vec![], true).unwrap();
+                assert_eq!(core.live["kit"].tool_kit.ids, ["design"]);
+            });
+            let opened = until_message(&messages, "thread/start").await;
+            let instructions = opened["params"]["developerInstructions"].as_str().unwrap();
+            assert!(instructions.contains("design_KIT_INSTRUCTIONS"));
+            assert!(!instructions.contains("debug_KIT_INSTRUCTIONS"));
+            engine.shutdown();
+        }
+    }
+
+    #[tokio::test]
+    async fn core_helpers_deliver_their_own_tasks_kit_to_the_other_vendor() {
+        for caller in [Vendor::Claude, Vendor::Codex] {
+            let dir = tempfile::tempdir().unwrap();
+            let folder = dir.path().canonicalize().unwrap();
+            let (spawn, args, messages) = fake();
+            let engine = engine(&folder, spawn);
+            let project = engine.add_project(&folder.to_string_lossy()).unwrap();
+            engine.with(|core| {
+                conversation(core, Area::Project, Some(&project.id), &folder, "Debug this failure");
+                core.launch("kit", &pick(caller)).unwrap();
+                let expected = vec!["debug"];
+                assert_eq!(core.live["kit"].tool_kit.ids, expected);
+                core.start_helper("kit", "child".into(), json!({"title":"Design the page", "brief":"Design a landing page"}));
+                assert!(core.helpers.contains_key("child"), "the helper must launch, not merely compute a prospective selection");
+                assert_eq!(core.live["kit"].tool_kit.ids, expected);
+            });
+            let child = crate::helper::other(caller);
+            if child == Vendor::Claude {
+                let text = claude_input(&messages).await;
+                assert!(text.contains("faber:design;") && text.contains("faber:debug;"));
+                assert!(!text.contains("design_KIT_INSTRUCTIONS"), "helpers keep native descriptions-only discovery");
+                let recorded = args.lock().unwrap();
+                let (_, argv) = recorded.iter().find(|(bin, _)| bin == "claude").unwrap();
+                let plugin = argv.windows(2).find(|a| a[0] == "--plugin-dir").unwrap();
+                assert!(Path::new(&plugin[1]).join("skills/debug/SKILL.md").is_file());
+                assert!(Path::new(&plugin[1]).join("skills/design/SKILL.md").is_file(), "Claude loads descriptions of every enabled skill");
+            } else {
+                let instructions = tokio::time::timeout(Duration::from_secs(2), async {
+                    loop {
+                        if let Some(instructions) = messages.lock().unwrap().iter().find_map(|(bin, msg)| {
+                            (bin == "codex" && msg["method"] == "thread/start")
+                                .then(|| msg["params"]["developerInstructions"].as_str().unwrap_or_default().to_string())
+                        }) {
+                            break instructions;
+                        }
+                        tokio::task::yield_now().await;
+                    }
+                })
+                .await
+                .expect("the helper's thread was not opened");
+                assert!(instructions.contains("design_KIT_INSTRUCTIONS"));
+                assert!(!instructions.contains("debug_KIT_INSTRUCTIONS"));
+            }
+            engine.shutdown();
+        }
+    }
+
+    #[tokio::test]
+    async fn production_pending_compaction_queues_send_and_stop_clears_its_busy_state() {
+        for stop in [false, true] {
+            let dir = tempfile::tempdir().unwrap();
+            let folder = dir.path().canonicalize().unwrap();
+            let (spawn, args, messages) = fake();
+            let engine = engine(&folder, spawn);
+            let (started, entered) = std::sync::mpsc::channel();
+            let (finished, ended) = std::sync::mpsc::channel();
+            let gate = Arc::new(std::sync::Barrier::new(2));
+            engine.with(|core| {
+                conversation(core, Area::Chat, None, &folder, "Debug the failure");
+                let c = core.convs.get_mut("kit").unwrap();
+                c.working_folder = None;
+                c.sessions.insert(Vendor::Claude, "native-history".into());
+                let reply = c.messages.last_mut().unwrap();
+                reply.vendor = Some(Vendor::Claude);
+                reply.status = Some(Status::Done);
+                core.synchronous_kit_checks = false;
+                core.kit_check_hook = Some((started, gate.clone(), finished));
+                core.compact_now("kit").unwrap();
+            });
+            checked_signal(&entered).await;
+            let pending_busy = engine.with(|core| core.convs["kit"].compacting && core.compacts.contains_key("kit"));
+            let sent = if stop {
+                engine.interrupt("kit");
+                Ok(String::new())
+            } else {
+                engine.with(|core| {
+                    core.send(
+                        SendRequest {
+                            conversation_id: Some("kit".into()),
+                            area: Area::Chat,
+                            project_id: None,
+                            text: "QUEUED_AFTER_COMPACT".into(),
+                            images: vec![],
+                            files: vec![],
+                            choice: Choice { vendor: "claude".into(), model: None, effort: None },
+                        },
+                        None,
+                    )
+                })
+            };
+            let queued = engine.with(|core| core.convs["kit"].queued.len());
+            gate.wait();
+            checked_signal(&ended).await;
+            assert!(pending_busy, "pending compaction owns the work slot before verification returns");
+            sent.unwrap();
+            if stop {
+                engine.with(|core| {
+                    assert!(!core.convs["kit"].compacting && !core.compacts.contains_key("kit"));
+                    assert!(!core.live.contains_key("kit") && core.kit_checks.is_empty());
+                });
+                assert!(args.lock().unwrap().is_empty(), "Stop before admission starts no native process");
+            } else {
+                assert_eq!(queued, 1, "Send queues behind the pending native compaction");
+                input_with(&messages, "/compact ").await;
+                assert!(!messages.lock().unwrap().iter().any(|(_, msg)| msg.to_string().contains("QUEUED_AFTER_COMPACT")));
+                engine.with(|core| {
+                    let sid = core.live["kit"].sid;
+                    core.handle(
+                        "kit",
+                        sid,
+                        EngineEvent::Done {
+                            ok: true,
+                            reason: String::new(),
+                            cost_total_usd: None,
+                            input_tokens: 0,
+                            output_tokens: 0,
+                            cache_read_tokens: 0,
+                            cache_write_tokens: 0,
+                            cache_write_1h_tokens: 0,
+                            incomplete: false,
+                        },
+                    );
+                });
+                input_with(&messages, "QUEUED_AFTER_COMPACT").await;
+                assert!(args.lock().unwrap()[0].1.windows(2).any(|part| part == ["--resume", "native-history"]));
+                engine.with(|core| assert!(!core.convs["kit"].compacting && core.convs["kit"].queued.is_empty()));
+            }
+            engine.shutdown();
+        }
+    }
+
+    #[tokio::test]
+    async fn production_stopping_a_pending_warmed_codex_send_releases_its_unused_process() {
+        let dir = tempfile::tempdir().unwrap();
+        let folder = dir.path().canonicalize().unwrap();
+        let (spawn, args, messages) = fake();
+        let engine = engine(&folder, spawn);
+        let (started, entered) = std::sync::mpsc::channel();
+        let (finished, ended) = std::sync::mpsc::channel();
+        let gate = Arc::new(std::sync::Barrier::new(2));
+        let server = engine.with(|core| {
+            conversation(core, Area::Chat, None, &folder, "Debug the failure");
+            core.convs.get_mut("kit").unwrap().working_folder = None;
+            core.warm_launch("kit", &pick(Vendor::Codex));
+            let server = core.codex.values().next().unwrap().clone();
+            core.synchronous_kit_checks = false;
+            core.kit_check_hook = Some((started, gate.clone(), finished));
+            core.rewind.captured_for_test("reply");
+            core.start("kit", "reply", &pick(Vendor::Codex), "CANCELLED_SEND".into(), vec![], true).unwrap();
+            server
+        });
+        checked_signal(&entered).await;
+        engine.interrupt("kit");
+        gate.wait();
+        checked_signal(&ended).await;
+        tokio::time::timeout(Duration::from_secs(3), async {
+            while server.is_alive() {
+                tokio::task::yield_now().await;
+            }
+        })
+        .await
+        .expect("the unused warmed process must retire after Stop");
+        assert_eq!(args.lock().unwrap().len(), 1, "verification adds no process");
+        assert!(
+            !messages.lock().unwrap().iter().any(|(_, message)| matches!(message["method"].as_str(), Some("thread/start" | "turn/start")))
+        );
+        engine.with(|core| assert!(core.kit_checks.is_empty() && core.codex_prepared.is_empty() && !core.live.contains_key("kit")));
+        engine.shutdown();
+    }
+
+    #[tokio::test]
+    async fn production_helper_rejection_after_verification_releases_its_pending_slot_and_lease() {
+        let dir = tempfile::tempdir().unwrap();
+        let folder = dir.path().canonicalize().unwrap();
+        let (spawn, args, _) = fake();
+        let engine = engine(&folder, spawn);
+        let project = engine.add_project(&folder.to_string_lossy()).unwrap();
+        let (started, entered) = std::sync::mpsc::channel();
+        let (finished, ended) = std::sync::mpsc::channel();
+        let gate = Arc::new(std::sync::Barrier::new(2));
+        engine.with(|core| {
+            conversation(core, Area::Project, Some(&project.id), &folder, "Debug the failure");
+            core.launch("kit", &pick(Vendor::Claude)).unwrap();
+            core.synchronous_kit_checks = false;
+            core.kit_check_hook = Some((started, gate.clone(), finished));
+            core.start_helper("kit", "rejected-child".into(), json!({"title":"Design", "brief":"Design a landing page"}));
+        });
+        checked_signal(&entered).await;
+        let child_cli = engine.with(|core| core.opts.clis.remove(&Vendor::Codex).unwrap());
+        gate.wait();
+        checked_signal(&ended).await;
+        tokio::time::timeout(Duration::from_secs(3), async {
+            while engine.with(|core| !core.kit_checks.is_empty()) {
+                tokio::task::yield_now().await;
+            }
+        })
+        .await
+        .expect("a helper rejected by the current connection gate releases its checked result");
+        assert_eq!(args.lock().unwrap().len(), 1, "only the parent CLI started");
+        engine.with(|core| {
+            assert!(core.helpers.is_empty());
+            core.opts.clis.insert(Vendor::Codex, child_cli);
+            core.synchronous_kit_checks = true;
+            for call in ["first-child", "second-child"] {
+                core.start_helper("kit", call.into(), json!({"title":"Design", "brief":"Design a landing page"}));
+            }
+            assert_eq!(core.helpers.len(), 2, "a rejected pending helper consumes neither of the two slots");
+        });
+        engine.shutdown();
+    }
+
+    #[tokio::test]
+    async fn production_discarding_a_pending_warm_conversation_releases_its_snapshot_lease() {
+        for draft in [true, false] {
+            let dir = tempfile::tempdir().unwrap();
+            let folder = dir.path().canonicalize().unwrap();
+            let (spawn, args, _) = fake();
+            let engine = engine(&folder, spawn);
+            let (started, entered) = std::sync::mpsc::channel();
+            let (finished, ended) = std::sync::mpsc::channel();
+            let gate = Arc::new(std::sync::Barrier::new(2));
+            engine.with(|core| {
+                conversation(core, Area::Chat, None, &folder, "Debug the failure");
+                core.convs.get_mut("kit").unwrap().working_folder = None;
+                if draft {
+                    core.draft = Some("kit".into());
+                    core.convs.get_mut("kit").unwrap().messages.clear();
+                }
+                core.synchronous_kit_checks = false;
+                core.kit_check_hook = Some((started, gate.clone(), finished));
+                core.warm_launch("kit", &pick(Vendor::Claude));
+            });
+            checked_signal(&entered).await;
+            let removed = engine.with(|core| {
+                if draft {
+                    core.drop_draft();
+                    Ok(())
+                } else {
+                    core.remove("kit")
+                }
+            });
+            gate.wait();
+            checked_signal(&ended).await;
+            removed.unwrap();
+            engine.with(|core| assert!(core.kit_checks.is_empty() && !core.convs.contains_key("kit") && !core.live.contains_key("kit")));
+            assert!(args.lock().unwrap().is_empty(), "discarded warm-up never starts a late process");
+            engine.shutdown();
+        }
+    }
+
+    #[tokio::test]
+    async fn production_failed_compact_check_sends_the_queued_turn_through_a_new_check() {
+        let dir = tempfile::tempdir().unwrap();
+        let folder = dir.path().canonicalize().unwrap();
+        let (spawn, args, messages) = fake();
+        let engine = engine(&folder, spawn);
+        let (started, entered) = std::sync::mpsc::channel();
+        let (finished, ended) = std::sync::mpsc::channel();
+        let gate = Arc::new(std::sync::Barrier::new(2));
+        engine.with(|core| {
+            conversation(core, Area::Chat, None, &folder, "Debug the failure");
+            let c = core.convs.get_mut("kit").unwrap();
+            c.working_folder = None;
+            c.sessions.insert(Vendor::Claude, "native-history".into());
+            let reply = c.messages.last_mut().unwrap();
+            reply.vendor = Some(Vendor::Claude);
+            reply.status = Some(Status::Done);
+            core.synchronous_kit_checks = false;
+            core.kit_check_hook = Some((started, gate.clone(), finished));
+            core.compact_now("kit").unwrap();
+        });
+        checked_signal(&entered).await;
+        let sent = engine.with(|core| {
+            let sent = core.send(
+                SendRequest {
+                    conversation_id: Some("kit".into()),
+                    area: Area::Chat,
+                    project_id: None,
+                    text: "QUEUED_AFTER_CHECK_FAILURE".into(),
+                    images: vec![],
+                    files: vec![],
+                    choice: Choice { vendor: "claude".into(), model: None, effort: None },
+                },
+                None,
+            );
+            let token = core.kit_checks["kit"].token;
+            // Exercise the actual JoinError recovery while its old worker is still parked.
+            core.failed_kit_check("kit", token);
+            sent
+        });
+        let no_spawn_before_verification = args.lock().unwrap().is_empty();
+        gate.wait();
+        checked_signal(&ended).await;
+        sent.unwrap();
+        assert!(no_spawn_before_verification, "the failed preflight never launches native resources");
+        input_with(&messages, "QUEUED_AFTER_CHECK_FAILURE").await;
+        assert!(!messages.lock().unwrap().iter().any(|(_, message)| message.to_string().contains("/compact ")));
+        assert_eq!(args.lock().unwrap().len(), 1);
+        assert!(args.lock().unwrap()[0].1.windows(2).any(|part| part == ["--resume", "native-history"]));
+        engine.with(|core| assert!(!core.convs["kit"].compacting && core.convs["kit"].queued.is_empty() && core.kit_checks.is_empty()));
+        engine.shutdown();
+    }
+
+    #[tokio::test]
+    async fn production_quota_exhausted_during_launch_check_recovers_the_original_reply() {
+        for already_recovering in [false, true] {
+            let dir = tempfile::tempdir().unwrap();
+            let folder = dir.path().canonicalize().unwrap();
+            let (spawn, args, _) = fake();
+            let engine = engine(&folder, spawn);
+            let (started, entered) = std::sync::mpsc::channel();
+            let (finished, ended) = std::sync::mpsc::channel();
+            let gate = Arc::new(std::sync::Barrier::new(2));
+            engine.with(|core| {
+                conversation(core, Area::Chat, None, &folder, "Debug the failure");
+                core.convs.get_mut("kit").unwrap().working_folder = None;
+                core.opts.clis.remove(&Vendor::Codex);
+                core.synchronous_kit_checks = false;
+                core.kit_check_hook = Some((started, gate.clone(), finished));
+                core.rewind.captured_for_test("reply");
+                let pick = pick(if already_recovering { Vendor::Codex } else { Vendor::Claude });
+                core.transfers.insert(
+                    "kit".into(),
+                    recovery::Transfer {
+                        reply: "reply".into(),
+                        pick: pick.clone(),
+                        request: "Debug the failure".into(),
+                        text: "Debug the failure".into(),
+                        images: vec![],
+                        by_hand: false,
+                        approved: None,
+                        retried: false,
+                        moving: false,
+                        check: "glance",
+                    },
+                );
+                if already_recovering {
+                    core.recover("kit", false).unwrap();
+                    assert!(core.transfers["kit"].retried, "the fallback has consumed the reply's one recovery attempt");
+                } else {
+                    core.dispatch("kit", "reply", &pick, "Debug the failure".into(), vec![], false).unwrap();
+                }
+            });
+            checked_signal(&entered).await;
+            let until = engine.with(|core| {
+                let until = core.secs() + 600.0;
+                core.ledger.of_mut(Vendor::Claude).reach = crate::budget::Reach::Out(Some(until));
+                until
+            });
+            gate.wait();
+            checked_signal(&ended).await;
+            tokio::time::timeout(Duration::from_secs(3), async {
+                while engine.with(|core| !core.kit_checks.is_empty()) {
+                    tokio::task::yield_now().await;
+                }
+            })
+            .await
+            .expect("the checked turn must pass through quota recovery");
+            engine.with(|core| {
+                let reply = core.convs["kit"].messages.last().unwrap();
+                assert_eq!(reply.id, "reply", "recovery keeps the original reply and history");
+                if already_recovering {
+                    assert_eq!(reply.status, Some(Status::Error));
+                    assert_eq!(reply.error.as_deref(), Some("error.moveFailed"), "recovery keeps its existing one-attempt limit");
+                    assert!(reply.wait_until.is_none() && !core.transfers.contains_key("kit"));
+                } else {
+                    assert_eq!(reply.status, Some(Status::Streaming));
+                    assert_eq!(reply.reason.as_deref(), Some("reason.waiting"));
+                    assert_eq!(reply.wait_until, Some(until));
+                    assert!(reply.error.is_none(), "a quota change during checking follows dispatch recovery instead of failing the reply");
+                    assert_eq!(core.transfers["kit"].reply, "reply");
+                }
+                assert!(!core.live.contains_key("kit"));
+            });
+            assert!(args.lock().unwrap().is_empty(), "an exhausted vendor starts no process after verification");
+            engine.shutdown();
+        }
+    }
+}

@@ -47,6 +47,12 @@ export function t(key: Key, vars: Record<string, string | number> = {}): string 
   return fill(one(Number(vars.n ?? 0)) ? entry.one : entry.other, vars);
 }
 
+/** Catalog cards, inventory and session reports share the same hand-written names. */
+export function catalogName(id: string): string {
+  const key = `catalog.name.${id}`;
+  return key in en ? t(key as Key) : id.replaceAll('-', ' ');
+}
+
 /** Whether `n` takes the singular form. Zero counts as plural everywhere ("0 steps"), though Portuguese and French grammar put it
  * with the singular. */
 const one = (n: number) => n !== 0 && new Intl.PluralRules(lang()).select(n) === 'one';

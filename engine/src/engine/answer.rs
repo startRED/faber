@@ -435,6 +435,12 @@ mod tests {
                 conv.messages.push(reply);
             }
             let live = Live {
+                tool_kit: Default::default(),
+                kit_identity: None,
+                kit_resource_digest: None,
+                kit_pending: false,
+                prepared: false,
+                kit_resources: None,
                 group_files: None,
                 group_context: None,
                 cwd: PathBuf::new(),

@@ -559,6 +559,8 @@ fn seed(dir: &Path, long: bool) -> Conversation {
     answer.model = Some("claude-opus-5-5".into());
     answer.reason = Some("reason.route.chat.hard".into());
     let c = Conversation {
+        session_kits: Default::default(),
+        session_resource_digests: Default::default(),
         commands: BTreeMap::new(),
         working_folder: None,
         project_start_pending: false,

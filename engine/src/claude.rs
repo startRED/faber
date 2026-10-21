@@ -62,16 +62,14 @@ fn mcp_tools(launch: &ClaudeLaunch) -> crate::helper::Tools {
     }
 }
 
-/// Where the catalog's skills go (`crate::tools`): a project's own agent, in every mode but Isolated, which turns every
-/// customization off. Chat keeps its lean tool list, which has no skill tool.
-pub fn offers_tools(area: Area, permissions: Permissions) -> bool {
-    area == Area::Project && permissions != Permissions::Isolated
+/// Catalog instructions reach user sessions in both areas; Isolated keeps customizations off.
+pub fn offers_tools(_area: Area, permissions: Permissions) -> bool {
+    permissions != Permissions::Isolated
 }
 
-/// Where the catalog's tool servers go: a project's agent in Full access only, as Faber's own browser (R195). A server runs
-/// outside the CLI's sandbox, with the network on and the whole disk in reach, so the modes that ask never get one.
-pub fn offers_servers(area: Area, permissions: Permissions) -> bool {
-    area == Area::Project && permissions == Permissions::FullAccess
+/// Catalog servers require Full access. The store additionally requires an explicit file-free, setup-free Chat review.
+pub fn offers_servers(_area: Area, permissions: Permissions) -> bool {
+    permissions == Permissions::FullAccess
 }
 
 /// Flags that only newer CLIs take, read once from `claude --help` (`from_help`). A flag the CLI does not list is never
@@ -277,6 +275,8 @@ pub fn claude_args(launch: &ClaudeLaunch) -> Vec<String> {
     args.extend(["--permission-prompt-tool".into(), "stdio".into()]);
     let env = |name: &str| std::env::var(name).ok();
     let aside = launch.helper == crate::helper::Helper::Aside;
+    // The caller verifies the used folders once, immediately before this launch.
+    let tools = &launch.tools;
     if aside {
         // A quick question on the side (R250): only reads in the working folder, none of the person's integrations, and no
         // history: a fork of the conversation's session leaves that session as it was. Every read asks, so the driver checks it with
@@ -306,7 +306,7 @@ pub fn claude_args(launch: &ClaudeLaunch) -> Vec<String> {
         if launch.area == Area::Chat {
             args.extend([
                 "--tools".into(),
-                if launch.permissions == Permissions::Plan { format!("{CHAT_TOOLS},ExitPlanMode") } else { CHAT_TOOLS.into() },
+                format!("{CHAT_TOOLS}{}", if launch.permissions == Permissions::Plan { ",ExitPlanMode" } else { "" }),
             ]);
             match launch.permissions {
                 mode if mode.guarded() => {
@@ -317,12 +317,20 @@ pub fn claude_args(launch: &ClaudeLaunch) -> Vec<String> {
                     }
                 }
                 Permissions::Isolated => args.extend(["--strict-mcp-config".into(), "--safe-mode".into()]),
-                // The person's own MCP servers, plugins, skills and hooks load as they do in the CLI itself.
+                // Full access keeps the person's integrations; Skill is still excluded from Chat's native tools.
                 _ => {}
             }
         }
         let web = web_deny(launch.tuning.web);
-        let deny = || tool_deny(&env).into_iter().chain(web.iter().cloned()).collect::<Vec<_>>();
+        let mut catalog_deny = Vec::new();
+        if launch.permissions != Permissions::Isolated
+            && let Some(root) = tools.tools_root()
+        {
+            let root = crate::project::git::native_path(&root);
+            let path = crate::permissions::claude_rule_path(&root);
+            catalog_deny.extend([format!("Edit({path}/**)"), format!("Write({path}/**)")]);
+        }
+        let deny = || tool_deny(&env).into_iter().chain(web.iter().cloned()).chain(catalog_deny.iter().cloned()).collect::<Vec<_>>();
         match launch.permissions.for_claude(launch.flags) {
             Permissions::Isolated => {
                 if launch.area == Area::Project {
@@ -372,14 +380,14 @@ pub fn claude_args(launch: &ClaudeLaunch) -> Vec<String> {
             words.push_str("\n\nThe person's instructions for this chat group:\n");
             words.push_str(instructions);
         }
+        // Catalog context travels in the current user turn: resumed CLIs can retain the original system prompt.
         args.push(words);
         // R161: Faber's own MCP server, answered by this driver over stdio, holds the helper tool and the browser.
         // The catalog's servers join it in the same config, where Faber offers its tools.
-        let servers: Vec<_> = launch
-            .tools
+        let servers: Vec<_> = tools
             .servers
             .iter()
-            .filter(|s| offers_servers(launch.area, launch.permissions) && !launch.tools.disabled_servers.contains(&s.name))
+            .filter(|s| offers_servers(launch.area, launch.permissions) && !tools.disabled_servers.contains(&s.name))
             .collect();
         if !servers.is_empty() {
             let mut config: Value =
@@ -393,8 +401,10 @@ pub fn claude_args(launch: &ClaudeLaunch) -> Vec<String> {
             args.extend(["--mcp-config".into(), crate::helper::CLAUDE_MCP_CONFIG.into()]);
         }
         // The catalog's skills, as one plugin from Faber's store, where Faber offers them.
-        if let Some(plugin) =
-            launch.tools.plugin.as_ref().filter(|_| offers_tools(launch.area, launch.permissions) && launch.flags.plugin_dir)
+        if let Some(plugin) = tools
+            .plugin
+            .as_ref()
+            .filter(|_| launch.area == Area::Project && offers_tools(launch.area, launch.permissions) && launch.flags.plugin_dir)
         {
             args.extend(["--plugin-dir".into(), plugin.to_string_lossy().into_owned()]);
         }

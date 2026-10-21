@@ -2,14 +2,31 @@ import { createComponent } from 'solid-js';
 import { render } from 'solid-js/web';
 import themes from '../../src-tauri/src/themes.json';
 import catalog from '../../engine/src/tools.json';
-import { api, type AppState, type ToolInventoryList, type ToolRow, type Vendor } from '../../ui/api.ts';
+import { api, type AppEvent, type AppState, type ToolInventoryList, type ToolRow, type Vendor } from '../../ui/api.ts';
 import { App } from '../../ui/App.tsx';
 import { Catalog } from '../../ui/Catalog.tsx';
-import { lang, t, useLanguage } from '../../ui/i18n.ts';
+import { catalogName, LANGUAGES, lang, t, useLanguage } from '../../ui/i18n.ts';
 import type { Key } from '../../ui/locales/en.ts';
 import { check, deepEqual, equal, ok } from './check.ts';
 
 const tick = () => new Promise<void>((resolve) => setTimeout(resolve, 25));
+
+check('catalog: every shipped item resolves to its shared name in every language', () => {
+  const before = lang();
+  try {
+    for (const locale of LANGUAGES) {
+      useLanguage(locale.code);
+      for (const row of [...catalog.skills, ...catalog.servers]) {
+        const key = `catalog.name.${row.id}` as Key;
+        ok(Object.hasOwn(locale.messages, key), `${locale.code}: ${row.id} has a hand-written name`);
+        const name = locale.messages[key];
+        ok(typeof name === 'string' && name.trim().length > 0);
+        equal(catalogName(row.id), name, `${locale.code}: names resolve without a storage-id fallback`);
+      }
+      ok(!Object.keys(locale.messages).some((key) => key.startsWith('kit.name.')), 'the work log has no second list of names');
+    }
+  } finally { useLanguage(before); }
+});
 const project = { id: 'catalog-project', name: 'Fixture project', path: 'C:/fixture/project' };
 const sample = (): ToolRow[] => [
   { id: 'systematic-debugging', job: 'debugging', tier: catalog.skills.find((row) => row.id === 'systematic-debugging')!.tier as ToolRow['tier'], license: 'MIT', repo: 'fixture/debugging', home: 'https://github.com/fixture/debugging', version: 'abc123', installed: false, server: false },
@@ -38,11 +55,13 @@ function keyboard(key: string, extra: KeyboardEventInit = {}) {
 async function panel(options: Options = {}) {
   const before = { ...api }, language = lang(), store = structuredClone(options.rows ?? sample());
   const removed = new Map<string, ToolRow>();
+  let listener: ((event: AppEvent) => void) | undefined;
   const calls = { list: 0, inventory: 0, install: [] as string[], remove: [] as string[], enabled: [] as boolean[], links: [] as string[] };
   api.toolsClearRemoved = async () => {};
+  api.on = async (receive) => { listener = receive; return () => {}; };
   api.toolsList = async () => { calls.list++; if (options.failList) throw 'error.tools.install'; return structuredClone(store); };
   api.toolsInventory = async () => { calls.inventory++; if (options.failInventory) throw 'error.tools.install'; return structuredClone(options.inventory ?? []); };
-  api.toolsInstall = async (id) => { calls.install.push(id); if (options.failInstall) throw 'error.tools.install'; Object.assign(store.find((r) => r.id === id)!, { installed: true, enabled: true }); };
+  api.toolsInstall = async (id) => { calls.install.push(id); if (options.failInstall) throw 'error.tools.install'; Object.assign(store.find((r) => r.id === id)!, { installed: true, enabled: true, status: undefined }); };
   api.toolsRemove = async (id) => { calls.remove.push(id); if (options.failRemove) throw 'error.tools.remove'; const row = store.find((r) => r.id === id)!; removed.set(id, structuredClone(row)); row.installed = false; };
   api.toolsRestore = async (id) => { Object.assign(store.find((r) => r.id === id)!, removed.get(id)); if (options.failRestore) throw 'error.tools.restore'; };
   api.toolsSetEnabled = async (id, enabled) => { calls.enabled.push(enabled); if (options.failToggle) throw 'error.tools.toggle'; store.find((r) => r.id === id)!.enabled = enabled; };
@@ -56,8 +75,67 @@ async function panel(options: Options = {}) {
   document.body.append(root);
   const dispose = render(() => createComponent(Catalog, { projects: [project], vendors: options.vendors ?? ['claude'] }), root);
   await tick();
-  return { root, calls, store, close: () => { dispose(); root.remove(); Object.assign(api, before); useLanguage(language); } };
+  return { root, calls, store, publish: () => listener?.({ type: 'catalog' }), close: () => { dispose(); root.remove(); Object.assign(api, before); useLanguage(language); } };
 }
+
+check('catalog: reinstall status follows catalog-owned inventory and reported servers without changing external rows', async () => {
+  const rows = sample();
+  rows[1].status = rows[2].status = 'error.tools.reinstall';
+  rows[2].installed = true;
+  const view = await panel({ rows, inventory: sources });
+  api.mcpServers = async () => [{ vendor: 'claude', rows: [
+    { name: 'faber-chrome-devtools', source: 'catalog', enabled: true, status: 'connected' },
+    { name: 'person-browser', source: 'user', status: 'connected' },
+  ] }];
+  try {
+    await tap(button(view.root, 'catalog.installed'));
+    ok(view.root.querySelector('[data-inventory-source=catalog]')?.textContent?.includes(t('error.tools.reinstall')));
+    ok(!view.root.querySelector('[data-inventory-source=user]')?.textContent?.includes(t('error.tools.reinstall')));
+    const picker = view.root.querySelector<HTMLSelectElement>('.catalog-project select')!;
+    picker.value = project.id; picker.dispatchEvent(new Event('change', { bubbles: true })); await tick();
+    const server = view.root.querySelector('[data-mcp-row=faber-chrome-devtools]')!;
+    ok(server.textContent?.includes(t('error.tools.reinstall')));
+    equal(server.querySelector<HTMLInputElement>('[role=switch]')?.disabled, true);
+    equal(server.querySelector<HTMLInputElement>('[role=switch]')?.checked, false);
+    ok(!view.root.querySelector('[data-mcp-row=person-browser]')?.textContent?.includes(t('error.tools.reinstall')));
+    view.store[1].status = view.store[2].status = undefined;
+    view.publish(); await tick();
+    ok(!view.root.textContent?.includes(t('error.tools.reinstall')), 'publication refreshes cards, inventory and server hints together');
+  } finally { view.close(); }
+});
+
+check('catalog: background publication preserves Remove Undo and its previous off choice', async () => {
+  const view = await panel();
+  try {
+    await tap(cards(view.root).find((card) => card.dataset.catalogCard === 'ponytail')!);
+    await tap(button(view.root, 'catalog.remove')); await tap(button(view.root, 'catalog.remove'));
+    view.publish(); await tick();
+    ok(view.root.querySelector('[role=status]')?.textContent?.includes(t('catalog.removed', { name: catalogName('ponytail') })));
+    await tap(button(view.root, 'catalog.undo'));
+    equal(view.store[1].installed, true); equal(view.store[1].enabled, false);
+    equal(view.root.querySelector<HTMLInputElement>('[role=switch]')?.checked, false);
+  } finally { view.close(); }
+});
+
+check('catalog: a publication read started before a successful toggle cannot restore its old choice', async () => {
+  const rows = sample(); rows[0].installed = true; rows[0].enabled = true;
+  const view = await panel({ rows });
+  try {
+    await tap(cards(view.root).find((card) => card.dataset.catalogCard === rows[0].id)!);
+    const previous = structuredClone(view.store);
+    let publish!: (rows: ToolRow[]) => void;
+    api.toolsList = () => new Promise((resolve) => { publish = resolve; });
+    view.publish();
+    const toggle = view.root.querySelector<HTMLInputElement>('[role=switch]')!;
+    toggle.focus(); await tap(toggle);
+    equal(view.store[0].enabled, false); equal(toggle.checked, false);
+    publish(previous); await tick();
+    equal(view.root.querySelector('[role=switch]'), toggle, 'the native input and focus survive');
+    equal(document.activeElement, toggle);
+    equal(toggle.checked, false, 'the late pre-action snapshot cannot undo a saved choice');
+    equal(view.store[0].enabled, false);
+  } finally { view.close(); }
+});
 
 check('catalog: search covers translated descriptions and jobs without case, and kind filters share one list', async () => {
   const view = await panel();
@@ -107,7 +185,7 @@ check('catalog: the full curated list pages without duplicates and searches beyo
     const target = rows.find((row) => row.id === 'flutter-apply-architecture-best-practices')!;
     for (const language of ['en', 'pt-BR', 'es', 'fr', 'de'] as const) {
       useLanguage(language);
-      for (const query of [target.id.toUpperCase(), t(`tools.${target.id}` as Key).toUpperCase()]) {
+      for (const query of [target.id.toUpperCase(), catalogName(target.id).toUpperCase(), t(`tools.${target.id}` as Key).toUpperCase()]) {
         search(view.root, query); await tick();
         equal(cards(view.root).length, 1);
         equal(cards(view.root)[0].dataset.catalogCard, target.id, 'search reaches items beyond the first page');
@@ -154,7 +232,7 @@ check('catalog: details open their original source in the system browser and ins
     await tap(toggle); equal(toggle.checked, true); await tap(toggle); equal(toggle.checked, false);
     await tap(button(view.root, 'catalog.remove')); await tap(button(view.root, 'catalog.cancel')); equal(view.calls.remove.length, 0);
     await tap(button(view.root, 'catalog.remove')); await tap(button(view.root, 'catalog.remove'));
-    equal(view.store[0].installed, false); ok(view.root.textContent?.includes(t('catalog.removed', { name: 'systematic-debugging' })));
+    equal(view.store[0].installed, false); ok(view.root.textContent?.includes(t('catalog.removed', { name: catalogName('systematic-debugging') })));
     await tap(button(view.root, 'catalog.undo'));
     equal(view.store[0].installed, true); equal(view.store[0].enabled, false);
     equal(view.root.querySelector<HTMLInputElement>('[role=switch]')?.checked, false, 'undo restores the off choice');
@@ -174,7 +252,7 @@ check('catalog: a failed removal of another item preserves the previous Undo ite
     await tap(button(view.root, 'catalog.remove')); await tap(button(view.root, 'catalog.remove'));
     ok(view.root.querySelector('[role=alert]'));
     equal(view.store[1].installed, true); equal(view.store[1].enabled, false);
-    ok(view.root.querySelector('[role=status]')?.textContent?.includes(t('catalog.removed', { name: rows[0].id })));
+    ok(view.root.querySelector('[role=status]')?.textContent?.includes(t('catalog.removed', { name: catalogName(rows[0].id) })));
     await tap(button(view.root, 'catalog.undo'));
     await tap(button(view.root, 'catalog.back'));
     await tap(cards(view.root).find((card) => card.dataset.catalogCard === rows[0].id)!);
@@ -212,7 +290,7 @@ check('catalog: shortcuts focus search, details focus their heading, Escape unwi
     equal(view.root.querySelector('input')?.getAttribute('aria-keyshortcuts'), null, 'caps and matching both come from the shared shortcut list');
     await tap(card); equal(document.activeElement, view.root.querySelector('.catalog-detail h1'));
     await tap(button(view.root, 'catalog.remove')); keyboard('Escape'); await tick();
-    ok(view.root.querySelector('.catalog-detail')); equal(view.root.textContent?.includes(t('catalog.confirmRemove', { name: 'ponytail' })), false);
+    ok(view.root.querySelector('.catalog-detail')); equal(view.root.textContent?.includes(t('catalog.confirmRemove', { name: catalogName('ponytail') })), false);
     keyboard('Escape'); await tick();
     equal(view.root.querySelector('.catalog-detail'), null);
     equal(document.activeElement, view.root.querySelector('[data-catalog-card=ponytail]'));
@@ -264,13 +342,14 @@ check('catalog: installed source inventory is read-only for personal and project
       equal(row.querySelectorAll('input, [role=switch]').length, 0);
       equal(row.querySelectorAll('button').length, source === 'catalog' ? 1 : 0, 'external installs cannot be removed or switched');
     }
+    equal(view.root.querySelector('[data-inventory-source=catalog] button')?.textContent, catalogName('ponytail'));
     ok(view.root.textContent?.includes('personal-skill') && view.root.textContent?.includes('team-plugin'));
     ok(view.root.querySelector('[data-inventory-issue]')?.textContent?.includes(t('catalog.issue.unsupported')));
     const picker = view.root.querySelector<HTMLSelectElement>('.catalog-project select')!;
     picker.value = project.id; picker.dispatchEvent(new Event('change', { bubbles: true })); await tick();
     equal(picker.value, project.id); ok(view.calls.inventory >= 3);
     await tap(view.root.querySelector<HTMLButtonElement>('[data-inventory-source=catalog] button')!);
-    equal(view.root.querySelector('.catalog-detail h1')?.textContent, 'ponytail');
+    equal(view.root.querySelector('.catalog-detail h1')?.textContent, catalogName('ponytail'));
   } finally { view.close(); }
 });
 

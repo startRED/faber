@@ -37,6 +37,10 @@ pub(super) struct State {
 }
 
 impl State {
+    #[cfg(test)]
+    pub(super) fn captured_for_test(&mut self, reply: &str) {
+        self.attempted.insert(reply.into());
+    }
     fn observe_writers(&mut self, conversation: &str, sid: u64, active: &[String], unknown: bool) {
         let key = (conversation.to_string(), sid);
         if active.is_empty() && !unknown {
@@ -1307,6 +1311,12 @@ mod tests {
             core.live.insert(
                 b.clone(),
                 Live {
+                    tool_kit: Default::default(),
+                    kit_identity: None,
+                    kit_resource_digest: None,
+                    kit_pending: false,
+                    prepared: false,
+                    kit_resources: None,
                     group_files: None,
                     group_context: None,
                     vendor: Vendor::Claude,

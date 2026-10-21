@@ -17,6 +17,7 @@ use tokio::sync::mpsc::UnboundedReceiver;
 /// What the app-server keeps on disk (shared by every process, like `~/.codex`), what it was asked, and how it misbehaves.
 #[derive(Default)]
 struct Disk {
+    initialized: usize,
     /// Threads that had a turn: the only ones with a rollout file.
     ran: HashSet<String>,
     started: usize,
@@ -50,7 +51,10 @@ fn codex(disk: Shared) -> Spawner {
                 let mut say = vec![];
                 let mut dies = false;
                 match msg["method"].as_str() {
-                    Some("initialize") => say.push(json!({ "id": id, "result": {} })),
+                    Some("initialize") => {
+                        disk.lock().unwrap().initialized += 1;
+                        say.push(json!({ "id": id, "result": {} }));
+                    }
                     Some("config/read") => say.push(json!({ "id": id, "result": { "config": {} } })),
                     Some(m @ ("thread/start" | "thread/resume")) => {
                         let mut d = disk.lock().unwrap();
@@ -202,19 +206,19 @@ fn leave_a_stale_thread(dir: &Path, id: &str, engine: &Engine) {
 
 /// The first message after a warm-up, with a model or effort the warm-up did not use (Auto's choice), is the case the owner hit.
 #[tokio::test]
-async fn a_warmed_thread_that_never_ran_is_not_resumed_when_the_first_turn_needs_another_launch() {
+async fn a_warmed_process_defers_its_thread_until_the_first_turn_even_when_effort_changes() {
     let (dir, disk) = (tempfile::tempdir().unwrap(), Shared::default());
     let (engine, mut rx) = start(dir.path(), &disk);
     engine.warm(WarmRequest { conversation_id: None, area: Area::Chat, project_id: None, choice: choice(Effort::Low) });
-    until(&disk, |d| d.started == 1).await;
-    // Give the warm-up's session id time to reach the engine before the message does.
-    tokio::time::sleep(Duration::from_millis(100)).await;
+    until(&disk, |d| d.initialized == 1).await;
+    assert_eq!(disk.lock().unwrap().started, 0, "preparing a process does not freeze a native thread or kit");
     let id = engine.send(send(None, "first", Effort::High)).unwrap();
     let reply = finished(&mut rx).await;
     assert_eq!((reply.status, reply.text.as_str()), (Some(Status::Done), "pong"), "{:?}", reply.error);
     let d = disk.lock().unwrap();
-    assert_eq!(d.asked, vec!["thread/start", "thread/start"], "the unused warm-up thread was resumed");
-    assert_eq!(engine.open(&id).unwrap().sessions[&Vendor::Codex], "thread-2", "only the thread that ran is resumable");
+    assert_eq!(d.asked, vec!["thread/start"], "the first task starts the only native thread");
+    assert_eq!(d.initialized, 1, "a different effort reuses the prepared process");
+    assert_eq!(engine.open(&id).unwrap().sessions[&Vendor::Codex], "thread-1", "only the thread that ran is resumable");
     drop(d);
     engine.shutdown();
 }

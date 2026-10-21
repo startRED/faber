@@ -3998,6 +3998,9 @@ async fn first_launch_args(help: Option<Option<&'static str>>) -> (Vec<String>, 
     engine.send(ask(Area::Chat, SKY, choice("claude", None))).unwrap();
     finished(&mut rx, |_| {}).await;
     let args = f.args.lock().unwrap().first().cloned().expect("a launch");
+    // Catalog write-deny rules contain this test's private data folder, independently of help flags.
+    let data = faber_engine::permissions::claude_rule_path(&dir.path().to_string_lossy());
+    let args = args.into_iter().map(|arg| arg.replace(&data, "//test-data")).collect();
     (args, engine.claude_flags())
 }
 

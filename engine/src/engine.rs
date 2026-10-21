@@ -49,6 +49,7 @@ mod helpers;
 pub use groups::{ChatGroup, GroupFile};
 mod install_gate;
 mod keep_going;
+mod kits;
 mod mcp_servers;
 mod move_chat;
 mod parked;
@@ -102,6 +103,7 @@ pub enum AppEvent {
         items: Vec<RunningItem>,
     },
     List,
+    Catalog,
     /// The agent's plan changed (None: it cleared it), for the checklist under the newest reply.
     Plan {
         conversation_id: String,
@@ -220,6 +222,12 @@ pub struct TerminalCommand {
 }
 
 struct Live {
+    tool_kit: crate::tools::kits::Report,
+    kit_identity: Option<String>,
+    kit_resource_digest: Option<String>,
+    kit_pending: bool,
+    prepared: bool,
+    kit_resources: Option<String>,
     group_files: Option<(Vec<String>, Vec<Image>)>,
     group_context: Option<(String, Vec<String>)>,
     vendor: Vendor,
@@ -282,6 +290,10 @@ pub fn is_cli_command(vendor: Vendor, text: &str) -> bool {
 }
 
 pub fn with_history(history: &[Message], text: &str, place: &dyn Fn(&str) -> String) -> String {
+    with_history_intro(history, text, place, "Earlier in this conversation, with another assistant:")
+}
+
+fn with_history_intro(history: &[Message], text: &str, place: &dyn Fn(&str) -> String, intro: &str) -> String {
     let lines = history
         .iter()
         .map(|m| {
@@ -295,7 +307,7 @@ pub fn with_history(history: &[Message], text: &str, place: &dyn Fn(&str) -> Str
         })
         .collect::<Vec<_>>()
         .join("\n\n");
-    format!("Earlier in this conversation, with another assistant:\n\n{lines}\n\nNow the user says:\n{text}")
+    format!("{intro}\n\n{lines}\n\nNow the user says:\n{text}")
 }
 
 pub(super) fn attachment_notes(history: &[Message], place: &dyn Fn(&str) -> String) -> String {
@@ -362,6 +374,13 @@ fn settle(m: &mut Message) {
 }
 
 struct Core {
+    catalog_store: Option<crate::tools::Store>,
+    kit_checks: HashMap<String, mcp_servers::LaunchCheck>,
+    kit_check_gate: Arc<tokio::sync::Semaphore>,
+    #[cfg(test)]
+    synchronous_kit_checks: bool,
+    #[cfg(test)]
+    kit_check_hook: Option<(std::sync::mpsc::Sender<()>, Arc<std::sync::Barrier>, std::sync::mpsc::Sender<()>)>,
     background: crate::background::Commands,
     background_pending: bool,
     opts: EngineOptions,
@@ -397,6 +416,7 @@ struct Core {
     /// The shared Codex processes, one per area, hooks choice and permissions. Faber's internal questions (routing) use an
     /// Isolated process of their own, so nothing the person's setting allows ever reaches them.
     codex: HashMap<(Area, bool, Permissions), CodexServer>,
+    codex_prepared: HashMap<String, ((Area, bool, Permissions), u64)>,
     /// The ChatGPT model the account recommends, once the CLI has listed the models.
     codex_recommended: Option<String>,
     /// Every model the account can run on Codex, once listed.
@@ -470,10 +490,24 @@ pub struct Engine {
 
 impl Engine {
     pub fn new(opts: EngineOptions, emit: Emit) -> Engine {
-        if let Err(error) = crate::tools::Store::new(&opts.data_dir).clear_removed() {
-            eprintln!("tools: Undo recovery or cleanup failed: {error}");
-        }
+        // Snapshot verification and cleanup run outside Core; an unready catalog never delays a session.
+        let catalog_store = crate::tools::Store::new(&opts.data_dir);
+        catalog_store.set_runtime(opts.runtime.clone());
+        let catalog_emit = emit.clone();
+        catalog_store.set_on_ready(Arc::new(move || catalog_emit(AppEvent::Catalog)));
         let mut store = Store::new(&opts.data_dir);
+        let catalog_prepare = catalog_store.clone();
+        let permissions = store.settings().permissions();
+        opts.runtime.spawn_blocking(move || {
+            if let Err(error) = catalog_prepare.clear_removed() {
+                eprintln!("tools: Undo recovery or cleanup failed: {error}");
+            }
+            for vendor in [Vendor::Claude, Vendor::Codex] {
+                for area in [Area::Chat, Area::Project] {
+                    catalog_prepare.prepare_kit_for(vendor, "", None, area, permissions, &[]);
+                }
+            }
+        });
         let search = store.search();
         // A crash can leave an unsaved draft behind. Visible records keep their scratch; orphan UUID folders do not.
         let scratch = opts.data_dir.join("chat");
@@ -500,6 +534,13 @@ impl Engine {
         let rewind = rewind::State::new(&opts.data_dir);
         let core = Arc::new_cyclic(|me| {
             Mutex::new(Core {
+                catalog_store: Some(catalog_store),
+                kit_checks: HashMap::new(),
+                kit_check_gate: Arc::new(tokio::sync::Semaphore::new(1)),
+                #[cfg(test)]
+                synchronous_kit_checks: false,
+                #[cfg(test)]
+                kit_check_hook: None,
                 background: Default::default(),
                 background_pending: false,
                 opts,
@@ -517,6 +558,7 @@ impl Engine {
                 next_sid: 0,
                 tick: 0,
                 codex: HashMap::new(),
+                codex_prepared: HashMap::new(),
                 codex_recommended: None,
                 codex_models: vec![],
                 commands: BTreeMap::new(),
@@ -864,6 +906,13 @@ impl Engine {
     pub fn interrupt(&self, id: &str) {
         // One lock for all of it: the end of Faber's checks waits for it, and never sends a turn in between.
         self.with(|c| {
+            c.kit_checks.retain(|_, check| check.owner != id);
+            c.release_codex_preparation(id);
+            if !c.live.contains_key(id)
+                && let Some(conv) = c.convs.get_mut(id)
+            {
+                conv.compacting = false;
+            }
             if let Some(conv) = c.convs.get_mut(id) {
                 conv.stopped = true;
                 conv.send_after_stop = None;
@@ -1816,6 +1865,7 @@ impl Core {
         ) && let Some(id) = self.live.get_mut(conv).and_then(|l| l.unsaved_session.take())
             && let Some(c) = self.convs.get_mut(conv)
         {
+            kits::record_native_kit(c, id.clone(), self.live.get(conv), self.catalog_store.as_ref());
             c.sessions.insert(vendor, id);
             c.tentative.remove(&vendor);
             if vendor == Vendor::Codex {
@@ -1897,10 +1947,11 @@ impl Core {
                     }
                 }
                 let fresh = self.live.get(conv).and_then(|l| l.unsaved_session.clone());
-                if let (Some(id), Some(c)) = (fresh, self.convs.get_mut(conv))
-                    && c.sessions.get(&vendor) != Some(&id)
-                {
-                    c.tentative.insert(vendor, id);
+                if let (Some(id), Some(c)) = (fresh, self.convs.get_mut(conv)) {
+                    kits::record_native_kit(c, id.clone(), self.live.get(conv), self.catalog_store.as_ref());
+                    if c.sessions.get(&vendor) != Some(&id) {
+                        c.tentative.insert(vendor, id);
+                    }
                     if !c.messages.is_empty() {
                         self.save(conv);
                     }
@@ -2989,18 +3040,6 @@ impl Core {
         self.keep_going_failed(id, reply_id, &error);
     }
 
-    /// What the tool store hands this session: nothing where no tool is offered, and servers only where they are.
-    fn tools_for(&self, area: Area, permissions: Permissions) -> crate::tools::Delivery {
-        if !crate::claude::offers_tools(area, permissions) {
-            return Default::default();
-        }
-        let mut tools = crate::tools::Store::new(&self.opts.data_dir).delivery();
-        if !crate::claude::offers_servers(area, permissions) {
-            tools.servers.clear();
-        }
-        tools
-    }
-
     /// A loaded Codex thread ignores resume overrides: use a fresh server without stopping its active peers.
     fn retire_codex_server(&mut self, key: (Area, bool, Permissions)) {
         if let Some(server) = self.codex.remove(&key) {
@@ -3024,8 +3063,8 @@ impl Core {
             user_hooks,
             windows: self.opts.windows,
             spawn: spawner(&self.opts.spawn, cli),
-            // What the store holds checked; a running server hears each change (`CodexServer::tools`).
-            tools: self.tools_for(area, permissions),
+            // Catalog skills belong to threads, never the process-wide extraRoots shared with other conversations.
+            tools: Default::default(),
         };
         let server = self.codex.entry((area, user_hooks, permissions)).or_insert_with(|| CodexServer::start(opts.clone()));
         if !server.is_alive() {
@@ -3112,18 +3151,53 @@ impl Core {
         {
             live.session.close();
         }
-        self.launch(id, pick)?;
+        let kit_reset = match self.launch(id, pick) {
+            Err(error) if error == mcp_servers::CHECK_PENDING => {
+                let (id, reply, pick) = (id.to_string(), reply_id.to_string(), pick.clone());
+                self.after_kit_check(&id.clone(), move |core| {
+                    if core.closing
+                        || core.installing
+                        || core.convs.get(&id).is_none_or(|c| {
+                            c.messages.last().is_none_or(|message| message.id != reply || message.status != Some(Status::Streaming))
+                        })
+                    {
+                        core.kit_checks.remove(&id);
+                        return;
+                    }
+                    if let Err(error) = core.dispatch(&id, &reply, &pick, text, images, by_hand) {
+                        core.fail_reply(&id, &reply, error);
+                    }
+                });
+                return Ok(());
+            }
+            result => result?,
+        };
         if let Some(live) = self.live.get_mut(id) {
             live.visual_root = crate::visual::pin(&live.cwd).map(Arc::new);
         }
+        let text = if kit_reset {
+            let c = self.convs.get(id).ok_or("error.conversationGone")?;
+            let history = c.context_messages();
+            with_history_intro(
+                &history[..history.len().saturating_sub(2)],
+                &text,
+                &|n| attachment_place(c.area, &self.opts.data_dir, id, n),
+                "Earlier in this conversation, before this session's catalog tool servers changed:",
+            )
+        } else {
+            text
+        };
         let text = if let Some(summary) = self.convs.get_mut(id).and_then(|c| c.rewind_summary.take()) {
             format!("{summary}\n\n{text}")
         } else {
             text
         };
         let rewind_notice = self.convs.get_mut(id).and_then(|c| c.rewind_notice.take());
+        let tool_kit = self.live.get_mut(id).and_then(|l| std::mem::replace(&mut l.kit_pending, false).then(|| l.tool_kit.clone()));
+        let tool_kit = tool_kit.and_then(|kit| self.session_tool_report(id, reply_id, kit));
         if let Some(m) = self.convs.get_mut(id).and_then(|c| c.messages.iter_mut().find(|m| m.id == reply_id)) {
             m.mode = self.live.get(id).and_then(|l| l.permissions.fallback_note(l.runs));
+            m.tool_kit = tool_kit;
             if rewind_notice.is_some() {
                 m.note = rewind_notice;
             }
@@ -3156,6 +3230,7 @@ impl Core {
             l.by_hand = by_hand;
             l.approved = approved;
             l.break_pending |= self.convs.get(id).and_then(|c| c.messages.last()).is_some_and(|m| !m.text.is_empty());
+            let text = kits::with_resources(text, l.kit_resources.take());
             let (text, images) = match l.group_files.take() {
                 Some((paths, mut group_images)) => {
                     group_images.extend(images);
@@ -3169,7 +3244,11 @@ impl Core {
         Ok(())
     }
 
-    fn launch(&mut self, conv: &str, pick: &Pick) -> Result<(), String> {
+    fn launch(&mut self, conv: &str, pick: &Pick) -> Result<bool, String> {
+        self.launch_session(conv, pick, kits::SessionStart::Turn)
+    }
+
+    fn launch_session(&mut self, conv: &str, pick: &Pick, mode: kits::SessionStart) -> Result<bool, String> {
         if self.rewind_blocked(conv) {
             return Err("error.rewind.busy".into());
         }
@@ -3197,6 +3276,16 @@ impl Core {
         };
         let group = if self.convs.get(conv).is_some_and(|c| c.area == Area::Chat) { self.group_for(conv)? } else { None };
         let group_context = group.as_ref().map(|g| (g.instructions.clone(), g.files.iter().map(|f| f.id.clone()).collect::<Vec<_>>()));
+        let prepared_key = self.convs.get(conv).map(|c| (c.area, settings.user_hooks() && permissions.guarded(), permissions));
+        let prepared_tools = if mode == kits::SessionStart::Turn && self.live.get(conv).is_some_and(|l| l.prepared) {
+            let (mut delivery, report) = self.choose_session_tools(conv, pick.vendor, permissions, &cwd);
+            if pick.vendor == Vendor::Claude && !flags.plugin_dir {
+                delivery.plugin = None;
+            }
+            Some((delivery, report))
+        } else {
+            None
+        };
         if let Some(l) = self.live.get_mut(conv) {
             if l.vendor == pick.vendor
                 && l.model == pick.model
@@ -3208,9 +3297,39 @@ impl Core {
                 && l.runs == runs
                 && l.cwd == cwd
                 && l.group_context == group_context
+                && prepared_tools.as_ref().is_none_or(|(delivery, _)| {
+                    pick.vendor != Vendor::Codex && kits::session_tool_identity(pick.vendor, delivery) == l.kit_identity
+                })
             {
+                if let Some((delivery, kit)) = &prepared_tools {
+                    l.tool_kit = kit.clone();
+                    if pick.vendor == Vendor::Claude {
+                        let c = &self.convs[conv];
+                        let resources = kits::resume_resources(
+                            kits::claude_resources(prepared_key.unwrap().0, delivery),
+                            c.session_kits.get(&pick.vendor),
+                            c.resumable(pick.vendor),
+                            c.session_resource_digests.get(&pick.vendor),
+                        );
+                        let digest = kits::resource_digest(resources.as_deref());
+                        l.kit_resources = kits::resources_changed(
+                            c.session_kits.get(&pick.vendor),
+                            c.resumable(pick.vendor),
+                            &kit.ids,
+                            &l.kit_identity,
+                            c.session_resource_digests.get(&pick.vendor),
+                            &digest,
+                        )
+                        .then_some(resources)
+                        .flatten();
+                        l.kit_resource_digest = Some(digest);
+                    }
+                }
+                if mode != kits::SessionStart::Prepare {
+                    l.prepared = false;
+                }
                 l.used = self.tick; // most recently used
-                return Ok(());
+                return Ok(false);
             }
             let research_backend = (l.vendor == Vendor::Codex && l.research != research)
                 .then_some((settings.user_hooks() && l.permissions.guarded(), l.permissions));
@@ -3221,6 +3340,16 @@ impl Core {
                 let area = self.convs.get(conv).ok_or("error.conversationGone")?.area;
                 self.retire_codex_server((area, user_hooks, permissions));
             }
+        }
+        let (mut project_tools, mut tool_kit) = self.checked_session_tools(conv, pick.vendor, permissions, &cwd)?;
+        if pick.vendor == Vendor::Claude && !flags.plugin_dir {
+            project_tools.plugin = None;
+        }
+        if cli.is_some() && pick.vendor == Vendor::Codex && self.codex_prepared.get(conv).is_some_and(|(key, _)| Some(*key) == prepared_key)
+        {
+            self.codex_prepared.remove(conv);
+        } else {
+            self.release_codex_preparation(conv);
         }
         let c = self.convs.get(conv).ok_or("error.conversationGone")?;
         let group_instructions = group.as_ref().map(|g| g.instructions.clone()).filter(|s| !s.is_empty());
@@ -3262,14 +3391,94 @@ impl Core {
         });
         // The hooks switch matters only while asking; with full access the person's hooks always run, as in the CLI itself.
         let user_hooks = settings.user_hooks() && permissions.guarded();
-        let resume = c.resumable(pick.vendor).cloned();
-        let resumed = resume.is_some();
+        let mut resume = c.resumable(pick.vendor).cloned();
+        let previous_kit = match c.session_kits.get(&pick.vendor) {
+            Some((id, ids, _)) if Some(id) == resume.as_ref() => {
+                Some(crate::tools::kits::Report { ids: ids.clone(), ..Default::default() })
+            }
+            Some(_) => None,
+            None => {
+                c.messages.iter().rev().find(|m| m.vendor == Some(pick.vendor) && m.tool_kit.is_some()).and_then(|m| m.tool_kit.clone())
+            }
+        };
         let area = c.area;
         let leave_plan = c.codex_plan && permissions != Permissions::Plan;
         // The conversation's own name, fixed when it began: a rename in Settings never reaches a conversation under way.
         let user_name = c.user_name.clone();
         let project_id = c.project_id.clone();
-        let project_tools = self.tools_for_project(area, permissions, project_id.as_deref());
+        let saved_identity = self
+            .convs
+            .get(conv)
+            .and_then(|c| c.session_kits.get(&pick.vendor))
+            .filter(|(id, _, _)| Some(id) == resume.as_ref())
+            .map(|(_, _, identity)| identity.clone());
+        let previous_identity = saved_identity.clone().flatten();
+        let disabled_servers = self.project_disabled_servers(project_id.as_deref());
+        let saved_ids = previous_kit.as_ref().map(|kit| kit.ids.as_slice()).unwrap_or_default();
+        // Retaining a native server also verifies its files and can discover a new revocation.
+        let current_servers = self.catalog_store().server_identity_for(saved_ids, area, permissions, &disabled_servers);
+        if tool_kit.error.is_none() {
+            let catalog = self.catalog_store();
+            tool_kit.error = catalog.preparation_error().or_else(|| saved_ids.iter().find_map(|id| catalog.item_status(id)));
+        }
+        let revoked_servers = previous_identity.as_deref().is_some_and(|old| old.starts_with("servers:") && old != current_servers);
+        let mut kit_identity = if pick.vendor == Vendor::Codex && !project_tools.catalog_ready && !revoked_servers {
+            previous_identity.clone()
+        } else if pick.vendor == Vendor::Codex {
+            project_tools.server_identity()
+        } else {
+            kits::session_tool_identity(pick.vendor, &project_tools)
+        };
+        // Skills can join a resumed turn; only known changes to the native server configuration require a new thread.
+        let kit_reset = mode != kits::SessionStart::Compact
+            && pick.vendor == Vendor::Codex
+            && (project_tools.catalog_ready || revoked_servers)
+            && resume.is_some()
+            && saved_identity
+                .as_ref()
+                .is_some_and(|key| key.as_deref().is_some_and(|identity| identity.starts_with("servers:")) && key != &kit_identity);
+        if kit_reset {
+            resume = None;
+        }
+        let resumed = resume.is_some();
+        let resources = if pick.vendor == Vendor::Claude {
+            kits::claude_resources(area, &project_tools)
+        } else {
+            kits::codex_resources(area, &project_tools)
+        };
+        let c = &self.convs[conv];
+        let resources = kits::resume_resources(
+            resources,
+            c.session_kits.get(&pick.vendor),
+            resume.as_ref(),
+            c.session_resource_digests.get(&pick.vendor),
+        );
+        let mut kit_resource_digest = Some(kits::resource_digest(resources.as_deref()));
+        let kit_resources = if mode == kits::SessionStart::Compact
+            || !kits::resources_changed(
+                self.convs.get(conv).and_then(|c| c.session_kits.get(&pick.vendor)),
+                resume.as_ref(),
+                &tool_kit.ids,
+                &kit_identity,
+                self.convs.get(conv).and_then(|c| c.session_resource_digests.get(&pick.vendor)),
+                kit_resource_digest.as_deref().expect("current resources have a digest"),
+            ) {
+            None
+        } else if pick.vendor == Vendor::Claude || resumed {
+            resources
+        } else {
+            None
+        };
+        if mode == kits::SessionStart::Compact {
+            tool_kit = previous_kit.unwrap_or_default();
+            kit_identity = previous_identity;
+            kit_resource_digest = self
+                .convs
+                .get(conv)
+                .filter(|_| saved_identity.is_some())
+                .and_then(|c| c.session_resource_digests.get(&pick.vendor))
+                .cloned();
+        }
         if let Some(project) = project_id.as_deref().and_then(|id| self.store.projects().into_iter().find(|p| p.id == id)) {
             let added = project_tools.servers.iter().map(|s| s.name.clone()).collect();
             self.mcp_servers.insert(
@@ -3342,6 +3551,12 @@ impl Core {
         self.live.insert(
             conv.to_string(),
             Live {
+                tool_kit,
+                kit_identity,
+                kit_resource_digest,
+                kit_pending: mode != kits::SessionStart::Compact,
+                prepared: mode != kits::SessionStart::Turn,
+                kit_resources,
                 group_files: Some(group_files),
                 group_context,
                 vendor: pick.vendor,
@@ -3391,7 +3606,7 @@ impl Core {
         }
         // A process started early (while the user types) closes too if the message never comes.
         self.refresh_running();
-        Ok(())
+        Ok(kit_reset)
     }
 
     fn blank(&mut self, area: Area, project_id: Option<String>) -> String {
@@ -3411,6 +3626,8 @@ impl Core {
             project_start_pending: area == Area::Project,
             copy: None,
             sessions: BTreeMap::new(),
+            session_kits: BTreeMap::new(),
+            session_resource_digests: BTreeMap::new(),
             tentative: BTreeMap::new(),
             command_gate: false,
             codex_plan: false,
@@ -3734,11 +3951,65 @@ impl Core {
     }
 
     fn warm_launch(&mut self, id: &str, pick: &Pick) {
+        if self.kit_checks.contains_key(id)
+            && self
+                .convs
+                .get(id)
+                .is_some_and(|conversation| conversation.messages.last().is_some_and(|message| message.status == Some(Status::Streaming)))
+        {
+            return;
+        }
         // Startup can write project files, so it waits for the sent message's baseline.
         if self.copy_due(id) || self.convs.get(id).is_some_and(|c| c.area == Area::Project || c.working_folder.is_some()) {
             return;
         }
-        let _ = self.launch(id, pick);
+        // Codex can prepare its shared process without freezing a thread's task kit.
+        if pick.vendor == Vendor::Codex {
+            self.kit_checks.remove(id);
+            if let Some(cli) = self.opts.clis.get(&Vendor::Codex).cloned() {
+                let settings = self.store.settings();
+                let key = (Area::Chat, settings.user_hooks() && settings.permissions().guarded(), settings.permissions());
+                if self.codex_prepared.get(id).is_none_or(|(old, _)| *old != key) {
+                    self.release_codex_preparation(id);
+                    self.tick += 1;
+                    let stamp = self.tick;
+                    self.codex_prepared.insert(id.into(), (key, stamp));
+                    let (me, id, idle) = (self.me.clone(), id.to_string(), self.opts.idle);
+                    self.opts.runtime.spawn(async move {
+                        tokio::time::sleep(idle).await;
+                        if let Some(core) = me.upgrade() {
+                            let mut core = core.lock().unwrap_or_else(|e| e.into_inner());
+                            if core.codex_prepared.get(&id) == Some(&(key, stamp)) {
+                                core.release_codex_preparation(&id);
+                            }
+                        }
+                    });
+                }
+                self.codex_server(key.0, key.1, key.2, &cli);
+            }
+        } else {
+            self.release_codex_preparation(id);
+            // Claude descriptions are task-independent; only a changed server kit replaces this prepared session at Send.
+            if self.launch_session(id, pick, kits::SessionStart::Prepare).is_err_and(|error| error == mcp_servers::CHECK_PENDING) {
+                let (key, pick) = (id.to_string(), pick.clone());
+                self.after_kit_check(id, move |core| {
+                    if !core.closing && !core.installing && core.convs.contains_key(&key) {
+                        core.warm_launch(&key, &pick);
+                    }
+                });
+            }
+        }
+    }
+
+    fn release_codex_preparation(&mut self, id: &str) {
+        let Some((key, _)) = self.codex_prepared.remove(id) else { return };
+        if !self.codex_prepared.values().any(|(other, _)| *other == key)
+            && !self.live.iter().any(|(id, live)| {
+                live.vendor == Vendor::Codex && live.permissions == key.2 && self.convs.get(id).is_some_and(|c| c.area == key.0)
+            })
+        {
+            self.retire_codex_server(key);
+        }
     }
 
     /// Throws away the blank conversation being typed, with the CLI that was started for it.
@@ -3747,6 +4018,7 @@ impl Core {
             return;
         }
         if let Some(old) = self.draft.take() {
+            self.kit_checks.retain(|_, check| check.owner != old);
             if let Some(l) = self.retire(&old) {
                 l.session.close();
             }
@@ -3790,6 +4062,7 @@ impl Core {
     fn remove(&mut self, id: &str) -> Result<(), String> {
         self.store.recover_group_move().map_err(|e| e.key())?;
         self.rewind_delete_allowed(id)?;
+        self.kit_checks.retain(|_, check| check.owner != id);
         if let Ok(mut groups) = self.store.chat_groups() {
             let changed = groups.iter().any(|g| g.conversation_ids.iter().any(|chat| chat == id));
             if changed {
@@ -4108,6 +4381,12 @@ mod tool_in_tests {
                 core.live.insert(
                     id.into(),
                     Live {
+                        tool_kit: Default::default(),
+                        kit_identity: None,
+                        kit_resource_digest: None,
+                        kit_pending: false,
+                        prepared: false,
+                        kit_resources: None,
                         group_files: None,
                         group_context: None,
                         vendor,

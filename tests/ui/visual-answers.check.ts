@@ -885,6 +885,7 @@ check('visual answers: Chat and Projects at 720 px reuse the resizable running p
         ok(host.querySelector('.rc-body'), 'back shows the running list');
         host.querySelector<HTMLButtonElement>('.visual-open')!.click();
         await settle();
+        await until(() => host.querySelector('iframe'), 'the reopened visual gets its frame');
         const closing = host.querySelector('iframe')!;
         host.querySelector<HTMLButtonElement>('.visual-pane .side-head .iconbtn:last-child')!.click();
         equal(host.querySelector('iframe'), null, 'closing immediately removes the frame');

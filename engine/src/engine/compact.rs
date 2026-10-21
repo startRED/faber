@@ -129,7 +129,29 @@ impl Core {
         if turn || verifying::checking(c) || !c.queued.is_empty() || c.messages.last().is_none_or(|m| m.status != Some(Status::Done)) {
             return Err("error.compact.busy".into());
         }
-        self.resume_compaction(conv)?;
+        if let Err(error) = self.resume_compaction(conv) {
+            if error == super::mcp_servers::CHECK_PENDING {
+                self.compacts.insert(conv.to_string(), Plan { next: None, fresh: None });
+                if let Some(c) = self.convs.get_mut(conv) {
+                    c.compacting = true;
+                }
+                self.list_changed();
+                let key = conv.to_string();
+                self.after_kit_check(conv, move |core| {
+                    if core.compacts.contains_key(&key) && !core.closing && !core.installing {
+                        if let Some(c) = core.convs.get_mut(&key) {
+                            c.compacting = false;
+                        }
+                        if !core.compact_due(&key) {
+                            core.compacts.remove(&key);
+                            core.list_changed();
+                        }
+                    }
+                });
+                return Ok(());
+            }
+            return Err(error);
+        }
         self.compacts.insert(conv.to_string(), Plan { next: None, fresh: None });
         if !self.compact_due(conv) {
             self.compacts.remove(conv);
@@ -156,7 +178,7 @@ impl Core {
             l.session.retire();
         }
         if !self.live.contains_key(conv) {
-            self.launch(conv, &pick)?;
+            self.launch_session(conv, &pick, kits::SessionStart::Compact)?;
         }
         Ok(())
     }
@@ -197,7 +219,28 @@ impl Core {
             }
             return false;
         }
-        if !self.live.contains_key(conv) && self.resume_compaction(conv).is_err() {
+        if !self.live.contains_key(conv)
+            && let Err(error) = self.resume_compaction(conv)
+        {
+            if error == super::mcp_servers::CHECK_PENDING {
+                if let Some(c) = self.convs.get_mut(conv) {
+                    c.compacting = true;
+                }
+                self.list_changed();
+                let key = conv.to_string();
+                self.after_kit_check(conv, move |core| {
+                    if core.compacts.contains_key(&key) && !core.closing && !core.installing {
+                        if let Some(c) = core.convs.get_mut(&key) {
+                            c.compacting = false;
+                        }
+                        if !core.compact_due(&key) {
+                            core.compacts.remove(&key);
+                            core.list_changed();
+                        }
+                    }
+                });
+                return true;
+            }
             return false;
         }
         let (Some(l), Some(c)) = (self.live.get(conv), self.convs.get_mut(conv)) else { return false };
@@ -284,6 +327,7 @@ impl Core {
     /// Pending work belongs to the conversation and follows its next session. Only a compaction already running ends
     /// with this process: nothing would ever hear its end.
     pub(super) fn retire(&mut self, conv: &str) -> Option<Live> {
+        self.release_codex_preparation(conv);
         let live = self.live.remove(conv)?;
         self.rewind_retire(conv, &live);
         if let Some(c) = self.convs.get_mut(conv).filter(|c| c.compacting) {

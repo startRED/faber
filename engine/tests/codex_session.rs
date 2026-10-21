@@ -592,6 +592,55 @@ pub(crate) async fn descendants_gone(tree: &faber_engine::proc::OwnedTree, what:
 }
 
 #[tokio::test]
+async fn catalog_kits_close_releases_a_real_drained_thread_while_the_peer_keeps_the_server() {
+    tokio::time::timeout(Duration::from_secs(60), async {
+        let mut wire = contained_wire(1).await;
+        let server = contained_server(&mut wire).await;
+        let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
+        let owner_tx = tx.clone();
+        let owner = contained_thread(&server, &mut wire, "owner", Arc::new(move |event| drop(owner_tx.send(("owner", event))))).await;
+        let peer = contained_thread(&server, &mut wire, "peer", Arc::new(move |event| drop(tx.send(("peer", event))))).await;
+        contained_turn(&peer, &mut wire, "peer-turn").await;
+        owner.close();
+        // A barrier confirms Close reached the driver while an unreported native descendant still owns resources.
+        assert_eq!(peer.answer("missing", false).await, Ok(Delivery::Unknown));
+        while let Ok((who, event)) = rx.try_recv() {
+            assert!(!matches!((who, event), ("owner", EngineEvent::WriterExit { confirmed: true })), "a live descendant lost its kit");
+        }
+        wire.release(0);
+        process_exited(wire.workers[0]).await;
+        descendants_gone(&wire.tree, "the native writer exited").await;
+        loop {
+            match rx.recv().await.unwrap() {
+                ("owner", EngineEvent::WriterExit { confirmed: true }) => break,
+                ("peer", EngineEvent::WriterExit { .. }) => panic!("closing the owner retired its active peer"),
+                _ => (),
+            }
+        }
+        assert!(process_alive(wire.tree.identity().pid), "the server survives after the owner's delivery is dropped");
+        support::emit(
+            &mut wire.output,
+            json!({"method":"item/agentMessage/delta","params":{
+            "threadId":"peer","turnId":"peer-turn","itemId":"words","delta":"peer still active"}}),
+        )
+        .await;
+        while !matches!(rx.recv().await.unwrap(), ("peer", EngineEvent::Text(text)) if text == "peer still active") {}
+        support::emit(
+            &mut wire.output,
+            json!({"method":"turn/completed","params":{
+            "threadId":"peer","turn":{"id":"peer-turn","status":"completed"}}}),
+        )
+        .await;
+        while !matches!(rx.recv().await.unwrap(), ("peer", EngineEvent::Done { .. })) {}
+        peer.close();
+        server.retire();
+        while !matches!(rx.recv().await.unwrap(), ("peer", EngineEvent::WriterExit { confirmed: true })) {}
+    })
+    .await
+    .expect("a closed native thread releases without waiting for its active peer");
+}
+
+#[tokio::test]
 async fn rewind_real_contained_idle_stop_after_native_exit_keeps_the_shared_peer_and_clears_the_owner() {
     tokio::time::timeout(Duration::from_secs(60), async {
         let mut wire = contained_wire(1).await;
@@ -2878,8 +2927,13 @@ async fn the_catalog_s_skill_root_is_set_once_before_the_first_thread_opens_and_
 /// A store's delivery with one server and, when given, a skill root.
 fn tools(skills: Option<&str>) -> faber_engine::tools::Delivery {
     faber_engine::tools::Delivery {
+        catalog_ready: true,
+        lease: None,
+        prepared: None,
+        catalog_root: None,
         plugin: None,
         skills: skills.map(Into::into),
+        skill_ids: None,
         servers: vec![faber_engine::tools::Launch {
             name: "measure".into(),
             command: "C:/node/node.exe".into(),

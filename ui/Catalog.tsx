@@ -3,7 +3,7 @@ import { createStore, reconcile } from 'solid-js/store';
 import { api, type Project, type ToolRow, type Vendor } from './api.ts';
 import { Toggle } from './controls.tsx';
 import { Icon } from './Glyphs.tsx';
-import { failureText, t } from './i18n.ts';
+import { catalogName, failureText, fromEngine, t } from './i18n.ts';
 import { en, type Key } from './locales/en.ts';
 import { CatalogInventory } from './CatalogInventory.tsx';
 import { McpServers } from './McpServers.tsx';
@@ -37,6 +37,10 @@ export function Catalog(props: { projects: Project[]; projectId?: string; vendor
   const [projectChoice, setProjectChoice] = createSignal(props.projectId ?? '');
   const projectId = () => props.projects.some((p) => p.id === projectChoice()) ? projectChoice() : undefined;
   let gone = false;
+  let stop: (() => void) | undefined;
+  let readStarted = false;
+  let read = 0;
+  let refreshAfterAction = false;
   let search: HTMLInputElement | undefined;
   let surface: HTMLElement | undefined;
   let detail: HTMLHeadingElement | undefined;
@@ -47,13 +51,39 @@ export function Catalog(props: { projects: Project[]; projectId?: string; vendor
     setError(undefined);
     try {
       await api.toolsClearRemoved();
+      readStarted = true;
+      const current = ++read;
       const list = await api.toolsList();
-      if (!gone) setRows(reconcile(list));
+      if (!gone && current === read) setRows(reconcile(list));
     } catch (err) {
       if (!gone) { setError(failureText(err)); setRetry(() => () => void load()); }
     } finally { if (!gone) setLoading(false); }
   };
-  onMount(() => { void load(); });
+  // The screen's optimistic rows and the engine's replies differ in shape (absent or null status, the flag of a removed item): compare what the screen shows.
+  const same = (list: readonly ToolRow[]) => JSON.stringify(list.map((r) => [r.id, r.installed, r.installed ? r.enabled !== false : true, r.status ?? null, r.version ?? null, r.nodeAvailable ?? null]));
+  const refresh = async () => {
+    if (gone) return;
+    if (busy()) { refreshAfterAction = true; return; }
+    const current = ++read;
+    try {
+      const list = await api.toolsList();
+      if (!gone && current === read) {
+        // Rereading the inventory remounts the server switches: only when the catalog really changed, never for an identical catch-up read.
+        const changed = same(list) !== same(rows);
+        setRows(reconcile(list));
+        if (changed) setRevision((v) => v + 1);
+      }
+    } catch (err) {
+      if (!gone && current === read) { setError(failureText(err)); setRetry(() => () => void refresh()); }
+    }
+  };
+  onMount(() => {
+    void api.on((event) => { if (event.type === 'catalog') void refresh(); }).then((unlisten) => {
+      if (gone) unlisten();
+      else { stop = unlisten; if (readStarted) void refresh(); }
+    }).catch(() => {});
+    void load();
+  });
   const key = (event: KeyboardEvent) => {
     if (surface?.closest('[inert]') || document.querySelector('.pal-scrim, .keys-sheet, .cmenu')) return;
     if (pressed(event, 'find')) {
@@ -64,7 +94,7 @@ export function Catalog(props: { projects: Project[]; projectId?: string; vendor
     if (!event.defaultPrevented && event.key === 'Escape' && selected()) { event.preventDefault(); if (confirming()) setConfirming(false); else back(); }
   };
   window.addEventListener('keydown', key);
-  onCleanup(() => { gone = true; window.removeEventListener('keydown', key); });
+  onCleanup(() => { gone = true; stop?.(); window.removeEventListener('keydown', key); });
   const starters = createMemo(() => {
     const recommended = rows.filter((row) => row.tier === 'recommended');
     const seen = new Set<string>();
@@ -79,8 +109,8 @@ export function Catalog(props: { projects: Project[]; projectId?: string; vendor
     const text = query().trim().toLocaleLowerCase();
     const list = filter() === 'all' && !text ? [...starters(), ...rows.filter((row) => !starters().includes(row))] : rows;
     return list.filter((row) => (filter() !== 'skills' || !row.server) && (filter() !== 'servers' || row.server)
-      && (filter() !== 'installed' || row.installed)
-      && (!text || `${row.id} ${row.repo} ${words(`tools.${row.id}`, row.id)} ${words(`catalog.job.${row.job}`, row.job)} ${words(`catalog.job.${job(row)}`, job(row))}`.toLocaleLowerCase().includes(text)));
+      && (filter() !== 'installed' || row.installed || row.status)
+      && (!text || `${row.id} ${catalogName(row.id)} ${row.repo} ${words(`tools.${row.id}`, row.id)} ${words(`catalog.job.${row.job}`, row.job)} ${words(`catalog.job.${job(row)}`, job(row))}`.toLocaleLowerCase().includes(text)));
   });
   createEffect(() => {
     const last = Math.max(0, Math.ceil(matching().length / PAGE) - 1);
@@ -98,7 +128,10 @@ export function Catalog(props: { projects: Project[]; projectId?: string; vendor
     ];
   });
   const item = () => rows.find((r) => r.id === selected());
-  const state = (row: ToolRow) => row.server && row.nodeAvailable === false ? t('catalog.needsNode') : t(row.installed ? row.enabled === false ? 'catalog.off' : 'catalog.on' : 'catalog.notInstalled');
+  const status = (id: string) => rows.find((row) => row.id === id)?.status ?? undefined;
+  const serverStatus = (name: string) => status(name.replace(/^faber-/, ''));
+  const available = (name: string) => rows.some((r) => `faber-${r.id}` === name && r.installed && r.enabled !== false && !r.status);
+  const state = (row: ToolRow) => row.status ? fromEngine(row.status) : row.server && row.nodeAvailable === false ? t('catalog.needsNode') : t(row.installed ? row.enabled === false ? 'catalog.off' : 'catalog.on' : 'catalog.notInstalled');
   const open = (row: ToolRow, button: HTMLElement) => {
     returnCard = button;
     setSelected(row.id);
@@ -113,6 +146,7 @@ export function Catalog(props: { projects: Project[]; projectId?: string; vendor
   };
   const change = async (id: string, action: 'install' | 'remove' | 'toggle' | 'restore', enabled = true): Promise<boolean> => {
     if (busy()) return false;
+    ++read;
     const wasEnabled = rows.find((r) => r.id === id)?.enabled !== false;
     const restoring = removed();
     setBusy(true); setError(undefined); setRetry(undefined);
@@ -124,7 +158,7 @@ export function Catalog(props: { projects: Project[]; projectId?: string; vendor
       if (gone) return true;
       // Update fields in place so a successful toggle keeps its native input and focus.
       const index = rows.findIndex((r) => r.id === id);
-      if (index >= 0) setRows(index, { installed: action !== 'remove', enabled: action === 'toggle' ? enabled : action === 'restore' ? restoring?.enabled !== false : true });
+      if (index >= 0) setRows(index, { installed: action !== 'remove', enabled: action === 'toggle' ? enabled : action === 'restore' ? restoring?.enabled !== false : true, status: undefined });
       if (action === 'remove') { setRemoved({ id, enabled: wasEnabled }); setConfirming(false); queueMicrotask(() => undo?.focus()); }
       else if (removed()?.id === id) setRemoved(undefined);
       if (action === 'install' || action === 'restore') queueMicrotask(() => detail?.focus());
@@ -133,14 +167,14 @@ export function Catalog(props: { projects: Project[]; projectId?: string; vendor
     } catch (err) {
       if (!gone) { setError(failureText(err)); setRetry(() => () => void change(id, action, enabled)); }
       return false;
-    } finally { if (!gone) setBusy(false); }
+    } finally { if (!gone) { setBusy(false); if (refreshAfterAction) { refreshAfterAction = false; void refresh(); } } }
   };
   return (
     <section class="catalog" ref={(el) => (surface = el)} data-catalog aria-label={t('area.catalog')}>
       <div class="catalog-content">
         <Show when={props.vendors.length === 0}><p class="hint">{t('catalog.noAi')}</p></Show>
         <Show when={error()}><div class="catalog-notice" role="alert"><span>{error()}</span><Show when={retry()}><button class="btn" disabled={busy()} onClick={() => retry()?.()}>{t('catalog.retry')}</button></Show></div></Show>
-        <Show when={removed()}><div class="catalog-notice" role="status"><span>{t('catalog.removed', { name: removed()!.id })}</span><button class="btn" ref={(el) => (undo = el)} disabled={busy()} onClick={() => void change(removed()!.id, 'restore')}>{t('catalog.undo')}</button></div></Show>
+        <Show when={removed()}><div class="catalog-notice" role="status"><span>{t('catalog.removed', { name: catalogName(removed()!.id) })}</span><button class="btn" ref={(el) => (undo = el)} disabled={busy()} onClick={() => void change(removed()!.id, 'restore')}>{t('catalog.undo')}</button></div></Show>
         <Show when={item()} fallback={<>
           <header class="catalog-top">
             <h1>{t('area.catalog')}</h1>
@@ -152,14 +186,14 @@ export function Catalog(props: { projects: Project[]; projectId?: string; vendor
           <Show when={loading()}><div class="catalog-empty" role="status"><Peek /><p>{t('catalog.loading')}</p></div></Show>
           <Show when={filter() !== 'installed' && !loading() && !matching().length && !error()}><div class="catalog-empty" role="status"><Peek /><p>{t(query().trim() ? 'catalog.noMatch' : 'catalog.empty')}</p></div></Show>
           <For each={groups()}>{(group) => <section class="catalog-group"><h2>{group.name}</h2><div class="catalog-grid"><For each={group.rows}>{(row) => <button class="catalog-card" data-catalog-card={row.id} onClick={(e) => open(row, e.currentTarget)}>
-            <span class="catalog-name">{row.id}</span><span class="catalog-description">{words(`tools.${row.id}`, row.id)}</span><span class="catalog-origin">{row.repo} · {row.license}</span><span class="catalog-state">{state(row)}</span>
+            <span class="catalog-name">{catalogName(row.id)}</span><span class="catalog-description">{words(`tools.${row.id}`, row.id)}</span><span class="catalog-origin">{row.repo} · {row.license}</span><span class="catalog-state">{state(row)}</span>
           </button>}</For></div></section>}</For>
           <Show when={matching().length > PAGE}><nav class="catalog-pages" aria-label={t('catalog.pages')}><button class="btn" disabled={!page()} onClick={() => setPage(page() - 1)}>{t('catalog.previous')}</button><span aria-live="polite">{t('catalog.page', { n: page() + 1, total: Math.ceil(matching().length / PAGE) })}</span><button class="btn" disabled={(page() + 1) * PAGE >= matching().length} onClick={() => setPage(page() + 1)}>{t('catalog.next')}</button></nav></Show>
-          <Show when={filter() === 'installed'}><CatalogInventory query={query()} catalogMatches={matching().length} available={(name) => rows.some((r) => `faber-${r.id}` === name && r.installed && r.enabled !== false)} revision={revision()} projectId={projectId()} projects={props.projects} onProject={setProjectChoice} onOpen={(id) => { const row = rows.find((r) => r.id === id); if (row) open(row, search!); }} /></Show>
+          <Show when={filter() === 'installed'}><CatalogInventory query={query()} catalogMatches={matching().length} status={status} serverStatus={serverStatus} available={available} revision={revision()} projectId={projectId()} projects={props.projects} onProject={setProjectChoice} onOpen={(id) => { const row = rows.find((r) => r.id === id); if (row) open(row, search!); }} /></Show>
         </>}>
           {(row) => <article class="catalog-detail" aria-busy={busy()}>
             <button class="btn" onClick={back}><Icon name="left" small />{t('catalog.back')}</button>
-            <h1 ref={(el) => (detail = el)} tabindex="-1">{row().id}</h1>
+            <h1 ref={(el) => (detail = el)} tabindex="-1">{catalogName(row().id)}</h1>
             <Show when={row().cliName && row().cliName !== row().id}><p>{t('catalog.cliName', { name: row().cliName! })}</p></Show>
             <p class="catalog-description">{words(`tools.${row().id}`, row().id)}</p>
             <p class="catalog-state">{state(row())}</p>
@@ -170,12 +204,13 @@ export function Catalog(props: { projects: Project[]; projectId?: string; vendor
             <p class="hint">{t('catalog.safeInstall')}</p>
             <Show when={row().server && row().nodeAvailable === false}><p>{t('catalog.nodeHelp')}</p><button class="link" onClick={() => void api.openLink('https://nodejs.org/en/download').catch((e) => setError(failureText(e)))}>{t('catalog.getNode')}</button></Show>
             <Show when={row().installed} fallback={<button class="btn primary" disabled={busy() || (row().server && row().nodeAvailable === false)} onClick={() => void change(row().id, 'install')}>{t(busy() ? 'catalog.working' : 'catalog.install')}</button>}>
-              <Toggle id="catalog-enabled" label={t('catalog.enabled')} hint={t('catalog.nextConversation')} checked={row().enabled !== false} onChange={(next) => change(row().id, 'toggle', next)} />
+              <Show when={row().status}><button class="btn primary" disabled={busy() || (row().server && row().nodeAvailable === false)} onClick={() => void change(row().id, 'install')}>{t(busy() ? 'catalog.working' : 'catalog.install')}</button></Show>
+              <Toggle id="catalog-enabled" label={t('catalog.enabled')} hint={t('catalog.nextConversation')} checked={!row().status && row().enabled !== false} disabled={!!row().status} onChange={(next) => change(row().id, 'toggle', next)} />
               <Show when={confirming()} fallback={<button class="btn danger" disabled={busy()} onClick={() => setConfirming(true)}>{t('catalog.remove')}</button>}>
-                <div class="catalog-notice"><span>{t('catalog.confirmRemove', { name: row().id })}</span><button class="btn" disabled={busy()} onClick={() => setConfirming(false)}>{t('catalog.cancel')}</button><button class="btn danger" disabled={busy()} onClick={() => void change(row().id, 'remove')}>{t('catalog.remove')}</button></div>
+                <div class="catalog-notice"><span>{t('catalog.confirmRemove', { name: catalogName(row().id) })}</span><button class="btn" disabled={busy()} onClick={() => setConfirming(false)}>{t('catalog.cancel')}</button><button class="btn danger" disabled={busy()} onClick={() => void change(row().id, 'remove')}>{t('catalog.remove')}</button></div>
               </Show>
             </Show>
-            <Show when={row().server && row().installed}><h2>{t('catalog.projectServers')}</h2><p class="hint">{t('catalog.projectChoice')}</p><McpServers globallyEnabled={row().enabled !== false} revision={revision()} projectId={projectId()} projects={props.projects} serverName={`faber-${row().id}`} onError={(e) => { setError(failureText(e)); setRetry(() => () => { setError(undefined); setRevision((v) => v + 1); }); }} /></Show>
+            <Show when={row().server && row().installed}><h2>{t('catalog.projectServers')}</h2><p class="hint">{t('catalog.projectChoice')}</p><McpServers status={serverStatus} globallyEnabled={row().enabled !== false && !row().status} revision={revision()} projectId={projectId()} projects={props.projects} serverName={`faber-${row().id}`} onError={(e) => { setError(failureText(e)); setRetry(() => () => { setError(undefined); setRevision((v) => v + 1); }); }} /></Show>
           </article>}
         </Show>
       </div>

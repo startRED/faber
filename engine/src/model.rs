@@ -239,6 +239,9 @@ pub struct Message {
     pub thinking: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub tools: Option<Vec<ToolUse>>,
+    /// Catalog items chosen when this reply's CLI session started; unchanged while that session runs.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tool_kit: Option<crate::tools::kits::Report>,
     /// Successful git commit calls, recognised by the engine's command parser; ids refer to this reply's tools.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub commits: Vec<String>,
@@ -696,6 +699,7 @@ impl Message {
             finished_at: None,
             now: None,
             wrap_up: None,
+            tool_kit: None,
         }
     }
 }
@@ -779,6 +783,12 @@ pub struct Conversation {
     /// One CLI session per vendor, so switching models keeps each vendor's own history and cache.
     #[serde(default)]
     pub sessions: BTreeMap<Vendor, String>,
+    /// The catalog ids of each native session, including empty kits that have no visible report.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub session_kits: BTreeMap<Vendor, (String, Vec<String>, Option<String>)>,
+    /// Digest of the exact catalog resource prefix accepted by each native kit; old records resend once.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub session_resource_digests: BTreeMap<Vendor, String>,
     /// A session id whose first turn was accepted but has not shown any output yet. It is not resumable like `sessions` (the CLI may
     /// not have saved it), but a restart after a crash resumes it instead of starting a session that knows nothing of the turn.
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]

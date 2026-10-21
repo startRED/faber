@@ -105,6 +105,12 @@ mod tests {
             c.live.insert(
                 id.clone(),
                 Live {
+                    tool_kit: Default::default(),
+                    kit_identity: None,
+                    kit_resource_digest: None,
+                    kit_pending: false,
+                    prepared: false,
+                    kit_resources: None,
                     group_files: None,
                     group_context: None,
                     cwd: PathBuf::new(),
@@ -264,6 +270,8 @@ mod tests {
             c.handle(&id, 1, parked("t3", "WebFetch", json!({ "url": "https://user:sk-SECRET-3@example.com:8443/a/b?key=sk-SECRET-4#x" })));
             c.handle(&id, 1, parked("t4", "mcp__x__send", json!({ "body": "sk-SECRET-5" })));
             c.handle(&id, 1, done());
+            // A safe timestamp may contain the same digits as a denied URL's port.
+            c.convs.get_mut(&id).unwrap().messages.last_mut().unwrap().parked.as_mut().unwrap()[0].at = 8443;
         });
         let reply = engine.open(&id).unwrap().messages.pop().unwrap();
         let kept: Vec<_> = reply.parked.as_ref().unwrap().iter().map(|p| (p.tool.as_str(), p.kind.as_str(), p.label.as_str())).collect();
@@ -281,9 +289,10 @@ mod tests {
         let saved = std::fs::read_to_string(dir.path().join("conversations").join(format!("{id}.json"))).unwrap_or_default();
         let wire =
             [serde_json::to_string(&reply).unwrap(), serde_json::to_string(&engine.state().running.items).unwrap(), saved].join("\n");
-        for secret in ["sk-SECRET", "Bearer", "Authorization", "curl", "8443", "key="] {
+        for secret in ["sk-SECRET", "Bearer", "Authorization", "curl", "example.com:8443", "key="] {
             assert!(!wire.contains(secret), "{secret} leaked: {wire}");
         }
+        assert!(wire.contains("8443"), "the regression fixture includes a legitimate timestamp, not a URL port");
     }
 
     #[tokio::test]

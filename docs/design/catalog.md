@@ -47,9 +47,27 @@ entry or engine restart; it retains no removed files and is checked against the 
 record precedes the file move; interrupted restores complete before launch pruning or cleanup, and a failed ledger
 save leaves the recoverable copy and intent in place. Only the latest removal retains Undo; opening Catalog or restarting
 the engine expires unreachable copies after recovery. Disabled copies are checked by name, ledger and folder type on
-launch; their files are hashed when enabling. Future project conversations follow the saved choice and existing
-permission boundaries. Moving files on Off or Remove may also affect ongoing work. This does not promise automatic
-selection or catalog delivery to Chat, which are later steps.
+launch; their files are hashed when enabling. Future sessions in Chat and Projects follow the saved choice and existing
+permission boundaries. The session kit selects verified installed instructions and servers for each task; Claude
+Projects also discovers descriptions of all enabled catalog skills. Chat receives only selected catalog instructions,
+never personal/plugin skills; servers there need an explicit file-free, setup-free catalog review and Full access.
+Moving files on Off or Remove may also affect ongoing work.
+
+Every shipped item has one hand-written `catalog.name.*` name in each of the five locales. Cards, details, installed
+catalog rows, removal messages and conversation work logs use that same source; CLI aliases remain a separate detail.
+Codex Projects also receives a lazy index of all enabled skills, using their checked, shortened descriptions. Its 32 KiB
+cap is separate from the 16 KiB selected kit, so discovery cannot crowd out servers or pins. Chat skips oversized
+instructions and takes the next matching item that fits. Claude Projects names native plugin skills without outside
+file reads when its CLI supports the plugin flag; older CLIs and helpers receive the lazy Read fallback. An unchanged
+native resume, including warm-up, sends no repeated index.
+
+An installed item with a failed source digest check stays listed with one localized reinstall line on its card, detail
+and installed catalog row. It is unavailable to new sessions; healthy items remain available. The existing Install action
+is offered as the explicit repair, never an automatic download. Install errors keep their retry; transient snapshot I/O
+errors do not mark healthy source files as needing reinstall. Catalog returns its current cached status without waiting
+for snapshot preparation. A `catalog` publication event refreshes mounted cards and installed catalog rows without polling;
+the listener closes with the tab, including when registration completes after closure. These controls and status never
+return to Settings.
 
 An installed server's detail offers the project picker and existing per-project MCP preference. It reads/writes the same
 projects.json field, reports each connected CLI's last known state, and never treats global availability as a second
@@ -79,12 +97,13 @@ or per-frame work. Catalog pages draw at most 48 cards; inventory pages draw at 
 folder entries/depth and manifest bytes before building its snapshot. CPU work is finite filtering and one snapshot per
 open/project/action. Filesystem commands run on blocking workers rather than the window's command thread. Inventory
 returns an unavailable state within two seconds; one scanner owns its permit until it actually finishes, even after
-timeout, so retries cannot accumulate stalled readers. Disk cost includes disabled items and the latest Undo copy.
+timeout, so retries cannot accumulate stalled readers. Disk cost includes disabled items, the latest Undo copy and leased snapshots.
 Metadata is capped at 36 KiB; stored job limits are 32 for building games, 11 for marketing, 23 for game design
 and 14 for any remaining job, checked in engine tests. Only metadata and localized words ship. Actual working-set/CPU
 measurements and the native screen suite belong to the lead's unsandboxed validation; no measured saving is claimed.
 
-Checks: `tests/ui/catalog.check.ts`, `engine/tests/tools.rs`, `engine/tests/tool_inventory.rs`, and existing MCP checks.
+Checks: `tests/ui/catalog.check.ts`, `tests/ui/kits.check.ts`, `engine/tests/locales.rs` (every shipped name in every locale),
+`engine/src/engine/kits.rs` (native resume and oversize discovery), `engine/tests/tools.rs`, `engine/tests/tool_inventory.rs`, and existing MCP checks.
 Cards checked in code review: C007 (localized UTF-8), C009 (shared context menu policy), C011 (management placement).
 Catalog is not a C005 work home; no composer is added to satisfy that card. Visual screenshots remain to be verified.
 
@@ -93,8 +112,12 @@ Catalog is not a C005 work home; no composer is added to satisfy that card. Visu
 No new process, background timer or persistent catalog DOM. While open, render at most 48 catalog cards and 48 inventory
 rows per AI page; keep one bounded metadata snapshot and at most one inventory worker. A timed-out filesystem call may
 retain that one worker until the OS returns, without polling or queuing retries. Closed, the tab releases its nodes and
-listeners. Disk hashing for disabled tools moves from every session start to activation; active-tool verification and
-restore verification retain their safety checks. Startup/entry cleanup expires the previous visit's Undo files. Native
+listeners. Disabled tools are hashed on activation. Snapshot preparation and cleanup use one store worker; ready sessions
+rehash the whole folders they may use before launch, outside the engine lock, including supporting files and server code.
+One launch check runs at a time per engine, so simultaneous conversations cannot multiply its file buffers.
+Transient preparation failures back off from one to sixty seconds; a catalog change allows an immediate retry. A snapshot shares
+verified files through hardlinks where supported, with streamed-copy fallback and a 256 MiB aggregate cap. Leases keep old
+states alive while needed; startup/entry cleanup also expires the previous visit's Undo files. Native
 working-set/processor measurements were not available in this sandbox, so no measured MB or CPU improvement is claimed.
 Undo metadata is one item id and its prior on/off choice; a restore attempt adds a bounded receipt read before the
 existing checks. Completed receipts add no per-session hashing or writes. No background work or process is added.

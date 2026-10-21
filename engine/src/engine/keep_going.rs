@@ -721,7 +721,7 @@ impl Core {
         let wait = at - self.secs() + 5.0 * self.keep_pace;
         let (me, conv, reply) = (self.me.clone(), conv.to_string(), reply_id.to_string());
         self.opts.runtime.spawn(async move {
-            tokio::time::sleep(Duration::from_secs_f64(wait)).await;
+            tokio::time::sleep(Duration::from_secs_f64(wait.max(0.0))).await;
             if let Some(core) = me.upgrade() {
                 let mut core = core.lock().unwrap_or_else(|e| e.into_inner());
                 // Only the latest wait wakes it: turning keep going off and on, or a newer turn, leaves this one behind.

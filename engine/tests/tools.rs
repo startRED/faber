@@ -15,6 +15,32 @@ fn zip_of(files: &[(&str, &[u8])]) -> Vec<u8> {
 
 const SKILL: &[u8] = b"---\nname: careful\ndescription: Be careful.\n---\nBe careful.";
 
+#[tokio::test]
+async fn every_catalog_command_handles_empty_app_data_without_a_preexisting_store() {
+    let profile = tempfile::tempdir().unwrap();
+    let id = "systematic-debugging";
+    let empty = || Store::new(profile.path());
+    // Catalog opens with cleanup followed by listing and inventory, before any installation.
+    assert!(!profile.path().join("tools").exists());
+    empty().clear_removed().unwrap();
+    assert!(empty().installed().is_empty());
+    assert!(empty().checked_statuses().is_empty());
+    assert!(!empty().enabled(id));
+    assert!(!faber_engine::tools::catalog().is_empty());
+    let inventory = faber_engine::tool_inventory::inventory(profile.path(), None, None);
+    assert!(inventory.iter().all(|list| list.rows.is_empty()));
+    empty().remove(id).unwrap();
+    assert!(empty().set_enabled(id, true).unwrap_err().contains("not installed"));
+    assert!(empty().set_enabled(id, false).unwrap_err().contains("not installed"));
+    assert!(empty().restore(id).is_err(), "there is no removed copy to restore");
+    empty().clear_removed().unwrap();
+    // The real installer refuses an invalid source before network access and leaves a usable empty catalog.
+    let source = "https://example.com/not-an-allowed-install-source";
+    assert!(install(&empty(), faber_engine::tools::find(id).unwrap(), Some(source)).await.is_err());
+    assert!(empty().installed().is_empty());
+    empty().clear_removed().unwrap();
+}
+
 #[test]
 fn curated_catalog_has_checked_metadata_locales_and_a_bounded_size() {
     use faber_engine::tools::{Tier, catalog};
@@ -97,6 +123,7 @@ fn item() -> Item {
         commit: "0123".into(),
         path: "skills/careful".into(),
         digest: digest(dir.path()).unwrap(),
+        chat_safe: false,
         server: None,
     }
 }
@@ -120,10 +147,16 @@ async fn a_skill_downloads_from_its_repository_and_installs_only_with_the_catalo
     assert!(store.installed().is_empty() && store.delivery().plugin.is_none());
 
     install(&store, &item(), Some(&server.origin)).await.unwrap();
+    store.kit("debug", None, faber_engine::model::Area::Chat, faber_engine::model::Permissions::Ask, &[]);
     assert_eq!(store.installed().get("careful").map(String::as_str), Some("0123"));
     assert_eq!(std::fs::read(data.path().join("tools/plugin/skills/careful/SKILL.md")).unwrap(), SKILL);
+    assert!(store.checked_statuses().is_empty());
     let leftovers: Vec<_> = std::fs::read_dir(data.path().join("tools")).unwrap().flatten().map(|e| e.file_name()).collect();
-    assert_eq!(leftovers.len(), 2, "only the plugin and the ledger stay: {leftovers:?}");
+    assert_eq!(
+        leftovers.into_iter().collect::<std::collections::BTreeSet<_>>(),
+        [".kits-lock", "installed.json", "kits", "plugin"].into_iter().map(std::ffi::OsString::from).collect(),
+        "only checked catalog resources, ledger and snapshot cache stay"
+    );
 
     let mut gone = item();
     gone.repo = "missing/repo".into();
@@ -171,6 +204,7 @@ async fn a_server_downloads_from_npm_s_path_and_installs_only_with_the_catalog_s
         commit: "0123".into(),
         path: String::new(),
         digest: digest(dir.path()).unwrap(),
+        chat_safe: false,
         server: Some(faber_engine::tools::Server {
             package: "@scope/measure".into(),
             version: version.into(),
@@ -191,8 +225,14 @@ async fn a_server_downloads_from_npm_s_path_and_installs_only_with_the_catalog_s
     install(&store, &measure("1.0.0"), Some(&server.origin)).await.unwrap();
     assert_eq!(std::fs::read(data.path().join("tools/servers/measure/run.js")).unwrap(), b"run()");
     assert_eq!(store.delivery().servers.len(), 1);
+    assert!(store.checked_statuses().is_empty());
+    store.kit("debug", None, faber_engine::model::Area::Chat, faber_engine::model::Permissions::Ask, &[]);
     let leftovers: Vec<_> = std::fs::read_dir(data.path().join("tools")).unwrap().flatten().map(|e| e.file_name()).collect();
-    assert_eq!(leftovers.len(), 2, "only the servers and the ledger stay: {leftovers:?}");
+    assert_eq!(
+        leftovers.into_iter().collect::<std::collections::BTreeSet<_>>(),
+        [".kits-lock", "installed.json", "kits", "servers"].into_iter().map(std::ffi::OsString::from).collect(),
+        "only checked catalog resources, ledger and snapshot cache stay"
+    );
     store.set_enabled("measure", false).unwrap();
     assert!(store.installed().contains_key("measure") && !store.enabled("measure"));
     assert!(store.delivery().servers.is_empty());
@@ -245,6 +285,61 @@ fn installed_skills_switch_off_and_on_from_local_files_and_removal_can_be_undone
     }
     assert!(reopened.set_enabled("../careful", true).is_err());
     assert!(reopened.set_enabled("missing", true).is_err());
+}
+
+#[test]
+fn catalog_switch_remove_and_undo_apply_to_next_kits_and_preserve_held_sessions() {
+    use faber_engine::model::{Area, Permissions, Vendor};
+    let data = tempfile::tempdir().unwrap();
+    let archive = data.path().join("skill.zip");
+    std::fs::write(&archive, zip_of(&[("skills/careful/SKILL.md", SKILL)])).unwrap();
+    let store = Store::with_catalog(data.path(), vec![item()]);
+    store.install_from(&item(), &archive).unwrap();
+    let task = "debug my app crash";
+    let kit = |vendor| store.kit_for(vendor, task, None, Area::Project, Permissions::Ask, &[]);
+    let (held, _) = kit(Vendor::Claude);
+    let held_path = held.skills.as_ref().unwrap().join("careful/SKILL.md");
+    for vendor in Vendor::ALL {
+        assert_eq!(kit(vendor).1.ids, ["careful"]);
+    }
+    store.set_enabled("careful", false).unwrap();
+    for vendor in Vendor::ALL {
+        assert!(kit(vendor).1.ids.is_empty(), "a switched-off item never enters the next session");
+    }
+    store.remove("careful").unwrap();
+    store.restore("careful").unwrap();
+    assert!(!store.enabled("careful"), "Undo preserves the disabled switch");
+    for vendor in Vendor::ALL {
+        assert!(kit(vendor).1.ids.is_empty());
+    }
+    store.set_enabled("careful", true).unwrap();
+    for vendor in Vendor::ALL {
+        assert_eq!(kit(vendor).1.ids, ["careful"]);
+    }
+    store.remove("careful").unwrap();
+    for vendor in Vendor::ALL {
+        assert!(kit(vendor).1.ids.is_empty(), "an uninstalled item never enters the next session");
+    }
+    assert_eq!(std::fs::read(held_path).unwrap(), SKILL, "a running session retains its verified snapshot");
+}
+
+#[test]
+fn catalog_preserves_previous_kit_switches_when_adopting_inventory_folders() {
+    use faber_engine::model::{Area, Permissions};
+    let data = tempfile::tempdir().unwrap();
+    let archive = data.path().join("skill.zip");
+    std::fs::write(&archive, zip_of(&[("skills/careful/SKILL.md", SKILL)])).unwrap();
+    let store = Store::with_catalog(data.path(), vec![item()]);
+    store.install_from(&item(), &archive).unwrap();
+    std::fs::write(data.path().join("tools/selection.json"), br#"{"disabled":["careful"],"always":[]}"#).unwrap();
+    assert!(!store.enabled("careful"));
+    assert!(store.kit("debug my app crash", None, Area::Project, Permissions::Ask, &[]).1.ids.is_empty());
+    store.remove("careful").unwrap();
+    store.restore("careful").unwrap();
+    assert!(!store.enabled("careful"), "Undo keeps a pre-Catalog disabled choice");
+    assert!(data.path().join("tools/disabled/careful/SKILL.md").is_file());
+    store.set_enabled("careful", true).unwrap();
+    assert_eq!(store.kit("debug my app crash", None, Area::Project, Permissions::Ask, &[]).1.ids, ["careful"]);
 }
 
 #[test]

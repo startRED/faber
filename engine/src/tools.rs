@@ -1,7 +1,7 @@
 //! The tool catalog, step 1 (R33, R152, R247): skills Faber installs from their own repository, at a pinned commit, into a
-//! store of its own, and hands to both CLIs on every session it starts. Nothing is bundled: `tools.json` lists only where each
+//! store of its own, and selects a task kit for each CLI session. Nothing is bundled: `tools.json` lists only where each
 //! skill lives and the digest its files must have. The person's own CLI folders are never touched: Claude Code gets the store
-//! as a plugin (`--plugin-dir`), Codex as an extra skill root (`skills/extraRoots/set`).
+//! as a private plugin (`--plugin-dir`), Codex as checked per-thread instructions because its extra skill roots are process-wide.
 
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
@@ -9,6 +9,8 @@ use std::collections::BTreeMap;
 use std::io::{self, Read, Write};
 use std::path::{Path, PathBuf};
 use std::sync::{Mutex, OnceLock};
+
+pub mod kits;
 
 /// One skill of the catalog.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -37,6 +39,9 @@ pub struct Item {
     /// Set for a tool server rather than a skill: what installs is the npm package, and `commit` is its release's.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub server: Option<Server>,
+    /// Only reviewed servers that touch no PC files and need no setup may opt into Chat.
+    #[serde(default)]
+    pub chat_safe: bool,
 }
 
 /// A tool server of the catalog (step 3): an npm package with no dependencies that Node runs and the CLIs speak to over
@@ -117,11 +122,20 @@ const SERVER_FILES: usize = 2000;
 /// (an empty plugin would only cost the CLI a folder scan), and how to start each installed server.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct Delivery {
+    /// False while a verified catalog snapshot is unavailable; this is not a server selection change.
+    pub catalog_ready: bool,
+    pub catalog_root: Option<PathBuf>,
     pub plugin: Option<PathBuf>,
     pub skills: Option<PathBuf>,
+    /// The task's skills inside a cached catalog snapshot; legacy direct-store delivery has no filter.
+    pub skill_ids: Option<Vec<String>>,
     pub servers: Vec<Launch>,
     /// Per-project catalog choices, passed only to this launch, never to a CLI file.
     pub disabled_servers: Vec<String>,
+    /// Protects the cached snapshot from sweeping while a driver uses it.
+    pub lease: Option<std::sync::Arc<kits::Lease>>,
+    /// Ready sessions read immutable, already checked text without filesystem work under the engine lock.
+    pub prepared: Option<std::sync::Arc<kits::PreparedText>>,
 }
 
 /// One server as both CLIs start it: Node, the package's script and Faber's arguments, and the environment Faber sets.
@@ -144,6 +158,7 @@ pub struct Store {
     items: Vec<Item>,
     /// Node for the servers; `None` looks it up on PATH when a server is installed.
     node: Option<PathBuf>,
+    ready: std::sync::Arc<kits::ReadyCache>,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -160,7 +175,7 @@ impl Removed {
     fn write(&self, dir: &Path) -> io::Result<()> {
         let part = dir.join(format!(".state-{}", uuid::Uuid::new_v4()));
         std::fs::write(&part, serde_json::to_vec(self).map_err(io::Error::other)?)?;
-        let saved = std::fs::rename(&part, dir.join("state.json"));
+        let saved = retry_busy(|| std::fs::rename(&part, dir.join("state.json")));
         if saved.is_err() {
             let _ = std::fs::remove_file(part);
         }
@@ -174,11 +189,18 @@ impl Store {
     }
     /// A store that trusts another catalog (tests).
     pub fn with_catalog(data_dir: &Path, items: Vec<Item>) -> Self {
-        Store { root: data_dir.join("tools"), items, node: None }
+        let root = data_dir.join("tools");
+        let ready = kits::ReadyCache::for_root(&root, &items, None);
+        let store = Store { root, items, node: None, ready };
+        store.refresh_ready_inventory();
+        store
     }
     /// A store that starts its servers with this Node (tests).
     pub fn with_node(self, node: PathBuf) -> Self {
-        Store { node: Some(node), ..self }
+        let ready = kits::ReadyCache::for_root(&self.root, &self.items, Some(&node));
+        let store = Store { node: Some(node), ready, ..self };
+        store.refresh_ready_inventory();
+        store
     }
     fn plugin(&self) -> PathBuf {
         self.root.join("plugin")
@@ -221,6 +243,7 @@ impl Store {
     /// Whether an installed copy is in the launch roots. Callers use installed() for ledger membership.
     pub fn enabled(&self, id: &str) -> bool {
         valid_id(id)
+            && !self.selection().disabled.contains(id)
             && !self.disabled().join(id).exists()
             && self.items.iter().find(|i| i.id == id).is_some_and(|i| {
                 let marker = i.server.as_ref().map_or("SKILL.md", |s| s.entry.as_str());
@@ -235,7 +258,8 @@ impl Store {
         }
         let _store = lock();
         let item = self.items.iter().find(|i| i.id == id).ok_or("Unknown tool")?;
-        self.prune().ok_or("The tool store cannot be checked")?;
+        let mut selection = self.read_selection().ok_or("Could not read catalog switches")?;
+        self.recover_restores()?;
         if !self.installed().contains_key(id) {
             return Err("The tool is not installed".into());
         }
@@ -248,11 +272,19 @@ impl Store {
         let (from, to) = if enabled { (disabled, active) } else { (active, disabled) };
         if from.exists() {
             std::fs::create_dir_all(to.parent().ok_or("Invalid tool folder")?).map_err(|e| e.to_string())?;
-            std::fs::rename(from, to).map_err(|e| e.to_string())?;
+            retry_busy(|| std::fs::rename(&from, &to)).map_err(|e| e.to_string())?;
         }
+        if enabled {
+            selection.disabled.remove(id);
+        } else {
+            selection.disabled.insert(id.into());
+        }
+        self.save_selection(&selection)?;
+        self.refresh_ready();
         Ok(())
     }
 
+    /// Legacy direct-store delivery retained for store/driver compatibility tests; production launches use session kits.
     pub fn delivery(&self) -> Delivery {
         let _store = lock();
         // Only what this very launch hashed is handed over.
@@ -260,7 +292,8 @@ impl Store {
             return Delivery::default();
         };
         let installed = self.installed();
-        let on = |i: &&Item| checked.contains(&i.id) && installed.contains_key(&i.id) && !self.disabled().join(&i.id).exists();
+        let selection = self.selection();
+        let on = |i: &&Item| checked.contains(&i.id) && installed.contains_key(&i.id) && !selection.disabled.contains(&i.id);
         let skill = self.items.iter().filter(on).any(|i| i.server.is_none());
         let mut servers = self.items.iter().filter(on).filter_map(|i| Some((i, i.server.as_ref()?))).peekable();
         // A server needs Node; without it the CLIs get no server rather than one that fails at every start.
@@ -268,14 +301,27 @@ impl Store {
         let node = servers.peek().and_then(|_| {
             self.node.clone().or_else(|| crate::cli::find_cli("node").map(|c| PathBuf::from(c.command)).filter(|p| p.is_absolute()))
         });
-        let servers = servers
+        let servers: Vec<_> = servers
             .filter_map(|(i, s)| {
                 let script = s.entry.split('/').fold(self.dir(i), |path, part| path.join(part));
                 let args = std::iter::once(script.to_string_lossy().into_owned()).chain(s.args.iter().cloned());
                 Some(Launch { name: format!("faber-{}", i.id), command: node.clone()?, args: args.collect(), env: s.env.clone() })
             })
             .collect();
-        Delivery { plugin: skill.then(|| self.plugin()), skills: skill.then(|| self.skills()), servers, disabled_servers: vec![] }
+        if !skill && servers.is_empty() {
+            return Delivery::default();
+        }
+        Delivery {
+            catalog_ready: true,
+            catalog_root: Some(self.root.clone()),
+            plugin: skill.then(|| self.plugin()),
+            skills: skill.then(|| self.skills()),
+            skill_ids: None,
+            servers,
+            disabled_servers: vec![],
+            lease: None,
+            prepared: None,
+        }
     }
 
     /// Before the CLIs get the store, it is made to hold exactly what was checked: a skill folder the ledger does not list (an
@@ -329,10 +375,11 @@ impl Store {
         if self.plugin().exists() && !intact {
             clean &= self.discard(&manifest).and_then(|()| self.write_manifest()).is_ok();
         }
-        // Leftovers of cut runs; a download in progress is outside the lock and stays.
+        self.sweep_kits();
+        // A download in progress is outside the lock and stays.
         for entry in std::fs::read_dir(&self.root).into_iter().flatten().flatten() {
             let name = entry.file_name().to_string_lossy().into_owned();
-            if [".trash-", ".staging-", ".ledger-"].iter().any(|p| name.starts_with(p)) {
+            if name.starts_with(".ledger-") {
                 let _ = std::fs::remove_dir_all(entry.path()).or_else(|_| std::fs::remove_file(entry.path()));
             }
         }
@@ -342,12 +389,17 @@ impl Store {
     /// Moves `dir` out of the skill root in one step, then deletes it as far as it can: a file held open stays behind in the
     /// trash, where no CLI looks, and the next prune retries it.
     fn discard(&self, dir: &Path) -> io::Result<()> {
-        let trash = self.root.join(format!(".trash-{}", uuid::Uuid::new_v4()));
-        match std::fs::rename(dir, &trash) {
+        match std::fs::symlink_metadata(dir) {
+            Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(()),
+            Err(error) => return Err(error),
+            Ok(_) => {}
+        }
+        let trash = kits::TemporaryCopy::new(&self.root, ".trash-")?;
+        match retry_busy(|| std::fs::rename(dir, &trash.path)) {
             Err(e) if e.kind() == io::ErrorKind::NotFound => return Ok(()),
             other => other?,
         }
-        let _ = std::fs::remove_dir_all(&trash);
+        let _ = std::fs::remove_dir_all(&trash.path);
         Ok(())
     }
 
@@ -355,7 +407,7 @@ impl Store {
         std::fs::create_dir_all(&self.root)?;
         let part = self.root.join(format!(".ledger-{}", uuid::Uuid::new_v4()));
         std::fs::write(&part, serde_json::to_vec_pretty(ledger).map_err(io::Error::other)?)?;
-        std::fs::rename(part, self.ledger())
+        retry_busy(|| std::fs::rename(&part, self.ledger()))
     }
 
     /// Unpacks `item` from the repository archive at `zip`, checks its digest and only then puts it in place. On any failure the
@@ -382,13 +434,14 @@ impl Store {
         }
         let dest = self.dir(item);
         std::fs::create_dir_all(dest.parent().unwrap_or(&self.root)).map_err(|e| e.to_string())?;
-        let staging = self.root.join(format!(".staging-{}", uuid::Uuid::new_v4()));
+        let temporary = kits::TemporaryCopy::new(&self.root, ".staging-").map_err(|e| e.to_string())?;
+        let staging = &temporary.path;
         let extracted = match &item.server {
-            Some(_) => extract_package(zip, &staging),
-            None => extract_skill(zip, &item.path, &staging),
+            Some(_) => extract_package(zip, staging),
+            None => extract_skill(zip, &item.path, staging),
         };
         let result = extracted.and_then(|()| {
-            let got = digest(&staging).map_err(|e| e.to_string())?;
+            let got = digest(staging).map_err(|e| e.to_string())?;
             if got != item.digest {
                 return Err(format!("The files of {} do not match the catalog (got {got})", item.id));
             }
@@ -407,17 +460,29 @@ impl Store {
             }
             self.discard(&self.removed().join(&item.id)).map_err(|e| e.to_string())?;
             self.discard(&self.disabled().join(&item.id)).map_err(|e| e.to_string())?;
-            self.discard(&dest).map_err(|e| e.to_string())?;
-            std::fs::rename(&staging, &dest).map_err(|e| e.to_string())?;
+            // Reinstalling identical verified bytes need not rename files a background snapshot is reading.
+            if !std::fs::symlink_metadata(&dest).is_ok_and(|metadata| metadata.is_dir())
+                || !digest(&dest).is_ok_and(|actual| actual == item.digest)
+            {
+                self.discard(&dest).map_err(|e| format!("Could not replace the catalog item: {e}"))?;
+                retry_busy(|| std::fs::rename(staging, &dest)).map_err(|e| format!("Could not publish catalog files: {e}"))?;
+            }
             let mut ledger = self.installed();
             ledger.insert(item.id.clone(), item.commit.clone());
+            let mut selection = self.read_selection().ok_or("Could not read catalog switches")?;
+            if selection.disabled.remove(&item.id) {
+                self.save_selection(&selection)?;
+            }
             // A ledger that cannot be written takes the files back out: the install failed, so nothing of it is loaded.
             self.write_ledger(&ledger).map_err(|e| {
                 let _ = self.discard(&dest);
-                e.to_string()
+                format!("Could not publish the catalog ledger: {e}")
             })
         });
-        let _ = std::fs::remove_dir_all(&staging);
+        let _ = std::fs::remove_dir_all(staging);
+        if result.is_ok() {
+            self.refresh_ready_after_install();
+        }
         result
     }
 
@@ -431,8 +496,8 @@ impl Store {
         self.prune().ok_or("The tool store cannot be checked")?;
         let mut ledger = self.installed();
         let Some(commit) = ledger.remove(id) else { return Ok(()) };
-        let enabled = !self.disabled().join(id).exists();
-        let source = if enabled { self.dir(item) } else { self.disabled().join(id) };
+        let enabled = self.enabled(id);
+        let source = if self.disabled().join(id).exists() { self.disabled().join(id) } else { self.dir(item) };
         let removed = self.removed().join(id);
         if std::fs::symlink_metadata(self.removed()).is_ok_and(|m| !m.is_dir()) {
             return Err("The removed tools folder is not a plain directory".into());
@@ -441,9 +506,9 @@ impl Store {
         std::fs::create_dir_all(&removed).map_err(|e| e.to_string())?;
         Removed { commit, enabled, restoring: false, restored: false }.write(&removed).map_err(|e| e.to_string())?;
         let files = removed.join("files");
-        std::fs::rename(&source, &files).map_err(|e| e.to_string())?;
+        retry_busy(|| std::fs::rename(&source, &files)).map_err(|e| e.to_string())?;
         self.write_ledger(&ledger).map_err(|e| {
-            let _ = std::fs::rename(&files, &source);
+            let _ = retry_busy(|| std::fs::rename(&files, &source));
             e.to_string()
         })?;
         // The screen keeps only the latest Undo. Older copies expire once this removal succeeds.
@@ -452,6 +517,7 @@ impl Store {
                 let _ = self.discard(&entry.path());
             }
         }
+        self.refresh_ready();
         Ok(())
     }
 
@@ -482,6 +548,7 @@ impl Store {
                     && std::fs::symlink_metadata(&dest).is_ok_and(|m| m.is_dir())
                     && digest(&dest).is_ok_and(|got| got == item.digest)
             }) {
+                self.refresh_ready();
                 return Ok(());
             }
             return Err("The tool is already installed".into());
@@ -500,7 +567,11 @@ impl Store {
         state.restoring = true;
         state.write(&removed).map_err(|e| e.to_string())?;
         self.recover_restores()?;
-        self.installed().contains_key(id).then_some(()).ok_or_else(|| "The removed tool could not be restored".into())
+        if !self.installed().contains_key(id) {
+            return Err("The removed tool could not be restored".into());
+        }
+        self.refresh_ready();
+        Ok(())
     }
 
     /// Completes a journaled Undo before pruning can discard its moved, not-yet-ledgered copy.
@@ -535,7 +606,7 @@ impl Store {
             {
                 // Keep an invalid or obsolete interrupted copy quarantined, never in a launch root.
                 if !pending && std::fs::symlink_metadata(&dest).is_ok() {
-                    std::fs::rename(&dest, &files).map_err(|e| e.to_string())?;
+                    retry_busy(|| std::fs::rename(&dest, &files)).map_err(|e| e.to_string())?;
                 }
                 state.restoring = false;
                 state.write(&removed).map_err(|e| e.to_string())?;
@@ -543,11 +614,18 @@ impl Store {
             }
             if pending {
                 std::fs::create_dir_all(dest.parent().ok_or("Invalid tool folder")?).map_err(|e| e.to_string())?;
-                std::fs::rename(&files, &dest).map_err(|e| e.to_string())?;
+                retry_busy(|| std::fs::rename(&files, &dest)).map_err(|e| e.to_string())?;
             }
             let mut ledger = self.installed();
             ledger.insert(item.id.clone(), state.commit.clone());
             self.write_ledger(&ledger).map_err(|e| e.to_string())?;
+            let mut selection = self.read_selection().ok_or("Could not read catalog switches")?;
+            if state.enabled {
+                selection.disabled.remove(&item.id);
+            } else {
+                selection.disabled.insert(item.id.clone());
+            }
+            self.save_selection(&selection)?;
             state.restoring = false;
             state.restored = true;
             state.write(&removed).map_err(|e| e.to_string())?;
@@ -560,14 +638,16 @@ impl Store {
     pub fn clear_removed(&self) -> Result<(), String> {
         let _store = lock();
         self.recover_restores()?;
-        self.discard(&self.removed()).map_err(|e| e.to_string())
+        self.discard(&self.removed()).map_err(|e| e.to_string())?;
+        self.refresh_ready();
+        Ok(())
     }
 
     /// The plugin's own manifest, so Claude Code names the skills `faber:<id>`.
     fn write_manifest(&self) -> io::Result<()> {
         let dir = self.plugin().join(".claude-plugin");
         std::fs::create_dir_all(&dir)?;
-        std::fs::write(dir.join("plugin.json"), manifest_bytes())
+        retry_busy(|| std::fs::write(dir.join("plugin.json"), manifest_bytes()))
     }
 }
 
@@ -590,8 +670,35 @@ fn entries(dir: &Path) -> Option<Vec<std::fs::DirEntry>> {
     }
 }
 
+/// Windows lets an antivirus or indexer hold a file it has just seen for a few milliseconds, and a rename or delete of its
+/// folder then fails with access denied or a sharing violation. Waits for the next try: `None` for any other error, system or
+/// attempt past the bound (about 0.9 s in all).
+fn busy_delay(windows: bool, error: &io::Error, attempt: u32) -> Option<std::time::Duration> {
+    let busy = error.kind() == io::ErrorKind::PermissionDenied || matches!(error.raw_os_error(), Some(5 | 32));
+    (windows && busy && attempt < 8).then(|| std::time::Duration::from_millis(25 * u64::from(attempt + 1)))
+}
+
+fn retry_with<T>(windows: bool, sleep: impl Fn(std::time::Duration), mut op: impl FnMut() -> io::Result<T>) -> io::Result<T> {
+    let mut attempt = 0;
+    loop {
+        match op() {
+            Err(error) if let Some(wait) = busy_delay(windows, &error, attempt) => {
+                sleep(wait);
+                attempt += 1;
+            }
+            done => return done,
+        }
+    }
+}
+
+/// Runs a file operation of the store again while Windows reports the file busy; the last error is never hidden. Blocks the
+/// thread, so it belongs on a blocking worker only.
+pub(crate) fn retry_busy<T>(op: impl FnMut() -> io::Result<T>) -> io::Result<T> {
+    retry_with(cfg!(windows), std::thread::sleep, op)
+}
+
 /// The store changes under one lock for the whole process: two switches flipped together never share a folder or a ledger.
-fn lock() -> std::sync::MutexGuard<'static, ()> {
+pub(crate) fn lock() -> std::sync::MutexGuard<'static, ()> {
     static STORE: Mutex<()> = Mutex::new(());
     STORE.lock().unwrap_or_else(|poisoned| poisoned.into_inner())
 }
@@ -654,17 +761,19 @@ pub fn digest(dir: &Path) -> io::Result<String> {
 }
 
 fn collect(base: &Path, dir: &Path, out: &mut Vec<String>) -> io::Result<()> {
-    for entry in std::fs::read_dir(dir)? {
-        let entry = entry?;
-        let kind = entry.file_type()?;
+    // Close Windows directory enumerators before a concurrent install replaces the source folder.
+    let entries = std::fs::read_dir(dir)?
+        .map(|entry| entry.and_then(|entry| Ok((entry.path(), entry.file_type()?))))
+        .collect::<io::Result<Vec<_>>>()?;
+    for (path, kind) in entries {
         if kind.is_dir() {
-            collect(base, &entry.path(), out)?;
+            collect(base, &path, out)?;
         } else if kind.is_file() {
-            let rel = entry.path().strip_prefix(base).map_err(io::Error::other)?.to_path_buf();
+            let rel = path.strip_prefix(base).map_err(io::Error::other)?.to_path_buf();
             out.push(rel.components().map(|c| c.as_os_str().to_string_lossy()).collect::<Vec<_>>().join("/"));
         } else {
             // A link (or junction) planted after the install would be read by the CLIs without being hashed.
-            return Err(io::Error::other(format!("Not a plain file: {}", entry.path().display())));
+            return Err(io::Error::other(format!("Not a plain file: {}", path.display())));
         }
     }
     Ok(())
@@ -844,7 +953,10 @@ pub async fn install(store: &Store, item: &Item, loopback: Option<&str>) -> Resu
         crate::install::download_with(&url, &part, loopback, crate::install::IDLE_TIMEOUT, |p| std::fs::File::create(p).map(Capped::new))
             .await;
     let result = match downloaded {
-        Ok(_) => store.install_from(item, &part),
+        Ok(_) => {
+            let (store, item, part) = (store.clone(), item.clone(), part.clone());
+            tokio::task::spawn_blocking(move || store.install_from(&item, &part)).await.map_err(|e| e.to_string())?
+        }
         Err(e) => Err(e.to_string()),
     };
     let _ = std::fs::remove_file(&part);
@@ -854,6 +966,36 @@ pub async fn install(store: &Store, item: &Item, loopback: Option<&str>) -> Resu
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_busy_file_is_retried_a_bounded_number_of_times_and_only_on_windows() {
+        let denied = || io::Error::from(io::ErrorKind::PermissionDenied);
+        let (calls, waited) = (std::cell::Cell::new(0), std::cell::Cell::new(std::time::Duration::ZERO));
+        let sleep = |wait| waited.set(waited.get() + wait);
+        let flaky = retry_with(true, sleep, || {
+            calls.set(calls.get() + 1);
+            if calls.get() < 3 { Err(denied()) } else { Ok(calls.get()) }
+        });
+        assert_eq!(flaky.unwrap(), 3, "two denials, then the operation goes through");
+        calls.set(0);
+        let stuck = retry_with(true, sleep, || -> io::Result<()> {
+            calls.set(calls.get() + 1);
+            Err(denied())
+        });
+        assert_eq!(stuck.unwrap_err().kind(), io::ErrorKind::PermissionDenied, "the last error is returned, never hidden");
+        assert_eq!(calls.get(), 9, "one try plus eight retries");
+        assert!(waited.get() < std::time::Duration::from_millis(1100), "the wait stays about a second");
+        for (windows, error, retried) in [
+            (true, io::Error::from_raw_os_error(5), true),
+            (true, io::Error::from_raw_os_error(32), true),
+            (true, io::Error::from(io::ErrorKind::NotFound), false),
+            (true, io::Error::other("digest mismatch"), false),
+            (false, denied(), false),
+        ] {
+            assert_eq!(busy_delay(windows, &error, 0).is_some(), retried, "{error:?} on windows={windows}");
+        }
+        assert!(busy_delay(true, &denied(), 8).is_none());
+    }
 
     /// A GitHub-shaped archive: everything under `repo-commit/`.
     fn archive(dir: &Path, files: &[(&str, &[u8])]) -> PathBuf {
@@ -880,6 +1022,7 @@ mod tests {
             path: "skills/tidy".into(),
             digest: digest.into(),
             server: None,
+            chat_safe: false,
         }
     }
 
@@ -910,6 +1053,7 @@ mod tests {
         assert!(store.installed().is_empty(), "a refused skill leaves nothing behind");
 
         store.install_from(&item(&expected()), &zip).unwrap();
+        store.wait_prepared_for_test();
         let skill = tmp.path().join("data/tools/plugin/skills/tidy");
         assert!(skill.join("SKILL.md").is_file() && skill.join("scripts/run.py").is_file());
         assert!(!tmp.path().join("data/tools/plugin/skills/other").exists(), "only the skill's own folder is taken");
@@ -922,6 +1066,35 @@ mod tests {
         store.remove("tidy").unwrap();
         assert!(store.installed().is_empty() && !skill.exists());
         assert_eq!(store.delivery(), Delivery::default());
+    }
+
+    #[test]
+    fn reinstalling_the_same_pin_invalidates_a_cached_failed_inventory() {
+        let tmp = tempfile::tempdir().unwrap();
+        let zip = archive(tmp.path(), SKILL);
+        let pinned = item(&expected());
+        let store = Store::with_catalog(&tmp.path().join("data"), vec![pinned.clone()]);
+        store.install_from(&pinned, &zip).unwrap();
+        store.wait_prepared_for_test();
+        std::fs::write(store.dir(&pinned).join("SKILL.md"), "corrupt source").unwrap();
+        store.clear_prepared_for_test();
+        store.prepare_kit_for(crate::model::Vendor::Codex, "debug", None, crate::model::Area::Chat, crate::model::Permissions::Ask, &[]);
+        assert_eq!(store.checked_statuses().get("tidy").map(String::as_str), Some("error.tools.reinstall"));
+        assert!(
+            store
+                .ready_kit_for(crate::model::Vendor::Codex, "debug", None, crate::model::Area::Chat, crate::model::Permissions::Ask, &[])
+                .1
+                .ids
+                .is_empty()
+        );
+        store.install_from(&pinned, &zip).unwrap();
+        store.wait_prepared_for_test();
+        assert!(store.checked_statuses().is_empty(), "same-commit reinstall must clear the failed-state cache");
+        for vendor in [crate::model::Vendor::Claude, crate::model::Vendor::Codex] {
+            let (kit, report) = store.ready_kit_for(vendor, "debug", None, crate::model::Area::Chat, crate::model::Permissions::Ask, &[]);
+            assert_eq!(report.ids, ["tidy"]);
+            assert!(kit.skills.unwrap().join("tidy/SKILL.md").is_file());
+        }
     }
 
     #[test]
@@ -942,6 +1115,7 @@ mod tests {
         let zip = archive(tmp.path(), SKILL);
         let store = Store::with_catalog(&tmp.path().join("data"), vec![item(&expected())]);
         store.install_from(&item(&expected()), &zip).unwrap();
+        store.wait_prepared_for_test();
         let plugin = tmp.path().join("data/tools/plugin");
 
         // What an agent with full access could plant: a server beside the skills, a folder the ledger never listed.
@@ -965,15 +1139,27 @@ mod tests {
         let tmp = tempfile::tempdir().unwrap();
         let zip = archive(tmp.path(), SKILL);
         let store = Store::with_catalog(&tmp.path().join("data"), vec![item(&expected())]);
+        store.install_from(&item(&expected()), &zip).unwrap();
+        store.wait_prepared_for_test();
+        let source = tmp.path().join("data/tools/plugin/skills/tidy");
+        // An active background hash may hold a Windows directory enumerator or a file reader.
+        let enumeration = std::fs::read_dir(&source).unwrap();
+        let reader = std::fs::File::open(source.join("SKILL.md")).unwrap();
         std::thread::scope(|s| {
             let runs: Vec<_> = (0..4).map(|_| s.spawn(|| store.install_from(&item(&expected()), &zip))).collect();
             for run in runs {
                 run.join().unwrap().unwrap();
             }
         });
+        drop((enumeration, reader));
         assert_eq!(digest(&tmp.path().join("data/tools/plugin/skills/tidy")).unwrap(), expected());
+        store.wait_prepared_for_test();
         let left: Vec<_> = std::fs::read_dir(tmp.path().join("data/tools")).unwrap().flatten().map(|e| e.file_name()).collect();
-        assert_eq!(left.len(), 2, "only the plugin and the ledger stay: {left:?}");
+        assert_eq!(
+            left.into_iter().collect::<std::collections::BTreeSet<_>>(),
+            [".kits-lock", "installed.json", "kits", "plugin"].into_iter().map(std::ffi::OsString::from).collect(),
+            "only the installed resources, ledger and verified snapshot cache stay"
+        );
     }
 
     #[test]
@@ -1017,6 +1203,7 @@ mod tests {
         let zip = archive(tmp.path(), SKILL);
         let store = Store::with_catalog(&tmp.path().join("data"), vec![item(&expected())]);
         store.install_from(&item(&expected()), &zip).unwrap();
+        store.wait_prepared_for_test();
         let skill = tmp.path().join("data/tools/plugin/skills/tidy");
         let outside = tmp.path().join("outside.py");
         std::fs::write(&outside, b"print('not checked')").unwrap();
@@ -1073,6 +1260,7 @@ mod tests {
             commit: "def".into(),
             path: String::new(),
             digest: digest(d.path()).unwrap(),
+            chat_safe: false,
             server: Some(Server {
                 package: "measure".into(),
                 version: "1.0.0".into(),
@@ -1089,6 +1277,7 @@ mod tests {
         let tgz = package(tmp.path(), &[("bin/run.js", RUN, FILE), ("package.json", b"{}", FILE)]);
         let store = Store::with_catalog(&tmp.path().join("data"), vec![item(&expected()), server_item()]).with_node("C:/node.exe".into());
         store.install_from(&server_item(), &tgz).unwrap();
+        store.wait_prepared_for_test();
         let dir = ["data", "tools", "servers", "measure"].iter().fold(tmp.path().to_path_buf(), |p, c| p.join(c));
         assert_eq!(store.installed().get("measure").map(String::as_str), Some("def"));
         let delivery = store.delivery();
@@ -1110,6 +1299,7 @@ mod tests {
         assert!(!dir.exists() && store.installed().is_empty());
 
         store.install_from(&server_item(), &tgz).unwrap();
+        store.wait_prepared_for_test();
         store.remove("measure").unwrap();
         assert!(!dir.exists() && store.delivery() == Delivery::default());
     }
@@ -1135,6 +1325,7 @@ mod tests {
         let tgz = package(tmp.path(), &[("bin/run.js", RUN, FILE), ("package.json", b"{}", FILE)]);
         let store = Store::with_catalog(&tmp.path().join("data"), vec![server_item()]).with_node("C:/node.exe".into());
         store.install_from(&server_item(), &tgz).unwrap();
+        store.wait_prepared_for_test();
         let dir = tmp.path().join("data").join("tools").join("servers").join("measure");
         // The same files elsewhere, where a guarded session could write them after the check.
         let elsewhere = tmp.path().join("workspace");
@@ -1158,6 +1349,7 @@ mod tests {
         let zip = archive(tmp.path(), SKILL);
         let store = Store::with_catalog(&tmp.path().join("data"), vec![item(&expected())]);
         store.install_from(&item(&expected()), &zip).unwrap();
+        store.wait_prepared_for_test();
         let ledger = tmp.path().join("data").join("tools").join("installed.json");
         let kept = std::fs::read(&ledger).unwrap();
         std::fs::write(&ledger, vec![b' '; 2 * 1024 * 1024]).unwrap();

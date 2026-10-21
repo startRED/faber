@@ -27,6 +27,8 @@ pub struct Row {
     pub catalog_id: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub linked: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub status: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
@@ -174,6 +176,7 @@ fn skills(list: &mut List, root: &Path, relative: &str, source: &'static str) {
                         enabled: None,
                         catalog_id: None,
                         linked: Some(true),
+                        status: None,
                     });
                 } else {
                     list.issue(source, "skill", "unreadable");
@@ -196,6 +199,7 @@ fn skills(list: &mut List, root: &Path, relative: &str, source: &'static str) {
                     enabled: None,
                     catalog_id: None,
                     linked: None,
+                    status: None,
                 });
             } else if manifest.is_err_and(|e| e.kind() != io::ErrorKind::NotFound) {
                 list.issue(source, "skill", "unreadable");
@@ -287,6 +291,7 @@ fn plugins(list: &mut List, home: &Path, project: Option<&Path>) {
                 enabled: None,
                 catalog_id: None,
                 linked: None,
+                status: None,
             });
         }
     }
@@ -296,6 +301,7 @@ fn plugins(list: &mut List, home: &Path, project: Option<&Path>) {
 /// Only the known skill roots and installation manifest are inspected; cached plugin folders are not proof of installation.
 pub fn inventory(data: &Path, home: Option<&Path>, project: Option<&Path>) -> Vec<List> {
     let store = Store::new(data);
+    let statuses = store.checked_statuses();
     let installed = store.installed();
     Vendor::ALL
         .into_iter()
@@ -310,6 +316,7 @@ pub fn inventory(data: &Path, home: Option<&Path>, project: Option<&Path>) -> Ve
                     enabled: Some(store.enabled(&item.id)),
                     catalog_id: Some(item.id.clone()),
                     linked: None,
+                    status: statuses.get(&item.id).cloned(),
                 });
             }
             let roots: &[&str] = match vendor {

@@ -55,6 +55,21 @@ impl Core {
     /// The agent called the helper tool. A helper that cannot start answers the call at once with why, so the agent goes on alone.
     pub(super) fn start_helper(&mut self, conv: &str, call: String, input: serde_json::Value) {
         if let Err(why) = self.launch_helper(conv, &call, &input) {
+            if why == super::mcp_servers::CHECK_PENDING {
+                let Some(sid) = self.live.get(conv).map(|live| live.sid) else { return };
+                let (owner, key) = (conv.to_string(), format!("helper:{call}"));
+                self.after_kit_check(&key, move |core| {
+                    if !core.closing
+                        && !core.installing
+                        && core.live.get(&owner).is_some_and(|live| live.sid == sid)
+                        && core.convs.get(&owner).is_some_and(|conversation| !conversation.stopped)
+                    {
+                        core.start_helper(&owner, call, input);
+                    }
+                });
+                return;
+            }
+            self.kit_checks.remove(&format!("helper:{call}"));
             let (_, text) = helper::report(false, "", &[], Some(why));
             if let Some(l) = self.live.get(conv) {
                 l.session.helper_reply(&call, false, text);
@@ -77,7 +92,15 @@ impl Core {
         if self.convs.get(conv).map(|c| c.area) != Some(Area::Project) {
             return Err("helpers work only in projects");
         }
-        if self.helpers.values().filter(|h| h.conv == conv).count() >= helper::MAX_PER_CONVERSATION {
+        let check_name = format!("helper:{call}");
+        if self.helpers.values().filter(|h| h.conv == conv).count()
+            + self
+                .kit_checks
+                .iter()
+                .filter(|(name, check)| name.starts_with("helper:") && name.as_str() != check_name && check.owner == conv)
+                .count()
+            >= helper::MAX_PER_CONVERSATION
+        {
             return Err("two helpers are already working; wait for one to finish");
         }
         let prompt = helper::prompt(input).ok_or("the brief was empty")?;
@@ -93,6 +116,16 @@ impl Core {
             Why::Billing => "the other AI may be billed per use, so Faber does not call it on its own",
             _ => "the other AI has no quota left right now",
         })?;
+        let project = self.convs.get(conv).and_then(|c| c.project_id.clone());
+        let disabled = self.project_disabled_servers(project.as_deref());
+        let raw = self.session_tools(vendor, Area::Project, permissions, project.as_deref(), &prompt, &cwd);
+        let (mut tools, _) = self
+            .check_kit(&check_name, conv, vendor, Area::Project, permissions, &cwd, prompt.clone(), None, vec![], disabled, raw)
+            .map_err(|_| super::mcp_servers::CHECK_PENDING)?;
+        let flags = if vendor == Vendor::Claude { self.claude_flags_for(&cli) } else { Default::default() };
+        if vendor == Vendor::Claude && !flags.plugin_dir {
+            tools.plugin = None;
+        }
         self.begin_unbounded(vendor).map_err(|_| "the other AI cannot start right now")?;
         let user_hooks = self.store.settings().user_hooks == Some(true) && permissions.guarded();
         self.next_sid += 1;
@@ -106,41 +139,37 @@ impl Core {
         });
         let shown = model.clone().unwrap_or_else(|| vendor.name().to_string());
         let effort = Some(effort);
-        let project = self.convs.get(conv).and_then(|c| c.project_id.as_deref());
-        let tools = self.tools_for_project(Area::Project, permissions, project);
+        let resources = (vendor == Vendor::Claude).then(|| super::kits::claude_resources(Area::Project, &tools)).flatten();
         let session = match vendor {
-            Vendor::Claude => {
-                let flags = self.claude_flags_for(&cli);
-                start_claude(
-                    ClaudeOptions {
-                        bin: cli.command.clone(),
-                        cwd,
-                        launch: ClaudeLaunch {
-                            area: Area::Project,
-                            model,
-                            effort,
-                            resume: None,
-                            user_hooks,
-                            permissions,
-                            instructions: None,
-                            research: None,
-                            user_name: None,
-                            group_instructions: None,
-                            flags,
-                            tuning,
-                            helper: Helper::Is,
-                            browse: false,
-                            conversations: false,
-                            progress: false,
-                            verify: false,
-                            tools: Default::default(),
-                        },
-                        spawn: spawner(&self.opts.spawn, &cli),
-                        sandbox: self.opts.clis.get(&Vendor::Codex).cloned(),
+            Vendor::Claude => start_claude(
+                ClaudeOptions {
+                    bin: cli.command.clone(),
+                    cwd,
+                    launch: ClaudeLaunch {
+                        area: Area::Project,
+                        model,
+                        effort,
+                        resume: None,
+                        user_hooks,
+                        permissions,
+                        instructions: None,
+                        research: None,
+                        user_name: None,
+                        group_instructions: None,
+                        flags,
+                        tuning,
+                        helper: Helper::Is,
+                        browse: false,
+                        conversations: false,
+                        progress: false,
+                        verify: false,
+                        tools,
                     },
-                    sink,
-                )
-            }
+                    spawn: spawner(&self.opts.spawn, &cli),
+                    sandbox: self.opts.clis.get(&Vendor::Codex).cloned(),
+                },
+                sink,
+            ),
             Vendor::Codex => self.codex_server(Area::Project, user_hooks, permissions, &cli).open_with_tools(
                 CodexThread {
                     leave_plan: false,
@@ -165,7 +194,7 @@ impl Core {
             ),
         };
         self.rewind_helper_session(call, hsid, session.clone());
-        session.send(UserTurn::text(prompt));
+        session.send(UserTurn::text(super::kits::with_resources(prompt, resources)));
         let started = self.secs();
         let run = Run {
             conv: conv.to_string(),
@@ -406,6 +435,7 @@ impl Core {
 
     /// The agent's turn stopped or ended: its helpers stop with it. An interrupted helper still reports what it had.
     pub(super) fn stop_helpers(&mut self, conv: &str, close: bool) {
+        self.kit_checks.retain(|name, check| !name.starts_with("helper:") || check.owner != conv);
         // The checks it was waiting for stop too (`verifying.rs`).
         self.stop_verify(conv);
         let calls: Vec<String> = self.helpers.iter().filter(|(_, h)| h.conv == conv).map(|(call, _)| call.clone()).collect();

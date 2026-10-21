@@ -1,0 +1,9 @@
+{"dir":"in","msg":{"id":1,"method":"initialize"}}
+{"dir":"out","msg":{"id":1,"result":{}}}
+{"dir":"in","msg":{"method":"initialized"}}
+{"dir":"in","msg":{"id":2,"method":"thread/start"}}
+{"dir":"out","msg":{"id":2,"result":{"thread":{"id":"kit-thread","model":"gpt-6-luna"}}}}
+{"dir":"in","msg":{"id":3,"method":"turn/start","params":{"threadId":"kit-thread","input":[{"type":"text","text":"Debug this failing test.","text_elements":[]}]}}}
+{"dir":"out","msg":{"id":3,"result":{"turn":{"id":"kit-turn"}}}}
+{"dir":"out","msg":{"method":"item/agentMessage/delta","params":{"threadId":"kit-thread","turnId":"kit-turn","itemId":"answer","delta":"Using the debugging kit."}}}
+{"dir":"out","msg":{"method":"turn/completed","params":{"threadId":"kit-thread","turn":{"id":"kit-turn","status":"completed"}}}}

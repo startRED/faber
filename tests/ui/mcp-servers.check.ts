@@ -1,6 +1,6 @@
 import { createComponent } from 'solid-js';
 import { render } from 'solid-js/web';
-import { api, type McpServerList } from '../../ui/api.ts';
+import { api, type AppEvent, type McpServerList } from '../../ui/api.ts';
 import { Catalog } from '../../ui/Catalog.tsx';
 import { t } from '../../ui/i18n.ts';
 import { check, deepEqual, equal, ok } from './check.ts';
@@ -26,6 +26,8 @@ async function panel(read: (id: string) => Promise<McpServerList[]>) {
   api.toolsInventory = async () => [];
   api.toolsSetEnabled = async () => {};
   api.toolsClearRemoved = async () => {};
+  let listener: ((event: AppEvent) => void) | undefined;
+  api.on = async (receive) => { listener = receive; return () => {}; };
   api.mcpServers = async (id) => structuredClone(await read(id));
   const root = document.createElement('div');
   root.dataset.motion = 'none';
@@ -39,6 +41,7 @@ async function panel(read: (id: string) => Promise<McpServerList[]>) {
   };
   return {
     root,
+    publish: () => listener?.({ type: 'catalog' }),
     open: async () => { root.querySelector<HTMLButtonElement>('[data-catalog-card="chrome-devtools"]')!.click(); await tick(); },
     back: async () => { button(t('catalog.back')).click(); await tick(); button(t('catalog.all')).click(); await tick(); },
     installed: async () => {
@@ -49,6 +52,23 @@ async function panel(read: (id: string) => Promise<McpServerList[]>) {
     close: () => { dispose(); root.remove(); Object.assign(api, before); },
   };
 }
+
+check('mcp-servers: a catch-up read of an unchanged catalog after an action keeps the focused switch', async () => {
+  const view = await panel(async () => reported);
+  try {
+    await view.open();
+    const global = [...view.root.querySelectorAll<HTMLInputElement>('[role="switch"]')].find((el) => !el.closest('[data-mcp-vendor]'));
+    ok(global, 'the catalog switch');
+    global.click(); await tick(); global.click(); await tick();
+    const toggle = view.root.querySelector<HTMLInputElement>('[data-mcp-vendor] [role="switch"]')!;
+    toggle.focus();
+    // The engine answers an unchanged catalog in its own shape: status null where the screen left it out.
+    api.toolsList = async () => [{ id: 'chrome-devtools', job: 'measure', license: 'Apache-2.0', repo: 'ChromeDevTools/chrome-devtools-mcp', home: '', installed: true, enabled: true, status: null, nodeAvailable: true, server: true }];
+    view.publish(); await tick();
+    equal(view.root.querySelector('[data-mcp-vendor] [role="switch"]'), toggle, 'the switch stays mounted');
+    equal(document.activeElement, toggle, 'the catch-up read keeps focus');
+  } finally { view.close(); }
+});
 
 check('mcp-servers: saving changes only the field and keeps every switch and keyboard focus', async () => {
   const view = await panel(async () => reported);

@@ -54,6 +54,8 @@ mod handover;
 mod install;
 #[path = "keep_going.rs"]
 mod keep_going;
+#[path = "kits.rs"]
+mod kits;
 #[path = "learn.rs"]
 mod learn;
 #[path = "learning.rs"]

@@ -1607,7 +1607,7 @@ async fn r161_claude_calling_the_helper_waits_for_its_report_and_gets_it_as_the_
 }
 
 #[test]
-fn the_catalog_s_skills_reach_a_project_s_agent_as_one_plugin_and_nowhere_else() {
+fn unverified_catalog_paths_never_load_a_plugin_and_chat_never_opens_native_skill() {
     assert!(ClaudeFlags::from_help("  --plugin-dir <path>   Load a plugin from a directory").plugin_dir);
     assert!(!ClaudeFlags::from_help("Use --plugin-dir to load a plugin").plugin_dir, "a flag named in a sentence is no support");
     let tools = faber_engine::tools::Delivery {
@@ -1618,15 +1618,27 @@ fn the_catalog_s_skills_reach_a_project_s_agent_as_one_plugin_and_nowhere_else()
     };
     let flags = ClaudeFlags { plugin_dir: true, ..NEWER };
     let args = |area: Area, permissions: Permissions, flags: ClaudeFlags, tools: &faber_engine::tools::Delivery| {
-        claude_args(&ClaudeLaunch { permissions, flags, tools: tools.clone(), ..launch(area) })
+        let tools = tools.verified_for_launch(faber_engine::model::Vendor::Claude).0;
+        claude_args(&ClaudeLaunch { permissions, flags, tools, ..launch(area) })
     };
     let loads = |args: &[String]| args.windows(2).any(|a| a[0] == "--plugin-dir" && a[1] == "C:/data/tools/plugin");
-    for permissions in [Permissions::FullAccess, Permissions::Ask, Permissions::Auto] {
-        assert!(loads(&args(Area::Project, permissions, flags, &tools)), "{permissions:?}");
+    for area in [Area::Chat, Area::Project] {
+        for permissions in [Permissions::FullAccess, Permissions::Ask, Permissions::AcceptEdits, Permissions::Plan, Permissions::Auto] {
+            let configured = args(area, permissions, flags, &tools);
+            assert!(!loads(&configured), "unverified paths never become a plugin: {area:?} {permissions:?}");
+            if area == Area::Chat {
+                let native = &configured[configured.iter().position(|a| a == "--tools").unwrap() + 1];
+                assert!(!native.split(',').any(|name| name == "Skill"), "personal and plugin skills remain unavailable in Chat");
+            }
+        }
+        assert!(!loads(&args(area, Permissions::Isolated, flags, &tools)), "Isolated turns every customization off");
     }
-    assert!(!loads(&args(Area::Project, Permissions::Isolated, flags, &tools)), "Isolated turns every customization off");
-    assert!(!loads(&args(Area::Chat, Permissions::FullAccess, flags, &tools)), "Chat keeps its lean tools");
     assert!(!loads(&args(Area::Project, Permissions::FullAccess, NEWER, &tools)), "an older CLI starts as before");
+    let missing_root = faber_engine::tools::Delivery { skills: None, ..tools };
+    assert!(
+        !loads(&args(Area::Project, Permissions::FullAccess, flags, &missing_root)),
+        "a plugin without a verified skills root stays off"
+    );
     let none = args(Area::Project, Permissions::FullAccess, flags, &Default::default());
     assert!(!none.iter().any(|a| a == "--plugin-dir"), "no skill installed, no plugin");
 }
@@ -1654,9 +1666,15 @@ fn the_catalog_s_servers_join_faber_s_own_in_one_config_only_in_full_access() {
         serde_json::json!({"type":"stdio","command":"C:/node/node.exe","args":["C:/data/tools/servers/measure/run.js","--headless"],"env":{"NO_STATS":"1"}})
     );
     assert_eq!(full["mcpServers"]["faber"]["type"], "sdk", "Faber's own tools stay beside it: {full}");
-    // A server runs outside the CLI's sandbox: the modes that ask, Isolated and Chat never get one (R195, as the browser).
+    // The store filters Chat servers by reviewed chat_safe metadata before the driver receives a delivery.
+    assert!(config(Area::Chat, Permissions::FullAccess).is_some_and(|c| c["mcpServers"].get("measure").is_some()));
+    // A server runs outside the CLI's sandbox: guarded modes never get one (R195, as the browser).
     let guarded = [Permissions::Ask, Permissions::AcceptEdits, Permissions::Plan, Permissions::Auto].map(|p| (Area::Project, p));
-    for (area, permissions) in guarded.into_iter().chain([(Area::Project, Permissions::Isolated), (Area::Chat, Permissions::FullAccess)]) {
+    for (area, permissions) in guarded.into_iter().chain([
+        (Area::Project, Permissions::Isolated),
+        (Area::Chat, Permissions::Ask),
+        (Area::Chat, Permissions::Isolated),
+    ]) {
         let config = config(area, permissions);
         assert!(config.as_ref().is_none_or(|c| c["mcpServers"].get("measure").is_none()), "{area:?} {permissions:?}: {config:?}");
     }

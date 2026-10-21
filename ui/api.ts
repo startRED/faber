@@ -89,6 +89,8 @@ export interface Message {
   effort?: Effort;
   thinking?: string;
   tools?: ToolUse[];
+  /** The catalog kit fixed when this reply's session started. */
+  toolKit?: { ids: string[]; jobs: string[]; suggested?: string; method: string; error?: string };
   /** Successful commit tool ids, recognised and confirmed by the engine. */
   commits?: string[];
   /** The engine's latest-reply needs-you state, shared with the running row and done card. */
@@ -545,6 +547,8 @@ export interface ToolRow {
   repo: string;
   home: string;
   installed: boolean;
+  /** An engine key when a present catalog item must be installed again. */
+  status?: string | null;
   enabled?: boolean;
   version?: string;
   nodeAvailable?: boolean;
@@ -554,7 +558,7 @@ export interface ToolRow {
 
 export interface ToolInventoryList {
   vendor: Vendor;
-  rows: { name: string; kind: 'skill' | 'plugin' | 'server'; source: 'catalog' | 'user' | 'project'; location: string; linked?: boolean; enabled?: boolean; catalogId?: string }[];
+  rows: { name: string; kind: 'skill' | 'plugin' | 'server'; source: 'catalog' | 'user' | 'project'; location: string; linked?: boolean; enabled?: boolean; catalogId?: string; status?: string | null }[];
   issues: { source: 'user' | 'project'; kind: 'skill' | 'plugin'; reason: 'unavailable' | 'unreadable' | 'limited' | 'unsupported' }[];
 }
 
@@ -702,6 +706,7 @@ export interface Aside {
   error?: string | null;
 }
 export type AppEvent =
+  | { type: 'catalog' }
   | ({ type: 'background' } & BackgroundList)
   | { type: 'commands'; conversationId: string; vendor: Vendor }
   | { type: 'message'; conversationId: string; message: Message }

@@ -30,7 +30,7 @@ import { appsOf, AwayPage, awaySites, SiteCard, sitesOf, stepsOf } from './Site.
 import { Quote } from './Floating.tsx';
 import { Strip, Thumb } from './Thumbs.tsx';
 import { canSpeak, speaking, stopSpeech, toggleSpeech } from './speech.ts';
-import { bytes, compact, duration, failureText, fromEngine, lang, money, t } from './i18n.ts';
+import { catalogName, bytes, compact, duration, failureText, fromEngine, lang, money, t } from './i18n.ts';
 import { prettyModel, vendorName, type Option } from './models.ts';
 import { animateList, keepForExit } from './motion.ts';
 import { windowHidden } from './appearance.ts';
@@ -299,6 +299,16 @@ function Answer(props: Shared & { m: Accessor<Message>; messages?: Message[]; pr
   const helperKind = () => (m().vendor ? vendorName(m().vendor === 'claude' ? 'codex' : 'claude') : '');
   const agents = createMemo(() => agentSteps(tools(), helperKind()));
   const steps = createMemo(() => narration().length + own().length + (thinking().length ? 1 : 0));
+  const hasKit = () => !!(m().toolKit?.ids.length || m().toolKit?.suggested || m().toolKit?.error);
+  const kitLine = () => {
+    const kit = m().toolKit;
+    if (!kit) return '';
+    if (kit.error) return fromEngine(kit.error);
+    const reason = t(kit.method === 'catalog' ? 'kit.catalog' : 'kit.code');
+    const line = t('kit.line', { tools: kit.ids.map(catalogName).join(', ') || t('kit.none'), reason });
+    if (!kit.suggested) return line;
+    return `${line} ${t('kit.suggest', { tool: catalogName(kit.suggested) })}`;
+  };
   // The pages the agent opened in Faber's browser and the apps it started on this computer, each a card beside the files.
   const sites = createMemo(() => [...sitesOf(own()), ...appsOf(own())]);
   const pageSteps = createMemo(() => stepsOf(own()));
@@ -439,10 +449,11 @@ function Answer(props: Shared & { m: Accessor<Message>; messages?: Message[]; pr
       <Show when={m().pace}>{(pace) => <p class="pace">{t(`reason.pace.${pace().kind}`, { vendor: vendorName(pace().vendor), other: m().vendor ? vendorName(m().vendor!) : t('model.auto') })}</p>}</Show>
       <Show when={m().mode}><p class="pace">{fromEngine(m().mode)}</p></Show>
       <QuotaCard id={props.conversationId} m={m()} usage={props.usage ?? []} />
-      <Show when={steps()}>
+      <Show when={steps() || hasKit()}>
         <details class="activity disclosure">
-          <summary>{t(working() ? 'activity.working' : 'activity.done', { steps: t('activity.steps', { n: steps() }), commands: t('activity.commands', { n: commands() }) })}</summary>
+          <summary>{steps() ? t(working() ? 'activity.working' : 'activity.done', { steps: t('activity.steps', { n: steps() }), commands: t('activity.commands', { n: commands() }) }) : t('kit.details')}</summary>
           <div class="activity-body">
+            <Show when={hasKit()}><p class="pace kit">{kitLine()}</p></Show>
             <Show when={thinking().length}>
               <div class="activity-thinking">
                 <For each={thinking()}>{(part) => <p>{part.title ? <b>{part.text}</b> : part.text}</p>}</For>

@@ -2,7 +2,7 @@ import { createComponent } from 'solid-js';
 import { render } from 'solid-js/web';
 import { api } from '../../ui/api.ts';
 import { Catalog } from '../../ui/Catalog.tsx';
-import { t } from '../../ui/i18n.ts';
+import { catalogName, t } from '../../ui/i18n.ts';
 import { check, equal, ok } from './check.ts';
 
 async function catalog() {
@@ -34,7 +34,7 @@ check('skills: the shipped catalog has translated descriptions, licences and an 
     }
     const debugging = cards.find((card) => card.dataset.catalogCard === 'systematic-debugging');
     ok(debugging); debugging.click();
-    equal(view.root.querySelector('.catalog-detail h1')?.textContent, 'systematic-debugging');
+    equal(view.root.querySelector('.catalog-detail h1')?.textContent, catalogName('systematic-debugging'));
     ok([...view.root.querySelectorAll('button')].some((el) => el.textContent === t('catalog.install')));
     equal(view.root.querySelector('[role=switch]'), null, 'installing and enabling are separate actions');
   } finally { view.close(); }

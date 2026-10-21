@@ -107,10 +107,11 @@ async fn retired_shared_server_closes_after_replacing_a_session_before_settings_
     start(&mut input, &mut output, "thread/resume", "a", "a2").await;
     until(|| {
         app.with(|c| {
-            c.rewind.retired_sessions.contains_key(&(a.clone(), old_sid)) && !c.rewind.session_writers.contains_key(&(a.clone(), old_sid))
+            !c.rewind.retired_sessions.contains_key(&(a.clone(), old_sid)) && !c.rewind.session_writers.contains_key(&(a.clone(), old_sid))
         })
     })
     .await;
+    // A drained closed thread now has its own confirmed exit, before the shared process and its answering peer stop.
     assert!(!stopped.load(Ordering::Acquire), "a closed thread cannot tear down its answering peer's container");
     app.save_settings(Settings { reply_style: Some(ReplyStyle::Short), ..Default::default() }).unwrap();
     assert_eq!(app.open(&peer).unwrap().messages.last().unwrap().status, Some(Status::Streaming));

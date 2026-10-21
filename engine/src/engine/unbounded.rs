@@ -136,6 +136,12 @@ mod tests {
             c.live.insert(
                 id.clone(),
                 Live {
+                    tool_kit: Default::default(),
+                    kit_identity: None,
+                    kit_resource_digest: None,
+                    kit_pending: false,
+                    prepared: false,
+                    kit_resources: None,
                     group_files: None,
                     group_context: None,
                     vendor: Vendor::Codex,

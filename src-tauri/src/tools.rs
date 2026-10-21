@@ -45,6 +45,8 @@ pub struct ToolRow {
     repo: String,
     home: String,
     installed: bool,
+    /// An engine key explaining why a present item needs reinstalling.
+    status: Option<String>,
     enabled: bool,
     version: String,
     node_available: bool,
@@ -57,6 +59,7 @@ pub async fn tools_list(faber: State<'_, Faber>) -> Res<Vec<ToolRow>> {
     let data = faber.data_dir.clone();
     tauri::async_runtime::spawn_blocking(move || {
         let store = Store::new(&data);
+        let statuses = store.checked_statuses();
         let installed = store.installed();
         let node_available = faber_engine::cli::find_cli("node").is_some();
         catalog()
@@ -70,6 +73,7 @@ pub async fn tools_list(faber: State<'_, Faber>) -> Res<Vec<ToolRow>> {
                 repo: i.repo.clone(),
                 home: i.home(),
                 installed: installed.contains_key(&i.id),
+                status: statuses.get(&i.id).cloned(),
                 enabled: installed.contains_key(&i.id) && store.enabled(&i.id),
                 version: i.server.as_ref().map_or_else(|| i.commit.clone(), |s| s.version.clone()),
                 node_available,
@@ -78,7 +82,7 @@ pub async fn tools_list(faber: State<'_, Faber>) -> Res<Vec<ToolRow>> {
             .collect()
     })
     .await
-    .map_err(|_| "error.tools.install".to_string())
+    .map_err(|_| "error.tools.read".to_string())
 }
 
 /// Downloads a skill from its own repository, or a server's package from npm, and installs it. New sessions receive the changed store; moving files may also affect an existing session.
@@ -91,7 +95,8 @@ pub async fn tools_install(faber: State<'_, Faber>, id: String) -> Res<()> {
     if item.server.is_some() && faber_engine::cli::find_cli("node").is_none() {
         return Err("error.tools.node".into());
     }
-    let store = Store::new(&faber.data_dir);
+    let data_dir = faber.data_dir.clone();
+    let store = tokio::task::spawn_blocking(move || Store::new(&data_dir)).await.map_err(|_| "error.tools.install".to_string())?;
     // FABER_SETUP_SOURCE (tests): the archive comes from that loopback server, as the CLI installs do.
     let source = std::env::var("FABER_SETUP_SOURCE").ok().map(|s| s.trim_end_matches('/').to_string());
     faber_engine::tools::install(&store, &item, source.as_deref()).await.map_err(|detail| {

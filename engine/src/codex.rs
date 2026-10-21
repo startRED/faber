@@ -897,10 +897,16 @@ impl Thread {
             && !self.interrupt_pending
             && !self.blocked
             && self.commands.is_empty()
+            && self.unconfirmed_commands.is_empty()
+            && self.helpers.is_empty()
             && self.native_commands.items.is_empty()
             && !self.native_commands.unknown()
             && helpers.is_empty()
             && !unknown
+    }
+
+    fn can_release(&self, key: u64, subagents: &Subagents, no_process: bool, has_tree: bool) -> bool {
+        self.closing && self.drained(key, subagents) && (no_process || (has_tree && self.id.is_some() && !self.server_writers))
     }
 
     fn publish_writers(&self, key: u64, subagents: &Subagents) {
@@ -1260,6 +1266,13 @@ async fn serve(
             } else {
                 let (method, mut params) = thread_params(area, &$t.params);
                 let delivery = $t.tools.as_ref().unwrap_or(&tools);
+                // extraRoots is process-wide; discovery and bounded instructions belong only to this thread.
+                let instructions = [delivery.project_skill_descriptions(Vendor::Codex), delivery.skill_instructions()]
+                    .into_iter().flatten().collect::<Vec<_>>().join("\n\n");
+                if !instructions.is_empty() {
+                    let words = params["developerInstructions"].as_str().unwrap_or_default();
+                    params["developerInstructions"] = format!("{words}\n\n{instructions}").into();
+                }
                 add_servers(&mut params, &delivery.servers);
                 for name in &delivery.disabled_servers {
                     if let Some(server) = params["config"].get_mut(format!("mcp_servers.{name}")) {
@@ -1295,8 +1308,13 @@ async fn serve(
                 t.report_stop(key, &subagents);
             }
         }
-        let closed: Vec<u64> =
-            threads.iter().filter(|(key, t)| no_process && t.closing && t.drained(**key, &subagents)).map(|(&key, _)| key).collect();
+        // Close/Retire and completion refresh the native tree; unresolved descendants use the existing one-second poll.
+        let closed: Vec<u64> = threads
+            .iter()
+            .filter(|(key, t)| t.can_release(**key, &subagents, no_process, server_tree.is_some()))
+            .map(|(&key, _)| key)
+            .collect();
+        let emptied = !closed.is_empty() && closed.len() == threads.len();
         for key in closed {
             subagents.forget(key);
             if let Some(t) = threads.remove(&key) {
@@ -1310,7 +1328,7 @@ async fn serve(
             }
         }
         if !stopping
-            && ((retired && threads.is_empty())
+            && ((emptied || retired) && threads.is_empty() && rx.is_empty()
                 || (!threads.is_empty()
                     && threads.iter().all(|(&key, t)| {
                         t.closing
@@ -1979,6 +1997,7 @@ async fn serve(
                         stop_native!(key);
                     }
                     SessionCommand::Retire => {
+                        refresh_writers!(key);
                         if let Some(t) = threads.get_mut(&key) {
                             t.closing = true;
                             t.publish_writers(key, &subagents);
@@ -2330,6 +2349,54 @@ mod rewind_tests {
         owner.command_finished(&retry_id, result.confirmed, result.unresolved);
         assert!(owner.commands.is_empty() && owner.unconfirmed_commands.is_empty());
         assert!(owner.drained(1, &Subagents::default()));
+    }
+
+    #[test]
+    fn a_closed_thread_releases_its_kit_only_after_the_native_tree_and_every_writer_are_clear() {
+        let root = proc::ProcessIdentity { pid: 100, created: 1 };
+        let child = proc::ProcessIdentity { pid: 101, created: 2 };
+        let members = Arc::new(std::sync::Mutex::new(vec![root, child]));
+        let query = members.clone();
+        let failed = Arc::new(AtomicBool::new(false));
+        let fail_query = failed.clone();
+        let container = proc::Containment::scripted_descendants(
+            root,
+            move || {
+                if fail_query.load(Ordering::Acquire) {
+                    Err(std::io::Error::other("query unavailable"))
+                } else {
+                    Ok(query.lock().unwrap().clone())
+                }
+            },
+            || {},
+        );
+        let server = container.owned_tree().unwrap();
+        let mut owner = thread(Arc::new(|_| {}));
+        owner.closing = true;
+        let mut peer = thread(Arc::new(|_| {}));
+        peer.watch.begin();
+        let mut threads = HashMap::from([(1, owner), (2, peer)]);
+        let helpers = Subagents::default();
+        refresh_native(&mut threads, 1, Some(&server), false);
+        assert!(!threads[&1].can_release(1, &helpers, false, true), "a native descendant still leases the kit");
+        members.lock().unwrap().clear();
+        failed.store(true, Ordering::Release);
+        refresh_native(&mut threads, 1, Some(&server), false);
+        assert!(!threads[&1].can_release(1, &helpers, false, true), "an unknown process tree cannot release anything");
+        failed.store(false, Ordering::Release);
+        members.lock().unwrap().push(root);
+        refresh_native(&mut threads, 1, Some(&server), false);
+        assert!(!threads[&1].can_release(1, &helpers, false, false), "a real process without a containment proof stays leased");
+        threads.get_mut(&1).unwrap().helpers.insert("helper".into(), json!(1));
+        assert!(!threads[&1].can_release(1, &helpers, false, true), "the helper may still need its owner's resources");
+        threads.get_mut(&1).unwrap().helpers.clear();
+        threads.get_mut(&1).unwrap().native_commands.track(&json!({"method":"item/started", "params":{"item":{
+            "type":"commandExecution", "id":"native", "processId":"terminal"}}}));
+        assert!(!threads[&1].can_release(1, &helpers, false, true));
+        threads.get_mut(&1).unwrap().native_commands.track(&json!({"method":"item/completed", "params":{"item":{
+            "type":"commandExecution", "id":"native", "processId":"terminal", "exitCode":0}}}));
+        assert!(threads[&1].can_release(1, &helpers, false, true), "the idle owner releases while the peer keeps running");
+        assert!(!threads[&2].can_release(2, &helpers, false, true));
     }
 
     #[test]

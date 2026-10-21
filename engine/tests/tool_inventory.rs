@@ -146,6 +146,22 @@ fn tool_inventory_catalog_rows_keep_ownership_and_on_off_without_scanning_the_st
 }
 
 #[test]
+fn tool_inventory_reports_catalog_reinstall_status_for_each_vendor() {
+    let data = tempfile::tempdir().unwrap();
+    let item = faber_engine::tools::catalog().iter().find(|item| item.server.is_none()).unwrap();
+    skill(data.path(), &format!("tools/plugin/skills/{}", item.id));
+    std::fs::write(data.path().join("tools/installed.json"), json!({(item.id.clone()):item.commit}).to_string()).unwrap();
+    let store = faber_engine::tools::Store::new(data.path());
+    store.mark_failed_items(std::slice::from_ref(&item.id));
+    for list in inventory(data.path(), None, None) {
+        let row = list.rows.iter().find(|row| row.catalog_id.as_deref() == Some(&item.id)).unwrap();
+        assert_eq!(row.status.as_deref(), Some("error.tools.reinstall"));
+        assert_eq!(row.enabled, Some(true), "the switch remains the person's choice; the status prevents delivery");
+        assert!(row.location.starts_with("https://github.com/"));
+    }
+}
+
+#[test]
 fn tool_inventory_bounds_scans_and_marks_invalid_or_oversized_manifests() {
     let data = tempfile::tempdir().unwrap();
     let home = tempfile::tempdir().unwrap();

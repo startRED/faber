@@ -2,7 +2,7 @@ import { createEffect, createResource, createSignal, For, onCleanup, Show } from
 import { createStore } from 'solid-js/store';
 import { api, type McpServerList, type McpServerRow, type Project } from './api.ts';
 import { Opt, Toggle } from './controls.tsx';
-import { lang, t } from './i18n.ts';
+import { fromEngine, lang, t } from './i18n.ts';
 import type { Key } from './locales/en.ts';
 
 const statuses: Record<string, Key> = {
@@ -18,7 +18,7 @@ const statuses: Record<string, Key> = {
 };
 
 /** Mounted only while the catalog is open: one snapshot, no timer or CLI launch. */
-export function McpServers(props: { revision: number; projects?: Project[]; projectId?: string; serverName?: string; fixedProject?: boolean; globallyEnabled?: boolean; available?: (name: string) => boolean; query?: string; onCount?: (value: { total: number; matching: number; ready: boolean }) => void; onError?: (error: unknown) => void }) {
+export function McpServers(props: { revision: number; projects?: Project[]; projectId?: string; serverName?: string; fixedProject?: boolean; globallyEnabled?: boolean; available?: (name: string) => boolean; status?: (name: string) => string | undefined; query?: string; onCount?: (value: { total: number; matching: number; ready: boolean }) => void; onError?: (error: unknown) => void }) {
   let gone = false;
   onCleanup(() => (gone = true));
   const [projects] = createResource(() => props.projects ? Promise.resolve(props.projects) : api.state().then((state) => state.projects).catch((error) => {
@@ -52,7 +52,7 @@ export function McpServers(props: { revision: number; projects?: Project[]; proj
       if (!gone) setBusy(undefined);
     }
   };
-  const hint = (row: McpServerRow) => `${t(`set.mcp.source.${row.source}`)} · ${t(statuses[row.status ?? ''] ?? 'set.mcp.status.unknown')}`;
+  const hint = (row: McpServerRow) => `${t(`set.mcp.source.${row.source}`)} · ${row.source === 'catalog' && props.status?.(row.name) ? fromEngine(props.status(row.name)!) : t(statuses[row.status ?? ''] ?? 'set.mcp.status.unknown')}`;
   const off = (row: McpServerRow) => row.source === 'catalog' && (props.globallyEnabled === false || props.available?.(row.name) === false);
   const matching = (row: McpServerRow) => (!props.serverName || row.name === props.serverName) && (!props.query?.trim() || `${row.name} ${hint(row)}`.toLocaleLowerCase().includes(props.query.trim().toLocaleLowerCase()));
   createEffect(() => props.onCount?.({ total: groups.reduce((n, group) => n + group.rows.length, 0), matching: groups.reduce((n, group) => n + group.rows.filter(matching).length, 0), ready: lists() !== undefined && !lists.loading }));

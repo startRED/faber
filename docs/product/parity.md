@@ -70,7 +70,7 @@ Size: S small, M medium, L large. Wave: 1 next, 2 after, 3 later or with its pha
 | # | Gap | Who has it | Faber today | Way | Size | Wave |
 |---|---|---|---|---|---|---|
 | X1 | See and switch MCP servers and connectors, with their status (`/mcp`, apps) | all four | Project MCP server list and catalog switches; connectors later | The catalog, MCP part | M | 2 |
-| X2 | See, add and remove skills and plugins (`/skills`, `/plugin`) | both CLIs, both apps | Catalog tab: install/remove/Undo/on-off and per-source discovery; external overrides and Codex plugin state explicitly unreported | Done for safe file discovery; full live CLI plugin state needs a supported report | M | 2 |
+| X2 | See, add and remove skills and plugins (`/skills`, `/plugin`) | both CLIs, both apps | Catalog tab: install/remove/Undo/on-off, per-item reinstall status and per-source discovery; cards and work logs share localized item names. Session kits deliver selected instructions, and Projects discovers all enabled skills lazily with a separate cap and checked descriptions, including oversized instructions. Older CLIs use the checked Read fallback. External overrides and Codex plugin state stay explicitly unreported | Done for safe file discovery and session delivery; full live CLI plugin state needs a supported report | M | 2 |
 | X5 | Reply style: concise, explanatory, a custom one (`/output-style`, styles, personality) | all four | Done: shared reply style in Settings | Settings, passed through each CLI's persona instructions; Codex also gets length | S | 2 |
 | X6 | Hooks: see which run and where they come from (`/hooks`) | both CLIs | One switch | Extends the hooks row | S | 3 |
 
