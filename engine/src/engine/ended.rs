@@ -58,7 +58,7 @@ impl Core {
 
 /// How the conversation's run ended, or None when it has not ended for the person: they put it away, or Keep going or a
 /// waiting message goes on with it.
-fn end_kind(c: &Conversation) -> Option<EndKind> {
+pub(super) fn end_kind(c: &Conversation) -> Option<EndKind> {
     if c.archived_at.is_some() || c.keep_going.is_some() || !c.queued.is_empty() {
         return None;
     }

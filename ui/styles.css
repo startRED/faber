@@ -1602,3 +1602,17 @@ html.away-win :is(.amb, .amb *) { animation-play-state: paused !important; }
 @media (max-width: 800px) { .catalog-content { padding-top: 24px; } .catalog-grid { grid-template-columns: 1fr; } .catalog-top { align-items: stretch; } .catalog-search { max-width: none; } }
 .catalog-empty .peek svg { animation: pulse var(--dur-pulse) steps(3) infinite; }
 html.away-win .catalog-empty .peek svg { animation-play-state: paused !important; }
+/* Technical facts use the existing column and tool rows; text stays still in every motion mode. */
+.det-line { margin: 8px 0 16px; color: var(--ink-3); font-size: var(--fs-sm); }
+.det-line button { padding: 0; border: 0; background: none; color: var(--ink-2); font: inherit; cursor: pointer; text-decoration: underline; text-underline-offset: 3px; }
+.det-line button:hover { color: var(--ink); }
+.det-line.need, .det-line.need button, .tally.project.bad { color: var(--amber-ink); }
+.tally.project.bad { box-shadow: inset 2px 0 0 var(--amber-ink); }
+.det-g { min-width: 0; display: grid; gap: 8px; }
+.det-g h3 { margin: 0; font-size: var(--fs-sm); font-weight: 580; color: var(--ink-2); }
+.det-facts { margin: 0; padding: 0; list-style: none; display: grid; gap: 10px; }
+.det-facts > li { min-width: 0; display: grid; gap: 4px; overflow-wrap: anywhere; }
+.det-facts .tools { min-width: 0; }
+.det-state { color: var(--ink-3); font-size: var(--fs-xs); }
+.det-facts > li[data-state='failed'] > .det-state { color: var(--amber-ink); }
+.details-view .follow, .details-view .checks { margin: 0; }

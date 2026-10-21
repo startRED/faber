@@ -16,6 +16,7 @@ import { crash, progress, report } from './crash.ts';
 import './appearance.check.ts';
 import './check.check.ts';
 import './composer.check.ts';
+import './details.check.ts';
 import './prompt-history.check.ts';
 import './money-words.check.ts';
 import './connect-more.check.ts';

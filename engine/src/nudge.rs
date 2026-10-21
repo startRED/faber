@@ -73,6 +73,16 @@ const SOURCE: [&str; 17] = ["rs", "ts", "tsx", "js", "jsx", "mjs", "cjs", "py", 
 /// Splits a command line into the words of each command, breaking at `&&`, `||`, `;`, `|`, `&` and newlines outside
 /// quotes. None when the line uses syntax this does not read: substitution, subshells, heredocs, an open quote.
 pub(crate) fn segments(line: &str) -> Option<Vec<Vec<String>>> {
+    read_segments(line, false)
+}
+
+/// Commands whose successful shell result proves every segment succeeded: a single call or a chain joined by `&&`.
+/// Alternatives, pipelines, background calls and unconditional separators cannot prove an individual commit succeeded.
+pub(crate) fn successful_segments(line: &str) -> Option<Vec<Vec<String>>> {
+    read_segments(line.trim(), true)
+}
+
+fn read_segments(line: &str, require_success: bool) -> Option<Vec<Vec<String>>> {
     let (mut all, mut words, mut word, mut started) = (vec![], vec![], String::new(), false);
     let mut quote: Option<char> = None;
     let mut chars = line.chars().peekable();
@@ -88,7 +98,11 @@ pub(crate) fn segments(line: &str) -> Option<Vec<Vec<String>>> {
             (None, '`' | '(' | ')') => return None,
             (None, '$') if next == Some('(') => return None,
             (None, '<') if next == Some('<') => return None,
+            (None, '#') if require_success => return None,
             (None, '&' | '|' | ';' | '\n') => {
+                if require_success && !(c == '&' && next == Some('&')) {
+                    return None;
+                }
                 if started {
                     words.push(std::mem::take(&mut word));
                     started = false;

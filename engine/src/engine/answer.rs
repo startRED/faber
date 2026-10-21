@@ -486,6 +486,102 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn commit_receipts_require_success_and_survive_loading_an_older_conversation() {
+        let dir = tempfile::tempdir().unwrap();
+        let (engine, _) = engine(dir.path());
+        let id = seed(&engine, stub(vec![]).session, &[("t1", &[])]);
+        for (call, command, ok, declined) in [
+            ("commit", "git -C 'a folder' commit -m fix", true, false),
+            ("quoted", "echo \"example && git commit -m demo\"", true, false),
+            ("push", "git push", true, false),
+            ("ready", "gh pr ready 2", true, false),
+            ("failed", "git commit -m failed", false, false),
+            ("refused", "git commit -m refused", true, true),
+        ] {
+            engine.with(|c| {
+                c.handle(
+                    &id,
+                    1,
+                    EngineEvent::Tool { id: call.into(), name: "Bash".into(), input: json!({ "command": command }), parent: None },
+                );
+                let result = EngineEvent::ToolResult { id: call.into(), ok, declined, text: String::new() };
+                c.handle(&id, 1, result.clone());
+                c.handle(&id, 1, result);
+            });
+        }
+        assert_eq!(engine.open(&id).unwrap().messages.last().unwrap().commits, ["commit"]);
+        engine.with(|c| {
+            c.convs.get_mut(&id).unwrap().messages.last_mut().unwrap().commits.clear();
+            c.save(&id);
+            c.convs.remove(&id);
+        });
+        let reply = engine.open(&id).unwrap().messages.pop().unwrap();
+        assert_eq!(reply.commits, ["commit"], "old saved tools are recognised once when loaded");
+        assert_eq!(serde_json::to_value(reply).unwrap()["commits"], json!(["commit"]));
+    }
+
+    #[tokio::test]
+    async fn reply_attention_is_the_latest_running_or_done_state_in_open_and_message_events() {
+        let dir = tempfile::tempdir().unwrap();
+        let (engine, events) = engine(dir.path());
+        let id = seed(&engine, stub(vec![]).session, &[("t1", &[])]);
+        engine.with(|c| {
+            c.turn(&id).unwrap().checks = Some(Checks { state: ChecksState::NeedsYou, passed: 0, failed: vec![] });
+            c.emit_message(&id, "t1");
+        });
+        assert!(engine.open(&id).unwrap().messages.last().unwrap().needs_you);
+        assert!(engine.state().running.items.iter().any(|i| i.turn_id == "t1" && i.state == RunState::NeedsYou));
+        assert!(events.lock().unwrap().iter().any(|e| matches!(e, AppEvent::Message { message, .. } if message.needs_you)));
+        engine.with(|c| {
+            let conv = c.convs.get_mut(&id).unwrap();
+            conv.messages.last_mut().unwrap().status = Some(Status::Done);
+            conv.messages.push(Message::new("u2".into(), Role::User, "Leave it, explain what broke.".into(), 4));
+            let mut reply = Message::new("t2".into(), Role::Assistant, "The greeting could not be read.".into(), 5);
+            reply.status = Some(Status::Done);
+            conv.messages.push(reply);
+            c.emit_message(&id, "t2");
+        });
+        assert!(!engine.open(&id).unwrap().messages.last().unwrap().needs_you);
+        assert!(engine.state().running.items.is_empty(), "the old needs-you is overtaken for every surface");
+        engine.with(|c| {
+            c.convs.get_mut(&id).unwrap().messages.last_mut().unwrap().halt = Some("reason.keepGoing.cap".into());
+            c.emit_message(&id, "t2");
+        });
+        assert!(engine.open(&id).unwrap().messages.last().unwrap().needs_you, "the done card's decision applies without a tool");
+        engine.seen(&id).unwrap();
+        assert!(engine.open(&id).unwrap().messages.last().unwrap().needs_you, "opening the card cannot erase a problem");
+    }
+
+    #[tokio::test]
+    async fn a_commit_that_finishes_after_steering_stays_in_its_own_reply() {
+        let dir = tempfile::tempdir().unwrap();
+        let (engine, _) = engine(dir.path());
+        let id = seed(&engine, stub(vec![]).session, &[("t1", &[])]);
+        engine.with(|c| {
+            c.handle(
+                &id,
+                1,
+                EngineEvent::Tool {
+                    id: "save".into(),
+                    name: "Bash".into(),
+                    input: json!({ "command": "git commit -m fix" }),
+                    parent: None,
+                },
+            );
+            let conv = c.convs.get_mut(&id).unwrap();
+            conv.messages.push(Message::new("u2".into(), Role::User, "Explain it too.".into(), 4));
+            let mut reply = Message::new("t2".into(), Role::Assistant, String::new(), 5);
+            reply.status = Some(Status::Streaming);
+            conv.messages.push(reply);
+            c.live.get_mut(&id).unwrap().turn = Some("t2".into());
+            c.handle(&id, 1, EngineEvent::ToolResult { id: "save".into(), ok: true, declined: false, text: String::new() });
+        });
+        let c = engine.open(&id).unwrap();
+        assert_eq!(c.messages.iter().find(|m| m.id == "t1").unwrap().commits, ["save"]);
+        assert!(c.messages.last().unwrap().commits.is_empty());
+    }
+
+    #[tokio::test]
     async fn r160_review_plan_approval_names_the_clicked_request_and_refuses_a_stale_one() {
         for request in ["missing", "second"] {
             let dir = tempfile::tempdir().unwrap();

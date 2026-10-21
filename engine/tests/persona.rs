@@ -1,11 +1,22 @@
 use faber_engine::persona::{PersonaInput, persona};
+
+#[test]
+fn plain_words_keep_failures_unfinished_work_decisions_and_useful_file_locations() {
+    let text = persona(&PersonaInput { name: None, tuning: &Default::default(), research: None });
+    assert!(text.contains("Always say plainly when something failed, is not finished, or needs the person's decision"));
+    assert!(text.contains("plain words never drop a problem"));
+    assert!(text.contains("Allow a file location when the person needs to find or open something you made"));
+    assert!(!text.contains("Technical details view"), "the common Chat persona must not promise a project-only view");
+    assert!(!text.contains("saved for the next version"), "saving alone promises no release");
+}
+
 #[test]
 fn persona_is_static_bounded_and_has_no_scar_rules() {
     for name in [None, Some("Erick"), Some("日本語")] {
         let p = PersonaInput { name, tuning: &Default::default(), research: None };
         let text = persona(&p);
         assert_eq!(text, persona(&p));
-        assert!(text.chars().count() <= 2800);
+        assert!(text.chars().count() <= 3400);
         assert!(text.contains("You are Faber"));
         assert!(text.contains("unverified"));
         assert!(!text.contains("scar rule"));

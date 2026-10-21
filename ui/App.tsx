@@ -51,6 +51,7 @@ import { Shortcuts, shortcutsOpen } from './Shortcuts.tsx';
 import { Projects } from './Projects.tsx';
 import { createOpening, upsert } from './opening.ts';
 import { Running } from './Running.tsx';
+import { openedDetails, showDetails } from './Details.tsx';
 import { agentWide, openedAgent, showAgent, startMessage, toggleAgentWide } from './AgentChat.tsx';
 import { openedVisual, showVisual } from './VisualAnswer.tsx';
 import { openedSite, showSite, sitesOf } from './Site.tsx';
@@ -463,6 +464,7 @@ export function App(props: { initial: AppState; update?: UpdateStatus; inbox: { 
     showVisual(undefined);
     showAside(undefined);
     showFile(undefined);
+    showDetails(undefined);
     setChangesOpen(undefined);
     setBackgroundOpen(false);
     if (!columnOpen()) return;
@@ -512,6 +514,7 @@ export function App(props: { initial: AppState; update?: UpdateStatus; inbox: { 
     const open = openedAside();
     return open && current()?.id === open.conversationId ? open : undefined;
   };
+  const sideDetails = () => openedDetails() === current()?.id && current()?.area === 'project' ? current() : undefined;
   const sideChanges = () => changesOpen() && changesOpen() === current()?.id ? changesOpen() : undefined;
   const canReview = () => {
     const c = current();
@@ -536,12 +539,13 @@ export function App(props: { initial: AppState; update?: UpdateStatus; inbox: { 
     const id = current()?.id;
     return open && id ? { conversationId: id, at: open.ref, open } : undefined;
   }, undefined, { equals: (a, b) => a?.open === b?.open && a?.conversationId === b?.conversationId });
-  createEffect(on(openedAgent, (open) => open && (showSite(undefined), showVisual(undefined), showAside(undefined), showFile(undefined), setChangesOpen(undefined), setBackgroundOpen(false)), { defer: true }));
-  createEffect(on(openedSite, (open) => open && (showAgent(undefined), showVisual(undefined), showAside(undefined), showFile(undefined), setChangesOpen(undefined), setBackgroundOpen(false)), { defer: true }));
-  createEffect(on(openedAside, (open) => open && (showAgent(undefined), showSite(undefined), showVisual(undefined), showFile(undefined), setChangesOpen(undefined), setBackgroundOpen(false)), { defer: true }));
-  createEffect(on(openedVisual, (open) => open && (showAgent(undefined), showSite(undefined), showAside(undefined), showFile(undefined), setChangesOpen(undefined), setBackgroundOpen(false)), { defer: true }));
-  createEffect(on(openedFile, (open) => open && (showAgent(undefined), showSite(undefined), showVisual(undefined), showAside(undefined), setChangesOpen(undefined), setBackgroundOpen(false)), { defer: true }));
-  createEffect(on(() => openedAgent() ?? openedSite() ?? openedAside() ?? openedVisual() ?? sideFile() ?? (changesOpen() ? { conversationId: changesOpen() } : undefined), (open) => {
+  createEffect(on(openedAgent, (open) => open && (showSite(undefined), showVisual(undefined), showAside(undefined), showFile(undefined), setChangesOpen(undefined), setBackgroundOpen(false), showDetails(undefined)), { defer: true }));
+  createEffect(on(openedSite, (open) => open && (showAgent(undefined), showVisual(undefined), showAside(undefined), showFile(undefined), setChangesOpen(undefined), setBackgroundOpen(false), showDetails(undefined)), { defer: true }));
+  createEffect(on(openedAside, (open) => open && (showAgent(undefined), showSite(undefined), showVisual(undefined), showFile(undefined), setChangesOpen(undefined), setBackgroundOpen(false), showDetails(undefined)), { defer: true }));
+  createEffect(on(openedVisual, (open) => open && (showAgent(undefined), showSite(undefined), showAside(undefined), showFile(undefined), setChangesOpen(undefined), setBackgroundOpen(false), showDetails(undefined)), { defer: true }));
+  createEffect(on(openedFile, (open) => open && (showAgent(undefined), showSite(undefined), showVisual(undefined), showAside(undefined), setChangesOpen(undefined), setBackgroundOpen(false), showDetails(undefined)), { defer: true }));
+  createEffect(on(openedDetails, (id) => id && (showAgent(undefined), showSite(undefined), showVisual(undefined), showAside(undefined), showFile(undefined), setChangesOpen(undefined), setBackgroundOpen(false)), { defer: true }));
+  createEffect(on(() => openedAgent() ?? openedSite() ?? openedAside() ?? openedVisual() ?? sideFile() ?? (openedDetails() ? { conversationId: openedDetails() } : undefined) ?? (changesOpen() ? { conversationId: changesOpen() } : undefined), (open) => {
     if (!open) return;
     // One of another conversation is never shown (`sideAgent`); it goes when the conversation on screen changes.
     if (current()?.id !== open.conversationId) return;
@@ -560,6 +564,7 @@ export function App(props: { initial: AppState; update?: UpdateStatus; inbox: { 
     if (openedAside() && openedAside()!.conversationId !== id) showAside(undefined);
     if (changesOpen() !== id) setChangesOpen(undefined);
     showFile(undefined);
+    if (openedDetails() !== id) showDetails(undefined);
   }, { defer: true }));
   // The window changes width while the column is open: it becomes a modal dialog or stops being one, and its element is
   // drawn again, so focus goes where the new state wants it.
@@ -678,7 +683,7 @@ export function App(props: { initial: AppState; update?: UpdateStatus; inbox: { 
     if (!state().conversations.some((c) => c.id === item.conversationId)) return;
     closeSettings();
     if (!docked()) closeColumn();
-    void go(placeOfRunning(place(), item));
+    return go(placeOfRunning(place(), item));
   };
 
   onMount(() => {
@@ -1165,6 +1170,7 @@ export function App(props: { initial: AppState; update?: UpdateStatus; inbox: { 
     showVisual(undefined);
     showAside(undefined);
     showFile(undefined);
+    showDetails(undefined);
     setBackgroundOpen(false);
     setChangesOpen(current()?.id);
     // The same conversation's changes again: the signal does not move, so the column is opened here.
@@ -1196,6 +1202,7 @@ export function App(props: { initial: AppState; update?: UpdateStatus; inbox: { 
         showVisual(undefined);
         showAside(undefined);
         showFile(undefined);
+        showDetails(undefined);
         setChangesOpen(undefined);
         setBackgroundOpen(true);
         if (!byUser()) {
@@ -1206,12 +1213,18 @@ export function App(props: { initial: AppState; update?: UpdateStatus; inbox: { 
       }}
       modal={trapped()}
       onOpen={openRunning}
+      onDetails={(item) => void openRunning(item)?.then(() => {
+        if (current()?.id === item.conversationId && place().id === item.conversationId) showDetails(item.conversationId);
+      })}
       onOpenDone={(c) => {
         if (!docked()) closeColumn();
         openSummary(c);
       }}
       onDismiss={(c) => void api.seen(c.id).catch(() => {})}
       onClose={closeColumn}
+      details={sideDetails() ? { conversationId: sideDetails()!.id, messages: sideDetails()!.messages,
+        background: state().background?.items ?? [], changes: { id: sideDetails()!.id, files: changeList()?.files ?? [], loading: changes.loading,
+          incomplete: changeList()?.incomplete, loadingMore: loadingMoreChanges(), onMore: () => void moreChanges() } } : undefined}
       agent={sideAgent()}
       site={sideSite()}
       visual={sideVisual()}
@@ -1230,6 +1243,7 @@ export function App(props: { initial: AppState; update?: UpdateStatus; inbox: { 
         showVisual(undefined);
         showAside(undefined);
         showFile(undefined);
+        showDetails(undefined);
         setChangesOpen(undefined);
         setBackgroundOpen(false);
         // The back button is gone with the subagent or the page: focus stays in the column, on the list's first control.
@@ -1596,6 +1610,7 @@ ${copy().path}`}>
                                     busy={checking()}
                                     weighing={items().some((i) => i.conversationId === c().id && i.weighing)}
                                     onError={fail}
+                                    area={current()!.area}
                                     onQueuedRecovered={showRecoveredQueue}
                                     usage={state().usage ?? []}
                                     from={from()}

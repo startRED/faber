@@ -68,6 +68,8 @@ mod pacing;
 mod paid_guard;
 #[path = "persona.rs"]
 mod persona;
+#[path = "plain_words.rs"]
+mod plain_words;
 #[path = "plan.rs"]
 mod plan;
 #[path = "pr_watch.rs"]

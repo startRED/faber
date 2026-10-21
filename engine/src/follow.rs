@@ -36,18 +36,65 @@ pub enum Kind {
 /// search for the words (`rg 'gh pr create'`) or an argument holding them runs none of them. A shell launcher's own line
 /// (`powershell -Command "…"`, as Codex runs commands on Windows) is read again.
 pub fn kind(command: &str) -> Option<Kind> {
-    kind_at(command, 0)
+    commands(command, 0, false)
+        .into_iter()
+        .filter_map(|action| match action {
+            Action::Follow(kind) => Some(kind),
+            Action::Commit | Action::Inspects => None,
+        })
+        .min()
 }
 
-fn kind_at(line: &str, depth: u8) -> Option<Kind> {
-    crate::nudge::segments(line)?.iter().filter_map(|words| runs(words, depth)).min()
+/// Whether a successful command confirms `git commit`, using the same quote-aware parser as pull request following.
+/// A successful alternative or pipeline cannot confirm an individual commit, so ambiguous shell chains do not count.
+pub fn commits(command: &str) -> bool {
+    commands(command, 0, true).contains(&Action::Commit)
 }
 
-fn runs(words: &[String], depth: u8) -> Option<Kind> {
+/// Whether a successful command made a commit: the parser of [`commits`] finds `git commit`, and Git's output
+/// shows the commit line (`[main 1a2b3c4] fix`) or, when its options are a plain commit, nothing (`--quiet`). A command
+/// that only shows what would be committed prints a status instead, however its options were spelled.
+pub fn committed(command: &str, output: &str) -> bool {
+    // shortcut: the command and its kept output are the only evidence, so a few odd lines still miscount: an output cut at
+    // the 4000 characters a tool keeps lets the options decide alone (an abbreviated `--dry` then counts), a later command
+    // printing a summary-shaped line counts, and a quiet commit followed by other output does not. Compare HEAD before and
+    // after the reply if a person ever sees one of these.
+    let cut = output.chars().count() >= 4000;
+    let actions = commands(command, 0, true);
+    let printed = || output.lines().any(|line| commit_line(line.trim_start()));
+    let commit = actions.contains(&Action::Commit);
+    if cut {
+        return commit;
+    }
+    (commit && (output.trim().is_empty() || printed())) || (actions.contains(&Action::Inspects) && printed())
+}
+
+/// `[<branch or detached HEAD> (root-commit)? <abbreviated id>] <subject>`.
+fn commit_line(line: &str) -> bool {
+    let Some(inside) = line.strip_prefix('[').and_then(|rest| rest.split_once(']')).map(|(inside, _)| inside) else {
+        return false;
+    };
+    inside.rsplit_once(' ').is_some_and(|(_, id)| (7..=64).contains(&id.len()) && id.bytes().all(|b| b.is_ascii_hexdigit()))
+}
+
+#[derive(PartialEq, Eq)]
+enum Action {
+    Follow(Kind),
+    Commit,
+    /// `git commit` whose options seem only to show what would be committed; its output decides.
+    Inspects,
+}
+
+fn commands(line: &str, depth: u8, require_success: bool) -> Vec<Action> {
+    let words = if require_success { crate::nudge::successful_segments(line) } else { crate::nudge::segments(line) };
+    words.unwrap_or_default().iter().flat_map(|words| runs(words, depth, require_success)).collect()
+}
+
+fn runs(words: &[String], depth: u8, require_success: bool) -> Vec<Action> {
     let assignment =
         |w: &String| w.split_once('=').is_some_and(|(k, _)| !k.is_empty() && k.chars().all(|c| c.is_alphanumeric() || c == '_'));
     let words: Vec<&str> = words.iter().skip_while(|w| assignment(w)).map(String::as_str).collect();
-    let (first, rest) = words.split_first()?;
+    let Some((first, rest)) = words.split_first() else { return vec![] };
     // The first word that is not an option, past the options that take a value (`git -C <folder> push`).
     let verb = |takes: &[&str]| {
         let mut words = rest.iter();
@@ -64,23 +111,89 @@ fn runs(words: &[String], depth: u8) -> Option<Kind> {
     match program.as_str() {
         "gh" => (verb(&["-R", "--repo"]) == Some("pr")
             && rest.iter().skip_while(|w| **w != "pr").nth(1).is_some_and(|w| matches!(*w, "create" | "ready" | "reopen")))
-        .then_some(Kind::Opens),
-        "node" => verb(&[]).is_some_and(|script| script.replace('\\', "/").rsplit('/').next() == Some("land.mjs")).then_some(Kind::Queues),
-        "git" => (verb(&["-C", "-c"]) == Some("push")).then_some(Kind::Pushes),
+        .then_some(Action::Follow(Kind::Opens))
+        .into_iter()
+        .collect(),
+        "node" => verb(&[])
+            .is_some_and(|script| script.replace('\\', "/").rsplit('/').next() == Some("land.mjs"))
+            .then_some(Action::Follow(Kind::Queues))
+            .into_iter()
+            .collect(),
+        "git" => match verb(&["-C", "-c"]) {
+            Some("push") => vec![Action::Follow(Kind::Pushes)],
+            Some("commit") if inspects(rest.iter().skip_while(|w| **w != "commit").skip(1).copied()) => vec![Action::Inspects],
+            Some("commit") => vec![Action::Commit],
+            _ => vec![],
+        },
         "bash" | "sh" | "zsh" | "pwsh" | "powershell" | "cmd" if depth < 2 => {
-            let flag = rest.iter().position(|w| matches!(w.to_ascii_lowercase().as_str(), "-c" | "-lc" | "-ic" | "-command" | "/c"))?;
+            let Some(flag) = rest.iter().position(|w| matches!(w.to_ascii_lowercase().as_str(), "-c" | "-lc" | "-ic" | "-command" | "/c"))
+            else {
+                return vec![];
+            };
             // The others run the one word after their flag. `cmd /c` runs the words after it: one quoted word is a line
             // to read again, several are read as they were split, so a quoted argument never turns back into commands.
-            let after = rest.get(flag + 1..)?;
+            let after = &rest[flag + 1..];
             match after {
-                [line] => kind_at(line, depth + 1),
-                _ if program == "cmd" => runs(&after.iter().map(|w| w.to_string()).collect::<Vec<_>>(), depth + 1),
-                [line, ..] => kind_at(line, depth + 1),
-                [] => None,
+                [line] => commands(line, depth + 1, require_success),
+                _ if program == "cmd" => runs(&after.iter().map(|w| w.to_string()).collect::<Vec<_>>(), depth + 1, require_success),
+                [line, ..] => commands(line, depth + 1, require_success),
+                [] => vec![],
             }
         }
-        _ => None,
+        _ => vec![],
     }
+}
+
+/// Whether `git commit`'s arguments only show what would be committed (`--dry-run`, and `--short`, `--porcelain` and
+/// `--long`, `-z` and `--null`, which imply it) or ask for help. An option's value (`-m --short`, `-am -z`) is never read
+/// as an option.
+fn inspects<'a>(args: impl Iterator<Item = &'a str>) -> bool {
+    const TAKES: &[&str] = &[
+        "-m",
+        "--message",
+        "-F",
+        "--file",
+        "-C",
+        "--reuse-message",
+        "-c",
+        "--reedit-message",
+        "-t",
+        "--template",
+        "--author",
+        "--date",
+        "--cleanup",
+        "--fixup",
+        "--squash",
+        "--trailer",
+        "--pathspec-from-file",
+    ];
+    let mut args = args;
+    while let Some(arg) = args.next() {
+        match arg {
+            "--" => return false,
+            "--dry-run" | "--short" | "--porcelain" | "--long" | "--null" | "--help" => return true,
+            _ if TAKES.contains(&arg) => {
+                args.next();
+            }
+            // A cluster of short options (`-az`): one that takes a value ends it, with the value after it or in the next word.
+            _ if arg.len() > 1 && arg.starts_with('-') && !arg.starts_with("--") => {
+                for (at, c) in arg.char_indices().skip(1) {
+                    match c {
+                        'z' | 'h' => return true,
+                        'm' | 'F' | 'C' | 'c' | 't' => {
+                            if at + 1 == arg.len() {
+                                args.next();
+                            }
+                            break;
+                        }
+                        _ => {}
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+    false
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -282,6 +395,76 @@ mod tests {
 
     fn follow() -> Follow {
         start(Found { repo: "acme/app".into(), number: 93, url: URL.into() }, 0)
+    }
+
+    #[test]
+    fn saved_changes_are_commits_in_program_position_not_quoted_examples_or_follow_commands() {
+        for line in [
+            "git commit -m fix",
+            "git commit --quiet -m fix\n",
+            "git -C 'a folder' commit -m fix && git push",
+            "pwsh.exe -Command \"git commit -m fix && git push\"",
+            "cmd /c git commit -m fix",
+            "git commit -m --short",
+            "git commit -am -z",
+            "git commit -mz",
+            "git commit -F msg.txt -- --long",
+        ] {
+            assert!(commits(line), "{line}");
+        }
+        for line in [
+            "echo \"example && git commit -m demo\"",
+            "rg 'git commit' README.md",
+            "cmd /c echo \"example & git commit -m demo\"",
+            "git push",
+            "gh pr create",
+            "gh pr ready 2",
+            "gh pr reopen 2",
+            "gh pr merge 2",
+            "node scripts/land.mjs 2",
+            "git merge feature",
+            "git commit --dry-run",
+            "git commit --help",
+            "git commit --short",
+            "git commit -a --porcelain",
+            "git commit --long -m fix",
+            "git commit -z",
+            "git commit --null",
+            "git commit -az -m fix",
+            "git commit -m 'unclosed",
+            "git diff --quiet || git commit -am fix",
+            "false && git commit -m fix || true",
+            "git commit -m fix; true",
+            "git commit -m fix | cat",
+            "echo done # && git commit -m fix",
+        ] {
+            assert!(!commits(line), "{line}");
+        }
+        assert_eq!(kind("git commit -m fix && git push && gh pr create"), Some(Kind::Opens));
+    }
+
+    #[test]
+    fn a_commit_counts_only_when_git_printed_one() {
+        for (line, output) in [
+            ("git commit -m fix", "[main 1a2b3c4] fix\n 1 file changed, 2 insertions(+)"),
+            ("git commit -qm fix", ""),
+            ("git commit -Sz --no-gpg-sign -m fix", "[main (root-commit) 1a2b3c4] fix"),
+            ("git commit --null --no-null -m fix", "[detached HEAD 0123abcd] fix"),
+            ("git commit --mes -z", "[feature/x 1a2b3c4d5e] -z"),
+            ("git commit -m fix && git push", "[main 1a2b3c4] fix\nTo github.com:acme/app.git"),
+        ] {
+            assert!(committed(line, output), "{line}");
+        }
+        for (line, output) in [
+            ("git commit --dry", "On branch main\nChanges to be committed:\n\tmodified:   a.txt"),
+            ("git commit --porcelain", "M  a.txt"),
+            ("git commit -z", "M  a.txt\0"),
+            ("git commit --dry-run -m fix", ""),
+            ("git push", "[main 1a2b3c4] fix"),
+            ("git commit -m fix", "[not an id] fix"),
+        ] {
+            assert!(!committed(line, output), "{line}");
+        }
     }
 
     #[test]

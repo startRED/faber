@@ -124,11 +124,11 @@ above an answer. The window widths, the sidebar and the running column are in [l
   Web searches remain ordinary work-log chips. There is no separate report surface (`tests/ui/research.check.ts`).
 - Keep going (R199): the chip, its quiet lines, its quota warning and what it shows on coming back are in
   [keep-going.md](keep-going.md).
-- A project reply that opened, queued or pushed a pull request ends with one pace-style line (R200): its words ("Following
+- A project reply that opened, queued or pushed a pull request has one pace-style line in Technical details (R200): its words ("Following
   pull request #93: checks running.") link to the page, and "Stop following" sits beside them while it is open. Only checks
   that wait for the person turn it amber. When the checks fail, Faber's own message is the loop
   mark on the next reply, its tooltip naming the pull request and its failed checks.
-- A project reply that changed files, in full access, ends with Faber's own checks (R146) in the same pace-style line,
+- A project reply that changed files, in full access, has Faber's own checks (R146) in Technical details in the same pace-style line,
   above the pull request's: "Faber is running the checks on these changes…", then "Faber's checks passed (3 checks)." or
   "Faber's checks failed: npm run lint." with "What failed" under it, the work log's disclosure holding each failed check's
   first three short failures in the data face. Faber's fix turn is the loop mark on the next reply ("Faber's checks failed (npm run
@@ -158,6 +158,12 @@ notice are in [rewind.md](rewind.md). No toolbar action or setting is added.
 
 ## Work log
 
+Project conversations have one plain line under the thread opening Technical details in the Running column. Full check
+results and followed-request records live there; failures, fixing, needed decisions and unfinished work stay in
+the plain thread line from the latest reply’s engine state; a personal Stop is neutral. The folded log retains its trace. Replies and closing recaps use
+everyday words without dropping a problem; technical words are allowed when asked for or used first by the person,
+and a useful file location is allowed when the person needs to find or open an artifact.
+
 - The chips' line counts extend into the project's "Changes" view in the running column: git supplies the conversation's
   whole change, including files changed by commands, so its totals can differ from the tool-input counts below.
 
@@ -169,7 +175,7 @@ notice are in [rewind.md](rewind.md). No toolbar action or setting is added.
 - The agent running Faber's checks (the `verify` tool) is one chip with no detail: "Running the quick checks", or
   "Running every check" for the full level. What failed is the agent's to read; the chip only says it ran.
 - Subagent and helper rows have their own page, [subagents.md](subagents.md).
-- While a reply runs and has ended at least one check, a quiet line under the status line counts them (R161 step 9):
+- While a reply runs and has ended at least one check, a polite line counts them (plain words in Projects) (R161 step 9):
   "Ran 3 checks · none failed" after a check mark in the accent's text ink, or "· 1 failed" with the error note's 2 px
   edge and no mark. The words are the subagent facts' own. It goes when the reply ends; nothing moves.
 - A file change's chip ends with its line count in the data face, `+N` in the accent's text ink and `−N` in the error
@@ -177,9 +183,6 @@ notice are in [rewind.md](rewind.md). No toolbar action or setting is added.
   line until the next step or the answer: at most four, one line each in the data face and the third ink, the sign in
   the count's ink, then "N more lines". Nothing moves; the status line already says the step, so the lines are hidden
   from a screen reader.
-- While a reply runs and has ended at least one check, a quiet line under the status line counts them (R161 step 9):
-  "Ran 3 checks · none failed" after a check mark in the accent's text ink, or "· 1 failed" with the error note's 2 px
-  edge and no mark. The words are the subagent facts' own. It goes when the reply ends; nothing moves.
 - While a reply runs and has read a web page, a quiet line under the status line names the sites it opened (R161 step 9):
   "Opened 5 sites", then "+N" for any past four, then the four last opened, joined by middle dots in the third ink, the
   one it reads now last and in the first ink. A site opened again moves to the end. It goes when the reply ends; nothing moves,

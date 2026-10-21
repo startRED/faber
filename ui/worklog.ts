@@ -47,6 +47,7 @@ const KINDS: Record<string, Key> = {
   Browser: 'tool.browse',
   Conversation: 'tool.conversation',
   Agent: 'tool.agent',
+  Helper: 'tool.agent',
   Task: 'tool.agent',
   TodoWrite: 'tool.plan',
   AskUserQuestion: 'tool.ask',
@@ -79,7 +80,7 @@ export function toolRow(tool: ToolUse): ToolRow {
   const action = tool.name === 'Conversation' ? (tool.input as { action?: unknown } | undefined)?.action : undefined;
   if (action === 'compact' || action === 'clear' || action === 'context') return { label: t(`tool.${action}`), detail: '' };
   // A conversation the agent starts reads as its title; one it reads back, as its id.
-  const named = SUBAGENT.has(tool.name) ? input?.description : tool.name === 'Conversation' ? (input?.title ?? input?.id) : undefined;
+  const named = SUBAGENT.has(tool.name) ? input?.description : tool.name === 'Helper' ? input?.title : tool.name === 'Conversation' ? (input?.title ?? input?.id) : undefined;
   const raw = typeof named === 'string' ? named : detailOf(tool.input);
   const camel = /^[a-z]+[A-Z]/.test(tool.name);
   // An MCP tool (`mcp__server__tool`) reads as using a tool, with the server's name when the call names nothing else.

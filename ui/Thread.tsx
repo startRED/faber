@@ -2,9 +2,7 @@ import { createEffect, createMemo, createResource, createSignal, For, Index, on,
 import {
   api,
   errorText,
-  type Checks,
   type Choice,
-  type Follow,
   type Message,
   type Plan,
   type QueuedTurn,
@@ -18,6 +16,7 @@ import { copyItem, openMenu } from './contextmenu.ts';
 import { keep, kept, recoverQueuedDraft, release, useDraft } from './unsent.ts';
 import { Icon, VendorMark } from './Glyphs.tsx';
 import { QuotaCard } from './QuotaCard.tsx';
+import { ChecksLine, DetailsLine, FollowLine } from './Details.tsx';
 import { PlanList, WrapUpBox } from './Plan.tsx';
 import { Rewind } from './Rewind.tsx';
 import { AnswersCard, answeredIn, folded, RunBlock, runsOf, type Answered } from './Run.tsx';
@@ -187,6 +186,7 @@ interface Shared {
   pieceRevision?: number;
   visuals?: VisualAnswer[];
   conversationId: string;
+  area?: 'chat' | 'project';
   options: Option[];
   /** What the composer has chosen now: the model a retry goes to. */
   choice?: Choice;
@@ -468,11 +468,11 @@ function Answer(props: Shared & { m: Accessor<Message>; messages?: Message[]; pr
       <Show when={working()}>
         <div class="tally-live" role="status" aria-live="polite" aria-atomic="true">
           <Show when={tally().ran}>
-            <p class="tally" classList={{ bad: tally().failed > 0 }}>
+            <p class="tally" classList={{ bad: tally().failed > 0, project: props.area === 'project' }}>
               <Show when={!tally().failed}>
                 <Icon name="check" small />
               </Show>
-              {t('agent.facts.checks', { n: tally().ran })} · {tally().failed ? t('agent.facts.failed', { n: tally().failed }) : t('agent.facts.passed')}
+              {t(props.area === 'project' ? 'details.checked' : 'agent.facts.checks', { n: tally().ran })} · {tally().failed ? t(props.area === 'project' ? 'details.checksFailed' : 'agent.facts.failed', { n: tally().failed }) : t('agent.facts.passed')}
             </p>
           </Show>
         </div>
@@ -513,14 +513,14 @@ function Answer(props: Shared & { m: Accessor<Message>; messages?: Message[]; pr
           <For each={sites()}>{(s) => <SiteCard conversationId={props.conversationId} tool={s.tool} site={s.site} steps={pageSteps} />}</For>
         </div>
       </Show>
-      <Show when={m().checks}>{(c) => <ChecksLine c={c()} />}</Show>
+      <Show when={props.area !== 'project' && m().checks}>{(c) => <ChecksLine c={c()} />}</Show>
       {/* The moment git is asked whether the reply changed files, before checks would start: one quiet line, Stop ends it. */}
-      <Show when={props.last && props.weighing && !m().checks}>
+      <Show when={props.area !== 'project' && props.last && props.weighing && !m().checks}>
         <div class="pace checks" data-state="weighing">
           <p>{t('checks.weighing')}</p>
         </div>
       </Show>
-      <Show when={m().follow}>{(f) => <FollowLine conversationId={props.conversationId} f={f()} />}</Show>
+      <Show when={props.area !== 'project' && m().follow}>{(f) => <FollowLine conversationId={props.conversationId} f={f()} />}</Show>
       {/* Only the person's own Stop is said: a turn Faber started and cut needs no word. */}
       <Show when={m().status === 'stopped' && props.prompt && !props.prompt.wake}>
         <div class="note">{t('answer.stopped')}</div>
@@ -588,57 +588,6 @@ function Answer(props: Shared & { m: Accessor<Message>; messages?: Message[]; pr
         </div>
       </Show>
     </article>
-  );
-}
-
-// Faber's own checks of a reply that changed files (R146): one quiet line while they run and once they ended, the failed
-// checks' first failures behind a disclosure. Checks that still fail after Faber's fixes wait for the person, in amber.
-function ChecksLine(props: { c: Checks }) {
-  const failed = () => props.c.failed ?? [];
-  const words = () => t(`checks.${props.c.state}` as Parameters<typeof t>[0], { n: props.c.passed, checks: failed().map((f) => f.command).join(', ') });
-  return (
-    <div class="pace checks" classList={{ need: props.c.state === 'needsYou' }} data-state={props.c.state}>
-      <p>{words()}</p>
-      <Show when={props.c.state !== 'running' && failed().length}>
-        <details class="disclosure">
-          <summary>{t('checks.why')}</summary>
-          <For each={failed()}>
-            {(f) => (
-              <div class="checks-failed">
-                <code>{f.command}</code>
-                <Show when={(f.lines ?? []).join('').trim()} fallback={<p>{t('checks.noDetails')}</p>}>
-                  <pre>{(f.lines ?? []).join('')}</pre>
-                </Show>
-              </div>
-            )}
-          </For>
-        </details>
-      </Show>
-    </div>
-  );
-}
-
-// The pull request a reply opened or pushed (R200): one quiet line while Faber follows its checks and after it ends, the
-// number a link to the page, and one way to stop. Checks that failed on a tight quota wait for the person, in amber.
-function FollowLine(props: { conversationId: string; f: Follow }) {
-  const words = () => {
-    const f = props.f;
-    const vars = { pr: `#${f.number}`, checks: (f.failed ?? []).join(', ') };
-    if (f.held && f.state === 'failing') return t('follow.held', vars);
-    return t(`follow.${f.problem?.replace('follow.', '') ?? f.state}` as Parameters<typeof t>[0], vars);
-  };
-  const open = () => ['pending', 'failing', 'conflict'].includes(props.f.state);
-  return (
-    <p class="pace follow" classList={{ need: !!props.f.held && open() }} data-state={props.f.state}>
-      <a href={props.f.url} title={`${props.f.repo}#${props.f.number}`} onClick={(e) => (e.preventDefault(), void api.openLink(props.f.url))}>
-        {words()}
-      </a>
-      <Show when={open()}>
-        <button type="button" class="btn" onClick={() => void api.unfollowPr(props.conversationId)}>
-          {t('follow.stop')}
-        </button>
-      </Show>
-    </p>
   );
 }
 
@@ -1000,6 +949,9 @@ export function Thread(props: Shared & { messages: Message[]; queued?: QueuedTur
           </Show>
         )}
       </Index>
+      <Show when={props.area === 'project' && props.until === undefined}>
+        <DetailsLine conversationId={props.conversationId} messages={props.messages} busy={props.busy} weighing={props.weighing} />
+      </Show>
       <Show when={props.conversationId} keyed>{(conversationId) =>
         <For each={queuedIds()}>{(id) => {
           const initial = props.queued!.find((q) => q.id === id)!;

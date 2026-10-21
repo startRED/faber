@@ -1,6 +1,7 @@
-import { createSignal, For, Show } from 'solid-js';
+import { createSignal, For, Show, type ComponentProps } from 'solid-js';
 import type { BackgroundCommand, Conversation, FileChange, Project, RunningItem, Summary } from './api.ts';
 import { AgentChat } from './AgentChat.tsx';
+import { DetailsPane } from './Details.tsx';
 import { Changes } from './Changes.tsx';
 import { FilePane } from './FileView.tsx';
 import { Commands } from './Commands.tsx';
@@ -31,6 +32,7 @@ export function Running(props: {
   done?: Summary[];
   projects: Project[];
   onOpen: (item: RunningItem) => void;
+  onDetails?: (item: RunningItem) => void;
   /** A done card's click opens its conversation, which clears it; its × only clears it. */
   onOpenDone?: (c: Summary) => void;
   onDismiss?: (c: Summary) => void;
@@ -48,6 +50,7 @@ export function Running(props: {
   file?: { conversationId: string; at: string };
   /** The conversation's changes, opened from the topbar. */
   changes?: { id: string; files: FileChange[]; loading: boolean; incomplete?: boolean; loadingMore?: boolean; onMore?: () => void; onReview?: (security: boolean) => void };
+  details?: Omit<ComponentProps<typeof DetailsPane>, 'onBack' | 'onClose'>;
   background?: BackgroundCommand[];
   conversations?: Summary[];
   commands?: boolean;
@@ -101,6 +104,7 @@ export function Running(props: {
   };
   return (
     <aside id="running" class="runcol" classList={{ wide: props.wide }} data-surface="running" aria-labelledby="running-title" role={props.modal ? 'dialog' : undefined} aria-modal={props.modal ? 'true' : undefined} ref={props.ref}>
+      <Show when={props.details} fallback={<>
       <Show
         when={props.agent}
         fallback={
@@ -165,6 +169,9 @@ export function Running(props: {
                                 <Show when={item.plan}>{(n) => <span class="plan-n num">{planWords(n())}</span>}</Show>
                                 {item.title || t('run.untitled')}
                               </button>
+                              <Show when={item.area === 'project' && props.onDetails}>
+                                <button class="btn ghost" onClick={() => props.onDetails?.(item)}>{t('details.title')}</button>
+                              </Show>
                               <Show when={!item.keepProgress && item.now}>{(now) => <p class="run-kg"><span class="last" title={now()}>{now()}</span></p>}</Show>
                               <Show when={item.keepProgress}>
                                 {(p) => (
@@ -226,6 +233,7 @@ export function Running(props: {
       >
         {(agent) => <AgentChat step={agent().step} streaming={agent().streaming} helpable={agent().helpable} onBack={() => props.onBack?.()} onTell={(text) => props.onTell?.(text)} onClose={props.onClose} wide={props.wide} onWide={props.onWide} />}
       </Show>
+      </>}>{(details) => <DetailsPane {...details()} onBack={() => props.onBack?.()} onClose={props.onClose} />}</Show>
       <Show when={props.resize}>{(r) => <Grip edge="run" label={t('run.resize')} value={r().value} limits={r().limits} fallback={r().fallback} onChange={r().onChange} />}</Show>
     </aside>
   );

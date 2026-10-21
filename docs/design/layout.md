@@ -105,3 +105,13 @@ Its rows, cards, file changes and when it opens by itself: [running.md](running.
 Changes, the quick question or Faber's browser in that same column in place of the running list, each a view of its own
 with its title and close; it never adds a second column. Like the other side views, opening it makes an
 automatically opened overlay modal. At most one file's patch stays open, and a partial list offers continuation.
+
+A project conversation also opens "Technical details" in this same slot, from one quiet plain line under the thread
+or beside its running row. Its head has Back, the title and Close; the existing modal, focus and width rules apply.
+It reuses the command rows, check and follow controls, and Changes' file disclosures, with facts newest first within
+each history. Only the open view holds DOM and at most one file patch; no extra reader, timer or stored history.
+
+This plain line uses only the latest reply’s Faber checks and engine needs-you state, shared with the Running row
+and done card. Failures, fixing, needed decisions and unfinished closing boxes stay amber with the column closed
+at 720 px; the person’s Stop stays neutral. Saved counts include only engine-confirmed commits. It also carries the wait while Faber looks for changed files to check; full command names and
+results stay in the pane. Check endings retain their polite live announcement, in plain words in Projects, with amber text and edge on failure.

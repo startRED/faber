@@ -767,7 +767,14 @@ impl Engine {
         })
     }
     pub fn open(&self, id: &str) -> Option<Conversation> {
-        self.with(|c| c.load(id).cloned())
+        self.with(|core| {
+            let mut c = core.load(id)?.clone();
+            let needs = reply_needs_you(&c, core.live.get(id));
+            if let Some(reply) = c.messages.last_mut().filter(|m| m.role == Role::Assistant) {
+                reply.needs_you = needs;
+            }
+            Some(c)
+        })
     }
     pub fn open_for_screen(&self, id: &str) -> Option<Conversation> {
         self.open(id).map(Conversation::for_screen)
@@ -1480,7 +1487,10 @@ impl Core {
         if !self.convs.contains_key(id) {
             let mut c = self.store.get(id)?;
             // Read from disk, so no CLI runs it: an answer cut off by a crash shows as stopped, not typing forever.
-            c.messages.iter_mut().for_each(settle);
+            c.messages.iter_mut().for_each(|m| {
+                settle(m);
+                m.refresh_commits();
+            });
             c.queued.iter_mut().for_each(|q| q.sending = false);
             self.restore_recovery(&mut c);
             self.convs.insert(id.to_string(), c);
@@ -1983,7 +1993,9 @@ impl Core {
                 self.watch_started(conv, &id);
             }
             EngineEvent::ToolResult { id, ok, declined, text } => {
-                if let Some(tool) = self.tool_of(conv, &id) {
+                let current = self.live.get(conv).and_then(|l| l.turn.clone());
+                if let Some(m) = self.convs.get_mut(conv).and_then(|c| message_with_tool(&mut c.messages, current.as_deref(), &id)) {
+                    let tool = m.tools.as_mut().unwrap().iter_mut().find(|t| t.id == id).unwrap();
                     // A helper sent to the background answers its call as soon as it starts; its end comes as `HelperDone`.
                     if !declined && crate::model::runs_in_background(tool) {
                         return;
@@ -1991,6 +2003,13 @@ impl Core {
                     tool.ok = Some(ok);
                     tool.declined = declined;
                     tool.output = Some(text.chars().take(4000).collect());
+                    let committed = ok
+                        && !declined
+                        && crate::nudge::command(tool).is_some_and(|c| crate::follow::committed(c, tool.output.as_deref().unwrap_or("")));
+                    m.commits.retain(|saved| saved != &id);
+                    if committed {
+                        m.commits.push(id.clone());
+                    }
                 }
                 let root = self.live.get(conv).and_then(|live| live.visual_root.clone());
                 if let (Some(root), Some(conversation)) = (root, self.convs.get_mut(conv)) {
@@ -2485,8 +2504,12 @@ impl Core {
     }
 
     fn emit_message(&mut self, conv: &str, message_id: &str) {
-        if let Some(m) = self.convs.get(conv).and_then(|c| c.messages.iter().find(|m| m.id == message_id)) {
-            (self.emit)(AppEvent::Message { conversation_id: conv.to_string(), message: Box::new(m.clone().for_screen()) });
+        if let Some(c) = self.convs.get(conv)
+            && let Some(m) = c.messages.iter().find(|m| m.id == message_id)
+        {
+            let mut message = m.clone();
+            message.needs_you = c.messages.last().is_some_and(|m| m.id == message_id) && reply_needs_you(c, self.live.get(conv));
+            (self.emit)(AppEvent::Message { conversation_id: conv.to_string(), message: Box::new(message.for_screen()) });
         }
         self.refresh_running();
     }
@@ -3871,6 +3894,13 @@ fn unseen(c: char) -> bool {
 /// requests (denied for want of anyone to answer; they wait for the person until the next message, and count as "needs you").
 /// Faber's checks of it count too: running, it is at work; failing with no fix asked, it needs the person (R146).
 /// Cache warmth is not here: it is a quiet note on the reply itself.
+/// The same needs-you decision as the running row and the done card, scoped to the latest reply even after its card was seen.
+fn reply_needs_you(c: &Conversation, live: Option<&Live>) -> bool {
+    running_item(c, live).is_some_and(|item| item.state == RunState::NeedsYou)
+        || (c.messages.last().is_some_and(|m| m.status != Some(Status::Streaming) || m.finished_at.is_some())
+            && ended::end_kind(c) == Some(EndKind::NeedsYou))
+}
+
 fn running_item(c: &Conversation, live: Option<&Live>) -> Option<RunningItem> {
     let reply = c.messages.last().filter(|m| m.role == Role::Assistant)?;
     let permissions = reply.permissions.clone().unwrap_or_default();
@@ -3974,9 +4004,13 @@ fn copy_dir(from: &Path, to: &Path) {
 
 /// The tool `id` of the conversation's replies: the current reply first, then the others from the newest.
 fn tool_in<'a>(messages: &'a mut [Message], current: Option<&str>, id: &str) -> Option<&'a mut ToolUse> {
+    message_with_tool(messages, current, id)?.tools.as_mut()?.iter_mut().find(|t| t.id == id)
+}
+
+fn message_with_tool<'a>(messages: &'a mut [Message], current: Option<&str>, id: &str) -> Option<&'a mut Message> {
     let has = |m: &Message| m.role == Role::Assistant && m.tools.iter().flatten().any(|t| t.id == id);
     let at = messages.iter().rposition(|m| Some(m.id.as_str()) == current && has(m)).or_else(|| messages.iter().rposition(has))?;
-    messages[at].tools.as_mut()?.iter_mut().find(|t| t.id == id)
+    Some(&mut messages[at])
 }
 
 #[cfg(test)]

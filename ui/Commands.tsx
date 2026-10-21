@@ -5,7 +5,7 @@ import { fromEngine, t } from './i18n.ts';
 import { Peek } from './Mark.tsx';
 import { vendorName } from './models.ts';
 
-function CommandRow(props: { command: BackgroundCommand; title: string }) {
+export function CommandRow(props: { command: BackgroundCommand; title: string }) {
   const [stopping, setStopping] = createSignal(false);
   const [error, setError] = createSignal('');
   const stop = async () => {
@@ -42,7 +42,9 @@ function CommandRow(props: { command: BackgroundCommand; title: string }) {
 /** The running column's command view, mounted only while open; output is already bounded by the engine. */
 export function Commands(props: { items: BackgroundCommand[]; conversations: Summary[]; onBack: () => void; onClose: () => void }) {
   // Keep a row and its focused Stop button alive when only its output changes.
-  const ids = createMemo(() => props.items.map((item) => item.id), [], { equals: (a, b) => a.length === b.length && a.every((id, i) => id === b[i]) });
+  const byId = createMemo(() => new Map(props.items.map((item) => [item.id, item])));
+  const titles = createMemo(() => new Map(props.conversations.map((c) => [c.id, c.title])));
+  const ids = createMemo(() => [...byId().keys()], [], { equals: (a, b) => a.length === b.length && a.every((id, i) => id === b[i]) });
   return (
     <>
       <div class="rc-head side-head">
@@ -54,8 +56,8 @@ export function Commands(props: { items: BackgroundCommand[]; conversations: Sum
         <Show when={props.items.length} fallback={<div class="rc-empty"><Peek /><p>{t('commands.none')}</p></div>}>
           <ul class="ritems">
             <For each={ids()}>{(id) => {
-              const item = () => props.items.find((item) => item.id === id)!;
-              return <CommandRow command={item()} title={props.conversations.find((c) => c.id === item().conversationId)?.title || t('run.untitled')} />;
+              const item = () => byId().get(id)!;
+              return <CommandRow command={item()} title={titles().get(item().conversationId) || t('run.untitled')} />;
             }}</For>
           </ul>
         </Show>

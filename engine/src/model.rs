@@ -239,6 +239,12 @@ pub struct Message {
     pub thinking: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub tools: Option<Vec<ToolUse>>,
+    /// Successful git commit calls, recognised by the engine's command parser; ids refer to this reply's tools.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub commits: Vec<String>,
+    /// A screen projection of the latest reply's authoritative running/done state; never inferred by the screen.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub needs_you: bool,
     /// Oldest first; a model can ask for several tools at once.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub permissions: Option<Vec<Permission>>,
@@ -590,12 +596,24 @@ pub struct AutoAnswer {
 }
 
 impl Message {
+    pub(crate) fn refresh_commits(&mut self) {
+        self.commits = self
+            .tools
+            .iter()
+            .flatten()
+            .filter(|tool| tool.ok == Some(true) && !tool.declined)
+            .filter(|tool| crate::nudge::command(tool).is_some_and(|c| crate::follow::committed(c, tool.output.as_deref().unwrap_or(""))))
+            .map(|tool| tool.id.clone())
+            .collect();
+    }
+
     pub fn for_screen(mut self) -> Self {
         // Sources are Arc-backed, so cloning the message never copies the snapshot bytes before removing them.
         self.visual_file_count = (!self.visual_files.is_empty()).then_some(self.visual_files.len());
         self.visual_files.clear();
         self
     }
+
     /// What the reply said to the person: its text, then its closing box's recap and question, which the agent does not
     /// repeat in words. Another AI taking over and a parent conversation read this, not the text alone.
     pub fn said(&self) -> String {
@@ -640,6 +658,8 @@ impl Message {
             reason: None,
             thinking: None,
             tools: None,
+            commits: vec![],
+            needs_you: false,
             permissions: None,
             files: None,
             status: None,

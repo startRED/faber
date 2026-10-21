@@ -89,6 +89,10 @@ export interface Message {
   effort?: Effort;
   thinking?: string;
   tools?: ToolUse[];
+  /** Successful commit tool ids, recognised and confirmed by the engine. */
+  commits?: string[];
+  /** The engine's latest-reply needs-you state, shared with the running row and done card. */
+  needsYou?: boolean;
   permissions?: Permission[];
   files?: { path: string; size: number }[];
   status?: Status;

@@ -55,6 +55,15 @@ export function Changes(props: { id: string; files: FileChange[]; loading: boole
         </Show>
       </div>
       <div class="rc-body side-body changes-view">
+        <ChangesFiles {...props} />
+      </div>
+    </>
+  );
+}
+
+/** Shared by Changes and Technical details; only the mounted view owns a patch. */
+export function ChangesFiles(props: { id: string; files: FileChange[]; loading: boolean; incomplete?: boolean; loadingMore?: boolean; onMore?: () => void }) {
+  return (<>
         <Show when={!props.loading} fallback={<p class="side-meta" role="status">{t('changes.loading')}</p>}>
           <Show when={props.files.length} fallback={!props.incomplete && <p class="side-meta">{t('changes.empty')}</p>}>
             <ChangesPreview files={props.files} summary={(file) => <Show when={file.countsKnown !== false && !file.binary} fallback={<span class="change-counts">{t(file.binary ? 'changes.binary' : 'changes.countsUnknown')}</span>}><Delta change={file} /></Show>}>
@@ -63,7 +72,5 @@ export function Changes(props: { id: string; files: FileChange[]; loading: boole
           </Show>
           <Show when={props.incomplete}><p class="side-meta" role="status">{t('changes.incomplete')}</p><button class="btn ghost changes-more" disabled={props.loadingMore} onClick={props.onMore}>{t(props.loadingMore ? 'changes.loading' : 'changes.more')}</button></Show>
         </Show>
-      </div>
-    </>
-  );
+  </>);
 }
