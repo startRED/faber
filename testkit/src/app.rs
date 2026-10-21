@@ -642,7 +642,8 @@ impl Ctx {
         if let Some(server) = &mut self.server {
             server.stop();
         }
-        let deadline = Instant::now() + Duration::from_secs(5);
+        // A webview renderer that held a visual frame can take several seconds to go after its job ends on a busy runner.
+        let deadline = Instant::now() + Duration::from_secs(15);
         loop {
             match self.survivors() {
                 Ok(rows) if rows.is_empty() => break,
