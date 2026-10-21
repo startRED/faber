@@ -633,7 +633,7 @@ export function App(props: { initial: AppState; update?: UpdateStatus; inbox: { 
   };
   // One object for the home's terminal list: the home does not get a new one on every state change.
   const fromTerminal = { list: api.cliSessions, onPick: (projectId: string, s: CliSession) => void pickUpSession(projectId, s) };
-  const terminalHere = () => area() === 'project' && !!project() && state().vendors.includes('codex');
+  const terminalHere = () => area() === 'project' && !!project() && state().vendors.length > 0;
   const openSummary = (c: Summary) => {
     closeSettings();
     closeSide(false);

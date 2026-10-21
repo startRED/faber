@@ -26,8 +26,8 @@ export function when(ms: number): string {
  * given, and the three conversations to pick up, those that wait for the user first. In Chat three short suggestions sit
  * under the composer and fill it without sending anything; the effects of the look sit behind (ui/Ambient.tsx). In a
  * project Curioso and a quiet line with the project and its folder come first, one line says where the agent works, and
- * the pick-up list holds only this project's conversations: the composer's hints already show what to ask. With Codex
- * connected, a quiet button under it lists the sessions started in a terminal in the project's folder (parity F5). */
+ * the pick-up list holds only this project's conversations: the composer's hints already show what to ask. A quiet button
+ * under it lists the sessions started in a terminal in the project's folder (parity F5). */
 export function Welcome(props: {
   /** How the person asked to be called, if they did. */
   name?: string;
@@ -38,7 +38,7 @@ export function Welcome(props: {
   project?: Project;
   onSuggest: (text: string) => void;
   onOpen: (conversation: Summary) => void;
-  /** In a project with Codex connected: its terminal sessions, asked for only when the person opens the list. */
+  /** In a project with an AI connected: its terminal sessions, asked for only when the person opens the list. */
   terminal?: { list: (projectId: string) => Promise<CliSession[]>; onPick: (projectId: string, session: CliSession) => void };
   children: JSX.Element;
 }) {

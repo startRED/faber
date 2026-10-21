@@ -30,6 +30,8 @@ mod cache_health;
 mod changes;
 #[path = "claude_session.rs"]
 mod claude_session;
+#[path = "claude_sessions.rs"]
+mod claude_sessions;
 #[path = "codex_session.rs"]
 mod codex_session;
 #[path = "compact.rs"]

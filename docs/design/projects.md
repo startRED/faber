@@ -22,13 +22,14 @@ mission board and the local build card left the bundle with their 30 s poll (R17
   lists the projects, and every setting of a project (the
   separate-copies switch and the checks) is in Settings, Projects (C011), one closed entry per project with one row per option with one short line and
   the rest behind the "?" of the row.
-- With Codex connected, a quiet button with the terminal icon, "Sessions from the terminal", sits under the pick-up list
-  (its tooltip says what it lists). Codex starts for a moment only when it is clicked: the section then takes the
+- With an AI connected, a quiet button with the terminal icon, "Sessions from the terminal", sits under the pick-up list
+  (its tooltip says what it lists). Only a click asks: Codex starts for a moment, and Claude Code's history of the
+  folder is read; the section then takes the
   heading, says "Looking…", and shows up to five sessions started in a terminal in the folder (the pick-up row: the
-  session's title or first message, "Codex · when"), or one line when there is none. A row opens the session as a
-  project conversation in the folder itself, never a separate copy, whose next message resumes it with Codex, even
+  session's title or first message, "Codex · when" or "Claude · when"), or one line when there is none. A row opens the session as a
+  project conversation in the folder itself, never a separate copy, whose next message resumes it with its own CLI, even
   with Auto in the picker; opening it again opens the same conversation, archived or not. Its earlier turns stay in the CLI: the conversation shows what is said from then on.
-  Claude Code offers no list of its sessions, so only Codex's are shown (parity F5).
+  Claude Code has no list to ask, so its sessions come from its history files of that folder only (parity F5).
 
 ### Separate copies
 

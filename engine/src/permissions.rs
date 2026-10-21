@@ -278,7 +278,8 @@ pub fn child_env(root: &Path) -> Value {
 }
 
 /// Folders that hold the sign-ins of the CLIs and the keys of the person's other tools. Only their names are used here:
-/// nothing in Faber ever opens what is inside them.
+/// nothing in Faber opens what is inside them, except Claude Code's history files of a project folder, read to list its
+/// terminal sessions (`crate::claude_sessions`; never a sign-in).
 const CREDENTIAL_FOLDERS: [&str; 8] = [".ssh", ".aws", ".claude", ".codex", ".gemini", ".docker", ".azure", ".kube"];
 const CREDENTIAL_FILES: [&str; 5] = [".claude.json", ".credentials.json", ".git-credentials", ".npmrc", "hosts.yml"];
 

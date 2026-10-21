@@ -29,7 +29,8 @@ impl Core {
                 let known = |m: &String| self.codex_models.is_empty() || self.codex_models.contains(m);
                 session.model.filter(known).or_else(|| self.codex_recommended.clone()).or_else(|| self.codex_models.first().cloned())
             }
-            Vendor::Claude => None,
+            // The picker names Claude's models by family.
+            Vendor::Claude => session.model.as_deref().and_then(crate::budget::family_of).map(String::from),
         };
         let c = self.convs.get_mut(&id).expect("new conversation");
         c.title = session.title.chars().take(60).collect();
@@ -58,17 +59,49 @@ impl Core {
 }
 
 impl Engine {
-    /// The sessions started in a terminal in project `project_id`'s folder, newest first, as Codex lists them. Each asking
-    /// is one short-lived process. Claude Code has no list of its own to ask, so its sessions are not offered.
+    /// The sessions started in a terminal in project `project_id`'s folder, newest first, of each connected CLI: Codex's
+    /// from its own list (one short-lived process), Claude Code's from its history files of that folder
+    /// (`crate::claude_sessions`), since it has no list to ask.
     pub async fn cli_sessions(&self, project_id: &str, timeout: Duration) -> Result<Vec<CliSession>, String> {
-        let (folder, cli, spawn, windows) = self.with(|c| {
+        let (folder, codex, claude, spawn, windows) = self.with(|c| {
             let project = c.project_of(Some(project_id)).ok_or("error.projectGone")?;
-            Ok::<_, String>((project.path, c.opts.clis.get(&Vendor::Codex).cloned(), c.opts.spawn.clone(), c.opts.windows))
+            let clis = &c.opts.clis;
+            Ok::<_, String>((
+                project.path,
+                clis.get(&Vendor::Codex).cloned(),
+                clis.contains_key(&Vendor::Claude),
+                c.opts.spawn.clone(),
+                c.opts.windows,
+            ))
         })?;
-        let Some(cli) = cli else { return Ok(vec![]) };
-        let prefix = cli.prefix;
-        let spawn: crate::proc::Spawner =
-            Arc::new(move |bin, args, cwd| spawn(bin, &prefix.iter().chain(args).cloned().collect::<Vec<_>>(), cwd));
-        Ok(crate::codex::list_codex_threads(&cli.command, Path::new(&folder), windows, spawn, timeout).await)
+        // One deadline for both lists, which are read side by side.
+        let deadline = tokio::time::Instant::now() + timeout;
+        // A read still stuck on a stalled network folder is not joined by another: each would hold a thread.
+        static READING: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+        use std::sync::atomic::Ordering::SeqCst;
+        let claude = (claude && READING.compare_exchange(false, true, SeqCst, SeqCst).is_ok()).then(|| {
+            let folder = PathBuf::from(&folder);
+            tokio::task::spawn_blocking(move || {
+                let list = crate::claude_sessions::config_dir(&|k| std::env::var(k).ok())
+                    .map(|config| crate::claude_sessions::list_claude_sessions(&config, &folder, 30))
+                    .unwrap_or_default();
+                READING.store(false, SeqCst);
+                list
+            })
+        });
+        let mut list = match codex {
+            Some(cli) => {
+                let prefix = cli.prefix;
+                let spawn: crate::proc::Spawner =
+                    Arc::new(move |bin, args, cwd| spawn(bin, &prefix.iter().chain(args).cloned().collect::<Vec<_>>(), cwd));
+                crate::codex::list_codex_threads(&cli.command, Path::new(&folder), windows, spawn, timeout).await
+            }
+            None => vec![],
+        };
+        if let Some(read) = claude {
+            list.extend(tokio::time::timeout_at(deadline, read).await.ok().and_then(Result::ok).unwrap_or_default());
+        }
+        list.sort_by_key(|s| std::cmp::Reverse(s.updated_at));
+        Ok(list)
     }
 }

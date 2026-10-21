@@ -289,10 +289,12 @@ async fn a_session_picked_up_from_a_terminal_works_in_the_project_folder() {
         vendor: Vendor::Claude,
         id: "terminal-1".into(),
         title: "Look around".into(),
-        model: None,
+        model: Some("claude-haiku-5-5".into()),
         updated_at: 1,
     };
     let id = s.engine.pick_up(&s.project, session).unwrap();
+    let model = s.engine.open(&id).unwrap().choice.and_then(|c| c.model);
+    assert_eq!(model.as_deref(), Some("haiku"), "the picker names Claude's models by family");
     s.engine.send(SendRequest { conversation_id: Some(id.clone()), ..ask(&s.project, "Go on") }).unwrap();
     assert!(s.engine.open(&id).unwrap().copy.is_none());
     agent_started(&s.cwds, 1).await;

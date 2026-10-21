@@ -8,6 +8,7 @@ pub mod budget;
 pub mod cadence;
 pub mod changes;
 pub mod claude;
+pub mod claude_sessions;
 pub mod cli;
 pub mod codex;
 pub mod engine;
