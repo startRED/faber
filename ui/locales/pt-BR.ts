@@ -1310,6 +1310,7 @@ export const ptBR: Messages = {
   'notes.145.new': 'Ctrl+Shift+D abre as alterações da conversa e Ctrl+Shift+B o navegador do Faber, como os botões no topo.',
   'notes.146.new': 'O navegador do Faber agora tem Voltar, Avançar e Recarregar ao lado do campo de endereço.',
   'notes.147.new': 'Um botão ao lado do endereço no navegador do Faber abre a página no seu próprio navegador.',
+  'notes.148.fixed': 'Trocar as permissões ou o estilo das respostas preserva o trabalho planejado e mantém visíveis os comandos em segundo plano.',
   'update.checking': 'Procurando atualização…',
   'update.downloading': 'Baixando atualização…',
   'update.downloadingPercent': 'Baixando atualização… {percent}%',

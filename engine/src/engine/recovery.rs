@@ -562,6 +562,8 @@ mod tests {
                     resumed: true,
                     permissions: Permissions::FullAccess,
                     tuning: Default::default(),
+                    retiring: false,
+                    was_idle: false,
                     runs: Permissions::FullAccess,
                     by_hand: true,
                     approved: false,

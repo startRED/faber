@@ -233,6 +233,10 @@ struct Live {
     permissions: Permissions,
     /// What the web and Codex settings were when the process started (R140).
     tuning: Tuning,
+    /// A settings change replaces this session once its scheduled work ends.
+    retiring: bool,
+    /// Arms the idle timer once per idle period when the running state is refreshed.
+    was_idle: bool,
     /// The mode the CLI really runs: not `permissions` when the CLI lacks it (Claude Code without `auto`).
     runs: Permissions,
     /// The folder the process was started in (checked); a turn that finds the folder resolving elsewhere starts a new process.
@@ -738,7 +742,12 @@ impl Engine {
         self.with(|c| c.store.settings())
     }
     pub fn save_settings(&self, patch: Settings) -> Result<Settings, String> {
-        self.with(|c| c.save_settings(patch))
+        self.with(|c| {
+            let settings = c.save_settings(patch)?;
+            // Plan approval saves internally and refreshes only after its continuation is queued.
+            c.refresh_running();
+            Ok(settings)
+        })
     }
     pub fn open(&self, id: &str) -> Option<Conversation> {
         self.with(|c| c.load(id).cloned())
@@ -810,7 +819,7 @@ impl Engine {
             if !active {
                 // Faber's checks of the reply that just ended stop too; the reply then keeps no row.
                 c.stop_checks(id);
-                c.stop_waiting(id)
+                c.stop_waiting(id);
             }
         })
     }
@@ -1577,21 +1586,17 @@ impl Core {
         // Idle CLIs restart on their next turn when permissions or tuning change; hooks remain a Projects choice.
         let tuned = settings.tuning() != before_tuning;
         if settings.user_hooks != before.user_hooks || settings.permissions != before.permissions || tuned {
-            let idle: Vec<String> = self
+            let affected: Vec<String> = self
                 .live
                 .iter()
-                .filter(|(id, l)| {
-                    l.turn.is_none()
-                        && !self.compacting(id)
-                        && (settings.permissions != before.permissions
-                            || tuned
-                            || self.convs.get(*id).is_some_and(|c| c.area == Area::Project))
+                .filter(|(id, _)| {
+                    settings.permissions != before.permissions || tuned || self.convs.get(*id).is_some_and(|c| c.area == Area::Project)
                 })
                 .map(|(id, _)| id.clone())
                 .collect();
-            for id in idle {
-                if let Some(l) = self.retire(&id) {
-                    l.session.close();
+            for id in affected {
+                if let Some(l) = self.live.get_mut(&id) {
+                    l.retiring = true;
                 }
             }
             let stale: Vec<_> = self
@@ -1683,11 +1688,13 @@ impl Core {
                 .get(conv)
                 .filter(|l| l.sid == sid)
                 .map(|l| (l.vendor, l.session.clone()))
+                .or_else(|| self.rewind_retired_session(conv, sid))
                 .or_else(|| self.background.session(conv, sid));
             if let Some((vendor, session)) = owner
                 && self.background.update(conv, sid, vendor, &session, update, now())
             {
                 self.emit_background();
+                self.refresh_running();
             }
             return;
         }
@@ -1699,12 +1706,14 @@ impl Core {
             && (current || self.rewind_tracks_session(conv, sid))
         {
             self.rewind_event(conv, sid, &event);
+            self.refresh_running();
             return;
         }
         if !current {
             return;
         }
         if self.rewind_event(conv, sid, &event) {
+            self.refresh_running();
             return;
         }
         let entry = self.live.get(conv).expect("session checked above");
@@ -2247,7 +2256,6 @@ impl Core {
     fn end_turn(&mut self, conv: &str, turn_id: Option<String>, read: Option<Option<String>>) {
         self.transfers.remove(conv);
         if let Some(l) = self.live.get_mut(conv) {
-            l.turn = None;
             l.held = None;
             // Whatever was handed to the turn and not taken in stays in the queue, and goes out like the rest of it.
             l.steering.clear();
@@ -2288,6 +2296,10 @@ impl Core {
             Some(read) => read,
             None => self.keep_going_ended(conv, turn_id.as_deref()),
         };
+        // A Keep going halt above must not close the session before its reply's checks are scheduled.
+        if let Some(l) = self.live.get_mut(conv) {
+            l.turn = None;
+        }
         // A project reply that changed files is done once Faber's checks say so (R146): the queue and keep going wait.
         let checking =
             completed_ok && !approving && turn_id.as_deref().is_some_and(|reply| self.check_done(conv, reply, keep_going.clone()));
@@ -2301,7 +2313,7 @@ impl Core {
         if self.live.get(conv).is_some_and(|l| self.opts.clis.get(&l.vendor) != Some(&l.cli))
             && let Some(l) = self.retire(conv)
         {
-            l.session.close();
+            l.session.retire();
         }
         // At the closing boundary, a deliberate send after Stop uses the ordinary Send now path; untouched messages stay held.
         let requested = self.convs.get_mut(conv).and_then(|c| c.send_after_stop.take());
@@ -2321,14 +2333,35 @@ impl Core {
                 self.tell_parent(conv);
             }
         }
-        self.close_when_idle(conv);
         self.try_seal_rewind(conv);
     }
 
-    /// A Claude process costs about 120 MB just waiting, so it closes when it has been idle for a while; the next
-    /// turn resumes the same session. Any newer use cancels the timer.
+    /// Checks and a scheduled compaction/continuation are work even when no CLI turn runs. An unsent queue can stay
+    /// after Stop and needs no live process, regardless of whether the running list already consumed `stopped`.
+    fn session_idle(&self, conv: &str) -> bool {
+        !self.live.get(conv).is_some_and(|l| l.turn.is_some())
+            && !self.background.running_in(conv)
+            && !self.helpers_in(conv)
+            && !self.rewind_writing(conv)
+            && !self.compacts.contains_key(conv)
+            && self.convs.get(conv).is_none_or(|c| {
+                !verifying::checking(c) && c.keep_going.is_none() && c.messages.last().is_none_or(|m| m.status != Some(Status::Streaming))
+            })
+    }
+
+    /// Replaced sessions close as soon as their work ends. Otherwise an idle Claude process (~120 MB) closes after a
+    /// while; the next turn resumes the same session. Any newer use cancels the timer.
     fn close_when_idle(&mut self, conv: &str) {
         self.try_seal_rewind(conv);
+        if !self.session_idle(conv) {
+            return;
+        }
+        if self.live.get(conv).is_some_and(|l| l.retiring) {
+            if let Some(l) = self.retire(conv) {
+                l.session.close();
+            }
+            return;
+        }
         let Some(l) = self.live.get(conv).filter(|l| l.vendor == Vendor::Claude) else { return };
         let (sid, used, idle) = (l.sid, l.used, self.opts.idle);
         let (me, conv) = (self.me.clone(), conv.to_string());
@@ -2336,9 +2369,8 @@ impl Core {
             tokio::time::sleep(idle).await;
             let Some(core) = me.upgrade() else { return };
             let mut core = core.lock().unwrap_or_else(|e| e.into_inner());
-            // A compaction is the CLI at work with no turn of Faber's: its end closes the process when it is idle (`compaction_ended`).
-            if core.live.get(&conv).is_some_and(|l| l.sid == sid && l.used == used && l.turn.is_none())
-                && !core.compacting(&conv)
+            if core.live.get(&conv).is_some_and(|l| l.sid == sid && l.used == used)
+                && core.session_idle(&conv)
                 && let Some(l) = core.retire(&conv)
             {
                 l.session.close();
@@ -2587,8 +2619,8 @@ impl Core {
         }
         let next = c.queued.remove(0);
         self.save(conv);
-        self.emit_queue(conv);
         let _ = self.dispatch_queued(conv, next);
+        self.emit_queue(conv);
     }
 
     fn edit_queued(&mut self, id: &str, turn_id: &str, text: &str) -> Result<(), String> {
@@ -2660,8 +2692,9 @@ impl Core {
             return Ok(());
         }
         self.save(id);
+        let result = self.dispatch_queued(id, item);
         self.emit_queue(id);
-        self.dispatch_queued(id, item)
+        result
     }
 
     /// Starts a queued message as a turn. If nothing can answer it, it goes back to the front of the queue, so no message is
@@ -2799,6 +2832,23 @@ impl Core {
     /// Recomputes the running list and emits it with the next revision, but only if it differs from the last one emitted.
     /// It runs wherever the engine emits a `Message` or a `List`, so every change of a turn or a permission passes here.
     fn refresh_running(&mut self) {
+        // Every end of work reaches this point, even if the visible running list stays the same.
+        let changed: Vec<_> = self
+            .live
+            .iter()
+            .filter_map(|(id, l)| {
+                let idle = self.session_idle(id);
+                (idle != l.was_idle || (idle && l.retiring)).then(|| (id.clone(), idle))
+            })
+            .collect();
+        for (id, idle) in changed {
+            if let Some(l) = self.live.get_mut(&id) {
+                l.was_idle = idle;
+            }
+            if idle {
+                self.close_when_idle(&id);
+            }
+        }
         let items = self.running_items();
         if items == self.running.items {
             return;
@@ -2991,8 +3041,9 @@ impl Core {
                 l.used = self.tick; // most recently used
                 return Ok(());
             }
-            l.session.close();
-            self.retire(conv);
+            if let Some(l) = self.retire(conv) {
+                l.session.retire();
+            }
         }
         let c = self.convs.get(conv).ok_or("error.conversationGone")?;
         let cwd_used = cwd.clone();
@@ -3112,6 +3163,8 @@ impl Core {
                 resumed,
                 permissions,
                 tuning,
+                retiring: false,
+                was_idle: false,
                 runs,
                 cwd: cwd_used,
                 by_hand: false,
@@ -3136,11 +3189,11 @@ impl Core {
                 break;
             };
             if let Some(l) = self.retire(&oldest) {
-                l.session.close();
+                l.session.retire();
             }
         }
         // A process started early (while the user types) closes too if the message never comes.
-        self.close_when_idle(conv);
+        self.refresh_running();
         Ok(())
     }
 
@@ -3531,6 +3584,7 @@ impl Core {
         self.asides.remove(id);
         self.follows.remove(id);
         self.before.remove(id);
+        self.compacts.remove(id);
         if let Some(l) = self.retire(id) {
             l.session.close();
         }
@@ -3772,6 +3826,8 @@ mod tool_in_tests {
                         resumed: false,
                         permissions: Permissions::Ask,
                         tuning: Default::default(),
+                        retiring: false,
+                        was_idle: false,
                         runs: Permissions::Ask,
                         cwd: data.path().to_path_buf(),
                         by_hand: true,
@@ -3813,6 +3869,36 @@ mod tool_in_tests {
         engine.interrupt("b");
         assert!(matches!(received.try_recv(), Ok(("b", crate::events::SessionCommand::Interrupt))));
         assert!(received.try_recv().is_err(), "confirmed retired owners are released");
+        engine.with(|core| {
+            for (id, sid) in [("a", 1), ("b", 2)] {
+                core.handle(id, sid, EngineEvent::Started { session_id: id.into(), model: "test".into() });
+                core.handle(id, sid, EngineEvent::Writers { active: vec!["native-command".into()], unknown: false });
+                core.live.get_mut(id).unwrap().retiring = true;
+                core.refresh_running();
+                assert!(core.live.contains_key(id), "a retired session still owns its writers");
+                core.handle(
+                    id,
+                    sid,
+                    EngineEvent::Background(crate::background::Update::Start {
+                        id: "command".into(),
+                        command: "long-task".into(),
+                        stoppable: false,
+                        turn_ended: true,
+                    }),
+                );
+                core.handle(id, sid, EngineEvent::Writers { active: vec![], unknown: true });
+                assert!(core.live.contains_key(id), "an uncertain writer is not idle");
+                core.handle(id, sid, EngineEvent::Writers { active: vec![], unknown: false });
+                assert!(core.live.contains_key(id), "background work still owns its driver after the turn");
+                core.handle(
+                    id,
+                    sid,
+                    EngineEvent::Background(crate::background::Update::End { id: "command".into(), state: crate::background::State::Done }),
+                );
+                assert!(!core.live.contains_key(id), "the last background completion refreshes retirement without another turn");
+                assert!(matches!(received.try_recv(), Ok((owner, crate::events::SessionCommand::Close)) if owner == id));
+            }
+        });
     }
 
     #[tokio::test]

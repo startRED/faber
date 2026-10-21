@@ -94,6 +94,8 @@ mod running;
 mod search;
 #[path = "session_resume.rs"]
 mod session_resume;
+#[path = "settings_change_retire.rs"]
+mod settings_change_retire;
 #[path = "signals.rs"]
 mod signals;
 #[path = "simulation.rs"]

@@ -1323,6 +1323,7 @@ export const fr: Messages = {
   'notes.145.new': 'Ctrl+Maj+D ouvre les modifications de la conversation et Ctrl+Maj+B le navigateur de Faber, comme les boutons du haut.',
   'notes.146.new': "Le navigateur de Faber a maintenant Précédent, Suivant et Recharger à côté du champ d'adresse.",
   'notes.147.new': "Un bouton à côté de l'adresse dans le navigateur de Faber ouvre la page dans votre propre navigateur.",
+  'notes.148.fixed': 'Changer les permissions ou le style des réponses préserve le travail prévu et laisse les commandes en arrière-plan visibles.',
   'update.checking': 'Recherche d’une mise à jour…',
   'update.downloading': 'Téléchargement de la mise à jour…',
   'update.downloadingPercent': 'Téléchargement de la mise à jour… {percent} %',

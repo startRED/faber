@@ -1323,6 +1323,7 @@ export const de: Messages = {
   'notes.145.new': 'Strg+Umschalt+D öffnet die Änderungen der Unterhaltung und Strg+Umschalt+B den Browser von Faber, wie die Schaltflächen oben.',
   'notes.146.new': 'Der Browser von Faber hat jetzt Zurück, Vorwärts und Neu laden neben dem Adressfeld.',
   'notes.147.new': 'Eine Schaltfläche neben der Adresse im Browser von Faber öffnet die Seite in deinem eigenen Browser.',
+  'notes.148.fixed': 'Beim Ändern der Berechtigungen oder des Antwortstils bleiben geplante Aufgaben erhalten und Hintergrundbefehle sichtbar.',
   'update.checking': 'Suche nach einem Update…',
   'update.downloading': 'Update wird heruntergeladen…',
   'update.downloadingPercent': 'Update wird heruntergeladen… {percent} %',

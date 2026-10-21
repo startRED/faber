@@ -1203,6 +1203,7 @@ export const en = {
   'notes.145.new': "Ctrl+Shift+D opens a conversation's changes and Ctrl+Shift+B Faber's browser, like the buttons at the top.",
   'notes.146.new': "Faber's browser now has Back, Forward and Reload next to its address field.",
   'notes.147.new': "A button next to the address in Faber's browser opens the page in your own browser.",
+  'notes.148.fixed': 'Changing permissions or reply style preserves planned work and keeps background commands visible.',
   'update.checking': 'Looking for an update…',
   'update.downloading': 'Downloading update…',
   'update.downloadingPercent': 'Downloading update… {percent}%',

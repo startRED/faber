@@ -273,6 +273,8 @@ pub enum SessionCommand {
     /// the last response's usage and local estimates). Its answer is an `EngineEvent::ContextParts`; Codex counts no parts.
     ContextUsage,
     Interrupt,
+    /// A replacement takes future turns; let this session's existing work finish before closing its driver.
+    Retire,
     Close,
 }
 
@@ -336,5 +338,8 @@ impl Session {
     }
     pub fn close(&self) {
         (self.send)(SessionCommand::Close);
+    }
+    pub fn retire(&self) {
+        (self.send)(SessionCommand::Retire);
     }
 }

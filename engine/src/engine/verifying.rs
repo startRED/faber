@@ -291,14 +291,14 @@ impl Core {
         c.weighing = None;
         let last = c.messages.last().is_some_and(|m| m.id == reply_id && m.checks.is_none());
         let idle = self.live.get(conv).is_none_or(|l| l.turn.is_none());
-        // The reply no longer says Faber is looking at git.
-        self.refresh_running();
         if differs && idle && last {
             self.start_checks(conv, reply_id, keep_going, prepared);
             self.save(conv);
             self.push(conv, Some(reply_id), true);
             return;
         }
+        // The reply no longer says Faber is looking at git, and no checks replace that work.
+        self.refresh_running();
         self.drain(conv);
         let on = self.convs.get(conv).is_some_and(|c| c.keep_going.is_some());
         match keep_going {
@@ -308,7 +308,6 @@ impl Core {
             None => {}
         }
         self.tell_parent(conv);
-        self.close_when_idle(conv);
     }
 
     /// Shows the reply's row running and runs the fast checks; `checks_ended` takes their outcome.
@@ -361,7 +360,7 @@ impl Core {
         }
         self.set_checks(conv, reply_id, checks.clone());
         if !last || busy {
-            return self.close_when_idle(conv);
+            return;
         }
         match checks.map(|k| k.state) {
             Some(ChecksState::NeedsYou) => {
@@ -398,7 +397,6 @@ impl Core {
             }
         }
         self.tell_parent(conv);
-        self.close_when_idle(conv);
     }
 
     fn set_checks(&mut self, conv: &str, reply_id: &str, checks: Option<Checks>) {

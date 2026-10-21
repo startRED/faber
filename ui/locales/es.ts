@@ -1323,6 +1323,7 @@ export const es: Messages = {
   'notes.145.new': 'Ctrl+Mayús+D abre los cambios de la conversación y Ctrl+Mayús+B el navegador de Faber, como los botones de arriba.',
   'notes.146.new': 'El navegador de Faber ahora tiene Atrás, Adelante y Volver a cargar junto al campo de dirección.',
   'notes.147.new': 'Un botón junto a la dirección en el navegador de Faber abre la página en tu propio navegador.',
+  'notes.148.fixed': 'Cambiar los permisos o el estilo de las respuestas conserva el trabajo previsto y mantiene visibles los comandos en segundo plano.',
   'update.checking': 'Buscando una actualización…',
   'update.downloading': 'Descargando actualización…',
   'update.downloadingPercent': 'Descargando actualización… {percent} %',

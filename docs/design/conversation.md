@@ -77,7 +77,15 @@ above an answer. The window widths, the sidebar and the running column are in [l
   lint). Faber asked the agent to fix them." in its tooltip); after two in a row, or where Faber does not ask (the reply asked the
   person something, Keep going stopped on it, the pace is used up), the line turns amber and says it needs the person.
   While the checks run the conversation reads as at work: the composer shows Stop, and a message written then waits in
-  the queue. Nothing moves, and no setting or first-run step comes with it.
+  the queue. Changing permissions or reply style leaves a scheduled compaction and its exact continuation waiting for
+  the checks; an automatic correction after failed checks may replace the session with the new settings without
+  losing that pending work. A retired Codex server closes once its last
+  session finishes. The shared running-state refresh handles every end of work, including Stop, passed or failed checks,
+  Keep going ending by itself or being turned off, archive and quota stops; removing a conversation closes its session
+  too. A settings relaunch lets background commands finish on their original driver while the next reply uses the new
+  settings. Commands announced after replacement still show their output and keep their own Stop. Waiting for an old
+  shared-server thread to close blocks rewind without keeping the current idle session alive. Stop leaves waiting messages in the queue without
+  keeping a retired session alive; the person can send them later on a new session. Nothing moves, and no setting or first-run step comes with it.
 - While an answer streams the engine sends the whole message every 33 ms, so the text is drawn block by block
   (`ui/markdown.tsx`): a block whose source did not change keeps its DOM and only the open one is parsed and sanitised
   again. A tick that changed only the tools builds no text. Everything that reaches the page passes DOMPurify.

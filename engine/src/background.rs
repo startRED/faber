@@ -73,6 +73,10 @@ impl Commands {
         List { revision: self.revision, items: self.entries.iter().map(|e| e.row.clone()).collect() }
     }
 
+    pub fn running_in(&self, conv: &str) -> bool {
+        self.entries.iter().any(|e| e.row.conversation_id == conv && e.row.state == State::Running)
+    }
+
     pub fn update(&mut self, conv: &str, sid: u64, vendor: Vendor, session: &Session, update: Update, now: u64) -> bool {
         let id = match &update {
             Update::Start { id, .. } | Update::Output { id, .. } | Update::End { id, .. } => id,

@@ -160,6 +160,8 @@ mod tests {
                     cwd: ".".into(),
                     permissions: crate::model::Permissions::Ask,
                     tuning: Default::default(),
+                    retiring: false,
+                    was_idle: false,
                     runs: crate::model::Permissions::Ask,
                     served: false,
                     unsaved_session: None,

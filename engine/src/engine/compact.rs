@@ -129,6 +129,18 @@ impl Core {
         if turn || verifying::checking(c) || !c.queued.is_empty() || c.messages.last().is_none_or(|m| m.status != Some(Status::Done)) {
             return Err("error.compact.busy".into());
         }
+        self.resume_compaction(conv)?;
+        self.compacts.insert(conv.to_string(), Plan { next: None, fresh: None });
+        if !self.compact_due(conv) {
+            self.compacts.remove(conv);
+            return Err("error.compact.busy".into());
+        }
+        Ok(())
+    }
+
+    /// Both requested and scheduled compactions resume the last reply's session if its process was replaced.
+    fn resume_compaction(&mut self, conv: &str) -> Result<(), String> {
+        let c = self.convs.get(conv).ok_or("error.conversationGone")?;
         let last = c.messages.iter().rev().find(|m| m.role == Role::Assistant && m.vendor.is_some()).ok_or("error.compact.busy")?;
         let pick = crate::router::Pick {
             vendor: last.vendor.unwrap_or(Vendor::Claude),
@@ -141,15 +153,10 @@ impl Core {
         if self.live.get(conv).is_some_and(|l| l.vendor != pick.vendor)
             && let Some(l) = self.retire(conv)
         {
-            l.session.close();
+            l.session.retire();
         }
         if !self.live.contains_key(conv) {
             self.launch(conv, &pick)?;
-        }
-        self.compacts.insert(conv.to_string(), Plan { next: None, fresh: None });
-        if !self.compact_due(conv) {
-            self.compacts.remove(conv);
-            return Err("error.compact.busy".into());
         }
         Ok(())
     }
@@ -173,16 +180,10 @@ impl Core {
             return false;
         }
         let Some(fresh) = self.compacts.get(conv).map(|p| p.fresh.clone()) else { return false };
-        // A fresh context needs no process (an idle one may have closed during Faber's checks), only the end of the turn.
-        match self.live.get(conv).map(|l| l.turn.is_some()) {
-            None if fresh.is_none() => {
-                self.compacts.remove(conv);
-                return false;
-            }
-            Some(true) => return false,
-            _ => {}
+        if self.live.get(conv).is_some_and(|l| l.turn.is_some()) {
+            return false;
         }
-        let Some(c) = self.convs.get_mut(conv) else { return false };
+        let Some(c) = self.convs.get(conv) else { return false };
         if c.compacting {
             return true;
         }
@@ -194,6 +195,9 @@ impl Core {
                 true => self.clear(conv),
                 false => drop(self.compacts.remove(conv)),
             }
+            return false;
+        }
+        if !self.live.contains_key(conv) && self.resume_compaction(conv).is_err() {
             return false;
         }
         let (Some(l), Some(c)) = (self.live.get(conv), self.convs.get_mut(conv)) else { return false };
@@ -241,7 +245,7 @@ impl Core {
     fn clear(&mut self, conv: &str) {
         let Some(Plan { next: Some(next), .. }) = self.compacts.remove(conv) else { return };
         if let Some(l) = self.retire(conv) {
-            l.session.close();
+            l.session.retire();
         }
         let Some(c) = self.convs.get_mut(conv) else { return };
         let requests: Vec<&str> = c.messages.iter().filter(|m| m.role == Role::User && m.wake.is_none()).map(|m| m.text.as_str()).collect();
@@ -277,15 +281,13 @@ impl Core {
         self.convs.get(conv).is_some_and(|c| c.compacting)
     }
 
-    /// Takes a session out of the live ones. A compaction that ran on it is over with it: nothing would ever hear its end. A
-    /// fresh context the agent asked for needs no session and stays planned; a Stop or a failed turn drops it.
+    /// Pending work belongs to the conversation and follows its next session. Only a compaction already running ends
+    /// with this process: nothing would ever hear its end.
     pub(super) fn retire(&mut self, conv: &str) -> Option<Live> {
         let live = self.live.remove(conv)?;
         self.rewind_retire(conv, &live);
-        if self.compacts.get(conv).is_some_and(|p| p.fresh.is_none()) {
-            self.compacts.remove(conv);
-        }
         if let Some(c) = self.convs.get_mut(conv).filter(|c| c.compacting) {
+            self.compacts.remove(conv);
             c.compacting = false;
             self.list_changed();
         }
@@ -340,7 +342,6 @@ impl Core {
             c.updated_at = now();
             self.save(conv);
             self.list_changed();
-            self.close_when_idle(conv);
             return;
         };
         if let Some(next) = plan.next {
@@ -365,9 +366,9 @@ impl Core {
         }
         c.updated_at = now();
         self.save(conv);
+        self.drain(conv);
         self.emit_queue(conv);
         self.list_changed();
-        self.drain(conv);
         let reply = self
             .convs
             .get(conv)
@@ -380,7 +381,6 @@ impl Core {
             // Nothing follows: a conversation an agent started reports to its parent now.
             None => self.tell_parent(conv),
         }
-        self.close_when_idle(conv);
     }
 }
 

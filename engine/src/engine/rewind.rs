@@ -3,6 +3,8 @@ use super::*;
 use crate::rewind::{Coverage, Cursor, History, PointInfo, Preview, RedoInfo, RedoRequest, RestoreRequest, RestoreResult, Running};
 use std::sync::atomic::{AtomicBool, Ordering};
 
+#[cfg(test)]
+mod retire_tests;
 mod steer;
 
 pub(super) struct State {
@@ -14,7 +16,7 @@ pub(super) struct State {
     steers: HashMap<String, PointInfo>,
     writers: HashMap<String, (Vec<String>, bool)>,
     session_writers: HashMap<(String, u64), (Vec<String>, bool)>,
-    retired_sessions: HashMap<(String, u64), Session>,
+    retired_sessions: HashMap<(String, u64), (Vendor, Session)>,
     session_folders: HashMap<(String, u64), PathBuf>,
     starting_sessions: HashSet<(String, u64)>,
     exited_sessions: HashSet<(String, u64)>,
@@ -626,9 +628,13 @@ impl Core {
             if self.helpers_in(id) {
                 writers.push("helpers".into());
             }
-            for (_, active, unclear) in self.rewind.helper_writers.values().filter(|(conv, _, _)| conv == id) {
+            for ((call, sid), (_, active, unclear)) in self.rewind.helper_writers.iter().filter(|(_, (conv, _, _))| conv == id) {
                 writers.extend(active.iter().map(|w| format!("helper:{w}")));
                 unknown |= *unclear;
+                if !self.helpers.get(call).is_some_and(|h| h.hsid == *sid) {
+                    writers.push("helper:session-closing".into());
+                    unknown = true;
+                }
             }
             // A verifier can still be draining a stopped command after the visible checks row disappears.
             if self.verifier.as_ref().is_some_and(|v| v.active_in(folder)) {
@@ -660,7 +666,7 @@ impl Core {
         }
         let active = self.rewind.writers.get(conv).is_some_and(|(writers, unknown)| !writers.is_empty() || *unknown)
             || self.helpers_in(conv)
-            || self.rewind.helper_writers.values().any(|(owner, writers, unknown)| owner == conv && (!writers.is_empty() || *unknown))
+            || self.rewind.helper_writers.values().any(|(owner, _, _)| owner == conv)
             || self.rewind.unconfirmed_checks.contains(conv)
             || self.rewind.pending.contains(conv)
             || self.copying.contains_key(conv)
@@ -680,13 +686,20 @@ impl Core {
         true
     }
 
+    pub(super) fn rewind_writing(&self, conv: &str) -> bool {
+        // Closing markers block restore until exit is confirmed, but cannot keep their own shared server alive.
+        self.live.get(conv).is_some_and(|l| self.rewind.starting_sessions.contains(&(conv.to_string(), l.sid)))
+            || self.rewind.session_writers.iter().any(|((owner, _), (writers, unknown))| owner == conv && (!writers.is_empty() || *unknown))
+            || self.rewind.helper_writers.values().any(|(owner, writers, unknown)| owner == conv && (!writers.is_empty() || *unknown))
+    }
+
     pub(super) fn rewind_retire(&mut self, conv: &str, live: &Live) {
         let key = (conv.to_string(), live.sid);
         if self.rewind.exited_sessions.remove(&key) {
             return;
         }
         self.rewind.session_folders.entry(key.clone()).or_insert_with(|| live.cwd.clone());
-        self.rewind.retired_sessions.insert(key, live.session.clone());
+        self.rewind.retired_sessions.insert(key, (live.vendor, live.session.clone()));
         self.rewind.refresh_writers(conv);
     }
 
@@ -698,7 +711,7 @@ impl Core {
     }
 
     pub(super) fn rewind_stop_retired(&self, conv: &str) {
-        for ((owner, _), session) in &self.rewind.retired_sessions {
+        for ((owner, _), (_, session)) in &self.rewind.retired_sessions {
             if owner == conv {
                 session.interrupt();
             }
@@ -715,6 +728,10 @@ impl Core {
     pub(super) fn rewind_tracks_session(&self, conv: &str, sid: u64) -> bool {
         let key = (conv.to_string(), sid);
         self.rewind.session_folders.contains_key(&key) || self.rewind.session_writers.contains_key(&key)
+    }
+
+    pub(super) fn rewind_retired_session(&self, conv: &str, sid: u64) -> Option<(Vendor, Session)> {
+        self.rewind.retired_sessions.get(&(conv.to_string(), sid)).cloned()
     }
 
     pub(super) fn rewind_event(&mut self, conv: &str, sid: u64, event: &EngineEvent) -> bool {
@@ -770,9 +787,7 @@ impl Core {
     }
 
     pub(super) fn rewind_helper_retire(&mut self, call: &str, sid: u64) {
-        if let Some((owner, writers, unknown)) = self.rewind.helper_writers.get_mut(&(call.into(), sid)) {
-            writers.push("session-closing".into());
-            *unknown = true;
+        if let Some((owner, _, _)) = self.rewind.helper_writers.get(&(call.into(), sid)) {
             let owner = owner.clone();
             self.rewind.bump(&owner);
         }
@@ -793,13 +808,10 @@ impl Core {
         } else if let EngineEvent::Writers { active, unknown: unclear } = event {
             *writers = active.clone();
             *unknown = *unclear;
-            if !self.helpers.get(call).is_some_and(|helper| helper.hsid == sid) {
-                writers.push("session-closing".into());
-                *unknown = true;
-            }
         }
         self.rewind.bump(&conv);
         self.try_seal_rewind(&conv);
+        self.refresh_running();
     }
 
     fn mark_rewind(&mut self, id: &str, reply_id: &str, result: Result<PointInfo, String>) {
@@ -1214,6 +1226,8 @@ mod tests {
                     resumed: false,
                     permissions: Permissions::Ask,
                     tuning: Default::default(),
+                    retiring: false,
+                    was_idle: false,
                     runs: Permissions::Ask,
                     cwd: root.clone(),
                     by_hand: true,

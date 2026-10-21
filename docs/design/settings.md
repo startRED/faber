@@ -33,10 +33,19 @@ How the Settings screen, the first-run steps and the tutorial look and behave.
   the saved choice or text. The short line says it applies from the next message in Chat and Projects; the closed "?"
   explains the limit and that a running reply keeps its style. Like a permission change, a reply-style change applies
   from the next turn of an idle conversation, after the running turn otherwise. The existing settings-change path
-  closes idle sessions and retires affected Codex servers; the next launch resumes the history with the latest style
-  through a new Claude Code process or a fresh Codex app-server. No new motion or restart prompt. Pending compaction
-  loss during project checks and retired-server cleanup in that shared path are deferred to
-  [task 320](../tasks/320-settings-change-retire.md).
+  closes idle sessions and retires affected Codex servers; running checks, a scheduled compaction and its continuation,
+  messages being sent and Keep going rests still count as work. A queue left by Stop stays saved but does not keep a
+  retired session alive; sending it later starts a session with the new settings. A pending compaction and its
+  continuation follow the
+  conversation across session replacements, including an automatic correction after failed checks. The next launch
+  resumes the history with the latest style
+  through a new Claude Code process or a fresh Codex app-server. The old session closes when its work ends, also after
+  Stop, a check result, Keep going ending by itself or being turned off, archive or a quota stop. The shared running-state
+  refresh handles that cleanup; removing a conversation closes its session too. The old server closes with its last
+  session. Replacing a session for the next message lets background commands finish on the original driver, including
+  commands announced after replacement: their output and Stop still belong to that driver;
+  an old thread waiting for that shared server to close does not keep the current idle session alive.
+  No new motion or restart prompt.
 - Projects starts with *Skills for projects*: one card closed like a project's, its head the name, how many are on ("2 of
   21 on") and the chevron. Open, it shows one quiet line, then a switch per skill of the catalog: its name as its
   repository spells it, one line of what it does and its licence, the repository behind the "?". While one installs or

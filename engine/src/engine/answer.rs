@@ -450,6 +450,8 @@ mod tests {
                 resumed: false,
                 permissions: Permissions::Ask,
                 tuning: Default::default(),
+                retiring: false,
+                was_idle: false,
                 runs: Permissions::Ask,
                 by_hand: true,
                 approved: false,

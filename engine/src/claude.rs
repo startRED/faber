@@ -692,6 +692,7 @@ pub fn start_claude(opts: ClaudeOptions, on_event: EventSink) -> Session {
         // Helper calls waiting for their report: tool call id to the control request and the JSON-RPC id that carried it.
         let mut helpers: HashMap<String, (String, Value)> = HashMap::new();
         let mut closed = false;
+        let mut retiring = false;
         let mut close_deadline = None;
         let mut control_id = 0u32;
         // The id of the `get_context_usage` request still waiting for its answer.
@@ -715,6 +716,12 @@ pub fn start_claude(opts: ClaudeOptions, on_event: EventSink) -> Session {
         let mut tree_check = None;
         on_event(writers.snapshot());
         'driver: loop {
+            if retiring && !watch.active() && !writers.busy() {
+                shutdown_confirmed |= proc::stop_confirmed(&mut *stdin, &mut child, &mut job).await;
+                writers.shutdown(shutdown_confirmed, false);
+                on_event(writers.snapshot());
+                break;
+            }
             let deadline = close_deadline.or(watch.deadline());
             tokio::select! {
                 () = proc::wait_deadline(tree_check) => {
@@ -1037,6 +1044,7 @@ pub fn start_claude(opts: ClaudeOptions, on_event: EventSink) -> Session {
                         let msg = json!({ "type": "control_request", "request_id": format!("faber-{control_id}"), "request": { "subtype": "interrupt" } });
                         let _ = proc::write_line(&mut *stdin, &msg).await;
                     }
+                    Some(SessionCommand::Retire) => retiring = true,
                     Some(SessionCommand::Close) | None => {
                         closed = true;
                         if watch.active() || writers.busy() {

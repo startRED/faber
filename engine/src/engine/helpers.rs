@@ -252,6 +252,7 @@ impl Core {
                 && self.background.update(&conv, hsid, vendor, &session, update, now())
             {
                 self.emit_background();
+                self.refresh_running();
             }
             return;
         }
@@ -260,6 +261,7 @@ impl Core {
             && self.background.exited(&conv, hsid)
         {
             self.emit_background();
+            self.refresh_running();
         }
         let Some(h) = self.helpers.get_mut(call).filter(|h| h.hsid == hsid) else { return };
         let (conv, sid, vendor) = (h.conv.clone(), h.sid, h.vendor);

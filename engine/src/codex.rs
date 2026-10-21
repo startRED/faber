@@ -1277,6 +1277,7 @@ async fn serve(
                 || (!threads.is_empty()
                     && threads.iter().all(|(&key, t)| {
                         t.closing
+                            && (t.stop_children || (t.drained(key, &subagents) && !t.server_writers))
                             && !t.native_pending(key, &subagents)
                             && ((!t.watch.active() && t.turn.is_none() && !t.interrupt_pending) || (!no_process && t.blocked))
                     })))
@@ -1908,6 +1909,12 @@ async fn serve(
                             request!("turn/interrupt", json!({ "threadId": thread, "turnId": turn }), Waiting::Other(key, SUBAGENT_STOP));
                         }
                         stop_native!(key);
+                    }
+                    SessionCommand::Retire => {
+                        if let Some(t) = threads.get_mut(&key) {
+                            t.closing = true;
+                            t.publish_writers(key, &subagents);
+                        }
                     }
                     // Keep an active thread until completion acknowledges the stop; its peers keep running.
                     SessionCommand::Close => {
