@@ -1,5 +1,6 @@
 import { type Accessor, createEffect, createResource, createSignal, For, Index, on, onCleanup, onMount, Show } from 'solid-js';
 import { api, type Message, type ToolUse } from './api.ts';
+import { appliedLook } from './appearance.ts';
 import { Icon } from './Glyphs.tsx';
 import { t } from './i18n.ts';
 
@@ -299,6 +300,59 @@ export function addressOf(typed: string): string | undefined {
   }
 }
 
+/** The corners the page takes: the box's own radius, drawn over the page in the colour of the card around it (the pane is a
+ * native rectangle; `round.js` in the shell draws them). None while that colour cannot be read. */
+export function cornersOf(box: HTMLElement): { radius: number; color: [number, number, number] } | undefined {
+  const radius = Number.parseFloat(getComputedStyle(box).borderTopLeftRadius) || 0;
+  const color = getComputedStyle(box.closest('.runcol') ?? document.body).backgroundColor.match(/[\d.]+/g)?.slice(0, 3).map((n) => Math.round(Number(n)));
+  if (!color || color.length < 3 || color.some((n) => !(n >= 0 && n <= 255))) return undefined;
+  return { radius, color: color as [number, number, number] };
+}
+
+/** The corners last sent, so a placing sends them only when a look changed them. */
+let rounded = '';
+function round(box: HTMLElement) {
+  const corners = cornersOf(box);
+  const key = corners ? `${corners.radius} ${corners.color.join(' ')}` : '';
+  if (!corners || key === rounded) return;
+  rounded = key;
+  void api.siteRound(corners.radius, corners.color).catch(() => (rounded = ''));
+}
+
+/** How long after a motion starts the pane keeps looking every frame: longer than any motion of the screen (300 ms at most). */
+const MOVING = 400;
+
+/** The screen's layers: what opens over the rest, wherever it lands. */
+const LAYERS = 'dialog[open], :popover-open, [role="dialog"], [role="alertdialog"], [role="menu"], [role="listbox"], [role="tooltip"], .toast';
+
+/** Whether something the screen draws (the picture viewer, a menu, a dialog, a toast) lies over the box. Faber's browser is
+ * a native view over the window, above everything the screen draws, so the page has to leave while anything covers its box.
+ * A layer counts by its bounds, however small, once anything of it is painted (one kept in the page fully faded or hidden
+ * does not); nine points catch anything else drawn over the box. */
+export function covered(box: HTMLElement): boolean {
+  const r = box.getBoundingClientRect();
+  if (r.width < 1 || r.height < 1) return false;
+  for (const layer of document.querySelectorAll<HTMLElement>(LAYERS)) {
+    // The column the box sits in is a dialog of its own below 1,100 px: only what lies over it counts.
+    if (layer.contains(box) || box.contains(layer)) continue;
+    const l = layer.getBoundingClientRect();
+    const over = l.width >= 1 && l.height >= 1 && l.left < r.right && l.right > r.left && l.top < r.bottom && l.bottom > r.top;
+    if (!over || !layer.checkVisibility({ opacityProperty: true, visibilityProperty: true })) continue;
+    // A layer under the box (a screen behind the column) does not cover it. Only one known to lie under it is left out: one
+    // that takes no pointer (a tooltip) is not in the stack and counts.
+    const stack = document.elementsFromPoint((Math.max(l.left, r.left) + Math.min(l.right, r.right)) / 2, (Math.max(l.top, r.top) + Math.min(l.bottom, r.bottom)) / 2);
+    const above = stack.findIndex((el) => layer.contains(el));
+    const under = stack.findIndex((el) => box.contains(el));
+    if (above === -1 || under === -1 || above < under) return true;
+  }
+  const xs = [r.left + 4, r.left + r.width / 2, r.right - 4];
+  const ys = [r.top + 4, r.top + r.height / 2, r.bottom - 4];
+  return xs.some((x) => ys.some((y) => {
+    const top = document.elementFromPoint(x, y);
+    return top !== null && !box.contains(top);
+  }));
+}
+
 /** The page in the right column: Faber's browser sits over this box, measured here, and leaves when the box goes. Every
  * move of the box moves it, and it is placed again whenever the window changes size. The address field above it takes
  * the person anywhere on the web; with no page yet, only the field shows. */
@@ -313,10 +367,10 @@ export function SitePane(props: { site: OpenSite; onClose: () => void }) {
   const place = () => {
     // While a step of the log shows, its picture holds the box and the page stays out of the window; with no page yet there
     // is nothing to place.
-    if (picked() || blank()) return;
+    if (away() || blank()) return;
     const r = box?.getBoundingClientRect();
     if (!r) return;
-    if (r.width >= 1 && r.height >= 1) void api.sitePlace(id, r.left, r.top, r.width, r.height);
+    if (r.width >= 1 && r.height >= 1) void api.sitePlace(id, r.left, r.top, r.width, r.height).then((placed) => placed && round(box!));
   };
   onMount(() => {
     const seen = new ResizeObserver(place);
@@ -325,7 +379,42 @@ export function SitePane(props: { site: OpenSite; onClose: () => void }) {
     // The column slides in: the box is placed again once it has arrived.
     const column = box!.closest('.runcol');
     column?.addEventListener('transitionend', place);
+    // Anything drawn over the box takes the page out of the window until it goes. The screen says so by changing its DOM, a
+    // dialog's open state or a popover's toggle; the look is taken once a frame at most, and only while a page is shown.
+    let look = 0;
+    const lookAgain = () => {
+      look = 0;
+      if (!blank() && !picked()) setCovered(covered(box!));
+    };
+    const soon = () => (look ||= requestAnimationFrame(lookAgain));
+    const watch = new MutationObserver(soon);
+    watch.observe(document.body, { childList: true, subtree: true, attributes: true, attributeFilter: ['open', 'class', 'hidden', 'style'] });
+    // Something that slides or fades may reach the box midway: while motion runs the look is taken every frame, for at most
+    // MOVING after the latest start (no motion of the screen's runs longer), and once more when it ends or stops.
+    let moving = 0;
+    let movingUntil = 0;
+    const follow = () => {
+      lookAgain();
+      moving = performance.now() < movingUntil ? requestAnimationFrame(follow) : 0;
+    };
+    const started = (event: Event) => {
+      // Only a layer's own motion: a row's hover never sets the pane looking.
+      if (!(event.target instanceof Element) || !event.target.closest(LAYERS)) return;
+      movingUntil = performance.now() + MOVING;
+      moving ||= requestAnimationFrame(follow);
+    };
+    const starts = ['transitionrun', 'animationstart'] as const;
+    const moved = ['toggle', 'transitionend', 'transitioncancel', 'animationend', 'animationcancel'] as const;
+    for (const event of starts) document.addEventListener(event, started, true);
+    for (const event of moved) document.addEventListener(event, soon, true);
+    // One already open counts before the first placing.
+    if (!blank() && !picked()) setCovered(covered(box!));
     onCleanup(() => {
+      watch.disconnect();
+      for (const event of starts) document.removeEventListener(event, started, true);
+      for (const event of moved) document.removeEventListener(event, soon, true);
+      cancelAnimationFrame(moving);
+      cancelAnimationFrame(look);
       seen.disconnect();
       window.removeEventListener('resize', place);
       column?.removeEventListener('transitionend', place);
@@ -337,12 +426,14 @@ export function SitePane(props: { site: OpenSite; onClose: () => void }) {
   const [picked, setPicked] = createSignal<string>();
   const pickedAt = () => steps().findIndex((s) => s.call === picked());
   const [still] = createResource(picked, (call) => api.sitePicture(props.site.conversationId, call).catch(() => null));
-  // The live page goes out of the window while a picture stands in for it, and comes back when the log lets go.
+  const [isCovered, setCovered] = createSignal(false);
+  const away = () => !!picked() || isCovered();
+  // The live page goes out of the window while a picture stands in for it or something covers its box, and comes back after.
   createEffect(
     on(
-      picked,
-      (call) => {
-        if (call) return void api.sitePark(id);
+      away,
+      (gone) => {
+        if (gone) return void api.sitePark(id);
         id = boxId();
         place();
       },
@@ -351,6 +442,8 @@ export function SitePane(props: { site: OpenSite; onClose: () => void }) {
   );
   // Another card, or an address typed in the field, starts on its live page, placed at once (the first one after a blank pane).
   createEffect(on(() => props.site, () => (setPicked(undefined), place()), { defer: true }));
+  // A new look may round the card differently: the page follows once the look has painted.
+  createEffect(on(appliedLook, () => requestAnimationFrame(() => box && !blank() && !picked() && round(box)), { defer: true }));
   // The latest step is the live page, unless it is a check at several sizes: its pictures are what it saw.
   const pick = (call?: string) => setPicked(call === steps().at(-1)?.call && !steps().at(-1)?.looks ? undefined : call);
   const keys = (e: KeyboardEvent) => {
@@ -438,15 +531,21 @@ export function SitePane(props: { site: OpenSite; onClose: () => void }) {
         <p class="side-meta bad" role="alert">{t('site.refused')}</p>
       </Show>
       <div class="rc-body side-body site-body">
-        <p class="side-meta">{blank() ? t('site.blank') : t('site.meta', { host: hostOf(live()) })}</p>
         {/* The sizes of a check are a list a screen reader walks, never one image. */}
         <div
           class="site-view"
           classList={{ blank: blank() }}
           ref={(el) => (box = el)}
-          role={picked() && steps()[pickedAt()]?.looks ? undefined : 'img'}
-          aria-label={picked() && steps()[pickedAt()]?.looks ? undefined : t('site.view', { title: title() })}
+          role={blank() || (picked() && steps()[pickedAt()]?.looks) ? undefined : 'img'}
+          aria-label={blank() || (picked() && steps()[pickedAt()]?.looks) ? undefined : t('site.view', { title: title() })}
         >
+          {/* No page yet: the box says what it is for, where the page will be. The address field above names a live page. */}
+          <Show when={blank()}>
+            <div class="site-empty">
+              <Icon name="globe" />
+              <p>{t('site.blank')}</p>
+            </div>
+          </Show>
           <Show when={picked()}>
             <Show
               when={steps()[pickedAt()]?.looks}

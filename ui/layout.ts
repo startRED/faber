@@ -41,15 +41,16 @@ export interface Limits {
   min: number;
   max: number;
 }
-export const SIDE: Limits & { fallback: number } = { min: 200, max: 360, fallback: 248 };
+export const SIDE: Limits & { fallback: number } = { min: 200, max: 420, fallback: 288 };
 export const RUN: Limits = { min: 300, max: 560 };
 export const STAGE_MIN = 440;
 /** The reading column's width, which the running column never takes. */
 export const READING = 760;
 
-/** The widths an edge may take. A docked column leaves the stage STAGE_MIN; one over the stage may take its whole range. */
+/** The widths an edge may take. A docked column leaves the stage STAGE_MIN; one over the stage may take its whole range. Where
+ * the column docks, the sidebar leaves room for the column's minimum and the stage's. */
 export function limitsOf(edge: Edge, win: number, side: number, docked: boolean): Limits {
-  if (edge === 'side') return SIDE;
+  if (edge === 'side') return docked ? { ...SIDE, max: Math.max(SIDE.min, Math.min(SIDE.max, win - RUN.min - STAGE_MIN)) } : SIDE;
   return { min: RUN.min, max: docked ? Math.max(RUN.min, Math.min(RUN.max, win - side - STAGE_MIN)) : RUN.max };
 }
 

@@ -44,6 +44,10 @@ Name what the motion is for: feedback, where something came from or went, a stat
 - Icons are paths in `ui/Glyphs.tsx`, coloured by `svg.i` with `currentColor`: no hex fills, no second icon set on one
   surface, stroke matches the text beside it, and the words beside the icon carry the meaning (the icon is decoration).
 - An icon that swaps on a rare state change cross-fades; one that swaps on a tab or row change swaps instantly.
+- It is an app, not a page: never set `scrollbar-width` or `scrollbar-color` (the screen's own thin scrollbar is global in
+  `ui/styles.css`; those two bring the system bar and its arrows back), controls show the arrow cursor, and chrome text is not
+  selectable. Faber's browser is a native view above the whole screen: a new layer that can lie over it must be seen by
+  `covered` in `ui/Site.tsx`, never drawn over the pane (docs/design/README.md).
 
 ## 4. Composition
 

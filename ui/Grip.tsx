@@ -112,6 +112,7 @@ export function Grip(props: { edge: Edge; label: string; value: number; limits: 
       role="separator"
       aria-orientation="vertical"
       aria-label={props.label}
+      title={props.label}
       aria-valuenow={props.value}
       aria-valuemin={props.limits.min}
       aria-valuemax={props.limits.max}

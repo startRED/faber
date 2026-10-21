@@ -557,7 +557,8 @@ check('right-click: a text field offers Cut, Copy, Paste and Select all, and Pas
 check('right-click: selected text offers Copy, and only where the click lands on it', async () => {
   const root = stage();
   const written = clipboard();
-  root.innerHTML = '<p id="p" style="display:inline-block;margin:20px">Some words to copy</p><div id="far" style="width:100px;height:60px"></div>';
+  // Text a person reads (an answer, a message) can be selected; the chrome around it cannot, as in a desktop app.
+  root.innerHTML = '<p id="p" class="md" style="display:inline-block;margin:20px">Some words to copy</p><div id="far" style="width:100px;height:60px"></div>';
   const dispose = render(() => createComponent(ContextMenuHost, {}), root);
   try {
     const p = root.querySelector('#p')!;

@@ -173,7 +173,7 @@ fn check_shell(at: &str, seen: &Value, width: u32, modal: bool) -> Result {
     same(num(seen, &["title", "h"]), 36.0, &format!("{at}: the title bar"))?;
     same(num(seen, &["topbar", "h"]), 52.0, &format!("{at}: the top bar"))?;
     if width >= 900 {
-        same(num(seen, &["side", "w"]), 248.0, &format!("{at}: the sidebar"))?;
+        same(num(seen, &["side", "w"]), 288.0, &format!("{at}: the sidebar"))?;
     } else {
         ensure(!shown(seen, "side"), || format!("{at}: the sidebar should be behind its button"))?;
     }
@@ -229,10 +229,10 @@ fn follows_the_width(ctx: &mut Ctx) -> Result {
         }
         if width >= 1100 {
             // The room beside the 760 px reading column (the window less the sidebar and 800 px), 360 to 560 px, with the 8 px of
-            // frame that runs round the stage.
+            // frame on each side of the column, its own card beside the stage.
             same(
-                num(&open, &["docked", "w"]) + 8.0,
-                (f64::from(width) - 248.0 - 800.0).clamp(360.0, 560.0),
+                num(&open, &["docked", "w"]) + 16.0,
+                (f64::from(width) - 288.0 - 800.0).clamp(360.0, 560.0),
                 &format!("{at}: the docked column"),
             )?;
             ensure(num(&open, &["main", "w"]) >= 439.5, || format!("{at}: the stage is {} px", open["main"]["w"]))?;
@@ -1076,8 +1076,8 @@ fn subagent_column(ctx: &mut Ctx, language: &str) -> Result {
             format!("{at}: a tool line is not held to two lines: {seen}")
         })?;
         if column > 0.0 {
-            // The track includes the 8 px of frame that runs round the stage.
-            same(num(&seen, &["col"]) + 8.0, column, &format!("{at}: the column's width"))?;
+            // The track includes the 8 px of frame on each side of the column, its own card beside the stage.
+            same(num(&seen, &["col"]) + 16.0, column, &format!("{at}: the column's width"))?;
         }
         ctx.shot(&mut app, &format!("subagent-column-{language}-{width}"))?;
         if width == 1920 {

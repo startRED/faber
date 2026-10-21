@@ -1028,6 +1028,17 @@ async fn site_place(app: AppHandle, load: u32, box_id: u64, x: f64, y: f64, widt
     false
 }
 
+/// The browser pane's page takes the corners of the card the screen shows it in: `radius` in logical pixels and the card's
+/// colour as red, green and blue, drawn over the page's own corners; a radius of 0 leaves them square.
+#[tauri::command]
+async fn site_round(app: AppHandle, radius: f64, color: [u8; 3]) {
+    #[cfg(windows)]
+    if let Some(pane) = app.try_state::<Arc<pane::Pane>>().map(|p| p.inner().clone()) {
+        pane.set_round(radius, color).await;
+    }
+    let _ = (app, radius, color);
+}
+
 /// The browser pane leaves the screen for the screen's box `box_id` and every older one; it keeps its page.
 #[tauri::command]
 async fn site_park(app: AppHandle, load: u32, box_id: u64) {
@@ -1424,6 +1435,7 @@ fn main() {
         .invoke_handler({
             let handler: fn(tauri::ipc::Invoke) -> bool = tauri::generate_handler![
                 site_place,
+                site_round,
                 site_park,
                 site_open,
                 site_step,

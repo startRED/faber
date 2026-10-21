@@ -34,7 +34,16 @@ The shared message box's lists and earlier messages live in [composer.md](compos
 - Every text on screen lives in `ui/locales/`, written by hand in each language.
 - Choice buttons use `aria-pressed`, or native radio groups. Switches are native checkboxes. "Open file" is a real
   button. Theme thumbnails are `aria-hidden`, and each theme card is named by its name and its description.
-- Areas whose content can grow scroll; they never cut content off.
+- Areas whose content can grow scroll; they never cut content off. Every scrollbar is the screen's own (`ui/styles.css`): no
+  arrows, no track, a thin rounded thumb while the pointer is over the list. `scrollbar-width` and `scrollbar-color` stay unset,
+  since in WebView2 they bring the system bar back with its arrows.
+- It is an app, not a page: the chrome's words are not selectable and keep the arrow cursor; answers, messages, code, files,
+  errors and fields are selectable with the text cursor. Buttons, rows and menus show the arrow, never the hand; only a link
+  in text does. Pictures and links never drag, and no list bounces past its end (`tests/ui/shell.check.ts` checks both).
+- Faber's browser is a native view over the window, above everything the screen draws. Anything that can lie over its box
+  (the picture viewer, a menu, a dialog, a toast) makes the page leave the window while it is there (`covered` in
+  `ui/Site.tsx`, which watches the screen once a frame at most and counts a painted layer by its bounds unless it lies under the box, so a new layer needs a role
+  of dialog, menu, listbox or tooltip, or `<dialog>` or a popover): never draw over the pane and hope.
 - Right-click is Faber's own (R123, `ui/contextmenu.ts`, `ui/ContextMenu.tsx`). The browser's menu never shows, and its
   reload, print, save and view-source shortcuts do nothing. A menu opens only on a conversation (Rename, Pin or Unpin when not archived, Export, Move to group, Remove from group when assigned and Move to project (project-name picker) in Chat, Archive or Unarchive, Delete), a Chat group (Rename, Delete), a project (New
   conversation in this project, Open folder, Remove from Faber), a message (Copy; Edit and Go back before this message on yours;

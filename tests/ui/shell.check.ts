@@ -14,17 +14,19 @@ const settle = (ms = 30) => new Promise((resolve) => setTimeout(resolve, ms));
 
 check('layout: a dragged width keeps the stage 440 px wide, and what storage holds is repaired', () => {
   deepEqual(limitsOf('side', 1280, 248, true), SIDE);
+  equal(limitsOf('side', 1100, 288, true).max, 1100 - RUN.min - STAGE_MIN, 'at 1,100 px the sidebar leaves the docked column and the stage their minimums');
+  equal(limitsOf('side', 1100, 288, false).max, SIDE.max, 'with the column over the stage it has its whole range');
   // The docked column gives up room before the stage does; over the stage it may take all of its range.
   equal(limitsOf('run', 1280, 248, true).max, RUN.max);
   equal(limitsOf('run', 1100, 360, true).max, 1100 - 360 - STAGE_MIN);
   equal(limitsOf('run', 1000, 360, true).max, RUN.min, 'never under its own minimum');
   equal(limitsOf('run', 1000, 360, false).max, RUN.max);
-  equal(fit(5000, SIDE), 360);
+  equal(fit(5000, SIDE), 420);
   equal(fit(10, SIDE), 200);
   equal(fit(250.6, SIDE), 251);
-  deepEqual(savedWidths(null), { side: 248, run: undefined });
-  deepEqual(savedWidths({ side: 'wide', run: NaN }), { side: 248, run: undefined });
-  deepEqual(savedWidths({ side: 9999, run: 1 }), { side: 360, run: 300 });
+  deepEqual(savedWidths(null), { side: 288, run: undefined });
+  deepEqual(savedWidths({ side: 'wide', run: NaN }), { side: 288, run: undefined });
+  deepEqual(savedWidths({ side: 9999, run: 1 }), { side: 420, run: 300 });
   deepEqual(savedWidths({ side: 300, run: 400 }), { side: 300, run: 400 });
 });
 
@@ -103,15 +105,15 @@ check('shell: the sidebar edge is a separator that a drag, the arrow keys and a 
     equal(grip.getAttribute('aria-orientation'), 'vertical');
     equal(grip.getAttribute('aria-label'), t('side.resize'));
     equal(grip.tabIndex, 0, 'the keyboard reaches it');
-    equal(grip.getAttribute('aria-valuenow'), '248');
+    equal(grip.getAttribute('aria-valuenow'), '288', 'the usual width');
     equal(grip.getAttribute('aria-valuemin'), String(SIDE.min));
     equal(grip.getAttribute('aria-valuemax'), String(SIDE.max));
-    equal(firstTrack(frame), 248);
+    equal(firstTrack(frame), 288);
 
     grip.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowRight', bubbles: true, cancelable: true }));
-    equal(firstTrack(frame), 264, 'an arrow key moves it by 16 px');
+    equal(firstTrack(frame), 304, 'an arrow key moves it by 16 px');
     grip.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowLeft', shiftKey: true, bubbles: true, cancelable: true }));
-    equal(firstTrack(frame), 216, 'with Shift, by 48 px');
+    equal(firstTrack(frame), 256, 'with Shift, by 48 px');
     grip.dispatchEvent(new KeyboardEvent('keydown', { key: 'End', bubbles: true, cancelable: true }));
     equal(firstTrack(frame), SIDE.max);
     equal(grip.getAttribute('aria-valuenow'), String(SIDE.max));
@@ -313,7 +315,7 @@ check('shell: Ctrl+B steps the sidebar and the column aside and brings them back
     await settle(60);
     ok(!frame.classList.contains('focus'), 'focus mode is off');
     ok(root.querySelector('.runcol'), 'the column that was open is open again');
-    equal(firstTrack(frame), 248);
+    equal(firstTrack(frame), 288);
     // Beside the stage the column leaves the sidebar alone; over it (a window under 1,100 px) the column is modal and keeps it shut.
     equal(side.inert, innerWidth < WIDE_FROM, 'the sidebar can be reached again unless the column is a dialog over the stage');
 
@@ -402,4 +404,42 @@ check('shell: with no composer on screen, a file over the window shows no notice
     root.querySelector('.topbar')!.dispatchEvent(dragged('dragenter', 'notes.txt'));
     equal(document.querySelector('.dropveil'), null);
   });
+});
+
+check('screen: it reads as an app, with no system scrollbar and no stray selection of its chrome', () => {
+  // In WebView2 a scrollbar-width or scrollbar-color anywhere brings back the system bar with its arrows and turns off the
+  // screen's own thin one (ui/styles.css), so no rule of the screen may set either.
+  const set: string[] = [];
+  const walk = (rules: CSSRuleList) => {
+    for (const rule of rules) {
+      if (rule instanceof CSSStyleRule && (rule.style.getPropertyValue('scrollbar-width') || rule.style.getPropertyValue('scrollbar-color'))) set.push(rule.selectorText);
+      if ('cssRules' in rule) walk((rule as CSSGroupingRule).cssRules);
+    }
+  };
+  for (const sheet of document.styleSheets) {
+    try {
+      walk(sheet.cssRules);
+    } catch {
+      // a sheet of another origin cannot be read, and the screen has none
+    }
+  }
+  deepEqual(set, [], 'rules that set scrollbar-width or scrollbar-color');
+  // WebView2 names the property with and without its old prefix, depending on its version.
+  const selects = (style: CSSStyleDeclaration) => style.getPropertyValue('user-select') || style.getPropertyValue('-webkit-user-select');
+  const html = getComputedStyle(document.documentElement);
+  equal(selects(html), 'none', 'the chrome is not selected by a stray drag');
+  equal(html.cursor, 'default', 'and keeps the arrow');
+  const answer = document.createElement('div');
+  answer.className = 'md';
+  answer.textContent = 'An answer';
+  document.body.append(answer);
+  const button = document.createElement('button');
+  document.body.append(button);
+  try {
+    equal(selects(getComputedStyle(answer)), 'text', 'an answer is selectable');
+    equal(getComputedStyle(button).cursor, 'default', 'a button shows the arrow, never the hand');
+  } finally {
+    answer.remove();
+    button.remove();
+  }
 });

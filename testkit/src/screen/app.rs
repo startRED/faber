@@ -15,7 +15,7 @@ const QUESTION: &str = "In one sentence: why is the sky blue?";
 
 /// The six looks, as the screen lists them, with the effects each draws on the new conversation: the projector beam with
 /// its dust, the loom and the flow line. The loom needs a stage wider than 920 px and the flow line one wider than
-/// 1140 px, so that neither lies over the greeting; the stage is the window less the 248 px sidebar.
+/// 1140 px, so that neither lies over the greeting; the stage is the window less the 288 px sidebar.
 const LOOKS: [(&str, bool, bool, bool); 6] = [
     ("sala", true, false, false),
     ("oficina", false, true, false),

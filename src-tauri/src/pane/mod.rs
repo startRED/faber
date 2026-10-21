@@ -45,6 +45,13 @@ const NAVIGATES: Duration = Duration::from_millis(1_500);
 /// The agent's actions, run inside the page: the function `act.js` exports, which the screen's checks import as it is.
 const ACT: &str = include_str!("act.js");
 
+/// The page's rounded corners and thin scrollbars, drawn in a world of Faber's own on every document (`round`).
+const ROUND: &str = include_str!("round.js");
+/// How long a call for the page's corners may take before the corners wait for the next placing.
+const LOOK_CALL: Duration = Duration::from_secs(3);
+/// The roundest corner a page takes, in logical pixels: a look's card is never rounder.
+const MAX_RADIUS: f64 = 32.0;
+
 fn act_function() -> &'static str {
     ACT.split_once("export default ").map_or(ACT, |(_, f)| f.trim_end().trim_end_matches(';'))
 }
@@ -95,10 +102,19 @@ pub struct Pane {
     /// The random name `act.js` gives the ring it draws where the agent acted, so it removes its own ring and never a node of
     /// the page (each action runs in a world of its own and cannot keep the node itself).
     mark: String,
+    /// Held while the page's corners change, so two placings never add the script twice.
+    rounding: tokio::sync::Mutex<()>,
 }
 
 #[derive(Default)]
 struct State {
+    /// The corners the screen's card asks for (radius, colour), and the ones the page has with the DevTools script that
+    /// draws them; a new pane has none until it is placed.
+    round: (f64, [u8; 3]),
+    rounded: Option<(f64, [u8; 3])>,
+    round_script: Option<String>,
+    /// Counts the panes made, so a look that finishes after its pane closed never counts for the next one.
+    made: u64,
     webview: Option<Webview>,
     shown: bool,
     used: Option<Instant>,
@@ -218,6 +234,7 @@ impl Pane {
             opening: tokio::sync::Mutex::new(()),
             looking: tokio::sync::watch::channel(false).0,
             acting: tokio::sync::Mutex::new(()),
+            rounding: tokio::sync::Mutex::new(()),
             mark: format!("{:016x}", std::hash::BuildHasher::hash_one(&std::collections::hash_map::RandomState::new(), 0u8)),
         })
     }
@@ -272,7 +289,9 @@ impl Pane {
                 }
             });
         let webview = window.add_child(builder, PARKED, SIZE).map_err(|e| e.to_string())?;
-        crate::lock(&self.state).webview = Some(webview);
+        let mut s = crate::lock(&self.state);
+        s.webview = Some(webview);
+        s.made += 1;
         Ok(before)
     }
 
@@ -293,6 +312,8 @@ impl Pane {
                         s.idle_watch = false;
                         s.visited.clear();
                         s.origins.clear();
+                        // The next pane is a new page: it gets its corners again.
+                        (s.rounded, s.round_script) = (None, None);
                         Err(s.webview.take())
                     } else {
                         Ok(left.max(Duration::from_secs(1)))
@@ -319,6 +340,7 @@ impl Pane {
             s.visited.clear();
             s.origins.clear();
             (s.size, s.emulated) = (None, false);
+            (s.rounded, s.round_script) = (None, None);
             s.webview.take()
         };
         self.looking.send_replace(false);
@@ -358,8 +380,62 @@ impl Pane {
                 crate::lock(&self.state).emulated = false;
             }
         }
+        // The corners are a look: the page shows at once, and a page slow to take them never holds the placing up.
+        if placed {
+            let pane = self.clone();
+            tauri::async_runtime::spawn(async move { pane.round().await });
+        }
         self.touch();
         placed
+    }
+
+    /// The card around the pane changed its corners or colour (a look, a corner setting): the page follows.
+    pub async fn set_round(self: &Arc<Self>, radius: f64, color: [u8; 3]) {
+        let radius = if radius.is_finite() { radius.clamp(0.0, MAX_RADIUS) } else { 0.0 };
+        crate::lock(&self.state).round = (radius, color);
+        self.round().await;
+    }
+
+    /// Draws the corners the screen asked for over the page (`round.js`), on its document and every next one, once per
+    /// change; the old script goes first. A call that fails leaves the page as it was, and the next placing tries again.
+    /// Every call goes to the pane the look began on: one made meanwhile never gets a script it does not know of.
+    async fn round(&self) {
+        let _one = self.rounding.lock().await;
+        let (wanted, old, made, webview) = {
+            let s = crate::lock(&self.state);
+            let Some(webview) = s.webview.clone() else { return };
+            if s.rounded == Some(s.round) {
+                return;
+            }
+            (s.round, s.round_script.clone(), s.made, webview)
+        };
+        let same = |s: &State| s.made == made && s.webview.is_some();
+        if let Some(identifier) = old {
+            let _ = look_call(&webview, "Page.removeScriptToEvaluateOnNewDocument", json!({ "identifier": identifier })).await;
+            let mut s = crate::lock(&self.state);
+            if !same(&s) {
+                return;
+            }
+            s.round_script = None;
+        }
+        let (radius, [r, g, b]) = wanted;
+        let source = ROUND
+            .replace("__ID__", &format!("faber-round-{}", self.mark))
+            .replace("__R__", &format!("{radius}"))
+            .replace("__C__", &format!("{r}, {g}, {b}"));
+        let added = look_call(
+            &webview,
+            "Page.addScriptToEvaluateOnNewDocument",
+            json!({ "source": source, "worldName": "faber-round", "runImmediately": true }),
+        )
+        .await;
+        if let Ok(identifier) = added.as_ref().map(|a| a["identifier"].as_str().map(str::to_string)) {
+            let mut s = crate::lock(&self.state);
+            // A pane made since has none of this: it gets its own.
+            if same(&s) {
+                (s.rounded, s.round_script) = (Some(wanted), identifier);
+            }
+        }
     }
 
     /// Takes the pane off the screen, back at the size the agent's pages load at, for the screen's box `box_id` and every
@@ -804,6 +880,16 @@ fn stored_by(origins: &mut Vec<String>, url: &Url) {
     if origins.len() > MAX_ORIGINS {
         origins.remove(0);
     }
+}
+
+/// A DevTools call for a look only, on the pane it was meant for: a page that holds it gives up after `LOOK_CALL` and keeps
+/// its pane, unlike `Pane::call`.
+async fn look_call(webview: &Webview, method: &str, params: Value) -> Result<Value, String> {
+    let answer = tokio::time::timeout(LOOK_CALL, native::devtools(webview, method, params.to_string()))
+        .await
+        .map_err(|_| "the page is busy".to_string())?;
+    let json = answer.map_err(|_| "the browser closed".to_string())??;
+    serde_json::from_str(&json).map_err(|e| e.to_string())
 }
 
 /// Notes a site the person went to, for the agent and so for its vendor: only the site's own name (`docs.github.com` is

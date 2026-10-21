@@ -893,6 +893,8 @@ export const api = {
   readFileAt: (id: string, path: string) => invoke<FileView>('read_file_at', { id, path }),
   /** Faber's browser pane (R161 step 7): over a box of the screen, off it, a page the person opens, a call's picture. */
   sitePlace: (boxId: number, x: number, y: number, width: number, height: number) => invoke<boolean>('site_place', { load: LOAD, boxId, x, y, width, height }),
+  /** The page's corners: the box's radius over the colour of the card around it, as red, green and blue. */
+  siteRound: (radius: number, color: [number, number, number]) => invoke<void>('site_round', { radius, color }),
   sitePark: (boxId: number) => invoke<void>('site_park', { load: LOAD, boxId }),
   siteOpen: (id: string, url: string) => invoke<boolean>('site_open', { id, url }),
   /** Back, forward or reload in Faber's browser, on that conversation's page only. */

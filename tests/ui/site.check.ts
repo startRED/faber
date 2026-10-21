@@ -3,7 +3,7 @@ import { render } from 'solid-js/web';
 import { api, type Message, type ToolUse } from '../../ui/api.ts';
 import { useLanguage } from '../../ui/i18n.ts';
 import { Running } from '../../ui/Running.tsx';
-import { addressOf, appsOf, awaySites, looksOf, openedSite, showSite, siteOf, sitesOf, stepsOf, type OpenSite } from '../../ui/Site.tsx';
+import { addressOf, appsOf, awaySites, cornersOf, covered, looksOf, openedSite, showSite, siteOf, sitesOf, stepsOf, type OpenSite } from '../../ui/Site.tsx';
 import { Thread } from '../../ui/Thread.tsx';
 import { check, deepEqual, equal, ok } from './check.ts';
 import act from '../../src-tauri/src/pane/act.js';
@@ -124,18 +124,47 @@ check('page in the browser: the column places Faber’s browser over its box, an
   try {
     equal(root.querySelector('.rc-empty'), null, 'the list makes way for the page');
     equal(root.querySelector('#running-title')!.textContent!.trim(), 'docs.example.org', 'a page without a title is named by its site');
-    equal(root.querySelector('.side-meta')!.textContent, "docs.example.org, in Faber's browser");
+    equal(root.querySelector('.side-meta'), null, 'the head and the address field name the page; no line says it again');
     const box = root.querySelector<HTMLElement>('.site-view')!;
     await new Promise((done) => requestAnimationFrame(() => requestAnimationFrame(done)));
     ok(placed.length > 0, 'the browser is placed once the box is measured');
     const r = box.getBoundingClientRect();
     deepEqual(placed.at(-1), [r.left, r.top, r.width, r.height], 'over the box, in the page’s pixels');
     ok(r.height > 300, 'the box fills the column');
+    const corners = cornersOf(box);
+    ok(corners, 'the page takes the corners of its box');
+    equal(corners!.radius, Number.parseFloat(getComputedStyle(box).borderTopLeftRadius), 'as round as the box');
+    deepEqual(corners!.color, getComputedStyle(root.querySelector('.runcol')!).backgroundColor.match(/\d+/g)!.slice(0, 3).map(Number), 'in the colour of the card around it');
+    // The page is a native view above everything the screen draws: a layer over its box (the picture viewer, a menu) sends it away.
+    ok(!covered(box), 'nothing covers the box yet');
+    const layer = document.createElement('div');
+    layer.style.cssText = 'position: fixed; inset: 0; z-index: 90;';
+    document.body.append(layer);
+    await new Promise((done) => requestAnimationFrame(() => requestAnimationFrame(done)));
+    ok(covered(box), 'a layer over the box covers it');
+    equal(parked, 1, 'the page leaves the window while the layer is there');
+    const before = placed.length;
+    layer.remove();
+    await new Promise((done) => requestAnimationFrame(() => requestAnimationFrame(done)));
+    ok(placed.length > before, 'and comes back once it goes');
+    // A small menu between the nine points a look samples still counts, by its bounds.
+    const at = box.getBoundingClientRect();
+    const menu = document.createElement('div');
+    menu.setAttribute('role', 'menu');
+    menu.style.cssText = `position: fixed; left: ${at.left + 20}px; top: ${at.top + 50}px; width: 40px; height: 20px; z-index: 90;`;
+    document.body.append(menu);
+    ok(covered(box), 'a small menu over the box covers it too');
+    menu.style.opacity = '0';
+    ok(!covered(box), 'one kept in the page fully faded covers nothing');
+    menu.style.cssText = 'position: fixed; inset: 0; z-index: -1;';
+    ok(!covered(box), 'nor does one that lies under the box');
+    menu.remove();
+    await new Promise((done) => requestAnimationFrame(() => requestAnimationFrame(done)));
+    parked = 0;
     moveTo('https://docs.example.org/other');
     equal(root.querySelector('#running-title')!.textContent!.trim(), 'docs.example.org', 'a page of the same site keeps its name');
     moveTo('https://look-alike.example/login');
     equal(root.querySelector('#running-title')!.textContent!.trim(), 'look-alike.example', 'a page that left the site is named by where it is now');
-    equal(root.querySelector('.side-meta')!.textContent, "look-alike.example, in Faber's browser");
     equal(root.querySelector('.back'), null, 'the page is a view of its own: the run button shows the list');
     equal(root.querySelector<HTMLInputElement>('.site-address')!.value, 'https://look-alike.example/login', 'the address field shows where the page is now');
     equal(back, 0);
@@ -748,7 +777,7 @@ check('page in the browser: with no page yet the pane shows only its address fie
   try {
     await frames();
     equal(root.querySelector('#running-title')!.textContent!.trim(), "Faber's browser");
-    equal(root.querySelector('.side-meta')!.textContent, "Open any web page here. This conversation's agent can read it too.");
+    equal(root.querySelector('.site-view .site-empty')!.textContent, "Open any web page here. This conversation's agent can read it too.", 'where the page will be');
     equal(placed, 0, 'nothing is placed before there is a page');
     equal(root.querySelector('[aria-label="Back"]'), null, 'no history to step through yet');
     equal(root.querySelector('.site-external'), null, 'and no page to take out of Faber');

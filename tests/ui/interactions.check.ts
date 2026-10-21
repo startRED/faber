@@ -37,6 +37,7 @@ check('interaction: the running column slides and fades for 120ms while the thre
     await settle(30);
     const closed = thread.getBoundingClientRect().width;
     let open = closed;
+    let taken = 0;
     for (const opening of [true, false]) {
       const before = thread.getBoundingClientRect().width;
       toggle(opening);
@@ -63,9 +64,10 @@ check('interaction: the running column slides and fades for 120ms while the thre
         }
       }
       await finish();
-      if (opening) open = thread.getBoundingClientRect().width;
+      if (opening) [open, taken] = [thread.getBoundingClientRect().width, column.getBoundingClientRect().width];
     }
-    ok(closed > open + 300);
+    // However wide the window leaves the column (100vw in the stylesheet), the thread gives up at least the column's width.
+    ok(taken >= 200 && closed - open >= taken - 1, 'the docked column takes its room from the thread');
     root.dataset.motion = 'reduced';
     for (const opening of [true, false]) {
       toggle(opening);

@@ -427,11 +427,14 @@ export function App(props: { initial: AppState; update?: UpdateStatus; inbox: { 
   const docked = () => width() === 'wide';
   // The column belongs to the work area, outside focus mode and Catalog.
   const colShown = () => columnOpen() && !focus() && !catalogOpen();
-  const runLimits = createMemo(() => limitsOf('run', win(), widths().side, docked()));
+  const sideLimits = createMemo(() => limitsOf('side', win(), widths().side, colShown() && docked()));
+  // What the sidebar really measures: the width the person dragged it to, inside what the window leaves it.
+  const sideWidth = () => fit(widths().side, sideLimits());
+  const runLimits = createMemo(() => limitsOf('run', win(), sideWidth(), docked()));
   // What the column really measures: the width the person dragged it to, or until then the room the window leaves beside the
   // reading column, inside what the window leaves it. A drag that ends on the usual width goes back to following the window.
-  const autoWidth = () => fit(autoRun(win(), widths().side), runLimits());
-  const runWidth = () => fit(widths().run ?? autoRun(win(), widths().side), runLimits());
+  const autoWidth = () => fit(autoRun(win(), sideWidth()), runLimits());
+  const runWidth = () => fit(widths().run ?? autoRun(win(), sideWidth()), runLimits());
   // An opened subagent can fill the stage as a full thread (R161 step 3): the column then sits over the work area, not beside it.
   const wide = () => !!sideAgent() && agentWide();
   const trapped = () => colShown() && byUser() && !docked() && !wide();
@@ -1375,7 +1378,7 @@ export function App(props: { initial: AppState; update?: UpdateStatus; inbox: { 
             class="shell"
             data-screen={catalogOpen() ? 'catalog' : `${area() === 'chat' ? 'chat' : 'project'}.${newChat() ? 'new' : 'thread'}`}
             classList={{ docked: colShown() && docked() && !wide(), focus: focus() }}
-            style={{ '--side-w': `${widths().side}px`, '--run-w': `${runWidth()}px` }}
+            style={{ '--side-w': `${sideWidth()}px`, '--run-w': `${runWidth()}px` }}
             inert={tourOpen() || notesOpen() || startScreen()}
             ref={animateList}
           >
@@ -1436,7 +1439,7 @@ export function App(props: { initial: AppState; update?: UpdateStatus; inbox: { 
                 onError={(err) => setSaveError(failureText(err))}
               />
               <Show when={!narrow()}>
-                <Grip edge="side" label={t('side.resize')} value={widths().side} limits={SIDE} fallback={SIDE.fallback} onChange={(px) => setWidth('side', px)} />
+                <Grip edge="side" label={t('side.resize')} value={sideWidth()} limits={sideLimits()} fallback={SIDE.fallback} onChange={(px) => setWidth('side', px)} />
               </Show>
             </aside>
             <Show when={sideOverlay()}>
