@@ -27,7 +27,7 @@ Size: S small, M medium, L large. Wave: 1 next, 2 after, 3 later or with its pha
 
 | # | Gap | Who has it | Faber today | Way | Size | Wave |
 |---|---|---|---|---|---|---|
-| T6 | Earlier prompts with the up arrow, and a search over them | both CLIs | None | Composer | S | 2 |
+| T6 | Earlier prompts with the up arrow, and a search over them | both CLIs | Done: Up brings back earlier messages and Ctrl+R searches them (R256) | Composer | S | 2 |
 | T7 | Branch from any point without editing, and arrows between the versions of an edited or retried message | claude.ai, ChatGPT, `/branch`, `/fork` | Done: "Branch from here" on an answer, and arrows between the versions, each its own conversation | Extends Branch | M | 2 |
 | T8 | Voice: dictate into the box | all four | None | The system's own speech input, no service | M | 3 |
 | T9 | Talk out loud with the AI (voice mode) | claude.ai, ChatGPT, Codex realtime | None | Owner's call (cost, phase) | L | 3 |
@@ -37,7 +37,7 @@ Size: S small, M medium, L large. Wave: 1 next, 2 after, 3 later or with its pha
 
 | # | Gap | Who has it | Faber today | Way | Size | Wave |
 |---|---|---|---|---|---|---|
-| U3 | Review the change for bugs or security from a button (`/review`, `/security-review`) | Claude Code, Codex | Faber's own checks tool only | Pass-through; the other vendor reviews | S | 2 |
+| U3 | Review the change for bugs or security from a button (`/review`, `/security-review`) | Claude Code, Codex | Done: Review, and Review with security, from the head of Changes (R279) | Pass-through; the other vendor reviews | S | 2 |
 
 ## Context and cost
 
@@ -50,8 +50,8 @@ Size: S small, M medium, L large. Wave: 1 next, 2 after, 3 later or with its pha
 
 | # | Gap | Who has it | Faber today | Way | Size | Wave |
 |---|---|---|---|---|---|---|
-| F2 | Pin or star a conversation | claude.ai, Claude app | Archive only | Extends the conversation row's menu | S | 2 |
-| F4 | Export a conversation to a file (Markdown, HTML) | Claude Code `/export`, Codex, claude.ai | None | Right-click menu, the native save picker | S | 2 |
+| F2 | Pin or star a conversation | claude.ai, Claude app | Done: Pin and Unpin in the row menu (R261) | Extends the conversation row's menu | S | 2 |
+| F4 | Export a conversation to a file (Markdown, HTML) | Claude Code `/export`, Codex, claude.ai | Done: Markdown through the native save picker (R268); HTML left out by R268 | Right-click menu, the native save picker | S | 2 |
 | F5 | Pick up a session started in the terminal, and bring setup over from another tool (`/resume`, `/import`) | both CLIs | Done: the project home lists both CLIs' terminal sessions of the folder | List the CLI's own sessions of the folder | M | 2 |
 | F6 | A temporary chat that leaves no history | ChatGPT | None | A Chat mode deleted on close | S | 3 |
 | F7 | Groups in the sidebar, two conversations side by side, pop a conversation out | Claude app, Codex app | One window, one conversation | Owner's call (R125: a second webview costs memory) | M | 3 |
@@ -62,7 +62,7 @@ Size: S small, M medium, L large. Wave: 1 next, 2 after, 3 later or with its pha
 |---|---|---|---|---|---|---|
 | P3 | Each conversation in its own copy of the project, on its own branch (`--worktree`) | Claude Code, Claude app, Codex | Separate copies for some conversations | Extends the separate copy | M | 2 |
 | P4 | Watch the pull request: CI, review comments, fix on red | Claude app (Auto-fix) | Followed pull requests notify | Extends the tray notice | M | 3 |
-| P5 | Background work started by the agent, kept after the reply (`Ctrl+B`, `/background`) | Claude Code | Helpers stop with the reply | Owner's call (process cost) | M | 3 |
+| P5 | Background work started by the agent, kept after the reply (`Ctrl+B`, `/background`) | Claude Code | A reply waits for the subagents its agent left in the background; no `/background` | Owner's call (process cost) | M | 3 |
 | P6 | Work in a folder on another machine over SSH | Claude app | This PC only | The CLI runs there, Faber drives it | L | 3 |
 
 ## Extensions and memory
@@ -78,7 +78,7 @@ Size: S small, M medium, L large. Wave: 1 next, 2 after, 3 later or with its pha
 
 | # | Gap | Who has it | Faber today | Way | Size | Wave |
 |---|---|---|---|---|---|---|
-| M1 | Visual answers: a page or app beside the chat, with versions, and native pieces within the reply (artifacts, canvas, inline visuals) | all four | Implemented: HTML/SVG/Mermaid reply blocks, bounded saved file versions, HTTPS through the existing web choice and ten inline pieces with saved controls | Extends the running column's pane; the lead's 27 Windows screen checks passed, including real Live Mermaid rendering and measured memory/processor cost ([design](../design/visual-answers.md)) | L | 2 |
+| M1 | Visual answers: a page or app beside the chat, with versions, and native pieces within the reply (artifacts, canvas, inline visuals) | all four | Done: HTML/SVG/Mermaid reply blocks, bounded saved file versions, HTTPS through the existing web choice and ten inline pieces with saved controls | Extends the running column's pane; the lead's 27 Windows screen checks passed, including real Live Mermaid rendering and measured memory/processor cost ([design](../design/visual-answers.md)) | L | 2 |
 | M2 | Deep research with a plan you can edit and a cited report | claude.ai, ChatGPT, `/deep-research`, Codex | Done: `/research` shows a plan to edit or approve, then a report with its sources | A Faber power over both CLIs | M | 2 |
 | M3 | Create and edit images | ChatGPT, Codex | None | Codex's image tool; phase 6 | L | 3 |
 | M4 | Documents: Word, slides, sheets, PDF, ready to send | claude.ai, Codex templates | Only what a CLI skill writes | Catalog skills plus a file card | M | 3 |
