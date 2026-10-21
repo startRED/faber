@@ -82,8 +82,8 @@ above an answer. The window widths, the sidebar and the running column are in [l
 - Keep going (R199): the chip, its quiet lines, its quota warning and what it shows on coming back are in
   [keep-going.md](keep-going.md).
 - A project reply that opened, queued or pushed a pull request has one pace-style line in Technical details (R200): its words ("Following
-  pull request #93: checks running.") link to the page, and "Stop following" sits beside them while it is open. Only checks
-  that wait for the person turn it amber. When the checks fail, Faber's own message is the loop
+  pull request #93: checks running.") link to the page, and "Stop following" sits beside them while it is open. It turns
+  amber when it fails, conflicts or needs the person. When checks fail, Faber's own message is the loop
   mark on the next reply, its tooltip naming the pull request and its failed checks.
 - A project reply that changed files, in full access, has Faber's own checks (R146) in Technical details in the same pace-style line,
   above the pull request's: "Faber is running the checks on these changes…", then "Faber's checks passed (3 checks)." or

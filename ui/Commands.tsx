@@ -1,11 +1,12 @@
-import { createMemo, createSignal, For, Show } from 'solid-js';
+import { createMemo, createSignal, For, Show, type JSX } from 'solid-js';
 import { api, errorText, type BackgroundCommand, type Summary } from './api.ts';
 import { Icon, VendorMark } from './Glyphs.tsx';
 import { fromEngine, t } from './i18n.ts';
 import { Peek } from './Mark.tsx';
 import { vendorName } from './models.ts';
 
-export function CommandRow(props: { command: BackgroundCommand; title: string }) {
+/** The same Stop path in Commands and Technical details, visible without opening output. */
+export function CommandStop(props: { command: BackgroundCommand }) {
   const [stopping, setStopping] = createSignal(false);
   const [error, setError] = createSignal('');
   const stop = async () => {
@@ -20,6 +21,15 @@ export function CommandRow(props: { command: BackgroundCommand; title: string })
       setStopping(false);
     }
   };
+  return <>
+        <Show when={props.command.state === 'running' && props.command.stoppable}>
+          <button class="btn ghost command-stop" disabled={stopping()} onClick={() => void stop()}>{t(stopping() ? 'commands.stopping' : 'commands.stop')}</button>
+        </Show>
+      <Show when={props.command.state === 'running' && error()}><p class="bad" role="alert">{error()}</p></Show>
+  </>;
+}
+
+export function CommandRow(props: { command: BackgroundCommand; title: string; output?: (text: string) => JSX.Element }) {
   return (
     <li class="ri command-row" data-command={props.command.id}>
       <div class="rhead">
@@ -27,14 +37,11 @@ export function CommandRow(props: { command: BackgroundCommand; title: string })
           <VendorMark vendor={props.command.vendor} /><b>{vendorName(props.command.vendor)}</b>
           <span class="verb">{t(`commands.${props.command.state}`)}</span>
         </span>
-        <Show when={props.command.state === 'running' && props.command.stoppable}>
-          <button class="btn ghost command-stop" disabled={stopping()} onClick={() => void stop()}>{t(stopping() ? 'commands.stopping' : 'commands.stop')}</button>
-        </Show>
+        <CommandStop command={props.command} />
       </div>
       <p class="side-meta command-conversation">{props.title}</p>
       <code class="command-line">{props.command.command}</code>
-      <Show when={props.command.output}><pre class="command-output" aria-label={t('commands.output')}>{props.command.output}</pre></Show>
-      <Show when={props.command.state === 'running' && error()}><p class="bad" role="alert">{error()}</p></Show>
+      <Show when={props.command.output}><pre class="command-output" aria-label={t('commands.output')}>{props.output ? props.output(props.command.output) : props.command.output}</pre></Show>
     </li>
   );
 }

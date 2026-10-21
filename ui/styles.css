@@ -1655,3 +1655,13 @@ html.away-win .catalog-empty .peek svg { animation-play-state: paused !important
 .det-state { color: var(--ink-3); font-size: var(--fs-xs); }
 .det-facts > li[data-state='failed'] > .det-state { color: var(--amber-ink); }
 .details-view .follow, .details-view .checks { margin: 0; }
+.work-chip { display: inline-flex; align-items: baseline; flex-wrap: wrap; gap: 4px 8px; max-width: 100%; min-height: var(--h-sm); padding: 3px 8px; border: 1px solid var(--line); border-radius: var(--r-pill); background: transparent; color: var(--ink-2); font: inherit; font-size: var(--fs-sm); overflow-wrap: anywhere; }
+.work-chip > span { min-width: 0; }
+button.work-chip, a.work-chip { cursor: pointer; }
+button.work-chip:hover, a.work-chip:hover { color: var(--ink); }
+.work-state { color: var(--ink-3); font-size: var(--fs-xs); }
+.background-work > li[data-need='true'] .work-state, .live-reference[data-need='true'] .work-state { color: var(--amber-ink); }
+.work-head { display: flex; align-items: baseline; flex-wrap: wrap; gap: 8px; }
+.work-reason { margin: 0; color: var(--amber-ink); font-size: var(--fs-sm); }
+.technical-reference { margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; }
+.live-reference { vertical-align: baseline; text-decoration: none; white-space: normal; }

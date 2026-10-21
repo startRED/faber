@@ -26,6 +26,8 @@ mod auto;
 mod auto_archive;
 #[path = "background.rs"]
 mod background;
+#[path = "background_live.rs"]
+mod background_live;
 #[path = "budget.rs"]
 mod budget;
 #[path = "cache_health.rs"]

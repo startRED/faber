@@ -215,6 +215,7 @@ interface Shared {
   usage?: VendorUsage[];
   /** Faber asks git whether the last reply changed files (the running row's `weighing`). */
   weighing?: boolean;
+  background?: import('./api.ts').BackgroundCommand[];
   /** The agent's plan for the request, drawn under the newest reply (task 017). */
   plan?: Plan;
   /** A button of a closing box: its words go as the person's message. */
@@ -986,7 +987,7 @@ export function Thread(props: Shared & { messages: Message[]; queued?: QueuedTur
         )}
       </Index>
       <Show when={props.area === 'project' && props.until === undefined}>
-        <DetailsLine conversationId={props.conversationId} messages={props.messages} busy={props.busy} weighing={props.weighing} />
+        <DetailsLine conversationId={props.conversationId} messages={props.messages} busy={props.busy} weighing={props.weighing} background={props.background} />
       </Show>
       <Show when={props.conversationId} keyed>{(conversationId) =>
         <For each={queuedIds()}>{(id) => {

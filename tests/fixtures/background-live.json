@@ -1,0 +1,34 @@
+{
+  "description": "Synthetic replay of the existing parsers, not a recording or proof of new engine code. The UI checks exercise task 019 behavior.",
+  "provenance": {
+    "recorded": "No event in this file is a fresh recording. Protocol shapes for background shell starts/ends and native helper launches/results are referenced from tests/fixtures/claude-background.jsonl and tests/fixtures/claude/background.jsonl.",
+    "madeUp": "Every event value, id, description, output, pull request, head and timestamp in this fixture is made up for deterministic replay. Monitor tool_use/tool_result events are made up; the recorded init tool inventory lists Monitor but contains no invocation.",
+    "monitorTiming": "Monitor result timing is unverified: a real tool result may acknowledge launch instead of completion. These events prove only that the generic parser preserves the supplied call/result, not that a real monitor has finished. With no report the screen stays neutral."
+  },
+  "text": "Saved #93 at abcdef1234567; #999 and deadbee remain unknown.",
+  "follow": { "repo": "acme/app", "number": 93, "url": "https://github.com/acme/app/pull/93", "state": "pending", "since": 1 },
+  "tools": [
+    { "id": "shell", "name": "Bash", "input": { "command": "node long-task.js", "description": "Check the preview", "run_in_background": true } },
+    { "id": "helper", "name": "Agent", "input": { "description": "Review the preview", "prompt": "Check the preview without editing.", "run_in_background": true } },
+    { "id": "monitor", "name": "Monitor", "input": { "command": "watch the preview" } },
+    { "id": "save", "name": "Bash", "input": { "command": "gh pr create --fill" }, "ok": true, "output": "https://github.com/acme/app/pull/93" }
+  ],
+  "command": { "id": "opaque-shell", "conversationId": "background-live", "vendor": "claude", "command": "node long-task.js", "started": 1, "output": "", "state": "running", "stoppable": true },
+  "start": [
+    { "type": "system", "subtype": "init", "session_id": "background-live", "model": "test" },
+    { "type": "assistant", "message": { "role": "assistant", "content": [ { "type": "tool_use", "id": "shell", "name": "Bash", "input": { "command": "node long-task.js", "description": "Check the preview", "run_in_background": true } } ] } },
+    { "type": "system", "subtype": "task_started", "task_type": "local_bash", "task_id": "shell-task", "tool_use_id": "shell", "is_backgrounded": true },
+    { "type": "assistant", "message": { "role": "assistant", "content": [ { "type": "tool_use", "id": "helper", "name": "Agent", "input": { "description": "Review the preview", "prompt": "Check the preview without editing.", "run_in_background": true } } ] } },
+    { "type": "user", "message": { "role": "user", "content": [ { "type": "tool_result", "tool_use_id": "helper", "content": "The helper started.", "is_error": false } ] } },
+    { "type": "assistant", "message": { "role": "assistant", "content": [ { "type": "tool_use", "id": "monitor", "name": "Monitor", "input": { "command": "watch the preview" } } ] } },
+    { "type": "assistant", "message": { "role": "assistant", "content": [ { "type": "tool_use", "id": "save", "name": "Bash", "input": { "command": "gh pr create --fill" } } ] } },
+    { "type": "user", "message": { "role": "user", "content": [ { "type": "tool_result", "tool_use_id": "save", "content": "https://github.com/acme/app/pull/93", "is_error": false } ] } },
+    { "type": "stream_event", "event": { "type": "content_block_delta", "delta": { "type": "text_delta", "text": "Saved #93 at abcdef1234567; #999 and deadbee remain unknown." } } }
+  ],
+  "finish": [
+    { "type": "system", "subtype": "task_notification", "task_id": "shell-task", "tool_use_id": "shell", "status": "failed", "summary": "The preview check failed." },
+    { "type": "system", "subtype": "task_notification", "tool_use_id": "helper", "status": "completed", "summary": "No findings." },
+    { "type": "user", "message": { "role": "user", "content": [ { "type": "tool_result", "tool_use_id": "monitor", "content": "Watch finished.", "is_error": false } ] } }
+  ],
+  "end": { "type": "result", "subtype": "success", "is_error": false, "total_cost_usd": 0, "usage": {} }
+}

@@ -121,7 +121,25 @@ or beside its running row. Its head has Back, the title and Close; the existing 
 It reuses the command rows, check and follow controls, and Changes' file disclosures, with facts newest first within
 each history. Only the open view holds DOM and at most one file patch; no extra reader, timer or stored history.
 
+Its first group is one list of background work: existing shell rows (named by their parsed description when unique),
+monitors, helpers, Faber's checks and followed pull requests. Quiet wrapping chips carry one state word each, with no
+motion: running, passed, failed, stopped, "waiting for you", "no report yet" (a monitor or shell from an earlier reply
+with nothing reported, neutral), or the helper's own words ("seems stuck" with what was seen, R174). Amber only for
+failed, stuck or needs the person. Helper chips open the existing helper view; a running shell has Stop on its row and
+its output behind a disclosure mounted only while open. Completed tool chips stay until their reply ends, then their
+existing histories retain the evidence. A pull request that merged or closed leaves the list and shows under Saved
+changes; a pending one reads "checks running". A shell reads the same state word as in Commands, and the last Stop ends every background call before it. Helpers keep their rows in the Projects thread (R161, R174). The thread
+line counts the same running rows with the same state rule ("N things still running").
+
+Known pull request numbers and unique observed head-hash prefixes in outputs or the "References in replies" group (its
+own group, shown only when a reply has a reference, never under Saved changes) carry the existing follow's newest state.
+Unknown or ambiguous references stay literal. Passing checks never claim a landing; merged is shown only when observed.
+Closing the pane releases its output and reference elements.
+
 This plain line uses only the latest reply’s Faber checks and engine needs-you state, shared with the Running row
 and done card. Failures, fixing, needed decisions and unfinished closing boxes stay amber with the column closed
-at 720 px; the person’s Stop stays neutral. Saved counts include only engine-confirmed commits. It also carries the wait while Faber looks for changed files to check; full command names and
-results stay in the pane. Check endings retain their polite live announcement, in plain words in Projects, with amber text and edge on failure.
+at 720 px; the person’s Stop stays neutral. Saved counts include only engine-confirmed commits. When none of those
+needs the person, it counts the work still running, not the work waiting or unreported. A followed pull request of an older reply that
+fails or conflicts is amber in the list while the line, which reads the latest reply only, stays neutral. It also carries the
+wait while Faber looks for changed files to check; full command names and results stay in the pane. Check endings retain their polite live announcement, in plain words in Projects,
+with amber text and edge on failure.

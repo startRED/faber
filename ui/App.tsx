@@ -1606,6 +1606,7 @@ ${copy().path}`}>
                                 {(c) => (
                                   <Thread
                                     messages={c().messages}
+                                    background={state().background?.items ?? []}
                                     rewindNotice={c().rewindNotice}
                                     onRewind={() => go(place())}
                                     conversationNames={Object.fromEntries(state().conversations.map((conversation) => [conversation.id, conversation.title]))}
