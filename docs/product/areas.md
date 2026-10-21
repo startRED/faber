@@ -70,6 +70,29 @@ is how they work:
 Recipes from past work are hints the agent may read, never a track it must follow. The guardrails below are the only
 fixed rules.
 
+### Aiming higher (AI proposal, not reviewed)
+
+People ask models for less than they can do, and a specific, hard goal gets more out of people and models than "do
+your best" (Locke and Latham's goal-setting research; [Rieseberg,
+2026-10-13](https://felixrieseberg.com/how-to-be-more-ambitious-a-tutorial-for-humans-with-models/)). Four proposals
+for the lead agent:
+
+- **Standing goals.** A project can keep goals that never finish, such as "no crashes", "opens in under 2 s" or "every
+  check passes". The lead watches them and starts a mission by itself when one breaks, within the project's daily cost
+  cap. First it gets what closes the loop without a person: the error logs on the user's PC (read there, never sent;
+  telemetry stays off), the build each error came from, and a copy where it reproduces the error before fixing it.
+  Faber's own "no crashes", fed by its overnight bug log, is the first one.
+- **Offer the bigger ask.** When a request is small and the goal behind it is clear, the lead offers the larger version
+  in a question card whose default is the request as asked: "You asked to fix this crash. Should I keep the app free of
+  crashes?" At most one per conversation, so it never turns into noise; people new to AI gain the most from it.
+- **A deeper pass before big work.** Before it writes the workers' briefs, the lead answers four questions in one short
+  turn: what a top professional would do that the request leaves out, the rawest material they would start from, the
+  methods and tools they would use (a database or a statistical model, not a table in the answer), and what outside
+  the models would check the result. The answers go into the briefs and the proof.
+- **Hard targets, and "impossible" needs evidence.** A proof states an ambitious, specific target, never "as good as
+  possible". A worker that calls a target impossible shows the measurement that proves it; without one, the lead tries
+  another path or the other vendor before it narrows the target.
+
 ### Normal and autonomous modes
 
 In both modes the agent decides what it can and asks only what changes the result; it never stops just to report or to
