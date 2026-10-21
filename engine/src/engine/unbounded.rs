@@ -160,6 +160,7 @@ mod tests {
                     steering: vec![],
                     held: None,
                     cwd: ".".into(),
+                    visual_root: None,
                     permissions: crate::model::Permissions::Ask,
                     tuning: Default::default(),
                     research: None,

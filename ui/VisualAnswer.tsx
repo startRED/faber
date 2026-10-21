@@ -1,28 +1,76 @@
-import { createEffect, createMemo, createResource, createSignal, Index, on, onCleanup, Show } from 'solid-js';
+import { createEffect, createMemo, createResource, createSignal, For, Index, on, onCleanup, Show } from 'solid-js';
 import { api, type VisualAnswer, type VisualVersion } from './api.ts';
 import { closeMenu } from './contextmenu.ts';
 import { Icon } from './Glyphs.tsx';
 import { t } from './i18n.ts';
 import { Markdown, referenceLinks } from './markdown.tsx';
 import runtime from './visual-page-runtime.js?raw';
+import { mermaidDocument } from './visual-mermaid.ts';
 
 export interface OpenVisual {
   conversationId: string;
   answerId: string;
   messageId?: string;
   block?: number;
+  file?: string;
 }
 const [openedVisual, showVisual] = createSignal<OpenVisual>();
 export { openedVisual, showVisual };
 
-export const visualName = (answer: VisualAnswer) => answer.name || t(answer.kind === 'svg' ? 'visual.drawing' : 'visual.page');
+export const visualName = (answer: VisualAnswer) => answer.name || t(answer.kind === 'html' ? 'visual.page' : 'visual.drawing');
+
+async function versionSource(conversationId: string, version: VisualVersion): Promise<string> {
+  if (!version.file || version.source) return version.source;
+  const answers = await api.visualAnswers(conversationId, version.messageId, version.block);
+  const found = answers.flatMap((a) => a.versions).find((v) => v.messageId === version.messageId && v.block === version.block && v.file === version.file);
+  if (!found?.source) throw new Error('error.messageGone');
+  return found.source;
+}
+
+function VisualCode(props: { conversationId: string; version: VisualVersion; code: string }) {
+  const [source] = createResource(() => props.version, (version) => versionSource(props.conversationId, version));
+  const text = () => {
+    if (!props.version.file) return props.code;
+    const saved = source() ?? '';
+    let length = 3;
+    for (const match of saved.matchAll(/`+/g)) length = Math.max(length, match[0].length + 1);
+    const marker = '`'.repeat(length);
+    return `${marker}${props.version.kind}\n${saved}\n${marker}`;
+  };
+  return <Show when={!source.error} fallback={<p class="side-meta" role="alert">{t('visual.failed')}</p>}>
+    <Show when={source() !== undefined}><Markdown text={text()} /></Show>
+  </Show>;
+}
+
+function VisualCard(props: { answer: VisualAnswer; version: VisualVersion; conversationId: string; code: string }) {
+  const [code, setCode] = createSignal(false);
+  return <div class="visual-card">
+    <div class="visual-card-head">
+      <Icon name="sheet" />
+      <span><b>{visualName(props.answer)}</b><small>{t(props.version.kind === 'html' ? 'visual.page' : 'visual.drawing')}</small></span>
+      <button class="btn visual-open" onClick={() => showVisual({ conversationId: props.conversationId, answerId: props.answer.id, messageId: props.version.messageId, block: props.version.block, ...(props.version.file ? { file: props.version.file } : {}) })}>{t('visual.open')}</button>
+    </div>
+    <Show when={props.version.file && props.version.kind !== 'mermaid'}><p class="side-meta">{t('visual.fileOnly')}</p></Show>
+    <details onToggle={(e) => setCode(e.currentTarget.open)}>
+      <summary>{t('visual.code')}</summary>
+      <Show when={code()}><VisualCode conversationId={props.conversationId} version={props.version} code={props.code} /></Show>
+    </details>
+  </div>;
+}
+
+/** File snapshots sit with the reply, independent of how its narration and final words fold. */
+export function VisualFiles(props: { answers: VisualAnswer[]; messageId: string; conversationId: string }) {
+  const files = createMemo(() => props.answers.flatMap((answer) => answer.versions
+    .filter((v) => v.file && v.messageId === props.messageId).map((version) => ({ answer, version }))));
+  return <For each={files()}>{({ answer, version }) => <VisualCard answer={answer} version={version} conversationId={props.conversationId} code="" />}</For>;
+}
 
 /** The engine supplies the closed fences' ranges; all remaining words use the reply's existing Markdown view. */
 export function VisualReply(props: { text: string; offset: number; messageId: string; conversationId: string; answers: VisualAnswer[] }) {
   const links = createMemo(() => referenceLinks(props.text));
   const pieces = createMemo(() => {
     const versions = props.answers.flatMap((answer) => answer.versions
-      .filter((v) => v.messageId === props.messageId && v.start >= props.offset && v.end <= props.offset + props.text.length)
+      .filter((v) => !v.file && v.messageId === props.messageId && v.start >= props.offset && v.end <= props.offset + props.text.length)
       .map((version) => ({ answer, version }))).sort((a, b) => a.version.start - b.version.start);
     const out: { text: string; answer?: VisualAnswer; version?: VisualVersion }[] = [];
     let at = 0;
@@ -38,20 +86,7 @@ export function VisualReply(props: { text: string; offset: number; messageId: st
     return out;
   });
   return <Index each={pieces()}>{(piece) => <Show when={piece().answer} fallback={<Markdown text={piece().text} links={links()} />}>
-    {(answer) => {
-      const [code, setCode] = createSignal(false);
-      return <div class="visual-card">
-        <div class="visual-card-head">
-          <Icon name="sheet" />
-          <span><b>{visualName(answer())}</b><small>{t(piece().version!.kind === 'svg' ? 'visual.drawing' : 'visual.page')}</small></span>
-          <button class="btn visual-open" onClick={() => showVisual({ conversationId: props.conversationId, answerId: answer().id, messageId: props.messageId, block: piece().version!.block })}>{t('visual.open')}</button>
-        </div>
-        <details onToggle={(e) => setCode(e.currentTarget.open)}>
-          <summary>{t('visual.code')}</summary>
-          <Show when={code()}><Markdown text={piece().text} /></Show>
-        </details>
-      </div>;
-    }}
+    {(answer) => <VisualCard answer={answer()} version={piece().version!} conversationId={props.conversationId} code={piece().text} />}
   </Show>}</Index>;
 }
 
@@ -237,7 +272,7 @@ export function VisualPane(props: { answer: VisualAnswer; open: OpenVisual; onBa
     window.removeEventListener('message', fromFrame);
     retire();
   });
-  const initial = () => props.answer.versions.findIndex((v) => v.messageId === props.open.messageId && v.block === props.open.block);
+  const initial = () => props.answer.versions.findIndex((v) => v.messageId === props.open.messageId && v.block === props.open.block && v.file === props.open.file);
   const [picked, setPicked] = createSignal(initial() < 0 ? props.answer.versions.length - 1 : initial());
   createEffect(on(() => props.open, () => setPicked(initial() < 0 ? props.answer.versions.length - 1 : initial()), { defer: true }));
   const at = () => Math.min(picked(), props.answer.versions.length - 1);
@@ -248,7 +283,9 @@ export function VisualPane(props: { answer: VisualAnswer; open: OpenVisual; onBa
     const id = await lease;
     if (disposed) return undefined;
     // The native response headers choose offline/live from saved Settings; the screen cannot grant it.
-    return api.visualPage(id, requested, visualDocument(version.source, true));
+    const source = await versionSource(props.open.conversationId, version);
+    if (disposed) return undefined;
+    return api.visualPage(id, requested, visualDocument(version.kind === 'mermaid' ? mermaidDocument(source, t('visual.mermaidWeb')) : source, true));
   });
   createEffect(() => { if (page.error) retire(); });
   const move = (by: number) => setPicked(Math.max(0, Math.min(at() + by, props.answer.versions.length - 1)));

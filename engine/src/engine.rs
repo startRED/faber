@@ -252,6 +252,7 @@ struct Live {
     runs: Permissions,
     /// The folder the process was started in (checked); a turn that finds the folder resolving elsewhere starts a new process.
     cwd: PathBuf,
+    visual_root: Option<Arc<faber_winproc::rewind::Root>>,
     by_hand: bool,
     approved: bool,
     started: f64,
@@ -767,6 +768,12 @@ impl Engine {
     }
     pub fn open(&self, id: &str) -> Option<Conversation> {
         self.with(|c| c.load(id).cloned())
+    }
+    pub fn open_for_screen(&self, id: &str) -> Option<Conversation> {
+        self.open(id).map(Conversation::for_screen)
+    }
+    pub fn visual_answers_for_screen(&self, id: &str, message_id: Option<&str>, block: Option<usize>) -> Vec<crate::visual::VisualAnswer> {
+        self.with(|c| c.load(id).map(|conversation| crate::visual::list(&conversation.messages, message_id.zip(block))).unwrap_or_default())
     }
     /// The messages of a conversation that have other versions (parity T7).
     pub fn versions(&self, id: &str) -> Vec<crate::model::Versions> {
@@ -1985,6 +1992,10 @@ impl Core {
                     tool.declined = declined;
                     tool.output = Some(text.chars().take(4000).collect());
                 }
+                let root = self.live.get(conv).and_then(|live| live.visual_root.clone());
+                if let (Some(root), Some(conversation)) = (root, self.convs.get_mut(conv)) {
+                    crate::visual::capture(&mut conversation.messages, &root, &id);
+                }
                 self.settle_facts(conv, &id);
                 self.watch_ended(conv, &id);
                 self.pr_seen(conv, &id, &text);
@@ -2327,6 +2338,7 @@ impl Core {
         self.transfers.remove(conv);
         if let Some(l) = self.live.get_mut(conv) {
             l.held = None;
+            l.visual_root = None;
             // Whatever was handed to the turn and not taken in stays in the queue, and goes out like the rest of it.
             l.steering.clear();
         }
@@ -2474,7 +2486,7 @@ impl Core {
 
     fn emit_message(&mut self, conv: &str, message_id: &str) {
         if let Some(m) = self.convs.get(conv).and_then(|c| c.messages.iter().find(|m| m.id == message_id)) {
-            (self.emit)(AppEvent::Message { conversation_id: conv.to_string(), message: Box::new(m.clone()) });
+            (self.emit)(AppEvent::Message { conversation_id: conv.to_string(), message: Box::new(m.clone().for_screen()) });
         }
         self.refresh_running();
     }
@@ -3077,6 +3089,9 @@ impl Core {
             live.session.close();
         }
         self.launch(id, pick)?;
+        if let Some(live) = self.live.get_mut(id) {
+            live.visual_root = crate::visual::pin(&live.cwd).map(Arc::new);
+        }
         let text = if let Some(summary) = self.convs.get_mut(id).and_then(|c| c.rewind_summary.take()) {
             format!("{summary}\n\n{text}")
         } else {
@@ -3324,6 +3339,7 @@ impl Core {
                 was_idle: false,
                 runs,
                 cwd: cwd_used,
+                visual_root: None,
                 by_hand: false,
                 approved: false,
                 started: 0.0,
@@ -3969,6 +3985,71 @@ mod tool_in_tests {
     use serde_json::json;
 
     #[tokio::test]
+    async fn streamed_reply_events_and_open_keep_captured_bytes_out_of_the_screen_store() {
+        let data = tempfile::tempdir().unwrap();
+        let seen = Arc::new(Mutex::new(0usize));
+        let emitted = seen.clone();
+        let engine = Engine::new(
+            EngineOptions {
+                data_dir: data.path().into(),
+                clis: BTreeMap::new(),
+                spawn: Arc::new(|_, _, _| panic!("snapshot projection never starts a CLI")),
+                windows: false,
+                claude_env_billed: false,
+                max_warm: 0,
+                idle: Duration::from_secs(120),
+                runtime: tokio::runtime::Handle::current(),
+                ask: None,
+            },
+            Arc::new(move |event| {
+                if let AppEvent::Message { message, .. } = event {
+                    let text = serde_json::to_string(&message).unwrap();
+                    assert!(!text.contains("SNAPSHOT-BYTES"));
+                    assert!(!text.contains("visualFiles"));
+                    assert!(text.len() < 8192);
+                    assert_eq!(message.visual_file_count, Some(3));
+                    *emitted.lock().unwrap() += 1;
+                }
+            }),
+        );
+        let id = engine.with(|core| {
+            let id = core.blank(Area::Chat, None);
+            let mut reply = Message::new("reply".into(), Role::Assistant, String::new(), 1);
+            for n in 0..3 {
+                let source = format!("SNAPSHOT-BYTES{}", "x".repeat(crate::visual::FILE_BYTES - 14));
+                reply.visual_files.push(crate::visual::VisualFile {
+                    path: format!("{n}.html"),
+                    kind: crate::visual::VisualKind::Html,
+                    source: source.into(),
+                });
+            }
+            core.convs.get_mut(&id).unwrap().messages.push(reply);
+            for _ in 0..300 {
+                core.convs.get_mut(&id).unwrap().messages[0].text.push('x');
+                core.emit_message(&id, "reply");
+            }
+            core.save(&id);
+            id
+        });
+        assert_eq!(*seen.lock().unwrap(), 300);
+        let screen = engine.open_for_screen(&id).unwrap();
+        assert!(screen.messages[0].visual_files.is_empty());
+        assert_eq!(screen.messages[0].visual_file_count, Some(3));
+        assert!(!serde_json::to_string(&screen).unwrap().contains("SNAPSHOT-BYTES"));
+        assert_eq!(engine.open(&id).unwrap().messages[0].visual_files.len(), 3, "screen projection leaves stored versions intact");
+        assert!(engine.visual_answers_for_screen(&id, None, None)[0].versions[0].source.is_empty());
+        assert!(engine.visual_answers_for_screen(&id, Some("reply"), Some(1))[1].versions[0].source.starts_with("SNAPSHOT-BYTES"));
+        let project_folder = tempfile::tempdir().unwrap();
+        let project = engine.add_project(&project_folder.path().to_string_lossy()).unwrap();
+        let moved = engine.move_to_project(&id, &project.id).unwrap().for_screen();
+        let json = serde_json::to_string(&moved).unwrap();
+        assert!(!json.contains("SNAPSHOT-BYTES") && !json.contains("visualFiles"));
+        assert_eq!(moved.messages[0].visual_file_count, Some(3));
+        assert_eq!(engine.open(&id).unwrap().messages[0].visual_files.len(), 3, "move response does not discard stored versions");
+        engine.shutdown();
+    }
+
+    #[tokio::test]
     async fn rewind_stop_reaches_idle_sessions_without_stopping_other_conversations() {
         let data = tempfile::tempdir().unwrap();
         let engine = Engine::new(
@@ -4015,6 +4096,7 @@ mod tool_in_tests {
                         was_idle: false,
                         runs: Permissions::Ask,
                         cwd: data.path().to_path_buf(),
+                        visual_root: None,
                         by_hand: true,
                         approved: false,
                         started: 0.0,

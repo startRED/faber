@@ -77,6 +77,10 @@ nothing stops a program from opening its own connection; blocking outbound traff
 
 ### Parallel scenarios
 
+The pane-memory scenario always measures offline HTML. Its real Mermaid CDN renderer and cost step runs only with
+`FABER_LIVE_CDN=1`; otherwise the log says Mermaid Live was not measured. That opt-in lead run requires internet and
+fails if the pinned library cannot draw; ordinary screen suites do not depend on CDN availability.
+
 On a person's PC the screen suite runs several scenarios at once, so a full run takes a fraction of the time it took one
 after the other (1432 s before, 497 s after with four workers, on the maintainer's PC, 2026-10-17). `FABER_SCREEN_WORKERS` sets how many
 (a number above zero); without it a PC uses 4 workers and GitHub Actions uses 1, since each CI part already shares a small

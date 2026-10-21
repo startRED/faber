@@ -566,6 +566,7 @@ mod tests {
                     group_files: None,
                     group_context: None,
                     cwd: PathBuf::new(),
+                    visual_root: None,
                     vendor: Vendor::Codex,
                     model: None,
                     running: None,

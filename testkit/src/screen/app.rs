@@ -1075,20 +1075,85 @@ fn visual_frames_collected(ctx: &mut Ctx, app: &mut Opened, baseline: f64, befor
     Ok(closed)
 }
 
+// DevTools reads the rendered DOM directly; the frame gains neither parent access nor a test reporting channel.
+fn wait_for_mermaid_drawing(page: &mut Page) -> Result {
+    let url = page.eval("document.querySelector('.visual-frame').src")?;
+    let targets = page.cdp.call("Target.getTargets", json!({}))?;
+    let target = targets["targetInfos"]
+        .as_array()
+        .and_then(|targets| targets.iter().find(|target| target["type"] == "iframe" && target["url"] == url));
+    let session = if let Some(target) = target {
+        Some(
+            page.cdp.call("Target.attachToTarget", json!({ "targetId": target["targetId"], "flatten": true }))?["sessionId"]
+                .as_str()
+                .ok_or("the visual frame has no DevTools session")?
+                .to_string(),
+        )
+    } else {
+        None
+    };
+    let mut params = json!({
+        "awaitPromise": true, "returnByValue": true,
+        "expression": r#"new Promise(resolve => {
+          const until = performance.now() + 15000;
+          const timer = setInterval(() => {
+            const svg = document.querySelector('#drawing > svg');
+            const box = svg?.getBoundingClientRect();
+            const ready = svg?.namespaceURI === 'http://www.w3.org/2000/svg'
+              && box.width > 0 && box.height > 0
+              && svg.textContent.includes('Memory sample') && svg.textContent.includes('Renderer released')
+              && document.getElementById('source')?.hidden === true && document.getElementById('fallback')?.hidden === true;
+            if (ready || performance.now() >= until) {
+              clearInterval(timer);
+              resolve({ ready, svg: !!svg, sourceHidden: document.getElementById('source')?.hidden,
+                fallbackHidden: document.getElementById('fallback')?.hidden });
+            }
+          }, 50);
+        })"#
+    });
+    if session.is_none() {
+        // A webview without a separate renderer still has an opaque child frame: inspect its own isolated world.
+        let tree = page.cdp.call("Page.getFrameTree", json!({}))?;
+        let child = tree["frameTree"]["childFrames"]
+            .as_array()
+            .and_then(|frames| frames.iter().find(|frame| frame["frame"]["url"] == url))
+            .ok_or("the visual frame has no inspectable DevTools document")?;
+        params["contextId"] = page.cdp.call(
+            "Page.createIsolatedWorld",
+            json!({
+                "frameId": child["frame"]["id"], "worldName": "faber-screen-mermaid"
+            }),
+        )?["executionContextId"]
+            .clone();
+    }
+    let inspected = page.cdp.call_in_session(session.as_deref(), "Runtime.evaluate", params);
+    if let Some(session) = session {
+        page.cdp.call("Target.detachFromTarget", json!({ "sessionId": session }))?;
+    }
+    let inspected = inspected?;
+    ensure(inspected["exceptionDetails"].is_null() && inspected["result"]["value"]["ready"] == json!(true), || {
+        format!(
+            "the real pinned Mermaid renderer must produce its SVG under the unchanged Live sandbox (internet required, no stub or offline fallback): {inspected}"
+        )
+    })
+}
+
 fn visual_answers_pane_memory(ctx: &mut Ctx) -> Result {
     start_settings(ctx, "en")?;
     let conversation = json!({
         "id": "visual-pane-memory", "title": "Visual pane memory", "area": "chat", "sessions": {},
         "createdAt": 1, "updatedAt": 1,
         "messages": [{ "id": "visual-page", "role": "assistant", "vendor": "claude", "at": 1, "status": "done",
-            "text": "```html\n<title>Memory chart</title><h1>Memory chart</h1><svg viewBox=\"0 0 300 160\"><rect x=\"20\" y=\"20\" width=\"80\" height=\"120\" fill=\"teal\"/></svg>\n```" }]
+            "text": "```html\n<title>Memory chart</title><h1>Memory chart</h1><svg viewBox=\"0 0 300 160\"><rect x=\"20\" y=\"20\" width=\"80\" height=\"120\" fill=\"teal\"/></svg>\n```" },
+          { "id": "visual-mermaid", "role": "assistant", "vendor": "claude", "at": 2, "status": "done",
+            "text": "```mermaid\nflowchart LR\nA[Memory sample] --> B[Renderer released]\n```" }]
     });
     let folder = ctx.sb.data.join("conversations");
     std::fs::create_dir_all(&folder).map_err(|e| e.to_string())?;
     std::fs::write(folder.join("visual-pane-memory.json"), conversation.to_string()).map_err(|e| e.to_string())?;
     let mut app = ctx.launch(no_cli())?;
     app.page.click(&css(".list .item").has_text("Visual pane memory"))?;
-    app.page.wait_count(&css(".visual-card"), 1)?;
+    app.page.wait_count(&css(".visual-card"), 2)?;
     same(app.page.count(&css("iframe"))?, 0, "a closed visual pane keeps no frame")?;
     app.page.cdp.call("HeapProfiler.collectGarbage", json!({}))?;
     pause(0.5);
@@ -1098,7 +1163,7 @@ fn visual_answers_pane_memory(ctx: &mut Ctx) -> Result {
     ctx.notes.push(format!("visual answer before opening: renderer DOM counters {dom}"));
     // Wait for the opaque frame's real load in its parent, without reading across the sandbox boundary.
     app.page.eval("document.addEventListener('load',function ready(e){if(e.target instanceof HTMLIFrameElement && e.target.matches('.visual-frame')){document.removeEventListener('load',ready,true);document.body.dataset.visualMemoryReady='yes';}},true)")?;
-    app.page.click(&css(".visual-open"))?;
+    app.page.click(&css(".visual-card").has_text("Memory chart").css(".visual-open"))?;
     app.page.wait_count(&css(".visual-frame"), 1)?;
     app.page.wait_for("the visual page to finish loading", "document.body.dataset.visualMemoryReady==='yes'")?;
     app.page.eval("window.__visualFrames=[new WeakRef(document.querySelector('.visual-frame'))];void 0")?;
@@ -1108,6 +1173,53 @@ fn visual_answers_pane_memory(ctx: &mut Ctx) -> Result {
     app.page.wait_gone(&css(".visual-pane"))?;
     same(app.page.count(&css("iframe"))?, 0, "closing the visual pane removes its frame")?;
     visual_frames_collected(ctx, &mut app, baseline, &before_processes, "visual answer after closing")?;
+
+    if std::env::var("FABER_LIVE_CDN").as_deref() != Ok("1") {
+        ctx.notes.push("Mermaid Live not measured; set FABER_LIVE_CDN=1 for the lead's real-CDN renderer and cost check".into());
+        return Ok(());
+    }
+    // Real CDN bytes, the production integrity pin and native guards: no bundled library or replacement renderer.
+    app.page.eval("window.__TAURI_INTERNALS__.invoke('save_settings',{patch:{webSearch:'live'}}).then(()=>true)")?;
+    let mermaid_baseline = super::setup::measure(ctx, &app, "Mermaid Live before opening")?;
+    let before_processes = crate::proctree::live_tree(&crate::proctree::snapshot()?, app.pid);
+    let idle_before = ctx.cpu_ms(app.id)?;
+    let idle_started = Instant::now();
+    pause(2.0);
+    let idle_cpu = (ctx.cpu_ms(app.id)? - idle_before) / idle_started.elapsed().as_secs_f64() / 10.0;
+    let render_before = ctx.cpu_ms(app.id)?;
+    let render_started = Instant::now();
+    app.page.eval("document.addEventListener('load',function ready(e){if(e.target===document.querySelector('.visual-frame')){document.removeEventListener('load',ready,true);document.body.dataset.mermaidMemoryLoaded='yes';}},true)")?;
+    app.page.click(&css(".visual-card .visual-open").last())?;
+    app.page.wait_count(&css(".visual-frame"), 1)?;
+    app.page
+        .wait_for("the Mermaid frame document to load before inspecting its target", "document.body.dataset.mermaidMemoryLoaded==='yes'")?;
+    wait_for_mermaid_drawing(&mut app.page)?;
+    let render_cpu_ms = ctx.cpu_ms(app.id)? - render_before;
+    let render_wall_ms = render_started.elapsed().as_secs_f64() * 1000.0;
+    same(
+        app.page.eval("document.querySelector('.visual-frame').getAttribute('sandbox')")?,
+        json!("allow-scripts"),
+        "Mermaid keeps the opaque sandbox",
+    )?;
+    app.page.eval("window.__visualFrames=[new WeakRef(document.querySelector('.visual-frame'))];void 0")?;
+    let mermaid_open = super::setup::measure(ctx, &app, "Mermaid Live after actual SVG rendering")?;
+    let open_before = ctx.cpu_ms(app.id)?;
+    let open_started = Instant::now();
+    pause(2.0);
+    let open_cpu = (ctx.cpu_ms(app.id)? - open_before) / open_started.elapsed().as_secs_f64() / 10.0;
+    ctx.shot(&mut app, "visual-pane-memory-mermaid-live")?;
+    app.page.click(&close)?;
+    app.page.wait_gone(&css(".visual-pane"))?;
+    same(app.page.count(&css("iframe"))?, 0, "closing the Mermaid pane removes its real renderer frame")?;
+    let mermaid_closed = visual_frames_collected(ctx, &mut app, mermaid_baseline, &before_processes, "Mermaid Live after closing")?;
+    let closed_before = ctx.cpu_ms(app.id)?;
+    let closed_started = Instant::now();
+    pause(2.0);
+    let closed_cpu = (ctx.cpu_ms(app.id)? - closed_before) / closed_started.elapsed().as_secs_f64() / 10.0;
+    ctx.notes.push(format!(
+        "Mermaid Live, real integrity-checked CDN renderer: before {mermaid_baseline:.1} MB, rendered {mermaid_open:.1} MB (+{:.1} MB), after close {mermaid_closed:.1} MB (+{:.1} MB); opening and rendering {render_cpu_ms:.0} ms CPU over {render_wall_ms:.0} ms including download; idle processor of one core before {idle_cpu:.1}%, open {open_cpu:.1}%, closed {closed_cpu:.1}%",
+        mermaid_open - mermaid_baseline, mermaid_closed - mermaid_baseline
+    ));
     Ok(())
 }
 

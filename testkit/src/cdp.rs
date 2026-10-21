@@ -231,12 +231,21 @@ impl Cdp {
     /// One protocol call. Load events are retained even when they arrive before the reply. The whole call shares one
     /// deadline, so a page that never stops sending events cannot keep it from ending.
     pub fn call(&mut self, method: &str, params: Value) -> Result<Value, String> {
+        self.call_in_session(None, method, params)
+    }
+
+    /// A trusted runner may inspect an out-of-process frame without changing its sandbox or the page's access.
+    pub fn call_in_session(&mut self, session: Option<&str>, method: &str, params: Value) -> Result<Value, String> {
         let own = Instant::now() + CALL_LIMIT;
         let deadline = self.deadline.map_or(own, |outer| outer.min(own));
         let what = format!("the answer to {method}");
         self.next += 1;
         let id = self.next;
-        let request = json!({ "id": id, "method": method, "params": params }).to_string();
+        let mut request = json!({ "id": id, "method": method, "params": params });
+        if let Some(session) = session {
+            request["sessionId"] = json!(session);
+        }
+        let request = request.to_string();
         self.socket.get_mut().deadline = deadline;
         self.socket.send(Message::text(request)).map_err(|e| {
             if protocol_timed_out(&e, deadline) { format!("timed out waiting for {what}") } else { format!("DevTools send: {e}") }
@@ -799,6 +808,20 @@ mod tests {
             }
         });
         (port, seen)
+    }
+
+    #[test]
+    fn frame_inspection_targets_only_its_session_and_leaves_parent_calls_unscoped() {
+        let (port, seen) = mock();
+        let mut cdp = Cdp::connect(port, Duration::from_secs(2)).unwrap();
+        let inspected = cdp.call_in_session(Some("visual-frame-session"), "Runtime.evaluate", json!({ "expression": "1 + 1" })).unwrap();
+        assert_eq!(inspected["result"]["value"], json!(2));
+        cdp.call("Runtime.evaluate", json!({ "expression": "1 + 1" })).unwrap();
+        let seen = seen.lock().unwrap();
+        let calls: Vec<_> = seen.iter().filter(|call| call["method"] == "Runtime.evaluate").collect();
+        assert_eq!(calls.len(), 2);
+        assert_eq!(calls[0]["sessionId"], json!("visual-frame-session"));
+        assert!(calls[1].get("sessionId").is_none());
     }
 
     #[test]

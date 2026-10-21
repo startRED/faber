@@ -1330,6 +1330,7 @@ mod tests {
                     was_idle: false,
                     runs: Permissions::Ask,
                     cwd: root.clone(),
+                    visual_root: None,
                     by_hand: true,
                     approved: false,
                     started: 0.0,

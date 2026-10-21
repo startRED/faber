@@ -1,11 +1,14 @@
 //! Visual answers are derived from reply text; the conversation already keeps their history.
 
 use crate::model::{Message, Role, WebSearch};
+use faber_winproc::rewind::Root;
 use html5ever::tokenizer::{BufferQueue, TagKind, Token, TokenSink, TokenSinkResult, Tokenizer, states::RawKind};
 use pulldown_cmark::{CodeBlockKind, Event, Parser, Tag, TagEnd};
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use std::cell::RefCell;
 use std::collections::HashMap;
+use std::io::Read;
+use std::sync::Arc;
 
 /// Cached search belongs to the CLI; only the person's live-web choice grants a page network access.
 pub fn network(web: Option<WebSearch>) -> bool {
@@ -54,11 +57,80 @@ pub fn public_https(url: &reqwest::Url) -> bool {
             .any(|suffix| host == *suffix || host.ends_with(&format!(".{suffix}")))
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum VisualKind {
     Html,
     Svg,
+    Mermaid,
+}
+
+/// Saved only after a successful editing tool, never reconstructed from the project on opening history.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct VisualFile {
+    pub path: String,
+    pub kind: VisualKind,
+    pub source: Arc<str>,
+}
+
+pub const FILE_BYTES: usize = 256 * 1024;
+pub const TURN_BYTES: usize = 1024 * 1024;
+pub const TURN_FILES: usize = 12;
+pub const CONVERSATION_BYTES: usize = 8 * 1024 * 1024;
+
+pub fn pin(root: &std::path::Path) -> Option<Root> {
+    let pinned = Root::open(root).ok()?;
+    // Launch removes Windows' canonical prefix for CLI compatibility. Normalize only that spelling, never resolve root again.
+    let same = if cfg!(windows) {
+        crate::project::git::native_path(pinned.path()) == crate::project::git::native_path(root)
+    } else {
+        pinned.path() == root
+    };
+    same.then_some(pinned)
+}
+
+/// Read only the editing call's named outputs through the existing pinned, no-link file reader.
+pub fn capture(messages: &mut [Message], root: &Root, id: &str) {
+    let remaining = CONVERSATION_BYTES.saturating_sub(messages.iter().flat_map(|m| &m.visual_files).map(|f| f.source.len()).sum());
+    let Some(message) = messages.iter_mut().rev().find(|m| m.tools.iter().flatten().any(|tool| tool.id == id)) else { return };
+    capture_message(message, root, id, remaining);
+}
+
+fn capture_message(message: &mut Message, root: &Root, id: &str, mut remaining: usize) {
+    let Some(tool) = message.tools.iter().flatten().find(|tool| tool.id == id) else { return };
+    if message.role != Role::Assistant || tool.ok != Some(true) || tool.declined || tool.parent.is_some() {
+        return;
+    }
+    let paths: Vec<String> = crate::nudge::edited(tool).into_iter().take(TURN_FILES).map(str::to_string).collect();
+    let mut used: usize = message.visual_files.iter().map(|file| file.source.len()).sum();
+    for raw in paths {
+        if message.visual_files.len() >= TURN_FILES || used >= TURN_BYTES || remaining == 0 {
+            break;
+        }
+        let Some(file) = crate::fileview::literal(root.path(), &raw) else { continue };
+        let kind = match std::path::Path::new(&file.path).extension().and_then(|ext| ext.to_str()).map(str::to_ascii_lowercase).as_deref() {
+            Some("html" | "htm") => VisualKind::Html,
+            Some("svg") => VisualKind::Svg,
+            Some("mmd" | "mermaid") => VisualKind::Mermaid,
+            _ => continue,
+        };
+        let limit = FILE_BYTES.min(TURN_BYTES - used).min(remaining);
+        let Ok(input) = root.open_file(&file.path) else { continue };
+        let mut bytes = Vec::new();
+        if input.take((limit + 1) as u64).read_to_end(&mut bytes).is_err() {
+            continue;
+        }
+        if bytes.is_empty() || bytes.len() > limit || bytes.contains(&0) {
+            continue;
+        }
+        let Ok(source) = String::from_utf8(bytes) else { continue };
+        if message.visual_files.iter().rev().find(|old| old.path == file.path).is_some_and(|old| old.source.as_ref() == source) {
+            continue;
+        }
+        used += source.len();
+        remaining -= source.len();
+        message.visual_files.push(VisualFile { path: file.path, kind, source: source.into() });
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -72,6 +144,8 @@ pub struct VisualVersion {
     pub end: usize,
     pub kind: VisualKind,
     pub source: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub file: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -86,8 +160,18 @@ pub struct VisualAnswer {
 
 /// Pure detection shared by both CLI drivers, in the conversation's message order.
 pub fn detect(messages: &[Message]) -> Vec<VisualAnswer> {
+    project(messages, true, None)
+}
+
+/// Discovery sends locators, not captured bytes. Only the requested version supplies its saved source.
+pub fn list(messages: &[Message], selected: Option<(&str, usize)>) -> Vec<VisualAnswer> {
+    project(messages, false, selected)
+}
+
+fn project(messages: &[Message], all: bool, selected: Option<(&str, usize)>) -> Vec<VisualAnswer> {
     let mut answers: Vec<VisualAnswer> = Vec::new();
     let mut named = HashMap::new();
+    let mut files: HashMap<String, usize> = HashMap::new();
     for message in messages.iter().filter(|message| message.role == Role::Assistant) {
         let mut block = 0;
         let mut pending = None;
@@ -97,6 +181,7 @@ pub fn detect(messages: &[Message]) -> Vec<VisualAnswer> {
                     let kind = match language.split_whitespace().next() {
                         Some("html") => Some(VisualKind::Html),
                         Some("svg") => Some(VisualKind::Svg),
+                        Some("mermaid") => Some(VisualKind::Mermaid),
                         _ => None,
                     };
                     if let Some(kind) = kind {
@@ -121,10 +206,10 @@ pub fn detect(messages: &[Message]) -> Vec<VisualAnswer> {
                     if suffix.bytes().rev().take_while(|byte| *byte == marker).count() < count {
                         continue;
                     }
-                    let name = title(&source);
+                    let name = if kind == VisualKind::Mermaid { None } else { title(&source) };
                     let start = message.text[..range.start].encode_utf16().count();
                     let end = start + message.text[range].encode_utf16().count();
-                    let version = VisualVersion { message_id: message.id.clone(), block, start, end, kind, source };
+                    let version = VisualVersion { message_id: message.id.clone(), block, start, end, kind, source, file: None };
                     if let Some(index) = name.as_ref().and_then(|name| named.get(name)).copied() {
                         let answer: &mut VisualAnswer = &mut answers[index];
                         answer.versions.push(version);
@@ -136,6 +221,28 @@ pub fn detect(messages: &[Message]) -> Vec<VisualAnswer> {
                     }
                 }
                 _ => {}
+            }
+        }
+        for (index, file) in message.visual_files.iter().enumerate() {
+            let version = VisualVersion {
+                message_id: message.id.clone(),
+                block: index,
+                start: 0,
+                end: 0,
+                kind: file.kind,
+                source: if all || selected == Some((message.id.as_str(), index)) { file.source.to_string() } else { String::new() },
+                file: Some(file.path.clone()),
+            };
+            if let Some(index) = files.get(&file.path).copied() {
+                answers[index].versions.push(version);
+            } else {
+                files.insert(file.path.clone(), answers.len());
+                answers.push(VisualAnswer {
+                    id: format!("{}:file:{index}", message.id),
+                    name: Some(file.path.clone()),
+                    kind: file.kind,
+                    versions: vec![version],
+                });
             }
         }
     }

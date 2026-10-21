@@ -3,7 +3,8 @@ import { render } from 'solid-js/web';
 import { api, type AppState, type Conversation, type Message, type VisualAnswer } from '../../ui/api.ts';
 import { App } from '../../ui/App.tsx';
 import { Thread } from '../../ui/Thread.tsx';
-import { openedVisual, showVisual, VisualPane, visualDocument, VISUAL_CSP, VISUAL_LIVE_CSP } from '../../ui/VisualAnswer.tsx';
+import { openedVisual, showVisual, VisualFiles, VisualPane, VisualReply, visualDocument, VISUAL_CSP, VISUAL_LIVE_CSP } from '../../ui/VisualAnswer.tsx';
+import { MERMAID_INTEGRITY, MERMAID_URL, mermaidDocument } from '../../ui/visual-mermaid.ts';
 import { openedSite, showSite } from '../../ui/Site.tsx';
 import { openedFile, showFile } from '../../ui/fileref.ts';
 import { store } from '../../ui/running.ts';
@@ -114,6 +115,125 @@ const source = (n: number) => `<!doctype html><html lang="en"><head><title>Budge
 const fence = (text: string) => `\`\`\`html\n${text}\n\`\`\``;
 const answer = (): VisualAnswer => ({ id: 'v1:0', name: 'Budget chart', kind: 'html', versions: [1, 2].map((n) => ({ messageId: `v${n}`, block: 0, start: 0, end: fence(source(n)).length, kind: 'html', source: source(n) })) });
 const messages = (): Message[] => [1, 2].map((n) => ({ id: `v${n}`, role: 'assistant', text: fence(source(n)), vendor: n === 1 ? 'claude' : 'codex', at: n, status: 'done' }));
+
+check('visual files: cards retain exact versions and show the self-contained limit without duplicating reply cards', async () => {
+  const a = answer();
+  a.name = 'site/index.html';
+  a.versions = a.versions.map((v) => ({ ...v, file: 'site/index.html', start: 0, end: 0 }));
+  const host = document.createElement('div'); document.body.append(host);
+  const dispose = render(() => createComponent(VisualFiles, { answers: [a], messageId: 'v1', conversationId: 'files' }), host);
+  const reply = document.createElement('div'); host.append(reply);
+  const stopReply = render(() => createComponent(VisualReply, { text: 'Files ready.', offset: 0, messageId: 'v1', conversationId: 'files', answers: [a] }), reply);
+  try {
+    equal(host.querySelectorAll('.visual-card').length, 1);
+    ok(host.textContent!.includes(t('visual.fileOnly')));
+    host.querySelector<HTMLButtonElement>('.visual-open')!.click();
+    equal(openedVisual()!.messageId, 'v1'); equal(openedVisual()!.file, 'site/index.html');
+    host.querySelector('details')!.open = true;
+    await settle();
+    ok(host.querySelector('pre')!.textContent!.includes('Version 1'));
+    ok(!host.querySelector('pre')!.textContent!.includes('Version 2'));
+  } finally { stopReply(); dispose(); host.remove(); showVisual(undefined); }
+});
+
+check('visual files: discovery has no source and opening code or a version reads only that saved version', async () => {
+  const a = answer();
+  a.versions = a.versions.map((v) => ({ ...v, file: 'page.html', start: 0, end: 0, source: '' }));
+  const saved = api.visualAnswers;
+  const requests: [string, string | undefined, number | undefined][] = [];
+  api.visualAnswers = async (id, messageId, block) => {
+    requests.push([id, messageId, block]);
+    return [{ ...a, versions: a.versions.map((v) => ({ ...v, source: v.messageId === messageId && v.block === block ? source(messageId === 'v1' ? 1 : 2) : '' })) }];
+  };
+  const host = document.createElement('div'); document.body.append(host);
+  let dispose = render(() => createComponent(VisualFiles, { answers: [a], messageId: 'v1', conversationId: 'lazy-files' }), host);
+  try {
+    equal(requests.length, 0);
+    host.querySelector('details')!.open = true;
+    await until(() => host.querySelector('pre'));
+    deepEqual(requests, [['lazy-files', 'v1', 0]]);
+    ok(host.querySelector('pre')!.textContent!.includes('Version 1'));
+    host.querySelector('details')!.open = false;
+    await until(() => !host.querySelector('pre'));
+    dispose();
+    dispose = render(() => createComponent(VisualPane, { answer: a, open: { conversationId: 'lazy-files', answerId: a.id }, onBack: () => {}, onClose: () => {} }), host);
+    await until(() => host.querySelector('iframe'));
+    const frame = host.querySelector('iframe')!;
+    ok(prepared.get(frame.src)!.document.includes('Version 2'));
+    host.querySelector<HTMLButtonElement>('.visual-prev')!.click();
+    await until(() => prepared.get(frame.src)?.document.includes('Version 1'));
+    deepEqual(requests, [['lazy-files', 'v1', 0], ['lazy-files', 'v2', 0], ['lazy-files', 'v1', 0]]);
+    ok(a.versions.every((v) => !v.source), 'discovery never becomes a second source store');
+  } finally { dispose(); host.remove(); api.visualAnswers = saved; }
+});
+
+check('Mermaid: source cannot escape into markup, the lazy library is pinned and its code fallback stays offline', () => {
+  const source = 'flowchart LR\nA-->B\n</pre><script>parent.compromised=true</script>';
+  const doc = new DOMParser().parseFromString(mermaidDocument(source), 'text/html');
+  equal(doc.querySelector('#source')!.textContent, source);
+  equal(doc.querySelectorAll('script').length, 2);
+  const library = doc.querySelector('script[src]')!;
+  equal(library.getAttribute('src'), MERMAID_URL);
+  equal(library.getAttribute('integrity'), MERMAID_INTEGRITY);
+  equal(library.getAttribute('crossorigin'), 'anonymous');
+  ok(!doc.querySelector('#source')!.hasAttribute('hidden'));
+  const offline = new DOMParser().parseFromString(visualDocument(mermaidDocument('flowchart LR\nA-->B')), 'text/html');
+  equal(offline.querySelector('[data-faber-src]'), null, 'offline cleaning removes the only library request');
+  equal(offline.querySelector('#source')!.textContent, 'flowchart LR\nA-->B');
+  const live = new DOMParser().parseFromString(visualDocument(mermaidDocument('flowchart LR\nA-->B'), true), 'text/html');
+  equal(live.querySelector('[data-faber-src]')!.getAttribute('integrity'), MERMAID_INTEGRITY);
+  equal(live.querySelectorAll('[data-faber-src]').length, 1);
+});
+
+check('Mermaid: reply cards do not keep a permanent renderer-limits notice', () => {
+  const source = 'flowchart LR\nA-->B';
+  const text = '```mermaid\n' + source + '\n```';
+  const a = answer(); a.kind = 'mermaid';
+  a.versions = [{ ...a.versions[0]!, kind: 'mermaid', source, start: 0, end: text.length }];
+  const host = document.createElement('div'); document.body.append(host);
+  const dispose = render(() => createComponent(VisualReply, { text, offset: 0, messageId: 'v1', conversationId: 'mermaid', answers: [a] }), host);
+  try {
+    equal(host.querySelectorAll('.visual-card').length, 1);
+    equal(host.querySelector('.visual-card .side-meta'), null);
+    ok(!host.textContent!.includes(t('visual.mermaidWeb')));
+  } finally { dispose(); host.remove(); }
+});
+
+check('Mermaid: a controlled renderer draws in the real isolated pane and a render failure retains code', async () => {
+  const host = document.createElement('div'); document.body.append(host);
+  const saved = api.visualPage;
+  const probe = crypto.randomUUID();
+  let result: { drawing: boolean; code: boolean; notice: boolean; isolated: boolean } | undefined;
+  const listen = (e: MessageEvent) => {
+    if (e.origin === 'null' && e.source === host.querySelector('iframe')?.contentWindow && e.data?.probe === probe) result = e.data;
+  };
+  window.addEventListener('message', listen);
+  try {
+    for (const fails of [false, true]) {
+      result = undefined;
+      // Deterministic screen fixture: no external service or third-party bytes enter the test build.
+      api.visualPage = (id, revision, document) => {
+        const doc = new DOMParser().parseFromString(document, 'text/html');
+        const library = doc.querySelector('script[data-faber-src]')!;
+        library.removeAttribute('data-faber-src');
+        library.textContent = `window.mermaid={initialize(c){if(c.securityLevel!=='strict'||c.maxEdges!==200)throw Error('unsafe config');},render(){return ${fails ? "Promise.reject(Error('fixture'))" : "Promise.resolve({svg:'<svg xmlns=\"http://www.w3.org/2000/svg\"><title>Flow</title><text>A to B</text></svg>'})"};}};`;
+        const report = doc.createElement('script');
+        report.type = 'application/faber-script'; report.setAttribute('data-faber-script', 'text/javascript');
+        report.textContent = `window.addEventListener('load',()=>{let isolated=false;try{parent.document.body}catch{isolated=true}parent.postMessage({probe:${JSON.stringify(probe)},drawing:!!document.querySelector('#drawing svg'),code:!document.getElementById('source').hidden,notice:!document.getElementById('fallback').hidden,isolated},'*')});`;
+        doc.body.append(report);
+        return saved(id, revision, '<!doctype html>' + doc.documentElement.outerHTML);
+      };
+      const a = answer(); a.kind = 'mermaid'; a.versions = [{ ...a.versions[0]!, kind: 'mermaid', source: 'flowchart LR\nA-->B' }];
+      const dispose = render(() => createComponent(VisualPane, { answer: a, open: { conversationId: 'diagram', answerId: a.id }, onBack: () => {}, onClose: () => {} }), host);
+      try {
+        await until(() => result);
+        equal(result!.drawing, !fails); equal(result!.code, fails); equal(result!.notice, fails); equal(result!.isolated, true);
+        equal(host.querySelector('iframe')!.getAttribute('sandbox'), 'allow-scripts');
+        equal(prepared.get(host.querySelector('iframe')!.src)!.live, false);
+      } finally { dispose(); }
+    }
+  } finally { api.visualPage = saved; host.remove(); window.removeEventListener('message', listen); }
+});
 
 registerCheck('visual answers: the real native filter compiles before Live can be used on Windows and macOS', async () => {
   if (!/Windows|Macintosh|Mac OS/.test(navigator.userAgent)) return;
@@ -446,7 +566,7 @@ check('visual answers: scripts cannot connect dynamic hints through DOM, HTML, t
       parent.postMessage({probe:${JSON.stringify(probe)},cases},'*');
     } catch(error) { parent.postMessage({probe:${JSON.stringify(probe)},cases,error:String(error)},'*'); }
   </script>`;
-  const a = answer(); a.versions = [{ ...a.versions[0]!, source: script }];
+  const a = answer(); a.versions = [{ ...a.versions[0]!, source: script, file: 'project/app.html' }];
   const dispose = render(() => createComponent(VisualPane, { answer: a, open: { conversationId: 'hints', answerId: a.id }, onBack: () => {}, onClose: () => {} }), host);
   try {
     await until(() => result);
@@ -618,6 +738,22 @@ check('visual answers: a visual written between tool steps keeps its card when t
   } finally { dispose(); host.remove(); }
 });
 
+check('visual files: saved file locators do not unfold the hidden narration beside More', () => {
+  const host = document.createElement('div'); document.body.append(host);
+  const a = answer(); a.versions = [{ ...a.versions[0]!, file: 'page.html', start: 0, end: 0 }];
+  const before = 'Hidden first paragraph.\n\nHidden second paragraph.\n\nShown third paragraph.\n\nShown fourth paragraph.\n\n';
+  const message: Message = { ...messages()[0]!, text: before + 'Done.', activityEnd: before.length, tools: [{ id: 'read', name: 'Read', input: {}, ok: true }] };
+  const dispose = render(() => createComponent(Thread, { messages: [message], visuals: [a], conversationId: 'visual', options: [], from: 0, onBranch: () => {} }), host);
+  try {
+    ok(host.querySelector('.more-narration'));
+    ok(!host.textContent!.includes('Hidden first paragraph.'));
+    ok(host.textContent!.includes('Shown third paragraph.'));
+    host.querySelector<HTMLButtonElement>('.more-narration')!.click();
+    ok(host.textContent!.includes('Hidden first paragraph.'));
+    equal(host.querySelectorAll('.visual-card').length, 1, 'saved file appears once, after the reply');
+  } finally { dispose(); host.remove(); }
+});
+
 check('visual answers: Chat and Projects at 720 px reuse the resizable running pane, switch versions and release the frame with reduced motion', async () => {
   const before = { ...api };
   const stored = { place: localStorage.getItem('faber.place'), layout: localStorage.getItem('faber.layout') };
@@ -627,12 +763,28 @@ check('visual answers: Chat and Projects at 720 px reuse the resizable running p
   const revision = store.list().revision;
   store.offer({ revision: revision + 1, items: [] });
   try {
-    for (const area of ['chat', 'project'] as const) {
+    for (const area of ['chat', 'project'] as const) for (const form of ['reply', 'file', 'mermaid'] as const) {
       useLanguage('de');
       const host = document.createElement('div');
       host.style.cssText = 'position:fixed;top:0;left:0;width:720px;height:800px';
       document.body.append(host);
-      const c: Conversation = { id: `visual-${area}`, title: 'Visual answers', area, projectId: area === 'project' ? 'p1' : undefined, sessions: {}, messages: messages(), createdAt: 1, updatedAt: 2 };
+      const visual = answer();
+      const replies = messages();
+      if (form === 'file') {
+        visual.name = 'site/index.html';
+        visual.versions = visual.versions.map((v) => ({ ...v, file: 'site/index.html', start: 0, end: 0 }));
+        for (const message of replies) message.text = 'Files ready.';
+      }
+      if (form === 'mermaid') {
+        visual.kind = 'mermaid';
+        visual.versions = visual.versions.map((v, i) => {
+          const source = `flowchart LR\nA-->B\n%% data-version="${i + 1}"`;
+          const text = '```mermaid\n' + source + '\n```';
+          replies[i]!.text = text;
+          return { ...v, kind: 'mermaid', source, start: 0, end: text.length };
+        });
+      }
+      const c: Conversation = { id: `visual-${area}-${form}`, title: 'Visual answers', area, projectId: area === 'project' ? 'p1' : undefined, sessions: {}, messages: replies, createdAt: 1, updatedAt: 2 };
       const initial = {
         conversations: [{ id: c.id, title: c.title, area, projectId: c.projectId, updatedAt: 2 }],
         projects: [{ id: 'p1', name: 'Visual project', path: 'E:/visual-project' }], vendors: [],
@@ -640,7 +792,7 @@ check('visual answers: Chat and Projects at 720 px reuse the resizable running p
         running: { revision: revision + 1, items: [] }, quotas: [], usage: [], models: [], version: 'test', look,
       } as unknown as AppState;
       api.open = async () => c; api.state = async () => initial;
-      api.versions = async () => []; api.visualAnswers = async () => [answer()];
+      api.versions = async () => []; api.visualAnswers = async () => [visual];
       api.warm = async () => {}; api.routeDraft = async () => {}; api.setClock = async () => {}; api.setShellTexts = async () => {};
       api.changes = async () => ({ files: [], incomplete: false });
       api.readFileAt = async () => ({ path: 'chart.ts', line: 2, first: 1, text: 'first\nsecond', total: 2, tooLarge: false, binary: false });

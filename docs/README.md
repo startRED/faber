@@ -36,6 +36,7 @@ points nowhere; a page that grows past the limit splits by topic, and its row he
 | [design/branch.md](design/branch.md) | "Branch from here" and the arrows between the versions of a message |
 | [design/queue.md](design/queue.md) | Queued messages, in-place editing, keyboard controls and drafts when a message leaves the queue |
 | [design/rewind.md](design/rewind.md) | The message menu's Go back, Redo and recovery confirmation, file preview and saved-message notice |
+| [design/visual-answers.md](design/visual-answers.md) | Reply pages, captured file versions, Mermaid, isolation and measured bounds |
 | [design/running.md](design/running.md) | The running column: rows, question cards, done cards, when it opens by itself |
 | [design/keep-going.md](design/keep-going.md) | Keep going: the chip, the quiet lines, the quota warning, the running row and the summary on coming back |
 | [design/search.md](design/search.md) | Sidebar message search, the command box (Ctrl+K) and find in a conversation (Ctrl+F) |

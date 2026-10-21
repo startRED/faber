@@ -120,6 +120,8 @@ mod turn_usage;
 mod usage_view;
 #[path = "verify.rs"]
 mod verify;
+#[path = "visual_files.rs"]
+mod visual_files;
 #[path = "visual_pieces.rs"]
 mod visual_pieces;
 #[path = "waiting.rs"]

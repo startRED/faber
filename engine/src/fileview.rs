@@ -106,15 +106,15 @@ fn absolute(path: &str) -> bool {
     path.starts_with('/') || (b.len() > 2 && b[0].is_ascii_alphabetic() && b[1] == b':' && b[2] == b'/')
 }
 
-/// `root` as a reply would write it: `/` between parts, without Windows' `\\?\` prefix or a trailing slash.
-fn written(root: &Path) -> String {
-    let root = root.to_string_lossy().replace('\\', "/");
-    let root = root.strip_prefix("//?/").unwrap_or(&root);
-    root.trim_end_matches('/').to_string()
+/// Native root spelling; only Windows uses slash aliases and the `\\?\` prefix.
+fn written(root: &Path) -> Option<String> {
+    let native = root.to_str()?;
+    let root = if cfg!(windows) { crate::project::git::native_path(root).replace('\\', "/") } else { native.to_string() };
+    Some(root.trim_end_matches('/').to_string())
 }
 
 /// The file `raw` names inside `root`, or None when it points anywhere else or at a protected file. A relative path is read
-/// from `root`; an absolute one only when it lies under `root` (Windows compares letters without case, like the disk).
+/// from `root`; an absolute one needs lossless Unicode and exact folder spelling (only a Windows drive letter ignores case).
 pub fn parse(root: &Path, raw: &str) -> Option<FileRef> {
     let raw = raw.trim().trim_matches(['`', '"', '\'']);
     let raw = raw.strip_prefix("file://").map_or(raw, |rest| {
@@ -123,11 +123,27 @@ pub fn parse(root: &Path, raw: &str) -> Option<FileRef> {
     });
     let decoded = unescape(raw);
     let (path, line, end) = split_line(&decoded);
-    let path = path.replace('\\', "/");
+    let mut file = literal(root, &path.replace('\\', "/"))?;
+    file.line = line.filter(|n| *n > 0);
+    file.end = file.line.and(end);
+    Some(file)
+}
+
+/// Editing tools report literal filesystem names, not links or line references.
+pub(crate) fn literal(root: &Path, path: &str) -> Option<FileRef> {
+    let path = if cfg!(windows) { path.replace('\\', "/") } else { path.to_string() };
     let relative = if absolute(&path) {
-        let root = written(root);
+        let root = written(root)?;
+        // Stripping the verbatim prefix can redirect a dotted/spaced folder to a different Win32 name.
+        if cfg!(windows) && root.split('/').any(|part| part.ends_with(['.', ' '])) {
+            return None;
+        }
         let head = path.get(..root.len())?;
-        let same = if cfg!(windows) { head.eq_ignore_ascii_case(&root) } else { head == root };
+        let same = if cfg!(windows) && root.as_bytes().get(1) == Some(&b':') && root.as_bytes()[0].is_ascii_alphabetic() {
+            head.get(..2)?.eq_ignore_ascii_case(&root[..2]) && head.get(2..)? == &root[2..]
+        } else {
+            head == root
+        };
         if !same || path.as_bytes().get(root.len()) != Some(&b'/') {
             return None;
         }
@@ -149,8 +165,7 @@ pub fn parse(root: &Path, raw: &str) -> Option<FileRef> {
     {
         return None;
     }
-    let line = line.filter(|n| *n > 0);
-    Some(FileRef { path: relative, line, end: line.and(end) })
+    Some(FileRef { path: relative, line: None, end: None })
 }
 
 /// The file `raw` names, at most `LINES` lines of it around its line.
@@ -211,12 +226,57 @@ mod tests {
         assert_eq!(parse(root, r"src\ui\app.ts:12"), at("src/ui/app.ts", Some(12), None));
         assert_eq!(parse(root, "/work/app/src/app.ts:4"), at("src/app.ts", Some(4), None));
         assert_eq!(parse(root, "file:///work/app/src/app.ts"), at("src/app.ts", None, None));
-        let windows = Path::new(r"E:\Projects\app");
-        assert_eq!(parse(windows, r"E:\Projects\app\src\app.ts:42"), at("src/app.ts", Some(42), None));
-        assert_eq!(parse(windows, "file:///E:/Projects/app/src/app.ts#L42"), at("src/app.ts", Some(42), None));
-        assert_eq!(parse(Path::new(r"\\?\E:\Projects\app"), "E:/Projects/app/a b.ts"), at("a b.ts", None, None));
-        if cfg!(windows) {
-            assert_eq!(parse(windows, r"e:\projects\APP\src\app.ts"), at("src/app.ts", None, None));
+        #[cfg(windows)]
+        {
+            let windows = Path::new(r"E:\Projects\app");
+            assert_eq!(parse(windows, r"E:\Projects\app\src\app.ts:42"), at("src/app.ts", Some(42), None));
+            assert_eq!(parse(windows, "file:///E:/Projects/app/src/app.ts#L42"), at("src/app.ts", Some(42), None));
+            assert_eq!(parse(Path::new(r"\\?\E:\Projects\app"), "E:/Projects/app/a b.ts"), at("a b.ts", None, None));
+            assert_eq!(parse(windows, r"e:\projects\APP\src\app.ts"), None);
+        }
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn absolute_windows_drive_letters_ignore_case_but_folder_names_do_not() {
+        for root in [r"E:\Proj", r"\\?\E:\Proj"] {
+            assert_eq!(literal(Path::new(root), r"e:\Proj\page.html"), at("page.html", None, None));
+            assert_eq!(parse(Path::new(root), "file:///e:/Proj/page.html#L2"), at("page.html", Some(2), None));
+            assert_eq!(literal(Path::new(root), r"e:\proj\page.html"), None);
+            assert_eq!(literal(Path::new(root), r"f:\Proj\page.html"), None);
+        }
+        assert_eq!(literal(Path::new(r"e:\Proj"), r"E:\Proj\page.html"), at("page.html", None, None));
+    }
+
+    #[test]
+    fn absolute_paths_refuse_non_unicode_working_folders_without_replacing_native_names() {
+        #[cfg(unix)]
+        let name = {
+            use std::os::unix::ffi::OsStringExt;
+            std::ffi::OsString::from_vec(b"/work/p\xff".to_vec())
+        };
+        #[cfg(windows)]
+        let name = {
+            use std::os::windows::ffi::OsStringExt;
+            std::ffi::OsString::from_wide(&r"E:\work\p".encode_utf16().chain([0xd800]).collect::<Vec<_>>())
+        };
+        let root = Path::new(&name);
+        assert!(root.to_str().is_none());
+        let candidate = root.to_string_lossy().to_string() + "/page.html";
+        assert_eq!(literal(root, &candidate), None, "replacement characters must not alias a different native folder");
+        assert_eq!(literal(root, "page.html"), at("page.html", None, None));
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn absolute_paths_refuse_case_different_working_folder_spellings() {
+        for (root, candidate) in [
+            (r"E:\Projects\app", r"E:\Projects\APP\page.html"),
+            (r"\\?\E:\Projects\app", r"E:\Projects\APP\page.html"),
+            (r"\\?\UNC\server\share\Project", r"\\server\share\project\page.html"),
+        ] {
+            assert_eq!(literal(Path::new(root), candidate), None, "case-sensitive folders can be distinct: {root} and {candidate}");
+            assert_eq!(literal(Path::new(root), "page.html"), at("page.html", None, None));
         }
     }
 

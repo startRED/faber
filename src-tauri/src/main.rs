@@ -213,7 +213,7 @@ async fn state(app: AppHandle, faber: State<'_, Faber>) -> Res<FullState> {
 
 #[tauri::command]
 async fn open(faber: State<'_, Faber>, id: String) -> Res<Option<Conversation>> {
-    Ok(faber.engine.open(&id))
+    Ok(faber.engine.open_for_screen(&id))
 }
 
 #[tauri::command]
@@ -257,7 +257,7 @@ async fn move_chat_to_group(faber: State<'_, Faber>, conversation_id: String, gr
 
 #[tauri::command]
 async fn new_group_chat(faber: State<'_, Faber>, group_id: String) -> Res<Conversation> {
-    faber.engine.new_group_chat(&group_id)
+    faber.engine.new_group_chat(&group_id).map(Conversation::for_screen)
 }
 
 struct SearchRequest {
@@ -467,9 +467,16 @@ async fn versions(faber: State<'_, Faber>, id: String) -> Res<Vec<faber_engine::
 
 /// Pages and drawings, with the versions already held in the conversation's saved replies.
 #[tauri::command]
-async fn visual_answers(faber: State<'_, Faber>, id: String) -> Res<Vec<faber_engine::visual::VisualAnswer>> {
+async fn visual_answers(
+    faber: State<'_, Faber>,
+    id: String,
+    message_id: Option<String>,
+    block: Option<usize>,
+) -> Res<Vec<faber_engine::visual::VisualAnswer>> {
     let engine = faber.engine.clone();
-    tauri::async_runtime::spawn_blocking(move || engine.visual_answers(&id)).await.map_err(|_| "error.messageGone".to_string())
+    tauri::async_runtime::spawn_blocking(move || engine.visual_answers_for_screen(&id, message_id.as_deref(), block))
+        .await
+        .map_err(|_| "error.messageGone".to_string())
 }
 
 /// No authored page can call this command; the screen snapshots the saved choice for each opened version.
@@ -615,7 +622,7 @@ async fn pin(faber: State<'_, Faber>, id: String, on: bool) -> Res<()> {
 #[tauri::command]
 async fn move_to_project(faber: State<'_, Faber>, id: String, project_id: String) -> Res<Conversation> {
     let engine = faber.engine.clone();
-    tauri::async_runtime::spawn_blocking(move || engine.move_to_project(&id, &project_id))
+    tauri::async_runtime::spawn_blocking(move || engine.move_to_project(&id, &project_id).map(Conversation::for_screen))
         .await
         .map_err(|_| "error.store.write".to_string())?
 }
@@ -941,11 +948,11 @@ async fn chat_folder(
     path: Option<String>,
 ) -> Res<Option<Conversation>> {
     if scratch {
-        return faber.engine.chat_folder(id.as_deref(), None).map(Some);
+        return faber.engine.chat_folder(id.as_deref(), None).map(Conversation::for_screen).map(Some);
     }
     // A folder taken from the recents needs no dialog; the engine checks it like any chosen folder.
     if let Some(path) = path {
-        return faber.engine.chat_folder(id.as_deref(), Some(Path::new(&path))).map(Some);
+        return faber.engine.chat_folder(id.as_deref(), Some(Path::new(&path))).map(Conversation::for_screen).map(Some);
     }
     // A hidden test build must never open a visible native dialog.
     if faber.hidden {
@@ -957,7 +964,7 @@ async fn chat_folder(
     }
     let Some(picked) = dialog.blocking_pick_folder() else { return Ok(None) };
     let path = picked.into_path().map_err(|_| "error.chatFolder")?;
-    faber.engine.chat_folder(id.as_deref(), Some(&path)).map(Some)
+    faber.engine.chat_folder(id.as_deref(), Some(&path)).map(Conversation::for_screen).map(Some)
 }
 
 /// Copies a file from a chat workspace to wherever the user picks.

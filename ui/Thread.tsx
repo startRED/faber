@@ -23,6 +23,7 @@ import { Rewind } from './Rewind.tsx';
 import { AnswersCard, answeredIn, folded, RunBlock, runsOf, type Answered } from './Run.tsx';
 import { html, openLinks, pressImage } from './markdown.tsx';
 import { PieceReply } from './VisualPiece.tsx';
+import { VisualFiles } from './VisualAnswer.tsx';
 import type { VisualAnswer } from './api.ts';
 import { agentMeta, ChangedLines, openedAgent, SourceList, showAgent, tellAbout, ToolChip } from './AgentChat.tsx';
 import { untilReset } from './Sidebar.tsx';
@@ -484,6 +485,7 @@ function Answer(props: Shared & { m: Accessor<Message>; messages?: Message[]; pr
       <Parkeds parked={m().parked ?? []} more={m().parkedMore} surface="ask" />
       <div class="md" aria-busy={working()} onClick={openLinks} onKeyDown={pressImage}>
         <PieceReply text={finalText()} offset={boundary()} messageId={m().id} conversationId={props.conversationId} answers={props.visuals ?? []} revision={props.pieceRevision} />
+        <VisualFiles answers={props.visuals ?? []} messageId={m().id} conversationId={props.conversationId} />
         <Show when={working() && !waiting().length && !m().waitUntil && !runningStep() && (typing() || !finalText().trim())}>
           <span class="cursor" aria-hidden="true" />
         </Show>
@@ -911,7 +913,7 @@ function Narration(props: { text: string; conversationId: string; messageId: str
           {t('narration.more', { n: hidden() })}
         </button>
       </Show>
-      <Show when={props.text.includes('faber-piece') || props.visuals?.some((a) => a.versions.some((v) => v.messageId === props.messageId && v.end <= props.text.length))}
+      <Show when={props.text.includes('faber-piece') || props.visuals?.some((a) => a.versions.some((v) => !v.file && v.messageId === props.messageId && v.end <= props.text.length))}
         fallback={<div class="md" onClick={openLinks} innerHTML={html(parts().slice(hidden()).join(BLANK))} />}>
         <div class="md" onClick={openLinks} onKeyDown={pressImage}><PieceReply text={props.text} offset={0} conversationId={props.conversationId} messageId={props.messageId} answers={props.visuals ?? []} revision={props.pieceRevision} /></div>
       </Show>

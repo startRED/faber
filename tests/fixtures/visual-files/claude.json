@@ -1,0 +1,292 @@
+[
+  {
+    "type": "assistant",
+    "message": {
+      "content": [
+        {
+          "type": "tool_use",
+          "id": "read",
+          "name": "Read",
+          "input": {
+            "file_path": "read.html"
+          }
+        }
+      ]
+    }
+  },
+  {
+    "type": "user",
+    "message": {
+      "content": [
+        {
+          "type": "tool_result",
+          "tool_use_id": "read",
+          "is_error": false,
+          "content": "done"
+        }
+      ]
+    }
+  },
+  {
+    "type": "assistant",
+    "message": {
+      "content": [
+        {
+          "type": "tool_use",
+          "id": "write",
+          "name": "Write",
+          "input": {
+            "file_path": "page.html"
+          }
+        }
+      ]
+    }
+  },
+  {
+    "type": "user",
+    "message": {
+      "content": [
+        {
+          "type": "tool_result",
+          "tool_use_id": "write",
+          "is_error": false,
+          "content": "done"
+        }
+      ]
+    }
+  },
+  {
+    "type": "assistant",
+    "message": {
+      "content": [
+        {
+          "type": "tool_use",
+          "id": "edit",
+          "name": "Edit",
+          "input": {
+            "file_path": "drawing.svg"
+          }
+        }
+      ]
+    }
+  },
+  {
+    "type": "user",
+    "message": {
+      "content": [
+        {
+          "type": "tool_result",
+          "tool_use_id": "edit",
+          "is_error": false,
+          "content": "done"
+        }
+      ]
+    }
+  },
+  {
+    "type": "assistant",
+    "message": {
+      "content": [
+        {
+          "type": "tool_use",
+          "id": "diagram",
+          "name": "Write",
+          "input": {
+            "file_path": "flow.mmd"
+          }
+        }
+      ]
+    }
+  },
+  {
+    "type": "user",
+    "message": {
+      "content": [
+        {
+          "type": "tool_result",
+          "tool_use_id": "diagram",
+          "is_error": false,
+          "content": "done"
+        }
+      ]
+    }
+  },
+  {
+    "type": "assistant",
+    "message": {
+      "content": [
+        {
+          "type": "tool_use",
+          "id": "diagram-long",
+          "name": "Write",
+          "input": {
+            "file_path": "flow.mermaid"
+          }
+        }
+      ]
+    }
+  },
+  {
+    "type": "user",
+    "message": {
+      "content": [
+        {
+          "type": "tool_result",
+          "tool_use_id": "diagram-long",
+          "is_error": false,
+          "content": "done"
+        }
+      ]
+    }
+  },
+  {
+    "type": "assistant",
+    "message": {
+      "content": [
+        {
+          "type": "tool_use",
+          "id": "long",
+          "name": "Write",
+          "input": {
+            "file_path": "large.htm"
+          }
+        }
+      ]
+    }
+  },
+  {
+    "type": "user",
+    "message": {
+      "content": [
+        {
+          "type": "tool_result",
+          "tool_use_id": "long",
+          "is_error": false,
+          "content": "done"
+        }
+      ]
+    }
+  },
+  {
+    "type": "assistant",
+    "message": {
+      "content": [
+        {
+          "type": "tool_use",
+          "id": "outside",
+          "name": "Write",
+          "input": {
+            "file_path": "../outside.html"
+          }
+        }
+      ]
+    }
+  },
+  {
+    "type": "user",
+    "message": {
+      "content": [
+        {
+          "type": "tool_result",
+          "tool_use_id": "outside",
+          "is_error": false,
+          "content": "done"
+        }
+      ]
+    }
+  },
+  {
+    "type": "assistant",
+    "message": {
+      "content": [
+        {
+          "type": "tool_use",
+          "id": "other",
+          "name": "Write",
+          "input": {
+            "file_path": "private.txt"
+          }
+        }
+      ]
+    }
+  },
+  {
+    "type": "user",
+    "message": {
+      "content": [
+        {
+          "type": "tool_result",
+          "tool_use_id": "other",
+          "is_error": false,
+          "content": "done"
+        }
+      ]
+    }
+  },
+  {
+    "type": "assistant",
+    "message": {
+      "content": [
+        {
+          "type": "tool_use",
+          "id": "failed",
+          "name": "Write",
+          "input": {
+            "file_path": "failed.html"
+          }
+        }
+      ]
+    }
+  },
+  {
+    "type": "user",
+    "message": {
+      "content": [
+        {
+          "type": "tool_result",
+          "tool_use_id": "failed",
+          "is_error": true,
+          "content": "done"
+        }
+      ]
+    }
+  },
+  {
+    "type": "assistant",
+    "message": {
+      "content": [
+        {
+          "type": "tool_use",
+          "id": "relative",
+          "name": "Write",
+          "input": {
+            "file_path": "./nested/page.htm"
+          }
+        }
+      ]
+    }
+  },
+  {
+    "type": "user",
+    "message": {
+      "content": [
+        {
+          "type": "tool_result",
+          "tool_use_id": "relative",
+          "is_error": false,
+          "content": "done"
+        }
+      ]
+    }
+  },
+  {
+    "type": "stream_event",
+    "event": {
+      "type": "content_block_delta",
+      "delta": {
+        "type": "text_delta",
+        "text": "```mermaid\nflowchart LR\nA-->B\n```\n\n```mermaid\nflowchart LR\nUnfinished"
+      }
+    }
+  }
+]

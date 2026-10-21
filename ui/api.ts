@@ -72,6 +72,7 @@ export interface Parked {
   at: number;
 }
 export interface Message {
+  visualFileCount?: number;
   id: string;
   role: 'user' | 'assistant';
   text: string;
@@ -205,13 +206,14 @@ export interface VisualVersion {
   block: number;
   start: number;
   end: number;
-  kind: 'html' | 'svg';
+  kind: 'html' | 'svg' | 'mermaid';
   source: string;
+  file?: string;
 }
 export interface VisualAnswer {
   id: string;
   name?: string;
-  kind: 'html' | 'svg';
+  kind: 'html' | 'svg' | 'mermaid';
   versions: VisualVersion[];
 }
 export type PieceData =
@@ -804,7 +806,7 @@ export const api = {
   pickUp: (projectId: string, session: CliSession) => invoke<string>('pick_up', { projectId, session }),
   branchHere: (conversationId: string, messageId: string) => invoke<string>('branch_here', { conversationId, messageId }),
   versions: (id: string) => invoke<Versions[]>('versions', { id }),
-  visualAnswers: (id: string) => invoke<VisualAnswer[]>('visual_answers', { id }),
+  visualAnswers: (id: string, messageId?: string, block?: number) => invoke<VisualAnswer[]>('visual_answers', { id, messageId, block }),
   visualPolicy: () => invoke<boolean>('visual_policy'),
   visualOpen: () => invoke<string>('visual_open'),
   visualPage: (id: string, revision: number, document: string) => invoke<{ url: string; live: boolean }>('visual_page', { id, revision, document }),

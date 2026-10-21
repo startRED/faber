@@ -206,6 +206,12 @@ pub struct Message {
     pub id: String,
     pub role: Role,
     pub text: String,
+    /// Bounded visual outputs captured when this turn's editing tools completed.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub visual_files: Vec<crate::visual::VisualFile>,
+    /// Screen-only invalidation signal; snapshots themselves never enter the message store in the screen.
+    #[serde(default, skip_deserializing, skip_serializing_if = "Option::is_none")]
+    pub visual_file_count: Option<usize>,
     /// UTF-16 offsets where a new CLI text block starts.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub text_breaks: Option<Vec<usize>>,
@@ -584,6 +590,12 @@ pub struct AutoAnswer {
 }
 
 impl Message {
+    pub fn for_screen(mut self) -> Self {
+        // Sources are Arc-backed, so cloning the message never copies the snapshot bytes before removing them.
+        self.visual_file_count = (!self.visual_files.is_empty()).then_some(self.visual_files.len());
+        self.visual_files.clear();
+        self
+    }
     /// What the reply said to the person: its text, then its closing box's recap and question, which the agent does not
     /// repeat in words. Another AI taking over and a parent conversation read this, not the text alone.
     pub fn said(&self) -> String {
@@ -614,6 +626,8 @@ impl Message {
             id,
             role,
             text,
+            visual_files: vec![],
+            visual_file_count: None,
             text_breaks: None,
             activity_end: None,
             at,
@@ -1319,6 +1333,11 @@ fn is_zero(n: &u32) -> bool {
 }
 
 impl Conversation {
+    pub fn for_screen(mut self) -> Self {
+        self.messages = self.messages.into_iter().map(Message::for_screen).collect();
+        self
+    }
+
     /// The session to continue for this vendor: the one that has shown output, else one whose turn was accepted and then cut off.
     pub fn resumable(&self, vendor: Vendor) -> Option<&String> {
         self.sessions.get(&vendor).or_else(|| self.tentative.get(&vendor))

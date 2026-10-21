@@ -119,7 +119,7 @@ export function App(props: { initial: AppState; update?: UpdateStatus; inbox: { 
     if (!c) return '';
     const replies = c.messages.filter((m) => m.role === 'assistant').map((m) => {
       const fences = m.text.match(/`{3,}|~{3,}/g)?.join(',') ?? '';
-      return `${m.id}:${fences}:${m.status}`;
+      return `${m.id}:${fences}:${m.status}:${m.visualFileCount ?? 0}`;
     });
     return `${c.id}\0${replies.join('|')}`;
   });

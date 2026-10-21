@@ -48,6 +48,8 @@ and Projects.
 
 - Ten built-in pieces appear within the reply: big numbers, table, chart, slider tied to a calculation, checklist,
   tabs, steps, options form, notice and timeline (R348). Large pages keep the shared pane beside the chat.
+- HTML/SVG/Mermaid replies and snapshots of edited files share the pane and saved versions. Mermaid needs Live;
+  offline it stays code. See [visual-answers](../design/visual-answers.md) for file rules, isolation and costs.
 - Both CLIs learn the same short `faber-piece` JSON fence format through Faber's existing persona instructions. The
   engine accepts only known fields and bounded values in closed blocks; Faber's components draw them, never AI HTML.
 - What the user checks or moves stays saved with the conversation in the engine, bound to that piece's source, even
