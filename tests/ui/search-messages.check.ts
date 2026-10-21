@@ -7,6 +7,8 @@ import { Sidebar } from '../../ui/Sidebar.tsx';
 import { t } from '../../ui/i18n.ts';
 import { check, equal, ok } from './check.ts';
 
+// A fixed wait is only for an assertion that something did NOT happen (a stale reply, a repeated search): a slow machine
+// can only make it pass later, never fail. Everything that must happen waits for its state with `until`.
 const settle = (ms = 30) => new Promise((resolve) => setTimeout(resolve, ms));
 // Waits for a state instead of a fixed time, so a slow runner cannot fail the check.
 const until = async (done: () => unknown, limit = 4000) => {
@@ -37,6 +39,8 @@ check('search-messages: the sidebar debounces, drops stale replies, marks safe s
   const root = document.createElement('div');
   root.dataset.motion = 'none';
   document.body.append(root);
+  // The newest query was asked and its answer is on screen (the results are no longer busy).
+  const answered = (text: string) => until(() => calls.at(-1)?.[0] === text && root.querySelector('[aria-busy]')?.getAttribute('aria-busy') === 'false');
   const dispose = render(() => createComponent(Sidebar, {
     conversations: ['chat', 'project'].map((area) => ({ id: `search-${area}`, area: area as Area, title: 'A saved conversation', updatedAt: 0 })),
     projects: [], vendors: [], version: 'test', get place() { return { area: area(), id: conversation() }; },
@@ -48,37 +52,37 @@ check('search-messages: the sidebar debounces, drops stale replies, marks safe s
     type(root, 'old');
     equal(calls.length, 0, 'keystrokes do not each start a command');
     ok(root.textContent?.includes(t('side.searching')));
-    await settle(220);
+    await until(() => calls.length > 0);
     equal(calls.length, 1);
     type(root, 'café');
-    await settle(220);
+    await answered('café');
     equal(root.querySelectorAll('.message-hit').length, 1, 'another area never leaks into the results');
     equal(root.querySelector('mark')!.textContent, 'café');
     equal(root.querySelector('.hit-snippet b'), null, 'a snippet is text, never injected markup');
     ok(root.querySelector('.hit-snippet')!.textContent?.includes('<b>café</b>'));
     old({ ready: true, hits: [] });
-    await settle();
+    await settle(); // negative: the late reply had time to land
     equal(root.querySelectorAll('.message-hit').length, 1, 'the earlier request cannot replace the newest results');
     const button = root.querySelector('.message-hit');
     const searched = calls.length;
     setConversation('search-chat');
     equal(root.querySelector('.message-hit'), button, 'opening a conversation in the same area keeps its clickable hit');
-    await settle(220);
+    await settle(220); // negative: longer than the 180 ms pause, so a repeated search would have started
     equal(calls.length, searched, 'opening a conversation in the same area does not repeat the search');
     setArea('project');
-    await settle(220);
+    await until(() => calls.at(-1)?.[1] === 'project' && root.querySelector('.message-hit'));
     equal(calls.at(-1)![1], 'project');
     equal(root.querySelectorAll('.message-hit').length, 1);
     setArea('chat');
     type(root, 'saved');
-    await settle(220);
+    await answered('saved');
     equal(root.querySelectorAll('.crow').length, 1, 'a matching title stays above the message results');
     ok(root.querySelector('.message-hits')!.textContent?.includes(t('side.noMatch')), 'no matching messages is said even when a title matches');
     type(root, 'missing');
-    await settle(220);
+    await answered('missing');
     ok(root.textContent?.includes(t('side.noMatch')));
     type(root, 'failed');
-    await settle(220);
+    await until(() => root.textContent?.includes(t('side.searchFailed')));
     ok(root.textContent?.includes(t('side.searchFailed')));
     equal(root.querySelector('[aria-busy]')!.getAttribute('aria-busy'), 'false');
     type(root, '');
@@ -108,26 +112,26 @@ check('search-messages: refreshing conversations keeps a focused hit mounted and
       }), root);
       try {
         type(root, 'café');
-        await settle(220);
+        await until(() => root.querySelector('.message-hit'));
         const button = root.querySelector<HTMLButtonElement>('.message-hit')!;
         button.focus();
         equal(document.activeElement, button);
         setConversations([{ ...summary, updatedAt: 1 }, { id: 'other', area, title: 'Another conversation', updatedAt: 1 }]);
         equal(root.querySelector('.message-hit'), button, 'a list refresh leaves the old hit in place during the debounce');
         equal(document.activeElement, button, 'a list refresh never removes the keyboard target');
-        await settle(220);
+        await until(() => calls >= 2);
         equal(root.querySelector('.message-hit'), button, 'the hit remains mounted while the refreshed search is pending');
         refresh({ ready: true, hits: [{ ...hit(area), title: 'Updated title', snippet: 'Updated café match', highlights: [{ start: 8, end: 12 }] }] });
-        await settle();
+        await until(() => button.textContent?.includes('Updated title'));
         equal(root.querySelector('.message-hit'), button, 'fresh objects with the same conversation and message reuse the button');
         equal(document.activeElement, button, 'the refreshed result keeps keyboard focus');
         ok(button.textContent?.includes('Updated title'));
         button.click();
         equal(opened?.snippet, 'Updated café match', 'the retained button opens its fresh result');
         setConversations([{ ...summary, updatedAt: 2 }]);
-        await settle(220);
+        await until(() => calls >= 3);
         refresh({ ready: true, hits: [{ ...hit(area), messageIndex: 5 }] });
-        await settle();
+        await until(() => root.querySelector('.message-hit') !== button);
         ok(root.querySelector('.message-hit') !== button, 'a different message gets its own button');
       } finally { dispose(); root.remove(); }
     }
@@ -149,11 +153,11 @@ check('search-messages: message-only matches show the same archived label as tit
       }), root);
       try {
         type(root, 'café');
-        await settle(220);
+        await until(() => root.querySelector('.message-hit .tag-quiet'));
         equal(root.querySelectorAll('.crow').length, 0, 'the archived conversation matches only in its message');
         equal(root.querySelector('.message-hit .tag-quiet')?.textContent, t('archive.tag'));
         type(root, 'saved');
-        await settle(220);
+        await until(() => root.querySelector('.item .tag-quiet') && root.querySelector('.message-hit .tag-quiet'));
         const titleTag = getComputedStyle(root.querySelector('.item .tag-quiet')!);
         const messageTag = getComputedStyle(root.querySelector('.message-hit .tag-quiet')!);
         equal(messageTag.fontSize, titleTag.fontSize, 'message hits reuse the archived label size');
@@ -232,9 +236,9 @@ check('search-messages: clicking a hit opens its old message, unfolds its run an
         equal(scroll?.behavior, full ? 'smooth' : 'instant');
         const run = target.closest<HTMLDetailsElement>('.run-block')!;
         run.open = false;
-        await settle();
+        await until(() => !run.querySelector('.run-earlier'));
         receive?.({ type: 'message', conversationId: conversation.id, message: { ...conversation.messages[5]!, text: 'Another streaming chunk', status: 'streaming' } });
-        await settle();
+        await until(() => root.querySelector('[data-message-index="5"]')?.textContent?.includes('Another streaming chunk'));
         equal(run.open, false, 'a streaming update preserves a run the person collapsed after the search jump');
         button.click();
         await until(() => root.querySelector('[data-message-index="3"]')?.closest<HTMLDetailsElement>('.run-block')?.open);
@@ -245,12 +249,12 @@ check('search-messages: clicking a hit opens its old message, unfolds its run an
         thread.dispatchEvent(new Event('scroll'));
         ok(root.querySelector('[data-message-index="70"]'), 'scrolling onward loads the next page');
         button.click();
-        await settle(60);
+        await until(() => root.querySelector('[data-message-index="3"].search-focus'));
         const textarea = root.querySelector<HTMLTextAreaElement>('.composer textarea')!;
         textarea.value = 'Continue from here';
         textarea.dispatchEvent(new Event('input', { bubbles: true }));
         root.querySelector<HTMLButtonElement>('.composer button[type="submit"]')!.click();
-        await until(() => root.querySelector('[data-message-index="101"]'));
+        await until(() => root.querySelector('[data-message-index="101"]')?.textContent?.includes('The newest answer') && !root.querySelector('[data-message-index="3"]'));
         ok(root.querySelector('[data-message-index="101"]')?.textContent?.includes('The newest answer'), 'sending leaves the search page and shows the new answer');
         equal(root.querySelector('.search-focus'), null, 'sending clears the old search marker');
         equal(root.querySelector('[data-message-index="3"]'), null, 'sending returns to the latest page without retaining the old history');
@@ -270,7 +274,7 @@ check('search-messages: clicking a hit opens its old message, unfolds its run an
         equal(root.querySelector<HTMLTextAreaElement>('.you.editing textarea')!.value, 'An unfinished edit', 'searching never loses an unsent edit');
         root.querySelector<HTMLButtonElement>('.you.editing .actions button[type="button"]')!.click();
         root.querySelector<HTMLButtonElement>('.newchat')!.click();
-        await settle();
+        await until(() => !root.querySelector('[data-message-index]'));
         equal(root.querySelector('[data-message-index]'), null, 'a new conversation retains no old message window');
 
         conversation.messages = conversation.messages.slice(0, 6);
@@ -288,14 +292,14 @@ check('search-messages: clicking a hit opens its old message, unfolds its run an
         activeThread.scrollTop = activeThread.scrollHeight;
         activeThread.dispatchEvent(new Event('scroll'));
         revealed.open = false;
-        await settle();
+        await until(() => !revealed.querySelector('.run-earlier'));
         const automatic: Message[] = [
           { id: 'automatic-question', at: 6, role: 'user', text: 'Continue', wake: { why: 'wake.keepGoing' } },
           { id: 'automatic-answer', at: 7, role: 'assistant', text: 'The next automatic turn', status: 'streaming' },
         ];
         for (const message of automatic) receive?.({ type: 'message', conversationId: conversation.id, message });
         conversation.messages = [...conversation.messages, ...automatic];
-        await settle();
+        await until(() => !revealed.isConnected && root.querySelector('.run-block'));
         const regrouped = root.querySelector<HTMLDetailsElement>('.run-block');
         ok(regrouped && regrouped !== revealed && !revealed.isConnected, 'the next automatic turn mounts a new run block');
         equal(root.querySelectorAll('.run-block').length, 1, 'the mounted run includes all automatic replies');

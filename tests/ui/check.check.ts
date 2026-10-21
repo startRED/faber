@@ -1,4 +1,4 @@
-import { check, deepEqual, doesNotMatch, equal, matches, notEqual, ok } from './check.ts';
+import { check, deepEqual, doesNotMatch, equal, finished, frames, matches, notEqual, ok } from './check.ts';
 
 // An assertion that never throws would turn every other check green, so the helpers are checked first.
 const throws = (run: () => void) => {
@@ -34,4 +34,15 @@ check('check: the assertions fail when they should and pass when they should', (
   ok(!throws(() => matches('abc', /b/)), 'matches must pass when the text matches');
   ok(throws(() => doesNotMatch('abc', /b/)), 'doesNotMatch must throw when the text matches');
   ok(!throws(() => doesNotMatch('abc', /x/)), 'doesNotMatch must pass when it does not');
+});
+
+check('check: the frame and animation waits are bounded, so a held-back window cannot hang the run', async () => {
+  const held = document.body.animate([{ opacity: 1 }, { opacity: 0 }], { duration: 1000 });
+  held.pause();
+  const began = performance.now();
+  await finished([held], 50);
+  held.cancel();
+  ok(performance.now() - began < 900, 'a paused animation does not hold the wait past its limit');
+  await frames(2, 50);
+  ok(performance.now() - began < 1500, 'frames end by themselves');
 });

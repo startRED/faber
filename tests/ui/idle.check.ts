@@ -13,12 +13,8 @@ import { check, equal, ok } from './check.ts';
 const settle = (ms = 30) => new Promise((resolve) => setTimeout(resolve, ms));
 const HINTS = ['One', 'Two', 'Three'];
 
-const systemReduces = matchMedia('(prefers-reduced-motion: reduce)');
-
-/** Runs `body` with the page wearing a look of this motion level, and puts the page back after. A machine whose system asks
- * for reduced motion caps `full` at `reduced`, so the checks of full motion have nothing to see there and stand aside. */
+/** Runs `body` with the page wearing a look of this motion level, and puts the page back after. */
 async function withMotion(motion: 'full' | 'reduced' | 'none', body: () => Promise<void>) {
-  if (motion === 'full' && systemReduces.matches) return;
   const restore = keepRoot();
   const saved = appliedLook();
   try {
@@ -28,6 +24,34 @@ async function withMotion(motion: 'full' | 'reduced' | 'none', body: () => Promi
     if (saved) await applyLook(saved);
     restore();
   }
+}
+
+/** The colour a field draws its placeholder in. WebKit (macOS) answers a style query on `::placeholder` with the field's own
+ * style, so when the answer is the field's own colour the cascade is read from the stylesheet: the last rule whose selector
+ * reaches this field's placeholder (the rules that decide it share a specificity order with their place in the sheet). */
+function placeholderColor(field: HTMLTextAreaElement): string {
+  const asked = getComputedStyle(field, '::placeholder').color;
+  if (asked !== getComputedStyle(field).color) return asked;
+  let found = '';
+  const walk = (rules: CSSRuleList) => {
+    for (const rule of rules) {
+      if (rule instanceof CSSStyleRule) {
+        if (rule.selectorText.includes('::placeholder') && rule.style.color) {
+          try {
+            if (field.matches(rule.selectorText.replace(/::placeholders*$/, ''))) found = rule.style.color;
+          } catch { /* a selector this engine cannot match is not this field's */ }
+        }
+      } else if ('cssRules' in rule) walk((rule as CSSGroupingRule).cssRules);
+    }
+  };
+  for (const sheet of document.styleSheets) walk(sheet.cssRules);
+  if (!found) return asked;
+  const probe = document.createElement('span');
+  probe.style.color = found;
+  field.parentElement!.append(probe);
+  const color = getComputedStyle(probe).color;
+  probe.remove();
+  return color;
 }
 
 async function withComposer(hints: string[] | undefined, body: (root: HTMLElement, field: HTMLTextAreaElement) => Promise<void>) {
@@ -53,7 +77,7 @@ check('idle: the empty composer of a home draws a typing bar and hints, and neve
   ok(root.querySelector('.idle-box'), 'the idle composer has its hints');
   equal(root.querySelectorAll('.g-hint').length, 3);
   equal(root.querySelectorAll('.g-hint.on').length, 1, 'one hint shows at a time');
-  equal(getComputedStyle(field, '::placeholder').color, 'rgba(0, 0, 0, 0)', 'the hints stand in for the placeholder, so it is not drawn twice');
+  equal(placeholderColor(field), 'rgba(0, 0, 0, 0)', 'the hints stand in for the placeholder, so it is not drawn twice');
   const caret = () => root.querySelectorAll('.g-caret').length;
   // The window has the keyboard and the field has focus: the real caret blinks, and the screen draws none.
   window.dispatchEvent(new Event('focus'));
@@ -111,7 +135,7 @@ check('idle: reduced motion and no motion render no hints and no bar, only the p
       equal(root.querySelector('.idle-box'), null, `${level}: nothing idles`);
       equal(root.querySelector('.g-caret'), null, `${level}: no bar`);
       equal(field.placeholder, 'The plain placeholder');
-      ok(getComputedStyle(field, '::placeholder').color !== 'rgba(0, 0, 0, 0)', `${level}: the placeholder is drawn`);
+      ok(placeholderColor(field) !== 'rgba(0, 0, 0, 0)', `${level}: the placeholder is drawn`);
     }));
   }
 });
@@ -165,8 +189,7 @@ check('idle: a look with no effects of its own gets a drifting light, off with t
     await settle();
     const light = host.querySelector<HTMLElement>('.amb-drift')!;
     equal(getComputedStyle(light).display, 'block', 'a plain look has a light');
-    // A system that asks for less motion caps the level, so the light stands still there (the reduced step below covers it).
-    if (!systemReduces.matches) equal(getComputedStyle(light).animationName, 'drift');
+    equal(getComputedStyle(light).animationName, 'drift');
     await applyLook(bare('full', false));
     await settle();
     equal(getComputedStyle(light).display, 'none', 'the ambient switch turns it off');

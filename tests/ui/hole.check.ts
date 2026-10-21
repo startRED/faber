@@ -75,6 +75,11 @@ check('hole: when the words grow wider, the veil follows their edge and they sta
     await settle(200);
     const canvas = root.querySelector<HTMLCanvasElement>('canvas.amb-hole')!;
     ok(canvas.width > 0, 'Dark Room draws the black hole');
+    // In a shown and focused window with full motion (a macOS runner's is) the scene lights up from the hole outward first,
+    // and it is measured only once that entrance is over; a window that is hidden or unfocused paints it at once.
+    const deadline = performance.now() + 10000;
+    while (canvas.dataset.intro === 'on' && performance.now() < deadline) await settle(50);
+    equal(canvas.dataset.intro, undefined, 'the entrance ends');
     // A canvas still dark from the entrance would pass for nothing: the scene must be painted before it is measured.
     const all = canvas.getContext('2d')!.getImageData(0, 0, canvas.width, canvas.height).data;
     let lit = 0;

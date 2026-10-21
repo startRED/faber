@@ -11,6 +11,21 @@ export function check(name: string, run: () => void | Promise<void>): void {
   registry.push({ name, run });
 }
 
+/** One check never holds the run for more than this: a promise that never settles (a frame or an animation the webview
+ * holds back) fails that check by name and the run goes on, instead of stopping everything until the runner gives up. */
+export const CHECK_LIMIT = 60_000;
+
+/** Two frames, but never forever: a window the system holds back (a hidden one on macOS) can pause frames, and a frame
+ * awaited without a bound would hang the whole run. What a check needs is asserted after it, by state. */
+export const frames = (count = 2, limit = 1000): Promise<void> => {
+  const frame = (left: number) => new Promise<void>((done) => requestAnimationFrame(() => (left > 1 ? frame(left - 1).then(done) : done())));
+  return Promise.race([frame(count), new Promise<void>((done) => setTimeout(done, limit))]);
+};
+
+/** The animations are done, or `limit` passed: `finished` settles in the page's rendering step, which a held-back window skips. */
+export const finished = (animations: Animation[], limit = 1500): Promise<unknown> =>
+  Promise.race([Promise.all(animations.map((animation) => animation.finished)), new Promise((done) => setTimeout(done, limit))]);
+
 /**
  * Runs every registered check, in the order they were registered, and reports each one. `onStart` hears each check just
  * before it runs, so a runner can tell a slow page from a stuck one.
@@ -22,11 +37,17 @@ export async function runAll(onStart?: (index: number, total: number, name: stri
     // Every check starts in English: the language the system starts with (a Portuguese PC), or one a check before it left, must not decide which pass.
     useLanguage('en');
     const started = performance.now();
+    let timer: ReturnType<typeof setTimeout> | undefined;
     try {
-      await run();
+      await Promise.race([
+        run(),
+        new Promise<never>((_, reject) => { timer = setTimeout(() => reject(new Error(`the check did not finish in ${CHECK_LIMIT / 1000} s`)), CHECK_LIMIT); }),
+      ]);
       results.push({ name, ok: true, message: '', ms: performance.now() - started });
     } catch (error) {
       results.push({ name, ok: false, message: error instanceof Error ? error.message : String(error), ms: performance.now() - started });
+    } finally {
+      clearTimeout(timer);
     }
   }
   return results;

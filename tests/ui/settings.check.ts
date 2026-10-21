@@ -15,7 +15,7 @@ import { ptBR } from '../../ui/locales/pt-BR.ts';
 import { useLanguage } from '../../ui/i18n.ts';
 import { accountLine, seedQuotas, usageRows } from '../../ui/sidebar.ts';
 import { Settings } from '../../ui/Settings.tsx';
-import { check, deepEqual, equal, ok } from './check.ts';
+import { check, deepEqual, equal, frames, ok } from './check.ts';
 
 check('R107: Settings names Chat and Projects and discloses the shared default', () => {
   ok(en['set.permissions'].includes('Chat'));
@@ -662,7 +662,7 @@ check('settings: switching sections is a short cross-fade (the old one leaves as
     await tick();
     equal(document.querySelector('.motion-exit'), null, 'no copy of the old section');
     for (const frame of [0, 1, 2]) {
-      await new Promise((resolve) => requestAnimationFrame(resolve));
+      await frames(1);
       equal(main.getAnimations({ subtree: true }).length, 0, `nothing on the stage animates (frame ${frame})`);
     }
   } finally {

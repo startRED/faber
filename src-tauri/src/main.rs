@@ -1447,6 +1447,12 @@ fn create_window(app: &AppHandle, hidden: bool, data_dir: &Path) -> tauri::Resul
         .disable_drag_drop_handler()
         // Only the screen's explicit open_link command opens a browser; an authored frame never may.
         .on_navigation(screen_navigation_allowed);
+    // The page of the screen's checks never sees the system's reduced-motion preference (tests/ui/system-motion.js): a CI
+    // runner asks for it, and the motion checks would stand aside or fail.
+    #[cfg(feature = "test-hooks")]
+    if std::env::var_os("FABER_CHECKS_OUT").is_some() {
+        builder = builder.initialization_script(include_str!("../../tests/ui/system-motion.js"));
+    }
     // The top bar of the page is the title bar (ui/WindowControls.tsx); macOS keeps its traffic lights over it.
     #[cfg(target_os = "macos")]
     {
@@ -1460,6 +1466,19 @@ fn create_window(app: &AppHandle, hidden: bool, data_dir: &Path) -> tauri::Resul
     // or share state between runs.
     if hidden {
         builder = builder.position(-32000.0, -32000.0).skip_taskbar(true).focused(false);
+    }
+    // macOS treats a window placed past the desktop as occluded, and WebKit suspends the page of an occluded window after a
+    // while (the checks page's whole event loop froze mid-run on CI). The test build there sits on the screen's corner under
+    // every other window, ignores the mouse, never takes focus and asks WebKit not to schedule its page as inactive.
+    // Windows keeps the offscreen place above, and nothing here runs outside the test build.
+    #[cfg(all(feature = "test-hooks", target_os = "macos"))]
+    if hidden {
+        builder = builder
+            .position(0.0, 0.0)
+            .always_on_bottom(true)
+            .focusable(false)
+            .shadow(false)
+            .background_throttling(tauri::utils::config::BackgroundThrottlingPolicy::Disabled);
     }
     if hidden {
         builder = builder.data_directory(data_dir.join("webview"));
@@ -1490,6 +1509,10 @@ fn create_window(app: &AppHandle, hidden: bool, data_dir: &Path) -> tauri::Resul
         builder = builder.additional_browser_args(&args);
     }
     let window = builder.build()?;
+    #[cfg(all(feature = "test-hooks", target_os = "macos"))]
+    if hidden {
+        let _ = window.set_ignore_cursor_events(true);
+    }
     visual_network::install(&window);
     if !hidden {
         // The failsafe: a screen that never reports its first paint still shows up.

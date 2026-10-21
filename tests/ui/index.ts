@@ -13,6 +13,7 @@ import type { Key } from '../../ui/locales/en.ts';
 import { runAll, type Result } from './check.ts';
 import { mojibake } from '../ux/mojibake.ts';
 import { crash, progress, report } from './crash.ts';
+import { ignoreSystemMotion } from './system-motion.ts';
 import './appearance.check.ts';
 import './check.check.ts';
 import './composer.check.ts';
@@ -129,5 +130,5 @@ window.__faberText = textFor;
 window.__faberMojibake = mojibake;
 
 if (new URLSearchParams(location.search).has('checks')) {
-  runAll(progress).then(report, (error: unknown) => crash(String(error)));
+  ignoreSystemMotion().then(() => runAll(progress)).then(report, (error: unknown) => crash(String(error)));
 }

@@ -44,7 +44,6 @@ check('notes: the entries are grouped by kind, new first, and a kind with none i
 });
 
 const settle = (ms = 30) => new Promise((resolve) => setTimeout(resolve, ms));
-const systemReduces = matchMedia('(prefers-reduced-motion: reduce)');
 
 /** Draws the screen on the page for `body`, wearing a look of this motion level, and puts everything back after. */
 async function shown(motion: 'full' | 'reduced', onClose: () => void, body: (root: HTMLElement) => Promise<void>) {
@@ -155,12 +154,10 @@ check('notes: only an install with no data at all is a first install', () => {
 });
 
 check('notes: it arrives with a gentle entrance, and with none at all under reduced motion', async () => {
-  if (!systemReduces.matches) {
-    await shown('full', () => {}, async (host) => {
-      equal(getComputedStyle(host.querySelector('.notes')!).animationName, 'arrive', 'the screen eases in');
-      equal(getComputedStyle(host.querySelector('li')!).animationName, 'arrive', 'each line arrives');
-    });
-  }
+  await shown('full', () => {}, async (host) => {
+    equal(getComputedStyle(host.querySelector('.notes')!).animationName, 'arrive', 'the screen eases in');
+    equal(getComputedStyle(host.querySelector('li')!).animationName, 'arrive', 'each line arrives');
+  });
   await shown('reduced', () => {}, async (host) => {
     for (const el of host.querySelectorAll<HTMLElement>('.notes, h2, li')) {
       equal(getComputedStyle(el).animationName, 'none', 'no animation under reduced motion');

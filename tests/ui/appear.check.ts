@@ -4,7 +4,6 @@ import themes from '../../src-tauri/src/themes.json';
 import type { Project, UpdateStatus } from '../../ui/api.ts';
 import { Collapse, Fold, Opt, PickMenu } from '../../ui/controls.tsx';
 import { UpdateLine } from '../../ui/UpdateStage.tsx';
-import { millis } from '../../ui/motion.ts';
 import { Welcome } from '../../ui/Welcome.tsx';
 import { check, equal, ok } from './check.ts';
 
@@ -12,9 +11,10 @@ import { check, equal, ok } from './check.ts';
 // eases, and under reduced or no motion it is instant. Each check below fails when its part goes back to jumping.
 
 const settle = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
-const exit = () => millis(document.documentElement, '--dur-exit', 180);
-/** Opening takes '--dur-ui', longer than an exit since exits got quicker. */
-const entry = () => millis(document.documentElement, '--dur-ui', 220);
+// Waits for a state, not a time: opening takes the theme's longer duration, so a wait sized on the exit is too short.
+const until = async (done: () => unknown, limit = 4000) => {
+  for (let waited = 0; waited < limit && !done(); waited += 20) await settle(20);
+};
 
 /** A page that is in full motion whatever the PC asks for: the system preference is read through one media query. The mock
  * reaches the script only. A check that needs the stylesheet's own transitions (`css`) stands down when the PC asks for less
@@ -50,7 +50,7 @@ check('appear: the "?" text of a row grows open and shrinks away, and is out of 
     ok(wrap?.classList.contains('open') && wrap.querySelector('.st-more'), 'open: the text is there');
     ok(wrap.getAnimations().length > 0, 'it grows from nothing instead of appearing at its height');
     equal(getComputedStyle(wrap.firstElementChild!).overflow, 'hidden', 'clipped while it grows');
-    await settle(entry() + 120);
+    await until(() => wrap.getAnimations().length === 0);
     equal(wrap.getAnimations().length, 0, 'and rests');
     equal(getComputedStyle(wrap.firstElementChild!).overflow, 'visible', 'free once it rests, so a focus ring is never cut');
     q.click();
@@ -58,7 +58,7 @@ check('appear: the "?" text of a row grows open and shrinks away, and is out of 
     ok(view.host.querySelector('.collapse'), 'closing keeps it in the page while it shrinks');
     ok(!view.host.querySelector('.collapse.open'), 'closing: no longer open');
     ok(view.host.querySelector('.collapse')!.getAnimations().length > 0, 'it shrinks instead of vanishing');
-    await settle(exit() + 120);
+    await until(() => !view.host.querySelector('.collapse'));
     equal(view.host.querySelector('.collapse'), null, 'closed again: out of the page');
   } finally { view.stop(); }
 }));
@@ -72,7 +72,7 @@ check('appear: a folded group opens and closes the same way, and the stylesheet 
     view.host.querySelector<HTMLButtonElement>('.st-fold-head')!.click();
     await settle(0);
     ok(view.host.querySelector('.st-fold-body'), 'and stays while it shrinks');
-    await settle(exit() + 120);
+    await until(() => !view.host.querySelector('.st-fold-body'));
     equal(view.host.querySelector('.st-fold-body'), null);
   } finally { view.stop(); }
   // The transition itself is cancelled at the reduced level by the stylesheet.
@@ -99,7 +99,7 @@ check('appear: the permission menu opens from its corner and is still there, fad
     ok(going, 'closing keeps the menu in the page while it fades');
     ok(going.inert, 'and nothing in it can be reached meanwhile');
     equal(button.getAttribute('aria-expanded'), 'false');
-    await settle(exit() + 120);
+    await until(() => !view.host.querySelector('.st-menu'));
     equal(view.host.querySelector('.st-menu'), null, 'then it is gone');
   } finally { view.stop(); }
 }));
@@ -117,7 +117,7 @@ check('appear: the update line grows in and shrinks away with its last words, so
     await settle(0);
     const line = view.host.querySelector('.upd')!;
     ok(line && line.textContent!.includes('42'), 'it leaves with the words it had');
-    await settle(exit() + 120);
+    await until(() => !view.host.querySelector('.upd'));
     equal(view.host.querySelector('.upd'), null);
   } finally { view.stop(); }
 }));
@@ -135,18 +135,18 @@ check('appear: the home between a project and a chat swaps its header with a cro
     equal(view.host.querySelector('.p-header'), null, 'the chat home has no project header');
     const before = view.host.querySelector('.hello')!.textContent;
     setOpen(project);
-    await settle(30);
+    await until(() => view.host.querySelector('.p-header'));
     const header = view.host.querySelector<HTMLElement>('.p-header');
     ok(header, 'the project header is there');
     ok(header.getAnimations().length > 0, 'it arrives instead of appearing');
     ok(view.host.querySelector('.hello')!.textContent !== before, 'the greeting is the project one');
     const copy = document.querySelector('.motion-exit')?.shadowRoot?.querySelector('.hello');
     ok(copy, 'the old greeting leaves as an inert copy');
-    await settle(400);
+    await until(() => !document.querySelector('.motion-exit'));
     equal(document.querySelector('.motion-exit'), null, 'and the copy is removed when it has faded');
     setOpen(undefined);
-    await settle(30);
+    await until(() => document.querySelector('.motion-exit')?.shadowRoot?.querySelector('.p-header'));
     ok(document.querySelector('.motion-exit')?.shadowRoot?.querySelector('.p-header'), 'the project header leaves as a copy too');
-    await settle(400);
+    await until(() => !document.querySelector('.motion-exit'));
   } finally { view.stop(); }
 }, false));

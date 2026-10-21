@@ -256,6 +256,10 @@ check('conversation changes: failed and timed-out patch reads show a retry inste
 
 check('conversation changes: at 720 px, the auto-opened column becomes modal, pages files and loads lines lazily', async () => {
   const settle = () => new Promise((resolve) => setTimeout(resolve, 30));
+  // A disclosure at full motion keeps its content until the height has finished closing: wait for the state, not a time.
+  const until = async (done: () => unknown, limit = 4000) => {
+    for (let waited = 0; waited < limit && !done(); waited += 20) await new Promise((resolve) => setTimeout(resolve, 20));
+  };
   const host = document.createElement('div');
   document.body.append(host);
   const before = { open: api.open, state: api.state, warm: api.warm, routeDraft: api.routeDraft, setClock: api.setClock, setShellTexts: api.setShellTexts, changes: api.changes, changePatch: api.changePatch };
@@ -353,7 +357,7 @@ check('conversation changes: at 720 px, the auto-opened column becomes modal, pa
     ok(source.querySelector('.patch-line.add')!.textContent!.includes("+export const greeting = 'Welcome';"));
     equal(source.querySelector('script'), null, 'patches are text');
     source.querySelector('summary')!.click();
-    await settle();
+    await until(() => !source.querySelector('.change-patch'));
     equal(source.querySelector('.change-patch'), null, 'closing releases the patch DOM');
     source.querySelector('summary')!.click();
     await settle();

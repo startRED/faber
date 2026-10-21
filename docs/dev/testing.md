@@ -27,6 +27,11 @@ desktop in use and, if one belongs to the app's job, ends the job at once and fa
 ...` proves the mechanism without Faber: a helper started like the app lists the windows of its own desktop, and none of
 them is a window of the desktop in use.
 
+**macOS keeps the page awake.** A window placed at (-32000, -32000) counts as occluded there, and WebKit froze the checks
+page's whole event loop partway through a run on CI. So the macOS test build (`test-hooks`, hidden) sits at the screen's
+corner under every other window, ignores the mouse, never takes focus, and sets WebKit's inactive scheduling policy to
+`Disabled` (`background_throttling`, macOS 14+). Windows keeps the offscreen place and its own desktop.
+
 Every launch is sandboxed: a temporary home, an empty `PATH`, no provider variables, a dead proxy and no real CLI (a fake
 CLI replays the recordings in `tests/fixtures/`). Each scenario is audited afterwards for leaked processes, writes outside
 the sandbox and a changed environment. What the app started must end by itself once the app is ended, except WebView2's

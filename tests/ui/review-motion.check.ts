@@ -54,13 +54,11 @@ check('review 4/13: full-motion growth is laid out at once and opened up by a cl
     const initial = field.clientHeight;
     fill('Wrapped prompt. '.repeat(30));
     await settle(45);
-    if (!matchMedia('(prefers-reduced-motion: reduce)').matches) {
-      // The field is already at its new height: only the card around it is drawn smaller and opens up, so no layout runs.
-      ok(field.clientHeight > initial, 'the field grows at once');
-      const card = root.querySelector<HTMLElement>('.composer')!;
-      ok(card.getAnimations().some((a) => a.playState === 'running' && (a.effect as KeyframeEffect).getKeyframes().some((k) => 'clipPath' in k)), 'the card opens up with a clip');
-      ok(!field.getAnimations().length, 'the field itself is not animated');
-    }
+    // The field is already at its new height: only the card around it is drawn smaller and opens up, so no layout runs.
+    ok(field.clientHeight > initial, 'the field grows at once');
+    const card = root.querySelector<HTMLElement>('.composer')!;
+    ok(card.getAnimations().some((a) => a.playState === 'running' && (a.effect as KeyframeEffect).getKeyframes().some((k) => 'clipPath' in k)), 'the card opens up with a clip');
+    ok(!field.getAnimations().length, 'the field itself is not animated');
     for (let i = 0; i < 6; i++) {
       document.execCommand('insertText', false, ' another word');
       await settle(25);
@@ -95,9 +93,7 @@ check('review 11: focus entering an activity during its exit returns to the summ
     const summary = root.querySelector('summary')!;
     const link = root.querySelector('a')!;
     summary.focus(); summary.click();
-    if (!matchMedia('(prefers-reduced-motion: reduce)').matches) {
-      link.focus(); equal(document.activeElement, link, 'Tab can enter content while an exit still holds details open');
-    }
+    link.focus(); equal(document.activeElement, link, 'Tab can enter content while an exit still holds details open');
     await settle(260);
     equal(root.querySelector('details')!.open, false);
     equal(document.activeElement, summary, `collapse stranded focus on ${document.activeElement?.tagName}`);
@@ -175,10 +171,8 @@ check('review 16: cached exit CSS inherits the current theme font, density and c
       const values = [expected.color, expected.fontFamily, expected.padding];
       row.remove(); await settle();
       const copy = document.querySelector('.motion-exit')?.shadowRoot?.querySelector<HTMLElement>('.ai');
-      if (!matchMedia('(prefers-reduced-motion: reduce)').matches) {
-        ok(copy); const actual = getComputedStyle(copy);
-        equal(actual.color, values[0]); equal(actual.fontFamily, values[1]); equal(actual.padding, values[2]);
-      }
+      ok(copy); const actual = getComputedStyle(copy);
+      equal(actual.color, values[0]); equal(actual.fontFamily, values[1]); equal(actual.padding, values[2]);
       await settle(260);
       root.append(row); await settle(260);
     }

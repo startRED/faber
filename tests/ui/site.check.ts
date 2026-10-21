@@ -6,7 +6,7 @@ import { Running } from '../../ui/Running.tsx';
 import { addressOf, appsOf, awaySites, cornersOf, covered, looksOf, openedSite, showSite, siteOf, sitesOf, stepsOf, type OpenSite } from '../../ui/Site.tsx';
 import { Thread } from '../../ui/Thread.tsx';
 import { Cookies } from '../../ui/Cookies.tsx';
-import { check, deepEqual, equal, matches, ok } from './check.ts';
+import { check, deepEqual, equal, frames, matches, ok } from './check.ts';
 import act from '../../src-tauri/src/pane/act.js';
 
 // A page the agent opened in Faber's browser (R161 step 7; docs/product-map.md, "Page in Faber's browser").
@@ -127,7 +127,8 @@ check('page in the browser: the column places Faber’s browser over its box, an
     equal(root.querySelector('#running-title')!.textContent!.trim(), 'docs.example.org', 'a page without a title is named by its site');
     equal(root.querySelector('.side-meta'), null, 'the head and the address field name the page; no line says it again');
     const box = root.querySelector<HTMLElement>('.site-view')!;
-    await new Promise((done) => requestAnimationFrame(() => requestAnimationFrame(done)));
+    window.dispatchEvent(new Event('resize')); // places the browser now: the check never depends on a frame
+    await frames();
     ok(placed.length > 0, 'the browser is placed once the box is measured');
     const r = box.getBoundingClientRect();
     deepEqual(placed.at(-1), [r.left, r.top, r.width, r.height], 'over the box, in the page’s pixels');
@@ -176,7 +177,8 @@ check('page in the browser: the column places Faber’s browser over its box, an
     ok(root.querySelector('.rc-empty'), 'the list is back');
     const first = boxPlaced;
     setSite({ conversationId: 'c1', url: 'https://docs.example.org/guide', title: '' });
-    await new Promise((done) => requestAnimationFrame(() => requestAnimationFrame(done)));
+    window.dispatchEvent(new Event('resize')); // places the browser now: the check never depends on a frame
+    await frames();
     ok(boxPlaced > first, 'and the next box has a larger one');
   } finally {
     setSite(undefined);
@@ -248,7 +250,6 @@ check('page in the browser: a step of the log shows its picture in the page’s 
       }),
     root,
   );
-  const frames = () => new Promise((done) => requestAnimationFrame(() => requestAnimationFrame(done)));
   const rows = () => [...root.querySelectorAll<HTMLButtonElement>('.site-log li button')];
   try {
     await frames();
@@ -677,7 +678,6 @@ check('screen sizes: the page view shows each size’s picture with its name, an
     () => createComponent(Running, { items: [], projects: [], modal: false, onOpen: () => {}, onClose: () => {}, ref: () => {}, site: { conversationId: 'c1', url: 'http://localhost:5173/', title: 'Shop', steps } }),
     root,
   );
-  const frames = () => new Promise((done) => requestAnimationFrame(() => requestAnimationFrame(done)));
   try {
     await frames();
     const rows = [...root.querySelectorAll<HTMLButtonElement>('.site-log li button')];

@@ -5,7 +5,7 @@ import { App } from '../../ui/App.tsx';
 import { api, type AppState, type Conversation } from '../../ui/api.ts';
 import { animateList } from '../../ui/motion.ts';
 import { lang, useLanguage } from '../../ui/i18n.ts';
-import { check, equal, ok } from './check.ts';
+import { check, equal, finished, ok } from './check.ts';
 
 const settle = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
@@ -30,7 +30,7 @@ check('interaction: the running column slides and fades for 120ms while the thre
     const ghosts = [...(document.querySelector('.motion-exit')?.shadowRoot?.querySelectorAll<HTMLElement>('.motion-exit') ?? [])];
     const animations = [...main.getAnimations(), ...column.getAnimations(), ...ghosts.flatMap((el) => el.getAnimations())];
     for (const animation of animations) animation.finish();
-    await Promise.all(animations.map((animation) => animation.finished));
+    await finished(animations);
     await settle(0);
   };
   try {
@@ -43,25 +43,23 @@ check('interaction: the running column slides and fades for 120ms while the thre
       toggle(opening);
       await settle(20);
       const animation = main.getAnimations()[0];
-      if (!matchMedia('(prefers-reduced-motion: reduce)').matches) {
-        ok(animation, 'the actual stage has a FLIP animation');
-        ok(Number(animation.effect!.getComputedTiming().duration) >= 120);
-        equal(shell.getAnimations().length, 0, 'no layout animation on the grid');
-        animation.pause();
-        animation.currentTime = 0;
-        ok(Math.abs(thread.getBoundingClientRect().width - before) < 1, 'the first frame retains the previous thread width');
-        animation.currentTime = 60;
-        const early = thread.getBoundingClientRect().width;
-        animation.currentTime = 120;
-        const later = thread.getBoundingClientRect().width;
-        ok(opening ? later < early : later > early, 'the thread keeps moving through intermediate frames over 120ms');
-        if (opening) {
-          const entrance = column.getAnimations()[0]!;
-          entrance.pause();
-          entrance.currentTime = 0;
-          equal(getComputedStyle(column).opacity, '0');
-          ok(new DOMMatrix(getComputedStyle(column).transform).m41 > 0, 'the column slides in from the right');
-        }
+      ok(animation, 'the actual stage has a FLIP animation');
+      ok(Number(animation.effect!.getComputedTiming().duration) >= 120);
+      equal(shell.getAnimations().length, 0, 'no layout animation on the grid');
+      animation.pause();
+      animation.currentTime = 0;
+      ok(Math.abs(thread.getBoundingClientRect().width - before) < 1, 'the first frame retains the previous thread width');
+      animation.currentTime = 60;
+      const early = thread.getBoundingClientRect().width;
+      animation.currentTime = 120;
+      const later = thread.getBoundingClientRect().width;
+      ok(opening ? later < early : later > early, 'the thread keeps moving through intermediate frames over 120ms');
+      if (opening) {
+        const entrance = column.getAnimations()[0]!;
+        entrance.pause();
+        entrance.currentTime = 0;
+        equal(getComputedStyle(column).opacity, '0');
+        ok(new DOMMatrix(getComputedStyle(column).transform).m41 > 0, 'the column slides in from the right');
       }
       await finish();
       if (opening) [open, taken] = [thread.getBoundingClientRect().width, column.getBoundingClientRect().width];

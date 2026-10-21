@@ -1,7 +1,21 @@
 import { render } from 'solid-js/web';
 import themes from '../../src-tauri/src/themes.json';
 import { animateDetails, animateList } from '../../ui/motion.ts';
-import { check, equal, ok } from './check.ts';
+import { check, equal, finished, frames, ok } from './check.ts';
+
+// CI's machines ask Windows for reduced motion, and the stylesheet then cancels every transition and animation. The checks
+// page hides that (tests/ui/system-motion.ts) and must never see it: the motion checks would stand aside or fail
+// without saying so. A check of the reduced path sets it by itself.
+check('motion: the test build never reports reduced motion, in the script or in the stylesheet', () => {
+  ok(!matchMedia('(prefers-reduced-motion: reduce)').matches, 'the webview reports prefers-reduced-motion: reduce');
+  const probe = document.createElement('div');
+  probe.style.cssText = 'transition: opacity 1s; animation: none';
+  document.body.append(probe);
+  try {
+    equal(getComputedStyle(probe).transitionDuration, '1s', 'the stylesheet cancels transitions as if the system asked for reduced motion');  } finally {
+    probe.remove();
+  }
+});
 
 check('motion: panel content staggers within 300ms and reduced motion disables all feedback', async () => {
   const root = document.createElement('div');
@@ -14,14 +28,12 @@ check('motion: panel content staggers within 300ms and reduced motion disables a
   const dispose = render(() => { animateList(root); return [...root.children] as HTMLElement[]; }, root);
   try {
     const animations = root.getAnimations({ subtree: true });
-    if (!matchMedia('(prefers-reduced-motion: reduce)').matches) {
-      equal(animations.length, 3);
-      const timing = animations.map((a) => a.effect!.getComputedTiming());
-      ok(Number(timing[1]!.delay) > Number(timing[0]!.delay) && Number(timing[2]!.delay) > Number(timing[1]!.delay));
-      ok(timing.every((t) => Number(t.delay) + Number(t.duration) <= 300));
-    }
+    equal(animations.length, 3);
+    const timing = animations.map((a) => a.effect!.getComputedTiming());
+    ok(Number(timing[1]!.delay) > Number(timing[0]!.delay) && Number(timing[2]!.delay) > Number(timing[1]!.delay));
+    ok(timing.every((t) => Number(t.delay) + Number(t.duration) <= 300));
     for (const animation of animations) animation.finish();
-    await Promise.all(animations.map((a) => a.finished));
+    await finished(animations);
     root.dataset.motion = 'reduced';
     const button = root.querySelector('button')!;
     equal(getComputedStyle(button).transitionDuration, '0s');
@@ -66,7 +78,7 @@ check('motion: removing a row has inert exits with full motion and stays instant
           ok(row.getAnimations().length > 0, 'the surviving row has a FLIP animation');
           ok(row.getBoundingClientRect().y > 10 && row.getBoundingClientRect().y <= y, 'the row moves through intermediate positions');
           const copy = ghost.shadowRoot!.querySelector<HTMLElement>('.motion-exit')!;
-          await Promise.all([...row.getAnimations(), ...copy.getAnimations()].map((animation) => animation.finished));
+          await finished([...row.getAnimations(), ...copy.getAnimations()]);
           await settle(0);
           equal(document.querySelector('.motion-exit'), null, 'the copy is removed after exit');
         }
@@ -139,12 +151,11 @@ check('motion: container resize preserves FLIP until child layout really changes
   root.innerHTML = '<div style="height:40px">greeting</div><div style="height:40px">resume</div>';
   document.body.append(root);
   const dispose = render(() => { animateList(root); return [...root.children] as HTMLElement[]; }, root);
-  const frame = () => new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
   try {
-    await frame(); await frame();
+    await frames();
     root.style.gridTemplateColumns = '200px';
     root.style.width = '690px';
-    await frame(); await frame();
+    await frames();
     const row = root.lastElementChild as HTMLElement;
     const animation = row.getAnimations()[0];
     ok(animation, 'a real container breakpoint starts FLIP');
@@ -152,14 +163,14 @@ check('motion: container resize preserves FLIP until child layout really changes
     animation.pause();
     animation.currentTime = 40;
     root.style.width = '680px';
-    await frame(); await frame();
+    await frames();
     equal(row.getAnimations()[0], animation, 'visual travel is not another layout change');
     root.style.gridTemplateColumns = '600px 80px';
     root.style.width = '670px';
-    await frame(); await frame();
+    await frames();
     const replacement = row.getAnimations()[0];
     ok(replacement && replacement !== animation, 'a genuine layout change retargets the active FLIP');
-    await replacement.finished;
+    await finished([replacement]);
     equal(row.getAnimations().length, 0);
     equal(row.getBoundingClientRect().x, 610);
     equal(row.getBoundingClientRect().y, 10);
@@ -183,7 +194,7 @@ check('motion: disclosures animate both ways, survive interruption and toggle in
     summary.click();
     equal(details.open, true);
     await settle(40);
-    if (!matchMedia('(prefers-reduced-motion: reduce)').matches) ok(details.getAnimations().length > 0);
+    ok(details.getAnimations().length > 0);
     summary.click();
     await settle(250);
     equal(details.open, false, 'a click during entry closes the disclosure');

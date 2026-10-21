@@ -59,14 +59,12 @@ check('appearance: theme cross-fades use native snapshots, suppress stale previe
     await applyLook(sala());
     const warm = sala({ appearance: { ...sala().appearance, base: 'oficina' } });
     const pending = applyLook(warm);
-    if (!matchMedia('(prefers-reduced-motion: reduce)').matches) {
-      equal(calls, 1);
-      await applyLook(sala({ motion: 'reduced' }));
-      equal(skips, 1);
-      update();
-      await pending;
-      equal(document.documentElement.dataset.base, 'sala', 'a snapshot from a closed preview never applies later');
-    }
+    equal(calls, 1);
+    await applyLook(sala({ motion: 'reduced' }));
+    equal(skips, 1);
+    update();
+    await pending;
+    equal(document.documentElement.dataset.base, 'sala', 'a snapshot from a closed preview never applies later');
     const before = calls;
     await applyLook({ ...warm, motion: 'reduced' });
     await applyLook(sala({ motion: 'none' }));
