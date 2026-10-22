@@ -1794,6 +1794,11 @@ fn main() {
                 ask: None,
             };
             let engine = Engine::new(opts, emit);
+            // The test build's agent installs come from the loopback server of FABER_SETUP_SOURCE, as `tools_install` does: they never reach the network.
+            #[cfg(feature = "test-hooks")]
+            if let Ok(source) = std::env::var("FABER_SETUP_SOURCE") {
+                engine.set_setup_source(&source);
+            }
             // Project conversations work in copies of their own (R201), made with the native git only, never a shell.
             engine.set_git(Arc::new(|| {
                 faber_engine::project::git::Process::find()

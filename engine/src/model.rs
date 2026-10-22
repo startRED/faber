@@ -1264,6 +1264,11 @@ pub struct Settings {
     /// the stable of its own `X.Y.Z`, which may be built from an older preview (`src-tauri/src/update.rs`).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub previews: Option<bool>,
+    /// Full trust for Faber's own setup (guardrail 3; off by default): the project agent installs from the catalog without a
+    /// card. It never covers sending, publishing, paying or deleting. Only the Settings screen writes it: no card button and no
+    /// tool of the agent does (in Full access the agent could still edit the file itself, so this is no wall against it).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub faber_trust: Option<bool>,
 }
 
 /// A fresh grants epoch: 244 random bits as hex.
@@ -1296,6 +1301,10 @@ impl Settings {
 
     pub fn autostart(&self) -> bool {
         self.autostart.unwrap_or(false)
+    }
+
+    pub fn faber_trust(&self) -> bool {
+        self.faber_trust.unwrap_or(false)
     }
 
     /// What the screen is sent: every switch with its value, so the screen keeps no default of its own. The file keeps

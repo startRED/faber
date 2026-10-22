@@ -1,8 +1,8 @@
-//! Two read-only tools of a project's agent (the "Toolbox" of docs/product/areas.md): `quota`, what Faber already knows of
-//! each connected AI's limits, and `catalog`, a search of the tool catalog. Neither starts a request, a process or a download,
-//! and neither shows a token, an account id or an e-mail: they answer from what Faber keeps in memory and ships. Both CLIs
-//! call them like the other tools of Faber's server; the engine answers at once. Installing from the catalog is not here: it
-//! changes Faber itself and waits for the approval gate.
+//! Two tools of a project's agent (the "Toolbox" of docs/product/areas.md): `quota`, what Faber already knows of each connected
+//! AI's limits, and `catalog`, a search of the tool catalog. Searching starts no request, process or download, and neither tool
+//! shows a token, an account id or an e-mail: they answer from what Faber keeps in memory and ships. Both CLIs call them like the
+//! other tools of Faber's server. `catalog` also installs, by id (`install`): that changes Faber itself, so it waits for the
+//! person's card (guardrail 3, `engine/src/engine/toolbox.rs`); the words of the card and of the log live here.
 
 use crate::engine::VendorUsage;
 use crate::model::Vendor;
@@ -29,8 +29,18 @@ const SHORTEST_WORD: usize = 3;
 const QUOTA_DESCRIPTION: &str = "Reads the limits of each connected AI subscription as Faber last measured them: share used in each \
 window, when it renews, and whether it is billed per use. Starts no request. Use it before big work or to choose which AI takes it.";
 
-const CATALOG_DESCRIPTION: &str = "Searches Faber's catalog of skills, plugins and tool servers by words, offline. It installs \
-nothing: the person does that in the Catalog.";
+const CATALOG_DESCRIPTION: &str = "Searches Faber's catalog of skills, plugins and tool servers by words, offline. With `install` set \
+to a catalog id it installs that tool from its original source, but only after the person allows it on a card in Faber (or has \
+turned on full trust for Faber's own setup), and only a tool Faber holds no copy of: it never updates, repairs or replaces one. A \
+tool installed loads in a new conversation, not this one.";
+
+/// The permission card of an install: its tool name in the turn's list. It is Faber's own, never a CLI's request.
+pub const SELF_INSTALL: &str = "faber.tools.install";
+/// Every decision about a self-change, one line each, in the data folder.
+pub const SELF_CHANGES: &str = "self-changes.jsonl";
+/// About 1,000 lines of about 200 bytes. At the cap the oldest half goes and the newest lines stay, so a decision is never lost
+/// for being late.
+const SELF_CHANGES_MAX: u64 = 200_000;
 
 fn quota_schema() -> Value {
     json!({ "type": "object", "properties": {}, "additionalProperties": false })
@@ -39,7 +49,10 @@ fn quota_schema() -> Value {
 fn catalog_schema() -> Value {
     json!({
         "type": "object",
-        "properties": { "query": { "type": "string", "description": "Words for the job, e.g. \"fix a bug\". Empty lists the recommended tools." } },
+        "properties": {
+            "query": { "type": "string", "description": "Words for the job, e.g. \"fix a bug\". Empty lists the recommended tools." },
+            "install": { "type": "string", "description": "The id of one catalog tool, from a search, to install after the person allows it." }
+        },
         "additionalProperties": false
     })
 }
@@ -205,6 +218,17 @@ fn english() -> &'static HashMap<&'static str, String> {
     })
 }
 
+/// What a catalog item is called to the agent: a tool server, a plugin or a skill.
+fn kind_of(item: &Item, plugin: bool) -> &'static str {
+    if item.server.is_some() {
+        "tool server"
+    } else if plugin {
+        "plugin"
+    } else {
+        "skill"
+    }
+}
+
 /// The entries that match the words of `input["query"]`, best first: a tool matches by how many of the words its id, name,
 /// purpose, job or source holds; with no words the recommended ones are listed. At most 20 are shown.
 pub fn catalog(entries: &[Entry], input: &Value) -> (bool, String) {
@@ -237,13 +261,7 @@ pub fn catalog(entries: &[Entry], input: &Value) -> (bool, String) {
         .iter()
         .take(SHOWN)
         .map(|(_, e, name, what)| {
-            let kind = if e.item.server.is_some() {
-                "tool server"
-            } else if e.plugin {
-                "plugin"
-            } else {
-                "skill"
-            };
+            let kind = kind_of(e.item, e.plugin);
             let state = match (e.installed, e.on) {
                 (false, _) => "not installed",
                 (true, true) => "installed, on",
@@ -256,6 +274,107 @@ pub fn catalog(entries: &[Entry], input: &Value) -> (bool, String) {
         out.push(format!("({} more: add words to narrow it)", found.len() - SHOWN));
     }
     (true, out.join("\n"))
+}
+
+// ---- install ----
+
+/// What the card shows, built by the engine from the shipped catalog: the model never writes a word of it. The screen names
+/// the tool from its own `catalog.name.<id>` and `tools.<id>` words.
+/// `runs_code` is true for a tool server, or a plugin that brings one: the card says it runs code on this computer.
+pub fn install_card(item: &Item, plugin: bool, runs_code: bool) -> Value {
+    let kind = if item.server.is_some() {
+        "server"
+    } else if plugin {
+        "plugin"
+    } else {
+        "skill"
+    };
+    json!({
+        "kind": kind, "id": item.id, "repo": item.repo, "license": item.license, "version": version_of(item),
+        "server": item.server.is_some(), "code": runs_code
+    })
+}
+
+/// The pinned version an install brings: a server's release, or a skill's commit.
+pub fn version_of(item: &Item) -> String {
+    item.server.as_ref().map_or_else(|| item.commit.chars().take(7).collect(), |s| s.version.clone())
+}
+
+pub const NOT_HERE: &str = "Faber installs tools only for a project's own agent.";
+pub const NOT_ALLOWED: &str = "The person said no. Do not retry; they can install it from Catalog.";
+pub const ALREADY: &str = "Already installed.";
+/// While updating and repairing from the agent are not built, it installs only what Faber holds nothing of: these are the
+/// refusals, each with no card, that leave a copy, its Undo copy and its switch as the person left them.
+pub const REINSTALL: &str = "It needs reinstalling; the person does that in Catalog.";
+pub const SWITCHED_OFF: &str = "It is installed but switched off; the person turns it on in Catalog.";
+pub const REMOVED: &str = "The person removed it; they can bring it back in Catalog.";
+pub const BUSY: &str = "Another install of it is already running; nothing was changed.";
+pub const NO_RECORD: &str = "Nothing was changed: Faber could not write its record of the install.";
+pub const UPDATING: &str = "Faber is about to restart for an update, so nothing was installed. Ask again afterwards.";
+pub const NO_NODE: &str = "Needs Node.js to run, which is not installed on this computer. Nothing was changed.";
+pub const FAILED: &str = "Download failed; nothing changed.";
+pub const UNKNOWN: &str = "No tool with that id is in the catalog. Search it first and use an id from the results.";
+pub const WAITING: &str = "Another install is already waiting for the person's answer. Wait for it, then ask again.";
+pub const PLAN: &str = "Faber is in Plan or Isolated mode, which changes nothing here. The person can install it from Catalog.";
+
+/// What the agent reads once the tool is installed: what it is, where it came from (the pinned source) and when it loads.
+pub fn installed(item: &Item, plugin: bool) -> String {
+    format!(
+        "Installed {} ({}, licence {}) from github.com/{} at {}. It loads in a new conversation, not this one.",
+        item.id,
+        kind_of(item, plugin),
+        item.license,
+        item.repo,
+        version_of(item)
+    )
+}
+
+/// One decision about changing Faber itself, as a line of `self-changes.jsonl`: when, what, from which pinned version to which,
+/// how it was allowed and what came of it. No path, no prompt and no token: it stays on this computer.
+pub struct SelfChange<'a> {
+    pub at: u64,
+    pub id: &'a str,
+    pub from: Option<&'a str>,
+    pub to: &'a str,
+    pub how: &'a str,
+    pub result: &'a str,
+    pub conv: &'a str,
+}
+
+/// Adds one line and says whether it is on the disk. Installs can overlap, so one write at a time.
+pub fn log_self_change(dir: &std::path::Path, change: &SelfChange) -> bool {
+    use std::io::{Read, Seek, SeekFrom, Write};
+    static ONE_AT_A_TIME: std::sync::Mutex<()> = std::sync::Mutex::new(());
+    let _one = ONE_AT_A_TIME.lock().unwrap_or_else(|e| e.into_inner());
+    let SelfChange { at, id, from, to, how, result, conv } = change;
+    let line = json!({ "at": at, "kind": "tools.install", "id": id, "from": from, "to": to, "how": how, "result": result, "conv": conv });
+    let path = dir.join(SELF_CHANGES);
+    if std::fs::metadata(&path).is_ok_and(|m| m.len() >= SELF_CHANGES_MAX) {
+        // The newest half, from the start of a line, replaces the file in one rename.
+        let Ok(old) = std::fs::read(&path) else { return false };
+        let from_byte = old.len().saturating_sub(SELF_CHANGES_MAX as usize / 2);
+        let start = old[from_byte..].iter().position(|b| *b == b'\n').map_or(old.len(), |n| from_byte + n + 1);
+        let part = path.with_extension("part");
+        if std::fs::write(&part, &old[start..]).and_then(|()| crate::tools::retry_busy(|| std::fs::rename(&part, &path))).is_err() {
+            return false;
+        }
+    }
+    std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .read(true)
+        .open(&path)
+        .and_then(|mut f| {
+            // A line a crash cut short gets its newline first, so it never swallows this decision.
+            let torn = f.metadata()?.len() > 0 && {
+                f.seek(SeekFrom::End(-1))?;
+                let mut last = [0u8];
+                f.read_exact(&mut last)?;
+                last[0] != b'\n'
+            };
+            f.write_all(format!("{}{line}\n", if torn { "\n" } else { "" }).as_bytes())
+        })
+        .is_ok()
 }
 
 #[cfg(test)]
@@ -370,11 +489,86 @@ mod tests {
     }
 
     #[test]
+    fn an_install_card_and_its_log_line_hold_only_catalog_facts_and_the_description_names_the_card() {
+        let skill = crate::tools::find("ponytail").unwrap();
+        let card = install_card(skill, false, false);
+        assert_eq!(
+            (card["kind"].as_str(), card["id"].as_str(), card["version"].as_str()),
+            (Some("skill"), Some("ponytail"), Some(&skill.commit[..7]))
+        );
+        assert_eq!((card["repo"].as_str(), card["license"].as_str()), (Some(skill.repo.as_str()), Some(skill.license.as_str())));
+        assert_eq!(
+            (install_card(skill, true, true)["kind"].as_str(), install_card(skill, true, true)["code"].as_bool()),
+            (Some("plugin"), Some(true))
+        );
+        let server = crate::tools::catalog().iter().find(|i| i.server.is_some()).unwrap();
+        assert_eq!(
+            (install_card(server, false, true)["kind"].as_str(), install_card(server, false, true)["server"].as_bool()),
+            (Some("server"), Some(true))
+        );
+        assert_eq!(version_of(server), server.server.as_ref().unwrap().version);
+        assert!(installed(skill, false).contains("loads in a new conversation, not this one"));
+        assert!(NOT_ALLOWED.contains("Do not retry") && NOT_ALLOWED.contains("Catalog"));
+
+        let dir = tempfile::tempdir().unwrap();
+        let change = SelfChange { at: 5, id: "ponytail", from: None, to: "abc", how: "once", result: "declined", conv: "c1" };
+        assert!(log_self_change(dir.path(), &change));
+        assert!(log_self_change(dir.path(), &SelfChange { from: Some("old"), how: "always", result: "installed", ..change }));
+        let text = std::fs::read_to_string(dir.path().join(SELF_CHANGES)).unwrap();
+        let lines: Vec<Value> = text.lines().map(|l| serde_json::from_str(l).unwrap()).collect();
+        assert_eq!(lines.len(), 2);
+        assert_eq!(
+            lines[0],
+            json!({ "at": 5, "kind": "tools.install", "id": "ponytail", "from": null, "to": "abc", "how": "once", "result": "declined", "conv": "c1" })
+        );
+        assert_eq!((lines[1]["from"].as_str(), lines[1]["how"].as_str()), (Some("old"), Some("always")));
+
+        let listed = mcp_tools();
+        assert!(listed[1]["inputSchema"]["properties"]["install"].is_object(), "the model can name an id to install");
+        assert!(CATALOG_DESCRIPTION.contains("only after the person allows it on a card"));
+        assert!(!CATALOG_DESCRIPTION.contains("installs nothing"));
+    }
+
+    #[test]
+    fn a_log_at_its_cap_drops_the_oldest_lines_and_still_records_the_new_decision() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join(SELF_CHANGES);
+        let old = format!("{}\n", json!({ "at": 1, "pad": "x".repeat(180) }));
+        let full: String = old.repeat(SELF_CHANGES_MAX as usize / old.len() + 1);
+        std::fs::write(&path, &full).unwrap();
+        let change = SelfChange { at: 9, id: "ponytail", from: None, to: "abc", how: "once", result: "allowed", conv: "c1" };
+        assert!(log_self_change(dir.path(), &change));
+        let text = std::fs::read_to_string(&path).unwrap();
+        let lines: Vec<Value> = text.lines().map(|l| serde_json::from_str(l).expect("every line is whole")).collect();
+        assert!(lines.len() > 100 && (text.len() as u64) < SELF_CHANGES_MAX, "the newest half stays: {} lines", lines.len());
+        assert_eq!(lines.last().unwrap()["result"], "allowed");
+        assert!(log_self_change(dir.path(), &SelfChange { result: "installed", ..change }));
+        assert_eq!(std::fs::read_to_string(&path).unwrap().lines().last().map(|l| l.contains("installed")), Some(true));
+        let blocked = tempfile::tempdir().unwrap();
+        std::fs::create_dir(blocked.path().join(SELF_CHANGES)).unwrap();
+        assert!(!log_self_change(blocked.path(), &change), "a log that cannot be written says so");
+    }
+
+    #[test]
     fn the_tools_are_named_for_both_clis() {
         assert_eq!((tool_of("quota"), tool_of("catalog"), tool_of("map")), (Some("Quota"), Some("Catalog"), None));
         assert_eq!(
             (claude_tool(CLAUDE_QUOTA), claude_tool(CLAUDE_CATALOG), claude_tool("mcp__other__quota")),
             (Some("Quota"), Some("Catalog"), None)
         );
+    }
+
+    #[test]
+    fn a_line_cut_by_a_crash_never_swallows_the_next_decision_and_a_short_log_is_never_cut() {
+        let dir = tempfile::tempdir().unwrap();
+        let change = |id| SelfChange { at: 1, id, from: None, to: "0123", how: "once", result: "allowed", conv: "c" };
+        std::fs::write(dir.path().join(SELF_CHANGES), b"{\"at\":1,\"kind\":\"tools.in").unwrap();
+        assert!(log_self_change(dir.path(), &change("careful")));
+        assert!(log_self_change(dir.path(), &change("other")));
+        let text = std::fs::read_to_string(dir.path().join(SELF_CHANGES)).unwrap();
+        let ids: Vec<_> =
+            text.lines().filter_map(|l| serde_json::from_str::<Value>(l).ok()).map(|v| v["id"].as_str().unwrap().to_string()).collect();
+        assert_eq!(ids, ["careful", "other"], "{text}");
+        assert_eq!(text.lines().count(), 3, "the cut line stays on a line of its own");
     }
 }

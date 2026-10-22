@@ -5,7 +5,7 @@
 
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::io::{self, Read, Write};
 use std::path::{Path, PathBuf};
 use std::sync::{Mutex, OnceLock};
@@ -279,6 +279,27 @@ impl Store {
         ledger.into_iter().filter(|(id, _)| valid_id(id) && present(id)).collect()
     }
 
+    /// Why the project agent may not install `item` now: Faber holds something of it already (a ledger entry, a switch left off, an
+    /// Undo copy of a removal). The `bool` is whether the agent's call succeeded (it did, if the tool is there and healthy).
+    pub fn held(&self, item: &Item) -> Option<(bool, &'static str)> {
+        use crate::toolbox as reply;
+        if let Some(commit) = self.installed().get(&item.id) {
+            return Some(if self.item_status(&item.id).is_some() || *commit != item.commit {
+                (false, reply::REINSTALL)
+            } else if !self.enabled(&item.id) {
+                (false, reply::SWITCHED_OFF)
+            } else {
+                (true, reply::ALREADY)
+            });
+        }
+        self.has_removed_copy(&item.id).then_some((false, reply::REMOVED))
+    }
+
+    /// Whether the person removed this tool and Catalog still offers Undo for it (`removed/<id>`).
+    pub fn has_removed_copy(&self, id: &str) -> bool {
+        valid_id(id) && self.removed().join(id).exists()
+    }
+
     /// Whether an installed copy is in the launch roots. Callers use installed() for ledger membership.
     pub fn enabled(&self, id: &str) -> bool {
         valid_id(id)
@@ -472,11 +493,20 @@ impl Store {
 
     /// Installs the source and each pinned package as one checked item, under the ordinary ledger and lock.
     pub fn install_sources(&self, item: &Item, zip: &Path, packages: &BTreeMap<String, PathBuf>) -> Result<(), String> {
+        self.install_sources_as(item, zip, packages, false)
+    }
+
+    /// `agent` is the project agent's install: it touches only an id Faber holds nothing of, checked again here under the lock
+    /// (the error is then one of the `toolbox` refusals), since an install replaces a copy and discards an Undo copy and a switch.
+    fn install_sources_as(&self, item: &Item, zip: &Path, packages: &BTreeMap<String, PathBuf>, agent: bool) -> Result<(), String> {
         if !valid_id(&item.id) {
             return Err(format!("Invalid skill id: {}", item.id));
         }
         // One change to the store at a time, from unpacking to the ledger: what goes live is what was checked.
         let _store = lock();
+        if agent && let Some((_, why)) = self.held(item) {
+            return Err(why.into());
+        }
         if [
             self.root.clone(),
             self.plugin(),
@@ -1117,6 +1147,10 @@ impl<W: Write> Write for Capped<W> {
 
 /// Downloads `item`'s archive into the store's own temporary file and installs it. `loopback` replaces GitHub in tests.
 pub async fn install(store: &Store, item: &Item, loopback: Option<&str>) -> Result<(), String> {
+    download_and_install(store, item, loopback, false).await
+}
+
+async fn download_and_install(store: &Store, item: &Item, loopback: Option<&str>, agent: bool) -> Result<(), String> {
     if let Some(definition) = store.plugin_definition(&item.id) {
         definition.validate()?;
         if definition.item != *item {
@@ -1161,7 +1195,7 @@ pub async fn install(store: &Store, item: &Item, loopback: Option<&str>) -> Resu
     }
     if result.is_ok() {
         let (store, item, first) = (store.clone(), item.clone(), downloads[0].clone());
-        result = tokio::task::spawn_blocking(move || store.install_sources(&item, &first, &packages))
+        result = tokio::task::spawn_blocking(move || store.install_sources_as(&item, &first, &packages, agent))
             .await
             .map_err(|e| e.to_string())
             .and_then(|installed| installed);
@@ -1170,6 +1204,68 @@ pub async fn install(store: &Store, item: &Item, loopback: Option<&str>) -> Resu
         let _ = std::fs::remove_file(path);
     }
     result
+}
+
+/// Why `install_checked` installed nothing.
+#[derive(Debug, PartialEq, Eq)]
+pub enum InstallError {
+    /// The item runs under Node, which neither CLI brings, and this computer has none.
+    Node,
+    /// The agent may not install it now (one of the `toolbox` refusals); the store is as it was.
+    Held(&'static str),
+    /// The download, the digest check or the store refused; the store is as it was. The detail is for the log, never the screen.
+    Failed(String),
+}
+
+impl Store {
+    /// Whether the item (or a part of a plugin) is a tool server, which Node starts.
+    pub fn requires_node(&self, item: &Item) -> bool {
+        item.server.is_some()
+            || self.plugin_definition(&item.id).is_some_and(|plugin| plugin.parts.iter().any(|part| part.server.is_some()))
+    }
+
+    /// Whether the item needs Node and this computer has none (an install would leave a tool nothing can start).
+    pub fn lacks_node(&self, item: &Item) -> bool {
+        self.requires_node(item) && self.node.is_none() && crate::cli::find_cli("node").is_none()
+    }
+}
+
+/// The one way into the store from outside: the Catalog screen and the project agent's `catalog` tool both come through here, so
+/// the same Node check, host list, digest check, size caps and store lock apply to both. `source` replaces the download host in
+/// tests and must be a loopback address.
+pub async fn install_checked(store: &Store, item: &Item, source: Option<&str>) -> Result<(), InstallError> {
+    if store.lacks_node(item) {
+        return Err(InstallError::Node);
+    }
+    install(store, item, source).await.map_err(InstallError::Failed)
+}
+
+/// The tools (by place in their store) the project agent is installing now: a second install of one is refused, not queued behind the first.
+static AGENT_INSTALLING: Mutex<BTreeSet<PathBuf>> = Mutex::new(BTreeSet::new());
+
+struct AgentSlot(PathBuf);
+
+impl Drop for AgentSlot {
+    fn drop(&mut self) {
+        AGENT_INSTALLING.lock().unwrap_or_else(|e| e.into_inner()).remove(&self.0);
+    }
+}
+
+/// `install_checked` for the project agent: only an id Faber holds nothing of, one install of it at a time, and the hold checked
+/// again under the store lock right before anything is written. The Catalog screen's own path stays `install_checked`.
+pub async fn install_for_agent(store: &Store, item: &Item, source: Option<&str>) -> Result<(), InstallError> {
+    use crate::toolbox as reply;
+    if !AGENT_INSTALLING.lock().unwrap_or_else(|e| e.into_inner()).insert(store.root.join(&item.id)) {
+        return Err(InstallError::Held(reply::BUSY));
+    }
+    let _slot = AgentSlot(store.root.join(&item.id));
+    if store.lacks_node(item) {
+        return Err(InstallError::Node);
+    }
+    let refusals = [reply::REINSTALL, reply::SWITCHED_OFF, reply::REMOVED, reply::ALREADY];
+    download_and_install(store, item, source, true)
+        .await
+        .map_err(|detail| refusals.into_iter().find(|r| *r == detail).map_or(InstallError::Failed(detail), InstallError::Held))
 }
 
 #[cfg(test)]

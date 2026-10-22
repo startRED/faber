@@ -280,3 +280,734 @@ fn a_side_question_lists_neither_tool_in_either_cli() {
     };
     assert!(!claude_args(&launch).iter().any(|a| a == CLAUDE_MCP_CONFIG), "no server of Faber's, so no tool");
 }
+
+// ---- installing: guardrail 3 puts the person's card in front of every install ----
+
+use faber_engine::model::{Conversation, Permission, Permissions};
+
+const CARD: &str = "faber.tools.install";
+
+const SKILL: &[u8] = b"---\nname: careful\ndescription: Be careful.\n---\nBe careful.";
+
+/// The archive of the repository `owner/repo` at `commit`, holding the skill `careful`.
+fn careful_zip() -> Vec<u8> {
+    use std::io::Write;
+    let mut zip = zip::ZipWriter::new(std::io::Cursor::new(Vec::new()));
+    zip.start_file("repo-0123/skills/careful/SKILL.md", zip::write::SimpleFileOptions::default()).unwrap();
+    zip.write_all(SKILL).unwrap();
+    zip.finish().unwrap().into_inner()
+}
+
+/// The one skill of the test catalog, pinned to the digest of `SKILL` (the shipped items are pinned to their real files).
+fn careful(commit: &str) -> faber_engine::tools::Item {
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::write(dir.path().join("SKILL.md"), SKILL).unwrap();
+    faber_engine::tools::Item {
+        id: "careful".into(),
+        cli_name: None,
+        job: "debugging".into(),
+        tier: Default::default(),
+        license: "MIT".into(),
+        repo: "owner/repo".into(),
+        commit: commit.into(),
+        path: "skills/careful".into(),
+        digest: faber_engine::tools::digest(dir.path()).unwrap(),
+        chat_safe: false,
+        server: None,
+    }
+}
+
+/// Where the downloads of an agent go: a loopback server that counts its requests and, while `open` is false, holds each one.
+struct Serve {
+    server: crate::loopback::Server,
+    hits: Arc<std::sync::atomic::AtomicUsize>,
+    open: Arc<std::sync::atomic::AtomicBool>,
+}
+
+impl Serve {
+    /// Answers the archive of `careful` (nothing but a 404 for an empty `zip`). Starts holding every request when `shut`.
+    fn new(zip: Vec<u8>, shut: bool) -> Serve {
+        use std::sync::atomic::Ordering::SeqCst;
+        let (hits, open) = (Arc::new(std::sync::atomic::AtomicUsize::new(0)), Arc::new(std::sync::atomic::AtomicBool::new(!shut)));
+        let (seen, gate) = (hits.clone(), open.clone());
+        let server = crate::loopback::Server::start(move |_, path, stream| {
+            seen.fetch_add(1, SeqCst);
+            for _ in 0..2000 {
+                if gate.load(SeqCst) {
+                    break;
+                }
+                std::thread::sleep(Duration::from_millis(10));
+            }
+            if path == "/owner/repo/archive/0123.zip" && !zip.is_empty() {
+                crate::loopback::send(stream, &zip)
+            } else {
+                crate::loopback::not_found(stream)
+            }
+        });
+        Serve { server, hits, open }
+    }
+
+    fn hits(&self) -> usize {
+        self.hits.load(std::sync::atomic::Ordering::SeqCst)
+    }
+}
+
+/// A project's agent under Claude Code in `mode`, ready for calls. The fake source answers every download with a 404.
+struct Agent {
+    app: Engine,
+    pipe: Pipe,
+    id: String,
+    dir: tempfile::TempDir,
+    _folder: tempfile::TempDir,
+    serve: Serve,
+}
+
+async fn claude_project(mode: Permissions) -> Agent {
+    claude_project_with(mode, Serve::new(vec![], false), vec![]).await
+}
+
+/// The same with `serve` as the source and, when `items` is not empty, those items as the whole catalog.
+async fn claude_project_with(mode: Permissions, serve: Serve, items: Vec<faber_engine::tools::Item>) -> Agent {
+    let (dir, folder) = (support::canonical_tempdir().unwrap(), support::work_folder());
+    let (spawn, made) = pipes();
+    let app = engine(dir.path(), Vendor::Claude, spawn);
+    app.save_settings(Settings { permissions: Some(mode), ..Settings::default() }).unwrap();
+    app.set_setup_source(&serve.server.origin);
+    if !items.is_empty() {
+        app.set_catalog_items(items);
+    }
+    let project = app.add_project(&folder.path().to_string_lossy()).unwrap().id;
+    let id = app.send(request(Vendor::Claude, Area::Project, Some(project))).unwrap();
+    let mut pipe = next_pipe(&made).await;
+    wire(&pipe, |m| m["type"] == "user").await;
+    pipe.say(json!({ "type": "system", "subtype": "init", "session_id": "s1", "model": "claude-haiku-5-5" })).await;
+    Agent { app, pipe, id, dir, _folder: folder, serve }
+}
+
+impl Agent {
+    /// The agent calls `catalog` with `arguments`; the reply is read later with `reply`.
+    async fn call(&mut self, rpc: &str, call: &str, arguments: Value) {
+        let message = json!({ "jsonrpc": "2.0", "id": 7, "method": "tools/call",
+            "params": { "name": "catalog", "arguments": arguments, "_meta": { "claudecode/toolUseId": call } } });
+        self.pipe
+            .say(json!({ "type": "control_request", "request_id": rpc,
+                "request": { "subtype": "mcp_message", "server_name": "faber", "message": message } }))
+            .await;
+    }
+
+    async fn reply(&self, rpc: &str) -> (String, bool) {
+        said(&wire(&self.pipe, |m| m["response"]["request_id"] == rpc).await["response"]["response"]["mcp_response"]["result"])
+    }
+
+    fn conversation(&self) -> Conversation {
+        self.app.open(&self.id).unwrap()
+    }
+
+    /// The install cards on the turn now, with the turn's id.
+    fn cards(&self) -> (String, Vec<Permission>) {
+        let reply = self.conversation().messages.last().cloned().unwrap();
+        (reply.id, reply.permissions.unwrap_or_default().into_iter().filter(|p| p.tool == CARD).collect())
+    }
+
+    async fn card(&self) -> (String, Permission) {
+        for _ in 0..300 {
+            let (turn, mut cards) = self.cards();
+            if !cards.is_empty() {
+                return (turn, cards.remove(0));
+            }
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+        panic!("no install card: {:?}", self.conversation().messages.last());
+    }
+
+    async fn answer(&self, call: &str, allow: bool, always: bool) -> Result<(), String> {
+        let (turn, _) = self.card().await;
+        self.app.answer(&self.id, &turn, call, allow, always).await
+    }
+
+    fn log_path(&self) -> std::path::PathBuf {
+        self.dir.path().join("data").join("self-changes.jsonl")
+    }
+
+    /// The decisions logged so far, one per line.
+    fn log(&self) -> Vec<Value> {
+        std::fs::read_to_string(self.log_path()).unwrap_or_default().lines().map(|l| serde_json::from_str(l).unwrap()).collect()
+    }
+
+    /// Nothing of the catalog is on the disk: no ledger line, no folder, no download left behind.
+    fn store_untouched(&self) {
+        let data = self.dir.path().join("data");
+        assert!(faber_engine::tools::Store::new(&data).installed().is_empty(), "nothing is installed");
+        assert!(!data.join("tools").join("plugin").join("skills").join("ponytail").exists());
+        let left: Vec<_> = std::fs::read_dir(data.join("tools")).into_iter().flatten().flatten().map(|e| e.file_name()).collect();
+        assert!(!left.iter().any(|n| n.to_string_lossy().starts_with(".download")), "no download is left: {left:?}");
+    }
+
+    /// Nothing answered the call yet: not the mcp reply, and nothing written to the CLI for the card.
+    fn silent(&self, rpc: &str, call: &str) {
+        let lines = self.pipe.lines.lock().unwrap();
+        assert!(!lines.iter().any(|m| m["response"]["request_id"] == rpc || m["response"]["request_id"] == call), "{lines:?}");
+    }
+}
+
+#[tokio::test]
+async fn an_install_in_ask_and_full_access_waits_on_one_card_and_a_no_changes_nothing() {
+    for mode in [Permissions::Ask, Permissions::FullAccess] {
+        let mut agent = claude_project(mode).await;
+        agent.call("rpc1", "toolu_i1", json!({ "install": "ponytail" })).await;
+        let (turn, card) = agent.card().await;
+        assert_eq!(card.request_id, "toolu_i1", "{mode:?}");
+        let item = faber_engine::tools::find("ponytail").unwrap();
+        // The engine builds the card from the shipped catalog: what the person reads about the source comes from there.
+        assert_eq!(
+            card.input,
+            json!({ "kind": "skill", "id": "ponytail", "repo": item.repo, "license": item.license, "version": &item.commit[..7], "server": false, "code": false })
+        );
+        tokio::time::sleep(Duration::from_millis(150)).await;
+        agent.silent("rpc1", "toolu_i1");
+        agent.store_untouched();
+        assert!(agent.log().is_empty(), "nothing is decided yet");
+
+        agent.app.answer(&agent.id, &turn, "toolu_i1", false, false).await.unwrap();
+        let (text, error) = agent.reply("rpc1").await;
+        assert!(error && text.contains("The person said no. Do not retry"), "{mode:?}: {text}");
+        assert!(agent.cards().1.is_empty(), "the card is spent");
+        agent.store_untouched();
+        let log = agent.log();
+        assert_eq!(log.len(), 1, "{log:?}");
+        let said = |key: &str| log[0][key].as_str().map(str::to_string);
+        assert_eq!(
+            (said("kind"), said("id"), said("how"), said("result")),
+            (Some("tools.install".into()), Some("ponytail".into()), Some("once".into()), Some("declined".into()))
+        );
+        assert_eq!((log[0]["from"].is_null(), said("to"), said("conv")), (true, Some(item.commit.clone()), Some(agent.id.clone())));
+        let mut keys: Vec<_> = log[0].as_object().unwrap().keys().cloned().collect();
+        keys.sort();
+        assert_eq!(keys, ["at", "conv", "from", "how", "id", "kind", "result", "to"], "no path, prompt or token");
+        let raw = std::fs::read_to_string(agent.log_path()).unwrap();
+        assert!(!raw.contains(&*agent.dir.path().to_string_lossy()), "no path of this computer is logged");
+        // A second answer to the same card is stale.
+        assert!(agent.app.answer(&agent.id, &turn, "toolu_i1", true, false).await.unwrap_err().contains("stale"));
+        agent.app.shutdown();
+    }
+}
+
+#[tokio::test]
+async fn an_install_the_person_allows_once_that_cannot_download_changes_nothing_and_the_next_one_asks_again() {
+    let mut agent = claude_project(Permissions::Ask).await;
+    agent.call("rpc1", "toolu_i1", json!({ "install": "ponytail" })).await;
+    agent.answer("toolu_i1", true, false).await.unwrap();
+    let (text, error) = agent.reply("rpc1").await;
+    assert!(error && text == "Download failed; nothing changed.", "{text}");
+    agent.store_untouched();
+    let log = agent.log();
+    let steps: Vec<_> = log.iter().map(|l| (l["how"].as_str().unwrap(), l["result"].as_str().unwrap())).collect();
+    assert_eq!(steps, [("once", "allowed"), ("once", "failed")], "the decision is written before the download, the result after");
+    assert!(log.iter().all(|l| l["from"].is_null()));
+    assert_eq!(agent.conversation().allow_always, None, "an allow once remembers nothing");
+
+    agent.call("rpc2", "toolu_i2", json!({ "install": "ponytail" })).await;
+    assert_eq!(agent.card().await.1.request_id, "toolu_i2", "it asks again");
+    agent.silent("rpc2", "toolu_i2");
+    agent.answer("toolu_i2", false, false).await.unwrap();
+    assert!(agent.reply("rpc2").await.0.contains("said no"));
+    agent.app.shutdown();
+}
+
+#[tokio::test]
+async fn always_allow_installs_stops_the_card_and_a_stricter_mode_takes_it_back() {
+    let mut agent = claude_project(Permissions::FullAccess).await;
+    agent.call("rpc1", "toolu_i1", json!({ "install": "ponytail" })).await;
+    agent.answer("toolu_i1", true, true).await.unwrap();
+    assert!(agent.reply("rpc1").await.1, "the download still fails");
+    assert_eq!(agent.conversation().allow_always, Some(vec![CARD.to_string()]));
+
+    agent.call("rpc2", "toolu_i2", json!({ "install": "ponytail" })).await;
+    let (text, error) = agent.reply("rpc2").await;
+    assert!(error && text.starts_with("Download failed"), "no card: it went straight to the download: {text}");
+    assert!(agent.cards().1.is_empty());
+    let how: Vec<_> = agent.log().iter().map(|l| l["how"].as_str().unwrap().to_string()).collect();
+    assert_eq!(how, ["always", "always", "always", "always"], "a decision line and a result line for each");
+
+    agent.app.save_settings(Settings { permissions: Some(Permissions::Ask), ..Settings::default() }).unwrap();
+    assert_eq!(agent.conversation().allow_always, None, "a stricter mode forgets every always");
+    agent.app.shutdown();
+}
+
+#[tokio::test]
+async fn full_trust_in_settings_installs_without_a_card_and_plan_refuses_even_then() {
+    let mut agent = claude_project(Permissions::Ask).await;
+    agent.app.save_settings(Settings { faber_trust: Some(true), ..Settings::default() }).unwrap();
+    agent.call("rpc1", "toolu_i1", json!({ "install": "ponytail" })).await;
+    let (text, error) = agent.reply("rpc1").await;
+    assert!(error && text.starts_with("Download failed"), "{text}");
+    assert!(agent.cards().1.is_empty(), "trust skips the card");
+    assert_eq!(agent.log()[0]["how"], "trust");
+    agent.store_untouched();
+    agent.app.shutdown();
+
+    let mut plan = claude_project(Permissions::Plan).await;
+    plan.app.save_settings(Settings { faber_trust: Some(true), ..Settings::default() }).unwrap();
+    plan.call("rpc1", "toolu_i1", json!({ "install": "ponytail" })).await;
+    let (text, error) = plan.reply("rpc1").await;
+    assert!(error && text.contains("changes nothing"), "{text}");
+    assert!(plan.cards().1.is_empty() && plan.log().is_empty(), "no card and no decision: nothing changes in Plan");
+    plan.app.shutdown();
+}
+
+#[tokio::test]
+async fn an_install_that_needs_no_answer_from_the_person_gets_none() {
+    let mut agent = claude_project(Permissions::Ask).await;
+    agent.call("unknown", "toolu_u", json!({ "install": "no-such-tool" })).await;
+    let (text, error) = agent.reply("unknown").await;
+    assert!(error && text.contains("No tool with that id"), "{text}");
+    agent.call("number", "toolu_n", json!({ "install": 7 })).await;
+    assert!(agent.reply("number").await.0.contains("No tool with that id"));
+
+    // A tool server runs under Node: with none, the reply comes at once, before any card.
+    let server = faber_engine::tools::catalog().iter().find(|i| i.server.is_some()).unwrap();
+    agent.app.set_node_missing(true);
+    agent.call("node", "toolu_node", json!({ "install": server.id })).await;
+    let (text, error) = agent.reply("node").await;
+    assert!(error && text.starts_with("Needs Node.js"), "{text}");
+    assert!(agent.cards().1.is_empty() && agent.log().is_empty());
+    agent.app.set_node_missing(false);
+
+    // A second call while a card waits is refused; the first card stays the only one.
+    agent.call("first", "toolu_1", json!({ "install": "ponytail" })).await;
+    agent.card().await;
+    agent.call("second", "toolu_2", json!({ "install": "ponytail-debt" })).await;
+    let (text, error) = agent.reply("second").await;
+    assert!(error && text.contains("already waiting"), "{text}");
+    assert_eq!(agent.cards().1.len(), 1);
+    agent.silent("first", "toolu_1");
+
+    // A search still answers at once while the card waits.
+    let (found, error) = claude_call(&mut agent.pipe, "search", "catalog", json!({ "query": "debugging" })).await;
+    assert!(!error && found.contains("systematic-debugging"), "{found}");
+    agent.store_untouched();
+    agent.app.shutdown();
+}
+
+#[tokio::test]
+async fn an_answer_after_the_turn_ended_is_stale_and_installs_nothing() {
+    let mut agent = claude_project(Permissions::Ask).await;
+    agent.call("rpc1", "toolu_i1", json!({ "install": "ponytail" })).await;
+    let (turn, _) = agent.card().await;
+    agent.pipe.say(json!({ "type": "result", "subtype": "success", "is_error": false, "usage": {} })).await;
+    for _ in 0..300 {
+        if agent.cards().1.is_empty() {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(10)).await;
+    }
+    assert!(agent.cards().1.is_empty(), "the card goes with the turn");
+    assert!(agent.app.answer(&agent.id, &turn, "toolu_i1", true, true).await.unwrap_err().contains("stale"));
+    assert_eq!(agent.conversation().allow_always, None);
+    tokio::time::sleep(Duration::from_millis(100)).await;
+    agent.store_untouched();
+    assert!(agent.log().is_empty(), "no decision was made");
+    agent.app.shutdown();
+}
+
+#[tokio::test]
+async fn codex_asks_before_it_installs_through_its_dynamic_tool_too() {
+    let (dir, folder) = (support::canonical_tempdir().unwrap(), support::work_folder());
+    let (spawn, made) = pipes();
+    let app = engine(dir.path(), Vendor::Codex, spawn);
+    app.save_settings(Settings { permissions: Some(Permissions::Ask), ..Settings::default() }).unwrap();
+    let project = app.add_project(&folder.path().to_string_lossy()).unwrap().id;
+    let id = app.send(request(Vendor::Codex, Area::Project, Some(project))).unwrap();
+    let mut pipe = next_pipe(&made).await;
+    codex_boot(&mut pipe).await;
+    pipe.say(json!({"id":910,"method":"item/tool/call","params":{"threadId":"main","turnId":"turn-main","callId":"call-910",
+        "tool":"catalog","arguments":{"install":"ponytail"}}}))
+        .await;
+    let mut waiting = None;
+    for _ in 0..300 {
+        let reply = app.open(&id).unwrap().messages.last().cloned().unwrap();
+        if let Some(card) = reply.permissions.iter().flatten().find(|p| p.tool == CARD) {
+            waiting = Some((reply.id.clone(), card.clone()));
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(10)).await;
+    }
+    let (turn, card) = waiting.expect("the card");
+    assert_eq!((card.request_id.as_str(), card.input["id"].as_str()), ("call-910", Some("ponytail")));
+    tokio::time::sleep(Duration::from_millis(150)).await;
+    assert!(!pipe.lines.lock().unwrap().iter().any(|m| m["id"] == 910), "the thread has no answer before the person's");
+    app.answer(&id, &turn, "call-910", false, false).await.unwrap();
+    let result = wire(&pipe, |m| m["id"] == 910 && m.get("result").is_some()).await["result"].clone();
+    assert!(result["success"] != true && result["contentItems"][0]["text"].as_str().unwrap().contains("said no"), "{result}");
+    assert!(!dir.path().join("data").join("tools").join("plugin").exists());
+    app.shutdown();
+}
+
+#[tokio::test]
+async fn chat_cannot_install_even_when_it_calls_the_tool() {
+    let dir = support::canonical_tempdir().unwrap();
+    let (spawn, made) = pipes();
+    let app = engine(dir.path(), Vendor::Codex, spawn);
+    app.send(request(Vendor::Codex, Area::Chat, None)).unwrap();
+    let mut pipe = next_pipe(&made).await;
+    codex_boot(&mut pipe).await;
+    let (refused, failed) = codex_call(&mut pipe, 903, "catalog", json!({ "install": "ponytail" })).await;
+    assert!(failed && refused.contains("not available"), "{refused}");
+    assert!(!dir.path().join("data").join("self-changes.jsonl").exists());
+    app.shutdown();
+
+    let (app, mut pipe, dir, _folder) = claude_agent(Area::Chat).await;
+    let call = json!({ "jsonrpc": "2.0", "id": 7, "method": "tools/call", "params": { "name": "catalog", "arguments": { "install": "ponytail" } } });
+    pipe.say(json!({ "type": "control_request", "request_id": "chat",
+        "request": { "subtype": "mcp_message", "server_name": "faber", "message": call } }))
+        .await;
+    let answer = wire(&pipe, |m| m["response"]["request_id"] == "chat").await;
+    assert!(answer["response"]["response"]["mcp_response"]["error"].is_object(), "{answer}");
+    assert!(!dir.path().join("data").join("self-changes.jsonl").exists());
+    app.shutdown();
+}
+
+// ---- installing: what the agent may replace, how long it counts as work, and what the log keeps ----
+
+use faber_engine::tools::{Item, Store};
+use std::sync::atomic::Ordering::SeqCst;
+
+/// Every file under the tool store, by path: what an install, a refusal or a stale answer must leave exactly as it was.
+fn tree(data: &std::path::Path) -> BTreeMap<String, Vec<u8>> {
+    fn walk(root: &std::path::Path, at: &std::path::Path, into: &mut BTreeMap<String, Vec<u8>>) {
+        for entry in std::fs::read_dir(at).into_iter().flatten().flatten() {
+            let path = entry.path();
+            if path.is_dir() {
+                walk(root, &path, into);
+            } else {
+                // A snapshot file the background cleanup removes while this walks is no part of the store either.
+                if let Ok(bytes) = std::fs::read(&path) {
+                    into.insert(path.strip_prefix(root).unwrap().to_string_lossy().replace('\\', "/"), bytes);
+                }
+            }
+        }
+    }
+    let mut into = BTreeMap::new();
+    walk(data, &data.join("tools"), &mut into);
+    // The store proper: the copies, the Undo copies, the switches and the ledger. The next session's snapshots and their locks are
+    // rebuilt in the background whatever the agent does.
+    let kept = [
+        "tools/plugin/",
+        "tools/plugins/",
+        "tools/servers/",
+        "tools/removed/",
+        "tools/disabled/",
+        "tools/installed.json",
+        "tools/selection.json",
+    ];
+    into.retain(|path, _| kept.iter().any(|k| path.starts_with(k)));
+    into
+}
+
+/// Installs `item` into the agent's store as the Catalog does, so the agent finds something there already.
+fn seed(agent: &Agent, item: &Item) -> Store {
+    let archive = tempfile::tempdir().unwrap();
+    let zip = archive.path().join("careful.zip");
+    std::fs::write(&zip, careful_zip()).unwrap();
+    let store = Store::with_catalog(&agent.dir.path().join("data"), vec![item.clone()]);
+    store.install_from(item, &zip).unwrap();
+    store
+}
+
+fn steps(log: &[Value]) -> Vec<(String, String)> {
+    log.iter().map(|l| (l["how"].as_str().unwrap().to_string(), l["result"].as_str().unwrap().to_string())).collect()
+}
+
+fn pair(how: &str, result: &str) -> (String, String) {
+    (how.into(), result.into())
+}
+
+#[tokio::test]
+async fn an_allowed_install_downloads_logs_the_decision_then_the_result_and_the_next_call_finds_it_installed() {
+    let mut agent = claude_project_with(Permissions::Ask, Serve::new(careful_zip(), false), vec![careful("0123")]).await;
+    agent.call("rpc1", "toolu_i1", json!({ "install": "careful" })).await;
+    let (_, card) = agent.card().await;
+    assert_eq!(
+        card.input,
+        json!({ "kind": "skill", "id": "careful", "repo": "owner/repo", "license": "MIT", "version": "0123", "server": false, "code": false })
+    );
+    assert_eq!(agent.serve.hits(), 0, "nothing is downloaded before the person answers");
+    agent.answer("toolu_i1", true, false).await.unwrap();
+    let (text, error) = agent.reply("rpc1").await;
+    assert!(!error && text.starts_with("Installed careful (skill, licence MIT) from github.com/owner/repo at 0123."), "{text}");
+    let log = agent.log();
+    assert_eq!(steps(&log), [pair("once", "allowed"), pair("once", "installed")]);
+    assert!(log.iter().all(|l| l["id"] == "careful" && l["to"] == "0123" && l["from"].is_null() && l["conv"] == agent.id.as_str()));
+    let data = agent.dir.path().join("data");
+    assert_eq!(Store::with_catalog(&data, vec![careful("0123")]).installed().get("careful").map(String::as_str), Some("0123"));
+    assert_eq!(std::fs::read(data.join("tools/plugin/skills/careful/SKILL.md")).unwrap(), SKILL);
+    assert_eq!(agent.serve.hits(), 1);
+
+    agent.call("rpc2", "toolu_i2", json!({ "install": "careful" })).await;
+    let (text, error) = agent.reply("rpc2").await;
+    assert!(!error && text == "Already installed.", "{text}");
+    assert!(agent.cards().1.is_empty(), "an installed tool gets no card");
+    assert_eq!((agent.log().len(), agent.serve.hits()), (2, 1), "and no new line and no new download");
+    agent.app.shutdown();
+}
+
+#[tokio::test]
+async fn an_app_update_waits_for_an_install_the_agent_was_allowed_to_start_even_after_stop() {
+    let mut agent = claude_project_with(Permissions::Ask, Serve::new(careful_zip(), true), vec![careful("0123")]).await;
+    agent.call("rpc1", "toolu_i1", json!({ "install": "careful" })).await;
+    agent.answer("toolu_i1", true, false).await.unwrap();
+    for _ in 0..500 {
+        if agent.serve.hits() > 0 {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(10)).await;
+    }
+    assert_eq!(agent.serve.hits(), 1, "the download has begun and is held");
+    // Stop: the turn ends, nothing is left in the running list, and the install goes on.
+    agent.app.interrupt(&agent.id);
+    agent.pipe.say(json!({ "type": "result", "subtype": "success", "is_error": false, "usage": {} })).await;
+    for _ in 0..500 {
+        if agent.conversation().messages.last().is_some_and(|m| m.status != Some(faber_engine::model::Status::Streaming)) {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(10)).await;
+    }
+    assert!(agent.conversation().messages.last().is_some_and(|m| m.status != Some(faber_engine::model::Status::Streaming)));
+    assert!(agent.app.is_working(), "an install in flight is work");
+    assert_eq!(agent.app.install_admission().err().as_deref(), Some("error.update.activeOperations"), "so no update installs under it");
+
+    agent.serve.open.store(true, SeqCst);
+    let mut admitted = None;
+    for _ in 0..500 {
+        if let Ok(guard) = agent.app.install_admission() {
+            admitted = Some(guard);
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(10)).await;
+    }
+    assert!(admitted.is_some(), "the update is admitted once the install ended");
+    assert!(!agent.app.is_working());
+    let data = agent.dir.path().join("data");
+    assert!(Store::with_catalog(&data, vec![careful("0123")]).installed().contains_key("careful"), "and the install had finished first");
+    assert_eq!(steps(&agent.log()), [pair("once", "allowed"), pair("once", "installed")]);
+    drop(admitted);
+    agent.app.shutdown();
+}
+
+#[tokio::test]
+async fn the_agent_installs_only_what_faber_holds_nothing_of() {
+    for state in ["reinstall", "off", "removed"] {
+        let agent = claude_project_with(Permissions::Ask, Serve::new(careful_zip(), false), vec![careful("0123")]).await;
+        let store = seed(&agent, &careful("0123"));
+        let (seen, expected) = match state {
+            // The catalog moved on: the copy is outdated, and an install would replace it in place.
+            "reinstall" => (careful("0456"), "It needs reinstalling; the person does that in Catalog."),
+            "off" => {
+                store.set_enabled("careful", false).unwrap();
+                (careful("0123"), "It is installed but switched off; the person turns it on in Catalog.")
+            }
+            _ => {
+                store.remove("careful").unwrap();
+                (careful("0123"), "The person removed it; they can bring it back in Catalog.")
+            }
+        };
+        agent.app.set_catalog_items(vec![seen]);
+        let data = agent.dir.path().join("data");
+        let before = tree(&data);
+        assert!(!before.is_empty());
+        let mut agent = agent;
+        agent.call("rpc1", "toolu_i1", json!({ "install": "careful" })).await;
+        let (text, error) = agent.reply("rpc1").await;
+        assert!(error && text == expected, "{state}: {text}");
+        tokio::time::sleep(Duration::from_millis(100)).await;
+        assert!(agent.cards().1.is_empty(), "{state}: no card");
+        assert!(agent.log().is_empty(), "{state}: nothing was decided");
+        let after = tree(&data);
+        let changed: Vec<_> = after.keys().chain(before.keys()).filter(|k| after.get(*k) != before.get(*k)).collect();
+        assert_eq!((agent.serve.hits(), changed.is_empty()), (0, true), "{state}: nothing downloaded, the disk is as it was: {changed:?}");
+        agent.app.shutdown();
+    }
+}
+
+#[tokio::test]
+async fn stop_while_a_card_waits_makes_a_later_allow_stale_and_installs_nothing() {
+    let mut agent = claude_project_with(Permissions::Ask, Serve::new(careful_zip(), false), vec![careful("0123")]).await;
+    agent.call("rpc1", "toolu_i1", json!({ "install": "careful" })).await;
+    let (turn, _) = agent.card().await;
+    agent.app.interrupt(&agent.id);
+    let err = agent.app.answer(&agent.id, &turn, "toolu_i1", true, true).await.unwrap_err();
+    assert!(err.contains("stale"), "{err}");
+    tokio::time::sleep(Duration::from_millis(150)).await;
+    assert_eq!((agent.serve.hits(), agent.cards().1.len()), (0, 0));
+    assert!(agent.log().is_empty() && tree(&agent.dir.path().join("data")).is_empty());
+    assert_eq!(agent.conversation().allow_always, None, "and an always on a stale card is not kept");
+    agent.app.shutdown();
+}
+
+#[tokio::test]
+async fn a_conversation_removed_while_its_card_waits_installs_nothing() {
+    let mut agent = claude_project_with(Permissions::Ask, Serve::new(careful_zip(), false), vec![careful("0123")]).await;
+    agent.call("rpc1", "toolu_i1", json!({ "install": "careful" })).await;
+    let (turn, _) = agent.card().await;
+    agent.app.remove(&agent.id);
+    assert!(agent.app.open(&agent.id).is_none(), "the conversation is gone");
+    assert!(agent.app.answer(&agent.id, &turn, "toolu_i1", true, false).await.is_err());
+    tokio::time::sleep(Duration::from_millis(150)).await;
+    assert_eq!(agent.serve.hits(), 0);
+    assert!(agent.log().is_empty() && tree(&agent.dir.path().join("data")).is_empty());
+    agent.app.shutdown();
+}
+
+#[tokio::test]
+async fn a_reloaded_engine_shows_no_install_card_and_an_answer_to_the_old_one_installs_nothing() {
+    let mut agent = claude_project_with(Permissions::Ask, Serve::new(careful_zip(), false), vec![careful("0123")]).await;
+    agent.call("rpc1", "toolu_i1", json!({ "install": "careful" })).await;
+    let (turn, _) = agent.card().await;
+    agent.app.shutdown();
+    let (spawn, _made) = pipes();
+    let again = engine(agent.dir.path(), Vendor::Claude, spawn);
+    again.set_setup_source(&agent.serve.server.origin);
+    again.set_catalog_items(vec![careful("0123")]);
+    let shown = again.open(&agent.id).unwrap();
+    let cards = shown.messages.iter().flat_map(|m| m.permissions.iter().flatten()).filter(|p| p.tool == CARD).count();
+    assert_eq!(cards, 0, "no card survives a restart");
+    assert!(again.answer(&agent.id, &turn, "toolu_i1", true, false).await.is_err());
+    tokio::time::sleep(Duration::from_millis(100)).await;
+    assert!(agent.serve.hits() == 0 && agent.log().is_empty() && tree(&agent.dir.path().join("data")).is_empty());
+    again.shutdown();
+}
+
+#[tokio::test]
+async fn plan_refuses_an_install_with_no_card_even_with_full_trust() {
+    for mode in [Permissions::Plan] {
+        let mut agent = claude_project(mode).await;
+        agent.app.save_settings(Settings { faber_trust: Some(true), ..Settings::default() }).unwrap();
+        agent.call("rpc1", "toolu_i1", json!({ "install": "ponytail" })).await;
+        let (text, error) = agent.reply("rpc1").await;
+        assert!(error && text.contains("changes nothing"), "{mode:?}: {text}");
+        assert!(agent.cards().1.is_empty() && agent.log().is_empty(), "{mode:?}: no card and no decision");
+        agent.store_untouched();
+        agent.app.shutdown();
+    }
+}
+
+#[tokio::test]
+async fn full_trust_installs_under_codex_without_a_card_and_logs_the_decision_and_the_result() {
+    let (dir, folder) = (support::canonical_tempdir().unwrap(), support::work_folder());
+    let (spawn, made) = pipes();
+    let app = engine(dir.path(), Vendor::Codex, spawn);
+    app.save_settings(Settings { permissions: Some(Permissions::Ask), faber_trust: Some(true), ..Settings::default() }).unwrap();
+    let serve = Serve::new(careful_zip(), false);
+    app.set_setup_source(&serve.server.origin);
+    app.set_catalog_items(vec![careful("0123")]);
+    let project = app.add_project(&folder.path().to_string_lossy()).unwrap().id;
+    let id = app.send(request(Vendor::Codex, Area::Project, Some(project))).unwrap();
+    let mut pipe = next_pipe(&made).await;
+    codex_boot(&mut pipe).await;
+    let (text, failed) = codex_call(&mut pipe, 920, "catalog", json!({ "install": "careful" })).await;
+    assert!(!failed && text.starts_with("Installed careful (skill"), "{text}");
+    let reply = app.open(&id).unwrap().messages.last().cloned().unwrap();
+    assert!(!reply.permissions.iter().flatten().any(|p| p.tool == CARD), "trust skips the card");
+    let log: Vec<Value> = std::fs::read_to_string(dir.path().join("data").join("self-changes.jsonl"))
+        .unwrap()
+        .lines()
+        .map(|l| serde_json::from_str(l).unwrap())
+        .collect();
+    assert_eq!(steps(&log), [pair("trust", "allowed"), pair("trust", "installed")]);
+    assert!(Store::with_catalog(&dir.path().join("data"), vec![careful("0123")]).installed().contains_key("careful"));
+    assert_eq!(serve.hits(), 1);
+    app.shutdown();
+}
+
+#[tokio::test]
+async fn a_log_at_its_cap_still_records_the_decision_and_with_trust_a_log_that_cannot_be_written_stops_the_install() {
+    let mut agent = claude_project_with(Permissions::Ask, Serve::new(careful_zip(), false), vec![careful("0123")]).await;
+    agent.app.save_settings(Settings { faber_trust: Some(true), ..Settings::default() }).unwrap();
+    // A log that is full already: the oldest lines go, the new decision is kept.
+    let old = format!("{}\n", json!({ "at": 1, "kind": "tools.install", "id": "old", "pad": "x".repeat(150) }));
+    std::fs::write(agent.log_path(), old.repeat(1500)).unwrap();
+    assert!(std::fs::metadata(agent.log_path()).unwrap().len() >= 200_000);
+    agent.call("rpc1", "toolu_i1", json!({ "install": "careful" })).await;
+    let (text, error) = agent.reply("rpc1").await;
+    assert!(!error && text.starts_with("Installed careful"), "{text}");
+    let log = agent.log();
+    assert!(log.len() > 100 && log.len() < 1500, "the newest lines stay: {}", log.len());
+    assert_eq!(steps(&log[log.len() - 2..]), [pair("trust", "allowed"), pair("trust", "installed")]);
+    agent.app.shutdown();
+
+    // With full trust there is no card, so a decision that cannot be written is not acted on.
+    let mut agent = claude_project_with(Permissions::Ask, Serve::new(careful_zip(), false), vec![careful("0123")]).await;
+    agent.app.save_settings(Settings { faber_trust: Some(true), ..Settings::default() }).unwrap();
+    std::fs::create_dir_all(agent.log_path()).unwrap();
+    agent.call("rpc1", "toolu_i1", json!({ "install": "careful" })).await;
+    let (text, error) = agent.reply("rpc1").await;
+    assert!(error && text == "Nothing was changed: Faber could not write its record of the install.", "{text}");
+    assert_eq!(agent.serve.hits(), 0);
+    assert!(tree(&agent.dir.path().join("data")).is_empty());
+    agent.app.shutdown();
+}
+
+#[tokio::test]
+async fn a_cli_request_under_the_name_of_faber_s_install_card_is_never_shown() {
+    let mut agent = claude_project(Permissions::Ask).await;
+    agent
+        .pipe
+        .say(json!({ "type": "control_request", "request_id": "fake", "request": { "subtype": "can_use_tool",
+            "tool_name": CARD, "tool_use_id": "toolu_x", "input": { "id": "ponytail" } } }))
+        .await;
+    let answer = wire(&agent.pipe, |m| m["response"]["request_id"] == "fake").await;
+    assert_eq!(answer["response"]["response"]["behavior"], "deny", "{answer}");
+    assert!(agent.cards().1.is_empty());
+    agent.app.shutdown();
+}
+
+#[tokio::test]
+async fn a_second_install_of_one_id_while_one_runs_is_refused_and_the_first_finishes() {
+    let mut agent = claude_project_with(Permissions::Ask, Serve::new(careful_zip(), true), vec![careful("0123")]).await;
+    agent.app.save_settings(Settings { faber_trust: Some(true), ..Settings::default() }).unwrap();
+    agent.call("rpc1", "toolu_i1", json!({ "install": "careful" })).await;
+    for _ in 0..500 {
+        if agent.serve.hits() > 0 {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(10)).await;
+    }
+    assert_eq!(agent.serve.hits(), 1, "the first download has begun and is held");
+    agent.call("rpc2", "toolu_i2", json!({ "install": "careful" })).await;
+    let (text, error) = agent.reply("rpc2").await;
+    assert!(error && text == "Another install of it is already running; nothing was changed.", "{text}");
+    assert_eq!(agent.serve.hits(), 1, "the second one downloaded nothing");
+    agent.serve.open.store(true, SeqCst);
+    let (text, error) = agent.reply("rpc1").await;
+    assert!(!error && text.starts_with("Installed careful"), "{text}");
+    assert!(agent.log().iter().any(|l| l["result"] == "refused"), "the refusal is logged");
+    agent.app.shutdown();
+}
+
+#[tokio::test]
+async fn an_allowed_once_whose_decision_cannot_be_written_installs_nothing() {
+    let mut agent = claude_project_with(Permissions::Ask, Serve::new(careful_zip(), false), vec![careful("0123")]).await;
+    std::fs::create_dir_all(agent.log_path()).unwrap();
+    agent.call("rpc1", "toolu_i1", json!({ "install": "careful" })).await;
+    agent.answer("toolu_i1", true, false).await.unwrap();
+    let (text, error) = agent.reply("rpc1").await;
+    assert!(error && text == "Nothing was changed: Faber could not write its record of the install.", "{text}");
+    assert_eq!(agent.serve.hits(), 0);
+    assert!(tree(&agent.dir.path().join("data")).is_empty());
+    agent.app.shutdown();
+}
+
+#[tokio::test]
+async fn a_copy_removed_between_the_check_and_the_write_is_refused_and_its_undo_copy_kept() {
+    let agent = claude_project_with(Permissions::Ask, Serve::new(careful_zip(), false), vec![careful("0123")]).await;
+    let store = seed(&agent, &careful("0123"));
+    store.remove("careful").unwrap();
+    let before = tree(&agent.dir.path().join("data"));
+    // The download goes ahead as if the check had found nothing; the store lock's own check is what stops the write.
+    let origin = agent.serve.server.origin.clone();
+    let refused = faber_engine::tools::install_for_agent(&store, &careful("0123"), Some(&origin)).await;
+    assert_eq!(refused, Err(faber_engine::tools::InstallError::Held("The person removed it; they can bring it back in Catalog.")));
+    assert_eq!(agent.serve.hits(), 1);
+    assert_eq!(tree(&agent.dir.path().join("data")), before, "the Undo copy and the rest are as they were");
+    agent.app.shutdown();
+}

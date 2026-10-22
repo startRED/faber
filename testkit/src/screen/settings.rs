@@ -92,10 +92,10 @@ fn walks_the_sections(ctx: &mut Ctx) -> Result {
     page.wait_for("the quota to show", "/^(≥ )?47%$/.test(document.querySelector('.usage .share')?.textContent ?? '')")?;
     open_settings(page)?;
 
-    // General: the language, hooks, both notification switches, keep-awake and autostart.
+    // General: the language, hooks, both notification switches, keep-awake, autostart and full trust for Faber's own setup.
     let language = page.labelled("set.language")?;
     page.wait_visible(&language)?;
-    same(page.count(&role_any("switch"))?, 6, "switches on General")?;
+    same(page.count(&role_any("switch"))?, 7, "switches on General")?;
     for key in ["set.notifyMe", "set.playSound", "set.keepAwake"] {
         let toggle = page.named("switch", key)?;
         same(page.is_checked(&toggle)?, true, "defaults on")?;

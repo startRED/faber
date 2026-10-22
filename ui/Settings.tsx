@@ -220,6 +220,8 @@ export function Settings(props: Props) {
               </Opt>
               {/* In Full access the person's hooks always run (the CLI's own way), so the switch shows that and cannot change it. */}
               <Toggle id="set-hooks" label={t('set.hooksBody')} hint={t(mode() === 'dontAsk' ? 'set.hooksLocked' : 'set.hooksHint')} more={t('set.hooksMore')} checked={mode() === 'dontAsk' || props.saved.userHooks === true} disabled={mode() === 'dontAsk'} onChange={(on) => save({ userHooks: on })} />
+              {/* Guardrail 3: when the agent changes Faber itself it asks; this skips that card and nothing else (never sending, publishing, paying or deleting). */}
+              <Toggle id="set-trust" label={t('set.faberTrust')} hint={t('set.faberTrustHint')} more={t('set.faberTrustMore')} checked={props.saved.faberTrust === true} onChange={(on) => save({ faberTrust: on })} />
               <Show when={props.onChatFolder}>
                 <ChatFolder {...props} />
               </Show>

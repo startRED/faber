@@ -412,6 +412,17 @@ struct Core {
     browser: Option<std::sync::Arc<dyn crate::browser::Browser>>,
     /// Runs a project's checks (`crate::verify`), given by the shell; without it the tool is not offered.
     verifier: Option<std::sync::Arc<crate::verify::Verifier>>,
+    /// Where the catalog install of a project's agent downloads from instead of the real hosts (tests; a loopback address only).
+    setup_source: Option<String>,
+    /// Tests: this computer is taken to have no Node, so a tool that needs it is refused before any card.
+    node_missing: bool,
+    /// The install card each conversation waits on: the call it answers and the process that made it (`engine/toolbox.rs`).
+    installs: HashMap<String, (String, u64)>,
+    /// Installs the project agent's allowed `catalog` calls are running now (`engine/toolbox.rs`): work the running list does not
+    /// show, so an app update waits for them as it does for a CLI install of the setup screen.
+    agent_installs: usize,
+    /// Tests: catalog items the agent can install in place of the shipped ones (`Engine::set_catalog_items`).
+    test_items: Vec<&'static crate::tools::Item>,
     /// What each conversation's folder held when its reply began, for Faber's checks (`verifying::Before`).
     before: HashMap<String, verifying::Before>,
     live: HashMap<String, Live>,
@@ -631,6 +642,11 @@ impl Engine {
                 pr_reader,
                 browser: None,
                 verifier: None,
+                setup_source: None,
+                node_missing: false,
+                installs: HashMap::new(),
+                agent_installs: 0,
+                test_items: Vec::new(),
                 before: HashMap::new(),
                 git: None,
                 rewind,
@@ -1058,6 +1074,27 @@ impl Engine {
     pub fn set_browser(&self, browser: std::sync::Arc<dyn crate::browser::Browser>) {
         self.with(|c| c.browser = Some(browser));
     }
+    /// Makes the project agent's catalog install download from this loopback address instead of the real hosts (tests).
+    #[doc(hidden)]
+    pub fn set_setup_source(&self, source: &str) {
+        self.with(|c| c.setup_source = Some(source.trim_end_matches('/').to_string()));
+    }
+    /// Tests: the catalog is these items alone, so an install can be checked end to end against a loopback server (the shipped items
+    /// are pinned to the digest of their real files).
+    #[doc(hidden)]
+    pub fn set_catalog_items(&self, items: Vec<crate::tools::Item>) {
+        self.with(|c| {
+            let store = crate::tools::Store::with_catalog(&c.opts.data_dir, items.clone());
+            store.set_runtime(c.opts.runtime.clone());
+            c.test_items = items.into_iter().map(|item| &*Box::leak(Box::new(item))).collect();
+            c.catalog_store = Some(store);
+        })
+    }
+    /// Tests: makes the install of a tool that needs Node answer as if this computer had none.
+    #[doc(hidden)]
+    pub fn set_node_missing(&self, missing: bool) {
+        self.with(|c| c.node_missing = missing);
+    }
     /// The picture Faber's browser took for a call, when there is one.
     pub fn site_picture(&self, id: &str, call: &str) -> Option<PathBuf> {
         self.with(|c| c.site_picture(id, call))
@@ -1226,6 +1263,8 @@ impl Engine {
     pub fn is_working(&self) -> bool {
         self.with(|c| {
             !c.running.items.is_empty()
+                // An install the agent was allowed to make goes on after Stop, with nothing in the list.
+                || c.agent_installs > 0
                 // A conversation that goes on by itself works between turns and while it waits too (R199).
                 || c.convs.values().any(|conv| conv.keep_going.is_some())
         })
@@ -1721,6 +1760,7 @@ impl Core {
             before_plan: before.before_plan,
             permissions_revision: before.permissions_revision,
             previews: patch.previews.or(before.previews),
+            faber_trust: patch.faber_trust.or(before.faber_trust),
         };
         // A stricter mode revokes every remembered "Always allow" in the very save that changes the mode, by replacing the grants
         // epoch: a grant made under another one never counts again, even if a conversation file below fails to update.
@@ -1893,6 +1933,10 @@ impl Core {
             self.keep_going_off(id);
         }
         self.compacts.remove(id);
+        // A card still waiting is spent by Stop: an Allow after it is stale and installs nothing.
+        if by_person {
+            self.installs.remove(id);
+        }
         let compacting = self.convs.get(id).is_some_and(|c| c.compacting);
         let active = self.live.get(id).is_some_and(|l| l.turn.is_some() || compacting);
         if let Some(l) = self.live.get(id) {
@@ -2223,6 +2267,13 @@ impl Core {
             EngineEvent::ProgressCall { id, tool, input } => return self.progress_call(conv, id, tool, input),
             EngineEvent::ToolboxCall { id, tool, input } => return self.toolbox_call(conv, id, tool, input),
             EngineEvent::Permission { request_id, tool, mut input } => {
+                // The install card is Faber's own: a CLI's request under its name is never shown, so no CLI can dress a card as ours.
+                if tool == crate::toolbox::SELF_INSTALL {
+                    if let Some(l) = self.live.get(conv) {
+                        drop(l.session.answer(&request_id, false));
+                    }
+                    return;
+                }
                 if self.turn(conv).is_some_and(|m| m.status != Some(Status::Streaming)) {
                     if let Some(l) = self.live.get(conv) {
                         drop(l.session.answer(&request_id, false));
@@ -2573,6 +2624,7 @@ impl Core {
     /// The rest of a turn's end, with the keep-going reading `finish` already made when it held the turn.
     fn end_turn(&mut self, conv: &str, turn_id: Option<String>, read: Option<Option<String>>) {
         self.transfers.remove(conv);
+        self.installs.remove(conv);
         if let Some(l) = self.live.get_mut(conv) {
             l.held = None;
             l.visual_root = None;
@@ -4305,6 +4357,7 @@ impl Core {
         }
         self.note_turn(id, None, true);
         self.transfers.remove(id);
+        self.installs.remove(id);
         self.stop_helpers(id, true);
         self.close_asides(Some(id));
         self.asides.remove(id);

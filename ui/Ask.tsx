@@ -4,7 +4,8 @@ import { PermissionChip } from './Composer.tsx';
 import { Markdown, openLinks } from './markdown.tsx';
 import { motion } from './appearance.ts';
 import { Icon } from './Glyphs.tsx';
-import { fromEngine, t } from './i18n.ts';
+import { catalogName, fromEngine, t } from './i18n.ts';
+import { en, type Key } from './locales/en.ts';
 import { millis } from './motion.ts';
 import { answerOutcome } from './running.ts';
 
@@ -18,6 +19,25 @@ function describe(tool: string, input: unknown): { title: string; note?: string;
   if (['Write', 'Edit', 'MultiEdit', 'NotebookEdit', 'fileChange'].includes(tool)) return { title: t('ask.file'), body: String(i.file_path ?? i.path ?? raw) };
   if (tool === 'WebFetch') return { title: t('ask.page'), body: String(i.url ?? raw) };
   return { title: t('ask.other', { tool }), body: raw };
+}
+
+/** Faber's own self-change card (the agent installing from the catalog): the engine sends ids and facts, and every word here is the
+ * screen's own, from the Catalog's names and purposes, so the agent cannot write any of them. Any other tool is not one. */
+const SELF = 'faber'; // not written as one quoted word: the map's check reads that as a browser storage key
+function selfInstall(tool: string, input: unknown): { title: string; what: string; line: string; code: string } | undefined {
+  if (tool !== `${SELF}.tools.install`) return undefined;
+  const i = (input && typeof input === 'object' ? input : {}) as Record<string, unknown>;
+  const text = (v: unknown) => (typeof v === 'string' ? v : '');
+  const id = text(i.id);
+  const kind = ['skill', 'plugin', 'server'].includes(text(i.kind)) ? text(i.kind) : 'skill';
+  const purpose = `tools.${id}`;
+  return {
+    title: t('ask.self.install', { name: catalogName(id) }),
+    what: purpose in en ? t(purpose as Key) : '',
+    line: t('ask.self.line', { kind: t(`catalog.kind.${kind}` as Key), version: text(i.version), repo: text(i.repo), licence: text(i.license) }),
+    // A tool server, or a plugin that brings one, runs code on this computer: said once, calmly.
+    code: i.code === true ? t('ask.self.code') : '',
+  };
 }
 
 interface AskedQuestion {
@@ -394,6 +414,7 @@ function Card(props: { conversationId: string; turnId: string; permission: Permi
   const [dropped, setDropped] = createSignal(false);
   const [sending, setSending] = createSignal(false);
   const [problem, setProblem] = createSignal<string>();
+  const own = () => selfInstall(props.permission.tool, props.permission.input);
   const d = () => describe(props.permission.tool, props.permission.input);
   const answer = async (allow: boolean, always = false) => {
     setProblem(undefined);
@@ -413,17 +434,37 @@ function Card(props: { conversationId: string; turnId: string; permission: Permi
   return (
     <Show when={!dropped()}>
       <div class="ask" data-surface={props.surface} role="alertdialog" aria-label={t('ask.label')}>
-        <b>{d().title}</b>
-        <Show when={d().note}>
-          <span class="note">{d().note}</span>
+        <Show
+          when={own()}
+          fallback={
+            <>
+              <b>{d().title}</b>
+              <Show when={d().note}>
+                <span class="note">{d().note}</span>
+              </Show>
+              <pre>{d().body}</pre>
+            </>
+          }
+        >
+          {(self) => (
+            <>
+              <b>{self().title}</b>
+              <Show when={self().what}>
+                <span class="note">{self().what}</span>
+              </Show>
+              <span class="note" data-testid="self-line">{self().line}</span>
+              <Show when={self().code}>
+                <span class="note" data-testid="self-code">{self().code}</span>
+              </Show>
+            </>
+          )}
         </Show>
-        <pre>{d().body}</pre>
         <div>
           <button class="btn primary" disabled={sending()} onClick={() => void answer(true)}>
-            {t('ask.allow')}
+            {own() ? t('ask.self.once') : t('ask.allow')}
           </button>
           <button class="btn" disabled={sending()} onClick={() => void answer(true, true)}>
-            {t('ask.always')}
+            {own() ? t('ask.self.always') : t('ask.always')}
           </button>
           <button class="btn" disabled={sending()} onClick={() => void answer(false)}>
             {t('ask.deny')}

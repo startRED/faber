@@ -166,6 +166,14 @@ check('settings: the new sections are written in every language, and the file hi
     'set.hooksMore',
     'set.soundLine',
     'set.previewsMore',
+    'set.faberTrust',
+    'set.faberTrustHint',
+    'set.faberTrustMore',
+    'ask.self.install',
+    'ask.self.line',
+    'ask.self.once',
+    'ask.self.always',
+    'tool.catalogInstall',
     'set.chatFolderMore',
     'usage.details',
     'usage.pill.ok',
@@ -359,6 +367,42 @@ check('settings: receive previews defaults off, saves on its own and is restored
   } finally { view.stop(); }
 });
 
+check('settings: full trust for Faber\u2019s own setup is one switch under How the AI works, off by default, saved on its own', async () => {
+  const [saved, setSaved] = createSignal<Saved>(SHOWN);
+  const patches: Saved[] = [];
+  let accept = false;
+  const view = mount(() => createComponent(Settings, {
+    look: look(), get saved() { return saved(); }, vendors: [], quotas: {}, now: 0,
+    onClose: () => {}, onOpenSetup: () => {},
+    onSave: async (patch) => {
+      patches.push(patch);
+      if (accept) setSaved({ ...saved(), ...patch });
+      return accept;
+    },
+  }));
+  try {
+    const group = [...view.host.querySelectorAll<HTMLElement>('.st-group')].find((g) => g.querySelector('.st-title')?.textContent === en['set.group.ai']);
+    ok(group, 'General has the How the AI works group');
+    const row = group!.querySelector<HTMLElement>('[data-opt="set-trust"]');
+    ok(row, 'the switch lives in Settings, in that group');
+    equal(view.host.querySelectorAll('[data-opt="set-trust"]').length, 1, 'one switch, no second way');
+    ok(row!.textContent!.includes(en['set.faberTrust']) && row!.textContent!.includes(en['set.faberTrustHint']), 'its label and its one line');
+    const sw = view.host.querySelector<HTMLInputElement>('#set-trust-switch')!;
+    equal(sw.checked, false, 'full trust defaults off');
+    sw.click();
+    await tick();
+    equal(sw.checked, false, 'a refused save restores the switch');
+    accept = true;
+    sw.click();
+    await tick();
+    equal(sw.checked, true);
+    sw.click();
+    await tick();
+    equal(sw.checked, false, 'turning it off is saved too');
+    deepEqual(patches, [{ faberTrust: true }, { faberTrust: true }, { faberTrust: false }]);
+  } finally { view.stop(); }
+});
+
 check('settings: an answer that arrives after Appearance closed leaves the draft alone', async () => {
   const [draft, setDraft] = createSignal<Appearance>({ base: 'oficina' });
   const asks: Array<{ resolve: (l: Look) => void; reject: (e: unknown) => void }> = [];
@@ -445,7 +489,8 @@ check('settings: unsupported system controls are absent outside Windows', () => 
     onClose: () => {}, onOpenSetup: () => {}, onSave: async () => true,
   }));
   try {
-    equal(view.host.querySelectorAll('input[role="switch"]').length, 4);
+    // Hooks, full trust, notify, sound and previews; keep-awake and autostart are Windows-only.
+    equal(view.host.querySelectorAll('input[role="switch"]').length, 5);
   } finally {
     view.stop();
     if (original) Object.defineProperty(navigator, 'userAgent', original);

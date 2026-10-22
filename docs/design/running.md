@@ -48,6 +48,7 @@ rest of the shell are in [layout.md](layout.md).
   the time since the turn started.
 - An item that needs the user shows the permission card, and the user can answer in place with Allow, Always or Deny.
   A question the agent asks (`AskUserQuestion`) shows instead as a question card, in the thread and in the column alike.
+  When the agent asks to install a tool from the catalog, the permission card is Faber’s own: a title ("Install <name> into Faber?"), the tool’s one-line purpose and one line with its kind, version, source repository and licence, always above the buttons (a tool server, or a plugin that brings one, adds a second calm line that it runs code on this PC), then "Allow once", "Always allow installs in this conversation" and Deny. Every word is the screen’s (the Catalog’s names and purposes); the agent writes none of them. It has the permission card’s look and motion, nothing new.
   Several questions are steps: a strip of their header words (a number, a tick once answered), one question open at a
   time in the same cell, so the card keeps one height; the others wait beside it and glide in from the side. Each answer
   is a tile (radio or checkbox mark that fills with a tick, title, muted description of at most two lines, a small

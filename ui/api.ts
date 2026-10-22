@@ -444,6 +444,8 @@ export interface Settings {
   autostart?: boolean;
   /** Receive previews: update checks read the preview channel. Off by default; turning it off never downgrades. */
   previews?: boolean;
+  /** Full trust for Faber's own setup: the project agent installs from the catalog without a card. Off by default; only Settings writes it. */
+  faberTrust?: boolean;
 }
 export interface ModelInfo {
   id: string;

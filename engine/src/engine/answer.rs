@@ -10,7 +10,7 @@ use tokio::time::{Instant, timeout_at};
 /// How long the engine waits, in all, for the sessions to confirm one answer.
 const ACK_WAIT: Duration = Duration::from_secs(5);
 
-const STALE: &str = "error.permission.stale";
+pub(super) const STALE: &str = "error.permission.stale";
 const UNDELIVERED: &str = "error.permission.undelivered";
 
 /// An answer given to the sessions and not yet settled.
@@ -33,6 +33,10 @@ impl Engine {
     /// answer could not be written or was not confirmed in time. The lock is free while the engine waits, so nothing
     /// else in the engine waits for the CLI.
     pub async fn answer(&self, conv: &str, turn_id: &str, request_id: &str, allow: bool, always: bool) -> Result<(), String> {
+        // Faber's own self-change card (an install) is no request of the CLI: nothing is written to it, so the answer is settled here.
+        if let Some(settled) = self.with(|c| c.answer_self_change(conv, turn_id, request_id, allow, always)) {
+            return settled;
+        }
         let plan = self.with(|c| {
             c.convs
                 .get(conv)

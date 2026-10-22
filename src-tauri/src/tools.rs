@@ -1,7 +1,7 @@
 //! The catalog's skills and servers on screen (`faber_engine::tools`): what ships, what is installed, and installing or removing one.
 
 use crate::Faber;
-use faber_engine::tools::{Store, catalog, find};
+use faber_engine::tools::{InstallError, Store, catalog, find};
 use serde::Serialize;
 use tauri::State;
 
@@ -96,8 +96,7 @@ pub async fn tools_list(faber: State<'_, Faber>) -> Res<Vec<ToolRow>> {
                     .plugin_definition(&i.id)
                     .map(|plugin| plugin.parts.iter().map(|part| PluginPartRow { id: part.id.clone(), kind: part.kind }).collect()),
                 claude_plugins_available: store.plugin_definition(&i.id).and(claude_plugins_available),
-                requires_node: i.server.is_some()
-                    || store.plugin_definition(&i.id).is_some_and(|plugin| plugin.parts.iter().any(|part| part.server.is_some())),
+                requires_node: store.requires_node(i),
             })
             .collect()
     })
@@ -111,22 +110,18 @@ pub async fn tools_install(faber: State<'_, Faber>, id: String) -> Res<()> {
     // An update never ends the process in the middle of an install (update.rs).
     let _running = crate::update::SetupRunning::begin()?;
     let item = find(&id).ok_or("error.tools.unknown")?.clone();
-    // A server runs under Node, which neither CLI brings: without it the switch would install a tool nothing can start.
-    let requires_node = item.server.is_some()
-        || faber_engine::tools::plugins::catalog()
-            .iter()
-            .find(|plugin| plugin.item.id == id)
-            .is_some_and(|plugin| plugin.parts.iter().any(|part| part.server.is_some()));
-    if requires_node && faber_engine::cli::find_cli("node").is_none() {
-        return Err("error.tools.node".into());
-    }
     let data_dir = faber.data_dir.clone();
     let store = tokio::task::spawn_blocking(move || Store::new(&data_dir)).await.map_err(|_| "error.tools.install".to_string())?;
     // FABER_SETUP_SOURCE (tests): the archive comes from that loopback server, as the CLI installs do.
     let source = std::env::var("FABER_SETUP_SOURCE").ok().map(|s| s.trim_end_matches('/').to_string());
-    faber_engine::tools::install(&store, &item, source.as_deref()).await.map_err(|detail| {
-        eprintln!("tools: install of {id} failed: {detail}");
-        "error.tools.install".to_string()
+    // The project agent's install comes through the same function: the Node check, host list, digest and caps are one.
+    faber_engine::tools::install_checked(&store, &item, source.as_deref()).await.map_err(|why| match why {
+        InstallError::Node => "error.tools.node".to_string(),
+        InstallError::Held(_) => "error.tools.install".to_string(),
+        InstallError::Failed(detail) => {
+            eprintln!("tools: install of {id} failed: {detail}");
+            "error.tools.install".to_string()
+        }
     })
 }
 

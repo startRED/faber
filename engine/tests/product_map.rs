@@ -38,6 +38,7 @@ fn settings_keys() -> Vec<String> {
         before_plan: Some(Permissions::Ask),
         permissions_revision: Some(String::new()),
         previews: Some(true),
+        faber_trust: Some(true),
     };
     serde_json::to_value(every).unwrap().as_object().unwrap().keys().cloned().collect()
 }
