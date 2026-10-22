@@ -17,6 +17,8 @@ pub struct Spec {
     pub args: Vec<String>,
     pub cwd: PathBuf,
     pub env: Vec<(String, String)>,
+    /// The most memory the check's processes may commit together, in bytes (`admit::cap`); none leaves it uncapped.
+    pub memory: Option<u64>,
 }
 
 /// A started check: its two pipes and its end. Dropping `exit` requests cancellation; `confirmed` proves completion.
@@ -75,7 +77,7 @@ impl Runner for Real {
         }
         let mut cmd = tokio::process::Command::new(&cli.command);
         cmd.args(&cli.prefix).args(&spec.args).current_dir(&spec.cwd).envs(spec.env.iter().map(|(k, v)| (k, v)));
-        let p = crate::proc::spawn_check(cmd)?;
+        let p = crate::proc::spawn_check(cmd, spec.memory)?;
         // Nothing is ever typed into a check.
         drop(p.stdin);
         let (mut child, job) = (p.child, p.contained);
@@ -467,7 +469,7 @@ mod tests {
 
     #[tokio::test(start_paused = true)]
     async fn a_check_that_exited_ends_with_its_code_even_when_something_holds_its_pipes() {
-        let spec = Spec { program: "x".into(), args: vec![], cwd: ".".into(), env: vec![] };
+        let spec = Spec { program: "x".into(), args: vec![], cwd: ".".into(), env: vec![], memory: None };
         let ran = check(&Held(3), &spec, &mut Log::none(), Duration::from_secs(900), None).await;
         assert_eq!((ran.exit, ran.timed_out), (Some(3), false));
         assert!(ran.took < Duration::from_secs(10), "{:?}", ran.took);

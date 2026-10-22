@@ -193,7 +193,7 @@ Each step lands on its own, proves itself with the checks above, and reports its
   - Measured ([results](../../research/2026-10-17-verifier-v0-measurements.md)): CI jobs waited 3,133 minutes for a
     runner and ran 1,854; `tsgo`, light debug info and `rust-lld` were already in; Defender costs nothing in `target/`,
     so no Dev Drive for now; a one-file Rust check takes 7 s; 22 rust tests fail in any `.claude\worktrees\` lane.
-- [ ] **V1. The verifier for Faber itself.** The engine module of [section 4](#4-design) running `cargo t`'s plan,
+- [x] **V1. The verifier for Faber itself.** The engine module of [section 4](#4-design) running `cargo t`'s plan,
   `tsc` and `oxlint` per worktree:
   - change feed, graph, RAM admission, one job per run, game guard, journal;
   - fast and full checks, results as events and the `verify` tool;
@@ -213,6 +213,13 @@ Each step lands on its own, proves itself with the checks above, and reports its
   - Built first (R203): the `verify` tool, fast and full, on the project's own Checks of R137 (no second checks file),
     selection found from each command, content-hash cutoff, one kill-on-close job per check below normal priority, one
     Cargo build at a time, logs on disk; the change feed is git asked at each call, with no watcher yet.
+  - Built last (R429 of `docs/next/verify-limits.json`): the job memory cap, half again a check's kept peak or the
+    room past the reserve when more, at least 1 GiB, none before a first measured run; a failure at it is told to the agent. Left out by evidence: low memory priority, EcoQoS and low
+    I/O priority (per process on Windows, with no inheritance or job-wide class, so the tree would need watching); the
+    `verify.*` events move to V5, whose screens are their only reader.
+  - The checks of section 5: `engine/tests/verify_cost.rs` measures the idle verifier (at most 15 MB) and the memory
+    after 200 fast checks (within 5 MB of the first), and `engine/tests/verify.rs` the cap. Idle CPU stays zero by
+    construction: the verifier has no thread, timer or watcher of its own, and the game guard reads only while a run waits.
 - [x] **V2. GitHub confirms.** Built: `land.mjs` runs the suites CI would run on the exact queued commit with `cargo t`
   (the project's own runner; the engine's verifier runs the proof commands, not the screen suite) and posts
   `faber/verify`; ci-scope.mjs takes it only for the named tree, from the owner. Misses show as a red daily run on main.

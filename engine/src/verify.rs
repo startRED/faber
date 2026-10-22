@@ -532,8 +532,13 @@ impl Verifier {
     async fn metadata(&self, request: &Request, manifest: &str, runner: &dyn Runner) -> Option<String> {
         use tokio::io::AsyncReadExt;
         let args = ["metadata", "--format-version", "1", "--no-deps", "--manifest-path", manifest];
-        let spec =
-            Spec { program: "cargo".into(), args: args.map(String::from).to_vec(), cwd: request.folder.clone(), env: request.local.vars() };
+        let spec = Spec {
+            program: "cargo".into(),
+            args: args.map(String::from).to_vec(),
+            cwd: request.folder.clone(),
+            env: request.local.vars(),
+            memory: None,
+        };
         let started = runner.start(&spec).ok()?;
         let (mut stdout, mut stderr) = (started.stdout.take(METADATA_BYTES), started.stderr);
         let mut out = Vec::new();
@@ -642,6 +647,7 @@ impl Verifier {
                 args: vec!["ci".into(), "--no-audit".into(), "--no-fund".into()],
                 cwd: request.folder.clone(),
                 env: vars.clone(),
+                memory: None,
             };
             log.line("== npm ci (the dependencies were not installed in this folder) ==");
             let ran = run::check(runner, &spec, &mut log, self.deadline, self.guard.as_ref()).await;
@@ -659,8 +665,14 @@ impl Verifier {
                 }
             };
             log.line(&format!("== {} ==", check.command));
-            let spec =
-                Spec { program: check.tokens[0].clone(), args: check.tokens[1..].to_vec(), cwd: request.folder.clone(), env: vars.clone() };
+            let memory = admit::cap(known[&check.command].peak, (self.free)());
+            let spec = Spec {
+                program: check.tokens[0].clone(),
+                args: check.tokens[1..].to_vec(),
+                cwd: request.folder.clone(),
+                env: vars.clone(),
+                memory,
+            };
             // A check the journal knows as flaky (it passed and failed on the same content) that fails is run once more on
             // its own: passing then, it turns nothing red (R190 V3). Any other failure stands at once.
             let mut retried = false;
@@ -668,6 +680,14 @@ impl Verifier {
                 let ran = run::check(runner, &spec, &mut log, self.deadline, self.guard.as_ref()).await;
                 log.line(&format!("== {}: exit {:?} after {} ms ==", check.command, ran.exit, ran.took.as_millis()));
                 let mut out = result(&check.command, &ran, &root);
+                let capped = out.verdict != Verdict::Passed && at_cap(ran.peak, memory);
+                if capped {
+                    out.summary.push_str(&format!(
+                        "; it reached its memory cap of {} MB, half again the most its past runs held or what was free, whichever was more, at least \
+                         1 GiB: it took far more memory than before; if it truly needs that much now, run it when more memory is free",
+                        memory.unwrap_or_default() >> 20
+                    ));
+                }
                 if ran.refused.is_some() {
                     break out;
                 }
@@ -679,7 +699,9 @@ impl Verifier {
                     ok,
                     millis: out.millis,
                     at: (self.clock)(),
-                    peak: ran.peak,
+                    // A run stopped at its cap tells only the cap (Windows adds the refused request to the peak): kept, it
+                    // would raise the next cap and the admission past what the check ever really held.
+                    peak: if capped { None } else { ran.peak },
                 };
                 let flaky = self.journal.add(entry);
                 if out.verdict == Verdict::Failed && known[&check.command].flaky && !retried {
@@ -748,6 +770,12 @@ fn on_node(tokens: &[String]) -> bool {
     !["cargo", "rustfmt", "rustc", "rustup", "go", "python", "python3", "pytest", "dotnet", "make", "git"].contains(&program.as_str())
 }
 
+/// Whether a check's job held about as much memory as its cap allows, so a failure may be the cap's (Windows refuses the
+/// allocations past it and says nothing else).
+fn at_cap(peak: Option<u64>, cap: Option<u64>) -> bool {
+    peak.zip(cap).is_some_and(|(peak, cap)| peak.saturating_add(64 << 20) >= cap)
+}
+
 /// A finished check read into its short form; a line that looks like a secret never reaches the agent.
 fn result(command: &str, ran: &run::Ran, root: &str) -> CheckResult {
     let millis = ran.took.as_millis() as u64;
@@ -791,6 +819,10 @@ mod tests {
         dropped: Arc<AtomicUsize>,
         /// What the game guard asked of each check's processor share, in order.
         capped: Arc<Mutex<Vec<bool>>>,
+        /// The memory cap each check was started with, in order.
+        memories: Mutex<Vec<Option<u64>>>,
+        /// The peak every check tells, when set.
+        peak: Mutex<Option<u64>>,
     }
 
     struct Ends(Arc<AtomicUsize>);
@@ -804,6 +836,8 @@ mod tests {
         fn start(&self, spec: &Spec) -> std::io::Result<Started> {
             let line = std::iter::once(spec.program.clone()).chain(spec.args.iter().cloned()).collect::<Vec<_>>().join(" ");
             self.started.lock().unwrap().push(line.clone());
+            self.memories.lock().unwrap().push(spec.memory);
+            let peak = self.peak.lock().unwrap().map(|p| Arc::new(std::sync::atomic::AtomicU64::new(p)));
             let first = self.once.lock().unwrap().remove(&line);
             let (out, code) = first.or_else(|| self.script.get(&line).cloned()).ok_or_else(|| std::io::Error::other("unknown program"))?;
             let ends = Ends(self.dropped.clone());
@@ -829,7 +863,7 @@ mod tests {
                 stderr: Box::new(tokio::io::empty()),
                 exit,
                 throttle: Some(throttle),
-                peak: None,
+                peak,
             })
         }
     }
@@ -978,6 +1012,28 @@ mod tests {
             ["npm run lint", "npm run docs", "npm run docs"],
             "a known flaky failure runs once more"
         );
+    }
+
+    #[test]
+    fn a_check_is_capped_from_its_kept_peak_and_a_run_stopped_at_the_cap_keeps_none() {
+        const GB: u64 = 1 << 30;
+        let dir = tempfile::tempdir().unwrap();
+        let runner = Arc::new(fake(&[("npm run docs", "docs ok", Some(0))]));
+        runner.once.lock().unwrap().insert("npm run docs".into(), ("out of memory".into(), Some(1)));
+        *runner.peak.lock().unwrap() = Some(3 * GB + (1 << 20));
+        let v = Arc::new(Verifier::new(runner.clone()));
+        let project = dir.path().to_string_lossy().into_owned();
+        let kept =
+            Entry { project: project.clone(), command: "npm run docs".into(), key: None, ok: true, millis: 5, at: 0, peak: Some(2 * GB) };
+        v.journal.add(kept);
+        let mut request = request(dir.path(), Level::Full, &[("docs/a.md", "h1")]);
+        request.commands = vec!["npm run docs".into()];
+        let report = rt().block_on(v.verify(request.clone()));
+        assert_eq!(*runner.memories.lock().unwrap(), [Some(3 * GB)], "half again the 2 GB it held, with no free reading");
+        assert!(report.checks[0].summary.contains("memory cap of 3072 MB"), "{}", report.checks[0].summary);
+        assert_eq!(v.journal.known(&project, "npm run docs").peak, Some(2 * GB), "the capped run's peak is not kept");
+        rt().block_on(v.verify(request));
+        assert_eq!(runner.memories.lock().unwrap()[1], Some(3 * GB), "so the next cap stays where it was");
     }
 
     #[test]

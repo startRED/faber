@@ -2026,6 +2026,7 @@ export const fr: Messages = {
   'notes.194.new': 'Dans le projet de Faber lui-même, un objectif peut surveiller les nouveaux plantages et lancer une réparation tout seul, si vous l’activez dans Réglages.',
   'notes.195.better': 'Quand l’agent est empêché de lancer une commande, vous voyez ce qu’elle aurait fait, et Compris retire A besoin de vous.',
   'notes.196.better': "Le navigateur, les modifications, les réponses visuelles et les fichiers s'ouvrent maintenant larges à droite, la question rapide plus étroite, et chacun garde la largeur que vous lui donnez.",
+  'notes.197.new': 'Sous Windows, une vérification qui dépasse de loin la mémoire qu’elle prend d’habitude s’arrête maintenant et dit pourquoi, au lieu de ralentir votre PC.',
   'update.checking': 'Recherche d’une mise à jour…',
   'update.downloading': 'Téléchargement de la mise à jour…',
   'update.downloadingPercent': 'Téléchargement de la mise à jour… {percent} %',

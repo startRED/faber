@@ -2026,6 +2026,7 @@ export const de: Messages = {
   'notes.194.new': 'Im Projekt von Faber selbst kann ein Ziel auf neue Abstürze achten und von selbst eine Reparatur starten, wenn du das in den Einstellungen einschaltest.',
   'notes.195.better': 'Wenn der Agent einen Befehl nicht ausführen darf, siehst du, was er getan hätte, und Verstanden nimmt Braucht dich weg.',
   'notes.196.better': 'Browser, Änderungen, visuelle Antworten und Dateien öffnen sich rechts jetzt breit, die schnelle Frage schmaler, und jede Ansicht merkt sich die Breite, die Sie ihr geben.',
+  'notes.197.new': 'Unter Windows hört eine Prüfung, die weit über den Speicher hinauswächst, den sie sonst braucht, jetzt auf und sagt warum, statt deinen PC langsam zu machen.',
   'update.checking': 'Suche nach einem Update…',
   'update.downloading': 'Update wird heruntergeladen…',
   'update.downloadingPercent': 'Update wird heruntergeladen… {percent} %',

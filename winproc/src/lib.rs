@@ -19,7 +19,9 @@ pub fn background_thread() -> std::io::Result<()> {
 }
 
 #[cfg(windows)]
-pub use imp::{background_thread, job_active_processes, job_cpu_cap, job_peak_memory, job_terminate, process_ended, resume_process};
+pub use imp::{
+    background_thread, job_active_processes, job_cpu_cap, job_memory_cap, job_peak_memory, job_terminate, process_ended, resume_process,
+};
 
 mod files;
 pub use files::open_plain_file;
@@ -164,6 +166,43 @@ mod imp {
             )
         };
         if ok == 0 { Err(io::Error::last_os_error()) } else { Ok(info.PeakJobMemoryUsed as u64) }
+    }
+
+    /// Caps the memory the processes of the job object `job` (a handle) may commit together at `bytes`, keeping the job's
+    /// other limits: past it Windows refuses their allocations, so a runaway build fails instead of paging the PC.
+    pub fn job_memory_cap(job: isize, bytes: u64) -> io::Result<()> {
+        use windows_sys::Win32::System::JobObjects::{
+            JOB_OBJECT_LIMIT_JOB_MEMORY, JOBOBJECT_EXTENDED_LIMIT_INFORMATION, JobObjectExtendedLimitInformation,
+            QueryInformationJobObject, SetInformationJobObject,
+        };
+        let mut info = JOBOBJECT_EXTENDED_LIMIT_INFORMATION::default();
+        let size = std::mem::size_of::<JOBOBJECT_EXTENDED_LIMIT_INFORMATION>() as u32;
+        // SAFETY: `info` is a plain-data struct that lives across both calls, and the size passed is its size; the handle
+        // is one the caller holds open; no returned length is asked for.
+        let read = unsafe {
+            QueryInformationJobObject(
+                job as _,
+                JobObjectExtendedLimitInformation,
+                (&mut info as *mut JOBOBJECT_EXTENDED_LIMIT_INFORMATION).cast(),
+                size,
+                std::ptr::null_mut(),
+            )
+        };
+        if read == 0 {
+            return Err(io::Error::last_os_error());
+        }
+        info.BasicLimitInformation.LimitFlags |= JOB_OBJECT_LIMIT_JOB_MEMORY;
+        info.JobMemoryLimit = usize::try_from(bytes).unwrap_or(usize::MAX);
+        // SAFETY: as above.
+        let ok = unsafe {
+            SetInformationJobObject(
+                job as _,
+                JobObjectExtendedLimitInformation,
+                (&info as *const JOBOBJECT_EXTENDED_LIMIT_INFORMATION).cast(),
+                size,
+            )
+        };
+        if ok == 0 { Err(io::Error::last_os_error()) } else { Ok(()) }
     }
 
     /// Ends every process in the job object `job` (a handle) at once.

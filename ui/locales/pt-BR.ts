@@ -2013,6 +2013,7 @@ export const ptBR: Messages = {
   'notes.194.new': 'No projeto do próprio Faber, uma meta pode vigiar travamentos novos e começar um conserto sozinha, se você ligar isso em Ajustes.',
   'notes.195.better': 'Quando o agente é impedido de rodar um comando, você vê o que ele faria, e Entendi tira o Precisa de você.',
   'notes.196.better': 'O navegador, as alterações, as respostas visuais e os arquivos agora abrem largos à direita, a pergunta rápida abre mais estreita, e cada um guarda a largura que você der.',
+  'notes.197.new': 'No Windows, uma checagem que cresce muito além da memória que costuma usar agora para e diz por quê, em vez de deixar o PC lento.',
   'update.checking': 'Procurando atualização…',
   'update.downloading': 'Baixando atualização…',
   'update.downloadingPercent': 'Baixando atualização… {percent}%',

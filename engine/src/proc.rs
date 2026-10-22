@@ -216,8 +216,9 @@ thread_local! {
 }
 
 /// Starts a project check like `spawn_command` (no window, its own kill-on-close job), at below-normal priority on Windows
-/// so a build never makes the person's apps or a game stutter. Elsewhere it runs at the normal priority.
-pub fn spawn_check(cmd: Command) -> io::Result<Proc> {
+/// so a build never makes the person's apps or a game stutter, and with its job's memory capped at `memory` bytes before
+/// it runs. Elsewhere it runs at the normal priority, uncapped.
+pub fn spawn_check(cmd: Command, memory: Option<u64>) -> io::Result<Proc> {
     struct Reset;
     impl Drop for Reset {
         fn drop(&mut self) {
@@ -226,7 +227,19 @@ pub fn spawn_check(cmd: Command) -> io::Result<Proc> {
     }
     CHECK.with(|c| c.set(true));
     let _reset = Reset;
-    spawn_command(cmd)
+    spawn_in_job(cmd, |child| {
+        let job = join_job(child)?;
+        #[cfg(windows)]
+        if let Some(bytes) = memory {
+            // ponytail: a cap Windows refuses leaves the check uncapped rather than not run; the admission still holds.
+            if let Some(job) = job.tree.job.lock().unwrap_or_else(|e| e.into_inner()).as_ref() {
+                let _ = faber_winproc::job_memory_cap(job.handle(), bytes);
+            }
+        }
+        #[cfg(not(windows))]
+        let _ = memory;
+        Ok(job)
+    })
 }
 
 fn spawn_in_job(mut cmd: Command, join: impl FnOnce(&Child) -> io::Result<Containment>) -> io::Result<Proc> {

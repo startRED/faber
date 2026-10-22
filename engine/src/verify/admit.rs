@@ -23,6 +23,18 @@ pub fn free_memory() -> Option<u64> {
     Some(system.available_memory()).filter(|&m| m > 0)
 }
 
+/// The smallest memory cap a check's job gets.
+pub const FLOOR: u64 = 1 << 30;
+
+/// The memory cap of a check's job (the verifier spec's part 5): half again the most its kept runs held, or what is free
+/// past the person's reserve when that is more, and at least `FLOOR`. So a check is never capped under what it usually
+/// takes, and only a run far past it fails instead of pushing the PC into paging. A check with no kept peak runs
+/// uncapped: nothing tells yet what it needs.
+pub fn cap(peak: Option<u64>, free: Option<u64>) -> Option<u64> {
+    let room = free.map_or(0, |free| free.saturating_sub(RESERVE));
+    peak.map(|peak| peak.saturating_add(peak / 2).max(room).max(FLOOR))
+}
+
 #[derive(Default)]
 struct Held {
     builds: usize,
@@ -119,6 +131,15 @@ mod tests {
 
     fn rt() -> tokio::runtime::Runtime {
         tokio::runtime::Builder::new_current_thread().enable_time().start_paused(true).build().unwrap()
+    }
+
+    #[test]
+    fn a_check_s_memory_cap_is_never_under_what_it_usually_takes_and_none_without_a_record() {
+        assert_eq!(cap(Some(6 * GB), Some(5 * GB)), Some(9 * GB), "a busy PC: half again its usual peak");
+        assert_eq!(cap(Some(2 * GB), Some(12 * GB)), Some(10 * GB), "an idle PC: what is free past the person's 2");
+        assert_eq!(cap(Some(GB / 4), None), Some(FLOOR), "never under the floor, even with no reading");
+        assert_eq!(cap(None, Some(12 * GB)), None, "a check never measured runs uncapped");
+        assert_eq!(cap(Some(u64::MAX), Some(u64::MAX)), Some(u64::MAX));
     }
 
     #[test]

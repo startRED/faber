@@ -1906,6 +1906,7 @@ export const en = {
   'notes.194.new': "In Faber's own project, a goal can watch for new crashes and start a fix by itself, when you turn that on in Settings.",
   'notes.195.better': 'When the agent is held back from a command, you now see what it would have done, and Got it clears Needs you.',
   'notes.196.better': 'The browser, Changes, visual answers and files now open wide on the right, a quick question opens narrower, and each remembers the width you give it.',
+  'notes.197.new': 'On Windows, a check that grows far past the memory it usually takes now stops and says why, instead of slowing your PC down.',
   'update.checking': 'Looking for an update…',
   'update.downloading': 'Downloading update…',
   'update.downloadingPercent': 'Downloading update… {percent}%',

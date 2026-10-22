@@ -648,6 +648,7 @@ mod processes {
             args: vec!["-e".into(), "Buffer.alloc(200*1024*1024, 1)".into()],
             cwd: dir.path().to_path_buf(),
             env: vec![],
+            memory: None,
         };
         let started = faber_engine::verify::Runner::start(&faber_engine::verify::Real, &spec).unwrap();
         let peak = started.peak.clone().expect("a contained check tells its peak");
@@ -666,6 +667,29 @@ mod processes {
         let peak = started.peak.clone().unwrap();
         drop(started);
         assert!(peak.load(std::sync::atomic::Ordering::Relaxed) >= 200 << 20, "the peak of a check ended early");
+    }
+
+    #[cfg(windows)]
+    #[tokio::test]
+    async fn a_check_past_its_memory_cap_fails_instead_of_taking_the_memory() {
+        if faber_engine::cli::find_cli("node").is_none() {
+            return;
+        }
+        let dir = tempfile::tempdir().unwrap();
+        let spec = faber_engine::verify::Spec {
+            program: "node".into(),
+            args: vec!["-e".into(), "Buffer.alloc(600*1024*1024, 1)".into()],
+            cwd: dir.path().to_path_buf(),
+            env: vec![],
+            memory: Some(300 << 20),
+        };
+        let started = faber_engine::verify::Runner::start(&faber_engine::verify::Real, &spec).unwrap();
+        let peak = started.peak.clone().unwrap();
+        assert_ne!(started.exit.await, Some(0), "600 MB do not fit under a 300 MB cap");
+        // Windows counts the refused commit in the peak, so the failure reads as the cap reached (`at_cap`).
+        assert!(peak.load(std::sync::atomic::Ordering::Relaxed) >= 300 << 20);
+        let uncapped = faber_engine::verify::Spec { memory: None, ..spec };
+        assert_eq!(faber_engine::verify::Runner::start(&faber_engine::verify::Real, &uncapped).unwrap().exit.await, Some(0));
     }
 
     #[tokio::test]

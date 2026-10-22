@@ -120,7 +120,7 @@ async fn run_program(program: &str, args: &[String], cwd: &Path, input: Option<&
     let mut command = tokio::process::Command::new(program);
     command.args(args).current_dir(cwd);
     let Proc { mut stdin, mut stdout, stderr, child, contained } =
-        proc::spawn_check(command).map_err(|e| format!("could not start {program}: {e}"))?;
+        proc::spawn_check(command, None).map_err(|e| format!("could not start {program}: {e}"))?;
     if let Some(text) = input {
         stdin.write_all(text.as_bytes()).await.map_err(|e| format!("{program} did not take its input: {e}"))?;
     }

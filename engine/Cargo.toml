@@ -71,3 +71,7 @@ path = "tests/rewind_cost.rs"
 [[test]]
 name = "background_cost"
 path = "tests/background_cost.rs"
+
+[[test]]
+name = "verify_cost"
+path = "tests/verify_cost.rs"
