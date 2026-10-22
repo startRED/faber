@@ -726,6 +726,8 @@ export type AppEvent =
   | { type: 'contextParts'; conversationId: string; parts: ContextPart[] }
   | { type: 'plan'; conversationId: string; plan?: Plan }
   | { type: 'halted'; conversationId: string; title: string; why: string; vendor?: Vendor }
+  /** A conversation could not be written to disk and no command was waiting to say so; `key` is an `error.chat.*` key (or `error.store.read` or `error.store.corrupt`). */
+  | { type: 'saveFailed'; key: string }
   | SetupProgressEvent;
 
 export interface SendRequest {

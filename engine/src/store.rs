@@ -90,10 +90,18 @@ impl Disk for RealDisk {
 /// Writes `bytes` beside `path` and renames the result over it. On failure the temp file is removed and the old file
 /// stays as it was.
 pub fn replace(disk: &dyn Disk, path: &Path, bytes: &[u8]) -> Result<(), Fault> {
+    replace_with(disk, path, bytes, true)
+}
+
+/// [`replace`], where `patient` false does not wait for a busy rename: the caller already knows this file keeps failing.
+pub fn replace_with(disk: &dyn Disk, path: &Path, bytes: &[u8], patient: bool) -> Result<(), Fault> {
     let mut name = path.file_name().unwrap_or_default().to_os_string();
     name.push(".tmp");
     let tmp = path.with_file_name(name);
-    disk.write(&tmp, bytes).and_then(|()| disk.rename(&tmp, path)).map_err(|e| {
+    // Windows lets an antivirus or indexer hold a file it has just seen for a few ms: a busy rename tries again before it
+    // counts as a failed save.
+    let rename = || if patient { crate::tools::retry_busy(|| disk.rename(&tmp, path)) } else { disk.rename(&tmp, path) };
+    disk.write(&tmp, bytes).and_then(|()| rename()).map_err(|e| {
         drop(fs::remove_file(&tmp));
         Fault::of_write(&e)
     })
@@ -192,7 +200,12 @@ impl Store {
     }
 
     fn write<T: Serialize>(&self, path: &Path, value: &T) -> Result<(), Fault> {
-        replace(&*self.disk, path, serde_json::to_string_pretty(value).expect("plain data always serializes").as_bytes())
+        self.write_with(path, value, true)
+    }
+
+    fn write_with<T: Serialize>(&self, path: &Path, value: &T, patient: bool) -> Result<(), Fault> {
+        let bytes = serde_json::to_string_pretty(value).expect("plain data always serializes");
+        replace_with(&*self.disk, path, bytes.as_bytes(), patient)
     }
 
     fn file(&self, id: &str) -> PathBuf {
@@ -284,27 +297,42 @@ impl Store {
 
     /// Replaces the record durably before publishing it to search or acknowledging a rewind cursor.
     pub fn save_checked(&self, conversation: &Conversation) -> Result<(), Fault> {
+        self.save_checked_with(conversation, true)
+    }
+
+    /// [`Store::save_checked`], where `patient` false does not wait for a busy rename (see [`replace_with`]).
+    pub fn save_checked_with(&self, conversation: &Conversation, patient: bool) -> Result<(), Fault> {
         if let Some((pending, area)) = self.read_group_move()?
             && pending.conversation_id == conversation.id
             && area != conversation.area
         {
             self.recover_group_move()?;
         }
-        self.write(&self.file(&conversation.id), conversation)?;
+        self.write_with(&self.file(&conversation.id), conversation, patient)?;
         self.search.saved(conversation);
         Ok(())
     }
 
     pub fn remove(&self, id: &str) {
-        let Ok(pending) = self.read_group_move() else {
-            return;
-        };
-        if pending.is_some_and(|(pending, _)| pending.conversation_id == id) && self.recover_group_move().is_err() {
-            return;
+        let _ = self.remove_checked(id);
+    }
+
+    /// Deletes the record, or says why it stayed. Only a record that is not there is already removed: one that cannot be
+    /// read (locked, damaged) is still a file that stays until it is deleted.
+    pub fn remove_checked(&self, id: &str) -> Result<(), Fault> {
+        // Ids are UUIDs; anything else could point outside the folder.
+        if !id.chars().all(|c| c.is_ascii_alphanumeric() || c == '-') {
+            return Ok(());
         }
-        if self.get(id).is_some() && fs::remove_file(self.file(id)).is_ok() {
-            self.search.removed(id);
+        if self.read_group_move()?.is_some_and(|(pending, _)| pending.conversation_id == id) {
+            self.recover_group_move()?;
         }
+        match crate::tools::retry_busy(|| fs::remove_file(self.file(id))) {
+            Ok(()) => self.search.removed(id),
+            Err(e) if e.kind() == io::ErrorKind::NotFound => {}
+            Err(e) => return Err(Fault::of_write(&e)),
+        }
+        Ok(())
     }
 
     pub fn search(&self) -> crate::search::Search {
@@ -464,6 +492,8 @@ impl Store {
             {
                 c.allow_always = None;
                 c.allow_always_epochs.clear();
+                // Silent on purpose: the epoch replaced in `save_settings` already voids these grants, so a file that stays
+                // stale costs nothing and the person's mode change is not undone by it.
                 self.save(&c);
             }
         }

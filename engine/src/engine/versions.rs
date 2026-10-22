@@ -17,14 +17,16 @@ impl Core {
 
     /// A conversation that goes takes no family apart: what branched from it now branches from where it came from (from
     /// the first of its branches when it was the first of the family), so the versions that stay keep finding each other
-    /// after a restart too.
-    pub(super) fn keep_family(&mut self, gone: &str) {
-        let children: Vec<String> = self.links().iter().filter(|(_, parent)| parent == gone).map(|(child, _)| child.clone()).collect();
-        if children.is_empty() {
+    /// after a restart too. `heir` is where `gone` itself branched from, read before its record went.
+    pub(super) fn keep_family(&mut self, gone: &str, mut heir: Option<BranchOf>) {
+        let ids: Vec<String> = self.links().iter().filter(|(_, parent)| parent == gone).map(|(child, _)| child.clone()).collect();
+        if ids.is_empty() {
             return;
         }
-        let mut heir = self.load(gone).and_then(|c| c.branch_of.clone());
-        for child in &children {
+        // The folder lists files in no fixed order (macOS differs from Windows): the oldest branch is the first, then by id.
+        let mut children: Vec<(u64, String)> = ids.into_iter().filter_map(|c| self.load(&c).map(|x| (x.created_at, c))).collect();
+        children.sort();
+        for (_, child) in &children {
             let Some(c) = self.load(child) else { continue };
             let own = c.branch_of.take();
             c.branch_of = heir.clone();

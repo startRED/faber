@@ -137,6 +137,13 @@ pub enum AppEvent {
         conversation_id: String,
         asides: Vec<aside::Aside>,
     },
+    /// A conversation could not be written to disk with no command waiting to say so (a turn, a rename, a pin, an archive).
+    /// `key` is `error.chat.saveFailed` or `error.chat.saveFull` (a full disk), or `error.store.read` or `error.store.corrupt`
+    /// when the record's journal could not be read; the screen shows it in its save-error toast when the first conversation
+    /// fails, and again only after every failed one has been saved.
+    SaveFailed {
+        key: String,
+    },
 }
 
 pub type Emit = Arc<dyn Fn(AppEvent) + Send + Sync>;
@@ -449,6 +456,9 @@ struct Core {
     ledger_saved: f64,
     /// Safety changes cannot admit work after a failed ledger save.
     ledger_failed: bool,
+    /// The conversations whose last save failed. The person is told when the first one fails, `shutdown` tries each again,
+    /// and a save that works takes its conversation out (`Core::save`).
+    save_failed: Mutex<HashSet<String>>,
     /// No ownership or unreadable authority: keep Chat in memory and leave the durable budget intact.
     projects_closed: bool,
     /// When each vendor's quota is read next (cadence.rs), and which readings are under way.
@@ -592,6 +602,7 @@ impl Engine {
                 ledger,
                 ledger_saved: 0.0,
                 ledger_failed: false,
+                save_failed: Mutex::new(HashSet::new()),
                 projects_closed,
                 cadence: Cadence::default(),
                 reading: HashSet::new(),
@@ -879,7 +890,7 @@ impl Engine {
             let conversation = c.load(id).ok_or("error.conversationGone")?;
             let previous = conversation.piece_values.clone();
             crate::pieces::save_value(conversation, message_id, block, value).map_err(str::to_string)?;
-            if let Err(fault) = c.save_checked(id) {
+            if let Err(fault) = c.save_checked(id, true) {
                 if let Some(conversation) = c.convs.get_mut(id) {
                     conversation.piece_values = previous;
                 }
@@ -1232,6 +1243,13 @@ impl Engine {
                 server.retire();
             }
             c.close_spare();
+            // A conversation whose last save failed gets one more try before Faber closes, waiting for a busy file, for about
+            // 3 s in all.
+            let failed: Vec<String> = c.save_failed.lock().unwrap_or_else(|e| e.into_inner()).iter().cloned().collect();
+            let started = std::time::Instant::now();
+            for id in failed.into_iter().take_while(|_| started.elapsed() < Duration::from_secs(3)) {
+                c.save_with(&id, true);
+            }
             c.save_ledger(true);
             c.store.release_budget();
             c.store.search().stop();
@@ -1550,17 +1568,51 @@ impl Core {
         Some(c)
     }
 
+    /// Writes conversation `id` through. A failure never loses it while Faber is open (it stays in memory, the next save writes
+    /// it whole and `shutdown` tries once more) and is never silent: the screen's save-error toast says it when the first
+    /// conversation starts failing, and again only after every failed one has been saved.
     fn save(&self, id: &str) {
-        let _ = self.save_checked(id);
+        // A conversation that keeps failing does not make every save wait for a busy file again.
+        let patient = !self.save_failed.lock().unwrap_or_else(|e| e.into_inner()).contains(id);
+        self.save_with(id, patient);
     }
 
-    fn save_checked(&self, id: &str) -> Result<(), crate::store::Fault> {
+    fn save_with(&self, id: &str, patient: bool) {
+        // Nothing is written for a conversation that is not loaded, so that is neither a failure nor a success.
+        if !self.convs.contains_key(id) {
+            return;
+        }
+        let result = self.save_checked(id, patient);
+        let first = {
+            let mut failed = self.save_failed.lock().unwrap_or_else(|e| e.into_inner());
+            // A conversation deleted, dropped or unloaded since it failed is not waited for: it must not hide the next one.
+            failed.retain(|f| self.convs.contains_key(f));
+            match &result {
+                Ok(()) => {
+                    failed.remove(id);
+                    false
+                }
+                Err(_) => failed.insert(id.to_string()) && failed.len() == 1,
+            }
+        };
+        if let (true, Err(fault)) = (first, result) {
+            use crate::store::Fault;
+            let key = match fault {
+                Fault::DiskFull => "error.chat.saveFull",
+                Fault::Write => "error.chat.saveFailed",
+                other => other.key(),
+            };
+            (self.emit)(AppEvent::SaveFailed { key: key.to_string() });
+        }
+    }
+
+    fn save_checked(&self, id: &str, patient: bool) -> Result<(), crate::store::Fault> {
         if let Some(c) = self.convs.get(id) {
             if c.messages
                 .last()
                 .is_none_or(|m| !matches!(m.error.as_deref(), Some("error.quotaOut" | "error.quotaWait")) && m.recovery.is_none())
             {
-                return self.store.save_checked(c);
+                return self.store.save_checked_with(c, patient);
             }
             let mut saved = c.clone();
             if let Some(m) = saved.messages.last_mut() {
@@ -1580,7 +1632,7 @@ impl Core {
                         check: t.check.into(),
                     });
             }
-            return self.store.save_checked(&saved);
+            return self.store.save_checked_with(&saved, patient);
         }
         Ok(())
     }
@@ -4199,16 +4251,20 @@ impl Core {
     }
 
     fn remove(&mut self, id: &str) -> Result<(), String> {
-        self.store.recover_group_move().map_err(|e| e.key())?;
+        // Whatever cannot be written is told with this key. The steps that can fail come first and the ones that forget
+        // or rewrite other files come after the record is gone, so a deletion that stops leaves the chat whole.
+        const FAILED: &str = "error.chat.deleteFailed";
+        self.store.recover_group_move().map_err(|_| FAILED)?;
         self.rewind_delete_allowed(id)?;
-        self.kit_checks.retain(|_, check| check.owner != id);
+        let mut groups_before = None;
         if let Ok(mut groups) = self.store.chat_groups() {
-            let changed = groups.iter().any(|g| g.conversation_ids.iter().any(|chat| chat == id));
-            if changed {
-                for group in &mut groups {
-                    group.conversation_ids.retain(|chat| chat != id);
-                }
-                let _ = self.store.save_chat_groups(&groups);
+            let before = groups.clone();
+            for group in &mut groups {
+                group.conversation_ids.retain(|chat| chat != id);
+            }
+            if groups != before {
+                self.store.save_chat_groups(&groups).map_err(|_| FAILED)?;
+                groups_before = Some(before);
             }
         }
         self.note_turn(id, None, true);
@@ -4216,19 +4272,43 @@ impl Core {
         self.stop_helpers(id, true);
         self.close_asides(Some(id));
         self.asides.remove(id);
-        self.follows.remove(id);
-        self.before.remove(id);
         self.compacts.remove(id);
-        if let Some(l) = self.retire(id) {
+        // The live process goes first: a turn still running could write the record again.
+        let retired = self.retire(id);
+        if let Some(l) = &retired {
             l.session.close();
         }
-        if self.store.get(id).is_some() || self.convs.contains_key(id) {
-            self.keep_family(id);
+        let stored = self.store.get(id);
+        let existed = stored.is_some() || self.convs.contains_key(id);
+        let heir = self.convs.get(id).map_or_else(|| stored.and_then(|c| c.branch_of), |c| c.branch_of.clone());
+        if self.store.remove_checked(id).is_err() {
+            // Best effort: the chat stays, so it goes back to its group; if this write fails too the chat stays outside it.
+            if let Some(before) = groups_before {
+                let _ = self.store.save_chat_groups(&before);
+            }
+            // The answer that was live was stopped: its reply ends as a stopped one, as when a settings change stops it, so
+            // the chat that stays is usable and nothing is left typing.
+            if let Some(live) = retired {
+                if let Some(message) =
+                    live.turn.as_ref().and_then(|turn| self.convs.get_mut(id)?.messages.iter_mut().find(|m| &m.id == turn))
+                {
+                    settle(message);
+                }
+                self.finish(id, live.turn);
+            }
+            self.list_changed();
+            return Err(FAILED.into());
+        }
+        self.kit_checks.retain(|_, check| check.owner != id);
+        self.follows.remove(id);
+        self.before.remove(id);
+        if existed {
+            self.keep_family(id, heir);
             self.rewind_forget(id);
-            self.store.remove(id);
             self.draft_routes.remove(id);
             self.convs.remove(id);
             self.try_seal_rewind(id);
+            // Clearing leftovers is best-effort: the conversation is already gone and nothing reads these folders again.
             let _ = std::fs::remove_dir_all(self.scratch_of(id));
             let _ = std::fs::remove_dir_all(self.opts.data_dir.join("attachments").join(id));
         }

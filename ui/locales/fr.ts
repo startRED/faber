@@ -1671,6 +1671,9 @@ export const fr: Messages = {
   // Native speaker must translate (needs native review).
   // Native speaker must translate (needs native review).
   "error.store.full": "Le disque est plein. Rien n'a été approuvé.",
+  "error.chat.saveFailed": "Faber n'a pas pu enregistrer cette conversation. Elle reste en sécurité tant que Faber est ouvert, et Faber réessaie à votre prochaine modification. Ne fermez pas encore Faber.",
+  "error.chat.saveFull": "Le disque est plein, donc Faber n'a pas pu enregistrer cette conversation. Elle reste en sécurité tant que Faber est ouvert et sera enregistrée à votre prochaine modification, dès qu'il y a de la place. Ne fermez pas encore Faber.",
+  "error.chat.deleteFailed": "Faber n'a pas pu supprimer cette conversation, elle reste donc où elle est. Réessayez dans un instant.",
   // Native speaker must translate (needs native review).
   "reason.interrupted": "En pause au dernier point de contrôle sauvegardé.",
   // Native speaker must translate (needs native review).
@@ -1943,6 +1946,8 @@ export const fr: Messages = {
   'notes.182.new': 'Auto démarre sur un modèle plus fort une tâche que vous recommencez souvent, et le dit, en apprenant seulement sur ce PC. Les Réglages permettent de lui faire oublier.',
   'notes.183.better': 'Les étapes de même nature qui se suivent tiennent sur une seule ligne, comme "Modification de 3 fichiers", et une aide terminée indique combien de temps elle a pris.',
   'notes.184.new': 'Dans Projets, l’agent consulte les limites de vos IA et cherche des outils dans le catalogue, mais n’installe jamais rien.',
+  'notes.185.better': 'Quand Faber ne peut pas supprimer une conversation, il le dit et laisse la conversation, ses fichiers et sa place dans un groupe comme avant.',
+  'notes.186.fixed': "Faber vous prévient quand il ne peut pas enregistrer une conversation. Il la garde tant qu'il est ouvert et réessaie à votre prochaine modification.",
   'update.checking': 'Recherche d’une mise à jour…',
   'update.downloading': 'Téléchargement de la mise à jour…',
   'update.downloadingPercent': 'Téléchargement de la mise à jour… {percent} %',

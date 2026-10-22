@@ -1668,6 +1668,9 @@ export const ptBR: Messages = {
   // Native speaker must translate (needs native review).
   // Native speaker must translate (needs native review).
   "error.store.full": "O disco está cheio. Nada foi aprovado.",
+  "error.chat.saveFailed": "O Faber não conseguiu salvar esta conversa. Ela fica segura enquanto o Faber estiver aberto, e o Faber tenta de novo na sua próxima alteração. Não feche o Faber ainda.",
+  "error.chat.saveFull": "O disco está cheio, então o Faber não conseguiu salvar esta conversa. Ela fica segura enquanto o Faber estiver aberto e é salva de novo na sua próxima alteração, assim que houver espaço. Não feche o Faber ainda.",
+  "error.chat.deleteFailed": "O Faber não conseguiu apagar esta conversa, então ela continua onde está. Tente de novo daqui a pouco.",
   // Native speaker must translate (needs native review).
   "reason.interrupted": "Pausado no último checkpoint salvo.",
   // Native speaker must translate (needs native review).
@@ -1930,6 +1933,8 @@ export const ptBR: Messages = {
   'notes.182.new': 'O Automático passa a usar um modelo mais forte numa tarefa que você sempre refaz e avisa, aprendendo só neste PC. Em Configurações dá para esquecer.',
   'notes.183.better': 'Passos seguidos do mesmo tipo aparecem em uma só linha, como "Alterando 3 arquivos", e um ajudante que terminou diz quanto tempo levou.',
   'notes.184.new': 'Em Projetos, o agente consulta os limites das suas IAs e busca ferramentas no catálogo, mas nunca instala nada.',
+  'notes.185.better': 'Quando o Faber não consegue apagar uma conversa, ele avisa e deixa a conversa, os arquivos dela e o lugar dela em um grupo como estavam.',
+  'notes.186.fixed': 'O Faber avisa quando não consegue salvar uma conversa. Ele a mantém enquanto estiver aberto e tenta de novo na sua próxima alteração.',
   'update.checking': 'Procurando atualização…',
   'update.downloading': 'Baixando atualização…',
   'update.downloadingPercent': 'Baixando atualização… {percent}%',

@@ -50,6 +50,8 @@ mod conversation_copy;
 mod engine;
 #[path = "export.rs"]
 mod export;
+#[path = "failed_writes.rs"]
+mod failed_writes;
 #[path = "groups.rs"]
 mod groups;
 #[path = "guide.rs"]

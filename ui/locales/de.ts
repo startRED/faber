@@ -1671,6 +1671,9 @@ export const de: Messages = {
   // Native speaker must translate (needs native review).
   // Native speaker must translate (needs native review).
   "error.store.full": "Der Datenträger ist voll. Es wurde nichts genehmigt.",
+  "error.chat.saveFailed": "Faber konnte diese Unterhaltung nicht speichern. Sie bleibt sicher, solange Faber geöffnet ist, und Faber versucht es bei deiner nächsten Änderung erneut. Schließe Faber noch nicht.",
+  "error.chat.saveFull": "Der Datenträger ist voll, deshalb konnte Faber diese Unterhaltung nicht speichern. Sie bleibt sicher, solange Faber geöffnet ist, und wird bei deiner nächsten Änderung gespeichert, sobald wieder Platz ist. Schließe Faber noch nicht.",
+  "error.chat.deleteFailed": "Faber konnte diese Unterhaltung nicht löschen, deshalb bleibt sie, wo sie ist. Versuche es gleich noch einmal.",
   // Native speaker must translate (needs native review).
   "reason.interrupted": "Am letzten gespeicherten Prüfpunkt pausiert.",
   // Native speaker must translate (needs native review).
@@ -1943,6 +1946,8 @@ export const de: Messages = {
   'notes.182.new': 'Auto startet eine Aufgabe, die du oft wiederholst, mit einem stärkeren Modell und sagt es dir, gelernt wird nur auf diesem PC. In den Einstellungen kannst du es vergessen lassen.',
   'notes.183.better': 'Aufeinanderfolgende Schritte derselben Art stehen in einer Zeile, etwa "Ändert 3 Dateien", und ein fertiger Helfer sagt, wie lange er gebraucht hat.',
   'notes.184.new': 'In Projekten kann der Agent deine KI-Limits nachsehen und im Katalog nach Werkzeugen suchen, installiert aber nie etwas.',
+  'notes.185.better': 'Wenn Faber eine Unterhaltung nicht löschen kann, sagt es das und lässt die Unterhaltung, ihre Dateien und ihren Platz in der Gruppe unverändert.',
+  'notes.186.fixed': 'Faber sagt dir Bescheid, wenn es eine Unterhaltung nicht speichern kann. Es hält sie, solange es geöffnet ist, und versucht es bei deiner nächsten Änderung erneut.',
   'update.checking': 'Suche nach einem Update…',
   'update.downloading': 'Update wird heruntergeladen…',
   'update.downloadingPercent': 'Update wird heruntergeladen… {percent} %',

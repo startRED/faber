@@ -744,7 +744,8 @@ fn retry_with<T>(windows: bool, sleep: impl Fn(std::time::Duration), mut op: imp
 }
 
 /// Runs a file operation of the store again while Windows reports the file busy; the last error is never hidden. Blocks the
-/// thread, so it belongs on a blocking worker only.
+/// thread for up to about 0.9 s, and only while Windows reports the file busy: on a blocking worker, or for a conversation's
+/// save and removal on the engine thread under its lock (`store::replace`).
 pub(crate) fn retry_busy<T>(op: impl FnMut() -> io::Result<T>) -> io::Result<T> {
     retry_with(cfg!(windows), std::thread::sleep, op)
 }

@@ -1671,6 +1671,9 @@ export const es: Messages = {
   // Native speaker must translate (needs native review).
   // Native speaker must translate (needs native review).
   "error.store.full": "El disco está lleno. No se aprobó nada.",
+  "error.chat.saveFailed": "Faber no pudo guardar esta conversación. Está a salvo mientras Faber siga abierto, y Faber lo intenta de nuevo en tu próximo cambio. No cierres Faber todavía.",
+  "error.chat.saveFull": "El disco está lleno, así que Faber no pudo guardar esta conversación. Está a salvo mientras Faber siga abierto y se guarda de nuevo en tu próximo cambio, cuando haya espacio. No cierres Faber todavía.",
+  "error.chat.deleteFailed": "Faber no pudo borrar esta conversación, así que sigue donde estaba. Inténtalo de nuevo en un momento.",
   // Native speaker must translate (needs native review).
   "reason.interrupted": "Pausado en el último punto de control guardado.",
   // Native speaker must translate (needs native review).
@@ -1943,6 +1946,8 @@ export const es: Messages = {
   'notes.182.new': 'Auto empieza con un modelo más fuerte una tarea que repites a menudo y lo avisa, aprendiendo solo en este PC. En Ajustes puedes hacerle olvidar.',
   'notes.183.better': 'Los pasos seguidos del mismo tipo se leen en una sola línea, como "Cambiando 3 archivos", y un ayudante que terminó dice cuánto tardó.',
   'notes.184.new': 'En Proyectos, el agente consulta los límites de tus IA y busca herramientas en el catálogo, pero nunca instala nada.',
+  'notes.185.better': 'Cuando Faber no puede borrar una conversación, te lo dice y deja la conversación, sus archivos y su lugar en un grupo como estaban.',
+  'notes.186.fixed': 'Faber te avisa cuando no puede guardar una conversación. La conserva mientras siga abierto y lo intenta de nuevo en tu próximo cambio.',
   'update.checking': 'Buscando una actualización…',
   'update.downloading': 'Descargando actualización…',
   'update.downloadingPercent': 'Descargando actualización… {percent} %',

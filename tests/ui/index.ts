@@ -89,6 +89,7 @@ import './continue.check.ts';
 import './mention.check.ts';
 import './slash.check.ts';
 import './quick-question.check.ts';
+import './save-error.check.ts';
 import './steer.check.ts';
 import './edit-queued.check.ts';
 import './stop-helpers.check.ts';

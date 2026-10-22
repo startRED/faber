@@ -722,6 +722,7 @@ export function App(props: { initial: AppState; update?: UpdateStatus; inbox: { 
         setCommandsVersion((n) => n + 1);
       }
       if (e.type === 'list') void refresh();
+      if (e.type === 'saveFailed') setSaveError(failureText({ key: e.key }));
       if (e.type === 'usage') setState((s) => ({ ...s, usage: e.vendors }));
       if (e.type === 'settings') setState((s) => ({ ...s, settings: e.settings }));
       if (e.type === 'message') restoreRejected(e.conversationId, e.message.role === 'assistant' ? e.message : undefined);

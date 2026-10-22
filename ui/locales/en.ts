@@ -1579,6 +1579,9 @@ export const en = {
   "reason.remote.target": "The branch, remote or text to publish is not valid.",
   "reason.remote.unreachable": "The remote could not be reached. Your work stays local.",
   "error.store.full": "The disk is full. Nothing was approved.",
+  "error.chat.saveFailed": "Faber could not save this conversation. It stays safe while Faber is open, and Faber tries again at your next change. Do not close Faber yet.",
+  "error.chat.saveFull": "The disk is full, so Faber could not save this conversation. It stays safe while Faber is open and saves again at your next change once there is room. Do not close Faber yet.",
+  "error.chat.deleteFailed": "Faber could not delete this conversation, so it stays where it is. Try again in a moment.",
   "reason.interrupted": "Paused at the last saved checkpoint.",
   "crumb.separator": "\u203a",
   // Right-click menus (ui/ContextMenu.tsx).
@@ -1823,6 +1826,8 @@ export const en = {
   'notes.182.new': 'Auto starts a task you keep retrying on a stronger model and says so, learning only on this PC. Settings can forget it.',
   'notes.183.better': 'Steps of one kind in a row read as one line, like "Changing 3 files", and a finished helper says how long it took.',
   'notes.184.new': 'In Projects, the agent can check your AI limits and search the catalog for tools, but it never installs anything.',
+  'notes.185.better': 'When Faber cannot delete a conversation, it says so and leaves the conversation, its files and its place in a group as they were.',
+  'notes.186.fixed': 'Faber tells you when it cannot save a conversation. It keeps it while Faber is open and tries again at your next change.',
   'update.checking': 'Looking for an update…',
   'update.downloading': 'Downloading update…',
   'update.downloadingPercent': 'Downloading update… {percent}%',

@@ -192,7 +192,7 @@ async fn move_chat_to_project_group_commit_recovers_after_interruption() {
             let attachment = dir.path().join("chat").join(&chat.id).join("attachments").join("notes.txt");
             std::fs::create_dir_all(attachment.parent().unwrap()).unwrap();
             std::fs::write(&attachment, b"keep these notes").unwrap();
-            assert_eq!(app.remove_with(&chat.id, false).unwrap_err(), "error.store.write");
+            assert_eq!(app.remove_with(&chat.id, false).unwrap_err(), "error.chat.deleteFailed");
             assert!(store.get(&chat.id).is_some(), "a refused deletion retains its conversation record");
             assert_eq!(std::fs::read(&attachment).unwrap(), b"keep these notes", "a refused deletion retains its files too");
             app.shutdown();
