@@ -277,6 +277,8 @@ pub fn card_part(facts: &Facts) -> String {
                 _ => "The package's check scripts:\n\n",
             });
             out.push_str(&items(&facts.checks));
+            // Repository text of a checked shape (spec "Trust"); the agent learns nobody reviewed it.
+            out.push_str("\nThey are listed as the files name them; the person has not reviewed them.\n");
         }
         None => out.push_str("No check is named in the project's files. Say what you checked by hand and what you could not.\n"),
     }

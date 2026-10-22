@@ -20,9 +20,6 @@ Read the spec's sections "Building `rules.md`", "Trust", "The start card", "Adop
   - Technical details shows the card as sent.
 - **The data folder.** Writes to it are denied in every sandboxed mode of both CLIs (`engine/src/permissions.rs`), with
   a test of an attempt from each.
-- **Adoption pointers.** They live in the data folder, read-only until slice 4.
-  - Containment is checked on the opened handle at every open.
-  - Before the first write, the person reconciles existing items once.
 - **Kits.** The stack facts feed the session-kit matcher. A check shows that a project's kit is unchanged or better.
 - **Hostile-repository checks:** injected text in the source files, a forged mark, and a planted file read by a later
   session.

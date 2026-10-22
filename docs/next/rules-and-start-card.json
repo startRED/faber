@@ -7,5 +7,8 @@
       "fr": "Au début de chaque conversation de projet, l'IA reçoit maintenant une courte fiche avec les règles du projet et les décisions que vous avez gardées. Détails techniques l'affiche.",
       "de": "Zu Beginn jedes Projektgesprächs bekommt die KI jetzt eine kurze Karte mit den Regeln des Projekts und den Entscheidungen, die du behalten hast. Technische Details zeigt sie."
     }
-  }
+  },
+  "decisions": [
+    "| R-next | 2026-10-22 | The own work method's adoption pointers move from slice 1 to slice 4 (task 994), where the adapters that read and write an adopted file are built. In slice 1 a pointer could be stored but nothing could use it: the start card's decision share and Memory would need the adapter's parsing to load an adopted source, and no screen approves a pointer yet. The design is unchanged (spec \"Adopt before create\"); only its slice moves. Slice 1 keeps the rules file, the start card, provenance, the data-folder protection, the stack facts and the hostile-repository checks. | AI (Erick delegou) |"
+  ]
 }

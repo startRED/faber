@@ -16,6 +16,9 @@ its sections "The loop, sized by risk", "Adopt before create" and "Faber's own d
   fallback and "not reviewed" when none can start.
   - The blocking classes clear only by a fix or an answer that the reviewer or the person accepts.
   - Security takes two reviews, recorded separately.
+- **Adoption pointers** (moved here from slice 1, R-next). They live in the data folder, approved by the person, never in
+  the repository. Containment is checked on the opened handle at every open; a target outside the project is refused.
+  Before the first write, the person reconciles existing `.faber/` items of that kind once.
 - **Adapters.** Build them for Faber's R-numbered table, its taste cards and `docs/tasks/`, each with its own operations
   only. Prove them on Faber's own repo, with no second copy.
 - **AGENTS.md.** Shrink "Done means" to its repo-specific lines.
