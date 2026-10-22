@@ -52,6 +52,7 @@ mod keep_going;
 mod kits;
 mod look;
 mod mcp_servers;
+mod memory_search;
 mod move_chat;
 mod parked;
 mod pick_up;

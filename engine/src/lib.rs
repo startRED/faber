@@ -27,6 +27,7 @@ pub mod look;
 pub mod look_log;
 pub mod map;
 pub mod mcp_servers;
+pub mod memory_search;
 pub mod mention;
 pub mod model;
 pub mod nudge;

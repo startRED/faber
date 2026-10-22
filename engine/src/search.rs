@@ -50,6 +50,13 @@ pub struct Hit {
     pub message_index: usize,
     pub snippet: String,
     pub highlights: Vec<Highlight>,
+    // What a project's agent is told of a hit (`crate::memory_search`); the screen's payload stays as it was.
+    #[serde(skip)]
+    pub updated_at: u64,
+    #[serde(skip)]
+    pub archived: bool,
+    #[serde(skip)]
+    pub by_person: bool,
 }
 
 /// UTF-16 offsets in the snippet, matching the screen's string offsets.
@@ -100,6 +107,13 @@ fn word_spans(text: &str) -> impl Iterator<Item = (usize, &str)> {
             Some(word)
         })
         .filter(|(_, word)| (2..=32).contains(&word.chars().count()))
+}
+
+/// Whether every word of `query` begins some word of `text`, folded as the index folds: how a note is matched like a message.
+pub(crate) fn matches(text: &str, query: &str) -> bool {
+    let (query, text) = (normalize(&query.chars().take(256).collect::<String>()), normalize(text));
+    let wanted: Vec<_> = words(&query).collect();
+    !wanted.is_empty() && wanted.iter().all(|w| words(&text).any(|t| t.starts_with(w)))
 }
 
 /// Binary search directly in the newline-delimited words; no per-word pointers or offsets are retained.
@@ -361,10 +375,26 @@ impl Search {
     }
 
     pub fn query_cancellable(&self, query: &str, area: Area, cancelled: &AtomicBool) -> Result<Results, &'static str> {
-        self.query_until(query, area, || cancelled.load(Ordering::Relaxed))
+        self.query_until(query, area, None, HIT_LIMIT, || cancelled.load(Ordering::Relaxed))
     }
 
-    fn query_until(&self, query: &str, area: Area, mut cancelled: impl FnMut() -> bool) -> Result<Results, &'static str> {
+    /// The conversations of one project (never Chat, never another project's) except `asking`, newest first, at most `limit`.
+    /// Blocking, like `query`: it runs on a worker, never under the engine lock.
+    pub fn query_project(&self, query: &str, project: &str, asking: &str, limit: usize) -> Result<Results, &'static str> {
+        let mut found = self.query_until(query, Area::Project, Some(project), limit + 1, || false)?;
+        found.hits.retain(|h| h.conversation_id != asking);
+        found.hits.truncate(limit);
+        Ok(found)
+    }
+
+    fn query_until(
+        &self,
+        query: &str,
+        area: Area,
+        project: Option<&str>,
+        limit: usize,
+        mut cancelled: impl FnMut() -> bool,
+    ) -> Result<Results, &'static str> {
         let normalized = normalize(&query.chars().take(256).collect::<String>());
         let words: Vec<String> = words(&normalized).map(str::to_string).collect();
         let index = self.state.lock().unwrap_or_else(|e| e.into_inner());
@@ -375,8 +405,12 @@ impl Search {
         if words.is_empty() {
             return Ok(Results { ready, hits: vec![] });
         }
-        let mut docs: Vec<_> =
-            index.documents.iter().filter(|(_, doc)| doc.area == area).map(|(id, doc)| (id.clone(), doc.clone())).collect();
+        let mut docs: Vec<_> = index
+            .documents
+            .iter()
+            .filter(|(_, doc)| doc.area == area && project.is_none_or(|p| doc.project_id.as_deref() == Some(p)))
+            .map(|(id, doc)| (id.clone(), doc.clone()))
+            .collect();
         drop(index);
         // Share immutable documents while scanning, so saving a reply never waits for a search.
         docs.sort_by(|(a, left), (b, right)| right.updated.cmp(&left.updated).then_with(|| a.cmp(b)));
@@ -395,15 +429,29 @@ impl Search {
             let Some(c) = crate::store::read_checked::<Conversation>(&self.directory.join(format!("{id}.json"))).ok().flatten() else {
                 continue;
             };
-            if c.id != id || c.area != area {
+            if c.id != id || c.area != area || project.is_some_and(|p| c.project_id.as_deref() != Some(p)) {
                 continue;
             }
+            // A conversation another agent started opens with that agent's brief, which is not the person's own words.
+            let brief = c.started_by.as_ref().and_then(|_| c.messages.iter().position(|m| m.role == Role::User));
             for (message_index, message) in c.messages.iter().enumerate() {
                 let Some((snippet, highlights)) = snippet(visible(message), &words) else { continue };
-                hits.push(Hit { conversation_id: id, area, title: c.title, message_index, snippet, highlights });
+                let (updated_at, archived) = (c.updated_at, c.archived_at.is_some());
+                let by_person = message.role == Role::User && Some(message_index) != brief;
+                hits.push(Hit {
+                    conversation_id: id,
+                    area,
+                    title: c.title,
+                    message_index,
+                    snippet,
+                    highlights,
+                    updated_at,
+                    archived,
+                    by_person,
+                });
                 break;
             }
-            if hits.len() == HIT_LIMIT {
+            if hits.len() == limit {
                 break;
             }
         }
@@ -674,6 +722,103 @@ mod tests {
         assert_eq!(search.query("token20009", Area::Chat).unwrap().hits[0].conversation_id, "overflow");
     }
 
+    fn in_project(id: &str, project: Option<&str>, area: Area, text: &str, updated: u64) -> Conversation {
+        let mut c = conversation(id, &[text]);
+        (c.area, c.project_id, c.updated_at) = (area, project.map(String::from), updated);
+        c
+    }
+
+    #[test]
+    fn a_project_search_sees_only_that_projects_other_conversations_newest_first_up_to_its_limit() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = Store::new(dir.path());
+        store.save(&in_project("asking", Some("a"), Area::Project, "zebra now", 9));
+        for i in 0..4 {
+            store.save(&in_project(&format!("mine-{i}"), Some("a"), Area::Project, "A zebra here", 1 + i));
+        }
+        let mut gone = in_project("archived", Some("a"), Area::Project, "zebra long ago", 0);
+        gone.archived_at = Some(5);
+        store.save(&gone);
+        store.save(&in_project("theirs", Some("b"), Area::Project, "zebra elsewhere", 7));
+        store.save(&in_project("chat", None, Area::Chat, "zebra chatter", 8));
+        store.save(&in_project("loose", None, Area::Project, "zebra without a project", 8));
+
+        let ids = |found: Results| found.hits.into_iter().map(|h| h.conversation_id).collect::<Vec<_>>();
+        let search = store.search();
+        assert_eq!(ids(search.query_project("zebra", "a", "asking", 10).unwrap()), ["mine-3", "mine-2", "mine-1", "mine-0", "archived"]);
+        assert_eq!(ids(search.query_project("zebra", "a", "asking", 2).unwrap()), ["mine-3", "mine-2"], "the limit counts the answer");
+        assert_eq!(ids(search.query_project("zebra", "b", "asking", 10).unwrap()), ["theirs"]);
+        assert!(ids(search.query_project("zebra", "none", "asking", 10).unwrap()).is_empty());
+        let found = search.query_project("zebra", "a", "asking", 10).unwrap();
+        let last = found.hits.last().unwrap();
+        assert_eq!((last.archived, last.by_person, last.updated_at), (true, true, 0));
+        assert!(!found.hits[0].archived);
+        // The sidebar's own search still sees every project's conversations of its area, and its payload has no new field.
+        assert_eq!(search.query("zebra", Area::Project).unwrap().hits.len(), 8);
+        let keys: BTreeSet<_> = serde_json::to_value(&found.hits[0]).unwrap().as_object().unwrap().keys().cloned().collect();
+        assert_eq!(
+            keys.iter().map(String::as_str).collect::<Vec<_>>(),
+            ["area", "conversationId", "highlights", "messageIndex", "snippet", "title"]
+        );
+    }
+
+    #[test]
+    fn a_hit_says_whether_the_matching_message_is_the_persons_or_the_answer() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = Store::new(dir.path());
+        let mut c = in_project("talk", Some("a"), Area::Project, "a question", 1);
+        let mut answer = Message::new("1".into(), Role::Assistant, "the zebra answer".into(), 1);
+        answer.status = Some(Status::Done);
+        c.messages.push(answer);
+        store.save(&c);
+        let hit = store.search().query_project("zebra", "a", "", 5).unwrap().hits.remove(0);
+        assert_eq!((hit.message_index, hit.by_person), (1, false));
+    }
+
+    #[test]
+    fn the_brief_that_opens_a_conversation_another_agent_started_is_not_the_persons_own_words() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = Store::new(dir.path());
+        let mut started = in_project("started", Some("a"), Area::Project, "zebra brief", 2);
+        started.started_by = Some("parent".into());
+        store.save(&started);
+        let mut own = in_project("own", Some("a"), Area::Project, "zebra question", 1);
+        own.messages.push(Message::new("1".into(), Role::User, "a later zebra".into(), 1));
+        store.save(&own);
+        let mut later = in_project("later", Some("a"), Area::Project, "the brief", 3);
+        later.started_by = Some("parent".into());
+        later.messages.push(Message::new("1".into(), Role::User, "then a zebra".into(), 1));
+        store.save(&later);
+        let hits = store.search().query_project("zebra", "a", "", 5).unwrap().hits;
+        let by = |id: &str| hits.iter().find(|h| h.conversation_id == id).unwrap().by_person;
+        assert_eq!((by("started"), by("own")), (false, true));
+        assert!(by("later"), "only the first user message of such a conversation is the brief");
+    }
+
+    #[test]
+    fn a_tools_output_and_the_thinking_are_never_searched_or_returned() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = Store::new(dir.path());
+        let mut c = in_project("work", Some("a"), Area::Project, "a question", 1);
+        let mut answer = Message::new("1".into(), Role::Assistant, "The visible answer.".into(), 1);
+        answer.status = Some(Status::Done);
+        answer.thinking = Some("secret quokka reasoning".into());
+        answer.tools = serde_json::from_value(
+            json!([{ "id": "t", "name": "Bash", "input": { "command": "echo quokka" }, "output": "quokka output" }]),
+        )
+        .unwrap();
+        c.messages.push(answer);
+        store.save(&c);
+        assert!(store.search().query_project("quokka", "a", "", 5).unwrap().hits.is_empty());
+        assert_eq!(store.search().query_project("visible", "a", "", 5).unwrap().hits[0].message_index, 1);
+    }
+
+    #[test]
+    fn notes_match_the_way_messages_do() {
+        assert!(matches("Ação: usar o Postgres", "acao POSTG"));
+        assert!(!matches("Ação: usar o Postgres", "acao mysql") && !matches("Postgres", "stgres") && !matches("Postgres", " "));
+    }
+
     #[test]
     fn search_cancelled_scan_stops_before_opening_the_next_file() {
         let dir = tempfile::tempdir().unwrap();
@@ -687,7 +832,7 @@ mod tests {
         let mut files = 0;
         let result = store
             .search()
-            .query_until("needle", Area::Chat, || {
+            .query_until("needle", Area::Chat, None, HIT_LIMIT, || {
                 files += 1;
                 files > 1
             })

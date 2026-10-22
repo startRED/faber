@@ -552,7 +552,13 @@ impl Store {
     /// not in the project, so no agent can write a review. A missing or damaged file keeps nothing: decisions read "not
     /// reviewed" again.
     pub fn kept_decisions(&self, project: &str) -> Vec<String> {
-        read::<BTreeMap<String, Vec<String>>>(&self.decisions_kept).unwrap_or_default().remove(project).unwrap_or_default()
+        self.kept_decisions_reader(project)()
+    }
+
+    /// `kept_decisions` for a worker: the file is read when the closure is called, away from the engine lock.
+    pub fn kept_decisions_reader(&self, project: &str) -> impl FnOnce() -> Vec<String> + Send + 'static {
+        let (path, project) = (self.decisions_kept.clone(), project.to_string());
+        move || read::<BTreeMap<String, Vec<String>>>(&path).unwrap_or_default().remove(&project).unwrap_or_default()
     }
 
     /// Adds one kept decision. The newest 500 per project stay, and projects that are gone (not in `live`) are dropped.

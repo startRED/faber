@@ -2,6 +2,7 @@
 //! catalog and the store's ledger. Searching starts no request, so both are offered to a project's own agent in any permission
 //! mode. `catalog` with `install` changes Faber itself (guardrail 3): it waits for the person's card, then installs through the
 //! one installer the Catalog screen uses (`tools::install_for_agent`, whose last check of what Faber holds runs under the store lock), and only a tool the store holds no copy of.
+//! `memory_search` is answered in `memory_search.rs`.
 use super::answer::STALE;
 use super::*;
 use crate::toolbox;
@@ -44,6 +45,9 @@ impl Core {
             let text = toolbox::quota(&self.usage(), self.secs());
             return self.answer_toolbox(conv, sid, &call, true, text);
         }
+        if tool == toolbox::MEMORY_SEARCH_TOOL {
+            return self.memory_search_call(conv, sid, call, &input);
+        }
         if !input["install"].is_null() {
             return self.install_call(conv, sid, call, &input["install"]);
         }
@@ -71,7 +75,7 @@ impl Core {
     }
 
     /// The answer goes back only to the process that asked: a conversation that was stopped or moved on drops it.
-    fn answer_toolbox(&self, conv: &str, sid: u64, call: &str, ok: bool, text: String) {
+    pub(super) fn answer_toolbox(&self, conv: &str, sid: u64, call: &str, ok: bool, text: String) {
         if let Some(l) = self.live.get(conv).filter(|l| l.sid == sid) {
             l.session.helper_reply(call, ok, text);
         }

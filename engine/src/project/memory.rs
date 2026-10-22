@@ -512,11 +512,22 @@ pub fn list(project: &Path) -> Result<MemoryList, &'static str> {
     list_with_private(project, &private_roots())
 }
 
+/// Only the notes in the project's root `.faber` folder, through the same no-follow handles: no other folder is walked, no
+/// `CLAUDE.md` or `AGENTS.md` is read, and a note that cannot be read is skipped (the list says it may be incomplete).
+pub fn list_faber(project: &Path) -> Result<MemoryList, &'static str> {
+    scan(project, &private_roots(), true)
+}
+
 fn list_with_private(project: &Path, protected: &[String]) -> Result<MemoryList, &'static str> {
+    scan(project, protected, false)
+}
+
+fn scan(project: &Path, protected: &[String], faber_only: bool) -> Result<MemoryList, &'static str> {
     let protected = resolved_private(protected);
     let (root, project_dir) = project_directory(project, &protected)?;
     let identity = project_dir.identity().map_err(|_| READ)?;
-    let mut pending = vec![String::new()];
+    let mut pending = vec![if faber_only { ".faber".to_string() } else { String::new() }];
+    let mut skipped = false;
     let mut result = MemoryList::default();
     let mut visited = 0;
     let mut bytes = 0;
@@ -530,9 +541,15 @@ fn list_with_private(project: &Path, protected: &[String]) -> Result<MemoryList,
         if private(&root.join(&relative), &protected) {
             continue;
         }
-        let dir = project_dir.under(Path::new(&relative)).map_err(|_| REFUSED)?;
+        let dir = match project_dir.under(Path::new(&relative)) {
+            Ok(dir) => dir,
+            // No `.faber` (or a link in its place) is no notes.
+            Err(_) if faber_only => continue,
+            Err(_) => return Err(REFUSED),
+        };
         let codex_path = if relative.is_empty() { "AGENTS.md".into() } else { format!("{relative}/AGENTS.md") };
-        let codex = if source(&codex_path) == Some("codex") { codex_file(&dir, &root.join(&relative), &protected)? } else { None };
+        let codex =
+            if !faber_only && source(&codex_path) == Some("codex") { codex_file(&dir, &root.join(&relative), &protected)? } else { None };
         let mut names = dir.names().map_err(|_| READ)?;
         names.sort();
         for name in names {
@@ -554,7 +571,14 @@ fn list_with_private(project: &Path, protected: &[String]) -> Result<MemoryList,
                 if source == "codex" && Some(name.as_str()) != codex {
                     continue;
                 }
-                let mut file = read_file(&dir, &name, path, source)?;
+                let mut file = match read_file(&dir, &name, path, source) {
+                    Ok(file) => file,
+                    Err(_) if faber_only => {
+                        skipped = true;
+                        continue;
+                    }
+                    Err(e) => return Err(e),
+                };
                 if !file.too_large {
                     file.revision = format!("{identity}:{}", file.revision);
                 }
@@ -586,6 +610,7 @@ fn list_with_private(project: &Path, protected: &[String]) -> Result<MemoryList,
             break;
         }
     }
+    result.incomplete |= skipped;
     result.files.sort_by(|a, b| a.path.cmp(&b.path));
     Ok(result)
 }
@@ -794,6 +819,77 @@ mod tests {
         #[cfg(unix)]
         std::fs::remove_file(&linked).unwrap();
         assert!(result.unwrap().files.is_empty());
+    }
+
+    fn faber_notes(project: &Path) -> Result<MemoryList, &'static str> {
+        scan(project, &[], true)
+    }
+
+    #[test]
+    fn the_faber_only_list_reads_the_notes_of_a_big_project_and_no_other_file() {
+        let project = folder();
+        let big = project.path().join("big");
+        std::fs::create_dir(&big).unwrap();
+        for i in 0..20_050 {
+            std::fs::write(big.join(format!("f{i}.txt")), "").unwrap();
+        }
+        std::fs::create_dir(project.path().join(".faber")).unwrap();
+        std::fs::write(project.path().join(".faber/decisions.md"), "- Use Postgres [by AI]\n").unwrap();
+        // Not readable as text, and not a note: it must not be opened, let alone fail the list.
+        std::fs::write(project.path().join("CLAUDE.md"), [0xff, 0x00]).unwrap();
+        std::fs::write(project.path().join("AGENTS.md"), [0xff, 0x00]).unwrap();
+        let list = faber_notes(project.path()).unwrap();
+        assert_eq!(list.files.iter().map(|f| f.path.as_str()).collect::<Vec<_>>(), [".faber/decisions.md"]);
+        assert!(!list.incomplete);
+        assert!(list_with_private(project.path(), &[]).is_err(), "the whole walk still fails on it");
+    }
+
+    #[test]
+    fn the_faber_only_list_skips_a_note_it_cannot_read_and_says_the_list_may_be_incomplete() {
+        let project = folder();
+        std::fs::create_dir_all(project.path().join(".faber/plans")).unwrap();
+        std::fs::write(project.path().join(".faber/taste.md"), [0xff, 0x00]).unwrap();
+        std::fs::write(project.path().join(".faber/plans/one.md"), "- A plan\n").unwrap();
+        let list = faber_notes(project.path()).unwrap();
+        assert_eq!(list.files.iter().map(|f| f.path.as_str()).collect::<Vec<_>>(), [".faber/plans/one.md"]);
+        assert!(list.incomplete);
+        let none = folder();
+        assert!(faber_notes(none.path()).unwrap().files.is_empty(), "no .faber is no notes");
+    }
+
+    #[test]
+    fn the_faber_only_list_returns_nothing_from_outside_through_a_link() {
+        let base = folder();
+        let outside = base.path().join("outside");
+        let project = base.path().join("project");
+        std::fs::create_dir_all(&outside).unwrap();
+        std::fs::create_dir_all(project.join(".faber")).unwrap();
+        std::fs::write(outside.join("decisions.md"), "- Secret [by AI]\n").unwrap();
+        // A linked `.faber`.
+        let linked = base.path().join("linked");
+        std::fs::create_dir_all(&linked).unwrap();
+        #[cfg(windows)]
+        junction::create(&outside, linked.join(".faber")).unwrap();
+        #[cfg(unix)]
+        std::os::unix::fs::symlink(&outside, linked.join(".faber")).unwrap();
+        let through_dir = faber_notes(&linked);
+        #[cfg(windows)]
+        junction::delete(linked.join(".faber")).unwrap();
+        #[cfg(unix)]
+        std::fs::remove_file(linked.join(".faber")).unwrap();
+        assert!(through_dir.unwrap().files.is_empty());
+        // A linked folder or file inside it.
+        #[cfg(windows)]
+        junction::create(&outside, project.join(".faber/decisions")).unwrap();
+        #[cfg(unix)]
+        {
+            std::os::unix::fs::symlink(&outside, project.join(".faber/decisions")).unwrap();
+            std::os::unix::fs::symlink(outside.join("decisions.md"), project.join(".faber/taste.md")).unwrap();
+        }
+        let inside = faber_notes(&project);
+        #[cfg(windows)]
+        junction::delete(project.join(".faber/decisions")).unwrap();
+        assert!(inside.unwrap().files.is_empty());
     }
 
     #[test]

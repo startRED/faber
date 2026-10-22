@@ -29,12 +29,16 @@ check('worklog: every Claude Code tool reads as what it does, in words', () => {
   deepEqual(toolRow({ id: '13', name: 'Quota', input: {} }), { label: t('tool.quota'), detail: '' });
   deepEqual(toolRow({ id: '14', name: 'Catalog', input: { query: 'fix a bug' } }), { label: t('tool.catalog'), detail: 'fix a bug' });
   deepEqual(toolRow({ id: '15', name: 'Catalog', input: {} }), { label: t('tool.catalog'), detail: '' });
+  // The project's memory search reads as that, with its words, in every language.
+  deepEqual(toolRow({ id: '17', name: 'MemorySearch', input: { query: 'database choice' } }), { label: t('tool.memorySearch'), detail: 'database choice' });
+  deepEqual(toolRow({ id: '18', name: 'MemorySearch', input: {} }), { label: t('tool.memorySearch'), detail: '' });
   // An install by id reads as installing from the catalog, with the id.
   deepEqual(toolRow({ id: '16', name: 'Catalog', input: { install: 'ponytail' } }), { label: t('tool.catalogInstall'), detail: 'ponytail' });
   for (const lang of ['pt-BR', 'es', 'fr', 'de'] as const) {
     useLanguage(lang);
     ok(t('tool.quota') !== 'Checking the AI limits' && t('tool.catalog') !== 'Searching the catalog', `${lang} has its own words`);
     ok(t('tool.catalogInstall') !== 'Installing from the catalog', `${lang} names the install in its own words`);
+    ok(t('tool.memorySearch') !== "Searching the project's memory", `${lang} names the memory search in its own words`);
   }
   useLanguage('en');
 });
