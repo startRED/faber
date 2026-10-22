@@ -1648,7 +1648,7 @@ impl Core {
         let (mut kept, mut unreviewed) = (Vec::new(), 0);
         for entry in decisions.flat_map(|f| &f.entries) {
             match (entry.author, entry.reviewed) {
-                (Some("person"), _) | (Some("ai"), true) => kept.push(entry.body.clone().unwrap_or_default()),
+                (Some("person"), _) | (Some("ai"), true) => kept.push(entry.body.as_deref().unwrap_or_default()),
                 (Some("ai"), false) => unreviewed += 1,
                 _ => {}
             }

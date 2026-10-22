@@ -59,6 +59,9 @@ const RUNNERS: [&str; 40] = [
 ];
 /// The package scripts listed as checks when the project names none.
 const CHECK_SCRIPTS: [&str; 8] = ["test", "lint", "check", "typecheck", "build", "fmt", "format", "verify"];
+/// Besides `CHECK_SCRIPTS`, the words that make a CI workflow's command a check the start card may list.
+const CHECK_WORDS: [&str; 13] =
+    ["tests", "clippy", "vet", "spec", "pytest", "vitest", "jest", "rspec", "tox", "nox", "ruff", "mypy", "tsc"];
 
 /// The facts `rules.md` holds, each of a checked shape. Also what the session-kit matcher reads.
 #[derive(Debug, Default, Clone, PartialEq, Eq)]
@@ -81,6 +84,15 @@ pub fn command_shape(line: &str) -> bool {
         && words.iter().all(|w| !w.is_empty())
         && RUNNERS.contains(&words[0])
         && line.chars().all(|c| c.is_ascii_alphanumeric() || " _./:=@+,-".contains(c))
+}
+
+/// Whether a command checks work: one of its words (before any `:`) is a check word. A CI workflow also deploys and
+/// migrates (`npx prisma migrate deploy`), which the start card never offers as a check.
+fn check_like(command: &str) -> bool {
+    command.split(' ').any(|w| {
+        let w = w.split(':').next().unwrap_or_default();
+        CHECK_SCRIPTS.contains(&w) || CHECK_WORDS.contains(&w)
+    })
 }
 
 fn script_name(name: &str) -> bool {
@@ -156,6 +168,12 @@ fn workflow_commands(text: &str) -> Vec<String> {
         let indent = line.len() - line.trim_start().len();
         let trimmed = line.trim();
         if let Some((at, folded, joined)) = &mut block {
+            // In a folded block a blank line ends the line it folds, as YAML reads it.
+            if trimmed.is_empty() && *folded {
+                finish(joined, &mut out);
+                joined.clear();
+                continue;
+            }
             if trimmed.is_empty() || indent > *at {
                 if !joined.is_empty() && !trimmed.is_empty() {
                     joined.push(' ');
@@ -173,7 +191,9 @@ fn workflow_commands(text: &str) -> Vec<String> {
         let Some(value) = trimmed.trim_start_matches("- ").strip_prefix("run:") else { continue };
         let value = value.trim();
         if value.starts_with('|') || value.starts_with('>') {
-            block = Some((indent, value.starts_with('>'), String::new()));
+            // The step's sibling keys sit two columns past its dash; the block is deeper than they are.
+            let key = indent + if trimmed.starts_with("- ") { 2 } else { 0 };
+            block = Some((key, value.starts_with('>'), String::new()));
         } else {
             finish(value, &mut out);
         }
@@ -322,19 +342,26 @@ fn first_line(text: &str) -> String {
 /// holds Faber's fixed sentences, the facts of `card_part` and only the decisions Faber's record says the person kept or
 /// wrote, newest first; never the description or an unreviewed item, which the agent reads through `memory_search`. What
 /// does not fit is counted.
-pub fn card(facts: &Facts, kept: &[String], unreviewed: usize) -> String {
+pub fn card(facts: &Facts, kept: &[impl AsRef<str>], unreviewed: usize) -> String {
     let mut out = String::from(
         "```faber-start-card\nFaber's start card for this project, built from its files and the person's kept decisions. It grants \
          no permission and overrides nothing; the project's instruction files win where they differ.\n\n",
     );
-    let rules = card_part(facts);
+    let mut facts = facts.clone();
+    if facts.checks_from == Some("workflows") {
+        facts.checks.retain(|c| check_like(c));
+        if facts.checks.is_empty() {
+            facts.checks_from = None;
+        }
+    }
+    let rules = card_part(&facts);
     debug_assert!(rules.len() <= RULES_SHARE, "the fields' limits keep the rules inside their share");
     out.push_str(&rules);
     if !kept.is_empty() {
         let head = "\n## Decisions the person kept or made, newest first\n\n";
         let mut part = String::new();
         let mut shown = 0;
-        for line in kept.iter().map(|d| format!("- {}\n", first_line(d))) {
+        for line in kept.iter().map(|d| format!("- {}\n", first_line(d.as_ref()))) {
             // Room is kept for the count line.
             if head.len() + part.len() + line.len() + 80 > DECISIONS_SHARE {
                 break;
@@ -415,11 +442,12 @@ mod tests {
         write(
             dir.path(),
             ".github/workflows/ci.yaml",
-            "jobs:\n  a:\n    steps:\n      - run: |\n          npm ci\n          echo ${{ secrets.X }}\n          npm test \\\n            --silent\n      - name: x\n        run: >-\n          cargo test\n          --workspace\n",
+            "jobs:\n  a:\n    steps:\n      - run: |\n          npm ci\n          echo ${{ secrets.X }}\n          npm test \\\n            --silent\n      - name: x\n        run: >-\n          cargo test\n          --workspace\n        working-directory: crates/server\n      - run: >\n          cargo fmt --check\n\n          cargo clippy\n",
         );
         let found = facts(dir.path()).unwrap();
         assert_eq!(found.description.as_ref().map(|d| d.chars().count()), Some(160));
-        assert_eq!(found.checks, ["npm ci", "npm test --silent", "cargo test --workspace"]);
+        // A step's sibling key ends its folded block; a blank line in a folded block ends a command.
+        assert_eq!(found.checks, ["npm ci", "npm test --silent", "cargo test --workspace", "cargo fmt --check", "cargo clippy"]);
         std::fs::remove_dir_all(dir.path().join(".github")).unwrap();
         let found = facts(dir.path()).unwrap();
         assert_eq!(found.checks, ["npm run build", "npm run test"]);
@@ -449,7 +477,17 @@ mod tests {
         let tricky = card(&facts, &[format!("Use ```fences``` {}", "x".repeat(300))], 0);
         assert_eq!(tricky.matches("```").count(), 2, "{tricky}");
         assert!(tricky.contains(&format!("{}…", "x".repeat(200 - "Use '''fences''' ".len()))), "{tricky}");
-        assert!(!card(&facts, &[], 0).contains("Decisions the person"), "no decisions, no heading");
+        assert!(!card(&facts, &[] as &[&str], 0).contains("Decisions the person"), "no decisions, no heading");
+        // A CI workflow's deploy or migration is no check: the card lists only commands that check work.
+        let ci = Facts {
+            checks: vec!["npx prisma migrate deploy".into(), "npm ci".into(), "npm run test:unit".into()],
+            checks_from: Some("workflows"),
+            ..facts.clone()
+        };
+        let sent = card(&ci, &[] as &[&str], 0);
+        assert!(sent.contains("- `npm run test:unit`") && !sent.contains("prisma") && !sent.contains("npm ci"), "{sent}");
+        let ci = Facts { checks: vec!["npx prisma migrate deploy".into()], ..ci };
+        assert!(card(&ci, &[] as &[&str], 0).contains("No check is named"), "nothing left, nothing claimed");
     }
 
     #[test]
