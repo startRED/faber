@@ -398,16 +398,16 @@ export function Sidebar(props: Props) {
         <kbd>{keysOf('new')}</kbd>
       </button>
       <div class="areas" role="group" aria-label={t('area.label')}>
-        <button class="area" aria-pressed={!props.catalogOpen && props.place.area === 'chat'} onClick={() => props.onArea('chat')}>
+        <button class="area" title={keysOf('chat')} aria-pressed={!props.catalogOpen && props.place.area === 'chat'} onClick={() => props.onArea('chat')}>
           <Icon name="chat" />
           <span>{t('area.chat')}</span>
         </button>
-        <button class="area" data-tour="projects" aria-pressed={!props.catalogOpen && props.place.area === 'project'} onClick={() => props.onArea('project')}>
+        <button class="area" data-tour="projects" title={keysOf('projects')} aria-pressed={!props.catalogOpen && props.place.area === 'project'} onClick={() => props.onArea('project')}>
           <Icon name="folder" />
           <span>{t('area.projects')}</span>
           <span class="count num">{props.projects.length}</span>
         </button>
-        <button class="area" data-catalog-tab aria-pressed={!!props.catalogOpen} onClick={() => props.onCatalog?.()}><Icon name="plug" /><span>{t('area.catalog')}</span></button>
+        <button class="area" data-catalog-tab title={keysOf('catalog')} aria-pressed={!!props.catalogOpen} onClick={() => props.onCatalog?.()}><Icon name="plug" /><span>{t('area.catalog')}</span></button>
       </div>
       <Show when={!props.catalogOpen}>
       <label class="field search">

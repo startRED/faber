@@ -1809,3 +1809,4 @@ button.work-chip:hover, a.work-chip:hover { color: var(--ink); }
 .goal-add { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; margin-top: 12px; }
 .goal-add .field { flex: 1 1 200px; min-width: 0; max-width: 100%; }
 .goal-add .btn { white-space: normal; height: auto; min-height: var(--h-sm); }
+.goal-add .goal-words { flex-basis: 100%; margin: 0; }

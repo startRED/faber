@@ -2,6 +2,7 @@ import { createComponent } from 'solid-js';
 import { render } from 'solid-js/web';
 import { t } from '../../ui/i18n.ts';
 import { cap, keysOf, pressed, type Shortcut, SHORTCUTS } from '../../ui/keys.ts';
+import { neighbour } from '../../ui/sidebar.ts';
 import { Shortcuts, shortcutsOpen } from '../../ui/Shortcuts.tsx';
 import { mac } from '../../ui/WindowControls.tsx';
 import { check, deepEqual, equal, ok } from './check.ts';
@@ -116,4 +117,32 @@ check('shortcuts: no Ctrl key works without being on the list', async () => {
   ok(found.length === 0, found.join('\n'));
   // The sidebar's caps come from the same list.
   ok(/^(Ctrl|Strg) N$|^⌘N$/.test(keysOf('new')), keysOf('new'));
+});
+
+check('shortcuts: Ctrl 1, 2, 3 and Alt Up, Down are on the list, and Up alone and Ctrl Up are not them', () => {
+  ok(pressed(key('1', { ctrlKey: true }), 'chat') && pressed(key('2', { metaKey: true }), 'projects') && pressed(key('3', { ctrlKey: true }), 'catalog'));
+  ok(pressed(key('&', { ctrlKey: true, code: 'Digit1' }), 'chat'), 'a French keyboard types & on the 1');
+  ok(!pressed(key('1', { ctrlKey: true, altKey: true }), 'chat') && !pressed(key('1'), 'chat'), 'Ctrl Alt 1 and a bare 1 are not Chat');
+  ok(pressed(key('ArrowUp', { altKey: true }), 'previous') && pressed(key('ArrowDown', { altKey: true }), 'next'));
+  ok(!pressed(key('ArrowUp'), 'previous') && !pressed(key('ArrowUp', { ctrlKey: true }), 'previous') && !pressed(key('ArrowUp', { altKey: true, shiftKey: true }), 'previous'), 'the message box keeps its Up');
+  ok(/^(Ctrl|Strg) 2$|^⌘2$/.test(keysOf('projects')) && /^Alt ↑$|^⌥↑$/.test(keysOf('previous')), `${keysOf('projects')} ${keysOf('previous')}`);
+});
+
+check('shortcuts: Alt Up and Down walk the sidebar order of the open list, skipping archived ones and stopping at the ends', () => {
+  const now = Date.parse('2026-10-22T12:00:00');
+  const c = (id: string, area: string, ago: number, extra = {}) => ({ id, area, updatedAt: now - ago * 3_600_000, ...extra });
+  const all = [c('old', 'chat', 48), c('new', 'chat', 1), c('pin', 'chat', 30, { pinnedAt: 1 }), c('gone', 'chat', 2, { archived: true }), c('p1', 'project', 1, { projectId: 'a' }), c('p2', 'project', 2, { projectId: 'b' })];
+  const at = (id: string, step: 1 | -1, area = 'chat', projectId?: string) => neighbour(all, { id, area, projectId }, step, now)?.id;
+  equal(at('pin', 1), 'new', 'pinned first');
+  equal(at('new', 1), 'old');
+  equal(at('old', 1), undefined, 'the last one');
+  equal(at('pin', -1), undefined, 'the first one');
+  equal(at('gone', 1), undefined, 'an archived one is not in the list');
+  equal(at('p1', 1, 'project', 'a'), undefined, 'a project walks its own conversations');
+});
+
+check('shortcuts: Alt Up and Down skip chats that sit in a group, as the sidebar list does', () => {
+  const now = Date.parse('2026-10-22T12:00:00');
+  const all = ['a', 'b', 'c'].map((id, i) => ({ id, area: 'chat', updatedAt: now - i * 3_600_000 }));
+  equal(neighbour(all, { id: 'a', area: 'chat' }, 1, now, new Set(['b']))?.id, 'c');
 });

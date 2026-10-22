@@ -157,3 +157,14 @@ export function tailOf(items: RunningItem[], projectId: string): { needs: number
   const mine = items.filter((i) => i.area === 'project' && i.projectId === projectId);
   return { needs: mine.filter((i) => i.state === 'needsYou').length, running: mine.length > 0 };
 }
+
+/** The conversation `step` rows from the open one in the sidebar's order (pinned, today, this week, earlier) within the
+ * same list: the chat list, or the open project's. None at the ends, or when the open one is not in the list. */
+export function neighbour<T extends { id: string; area: string; projectId?: string; updatedAt: number; pinnedAt?: number; archived?: boolean; startedBy?: string }>(
+  all: T[], at: { id?: string; area: string; projectId?: string }, step: 1 | -1, now: number, apart: ReadonlySet<string> = new Set(),
+): T | undefined {
+  const here = all.filter((c) => !c.archived && !(at.area === 'chat' && apart.has(c.id)) && c.area === at.area && (at.area !== 'project' || c.projectId === at.projectId));
+  const order = nest(groupChats(here, now).flatMap((g) => g.chats));
+  const i = order.findIndex((c) => c.id === at.id);
+  return i < 0 ? undefined : order[i + step];
+}

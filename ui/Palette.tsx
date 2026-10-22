@@ -166,7 +166,6 @@ export function Palette(props: Props) {
               aria-activedescendant={rows().length ? `pal-${active()}` : undefined}
               autocomplete="off"
               spellcheck={false}
-              placeholder={t('palette.placeholder')}
               aria-label={t('palette.label')}
               value={query()}
               ref={(el) => queueMicrotask(() => el.focus())}

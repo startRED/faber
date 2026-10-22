@@ -64,7 +64,7 @@ import { Setup } from './Setup.tsx';
 import { continuePatch, type FirstStep, firstRunStep, lookDue, setupPatch } from './setup.ts';
 import { Catalog, showInCatalog } from './Catalog.tsx';
 import { Sidebar } from './Sidebar.tsx';
-import { keepRows, seedQuotas, withQuota } from './sidebar.ts';
+import { keepRows, neighbour, seedQuotas, withQuota } from './sidebar.ts';
 import { ToEnd } from './Floating.tsx';
 import { Thread } from './Thread.tsx';
 import { tutorialDue } from './tour.ts';
@@ -876,6 +876,28 @@ export function App(props: { initial: AppState; update?: UpdateStatus; inbox: { 
       if (pressed(e, 'browser')) {
         e.preventDefault();
         if (inShell && !catalogOpen() && canBrowse()) void toggleSite();
+      }
+      for (const [id, area] of [['chat', 'chat'], ['projects', 'project']] as const) {
+        if (!pressed(e, id)) continue;
+        e.preventDefault();
+        if (inShell) switchArea(area);
+      }
+      if (pressed(e, 'catalog')) {
+        e.preventDefault();
+        if (!inShell) return;
+        closeSettings();
+        closeSide(false);
+        setFocus(false);
+        setCatalogOpen(true);
+      }
+      for (const [id, dir] of [['previous', -1], ['next', 1]] as const) {
+        if (!pressed(e, id)) continue;
+        // Option with an arrow moves the caret by paragraph on a Mac: in a text box it stays that.
+        if (mac && e.target instanceof Element && e.target.matches(TYPING)) continue;
+        e.preventDefault();
+        const apart = new Set((state().groups ?? []).flatMap((g) => g.conversationIds));
+        const to = inShell && !catalogOpen() ? neighbour(state().conversations, place(), dir, Date.now(), apart) : undefined;
+        if (to) openSummary(to);
       }
       if (e.key === 'Escape') {
         if (sideOverlay() && inShell) return closeSide();

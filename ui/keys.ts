@@ -7,7 +7,7 @@ import { mac } from './WindowControls.tsx';
 // control handles by itself (Enter, Esc, the arrows) is listed here with no `ctrl`, and its handler stays where it is.
 
 /** A key cap: a letter or sign as it is printed, or one whose name each language says (Ctrl is Strg in German). */
-type Cap = 'ctrl' | 'shift' | 'enter' | 'esc' | 'up' | 'down' | 'tab' | 'f10' | 'menukey' | (string & {});
+type Cap = 'ctrl' | 'shift' | 'alt' | 'enter' | 'esc' | 'up' | 'down' | 'tab' | 'f10' | 'menukey' | (string & {});
 
 export interface Shortcut {
   /** Where it works, the sheet's heading. */
@@ -20,6 +20,8 @@ export interface Shortcut {
   also?: readonly Cap[];
   /** The `KeyboardEvent.key` (lower case) for a shortcut with Ctrl (⌘ on a Mac), matched by `pressed`. */
   ctrl?: string;
+  /** The `KeyboardEvent.key` (lower case) for a shortcut with Alt alone, matched by `pressed`. */
+  alt?: string;
   /** Shift and Alt do not matter (the keys that always took them: Ctrl+Shift+N opens a conversation too, and a comma
    * typed with Shift on some layouts still opens Settings). */
   loose?: true;
@@ -39,6 +41,14 @@ export const SHORTCUTS = {
   changes: { group: 'anywhere', label: 'changes.title', caps: ['ctrl', 'shift', 'D'], ctrl: 'd', shift: true },
   browser: { group: 'anywhere', label: 'site.browser', caps: ['ctrl', 'shift', 'B'], ctrl: 'b', shift: true },
   focus: { group: 'anywhere', label: 'keys.focus', caps: ['ctrl', 'B'], ctrl: 'b' },
+  // The sidebar's three places, in its order. Inside the browser pane Ctrl and a digit pick its tabs: the pane is native,
+  // so those keys never reach the screen.
+  chat: { group: 'anywhere', label: 'area.chat', caps: ['ctrl', '1'], ctrl: '1' },
+  projects: { group: 'anywhere', label: 'area.projects', caps: ['ctrl', '2'], ctrl: '2' },
+  catalog: { group: 'anywhere', label: 'area.catalog', caps: ['ctrl', '3'], ctrl: '3' },
+  // Alt and not Ctrl: Up alone recalls earlier messages in the message box, and Ctrl+Up moves the caret by paragraph.
+  previous: { group: 'anywhere', label: 'keys.previous', caps: ['alt', 'up'], alt: 'arrowup' },
+  next: { group: 'anywhere', label: 'keys.next', caps: ['alt', 'down'], alt: 'arrowdown' },
   menu: { group: 'anywhere', label: 'keys.menu', caps: ['shift', 'f10'], also: ['menukey'] },
   sheet: { group: 'anywhere', label: 'keys.title', caps: ['?'] },
   close: { group: 'anywhere', label: 'keys.close', caps: ['esc'] },
@@ -81,13 +91,14 @@ export function siteKeyOf(e: KeyboardEvent): SiteKey | undefined {
 
 export type ShortcutId = keyof typeof SHORTCUTS;
 
-const CAPS: Partial<Record<Cap, Key>> = { ctrl: 'key.ctrl', shift: 'key.shift', enter: 'key.enter', esc: 'key.esc', menukey: 'key.menu' };
+const CAPS: Partial<Record<Cap, Key>> = { ctrl: 'key.ctrl', shift: 'key.shift', alt: 'key.alt', enter: 'key.enter', esc: 'key.esc', menukey: 'key.menu' };
 const SIGNS: Partial<Record<Cap, string>> = { up: '↑', down: '↓', tab: 'Tab', f10: 'F10' };
 
 /** One cap as the person's keyboard prints it. */
 export function cap(c: Cap): string {
   if (mac && c === 'ctrl') return '⌘';
   if (mac && c === 'shift') return '⇧';
+  if (mac && c === 'alt') return '⌥';
   const word = CAPS[c];
   return word ? t(word) : (SIGNS[c] ?? c);
 }
@@ -98,11 +109,15 @@ export function keysOf(id: ShortcutId): string {
   return mac ? caps.join('') : caps.join(' ');
 }
 
-/** Whether this key press is that Ctrl shortcut: Ctrl (or ⌘) and the key, with no Alt, and Shift only where the key takes it
- * (or anything where it is loose). */
+/** Whether this key press is that shortcut: Ctrl (or ⌘) and the key, with no Alt, and Shift only where the key takes it
+ * (or anything where it is loose); or Alt alone and the key. A digit is read from the key's place too, since a French
+ * keyboard types & where the 1 is. */
 export function pressed(e: KeyboardEvent, id: ShortcutId): boolean {
   const s: Shortcut = SHORTCUTS[id];
-  return !!s.ctrl && (e.ctrlKey || e.metaKey) && (!!s.loose || (!e.altKey && e.shiftKey === !!s.shift)) && e.key.toLowerCase() === s.ctrl;
+  const key = e.key.toLowerCase();
+  if (s.alt) return e.altKey && !e.ctrlKey && !e.metaKey && !e.shiftKey && key === s.alt;
+  const digit = !!s.ctrl && /^\d$/.test(s.ctrl) && e.code === `Digit${s.ctrl}`;
+  return !!s.ctrl && (e.ctrlKey || e.metaKey) && (!!s.loose || (!e.altKey && e.shiftKey === !!s.shift)) && (key === s.ctrl || digit);
 }
 
 /** The browser's own reload, caret browsing, print, save, view-source and find: Faber has no use for them, so they do
@@ -112,7 +127,7 @@ export function browserKey(e: KeyboardEvent): boolean {
   return e.key === 'F5' || e.key === 'F7' || (ctrl && !e.altKey && ['r', 'p', 's', 'u', 'f'].includes(e.key.toLowerCase()));
 }
 
-/** Whether this key press is any Ctrl shortcut of the list: a layer that must be answered first holds them all back. */
+/** Whether this key press is any Ctrl or Alt shortcut of the list: a layer that must be answered first holds them all back. */
 export function pressedAny(e: KeyboardEvent): boolean {
   return (Object.keys(SHORTCUTS) as ShortcutId[]).some((id) => pressed(e, id));
 }

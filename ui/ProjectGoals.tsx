@@ -126,8 +126,8 @@ function GoalList(props: { projectId: string }) {
             </ul>
             <Show when={v().checks.length || v().canWatchCrashes} fallback={<p class="hint">{t('goals.noChecks')}</p>}>
               <form class="goal-add" onSubmit={(event) => void add(event)}>
-                <label class="sr-only" for={`goal-words-${props.projectId}`}>{t('goals.words')}</label>
-                <input id={`goal-words-${props.projectId}`} class="field" type="text" maxlength={WORDS_MAX} placeholder={t('goals.placeholder')} value={words()} disabled={busy()} onInput={(e) => setWords(e.currentTarget.value)} />
+                <label class="hint goal-words" for={`goal-words-${props.projectId}`}>{t('goals.words')}</label>
+                <input id={`goal-words-${props.projectId}`} class="field" type="text" maxlength={WORDS_MAX} value={words()} disabled={busy()} onInput={(e) => setWords(e.currentTarget.value)} />
                 <Show when={v().checks.length} fallback={<p class="hint">{t('goals.noChecks')}</p>}>
                   <label class="sr-only" for={`goal-check-${props.projectId}`}>{t('goals.pickCheck')}</label>
                   <select id={`goal-check-${props.projectId}`} class="field" value={check()} disabled={busy()} onChange={(e) => setCheck(e.currentTarget.value)}>
