@@ -106,9 +106,12 @@ impl Core {
         let prompt = helper::prompt(input).ok_or("the brief was empty")?;
         let cli = self.opts.clis.get(&vendor).cloned().ok_or("the other AI is not connected")?;
         // Before Codex has listed the account's models, its recommended one stands in.
-        let (model, effort) = match helper::profile(&crate::route::candidates(&self.vendors(), &self.codex_models), vendor) {
+        let economy = self.economy(conv);
+        let (model, effort) = match helper::profile(&crate::route::candidates(&self.vendors(), &self.codex_models), vendor, economy) {
             Some(p) => (Some(p.model.to_string()), p.effort.to_string()),
-            None if vendor == Vendor::Codex && self.codex_recommended.is_some() => (self.codex_recommended.clone(), "medium".to_string()),
+            None if vendor == Vendor::Codex && self.codex_recommended.is_some() => {
+                (self.codex_recommended.clone(), if economy { "low" } else { "medium" }.to_string())
+            }
             None => return Err("the other AI has no model for this"),
         };
         let family = model.as_deref().and_then(family_of);
@@ -375,6 +378,7 @@ impl Core {
         self.rewind_helper_retire(call, h.hsid);
         h.session.close();
         self.note_span(h.vendor, h.started, &h.model, cost, incomplete);
+        self.add_spend(&h.conv, cost);
         let (ok, mut text) = helper::report(ok, &h.report, &h.refused, error);
         if !h.told.is_empty() {
             text.push_str(&helper::told_note(&h.told));

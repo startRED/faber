@@ -582,6 +582,8 @@ fn seed(dir: &Path, long: bool) -> Conversation {
         allow_always_epochs: Default::default(),
         branch_of: None,
         started_by: None,
+        spent_usd: 0.0,
+        estimate: None,
         user_name: None,
         persona_version: None,
         created_at: 1,

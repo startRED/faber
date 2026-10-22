@@ -546,6 +546,22 @@ pub struct Plan {
     pub steps: Vec<PlanStep>,
     /// When the agent last sent it, in milliseconds.
     pub at: u64,
+    /// The conversation's estimate, copied here for the screen only (`Conversation::shown_plan`): the plan that is stored never
+    /// holds one, since the estimate belongs to the job and outlives any list.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub estimate: Option<Estimate>,
+}
+
+/// A big job's estimate in whole US$ cents at API price (the unit of `Message.cost_usd`), so `Plan` keeps `Eq`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Estimate {
+    pub cents: u32,
+    /// The conversation's running total (`Conversation::spent_usd`) in cents when the first estimate arrived; the job's spend
+    /// is counted from there.
+    pub base: u64,
+    /// The estimate was passed by half: support work now runs cheaper and extras wait.
+    #[serde(default)]
+    pub economy: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -819,6 +835,15 @@ pub struct Conversation {
     /// cannot start conversations of its own.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub started_by: Option<String>,
+    /// What this conversation has cost in US$ at API price, counted where each cost is written: its turns, the helpers and
+    /// quick side questions (`/btw`) of its agent, and those of the conversations that agent started. A running total that no
+    /// rewind takes back, so the job's spend (rule 7) is never a scan of the conversations.
+    #[serde(default, skip_serializing_if = "is_zero_usd")]
+    pub spent_usd: f64,
+    /// The whole job's estimate (rule 7), kept here and not in the plan: it ends only when the closing box says the work is
+    /// done, whatever happens to the list of steps or to a rewind.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub estimate: Option<Estimate>,
     /// What the user asked to be called when this conversation started. Kept here so the CLI gets the same instructions every
     /// time the conversation resumes, whatever Settings says by then; a conversation saved before this field has none.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -1374,10 +1399,25 @@ fn is_zero(n: &u32) -> bool {
     *n == 0
 }
 
+fn is_zero_usd(n: &f64) -> bool {
+    *n == 0.0
+}
+
 impl Conversation {
     pub fn for_screen(mut self) -> Self {
         self.messages = self.messages.into_iter().map(Message::for_screen).collect();
+        self.plan = self.shown_plan();
         self
+    }
+
+    /// The plan as the screen draws it, with the job's estimate in it (rule 7).
+    pub fn shown_plan(&self) -> Option<Plan> {
+        self.plan.clone().map(|plan| Plan { estimate: self.estimate, ..plan })
+    }
+
+    /// What the conversation has cost so far, in whole US$ cents.
+    pub fn spent_cents(&self) -> u64 {
+        (self.spent_usd * 100.0).round() as u64
     }
 
     /// The session to continue for this vendor: the one that has shown output, else one whose turn was accepted and then cut off.

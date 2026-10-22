@@ -1509,6 +1509,7 @@ html.away-win :is(.amb, .amb *) { animation-play-state: paused !important; }
 .plan li.active { color: var(--ink); }
 .plan li.active .mark { box-shadow: inset 0 0 0 1.5px var(--accent); }
 .plan li .now { color: var(--ink-3); }
+.plan .note { margin: 6px 0 0; overflow-wrap: anywhere; }
 .wrap-up { margin: 12px 0 4px; padding: 10px 12px; border-radius: var(--r-md); box-shadow: inset 0 0 0 1px var(--line-2); display: grid; gap: 8px; }
 .wrap-up .recap { margin: 0; }
 .wrap-ask { display: grid; gap: 8px; }

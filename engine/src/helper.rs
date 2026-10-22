@@ -172,12 +172,12 @@ pub fn other(vendor: Vendor) -> Vendor {
 }
 
 /// The model a helper runs: the cheapest of the vendor's profiles that clears a bar for multi-step agent work (Terminal-Bench
-/// 44 and up), so a helper is good at the work and light on the quota.
-pub fn profile(candidates: &[Profile], vendor: Vendor) -> Option<Profile> {
-    const AGENT_BAR: u8 = 44;
+/// 44 and up), so a helper is good at the work and light on the quota. In economy mode (rule 7) the bar drops to 30.
+pub fn profile(candidates: &[Profile], vendor: Vendor, economy: bool) -> Option<Profile> {
+    let bar: u8 = if economy { 30 } else { 44 };
     candidates
         .iter()
-        .filter(|p| p.vendor == vendor && p.agent >= AGENT_BAR)
+        .filter(|p| p.vendor == vendor && p.agent >= bar)
         .min_by(|a, b| a.cost.total_cmp(&b.cost))
         .or_else(|| candidates.iter().filter(|p| p.vendor == vendor).max_by_key(|p| p.agent))
         .copied()
@@ -347,11 +347,14 @@ mod tests {
     #[test]
     fn a_helper_runs_the_cheapest_model_of_the_other_vendor_that_is_good_at_agent_work() {
         let all = crate::route::PROFILES;
-        assert_eq!(profile(&all, Vendor::Claude).map(|p| (p.model, p.effort)), Some(("claude-sonnet-5-5", "high")));
-        assert_eq!(profile(&all, Vendor::Codex).map(|p| (p.model, p.effort)), Some(("gpt-6.1-sol", "medium")));
+        assert_eq!(profile(&all, Vendor::Claude, false).map(|p| (p.model, p.effort)), Some(("claude-sonnet-5-5", "high")));
+        assert_eq!(profile(&all, Vendor::Codex, false).map(|p| (p.model, p.effort)), Some(("gpt-6.1-sol", "medium")));
+        // Economy mode (rule 7) lowers the bar, so support work runs one rung cheaper; Haiku and luna stay out.
+        assert_eq!(profile(&all, Vendor::Claude, true).map(|p| (p.model, p.effort)), Some(("claude-sonnet-5-5", "medium")));
+        assert_eq!(profile(&all, Vendor::Codex, true).map(|p| (p.model, p.effort)), Some(("gpt-6.1-sol", "low")));
         let only_luna: Vec<_> = all.into_iter().filter(|p| p.model == "gpt-6-luna").collect();
-        assert_eq!(profile(&only_luna, Vendor::Codex).map(|p| p.model), Some("gpt-6-luna"));
-        assert_eq!(profile(&only_luna, Vendor::Claude), None);
+        assert_eq!(profile(&only_luna, Vendor::Codex, false).map(|p| p.model), Some("gpt-6-luna"));
+        assert_eq!(profile(&only_luna, Vendor::Claude, false), None);
     }
 
     #[test]

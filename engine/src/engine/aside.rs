@@ -231,6 +231,11 @@ impl Core {
         if let Some(vendor) = vendor {
             let (cost, incomplete) = done.as_ref().map_or((None, true), |e| usage::fresh_price(e, &asking.model));
             self.note_span(vendor, asking.started, &asking.model, cost, incomplete);
+            // A quick question is part of the job's spend (rule 7), though it is no reply.
+            self.add_spend(&asking.conv, cost);
+            if cost.is_some_and(|usd| usd > 0.0) {
+                self.save(&asking.conv);
+            }
         }
         // One process per question: it is gone once it answered.
         asking.session.close();

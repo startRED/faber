@@ -2389,6 +2389,9 @@ impl Core {
                     looked = ok.then(|| m.id.clone());
                     offered = m.look.as_ref().map(|l| l.reason.clone());
                 }
+                // A turn with no known cost adds 0 to the job's spend, so economy mode comes late rather than wrongly.
+                self.add_spend(conv, cost);
+                self.check_estimate(conv);
                 if let Some(sign) = offered {
                     self.count_look("offered", &sign, area);
                 }
@@ -3804,6 +3807,8 @@ impl Core {
             allow_always_epochs: BTreeMap::new(),
             branch_of: None,
             started_by: None,
+            spent_usd: 0.0,
+            estimate: None,
             user_name: self.store.settings().user_name.and_then(|name| clean_name(&name)),
             persona_version: Some(crate::persona::VERSION),
             created_at: at,

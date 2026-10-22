@@ -101,11 +101,6 @@ phase.
 9. **Keep each Haiku request under 100K tokens and each GPT-6 request under 272K.** Above those points the whole request
    is billed more.
 
-Rules 1 to 6, 8 and 9 hold today (rule 4 wherever work changes vendor: a conversation that moves to the other AI carries its earlier messages, or a summary of them, as text, `engine/src/handover.rs`, and the helper gets a written brief; rule 5's silence watch covers an answer; a tool step it reports as running, a helper's own process and a quick question are not watched). Every session start passes its mode, model and effort (the CLI probes that start no
+Rules 1 to 9 hold today (rule 4 wherever work changes vendor: a conversation that moves to the other AI carries its earlier messages, or a summary of them, as text, `engine/src/handover.rs`, and the helper gets a written brief; rule 5's silence watch covers an answer; a tool step it reports as running, a helper's own process and a quick question are not watched; rule 7: a project agent gives an estimate in its plan, Faber counts the conversation's spend per turn from it, and past half again the estimate it warns once and switches to economy mode until the job ends, `engine/src/engine/plan.rs`, `engine/src/progress.rs`. The spend is a running total on the conversation, added to where each cost is written (a turn, a helper, a quick side question, and the same of the conversations its agent started), so it is read in one step; a cost with no known price counts 0 and a rewind takes no spend back, so the warning can come late; only an estimate sent after a costly first stretch of a turn counts that whole turn. The estimate ends only when `wrap_up` reports done). Every session start passes its mode, model and effort (the CLI probes that start no
 session carry no model: Codex's lists of models, quota and threads, and Claude Code's `--help` and its `/usage` read), the engine keeps each session's start-up
-`capabilities`, and every result becomes a `reason.*` key. The engine that already drives the CLIs has known legacy
-exceptions to the others. They are known defects of the old code, no new code may add to them, and each phase closes some:
-
-| Rule | What the engine does today | Closed in |
-| :--- | :--- | :--- |
-| 7 | Faber counts spend per turn itself (`engine/src/ledger.rs`), but no estimate warns before big work and nothing changes to economy mode | Phase 3 |
+`capabilities`, and every result becomes a `reason.*` key.

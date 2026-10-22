@@ -79,6 +79,11 @@ impl Core {
         if !offers(parent.area) || parent.started_by.is_some() {
             return Err("only a project's own agent can start conversations");
         }
+        // Economy mode (rule 7): extras wait, so no new conversation starts. `ask` into a conversation already running stays
+        // allowed: it continues work that was started.
+        if self.economy(conv) {
+            return Err("the job has passed its estimate by half, so no new conversation starts; keep to the plan");
+        }
         let project = parent.project_id.clone().ok_or("this conversation has no project")?;
         let choice = parent.choice.clone().ok_or("this conversation has no model chosen")?;
         // The cap is on what agents start: a conversation counts from the call on, its copy still being made, routing and

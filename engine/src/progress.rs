@@ -3,7 +3,7 @@
 //! `done` also ends Keep going. Each call only writes down what it says: the engine stores it on the conversation or the
 //! reply, the screen draws it, and the call answers at once. Both CLIs call them like the other tools of Faber's server.
 
-use crate::model::{Plan, PlanStep, StepState, WrapUp};
+use crate::model::{Estimate, Plan, PlanStep, StepState, WrapUp};
 use serde_json::{Value, json};
 
 /// The names both drivers give the calls, whatever the CLI calls them.
@@ -32,7 +32,9 @@ const PLAN_DESCRIPTION: &str = "Shows the person your plan for this request as a
 across turns. Send the whole list (at most 12 short imperative steps, each pending, in_progress or done, exactly one in_progress \
 while you work) with the first tool call of a task that has more than one step, in the same message, never in a message of its \
 own. Then send {\"advance\": true} together with the call that starts the next step: it finishes the current step and starts the \
-next pending one. Send the whole list again when the plan changes. Never repeat the plan as a list in your text.";
+next pending one. Send the whole list again when the plan changes. Never repeat the plan as a list in your text. For big \
+work, also send estimate: what the whole job will cost in US dollars at API price, your honest guess; Faber then counts the \
+spend and, when the job has cost half as much again, tells you to keep to the plan and use cheaper helpers.";
 
 const STATUS_DESCRIPTION: &str = "Shows the person, in 3 to 6 words, what you are doing now (at most 50 characters), in their \
 language, with no tool, command or file names: \"Fixing the login page\", \"Checking the new layout\". Call it when substantial \
@@ -64,7 +66,8 @@ fn plan_schema() -> Value {
                     "additionalProperties": false
                 }
             },
-            "advance": { "type": "boolean", "description": "Finish the current step and start the next pending one." }
+            "advance": { "type": "boolean", "description": "Finish the current step and start the next pending one." },
+            "estimate": { "type": "number", "description": "For big work: the whole job's cost in US dollars at API price." }
         },
         "additionalProperties": false
     })
@@ -149,6 +152,36 @@ fn text_of(v: &Value, most: usize) -> Option<String> {
     v.as_str().map(|t| line(t, most)).filter(|t| !t.is_empty())
 }
 
+/// The most an estimate may say, in US dollars: above it the number is a mistake, not a job.
+const MAX_ESTIMATE_USD: f64 = 10_000.0;
+
+/// What the model reads while economy mode is on (rule 7), added to the answer of every `plan` call.
+pub const ECONOMY_LINE: &str =
+    "The job has cost half as much again as your estimate: keep to the plan, use cheap helpers for support work, and drop extras.";
+
+/// Whether a job has spent more than half again its estimate: `spent` is the conversation's spend now, in cents.
+pub fn passed(e: &Estimate, spent: u64) -> bool {
+    spent.saturating_sub(e.base) * 2 > u64::from(e.cents) * 3
+}
+
+/// The job's estimate after a `plan` call, from the one the conversation has. The first number starts the count from `spent`
+/// cents; a different one later only changes what the job is measured against, and the count stays from the first, so
+/// re-estimating cannot dodge the warning. Once economy mode is on, a number changes nothing. Err says what to fix.
+pub fn estimate(had: Option<Estimate>, input: &Value, spent: u64) -> Result<Option<Estimate>, String> {
+    let Some(v) = input.get("estimate").filter(|v| !v.is_null()) else { return Ok(had) };
+    match v.as_f64() {
+        Some(usd) if usd > 0.0 && usd <= MAX_ESTIMATE_USD => {
+            let cents = (usd * 100.0).round().max(1.0) as u32;
+            Ok(Some(match had {
+                Some(e) if e.economy => e,
+                Some(e) => Estimate { cents, ..e },
+                None => Estimate { cents, base: spent, economy: false },
+            }))
+        }
+        _ => Err(format!("Send estimate as a number of US dollars above 0 and at most {MAX_ESTIMATE_USD}.")),
+    }
+}
+
 /// The plan after a `plan` call, from the one before: a new list replaces it, `advance` moves it one step on. At most one
 /// step is in progress (the first one the list marks), and a list with no step clears the plan. Err says what to fix.
 pub fn plan(before: Option<&Plan>, input: &Value, at: u64) -> Result<Option<Plan>, String> {
@@ -186,7 +219,7 @@ pub fn plan(before: Option<&Plan>, input: &Value, at: u64) -> Result<Option<Plan
             next.state = StepState::Active;
         }
     }
-    Ok(Some(Plan { steps, at }))
+    Ok(Some(Plan { steps, at, estimate: None }))
 }
 
 /// What a `status` call shows.
@@ -252,6 +285,44 @@ mod tests {
         assert_eq!(plan(Some(&p), &json!({ "steps": [] }), 6).unwrap(), None, "an empty list clears it");
         let long = json!({ "steps": (0..20).map(|i| json!({ "text": format!("Step {i}"), "state": "pending" })).collect::<Vec<_>>() });
         assert_eq!(plan(None, &long, 7).unwrap().unwrap().steps.len(), MAX_STEPS);
+    }
+
+    #[test]
+    fn the_first_estimate_starts_the_count_a_new_number_keeps_it_and_economy_mode_holds_its_estimate() {
+        let with = |usd: Value| json!({ "estimate": usd });
+        let first = estimate(None, &with(json!(1.0)), 0).unwrap();
+        assert_eq!(first, Some(Estimate { cents: 100, base: 0, economy: false }), "counted from what was spent when it came");
+        assert_eq!(estimate(first, &json!({}), 300).unwrap(), first, "a call with no number keeps it");
+        assert_eq!(estimate(first, &with(json!(null)), 300).unwrap(), first, "a null is no number");
+        assert_eq!(estimate(first, &with(json!(1.0)), 450).unwrap(), first, "the same number again changes nothing");
+        // The estimate is for the whole job: another number moves the target, never the start of the count.
+        let revised = estimate(first, &with(json!(0.8)), 140).unwrap();
+        assert_eq!(revised, Some(Estimate { cents: 80, base: 0, economy: false }));
+        assert!(passed(&revised.unwrap(), 140), "1.40 spent past a revised 0.80");
+        assert!(!passed(&Estimate { base: 140, ..revised.unwrap() }, 140), "a reset base would have dodged the warning");
+        let on = Some(Estimate { economy: true, ..first.unwrap() });
+        assert_eq!(estimate(on, &with(json!(2.5)), 900).unwrap(), on, "in economy mode a number changes nothing");
+        for bad in [json!(0), json!(-3), json!("5"), json!(1e9)] {
+            assert!(estimate(None, &with(bad.clone()), 0).is_err(), "{bad}");
+        }
+        assert!(PLAN_DESCRIPTION.contains("estimate"), "the lead is told to give one for big work");
+    }
+
+    #[test]
+    fn a_plan_never_carries_the_estimate_it_belongs_to_the_job_not_the_list() {
+        let list =
+            json!({ "steps": [{ "text": "Build it", "state": "in_progress" }, { "text": "Check it", "state": "done" }], "estimate": 1.0 });
+        assert_eq!(plan(None, &list, 1).unwrap().unwrap().estimate, None);
+        assert_eq!(plan(None, &json!({ "steps": [], "estimate": 1.0 }), 2).unwrap(), None, "an empty list clears the plan alone");
+    }
+
+    #[test]
+    fn a_job_has_passed_its_estimate_only_above_one_and_a_half_times_it() {
+        let e = Estimate { cents: 100, base: 40, economy: false };
+        assert!(!passed(&e, 40) && !passed(&e, 189), "under");
+        assert!(!passed(&e, 190), "exactly one and a half times: no");
+        assert!(passed(&e, 191), "just above");
+        assert!(!passed(&e, 10), "spend below the base never counts");
     }
 
     #[test]

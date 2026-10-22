@@ -4397,6 +4397,7 @@ async fn r250_a_quick_question_on_the_side_leaves_the_turn_its_queue_and_its_ses
     assert_eq!(main.lines.lock().unwrap().len(), main_lines, "the running turn never heard the question");
     assert_eq!((after.messages.len(), after.queued.len()), (before.messages.len(), before.queued.len()));
     assert_eq!(after.resumable(Vendor::Claude), Some(&"s1".to_string()), "the conversation keeps its own session");
+    assert!((after.spent_usd - 0.004).abs() < 1e-9, "its cost joins the job's spend (rule 7): {}", after.spent_usd);
 
     let ended = |engine: &Engine| engine.open(&id).is_some_and(|c| c.messages.last().is_some_and(|m| m.status != Some(Status::Streaming)));
     main.say(json!({"type":"result","subtype":"success","is_error":false,"total_cost_usd":0.01,"usage":{}})).await;

@@ -152,6 +152,8 @@ export interface Message {
 export interface Plan {
   steps: { text: string; state: 'pending' | 'active' | 'done' }[];
   at: number;
+  /** The conversation's estimate, put here by the engine for the screen; `economy` once the job went half over it (rule 7). */
+  estimate?: { cents: number; base: number; economy: boolean };
 }
 /** "3 of 7": a plan's steps done and in all. */
 export interface PlanCount {

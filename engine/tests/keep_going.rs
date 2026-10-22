@@ -916,6 +916,338 @@ async fn the_agent_keeps_a_plan_says_what_it_does_now_and_closes_with_a_box() {
     engine.shutdown();
 }
 
+/// Rule 7: a turn ends with this running total of the conversation's cost, as Claude Code reports it.
+async fn ends_costing(pipe: &mut Pipe, total: f64) {
+    pipe.say(json!({ "type": "result", "subtype": "success", "is_error": false, "total_cost_usd": total, "usage": {} })).await;
+}
+
+/// Rule 7: a project agent gives an estimate for big work; when the job has cost half as much again, Faber warns once and
+/// switches to economy mode (the plan's answer says so, no conversation starts), and a later turn over the limit says nothing more.
+#[tokio::test]
+async fn a_job_going_half_over_its_estimate_warns_once_and_switches_to_economy_mode() {
+    let (dir, project) = (tempfile::tempdir().unwrap(), support::work_folder());
+    let (engine, mut rx, mut pipe, id) = started(dir.path(), project.path()).await;
+    let steps =
+        json!({ "steps": [{ "text": "Build it", "state": "in_progress" }, { "text": "Check it", "state": "pending" }], "estimate": 1.0 });
+    let (said, error) = calls(&mut pipe, "p1", "plan", steps).await;
+    assert!(!error && said.contains("0 of 2") && !said.contains("estimate"), "{said}");
+    // A turn that costs US$ 1.60 passes an estimate of US$ 1.00 by more than half.
+    ends_costing(&mut pipe, 1.6).await;
+    let c = until(&engine, &id, economy_on).await;
+    assert_eq!(c.estimate.map(|e| (e.cents, e.base)), Some((100, 0)));
+    let events = |rx: &mut UnboundedReceiver<AppEvent>| {
+        let mut plans = 0;
+        while let Ok(e) = rx.try_recv() {
+            plans += usize::from(matches!(e, AppEvent::Plan { .. }));
+        }
+        plans
+    };
+    assert_eq!(events(&mut rx), 2, "the plan, then the one warning");
+    let (said, error) = calls(&mut pipe, "p2", "plan", json!({ "advance": true })).await;
+    assert!(!error && said.contains("1 of 2") && said.contains("half as much again"), "{said}");
+    let (said, error) = calls(&mut pipe, "c1", "conversation", json!({ "title": "Docs", "brief": "Write the docs." })).await;
+    assert!(error && said.contains("passed its estimate"), "{said}");
+    assert_eq!(events(&mut rx), 1, "the advance is the only plan event");
+    // The next turn is over the limit too: nothing more is said, nothing is stopped.
+    let choice = Choice { vendor: "claude".into(), model: Some("haiku".into()), effort: None };
+    let more = SendRequest {
+        conversation_id: Some(id.clone()),
+        area: Area::Project,
+        project_id: None,
+        text: "Then the rest".into(),
+        images: vec![],
+        files: vec![],
+        choice,
+    };
+    engine.send(more).unwrap();
+    until_turns(&pipe, 2).await;
+    echo(&mut pipe, 1).await;
+    ends_costing(&mut pipe, 3.2).await;
+    until(&engine, &id, |c| idle(c) && c.messages.len() == 4).await;
+    assert_eq!(events(&mut rx), 0, "the warning fires once");
+    engine.shutdown();
+}
+
+/// The processes a test's engine starts, in order, apart from the first agent's.
+type Made = Arc<std::sync::Mutex<Vec<Pipe>>>;
+
+/// Like [`started_on`], also giving the queue of the other processes the engine starts (a helper's, a conversation an agent starts).
+async fn started_made(dir: &Path, folder: &Path, vendors: &[Vendor]) -> (Engine, Pipe, String, Made) {
+    let (spawn, made) = pipes();
+    let (engine, _rx) = engine_with(dir, spawn, vendors);
+    let project = engine.add_project(&folder.to_string_lossy()).unwrap();
+    let choice = Choice { vendor: "claude".into(), model: Some("haiku".into()), effort: None };
+    let request = SendRequest {
+        conversation_id: None,
+        area: Area::Project,
+        project_id: Some(project.id),
+        text: "Fix the login page, then the rest of the list".into(),
+        images: vec![],
+        files: vec![],
+        choice,
+    };
+    let id = engine.send(request).unwrap();
+    let mut pipe = next_pipe(&made).await;
+    until_turns(&pipe, 1).await;
+    pipe.say(json!({ "type": "system", "subtype": "init", "session_id": "s", "model": "claude-haiku-5-5" })).await;
+    (engine, pipe, id, made)
+}
+
+fn steps_with(estimate: f64) -> Value {
+    json!({ "steps": [{ "text": "Build it", "state": "in_progress" }, { "text": "Check it", "state": "pending" }], "estimate": estimate })
+}
+
+fn economy_on(c: &Conversation) -> bool {
+    c.estimate.is_some_and(|e| e.economy)
+}
+
+/// Rule 7: the estimate and economy mode belong to the job. They go when the agent's closing box says the work is done, and a
+/// plan sent after that starts with none.
+#[tokio::test]
+async fn the_estimate_and_economy_mode_end_with_the_job() {
+    let (dir, project) = (tempfile::tempdir().unwrap(), support::work_folder());
+    let (engine, mut rx, mut pipe, id) = started(dir.path(), project.path()).await;
+    calls(&mut pipe, "p1", "plan", steps_with(1.0)).await;
+    ends_costing(&mut pipe, 1.6).await;
+    until(&engine, &id, economy_on).await;
+    while rx.try_recv().is_ok() {}
+    // The closing box belongs to a reply, so the agent closes the job in its next turn.
+    let choice = Choice { vendor: "claude".into(), model: Some("haiku".into()), effort: None };
+    let more = SendRequest {
+        conversation_id: Some(id.clone()),
+        area: Area::Project,
+        project_id: None,
+        text: "Then the rest".into(),
+        images: vec![],
+        files: vec![],
+        choice,
+    };
+    engine.send(more).unwrap();
+    until_turns(&pipe, 2).await;
+    echo(&mut pipe, 1).await;
+    // Every step done, an empty list, a list again: none of them ends the job, only the closing box does.
+    let all_done = json!({ "steps": [{ "text": "Build it", "state": "done" }, { "text": "Check it", "state": "done" }] });
+    for (call, input) in
+        [("p3", all_done), ("p4", json!({ "steps": [] })), ("p5", json!({ "steps": [{ "text": "More", "state": "pending" }] }))]
+    {
+        let (said, error) = calls(&mut pipe, call, "plan", input).await;
+        assert!(!error && said.contains("half as much again"), "{call}: {said}");
+        assert!(economy_on(&engine.open(&id).unwrap()), "{call} left the job's estimate alone");
+    }
+    while rx.try_recv().is_ok() {}
+    let done = json!({ "recap": "The login page and the rest are fixed. Both were checked.", "done": true });
+    let (said, error) = calls(&mut pipe, "w1", "wrap_up", done).await;
+    assert!(!error, "{said}");
+    let c = until(&engine, &id, |c| c.estimate.is_none()).await;
+    assert!(!economy_on(&c));
+    let mut plans = 0;
+    while let Ok(e) = rx.try_recv() {
+        plans += usize::from(matches!(e, AppEvent::Plan { plan: Some(p), .. } if p.estimate.is_none()));
+    }
+    assert_eq!(plans, 1, "the screen hears that economy mode ended");
+    let later = json!({ "steps": [{ "text": "Next job", "state": "in_progress" }] });
+    let (said, error) = calls(&mut pipe, "p2", "plan", later).await;
+    assert!(!error && !said.contains("half as much again"), "{said}");
+    assert!(until(&engine, &id, |c| c.plan.as_ref().is_some_and(|p| p.steps[0].text == "Next job")).await.estimate.is_none());
+    engine.shutdown();
+}
+
+/// Rule 7: the job's spend counts the conversations the agent started, not only the replies of its own.
+#[tokio::test]
+async fn the_spend_of_a_job_counts_the_conversations_the_agent_started() {
+    let (dir, project) = (tempfile::tempdir().unwrap(), support::work_folder());
+    let (engine, mut pipe, id, made) = started_made(dir.path(), project.path(), &[Vendor::Claude]).await;
+    calls(&mut pipe, "p1", "plan", steps_with(1.0)).await;
+    let (said, error) = calls(&mut pipe, "c1", "conversation", json!({ "title": "Docs", "brief": "Write the docs." })).await;
+    assert!(!error, "{said}");
+    let mut child = next_pipe(&made).await;
+    until_turns(&child, 1).await;
+    child.say(json!({ "type": "system", "subtype": "init", "session_id": "c", "model": "claude-haiku-5-5" })).await;
+    ends_costing(&mut child, 1.6).await;
+    let started = engine.state().conversations.into_iter().find(|c| c.title == "Docs").unwrap().id;
+    until(&engine, &started, |c| c.messages.last().is_some_and(|m| m.cost_usd == Some(1.6))).await;
+    let parent = engine.open(&id).unwrap();
+    assert!((parent.spent_usd - 1.6).abs() < 1e-9, "the child's turn is added to the parent's total: {}", parent.spent_usd);
+    assert!(!economy_on(&parent), "nothing is checked before the agent's own turn ends");
+    // The agent's own turn cost nothing known, and the job is past its estimate all the same.
+    ends_costing(&mut pipe, 0.0).await;
+    until(&engine, &id, economy_on).await;
+    engine.shutdown();
+}
+
+/// The model and effort of the helper that a Claude process asks for, as the Codex app-server it starts receives them. The
+/// app-server is answered by hand: the model comes with the thread, the effort with the turn.
+async fn helper_models(claude: &mut Pipe, made: &Made) -> (Option<String>, Option<String>) {
+    let call = json!({ "jsonrpc": "2.0", "id": 8, "method": "tools/call",
+        "params": { "name": "helper", "arguments": { "title": "Check", "brief": "What is the answer?" } } });
+    claude
+        .say(json!({ "type": "control_request", "request_id": "h1",
+            "request": { "subtype": "mcp_message", "server_name": "faber", "message": call } }))
+        .await;
+    let mut codex = next_pipe(made).await;
+    let (mut answered, mut seen) = (0, (None, None));
+    for _ in 0..600 {
+        let lines = codex.lines.lock().unwrap().clone();
+        for m in lines.iter().skip(answered) {
+            let result = match m["method"].as_str() {
+                Some("thread/start") => {
+                    seen.0 = m["params"]["model"].as_str().map(String::from);
+                    json!({ "thread": { "id": "t1", "model": "gpt-6.1-sol" } })
+                }
+                Some("turn/start") => {
+                    seen.1 = m["params"]["effort"].as_str().map(String::from);
+                    json!({ "turn": { "id": "u1", "status": "inProgress" } })
+                }
+                _ => json!({}),
+            };
+            if m["method"].is_string() && !m["id"].is_null() {
+                codex.say(json!({ "id": m["id"], "result": result })).await;
+            }
+        }
+        answered = lines.len();
+        if seen.1.is_some() {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(10)).await;
+    }
+    seen
+}
+
+/// Rule 7: a helper the agent calls in economy mode runs one rung cheaper than usual, on the other AI's own model list.
+#[tokio::test]
+async fn a_helper_started_in_economy_mode_runs_one_rung_cheaper() {
+    let (dir, project) = (tempfile::tempdir().unwrap(), support::work_folder());
+    let (engine, mut pipe, id, made) = started_made(dir.path(), project.path(), &[Vendor::Claude, Vendor::Codex]).await;
+    calls(&mut pipe, "p1", "plan", steps_with(1.0)).await;
+    ends_costing(&mut pipe, 1.6).await;
+    until(&engine, &id, economy_on).await;
+    let seen = helper_models(&mut pipe, &made).await;
+    assert_eq!(seen, (Some("gpt-6.1-sol".to_string()), Some("low".to_string())), "Sol at low effort, not medium");
+    engine.shutdown();
+}
+
+/// Rule 7: the job is the lead's, so a helper of a conversation the lead started runs cheaper too once the lead's job is in
+/// economy mode.
+#[tokio::test]
+async fn a_helper_of_a_conversation_the_lead_started_follows_the_leads_economy_mode() {
+    let (dir, project) = (tempfile::tempdir().unwrap(), support::work_folder());
+    let (engine, mut pipe, id, made) = started_made(dir.path(), project.path(), &[Vendor::Claude, Vendor::Codex]).await;
+    calls(&mut pipe, "p1", "plan", steps_with(1.0)).await;
+    let (said, error) = calls(&mut pipe, "c1", "conversation", json!({ "title": "Docs", "brief": "Write the docs." })).await;
+    assert!(!error, "{said}");
+    let mut child = next_pipe(&made).await;
+    until_turns(&child, 1).await;
+    child.say(json!({ "type": "system", "subtype": "init", "session_id": "c", "model": "claude-haiku-5-5" })).await;
+    ends_costing(&mut child, 1.6).await;
+    // The job is the lead's: its turn ends with the child's spend in the total, and economy mode starts.
+    ends_costing(&mut pipe, 0.0).await;
+    until(&engine, &id, economy_on).await;
+    let seen = helper_models(&mut child, &made).await;
+    assert_eq!(seen, (Some("gpt-6.1-sol".to_string()), Some("low".to_string())), "the child's helper runs cheaper as well");
+    engine.shutdown();
+}
+
+/// Rule 7: the running total is saved with the conversation, so a restart in the middle of a job loses nothing: a turn of a
+/// conversation the agent started, ended after the restart, is still added to the lead's total.
+#[tokio::test]
+async fn a_restart_mid_job_still_counts_the_conversations_the_agent_started() {
+    let (dir, project) = (tempfile::tempdir().unwrap(), support::work_folder());
+    let (engine, mut pipe, id, made) = started_made(dir.path(), project.path(), &[Vendor::Claude]).await;
+    calls(&mut pipe, "p1", "plan", steps_with(1.0)).await;
+    let (said, error) = calls(&mut pipe, "c1", "conversation", json!({ "title": "Docs", "brief": "Write the docs." })).await;
+    assert!(!error, "{said}");
+    let mut child = next_pipe(&made).await;
+    until_turns(&child, 1).await;
+    child.say(json!({ "type": "system", "subtype": "init", "session_id": "c", "model": "claude-haiku-5-5" })).await;
+    ends_costing(&mut child, 0.8).await;
+    let started = engine.state().conversations.into_iter().find(|c| c.title == "Docs").unwrap().id;
+    until(&engine, &started, |c| c.messages.last().is_some_and(|m| m.cost_usd == Some(0.8))).await;
+    assert!((engine.open(&id).unwrap().spent_usd - 0.8).abs() < 1e-9);
+    engine.shutdown();
+
+    // A new engine reads everything from disk; the child goes on with a turn of the person's.
+    let (spawn, made) = pipes();
+    let (again, _rx) = engine_with(dir.path(), spawn, &[Vendor::Claude]);
+    let choice = Choice { vendor: "claude".into(), model: Some("haiku".into()), effort: None };
+    let more = SendRequest {
+        conversation_id: Some(started.clone()),
+        area: Area::Project,
+        project_id: None,
+        text: "And the changelog".into(),
+        images: vec![],
+        files: vec![],
+        choice,
+    };
+    again.send(more).unwrap();
+    let mut child = next_pipe(&made).await;
+    until_turns(&child, 1).await;
+    child.say(json!({ "type": "system", "subtype": "init", "session_id": "c2", "model": "claude-haiku-5-5" })).await;
+    ends_costing(&mut child, 0.9).await;
+    let c = until(&again, &started, |c| idle(c) && c.messages.len() == 4).await;
+    let paid: f64 = c.messages.iter().filter_map(|m| m.cost_usd).sum();
+    assert!(paid > 0.8 + 1e-9, "the second turn cost something: {paid}");
+    let lead = again.open(&id).unwrap();
+    assert!((lead.spent_usd - paid).abs() < 1e-9, "the lead counts both turns of the child: {} against {paid}", lead.spent_usd);
+    assert!((c.spent_usd - paid).abs() < 1e-9, "and the child its own: {}", c.spent_usd);
+    again.shutdown();
+}
+
+/// Rule 7: a quick question on the side is no reply, yet its cost joins the job's spend and can tip it over the limit.
+#[tokio::test]
+async fn a_quick_question_on_the_side_tips_the_spend_of_the_job() {
+    let (dir, project) = (tempfile::tempdir().unwrap(), support::work_folder());
+    let (engine, mut pipe, id, made) = started_made(dir.path(), project.path(), &[Vendor::Claude]).await;
+    calls(&mut pipe, "p1", "plan", steps_with(1.0)).await;
+    pipe.say(json!({"type":"stream_event","parent_tool_use_id":null,"event":{"type":"content_block_delta","delta":{"type":"text_delta","text":"Reading."}}})).await;
+    until(&engine, &id, |c| c.resumable(Vendor::Claude).is_some()).await;
+    let aside = engine.ask_aside(&id, "why that file?", None).unwrap();
+    let mut side = next_pipe(&made).await;
+    side.say(json!({"type":"stream_event","parent_tool_use_id":null,"event":{"type":"content_block_delta","delta":{"type":"text_delta","text":"It holds the parser."}}})).await;
+    side.say(json!({"type":"result","subtype":"success","is_error":false,"total_cost_usd":1.6,"usage":{}})).await;
+    for _ in 0..300 {
+        if engine.asides(&id).iter().any(|a| a.id == aside && a.state == "done") {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(10)).await;
+    }
+    let c = engine.open(&id).unwrap();
+    assert!((c.spent_usd - 1.6).abs() < 1e-9, "the question's cost is in the total: {}", c.spent_usd);
+    assert!(!economy_on(&c), "nothing is checked before the agent's own turn ends");
+    // The agent's own turn cost nothing known: the side question alone passed the estimate.
+    ends_costing(&mut pipe, 0.0).await;
+    until(&engine, &id, economy_on).await;
+    engine.shutdown();
+}
+
+/// Rule 7: a conversation saved before estimates existed loads without one, and an estimate saved before economy mode loads with it off.
+#[tokio::test]
+async fn a_conversation_saved_before_the_estimate_loads_without_it() {
+    let (dir, project) = (tempfile::tempdir().unwrap(), support::work_folder());
+    let (engine, _rx, mut pipe, id) = started(dir.path(), project.path()).await;
+    calls(&mut pipe, "p1", "plan", steps_with(1.0)).await;
+    engine.shutdown();
+    let file = dir.path().join("conversations").join(format!("{id}.json"));
+    let mut saved: Value = serde_json::from_str(&std::fs::read_to_string(&file).unwrap()).unwrap();
+    assert!(saved["plan"].get("estimate").is_none(), "the list carries none: the estimate belongs to the job");
+    let estimate = saved["estimate"].as_object_mut().expect("the estimate is saved on the conversation");
+    assert!(estimate.remove("economy").is_some());
+    std::fs::write(&file, saved.to_string()).unwrap();
+    let (again, _rx) = engine_with(dir.path(), pipes().0, &[Vendor::Claude]);
+    let e = again.open(&id).unwrap().estimate.expect("the estimate loads");
+    assert_eq!((e.cents, e.base, e.economy), (100, 0, false), "an estimate with no economy flag has it off");
+    again.shutdown();
+    saved.as_object_mut().unwrap().remove("estimate");
+    std::fs::write(&file, saved.to_string()).unwrap();
+    let (again, _rx) = engine_with(dir.path(), pipes().0, &[Vendor::Claude]);
+    let c = again.open(&id).unwrap();
+    assert_eq!(
+        (c.plan.expect("the plan loads").steps.len(), c.estimate, c.spent_usd),
+        (2, None, 0.0),
+        "a conversation with no estimate loads as before"
+    );
+    again.shutdown();
+}
+
 /// Task 017: under Keep going, a closing box that says the request is done ends it like the stop line, on the second time
 /// (the first is checked against the original request).
 #[tokio::test]

@@ -35,7 +35,7 @@ parallel, each on what it does best, and the result must read as if one careful 
 - "Stop" pauses, and the work resumes from where it stopped.
 - Going 50% over the estimate only warns and switches to economy mode: cheaper models for support work, extras put
   off. Faber preserves unfinished work. Projects narrows or pauses before its live worker, mission and daily cost caps;
-  an estimate overrun only warns. R88/R90/R91 govern admission, not the estimate.
+  an estimate overrun only warns. R88/R90/R91 govern admission, not the estimate. Built for a project agent that gives an estimate in its plan: past half again it, the screen says so once, helpers run one rung cheaper and no conversation starts (`engine/src/engine/plan.rs`, R414).
 - A stuck attempt is dropped while what it produced stays. The lead tries another path (another approach, a stronger
   model or one from the other vendor, a clean session) and only then asks the user about that one point, while the rest
   goes on.

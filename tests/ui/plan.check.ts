@@ -1,7 +1,7 @@
 import { createComponent, createSignal } from 'solid-js';
 import { render } from 'solid-js/web';
 import type { Plan, WrapUp } from '../../ui/api.ts';
-import { t } from '../../ui/i18n.ts';
+import { lang, t, useLanguage } from '../../ui/i18n.ts';
 import { PlanList, WrapUpBox } from '../../ui/Plan.tsx';
 import { isProgressCall } from '../../ui/worklog.ts';
 import { check, deepEqual, equal, ok } from './check.ts';
@@ -37,6 +37,38 @@ check('plan: done steps are checked, the current one is marked, and the count fo
     await settle();
     equal(view.root.querySelector('.plan-head .num')!.textContent, t('plan.count', { done: 2, total: 3 }));
   } finally {
+    view.done();
+  }
+});
+
+check('plan: the economy line shows only once the estimate is passed, and fits 720 px in the longest language', async () => {
+  const plan = (economy?: boolean): Plan => ({
+    at: 1,
+    steps: [{ text: 'Build it', state: 'active' }],
+    ...(economy === undefined ? {} : { estimate: { cents: 100, base: 0, economy } }),
+  });
+  const before = lang();
+  const [p, setP] = createSignal(plan(false));
+  const view = mount(() => createComponent(PlanList, { get plan() { return p(); } }));
+  view.root.style.cssText = 'position:fixed;left:0;top:0;width:720px';
+  try {
+    await settle();
+    equal(view.root.querySelector('.plan .note'), null, 'an estimate not passed says nothing');
+    setP(plan());
+    await settle();
+    equal(view.root.querySelector('.plan .note'), null, 'no estimate, no line');
+    setP(plan(true));
+    for (const code of ['en', 'pt-BR', 'es', 'fr', 'de']) {
+      useLanguage(code);
+      await settle();
+      const note = view.root.querySelector<HTMLElement>('.plan .note')!;
+      equal(note.textContent, t('plan.economy'), code);
+      ok(!/\d/.test(note.textContent!), 'no numbers in the line');
+      ok(note.getBoundingClientRect().right <= view.root.getBoundingClientRect().right + 1, `${code} stays inside 720 px`);
+      ok(note.scrollWidth <= note.clientWidth + 1, `${code} does not overflow`);
+    }
+  } finally {
+    useLanguage(before);
     view.done();
   }
 });

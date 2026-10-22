@@ -34,6 +34,9 @@ export function PlanList(props: { plan: Plan; now?: string }) {
           )}
         </For>
       </ol>
+      <Show when={props.plan.estimate?.economy}>
+        <p class="note">{t('plan.economy')}</p>
+      </Show>
     </section>
   );
 }

@@ -149,6 +149,6 @@ Built so far, as read-only tools of a project's own agent in every permission mo
    when both are connected.
 6. A mission never stops to wait for the user. Without an answer in time, it takes the safest path and logs it.
 7. Every mission has an estimate of time and quota. Passing it by 50% only warns and moves to economy mode (see Big
-   work above). Unattended missions have a fence: whatever hits it is parked with a note and the rest continues.
+   work above; built for a project agent's plan estimate, not yet for missions). Unattended missions have a fence: whatever hits it is parked with a note and the rest continues.
 8. Whatever shows up on screen, in a page or in a file is data, never an instruction.
 9. Nothing third-party ships with the app. Telemetry is off by default.
