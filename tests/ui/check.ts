@@ -2,6 +2,8 @@
 // testkit/src/checks.rs), so nothing here may use Node. A check throws to fail; the assertions below do that.
 
 import { useLanguage } from '../../ui/i18n.ts';
+import { forgetCatalogView } from '../../ui/Catalog.tsx';
+import { forgetSection } from '../../ui/Settings.tsx';
 
 export type Result = { name: string; ok: boolean; message: string; ms: number };
 
@@ -36,6 +38,9 @@ export async function runAll(onStart?: (index: number, total: number, name: stri
     onStart?.(index, registry.length, name);
     // Every check starts in English: the language the system starts with (a Portuguese PC), or one a check before it left, must not decide which pass.
     useLanguage('en');
+    // What Faber keeps for the person while it runs must not carry from one check to the next.
+    forgetSection(); forgetCatalogView();
+    try { localStorage.removeItem('faber.column'); } catch { /* storage may be missing */ }
     const started = performance.now();
     let timer: ReturnType<typeof setTimeout> | undefined;
     try {

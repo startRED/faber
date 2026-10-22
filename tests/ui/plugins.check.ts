@@ -1,7 +1,7 @@
 import { createComponent } from 'solid-js';
 import { render } from 'solid-js/web';
 import { api, type ToolRow, type Vendor } from '../../ui/api.ts';
-import { Catalog } from '../../ui/Catalog.tsx';
+import { Catalog, forgetCatalogView } from '../../ui/Catalog.tsx';
 import { LANGUAGES, catalogName, lang, t, useLanguage } from '../../ui/i18n.ts';
 import type { Key } from '../../ui/locales/en.ts';
 import { check, deepEqual, equal, ok } from './check.ts';
@@ -48,6 +48,7 @@ async function panel(row = fixture(), options: { plugin?: boolean; vendors?: Ven
   root.style.cssText = 'position:fixed;left:0;top:0;width:720px;height:600px;overflow:auto';
   root.dataset.motion = 'reduced';
   document.body.append(root);
+  forgetCatalogView();
   const dispose = render(() => createComponent(Catalog, { projects: [{ id: 'fixture-project', name: 'Fixture project', path: 'C:/fixture/project' }], vendors: options.vendors ?? ['claude', 'codex'] }), root);
   await tick();
   return { root, row, calls, fail: (next: boolean) => { failInstall = next; }, close: () => { dispose(); root.remove(); Object.assign(api, before); useLanguage(language); } };

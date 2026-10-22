@@ -1,11 +1,11 @@
-import { createMemo, createResource, createSignal, For, Show } from 'solid-js';
+import { createMemo, createResource, createSignal, For, onCleanup, Show } from 'solid-js';
 import { api, errorText, type ChildWords, type ToolUse } from './api.ts';
 import { Icon } from './Glyphs.tsx';
 import { fromEngine, t } from './i18n.ts';
 import { Markdown, openLinks } from './markdown.tsx';
 import { animateList } from './motion.ts';
 import { elapsed } from './running.ts';
-import { useDraft } from './unsent.ts';
+import { keep, kept, release, useDraft } from './unsent.ts';
 import { agentKind, agentState, changeOf, middle, toolRow, type AgentStep, type Change, type Sources } from './worklog.ts';
 
 // A subagent opened in the running column (R161 step 3): its brief word for word, the steps it ran and its report, drawn
@@ -189,18 +189,18 @@ function Told(props: { told: NonNullable<ToolUse['told']> }) {
   );
 }
 
-/** Unsent words per helper's call, so switching to another helper or closing the view never loses them or sends them elsewhere. */
-const helperDrafts = new Map<string, string>();
-
 /** A helper at work is a session of its own (R161 step 5), so this box writes to it: Enter sends, Shift+Enter breaks the line.
  * It is made again for each helper (keyed by its call). */
 function HelperBox(props: { callId: string }) {
-  const [text, setTextNow] = createSignal(helperDrafts.get(props.callId) ?? '');
+  // Unsent words per helper's call, kept like every box's: switching helpers, closing the view or a restart never loses
+  // them or sends them elsewhere.
+  const key = `helper.${props.callId}`;
+  const [text, setTextNow] = createSignal(kept(key));
   const setText = (words: string) => {
     setTextNow(words);
-    if (words) helperDrafts.set(props.callId, words);
-    else helperDrafts.delete(props.callId);
+    keep(key, words);
   };
+  onCleanup(() => release(key));
   const [error, setError] = createSignal('');
   const [sending, setSending] = createSignal(false);
   // Like every box, unsent words keep an update from closing the window over them.

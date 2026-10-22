@@ -92,8 +92,15 @@ function Select<T extends string>(props: { label: string; value: T; options: [T,
   );
 }
 
+// The section open when Settings was last closed, so it opens there again while Faber runs.
+let lastSection: Section = 'general';
+/** Back to the first section, for the screen checks that each start from a fresh Settings. */
+export const forgetSection = (): void => { lastSection = 'general'; };
+
 export function Settings(props: Props) {
-  const [section, setSection] = createSignal<Section>(props.start ?? 'general');
+  const [section, setSectionNow] = createSignal<Section>(props.start ?? lastSection);
+  const setSection = (id: Section) => { lastSection = id; setSectionNow(id); };
+  if (props.start) lastSection = props.start;
   // The look being worked on in Appearance. It is not on the page until "Use this look" has saved it.
   const [draft, setDraft] = createSignal<Appearance>(props.kept ?? props.saved.appearance ?? factory());
   const mode = () => props.saved.permissions ?? 'dontAsk';

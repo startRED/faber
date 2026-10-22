@@ -199,3 +199,18 @@ check('settings projects: a goals read that fails says why in the switch row, an
     ok(root.textContent!.includes(t('error.store.corrupt')), 'the row says why');
   } finally { dispose(); root.remove(); Object.assign(api, originals); }
 });
+
+check('project goals: words typed for a new goal survive closing the fold and building the page again', async () => {
+  const mock = () => { api.projectGoals = async () => view(); };
+  await withFold(mock, async (root) => {
+    button(root, 'goals.title').click(); await settle();
+    const words = root.querySelector<HTMLInputElement>('.goal-add input')!;
+    words.value = 'It builds'; words.dispatchEvent(new Event('input', { bubbles: true }));
+  });
+  try {
+    await withFold(mock, async (root) => {
+      button(root, 'goals.title').click(); await settle();
+      equal(root.querySelector<HTMLInputElement>('.goal-add input')!.value, 'It builds');
+    });
+  } finally { localStorage.removeItem('faber.unsent.goal.goal-project'); }
+});

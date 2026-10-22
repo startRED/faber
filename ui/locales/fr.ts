@@ -2034,6 +2034,7 @@ export const fr: Messages = {
   'notes.196.better': "Le navigateur, les modifications, les réponses visuelles et les fichiers s'ouvrent maintenant larges à droite, la question rapide plus étroite, et chacun garde la largeur que vous lui donnez.",
   'notes.197.new': 'Sous Windows, une vérification qui dépasse de loin la mémoire qu’elle prend d’habitude s’arrête maintenant et dit pourquoi, au lieu de ralentir votre PC.',
   'notes.198.better': 'La question rapide devient une vraie discussion à côté de la conversation : les réponses restent même si vous la fermez ou redémarrez, et vous pouvez enchaîner.',
+  'notes.199.better': 'Faber se souvient d’où vous en étiez : l’endroit de chaque conversation, les projets ouverts, la recherche du Catalogue, un objectif ou une réponse à l’assistant à moitié écrits, la vue Modifications ouverte et la dernière section des Réglages.',
   'update.checking': 'Recherche d’une mise à jour…',
   'update.downloading': 'Téléchargement de la mise à jour…',
   'update.downloadingPercent': 'Téléchargement de la mise à jour… {percent} %',

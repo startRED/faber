@@ -1914,6 +1914,7 @@ export const en = {
   'notes.196.better': 'The browser, Changes, visual answers and files now open wide on the right, a quick question opens narrower, and each remembers the width you give it.',
   'notes.197.new': 'On Windows, a check that grows far past the memory it usually takes now stops and says why, instead of slowing your PC down.',
   'notes.198.better': 'The quick question is now a real side chat: answers stay with the conversation after you close it or restart, and you can follow up.',
+  'notes.199.better': "Faber remembers where you were: your place in each conversation, the open projects, the Catalog's search, a half-written goal or helper reply, the open Changes view and Settings' last section.",
   'update.checking': 'Looking for an update…',
   'update.downloading': 'Downloading update…',
   'update.downloadingPercent': 'Downloading update… {percent}%',

@@ -46,16 +46,23 @@ function PluginLimits(props: { row: ToolRow; claude: boolean }) {
   return <Show when={plugin(props.row) && limits()}>{(text) => <span class="catalog-description">{text()}</span>}</Show>;
 }
 
+// What was filtered, searched, paged and selected, held while Faber runs: leaving the Catalog and coming back finds it as it was.
+const held: { query: string; filter: Filter; page: number; selected?: string } = { query: '', filter: 'all', page: 0 };
+
+/** Back to an unfiltered list, for the screen checks that each start from a fresh Catalog. */
+export const forgetCatalogView = (): void => { Object.assign(held, { query: '', filter: 'all', page: 0, selected: undefined }); };
+
 /** Browse only while open: no CLI launch, polling or hidden card tree. */
 export function Catalog(props: { projects: Project[]; projectId?: string; vendors: Vendor[] }) {
   const [rows, setRows] = createStore<ToolRow[]>([]);
   const [error, setError] = createSignal<string>();
   const [retry, setRetry] = createSignal<() => void>();
   const [loading, setLoading] = createSignal(true);
-  const [query, setQuery] = createSignal('');
-  const [filter, setFilter] = createSignal<Filter>('all');
-  const [page, setPage] = createSignal(0);
-  const [selected, setSelected] = createSignal<string>();
+  const [query, setQuery] = createSignal(held.query);
+  const [filter, setFilter] = createSignal<Filter>(held.filter);
+  const [page, setPage] = createSignal(held.page);
+  const [selected, setSelected] = createSignal<string | undefined>(held.selected);
+  createEffect(() => { held.query = query(); held.filter = filter(); held.page = page(); held.selected = selected(); });
   const [busy, setBusy] = createSignal(false);
   const [confirming, setConfirming] = createSignal(false);
   const [removed, setRemoved] = createSignal<{ id: string; enabled: boolean }>();
@@ -147,6 +154,7 @@ export function Catalog(props: { projects: Project[]; projectId?: string; vendor
       && (!text || `${row.id} ${catalogName(row.id)} ${row.repo} ${words(`tools.${row.id}`, row.id)} ${words(`catalog.job.${row.job}`, row.job)} ${words(`catalog.job.${job(row)}`, job(row))}`.toLocaleLowerCase().includes(text)));
   });
   createEffect(() => {
+    if (loading()) return;
     const last = Math.max(0, Math.ceil(matching().length / PAGE) - 1);
     if (page() > last) setPage(last);
   });

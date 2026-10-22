@@ -2034,6 +2034,7 @@ export const de: Messages = {
   'notes.196.better': 'Browser, Änderungen, visuelle Antworten und Dateien öffnen sich rechts jetzt breit, die schnelle Frage schmaler, und jede Ansicht merkt sich die Breite, die Sie ihr geben.',
   'notes.197.new': 'Unter Windows hört eine Prüfung, die weit über den Speicher hinauswächst, den sie sonst braucht, jetzt auf und sagt warum, statt deinen PC langsam zu machen.',
   'notes.198.better': 'Die kurze Frage ist jetzt ein echter Chat neben dem Gespräch: Antworten bleiben erhalten, auch nach Schließen oder Neustart, und du kannst nachfragen.',
+  'notes.199.better': 'Faber merkt sich, wo du warst: die Stelle in jedem Gespräch, die offenen Projekte, die Suche im Katalog, ein halb geschriebenes Ziel oder eine Antwort an den Helfer, die offene Änderungsansicht und den letzten Bereich der Einstellungen.',
   'update.checking': 'Suche nach einem Update…',
   'update.downloading': 'Update wird heruntergeladen…',
   'update.downloadingPercent': 'Update wird heruntergeladen… {percent} %',

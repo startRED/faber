@@ -2,7 +2,7 @@ import { createComponent, createSignal } from 'solid-js';
 import { render } from 'solid-js/web';
 import { Thread } from '../../ui/Thread.tsx';
 import { api, type AppEvent, type Message, type ToolRow, type Vendor } from '../../ui/api.ts';
-import { Catalog } from '../../ui/Catalog.tsx';
+import { Catalog, forgetCatalogView } from '../../ui/Catalog.tsx';
 import { catalogName, lang, t, useLanguage } from '../../ui/i18n.ts';
 import { check, equal, ok } from './check.ts';
 
@@ -61,7 +61,7 @@ check('kits: Chat and Projects show session choices and their reason inside the 
 });
 
 const tick = () => new Promise<void>((resolve) => setTimeout(resolve, 20));
-const catalog = () => createComponent(Catalog, { projects: [], vendors: ['claude'] });
+const catalog = () => (forgetCatalogView(), createComponent(Catalog, { projects: [], vendors: ['claude'] }));
 
 check('kits: expanded catalog cards, details and work log use the same localized item name', async () => {
   const before = { ...api }, language = lang();

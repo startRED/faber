@@ -2021,6 +2021,7 @@ export const ptBR: Messages = {
   'notes.196.better': 'O navegador, as alterações, as respostas visuais e os arquivos agora abrem largos à direita, a pergunta rápida abre mais estreita, e cada um guarda a largura que você der.',
   'notes.197.new': 'No Windows, uma checagem que cresce muito além da memória que costuma usar agora para e diz por quê, em vez de deixar o PC lento.',
   'notes.198.better': 'A pergunta rápida virou um chat de verdade ao lado da conversa: as respostas ficam guardadas mesmo se você fechar ou reiniciar, e dá para continuar perguntando.',
+  'notes.199.better': 'O Faber lembra onde você estava: o ponto de cada conversa, os projetos abertos, a busca do Catálogo, uma meta ou resposta ao ajudante pela metade, a vista de Alterações aberta e a última seção de Ajustes.',
   'update.checking': 'Procurando atualização…',
   'update.downloading': 'Baixando atualização…',
   'update.downloadingPercent': 'Baixando atualização… {percent}%',

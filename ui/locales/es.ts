@@ -2034,6 +2034,7 @@ export const es: Messages = {
   'notes.196.better': 'El navegador, los cambios, las respuestas visuales y los archivos ahora se abren anchos a la derecha, la pregunta rápida se abre más estrecha y cada uno recuerda el ancho que le des.',
   'notes.197.new': 'En Windows, una comprobación que crece mucho más allá de la memoria que suele usar ahora se detiene y dice por qué, en vez de volver lento tu PC.',
   'notes.198.better': 'La pregunta rápida ahora es un chat de verdad al lado de la conversación: las respuestas se guardan aunque la cierres o reinicies, y puedes seguir preguntando.',
+  'notes.199.better': 'Faber recuerda dónde estabas: el punto de cada conversación, los proyectos abiertos, la búsqueda del Catálogo, una meta o respuesta al ayudante a medias, la vista de Cambios abierta y la última sección de Ajustes.',
   'update.checking': 'Buscando una actualización…',
   'update.downloading': 'Descargando actualización…',
   'update.downloadingPercent': 'Descargando actualización… {percent} %',

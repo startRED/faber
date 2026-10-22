@@ -220,6 +220,7 @@ export function App(props: { initial: AppState; update?: UpdateStatus; inbox: { 
   const [saveError, setSaveError] = createSignal<string>();
   const [settingsOpen, setSettingsOpen] = createSignal(false);
   const [catalogOpen, setCatalogOpen] = createSignal(false);
+  createEffect(on(catalogOpen, (open) => remember('faber.place', { ...place(), catalog: open || undefined }), { defer: true }));
   // The section a link into Settings names (the quota in the sidebar names the accounts and limits), and what Settings kept while
   // the account cards were open from it: closing them brings Settings back as it was.
   const [settingsAt, setSettingsAt] = createSignal<Section>();
@@ -313,6 +314,12 @@ export function App(props: { initial: AppState; update?: UpdateStatus; inbox: { 
     }
   }));
   let stick = true;
+  // Where each conversation was left while Faber runs: the first message drawn and the scroll inside that window. A
+  // conversation read to its end has none, so it opens at the end; a search reveal still wins.
+  const scrolls = new Map<string, { from: number; top: number }>();
+  // The column view a conversation had open, by id, kept with the place so a restart reopens it.
+  type Pane = 'changes' | 'details';
+  const panes = recall<Record<string, Pane>>('faber.column', {});
   // One observer keeps the tail visible when the thread box or the column inside it changes size.
   let tail: ResizeObserver | undefined;
   const tailWatch = () => (tail ??= new ResizeObserver(() => { if (thread && stick) thread.scrollTop = thread.scrollHeight; }));
@@ -394,7 +401,7 @@ export function App(props: { initial: AppState; update?: UpdateStatus; inbox: { 
   const [widths, setWidths] = createSignal(savedWidths(recall('faber.layout', null)));
   const setSideWidth = (px: number) => {
     setWidths((w) => ({ ...w, side: px }));
-    remember('faber.layout', widths());
+    remember('faber.layout', { ...recall<Record<string, unknown>>('faber.layout', {}), ...widths() });
   };
   // A drag of the column is kept for the kind of view it shows; undefined puts that kind back to its usual width.
   const setPaneWidth = (kind: Kind, px: number | undefined) => {
@@ -404,7 +411,7 @@ export function App(props: { initial: AppState; update?: UpdateStatus; inbox: { 
       else panes[kind] = px;
       return { ...w, panes };
     });
-    remember('faber.layout', widths());
+    remember('faber.layout', { ...recall<Record<string, unknown>>('faber.layout', {}), ...widths() });
   };
   const [focus, setFocus] = createSignal(false);
   const dropping = createFileDrop();
@@ -618,6 +625,15 @@ export function App(props: { initial: AppState; update?: UpdateStatus; inbox: { 
     showFile(undefined);
     if (openedDetails() !== id) showDetails(undefined);
   }, { defer: true }));
+  // The column view of the conversation on screen is written as it opens and goes when it closes.
+  createEffect(on([changesOpen, openedDetails], ([changed, details]) => {
+    const id = current()?.id;
+    if (!id || loading() || place().id !== id) return;
+    const now: Pane | undefined = changed === id ? 'changes' : details === id ? 'details' : undefined;
+    if (now) panes[id] = now;
+    else delete panes[id];
+    remember('faber.column', panes);
+  }, { defer: true }));
   // The window changes width while the column is open: it becomes a modal dialog or stops being one, and its element is
   // drawn again, so focus goes where the new state wants it.
   createEffect(
@@ -683,14 +699,21 @@ export function App(props: { initial: AppState; update?: UpdateStatus; inbox: { 
     if (done.stale) return;
     setLoading(false);
     const target = messageIndex !== undefined && messageIndex >= 0 && messageIndex < (done.conversation?.messages.length ?? 0) ? messageIndex : undefined;
-    stick = target === undefined;
+    const left = target === undefined && next.id ? scrolls.get(next.id) : undefined;
+    const pane = next.id ? panes[next.id] : undefined;
+    stick = target === undefined && !left;
     setUntil(target === undefined ? undefined : Math.min(done.conversation!.messages.length, target + PAGE));
-    setFrom(Math.min(target ?? Infinity, Math.max(0, (done.conversation?.messages.length ?? 0) - PAGE)));
+    setFrom(left ? Math.min(Math.max(left.from, (done.conversation?.messages.length ?? 0) - 3 * PAGE), Math.max(0, (done.conversation?.messages.length ?? 0) - 1)) : Math.min(target ?? Infinity, Math.max(0, (done.conversation?.messages.length ?? 0) - PAGE)));
     fillPage();
     const heard = planHeard.plan as { id: string; plan?: Plan } | undefined;
     const plan = heard?.id === done.conversation?.id ? heard : undefined;
     setCurrent(done.conversation && plan ? { ...done.conversation, plan: plan.plan } : done.conversation);
     setSearchIndex(target);
+    if (left) requestAnimationFrame(() => { if (thread && place().id === next.id) { thread.scrollTop = left.top; lastScrollTop = thread.scrollTop; } });
+    if (pane && done.conversation?.area === 'project') {
+      if (pane === 'changes') setChangesOpen(next.id);
+      else showDetails(next.id);
+    }
     if (done.conversation) askVersions(done.conversation.id);
     if (target !== undefined) searchFrame = requestAnimationFrame(() => {
       searchMark = thread?.querySelector<HTMLElement>(`[data-message-index="${target}"]`) ?? undefined;
@@ -761,6 +784,8 @@ export function App(props: { initial: AppState; update?: UpdateStatus; inbox: { 
       for (const type of ['input', 'paste', 'drop']) window.removeEventListener(type, told, true);
     });
     if (saved?.id && props.initial.conversations.some((c) => c.id === saved.id)) void go({ ...saved, area: saved.area ?? 'chat' });
+    // The Catalog is a place too: it was open when Faber closed, so it opens again over the conversation.
+    if ((saved as { catalog?: boolean } | undefined)?.catalog) setCatalogOpen(true);
     const stopFollowing = watchSystem();
     // The restored conversation is already opening (`go` above), so what the inbox held since the page started is kept for
     // its snapshot and nothing is lost between the two.
@@ -911,6 +936,11 @@ export function App(props: { initial: AppState; update?: UpdateStatus; inbox: { 
     if (below < 40 && (end === undefined || end >= (current()?.messages.length ?? 0))) stick = true;
     else if (el.scrollTop < lastScrollTop - 1) stick = false;
     lastScrollTop = el.scrollTop;
+    const here = current()?.id;
+    if (here && place().id === here) {
+      if (stick) scrolls.delete(here);
+      else scrolls.set(here, { from: from(), top: el.scrollTop });
+    }
     if (below < 400 && end !== undefined) {
       const next = end + PAGE;
       setUntil(next < (current()?.messages.length ?? 0) ? next : undefined);

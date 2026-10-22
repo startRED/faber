@@ -121,6 +121,22 @@ interface Props {
   onConnect?: () => void;
 }
 
+/** The open projects and groups, stored with the widths in `faber.layout` (`open`), so a restart shows the list as it was left. */
+function openFolded(): string[] {
+  try {
+    const open = (JSON.parse(localStorage.getItem('faber.layout') ?? 'null') as { open?: unknown } | null)?.open;
+    return Array.isArray(open) ? open.filter((id): id is string => typeof id === 'string') : [];
+  } catch {
+    return [];
+  }
+}
+function keepOpen(open: ReadonlySet<string>): void {
+  try {
+    const held = JSON.parse(localStorage.getItem('faber.layout') ?? 'null') as Record<string, unknown> | null;
+    localStorage.setItem('faber.layout', JSON.stringify({ ...held, open: [...open] }));
+  } catch { /* per-viewer convenience only */ }
+}
+
 /** The sidebar: new conversation, the two areas, the projects with their conversations, the chats by day, and at the
  * bottom Settings and the quota of each connected vendor. */
 export function Sidebar(props: Props) {
@@ -222,7 +238,11 @@ export function Sidebar(props: Props) {
     onCleanup(() => { cancelled = true; clearTimeout(timer); });
   });
   // The projects whose conversations show. The project the user is in starts open.
-  const [open, setOpen] = createSignal<ReadonlySet<string>>(new Set(props.place.projectId ? [props.place.projectId] : []));
+  const [open, setOpenNow] = createSignal<ReadonlySet<string>>(new Set([...openFolded(), ...(props.place.projectId ? [props.place.projectId] : [])]));
+  const setOpen = (change: (held: ReadonlySet<string>) => ReadonlySet<string>) => {
+    setOpenNow(change(open()));
+    keepOpen(open());
+  };
   const toggle = (id: string, on: boolean) =>
     setOpen((held) => {
       const next = new Set(held);

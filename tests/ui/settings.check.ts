@@ -986,3 +986,18 @@ check('reply_style: Escape saves the focused words before Settings closes and re
     else localStorage.setItem('faber.place', place);
   }
 });
+
+check('settings: opening again lands on the section that was open', () => {
+  const props = { look: look(), saved: SHOWN, vendors: [], quotas: {}, now: 0, onClose: () => {}, onOpenSetup: () => {}, onSave: async () => true };
+  const first = mount(() => createComponent(Settings, props));
+  const item = (host: HTMLElement, key: 'set.appearance' | 'set.general') => [...host.querySelectorAll<HTMLButtonElement>('button.item')].find((b) => b.textContent?.includes(en[key] as string))!;
+  item(first.host, 'set.appearance').click();
+  first.stop();
+  const again = mount(() => createComponent(Settings, props));
+  try {
+    equal(item(again.host, 'set.appearance').getAttribute('aria-current'), 'true');
+  } finally {
+    item(again.host, 'set.general').click();
+    again.stop();
+  }
+});

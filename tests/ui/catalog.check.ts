@@ -4,7 +4,7 @@ import themes from '../../src-tauri/src/themes.json';
 import catalog from '../../engine/src/tools.json';
 import { api, type AppEvent, type AppState, type ToolInventoryList, type ToolRow, type Vendor } from '../../ui/api.ts';
 import { App } from '../../ui/App.tsx';
-import { Catalog } from '../../ui/Catalog.tsx';
+import { Catalog, forgetCatalogView } from '../../ui/Catalog.tsx';
 import { catalogName, LANGUAGES, lang, t, useLanguage } from '../../ui/i18n.ts';
 import type { Key } from '../../ui/locales/en.ts';
 import { check, deepEqual, equal, ok } from './check.ts';
@@ -38,7 +38,7 @@ const sources: ToolInventoryList[] = [{ vendor: 'claude', rows: [
   { name: 'personal-skill', kind: 'skill', source: 'user', location: 'C:/person/.claude/skills/personal-skill' },
   { name: 'team-plugin', kind: 'plugin', source: 'project', location: 'C:/person/.claude/plugins/installed_plugins.json' },
 ], issues: [{ source: 'user', kind: 'plugin', reason: 'unsupported' }] }];
-type Options = { rows?: ToolRow[]; inventory?: ToolInventoryList[]; vendors?: Vendor[]; failList?: boolean; failInventory?: boolean; failInstall?: boolean; failToggle?: boolean; failRemove?: boolean; failRestore?: boolean };
+type Options = { keepView?: boolean; rows?: ToolRow[]; inventory?: ToolInventoryList[]; vendors?: Vendor[]; failList?: boolean; failInventory?: boolean; failInstall?: boolean; failToggle?: boolean; failRemove?: boolean; failRestore?: boolean };
 const cards = (root: Element) => [...root.querySelectorAll<HTMLButtonElement>('[data-catalog-card]')];
 function button(root: Element, key: Key) {
   const found = [...root.querySelectorAll<HTMLButtonElement>('button')].find((el) => el.textContent?.trim() === t(key));
@@ -73,6 +73,7 @@ async function panel(options: Options = {}) {
   root.dataset.motion = 'reduced';
   for (const [key, value] of Object.entries(themes.css.base)) root.style.setProperty(`--${key}`, value);
   document.body.append(root);
+  if (!options.keepView) forgetCatalogView();
   const dispose = render(() => createComponent(Catalog, { projects: [project], vendors: options.vendors ?? ['claude'] }), root);
   await tick();
   return { root, calls, store, publish: () => listener?.({ type: 'catalog' }), close: () => { dispose(); root.remove(); Object.assign(api, before); useLanguage(language); } };
@@ -527,4 +528,24 @@ check('catalog: cards act in place and a selection installs, switches and remove
     await tap(button(failing.root.querySelector('[data-catalog-batch]')!, 'catalog.retry'));
     deepEqual(failing.calls.install, ['chrome-devtools'], 'Try again repeats the same action on the failed item');
   } finally { failing.close(); }
+});
+
+check('catalog: the filter and the search are still there when the Catalog is opened again', async () => {
+  const first = await panel();
+  try {
+    // Earlier checks leave a card selected, which is kept like the rest: go back to the list first.
+    const back = [...first.root.querySelectorAll<HTMLButtonElement>('button')].find((el) => el.textContent?.trim() === t('catalog.back'));
+    if (back) await tap(back);
+    await tap(button(first.root, 'catalog.skills'));
+    search(first.root, 'pony');
+  } finally { first.close(); }
+  const again = await panel({ keepView: true });
+  try {
+    equal(button(again.root, 'catalog.skills').getAttribute('aria-pressed'), 'true', 'the filter comes back');
+    equal(again.root.querySelector<HTMLInputElement>('.catalog-search input')!.value, 'pony', 'the search comes back');
+  } finally {
+    await tap(button(again.root, 'catalog.all'));
+    search(again.root, '');
+    again.close();
+  }
 });

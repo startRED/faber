@@ -1,7 +1,7 @@
 import { createComponent } from 'solid-js';
 import { render } from 'solid-js/web';
 import { api, type AppEvent, type McpServerList } from '../../ui/api.ts';
-import { Catalog } from '../../ui/Catalog.tsx';
+import { Catalog, forgetCatalogView } from '../../ui/Catalog.tsx';
 import { t } from '../../ui/i18n.ts';
 import { check, deepEqual, equal, ok } from './check.ts';
 
@@ -32,6 +32,7 @@ async function panel(read: (id: string) => Promise<McpServerList[]>) {
   const root = document.createElement('div');
   root.dataset.motion = 'none';
   document.body.append(root);
+  forgetCatalogView();
   const dispose = render(() => createComponent(Catalog, { projects, vendors: ['claude', 'codex'] }), root);
   await tick();
   const button = (text: string) => {

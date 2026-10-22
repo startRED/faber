@@ -3,7 +3,7 @@ import { api, errorText, type GoalRow, type GoalsView } from './api.ts';
 import { Collapse } from './controls.tsx';
 import { fromEngine, lang, t } from './i18n.ts';
 import type { Key } from './locales/en.ts';
-import { useDraft } from './unsent.ts';
+import { keep, kept, release, useDraft } from './unsent.ts';
 
 // Two activations inside one double-click interval cannot confirm a removal (as in the Memory fold and the context menu).
 const SAME_GESTURE = 500;
@@ -33,7 +33,11 @@ function GoalList(props: { projectId: string }) {
   const [view, setView] = createSignal<GoalsView>();
   const [error, setError] = createSignal('');
   const [busy, setBusy] = createSignal(false);
-  const [words, setWords] = createSignal('');
+  // Kept like every box's unsent words, so closing the fold, leaving the page or a restart loses nothing.
+  const wordsKey = `goal.${props.projectId}`;
+  const [words, setWordsNow] = createSignal(kept(wordsKey));
+  const setWords = (text: string) => { setWordsNow(text); keep(wordsKey, text); };
+  onCleanup(() => release(wordsKey));
   const [check, setCheck] = createSignal('');
   const [confirm, setConfirm] = createSignal<string>();
   let armedAt = 0;
