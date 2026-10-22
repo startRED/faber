@@ -446,19 +446,45 @@ pub struct SelfChange<'a> {
 
 /// Adds one line and says whether it is on the disk. Installs can overlap, so one write at a time.
 pub fn log_self_change(dir: &std::path::Path, change: &SelfChange) -> bool {
-    use std::io::{Read, Seek, SeekFrom, Write};
-    static ONE_AT_A_TIME: std::sync::Mutex<()> = std::sync::Mutex::new(());
-    let _one = ONE_AT_A_TIME.lock().unwrap_or_else(|e| e.into_inner());
     let SelfChange { at, id, from, to, how, result, conv } = change;
     let line = json!({ "at": at, "kind": "tools.install", "id": id, "from": from, "to": to, "how": how, "result": result, "conv": conv });
-    let path = dir.join(SELF_CHANGES);
-    if std::fs::metadata(&path).is_ok_and(|m| m.len() >= SELF_CHANGES_MAX) {
+    append_capped_line(&dir.join(SELF_CHANGES), &line.to_string(), SELF_CHANGES_MAX)
+}
+
+static ONE_AT_A_TIME: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+/// Adds one line to a local log and says whether it is on the disk. At `max` bytes the oldest half goes and the newest lines
+/// stay. One write at a time, for every log that uses it (`crash.rs` too).
+pub fn append_capped_line(path: &std::path::Path, line: &str, max: u64) -> bool {
+    let _one = ONE_AT_A_TIME.lock().unwrap_or_else(|e| e.into_inner());
+    append_locked(path, line, max)
+}
+
+/// `append_capped_line` for a panic hook, which may run on the thread that holds the lock: it waits for the lock at most about
+/// 200 ms and then gives the line up, so the hook never hangs.
+pub fn append_capped_line_without_hanging(path: &std::path::Path, line: &str, max: u64) -> bool {
+    for _ in 0..20 {
+        match ONE_AT_A_TIME.try_lock() {
+            Ok(_one) => return append_locked(path, line, max),
+            Err(std::sync::TryLockError::Poisoned(e)) => {
+                let _one = e.into_inner();
+                return append_locked(path, line, max);
+            }
+            Err(std::sync::TryLockError::WouldBlock) => std::thread::sleep(std::time::Duration::from_millis(10)),
+        }
+    }
+    false
+}
+
+fn append_locked(path: &std::path::Path, line: &str, max: u64) -> bool {
+    use std::io::{Read, Seek, SeekFrom, Write};
+    if std::fs::metadata(path).is_ok_and(|m| m.len() >= max) {
         // The newest half, from the start of a line, replaces the file in one rename.
-        let Ok(old) = std::fs::read(&path) else { return false };
-        let from_byte = old.len().saturating_sub(SELF_CHANGES_MAX as usize / 2);
+        let Ok(old) = std::fs::read(path) else { return false };
+        let from_byte = old.len().saturating_sub(max as usize / 2);
         let start = old[from_byte..].iter().position(|b| *b == b'\n').map_or(old.len(), |n| from_byte + n + 1);
         let part = path.with_extension("part");
-        if std::fs::write(&part, &old[start..]).and_then(|()| crate::tools::retry_busy(|| std::fs::rename(&part, &path))).is_err() {
+        if std::fs::write(&part, &old[start..]).and_then(|()| crate::tools::retry_busy(|| std::fs::rename(&part, path))).is_err() {
             return false;
         }
     }
@@ -466,9 +492,9 @@ pub fn log_self_change(dir: &std::path::Path, change: &SelfChange) -> bool {
         .create(true)
         .append(true)
         .read(true)
-        .open(&path)
+        .open(path)
         .and_then(|mut f| {
-            // A line a crash cut short gets its newline first, so it never swallows this decision.
+            // A line a crash cut short gets its newline first, so it never swallows this one.
             let torn = f.metadata()?.len() > 0 && {
                 f.seek(SeekFrom::End(-1))?;
                 let mut last = [0u8];
@@ -704,5 +730,18 @@ mod tests {
             text.lines().filter_map(|l| serde_json::from_str::<Value>(l).ok()).map(|v| v["id"].as_str().unwrap().to_string()).collect();
         assert_eq!(ids, ["careful", "other"], "{text}");
         assert_eq!(text.lines().count(), 3, "the cut line stays on a line of its own");
+    }
+
+    #[test]
+    fn the_writer_for_a_panic_hook_gives_up_instead_of_waiting_for_a_lock_its_own_thread_holds() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("log.jsonl");
+        assert!(append_capped_line_without_hanging(&path, "free", 1000), "an unheld lock writes at once");
+        let held = ONE_AT_A_TIME.lock().unwrap_or_else(|e| e.into_inner());
+        let started = std::time::Instant::now();
+        assert!(!append_capped_line_without_hanging(&path, "stuck", 1000));
+        assert!(started.elapsed() < std::time::Duration::from_secs(5), "it must not hang");
+        drop(held);
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), "free\n");
     }
 }

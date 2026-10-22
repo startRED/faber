@@ -1360,10 +1360,19 @@ pub(crate) fn load_models(app: &AppHandle, codex: Cli, cwd: PathBuf) {
 
 /// What Quit does, and what the idle update install does before the installer ends the process.
 pub(crate) fn shut_down(app: &AppHandle) {
-    terminal::terminate_hidden();
     let faber = app.state::<Faber>();
+    // First, since a Windows sign-out gives the shutdown below only a few seconds: Quit, a session end and the stop before an
+    // update installs all come here, and none of them counts as a crash at the next start.
+    faber_engine::crash::end_run(&faber.data_dir);
+    terminal::terminate_hidden();
     lock(&faber.awake).shutdown();
     faber.engine.shutdown();
+}
+
+/// Where a real run keeps its crash record (a local file, never sent): none for a test build, a hidden run or one with its own
+/// data folder. The folder is the one `data_dir` gives later, which Tauri reads from the same `dirs` call.
+fn crash_record_dir(is_test: bool) -> Option<PathBuf> {
+    if is_test { None } else { dirs::config_dir().map(|config| default_data_dir(&config)) }
 }
 
 /// Brings the window back, building the screen again if it was closed to the tray.
@@ -1566,6 +1575,11 @@ fn main() {
     }
     let autostart_launch = !creates_window(std::env::args());
     let hidden = std::env::var("FABER_HIDDEN").is_ok_and(|v| v == "1");
+    let is_test = cfg!(feature = "test-hooks") || hidden || std::env::var_os("FABER_DATA_DIR").is_some();
+    // From the first line on, so a panic before the app is set up is written too.
+    if let Some(dir) = crash_record_dir(is_test) {
+        faber_engine::crash::install_hook(dir, env!("CARGO_PKG_VERSION"), env!("FABER_COMMIT"));
+    }
     let mut builder = tauri::Builder::default();
     // A second launch brings the open window forward. Runs with their own data folder (tests) stay separate.
     if std::env::var_os("FABER_DATA_DIR").is_none() {
@@ -1734,7 +1748,10 @@ fn main() {
             app.manage(tray::Tray::default());
             let clis = detect_clis();
             let handle = app.handle().clone();
-            let is_test = cfg!(feature = "test-hooks") || hidden || std::env::var_os("FABER_DATA_DIR").is_some();
+            // Only the first launch gets here (a second one ends in the single-instance plugin), so only it reads the marker.
+            if crash_record_dir(is_test).is_some() {
+                faber_engine::crash::start_run(&data_dir, env!("CARGO_PKG_VERSION"), env!("FABER_COMMIT"));
+            }
             let power: Box<dyn PowerKeepAwake> = if is_test {
                 Box::new(NoopPower)
             } else {
@@ -1883,4 +1900,42 @@ fn main() {
                 }
             }
         });
+}
+
+#[cfg(test)]
+#[test]
+fn the_build_carries_its_commit_or_says_it_does_not_know_it() {
+    let commit = env!("FABER_COMMIT");
+    assert!(commit == "unknown" || (commit.len() == 12 && commit.chars().all(|c| c.is_ascii_hexdigit())), "{commit}");
+}
+
+#[cfg(test)]
+mod crash_record_wiring_tests {
+    use super::*;
+
+    /// The text of the top-level function that starts at `signature`, without spaces or line breaks.
+    fn body_of(signature: &str) -> String {
+        // A Windows checkout may end its lines with CR LF.
+        let source = include_str!("main.rs").replace("\r\n", "\n");
+        let from = source.find(signature).expect("the function is in this file");
+        let end = source[from..].find("\n}\n").expect("it ends at the left margin");
+        source[from..from + end].split_whitespace().collect()
+    }
+
+    #[test]
+    fn a_test_build_a_hidden_run_or_one_with_its_own_data_folder_writes_no_crash_record() {
+        assert_eq!(crash_record_dir(true), None);
+        assert_eq!(crash_record_dir(false).and_then(|dir| dir.file_name().map(|n| n.to_owned())), Some("Faber".into()));
+        // The three places that act on it: the hook at the top of main, the marker at the setup, and the end of the run.
+        let main = body_of("fn main() {");
+        assert!(main.contains("ifletSome(dir)=crash_record_dir(is_test){faber_engine::crash::install_hook(dir,"), "the hook is gated");
+        assert!(main.contains("ifcrash_record_dir(is_test).is_some(){faber_engine::crash::start_run("), "the marker is gated");
+    }
+
+    #[test]
+    fn quit_the_end_of_a_session_and_the_stop_before_an_update_all_end_the_run_cleanly() {
+        // `shut_down` is what `RunEvent::Exit` calls, and tao sends that event on a Windows sign-out, restart or shutdown.
+        assert!(body_of("pub(crate) fn shut_down(").contains("faber_engine::crash::end_run(&faber.data_dir);"));
+        assert!(body_of("fn main() {").contains("RunEvent::Exit=event{shut_down(app);"));
+    }
 }

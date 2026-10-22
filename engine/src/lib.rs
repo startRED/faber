@@ -12,6 +12,7 @@ pub mod claude;
 pub mod claude_sessions;
 pub mod cli;
 pub mod codex;
+pub mod crash;
 pub mod engine;
 pub mod events;
 pub mod export;
