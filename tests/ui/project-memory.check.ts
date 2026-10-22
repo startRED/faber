@@ -321,3 +321,23 @@ check('project memory: Keep leaves a long list as long as it was', async () => {
     equal(document.activeElement?.closest('.memory-entry')?.textContent?.includes('Choice 55.'), true, 'focus stays on the row that was kept');
   } finally { dispose(); root.remove(); api.projectMemory = before.read; api.editProjectMemory = before.edit; }
 });
+
+check('project memory: a note over its size limit is named once, and a note naming a gone file says so', async () => {
+  const before = api.projectMemory;
+  api.projectMemory = async () => ({ incomplete: false, files: [
+    { path: '.faber/decisions.md', source: 'faber', revision: 'big', tooLarge: false, over: true, entries: [
+      { start: 0, end: 30, line: 1, text: '- Split `src/gone.rs`. [by AI]', body: '- Split `src/gone.rs`.', author: 'ai', stale: true },
+      { start: 31, end: 60, line: 2, text: '- Use SQLite. [by AI]', body: '- Use SQLite.', author: 'ai' },
+    ] },
+    { path: '.faber/taste.md', source: 'faber', revision: 'small', tooLarge: false, entries: [{ start: 0, end: 9, line: 1, text: '- Short.' }] },
+  ] });
+  const root = document.createElement('div'); root.dataset.motion = 'none'; document.body.append(root);
+  const dispose = render(() => createComponent(ProjectMemory, { projectId: 'memory-project' }), root);
+  try {
+    button(root, 'memory.title').click(); await settle();
+    const over = [...root.querySelectorAll('.hint')].filter((p) => p.textContent === t('memory.over', { path: '.faber/decisions.md' }));
+    equal(over.length, 1, 'the file over its limit is named once, not on every row');
+    ok(!root.textContent!.includes(t('memory.over', { path: '.faber/taste.md' })), 'a file within its limit says nothing');
+    equal(JSON.stringify([...root.querySelectorAll('.memory-stale')].map((s) => s.closest('.memory-entry')?.getAttribute('data-entry'))), JSON.stringify(['.faber/decisions.md:0']));
+  } finally { dispose(); root.remove(); api.projectMemory = before; }
+});

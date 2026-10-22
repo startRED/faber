@@ -182,11 +182,11 @@ mod tests {
 
     fn entry(line: usize, text: &str, author: Option<&'static str>, reviewed: bool) -> Entry {
         let body = author.map(|_| text.to_string());
-        Entry { start: 0, end: 0, line, text: text.into(), body, author, reviewed }
+        Entry { start: 0, end: 0, line, text: text.into(), body, author, reviewed, stale: false }
     }
 
     fn file(path: &str, source: &'static str, entries: Vec<Entry>) -> MemoryFile {
-        MemoryFile { path: path.into(), source, revision: String::new(), too_large: false, entries }
+        MemoryFile { path: path.into(), source, revision: String::new(), too_large: false, over: false, entries }
     }
 
     fn results(ready: bool, hits: Vec<Hit>) -> Result<Results, &'static str> {

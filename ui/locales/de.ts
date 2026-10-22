@@ -1653,6 +1653,8 @@ export const de: Messages = {
   "memory.author.ai": "KI, nicht geprüft",
   "memory.author.aiKept": "KI, behalten",
   "memory.author.person": "Du",
+  "memory.over": "{path} ist größer als vorgesehen. Die KI räumt die Datei nach ihrer nächsten Aufgabe auf und behält alles, was noch gilt.",
+  "memory.stale": "Nennt eine fehlende Datei",
   "error.memory.read": "Das Gedächtnis dieses Projekts konnte nicht gelesen werden.",
   "error.memory.changed": "Die Datei wurde geändert; öffne sie erneut.",
   "error.memory.refused": "Diese Datei oder dieser Eintrag lässt sich hier nicht ändern.",

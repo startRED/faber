@@ -419,6 +419,8 @@ struct Core {
     start_cards: bool,
     /// The facts the turn's rules rebuild just read, by project folder, so the session it starts reads them once.
     rules_facts: Option<(String, crate::project::rules::Facts)>,
+    /// The over-target notes a close already asked to fold, by conversation, file and size (`Core::fold_ask`).
+    folds_asked: std::collections::HashSet<String>,
     /// Where the catalog install of a project's agent downloads from instead of the real hosts (tests; a loopback address only).
     setup_source: Option<String>,
     /// Tests: this computer is taken to have no Node, so a tool that needs it is refused before any card.
@@ -657,6 +659,7 @@ impl Engine {
                 verifier: None,
                 start_cards: true,
                 rules_facts: None,
+                folds_asked: Default::default(),
                 setup_source: None,
                 node_missing: false,
                 installs: HashMap::new(),
@@ -1161,6 +1164,7 @@ impl Engine {
         let project = self.project(id)?;
         let mut list = crate::project::memory::list(Path::new(&project.path)).map_err(str::to_string)?;
         crate::project::memory::mark_kept(&mut list, &self.with(|c| c.store.kept_decisions(id)));
+        crate::project::memory::mark_stale(&mut list, Path::new(&project.path));
         Ok(list)
     }
     pub fn edit_project_memory(&self, id: &str, edit: &crate::project::memory::Edit) -> Result<(), String> {
@@ -1654,7 +1658,7 @@ impl Core {
             }
         }
         kept.reverse();
-        Some(crate::project::rules::card(&facts, &kept, unreviewed))
+        Some(crate::project::rules::card(&facts, &kept, unreviewed, |d| crate::project::memory::stale(path, d)))
     }
 
     fn folder_of(&self, c: &Conversation) -> Result<PathBuf, String> {

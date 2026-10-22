@@ -90,10 +90,11 @@ function MemoryList(props: { projectId: string }) {
       <Show when={error()}><p class="note err" role="alert">{error()}</p></Show>
       <Show when={files() && !files.loading && !rows().length}><p class="hint">{t('memory.empty')}</p></Show>
       <Show when={files()?.incomplete}><p class="hint" role="status">{t('memory.incomplete')}</p></Show>
+      <For each={files()?.files.filter((file) => file.over)}>{(file) => <p class="hint">{t('memory.over', { path: file.path })}</p>}</For>
       <ul class="memory-entries">
         <For each={rows().slice(0, shown())}>{({ file, entry }) => (
           <li class="memory-entry" data-entry={entry ? key(file, entry) : undefined}>
-            <div class="memory-from">{t(`memory.source.${file.source}`)} · <span>{file.path}{entry ? `:${entry.line}` : ''}</span>{entry?.author && <> · <span class="memory-flag" classList={{ ask: entry.author === 'ai' && !entry.reviewed }}>{t(entry.author === 'person' ? 'memory.author.person' : entry.reviewed ? 'memory.author.aiKept' : 'memory.author.ai')}</span></>}</div>
+            <div class="memory-from">{t(`memory.source.${file.source}`)} · <span>{file.path}{entry ? `:${entry.line}` : ''}</span>{entry?.author && <> · <span class="memory-flag" classList={{ ask: entry.author === 'ai' && !entry.reviewed }}>{t(entry.author === 'person' ? 'memory.author.person' : entry.reviewed ? 'memory.author.aiKept' : 'memory.author.ai')}</span></>}{entry?.stale && <> · <span class="memory-stale">{t('memory.stale')}</span></>}</div>
             <Show when={entry} fallback={<p class="hint">{t(file.tooLarge ? 'memory.tooLarge' : 'memory.noEntries')}</p>}>
               {(entry) => <Show when={editing() === key(file, entry())} fallback={<>
                 <p class="memory-text">{entry().body || entry().text}</p>

@@ -12,6 +12,17 @@ const MAX_ENTRIES: usize = 4096;
 const READ: &str = "error.memory.read";
 const CHANGED: &str = "error.memory.changed";
 const REFUSED: &str = "error.memory.refused";
+/// Soft targets of the project's own notes (own work method, "Staying small and current"). Over one, Memory says so and
+/// the next close asks the agent to fold the file; Faber itself never cuts an item.
+pub const TARGETS: [(&str, usize); 2] = [(".faber/decisions.md", 8 * 1024), (".faber/taste.md", 1024)];
+/// The note kinds read under `.faber/`: today's, `decisions-old` (overridden decisions, searched and never loaded), and the
+/// legacy `plans`, `recipes`, `learning` and `memory`, still read for folders that have them.
+const KINDS: [&str; 7] = ["decisions", "decisions-old", "taste", "plans", "recipes", "learning", "memory"];
+/// The file extensions a backticked name with no folder needs to be judged a path (`.js` is left out: `Next.js` is a name).
+const EXTENSIONS: [&str; 30] = [
+    "md", "rs", "ts", "tsx", "jsx", "mjs", "cjs", "json", "toml", "yaml", "yml", "py", "go", "java", "kt", "swift", "c", "h", "cpp", "cs",
+    "rb", "php", "html", "css", "scss", "sql", "sh", "ps1", "txt", "lock",
+];
 
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -20,6 +31,9 @@ pub struct MemoryFile {
     pub source: &'static str,
     pub revision: String,
     pub too_large: bool,
+    /// Over its soft target (`TARGETS`).
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub over: bool,
     pub entries: Vec<Entry>,
 }
 
@@ -44,6 +58,9 @@ pub struct Entry {
     pub author: Option<&'static str>,
     #[serde(skip_serializing_if = "std::ops::Not::not")]
     pub reviewed: bool,
+    /// A note of `.faber/` naming a project file that is gone (`mark_stale`): `(stale?)` in Memory, and out of the card.
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub stale: bool,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -67,9 +84,7 @@ fn source(path: &str) -> Option<&'static str> {
     let name = *parts.last()?;
     if let Some(i) = parts.iter().position(|p| *p == ".faber") {
         let kind = parts.get(i + 1)?;
-        return (name.ends_with(".md")
-            && ["decisions", "taste", "plans", "recipes", "learning", "memory"].contains(&kind.trim_end_matches(".md")))
-        .then_some("faber");
+        return (name.ends_with(".md") && KINDS.contains(&kind.trim_end_matches(".md"))).then_some("faber");
     }
     if let Some(i) = parts.iter().position(|p| *p == ".claude") {
         return (i + 2 == parts.len() && name == "CLAUDE.md").then_some("claude");
@@ -81,10 +96,45 @@ fn source(path: &str) -> Option<&'static str> {
     }
 }
 
-/// `.faber/decisions.md` (or a file under `.faber/decisions/`): the one list whose entries carry an author.
+/// `.faber/decisions.md` (or a file under `.faber/decisions/`) and `.faber/decisions-old.md`: the lists whose entries carry
+/// an author.
 fn decisions(path: &str) -> bool {
     let parts: Vec<_> = path.split('/').collect();
-    parts.iter().position(|p| *p == ".faber").and_then(|i| parts.get(i + 1)).is_some_and(|kind| kind.trim_end_matches(".md") == "decisions")
+    parts
+        .iter()
+        .position(|p| *p == ".faber")
+        .and_then(|i| parts.get(i + 1))
+        .is_some_and(|kind| matches!(kind.trim_end_matches(".md"), "decisions" | "decisions-old"))
+}
+
+/// The backticked project-relative file paths in a note. Only these are judged: a span with a space, a quote, `=`, `:`, a
+/// wildcard, `..` or a leading `/`, `~` or `-` is prose, a command or a setting, and so is a name whose last part has no
+/// known file extension (`owner/repo`, `editor.fontSize`).
+fn paths(text: &str) -> impl Iterator<Item = &str> {
+    text.split('`').skip(1).step_by(2).map(|span| span.strip_prefix("./").unwrap_or(span)).filter(|span| {
+        let parts: Vec<_> = span.split('/').collect();
+        let ext = parts.last().and_then(|name| name.rsplit_once('.'));
+        (1..=200).contains(&span.len())
+            && !span.starts_with(['/', '~', '-'])
+            && !span.chars().any(|c| c.is_whitespace() || "\\\"'=:*?{}<>|$`".contains(c))
+            && parts.iter().all(|p| !p.is_empty() && *p != "..")
+            && ext.is_some_and(|(stem, ext)| !stem.is_empty() && (EXTENSIONS.contains(&ext) || parts.len() > 1 && ext == "js"))
+    })
+}
+
+/// Whether a note names a project file that no longer exists. Checked when read, never written into the note, so a kept
+/// decision keeps its record and a file that comes back clears it.
+pub fn stale(project: &Path, text: &str) -> bool {
+    paths(text).any(|path| std::fs::symlink_metadata(project.join(path)).is_err())
+}
+
+/// Marks the notes of the project's root `.faber/` that name a gone file.
+pub fn mark_stale(list: &mut MemoryList, project: &Path) {
+    for file in list.files.iter_mut().filter(|f| f.path.starts_with(".faber/")) {
+        for entry in &mut file.entries {
+            entry.stale = stale(project, &entry.text);
+        }
+    }
 }
 
 struct Mark {
@@ -570,7 +620,16 @@ fn entries(text: &str) -> Vec<Entry> {
             let content_end = text[..end].trim_end_matches(['\r', '\n']).len();
             line += text[cursor..range.start].bytes().filter(|b| *b == b'\n').count();
             cursor = range.start;
-            Entry { start: range.start, end, line, text: text[range.start..content_end].into(), body: None, author: None, reviewed: false }
+            Entry {
+                start: range.start,
+                end,
+                line,
+                text: text[range.start..content_end].into(),
+                body: None,
+                author: None,
+                reviewed: false,
+                stale: false,
+            }
         })
         .collect()
 }
@@ -581,8 +640,10 @@ fn read_file(dir: &Directory, name: &str, path: String, source: &'static str) ->
     if file.metadata().map_err(|_| READ)?.len() <= MAX_BYTES as u64 {
         file.take(MAX_BYTES as u64 + 1).read_to_end(&mut bytes).map_err(|_| READ)?;
     } else {
-        return Ok(MemoryFile { path, source, revision: String::new(), too_large: true, entries: vec![] });
+        let over = TARGETS.iter().any(|(target, _)| *target == path);
+        return Ok(MemoryFile { path, source, revision: String::new(), too_large: true, over, entries: vec![] });
     }
+    let over = TARGETS.iter().any(|(target, cap)| *target == path && bytes.len() > *cap);
     let too_large = bytes.len() > MAX_BYTES;
     let mut entries = if too_large { vec![] } else { entries(std::str::from_utf8(&bytes).map_err(|_| READ)?) };
     if decisions(&path) {
@@ -592,7 +653,7 @@ fn read_file(dir: &Directory, name: &str, path: String, source: &'static str) ->
             }
         }
     }
-    Ok(MemoryFile { path, source, revision: revision(&bytes), too_large, entries })
+    Ok(MemoryFile { path, source, revision: revision(&bytes), too_large, over, entries })
 }
 
 pub fn list(project: &Path) -> Result<MemoryList, &'static str> {
@@ -711,7 +772,7 @@ fn descend(path: &str) -> bool {
         return i + 1 == parts.len();
     }
     if let Some(i) = parts.iter().position(|p| *p == ".faber") {
-        return i + 1 == parts.len() || ["decisions", "taste", "plans", "recipes", "learning", "memory"].contains(&parts[i + 1]);
+        return i + 1 == parts.len() || KINDS.contains(&parts[i + 1]);
     }
     let name = parts.last().copied().unwrap_or_default();
     !matches!(name, ".git" | ".codex" | "node_modules" | "target" | "dist" | "vendor")
@@ -1179,5 +1240,32 @@ mod tests {
         assert!(crlf.entries[0].reviewed && !crlf.entries[1].reviewed);
         std::fs::write(project.path().join(".faber/decisions.md"), "- Use SQLite. [by AI]\r\n- Second [by AI]\r\n- Third\r\n").unwrap();
         assert_eq!(keep(project.path(), &file, 1), Err(CHANGED), "the person never keeps words they did not see");
+    }
+
+    #[test]
+    fn faber_notes_over_their_target_old_decisions_and_legacy_names_are_read_and_gone_paths_are_stale() {
+        let project = folder();
+        let faber = project.path().join(".faber");
+        std::fs::create_dir_all(faber.join("plans")).unwrap();
+        std::fs::create_dir_all(project.path().join("src")).unwrap();
+        std::fs::write(project.path().join("src/kept.rs"), "").unwrap();
+        let line = "- Keep `src/kept.rs` small, `npm run test`, `editor.fontSize`, `owner/repo`, `Next.js` [by AI]\n";
+        std::fs::write(faber.join("decisions.md"), format!("{line}- Split `src/gone.rs` in two [by person]\n")).unwrap();
+        std::fs::write(faber.join("taste.md"), "- x\n".repeat(300)).unwrap();
+        std::fs::write(faber.join("decisions-old.md"), "- Use npm [by AI]\n").unwrap();
+        std::fs::write(faber.join("plans/old.md"), "A plan from an older version.\n").unwrap();
+        let mut list = list(project.path()).unwrap();
+        mark_stale(&mut list, project.path());
+        let file = |path: &str| list.files.iter().find(|f| f.path == path).unwrap_or_else(|| panic!("{path} is read"));
+        let decisions = file(".faber/decisions.md");
+        assert!(!decisions.over, "under 8 KB");
+        assert!(!decisions.entries[0].stale, "only backticked file paths are judged, and this one exists");
+        assert!(decisions.entries[1].stale, "a gone file makes the note stale");
+        assert!(file(".faber/taste.md").over, "1.2 KB is over the 1 KB target");
+        assert_eq!(file(".faber/decisions-old.md").entries[0].author, Some("ai"), "old decisions keep their authors");
+        assert_eq!(file(".faber/plans/old.md").entries.len(), 1, "a legacy name stays readable");
+        std::fs::write(faber.join("decisions.md"), line.repeat(100)).unwrap();
+        assert!(list_faber(project.path()).unwrap().files.iter().any(|f| f.path == ".faber/decisions.md" && f.over), "over 8 KB");
+        assert!(!stale(project.path(), "`../outside.rs`, `/abs.rs`, `C:/x.rs`, `a b.rs`, `*.rs`, `.gitignore`"), "never judged");
     }
 }

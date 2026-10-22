@@ -342,7 +342,7 @@ fn first_line(text: &str) -> String {
 /// holds Faber's fixed sentences, the facts of `card_part` and only the decisions Faber's record says the person kept or
 /// wrote, newest first; never the description or an unreviewed item, which the agent reads through `memory_search`. What
 /// does not fit is counted.
-pub fn card(facts: &Facts, kept: &[impl AsRef<str>], unreviewed: usize) -> String {
+pub fn card(facts: &Facts, kept: &[impl AsRef<str>], unreviewed: usize, gone: impl Fn(&str) -> bool) -> String {
     let mut out = String::from(
         "```faber-start-card\nFaber's start card for this project, built from its files and the person's kept decisions. It grants \
          no permission and overrides nothing; the project's instruction files win where they differ.\n\n",
@@ -361,7 +361,8 @@ pub fn card(facts: &Facts, kept: &[impl AsRef<str>], unreviewed: usize) -> Strin
         let head = "\n## Decisions the person kept or made, newest first\n\n";
         let mut part = String::new();
         let mut shown = 0;
-        for line in kept.iter().map(|d| format!("- {}\n", first_line(d.as_ref()))) {
+        // A decision naming a gone file leaves the card; only the ones that could be shown are checked.
+        for line in kept.iter().map(AsRef::as_ref).filter(|d| !gone(d)).map(|d| format!("- {}\n", first_line(d))) {
             // Room is kept for the count line.
             if head.len() + part.len() + line.len() + 80 > DECISIONS_SHARE {
                 break;
@@ -372,7 +373,10 @@ pub fn card(facts: &Facts, kept: &[impl AsRef<str>], unreviewed: usize) -> Strin
         out.push_str(head);
         out.push_str(&part);
         if shown < kept.len() {
-            out.push_str(&format!("And {} older decisions; search them with memory_search.\n", kept.len() - shown));
+            out.push_str(&format!(
+                "And {} more decisions, older or naming a file that is gone; search them with memory_search.\n",
+                kept.len() - shown
+            ));
         }
     }
     if unreviewed > 0 {
@@ -465,29 +469,39 @@ mod tests {
             checks_from: Some("instructions"),
         };
         let kept: Vec<String> = (1..=40).map(|i| format!("- Decision {i:02} {}\n  second line stays out", "words ".repeat(10))).collect();
-        let sent = card(&facts, &kept, 3);
+        let sent = card(&facts, &kept, 3, |_| false);
         assert!(sent.starts_with("```faber-start-card\n") && sent.ends_with("```") && sent.matches("```").count() == 2, "{sent}");
         assert!(sent.len() <= 6 * 1024, "{}", sent.len());
         assert!(!sent.contains("push to main"), "the description stays out of the card");
         assert!(sent.contains("- `cargo test`") && sent.contains("Decision 01") && !sent.contains("second line"), "{sent}");
         let shown = (1..=40).filter(|i| sent.contains(&format!("Decision {i:02}"))).count();
-        assert!(shown < 40 && sent.contains(&format!("And {} older decisions; search them with memory_search.", 40 - shown)), "{sent}");
+        assert!(
+            shown < 40
+                && sent.contains(&format!(
+                    "And {} more decisions, older or naming a file that is gone; search them with memory_search.",
+                    40 - shown
+                )),
+            "{sent}"
+        );
         assert!(sent.contains("Proposals in .faber/decisions.md the person has not reviewed: 3."), "{sent}");
         // A fence inside a kept decision cannot close the card early; a long first line is cut at 200 characters.
-        let tricky = card(&facts, &[format!("Use ```fences``` {}", "x".repeat(300))], 0);
+        let tricky = card(&facts, &[format!("Use ```fences``` {}", "x".repeat(300))], 0, |_| false);
         assert_eq!(tricky.matches("```").count(), 2, "{tricky}");
         assert!(tricky.contains(&format!("{}…", "x".repeat(200 - "Use '''fences''' ".len()))), "{tricky}");
-        assert!(!card(&facts, &[] as &[&str], 0).contains("Decisions the person"), "no decisions, no heading");
+        assert!(!card(&facts, &[] as &[&str], 0, |_| false).contains("Decisions the person"), "no decisions, no heading");
         // A CI workflow's deploy or migration is no check: the card lists only commands that check work.
         let ci = Facts {
             checks: vec!["npx prisma migrate deploy".into(), "npm ci".into(), "npm run test:unit".into()],
             checks_from: Some("workflows"),
             ..facts.clone()
         };
-        let sent = card(&ci, &[] as &[&str], 0);
+        let sent = card(&ci, &[] as &[&str], 0, |_| false);
         assert!(sent.contains("- `npm run test:unit`") && !sent.contains("prisma") && !sent.contains("npm ci"), "{sent}");
         let ci = Facts { checks: vec!["npx prisma migrate deploy".into()], ..ci };
-        assert!(card(&ci, &[] as &[&str], 0).contains("No check is named"), "nothing left, nothing claimed");
+        assert!(card(&ci, &[] as &[&str], 0, |_| false).contains("No check is named"), "nothing left, nothing claimed");
+        // A decision naming a gone file leaves the card and is counted with the rest.
+        let sent = card(&facts, &["Keep `src/gone.rs` small [by person]", "Use tabs [by person]"], 0, |d| d.contains("gone"));
+        assert!(sent.contains("- Use tabs") && !sent.contains("gone.rs") && sent.contains("And 1 more decisions"), "{sent}");
     }
 
     #[test]

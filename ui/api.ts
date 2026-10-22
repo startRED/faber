@@ -849,12 +849,16 @@ export interface MemoryEntry {
   body?: string;
   author?: 'ai' | 'person';
   reviewed?: boolean;
+  /** A note of `.faber/` naming a project file that is gone: it stays out of the start card. */
+  stale?: boolean;
 }
 export interface MemoryFile {
   path: string;
   source: 'claude' | 'codex' | 'faber';
   revision: string;
   tooLarge: boolean;
+  /** Over its soft target: the agent folds it at its next close. */
+  over?: boolean;
   entries: MemoryEntry[];
 }
 export interface MemoryList {

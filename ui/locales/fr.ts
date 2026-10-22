@@ -1653,6 +1653,8 @@ export const fr: Messages = {
   "memory.author.ai": "IA, non relue",
   "memory.author.aiKept": "IA, gardée",
   "memory.author.person": "Vous",
+  "memory.over": "{path} dépasse sa taille prévue. L’IA le range à la fin de sa prochaine tâche et garde tout ce qui reste valable.",
+  "memory.stale": "Cite un fichier disparu",
   "error.memory.read": "Impossible de lire la mémoire de ce projet.",
   "error.memory.changed": "Le fichier a changé ; ouvrez-le à nouveau.",
   "error.memory.refused": "Ce fichier ou cette entrée ne peut pas être modifié ici.",

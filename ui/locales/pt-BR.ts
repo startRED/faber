@@ -1650,6 +1650,8 @@ export const ptBR: Messages = {
   "memory.author.ai": "IA, não revisada",
   "memory.author.aiKept": "IA, mantida",
   "memory.author.person": "Você",
+  "memory.over": "{path} passou do tamanho combinado. A IA organiza o arquivo quando terminar a próxima tarefa e mantém tudo que ainda vale.",
+  "memory.stale": "Cita um arquivo que sumiu",
   "error.memory.read": "Não deu pra ler a memória deste projeto.",
   "error.memory.changed": "O arquivo mudou; abra de novo.",
   "error.memory.refused": "Este arquivo ou esta entrada não pode ser alterado aqui.",

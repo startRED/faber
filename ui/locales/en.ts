@@ -1592,6 +1592,8 @@ export const en = {
   "memory.author.ai": "AI, not reviewed",
   "memory.author.aiKept": "AI, kept",
   "memory.author.person": "You",
+  "memory.over": "{path} is over its size limit. The AI tidies it when it next finishes a task, and keeps everything still in force.",
+  "memory.stale": "Names a missing file",
   "error.memory.read": "Could not read this project’s memory.",
   "error.memory.changed": "The file changed; open it again.",
   "error.memory.refused": "This file or entry cannot be changed here.",

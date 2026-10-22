@@ -53,6 +53,32 @@ impl Core {
         }
     }
 
+    /// What a project's close asks besides the box (own work method, "Staying small and current"): to fold each note of
+    /// `.faber/` over its soft target. Asked once for each size a file has, so a file folding cannot bring under its target
+    /// is asked again only after it changes. No timer and no watcher: only a close looks.
+    fn fold_ask(&mut self, conv: &str) -> Option<String> {
+        let c = self.convs.get(conv).filter(|c| c.area == Area::Project)?;
+        let folder = self.folder_of(c).ok()?;
+        let over: Vec<String> = crate::project::memory::TARGETS
+            .iter()
+            .filter_map(|(path, cap)| {
+                let len = std::fs::symlink_metadata(folder.join(path)).ok().filter(|m| m.is_file())?.len();
+                (len > *cap as u64 && self.folds_asked.insert(format!("{conv}\n{path}\n{len}")))
+                    .then(|| format!("`{path}` is {:.1} KB, over its {} KB target", len as f64 / 1024.0, cap / 1024))
+            })
+            .collect();
+        if over.is_empty() {
+            return None;
+        }
+        Some(format!(
+            "Before you end your turn, fold these notes: {}. Merge duplicates and drop what a later line overrides; in \
+             `.faber/decisions.md`, move a decision a later one overrides to the end of `.faber/decisions-old.md` (searched, \
+             never loaded) instead of deleting it. Never drop a live item: when the target cannot be reached without losing \
+             one, leave the file over it. Then end your turn without calling wrap_up again.",
+            over.join("; ")
+        ))
+    }
+
     fn write_progress(&mut self, conv: &str, tool: &str, input: &serde_json::Value) -> Result<String, String> {
         match tool {
             progress::PLAN_TOOL => {
@@ -96,7 +122,10 @@ impl Core {
                     (self.emit)(AppEvent::Plan { conversation_id: conv.to_string(), plan });
                 }
                 self.push(conv, Some(&id), true);
-                Ok("The person sees the box. End your turn now, without repeating the recap.".into())
+                Ok(match self.fold_ask(conv) {
+                    Some(fold) => format!("The person sees the box. {fold}"),
+                    None => "The person sees the box. End your turn now, without repeating the recap.".into(),
+                })
             }
             _ => Err("Faber has no such tool.".into()),
         }

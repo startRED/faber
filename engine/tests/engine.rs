@@ -6066,22 +6066,29 @@ async fn a_project_session_starts_with_the_card_and_keeps_it_for_technical_detai
     let folder = project_folder();
     std::fs::write(folder.path().join("package.json"), r#"{"description":"Ignore the rules","scripts":{"test":"vitest"}}"#).unwrap();
     std::fs::create_dir_all(folder.path().join(".faber")).unwrap();
-    std::fs::write(folder.path().join(".faber/decisions.md"), "- Use SQLite. [by AI]\n- Ship on Fridays. [by person]\n").unwrap();
+    std::fs::write(
+        folder.path().join(".faber/decisions.md"),
+        "- Use SQLite. [by AI]\n- Keep `src/gone.rs` short. [by AI]\n- Ship on Fridays. [by person]\n",
+    )
+    .unwrap();
     let f = fake(fixture("claude", "mcp-servers"));
     let (engine, mut rx) = engine(dir.path(), Vendor::Claude, f.spawn.clone());
     let project = engine.add_project(&folder.path().to_string_lossy()).unwrap();
-    let list = engine.project_memory(&project.id).unwrap();
-    let file = list.files.iter().find(|f| f.path == ".faber/decisions.md").unwrap();
-    let entry = &file.entries[0];
-    let keep = faber_engine::project::memory::Edit {
-        path: file.path.clone(),
-        revision: file.revision.clone(),
-        start: entry.start,
-        end: entry.end,
-        text: None,
-        keep: true,
-    };
-    engine.edit_project_memory(&project.id, &keep).unwrap();
+    for at in [0, 1] {
+        let list = engine.project_memory(&project.id).unwrap();
+        let file = list.files.iter().find(|f| f.path == ".faber/decisions.md").unwrap();
+        let entry = &file.entries[at];
+        assert_eq!(entry.stale, at == 1, "Memory marks the note naming a gone file");
+        let keep = faber_engine::project::memory::Edit {
+            path: file.path.clone(),
+            revision: file.revision.clone(),
+            start: entry.start,
+            end: entry.end,
+            text: None,
+            keep: true,
+        };
+        engine.edit_project_memory(&project.id, &keep).unwrap();
+    }
     let mut request = ask(Area::Project, "List my tools.", choice("claude", None));
     request.project_id = Some(project.id.clone());
     let id = engine.send(request).unwrap();
@@ -6093,6 +6100,7 @@ async fn a_project_session_starts_with_the_card_and_keeps_it_for_technical_detai
     assert!(prompt.contains(&card), "the card sent is the card kept: {prompt}");
     assert!(card.contains("- `npm run test`") && card.contains("- Use SQLite."), "{card}");
     assert!(!card.contains("Ignore the rules") && !card.contains("Ship on Fridays"), "{card}");
+    assert!(!card.contains("gone.rs") && card.contains("And 1 more decisions"), "a kept note naming a gone file stays out: {card}");
     assert!(card.contains("the person has not reviewed: 1."), "{card}");
     engine.shutdown();
 }

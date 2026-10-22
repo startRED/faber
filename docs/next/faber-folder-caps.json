@@ -1,0 +1,14 @@
+{
+  "notes": {
+    "new": {
+      "en": "When a project’s notes grow past their size, the AI tidies them as it finishes a task, and Memory marks a note that names a file that is gone.",
+      "pt-BR": "Quando as anotações de um projeto passam do tamanho combinado, a IA organiza tudo ao terminar uma tarefa, e a Memória marca a anotação que cita um arquivo que sumiu.",
+      "es": "Cuando las notas de un proyecto superan su tamaño, la IA las ordena al terminar una tarea, y Memoria marca la nota que nombra un archivo que ya no está.",
+      "fr": "Quand les notes d’un projet dépassent leur taille, l’IA les range en finissant une tâche, et Mémoire signale la note qui cite un fichier disparu.",
+      "de": "Wenn die Notizen eines Projekts zu groß werden, räumt die KI sie am Ende einer Aufgabe auf, und Gedächtnis markiert eine Notiz, die eine fehlende Datei nennt."
+    }
+  },
+  "decisions": [
+    "| R-next | 2026-10-22 | Own work method, slice 2: a note naming a gone file is judged when it is read (Memory, the start card), never written back as `(stale?)` into the project file. Writing it would change the words a kept decision's record is bound to, so the person's decision would read as an unreviewed proposal, and a file that comes back would need a second write to clear it. Only backticked project-relative paths whose last part has a known file extension are judged (`.js` only with a folder, since `Next.js` is a name). The card checks only the decisions it could show, so its cost stays near the 9 ms measured. | AI (Erick delegou) |"
+  ]
+}

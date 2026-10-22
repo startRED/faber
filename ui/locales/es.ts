@@ -1653,6 +1653,8 @@ export const es: Messages = {
   "memory.author.ai": "IA, sin revisar",
   "memory.author.aiKept": "IA, conservada",
   "memory.author.person": "Tú",
+  "memory.over": "{path} superó su tamaño previsto. La IA lo ordena cuando termine la próxima tarea y conserva todo lo que sigue vigente.",
+  "memory.stale": "Nombra un archivo que ya no está",
   "error.memory.read": "No se pudo leer la memoria de este proyecto.",
   "error.memory.changed": "El archivo cambió; ábrelo de nuevo.",
   "error.memory.refused": "Este archivo o esta entrada no se puede modificar aquí.",

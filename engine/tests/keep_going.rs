@@ -899,6 +899,26 @@ async fn calls(pipe: &mut Pipe, request: &str, tool: &str, input: Value) -> (Str
     panic!("Faber never answered the {tool} call");
 }
 
+/// Own work method, slice 2: a project's close asks the agent to fold a note over its soft target, once for each size it
+/// has, so a file folding cannot shrink is not asked about again until it changes.
+#[tokio::test]
+async fn a_close_asks_to_fold_a_note_over_its_target_once_for_each_size() {
+    let (dir, project) = (tempfile::tempdir().unwrap(), support::work_folder());
+    std::fs::create_dir_all(project.path().join(".faber")).unwrap();
+    std::fs::write(project.path().join(".faber/decisions.md"), "- Use SQLite for the cache. [by AI]\n".repeat(300)).unwrap();
+    std::fs::write(project.path().join(".faber/taste.md"), "- Short lines.\n").unwrap();
+    let (_engine, _rx, mut pipe, _id) = started(dir.path(), project.path()).await;
+    let close = json!({ "recap": "The login page works. It was checked." });
+    let (said, error) = calls(&mut pipe, "w1", "wrap_up", close.clone()).await;
+    assert!(!error && said.contains("fold these notes: `.faber/decisions.md` is 10.5 KB, over its 8 KB target"), "{said}");
+    assert!(said.contains("`.faber/decisions-old.md`") && !said.contains("taste.md"), "{said}");
+    let (said, _) = calls(&mut pipe, "w2", "wrap_up", close.clone()).await;
+    assert!(!said.contains("fold") && said.contains("End your turn"), "asked once for a size: {said}");
+    std::fs::write(project.path().join(".faber/decisions.md"), "- Use SQLite for the cache. [by AI]\n".repeat(290)).unwrap();
+    let (said, _) = calls(&mut pipe, "w3", "wrap_up", close).await;
+    assert!(said.contains("is 10.2 KB, over its 8 KB target"), "a file that changed and is still over is asked again: {said}");
+}
+
 /// Task 017: a project agent keeps its plan, says what it is doing now and closes with a box, through Faber's own tools.
 /// The plan belongs to the conversation (and the list's row counts it); the now line and the box belong to the reply.
 #[tokio::test]
