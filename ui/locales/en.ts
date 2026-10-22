@@ -1804,6 +1804,7 @@ export const en = {
   'notes.178.new': 'Ask any conversation how Faber works, such as what Keep going does. It answers in your language, with the words on your screen.',
   'notes.179.better': 'In the Catalog, each card has a drawing and its own Install, switch and source link; select several to change them at once.',
   'notes.180.better': "Faber's browser can now be dragged as wide as the window, fill the area over the conversation, and show a page at PC, MacBook, tablet or phone size.",
+  'notes.181.new': 'A new chat costs much less when you have many tool servers set up: their tools now load only when the chat needs them.',
   'update.checking': 'Looking for an update…',
   'update.downloading': 'Downloading update…',
   'update.downloadingPercent': 'Downloading update… {percent}%',

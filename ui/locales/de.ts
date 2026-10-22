@@ -1924,6 +1924,7 @@ export const de: Messages = {
   'notes.178.new': 'Frag jede Unterhaltung, wie Faber funktioniert, zum Beispiel was Selbst weitermachen tut. Sie antwortet in deiner Sprache, mit den Wörtern auf deinem Bildschirm.',
   'notes.179.better': 'Im Katalog hat jede Karte ein Bild, eigenes Installieren, einen Schalter und einen Link zur Quelle; wähle mehrere aus, um sie gemeinsam zu ändern.',
   'notes.180.better': 'Fabers Browser lässt sich jetzt bis zur Fensterbreite ziehen, kann den Bereich des Gesprächs füllen und zeigt die Seite in PC-, MacBook-, Tablet- oder Handygröße.',
+  'notes.181.new': 'Ein neuer Chat kostet viel weniger, wenn du viele Werkzeugserver eingerichtet hast: Ihre Werkzeuge werden erst geladen, wenn der Chat sie braucht.',
   'update.checking': 'Suche nach einem Update…',
   'update.downloading': 'Update wird heruntergeladen…',
   'update.downloadingPercent': 'Update wird heruntergeladen… {percent} %',

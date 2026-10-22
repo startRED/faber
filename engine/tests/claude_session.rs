@@ -688,7 +688,7 @@ fn r121_full_access_bypasses_approvals_keeps_integrations_and_denies_only_the_cr
     }
     let chat = claude_args(&ClaudeLaunch { permissions: Permissions::FullAccess, ..launch(Area::Chat) });
     assert!(
-        chat.windows(2).any(|a| a == ["--tools", "Read,Write,Edit,Glob,Grep,Bash,WebSearch,WebFetch,AskUserQuestion"]),
+        chat.windows(2).any(|a| a == ["--tools", "Read,Write,Edit,Glob,Grep,Bash,WebSearch,WebFetch,AskUserQuestion,ToolSearch"]),
         "Chat keeps its lean tool list"
     );
 }

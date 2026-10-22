@@ -1911,6 +1911,7 @@ export const ptBR: Messages = {
   'notes.178.new': 'Pergunte a uma conversa como o Faber funciona, por exemplo o Continuar sozinho. Ela responde no seu idioma, com as palavras da tela.',
   'notes.179.better': 'No Catálogo, cada cartão tem um desenho e seus próprios Instalar, botão de ativar e link da fonte; selecione vários pra mudar todos juntos.',
   'notes.180.better': 'O navegador do Faber agora estica até a largura da janela, pode ocupar a área da conversa e mostra a página em tamanho de PC, MacBook, tablet ou celular.',
+  'notes.181.new': 'Uma conversa nova custa bem menos quando você tem muitos servidores de ferramentas: as ferramentas deles só carregam quando a conversa precisa.',
   'update.checking': 'Procurando atualização…',
   'update.downloading': 'Baixando atualização…',
   'update.downloadingPercent': 'Baixando atualização… {percent}%',

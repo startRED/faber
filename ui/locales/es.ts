@@ -1924,6 +1924,7 @@ export const es: Messages = {
   'notes.178.new': 'Pregunta a cualquier conversación cómo funciona Faber, por ejemplo qué hace Seguir solo. Responde en tu idioma, con las palabras de tu pantalla.',
   'notes.179.better': 'En el Catálogo, cada tarjeta tiene un dibujo y su propio Instalar, interruptor y enlace de origen; selecciona varias para cambiarlas a la vez.',
   'notes.180.better': 'El navegador de Faber ahora se estira hasta el ancho de la ventana, puede ocupar el área de la conversación y muestra la página en tamaño de PC, MacBook, tableta o móvil.',
+  'notes.181.new': 'Una conversación nueva cuesta mucho menos si tienes muchos servidores de herramientas: sus herramientas solo se cargan cuando la conversación las necesita.',
   'update.checking': 'Buscando una actualización…',
   'update.downloading': 'Descargando actualización…',
   'update.downloadingPercent': 'Descargando actualización… {percent} %',

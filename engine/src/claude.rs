@@ -121,7 +121,9 @@ impl ClaudeFlags {
 }
 
 // Chat stays lean: a fixed list of built-in tools. Ask keeps Chat restricted with no MCP servers; Isolated also drops every
-// startup customization; full access leaves the person's own integrations on.
+// startup customization; full access leaves the person's own integrations on, with `ToolSearch` so Claude Code loads those
+// integrations' tools when needed: without it every definition went into the first request (233k tokens on a PC with three
+// servers, 14k with it; docs/research/2026-10-22/benchmark-light.md).
 const CHAT_TOOLS: &str = "Read,Write,Edit,Glob,Grep,Bash,WebSearch,WebFetch,AskUserQuestion";
 
 /// A quick question on the side (R250) reads, searches and lists, and nothing else.
@@ -326,7 +328,14 @@ pub fn claude_args(launch: &ClaudeLaunch) -> Vec<String> {
         if launch.area == Area::Chat {
             args.extend([
                 "--tools".into(),
-                format!("{CHAT_TOOLS}{}", if launch.permissions == Permissions::Plan { ",ExitPlanMode" } else { "" }),
+                format!(
+                    "{CHAT_TOOLS}{}",
+                    match launch.permissions {
+                        Permissions::Plan => ",ExitPlanMode",
+                        Permissions::FullAccess => ",ToolSearch",
+                        _ => "",
+                    }
+                ),
             ]);
             match launch.permissions {
                 mode if mode.guarded() => {
