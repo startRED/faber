@@ -47,6 +47,7 @@ points nowhere; a page that grows past the limit splits by topic, and its row he
 | [design/first-run.md](design/first-run.md) | The first run and the tutorial |
 | [design/projects.md](design/projects.md) | The Projects screens, what a project stores, and how its checks run |
 | [dev/testing.md](dev/testing.md) | Tests: `cargo t`, screen tests, build folder and slots, what a run prints |
+| [dev/benchmark.md](dev/benchmark.md) | Running the light benchmark: the one command, what a run measures, what it leaves out |
 | [dev/workflow.md](dev/workflow.md) | Landing work: lane claims, merge on green, the task queue, a red base, the numbers given at landing |
 | [dev/whats-new.md](dev/whats-new.md) | Writing a what's-new entry: the words, the kinds, numbers for speed and memory |
 | [dev/sentinel.md](dev/sentinel.md) | The UX sentinel, the visual critique and the first-user review |
@@ -80,6 +81,7 @@ one is never touched again, and its boxes say nothing.
 | superpowers/specs/2026-10-20-rewind-design.md | Approved (Erick's three answers, 2026-10-20; seventh fresh review), task 090 landed (#191): go back to before a message, files, conversation or both, with redo |
 | superpowers/specs/2026-10-21-look-around.md | In progress, steps 1 and 2 landed (R369), step 3 landed (R386), step 4 counting built (R403), the week of use and the decision still to come: after a fix, the same mistake looked for elsewhere and asked about, scoped to the close of a fix and a red-to-green sign, never a rule for every turn |
 | research/2026-10-21/catalog-list.md | Catalog step 2 curation completed locally; proof results and remaining native validation |
+| research/2026-10-22/benchmark-light.md | First run of the light benchmark: Faber against plain Claude Code on 5 requests; Codex rows wait for its quota |
 | research/ | Measurements, probes and reviews of the day in their name; model names and prices in them go stale fast. The UX, notification and screen-flake reviews of 2026-10-12 live here; their conclusions are in design/ and product/ |
 
 A new spec or plan goes to `superpowers/specs` or `superpowers/plans` with the date in its name and a `Status:` line at the

@@ -178,7 +178,7 @@ The program is `faber-test`, run as `cargo t`.
    WebView2 DevTools port; the checks that need no such port run on every system.
 4. **Unit tests never spawn processes, touch real git or call a real CLI.**
 5. **The benchmark of ~40 real requests** that measures the goals against plain Claude Code and plain Codex before
-   each version.
+   each version. Its light version (5 requests, `cargo run -p faber-engine --example bench`) is compiled by `cargo t` and the lint suite but never run by them or by CI, since it spends real quota ([benchmark](benchmark.md)).
 6. **Still to build: faster and lighter than TL-ADE's suite, measured fairly** (R113, R115, R116, owner;
    [spec](../superpowers/specs/2026-10-14-test-system-rework-design.md),
    [plan](../superpowers/plans/2026-10-14-test-system-rework.md)). A job-object meter measures both projects the same way:

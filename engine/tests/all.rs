@@ -143,6 +143,11 @@ mod waiting;
 #[path = "workspace.rs"]
 mod workspace;
 
+// The benchmark's pure parts (`bench/pure.rs`, also built into `engine/examples/bench.rs`); their tests run here.
+#[allow(dead_code)]
+#[path = "../../bench/pure.rs"]
+mod bench_pure;
+
 #[test]
 fn every_test_file_is_listed() {
     let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests");

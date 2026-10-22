@@ -332,7 +332,7 @@ mod tests {
     // rule knows runs everything.
     #[test]
     fn a_small_change_runs_only_its_suites_and_the_tools_the_build_or_an_unknown_file_run_everything() {
-        let only: [(&str, &[&str]); 8] = [
+        let only: [(&str, &[&str]); 10] = [
             ("ui/Thread.tsx", &["ui", "screen"]),
             ("ui/locales/en.ts", &["ui", "screen"]),
             ("engine/src/codex.rs", &["rust", "screen"]),
@@ -340,6 +340,8 @@ mod tests {
             ("engine/tests/codex_session.rs", &["rust"]),
             ("engine/tests/support/mod.rs", &["rust"]),
             ("engine/examples/route_eval.rs", &["rust"]),
+            ("engine/examples/bench.rs", &["rust"]),
+            ("bench/pure.rs", &["rust"]),
             ("tests/ui/thread.check.ts", &["ui"]),
         ];
         for (path, want) in only {
