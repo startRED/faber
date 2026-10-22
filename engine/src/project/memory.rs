@@ -126,9 +126,17 @@ fn paths(text: &str) -> impl Iterator<Item = &str> {
 /// planted in the project never makes Faber look outside it.
 pub struct ProjectFiles {
     root: Directory,
-    /// The names in each folder listed so far, by relative path; `None` when the folder is gone. Notes name the same few
-    /// folders, and one listing answers for all their files (opening each file costs about 75 µs on Windows).
-    folders: std::cell::RefCell<std::collections::HashMap<String, Option<std::collections::HashSet<String>>>>,
+    /// What each folder listed so far holds, by relative path. Notes name the same few folders, and one listing answers
+    /// for all their files (opening each file costs about 75 µs on Windows).
+    folders: std::cell::RefCell<std::collections::HashMap<String, Listing>>,
+}
+
+enum Listing {
+    Names(std::collections::HashSet<String>),
+    /// The folder is not found: every file named in it is gone.
+    Gone,
+    /// A link, refused, unreadable or over 20,000 names: nothing named in it is judged.
+    Unknown,
 }
 
 /// A file name as the file system compares it: Windows folders ignore case.
@@ -161,12 +169,16 @@ impl ProjectFiles {
         let names = folders.entry(parent.to_string()).or_insert_with(|| {
             let listed = if parent.is_empty() { self.root.names() } else { self.root.under(Path::new(parent)).and_then(|d| d.names()) };
             match listed {
-                Ok(names) if names.len() <= 20_000 => Some(names.iter().map(|n| compared(n)).collect()),
-                Err(e) if e.kind() == std::io::ErrorKind::NotFound => None,
-                _ => Some(std::collections::HashSet::from([compared(name)])),
+                Ok(names) if names.len() <= 20_000 => Listing::Names(names.iter().map(|n| compared(n)).collect()),
+                Err(e) if e.kind() == std::io::ErrorKind::NotFound => Listing::Gone,
+                _ => Listing::Unknown,
             }
         });
-        names.as_ref().is_none_or(|names| !names.contains(&compared(name)))
+        match names {
+            Listing::Names(names) => !names.contains(&compared(name)),
+            Listing::Gone => true,
+            Listing::Unknown => false,
+        }
     }
 
     /// Whether a note names a project file that no longer exists. Only "not found" counts: a link, a refused or an
@@ -1332,5 +1344,7 @@ mod tests {
         #[cfg(windows)]
         junction::create(outside.path(), project.path().join("linked")).unwrap();
         assert!(!files.stale("`linked/missing.rs`") && files.size("linked/there.rs").is_none(), "nothing is probed through a link");
+        assert!(!files.stale("`linked/other.rs`"), "a folder that cannot be listed judges none of its files");
+        assert!(files.stale("`gone/a.rs`") && files.stale("`gone/b.rs`"), "a gone folder makes each file in it gone");
     }
 }
