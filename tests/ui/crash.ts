@@ -12,12 +12,24 @@ let reported = false;
 export function report(results: Result[]): void {
   if (reported) return;
   reported = true;
+  clearInterval(beat);
   void invoke('report_checks', { json: JSON.stringify(results) });
 }
 
+let note = '';
+let since = 0;
+let beat: ReturnType<typeof setInterval> | undefined;
+
 /** Tells the shell which check starts now; it writes a note the runner watches, so a slow run is never taken for a stuck one. */
 export function progress(index: number, total: number, name: string): void {
-  void invoke('checks_progress', { note: `${index + 1}/${total} ${name}` }).catch(() => {});
+  note = `${index + 1}/${total} ${name}`;
+  since = Date.now();
+  void invoke('checks_progress', { note }).catch(() => {});
+  // A heartbeat the runner never counts as progress (`BEAT` in testkit/src/checks.rs): when the checks stop, it tells a
+  // page whose timers stopped (no beat) from a page that runs while its checks do not move (beats).
+  beat ??= setInterval(() => {
+    void invoke('checks_progress', { note: `${note} · page alive ${Math.round((Date.now() - since) / 1000)} s` }).catch(() => {});
+  }, 10_000);
 }
 
 export function crash(message: string): void {
@@ -25,6 +37,9 @@ export function crash(message: string): void {
 }
 
 if (new URLSearchParams(location.search).has('checks')) {
+  // On macOS a check that types made WebKit's page wait on a spelling check from the app while the app's main thread
+  // waited on the page's scrolling (queue run 39724178951): both stopped for good. The checks never need spelling marks.
+  document.documentElement.spellcheck = false;
   // Only errors that carry an `Error`: the harmless "ResizeObserver loop" notice does not.
   window.addEventListener('error', (e) => {
     if (e.error !== undefined && e.error !== null) crash(`${e.error instanceof Error ? e.error.stack || e.error.message : String(e.error)}`);

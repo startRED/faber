@@ -190,8 +190,19 @@ jobs:
         run: cargo test --workspace --no-run
       - if: matrix.part == 'rust'
         run: cargo t --suite rust
+      # On macOS the hidden test window's page stopped mid-run: a check that typed waited on a spelling check while the
+      # app waited on the page's scrolling (the checks page turns spelling off, tests/ui/crash.ts). The system's text
+      # services, App Nap and an idle display stay off too while the screen checks run.
+      - if: contains(matrix.part, 'ui') && runner.os == 'macOS'
+        run: |
+          defaults write NSGlobalDomain NSAppSleepDisabled -bool YES
+          for key in NSAutomaticTextCompletionEnabled NSAutomaticInlinePredictionEnabled NSAutomaticSpellingCorrectionEnabled \
+            NSAutomaticCapitalizationEnabled NSAutomaticPeriodSubstitutionEnabled WebAutomaticSpellingCorrectionEnabled \
+            WebContinuousSpellCheckingEnabled WebGrammarCheckingEnabled; do
+            defaults write NSGlobalDomain "$key" -bool NO
+          done
       - if: contains(matrix.part, 'ui')
-        run: cargo t --suite ui
+        run: ${{ runner.os == 'macOS' && 'caffeinate -dimsu ' || '' }}cargo t --suite ui
       - uses: actions/upload-artifact@v7
         if: always()
         with:

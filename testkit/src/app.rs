@@ -370,6 +370,10 @@ impl Ctx {
         self.live[id].owned.status()
     }
 
+    pub fn pid(&self, id: usize) -> u32 {
+        self.live[id].pid
+    }
+
     pub fn stderr(&self, id: usize) -> String {
         self.live[id].stderr.lock().unwrap_or_else(|e| e.into_inner()).trim().to_string()
     }
