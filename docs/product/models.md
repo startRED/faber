@@ -87,12 +87,12 @@ phase.
 9. **Keep each Haiku request under 100K tokens and each GPT-6 request under 272K.** Above those points the whole request
    is billed more.
 
-Rules 1, 3, 5, 8 and 9 hold today (rule 5's silence watch covers an answer; a tool step it reports as running, a helper's own process and a quick question are not watched). The engine that already drives the CLIs has known legacy exceptions to the others. They are
-known defects of the old code, no new code may add to them, and each phase closes some:
+Rules 1, 2, 3, 5, 6, 8 and 9 hold today (rule 5's silence watch covers an answer; a tool step it reports as running, a helper's own process and a quick question are not watched). Every session start passes its mode, model and effort (the CLI probes that start no
+session carry no model: Codex's lists of models, quota and threads, and Claude Code's `--help` and its `/usage` read), the engine keeps each session's start-up
+`capabilities`, and every result becomes a `reason.*` key. The engine that already drives the CLIs has known legacy
+exceptions to the others. They are known defects of the old code, no new code may add to them, and each phase closes some:
 
 | Rule | What the engine does today | Closed in |
 | :--- | :--- | :--- |
-| 2 | A session may start on the account's default model or effort (Chat passes `--permission-mode` for each permission choice; Projects has no direct sessions, and mission roles run isolated) | Phase 2 |
 | 4 | There is no lead agent yet, so there is no hand-over | Phase 3 |
-| 6 | `terminal_reason` or `subtype` is passed on as a raw string, and `capabilities` from `system/init` is not read | Phase 2 |
 | 7 | The engine keeps no running budget | Phase 3 |

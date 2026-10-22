@@ -1591,7 +1591,10 @@ export const ptBR: Messages = {
   // Native speaker must translate (needs native review).
   // Native speaker must translate (needs native review).
   'reason.budget.other': 'O Faber está esperando sua cota permitir o próximo passo.',
-  'reason.other': 'O Faber parou aqui por um motivo que ainda não sabe descrever. Os detalhes estão no log.',
+  'reason.other': 'O Faber parou aqui por um motivo que ainda não sabe descrever.',
+  'reason.turnLimit': 'A IA parou porque chegou ao limite de passos para uma mensagem.',
+  'reason.budget': 'A IA parou porque chegou ao limite de gasto.',
+  'reason.failed': 'A IA parou porque algo deu errado. Envie uma mensagem para tentar de novo.',
   'reason.silent': "Esta resposta ficou 15 minutos em silêncio, então o Faber a parou. O que ela escreveu até aqui foi mantido; envie uma mensagem para continuar.",
   'reason.silent.unconfirmed': "Esta resposta ficou 15 minutos em silêncio. O Faber tentou pará-la, mas não confirmou que ela parou. Espere e confira de novo.",
   // Native speaker must translate (needs native review).
@@ -1880,6 +1883,7 @@ export const ptBR: Messages = {
   'notes.174.fixed': 'Uma resposta que trava por 15 minutos agora termina com um aviso, e o que ela escreveu fica. Suas outras conversas continuam.',
   'notes.175.better': 'As barras de uso e as setas das seções dobráveis agora se movem suavemente, sem pular.',
   'notes.176.fixed': 'Ao responder uma pergunta em Rodando agora, o cartão dela não some de repente: ele se recolhe aos poucos.',
+  'notes.177.fixed': 'Uma resposta que parava sozinha, num limite ou por um erro, ficava sem explicação. Agora ela diz o motivo.',
   'update.checking': 'Procurando atualização…',
   'update.downloading': 'Baixando atualização…',
   'update.downloadingPercent': 'Baixando atualização… {percent}%',

@@ -118,6 +118,8 @@ mod tests {
                     vendor: Vendor::Claude,
                     model: None,
                     running: None,
+                    capabilities: Default::default(),
+                    ended: None,
                     effort: "medium".into(),
                     sid: 1,
                     session,

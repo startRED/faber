@@ -1594,7 +1594,10 @@ export const fr: Messages = {
   // Native speaker must translate (needs native review).
   // Native speaker must translate (needs native review).
   'reason.budget.other': 'Faber attend que votre quota permette l’étape suivante.',
-  'reason.other': 'Faber s’est arrêté ici pour une raison qu’il ne sait pas encore décrire. Les détails sont dans le journal.',
+  'reason.other': 'Faber s’est arrêté ici pour une raison qu’il ne sait pas encore décrire.',
+  'reason.turnLimit': 'L’IA s’est arrêtée, car elle a atteint sa limite d’étapes pour un message.',
+  'reason.budget': 'L’IA s’est arrêtée, car elle a atteint sa limite de dépenses.',
+  'reason.failed': 'L’IA s’est arrêtée, car quelque chose a mal tourné. Envoyez un message pour réessayer.',
   'reason.silent': "Cette réponse est restée muette pendant 15 minutes, alors Faber l’a arrêtée. Ce qu’elle avait écrit est conservé ; envoyez un message pour continuer.",
   'reason.silent.unconfirmed': "Cette réponse est restée muette pendant 15 minutes. Faber a essayé de l’arrêter, mais n’a pas confirmé qu’elle s’est arrêtée. Patientez et vérifiez de nouveau.",
   // Native speaker must translate (needs native review).
@@ -1893,6 +1896,7 @@ export const fr: Messages = {
   'notes.174.fixed': 'Une réponse qui reste bloquée 15 minutes s’arrête maintenant avec un message, et ce qu’elle a écrit est conservé. Vos autres conversations continuent.',
   'notes.175.better': 'Les barres d’usage et les flèches des sections repliables bougent maintenant sans à-coup.',
   'notes.176.fixed': 'Quand vous répondez à une question dans En cours, sa carte ne disparaît plus d’un coup : elle se replie en douceur.',
+  'notes.177.fixed': 'Une réponse qui s’arrêtait d’elle-même, à une limite ou sur une erreur, restait sans explication. Elle en donne maintenant la raison.',
   'update.checking': 'Recherche d’une mise à jour…',
   'update.downloading': 'Téléchargement de la mise à jour…',
   'update.downloadingPercent': 'Téléchargement de la mise à jour… {percent} %',

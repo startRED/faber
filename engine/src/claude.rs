@@ -3,10 +3,11 @@
 mod background;
 mod commands;
 
-use crate::events::{Delivery, EngineEvent, Session, SessionCommand, UserTurn};
-use crate::model::{Area, Permissions, Tuning, WebSearch};
+use crate::events::{Capabilities, Delivery, EngineEvent, Session, SessionCommand, UserTurn, failure_reason};
+use crate::model::{Area, Permissions, Tuning, Vendor, WebSearch};
 use crate::persona::{PersonaInput, persona};
 use crate::proc::{self, Spawner};
+use crate::router::{EFFORT, default_model};
 use crate::signals::claude_signals;
 use serde_json::{Value, json};
 use std::collections::{HashMap, VecDeque};
@@ -300,6 +301,8 @@ pub fn claude_args(launch: &ClaudeLaunch) -> Vec<String> {
         for a in ["--system-prompt", instructions, "--tools", "", "--no-session-persistence"] {
             args.push(a.into());
         }
+        // It has no tools to ask for, so a request that came up anyway is refused, never asked (as the usage probes do).
+        args.extend(["--permission-mode".into(), "dontAsk".into()]);
         args.extend(claude_exposure_args());
     } else {
         let mut settings = json!({});
@@ -415,16 +418,18 @@ pub fn claude_args(launch: &ClaudeLaunch) -> Vec<String> {
             args.push("--no-session-persistence".into());
         }
     }
+    // Rule 2 of docs/product/models.md: every start names its model and effort, never the CLI's own pick. A caller that chose
+    // none (the engine resolves its choice first) gets the defaults the engine would have shown.
+    let model = launch.model.clone().filter(|m| !m.is_empty()).unwrap_or_else(|| default_model(Vendor::Claude, None, &[]));
+    let effort = launch.effort.clone().filter(|e| !e.is_empty()).unwrap_or_else(|| EFFORT.into());
     // Side questions keep the CLI default, and an older CLI that does not list the flag would refuse to start with it.
     let compacts = launch.flags.autocompact && launch.instructions.is_none() && !aside;
-    if let Some(window) = compacts.then(|| launch.model.as_deref().and_then(autocompact_window)).flatten() {
+    if let Some(window) = compacts.then(|| autocompact_window(&model)).flatten() {
         args.extend(["--autocompact".into(), window]);
     }
-    for (flag, value) in [("--model", &launch.model), ("--effort", &launch.effort), ("--resume", &launch.resume)] {
-        if let Some(v) = value {
-            args.push(flag.into());
-            args.push(v.clone());
-        }
+    args.extend(["--model".into(), model, "--effort".into(), effort]);
+    if let Some(resume) = &launch.resume {
+        args.extend(["--resume".into(), resume.clone()]);
     }
     args
 }
@@ -509,6 +514,8 @@ pub fn parse_claude_message(msg: &Value) -> Vec<EngineEvent> {
             if let Some(servers) = msg["mcp_servers"].as_array() {
                 events.push(EngineEvent::McpServers(crate::mcp_servers::reported(servers, "status")));
             }
+            // What the CLI says it can do: the engine keeps it, and no feature is read from its version (rule 6).
+            events.extend(Capabilities::from_init(msg).map(EngineEvent::Capabilities));
             events
         }
         // A subagent's own words stream too (`parent_tool_use_id` names the agent call that started it): they are its work, never
@@ -602,6 +609,12 @@ pub fn parse_claude_message(msg: &Value) -> Vec<EngineEvent> {
 
 /// A finished turn. `usage` describes the main response only, while `modelUsage` adds the sub-model work of the same turn
 /// (web fetches and the like), so a turn whose `modelUsage` prompt is larger is marked incomplete; its cost stays valid.
+/// Whether a result's own text is the plan's limit (and not another limit such as the context's).
+fn says_plan_limit(text: &str) -> bool {
+    let t = text.to_ascii_lowercase();
+    ["you've hit your limit", "usage limit", "usage_limit_reached", "weekly limit", "out of credits"].iter().any(|p| t.contains(p))
+}
+
 fn result_events(msg: &Value) -> Vec<EngineEvent> {
     let u = &msg["usage"];
     let n = |k: &str| u[k].as_u64().unwrap_or(0);
@@ -642,16 +655,23 @@ fn result_events(msg: &Value) -> Vec<EngineEvent> {
         })
         .and_then(|m| m["contextWindow"].as_u64())
         .map(|window| EngineEvent::Context { used: None, window: Some(window) });
+    let ok = msg["subtype"] == "success" && msg["is_error"] != true;
+    // Why a turn that did not end well ended, from the CLI's terminal reason (its subtype when it names none), as a key.
+    let why = (!ok).then(|| failure_reason(msg["terminal_reason"].as_str(), msg["subtype"].as_str()));
     window
         .into_iter()
         .chain(warm)
         .chain(parked)
+        .chain(why.map(EngineEvent::Reason))
         .chain([EngineEvent::Done {
-            ok: msg["subtype"] == "success" && msg["is_error"] != true,
+            ok,
             reason: msg["errors"]
                 .as_array()
                 .filter(|errors| !errors.is_empty())
                 .map(|errors| errors.iter().filter_map(Value::as_str).collect::<Vec<_>>().join(" "))
+                // A plan limit can arrive as a "success" result flagged as an error, its words only in `result`: keep them, so the
+                // limit is still recognised as one. Only the plan's own phrases: "Context limit reached" is not a plan limit.
+                .or_else(|| msg["result"].as_str().filter(|r| !ok && says_plan_limit(r)).map(String::from))
                 .unwrap_or_else(|| msg["terminal_reason"].as_str().or(msg["subtype"].as_str()).unwrap_or_default().into()),
             cost_total_usd: total.filter(|_| counters),
             input_tokens: prompt,

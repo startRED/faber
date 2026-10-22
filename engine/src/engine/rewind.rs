@@ -1322,6 +1322,8 @@ mod tests {
                     vendor: Vendor::Claude,
                     model: None,
                     running: None,
+                    capabilities: Default::default(),
+                    ended: None,
                     effort: String::new(),
                     sid: 1,
                     session: Session::from_fn(move |cmd| {

@@ -52,7 +52,8 @@ fn launch(area: Area) -> ClaudeLaunch {
         verify: false,
         progress: false,
         area,
-        model: None,
+        // A model with no compaction window of its own, so the tests of the newer flags still compare like with like.
+        model: Some("unlisted-model".into()),
         effort: None,
         resume: None,
         user_hooks: false,
@@ -555,6 +556,98 @@ fn chat_is_lean_and_confined_to_its_workspace_projects_get_the_user_setup_withou
     assert!(deny_rules(&project).contains(&"Read(~/.ssh/**)".to_string()));
     let on = settings_of(&claude_args(&ClaudeLaunch { user_hooks: true, ..launch(Area::Project) }));
     assert!(on.get("disableAllHooks").is_none() && on["permissions"]["deny"].is_array());
+}
+
+#[test]
+fn rule_2_every_claude_start_names_its_permission_mode_model_and_effort() {
+    use faber_engine::helper::Helper;
+    let named = |args: &[String], flag: &str| args.iter().position(|a| a == flag).and_then(|i| args.get(i + 1)).cloned();
+    // A side question with its own instructions (routing, summaries) and a quick question on the side are starts too.
+    let mut starts = vec![
+        ("router", ClaudeLaunch { instructions: Some("Classify.".into()), permissions: Permissions::Isolated, ..launch(Area::Chat) }),
+        ("aside", ClaudeLaunch { helper: Helper::Aside, permissions: Permissions::Isolated, ..launch(Area::Chat) }),
+    ];
+    for area in [Area::Chat, Area::Project] {
+        for permissions in [
+            Permissions::Ask,
+            Permissions::AcceptEdits,
+            Permissions::Plan,
+            Permissions::Auto,
+            Permissions::FullAccess,
+            Permissions::Isolated,
+        ] {
+            starts.push(("session", ClaudeLaunch { permissions, ..launch(area) }));
+        }
+    }
+    for (what, mut start) in starts {
+        // Nothing chosen: the defaults Faber would show, never the CLI's own.
+        start.model = None;
+        let args = claude_args(&start);
+        for flag in ["--permission-mode", "--model", "--effort"] {
+            assert!(named(&args, flag).is_some_and(|v| !v.is_empty()), "{what} {:?} {:?} leaves {flag} out", start.area, start.permissions);
+        }
+        assert_eq!((named(&args, "--model").as_deref(), named(&args, "--effort").as_deref()), (Some("claude-sonnet-5-5"), Some("medium")));
+        // What was chosen is kept.
+        let chosen = claude_args(&ClaudeLaunch { model: Some("claude-opus-5-5".into()), effort: Some("high".into()), ..start });
+        assert_eq!((named(&chosen, "--model").as_deref(), named(&chosen, "--effort").as_deref()), (Some("claude-opus-5-5"), Some("high")));
+    }
+    // A side request with no tools is refused anything it asks for, never asked (the mode the usage probes use).
+    let router = claude_args(&ClaudeLaunch { instructions: Some("Classify.".into()), ..launch(Area::Chat) });
+    assert_eq!(named(&router, "--permission-mode").as_deref(), Some("dontAsk"));
+}
+
+#[test]
+fn rule_6_the_start_up_capabilities_come_from_system_init_and_an_older_cli_reads_as_none() {
+    let init = fixture("claude", "chat").into_iter().map(|e| e.msg).find(|m| m["subtype"] == "init").unwrap();
+    let found = |msg: &serde_json::Value| {
+        parse_claude_message(msg).into_iter().find_map(|e| if let EngineEvent::Capabilities(c) = e { Some(c.names) } else { None })
+    };
+    let names = found(&init).expect("the recorded init lists its capabilities");
+    assert!(names.iter().any(|n| n == "interrupt_receipt_v1") && names.iter().any(|n| n == "msg_lifecycle_v1"), "{names:?}");
+    let mut older = init.clone();
+    older.as_object_mut().unwrap().remove("capabilities");
+    assert_eq!(found(&older), None, "a CLI that lists none is never guessed from its version");
+}
+
+#[test]
+fn rule_6_every_result_subtype_and_terminal_reason_becomes_a_reason_key_and_never_the_raw_word() {
+    let reason = |msg: serde_json::Value| {
+        let events = parse_claude_message(&msg);
+        let key = events.iter().find_map(|e| if let EngineEvent::Reason(key) = e { Some(*key) } else { None });
+        // The key always comes just before the turn's end.
+        assert!(key.is_none() || matches!(events.last(), Some(EngineEvent::Done { .. })), "{events:?}");
+        key
+    };
+    let result = |subtype: &str, terminal: Option<&str>, is_error: bool| json!({"type":"result","subtype":subtype,"is_error":is_error,"terminal_reason":terminal,"total_cost_usd":0.0,"usage":{}});
+    assert_eq!(reason(result("success", Some("completed"), false)), None, "a turn that ended well needs no reason");
+    for (subtype, terminal, key) in [
+        ("error_max_turns", None, "reason.turnLimit"),
+        ("error_max_budget_usd", None, "reason.budget"),
+        ("error_during_execution", None, "reason.failed"),
+        ("error_during_execution", Some("model_error"), "reason.failed"),
+        ("error_during_execution", Some("max_turns"), "reason.turnLimit"),
+        // The CLI's own word wins over the subtype: a stop from the person reads as one.
+        ("error_during_execution", Some("aborted_streaming"), "reason.interrupted"),
+        ("error_during_execution", Some("aborted_tools"), "reason.interrupted"),
+        // A word that says "completed" on a turn that failed is a failure.
+        ("success", Some("completed"), "reason.failed"),
+        // Words Faber does not know say so in a generic sentence.
+        ("error_in_some_future_cli", None, "reason.other"),
+        ("error_in_some_future_cli", Some("a_future_terminal_reason"), "reason.other"),
+        // An unknown terminal reason falls back to what the subtype says, and an API error is a failure.
+        ("error_during_execution", Some("a_future_terminal_reason"), "reason.failed"),
+        ("error_max_turns", Some("a_future_terminal_reason"), "reason.turnLimit"),
+        ("api_error", None, "reason.failed"),
+    ] {
+        assert_eq!(
+            reason(result(subtype, terminal, subtype == "success" || subtype.starts_with("error"))),
+            Some(key),
+            "{subtype} {terminal:?}"
+        );
+    }
+    // The recorded stop of a turn (a real CLI's words).
+    let stopped = fixture("claude", "interrupt").into_iter().map(|e| e.msg).find(|m| m["type"] == "result").unwrap();
+    assert_eq!(reason(stopped), Some("reason.interrupted"));
 }
 
 const CREDENTIAL_DENIES: [&str; 5] =
@@ -1081,7 +1174,7 @@ fn ask_the_isolated_mode_and_side_questions_never_change_with_the_new_flags() {
         for permissions in [Permissions::Ask, Permissions::Isolated] {
             let old = claude_args(&ClaudeLaunch { permissions, ..launch(area) });
             let new = claude_args(&ClaudeLaunch { permissions, flags: NEWER, ..launch(area) });
-            assert_eq!(old, new, "{area:?} {permissions:?}: no model named, so no autocompact either");
+            assert_eq!(old, new, "{area:?} {permissions:?}: no window known for the model, so no autocompact either");
             assert!(new.windows(2).any(|a| a == ["--permission-prompt-tool", "stdio"]) && !new.contains(&"--permission-prompts".into()));
         }
         let side = claude_args(&ClaudeLaunch {
@@ -1472,7 +1565,8 @@ fn r140_the_web_setting_never_reaches_the_isolated_mode_or_a_side_question() {
         assert_eq!(claude_args(&isolated), claude_args(&ClaudeLaunch { tuning: off.clone(), ..isolated.clone() }), "{area:?}");
         let side = ClaudeLaunch { instructions: Some("Route.".into()), permissions: Permissions::Auto, ..launch(area) };
         assert_eq!(claude_args(&side), claude_args(&ClaudeLaunch { tuning: off.clone(), ..side.clone() }), "{area:?}");
-        assert!(!claude_args(&side).contains(&"--permission-mode".into()));
+        // It names its mode like every start (rule 2), and the web setting has no part in it.
+        assert!(claude_args(&side).windows(2).any(|a| a == ["--permission-mode", "dontAsk"]));
     }
 }
 

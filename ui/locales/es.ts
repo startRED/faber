@@ -1594,7 +1594,10 @@ export const es: Messages = {
   // Native speaker must translate (needs native review).
   // Native speaker must translate (needs native review).
   'reason.budget.other': 'Faber está esperando a que tu cuota permita el siguiente paso.',
-  'reason.other': 'Faber se detuvo aquí por un motivo que todavía no sabe describir. Los detalles están en el registro.',
+  'reason.other': 'Faber se detuvo aquí por un motivo que todavía no sabe describir.',
+  'reason.turnLimit': 'La IA se detuvo porque llegó al límite de pasos para un mensaje.',
+  'reason.budget': 'La IA se detuvo porque llegó a su límite de gasto.',
+  'reason.failed': 'La IA se detuvo porque algo salió mal. Envía un mensaje para intentarlo de nuevo.',
   'reason.silent': "Esta respuesta se quedó en silencio 15 minutos, así que Faber la detuvo. Lo que escribió hasta ahora se conserva; envía un mensaje para seguir.",
   'reason.silent.unconfirmed': "Esta respuesta se quedó en silencio 15 minutos. Faber intentó detenerla, pero no ha confirmado que se detuvo. Espera y vuelve a comprobar.",
   // Native speaker must translate (needs native review).
@@ -1893,6 +1896,7 @@ export const es: Messages = {
   'notes.174.fixed': 'Una respuesta que se cuelga durante 15 minutos ahora se detiene con un aviso, y lo que escribió se conserva. Tus otras conversaciones siguen.',
   'notes.175.better': 'Las barras de uso y las flechas de las secciones plegables ahora se mueven con fluidez, sin saltos.',
   'notes.176.fixed': 'Al responder una pregunta en En marcha ahora, su tarjeta ya no desaparece de golpe: se pliega con suavidad.',
+  'notes.177.fixed': 'Una respuesta que se detenía sola, por un límite o por un error, quedaba sin explicación. Ahora dice el motivo.',
   'update.checking': 'Buscando una actualización…',
   'update.downloading': 'Descargando actualización…',
   'update.downloadingPercent': 'Descargando actualización… {percent} %',

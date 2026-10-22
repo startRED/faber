@@ -233,10 +233,15 @@ struct Live {
     group_files: Option<(Vec<String>, Vec<Image>)>,
     group_context: Option<(String, Vec<String>)>,
     vendor: Vendor,
-    /// The model asked for (none = the account's default).
+    /// The model asked for: always a full id (a start resolves a choice that named none).
     model: Option<String>,
     /// The model the CLI says it runs, once it has said so.
     running: Option<String>,
+    /// What the CLI said at start-up it can do (Claude Code's `capabilities`); empty until it says, and for a CLI that never does.
+    #[allow(dead_code)] // rule 6 asks it be read and kept; the first feature check made from it will read it
+    capabilities: crate::events::Capabilities,
+    /// How the turn that is ending ended, when the CLI named a reason (a `reason.*` key), until its `Done` takes it.
+    ended: Option<&'static str>,
     effort: String,
     /// Tells this process's events apart from those of a replaced one.
     sid: u64,
@@ -1867,6 +1872,13 @@ impl Core {
             self.refresh_running();
             return;
         }
+        // What the CLI said at start-up it can do is kept with its process, also when that process was started for a compaction.
+        if let EngineEvent::Capabilities(found) = event {
+            if let Some(l) = self.live.get_mut(conv) {
+                l.capabilities = found;
+            }
+            return;
+        }
         let entry = self.live.get(conv).expect("session checked above");
         let (vendor, resumed) = (entry.vendor, entry.resumed);
         let turn_id = entry.turn.clone();
@@ -1942,7 +1954,13 @@ impl Core {
                 self.note_mcp_servers(conv, sid, servers);
                 return;
             }
-            EngineEvent::Background(_) => unreachable!("handled before reply events"),
+            EngineEvent::Reason(key) => {
+                if let Some(l) = self.live.get_mut(conv) {
+                    l.ended = Some(key);
+                }
+                return;
+            }
+            EngineEvent::Background(_) | EngineEvent::Capabilities(_) => unreachable!("handled before reply events"),
             EngineEvent::Writers { .. } | EngineEvent::WriterExit { .. } | EngineEvent::Cursor { .. } => return,
             EngineEvent::Commands(commands) => {
                 if let Some(c) = self.convs.get_mut(conv) {
@@ -2219,6 +2237,13 @@ impl Core {
                 // A turn explicitly completed before interruption (plan approval) stays Done while its counters arrive.
                 let ended = self.turn(conv).is_some_and(|m| m.status == Some(Status::Done));
                 let ok = ok || ended;
+                // A turn that did not end well says why, in plain words, unless the person stopped it, the plan's limit answers
+                // it (recovery), or the CLI only said it was interrupted.
+                let why = self.live.get_mut(conv).and_then(|l| l.ended.take());
+                let by_person = self.convs.get(conv).is_some_and(|c| c.stopped);
+                let why = why.filter(|key| {
+                    !ok && !by_person && !recovery::plan_limit(&reason) && !matches!(*key, "reason.interrupted" | "reason.complete")
+                });
                 // Claude reports a conversation total; Codex has already priced this turn's individual requests.
                 let session = self.convs.get(conv).and_then(|c| c.sessions.get(&vendor)).cloned().unwrap_or_default();
                 let area = self.convs.get(conv).map_or(Area::Chat, |c| c.area);
@@ -2267,8 +2292,11 @@ impl Core {
                 let mut looked = None;
                 if let Some(m) = self.turn(conv) {
                     m.status = Some(if ok { Status::Done } else { Status::Stopped });
+                    // The silence cut says its own key; any other ending says what the CLI reported.
                     if silent {
                         m.error = Some(silence::KEY.into());
+                    } else if let Some(key) = why {
+                        m.error = Some(key.into());
                     }
                     m.took = ok.then(|| now().saturating_sub(m.at));
                     // Only a turn that ended well is done: a failed one may still be waited on or moved, and works again then.
@@ -3290,6 +3318,11 @@ impl Core {
             return Err("error.rewind.busy".into());
         }
         self.tick += 1;
+        // Rule 2 of docs/product/models.md: a CLI never starts on its own default model or effort. A choice with none (Claude
+        // without a model, ChatGPT before its models are listed) takes the default the engine would show, so it is also what
+        // an open process is compared with below.
+        let resolved = pick.resolved(self.codex_recommended.as_deref(), &self.codex_models);
+        let pick = &resolved;
         let cli = self.opts.clis.get(&pick.vendor).cloned();
         let settings = self.store.settings();
         let (permissions, tuning) = (settings.permissions(), settings.tuning());
@@ -3599,6 +3632,8 @@ impl Core {
                 vendor: pick.vendor,
                 model: pick.model.clone(),
                 running: None,
+                capabilities: Default::default(),
+                ended: None,
                 effort: pick.effort.clone(),
                 sid,
                 session,
@@ -4407,6 +4442,84 @@ mod tool_in_tests {
         engine.shutdown();
     }
 
+    /// A CLI's start-up `capabilities` stay with the process that announced them (rule 6 of docs/product/models.md): another
+    /// conversation's process, and a process started later, begin with none.
+    #[tokio::test]
+    async fn the_capabilities_a_cli_announced_stay_with_its_own_process() {
+        let data = tempfile::tempdir().unwrap();
+        let engine = Engine::new(
+            EngineOptions {
+                data_dir: data.path().to_path_buf(),
+                clis: Default::default(),
+                spawn: Arc::new(|_, _, _| panic!("the test must never spawn a process")),
+                windows: cfg!(windows),
+                claude_env_billed: false,
+                max_warm: 0,
+                idle: Duration::from_secs(60),
+                runtime: tokio::runtime::Handle::current(),
+                ask: None,
+            },
+            Arc::new(|_| {}),
+        );
+        let live = |id: &'static str| Live {
+            tool_kit: Default::default(),
+            kit_identity: None,
+            kit_resource_digest: None,
+            kit_pending: false,
+            prepared: false,
+            kit_resources: None,
+            group_files: None,
+            group_context: None,
+            vendor: Vendor::Claude,
+            model: None,
+            running: None,
+            capabilities: Default::default(),
+            ended: None,
+            effort: String::new(),
+            sid: 1,
+            session: Session::from_fn(move |_| {
+                let _ = id;
+            }),
+            turn: None,
+            break_pending: false,
+            answer_started: false,
+            used: 0,
+            cli: Cli { command: "unused".into(), prefix: vec![] },
+            resumed: false,
+            permissions: Permissions::Ask,
+            tuning: Default::default(),
+            research: None,
+            retiring: false,
+            was_idle: false,
+            runs: Permissions::Ask,
+            cwd: data.path().to_path_buf(),
+            visual_root: None,
+            by_hand: true,
+            approved: false,
+            started: 0.0,
+            served: true,
+            steering: vec![],
+            held: None,
+            unsaved_session: None,
+        };
+        engine.with(|core| {
+            core.live.insert("a".into(), live("a"));
+            core.live.insert("b".into(), live("b"));
+            let said = crate::events::Capabilities { names: vec!["interrupt_receipt_v1".into()] };
+            core.handle("a", 1, EngineEvent::Capabilities(said.clone()));
+            assert_eq!(core.live["a"].capabilities, said);
+            assert!(core.live["b"].capabilities.names.is_empty(), "another conversation's process said nothing");
+            // A late word from a process that was replaced does not land on its successor.
+            core.handle("a", 9, EngineEvent::Capabilities(crate::events::Capabilities { names: vec!["stale".into()] }));
+            assert_eq!(core.live["a"].capabilities, said);
+            // The reason a turn ended is taken by its `Done`, once.
+            core.handle("b", 1, EngineEvent::Reason("reason.failed"));
+            assert_eq!(core.live["b"].ended, Some("reason.failed"));
+            assert_eq!(core.live.get_mut("b").unwrap().ended.take(), Some("reason.failed"));
+        });
+        engine.shutdown();
+    }
+
     #[tokio::test]
     async fn rewind_stop_reaches_idle_sessions_without_stopping_other_conversations() {
         let data = tempfile::tempdir().unwrap();
@@ -4442,6 +4555,8 @@ mod tool_in_tests {
                         vendor,
                         model: None,
                         running: None,
+                        capabilities: Default::default(),
+                        ended: None,
                         effort: String::new(),
                         sid: 1,
                         session: Session::from_fn(move |cmd| {

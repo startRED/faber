@@ -646,8 +646,11 @@ fn parse_notification(msg: &Value, state: &mut CodexTurnState) -> Vec<EngineEven
                 tool: "ExitPlanMode".into(),
                 input: json!({}),
             });
+            // Why a turn that did not complete ended, from the turn's own status, as a key (rule 6).
+            let why = (status != "completed").then(|| crate::events::failure_reason(Some(&status), None));
             approval
                 .into_iter()
+                .chain(why.map(EngineEvent::Reason))
                 .chain([EngineEvent::Done {
                     ok: status == "completed",
                     reason: p["turn"]["error"]["message"].as_str().map(String::from).unwrap_or(status),
@@ -990,7 +993,9 @@ fn turn_params(thread: &str, effort: Option<&str>, turn: &UserTurn) -> Value {
 
 /// Collaboration mode selects Codex's actual planning prompt; a read-only sandbox alone is not Plan mode.
 fn start_params(thread: &str, settings: &mut CodexThread, model: &str, turn: &UserTurn) -> Value {
-    let mut params = turn_params(thread, settings.effort.as_deref(), turn);
+    // Rule 2 of docs/product/models.md: every turn names its effort, never the account's own.
+    let effort = settings.effort.clone().filter(|e| !e.is_empty()).unwrap_or_else(|| crate::router::EFFORT.into());
+    let mut params = turn_params(thread, Some(&effort), turn);
     let leave_plan = settings.leave_plan && !model.is_empty();
     if leave_plan {
         settings.leave_plan = false;
@@ -1001,7 +1006,7 @@ fn start_params(thread: &str, settings: &mut CodexThread, model: &str, turn: &Us
         params["collaborationMode"] = json!({
             "mode": if settings.permissions == Permissions::Plan { "plan" } else { "default" },
             "settings": { "model": model,
-                "reasoning_effort": settings.effort, "developer_instructions": null }
+                "reasoning_effort": effort, "developer_instructions": null }
         });
     }
     // thread/start or thread/resume already sets this session's sandbox and approval policy from the same mode.
@@ -1017,7 +1022,10 @@ pub fn add_servers(params: &mut Value, servers: &[crate::tools::Launch]) {
 }
 
 pub fn thread_params(area: Area, t: &CodexThread) -> (&'static str, Value) {
-    let mut params = codex_thread(area, t.model.as_deref(), t.permissions);
+    // Rule 2 of docs/product/models.md: a thread always names its model. The engine resolves its choice first, from the
+    // account's list; this is the last resort for a caller that chose none and knows no account.
+    let model = t.model.clone().filter(|m| !m.is_empty()).unwrap_or_else(|| crate::router::default_model(Vendor::Codex, None, &[]));
+    let mut params = codex_thread(area, Some(&model), t.permissions);
     if let Some(instructions) = &t.instructions {
         params.insert("baseInstructions".into(), instructions.clone().into());
         // Legacy read-only still permits disk-wide reads. Internal questions keep the same credential/network

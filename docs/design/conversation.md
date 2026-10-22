@@ -38,6 +38,11 @@ above an answer. The window widths, the sidebar and the running column are in [l
   where a message waits in the queue. More words after that undo it. The age ticks once a minute on the newest reply only,
   never while the window is hidden; older replies run no timer. A reply from before the times were kept, a stop and an error
   say nothing here. Nothing animates.
+- A reply that stopped on its own says why in one line under its words, and never beside "Stopped." (that word is only the
+  person's own Stop, which says nothing more). A limit (`reason.turnLimit`, `reason.budget`) is told in the quiet note
+  style; a failure (`reason.failed`, and `reason.other` for an ending this version does not know) keeps the red note (C001).
+  A plan limit is the quota card's, and an ending the CLI itself reports as a stop says nothing. The line is a sentence from
+  `ui/locales/`, never the CLI's own word.
 - In the work log, what the agent wrote between its steps shows its last two paragraphs; earlier ones wait under a quiet
   "1 more" link in the third ink (R251). A code block keeps the narration whole. The answer itself never folds.
 - The caret blinks only while words arrive; a reply at work after its words shows its step under them, in the status

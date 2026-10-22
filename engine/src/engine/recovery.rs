@@ -576,6 +576,8 @@ mod tests {
                     vendor: Vendor::Codex,
                     model: None,
                     running: None,
+                    capabilities: Default::default(),
+                    ended: None,
                     effort: "medium".into(),
                     sid: 1,
                     session: Session::from_fn(|_| {}),

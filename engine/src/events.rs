@@ -4,7 +4,7 @@ use crate::model::Image;
 use serde_json::Value;
 
 /// Startup advertisements are information, never authority to admit an automated role.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct Capabilities {
     pub names: Vec<String>,
 }
@@ -19,15 +19,82 @@ impl Capabilities {
     }
 }
 
-/// Project event adapters use fixed keys; Chat keeps its existing result strings.
+/// The `reason.*` key for how a turn ended, from the CLI's own word for it: Claude Code's terminal reason (its result subtype
+/// when it names none) or ChatGPT's turn status. A word Faber does not know is `reason.other`, whose sentence says so: a raw
+/// string never reaches the screen (rule 6 of docs/product/models.md).
 pub fn terminal_reason(raw: &str) -> &'static str {
     match raw {
         "success" | "completed" | "end_turn" => "reason.complete",
-        "interrupted" | "cancelled" => "reason.interrupted",
+        "interrupted" | "cancelled" | "aborted_streaming" | "aborted_tools" => "reason.interrupted",
         "error_max_turns" | "max_turns" => "reason.turnLimit",
         "error_max_budget_usd" | "max_budget_usd" => "reason.budget",
-        "error_during_execution" | "failed" => "reason.failed",
-        _ => "reason.unknown",
+        "error_during_execution" | "failed" | "model_error" | "api_error" => "reason.failed",
+        _ => "reason.other",
+    }
+}
+
+/// The key of a turn that did not end well, from its own words, the terminal reason first and the result subtype after it: the
+/// first word Faber knows that says why. A word that says "completed" on a turn that failed is a failure. When neither word is
+/// known the key is generic and the unknown word goes to the engine's stderr, once, never to the screen.
+pub fn failure_reason(terminal: Option<&str>, subtype: Option<&str>) -> &'static str {
+    let words = [terminal, subtype].into_iter().flatten().filter(|w| !w.is_empty());
+    let keys: Vec<_> = words.clone().map(|w| (w, terminal_reason(w))).collect();
+    if let Some((_, key)) = keys.iter().find(|(_, k)| !matches!(*k, "reason.other" | "reason.complete")) {
+        return key;
+    }
+    if keys.iter().any(|(_, k)| *k == "reason.complete") {
+        return "reason.failed";
+    }
+    for word in words {
+        if unseen(word) {
+            eprintln!("faber: a turn ended with a word this version does not know: {}", word.chars().take(WORD_MAX).collect::<String>());
+        }
+    }
+    "reason.other"
+}
+
+const WORD_MAX: usize = 80;
+const WORDS_MAX: usize = 64;
+
+/// True the first time this process sees a word (cut to `WORD_MAX` characters), so each unknown ending is logged once. Past
+/// `WORDS_MAX` different words nothing is stored and nothing more is logged.
+fn unseen(word: &str) -> bool {
+    static SEEN: std::sync::Mutex<Vec<String>> = std::sync::Mutex::new(Vec::new());
+    let word: String = word.chars().take(WORD_MAX).collect();
+    let mut seen = SEEN.lock().unwrap_or_else(|e| e.into_inner());
+    // shortcut: a short list scanned linearly, a few words ever come in a run; use a set if CLIs start to send many.
+    if seen.len() >= WORDS_MAX || seen.contains(&word) {
+        return false;
+    }
+    seen.push(word);
+    true
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn an_unknown_ending_word_is_logged_once() {
+        assert!(unseen("a_word_only_this_test_sends"));
+        assert!(!unseen("a_word_only_this_test_sends"));
+        // A long word is stored cut, so its repeat is known; and the list is bounded, so a full one logs nothing more.
+        let long = "x".repeat(200);
+        assert!(unseen(&long) && !unseen(&long));
+        for n in 0..WORDS_MAX * 2 {
+            unseen(&format!("bounded_{n}"));
+        }
+        assert!(!unseen("one_more_after_the_list_is_full"));
+    }
+
+    #[test]
+    fn the_subtype_says_why_when_the_terminal_reason_is_unknown_and_nothing_known_is_generic() {
+        assert_eq!(failure_reason(Some("future_word"), Some("error_max_turns")), "reason.turnLimit");
+        assert_eq!(failure_reason(Some("completed"), Some("error_max_budget_usd")), "reason.budget");
+        assert_eq!(failure_reason(Some("completed"), Some("success")), "reason.failed");
+        assert_eq!(failure_reason(None, Some("api_error")), "reason.failed");
+        assert_eq!(failure_reason(Some("future_word"), Some("future_subtype")), "reason.other");
+        assert_eq!(failure_reason(None, None), "reason.other");
     }
 }
 
@@ -194,6 +261,12 @@ pub enum EngineEvent {
     SteerFailed {
         tag: String,
     },
+    /// What the CLI said at start-up it can do (Claude Code's `capabilities` in `system/init`). The engine keeps it with the
+    /// session; a feature is detected from it, never from the CLI's version.
+    Capabilities(Capabilities),
+    /// How a turn that did not end well ended, as a `reason.*` key the screen translates. Sent before its `Done`, only when the
+    /// CLI named a reason.
+    Reason(&'static str),
     /// `fatal`: the CLI process is gone and the next turn needs a new one.
     Error {
         message: String,

@@ -147,6 +147,8 @@ mod tests {
                     vendor: Vendor::Codex,
                     model: Some("gpt-6.1-sol".into()),
                     running: None,
+                    capabilities: Default::default(),
+                    ended: None,
                     effort: "medium".into(),
                     sid: 1,
                     session: Session::from_fn(move |cmd| {

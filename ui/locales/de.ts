@@ -1594,7 +1594,10 @@ export const de: Messages = {
   // Native speaker must translate (needs native review).
   // Native speaker must translate (needs native review).
   'reason.budget.other': 'Faber wartet, bis dein Kontingent den nächsten Schritt erlaubt.',
-  'reason.other': 'Faber hat hier aus einem Grund angehalten, den es noch nicht beschreiben kann. Die Details stehen im Protokoll.',
+  'reason.other': 'Faber hat hier aus einem Grund angehalten, den es noch nicht beschreiben kann.',
+  'reason.turnLimit': 'Die KI hat angehalten, weil sie ihr Limit an Schritten für eine Nachricht erreicht hat.',
+  'reason.budget': 'Die KI hat angehalten, weil sie ihr Ausgabenlimit erreicht hat.',
+  'reason.failed': 'Die KI hat angehalten, weil etwas schiefgelaufen ist. Schick eine Nachricht, um es noch einmal zu versuchen.',
   'reason.silent': "Diese Antwort war 15 Minuten lang still, deshalb hat Faber sie angehalten. Was bis dahin geschrieben war, bleibt erhalten; schick eine Nachricht, um weiterzumachen.",
   'reason.silent.unconfirmed': "Diese Antwort war 15 Minuten lang still. Faber hat versucht, sie anzuhalten, hat aber nicht bestätigt, dass sie angehalten wurde. Warte und prüfe es noch einmal.",
   // Native speaker must translate (needs native review).
@@ -1893,6 +1896,7 @@ export const de: Messages = {
   'notes.174.fixed': 'Eine Antwort, die 15 Minuten hängt, endet jetzt mit einer Meldung, und was sie geschrieben hat, bleibt. Deine anderen Unterhaltungen laufen weiter.',
   'notes.175.better': 'Die Nutzungsbalken und die Pfeile an aufklappbaren Bereichen bewegen sich jetzt fließend statt zu springen.',
   'notes.176.fixed': 'Wenn du in Läuft gerade eine Frage beantwortest, verschwindet ihre Karte nicht mehr abrupt: Sie klappt sanft zu.',
+  'notes.177.fixed': 'Eine Antwort, die von selbst stehen blieb, an einer Grenze oder bei einem Fehler, kam ohne Erklärung. Jetzt nennt sie den Grund.',
   'update.checking': 'Suche nach einem Update…',
   'update.downloading': 'Update wird heruntergeladen…',
   'update.downloadingPercent': 'Update wird heruntergeladen… {percent} %',

@@ -549,12 +549,13 @@ function Answer(props: Shared & { m: Accessor<Message>; messages?: Message[]; pr
         </div>
       </Show>
       <Show when={props.area !== 'project' && m().follow}>{(f) => <FollowLine conversationId={props.conversationId} f={f()} />}</Show>
-      {/* Only the person's own Stop is said: a turn Faber started and cut needs no word. */}
-      <Show when={m().status === 'stopped' && props.prompt && !props.prompt.wake}>
+      {/* Only the person's own Stop is said: a turn Faber started and cut needs no word, and one that ended on a reason says that. */}
+      <Show when={m().status === 'stopped' && !m().error?.startsWith('reason.') && props.prompt && !props.prompt.wake}>
         <div class="note">{t('answer.stopped')}</div>
       </Show>
       <Show when={m().error && !quotaPending(m())}>
-        <div class="note err">{fromEngine(m().error, { when: m().waitUntil ? untilReset(m().waitUntil!) : t('quota.unknown') })}</div>
+        {/* A limit is told calmly (C001); a failure keeps the red bar. */}
+        <div class="note" classList={{ err: m().error !== 'reason.turnLimit' && m().error !== 'reason.budget' }}>{fromEngine(m().error, { when: m().waitUntil ? untilReset(m().waitUntil!) : t('quota.unknown') })}</div>
       </Show>
       {/* "Keep going" stopped by itself after this reply: why, in one calm line (C001). */}
       <Show when={m().halt}>

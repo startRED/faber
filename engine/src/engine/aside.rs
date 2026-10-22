@@ -74,7 +74,11 @@ impl Core {
         let model = model
             .filter(|m| codex_model(m) == (vendor == Vendor::Codex))
             .or_else(|| live.filter(|l| l.vendor == vendor).and_then(|l| l.running.clone().or_else(|| l.model.clone())))
-            .or_else(|| last.filter(|m| m.vendor == Some(vendor)).and_then(|m| m.model.clone()));
+            .or_else(|| last.filter(|m| m.vendor == Some(vendor)).and_then(|m| m.model.clone()))
+            // A conversation that never named one still asks on a model Faber chose, never on the CLI's own (rule 2).
+            .or_else(|| Some(crate::router::default_model(vendor, self.codex_recommended.as_deref(), &self.codex_models)))
+            // The picker's alias ("opus") goes to the CLI as the full id.
+            .map(|m| crate::router::pinned(vendor, &m).to_string());
         let cli = self.opts.clis.get(&vendor).cloned().ok_or("error.aside.none")?;
         self.allows(vendor, model.as_deref().and_then(family_of), Purpose::UserTurn { by_hand: true }, false).map_err(refusal)?;
         let (area, cwd) = (c.area, self.cwd_of(c)?);

@@ -5480,3 +5480,184 @@ async fn reply_style_in_the_same_engine_reopens_claude_and_keeps_peer_turns() {
         app.shutdown();
     }
 }
+
+#[tokio::test]
+async fn rule_2_a_choice_that_names_no_model_or_effort_still_starts_each_cli_on_a_full_model_id_and_an_effort() {
+    for vendor in Vendor::ALL {
+        let dir = tempfile::tempdir().unwrap();
+        let f = fake(fixture(vendor.name(), "chat"));
+        let (engine, mut rx) = engine(dir.path(), vendor, f.spawn.clone());
+        engine.send(ask(Area::Chat, SKY, choice(vendor.name(), None))).unwrap();
+        finished(&mut rx, |_| {}).await;
+        engine.shutdown();
+        if vendor == Vendor::Claude {
+            let args = f.args.lock().unwrap();
+            let flag = |name: &str| args[0].windows(2).find(|w| w[0] == name).map(|w| w[1].clone());
+            assert!(flag("--permission-mode").is_some(), "{:?}", args[0]);
+            assert_eq!((flag("--model").as_deref(), flag("--effort").as_deref()), (Some("claude-sonnet-5-5"), Some("medium")));
+        } else {
+            let wire = f.wire.messages();
+            let sent =
+                |method: &str| wire.iter().find(|m| m["method"] == method).unwrap_or_else(|| panic!("no {method}: {wire:?}")).clone();
+            let thread = sent("thread/start");
+            assert_eq!(thread["params"]["model"], "gpt-6.1-sol", "before the account lists its models, the table's own stands in");
+            assert!(thread["params"]["sandbox"].is_string() && thread["params"]["approvalPolicy"].is_string(), "{thread}");
+            assert_eq!(sent("turn/start")["params"]["effort"], "medium");
+        }
+    }
+}
+
+#[tokio::test]
+async fn rule_2_the_account_recommended_model_is_the_one_chatgpt_starts_on_when_the_choice_names_none() {
+    let dir = tempfile::tempdir().unwrap();
+    let f = fake(fixture("codex", "chat"));
+    let (engine, mut rx) = engine(dir.path(), Vendor::Codex, f.spawn.clone());
+    engine.set_codex_models(vec!["gpt-6-luna".into(), "gpt-6.1-sol".into()], Some("gpt-6-luna".into()));
+    engine.send(ask(Area::Chat, SKY, choice("codex", None))).unwrap();
+    finished(&mut rx, |_| {}).await;
+    engine.shutdown();
+    let wire = f.wire.messages();
+    assert_eq!(wire.iter().find(|m| m["method"] == "thread/start").unwrap()["params"]["model"], "gpt-6-luna");
+}
+
+#[tokio::test]
+async fn rule_2_with_no_recommended_model_chatgpt_starts_on_one_the_account_lists_not_on_one_it_may_lack() {
+    let dir = tempfile::tempdir().unwrap();
+    let f = fake(fixture("codex", "chat"));
+    let (engine, mut rx) = engine(dir.path(), Vendor::Codex, f.spawn.clone());
+    // An account that lists only the small model: the table's own first model (gpt-6.1-sol) is not on it.
+    engine.set_codex_models(vec!["gpt-6-luna".into()], None);
+    engine.send(ask(Area::Chat, SKY, choice("codex", None))).unwrap();
+    finished(&mut rx, |_| {}).await;
+    engine.shutdown();
+    let wire = f.wire.messages();
+    assert_eq!(wire.iter().find(|m| m["method"] == "thread/start").unwrap()["params"]["model"], "gpt-6-luna");
+}
+
+#[tokio::test]
+async fn rule_6_a_turn_that_ends_badly_says_why_in_a_reason_key_and_an_unknown_one_is_generic_never_the_raw_word() {
+    // (what the CLI's result said, what the reply shows, or nothing when the person has no use for it)
+    let cases = [
+        (json!({"subtype":"error_max_turns","is_error":true}), Some("reason.turnLimit")),
+        (json!({"subtype":"error_max_budget_usd","is_error":true}), Some("reason.budget")),
+        (json!({"subtype":"error_during_execution","is_error":true}), Some("reason.failed")),
+        (json!({"subtype":"error_from_a_newer_cli","is_error":true}), Some("reason.other")),
+        (json!({"subtype":"error_during_execution","is_error":true,"terminal_reason":"a_newer_reason"}), Some("reason.failed")),
+        (json!({"subtype":"error_max_turns","is_error":true,"terminal_reason":"a_newer_reason"}), Some("reason.turnLimit")),
+        (json!({"subtype":"api_error","is_error":true}), Some("reason.failed")),
+        (json!({"subtype":"error_from_a_newer_cli","is_error":true,"terminal_reason":"a_newer_reason"}), Some("reason.other")),
+        // The CLI says it was stopped: nothing to explain. The same words from the plan's limit are recovery's to answer.
+        (json!({"subtype":"error_during_execution","is_error":true,"terminal_reason":"aborted_streaming"}), None),
+        (json!({"subtype":"error_during_execution","is_error":true,"errors":["You've hit your limit"]}), None),
+        (json!({"subtype":"success","is_error":false,"terminal_reason":"completed"}), None),
+        // A plan limit shaped as a "success" flagged as an error, its words only in `result`, is still the plan limit.
+        (json!({"subtype":"success","is_error":true,"terminal_reason":"completed","result":"You've hit your limit"}), None),
+        // Another limit in the same place (the context's) is no plan limit: it ends as a plain failure, never as a handover.
+        (
+            json!({"subtype":"success","is_error":true,"terminal_reason":"completed","result":"Context limit reached"}),
+            Some("reason.failed"),
+        ),
+    ];
+    for (result, shown) in cases {
+        let dir = tempfile::tempdir().unwrap();
+        let (spawn, made) = pipes();
+        let (engine, mut rx) = engine(dir.path(), Vendor::Claude, spawn);
+        engine.send(ask(Area::Chat, SKY, choice("claude", None))).unwrap();
+        let mut cli = next_pipe(&made).await;
+        cli.say(json!({"type":"system","subtype":"init","session_id":"s1","model":"claude-sonnet-5-5"})).await;
+        let mut result = result;
+        result["type"] = "result".into();
+        result["total_cost_usd"] = 0.0.into();
+        result["usage"] = json!({});
+        cli.say(result.clone()).await;
+        let reply = finished(&mut rx, |_| {}).await;
+        engine.shutdown();
+        if shown.is_some() {
+            assert_eq!(reply.error.as_deref(), shown, "{result}");
+        } else {
+            // A plan limit goes to recovery, which may name its own key; no raw word either way.
+            assert!(reply.error.as_deref().is_none_or(|e| e.starts_with("error.")), "{result}: {:?}", reply.error);
+        }
+        assert!(reply.error.as_deref().is_none_or(|e| !e.contains("error_") && !e.contains("terminal")), "{:?}", reply.error);
+    }
+}
+
+/// Every update of the reply the engine sends in the next moment, so a line that comes after the first stop is seen too.
+async fn drain(rx: &mut UnboundedReceiver<AppEvent>) -> Vec<Message> {
+    let mut seen = vec![];
+    while let Ok(Some(e)) = tokio::time::timeout(Duration::from_millis(300), rx.recv()).await {
+        if let AppEvent::Message { message, .. } = e {
+            seen.push(*message);
+        }
+    }
+    seen
+}
+
+#[tokio::test]
+async fn rule_6_the_persons_own_stop_stays_quiet_when_the_cli_names_no_terminal_reason() {
+    let dir = tempfile::tempdir().unwrap();
+    let (spawn, made) = pipes();
+    let (engine, mut rx) = engine(dir.path(), Vendor::Claude, spawn);
+    let id = engine.send(ask(Area::Chat, SKY, choice("claude", None))).unwrap();
+    let mut cli = next_pipe(&made).await;
+    cli.say(json!({"type":"system","subtype":"init","session_id":"s1","model":"claude-sonnet-5-5"})).await;
+    engine.interrupt(&id);
+    // What the CLI says when it was cut by the person: a failure result, with no terminal reason at all.
+    cli.say(json!({"type":"result","subtype":"error_during_execution","is_error":true,"total_cost_usd":0.0,"usage":{}})).await;
+    let mut seen = drain(&mut rx).await;
+    seen.push(engine.open(&id).unwrap().messages.last().unwrap().clone());
+    assert!(
+        seen.iter().all(|m| m.error.is_none()),
+        "the person's own Stop says nothing more: {:?}",
+        seen.iter().map(|m| &m.error).collect::<Vec<_>>()
+    );
+    engine.shutdown();
+}
+
+#[tokio::test]
+async fn rule_6_a_chatgpt_turn_that_failed_for_another_reason_than_the_plan_says_so() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut entries = fixture("codex", "chat");
+    // The recorded first turn ends as the CLI reports a failure that is not a plan limit.
+    let done = entries.iter_mut().find(|e| e.msg["method"] == "turn/completed").unwrap();
+    done.msg["params"]["turn"]["status"] = "failed".into();
+    done.msg["params"]["turn"]["error"] = json!({"message": "stream disconnected before completion"});
+    let f = fake(entries);
+    let (engine, mut rx) = engine(dir.path(), Vendor::Codex, f.spawn.clone());
+    engine.send(ask(Area::Chat, SKY, choice("codex", None))).unwrap();
+    let reply = finished(&mut rx, |_| {}).await;
+    engine.shutdown();
+    assert_eq!(reply.error.as_deref(), Some("reason.failed"), "{:?}", (reply.status, &reply.error));
+}
+
+#[tokio::test]
+async fn rule_2_two_messages_on_a_choice_that_names_no_model_start_one_process() {
+    let dir = tempfile::tempdir().unwrap();
+    let (spawn, made) = pipes();
+    let started = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+    let counted: Spawner = {
+        let (n, inner) = (started.clone(), spawn);
+        Arc::new(move |bin, argv, cwd| {
+            n.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            inner(bin, argv, cwd)
+        })
+    };
+    let (engine, mut rx) = engine(dir.path(), Vendor::Claude, counted);
+    let id = engine.send(ask(Area::Chat, SKY, choice("claude", None))).unwrap();
+    let mut cli = next_pipe(&made).await;
+    cli.say(json!({"type":"system","subtype":"init","session_id":"s1","model":"claude-sonnet-5-5"})).await;
+    cli.say(json!({"type":"result","subtype":"success","is_error":false,"terminal_reason":"completed","total_cost_usd":0.0,"usage":{}}))
+        .await;
+    finished(&mut rx, |_| {}).await;
+    engine.send(SendRequest { conversation_id: Some(id), ..ask(Area::Chat, "And at sunset?", choice("claude", None)) }).unwrap();
+    // The second message reaches the process that is already there: the default model is the same string both times.
+    for _ in 0..100 {
+        if cli.lines.lock().unwrap().iter().filter(|m| m["type"] == "user").count() == 2 {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(10)).await;
+    }
+    assert_eq!(cli.lines.lock().unwrap().iter().filter(|m| m["type"] == "user").count(), 2, "the second message went to the same process");
+    assert_eq!(started.load(std::sync::atomic::Ordering::SeqCst), 1);
+    engine.shutdown();
+}

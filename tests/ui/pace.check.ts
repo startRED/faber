@@ -230,3 +230,24 @@ check('pace: a failed snapshot after an accepted send never restores a request a
     if (storage === null) localStorage.removeItem('faber.place'); else localStorage.setItem('faber.place', storage);
   }
 });
+
+check('a reply that stopped on its own says why in one line: calm for a limit, red for a failure, never beside "Stopped."', () => {
+  useLanguage('en');
+  const user = { id: 'u', role: 'user', text: 'go', at: 1 } as Message;
+  for (const [error, calm] of [['reason.turnLimit', true], ['reason.budget', true], ['reason.failed', false], ['reason.other', false]] as const) {
+    const m = { id: 'reply', role: 'assistant', text: 'Partial', at: 2, status: 'stopped', vendor: 'claude', error } as Message;
+    const host = document.createElement('div');
+    const dispose = render(() => createComponent(Thread, { conversationId: 'chat', messages: [user, m], from: 0, options: [], onBranch: () => {} }), host);
+    try {
+      const why = [...host.querySelectorAll('.note')].filter((n) => n.textContent === t(error));
+      equal(why.length, 1, error + ' is said once');
+      equal(why[0]!.classList.contains('err'), !calm, error + (calm ? ' is calm' : ' is red'));
+      ok(!host.textContent!.includes(t('answer.stopped')), error + ': no second line saying Stopped');
+    } finally { dispose(); }
+  }
+  // The person's own Stop leaves no reason and still says so.
+  const stopped = { id: 'reply', role: 'assistant', text: 'Partial', at: 2, status: 'stopped', vendor: 'claude' } as Message;
+  const host = document.createElement('div');
+  const dispose = render(() => createComponent(Thread, { conversationId: 'chat', messages: [user, stopped], from: 0, options: [], onBranch: () => {} }), host);
+  try { ok(host.textContent!.includes(t('answer.stopped'))); } finally { dispose(); }
+});
