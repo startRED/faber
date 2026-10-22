@@ -9,15 +9,14 @@ Catalog is a separate browsing and management tab beside Chat and Projects, not 
 - **Chat** works like claude.ai and ChatGPT, and must beat them. It has many conversations. Each one works in a hidden
   workspace inside the app where the model runs code, draws charts and creates files, or in a folder the person picks
   before its first message (R107). Files show up in the conversation with Save and Show, and they stay in the workspace
-  until the user saves them; "take to a project" and moving a conversation to a project are planned, not built. "Don't
+  until the user saves them; an idle chat moves to a project from its row menu (R338), and "take to a project" for files is planned. "Don't
   ask", the default, gives full access (R121); "Ask before commands" asks before file changes and commands, except plain
   reads and what the person already allowed in the tool's own settings. The user picks any connected
   model or Auto, and every answer shows the model and, in Auto, the reason in one line.
 - **Projects** holds many git folders. Inside a project the person talks to one AI agent that works in the folder or in
   a separate copy of it (R160, R201); the agent splits the work itself, with the CLI's subagents, a helper from the
   other AI and conversations of its own (R161, R198). Faber builds itself this way (R96;
-  [self-development](../dev/self-development.md)). Moving a Chat conversation to a project with its full context is
-  planned.
+  [self-development](../dev/self-development.md)). A Chat conversation moves to a project with its messages (R338).
 
 The user always sees what is happening: the model behind each answer, the remaining quota of each subscription and
 when it renews, and, for running work, who is building and who is reviewing.
