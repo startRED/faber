@@ -1,6 +1,7 @@
 # Real-work benchmark (Task 7 of the test rework)
 
-Status: in progress, 2026-10-22. Step 1 is done (how TL-ADE is fed); nothing is built yet.
+Status: in progress, 2026-10-22. Steps 1 to 4 are done: Faber passes its 7 tasks and TL-ADE's driver its 5, each run
+once. Steps 5 and 6 (the measured runs and the report) are left.
 
 This is the plan for the real-work tier of the fair benchmark in R113: the spec's section 3.1
 ([spec](../specs/2026-10-14-test-system-rework-design.md)) and Task 7 of
@@ -54,12 +55,35 @@ their difference written beside the numbers.
   - Quota: `serve` always polls every 3 minutes and spawns the real CLIs. With the stand-in on PATH the poll fails
     quietly (logged only). Task 6 reads a `quota-<family>.json` written in the temporary `ADE_HOME` (`source:
     "official"`, its family, `observed_at` under 24 h old, `weekly_reset_at` ahead, `used_percent`).
-- [ ] **2. Record the sessions.** One short answer and one 50-turn thread, in Faber's fixture format and in TL-ADE's
+- [x] **2. Record the sessions.** One short answer and one 50-turn thread, in Faber's fixture format and in TL-ADE's
   scenario format, with the same text and the same delays.
-- [ ] **3. Faber's scenarios.** Tasks 1 to 7 as screen scenarios run alone (`cargo t --suite screen --filter real-work`),
-  each one a single meter run, with times to the first event and to the end read from the page.
-- [ ] **4. TL-ADE's driver.** One script per task (Node, DevTools over the debugging port), started by the meter with
+- [x] **3. Faber's scenarios.** Tasks 1 to 7 as screen scenarios run alone, each one a single meter run, with times to
+  the first event and to the end read from the page.
+  - The tasks are `testkit/src/screen/real_work.rs` ("real work N: …"). They join the suite only when `--filter`
+    names "real work", since task 1 sits idle for a minute, and they always run alone. They replay the recordings the
+    suite has (`chat.jsonl`, `resume.jsonl`, `interrupt.jsonl`), so step 2 needs only the 50-turn thread, which task 4
+    writes as a saved conversation the way the thousand-message scenario does.
+  - Each notes its times and the app's memory (`open 1.20 s, app 180 MB`), and `run.mjs` reads them back from the
+    runner's log into `<date>.notes.jsonl`.
+  - Task 6 needs a turn on Faber's side: the CLI reports its limits with each answer, while TL-ADE reads a file. So
+    the two are different work under different names (`turn_and_limit_shown_s` against `limit_shown_s`), and the
+    report says so beside the numbers.
+  - Task 7 replays `real-work-proof.jsonl`, written by hand: a project's answer in full access writes a file, so Faber's
+    checks (R204) run on the sample project. The fake CLI writes nothing, so the recording holds after its Write step
+    while the scenario writes the file into the work copy, and the checks show in the details beside the thread. Its
+    proof is `git diff --check`, since the sandbox's PATH holds git and no
+    Node; TL-ADE's mission runs the same command.
+- [x] **4. TL-ADE's driver.** One script per task (Node, DevTools over the debugging port), started by the meter with
   `serve` and the headless browser inside the same job.
+  - It is `scripts/bench/tlade.mjs --task N`. It makes a temporary repo (one commit), home and PATH. The PATH holds the
+    stand-in `faber-standin` copied as `claude.exe`, with `reply.txt` beside it, plus Node and git. It refuses to run
+    if either folder holds a program named after an AI's CLI.
+  - It starts `serve` and headless Chrome, and types into the panel's chat box (`Pergunta ao chat`). It counts the
+    answers (`.chat-turn.assistant`), polling every 50 ms.
+  - Task 3 stops both and starts them again on the same repo and home. Task 4 seeds `<repo>/.ade/chat/repo.json` with
+    the same 50 turns. Task 6 writes the quota receipt and opens Opções, then Modelos.
+  - The panel's triage call and its quota poll run the stand-in too. That is its own cost, and they stay in the
+    numbers.
 - [ ] **5. `run.mjs --only real-work`.** It adds the 7 pairs with a warm-up and three runs each, written with the suites
   to `docs/research/bench/`.
 - [ ] **6. Report.** The table goes into `docs/research/bench/README.md` against the floor of R113, with the tasks one

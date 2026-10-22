@@ -185,18 +185,7 @@ The program is `faber-test`, run as `cargo t`.
    memory and CPU, with no ceiling; no test is weakened. Landed: one engine test program, the `rust-lld` linker, lighter
    debug info and below-normal priority (2026-10-14), then in-page waits, parallel scenarios and skipping an unchanged
    screen build (R189); the shared running app was measured and shelved (R395).
-   - The meter is `faber-bench` (`testkit/src/bin/faber-bench.rs`, Windows only). It runs one command in a fresh job object
-     (started suspended, joined, resumed) below normal priority, with no window, no shell and its output thrown away (a log
-     would count as its writes). It reads the job's own accounting once the whole tree has ended, or 30 s after the
-     command did (it then ends what is left and the line counts it as `leaked`; the wall time then holds that wait): wall time, processes started, processor time, peak committed memory and
-     bytes written. It appends one JSON line with the folder's commit and the time. Before starting it waits until there
-     has been no input for `--idle` seconds (60), no full-screen app is in front and no Cargo build (`cargo`, `rustc`,
-     `link`) runs anywhere on the PC. `--unfair` skips the wait and marks the line, for checking the meter itself.
-   - `node scripts/bench/run.mjs [--only suites|matched] [--runs 3]` runs both sides through it. TL-ADE is the folder
-     beside the repository, or `--tlade` (needed from a worktree). The sides are `vitest run` against `cargo t --all`, and the 8 matched scenarios
-     of the spec, Faber one test module at a time (`--filter`), summed, which can only favour TL-ADE. Each gets one warm-up run, kept apart, so compilation is never measured
-     (R115), then three runs. Every run goes to `docs/research/bench/<date>.jsonl`, and the medians print as a table.
-   - Still open: the real-work tier (7 tasks through each app's screen) and the report against the floor.
+   How it is measured: [the fair benchmark](fair-bench.md).
 7. **The build folder has a budget** (R106). Every worktree builds into a folder of the main checkout's `target`, and
    Cargo never deletes anything there, so it grew to 123 GB and once filled the disk. `cargo t` sweeps it at start, at
    most once an hour: folders of removed worktrees and builds replaced more than a day ago go, and above 60 GB

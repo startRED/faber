@@ -19,6 +19,10 @@ path = "src/bin/fake-cli.rs"
 name = "faber-bench"
 path = "src/bin/faber-bench.rs"
 
+[[bin]]
+name = "faber-standin"
+path = "src/bin/faber-standin.rs"
+
 [dependencies]
 faber-engine = { path = "../engine" }
 base64 = "0.23"

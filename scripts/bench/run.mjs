@@ -3,13 +3,14 @@
 // and then `--runs` times, appends every run to docs/research/bench/<date>.jsonl and prints the medians as a table.
 // Compilation is never measured (R115): the warm-up run builds what the measured ones reuse.
 //
-//   node scripts/bench/run.mjs [--only suites|matched] [--runs 3] [--tlade <folder>] [--bench <faber-bench.exe>]
+//   node scripts/bench/run.mjs [--only suites|matched|real-work] [--runs 3] [--tlade <folder>] [--bench <faber-bench.exe>]
 //
 // Children start with no shell: the meter is given the real programs (cargo, node).
 import { spawnSync } from 'node:child_process';
-import { existsSync, mkdirSync } from 'node:fs';
+import { appendFileSync, existsSync, mkdirSync, readFileSync, rmSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { TASKS as TLADE_TASKS } from './tlade.mjs';
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..', '..');
 
@@ -25,8 +26,20 @@ export const MATCHED = [
   { id: 8, behaviour: 'An npm .cmd shim resolves to the real program', tlade: ['tests/doctor.test.ts', 'tests/parity/windows-durability.test.ts'], faber: ['engine::cli_lookup_follows_npm_cmd_shims'] },
 ];
 
-/** What one plan measures: a label, the folder it runs in, the program and its arguments. */
-export function plan(only, tlade) {
+/** The real-work tasks (docs/superpowers/plans/2026-10-22-real-work-bench.md) Faber has a scenario for. */
+export const REAL_WORK = [
+  { id: 1, task: 'Sit idle on a new conversation for 60 s' },
+  { id: 2, task: 'One chat turn that streams an answer' },
+  { id: 3, task: 'Close and reopen, then continue the same session' },
+  { id: 4, task: 'A 50-turn conversation, then scroll its whole thread' },
+  { id: 5, task: 'Interrupt a running turn and send the next one' },
+  { id: 6, task: 'Show the limit of each vendor' },
+  { id: 7, task: 'Run the proof of a small sample project and report it' },
+];
+
+/** What one plan measures: a label, the folder it runs in, the program and its arguments. The other side's real-work
+ * driver gets the stand-in CLI and the file it writes its notes to. */
+export function plan(only, tlade, { standin = 'faber-standin.exe', notes = 'notes.json' } = {}) {
   const vitest = ['node_modules/vitest/vitest.mjs', 'run'];
   const suites = [
     { label: 'tlade suite', dir: tlade, program: 'node', args: vitest },
@@ -38,7 +51,28 @@ export function plan(only, tlade) {
     { label: `tlade matched ${m.id}`, scenario: m.id, dir: tlade, program: 'node', args: [...vitest, ...new Set(m.tlade)] },
     ...m.faber.map((f) => ({ label: `faber matched ${m.id} ${f}`, scenario: m.id, dir: root, program: 'cargo', args: ['t', '--suite', 'rust', '--filter', f] })),
   ]);
-  return only === 'suites' ? suites : only === 'matched' ? matched : [...suites, ...matched];
+  // The colon keeps task 1 from matching a task 10.
+  const realWork = REAL_WORK.flatMap((t) => [
+    ...(TLADE_TASKS.includes(t.id)
+      ? [{ label: `tlade real work ${t.id}`, task: t.id, notes, dir: root, program: 'node', args: ['scripts/bench/tlade.mjs', '--task', String(t.id), '--tlade', tlade, '--standin', standin, '--notes', notes] }]
+      : []),
+    { label: `faber real work ${t.id}`, task: t.id, dir: root, program: 'cargo', args: ['t', '--suite', 'screen', '--filter', `real work ${t.id}:`] },
+  ]);
+  const by = { suites, matched, 'real-work': realWork };
+  return by[only] ?? [...suites, ...matched, ...realWork];
+}
+
+/** The times and sizes a real-work scenario noted, read from the runner's log line: `open 1.20 s` is `open_s: 1.2`. */
+export function notes(log, task) {
+  const line = log.split('\n').find((l) => l.startsWith('pass') && l.includes(`real work ${task}:`));
+  const noted = line?.match(/\[(.*)\]$/)?.[1];
+  if (!noted) return null;
+  return Object.fromEntries(
+    noted.split(', ').flatMap((note) => {
+      const m = note.match(/^(.*) ([\d.]+) (s|MB)$/);
+      return m ? [[`${m[1].replaceAll(' ', '_')}_${m[3].toLowerCase()}`, Number(m[2])]] : [];
+    }),
+  );
 }
 
 /** The median of a list of numbers. */
@@ -85,22 +119,36 @@ function main() {
   const tlade = resolve(flag('--tlade', join(root, '..', 'TL-ADE')));
   const target = process.env.CARGO_TARGET_DIR || join(root, 'target');
   const bench = flag('--bench', join(target, 'debug', 'faber-bench.exe'));
+  const standin = join(target, 'debug', 'faber-standin.exe');
   if (!existsSync(bench)) throw new Error(`no meter at ${bench}: cargo build -p faber-testkit --bin faber-bench`);
   if (!existsSync(join(tlade, 'node_modules', 'vitest'))) throw new Error(`no TL-ADE with its dependencies at ${tlade}`);
   const folder = join(root, 'docs', 'research', 'bench');
   mkdirSync(folder, { recursive: true });
   const out = join(folder, `${new Date().toISOString().slice(0, 10)}.jsonl`);
   const lines = [];
-  for (const step of plan(only, tlade)) {
+  const steps = plan(only, tlade, { standin, notes: join(target, 'tlade-notes.json') });
+  if (steps.some((s) => s.notes) && !existsSync(standin)) throw new Error(`no stand-in at ${standin}: cargo build -p faber-testkit --bin faber-standin`);
+  for (const step of steps) {
     for (let n = 0; n <= runs; n++) {
       const warmup = n === 0;
       const label = warmup ? `${step.label} (warm-up)` : step.label;
+      const from = step.notes ?? join(target, 'faber-test', 'run.log');
+      // Each measured run's notes come from that run alone: a file left by the one before never counts.
+      if (step.task) rmSync(from, { force: true });
       const meter = ['--label', label, '--dir', step.dir, '--out', warmup ? `${out}.warmup` : out, '--', step.program, ...step.args];
       const run = spawnSync(bench, meter, { encoding: 'utf8', windowsHide: true, stdio: ['ignore', 'pipe', 'inherit'] });
       if (run.status !== 0) throw new Error(`the meter failed on ${label}`);
       const line = JSON.parse(run.stdout.trim().split('\n').pop());
       lines.push({ ...line, warmup });
       console.error(`${label}: ${line.wall_s} s, exit ${line.exit}`);
+      if (step.task && line.exit !== 0) throw new Error(`${label} failed (exit ${line.exit}): see ${from}`);
+      if (step.task && !warmup) {
+        if (!existsSync(from)) throw new Error(`${label} wrote no notes: see ${from}`);
+        const noted = step.notes ? JSON.parse(readFileSync(from, 'utf8')) : notes(readFileSync(from, 'utf8'), step.task);
+        if (!noted) throw new Error(`${label} passed no notes: see ${from}`);
+        appendFileSync(out.replace(/\.jsonl$/, '.notes.jsonl'), `${JSON.stringify({ label, at: line.at, ...noted })}\n`);
+        console.error(`  ${JSON.stringify(noted)}`);
+      }
     }
   }
   console.log(table(medians(lines)));

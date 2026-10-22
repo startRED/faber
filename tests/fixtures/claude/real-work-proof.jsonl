@@ -1,0 +1,13 @@
+{"dir":"in","msg":{"type":"user","message":{"content":"Add a line to notes.txt."}}}
+{"dir":"out","msg":{"type":"system","subtype":"init","session_id":"real-work-proof","model":"claude-haiku-5-5"}}
+{"dir":"out","msg":{"type":"assistant","message":{"model":"claude-haiku-5-5","id":"msg_rw1","type":"message","role":"assistant","content":[{"type":"tool_use","id":"toolu_rw1","name":"Write","input":{"file_path":"notes.txt","content":"a line\n"}}]},"session_id":"real-work-proof","parent_tool_use_id":null}}
+{"dir":"out","msg":{"faber_hold":true}}
+{"dir":"out","msg":{"type":"user","message":{"role":"user","content":[{"tool_use_id":"toolu_rw1","type":"tool_result","content":"File created successfully at: notes.txt"}]},"session_id":"real-work-proof","parent_tool_use_id":null}}
+{"dir":"out","msg":{"type":"stream_event","event":{"type":"message_start","message":{"model":"claude-haiku-5-5","id":"msg_rw2","type":"message","role":"assistant","content":[]}},"session_id":"real-work-proof","parent_tool_use_id":null}}
+{"dir":"out","msg":{"type":"stream_event","event":{"type":"content_block_start","index":0,"content_block":{"type":"text","text":""}},"session_id":"real-work-proof","parent_tool_use_id":null}}
+{"dir":"out","msg":{"type":"stream_event","event":{"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"Added a line"}},"session_id":"real-work-proof","parent_tool_use_id":null}}
+{"dir":"out","msg":{"type":"stream_event","event":{"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":" to notes.txt."}},"session_id":"real-work-proof","parent_tool_use_id":null}}
+{"dir":"out","msg":{"type":"stream_event","event":{"type":"content_block_stop","index":0},"session_id":"real-work-proof","parent_tool_use_id":null}}
+{"dir":"out","msg":{"type":"assistant","message":{"model":"claude-haiku-5-5","id":"msg_rw2","type":"message","role":"assistant","content":[{"type":"text","text":"Added a line to notes.txt."}]},"session_id":"real-work-proof","parent_tool_use_id":null}}
+{"dir":"out","msg":{"type":"stream_event","event":{"type":"message_stop"},"session_id":"real-work-proof","parent_tool_use_id":null}}
+{"dir":"out","msg":{"type":"result","subtype":"success","is_error":false,"result":"Added a line to notes.txt.","session_id":"real-work-proof","usage":{}}}

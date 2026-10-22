@@ -47,6 +47,7 @@ points nowhere; a page that grows past the limit splits by topic, and its row he
 | [design/first-run.md](design/first-run.md) | The first run and the tutorial |
 | [design/projects.md](design/projects.md) | The Projects screens, what a project stores, and how its checks run |
 | [dev/testing.md](dev/testing.md) | Tests: `cargo t`, screen tests, build folder and slots, what a run prints |
+| [dev/fair-bench.md](dev/fair-bench.md) | The fair benchmark against TL-ADE: the meter, the suite and real-work tiers, the notes |
 | [dev/benchmark.md](dev/benchmark.md) | Running the light benchmark: the one command, what a run measures, what it leaves out |
 | [dev/workflow.md](dev/workflow.md) | Landing work: lane claims, merge on green, the task queue, a red base, the numbers given at landing |
 | [dev/whats-new.md](dev/whats-new.md) | Writing a what's-new entry: the words, the kinds, numbers for speed and memory |

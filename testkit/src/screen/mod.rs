@@ -13,6 +13,7 @@ pub mod menus;
 pub mod permissions;
 pub mod projects;
 pub mod projects_ui;
+pub mod real_work;
 pub mod review;
 pub mod sentinel;
 pub mod settings;
@@ -141,7 +142,7 @@ const NOT_ABOUT_THE_MACHINE: &[&str] = &["a focused heading", "waits on the budg
 
 /// Whether the scenario `name` runs alone, after the parallel batch.
 pub fn is_solo(name: &str) -> bool {
-    SOLO.iter().any(|(solo, _)| *solo == name)
+    SOLO.iter().any(|(solo, _)| *solo == name) || name.starts_with("real work")
 }
 
 /// How many scenarios run at once when `FABER_SCREEN_WORKERS` does not say. Measured on the maintainer's PC (docs/dev/testing.md,
@@ -225,8 +226,11 @@ pub fn run_all(
     costs: &Costs,
     done: &mut dyn FnMut(&Outcome),
 ) -> Vec<Outcome> {
+    // The real-work tier runs only when asked for by name: it is the benchmark's, not a check.
+    let real_work = real_work::scenarios().into_iter().filter(|_| filter.is_some_and(|f| f.contains("real work")));
     let chosen: Vec<Scenario> = all()
         .into_iter()
+        .chain(real_work)
         .filter(|s| filter.is_none_or(|f| s.name.contains(f)) && only.is_none_or(|names| names.iter().any(|n| n == s.name)))
         .collect();
     let seconds: Vec<u32> = chosen.iter().map(|s| costs.of(s.name)).collect();
