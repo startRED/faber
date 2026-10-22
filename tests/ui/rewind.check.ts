@@ -418,7 +418,9 @@ check('rewind: the app reloads after undoing the first message and keeps the sav
       await settle();
       const remove = [...document.querySelectorAll<HTMLButtonElement>('.cmenu:not(.leaving) [role=menuitem]')].find((item) => item.textContent === t('menu.delete'))!;
       remove.click(); await settle(560);
-      remove.click(); await settle();
+      remove.click();
+      // The refusal reaches the screen through an engine call and a render: wait for it, not a fixed time (a slow macOS runner takes longer).
+      for (const start = Date.now(); !root.querySelector('[role=alert]')?.textContent?.includes(t('error.rewind.deleteRecovery')) && Date.now() - start < 3000; ) await settle(50);
       ok(root.querySelector('[role=alert]')?.textContent?.includes(t('error.rewind.deleteRecovery')), `${language}: recovery refusal uses the existing error display`);
       ok(root.querySelector('.crow'), 'a refused deletion keeps the conversation listed');
       ok(root.querySelector('.mine'), 'a refused deletion keeps the current conversation open');

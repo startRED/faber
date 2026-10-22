@@ -41,3 +41,19 @@
     cancel(id);
   };
 })();
+
+// macOS WebKit can hang the app's main thread for good in a scrolling handshake (RemoteLayerTreeEventDispatcher::
+// mainThreadDisplayDidRefresh), taken while a smooth-scroll animation runs in the hidden test window. On the checks page a
+// smooth scroll runs instant: the screen still asks for 'smooth' (a check that stubs the method sees that), only the real
+// browser call changes. The scenarios drive the real page and are not touched.
+(() => {
+  const instant = (options) => (options && typeof options === 'object' && options.behavior === 'smooth' ? { ...options, behavior: 'auto' } : options);
+  for (const [target, names] of [[Element.prototype, ['scrollTo', 'scrollBy', 'scrollIntoView']], [window, ['scrollTo', 'scrollBy']]]) {
+    for (const name of names) {
+      const real = target[name];
+      target[name] = function (first, ...rest) {
+        return real.call(this, instant(first), ...rest);
+      };
+    }
+  }
+})();

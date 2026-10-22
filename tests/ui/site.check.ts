@@ -260,6 +260,7 @@ check('page in the browser: a step of the log shows its picture in the page’s 
     deepEqual(rows().map((b) => b.textContent), ['1Opened example.org', '2Typed into “Password”']);
     equal(rows()[1]!.getAttribute('aria-current'), 'step', 'the live page is the latest step');
     equal(root.querySelector('.site-log .btn'), null, 'no way back while the page is live');
+    window.dispatchEvent(new Event('resize')); // places the browser now: the box observer waits for a rendering step a held-back window skips
     const placedLive = places;
     ok(placedLive > 0);
     rows()[0]!.click();

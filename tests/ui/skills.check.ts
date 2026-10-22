@@ -12,7 +12,8 @@ async function catalog() {
   root.dataset.motion = 'none';
   document.body.append(root);
   const dispose = render(() => createComponent(Catalog, { projects: [], vendors: [] }), root);
-  for (let i = 0; i < 100 && !root.querySelector('[data-catalog-card]'); i++) await new Promise((resolve) => setTimeout(resolve, 20));
+  // The real list waits for the store lock while the first catalog preparation runs; a slow macOS runner took over 30 s (run 39730300698).
+  for (const start = Date.now(); !root.querySelector('[data-catalog-card]') && Date.now() - start < 45_000; ) await new Promise((resolve) => setTimeout(resolve, 50));
   const filter = (label: string) => {
     const button = [...root.querySelectorAll<HTMLButtonElement>('.catalog-filters button')].find((el) => el.textContent === label);
     ok(button, `catalog filter ${label}`); button.click();
