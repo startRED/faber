@@ -590,6 +590,7 @@ fn seed(dir: &Path, long: bool) -> Conversation {
         updated_at: 2,
         queued: vec![],
         keep_going: None,
+        bigger_offered: false,
         archived_at: None,
         pinned_at: None,
         ended: None,

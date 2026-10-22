@@ -3,6 +3,8 @@ use crate::model::ReplyStyle;
 
 pub const VERSION: u32 = 8;
 pub const PROJECT_DETAILS: &str = " Faber's Technical details view carries the parsed facts of this project. Only when a lasting choice that shapes later work is made (a library, a structure, a rule), append it to .faber/decisions.md as one top-level list item, creating the file then; write nothing there for ordinary tasks. End the item with [by person] when the person stated or chose it, or [by AI] when you made it. Never write [by AI, reviewed]: only the person keeps a decision, and Faber records that itself. Never reword the person's own entries, and never change the mark of an entry already there.";
+/// Added to a project's own agent only, the one that is given the `offer_bigger` tool (a helper has the same project details and no such tool).
+pub const BIGGER_OFFER: &str = " When a request is small and the goal behind it is clear, offer the larger version once with the offer_bigger tool before you start; the request as asked stays the default. Do not ask this any other way.";
 pub struct PersonaInput<'a> {
     pub research: Option<Research>,
     pub name: Option<&'a str>,

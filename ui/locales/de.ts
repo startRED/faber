@@ -1970,6 +1970,7 @@ export const de: Messages = {
   'notes.189.better': 'Wenn du rechts einen Subagenten öffnest, siehst du jetzt, was er zwischen seinen Schritten geschrieben hat.',
   'notes.190.new': 'In Projekten kann der Agent Katalogwerkzeuge installieren. Er fragt vorher auf einer Karte, außer du hast volles Vertrauen in den Einstellungen eingeschaltet.',
   'notes.191.new': 'In Projekten kann der Agent frühere Unterhaltungen und Notizen des Projekts durchsehen, wenn er sich an etwas erinnern muss.',
+  'notes.192.new': 'In Projekten kann der Agent bei einer kleinen Bitte einmal pro Unterhaltung eine größere Version anbieten. Was du gefragt hast, ist schon gewählt, ein Druck auf Antworten senden behält es.',
   'update.checking': 'Suche nach einem Update…',
   'update.downloading': 'Update wird heruntergeladen…',
   'update.downloadingPercent': 'Update wird heruntergeladen… {percent} %',

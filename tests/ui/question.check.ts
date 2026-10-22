@@ -190,6 +190,24 @@ check('question card: a single question has no steps, and a tile with a drawing 
   questions: [{ question: 'Where?', header: 'Layout', options: [{ label: 'Side', preview: '```\n[ side ]\n```' }, { label: 'Top', preview: '[ top ]' }, { label: 'None' }] }],
 }));
 
+const BIGGER = { questions: [{ question: 'Keep it free of crashes?', options: [{ label: 'Fix this crash' }, { label: 'Keep the app free of crashes' }] }] };
+
+check('question card: the bigger ask starts on the request as asked and one press of Send sends it', () => withCard(async (root, calls) => {
+  equal(options(root, 0)[0].getAttribute('aria-checked'), 'true', 'the first tile is already chosen');
+  equal(options(root, 0)[1].getAttribute('aria-checked'), 'false');
+  const send = button(root, 'Send answers');
+  equal(send.disabled, false);
+  click(send);
+  await settle();
+  deepEqual(calls, [['question', 'c1', 't1', 'r1', { 'Keep it free of crashes?': 'Fix this crash' }]]);
+}, { bigger: true, ...BIGGER }));
+
+check('question card: the same words without the mark of the engine start with nothing chosen', () => withCard(async (root, calls) => {
+  equal(options(root, 0)[0].getAttribute('aria-checked'), 'false');
+  ok(button(root, 'Send answers').disabled, 'nothing chosen yet');
+  deepEqual(calls, []);
+}, BIGGER));
+
 check('question card: questions without a drawing have no preview panel', () => withCard(async (root) => {
   equal(root.querySelector('.q-preview'), null);
   equal(root.querySelector('.with-preview'), null);

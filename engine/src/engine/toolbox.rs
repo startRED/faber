@@ -2,7 +2,8 @@
 //! catalog and the store's ledger. Searching starts no request, so both are offered to a project's own agent in any permission
 //! mode. `catalog` with `install` changes Faber itself (guardrail 3): it waits for the person's card, then installs through the
 //! one installer the Catalog screen uses (`tools::install_for_agent`, whose last check of what Faber holds runs under the store lock), and only a tool the store holds no copy of.
-//! `memory_search` is answered in `memory_search.rs`.
+//! `memory_search` is answered in `memory_search.rs`. `offer_bigger` shows one question card per conversation and answers from the
+//! person's choice (`answer.rs`).
 use super::answer::STALE;
 use super::*;
 use crate::toolbox;
@@ -45,6 +46,9 @@ impl Core {
             let text = toolbox::quota(&self.usage(), self.secs());
             return self.answer_toolbox(conv, sid, &call, true, text);
         }
+        if tool == toolbox::OFFER_BIGGER_TOOL {
+            return self.bigger_call(conv, sid, call, &input);
+        }
         if tool == toolbox::MEMORY_SEARCH_TOOL {
             return self.memory_search_call(conv, sid, call, &input);
         }
@@ -79,6 +83,50 @@ impl Core {
         if let Some(l) = self.live.get(conv).filter(|l| l.sid == sid) {
             l.session.helper_reply(call, ok, text);
         }
+    }
+
+    // ---- offer_bigger ----
+
+    /// The agent offers the larger version of a small request. The card is an ordinary question of the person's, with the request as
+    /// asked first, and it comes at most once per conversation: the code counts it (`bigger_offered`), the agent's own judgment
+    /// cannot. A refusal that sets nothing leaves the offer for a later turn. Nothing is written to the CLI for the card: its answer
+    /// goes back as this call's result (`prepare_answer`).
+    fn bigger_call(&mut self, conv: &str, sid: u64, call: String, input: &serde_json::Value) {
+        let refuse = |me: &Self, ok: bool, text: &str| me.answer_toolbox(conv, sid, &call, ok, text.into());
+        let Some(c) = self.convs.get(conv).filter(|c| c.area == Area::Project) else {
+            return refuse(self, false, toolbox::BIGGER_NOT_HERE);
+        };
+        if c.bigger_offered {
+            return refuse(self, true, toolbox::BIGGER_ONCE);
+        }
+        let turn = self.live.get(conv).filter(|l| l.sid == sid).and_then(|l| l.turn.clone());
+        let Some(reply) = c.messages.iter().find(|m| Some(&m.id) == turn.as_ref()).filter(|m| m.status == Some(Status::Streaming)) else {
+            return refuse(self, false, "The turn has ended.");
+        };
+        // Nobody to ask while the person is away, and one question at a time.
+        if c.keep_going.is_some() {
+            return refuse(self, true, toolbox::BIGGER_AWAY);
+        }
+        if reply.permissions.iter().flatten().next().is_some() {
+            return refuse(self, true, toolbox::BIGGER_WAITING);
+        }
+        let card = match toolbox::bigger_card(input) {
+            Ok(card) => card,
+            Err(text) => return refuse(self, false, text),
+        };
+        let (turn, epoch) = (reply.id.clone(), self.store.settings().grants_epoch);
+        if let Some(c) = self.convs.get_mut(conv) {
+            c.bigger_offered = true;
+            if let Some(m) = c.messages.iter_mut().find(|m| m.id == turn) {
+                let ask = Permission { request_id: call.clone(), tool: "AskUserQuestion".into(), input: card, epoch };
+                m.permissions.get_or_insert_default().push(ask);
+            }
+        }
+        self.bigger.insert(conv.to_string(), (call.clone(), sid));
+        self.save(conv);
+        self.weigh(conv);
+        self.watch_question(conv, &turn, &call);
+        self.push(conv, Some(&turn), true);
     }
 
     // ---- install ----

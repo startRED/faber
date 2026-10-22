@@ -210,6 +210,31 @@ impl Core {
         let waiting = reply.permissions.as_deref().unwrap_or_default();
         let clicked = waiting.iter().find(|p| p.request_id == request_id).ok_or(STALE)?;
         let (tool, epoch) = (clicked.tool.clone(), clicked.epoch.clone());
+        // The card of `offer_bigger` is Faber's own: the CLI never asked it, so nothing goes to the CLI as a control response. The
+        // person's choice (or the first one, for Skip and for Keep going) goes back as the tool's result, and the answer counts as
+        // delivered at once. Only the process that made the card gets it; any other is stale like an install card.
+        let faber_card = tool == "AskUserQuestion" && clicked.input["bigger"] == true;
+        if faber_card && !self.bigger.get(conv).is_some_and(|(call, sid)| call == request_id && *sid == live.sid) {
+            // Stop, a restart or another process spent it: the agent was told already or is gone, so nothing is written to it.
+            if let Some(waiting) =
+                self.convs.get_mut(conv).and_then(|c| c.messages.iter_mut().find(|m| m.id == turn_id)).and_then(|m| m.permissions.as_mut())
+            {
+                waiting.retain(|p| p.request_id != request_id);
+            }
+            self.save(conv);
+            self.push(conv, Some(turn_id), true);
+            return Err(STALE.into());
+        }
+        if faber_card {
+            let typed =
+                choices.as_ref().filter(|_| allow).and_then(|a| a.get(clicked.input["questions"][0]["question"].as_str()?)?.as_str());
+            live.session.helper_reply(request_id, true, crate::toolbox::bigger_reply(&clicked.input, typed));
+            let sid = live.sid;
+            self.bigger.remove(conv);
+            let (done, delivered) = oneshot::channel();
+            let _ = done.send(Delivery::Delivered);
+            return Ok(Handed { requests: vec![(request_id.to_string(), delivered)], tool, sid, always: false, epoch });
+        }
         // Not in Plan, and not for a card made under an epoch that is gone: that answer lets only its own request through.
         // A question the agent asks is never remembered: each one is the person's to answer.
         let always = always

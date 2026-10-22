@@ -76,7 +76,10 @@ function QuestionCard(props: { conversationId: string; turnId: string; permissio
   const uid = createUniqueId();
   const questions = () => askedQuestions(props.permission.input);
   // Kept by the question's place in the list, never by its text: the text is the model's, and could be `__proto__`.
-  const [picked, setPicked] = createSignal<string[][]>([]);
+  // The card of `offer_bigger` (marked by the engine, never by the model's words) starts on its first tile, the request as asked, so
+  // one press of Send does exactly what was asked; every other question starts with nothing picked.
+  const asAsked = (props.permission.input as { bigger?: unknown } | null)?.bigger === true ? questions()[0]?.options[0]?.label : undefined;
+  const [picked, setPicked] = createSignal<string[][]>(asAsked ? [[asAsked]] : []);
   const [other, setOther] = createSignal<string[]>([]);
   const [writing, setWriting] = createSignal<boolean[]>([]);
   const [peek, setPeek] = createSignal<(number | undefined)[]>([]);

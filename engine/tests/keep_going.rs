@@ -776,6 +776,38 @@ async fn a_question_nobody_answers_gets_its_first_choice_and_the_reply_says_so()
 }
 
 #[tokio::test]
+async fn a_bigger_offer_nobody_answers_gets_the_request_as_asked_and_the_reply_says_so() {
+    let (dir, project) = (tempfile::tempdir().unwrap(), support::work_folder());
+    let (engine, mut rx, mut pipe, id) = started(dir.path(), project.path()).await;
+    let offer = json!({ "question": "Keep the app free of crashes?", "asked": "Fix this crash", "bigger": "No more crashes" });
+    pipe.say(json!({ "type": "control_request", "request_id": "rpc",
+        "request": { "subtype": "mcp_message", "server_name": "faber", "message": { "jsonrpc": "2.0", "id": 7, "method": "tools/call",
+            "params": { "name": "offer_bigger", "arguments": offer, "_meta": { "claudecode/toolUseId": "toolu_b" } } } } }))
+        .await;
+    until(&engine, &id, |c| c.messages.last().is_some_and(|m| m.permissions.as_ref().is_some_and(|p| !p.is_empty()))).await;
+    // The person goes away with the card open: ten minutes pass (here 600 ms) and the first choice, the request as asked, is theirs.
+    engine.keep_going(&id, true).unwrap();
+    let reply = loop {
+        if let Some(m) = pipe.lines.lock().unwrap().iter().find(|m| m["response"]["request_id"] == "rpc") {
+            break m.clone();
+        }
+        tokio::time::sleep(Duration::from_millis(10)).await;
+    };
+    let result = &reply["response"]["response"]["mcp_response"]["result"];
+    assert_eq!(result["content"][0]["text"], "The person chose the request as asked. Do exactly that.");
+    assert_eq!(result["isError"], false);
+    let c = until(&engine, &id, |c| c.messages.last().is_some_and(|m| m.auto_answers.is_some())).await;
+    let chosen = c.messages.last().unwrap().auto_answers.clone().unwrap();
+    assert_eq!((chosen[0].question.as_str(), chosen[0].answer.as_str()), ("Keep the app free of crashes?", "Fix this crash"));
+    assert_eq!(chosen[0].others, vec!["No more crashes".to_string()]);
+    assert_eq!(c.keep_going.unwrap().answered, 1);
+    let heard = pipe.lines.lock().unwrap().iter().any(|m| m["response"]["request_id"] == "toolu_b");
+    assert!(!heard, "no control response went to the CLI for the card");
+    assert!(halts(&mut rx).is_empty(), "the tray is not woken: Faber decided");
+    engine.shutdown();
+}
+
+#[tokio::test]
 async fn a_permission_card_is_never_answered_by_keep_going() {
     let (dir, project) = (tempfile::tempdir().unwrap(), support::work_folder());
     let ask = |engine: &Engine| {

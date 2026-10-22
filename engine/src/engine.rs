@@ -419,6 +419,9 @@ struct Core {
     node_missing: bool,
     /// The install card each conversation waits on: the call it answers and the process that made it (`engine/toolbox.rs`).
     installs: HashMap<String, (String, u64)>,
+    /// The question card of `offer_bigger` each conversation waits on: the call it answers and the process that made it. Its answer
+    /// goes back as the tool's result, never to the CLI as a control response (`engine/toolbox.rs`, `engine/answer.rs`).
+    bigger: HashMap<String, (String, u64)>,
     /// Installs the project agent's allowed `catalog` calls are running now (`engine/toolbox.rs`): work the running list does not
     /// show, so an app update waits for them as it does for a CLI install of the setup screen.
     agent_installs: usize,
@@ -646,6 +649,7 @@ impl Engine {
                 setup_source: None,
                 node_missing: false,
                 installs: HashMap::new(),
+                bigger: HashMap::new(),
                 agent_installs: 0,
                 test_items: Vec::new(),
                 before: HashMap::new(),
@@ -1937,6 +1941,7 @@ impl Core {
         // A card still waiting is spent by Stop: an Allow after it is stale and installs nothing.
         if by_person {
             self.installs.remove(id);
+            self.bigger.remove(id);
         }
         let compacting = self.convs.get(id).is_some_and(|c| c.compacting);
         let active = self.live.get(id).is_some_and(|l| l.turn.is_some() || compacting);
@@ -2268,6 +2273,10 @@ impl Core {
             EngineEvent::ProgressCall { id, tool, input } => return self.progress_call(conv, id, tool, input),
             EngineEvent::ToolboxCall { id, tool, input } => return self.toolbox_call(conv, id, tool, input),
             EngineEvent::Permission { request_id, tool, mut input } => {
+                // `bigger` marks the card of `offer_bigger`, which only Faber makes: a CLI's request never carries it.
+                if let Some(fields) = input.as_object_mut() {
+                    fields.remove("bigger");
+                }
                 // The install card is Faber's own: a CLI's request under its name is never shown, so no CLI can dress a card as ours.
                 if tool == crate::toolbox::SELF_INSTALL {
                     if let Some(l) = self.live.get(conv) {
@@ -2626,6 +2635,7 @@ impl Core {
     fn end_turn(&mut self, conv: &str, turn_id: Option<String>, read: Option<Option<String>>) {
         self.transfers.remove(conv);
         self.installs.remove(conv);
+        self.bigger.remove(conv);
         if let Some(l) = self.live.get_mut(conv) {
             l.held = None;
             l.visual_root = None;
@@ -3899,6 +3909,7 @@ impl Core {
             updated_at: at,
             queued: Vec::new(),
             keep_going: None,
+            bigger_offered: false,
             archived_at: None,
             pinned_at: None,
             ended: None,
@@ -4123,6 +4134,8 @@ impl Core {
         c.title = format!("↳ {}", source.title.trim_start_matches("↳ "));
         c.branch_of = Some(BranchOf { conversation_id: source.id.clone(), message_id: req.message_id.clone() });
         c.working_folder = source.working_folder.clone();
+        // The offer was made on the way to these messages; a copy, retry or edit does not get a second one.
+        c.bigger_offered = source.bigger_offered;
         c.messages = source.messages[..if here { at + 1 } else { at }]
             .iter()
             .cloned()
@@ -4359,6 +4372,7 @@ impl Core {
         self.note_turn(id, None, true);
         self.transfers.remove(id);
         self.installs.remove(id);
+        self.bigger.remove(id);
         self.stop_helpers(id, true);
         self.close_asides(Some(id));
         self.asides.remove(id);

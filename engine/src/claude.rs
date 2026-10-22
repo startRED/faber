@@ -414,6 +414,9 @@ pub fn claude_args(launch: &ClaudeLaunch) -> Vec<String> {
         let mut words = persona(&PersonaInput { name: launch.user_name.as_deref(), tuning: &launch.tuning, research: launch.research });
         if launch.area == Area::Project {
             words.push_str(crate::persona::PROJECT_DETAILS);
+            if launch.progress {
+                words.push_str(crate::persona::BIGGER_OFFER);
+            }
         }
         if let Some(instructions) = &launch.group_instructions {
             words.push_str("\n\nThe person's instructions for this chat group:\n");

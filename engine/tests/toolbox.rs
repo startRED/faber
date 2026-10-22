@@ -1,4 +1,4 @@
-//! The agent's read-only toolbox (`quota`, `catalog`, `memory_search`): offered to a project's own agent in both CLIs and never in Chat, and
+//! The agent's toolbox (`quota`, `catalog`, `memory_search`, `offer_bigger`): offered to a project's own agent in both CLIs and never in Chat, and
 //! answered from what Faber holds, with no request, process or download.
 use crate::support::{self, Pipe, next_pipe, pipes};
 use faber_engine::cli::Cli;
@@ -117,7 +117,10 @@ async fn claude_code_reads_the_limits_and_searches_the_catalog_in_any_permission
         pipe.say(json!({ "type": "system", "subtype": "init", "session_id": "s1", "model": "claude-haiku-5-5" })).await;
 
         let tools = names(&claude_list(&mut pipe, "list").await);
-        assert!(["quota", "catalog", "memory_search"].iter().all(|t| tools.contains(&t.to_string())), "{mode:?}: {tools:?}");
+        assert!(
+            ["quota", "catalog", "memory_search", "offer_bigger"].iter().all(|t| tools.contains(&t.to_string())),
+            "{mode:?}: {tools:?}"
+        );
 
         // The step is a row of the reply, named Faber's way, and the tool's own permission asks nothing.
         pipe.say(json!({"type":"assistant","parent_tool_use_id":null,"message":{"content":[
@@ -199,7 +202,7 @@ async fn codex_reads_the_limits_and_searches_the_catalog_through_its_dynamic_too
     let start = codex_boot(&mut pipe).await;
     let tools: Vec<String> =
         start["params"]["dynamicTools"].as_array().unwrap().iter().map(|t| t["name"].as_str().unwrap().into()).collect();
-    assert!(["quota", "catalog", "memory_search"].iter().all(|t| tools.contains(&t.to_string())), "{tools:?}");
+    assert!(["quota", "catalog", "memory_search", "offer_bigger"].iter().all(|t| tools.contains(&t.to_string())), "{tools:?}");
 
     pipe.say(json!({"method":"item/started","params":{"threadId":"main","turnId":"turn-main","item":{"id":"c1","type":"dynamicToolCall",
         "tool":"catalog","arguments":{"query":"bug"}}}}))
@@ -228,10 +231,12 @@ async fn codex_in_chat_gets_neither_tool() {
         .as_array()
         .map(|t| t.iter().map(|t| t["name"].as_str().unwrap().into()).collect())
         .unwrap_or_default();
-    assert!(!["quota", "catalog", "memory_search"].iter().any(|t| tools.contains(&t.to_string())), "{tools:?}");
+    assert!(!["quota", "catalog", "memory_search", "offer_bigger"].iter().any(|t| tools.contains(&t.to_string())), "{tools:?}");
     let (refused, failed) = codex_call(&mut pipe, 902, "quota", json!({})).await;
     assert!(failed && refused.contains("not available"), "{refused}");
     let (refused, failed) = codex_call(&mut pipe, 903, "memory_search", json!({ "query": "plan" })).await;
+    assert!(failed && refused.contains("not available"), "{refused}");
+    let (refused, failed) = codex_call(&mut pipe, 904, "offer_bigger", json!({ "question": "q", "asked": "a", "bigger": "b" })).await;
     assert!(failed && refused.contains("not available"), "{refused}");
     app.shutdown();
 }
@@ -1172,4 +1177,292 @@ async fn a_copy_removed_between_the_check_and_the_write_is_refused_and_its_undo_
     assert_eq!(agent.serve.hits(), 1);
     assert_eq!(tree(&agent.dir.path().join("data")), before, "the Undo copy and the rest are as they were");
     agent.app.shutdown();
+}
+
+// ---- offer_bigger: the project agent offers the larger version of a small request, once per conversation ----
+
+const ASKED: &str = "Fix this crash";
+const BIGGER: &str = "Keep the app free of crashes";
+const QUESTION: &str = "You asked to fix this crash. Should I keep the app free of crashes?";
+const AS_ASKED: &str = "The person chose the request as asked. Do exactly that.";
+
+fn offer() -> Value {
+    json!({ "question": QUESTION, "asked": ASKED, "bigger": BIGGER })
+}
+
+/// What the screen sends back for the card: the question's text to the label picked, or to what the person wrote.
+fn pick(answer: &str) -> Value {
+    let mut answers = serde_json::Map::new();
+    answers.insert(QUESTION.into(), answer.into());
+    answers.into()
+}
+
+impl Agent {
+    /// The agent calls `offer_bigger`; the reply is read later with `reply`.
+    async fn offer(&mut self, rpc: &str, call: &str, arguments: Value) {
+        let message = json!({ "jsonrpc": "2.0", "id": 7, "method": "tools/call",
+            "params": { "name": "offer_bigger", "arguments": arguments, "_meta": { "claudecode/toolUseId": call } } });
+        self.pipe
+            .say(json!({ "type": "control_request", "request_id": rpc,
+                "request": { "subtype": "mcp_message", "server_name": "faber", "message": message } }))
+            .await;
+    }
+
+    /// The cards on the turn now, with the turn's id.
+    fn waiting(&self) -> (String, Vec<Permission>) {
+        let reply = self.conversation().messages.last().cloned().unwrap();
+        (reply.id, reply.permissions.unwrap_or_default())
+    }
+
+    /// The question card of the offer `call`, once it is on the turn, with the turn's id.
+    async fn question(&self, call: &str) -> (String, Permission) {
+        for _ in 0..300 {
+            let (turn, cards) = self.waiting();
+            if let Some(card) = cards.into_iter().find(|p| p.request_id == call) {
+                return (turn, card);
+            }
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+        panic!("no question card: {:?}", self.conversation().messages.last());
+    }
+}
+
+#[tokio::test]
+async fn the_agent_offers_the_bigger_version_on_one_card_in_every_mode_and_the_cli_hears_nothing_for_it() {
+    for mode in [Permissions::Ask, Permissions::FullAccess, Permissions::Plan] {
+        let mut agent = claude_project(mode).await;
+        // The step is a row of the reply, named Faber's way.
+        agent
+            .pipe
+            .say(json!({"type":"assistant","parent_tool_use_id":null,"message":{"content":[
+                {"type":"tool_use","id":"toolu_b","name":"mcp__faber__offer_bigger","input":offer()}]}}))
+            .await;
+        agent.offer("rpc1", "toolu_b", offer()).await;
+        let (turn, card) = agent.question("toolu_b").await;
+        // An ordinary question of the person's, with the request as asked first and no badge on either choice.
+        assert_eq!(card.tool, "AskUserQuestion", "{mode:?}");
+        assert_eq!(
+            card.input,
+            json!({ "bigger": true, "questions": [{ "question": QUESTION, "options": [{ "label": ASKED }, { "label": BIGGER }] }] }),
+            "{mode:?}"
+        );
+        assert!(agent.conversation().bigger_offered, "{mode:?}: counted when the card is shown");
+        tokio::time::sleep(Duration::from_millis(150)).await;
+        agent.silent("rpc1", "toolu_b");
+
+        agent.app.answer_question(&agent.id, &turn, "toolu_b", pick(ASKED)).await.unwrap();
+        assert_eq!(agent.reply("rpc1").await, (AS_ASKED.to_string(), false), "{mode:?}");
+        assert!(agent.waiting().1.is_empty(), "{mode:?}: the card is spent");
+        let lines = agent.pipe.lines.lock().unwrap().clone();
+        assert!(!lines.iter().any(|m| m["response"]["request_id"] == "toolu_b"), "{mode:?}: no control response went to the CLI");
+        let tools = agent.conversation().messages.last().cloned().unwrap().tools.unwrap_or_default();
+        assert!(tools.iter().any(|t| t.name == "OfferBigger"), "{mode:?}: the step reads as Faber's own");
+        agent.app.shutdown();
+    }
+}
+
+#[tokio::test]
+async fn each_way_of_answering_the_bigger_card_gives_the_agent_its_own_result() {
+    enum How {
+        Pick(&'static str),
+        Skip,
+    }
+    let larger = format!("The person wants the larger version: {BIGGER}. Do that.");
+    for (how, want) in [
+        (How::Pick(ASKED), AS_ASKED.to_string()),
+        (How::Pick(BIGGER), larger),
+        (How::Pick("only the login page"), "The person answered: only the login page.".to_string()),
+        (How::Skip, AS_ASKED.to_string()),
+    ] {
+        let mut agent = claude_project(Permissions::Ask).await;
+        agent.offer("rpc1", "toolu_b", offer()).await;
+        let (turn, _) = agent.question("toolu_b").await;
+        match how {
+            How::Pick(label) => agent.app.answer_question(&agent.id, &turn, "toolu_b", pick(label)).await.unwrap(),
+            How::Skip => agent.app.answer(&agent.id, &turn, "toolu_b", false, false).await.unwrap(),
+        }
+        assert_eq!(agent.reply("rpc1").await, (want, false));
+        assert!(agent.waiting().1.is_empty());
+        agent.app.shutdown();
+    }
+}
+
+#[tokio::test]
+async fn a_second_offer_is_refused_with_no_card_while_one_waits_after_it_is_answered_and_after_a_restart() {
+    let mut agent = claude_project(Permissions::Ask).await;
+    agent.offer("rpc1", "toolu_b1", offer()).await;
+    let (turn, _) = agent.question("toolu_b1").await;
+    // Counted when the card is shown: a second call while it waits is already the second.
+    agent.offer("rpc2", "toolu_b2", offer()).await;
+    let (text, error) = agent.reply("rpc2").await;
+    assert!(!error && text.starts_with("Already offered once"), "{text}");
+    assert_eq!(agent.waiting().1.len(), 1);
+    agent.app.answer_question(&agent.id, &turn, "toolu_b1", pick(BIGGER)).await.unwrap();
+    agent.reply("rpc1").await;
+
+    agent.offer("rpc3", "toolu_b3", offer()).await;
+    let (text, error) = agent.reply("rpc3").await;
+    assert!(!error && text == "Already offered once in this conversation. Do the request as asked.", "{text}");
+    assert!(agent.waiting().1.is_empty(), "no second card");
+    assert!(agent.conversation().bigger_offered);
+
+    // The count is stored: a reopened engine and a new process still refuse.
+    agent.app.shutdown();
+    let (spawn, made) = pipes();
+    let again = engine(agent.dir.path(), Vendor::Claude, spawn);
+    let stored = again.open(&agent.id).unwrap();
+    assert!(stored.bigger_offered);
+    let follow_up =
+        SendRequest { conversation_id: Some(agent.id.clone()), ..request(Vendor::Claude, Area::Project, stored.project_id.clone()) };
+    again.send(follow_up).unwrap();
+    let mut pipe = next_pipe(&made).await;
+    wire(&pipe, |m| m["type"] == "user").await;
+    pipe.say(json!({ "type": "system", "subtype": "init", "session_id": "s1", "model": "claude-haiku-5-5" })).await;
+    let (text, error) = claude_call(&mut pipe, "late", "offer_bigger", offer()).await;
+    assert!(!error && text.starts_with("Already offered once"), "{text}");
+    let reply = again.open(&agent.id).unwrap().messages.last().cloned().unwrap();
+    assert!(reply.permissions.unwrap_or_default().is_empty());
+    again.shutdown();
+}
+
+#[tokio::test]
+async fn a_branch_of_a_conversation_that_made_the_offer_does_not_get_a_second_one() {
+    let mut agent = claude_project(Permissions::Ask).await;
+    agent.offer("rpc1", "toolu_b1", offer()).await;
+    let (turn, _) = agent.question("toolu_b1").await;
+    agent.app.answer_question(&agent.id, &turn, "toolu_b1", pick(ASKED)).await.unwrap();
+    agent.reply("rpc1").await;
+    let first = agent.conversation().messages[0].id.clone();
+    let branch = agent.app.branch_here(&agent.id, &first).unwrap();
+    assert!(agent.app.open(&branch).unwrap().bigger_offered, "the copy starts with the offer spent");
+    agent.app.shutdown();
+}
+
+#[tokio::test]
+async fn stop_spends_the_card_so_a_later_answer_is_stale_and_nothing_more_reaches_the_agent() {
+    let mut agent = claude_project(Permissions::Ask).await;
+    agent.offer("rpc1", "toolu_b1", offer()).await;
+    let (turn, _) = agent.question("toolu_b1").await;
+    agent.app.interrupt(&agent.id);
+    let sent = |agent: &Agent| {
+        let lines = agent.pipe.lines.lock().unwrap();
+        lines.iter().filter(|m| m["response"]["request_id"] == "rpc1" || m["response"]["request_id"] == "toolu_b1").count()
+    };
+    let before = sent(&agent);
+    for answer in [
+        agent.app.answer_question(&agent.id, &turn, "toolu_b1", pick(BIGGER)).await,
+        agent.app.answer(&agent.id, &turn, "toolu_b1", false, false).await,
+    ] {
+        assert_eq!(answer, Err("error.permission.stale".to_string()));
+    }
+    assert_eq!(sent(&agent), before, "no answer reached the agent or the CLI");
+    assert!(agent.waiting().1.is_empty(), "the spent card is gone from the screen");
+    agent.app.shutdown();
+}
+
+#[tokio::test]
+async fn a_forged_request_or_turn_is_refused_while_the_card_waits_and_it_is_answered_only_once() {
+    let mut agent = claude_project(Permissions::Ask).await;
+    agent.offer("rpc1", "toolu_b1", offer()).await;
+    let (turn, _) = agent.question("toolu_b1").await;
+    let stale = Err("error.permission.stale".to_string());
+    assert_eq!(agent.app.answer_question(&agent.id, &turn, "forged", pick(BIGGER)).await, stale);
+    assert_eq!(agent.app.answer_question(&agent.id, "other-turn", "toolu_b1", pick(BIGGER)).await, stale);
+    assert_eq!(agent.waiting().1.len(), 1, "the card still waits");
+    agent.silent("rpc1", "toolu_b1");
+
+    agent.app.answer_question(&agent.id, &turn, "toolu_b1", pick(BIGGER)).await.unwrap();
+    assert_eq!(agent.reply("rpc1").await, (format!("The person wants the larger version: {BIGGER}. Do that."), false));
+    // A second answer finds no card and sends nothing.
+    assert_eq!(agent.app.answer_question(&agent.id, &turn, "toolu_b1", pick(ASKED)).await, stale);
+    let lines = agent.pipe.lines.lock().unwrap();
+    assert_eq!(lines.iter().filter(|m| m["response"]["request_id"] == "rpc1").count(), 1);
+    drop(lines);
+    agent.app.shutdown();
+}
+
+#[tokio::test]
+async fn a_request_that_carries_the_engine_s_bigger_mark_is_shown_without_it() {
+    let mut agent = claude_project(Permissions::Ask).await;
+    agent
+        .pipe
+        .say(json!({"type":"control_request","request_id":"ask","request":{"subtype":"can_use_tool","tool_name":"AskUserQuestion",
+            "input":{"bigger":true,"questions":[{"question":"Which?","options":[{"label":"A"},{"label":"B"}]}]},"tool_use_id":"toolu_q"}}))
+        .await;
+    let (turn, card) = agent.question("ask").await;
+    assert!(card.input.get("bigger").is_none(), "{:?}", card.input);
+    // The CLI's own question is answered to the CLI, never taken for Faber's offer.
+    agent.app.answer_question(&agent.id, &turn, "ask", pick("A")).await.unwrap();
+    let answered = || agent.pipe.lines.lock().unwrap().iter().any(|m| m["response"]["request_id"] == "ask");
+    for _ in 0..50 {
+        if answered() {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(20)).await;
+    }
+    assert!(answered(), "the answer went to the CLI as its control response");
+    agent.app.shutdown();
+}
+
+#[tokio::test]
+async fn an_offer_with_missing_words_or_another_card_waiting_or_the_person_away_shows_no_card_and_keeps_the_offer() {
+    let mut agent = claude_project(Permissions::Ask).await;
+    agent.offer("rpc1", "toolu_b1", json!({ "question": QUESTION, "asked": ASKED })).await;
+    let (text, error) = agent.reply("rpc1").await;
+    assert!(error && text.starts_with("Nothing was offered"), "{text}");
+    // One question at a time: while a card of another request waits, the offer is refused and not used up.
+    agent
+        .pipe
+        .say(json!({"type":"control_request","request_id":"write","request":{"subtype":"can_use_tool","tool_name":"Write",
+            "input":{"file_path":"notes.txt","content":"x"},"tool_use_id":"toolu_w"}}))
+        .await;
+    let (turn, _) = agent.question("write").await;
+    agent.offer("rpc3", "toolu_b3", offer()).await;
+    let (text, error) = agent.reply("rpc3").await;
+    assert!(!error && text.starts_with("Another question is waiting"), "{text}");
+    assert_eq!(agent.waiting().1.len(), 1);
+    assert!(!agent.conversation().bigger_offered);
+    agent.app.answer(&agent.id, &turn, "write", false, false).await.unwrap();
+    agent.app.keep_going(&agent.id, true).unwrap();
+    agent.offer("rpc2", "toolu_b2", offer()).await;
+    assert_eq!(agent.reply("rpc2").await, ("The person is away. Do the request as asked.".to_string(), false));
+    assert!(agent.waiting().1.is_empty());
+    assert!(!agent.conversation().bigger_offered, "nothing was offered, so the offer is still there for later");
+    agent.app.shutdown();
+}
+
+#[tokio::test]
+async fn codex_offers_the_bigger_version_through_its_dynamic_tool_and_gets_the_answer_as_the_tool_result() {
+    let (dir, folder) = (support::canonical_tempdir().unwrap(), support::work_folder());
+    let (spawn, made) = pipes();
+    let app = engine(dir.path(), Vendor::Codex, spawn);
+    app.save_settings(Settings { permissions: Some(Permissions::Ask), ..Settings::default() }).unwrap();
+    let project = app.add_project(&folder.path().to_string_lossy()).unwrap().id;
+    let id = app.send(request(Vendor::Codex, Area::Project, Some(project))).unwrap();
+    let mut pipe = next_pipe(&made).await;
+    let start = codex_boot(&mut pipe).await;
+    assert!(start["params"]["dynamicTools"].as_array().unwrap().iter().any(|t| t["name"] == "offer_bigger"));
+    pipe.say(json!({"id":920,"method":"item/tool/call","params":{"threadId":"main","turnId":"turn-main","callId":"call-920",
+        "tool":"offer_bigger","arguments":offer()}}))
+        .await;
+    let mut waiting = None;
+    for _ in 0..300 {
+        let reply = app.open(&id).unwrap().messages.last().cloned().unwrap();
+        if let Some(card) = reply.permissions.iter().flatten().find(|p| p.request_id == "call-920") {
+            waiting = Some((reply.id.clone(), card.clone()));
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(10)).await;
+    }
+    let (turn, card) = waiting.expect("the card");
+    assert_eq!(card.input["questions"][0]["options"], json!([{ "label": ASKED }, { "label": BIGGER }]));
+    tokio::time::sleep(Duration::from_millis(150)).await;
+    assert!(!pipe.lines.lock().unwrap().iter().any(|m| m["id"] == 920), "the thread has no answer before the person's");
+    app.answer_question(&id, &turn, "call-920", pick(BIGGER)).await.unwrap();
+    let result = wire(&pipe, |m| m["id"] == 920 && m.get("result").is_some()).await["result"].clone();
+    assert!(result["success"] == true, "{result}");
+    assert_eq!(result["contentItems"][0]["text"], format!("The person wants the larger version: {BIGGER}. Do that."));
+    let (text, failed) = codex_call(&mut pipe, 921, "offer_bigger", offer()).await;
+    assert!(!failed && text.starts_with("Already offered once"), "{text}");
+    app.shutdown();
 }

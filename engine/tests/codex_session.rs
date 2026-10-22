@@ -2120,6 +2120,10 @@ fn the_name_is_a_developer_instruction_that_resume_repeats_and_a_side_question_n
     assert!(chat["baseInstructions"].as_str().unwrap().starts_with("You are a helpful"));
     let project_only = faber_engine::persona::PROJECT_DETAILS; // only a project's prompt names the Technical details view
     assert_eq!(start["developerInstructions"].as_str().unwrap().strip_suffix(project_only), chat["developerInstructions"].as_str());
+    // Only the agent given the offer_bigger tool is told to use it; a helper shares the details and has no such tool.
+    let (_, agent) = thread_params(Area::Project, &CodexThread { progress: true, ..thread(None, None, Some("Erick")) });
+    assert!(agent["developerInstructions"].as_str().unwrap().ends_with(faber_engine::persona::BIGGER_OFFER));
+    assert!(!start["developerInstructions"].as_str().unwrap().contains("offer_bigger"));
     let (_, none) = thread_params(Area::Chat, &thread(None, None, None));
     assert!(none["developerInstructions"].as_str().unwrap().contains("You are Faber"));
     let (_, side) = thread_params(Area::Chat, &thread(None, Some("Route."), Some("Erick")));

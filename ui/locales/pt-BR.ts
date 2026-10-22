@@ -1957,6 +1957,7 @@ export const ptBR: Messages = {
   'notes.189.better': 'Ao abrir um subagente à direita, você agora vê o que ele escreveu entre as etapas.',
   'notes.190.new': 'Em Projetos, o agente pode instalar ferramentas do catálogo. Ele pergunta antes num cartão, a menos que você ligue a confiança total em Configurações.',
   'notes.191.new': 'Em Projetos, o agente pode consultar as conversas e as notas anteriores do projeto quando precisa se lembrar de algo.',
+  'notes.192.new': 'Em Projetos, quando o pedido é pequeno, o agente pode oferecer uma versão maior uma vez por conversa. O que você pediu já vem escolhido, então um toque em Enviar respostas o mantém.',
   'update.checking': 'Procurando atualização…',
   'update.downloading': 'Baixando atualização…',
   'update.downloadingPercent': 'Baixando atualização… {percent}%',

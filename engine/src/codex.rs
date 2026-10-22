@@ -1054,6 +1054,9 @@ pub fn thread_params(area: Area, t: &CodexThread) -> (&'static str, Value) {
         let mut words = persona(&PersonaInput { name: t.user_name.as_deref(), tuning: &t.tuning, research: t.research });
         if area == Area::Project {
             words.push_str(crate::persona::PROJECT_DETAILS);
+            if t.progress {
+                words.push_str(crate::persona::BIGGER_OFFER);
+            }
         }
         if let Some(instructions) = &t.group_instructions {
             words.push_str("\n\nThe person's instructions for this chat group:\n");

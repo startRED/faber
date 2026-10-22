@@ -927,6 +927,9 @@ pub struct Conversation {
     /// "Keep going" is on (`engine/src/engine/keep_going.rs`).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub keep_going: Option<KeepGoing>,
+    /// The agent already offered the larger version of a request in this conversation (`offer_bigger`): once is the most.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub bigger_offered: bool,
     /// When it was archived, by the person or by its own agent (`engine/src/engine/archive.rs`): it leaves the sidebar
     /// until the person brings it back or writes to it.
     #[serde(default, skip_serializing_if = "Option::is_none")]

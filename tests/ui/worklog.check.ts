@@ -32,6 +32,8 @@ check('worklog: every Claude Code tool reads as what it does, in words', () => {
   // The project's memory search reads as that, with its words, in every language.
   deepEqual(toolRow({ id: '17', name: 'MemorySearch', input: { query: 'database choice' } }), { label: t('tool.memorySearch'), detail: 'database choice' });
   deepEqual(toolRow({ id: '18', name: 'MemorySearch', input: {} }), { label: t('tool.memorySearch'), detail: '' });
+  // The larger-version offer is a question to the person: the same row as any other question, with no new words.
+  deepEqual(toolRow({ id: '19', name: 'OfferBigger', input: { question: 'Keep it free of crashes?', asked: 'Fix this', bigger: 'No crashes' } }), { label: t('tool.ask'), detail: '' });
   // An install by id reads as installing from the catalog, with the id.
   deepEqual(toolRow({ id: '16', name: 'Catalog', input: { install: 'ponytail' } }), { label: t('tool.catalogInstall'), detail: 'ponytail' });
   for (const lang of ['pt-BR', 'es', 'fr', 'de'] as const) {

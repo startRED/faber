@@ -1850,6 +1850,7 @@ export const en = {
   'notes.189.better': 'Opening a subagent on the right now shows what it wrote between its steps.',
   'notes.190.new': 'In Projects, the agent can install catalog tools. It asks on a card first, unless you turned on full trust in Settings.',
   'notes.191.new': "In Projects, the agent can look back through the project's earlier conversations and notes when it needs to remember something.",
+  'notes.192.new': 'In Projects, when your request is small, the agent can offer a bigger version once per conversation. What you asked is already chosen, so one press of Send answers keeps it.',
   'update.checking': 'Looking for an update…',
   'update.downloading': 'Downloading update…',
   'update.downloadingPercent': 'Downloading update… {percent}%',

@@ -936,6 +936,19 @@ async fn review2_h3_the_driver_sends_only_a_sandbox_wrapped_build_without_a_card
 }
 
 #[test]
+fn only_a_project_agent_given_the_bigger_offer_tool_is_told_to_use_it() {
+    let prompt = |l: ClaudeLaunch| {
+        let args = claude_args(&l);
+        args[args.iter().position(|a| a == "--append-system-prompt").unwrap() + 1].clone()
+    };
+    assert!(prompt(ClaudeLaunch { progress: true, ..launch(Area::Project) }).ends_with(faber_engine::persona::BIGGER_OFFER));
+    // A helper has the project's details and none of the agent's own tools.
+    let helper = prompt(launch(Area::Project));
+    assert!(helper.contains("Technical details") && !helper.contains("offer_bigger"), "{helper}");
+    assert!(!prompt(launch(Area::Chat)).contains("offer_bigger"));
+}
+
+#[test]
 fn the_name_is_appended_to_the_default_prompt_of_a_conversation_but_never_to_a_side_question() {
     let after = |args: &[String], flag: &str| args[args.iter().position(|a| a == flag).unwrap() + 1].clone();
     let named = |l: ClaudeLaunch| ClaudeLaunch { user_name: Some("Erick".into()), ..l };

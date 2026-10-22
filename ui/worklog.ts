@@ -51,6 +51,8 @@ const KINDS: Record<string, Key> = {
   Task: 'tool.agent',
   TodoWrite: 'tool.plan',
   AskUserQuestion: 'tool.ask',
+  // The larger-version offer is a question to the person, shown as the card it draws.
+  OfferBigger: 'tool.ask',
   Skill: 'tool.skill',
   ToolSearch: 'tool.toolSearch',
 };

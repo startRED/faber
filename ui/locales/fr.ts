@@ -1970,6 +1970,7 @@ export const fr: Messages = {
   'notes.189.better': 'En ouvrant un sous-agent à droite, vous voyez maintenant ce qu’il a écrit entre ses étapes.',
   'notes.190.new': 'Dans Projets, l’agent peut installer des outils du catalogue. Il demande d’abord sur une carte, sauf si vous activez la confiance totale.',
   'notes.191.new': 'Dans Projets, l’agent peut relire les conversations et les notes précédentes du projet quand il a besoin de se rappeler quelque chose.',
+  'notes.192.new': 'Dans Projets, quand votre demande est petite, l’agent peut proposer une version plus large, une fois par conversation. Ce que vous avez demandé est déjà choisi : un appui sur Envoyer les réponses le garde.',
   'update.checking': 'Recherche d’une mise à jour…',
   'update.downloading': 'Téléchargement de la mise à jour…',
   'update.downloadingPercent': 'Téléchargement de la mise à jour… {percent} %',

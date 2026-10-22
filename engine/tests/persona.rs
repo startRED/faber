@@ -94,3 +94,15 @@ fn a_project_prompt_teaches_the_decision_author_mark_and_the_common_persona_does
     assert!(project.contains("write nothing there for ordinary tasks"), "the list is for real decisions only");
     assert!(project.contains("Never write [by AI, reviewed]"), "only the person keeps a decision");
 }
+
+/// "Offer the bigger ask": only a project's own agent has the tool, so only its prompt names it, and the request as asked stays the default.
+#[test]
+fn a_project_prompt_teaches_the_bigger_offer_and_the_common_persona_does_not() {
+    let common = persona(&PersonaInput { name: None, tuning: &Default::default(), research: None });
+    assert!(!common.contains("offer_bigger"), "Chat has no such tool");
+    assert!(!faber_engine::persona::PROJECT_DETAILS.contains("offer_bigger"), "a helper shares the project details and has no such tool");
+    let offer = faber_engine::persona::BIGGER_OFFER;
+    assert!(offer.contains("offer_bigger") && offer.contains("offer the larger version once"));
+    assert!(offer.contains("the request as asked stays the default"));
+    assert!(offer.contains("Do not ask this any other way."), "the code counts only the tool");
+}
