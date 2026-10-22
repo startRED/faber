@@ -55,14 +55,15 @@ impl Core {
 
     /// What a project's close asks besides the box (own work method, "Staying small and current"): to fold each note of
     /// `.faber/` over its soft target. Asked once for each size a file has, so a file folding cannot bring under its target
-    /// is asked again only after it changes. No timer and no watcher: only a close looks.
+    /// is asked again only after it changes (while Faber runs: a restart may ask once more). No timer and no watcher: only
+    /// a close looks, through the folder's no-follow handle.
     fn fold_ask(&mut self, conv: &str) -> Option<String> {
         let c = self.convs.get(conv).filter(|c| c.area == Area::Project)?;
-        let folder = self.folder_of(c).ok()?;
+        let files = crate::project::memory::ProjectFiles::open(&self.folder_of(c).ok()?)?;
         let over: Vec<String> = crate::project::memory::TARGETS
             .iter()
             .filter_map(|(path, cap)| {
-                let len = std::fs::symlink_metadata(folder.join(path)).ok().filter(|m| m.is_file())?.len();
+                let len = files.size(path)?;
                 (len > *cap as u64 && self.folds_asked.insert(format!("{conv}\n{path}\n{len}")))
                     .then(|| format!("`{path}` is {:.1} KB, over its {} KB target", len as f64 / 1024.0, cap / 1024))
             })

@@ -122,17 +122,72 @@ fn paths(text: &str) -> impl Iterator<Item = &str> {
     })
 }
 
-/// Whether a note names a project file that no longer exists. Checked when read, never written into the note, so a kept
-/// decision keeps its record and a file that comes back clears it.
-pub fn stale(project: &Path, text: &str) -> bool {
-    paths(text).any(|path| std::fs::symlink_metadata(project.join(path)).is_err())
+/// A project folder held open to judge its notes: each path is opened through it without following a link, so a link
+/// planted in the project never makes Faber look outside it.
+pub struct ProjectFiles {
+    root: Directory,
+    /// The names in each folder listed so far, by relative path; `None` when the folder is gone. Notes name the same few
+    /// folders, and one listing answers for all their files (opening each file costs about 75 µs on Windows).
+    folders: std::cell::RefCell<std::collections::HashMap<String, Option<std::collections::HashSet<String>>>>,
+}
+
+/// A file name as the file system compares it: Windows folders ignore case.
+fn compared(name: &str) -> String {
+    if cfg!(windows) { name.to_lowercase() } else { name.to_string() }
+}
+
+impl ProjectFiles {
+    pub fn open(project: &Path) -> Option<Self> {
+        let (_, root) = project_directory(project, &resolved_private(&private_roots())).ok()?;
+        Some(Self { root, folders: Default::default() })
+    }
+
+    fn file(&self, path: &str) -> std::io::Result<File> {
+        match path.rsplit_once('/') {
+            Some((parent, name)) => self.root.under(Path::new(parent))?.file(name),
+            None => self.root.file(path),
+        }
+    }
+
+    /// Whether a project file is known to be gone: its folder is not found, or listing it lacks the name. A folder that is
+    /// a link, refused, unreadable or too large to list (20,000 names) answers "not gone".
+    fn gone(&self, path: &str) -> bool {
+        let (parent, name) = path.rsplit_once('/').unwrap_or(("", path));
+        let mut folders = self.folders.borrow_mut();
+        // shortcut: at most 256 folder listings are kept; past that a path's note is not judged, until a later read.
+        if folders.len() >= 256 && !folders.contains_key(parent) {
+            return false;
+        }
+        let names = folders.entry(parent.to_string()).or_insert_with(|| {
+            let listed = if parent.is_empty() { self.root.names() } else { self.root.under(Path::new(parent)).and_then(|d| d.names()) };
+            match listed {
+                Ok(names) if names.len() <= 20_000 => Some(names.iter().map(|n| compared(n)).collect()),
+                Err(e) if e.kind() == std::io::ErrorKind::NotFound => None,
+                _ => Some(std::collections::HashSet::from([compared(name)])),
+            }
+        });
+        names.as_ref().is_none_or(|names| !names.contains(&compared(name)))
+    }
+
+    /// Whether a note names a project file that no longer exists. Only "not found" counts: a link, a refused or an
+    /// unreadable folder keeps the note in force, and nothing is opened through a link. Checked when read, never written
+    /// into the note, so a kept decision keeps its record and a file that comes back clears it.
+    pub fn stale(&self, text: &str) -> bool {
+        paths(text).any(|path| self.gone(path))
+    }
+
+    /// The size of a file of the project, or nothing for a missing file, a link or a folder.
+    pub fn size(&self, path: &str) -> Option<u64> {
+        self.file(path).ok()?.metadata().ok().map(|m| m.len())
+    }
 }
 
 /// Marks the notes of the project's root `.faber/` that name a gone file.
 pub fn mark_stale(list: &mut MemoryList, project: &Path) {
+    let Some(files) = ProjectFiles::open(project) else { return };
     for file in list.files.iter_mut().filter(|f| f.path.starts_with(".faber/")) {
         for entry in &mut file.entries {
-            entry.stale = stale(project, &entry.text);
+            entry.stale = files.stale(&entry.text);
         }
     }
 }
@@ -1266,6 +1321,16 @@ mod tests {
         assert_eq!(file(".faber/plans/old.md").entries.len(), 1, "a legacy name stays readable");
         std::fs::write(faber.join("decisions.md"), line.repeat(100)).unwrap();
         assert!(list_faber(project.path()).unwrap().files.iter().any(|f| f.path == ".faber/decisions.md" && f.over), "over 8 KB");
-        assert!(!stale(project.path(), "`../outside.rs`, `/abs.rs`, `C:/x.rs`, `a b.rs`, `*.rs`, `.gitignore`"), "never judged");
+        let files = ProjectFiles::open(project.path()).unwrap();
+        assert!(!files.stale("`../outside.rs`, `/abs.rs`, `C:/x.rs`, `a b.rs`, `*.rs`, `.gitignore`"), "never judged");
+        assert_eq!(files.size(".faber/decisions.md"), Some(line.len() as u64 * 100));
+        // A link planted in the project is never followed: what lies behind it is neither found nor missing.
+        let outside = folder();
+        std::fs::write(outside.path().join("there.rs"), "").unwrap();
+        #[cfg(unix)]
+        std::os::unix::fs::symlink(outside.path(), project.path().join("linked")).unwrap();
+        #[cfg(windows)]
+        junction::create(outside.path(), project.path().join("linked")).unwrap();
+        assert!(!files.stale("`linked/missing.rs`") && files.size("linked/there.rs").is_none(), "nothing is probed through a link");
     }
 }

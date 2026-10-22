@@ -1658,7 +1658,8 @@ impl Core {
             }
         }
         kept.reverse();
-        Some(crate::project::rules::card(&facts, &kept, unreviewed, |d| crate::project::memory::stale(path, d)))
+        let files = crate::project::memory::ProjectFiles::open(path);
+        Some(crate::project::rules::card(&facts, &kept, unreviewed, |d| files.as_ref().is_some_and(|f| f.stale(d))))
     }
 
     fn folder_of(&self, c: &Conversation) -> Result<PathBuf, String> {
