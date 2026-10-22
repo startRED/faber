@@ -11,7 +11,7 @@ type Cap = 'ctrl' | 'shift' | 'enter' | 'esc' | 'up' | 'down' | 'tab' | 'f10' | 
 
 export interface Shortcut {
   /** Where it works, the sheet's heading. */
-  group: 'anywhere' | 'message';
+  group: 'anywhere' | 'message' | 'browser';
   /** What it does. */
   label: Key;
   /** The caps in the order they are pressed. */
@@ -47,7 +47,37 @@ export const SHORTCUTS = {
   earlier: { group: 'message', label: 'keys.earlier', caps: ['up'], also: ['down'] },
   pick: { group: 'message', label: 'keys.pick', caps: ['tab'], also: ['enter'] },
   search: { group: 'message', label: 'keys.search', caps: ['ctrl', 'R'], ctrl: 'r' },
+  // Faber's browser answers these itself while it has the focus (`siteKeyOf` on the screen, the shell's `site_key` on the
+  // page, which is a native view the screen never hears keys from), so they carry no `ctrl`. Alt is printed Alt everywhere.
+  siteNew: { group: 'browser', label: 'keys.siteNew', caps: ['ctrl', 'T'] },
+  siteReopen: { group: 'browser', label: 'keys.siteReopen', caps: ['ctrl', 'shift', 'T'] },
+  siteClose: { group: 'browser', label: 'keys.siteClose', caps: ['ctrl', 'W'] },
+  siteNext: { group: 'browser', label: 'keys.siteNext', caps: ['ctrl', 'tab'] },
+  sitePrevious: { group: 'browser', label: 'keys.sitePrevious', caps: ['ctrl', 'shift', 'tab'] },
+  siteTab: { group: 'browser', label: 'keys.siteTab', caps: ['ctrl', '1–9'] },
+  siteAddress: { group: 'browser', label: 'keys.siteAddress', caps: ['ctrl', 'L'] },
+  siteReload: { group: 'browser', label: 'site.reload', caps: ['ctrl', 'R'] },
+  siteBack: { group: 'browser', label: 'site.back', caps: ['Alt', '←'] },
+  siteForward: { group: 'browser', label: 'site.forward', caps: ['Alt', '→'] },
 } as const satisfies Record<string, Shortcut>;
+
+/** What a key the browser answers does, by the name the shell's `site_key` sends for the same key on the page. */
+export type SiteKey = 'new' | 'reopen' | 'close' | 'next' | 'previous' | 'address' | 'reload' | 'back' | 'forward' | `tab${1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9}`;
+
+/** The browser's key this press is, while the focus is in the pane's own head and bar. Ctrl and a digit are the sidebar's
+ * there: they pick tabs only from the page. AltGr (Ctrl and Alt) types a character on many keyboards and is never one. */
+export function siteKeyOf(e: KeyboardEvent): SiteKey | undefined {
+  const ctrl = e.ctrlKey || e.metaKey;
+  const key = e.key.toLowerCase();
+  if (ctrl && !e.altKey) {
+    if (key === 't') return e.shiftKey ? 'reopen' : 'new';
+    if (key === 'tab') return e.shiftKey ? 'previous' : 'next';
+    if (e.shiftKey) return undefined;
+    return ({ w: 'close', l: 'address', r: 'reload' } as const)[key as 'w' | 'l' | 'r'];
+  }
+  if (e.altKey && !ctrl && !e.shiftKey) return key === 'arrowleft' ? 'back' : key === 'arrowright' ? 'forward' : undefined;
+  return undefined;
+}
 
 export type ShortcutId = keyof typeof SHORTCUTS;
 

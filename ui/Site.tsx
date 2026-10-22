@@ -1,10 +1,11 @@
 import { type Accessor, createEffect, createResource, createSignal, For, Index, on, onCleanup, onMount, Show } from 'solid-js';
-import { api, type Message, type ToolUse } from './api.ts';
+import { api, type Message, type SiteTab, type SiteTabs, type SiteTabStep, type ToolUse } from './api.ts';
 import { appliedLook } from './appearance.ts';
 import { Cookies, cookieProfiles } from './Cookies.tsx';
-import { openMenu } from './contextmenu.ts';
+import { type MenuItem, openMenu } from './contextmenu.ts';
 import { Icon } from './Glyphs.tsx';
 import { t } from './i18n.ts';
+import { type SiteKey, siteKeyOf } from './keys.ts';
 
 /** A page the agent opened in Faber's browser (R161 step 7), which the person opened from the reply. */
 export interface OpenSite {
@@ -317,6 +318,35 @@ export function addressOf(typed: string): string | undefined {
   }
 }
 
+/** Where words typed in the address field go: the search page. The address field searches like a browser's. */
+const SEARCH = 'https://www.google.com/search?q=';
+
+/** What the person typed in the address field, as the page it goes to: an address (`addressOf`), or a search for the words
+ * when they are no address (spaces, or one word with no dot, port or slash). Anything with a scheme that is no web page goes
+ * nowhere, so `javascript:` is never searched for either. */
+export function goesTo(typed: string): string | undefined {
+  const text = typed.trim();
+  if (!text) return undefined;
+  const words = /\s/.test(text) || (!/[.:/]/.test(text) && !/^localhost$/i.test(text));
+  const address = words ? undefined : addressOf(text);
+  if (address) return address;
+  if (!/\s/.test(text) && /^[a-z][a-z0-9+.-]*:/i.test(text) && !/^[^:/]+:\d+(\/|$)/.test(text)) return undefined;
+  return SEARCH + encodeURIComponent(text);
+}
+
+/** How a tab names a page with no title: its site, or only the port for an app on this computer. */
+export function placeOf(url: string): string {
+  try {
+    const u = new URL(url);
+    return /^(localhost|127\.0\.0\.1|\[::1\])$/.test(u.hostname) && u.port ? `:${u.port}` : u.hostname.replace(/^www\./, '');
+  } catch {
+    return url;
+  }
+}
+
+/** A tab's name in the strip. */
+export const tabName = (tab: SiteTab) => tab.title || (tab.url ? placeOf(tab.url) : t('site.newTab'));
+
 /** The corners the page takes: the box's own radius, drawn over the page in the colour of the card around it (the pane is a
  * native rectangle; `round.js` in the shell draws them). None while that colour cannot be read. */
 export function cornersOf(box: HTMLElement): { radius: number; color: [number, number, number] } | undefined {
@@ -384,6 +414,8 @@ export function SitePane(props: { site: OpenSite; onClose: () => void; wide?: bo
     lives.set(liveKey(), url);
     setLiveNow(url);
   };
+  // Another tab or card brings its own page: the address it was last seen at, else the one it opens on.
+  createEffect(on(liveKey, () => setLiveNow(lives.get(liveKey()) ?? props.site.url), { defer: true }));
   const stop = api.onSite(setLive);
   onCleanup(() => void stop.then((unlisten) => unlisten()).catch(() => {}));
   const place = () => {
@@ -465,7 +497,18 @@ export function SitePane(props: { site: OpenSite; onClose: () => void; wide?: bo
     ),
   );
   // Another card, or an address typed in the field, starts on its live page, placed at once (the first one after a blank pane).
-  createEffect(on(() => props.site, () => (setPicked(undefined), place()), { defer: true }));
+  createEffect(
+    on(
+      () => props.site,
+      () => {
+        setPicked(undefined);
+        // A new tab has no page: the one the pane holds leaves the box, and the next page takes a new one.
+        if (blank()) return void api.sitePark(id), (id = boxId());
+        place();
+      },
+      { defer: true },
+    ),
+  );
   // A new look may round the card differently: the page follows once the look has painted.
   createEffect(on(appliedLook, () => requestAnimationFrame(() => box && !blank() && !picked() && round(box)), { defer: true }));
   // The latest step is the live page, unless it is a check at several sizes: its pictures are what it saw.
@@ -491,8 +534,9 @@ export function SitePane(props: { site: OpenSite; onClose: () => void; wide?: bo
   createEffect(on(live, () => setTyped(undefined), { defer: true }));
   const go = async (to: string | undefined) => {
     setRefused(false);
-    if (!to || !(await api.siteOpen(props.site.conversationId, to).catch(() => false))) return setRefused(true);
+    if (!to || !(await api.siteGo(props.site.conversationId, to).catch(() => false))) return setRefused(true);
     setTyped(undefined);
+    address?.blur();
     // The new page is the live one, even on the same site: a step's picture that stood in for the page goes.
     setPicked(undefined);
     setLive(to);
@@ -508,83 +552,283 @@ export function SitePane(props: { site: OpenSite; onClose: () => void; wide?: bo
     return size ? t('site.size', { screen: t(`site.screen.${size.screen}`), width: String(size.width), height: String(size.height) }) : t('site.size.own');
   };
   const pickSize = async (name: string | null) => setSizes((await api.siteSize(true, name).catch(() => undefined)) ?? sizes());
-  const sizeMenu = (e: MouseEvent) =>
+  const sizeMenu = (e: MouseEvent, from: HTMLElement) =>
     openMenu(e, [null, ...(sizes()?.sizes.map((s) => s.name) ?? [])].map((name) => ({
       id: name ?? 'own',
       label: `${sizes()?.now === name ? '✓ ' : ''}${sizeWords(name)}`,
       run: () => void pickSize(name),
-    })), e.currentTarget as HTMLElement);
+    })), from);
   const [signingIn, setSigningIn] = createSignal(false);
+  let address: HTMLInputElement | undefined;
+  const [focused, setFocused] = createSignal(false);
   const addressKeys = (e: KeyboardEvent) => {
     if (e.key === 'Enter') {
       e.preventDefault();
-      void go(addressOf(typed() ?? live()));
-    } else if (e.key === 'Escape' && typed() !== undefined) {
-      // Only the typing goes: the column itself stays.
+      void go(goesTo(typed() ?? live()));
+    } else if (e.key === 'Escape') {
+      // The first Esc puts back where the page is, the second leaves the field; the column itself stays.
       e.stopPropagation();
-      setTyped(undefined);
-      setRefused(false);
+      if (typed() !== undefined) {
+        setTyped(undefined);
+        setRefused(false);
+        requestAnimationFrame(() => address?.select());
+      } else address?.blur();
     }
+  };
+  // Unfocused, the field shows where the page is with its site bright and the rest quiet.
+  const shownAddress = () => {
+    if (blank() || focused() || typed() !== undefined) return undefined;
+    try {
+      const u = new URL(live());
+      return { site: (u.protocol === 'http:' ? 'http://' : '') + u.host, rest: (u.pathname === '/' ? '' : u.pathname) + u.search + u.hash };
+    } catch {
+      return undefined;
+    }
+  };
+
+  // The conversation's tabs (`engine/src/browser/tabs.rs`), read again whenever the engine changes them.
+  const conversation = () => props.site.conversationId;
+  const [tabs, setTabs] = createSignal<SiteTabs | null>(null);
+  const readTabs = () => void api.siteTabs(conversation()).then(setTabs, () => {});
+  createEffect(on(conversation, readTabs));
+  // A pane opened before it had any tab shows the one page it has.
+  const strip = (): SiteTab[] => (tabs()?.tabs.length ? tabs()!.tabs : [{ id: '', url: props.site.url, title: props.site.title }]);
+  const front = () => (tabs()?.tabs.length ? tabs()!.front : '');
+  const [busy, setBusy] = createSignal<ReadonlySet<string>>(new Set());
+  const [loading, setLoading] = createSignal(false);
+  const [history, setHistory] = createSignal<[boolean, boolean]>([false, false]);
+  const readHistory = () => (blank() ? setHistory([false, false]) : void api.siteHistory(conversation()).then(setHistory, () => {}));
+  createEffect(on([live, blank], readHistory));
+  createEffect(on(blank, (none) => none && setLoading(false)));
+  const listening = [
+    api.onSiteTabs((id) => id === conversation() && readTabs()),
+    api.onSiteBusy((b) => {
+      if (b.conversation !== conversation()) return;
+      setBusy((now) => {
+        const next = new Set(now);
+        if (b.busy) next.add(b.tab);
+        else next.delete(b.tab);
+        return next;
+      });
+    }),
+    api.onSiteLoading(setLoading),
+    api.onSiteKey((key) => siteKey(key as SiteKey)),
+  ].map((listening) => listening.catch(() => () => {}));
+  onCleanup(() => listening.forEach((stopping) => void stopping.then((unlisten) => unlisten()).catch(() => {})));
+
+  /** Does `kind` to the tabs; the tab in front then shows. Closing the last tab closes the pane. */
+  // The log of the agent's steps stays with its tab while the person looks at another.
+  let agentSteps = props.site.steps;
+  createEffect(() => props.site.steps && (agentSteps = props.site.steps));
+  const step = async (kind: SiteTabStep, tab?: string) => {
+    if (tab === '') return kind === 'close' ? props.onClose() : undefined;
+    const answer = await api.siteTab(conversation(), kind, tab).catch(() => null);
+    if (!answer || answer.tabs === null) return;
+    setTabs(answer.tabs);
+    if (!answer.tabs.tabs.length) return props.onClose();
+    const now = answer.tabs.tabs.find((t) => t.id === answer.tabs.front);
+    if (!now) return;
+    // The agent's steps are the log of its own tab only.
+    const steps = now.id === answer.tabs.agent ? agentSteps : undefined;
+    showSite({ conversationId: conversation(), url: now.url, title: now.title ?? '', ...(steps ? { steps } : {}) });
+  };
+  const siteKey = (key: SiteKey) => {
+    const list = strip();
+    const at = list.findIndex((tab) => tab.id === front());
+    switch (key) {
+      case 'new':
+      case 'reopen':
+        return void step(key);
+      case 'close': {
+        // With tabs but none in front there is no tab to close; with none at all the one page is the pane's.
+        const tab = front();
+        return void (tab !== undefined && step('close', tab));
+      }
+      case 'next':
+      case 'previous': {
+        const to = list[(at + (key === 'next' ? 1 : list.length - 1)) % list.length];
+        return void (to && to.id !== front() && step('bring', to.id));
+      }
+      case 'address':
+        address?.focus();
+        return address?.select();
+      case 'reload':
+      case 'back':
+      case 'forward':
+        return void (!blank() && api.siteStep(conversation(), key).catch(() => false));
+      default: {
+        // Ctrl+9 is the last tab, as in any browser.
+        const n = Number(key.slice(3));
+        const to = n === 9 ? list.at(-1) : list[n - 1];
+        return void (to && to.id !== front() && step('bring', to.id));
+      }
+    }
+  };
+  const chromeKeys = (e: KeyboardEvent) => {
+    const key = siteKeyOf(e);
+    if (!key) return;
+    e.preventDefault();
+    e.stopPropagation();
+    siteKey(key);
+  };
+  const tabMenu = (e: MouseEvent, tab: SiteTab) =>
+    openMenu(e, [
+      { id: 'external', label: t('site.external'), disabled: !tab.url, run: () => void api.openLink(tab.url).catch(() => {}) },
+      { id: 'close', label: t('site.closeTab'), run: () => void step('close', tab.id) },
+      { id: 'others', label: t('site.closeOthers'), disabled: strip().length < 2, run: () => void step('closeOthers', tab.id) },
+    ]);
+  // Tabs that no longer fit the strip are all in one menu; the one in front is always in view.
+  let tabsBox: HTMLDivElement | undefined;
+  const [overflowing, setOverflowing] = createSignal(false);
+  const measure = () => tabsBox && setOverflowing(tabsBox.scrollWidth > tabsBox.clientWidth + 1);
+  onMount(() => {
+    const seen = new ResizeObserver(measure);
+    seen.observe(tabsBox!);
+    onCleanup(() => seen.disconnect());
+  });
+  createEffect(
+    on([strip, front], () =>
+      requestAnimationFrame(() => {
+        measure();
+        tabsBox?.querySelector('[aria-current="page"]')?.scrollIntoView({ block: 'nearest', inline: 'nearest' });
+      }),
+    ),
+  );
+  const allTabs = (e: MouseEvent) =>
+    openMenu(e, strip().map((tab) => ({ id: tab.id || 'only', label: `${tab.id === front() ? '✓ ' : ''}${tabName(tab)}`, run: () => void step('bring', tab.id) })), e.currentTarget as HTMLElement);
+  const more = (e: MouseEvent) => {
+    const from = e.currentTarget as HTMLElement;
+    const items: MenuItem[] = [
+      { id: 'external', label: t('site.external'), disabled: blank(), run: () => void api.openLink(live()).catch(() => {}) },
+      { id: 'copy', label: t('site.copy'), disabled: blank(), run: () => void navigator.clipboard.writeText(live()) },
+    ];
+    // The screen the page is drawn at, for the person and the agent alike: a PC, a MacBook, a tablet or a phone.
+    if (sizes()?.sizes.length) {
+      items.push({
+        id: 'size',
+        label: t('site.screenSize', { size: sizeWords(sizes()?.now) }),
+        disabled: blank(),
+        run: () =>
+          requestAnimationFrame(() => {
+            const r = from.getBoundingClientRect();
+            sizeMenu(new MouseEvent('click', { clientX: r.left, clientY: r.bottom }), from);
+          }),
+      });
+    }
+    // The person's own sign-ins, from their Firefox, for this conversation's pages: only where a profile exists.
+    if (profiles()?.length) items.push({ id: 'signin', label: t('cookies.open'), run: () => setSigningIn(true) });
+    items.push({ id: 'clear', label: t('site.clear'), danger: true, confirm: t('site.clear.confirm'), run: () => void clear() });
+    openMenu(e, items, from);
+  };
+  const clear = async () => {
+    await api.siteClear(conversation()).catch(() => {});
+    setTabs(null);
+    showSite({ conversationId: conversation(), url: '', title: '' });
   };
   return (
     <>
-      <div class="rc-head side-head site-head">
-        <h2 id="running-title" class="display" title={live()}>
-          {title()}
-        </h2>
-        <Show when={props.onWide}>
-          <button class="iconbtn site-wide" aria-label={t(props.wide ? 'agent.narrow' : 'site.widen')} title={t(props.wide ? 'agent.narrow' : 'site.widen')} onClick={() => props.onWide!()}>
-            <Icon name={props.wide ? 'shrink' : 'expand'} />
+      {/* The browser's keys work wherever the focus is in its head and bar; on the page itself the shell hears them. */}
+      <div class="site-chrome" onKeyDown={chromeKeys}>
+        <div class="rc-head side-head site-head">
+          <h2 id="running-title" class="sr-only">
+            {title()}
+          </h2>
+          <div class="site-tabs" role="group" aria-label={t('site.tabs')} ref={(el) => (tabsBox = el)}>
+            <For each={strip()}>
+              {(tab) => {
+                const on = () => tab.id === front();
+                return (
+                  <div class="site-tab" classList={{ front: on() }}>
+                    <button
+                      class="site-tab-go"
+                      aria-current={on() ? 'page' : undefined}
+                      title={tab.url || tabName(tab)}
+                      onClick={() => !on() && void step('bring', tab.id)}
+                      onAuxClick={(e) => e.button === 1 && (e.preventDefault(), void step('close', tab.id))}
+                      onContextMenu={(e) => tabMenu(e, tab)}
+                    >
+                      <span class="site-mark" aria-hidden="true">
+                        <Show when={tab.url} fallback={<Icon name="globe" small />}>
+                          {placeOf(tab.url).replace(/^:/, '').charAt(0).toUpperCase()}
+                        </Show>
+                      </span>
+                      <span class="site-tab-name">{tabName(tab)}</span>
+                      <Show when={busy().has(tab.id)}>
+                        <span class="site-busy" role="img" aria-label={t('site.agentTab')} title={t('site.agentTab')} />
+                      </Show>
+                    </button>
+                    <button class="site-tab-close" aria-label={t('site.closeTab')} title={t('site.closeTab')} onClick={() => void step('close', tab.id)}>
+                      <Icon name="close" small />
+                    </button>
+                  </div>
+                );
+              }}
+            </For>
+          </div>
+          <Show when={overflowing()}>
+            <button class="iconbtn" aria-haspopup="menu" aria-label={t('site.allTabs')} title={t('site.allTabs')} onClick={allTabs}>
+              <Icon name="down" />
+            </button>
+          </Show>
+          <button class="iconbtn site-new" aria-label={t('site.newTab')} title={t('site.newTab')} onClick={() => void step('new')}>
+            <Icon name="plus" />
           </button>
-        </Show>
-        <button class="iconbtn" aria-label={t('run.close')} title={t('run.close')} onClick={() => props.onClose()}>
-          <Icon name="close" />
-        </button>
-      </div>
-      <div class="site-bar">
-        {/* Only the live page steps: while a step's picture stands in for it, the page is out of sight. */}
-        <Show when={!blank() && !picked()}>
+          <Show when={props.onWide}>
+            <button class="iconbtn site-wide" aria-label={t(props.wide ? 'agent.narrow' : 'site.widen')} title={t(props.wide ? 'agent.narrow' : 'site.widen')} onClick={() => props.onWide!()}>
+              <Icon name={props.wide ? 'shrink' : 'expand'} />
+            </button>
+          </Show>
+          <button class="iconbtn" aria-label={t('run.close')} title={t('run.close')} onClick={() => props.onClose()}>
+            <Icon name="close" />
+          </button>
+        </div>
+        <div class="site-bar">
+          {/* Always there, dimmed when they cannot act: a step's picture standing in for the page, or no page or history. */}
           <For each={STEPS}>
             {([step, icon, label]) => (
-              <button class="iconbtn" aria-label={t(label)} title={t(label)} onClick={() => void api.siteStep(props.site.conversationId, step).catch(() => false)}>
+              <button
+                class={`iconbtn site-${step}`}
+                aria-label={t(label)}
+                title={t(label)}
+                disabled={blank() || !!picked() || (step === 'back' && !history()[0]) || (step === 'forward' && !history()[1])}
+                onClick={() => void api.siteStep(props.site.conversationId, step).catch(() => false)}
+              >
                 <Icon name={icon} />
               </button>
             )}
           </For>
-        </Show>
-        <input
-          class="field site-address"
-          type="text"
-          inputmode="url"
-          spellcheck={false}
-          autocomplete="off"
-          aria-label={t('site.address')}
-          aria-invalid={refused() || undefined}
-          placeholder={t('site.addressHint')}
-          value={typed() ?? (blank() ? '' : live())}
-          onInput={(e) => (setTyped(e.currentTarget.value), setRefused(false))}
-          onFocus={(e) => e.currentTarget.select()}
-          onKeyDown={addressKeys}
-        />
-        {/* Where the page is now, in the person's own browser with their own sign-ins; Faber's pane stays as it is. */}
-        <Show when={!blank()}>
-          <button class="iconbtn site-external" aria-label={t('site.external')} title={t('site.external')} onClick={() => void api.openLink(live()).catch(() => {})}>
-            <Icon name="external" />
+          <div class="site-pill" classList={{ loading: loading() }}>
+            <input
+              class="site-address"
+              classList={{ veiled: !!shownAddress() }}
+              ref={(el) => (address = el)}
+              type="text"
+              inputmode="url"
+              spellcheck={false}
+              autocomplete="off"
+              aria-label={t('site.address')}
+              aria-invalid={refused() || undefined}
+              placeholder={t('site.addressHint')}
+              value={typed() ?? (blank() ? '' : live())}
+              onInput={(e) => (setTyped(e.currentTarget.value), setRefused(false))}
+              onFocus={(e) => (setFocused(true), e.currentTarget.select())}
+              onBlur={() => setFocused(false)}
+              onKeyDown={addressKeys}
+            />
+            <Show when={shownAddress()}>
+              {(shown) => (
+                <span class="site-shown" aria-hidden="true">
+                  <span class="site-host">{shown().site}</span>
+                  <span class="site-path">{shown().rest}</span>
+                </span>
+              )}
+            </Show>
+            <span class="site-load" aria-hidden="true" />
+          </div>
+          <button class="iconbtn site-more" aria-haspopup="menu" aria-label={t('site.more')} title={t('site.more')} onClick={more}>
+            <Icon name="more" />
           </button>
-        </Show>
-        {/* The screen the page is drawn at, for the person and the agent alike: a PC, a MacBook, a tablet or a phone. */}
-        <Show when={!blank() && sizes()?.sizes.length}>
-          <button class="btn ghost site-size" aria-haspopup="menu" aria-label={t('site.screenSize', { size: sizeWords(sizes()?.now) })} title={t('site.screenSize', { size: sizeWords(sizes()?.now) })} onClick={sizeMenu}>
-            <Icon name="monitor" small />
-            <span>{sizes()?.now ? sizes()!.now!.replace('x', '×') : t('site.size.fit')}</span>
-          </button>
-        </Show>
-        {/* The person's own sign-ins, from their Firefox, for this conversation's pages: only where a profile exists. */}
-        <Show when={profiles()?.length}>
-          <button class="iconbtn" aria-label={t('cookies.open')} title={t('cookies.open')} onClick={() => setSigningIn(true)}>
-            <Icon name="user" />
-          </button>
-        </Show>
+        </div>
       </div>
       <Show when={signingIn()}>
         <Cookies conversationId={props.site.conversationId} onClose={() => setSigningIn(false)} />

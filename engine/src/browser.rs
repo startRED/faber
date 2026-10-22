@@ -111,7 +111,9 @@ pub enum Request {
 /// What does what the agent asks, given by the shell. It waits for the page to settle or gives up with a reason the agent
 /// reads. A page belongs to the conversation that opened it: another conversation's agent never acts on it.
 pub trait Browser: Send + Sync {
-    fn act(&self, conversation: String, request: Request) -> Pin<Box<dyn Future<Output = Result<Page, String>> + Send>>;
+    /// `tab` is the agent's own tab of that conversation (`tabs::Tabs::agent`): the page it opens and acts on, never the one the
+    /// person is on.
+    fn act(&self, conversation: String, tab: String, request: Request) -> Pin<Box<dyn Future<Output = Result<Page, String>> + Send>>;
 }
 
 const DESCRIPTION: &str = "Faber's own browser, which the person can watch and take over. Give `url` to open a page, or an \

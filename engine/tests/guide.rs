@@ -171,6 +171,7 @@ fn every_shortcut_of_the_screen_is_in_the_guide() {
                 "ctrl" => "Ctrl".to_string(),
                 "shift" => "Shift".to_string(),
                 "f10" => "F10".to_string(),
+                "tab" => "Tab".to_string(),
                 other => other.to_string(),
             })
             .collect();

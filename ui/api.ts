@@ -9,11 +9,16 @@ export type Vendor = 'claude' | 'codex';
  * `percent` when the size is known, else the `mb` so far) and installing. `ready` is one kept for a restart.
  */
 /** A conversation's tabs in Faber's browser: where each one is, which one is in front and which one the agent drives. */
+export interface SiteTab { id: string; url: string; title?: string }
+/** A conversation's tabs in Faber's browser (`engine/src/browser/tabs.rs`); `closed` waits for "Reopen closed tab". */
 export interface SiteTabs {
-  tabs: { id: string; url: string; title?: string }[];
+  tabs: SiteTab[];
   front?: string;
   agent?: string;
+  closed?: SiteTab[];
 }
+/** What the person does to the tabs. */
+export type SiteTabStep = 'new' | 'reopen' | 'bring' | 'close' | 'closeOthers';
 
 export interface UpdateStatus {
   phase: 'none' | 'checking' | 'downloading' | 'installing' | 'ready';
@@ -987,6 +992,15 @@ export const api = {
   siteStep: (id: string, step: 'back' | 'forward' | 'reload') => invoke<boolean>('site_step', { id, step }),
   /** A conversation's tabs in Faber's browser, kept in its file (`engine/src/browser/tabs.rs`); null when it never had a page. */
   siteTabs: (id: string) => invoke<SiteTabs | null>('site_tabs', { id }),
+  siteTab: (id: string, step: SiteTabStep, tab?: string) => invoke<{ tabs: SiteTabs; tab: string | null } | null>('site_tab', { id, step, tab: tab ?? null }),
+  siteGo: (id: string, url: string) => invoke<boolean>('site_go', { id, url }),
+  siteClear: (id: string) => invoke<void>('site_clear', { id }),
+  siteHistory: (id: string) => invoke<[boolean, boolean]>('site_history', { id }),
+  onSiteTabs: (listener: (id: string) => void) => listen<string>('faber:site-tabs', (e) => listener(e.payload)),
+  onSiteBusy: (listener: (busy: { conversation: string; tab: string; busy: boolean }) => void) =>
+    listen<{ conversation: string; tab: string; busy: boolean }>('faber:site-busy', (e) => listener(e.payload)),
+  onSiteKey: (listener: (key: string) => void) => listen<string>('faber:site-key', (e) => listener(e.payload)),
+  onSiteLoading: (listener: (loading: boolean) => void) => listen<boolean>('faber:site-loading', (e) => listener(e.payload)),
   sitePicture: (id: string, call: string) => invoke<string | null>('site_picture', { id, call }),
   cookieProfiles: () => invoke<CookieProfile[]>('cookie_profiles'),
   cookieSites: (profile: string) => invoke<{ ticket: string; sites: CookieSite[] }>('cookie_sites', { profile }),

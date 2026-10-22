@@ -80,6 +80,7 @@ impl faber_engine::browser::Browser for Capabilities {
     fn act(
         &self,
         _: String,
+        _: String,
         _: faber_engine::browser::Request,
     ) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<faber_engine::browser::Page, String>> + Send>> {
         Box::pin(async { Err("the capability listing must not open a browser".into()) })
@@ -643,6 +644,7 @@ impl faber_engine::browser::Browser for ProjectToolProbe {
     fn act(
         &self,
         _: String,
+        _: String,
         _: faber_engine::browser::Request,
     ) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<faber_engine::browser::Page, String>> + Send>> {
         self.pages.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
@@ -679,7 +681,7 @@ async fn r160_codex_project_started_in_plan_keeps_tools_for_approved_full_access
                 input: false,
                 msg: json!({"id":id,"method":"item/tool/call",
                 "params":{"threadId":"plan-thread","turnId":turn,"callId":format!("{turn}-{tool}"),"tool":tool,
-                "arguments":if tool == "browse" { json!({"action":"read"}) } else { json!({}) }}}),
+                "arguments":if tool == "browse" { json!({"url":"https://example.org/"}) } else { json!({}) }}}),
             });
             calls.push(crate::support::Entry { input: true, msg: json!({"id":id,"result":{}}) });
         }

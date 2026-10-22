@@ -31,6 +31,7 @@ const PATHS = {
   retry: ['M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8', 'M3 3v5h5'],
   terminal: ['m4 17 6-6-6-6', 'M12 19h8'],
   menu: ['M4 6h16', 'M4 12h16', 'M4 18h16'],
+  more: ['M4 12a1 1 0 1 0 2 0 1 1 0 0 0-2 0', 'M11 12a1 1 0 1 0 2 0 1 1 0 0 0-2 0', 'M18 12a1 1 0 1 0 2 0 1 1 0 0 0-2 0'],
   sliders: ['M20 7h-9', 'M14 17H5', 'M17 14a3 3 0 1 0 0 6 3 3 0 0 0 0-6Z', 'M7 4a3 3 0 1 0 0 6 3 3 0 0 0 0-6Z'],
   // The sections of Settings, the lock of the colours that cannot change, and the two ends of a theme file.
   user: ['M19 21v-2a4 4 0 0 0-4-4H9a4 4 0 0 0-4 4v2', 'M12 3a4 4 0 1 0 0 8 4 4 0 0 0 0-8Z'],

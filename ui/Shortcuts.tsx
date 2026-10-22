@@ -21,6 +21,7 @@ const TYPING = 'textarea, input, select, [contenteditable]';
 const GROUPS = [
   ['anywhere', 'keys.anywhere'],
   ['message', 'keys.message'],
+  ['browser', 'keys.browser'],
 ] as const;
 
 /** "?" outside a text box: every shortcut Faber has, read from ui/keys.ts, in the Ctrl+K box's own surface. Esc, the close

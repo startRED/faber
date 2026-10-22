@@ -83,6 +83,69 @@ pub fn clear_all(webview: &tauri::Webview) -> oneshot::Receiver<Result<(), Strin
     rx
 }
 
+/// The browser's keys Faber answers while the pane's page has the focus (`ui/keys.ts`, `SITE_KEYS`), by the name the screen
+/// knows them by, from the key pressed (a Windows virtual key) and whether Ctrl, Shift and Alt are down. The page never
+/// sees them; every other key is the page's.
+#[cfg(windows)]
+pub fn site_key(key: u32, ctrl: bool, shift: bool, alt: bool) -> Option<&'static str> {
+    const DIGITS: [&str; 9] = ["tab1", "tab2", "tab3", "tab4", "tab5", "tab6", "tab7", "tab8", "tab9"];
+    match (key, ctrl, shift, alt) {
+        (0x54, true, false, false) => Some("new"),
+        (0x54, true, true, false) => Some("reopen"),
+        (0x57, true, false, false) => Some("close"),
+        (0x09, true, false, false) => Some("next"),
+        (0x09, true, true, false) => Some("previous"),
+        (0x31..=0x39, true, false, false) => DIGITS.get((key - 0x31) as usize).copied(),
+        (0x4C, true, false, false) => Some("address"),
+        (0x52, true, false, false) => Some("reload"),
+        (0x25, false, false, true) => Some("back"),
+        (0x27, false, false, true) => Some("forward"),
+        _ => None,
+    }
+}
+
+/// Calls `on` with the name of each of the browser's keys (`site_key`) pressed while the pane's page has the focus, and keeps
+/// it from the page.
+#[cfg(windows)]
+pub fn keys(webview: &tauri::Webview, on: impl Fn(&'static str) + Send + 'static) {
+    use webview2_com::AcceleratorKeyPressedEventHandler;
+    use webview2_com::Microsoft::Web::WebView2::Win32::{
+        COREWEBVIEW2_KEY_EVENT_KIND, COREWEBVIEW2_KEY_EVENT_KIND_KEY_DOWN, COREWEBVIEW2_KEY_EVENT_KIND_SYSTEM_KEY_DOWN,
+        COREWEBVIEW2_PHYSICAL_KEY_STATUS,
+    };
+    use winsafe::co::VK;
+    let _ = webview.with_webview(move |platform| {
+        let handler = AcceleratorKeyPressedEventHandler::create(Box::new(move |_, args| {
+            let Some(args) = args else { return Ok(()) };
+            let (mut kind, mut key, mut status) =
+                (COREWEBVIEW2_KEY_EVENT_KIND::default(), 0u32, COREWEBVIEW2_PHYSICAL_KEY_STATUS::default());
+            // SAFETY: the arguments are a live COM object for the length of this call, and the outputs are plain locals.
+            unsafe {
+                args.KeyEventKind(&mut kind)?;
+                args.VirtualKey(&mut key)?;
+                args.PhysicalKeyStatus(&mut status)?;
+            }
+            if kind != COREWEBVIEW2_KEY_EVENT_KIND_KEY_DOWN && kind != COREWEBVIEW2_KEY_EVENT_KIND_SYSTEM_KEY_DOWN {
+                return Ok(());
+            }
+            let down = |vk: VK| winsafe::GetKeyState(vk).0;
+            if let Some(name) = site_key(key, down(VK::CONTROL), down(VK::SHIFT), down(VK::MENU)) {
+                // SAFETY: as above.
+                unsafe { args.SetHandled(true)? };
+                // A held key repeats: Ctrl+W held down closes one tab, not one after another.
+                if !status.WasKeyDown.as_bool() {
+                    on(name);
+                }
+            }
+            Ok(())
+        }));
+        let mut token = 0i64;
+        // SAFETY: the controller is a live COM object on the thread that owns it, and WebView2 keeps its own reference to the
+        // handler while the pane lives.
+        let _ = unsafe { platform.controller().add_AcceleratorKeyPressed(&handler, &mut token) };
+    });
+}
+
 #[cfg(windows)]
 fn visual_frame_navigation(nested: bool, uri: &str) -> bool {
     !nested && tauri::Url::parse(uri).is_ok_and(|url| crate::visual_page::navigation_allowed(&url))
@@ -192,7 +255,20 @@ pub fn visual_network(window: &tauri::WebviewWindow, generation: u64) {
 
 #[cfg(all(test, windows))]
 mod tests {
-    use super::visual_frame_navigation;
+    use super::{site_key, visual_frame_navigation};
+
+    #[test]
+    fn the_browser_s_keys_on_the_page_are_the_screen_s_and_every_other_key_stays_the_page_s() {
+        assert_eq!(site_key(0x54, true, false, false), Some("new"));
+        assert_eq!(site_key(0x54, true, true, false), Some("reopen"));
+        assert_eq!(site_key(0x09, true, true, false), Some("previous"));
+        assert_eq!(site_key(0x39, true, false, false), Some("tab9"));
+        assert_eq!(site_key(0x25, false, false, true), Some("back"));
+        assert_eq!(site_key(0x25, false, false, false), None, "an arrow alone moves the page");
+        assert_eq!(site_key(0x54, false, false, false), None, "a letter typed in the page");
+        assert_eq!(site_key(0x43, true, false, false), None, "Ctrl+C copies in the page");
+        assert_eq!(site_key(0x54, true, false, true), None, "AltGr is Ctrl+Alt: a character on many keyboards");
+    }
 
     #[test]
     fn visual_native_frame_navigation_refuses_every_nested_destination() {

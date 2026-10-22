@@ -1114,6 +1114,65 @@ async fn site_step(app: AppHandle, id: String, step: String) -> bool {
     false
 }
 
+/// The person loads an address they typed in the tab in front of the browser pane.
+#[tauri::command]
+async fn site_go(app: AppHandle, id: String, url: String) -> bool {
+    #[cfg(windows)]
+    if let Some(pane) = app.try_state::<Arc<pane::Pane>>().map(|p| p.inner().clone()) {
+        return pane.go(&id, &url).await;
+    }
+    let _ = (app, id, url);
+    false
+}
+
+/// What the person did to the browser pane's tabs, answered with the tabs and the tab it concerns; the tab in front shows.
+#[derive(serde::Serialize)]
+struct SiteTab {
+    tabs: faber_engine::browser::tabs::Tabs,
+    tab: Option<String>,
+}
+
+#[tauri::command]
+async fn site_tab(app: AppHandle, id: String, step: String, tab: Option<String>) -> Option<SiteTab> {
+    use faber_engine::TabStep;
+    let step = match (step.as_str(), tab) {
+        ("new", _) => TabStep::New,
+        ("reopen", _) => TabStep::Reopen,
+        ("bring", Some(tab)) => TabStep::Bring(tab),
+        ("close", Some(tab)) => TabStep::Close(tab),
+        ("closeOthers", Some(tab)) => TabStep::CloseOthers(tab),
+        _ => return None,
+    };
+    #[cfg(windows)]
+    if let Some(pane) = app.try_state::<Arc<pane::Pane>>().map(|p| p.inner().clone()) {
+        return pane.tab(&id, step).await.map(|(tabs, tab)| SiteTab { tabs, tab });
+    }
+    let _ = (app, id, step);
+    None
+}
+
+/// Whether Back and Forward of the browser pane can act on conversation `id`'s page: `[back, forward]`.
+#[tauri::command]
+async fn site_history(app: AppHandle, id: String) -> [bool; 2] {
+    #[cfg(windows)]
+    if let Some(pane) = app.try_state::<Arc<pane::Pane>>().map(|p| p.inner().clone()) {
+        let (back, forward) = pane.history(&id).await;
+        return [back, forward];
+    }
+    let _ = (app, id);
+    [false, false]
+}
+
+/// Clears conversation `id`'s browsing data once the person said yes: tabs, closed tabs, sign-ins and the page's own data.
+#[tauri::command]
+async fn site_clear(app: AppHandle, id: String) {
+    #[cfg(windows)]
+    if let Some(pane) = app.try_state::<Arc<pane::Pane>>().map(|p| p.inner().clone()) {
+        pane.clear(&id).await;
+    }
+    let _ = (app, id);
+}
+
 /// A conversation's tabs in Faber's browser, kept in its file, so the pane opens the front one again.
 #[tauri::command]
 async fn site_tabs(faber: State<'_, Faber>, id: String) -> Res<Option<faber_engine::browser::tabs::Tabs>> {
@@ -1683,6 +1742,10 @@ fn main() {
                 site_open,
                 site_step,
                 site_tabs,
+                site_go,
+                site_tab,
+                site_clear,
+                site_history,
                 site_picture,
                 cookie_profiles,
                 cookie_sites,

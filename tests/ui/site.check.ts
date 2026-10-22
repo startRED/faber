@@ -6,6 +6,7 @@ import { store } from '../../ui/running.ts';
 import recorded from '../fixtures/conversation-changes.json';
 import { useLanguage } from '../../ui/i18n.ts';
 import { Running } from '../../ui/Running.tsx';
+import { quietTabs } from './site-tabs.check.ts';
 import { addressOf, appsOf, awaySites, cornersOf, covered, looksOf, openedSite, showSite, siteOf, sitesOf, stepsOf, type OpenSite } from '../../ui/Site.tsx';
 import { Thread } from '../../ui/Thread.tsx';
 import { Cookies } from '../../ui/Cookies.tsx';
@@ -751,7 +752,8 @@ check('page in the browser: the address field takes a bare name as https, a loca
 
 check('page in the browser: with no page yet the pane shows only its address field, and Enter opens what was typed in this conversation', async () => {
   useLanguage('en');
-  const [siteOpen, sitePlace, sitePark, onSite, siteStep, openLink] = [api.siteOpen, api.sitePlace, api.sitePark, api.onSite, api.siteStep, api.openLink];
+  const [siteGo, sitePlace, sitePark, onSite, siteStep, openLink, siteHistory] = [api.siteGo, api.sitePlace, api.sitePark, api.onSite, api.siteStep, api.openLink, api.siteHistory];
+  const tabs = quietTabs();
   const outside: string[] = [];
   api.openLink = async (url) => void outside.push(url);
   const opened: string[][] = [];
@@ -759,7 +761,8 @@ check('page in the browser: with no page yet the pane shows only its address fie
   api.siteStep = async (id, step) => (stepped.push([id, step]), true);
   let placed = 0;
   let refuse = false;
-  api.siteOpen = async (id, url) => (opened.push([id, url]), !refuse);
+  api.siteGo = async (id, url) => (opened.push([id, url]), !refuse);
+  api.siteHistory = async () => [true, true];
   api.sitePlace = async () => (placed++, true);
   api.sitePark = async () => {};
   api.onSite = async () => () => {};
@@ -788,8 +791,11 @@ check('page in the browser: with no page yet the pane shows only its address fie
     equal(root.querySelector('#running-title')!.textContent!.trim(), "Faber's browser");
     equal(root.querySelector('.site-view .site-empty')!.textContent, "Open any web page here. This conversation's agent can read it too.", 'where the page will be');
     equal(placed, 0, 'nothing is placed before there is a page');
-    equal(root.querySelector('[aria-label="Back"]'), null, 'no history to step through yet');
-    equal(root.querySelector('.site-external'), null, 'and no page to take out of Faber');
+    for (const label of ['Back', 'Forward', 'Reload the page']) ok(root.querySelector<HTMLButtonElement>(`[aria-label="${label}"]`)!.disabled, `${label} is there, dimmed: no page yet`);
+    root.querySelector<HTMLButtonElement>('.site-more')!.click();
+    const external = menu()?.items.find((item) => item.id === 'external');
+    ok(external?.disabled, 'and no page to take out of Faber');
+    closeMenu();
     const field = root.querySelector<HTMLInputElement>('.site-address')!;
     const type = (text: string) => {
       field.value = text;
@@ -802,13 +808,16 @@ check('page in the browser: with no page yet the pane shows only its address fie
     ok(root.querySelector('[role="alert"]'), 'and the pane says so');
     type('example.com');
     await frames();
-    deepEqual(opened, [['c1', 'https://example.com/']], 'the page opens for this conversation');
+    deepEqual(opened, [['c1', 'https://example.com/']], 'the page opens for this conversation, in its tab in front');
     equal(openedSite()?.url, 'https://example.com/', 'the pane now holds that page');
     equal(root.querySelector('[role="alert"]'), null);
     ok(placed > 0, 'and places the browser over its box');
+    await frames();
     for (const label of ['Back', 'Forward', 'Reload the page']) root.querySelector<HTMLButtonElement>(`[aria-label="${label}"]`)!.click();
     deepEqual(stepped, [['c1', 'back'], ['c1', 'forward'], ['c1', 'reload']], 'the head steps through the page of this conversation only');
-    root.querySelector<HTMLButtonElement>('.site-external')!.click();
+    root.querySelector<HTMLButtonElement>('.site-more')!.click();
+    menu()!.items.find((item) => item.id === 'external')!.run();
+    closeMenu();
     deepEqual(outside, ['https://example.com/'], 'the page opens where it is in the person’s own browser');
     refuse = true;
     type('example.org');
@@ -816,7 +825,8 @@ check('page in the browser: with no page yet the pane shows only its address fie
     ok(root.querySelector('[role="alert"]'), 'a page the browser refused is said');
   } finally {
     showSite(undefined);
-    Object.assign(api, { siteOpen, sitePlace, sitePark, onSite, siteStep, openLink });
+    Object.assign(api, { siteGo, sitePlace, sitePark, onSite, siteStep, openLink, siteHistory });
+    tabs();
     dispose();
     root.remove();
   }
@@ -887,6 +897,7 @@ check('sign-ins from Firefox: the person picks the profile and the sites, and on
 check('page in the browser: the person picks the screen size the page is drawn at, and can show it over the conversation', async () => {
   useLanguage('en');
   const [siteSize, sitePlace, sitePark, onSite] = [api.siteSize, api.sitePlace, api.sitePark, api.onSite];
+  const tabs = quietTabs();
   const sizes = [{ name: '1920x1080', screen: 'pc' as const, width: 1920, height: 1080 }, { name: '390x844', screen: 'phone' as const, width: 390, height: 844 }];
   let now: string | null = null;
   const picks: (string | null)[] = [];
@@ -921,17 +932,18 @@ check('page in the browser: the person picks the screen size the page is drawn a
   );
   try {
     await frames(2);
-    const button = root.querySelector<HTMLButtonElement>('.site-size')!;
-    ok(button, 'the bar has the screen size');
-    equal(button.textContent?.trim(), 'Panel', 'with none chosen, the page is drawn at the panel’s own size');
-    equal(button.getAttribute('aria-label'), 'Screen size: The panel’s own size');
-    button.click();
+    const more = root.querySelector<HTMLButtonElement>('.site-more')!;
+    const sizeItem = () => (more.click(), menu()?.items.find((item) => item.id === 'size'));
+    equal(sizeItem()?.label, 'Screen size: The panel’s own size', 'the bar’s menu has the screen size, none chosen: the panel’s own');
+    sizeItem()!.run();
+    await frames(2);
     const items = menu()?.items ?? [];
     deepEqual(items.map((item) => item.label), ['✓ The panel’s own size', 'PC · 1920 × 1080', 'Phone · 390 × 844'], 'every size the agent can use, the one in use ticked');
     items[1]!.run();
     await frames(2);
     deepEqual(picks, ['1920x1080'], 'the pick goes to the pane, which the agent’s next calls use too');
-    equal(button.textContent?.trim(), '1920×1080');
+    equal(sizeItem()?.label, 'Screen size: PC · 1920 × 1080');
+    closeMenu();
     const widen = root.querySelector<HTMLButtonElement>('.site-wide')!;
     equal(widen.getAttribute('aria-label'), 'Show the page over the conversation');
     widen.click();
@@ -943,6 +955,7 @@ check('page in the browser: the person picks the screen size the page is drawn a
     dispose();
     root.remove();
     Object.assign(api, { siteSize, sitePlace, sitePark, onSite });
+    tabs();
   }
 });
 

@@ -40,6 +40,12 @@ impl Core {
         let folder = matches!(&request, browser::Request::Sizes(sizes) if sizes.is_empty())
             .then(|| self.convs.get(conv).and_then(|c| self.cwd_of(c).ok()))
             .flatten();
+        // The agent acts only in its own tab: a new page opens there (a new tab unless the one in front is blank), and every
+        // other action needs the page it opened, never the one the person is on.
+        let Some(tab) = self.agent_tab(conv, matches!(request, browser::Request::Open(_))) else {
+            let text = "Faber's browser did not do it: no page of yours is open; open one with its address first.".to_string();
+            return self.answer_browse(conv, sid, &call, false, text, Vec::new());
+        };
         let (me, conv, dir) = (self.me.clone(), conv.to_string(), self.opts.data_dir.join("attachments").join(conv));
         self.opts.runtime.spawn(async move {
             let mut picked = None;
@@ -55,7 +61,7 @@ impl Core {
                 *sizes = crate::screens::sizes_of(kind.screens());
                 picked = Some(kind);
             }
-            let (ok, text, pictures) = match tokio::time::timeout(OPEN_TIMEOUT, b.act(conv.clone(), request)).await {
+            let (ok, text, pictures) = match tokio::time::timeout(OPEN_TIMEOUT, b.act(conv.clone(), tab, request)).await {
                 Ok(Ok(mut page)) => {
                     page.picked = picked;
                     // A picture that cannot be kept only leaves the card without one. Each size's picture is the call's
@@ -92,6 +98,22 @@ impl Core {
         }
     }
 
+    /// The tab the agent's call acts in: for a new page its own tab (made when it has none: `Tabs::agent_tab`), for anything
+    /// else the tab it already has, none when it has none. The record is saved when it changed.
+    fn agent_tab(&mut self, conv: &str, opens: bool) -> Option<String> {
+        let c = self.load(conv)?;
+        let before = c.browser.clone();
+        let tabs = c.browser.get_or_insert_default();
+        let tab = if opens { Some(tabs.agent_tab()) } else { tabs.agent.clone().filter(|id| tabs.get(id).is_some()) };
+        if tabs.tabs.is_empty() && tabs.closed.is_empty() {
+            c.browser = None;
+        }
+        if c.browser != before {
+            self.save(conv);
+        }
+        tab
+    }
+
     /// Where a call's picture is kept, when the conversation exists and the picture was taken.
     pub(super) fn site_picture(&self, conv: &str, call: &str) -> Option<PathBuf> {
         self.store.get(conv)?;
@@ -100,7 +122,58 @@ impl Core {
     }
 }
 
+/// What the person does to the tabs of a conversation's browser.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum TabStep {
+    New,
+    Bring(String),
+    Close(String),
+    CloseOthers(String),
+    Reopen,
+    /// The page of a reply's card: its own tab when one has it, else the blank one in front, else a new one.
+    Show(String),
+    /// "Clear this conversation's browsing data": every tab and every closed one go.
+    Clear,
+}
+
 impl Engine {
+    /// Does `step` to conversation `id`'s tabs and answers them with the tab it concerns (the new, reopened or shown one, or
+    /// the one in front after a close); none when the conversation is gone or the step names no tab of it. Closing the
+    /// last tab leaves none, and the screen closes the pane.
+    pub fn browser_tab(&self, id: &str, step: TabStep) -> Option<(browser::tabs::Tabs, Option<String>)> {
+        self.with(|c| {
+            let conversation = c.load(id)?;
+            let tabs = conversation.browser.get_or_insert_default();
+            let (known, tab) = match &step {
+                TabStep::New => (true, Some(tabs.new_tab())),
+                TabStep::Bring(tab) => (tabs.bring(tab), Some(tab.clone())),
+                TabStep::Close(tab) => (tabs.close(tab), tabs.front.clone()),
+                TabStep::CloseOthers(tab) => (tabs.close_others(tab), Some(tab.clone())),
+                TabStep::Reopen => {
+                    let tab = tabs.reopen();
+                    (tab.is_some(), tab)
+                }
+                TabStep::Clear => {
+                    *tabs = browser::tabs::Tabs::default();
+                    (true, None)
+                }
+                TabStep::Show(url) => {
+                    let tab = browser::tabs::kept_url(url).map(|url| tabs.show(&url));
+                    (tab.is_some(), tab)
+                }
+            };
+            let answer = tabs.clone();
+            if tabs.tabs.is_empty() && tabs.closed.is_empty() {
+                conversation.browser = None;
+            }
+            if !known {
+                return None;
+            }
+            c.save(id);
+            Some((answer, tab))
+        })
+    }
+
     /// A conversation's tabs in Faber's browser (`browser::tabs`); none for one that is gone or never had a page.
     pub fn browser_tabs(&self, id: &str) -> Option<browser::tabs::Tabs> {
         self.with(|c| c.load(id)?.browser.clone())
@@ -108,18 +181,19 @@ impl Engine {
 
     /// A page finished loading in tab `tab` of conversation `id`'s browser (the front one when none), with its title when it is
     /// known: kept in the conversation's file, so the pane opens it again. A load that changes nothing writes nothing, and a
-    /// page loading never moves the conversation in the sidebar.
-    pub fn browser_seen(&self, id: &str, tab: Option<&str>, url: &str, title: Option<&str>) {
+    /// page loading never moves the conversation in the sidebar. Answers whether the tabs changed.
+    pub fn browser_seen(&self, id: &str, tab: Option<&str>, url: &str, title: Option<&str>) -> bool {
         self.with(|c| {
-            let Some(conversation) = c.load(id) else { return };
+            let Some(conversation) = c.load(id) else { return false };
             let tabs = conversation.browser.get_or_insert_default();
             let changed = tabs.record(tab, url, title);
-            if tabs.tabs.is_empty() {
+            if tabs.tabs.is_empty() && tabs.closed.is_empty() {
                 conversation.browser = None;
             }
             if changed {
                 c.save(id);
             }
-        });
+            changed
+        })
     }
 }

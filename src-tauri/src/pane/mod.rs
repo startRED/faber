@@ -18,6 +18,8 @@ pub(crate) mod firefox;
 pub(crate) mod native;
 
 use base64::Engine as _;
+use faber_engine::TabStep;
+use faber_engine::browser::tabs::Tabs;
 use faber_engine::browser::{Browser, Look, MAX_CUT, MAX_TEXT, MAX_TITLE, MAX_URL, Page, Request, Turn};
 use faber_engine::screens::Viewport;
 use serde_json::{Value, json};
@@ -29,6 +31,11 @@ use tauri::webview::{NewWindowResponse, PageLoadEvent};
 use tauri::{AppHandle, Emitter, LogicalPosition, LogicalSize, Manager, Url, Webview, WebviewBuilder, WebviewUrl};
 
 const LABEL: &str = "site";
+/// The second pane: the agent's tab while the person has another tab of the same conversation in front. It is never shown,
+/// shares the first pane's private profile (the same conversation's sign-ins) and closes with it.
+const BEHIND_LABEL: &str = "site-agent";
+/// Unused this long, the agent's pane behind closes: a second page lives only while the agent works out of view.
+const BEHIND_IDLE: Duration = Duration::from_secs(60);
 /// Where the pane waits while nobody looks: outside the window, where it keeps drawing (the spike's rule 2).
 const PARKED: LogicalPosition<f64> = LogicalPosition { x: -20_000.0, y: -20_000.0 };
 /// The size the agent's pages load at while parked, a common laptop window.
@@ -97,6 +104,13 @@ fn allowed(url: &Url) -> bool {
 
 pub struct Pane {
     app: AppHandle,
+    label: &'static str,
+    /// How long the pane may sit unused out of sight before it closes.
+    idle: Duration,
+    /// The agent's pane behind this one (`BEHIND_LABEL`); none on that pane itself.
+    behind: Option<Arc<Pane>>,
+    /// On the pane behind: the first pane, whose era it is bound to (`still_behind`).
+    front_of: std::sync::OnceLock<std::sync::Weak<Pane>>,
     /// Never call a webview getter or await under this lock: `on_page_load` takes it on the window's thread.
     state: Mutex<State>,
     /// The pages that started and the last of them that finished, so an open waits for its own page and never for a late
@@ -124,6 +138,11 @@ struct State {
     round_script: Option<String>,
     /// Counts the panes made, so a look that finishes after its pane closed never counts for the next one.
     made: u64,
+    /// On the first pane: counts its closes, before the pane behind closes with it. On the pane behind: the first pane's era
+    /// and the conversation it works for, so a pane behind made while the first one closed never lives on beside another
+    /// conversation's pages in the profile they share.
+    era: u64,
+    bound: Option<(u64, String)>,
     webview: Option<Webview>,
     shown: bool,
     used: Option<Instant>,
@@ -133,11 +152,16 @@ struct State {
     handed_back: bool,
     /// The conversation whose page the pane holds: another conversation's agent never acts on it or reads it.
     owner: Option<String>,
+    /// The tab of that conversation (`browser::tabs`) whose page the pane holds, none for a page from before tabs.
+    tab: Option<String>,
     /// The pane (`made`) and the conversation whose tabs its pages are kept in (`browser_seen`): set when Faber loads a page in
     /// that pane, cleared when it closes, so a late page of a pane that closed is never kept in the conversation after it.
     keeps_for: Option<(u64, String)>,
-    /// From a page Faber loads until it starts: a title that comes meanwhile is the page before's.
+    /// From a page Faber loads until it finishes: a title or history that comes meanwhile may still be the page before's.
     keep_waits: bool,
+    /// The page Faber loads is another tab's than the one before: once it finishes, the history of the tab before goes, so
+    /// Back never steps into another tab.
+    new_history: bool,
     /// A write of where the page is runs (`keep_soon`), and another was asked meanwhile.
     keeping: bool,
     keep_again: bool,
@@ -311,8 +335,19 @@ fn unix_now() -> i64 {
 
 impl Pane {
     pub fn new(app: AppHandle) -> Arc<Pane> {
+        let behind = Pane::made(app.clone(), BEHIND_LABEL, BEHIND_IDLE, None);
+        let main = Pane::made(app, LABEL, IDLE, Some(behind.clone()));
+        let _ = behind.front_of.set(Arc::downgrade(&main));
+        main
+    }
+
+    fn made(app: AppHandle, label: &'static str, idle: Duration, behind: Option<Arc<Pane>>) -> Arc<Pane> {
         Arc::new(Pane {
             app,
+            label,
+            idle,
+            behind,
+            front_of: std::sync::OnceLock::new(),
             state: Mutex::default(),
             loads: tokio::sync::watch::channel((0, 0)).0,
             opening: tokio::sync::Mutex::new(()),
@@ -331,7 +366,7 @@ impl Pane {
     /// to wait past. A pane is made blank: before its first page it clears all the private data a closed one may still share
     /// (cookies, every site's storage; one conversation's sign-ins never reach the next one's, R308), waits until WebView2
     /// says it is gone, and takes the sign-ins `conversation` holds.
-    async fn load(self: &Arc<Self>, url: &str, conversation: &str) -> Result<u64, String> {
+    async fn load(self: &Arc<Self>, url: &str, conversation: &str, tab: Option<&str>) -> Result<u64, String> {
         let parsed = checked(url)?;
         let before = self.loads.borrow().0;
         // A page Faber loads is the agent's or a card's, never one the person went to.
@@ -341,6 +376,10 @@ impl Pane {
             {
                 let mut s = crate::lock(&self.state);
                 (s.keeps_for, s.keep_waits) = (Some((s.made, conversation.to_string())), true);
+                if s.tab.as_deref() != tab {
+                    s.new_history = true;
+                }
+                s.tab = tab.map(str::to_string);
             }
             if webview.navigate(parsed.clone()).is_ok() {
                 return Ok(before);
@@ -350,12 +389,14 @@ impl Pane {
         }
         let window = self.app.get_window("main").ok_or("Faber's window is closed")?;
         let (loads, app, pane) = (self.loads.clone(), self.app.clone(), Arc::downgrade(self));
+        let starting = self.app.clone();
         // Which pane this is (`State::made`), known once it is made: a late page of a pane that closed is never kept.
         let mine = Arc::new(std::sync::atomic::AtomicU64::new(0));
         let (titled, titled_mine, loaded_mine) = (Arc::downgrade(self), mine.clone(), mine.clone());
-        let started = Arc::downgrade(self);
         let blank = Url::parse("about:blank").map_err(|e| e.to_string())?;
-        let builder = WebviewBuilder::new(LABEL, WebviewUrl::External(blank))
+        // Only the pane the person sees tells the screen where its page is; the agent's pane behind is never on it.
+        let front = self.behind.is_some();
+        let builder = WebviewBuilder::new(self.label, WebviewUrl::External(blank))
             .incognito(true)
             .on_navigation(allowed)
             .on_new_window(|_, _| NewWindowResponse::Deny)
@@ -368,16 +409,19 @@ impl Pane {
             .on_page_load(move |_, payload| match payload.event() {
                 PageLoadEvent::Started => {
                     loads.send_modify(|(started, _)| *started += 1);
-                    if let Some(pane) = started.upgrade() {
-                        crate::lock(&pane.state).keep_waits = false;
+                    // The thin line under the address field, while the page the person sees loads.
+                    if front {
+                        let _ = starting.emit_to("main", "faber:site-loading", true);
                     }
                 }
                 PageLoadEvent::Finished => {
                     loads.send_modify(|(started, finished)| *finished = *started);
                     // A page that finished while the person had the pane is one they went to: the agent hears its site next time.
                     if let Some(pane) = pane.upgrade() {
-                        let redraw = {
+                        let (redraw, forget) = {
                             let mut s = crate::lock(&pane.state);
+                            s.keep_waits = false;
+                            let forget = std::mem::take(&mut s.new_history).then(|| s.webview.clone()).flatten();
                             if s.skip_finish > 0 {
                                 s.skip_finish -= 1;
                             } else if s.shown {
@@ -386,29 +430,53 @@ impl Pane {
                             // A new page may have left the screen size behind (another process draws it): the person's
                             // view is drawn at it again rather than trusted.
                             s.fitted = None;
-                            s.size.is_some() && *pane.looking.borrow()
+                            (s.size.is_some() && *pane.looking.borrow(), forget)
                         };
+                        if let Some(webview) = forget {
+                            tauri::async_runtime::spawn(async move {
+                                let _ = look_call(&webview, "Page.resetNavigationHistory", json!({})).await;
+                            });
+                        }
                         pane.keep_soon(loaded_mine.load(std::sync::atomic::Ordering::Relaxed));
                         if redraw {
                             tauri::async_runtime::spawn(async move { pane.show_size().await });
                         }
                     }
                     // The screen names the page it shows by where it is now, never by the card it was opened from.
-                    let _ = app.emit_to("main", "faber:site", payload.url().as_str());
+                    if front {
+                        let _ = app.emit_to("main", "faber:site-loading", false);
+                        let _ = app.emit_to("main", "faber:site", payload.url().as_str());
+                    }
                 }
             });
         let webview = window.add_child(builder, PARKED, SIZE).map_err(|e| e.to_string())?;
+        // The browser's keys pressed on the page are the screen's: the page is a native view, so they never reach it there.
+        if front {
+            let app = self.app.clone();
+            native::keys(&webview, move |key| {
+                let _ = app.emit_to("main", "faber:site-key", key);
+            });
+        }
         let made = {
             let mut s = crate::lock(&self.state);
             s.webview = Some(webview.clone());
             s.made += 1;
             (s.keeps_for, s.keep_waits) = (Some((s.made, conversation.to_string())), true);
+            s.tab = tab.map(str::to_string);
             mine.store(s.made, std::sync::atomic::Ordering::Relaxed);
             s.made
         };
+        // Stored first, then checked: a first pane that closes after this closes this webview too, and one that closed before
+        // is seen here.
+        if !self.still_behind() {
+            self.close();
+            return Err(MOVED.into());
+        }
         // Until its first page, a pane whose making stops (an error, or the call that made it given up) closes.
         let making = Making { pane: self, made, done: false };
-        if !clear_new(&webview).await {
+        // The pane behind shares the first pane's profile, which holds this same conversation's pages: clearing it would sign
+        // the person's tab out.
+        if self.behind.is_some() && !clear_new(&webview).await {
             // Never a page on data that may be another conversation's: the next open makes a new pane and tries again.
             return Err("Faber's browser could not start fresh; try again".into());
         }
@@ -420,7 +488,7 @@ impl Pane {
         if let Some(cookies) = held {
             self.set_cookies(&cookies).await;
         }
-        if crate::lock(&self.state).made != made {
+        if crate::lock(&self.state).made != made || !self.still_behind() {
             return Err("the browser closed".into());
         }
         let before = self.loads.borrow().0;
@@ -464,9 +532,13 @@ impl Pane {
     async fn keep_now(&self, made: u64) {
         let held = {
             let s = crate::lock(&self.state);
-            keeps_now(&s.keeps_for, made, s.webview.is_some()).zip(s.webview.clone())
+            // A page Faber loads has not started: the history still shows the page before, which is another tab's.
+            if s.keep_waits {
+                return;
+            }
+            keeps_now(&s.keeps_for, made, s.webview.is_some()).zip(s.webview.clone()).map(|(c, w)| (c, w, s.tab.clone()))
         };
-        let Some((conversation, webview)) = held else { return };
+        let Some((conversation, webview, tab)) = held else { return };
         let Ok(history) = look_call(&webview, "Page.getNavigationHistory", json!({})).await else { return };
         let entry = usize::try_from(history["currentIndex"].as_i64().unwrap_or(-1)).ok().and_then(|at| history["entries"].get(at));
         let Some(url) = entry.and_then(|e| e["url"].as_str()).and_then(|u| Url::parse(u).ok()).filter(allowed) else { return };
@@ -474,17 +546,20 @@ impl Pane {
         let title = entry.and_then(|e| e["title"].as_str()).filter(|t| !t.is_empty() && *t != url.as_str()).map(str::to_string);
         {
             let s = crate::lock(&self.state);
-            if keeps_now(&s.keeps_for, made, s.webview.is_some()).as_ref() != Some(&conversation) {
+            if keeps_now(&s.keeps_for, made, s.webview.is_some()).as_ref() != Some(&conversation) || s.tab != tab {
                 return;
             }
         }
         let (app, url) = (self.app.clone(), url.to_string());
-        let _ = tauri::async_runtime::spawn_blocking(move || {
-            if let Some(faber) = app.try_state::<crate::Faber>() {
-                faber.engine.browser_seen(&conversation, None, &url, Some(title.as_deref().unwrap_or("")));
-            }
+        let changed = tauri::async_runtime::spawn_blocking(move || {
+            let faber = app.try_state::<crate::Faber>()?;
+            faber.engine.browser_seen(&conversation, tab.as_deref(), &url, Some(title.as_deref().unwrap_or(""))).then_some(conversation)
         })
         .await;
+        // The strip shows the new title or address.
+        if let Ok(Some(conversation)) = changed {
+            let _ = self.app.emit_to("main", "faber:site-tabs", conversation);
+        }
     }
 
     fn touch(self: &Arc<Self>) {
@@ -499,7 +574,7 @@ impl Pane {
                 // Decided and taken under one lock, so a page that opens meanwhile is never closed under it.
                 let wait = {
                     let mut s = crate::lock(&pane.state);
-                    let left = s.used.map_or(Duration::ZERO, |u| IDLE.saturating_sub(u.elapsed()));
+                    let left = s.used.map_or(Duration::ZERO, |u| pane.idle.saturating_sub(u.elapsed()));
                     if left.is_zero() && !s.shown {
                         s.idle_watch = false;
                         s.visited.clear();
@@ -507,7 +582,9 @@ impl Pane {
                         (s.rounded, s.round_script) = (None, None);
                         (s.emulated, s.fitted) = (false, None);
                         s.brought = false;
-                        s.keeps_for = None;
+                        (s.keeps_for, s.tab) = (None, None);
+                        s.era += 1;
+                        s.bound = None;
                         Err(s.webview.take())
                     } else {
                         Ok(left.max(Duration::from_secs(1)))
@@ -518,6 +595,10 @@ impl Pane {
                     Err(webview) => {
                         if let Some(webview) = webview {
                             let _ = webview.close();
+                        }
+                        // The pane behind never outlives this one: a new pane clears the profile they share.
+                        if let Some(behind) = &pane.behind {
+                            behind.close();
                         }
                         break;
                     }
@@ -535,12 +616,17 @@ impl Pane {
             (s.size, s.emulated, s.fitted) = (None, false, None);
             (s.rounded, s.round_script) = (None, None);
             s.brought = false;
-            s.keeps_for = None;
+            (s.keeps_for, s.tab) = (None, None);
+            s.era += 1;
+            s.bound = None;
             s.webview.take()
         };
         self.looking.send_replace(false);
         if let Some(webview) = webview {
             let _ = webview.close();
+        }
+        if let Some(behind) = &self.behind {
+            behind.close();
         }
     }
 
@@ -703,22 +789,100 @@ impl Pane {
 
     /// Loads a page the person asked for from a conversation's reply. The page is that conversation's from then on.
     pub async fn show_page(self: &Arc<Self>, conversation: &str, url: &str) -> bool {
-        // The page the agent left is usually the one the card names: it shows at once, even while a call of the agent's runs,
-        // which then finds the person looking and stops before it acts.
-        let owner = crate::lock(&self.state).owner.clone();
-        let same = self.webview().and_then(|w| w.url().ok()).is_some_and(|now| now.as_str() == url);
-        if same && owner.as_deref() == Some(conversation) {
-            return true;
-        }
-        // An address the pane never loads leaves another conversation's page as it was.
+        // An address the pane never loads leaves another conversation's page and tabs as they were.
         if checked(url).is_err() {
             return false;
+        }
+        let tab = self.tab_step(conversation, TabStep::Show(url.to_string())).await.and_then(|(_, tab)| tab);
+        self.show_in(conversation, tab, url).await
+    }
+
+    /// The person loads `url` in the tab in front (an address they typed): the tab keeps it.
+    pub async fn go(self: &Arc<Self>, conversation: &str, url: &str) -> bool {
+        // An address too long for its tab to keep would load and then reopen on the page before.
+        if checked(url).is_err() || url.chars().count() > faber_engine::browser::MAX_URL {
+            return false;
+        }
+        let front = self.tabs_of(conversation).await.and_then(|tabs| tabs.front);
+        let tab = match front {
+            Some(front) => Some(front),
+            None => self.tab_step(conversation, TabStep::Show(url.to_string())).await.and_then(|(_, tab)| tab),
+        };
+        self.show_in(conversation, tab, url).await
+    }
+
+    /// The person did `step` to the conversation's tabs: the tab in front then shows, its page loaded again from its record
+    /// when the pane holds another (a blank one shows only the address field). A tab the agent's pane behind held comes to
+    /// this one, which loads it, and the pane behind closes. Answers the tabs and the tab the step concerns.
+    pub async fn tab(self: &Arc<Self>, conversation: &str, step: TabStep) -> Option<(Tabs, Option<String>)> {
+        let answer = self.tab_step(conversation, step).await?;
+        if let Some(behind) = self.behind.as_ref() {
+            let held = crate::lock(&behind.state).tab.clone();
+            if held.is_some_and(|held| behind.holds(conversation, &held) && answer.0.get(&held).is_none()) {
+                behind.close();
+            }
+        }
+        let front = answer.0.front_tab().cloned();
+        if let Some(front) = front.filter(|t| !t.url.is_empty() && !self.holds(conversation, &t.id)) {
+            self.show_in(conversation, Some(front.id.clone()), &front.url).await;
+        }
+        Some(answer)
+    }
+
+    /// Whether Back and Forward can go anywhere on the page the person sees of `conversation`: (back, forward).
+    pub async fn history(&self, conversation: &str) -> (bool, bool) {
+        let webview = {
+            let s = crate::lock(&self.state);
+            s.webview.clone().filter(|_| s.owner.as_deref() == Some(conversation))
+        };
+        let Some(webview) = webview else { return (false, false) };
+        let Ok(history) = look_call(&webview, "Page.getNavigationHistory", json!({})).await else { return (false, false) };
+        let at = history["currentIndex"].as_i64().unwrap_or(0);
+        let count = history["entries"].as_array().map_or(0, |e| e.len() as i64);
+        (at > 0, at + 1 < count)
+    }
+
+    /// Whether the pane holds tab `tab` of `conversation` now.
+    fn holds(&self, conversation: &str, tab: &str) -> bool {
+        let s = crate::lock(&self.state);
+        s.webview.is_some() && s.owner.as_deref() == Some(conversation) && s.tab.as_deref() == Some(tab)
+    }
+
+    /// A conversation's tabs, read off the window's thread.
+    async fn tabs_of(&self, conversation: &str) -> Option<Tabs> {
+        let (app, conversation) = (self.app.clone(), conversation.to_string());
+        tauri::async_runtime::spawn_blocking(move || app.try_state::<crate::Faber>()?.engine.browser_tabs(&conversation)).await.ok()?
+    }
+
+    /// Does `step` to a conversation's tabs in the engine, off the window's thread; the strip hears of it.
+    async fn tab_step(&self, conversation: &str, step: TabStep) -> Option<(Tabs, Option<String>)> {
+        let (app, id) = (self.app.clone(), conversation.to_string());
+        let answer =
+            tauri::async_runtime::spawn_blocking(move || app.try_state::<crate::Faber>()?.engine.browser_tab(&id, step)).await.ok()?;
+        let _ = self.app.emit_to("main", "faber:site-tabs", conversation);
+        answer
+    }
+
+    /// Loads `url` in tab `tab` for the person: the page is that conversation's from then on.
+    async fn show_in(self: &Arc<Self>, conversation: &str, tab: Option<String>, url: &str) -> bool {
+        // The page the agent left is usually the one the card names: it shows at once, even while a call of the agent's runs,
+        // which then finds the person looking and stops before it acts.
+        let (owner, held) = {
+            let s = crate::lock(&self.state);
+            (s.owner.clone(), s.tab.clone())
+        };
+        let same = self.webview().and_then(|w| w.url().ok()).is_some_and(|now| now.as_str() == url);
+        if same && owner.as_deref() == Some(conversation) && (tab.is_none() || held == tab) {
+            return true;
+        }
+        if let Some(behind) = self.behind.as_ref().filter(|b| tab.as_deref().is_some_and(|t| b.holds(conversation, t))) {
+            behind.close();
         }
         let _turn = self.opening.lock().await;
         self.fresh_for(conversation).await;
         // A pane already there takes the conversation's sign-ins before the page asks for anything.
         self.bring_in(conversation).await;
-        let shown = self.load(url, conversation).await.is_ok();
+        let shown = self.load(url, conversation, tab.as_deref()).await.is_ok();
         if shown {
             let mut s = crate::lock(&self.state);
             if s.owner.as_deref() != Some(conversation) {
@@ -882,6 +1046,23 @@ impl Pane {
         }
     }
 
+    /// "Clear this conversation's browsing data", once the person said yes: its tabs, closed tabs and sign-ins go, and a pane
+    /// holding its page closes with everything the page kept, so the next page starts clean.
+    pub async fn clear(&self, conversation: &str) {
+        // Held until the pane closed, so no page of the conversation loads while its data goes.
+        let _turn = self.opening.lock().await;
+        let webview = {
+            let mut s = crate::lock(&self.state);
+            s.held.retain(|h| h.conversation != conversation);
+            s.webview.clone().filter(|_| s.owner.as_deref() == Some(conversation))
+        };
+        if let Some(webview) = webview {
+            let _ = tokio::time::timeout(CLEARING, native::clear_all(&webview)).await;
+            self.close();
+        }
+        self.tab_step(conversation, TabStep::Clear).await;
+    }
+
     /// A page that passes to another conversation gets a pane of its own: one conversation's history (and anything the
     /// person signed in to there) is never a Back away from another's agent. The old pane's private data goes now, while
     /// its page still runs, and all of it again before the new pane's first page (`load`), since private panes made one
@@ -894,7 +1075,7 @@ impl Pane {
             }
             s.webview.clone()
         };
-        if let Some(webview) = webview {
+        if let Some(webview) = webview.filter(|_| self.behind.is_some()) {
             let _ = tokio::time::timeout(CLEARING, native::clear_all(&webview)).await;
         }
         self.close();
@@ -1093,8 +1274,27 @@ impl Pane {
         Ok(looks)
     }
 
-    async fn act_page(self: Arc<Self>, conversation: String, request: Request) -> Result<Page, String> {
+    async fn act_page(self: Arc<Self>, conversation: String, tab: Option<String>, request: Request) -> Result<Page, String> {
         let _turn = self.take().await?;
+        // The person may have brought another tab to the front, or closed the pane, while this call waited for its turn.
+        if !self.still_behind() {
+            self.close();
+            return Err(MOVED.into());
+        }
+        if let Some(tab) = tab.as_deref() {
+            let front = if self.behind.is_some() { self.tabs_of(&conversation).await.and_then(|t| t.front) } else { None };
+            let s = crate::lock(&self.state);
+            let moved = match request {
+                Request::Open(_) => {
+                    self.behind.is_some()
+                        && goes_behind(s.webview.is_some(), s.owner.as_deref(), s.tab.as_deref(), &conversation, tab, front.as_deref())
+                }
+                _ => !(s.webview.is_some() && s.owner.as_deref() == Some(conversation.as_str()) && s.tab.as_deref() == Some(tab)),
+            };
+            if moved {
+                return Err(MOVED.into());
+            }
+        }
         let (mine, taken, reported) = {
             let s = crate::lock(&self.state);
             // What the person did on another conversation's page is never this agent's to hear.
@@ -1111,7 +1311,7 @@ impl Pane {
                 self.person_took_it(taken)?;
                 self.fresh_for(&conversation).await;
                 self.bring_in(&conversation).await;
-                before = self.load(url, &conversation).await?;
+                before = self.load(url, &conversation, tab.as_deref()).await?;
                 {
                     let mut s = crate::lock(&self.state);
                     if !mine {
@@ -1370,12 +1570,104 @@ impl Drop for Abort {
     }
 }
 
+/// Tells the screen the agent works in a tab, and that it stopped once the call ends, however it ends.
+struct Busy {
+    app: AppHandle,
+    conversation: String,
+    tab: String,
+}
+
+impl Busy {
+    fn new(app: AppHandle, conversation: String, tab: String) -> Busy {
+        let _ = app.emit_to("main", "faber:site-busy", json!({ "conversation": conversation, "tab": tab, "busy": true }));
+        Busy { app, conversation, tab }
+    }
+}
+
+impl Drop for Busy {
+    fn drop(&mut self) {
+        let _ = self.app.emit_to("main", "faber:site-busy", json!({ "conversation": self.conversation, "tab": self.tab, "busy": false }));
+    }
+}
+
+/// Which pane the agent's call on tab `tab` goes to: the one that holds it; else the first pane, unless that one holds
+/// another tab of the same conversation, which is the person's and stays as it is: the pane behind takes the agent's then.
+fn agent_pane(main: &Arc<Pane>, conversation: &str, tab: &str, front: Option<&str>) -> Arc<Pane> {
+    let Some(behind) = main.behind.clone() else { return main.clone() };
+    let (person_s, era) = {
+        let s = crate::lock(&main.state);
+        (goes_behind(s.webview.is_some(), s.owner.as_deref(), s.tab.as_deref(), conversation, tab, front), s.era)
+    };
+    if !person_s {
+        return main.clone();
+    }
+    // Bound to this era of the first pane and this conversation: a pane behind bound to another goes first.
+    let bound = Some((era, conversation.to_string()));
+    if crate::lock(&behind.state).bound != bound {
+        behind.close();
+        crate::lock(&behind.state).bound = bound;
+    }
+    behind
+}
+
+/// Whether the agent's call on `tab` goes to the pane behind: the first pane holds another tab of its conversation, the
+/// person's, and the agent's tab is not the one in front (a blank tab in front that became the agent's shows its page).
+fn goes_behind(open: bool, owner: Option<&str>, held: Option<&str>, conversation: &str, tab: &str, front: Option<&str>) -> bool {
+    holds_another(open, owner, held, conversation, tab) && front != Some(tab)
+}
+
+/// Whether a pane with a page of `owner`'s tab `held` holds another tab of `conversation` than `tab`: the person's, which the
+/// agent's call never loads over. Another conversation's page is not: the pane passes to the agent's conversation as before.
+fn holds_another(open: bool, owner: Option<&str>, held: Option<&str>, conversation: &str, tab: &str) -> bool {
+    open && owner == Some(conversation) && held.is_some_and(|held| held != tab)
+}
+
+/// The agent's call found the pane it was sent to holding something else once its turn came: it is sent again.
+const MOVED: &str = "the person moved Faber's browser to another tab meanwhile; try again";
+/// How many times the agent's call is sent before it gives up.
+const SENDS: usize = 3;
+
+impl Pane {
+    /// Whether this pane may hold a page now: always for the first pane; for the pane behind, only while the first pane is
+    /// open on the same conversation in the era it was bound to.
+    fn still_behind(&self) -> bool {
+        let Some(main) = self.front_of.get() else { return true };
+        let Some((era, conversation)) = crate::lock(&self.state).bound.clone() else { return false };
+        let Some(main) = main.upgrade() else { return false };
+        let s = crate::lock(&main.state);
+        s.webview.is_some() && s.era == era && s.owner.as_deref() == Some(conversation.as_str())
+    }
+
+    /// The agent's call on its own tab: a page it left in a tab no pane holds now loads again from the tab's record first.
+    async fn agent_act(self: Arc<Self>, conversation: String, tab: String, request: Request) -> Result<Page, String> {
+        let _busy = Busy::new(self.app.clone(), conversation.clone(), tab.clone());
+        for _ in 1..SENDS {
+            match self.agent_send(&conversation, &tab, &request).await {
+                Err(e) if e == MOVED => continue,
+                done => return done,
+            }
+        }
+        self.agent_send(&conversation, &tab, &request).await
+    }
+
+    async fn agent_send(self: &Arc<Self>, conversation: &str, tab: &str, request: &Request) -> Result<Page, String> {
+        let tabs = self.tabs_of(conversation).await;
+        let pane = agent_pane(self, conversation, tab, tabs.as_ref().and_then(|t| t.front.as_deref()));
+        if !matches!(request, Request::Open(_)) && !pane.holds(conversation, tab) {
+            let url = tabs.as_ref().and_then(|tabs| tabs.get(tab).map(|t| t.url.clone())).filter(|u| !u.is_empty());
+            let url = url.ok_or("no page of yours is open; open one with its address first")?;
+            pane.clone().act_page(conversation.to_string(), Some(tab.to_string()), Request::Open(url)).await?;
+        }
+        pane.act_page(conversation.to_string(), Some(tab.to_string()), request.clone()).await
+    }
+}
+
 impl Browser for PaneBrowser {
-    fn act(&self, conversation: String, request: Request) -> Pin<Box<dyn Future<Output = Result<Page, String>> + Send>> {
+    fn act(&self, conversation: String, tab: String, request: Request) -> Pin<Box<dyn Future<Output = Result<Page, String>> + Send>> {
         let pane = self.0.clone();
         // Making the webview waits for the window's thread, so it runs off the engine's.
         Box::pin(async move {
-            let mut task = Abort(tauri::async_runtime::spawn(pane.act_page(conversation, request)));
+            let mut task = Abort(tauri::async_runtime::spawn(pane.agent_act(conversation, tab, request)));
             (&mut task.0).await.map_err(|e| e.to_string())?
         })
     }
@@ -1384,6 +1676,17 @@ impl Browser for PaneBrowser {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_agent_s_call_goes_behind_only_when_the_pane_holds_another_tab_of_its_conversation() {
+        assert!(holds_another(true, Some("a"), Some("t1"), "a", "t2"), "the person's tab stays as it is");
+        assert!(!holds_another(true, Some("a"), Some("t2"), "a", "t2"), "its own tab");
+        assert!(!holds_another(true, Some("a"), None, "a", "t2"), "a page from before tabs");
+        assert!(!holds_another(true, Some("b"), Some("t1"), "a", "t2"), "another conversation's page");
+        assert!(!holds_another(false, Some("a"), Some("t1"), "a", "t2"), "no page open");
+        assert!(goes_behind(true, Some("a"), Some("t1"), "a", "t2", Some("t1")), "the person looks at their own tab");
+        assert!(!goes_behind(true, Some("a"), Some("t1"), "a", "t2", Some("t2")), "a blank tab in front became the agent's");
+    }
 
     #[test]
     fn a_late_page_of_a_pane_that_closed_or_was_made_again_is_never_kept_in_another_conversation() {

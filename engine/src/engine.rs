@@ -41,6 +41,7 @@ mod compact;
 mod copies;
 mod ended;
 pub use aside::Aside;
+pub use browse::TabStep;
 pub use copies::GitRunner;
 pub mod facts;
 mod goals;

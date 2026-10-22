@@ -107,11 +107,16 @@ Its rows, cards, file changes and when it opens by itself: [running.md](running.
 Changes, the quick question or Faber's browser in that same column in place of the running list, each a view of its own
 with its title and close; it never adds a second column. Docked (about 1,030 px and wider), the column is a card of its own beside
 the stage, the frame between them and every corner as round as the stage's; a look with no inset keeps it flush. Faber's
-browser shows its page in a rounded box under the address field, with nothing repeating the site: the address names it.
+browser's head is its tab strip: tabs share it from 180 px down to 76 px each (the site's letter in a 16 px square, the
+title in one line, close on the tab in front and on hover or focus), the one in front on the raised surface, then New tab,
+expand and close. Under it one bar: Back, Forward and Reload (dimmed at 40% when they cannot act; under 300 px Forward
+goes first), the address field as a filled pill (site in normal ink, the rest quiet until focus, a 2 px line along its
+bottom while the page loads) and More. The page shows in a rounded box under the bar, with nothing repeating the site:
+the address names it.
 The pane is a native rectangle, so the shell draws the box's corners over the page in the card's colour, smooth, and gives
 the page the screen's thin scrollbars (`src-tauri/src/pane/round.js`, in a world of its own the page's scripts never see,
 `site_round`). With no page yet the box stays, calm, with a globe and what it is for in its middle. Where Firefox keeps a profile, the
-head ends with a person icon, "Sign in with your Firefox": a dialog on the rewind dialog's surface (the page steps aside
+More menu has "Sign in with your Firefox": a dialog on the rewind dialog's surface (the page steps aside
 for it like for any layer) with one primary action per step, Continue, then Bring over; the site list scrolls inside a
 hairline box, sensitive sites marked with an amber pill, never a colour alone. Like the other side views, opening it makes an
 automatically opened overlay modal. At most one file's patch stays open, and a partial list offers continuation.

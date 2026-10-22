@@ -4,7 +4,7 @@ Status: proposal, queued as tasks 010 to 060 (`docs/tasks/`). Each task ticks it
 
 - [ ] 010 Each pane opens at its own best width
 - [x] 020 Faber's browser remembers its pages
-- [ ] 030 Faber's browser gets tabs and a real browser bar
+- [x] 030 Faber's browser gets tabs and a real browser bar
 - [ ] 040 The quick question becomes a side chat
 - [ ] 050 What Faber forgets and should keep
 - [ ] 060 Words said twice, and the keys a desktop app has

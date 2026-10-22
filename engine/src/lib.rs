@@ -58,7 +58,7 @@ pub mod visual;
 pub mod workspace;
 
 pub use account::AccountStatus;
-pub use engine::{AppEvent, AppState, BranchRequest, Clock, Engine, EngineOptions, SendRequest, TerminalCommand, WarmRequest};
+pub use engine::{AppEvent, AppState, BranchRequest, Clock, Engine, EngineOptions, SendRequest, TabStep, TerminalCommand, WarmRequest};
 
 /// Lowercase hex of a digest or any bytes, the form every stored and compared hash uses.
 pub fn hex(bytes: &[u8]) -> String {
