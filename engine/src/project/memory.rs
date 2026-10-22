@@ -493,7 +493,7 @@ fn codex_file(dir: &Directory, folder: &Path, protected: &[String]) -> Result<Op
 }
 
 fn revision(bytes: &[u8]) -> String {
-    Sha256::digest(bytes).iter().map(|b| format!("{b:02x}")).collect()
+    crate::hex(&Sha256::digest(bytes))
 }
 
 /// What Faber stores when the person keeps an AI decision: a short hash of its words, so reworded words are not kept.

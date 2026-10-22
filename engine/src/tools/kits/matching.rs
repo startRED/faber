@@ -296,6 +296,10 @@ pub(super) fn stack_labels(request: &str, cwd: Option<&Path>) -> BTreeSet<&'stat
                 stacks.insert(stack);
             }
         }
+        // The project's own checks (the facts of `.faber/rules.md`) name a stack too: `npx prisma migrate deploy`, `flutter test`.
+        if let Ok(facts) = crate::project::rules::facts(cwd) {
+            stacks.extend(stack_labels(&facts.checks.join(" "), None));
+        }
     }
     stacks
 }
@@ -846,6 +850,21 @@ mod tests {
                 assert!(!matched.contains(id), "{request}: unrelated {id} in {matched:?}");
             }
         }
+    }
+
+    #[test]
+    fn a_projects_own_check_commands_name_its_stack_and_change_nothing_else() {
+        const TASK: &str = "Fix the failing login test.";
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join("package.json"), r#"{"scripts":{"test":"vitest"}}"#).unwrap();
+        let before = (stack_labels(TASK, Some(dir.path())), labels(TASK, Some(dir.path())));
+        assert!(before.0.is_empty(), "{before:?}");
+        std::fs::create_dir_all(dir.path().join(".github/workflows")).unwrap();
+        std::fs::write(dir.path().join(".github/workflows/ci.yml"), "jobs:\n  a:\n    steps:\n      - run: npx prisma migrate deploy\n")
+            .unwrap();
+        let after = stack_labels(TASK, Some(dir.path()));
+        assert_eq!(after, BTreeSet::from(["prisma"]), "the schema lives elsewhere; the check names the stack");
+        assert_eq!(labels(TASK, Some(dir.path())), before.1, "the jobs stay as the task and the file names set them");
     }
 
     #[test]

@@ -62,5 +62,12 @@ pub use engine::{AppEvent, AppState, BranchRequest, Clock, Engine, EngineOptions
 
 /// Lowercase hex of a digest or any bytes, the form every stored and compared hash uses.
 pub fn hex(bytes: &[u8]) -> String {
-    bytes.iter().map(|b| format!("{b:02x}")).collect()
+    // One allocation: a start card hashes every decision of a project's list (thousands) at each session start.
+    const DIGITS: &[u8; 16] = b"0123456789abcdef";
+    let mut out = String::with_capacity(bytes.len() * 2);
+    for b in bytes {
+        out.push(DIGITS[usize::from(b >> 4)].into());
+        out.push(DIGITS[usize::from(b & 15)].into());
+    }
+    out
 }

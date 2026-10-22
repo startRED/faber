@@ -417,6 +417,8 @@ struct Core {
     verifier: Option<std::sync::Arc<crate::verify::Verifier>>,
     /// Whether a project's sessions start with the start card; only the token benchmark turns it off.
     start_cards: bool,
+    /// The facts the turn's rules rebuild just read, by project folder, so the session it starts reads them once.
+    rules_facts: Option<(String, crate::project::rules::Facts)>,
     /// Where the catalog install of a project's agent downloads from instead of the real hosts (tests; a loopback address only).
     setup_source: Option<String>,
     /// Tests: this computer is taken to have no Node, so a tool that needs it is refused before any card.
@@ -654,6 +656,7 @@ impl Engine {
                 browser: None,
                 verifier: None,
                 start_cards: true,
+                rules_facts: None,
                 setup_source: None,
                 node_missing: false,
                 installs: HashMap::new(),
@@ -1622,20 +1625,23 @@ impl Core {
     /// A project's `.faber/rules.md` follows its sources: rebuilt in the project folder (where Memory reads) at each turn start
     /// of one of its conversations, and written only when it differs. A project that refuses it (a link, a read-only file)
     /// keeps its turn: the rules are an addition, never a condition.
-    fn refresh_rules(&self, id: &str) {
+    fn refresh_rules(&mut self, id: &str) {
         let Some(c) = self.convs.get(id).filter(|c| c.area == Area::Project) else { return };
         if let Some(project) = self.store.projects().into_iter().find(|p| Some(&p.id) == c.project_id.as_ref()) {
-            let _ = crate::project::rules::refresh(Path::new(&project.path));
+            self.rules_facts = crate::project::rules::refresh(Path::new(&project.path)).ok().map(|facts| (project.path, facts));
         }
     }
 
     /// The start card of a project's conversation (own work method), built at each session start from the project folder:
     /// the rules' facts and the decisions Faber's record says the person kept or wrote, newest (last in the file) first.
-    fn start_card(&self, conv: &str) -> Option<String> {
+    fn start_card(&mut self, conv: &str) -> Option<String> {
         let c = self.convs.get(conv).filter(|c| c.area == Area::Project && self.start_cards)?;
         let project = self.store.projects().into_iter().find(|p| Some(&p.id) == c.project_id.as_ref())?;
         let path = Path::new(&project.path);
-        let facts = crate::project::rules::facts(path).ok()?;
+        let facts = match self.rules_facts.take() {
+            Some((read, facts)) if read == project.path => facts,
+            _ => crate::project::rules::facts(path).ok()?,
+        };
         let mut notes = crate::project::memory::list_faber(path).unwrap_or_default();
         crate::project::memory::mark_kept(&mut notes, &self.store.kept_decisions(&project.id));
         let decisions = notes.files.iter().filter(|f| f.path == ".faber/decisions.md" || f.path.starts_with(".faber/decisions/"));
