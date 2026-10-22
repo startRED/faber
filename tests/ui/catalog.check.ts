@@ -484,3 +484,47 @@ check('catalog: Installed search includes external skills, linked entries, plugi
     ok(view.root.textContent?.includes(t('catalog.noMatch')));
   } finally { view.close(); }
 });
+
+check('catalog: cards act in place and a selection installs, switches and removes several items at once', async () => {
+  const view = await panel();
+  const pick = (id: string) => view.root.querySelector<HTMLInputElement>(`[data-catalog-card="${id}"] ~ .catalog-pick`)!;
+  const batch = (action: string) => view.root.querySelector<HTMLButtonElement>(`[data-batch="${action}"]`);
+  try {
+    await tap(view.root.querySelector<HTMLButtonElement>(`[data-catalog-card="ponytail"] ~ .catalog-site`)!);
+    deepEqual(view.calls.links, ['https://github.com/fixture/simple'], 'the card opens its source page without opening the detail');
+    equal(view.root.querySelector('.catalog-detail'), null);
+    const quick = view.root.querySelector<HTMLInputElement>('[data-catalog-card="ponytail"] ~ [role=switch]')!;
+    equal(quick.checked, false); await tap(quick);
+    deepEqual(view.calls.enabled, [true]); equal(view.store[1].enabled, true, 'the card switch saves the same choice as the detail');
+    equal(view.root.querySelector('[data-catalog-batch]'), null, 'no bar before anything is selected');
+    await tap(view.root.querySelector<HTMLButtonElement>('[data-catalog-pick-shown]')!);
+    ok(view.root.querySelector('[data-catalog-batch]')?.textContent?.includes(t('catalog.picked', { n: 3 })));
+    equal(batch('on'), null, 'an action that fits nothing selected is not offered');
+    await tap(batch('install')!);
+    deepEqual(view.calls.install, ['systematic-debugging', 'chrome-devtools']);
+    ok(view.store.every((row) => row.installed), 'every selected item that was missing is installed');
+    ok(view.root.querySelector('[data-catalog-batch]')?.textContent?.includes(t('catalog.picked', { n: 1 })), 'done items leave the selection; the one Install did not fit stays');
+    pick('chrome-devtools').click(); await tick();
+    await tap(batch('off')!);
+    deepEqual(view.calls.enabled, [true, false, false]); ok(view.store.filter((row) => row.id !== 'systematic-debugging').every((row) => row.enabled === false));
+    pick('ponytail').click(); pick('systematic-debugging').click(); await tick();
+    await tap(batch('remove')!); equal(view.calls.remove.length, 0, 'removing several asks first');
+    ok(view.root.textContent?.includes(t('catalog.confirmRemoveMany', { n: 2 })));
+    keyboard('Escape'); await tick(); ok(batch('remove'), 'Escape leaves the question and keeps the selection');
+    keyboard('Escape'); await tick(); equal(view.root.querySelector('[data-catalog-batch]'), null, 'a second Escape clears the selection');
+    pick('ponytail').click(); pick('systematic-debugging').click(); await tick();
+    await tap(batch('remove')!); await tap(batch('confirm-remove')!);
+    deepEqual(view.calls.remove, ['systematic-debugging', 'ponytail']);
+    equal(view.root.querySelector('[role=status]')?.textContent?.includes(t('catalog.undo')) ?? false, false, 'a group removal offers no single-item Undo');
+  } finally { view.close(); }
+  const failing = await panel({ failInstall: true });
+  try {
+    failing.root.querySelector<HTMLInputElement>('[data-catalog-card="chrome-devtools"] ~ .catalog-pick')!.click(); await tick();
+    await tap(failing.root.querySelector<HTMLButtonElement>('[data-batch="install"]')!);
+    ok(failing.root.querySelector('[role=alert]')?.textContent?.includes(t('catalog.batchFailed', { n: 1 })));
+    ok(failing.root.querySelector('[data-catalog-batch] [role=alert]'), 'the failure shows in the bar beside the selection');
+    failing.calls.install.length = 0;
+    await tap(button(failing.root.querySelector('[data-catalog-batch]')!, 'catalog.retry'));
+    deepEqual(failing.calls.install, ['chrome-devtools'], 'Try again repeats the same action on the failed item');
+  } finally { failing.close(); }
+});

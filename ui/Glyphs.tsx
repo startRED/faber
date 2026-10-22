@@ -57,7 +57,24 @@ const PATHS = {
   // The page in the person's own browser, out of Faber.
   external: ['M15 3h6v6', 'M10 14 21 3', 'M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6'],
   globe: ['M3 12a9 9 0 1 0 18 0 9 9 0 1 0-18 0', 'M3 12h18', 'M12 3c2.5 2.6 3.8 5.6 3.8 9s-1.3 6.4-3.8 9c-2.5-2.6-3.8-5.6-3.8-9s1.3-6.4 3.8-9Z'],
+  // The jobs of the catalog: one drawing per kind of tool, beside its name.
+  bug: ['M8 10a4 4 0 0 1 8 0v4a4 4 0 0 1-8 0Z', 'M12 10v8', 'M4 13h4M16 13h4', 'm5 8 3 2M19 8l-3 2', 'm5 19 3-2M19 19l-3-2', 'M10 6 9 4M14 6l1-2'],
+  flask: ['M9 3h6', 'M10 3v6l-5.5 9.5A1.7 1.7 0 0 0 6 21h12a1.7 1.7 0 0 0 1.5-2.5L14 9V3', 'M7.5 15h9'],
+  feather: ['M20 12.5a6 6 0 0 0-8.5-8.5L5 10.5V19h8.5Z', 'M16 8 3 21', 'M17.5 15H9'],
+  layers: ['m12 3 9 4.5-9 4.5-9-4.5Z', 'm3 12 9 4.5 9-4.5', 'm3 16.5 9 4.5 9-4.5'],
+  list: ['M10 6h10', 'M10 12h10', 'M10 18h10', 'm4 6 1.5 1.5L8 5', 'm4 12 1.5 1.5L8 11', 'm4 18 1.5 1.5L8 17'],
+  wand: ['m3 21 10-10', 'M15 3v3M15 12v3M10 7.5h3M17 7.5h3', 'm11.5 4.5 1.5 1.5M17 9l1.5 1.5M18.5 4.5 17 6'],
+  database: ['M4 6a8 3 0 1 0 16 0 8 3 0 1 0-16 0', 'M4 6v12a8 3 0 0 0 16 0V6', 'M4 12a8 3 0 0 0 16 0'],
+  card: ['M4 5h16a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V7a2 2 0 0 1 2-2Z', 'M2 10h20', 'M6 15h4'],
+  cloud: ['M17.5 19H8a6 6 0 1 1 5.7-8h3.8a4 4 0 0 1 0 8Z'],
+  phone: ['M8 2h8a2 2 0 0 1 2 2v16a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2Z', 'M11 18h2'],
+  megaphone: ['m3 10 16-5v14L3 14Z', 'M7 15.2V18a2 2 0 0 0 4 0v-1.6'],
+  gamepad: ['M7 6h10a5 5 0 0 1 5 5v2a4 4 0 0 1-7 2.6l-.6-.6H9.6l-.6.6A4 4 0 0 1 2 13v-2a5 5 0 0 1 5-5Z', 'M6 11h4M8 9v4', 'M15 10h.01M17 12h.01'],
+  dice: ['M5 3h14a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2Z', 'M8.5 8.5h.01M15.5 8.5h.01M12 12h.01M8.5 15.5h.01M15.5 15.5h.01'],
+  puzzle: ['M10 3h4v3a2 2 0 1 0 4 0V3h3v7h-3a2 2 0 1 0 0 4h3v7h-7v-3a2 2 0 1 0-4 0v3H3v-7h3a2 2 0 1 0 0-4H3V3Z'],
 } as const;
+
+export type GlyphName = keyof typeof PATHS;
 
 /** The same drawing as markup, for the places that build their DOM by hand (the copy button of a code block). */
 export const iconMarkup = (name: keyof typeof PATHS) =>

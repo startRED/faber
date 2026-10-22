@@ -23,6 +23,8 @@ jump under the pointer. The command box includes Go to Catalog and calls the sam
 action returns to the previous work area and shows the column, including when it was already open behind Catalog.
 When removal empties the last Installed page, the list returns to its last remaining page instead of leaving a blank list.
 
+Each card shows a drawing for its job (`ui/Glyphs.tsx`; plugins a puzzle piece, servers a globe) tinted with the accent while the item is on, and a dot before its state words. Beside the card, outside its button so the card stays one control: a select box (top right), the source page in the system browser, and Install or the on/off switch (bottom right), which save through the same store calls as the detail. The select box and the source link stay hidden at rest and show on hover, on keyboard focus, on every card once anything is selected, and always where there is no hover. A selection survives filters, search and pages; Select all shown adds or removes the visible cards. While anything is selected a bar floats at the bottom of the list with the count and only the actions that fit the selection (Install, Turn on, Turn off, Remove, each with its count), run one item after another with "Working on 2 of 5". Removing several asks first and says they can be installed again: Undo keeps only one single removal. Items that fail stay selected and the notice offers Try again. Escape leaves the question, then clears the selection.
+
 Cards use the look's surface, ink, line and radius tokens. Hover changes surface and border only; press changes the same
 properties, with no travel, scaling or blur. Reduced/no motion removes the transition. At 720 px cards become one column,
 filters wrap, and long names, pins and paths wrap. The ordinary narrow sidebar remains a modal dialog with its existing
@@ -30,7 +32,7 @@ focus trap and Escape close. Heading focus enters the same-tab detail; Back and 
 
 ## Detail and actions
 
-Detail names what the item does, when the agent can use it, access implications, source repository, licence and pinned
+Detail opens with a large drawing, the name, the job and the state, and Open the source page. "What you get" holds the item's description; the actions come next; "How it works in Faber" lists installing, when the agent uses it and what it can reach, each with its drawing. Detail names what the item does, when the agent can use it, access implications, source repository, licence and pinned
 commit/package version. New items with prerequisites name them in the five locales, under usage and before Install;
 these are requirements for use, not a second installer. When the pinned SKILL.md name differs from the card id,
 one localized “Name in the AI tool” line shows it before installation. Repository and Node download links open through the existing checked system-browser command.
