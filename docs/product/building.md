@@ -42,6 +42,10 @@ parallel, each on what it does best, and the result must read as if one careful 
 - When a quota runs out, the work moves to the other subscription, or waits and resumes by itself at the renewal.
 
 **Decision list.** Every project keeps a decision list with authors. The AI's decisions show as "not reviewed".
+The list is `.faber/decisions.md`: each entry ends with a short mark, `[by AI]` or `[by person]`, so the file reads
+the same in any editor and either side can write it by hand. The project's agent is told to add a lasting choice, and only then, ending it with
+`[by person]` when the person made it and `[by AI]` when it did; an entry with no mark has an unknown author and is never shown as the AI's. The Memory view of the project
+shows the author, and "Keep" on an AI decision stores, outside the project, that the person kept those words, so a review is never read from the project, where an agent writes, and reworded words read "not reviewed" again (R415).
 
 ## Running many workers
 

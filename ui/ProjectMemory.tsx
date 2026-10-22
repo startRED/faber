@@ -23,7 +23,9 @@ export function ProjectMemory(props: { projectId: string }) {
 
 function MemoryList(props: { projectId: string }) {
   let alive = true;
+  let body!: HTMLDivElement;
   onCleanup(() => { alive = false; });
+  const [notice, setNotice] = createSignal('');
   const [editing, setEditing] = createSignal<string>();
   const [draft, setDraft] = createSignal('');
   const [confirm, setConfirm] = createSignal<string>();
@@ -47,20 +49,28 @@ function MemoryList(props: { projectId: string }) {
     return t((key.startsWith('error.memory.') ? key : 'error.memory.read') as Key);
   };
   const refresh = async () => {
-    setEditing(undefined); setConfirm(undefined); setError(''); setShown(50);
+    setEditing(undefined); setConfirm(undefined); setError(''); setNotice(''); setShown(50);
     keyDown = needsRelease = false;
     await refetch();
   };
-  const save = async (file: MemoryFile, entry: MemoryEntry, text: string | null) => {
+  const save = async (file: MemoryFile, entry: MemoryEntry, text: string | null, keep = false) => {
     // The write can outlive the editor when the fold closes or the person changes projects.
     const pending = {};
+    let kept = false;
     setDirty(pending, true);
-    setBusy(true); setError('');
+    setBusy(true); setError(''); setNotice('');
     try {
-      await api.editProjectMemory(props.projectId, { path: file.path, revision: file.revision, start: entry.start, end: entry.end, text });
-      if (alive) await refresh();
+      await api.editProjectMemory(props.projectId, { path: file.path, revision: file.revision, start: entry.start, end: entry.end, text, keep });
+      if (alive && keep) {
+        // Keep is the repeated action of the list: the list keeps its length, an open editor and the person's place.
+        setNotice(t('memory.kept'));
+        await refetch();
+        kept = true;
+      } else if (alive) await refresh();
     } catch (err) { if (alive) setError(message(err)); }
     finally { if (alive) setBusy(false); setDirty(pending, false); }
+    // The buttons are enabled again only now, and a disabled one cannot take focus.
+    if (kept && alive) [...body.querySelectorAll<HTMLElement>('.memory-entry')].find((row) => row.dataset.entry === key(file, entry))?.querySelector<HTMLElement>('[data-edit]')?.focus();
   };
   const remove = (file: MemoryFile, entry: MemoryEntry) => {
     if (confirm() !== key(file, entry)) {
@@ -72,7 +82,8 @@ function MemoryList(props: { projectId: string }) {
     void save(file, entry, null);
   };
   return (
-    <div class="memory-body" aria-busy={busy() || files.loading}>
+    <div class="memory-body" aria-busy={busy() || files.loading} ref={body}>
+      <p class="sr-only" role="status">{notice()}</p>
       <div class="memory-head"><p class="hint">{t('memory.scope')}</p><button type="button" class="btn ghost" disabled={busy() || files.loading} onClick={() => void refresh()}>{t('memory.refresh')}</button></div>
       <p class="hint">{t('memory.nextLaunch')}</p>
       <Show when={files.loading}><p role="status">{t('memory.loading')}</p></Show>
@@ -81,13 +92,14 @@ function MemoryList(props: { projectId: string }) {
       <Show when={files()?.incomplete}><p class="hint" role="status">{t('memory.incomplete')}</p></Show>
       <ul class="memory-entries">
         <For each={rows().slice(0, shown())}>{({ file, entry }) => (
-          <li class="memory-entry">
-            <div class="memory-from">{t(`memory.source.${file.source}`)} · <span>{file.path}{entry ? `:${entry.line}` : ''}</span></div>
+          <li class="memory-entry" data-entry={entry ? key(file, entry) : undefined}>
+            <div class="memory-from">{t(`memory.source.${file.source}`)} · <span>{file.path}{entry ? `:${entry.line}` : ''}</span>{entry?.author && <> · <span class="memory-flag" classList={{ ask: entry.author === 'ai' && !entry.reviewed }}>{t(entry.author === 'person' ? 'memory.author.person' : entry.reviewed ? 'memory.author.aiKept' : 'memory.author.ai')}</span></>}</div>
             <Show when={entry} fallback={<p class="hint">{t(file.tooLarge ? 'memory.tooLarge' : 'memory.noEntries')}</p>}>
               {(entry) => <Show when={editing() === key(file, entry())} fallback={<>
-                <p class="memory-text">{entry().text}</p>
+                <p class="memory-text">{entry().body || entry().text}</p>
                 <div class="memory-actions">
-                  <button type="button" class="btn ghost" disabled={busy() || files.loading} onClick={() => { setConfirm(undefined); setEditing(key(file, entry())); setDraft(entry().text); }}>{t('memory.edit')}</button>
+                  <Show when={entry().author === 'ai' && !entry().reviewed}><button type="button" class="btn ghost" disabled={busy() || files.loading} onClick={() => void save(file, entry(), null, true)}>{t('memory.keep')}</button></Show>
+                  <button type="button" class="btn ghost" data-edit disabled={busy() || files.loading} onClick={() => { setConfirm(undefined); setEditing(key(file, entry())); setDraft(entry().text); }}>{t('memory.edit')}</button>
                   <button type="button" class="btn ghost danger" disabled={busy() || files.loading}
                     onKeyDown={(event) => {
                       if (event.key !== 'Enter' && event.key !== ' ') return;

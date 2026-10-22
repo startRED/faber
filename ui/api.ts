@@ -788,6 +788,10 @@ export interface MemoryEntry {
   end: number;
   line: number;
   text: string;
+  /** Decision lists: the text without its author mark, the author, and whether the person kept an AI decision. */
+  body?: string;
+  author?: 'ai' | 'person';
+  reviewed?: boolean;
 }
 export interface MemoryFile {
   path: string;
@@ -806,6 +810,8 @@ export interface MemoryEdit {
   start: number;
   end: number;
   text: string | null;
+  /** Marks an AI decision as kept; `text` is then ignored. */
+  keep?: boolean;
 }
 
 /** A Firefox profile Faber's browser can bring sign-ins from; 'default' names the one Firefox made itself. */

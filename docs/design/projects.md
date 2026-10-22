@@ -43,13 +43,15 @@ Each row shows the source, relative file and original line, then literal Markdow
 An empty list and a failed read are distinct, and Refresh retries. A partial scan says it is partial.
 For Codex, each folder shows only the first nonempty instruction file it reads: `AGENTS.override.md`, then `AGENTS.md`.
 
+In `.faber/decisions.md` an entry that ends with its author mark shows it as a quiet word after the file and line ("AI, not reviewed", "AI, kept", "You") and the text without the mark. Only an AI decision not yet reviewed has Keep, first among the row's actions; it is a plain ghost button like Edit and needs no confirmation, since it writes nothing to the project and Edit can still change the words. Keep records, in Faber's data folder, that the person kept those words, so the flag reads "not reviewed" again if the words change. Pressing it leaves the list as long as it was, moves focus to that row's Edit and says "Decision kept." to screen readers in a polite status line. Editing the words of an AI decision leaves it the AI's and not reviewed: ending the text with `[by person]` makes it the person's. Only "AI, not reviewed" takes the darker ink, because it is the one that asks for something. An entry with no mark shows neither.
+
 Edit opens a labelled textarea in place, focused on opening, with Save and Cancel. Escape from anywhere in the form
 cancels except during text composition or a save. Delete asks on the row first; confirmation requires a separate gesture
 at least 500 ms later and releasing the key that armed it, as in the shared context menu. Cancel leaves the file alone. During a
 write the actions wait. A changed-file refusal keeps the draft and asks the person to reopen the file. Read-only files get
 a plain refusal, and a replaced project folder or ancestor also refuses a stale save. One quiet line
 says that changes apply on the AI’s next launch in this folder; another says that separate copies and private home memory are outside this project-folder list. The list
-shows sources, not a claim that every nested instruction is active in every session. Faber creates no new instruction files or memory store.
+shows sources, not a claim that every nested instruction is active in every session. Faber has no memory store of its own: the one file a project's agent may create is `.faber/decisions.md`, and only for a lasting choice. Memory reads the project folder, so a decision written in a conversation's separate copy shows here once that copy's work is merged into the project; the copies are not scanned, which keeps opening Memory as light as it is.
 
 Projects under linked parent folders work normally. Links from the project root down to a memory file are refused;
 the root identity recorded on reading must still match before a save opens any memory file.

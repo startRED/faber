@@ -1553,6 +1553,7 @@ html.away-win :is(.amb, .amb *) { animation-play-state: paused !important; }
 .memory-entries { list-style: none; padding: 0; margin: 12px 0; }
 .memory-entry { border-top: 1px solid var(--line-2); padding: 12px 0; min-width: 0; }
 .memory-from { color: var(--ink-2); font-size: .85em; overflow-wrap: anywhere; }
+.memory-flag.ask { color: var(--ink); }
 .memory-text { white-space: pre-wrap; overflow-wrap: anywhere; margin: 8px 0; }
 .memory-entry textarea { width: 100%; min-height: 96px; resize: vertical; box-sizing: border-box; font: inherit; }
 .memory-actions .danger { color: var(--danger); }

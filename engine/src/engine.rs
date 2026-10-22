@@ -1081,11 +1081,20 @@ impl Engine {
     }
     pub fn project_memory(&self, id: &str) -> Result<crate::project::memory::MemoryList, String> {
         let project = self.project(id)?;
-        crate::project::memory::list(Path::new(&project.path)).map_err(str::to_string)
+        let mut list = crate::project::memory::list(Path::new(&project.path)).map_err(str::to_string)?;
+        crate::project::memory::mark_kept(&mut list, &self.with(|c| c.store.kept_decisions(id)));
+        Ok(list)
     }
     pub fn edit_project_memory(&self, id: &str, edit: &crate::project::memory::Edit) -> Result<(), String> {
         let project = self.project(id)?;
-        crate::project::memory::edit(Path::new(&project.path), edit).map_err(str::to_string)
+        // Keeping writes nothing to the project: the person's review is stored here, out of an agent's reach (R16).
+        if let Some(hash) = crate::project::memory::apply(Path::new(&project.path), edit).map_err(str::to_string)? {
+            self.with(|c| {
+                let live: Vec<_> = c.store.projects_checked().unwrap_or_default().into_iter().map(|p| p.id).collect();
+                c.store.keep_decision(id, hash, &live).map_err(|e| e.key().to_string())
+            })?;
+        }
+        Ok(())
     }
     pub fn update_project(&self, before: &Project, project: &Project) -> Result<(), String> {
         self.with(|c| {

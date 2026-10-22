@@ -35,6 +35,15 @@ pub struct Entry {
     pub end: usize,
     pub line: usize,
     pub text: String,
+    /// Decision lists only (R16), from the trailing mark of `mark`: the text without it and its author ("ai" or "person").
+    /// An entry with no mark has neither: its author is unknown, never the AI's. `reviewed` is never read from the file
+    /// (an agent could write it): `mark_kept` sets it from what the person kept, which Faber stores outside the project.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub body: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub author: Option<&'static str>,
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub reviewed: bool,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -45,6 +54,9 @@ pub struct Edit {
     pub end: usize,
     /// None deletes the entry; Some replaces its text.
     pub text: Option<String>,
+    /// Keeps an AI decision: nothing is written to the project, `apply` returns the hash of its words to store (`digest`).
+    #[serde(default)]
+    pub keep: bool,
 }
 
 fn source(path: &str) -> Option<&'static str> {
@@ -67,6 +79,37 @@ fn source(path: &str) -> Option<&'static str> {
         "AGENTS.md" | "AGENTS.override.md" => Some("codex"),
         _ => None,
     }
+}
+
+/// `.faber/decisions.md` (or a file under `.faber/decisions/`): the one list whose entries carry an author.
+fn decisions(path: &str) -> bool {
+    let parts: Vec<_> = path.split('/').collect();
+    parts.iter().position(|p| *p == ".faber").and_then(|i| parts.get(i + 1)).is_some_and(|kind| kind.trim_end_matches(".md") == "decisions")
+}
+
+struct Mark {
+    open: usize,
+    author: &'static str,
+}
+
+/// The mark closing a decision: `[by AI]` or `[by person]` (any case, any spacing). `[by AI, reviewed]` from an older
+/// version is still a mark, but only the author in it counts: a review in the file would be one anyone could forge.
+/// Anything else at the end is the person's own words and no mark.
+fn mark(text: &str) -> Option<Mark> {
+    let end = text.trim_end().len();
+    let open = text[..end].rfind('[')?;
+    let inner = text[..end].strip_suffix(']')?[open + 1..].to_ascii_lowercase();
+    let mut parts = inner.split(',').map(str::trim);
+    let author = match parts.next()?.strip_prefix("by ")?.trim() {
+        "ai" => "ai",
+        "person" => "person",
+        _ => return None,
+    };
+    // "reviewed" is read only after "ai", for files an older version wrote.
+    if !matches!((author, parts.next()), (_, None) | ("ai", Some("reviewed"))) {
+        return None;
+    }
+    parts.next().is_none().then_some(Mark { open, author })
 }
 
 fn normal(path: &Path) -> String {
@@ -371,6 +414,18 @@ fn revision(bytes: &[u8]) -> String {
     Sha256::digest(bytes).iter().map(|b| format!("{b:02x}")).collect()
 }
 
+/// What Faber stores when the person keeps an AI decision: a short hash of its words, so reworded words are not kept.
+fn digest(body: &str) -> String {
+    revision(body.trim().as_bytes())[..32].into()
+}
+
+/// Marks the AI decisions the person kept (`kept` is what Faber stored outside the project).
+pub fn mark_kept(list: &mut MemoryList, kept: &[String]) {
+    for entry in list.files.iter_mut().flat_map(|f| &mut f.entries) {
+        entry.reviewed = entry.author == Some("ai") && entry.body.as_deref().is_some_and(|b| kept.contains(&digest(b)));
+    }
+}
+
 fn entries(text: &str) -> Vec<Entry> {
     let mut depth = 0;
     let mut item = None;
@@ -428,7 +483,7 @@ fn entries(text: &str) -> Vec<Entry> {
             let content_end = text[..end].trim_end_matches(['\r', '\n']).len();
             line += text[cursor..range.start].bytes().filter(|b| *b == b'\n').count();
             cursor = range.start;
-            Entry { start: range.start, end, line, text: text[range.start..content_end].into() }
+            Entry { start: range.start, end, line, text: text[range.start..content_end].into(), body: None, author: None, reviewed: false }
         })
         .collect()
 }
@@ -442,7 +497,14 @@ fn read_file(dir: &Directory, name: &str, path: String, source: &'static str) ->
         return Ok(MemoryFile { path, source, revision: String::new(), too_large: true, entries: vec![] });
     }
     let too_large = bytes.len() > MAX_BYTES;
-    let entries = if too_large { vec![] } else { entries(std::str::from_utf8(&bytes).map_err(|_| READ)?) };
+    let mut entries = if too_large { vec![] } else { entries(std::str::from_utf8(&bytes).map_err(|_| READ)?) };
+    if decisions(&path) {
+        for entry in &mut entries {
+            if let Some(m) = mark(&entry.text) {
+                (entry.body, entry.author) = (Some(entry.text[..m.open].trim_end().into()), Some(m.author));
+            }
+        }
+    }
     Ok(MemoryFile { path, source, revision: revision(&bytes), too_large, entries })
 }
 
@@ -544,10 +606,15 @@ fn descend(path: &str) -> bool {
 }
 
 pub fn edit(project: &Path, edit: &Edit) -> Result<(), &'static str> {
+    apply(project, edit).map(drop)
+}
+
+/// Like `edit`, and for `keep` returns the hash of the kept words instead of writing anything.
+pub fn apply(project: &Path, edit: &Edit) -> Result<Option<String>, &'static str> {
     edit_with_private(project, edit, &private_roots())
 }
 
-fn edit_with_private(project: &Path, edit: &Edit, protected: &[String]) -> Result<(), &'static str> {
+fn edit_with_private(project: &Path, edit: &Edit, protected: &[String]) -> Result<Option<String>, &'static str> {
     static WRITES: std::sync::Mutex<()> = std::sync::Mutex::new(());
     let _write = WRITES.lock().map_err(|_| "error.memory.write")?;
     let source = source(&edit.path).ok_or(REFUSED)?;
@@ -564,7 +631,7 @@ fn edit_with_private(project: &Path, edit: &Edit, protected: &[String]) -> Resul
     let name = path.file_name().and_then(|s| s.to_str()).ok_or(REFUSED)?;
     let mut file = dir.file(name).map_err(|_| REFUSED)?;
     let permissions = file.metadata().map_err(|_| READ)?.permissions();
-    if permissions.readonly() {
+    if permissions.readonly() && !edit.keep {
         return Err("error.memory.readOnly");
     }
     if source == "codex" && codex_file(&dir, &root.join(parent), &protected)? != Some(name) {
@@ -578,6 +645,11 @@ fn edit_with_private(project: &Path, edit: &Edit, protected: &[String]) -> Resul
     let original = std::str::from_utf8(&bytes).map_err(|_| READ)?;
     let entry = entries(original).into_iter().find(|e| e.start == edit.start && e.end == edit.end).ok_or(REFUSED)?;
     let mut replacement = String::new();
+    if edit.keep {
+        let text = &original[entry.start..entry.end];
+        let kept = decisions(&edit.path).then(|| mark(text)).flatten().filter(|m| m.author == "ai").ok_or(REFUSED)?;
+        return Ok(Some(digest(&text[..kept.open])));
+    }
     if let Some(text) = &edit.text {
         if text.trim().is_empty() || text.contains('\0') || text.len() > MAX_BYTES {
             return Err(REFUSED);
@@ -599,7 +671,8 @@ fn edit_with_private(project: &Path, edit: &Edit, protected: &[String]) -> Resul
     }
     drop(file);
     dir.replace(name, &next, permissions, expected)
-        .map_err(|error| if error.kind() == std::io::ErrorKind::AlreadyExists { CHANGED } else { "error.memory.write" })
+        .map_err(|error| if error.kind() == std::io::ErrorKind::AlreadyExists { CHANGED } else { "error.memory.write" })?;
+    Ok(None)
 }
 
 #[cfg(test)]
@@ -658,6 +731,7 @@ mod tests {
                     start: file.entries[0].start,
                     end: file.entries[0].end,
                     text: Some("Changed global instructions.".into()),
+                    keep: false,
                 },
                 &protected,
             );
@@ -685,7 +759,14 @@ mod tests {
         let listed = list_with_private(project.path(), &protected);
         let saved = edit_with_private(
             project.path(),
-            &Edit { path: file.path, revision: file.revision, start: file.entries[0].start, end: file.entries[0].end, text: None },
+            &Edit {
+                path: file.path,
+                revision: file.revision,
+                start: file.entries[0].start,
+                end: file.entries[0].end,
+                text: None,
+                keep: false,
+            },
             &protected,
         );
         assert_eq!(listed.unwrap_err(), REFUSED, "private override bytes must not be decoded while choosing the active file");
@@ -792,5 +873,101 @@ mod tests {
         );
         assert_eq!(std::fs::read(project.join("AGENTS.md")).unwrap(), b"Changed.\n");
         assert_eq!(dir.names().unwrap(), ["AGENTS.md"]);
+    }
+
+    const DECISIONS: &str = "- Use SQLite for the cache. [by AI]\n- Keep the old export, it is\n  what customers use. [By Person]\n- Ship on Fridays\n- Drop the beta flag [by AI, reviewed]\n- Mixed [by robot]\n- Use [by AI] marks mid-line\n- Odd [by person, reviewed]\n";
+
+    fn listed(project: &Path, path: &str, kept: &[String]) -> MemoryFile {
+        let mut list = list(project).unwrap();
+        mark_kept(&mut list, kept);
+        list.files.into_iter().find(|f| f.path == path).unwrap()
+    }
+
+    fn decisions_file(text: &str) -> (tempfile::TempDir, MemoryFile) {
+        let project = folder();
+        std::fs::create_dir(project.path().join(".faber")).unwrap();
+        std::fs::write(project.path().join(".faber/decisions.md"), text).unwrap();
+        std::fs::write(project.path().join("CLAUDE.md"), "- Note [by AI]\n").unwrap();
+        let file = listed(project.path(), ".faber/decisions.md", &[]);
+        (project, file)
+    }
+
+    fn keep(project: &Path, file: &MemoryFile, i: usize) -> Result<Option<String>, &'static str> {
+        apply(
+            project,
+            &Edit {
+                path: file.path.clone(),
+                revision: file.revision.clone(),
+                start: file.entries[i].start,
+                end: file.entries[i].end,
+                text: None,
+                keep: true,
+            },
+        )
+    }
+
+    #[test]
+    fn project_memory_reads_the_author_of_each_decision_and_never_guesses_one() {
+        let (project, file) = decisions_file(DECISIONS);
+        let seen: Vec<_> = file.entries.iter().map(|e| (e.author, e.reviewed, e.body.as_deref())).collect();
+        assert_eq!(
+            seen,
+            [
+                (Some("ai"), false, Some("- Use SQLite for the cache.")),
+                (Some("person"), false, Some("- Keep the old export, it is\n  what customers use.")),
+                (None, false, None),
+                // A review written in the file is no review: an agent could write it.
+                (Some("ai"), false, Some("- Drop the beta flag")),
+                (None, false, None),
+                (None, false, None),
+                (None, false, None),
+            ],
+            "a missing or unknown mark is an unknown author, never an AI decision"
+        );
+        assert_eq!(file.entries[0].text, "- Use SQLite for the cache. [by AI]", "the stored words stay whole");
+        let other = listed(project.path(), "CLAUDE.md", &[]);
+        assert_eq!((other.entries[0].author, other.entries[0].body.as_deref()), (None, None), "only the decision list has authors");
+    }
+
+    #[test]
+    fn project_memory_keep_stores_the_hash_outside_the_file_and_binds_it_to_the_words() {
+        let (project, file) = decisions_file(DECISIONS);
+        for refused in [1, 2, 4, 5, 6] {
+            assert_eq!(keep(project.path(), &file, refused), Err(REFUSED), "only an AI decision can be kept (entry {refused})");
+        }
+        let hash = keep(project.path(), &file, 0).unwrap().expect("a kept decision returns its hash");
+        assert_eq!(
+            std::fs::read_to_string(project.path().join(".faber/decisions.md")).unwrap(),
+            DECISIONS,
+            "nothing is written to the project"
+        );
+        assert!(!listed(project.path(), ".faber/decisions.md", &[]).entries[0].reviewed, "nothing stored, nothing kept");
+        let again = listed(project.path(), ".faber/decisions.md", std::slice::from_ref(&hash));
+        assert_eq!((again.entries[0].author, again.entries[0].reviewed), (Some("ai"), true));
+        assert_eq!(again.entries.iter().filter(|e| e.reviewed).count(), 1, "the other decisions stay as they were");
+        // A person's entry never reads as reviewed, even with a hash of its words; a legacy "[by AI, reviewed]" is plain AI.
+        let person = digest("- Keep the old export, it is\n  what customers use.");
+        assert!(!listed(project.path(), ".faber/decisions.md", &[person]).entries[1].reviewed);
+        let legacy = keep(project.path(), &file, 3).unwrap().unwrap();
+        assert!(listed(project.path(), ".faber/decisions.md", &[legacy]).entries[3].reviewed);
+        // The agent rewords the kept decision: the stored hash no longer matches, so it reads "not reviewed" again.
+        let reworded = DECISIONS.replace("Use SQLite for the cache.", "Use Postgres for the cache.");
+        std::fs::write(project.path().join(".faber/decisions.md"), reworded).unwrap();
+        let after = listed(project.path(), ".faber/decisions.md", std::slice::from_ref(&hash));
+        assert_eq!((after.entries[0].author, after.entries[0].reviewed), (Some("ai"), false));
+        let note = listed(project.path(), "CLAUDE.md", &[]);
+        let attempt =
+            Edit { path: note.path.clone(), revision: note.revision.clone(), start: 0, end: note.entries[0].end, text: None, keep: true };
+        assert_eq!(apply(project.path(), &attempt), Err(REFUSED), "keeping is for the decision list only");
+    }
+
+    #[test]
+    fn project_memory_keep_refuses_a_stale_file_and_reads_crlf_entries_the_same() {
+        let (project, file) = decisions_file("- Use SQLite. [by AI]\r\n- Second [by AI]\r\n");
+        let hash = keep(project.path(), &file, 0).unwrap().unwrap();
+        let crlf = listed(project.path(), ".faber/decisions.md", std::slice::from_ref(&hash));
+        assert!(crlf.entries[0].reviewed && !crlf.entries[1].reviewed);
+        std::fs::write(project.path().join(".faber/decisions.md"), "- Use SQLite. [by AI]\r\n- Second [by AI]\r\n- Third\r\n").unwrap();
+        assert_eq!(keep(project.path(), &file, 1), Err(CHANGED), "the person never keeps words they did not see");
     }
 }

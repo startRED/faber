@@ -84,3 +84,13 @@ fn persona_keeps_reply_tuning_and_context_economy_during_research() {
         assert!(text.contains(research.instruction()), "the requested research phase is kept");
     }
 }
+
+#[test]
+fn a_project_prompt_teaches_the_decision_author_mark_and_the_common_persona_does_not() {
+    let common = persona(&PersonaInput { name: None, tuning: &Default::default(), research: None });
+    assert!(!common.contains(".faber/decisions.md"), "Chat has no decision list");
+    let project = faber_engine::persona::PROJECT_DETAILS;
+    assert!(project.contains(".faber/decisions.md") && project.contains("[by AI]") && project.contains("[by person]"));
+    assert!(project.contains("write nothing there for ordinary tasks"), "the list is for real decisions only");
+    assert!(project.contains("Never write [by AI, reviewed]"), "only the person keeps a decision");
+}

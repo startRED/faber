@@ -10,6 +10,7 @@ use crate::model::{BranchOf, Conversation, Project, Settings, Summary};
 use crate::recents::Recents;
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
+use std::collections::BTreeMap;
 use std::fs;
 use std::io::{self, Write};
 use std::path::{Path, PathBuf};
@@ -129,6 +130,7 @@ pub struct Store {
     chat_groups: PathBuf,
     settings: PathBuf,
     recents: PathBuf,
+    decisions_kept: PathBuf,
     budget: PathBuf,
     auto_learned: PathBuf,
     cache_health: PathBuf,
@@ -170,6 +172,7 @@ impl Store {
             chat_groups: data_dir.join("chat-groups.json"),
             settings: data_dir.join("settings.json"),
             recents: data_dir.join("recents.json"),
+            decisions_kept: data_dir.join("decisions-kept.json"),
             budget: data_dir.join("budget.json"),
             auto_learned: data_dir.join("auto-learned.json"),
             disk,
@@ -543,6 +546,24 @@ impl Store {
 
     pub fn save_recents(&self, recents: &Recents) -> Result<(), Fault> {
         self.write(&self.recents, recents)
+    }
+
+    /// The AI decisions the person kept in a project's decision list (R16), as hashes of their words. They live here and
+    /// not in the project, so no agent can write a review. A missing or damaged file keeps nothing: decisions read "not
+    /// reviewed" again.
+    pub fn kept_decisions(&self, project: &str) -> Vec<String> {
+        read::<BTreeMap<String, Vec<String>>>(&self.decisions_kept).unwrap_or_default().remove(project).unwrap_or_default()
+    }
+
+    /// Adds one kept decision. The newest 500 per project stay, and projects that are gone (not in `live`) are dropped.
+    pub fn keep_decision(&self, project: &str, hash: String, live: &[String]) -> Result<(), Fault> {
+        let mut all = read::<BTreeMap<String, Vec<String>>>(&self.decisions_kept).unwrap_or_default();
+        all.retain(|id, _| live.contains(id));
+        let kept = all.entry(project.into()).or_default();
+        kept.retain(|h| *h != hash);
+        kept.push(hash);
+        kept.drain(..kept.len().saturating_sub(500));
+        self.write(&self.decisions_kept, &all)
     }
 
     /// What Faber remembers about each vendor's quota, for Chat and Auto. A missing, damaged or unreadable file is an empty

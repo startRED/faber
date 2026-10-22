@@ -134,6 +134,7 @@ fn project_memory_lists_and_edits_a_project_under_a_linked_parent() {
                     start: entry.start,
                     end: entry.end,
                     text: Some("Changed through the selected project.".into()),
+                    keep: false,
                 },
             )?;
             assert!(std::fs::read_to_string(project.join(path)).unwrap().contains("Changed through the selected project."));
@@ -158,7 +159,7 @@ fn project_memory_review_rejects_replaced_roots_ancestors_and_project_identity()
             std::fs::create_dir_all(&project).unwrap();
             std::fs::write(project.join("CLAUDE.md"), "Keep local.\n").unwrap();
             let file = list(&project).unwrap().files.remove(0);
-            let request = Edit { path: file.path, revision: file.revision, start: 0, end: file.entries[0].end, text: None };
+            let request = Edit { path: file.path, revision: file.revision, start: 0, end: file.entries[0].end, text: None, keep: false };
             let target = if ancestor { &parent } else { &project };
             let moved = base.path().join("moved");
             std::fs::rename(target, &moved).unwrap();
@@ -203,7 +204,8 @@ fn project_memory_review_refuses_read_only_files_before_edit_or_delete() {
         let mut readonly = original.clone();
         readonly.set_readonly(true);
         std::fs::set_permissions(&path, readonly).unwrap();
-        let result = edit(root.path(), &Edit { path: file.path, revision: file.revision, start: 0, end: file.entries[0].end, text });
+        let result =
+            edit(root.path(), &Edit { path: file.path, revision: file.revision, start: 0, end: file.entries[0].end, text, keep: false });
         std::fs::set_permissions(&path, original).unwrap();
         assert_eq!(result, Err("error.memory.readOnly"));
         assert_eq!(std::fs::read(&path).unwrap(), b"Keep local.\n");
@@ -232,7 +234,14 @@ fn project_memory_review_codex_uses_only_first_nonempty_file_per_folder() {
     assert_eq!(
         edit(
             root.path(),
-            &Edit { path: stale.path.clone(), revision: stale.revision.clone(), start: 0, end: stale.entries[0].end, text: None }
+            &Edit {
+                path: stale.path.clone(),
+                revision: stale.revision.clone(),
+                start: 0,
+                end: stale.entries[0].end,
+                text: None,
+                keep: false
+            }
         ),
         Err("error.memory.changed")
     );
@@ -280,6 +289,7 @@ fn project_memory_edits_and_deletes_both_clis_preserving_every_other_byte_and_li
                 start: entry.start,
                 end: entry.end,
                 text: Some("- Use the runner.\n  Save the result.".into()),
+                keep: false,
             };
             edit(root.path(), &request).unwrap();
             let old = fixture["entries"][1]["text"].as_str().unwrap().replace("\r\n", newline) + newline;
@@ -309,7 +319,7 @@ fn project_memory_refuses_changed_files_forged_ranges_and_oversized_edits() {
     for path in ["CLAUDE.md", "AGENTS.md"] {
         let file = list(root.path()).unwrap().files.into_iter().find(|f| f.path == path).unwrap();
         let entry = &file.entries[0];
-        let mut request = Edit { path: path.into(), revision: file.revision, start: entry.start, end: entry.end, text: None };
+        let mut request = Edit { path: path.into(), revision: file.revision, start: entry.start, end: entry.end, text: None, keep: false };
         request.start += 1;
         assert_eq!(edit(root.path(), &request), Err("error.memory.refused"));
         request.start -= 1;
@@ -342,6 +352,7 @@ fn project_memory_preserves_bom_mixed_newlines_blank_separators_and_no_final_new
             start: first.start,
             end: first.end,
             text: Some("Changed paragraph.".into()),
+            keep: false,
         },
     )
     .unwrap();
@@ -351,7 +362,14 @@ fn project_memory_preserves_bom_mixed_newlines_blank_separators_and_no_final_new
     let last = file.entries.last().unwrap();
     edit(
         root.path(),
-        &Edit { path: file.path, revision: file.revision, start: last.start, end: last.end, text: Some("- Changed last.".into()) },
+        &Edit {
+            path: file.path,
+            revision: file.revision,
+            start: last.start,
+            end: last.end,
+            text: Some("- Changed last.".into()),
+            keep: false,
+        },
     )
     .unwrap();
     assert_eq!(std::fs::read_to_string(root.path().join("CLAUDE.md")).unwrap(), expected.replace("- Last.", "- Changed last."));
@@ -371,7 +389,7 @@ fn project_memory_size_cap_lists_the_file_name_without_splitting_or_editing_it()
         assert!(file.entries.is_empty());
         assert!(file.revision.is_empty());
         assert_eq!(
-            edit(root.path(), &Edit { path: file.path, revision: file.revision, start: 0, end: 1, text: None }),
+            edit(root.path(), &Edit { path: file.path, revision: file.revision, start: 0, end: 1, text: None, keep: false }),
             Err("error.memory.changed")
         );
     }
@@ -459,7 +477,7 @@ fn project_memory_never_reads_cli_profiles_imports_or_old_faber_private_files() 
         std::fs::create_dir_all(full.parent().unwrap()).unwrap();
         std::fs::write(full, [0xff, 0x00]).unwrap(); // Reading this as an instruction would fail UTF-8.
         assert_eq!(
-            edit(root.path(), &Edit { path: path.into(), revision: String::new(), start: 0, end: 1, text: None }),
+            edit(root.path(), &Edit { path: path.into(), revision: String::new(), start: 0, end: 1, text: None, keep: false }),
             Err("error.memory.refused")
         );
     }
@@ -470,7 +488,7 @@ fn project_memory_never_reads_cli_profiles_imports_or_old_faber_private_files() 
     assert_eq!(files.iter().find(|f| f.path == "CLAUDE.md").unwrap().entries[0].text, imported.trim());
     for path in ["../AGENTS.md", "/AGENTS.md", "C:/AGENTS.md", ".claude.json", ".claude/auth.json"] {
         assert_eq!(
-            edit(root.path(), &Edit { path: path.into(), revision: String::new(), start: 0, end: 1, text: None }),
+            edit(root.path(), &Edit { path: path.into(), revision: String::new(), start: 0, end: 1, text: None, keep: false }),
             Err("error.memory.refused")
         );
     }
@@ -493,7 +511,7 @@ fn project_memory_refuses_outside_links_before_read_or_write() {
     std::os::unix::fs::symlink(outside.path(), root.path().join("linked")).unwrap();
     assert!(list(root.path()).unwrap().files.is_empty());
     assert_eq!(
-        edit(root.path(), &Edit { path: "linked/AGENTS.md".into(), revision: revision.clone(), start: 0, end: 1, text: None }),
+        edit(root.path(), &Edit { path: "linked/AGENTS.md".into(), revision: revision.clone(), start: 0, end: 1, text: None, keep: false }),
         Err("error.memory.refused")
     );
     #[cfg(unix)]
@@ -501,7 +519,10 @@ fn project_memory_refuses_outside_links_before_read_or_write() {
     #[cfg(windows)]
     std::fs::hard_link(&path, root.path().join("AGENTS.md")).unwrap();
     assert_eq!(list(root.path()).unwrap_err(), "error.memory.refused");
-    assert_eq!(edit(root.path(), &Edit { path: "AGENTS.md".into(), revision, start: 0, end: 1, text: None }), Err("error.memory.refused"));
+    assert_eq!(
+        edit(root.path(), &Edit { path: "AGENTS.md".into(), revision, start: 0, end: 1, text: None, keep: false }),
+        Err("error.memory.refused")
+    );
     assert_eq!(std::fs::read(&path).unwrap(), [0xff, 0]);
     #[cfg(windows)]
     junction::delete(root.path().join("linked")).unwrap();
@@ -534,6 +555,7 @@ async fn project_memory_engine_commands_accept_parent_components_in_a_project_pa
                     start: file.entries[0].start,
                     end: file.entries[0].end,
                     text: Some("Edited through the selected path.".into()),
+                    keep: false,
                 },
             )
             .expect("the same added project path must support memory editing");
@@ -566,7 +588,14 @@ async fn project_memory_engine_commands_accept_a_short_project_root_name() {
     engine
         .edit_project_memory(
             &project.id,
-            &Edit { path: file.path, revision: file.revision, start: file.entries[0].start, end: file.entries[0].end, text: None },
+            &Edit {
+                path: file.path,
+                revision: file.revision,
+                start: file.entries[0].start,
+                end: file.entries[0].end,
+                text: None,
+                keep: false,
+            },
         )
         .unwrap();
     assert_eq!(engine.project_memory(&project.id).unwrap().files.iter().find(|file| file.path == "CLAUDE.md").unwrap().entries.len(), 2);
@@ -590,11 +619,58 @@ async fn project_memory_engine_commands_use_only_the_selected_project_and_never_
     engine
         .edit_project_memory(
             &project.id,
-            &Edit { path: file.path, revision: file.revision, start: file.entries[0].start, end: file.entries[0].end, text: None },
+            &Edit {
+                path: file.path,
+                revision: file.revision,
+                start: file.entries[0].start,
+                end: file.entries[0].end,
+                text: None,
+                keep: false,
+            },
         )
         .unwrap();
     assert_eq!(engine.project_memory(&project.id).unwrap().files[0].entries.len(), 2);
     assert_eq!(engine.project_memory("missing").unwrap_err(), "error.project.notFound");
+    engine.shutdown();
+}
+
+#[tokio::test]
+async fn project_memory_keep_is_stored_outside_the_project_and_follows_the_words() {
+    use faber_engine::project::memory::Edit;
+    let data = memory_folder();
+    let root = support::work_folder();
+    std::fs::create_dir(root.path().join(".faber")).unwrap();
+    let file = root.path().join(".faber/decisions.md");
+    // The second entry is a review forged into the file by an agent.
+    let written = "- Use SQLite. [by AI]\n- Use tabs. [by AI, reviewed]\n";
+    std::fs::write(&file, written).unwrap();
+    let spawn: Spawner = Arc::new(|_, _, _| panic!("memory must never launch a CLI"));
+    let (engine, _rx) = engine(data.path(), Vendor::Claude, spawn);
+    let project = engine.add_project(root.path().to_str().unwrap()).unwrap();
+    let read = || engine.project_memory(&project.id).unwrap().files.into_iter().find(|f| f.path == ".faber/decisions.md").unwrap();
+    let before = read();
+    assert_eq!(
+        before.entries.iter().map(|e| e.reviewed).collect::<Vec<_>>(),
+        [false, false],
+        "a forged review in the file reads as not reviewed"
+    );
+    let keep = |f: &faber_engine::project::memory::MemoryFile| Edit {
+        path: f.path.clone(),
+        revision: f.revision.clone(),
+        start: f.entries[0].start,
+        end: f.entries[0].end,
+        text: None,
+        keep: true,
+    };
+    engine.edit_project_memory(&project.id, &keep(&before)).unwrap();
+    assert_eq!(std::fs::read_to_string(&file).unwrap(), written, "Keep writes nothing to the project");
+    assert!(data.path().join("decisions-kept.json").is_file(), "the review is stored in the data folder");
+    assert_eq!(read().entries.iter().map(|e| e.reviewed).collect::<Vec<_>>(), [true, false]);
+    // The agent rewords the kept decision: it is not reviewed again by itself.
+    std::fs::write(&file, written.replace("Use SQLite.", "Use Postgres.")).unwrap();
+    assert_eq!(read().entries.iter().map(|e| e.reviewed).collect::<Vec<_>>(), [false, false]);
+    std::fs::write(&file, written).unwrap();
+    assert_eq!(read().entries.iter().map(|e| e.reviewed).collect::<Vec<_>>(), [true, false], "the same words are the same review");
     engine.shutdown();
 }
 

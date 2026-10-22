@@ -268,3 +268,56 @@ check('project memory: refresh prevents an editor from borrowing a newer file re
     equal(root.querySelector('textarea')!.value, 'The changed file.');
   } finally { dispose(); root.remove(); api.projectMemory = before; }
 });
+
+check('project memory: a decision shows its author, an AI one reads "not reviewed" until Keep, and an unmarked one claims nothing', async () => {
+  const before = { read: api.projectMemory, edit: api.editProjectMemory };
+  const asked: Array<{ start: number; text: string | null; keep?: boolean }> = [];
+  const data: MemoryList = { incomplete: false, files: [
+    { path: '.faber/decisions.md', source: 'faber', revision: 'decisions', tooLarge: false, entries: [
+      { start: 0, end: 30, line: 1, text: '- Use SQLite. [by AI]', body: '- Use SQLite.', author: 'ai' },
+      { start: 31, end: 60, line: 2, text: '- Keep the export. [by person]', body: '- Keep the export.', author: 'person' },
+      { start: 61, end: 80, line: 3, text: '- Ship on Fridays' },
+    ] },
+  ] };
+  api.projectMemory = async () => structuredClone(data);
+  api.editProjectMemory = async (_id, edit) => {
+    asked.push({ start: edit.start, text: edit.text, keep: edit.keep });
+    Object.assign(data.files[0].entries[0], { author: 'ai', reviewed: true });
+  };
+  const root = document.createElement('div'); root.dataset.motion = 'none'; document.body.append(root);
+  const dispose = render(() => createComponent(ProjectMemory, { projectId: 'memory-project' }), root);
+  try {
+    button(root, 'memory.title').click(); await settle();
+    const flags = () => [...root.querySelectorAll('.memory-flag')].map((f) => f.textContent);
+    equal(JSON.stringify(flags()), JSON.stringify([t('memory.author.ai'), t('memory.author.person')]), 'the unmarked decision claims no author');
+    ok(root.textContent!.includes('- Use SQLite.') && !root.textContent!.includes('[by AI]'), 'the mark is a flag, not part of the words');
+    equal([...root.querySelectorAll('button')].filter((b) => b.textContent === t('memory.keep')).length, 1, 'only the AI decision offers Keep');
+    button(root, 'memory.keep').click(); await settle();
+    equal(JSON.stringify(asked), JSON.stringify([{ start: 0, text: null, keep: true }]));
+    equal(JSON.stringify(flags()), JSON.stringify([t('memory.author.aiKept'), t('memory.author.person')]));
+    equal([...root.querySelectorAll('button')].some((b) => b.textContent === t('memory.keep')), false, 'nothing left to keep');
+    equal(document.activeElement?.textContent, t('memory.edit'), 'focus moves to the kept row, not to the page');
+    equal(root.querySelector('[role="status"].sr-only')!.textContent, t('memory.kept'), 'a screen reader hears the decision was kept');
+  } finally { dispose(); root.remove(); api.projectMemory = before.read; api.editProjectMemory = before.edit; }
+});
+
+check('project memory: Keep leaves a long list as long as it was', async () => {
+  const before = { read: api.projectMemory, edit: api.editProjectMemory };
+  const data: MemoryList = { incomplete: false, files: [
+    { path: '.faber/decisions.md', source: 'faber', revision: 'many', tooLarge: false, entries: Array.from({ length: 60 }, (_, i) => (
+      { start: i * 10, end: i * 10 + 9, line: i + 1, text: `- Choice ${i}. [by AI]`, body: `- Choice ${i}.`, author: 'ai' as const })) },
+  ] };
+  api.projectMemory = async () => structuredClone(data);
+  api.editProjectMemory = async (_id, edit) => { Object.assign(data.files[0].entries[edit.start / 10], { reviewed: true }); };
+  const root = document.createElement('div'); root.dataset.motion = 'none'; document.body.append(root);
+  const dispose = render(() => createComponent(ProjectMemory, { projectId: 'memory-project' }), root);
+  try {
+    button(root, 'memory.title').click(); await settle();
+    button(root, 'memory.more').click(); await settle();
+    equal(root.querySelectorAll('.memory-entry').length, 60);
+    [...root.querySelectorAll<HTMLButtonElement>('button')].filter((b) => b.textContent === t('memory.keep'))[55].click(); await settle();
+    equal(root.querySelectorAll('.memory-entry').length, 60, 'the list is not folded back to 50 rows');
+    equal(root.querySelectorAll('.memory-flag.ask').length, 59);
+    equal(document.activeElement?.closest('.memory-entry')?.textContent?.includes('Choice 55.'), true, 'focus stays on the row that was kept');
+  } finally { dispose(); root.remove(); api.projectMemory = before.read; api.editProjectMemory = before.edit; }
+});
