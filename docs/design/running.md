@@ -15,6 +15,9 @@ rest of the shell are in [layout.md](layout.md).
   A stop failure says so on its row and leaves retry available; an acknowledgement waits for the AI's end event.
   Finished rows leave when the conversation's turn ends, or immediately when they finish after it. The list updates
   by events, with no polling, new motion, console or terminal; closing the view releases its output elements.
+- When a project session started with a start card, Technical details has a group "What the AI got at the start": the
+  newest card, word for word, as plain preformatted text behind a folded disclosure. Nothing is mounted until it opens,
+  it never renders as markup, and nothing moves.
 - A project conversation with changed files has one "Changes" button among the topbar's pane buttons. It replaces the
   list, like a page or the quick question, with its title and close. Each file is a disclosure with the work log's `+N −N` counts;
   opening it closes the previous file and reads only its patch, so at most one patch stays mounted in total. Added and

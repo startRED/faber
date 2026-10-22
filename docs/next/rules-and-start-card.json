@@ -1,0 +1,11 @@
+{
+  "notes": {
+    "new": {
+      "en": "At the start of each project conversation the AI now gets a short card with the project rules and the decisions you kept. Technical details shows it.",
+      "pt-BR": "Ao começar cada conversa de projeto, a IA agora recebe um cartão curto com as regras do projeto e as decisões que você manteve. Detalhes técnicos mostra esse cartão.",
+      "es": "Al empezar cada conversación de proyecto, la IA ahora recibe una tarjeta corta con las reglas del proyecto y las decisiones que conservaste. Detalles técnicos la muestra.",
+      "fr": "Au début de chaque conversation de projet, l'IA reçoit maintenant une courte fiche avec les règles du projet et les décisions que vous avez gardées. Détails techniques l'affiche.",
+      "de": "Zu Beginn jedes Projektgesprächs bekommt die KI jetzt eine kurze Karte mit den Regeln des Projekts und den Entscheidungen, die du behalten hast. Technische Details zeigt sie."
+    }
+  }
+}
