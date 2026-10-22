@@ -62,6 +62,9 @@ const PICTURE_SCALE: f64 = 0.375;
 const LOOK_SIDE: f64 = 640.0;
 /// How long a page has to lay itself out again at a new screen size before it is looked at.
 const RESIZED: Duration = Duration::from_millis(400);
+/// The least time between two writes of where the pane's page is: a page that changes its title in a loop writes the
+/// conversation's file at most this often.
+const KEEP_EVERY: Duration = Duration::from_secs(2);
 
 /// The share of a page at `size` its picture takes: the capture counts each of the screen's device pixels, so a dense phone
 /// screen is scaled down further than a PC's, and every picture's longest side is `LOOK_SIDE`.
@@ -130,6 +133,14 @@ struct State {
     handed_back: bool,
     /// The conversation whose page the pane holds: another conversation's agent never acts on it or reads it.
     owner: Option<String>,
+    /// The pane (`made`) and the conversation whose tabs its pages are kept in (`browser_seen`): set when Faber loads a page in
+    /// that pane, cleared when it closes, so a late page of a pane that closed is never kept in the conversation after it.
+    keeps_for: Option<(u64, String)>,
+    /// From a page Faber loads until it starts: a title that comes meanwhile is the page before's.
+    keep_waits: bool,
+    /// A write of where the page is runs (`keep_soon`), and another was asked meanwhile.
+    keeping: bool,
+    keep_again: bool,
     /// Which of the screen's boxes has the pane.
     boxes: Boxes,
     /// Counts the times the person took the pane, so a call that ran meanwhile knows, even if they already went back.
@@ -327,6 +338,10 @@ impl Pane {
         crate::lock(&self.state).skip_finish += 1;
         self.touch();
         if let Some(webview) = self.webview() {
+            {
+                let mut s = crate::lock(&self.state);
+                (s.keeps_for, s.keep_waits) = (Some((s.made, conversation.to_string())), true);
+            }
             if webview.navigate(parsed.clone()).is_ok() {
                 return Ok(before);
             }
@@ -335,14 +350,28 @@ impl Pane {
         }
         let window = self.app.get_window("main").ok_or("Faber's window is closed")?;
         let (loads, app, pane) = (self.loads.clone(), self.app.clone(), Arc::downgrade(self));
+        // Which pane this is (`State::made`), known once it is made: a late page of a pane that closed is never kept.
+        let mine = Arc::new(std::sync::atomic::AtomicU64::new(0));
+        let (titled, titled_mine, loaded_mine) = (Arc::downgrade(self), mine.clone(), mine.clone());
+        let started = Arc::downgrade(self);
         let blank = Url::parse("about:blank").map_err(|e| e.to_string())?;
         let builder = WebviewBuilder::new(LABEL, WebviewUrl::External(blank))
             .incognito(true)
             .on_navigation(allowed)
             .on_new_window(|_, _| NewWindowResponse::Deny)
             .on_download(|_, _| false)
+            .on_document_title_changed(move |_, _| {
+                if let Some(pane) = titled.upgrade() {
+                    pane.keep_soon(titled_mine.load(std::sync::atomic::Ordering::Relaxed));
+                }
+            })
             .on_page_load(move |_, payload| match payload.event() {
-                PageLoadEvent::Started => loads.send_modify(|(started, _)| *started += 1),
+                PageLoadEvent::Started => {
+                    loads.send_modify(|(started, _)| *started += 1);
+                    if let Some(pane) = started.upgrade() {
+                        crate::lock(&pane.state).keep_waits = false;
+                    }
+                }
                 PageLoadEvent::Finished => {
                     loads.send_modify(|(started, finished)| *finished = *started);
                     // A page that finished while the person had the pane is one they went to: the agent hears its site next time.
@@ -359,6 +388,7 @@ impl Pane {
                             s.fitted = None;
                             s.size.is_some() && *pane.looking.borrow()
                         };
+                        pane.keep_soon(loaded_mine.load(std::sync::atomic::Ordering::Relaxed));
                         if redraw {
                             tauri::async_runtime::spawn(async move { pane.show_size().await });
                         }
@@ -372,6 +402,8 @@ impl Pane {
             let mut s = crate::lock(&self.state);
             s.webview = Some(webview.clone());
             s.made += 1;
+            (s.keeps_for, s.keep_waits) = (Some((s.made, conversation.to_string())), true);
+            mine.store(s.made, std::sync::atomic::Ordering::Relaxed);
             s.made
         };
         // Until its first page, a pane whose making stops (an error, or the call that made it given up) closes.
@@ -392,9 +424,67 @@ impl Pane {
             return Err("the browser closed".into());
         }
         let before = self.loads.borrow().0;
+        crate::lock(&self.state).keep_waits = true;
         webview.navigate(parsed).map_err(|e| e.to_string())?;
         making.finish();
         Ok(before)
+    }
+
+    /// Keeps where pane `made`'s page is now, with its title, in the tabs of the conversation it loads for, so the pane opens it
+    /// again after it closed, another conversation or a restart. One write at a time, in order, at most once per `KEEP_EVERY`;
+    /// the last change always gets its write.
+    fn keep_soon(self: &Arc<Self>, made: u64) {
+        {
+            let mut s = crate::lock(&self.state);
+            if s.keep_waits || keeps_now(&s.keeps_for, made, s.webview.is_some()).is_none() {
+                return;
+            }
+            if std::mem::replace(&mut s.keeping, true) {
+                s.keep_again = true;
+                return;
+            }
+        }
+        let pane = self.clone();
+        tauri::async_runtime::spawn(async move {
+            loop {
+                pane.keep_now(made).await;
+                tokio::time::sleep(KEEP_EVERY).await;
+                let mut s = crate::lock(&pane.state);
+                if !std::mem::take(&mut s.keep_again) {
+                    s.keeping = false;
+                    break;
+                }
+            }
+        });
+    }
+
+    /// One write: the address and title are read together from the page's history, so they always belong to the same page,
+    /// and written only while the same pane still keeps for the same conversation. Only web pages are kept, off the window's
+    /// thread.
+    async fn keep_now(&self, made: u64) {
+        let held = {
+            let s = crate::lock(&self.state);
+            keeps_now(&s.keeps_for, made, s.webview.is_some()).zip(s.webview.clone())
+        };
+        let Some((conversation, webview)) = held else { return };
+        let Ok(history) = look_call(&webview, "Page.getNavigationHistory", json!({})).await else { return };
+        let entry = usize::try_from(history["currentIndex"].as_i64().unwrap_or(-1)).ok().and_then(|at| history["entries"].get(at));
+        let Some(url) = entry.and_then(|e| e["url"].as_str()).and_then(|u| Url::parse(u).ok()).filter(allowed) else { return };
+        // A page without a title shows its address as one; the tab then keeps none.
+        let title = entry.and_then(|e| e["title"].as_str()).filter(|t| !t.is_empty() && *t != url.as_str()).map(str::to_string);
+        {
+            let s = crate::lock(&self.state);
+            if keeps_now(&s.keeps_for, made, s.webview.is_some()).as_ref() != Some(&conversation) {
+                return;
+            }
+        }
+        let (app, url) = (self.app.clone(), url.to_string());
+        let _ = tauri::async_runtime::spawn_blocking(move || {
+            if let Some(faber) = app.try_state::<crate::Faber>() {
+                faber.engine.browser_seen(&conversation, None, &url, Some(title.as_deref().unwrap_or("")));
+            }
+        })
+        .await;
     }
 
     fn touch(self: &Arc<Self>) {
@@ -417,6 +507,7 @@ impl Pane {
                         (s.rounded, s.round_script) = (None, None);
                         (s.emulated, s.fitted) = (false, None);
                         s.brought = false;
+                        s.keeps_for = None;
                         Err(s.webview.take())
                     } else {
                         Ok(left.max(Duration::from_secs(1)))
@@ -444,6 +535,7 @@ impl Pane {
             (s.size, s.emulated, s.fitted) = (None, false, None);
             (s.rounded, s.round_script) = (None, None);
             s.brought = false;
+            s.keeps_for = None;
             s.webview.take()
         };
         self.looking.send_replace(false);
@@ -1260,6 +1352,12 @@ fn went_to(visited: &mut Vec<String>, url: &Url) {
     }
 }
 
+/// The conversation pane `made`'s pages are kept for, while that pane is still the one open: a late title or load of a pane
+/// that closed, or of the pane before a new one, keeps nothing.
+fn keeps_now(keeps_for: &Option<(u64, String)>, made: u64, open: bool) -> Option<String> {
+    keeps_for.as_ref().filter(|(pane, _)| open && *pane == made && made != 0).map(|(_, conversation)| conversation.clone())
+}
+
 /// The engine's view of the pane.
 pub struct PaneBrowser(pub Arc<Pane>);
 
@@ -1286,6 +1384,16 @@ impl Browser for PaneBrowser {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_late_page_of_a_pane_that_closed_or_was_made_again_is_never_kept_in_another_conversation() {
+        let a = Some((3, "a".to_string()));
+        assert_eq!(keeps_now(&a, 3, true).as_deref(), Some("a"));
+        assert_eq!(keeps_now(&a, 3, false), None, "the pane closed");
+        assert_eq!(keeps_now(&None, 3, true), None, "closing forgot whose it was");
+        assert_eq!(keeps_now(&Some((4, "b".to_string())), 3, true), None, "pane 3's late title, once pane 4 loads for b");
+        assert_eq!(keeps_now(&a, 0, true), None, "a pane not made yet");
+    }
 
     #[test]
     fn a_screen_size_the_person_picked_shrinks_to_fit_its_box_and_never_grows() {

@@ -30,6 +30,8 @@ mod auto_learned;
 mod background;
 #[path = "background_live.rs"]
 mod background_live;
+#[path = "browser_tabs.rs"]
+mod browser_tabs;
 #[path = "budget.rs"]
 mod budget;
 #[path = "cache_health.rs"]

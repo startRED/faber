@@ -1114,6 +1114,14 @@ async fn site_step(app: AppHandle, id: String, step: String) -> bool {
     false
 }
 
+/// A conversation's tabs in Faber's browser, kept in its file, so the pane opens the front one again.
+#[tauri::command]
+async fn site_tabs(faber: State<'_, Faber>, id: String) -> Res<Option<faber_engine::browser::tabs::Tabs>> {
+    // Reading a conversation's file waits on the engine, never on the window's thread.
+    let engine = faber.engine.clone();
+    tauri::async_runtime::spawn_blocking(move || engine.browser_tabs(&id)).await.map_err(|_| "error.conversationGone".to_string())
+}
+
 /// A Firefox profile the person may bring sign-ins from: its id (never a path), its name and whether it is the one used last.
 #[derive(serde::Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -1674,6 +1682,7 @@ fn main() {
                 site_size,
                 site_open,
                 site_step,
+                site_tabs,
                 site_picture,
                 cookie_profiles,
                 cookie_sites,

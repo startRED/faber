@@ -1,6 +1,9 @@
 import { createComponent, createSignal } from 'solid-js';
 import { render } from 'solid-js/web';
-import { api, type Message, type ToolUse } from '../../ui/api.ts';
+import { App } from '../../ui/App.tsx';
+import { api, type AppState, type Conversation, type Message, type SiteTabs, type ToolUse } from '../../ui/api.ts';
+import { store } from '../../ui/running.ts';
+import recorded from '../fixtures/conversation-changes.json';
 import { useLanguage } from '../../ui/i18n.ts';
 import { Running } from '../../ui/Running.tsx';
 import { addressOf, appsOf, awaySites, cornersOf, covered, looksOf, openedSite, showSite, siteOf, sitesOf, stepsOf, type OpenSite } from '../../ui/Site.tsx';
@@ -940,5 +943,63 @@ check('page in the browser: the person picks the screen size the page is drawn a
     dispose();
     root.remove();
     Object.assign(api, { siteSize, sitePlace, sitePark, onSite });
+  }
+});
+
+check('page in the browser: the pane opens again on the page it last showed, after it closed and after a restart, not on the agent’s', async () => {
+  // The topbar's browser button is there only where Faber's browser is (Windows).
+  if (!navigator.userAgent.includes('Windows')) return;
+  useLanguage('en');
+  const before = { open: api.open, state: api.state, warm: api.warm, routeDraft: api.routeDraft, setClock: api.setClock, setShellTexts: api.setShellTexts, siteOpen: api.siteOpen, siteTabs: api.siteTabs, siteSize: api.siteSize };
+  const storage = localStorage.getItem('faber.place');
+  const settle = () => new Promise((resolve) => setTimeout(resolve, 30));
+  const c = structuredClone(recorded.conversation) as Conversation;
+  // The agent opened the guide; the person went on to a page of their own, which the engine kept as the front tab.
+  c.messages.push({ id: 'agent-page', role: 'assistant', at: 3, status: 'done', text: 'Read it.', tools: [BROWSE] });
+  let kept: SiteTabs | null = { tabs: [{ id: 't1', url: 'https://example.org/mine?q=1', title: 'Mine' }], front: 't1' };
+  const initial = {
+    conversations: [{ id: c.id, title: c.title, area: c.area, projectId: 'p1', updatedAt: c.updatedAt }],
+    projects: [{ id: 'p1', name: 'Greeting', path: 'E:/greeting' }], vendors: ['claude'],
+    settings: { setup: 'done', tutorialDone: true, language: 'en', appearance: { base: 'sala' } },
+    running: { revision: store.list().revision + 1, items: [] }, quotas: [], usage: [], models: [], version: 'test',
+    look: { vars: {}, scheme: 'dark', motion: 'none', checks: [], notices: [], effects: { ambient: false, texture: false, glow: false },
+      appearance: { base: 'sala', ground: 'sala', accent: '#ffffff', textFont: 'archivo', headingFont: 'narrow', textSize: 14, density: 1, corners: 1, motion: 'none', effects: { ambient: false, texture: false, glow: false } } },
+  } as AppState;
+  const opened: string[] = [];
+  api.open = async () => c; api.state = async () => initial;
+  api.warm = async () => {}; api.routeDraft = async () => {};
+  api.setClock = async () => {}; api.setShellTexts = async () => {};
+  api.siteSize = async () => ({ now: null, sizes: [] });
+  api.siteOpen = async (_, url) => (opened.push(url), true);
+  api.siteTabs = async (id) => (id === c.id ? kept : null);
+  localStorage.setItem('faber.place', JSON.stringify({ area: 'project', projectId: 'p1', id: c.id }));
+  store.offer({ revision: store.list().revision + 1, items: [] });
+  try {
+    for (const run of ['first', 'after a restart', 'with no tab kept']) {
+      // A conversation from before tabs were kept, or whose pages were never web pages: the agent's last page, as before.
+      if (run === 'with no tab kept') kept = null;
+      const want = kept ? 'https://example.org/mine?q=1' : 'https://docs.example.org/guide';
+      const host = document.createElement('div');
+      document.body.append(host);
+      const dispose = render(() => createComponent(App, { initial, inbox: { take: () => {} } }), host);
+      try {
+        await settle();
+        const button = host.querySelector<HTMLButtonElement>('.pane-site');
+        ok(button, 'the topbar has the browser button');
+        for (const time of ['opened', 'opened again after closing']) {
+          button.click();
+          await settle();
+          equal(opened.at(-1), want, `${run}, ${time}: the kept front tab loads, not the agent’s last page`);
+          equal(host.querySelector<HTMLInputElement>('.site-address')?.value, want);
+          button.click();
+          await settle();
+          equal(host.querySelector('.site-address'), null, 'the second press closes the pane');
+        }
+      } finally { dispose(); host.remove(); showSite(undefined); }
+    }
+  } finally {
+    Object.assign(api, before);
+    store.offer({ revision: store.list().revision + 1, items: [] });
+    if (storage === null) localStorage.removeItem('faber.place'); else localStorage.setItem('faber.place', storage);
   }
 });

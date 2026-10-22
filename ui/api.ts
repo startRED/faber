@@ -8,6 +8,13 @@ export type Vendor = 'claude' | 'codex';
  * The shell's view of the update. The first three phases belong to the install at open: looking, downloading (with a whole
  * `percent` when the size is known, else the `mb` so far) and installing. `ready` is one kept for a restart.
  */
+/** A conversation's tabs in Faber's browser: where each one is, which one is in front and which one the agent drives. */
+export interface SiteTabs {
+  tabs: { id: string; url: string; title?: string }[];
+  front?: string;
+  agent?: string;
+}
+
 export interface UpdateStatus {
   phase: 'none' | 'checking' | 'downloading' | 'installing' | 'ready';
   percent?: number;
@@ -978,6 +985,8 @@ export const api = {
   siteOpen: (id: string, url: string) => invoke<boolean>('site_open', { id, url }),
   /** Back, forward or reload in Faber's browser, on that conversation's page only. */
   siteStep: (id: string, step: 'back' | 'forward' | 'reload') => invoke<boolean>('site_step', { id, step }),
+  /** A conversation's tabs in Faber's browser, kept in its file (`engine/src/browser/tabs.rs`); null when it never had a page. */
+  siteTabs: (id: string) => invoke<SiteTabs | null>('site_tabs', { id }),
   sitePicture: (id: string, call: string) => invoke<string | null>('site_picture', { id, call }),
   cookieProfiles: () => invoke<CookieProfile[]>('cookie_profiles'),
   cookieSites: (profile: string) => invoke<{ ticket: string; sites: CookieSite[] }>('cookie_sites', { profile }),

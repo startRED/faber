@@ -7,6 +7,8 @@
 //! captcha or a payment is always the person's turn: on such a page the agent may read and scroll but never click or type,
 //! and the reply's card says "Your turn". While the person looks at the pane it is theirs, and the agent waits for them.
 
+pub mod tabs;
+
 use crate::screens::{self, Kind, Screen, Viewport};
 use serde_json::{Value, json};
 use std::future::Future;

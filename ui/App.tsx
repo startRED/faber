@@ -1265,9 +1265,16 @@ export function App(props: { initial: AppState; update?: UpdateStatus; inbox: { 
     if (sideSite() && colShown()) return closeColumn();
     const c = current();
     if (!c) return;
-    // The page this conversation's agent last opened, else an empty page with its address field.
-    const last = sitesOf(c.messages.flatMap((m) => m.tools ?? [])).at(-1)?.site;
-    if (last && (await api.siteOpen(c.id, last.url).catch(() => false))) return showSite({ conversationId: c.id, url: last.url, title: last.title });
+    // The tab in front when the pane last showed this conversation's pages (kept in its file, so it outlives a restart),
+    // else the page its agent last opened, else an empty page with its address field.
+    const tabs = await api.siteTabs(c.id).catch(() => null);
+    // The person may have gone to another conversation meanwhile: its pane is not opened on this one's page.
+    if (current()?.id !== c.id) return;
+    const kept = tabs?.tabs.find((tab) => tab.id === tabs.front);
+    const last = kept ? { url: kept.url, title: kept.title ?? '' } : sitesOf(c.messages.flatMap((m) => m.tools ?? [])).at(-1)?.site;
+    const opened = !!last && (await api.siteOpen(c.id, last.url).catch(() => false));
+    if (current()?.id !== c.id) return;
+    if (opened && last) return showSite({ conversationId: c.id, url: last.url, title: last.title });
     showSite({ conversationId: c.id, url: '', title: '' });
   };
 

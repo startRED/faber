@@ -967,6 +967,10 @@ pub struct Conversation {
     /// Changes to typed inline pieces, bound to the original reply block's source digest.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub piece_values: Vec<crate::pieces::SavedValue>,
+    /// Its tabs in Faber's browser (`crate::browser::tabs`): where each one is and which one is in front, so the pane opens
+    /// them again after it closed, another conversation or a restart. Never exported, and a branch starts with none.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub browser: Option<crate::browser::tabs::Tabs>,
     /// Saved-message continuation after rewind; consumed by the next reply, never a native CLI resume.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub rewind_notice: Option<String>,

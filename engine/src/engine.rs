@@ -3955,6 +3955,7 @@ impl Core {
             fresh_after: None,
             messages: vec![],
             piece_values: vec![],
+            browser: None,
             rewind_notice: None,
             rewind_summary: None,
             reported: (None, None),

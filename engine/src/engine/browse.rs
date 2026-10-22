@@ -99,3 +99,27 @@ impl Core {
         path.is_file().then_some(path)
     }
 }
+
+impl Engine {
+    /// A conversation's tabs in Faber's browser (`browser::tabs`); none for one that is gone or never had a page.
+    pub fn browser_tabs(&self, id: &str) -> Option<browser::tabs::Tabs> {
+        self.with(|c| c.load(id)?.browser.clone())
+    }
+
+    /// A page finished loading in tab `tab` of conversation `id`'s browser (the front one when none), with its title when it is
+    /// known: kept in the conversation's file, so the pane opens it again. A load that changes nothing writes nothing, and a
+    /// page loading never moves the conversation in the sidebar.
+    pub fn browser_seen(&self, id: &str, tab: Option<&str>, url: &str, title: Option<&str>) {
+        self.with(|c| {
+            let Some(conversation) = c.load(id) else { return };
+            let tabs = conversation.browser.get_or_insert_default();
+            let changed = tabs.record(tab, url, title);
+            if tabs.tabs.is_empty() {
+                conversation.browser = None;
+            }
+            if changed {
+                c.save(id);
+            }
+        });
+    }
+}

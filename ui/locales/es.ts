@@ -2035,6 +2035,7 @@ export const es: Messages = {
   'notes.197.new': 'En Windows, una comprobación que crece mucho más allá de la memoria que suele usar ahora se detiene y dice por qué, en vez de volver lento tu PC.',
   'notes.198.better': 'La pregunta rápida ahora es un chat de verdad al lado de la conversación: las respuestas se guardan aunque la cierres o reinicies, y puedes seguir preguntando.',
   'notes.199.better': 'Faber recuerda dónde estabas: el punto de cada conversación, los proyectos abiertos, la búsqueda del Catálogo, una meta o respuesta al ayudante a medias, la vista de Cambios abierta y la última sección de Ajustes.',
+  'notes.200.better': 'El navegador de Faber vuelve a abrir la última página que tenías en esa conversación, también después de cerrarlo, cambiar de conversación o reiniciar Faber.',
   'update.checking': 'Buscando una actualización…',
   'update.downloading': 'Descargando actualización…',
   'update.downloadingPercent': 'Descargando actualización… {percent} %',

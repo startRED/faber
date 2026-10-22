@@ -603,6 +603,7 @@ fn seed(dir: &Path, long: bool) -> Conversation {
         reported: (None, None),
         compacting: false,
         piece_values: vec![],
+        browser: None,
         messages: vec![
             Message::new("first".into(), Role::User, if long { "x".repeat(30_000) } else { "Original question".into() }, 1),
             answer,
