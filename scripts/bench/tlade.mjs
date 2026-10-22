@@ -339,10 +339,11 @@ async function main() {
     writeFileSync(out, JSON.stringify(notes));
     failed = false;
   } finally {
-    // Every process has ended by now. A folder left behind fails a run that was otherwise fine; after a failure the
-    // run's own error is the one that matters, so the leftover is only reported.
+    // Every process has ended by now, though a browser may hold its profile a few seconds more (2026-10-22 run). A folder
+    // left behind fails a run that was otherwise fine; after a failure the run's own error is the one that matters, so the
+    // leftover is only reported.
     try {
-      rmSync(tmp, { recursive: true, force: true, maxRetries: 5 });
+      rmSync(tmp, { recursive: true, force: true, maxRetries: 10, retryDelay: 500 });
     } catch (e) {
       const left = new Error(`left ${tmp}: ${e.message}`);
       if (!failed) throw left;
