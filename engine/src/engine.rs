@@ -64,6 +64,7 @@ mod rewind;
 mod siblings;
 mod silence;
 mod stuck_watch;
+mod toolbox;
 mod unbounded;
 mod usage_view;
 mod verifying;
@@ -1936,7 +1937,8 @@ impl Core {
                 | EngineEvent::ConversationCall { id, .. }
                 | EngineEvent::VerifyCall { id, .. }
                 | EngineEvent::MapCall { id, .. }
-                | EngineEvent::ProgressCall { id, .. } => {
+                | EngineEvent::ProgressCall { id, .. }
+                | EngineEvent::ToolboxCall { id, .. } => {
                     if let Some(l) = self.live.get(conv) {
                         l.session.helper_reply(id, false, "The turn has ended.".into());
                     }
@@ -2136,6 +2138,7 @@ impl Core {
             EngineEvent::VerifyCall { id, input } => return self.verify_call(conv, id, input),
             EngineEvent::MapCall { id, input } => return self.map_call(conv, id, input),
             EngineEvent::ProgressCall { id, tool, input } => return self.progress_call(conv, id, tool, input),
+            EngineEvent::ToolboxCall { id, tool, input } => return self.toolbox_call(conv, id, tool, input),
             EngineEvent::Permission { request_id, tool, mut input } => {
                 if self.turn(conv).is_some_and(|m| m.status != Some(Status::Streaming)) {
                     if let Some(l) = self.live.get(conv) {

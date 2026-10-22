@@ -608,6 +608,7 @@ pub fn parse_claude_message(msg: &Value) -> Vec<EngineEvent> {
                         Some(crate::verify::CLAUDE_NAME) => crate::verify::TOOL.to_string(),
                         Some(crate::map::CLAUDE_NAME) => crate::map::TOOL.to_string(),
                         Some(name) if let Some(tool) = crate::progress::claude_tool(name) => tool.to_string(),
+                        Some(name) if let Some(tool) = crate::toolbox::claude_tool(name) => tool.to_string(),
                         _ => s(&c["name"]),
                     };
                     EngineEvent::Tool { id: s(&c["id"]), name, input: c["input"].clone(), parent: parent.clone() }
@@ -954,6 +955,7 @@ pub fn start_claude(opts: ClaudeOptions, on_event: EventSink) -> Session {
                                             crate::verify::NAME => EngineEvent::VerifyCall { id, input },
                                             crate::map::NAME => EngineEvent::MapCall { id, input },
                                             name if let Some(tool) = crate::progress::tool_of(name) => EngineEvent::ProgressCall { id, tool, input },
+                                            name if let Some(tool) = crate::toolbox::tool_of(name) => EngineEvent::ToolboxCall { id, tool, input },
                                             _ => EngineEvent::HelperCall { id, input },
                                         });
                                     }
@@ -986,7 +988,7 @@ pub fn start_claude(opts: ClaudeOptions, on_event: EventSink) -> Session {
                                         || (tool == crate::browser::CLAUDE_NAME && opts.launch.browse)
                                         || (tool == crate::sibling::CLAUDE_NAME && opts.launch.conversations)
                                         || ((tool == crate::verify::CLAUDE_NAME || tool == crate::map::CLAUDE_NAME) && opts.launch.verify)
-                                        || (crate::progress::claude_tool(tool).is_some() && opts.launch.progress)
+                                        || ((crate::progress::claude_tool(tool).is_some() || crate::toolbox::claude_tool(tool).is_some()) && opts.launch.progress)
                                     {
                                         let msg = json!({ "type": "control_response", "response": { "subtype": "success", "request_id": request_id,
                                             "response": { "behavior": "allow", "updatedInput": input } } });

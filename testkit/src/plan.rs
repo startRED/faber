@@ -334,7 +334,7 @@ mod tests {
     fn a_small_change_runs_only_its_suites_and_the_tools_the_build_or_an_unknown_file_run_everything() {
         let only: [(&str, &[&str]); 10] = [
             ("ui/Thread.tsx", &["ui", "screen"]),
-            ("ui/locales/en.ts", &["ui", "screen"]),
+            ("ui/locales/en.ts", &["rust", "ui", "screen"]),
             ("engine/src/codex.rs", &["rust", "screen"]),
             ("engine/examples/cache_probe.rs", &["rust", "screen"]),
             ("engine/tests/codex_session.rs", &["rust"]),

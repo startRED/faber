@@ -130,6 +130,8 @@ wait. Everything persists across closing, crashes and reboots.
 | `memory.search` | searches past conversations, decisions and the user's taste |
 | `quota.get` | remaining quota per subscription and when it renews |
 
+Built so far, as read-only tools of a project's own agent in every permission mode (R412): `quota.get` as `quota` (the limits Faber already holds, no new CLI call) and the search half of `catalog.search` as `catalog` (the shipped catalog, no network). `catalog.install` is not built: it changes Faber itself, so it waits for the approval gate of guardrail 3. Together the two tools add about 200 tokens to every request of a project agent. See "Faber's AI limits" and "Faber's catalog search" in [the product map](../product-map.md).
+
 ## Guardrails enforced by code, never by the model
 
 1. Faber never reads, copies or stores logins. Sign-in happens in each CLI's own flow, and CLIs run unmodified.

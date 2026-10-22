@@ -1,5 +1,5 @@
 {
-  "about": "Which suites a changed path needs (R163). `cargo t` (testkit/src/plan.rs) and CI (scripts/ci-scope.mjs) both read this file. The first rule that matches a path wins; a path no rule matches needs every suite. A rule matches a path that is one of its `files`, starts with one of its `prefixes` or ends with one of its `suffixes`. docs/product-map.md needs the Rust suite because engine/tests/product_map.rs reads it. The engine's and the shell's own test files, and the engine's examples no screen scenario starts, are built only by the Rust suite, so they need nothing else, and a change to a manifest runs everything (R165); engine/examples/cache_probe.rs is one the screen suite starts. bench/ holds the light benchmark's requests, proofs and pure parts, which only the Rust suite builds.",
+  "about": "Which suites a changed path needs (R163). `cargo t` (testkit/src/plan.rs) and CI (scripts/ci-scope.mjs) both read this file. The first rule that matches a path wins; a path no rule matches needs every suite. A rule matches a path that is one of its `files`, starts with one of its `prefixes` or ends with one of its `suffixes`. docs/product-map.md needs the Rust suite because engine/tests/product_map.rs reads it, and ui/locales/en.ts because engine/src/toolbox.rs reads the catalog's English words. The engine's and the shell's own test files, and the engine's examples no screen scenario starts, are built only by the Rust suite, so they need nothing else, and a change to a manifest runs everything (R165); engine/examples/cache_probe.rs is one the screen suite starts. bench/ holds the light benchmark's requests, proofs and pure parts, which only the Rust suite builds.",
   "rules": [
     { "files": ["docs/product-map.md"], "suites": ["rust"] },
     { "prefixes": ["docs/"], "suffixes": [".md"], "suites": [] },
@@ -9,6 +9,7 @@
     { "prefixes": ["engine/tests/", "src-tauri/tests/", "bench/"], "files": ["engine/examples/route_eval.rs", "engine/examples/security_probe.rs", "engine/examples/selfdev_probe.rs", "engine/examples/selfdev_accept.rs", "engine/examples/bench.rs"], "suites": ["rust"] },
     { "prefixes": ["tests/fixtures/", "engine/"], "suites": ["rust", "screen"] },
     { "prefixes": ["src-tauri/"], "suites": ["rust", "ui", "screen"] },
+    { "files": ["ui/locales/en.ts"], "suites": ["rust", "ui", "screen"] },
     { "prefixes": ["ui/"], "files": ["vite.config.ts", "tsconfig.json", "package.json", "package-lock.json"], "suites": ["ui", "screen"] }
   ]
 }

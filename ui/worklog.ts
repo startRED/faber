@@ -76,6 +76,9 @@ export function toolRow(tool: ToolUse): ToolRow {
   if (tool.name === 'Verify') return { label: t(input?.level === 'full' ? 'tool.verifyFull' : 'tool.verify'), detail: '' };
   // The project map (R146) reads as reading it, with what was looked up.
   if (tool.name === 'Map') return { label: t('tool.map'), detail: [input?.kind, input?.query].filter((v) => typeof v === 'string' && v).join(' ') };
+  // Faber's two read-only lookups: the limits of the AIs (nothing after) and a catalog search (with its words).
+  if (tool.name === 'Quota') return { label: t('tool.quota'), detail: '' };
+  if (tool.name === 'Catalog') return { label: t('tool.catalog'), detail: typeof input?.query === 'string' ? input.query : '' };
   // Its own context, and compacting or clearing it, read as what they are, with nothing after.
   const action = tool.name === 'Conversation' ? (tool.input as { action?: unknown } | undefined)?.action : undefined;
   if (action === 'compact' || action === 'clear' || action === 'context') return { label: t(`tool.${action}`), detail: '' };

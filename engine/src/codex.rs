@@ -518,6 +518,7 @@ fn parse_notification(msg: &Value, state: &mut CodexTurnState) -> Vec<EngineEven
                 ("dynamicToolCall", Some(crate::verify::NAME)) => crate::verify::TOOL,
                 ("dynamicToolCall", Some(crate::map::NAME)) => crate::map::TOOL,
                 ("dynamicToolCall", Some(name)) if let Some(tool) = crate::progress::tool_of(name) => tool,
+                ("dynamicToolCall", Some(name)) if let Some(tool) = crate::toolbox::tool_of(name) => tool,
                 _ => kind,
             };
             vec![EngineEvent::Tool { id: s(&item["id"]), name: name.into(), input, parent: None }]
@@ -1090,6 +1091,7 @@ pub fn thread_params(area: Area, t: &CodexThread) -> (&'static str, Value) {
             let tools = params.entry("dynamicTools").or_insert_with(|| json!([]));
             if let Some(tools) = tools.as_array_mut() {
                 tools.extend(crate::progress::codex_tools());
+                tools.extend(crate::toolbox::codex_tools());
             }
         }
     }
@@ -1641,6 +1643,20 @@ async fn serve(
                                 }
                                 None => {
                                     let _ = proc::write_line(&mut *stdin, &json!({"id":id,"result":{"success":false,"contentItems":[{"type":"inputText","text":"Faber's project map is not available here."}]}})).await;
+                                }
+                            }
+                            continue;
+                        }
+                        if method == "item/tool/call" && let Some(tool) = params["tool"].as_str().and_then(crate::toolbox::tool_of) {
+                            // `quota` and `catalog` read only what Faber keeps; the engine answers at once.
+                            match thread.filter(|t| t.params.progress && !t.blocked && !t.closing) {
+                                Some(t) => {
+                                    let call = s(&params["callId"]);
+                                    t.helpers.insert(call.clone(), id.clone());
+                                    (t.sink)(EngineEvent::ToolboxCall { id: call, tool, input: params["arguments"].clone() });
+                                }
+                                None => {
+                                    let _ = proc::write_line(&mut *stdin, &json!({"id":id,"result":{"success":false,"contentItems":[{"type":"inputText","text":"This tool is not available here."}]}})).await;
                                 }
                             }
                             continue;

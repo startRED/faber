@@ -48,6 +48,7 @@ pub mod signals;
 pub mod store;
 pub mod stuck;
 pub mod tool_inventory;
+pub mod toolbox;
 pub mod tools;
 pub mod usage;
 pub mod verify;

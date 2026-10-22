@@ -175,6 +175,13 @@ pub enum EngineEvent {
         id: String,
         input: Value,
     },
+    /// The agent called `quota` or `catalog` (`crate::toolbox`; `tool` is the name both drivers give it). The engine answers at
+    /// once with `Session::helper_reply`.
+    ToolboxCall {
+        id: String,
+        tool: &'static str,
+        input: Value,
+    },
     /// The agent called `plan`, `status` or `wrap_up` (`crate::progress`; `tool` is the name both drivers give it). The engine
     /// writes it down and answers at once with `Session::helper_reply`.
     ProgressCall {

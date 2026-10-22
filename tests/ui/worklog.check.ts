@@ -25,6 +25,15 @@ check('worklog: every Claude Code tool reads as what it does, in words', () => {
   deepEqual(toolRow({ id: '10', name: 'Verify', input: { level: 'full' } }), { label: t('tool.verifyFull'), detail: '' });
   deepEqual(toolRow({ id: '11', name: 'Map', input: {} }), { label: t('tool.map'), detail: '' });
   deepEqual(toolRow({ id: '12', name: 'Map', input: { kind: 'setting', query: 'theme' } }), { label: t('tool.map'), detail: 'setting theme' });
+  // The limits and the catalog search read as what they do; the search shows its words, in every language of the screen.
+  deepEqual(toolRow({ id: '13', name: 'Quota', input: {} }), { label: t('tool.quota'), detail: '' });
+  deepEqual(toolRow({ id: '14', name: 'Catalog', input: { query: 'fix a bug' } }), { label: t('tool.catalog'), detail: 'fix a bug' });
+  deepEqual(toolRow({ id: '15', name: 'Catalog', input: {} }), { label: t('tool.catalog'), detail: '' });
+  for (const lang of ['pt-BR', 'es', 'fr', 'de'] as const) {
+    useLanguage(lang);
+    ok(t('tool.quota') !== 'Checking the AI limits' && t('tool.catalog') !== 'Searching the catalog', `${lang} has its own words`);
+  }
+  useLanguage('en');
 });
 
 // R161 step 9: while a reply runs, the checks it ran tick up under the status line, marked by the engine, never guessed here.

@@ -58,7 +58,7 @@ pub fn codex_tool() -> Value {
 pub enum Mcp {
     /// The answer goes back at once (`mcp_response`).
     Answer(Value),
-    /// A call of one of its tools (`NAME`, `crate::browser::NAME`, `crate::sibling::NAME`, `crate::verify::NAME` or `crate::map::NAME`): the answer waits for the work. `id` is the tool
+    /// A call of one of its tools (`NAME`, `crate::browser::NAME`, `crate::sibling::NAME`, `crate::verify::NAME`, `crate::map::NAME` or one of `crate::progress` and `crate::toolbox`): the answer waits for the work. `id` is the tool
     /// call's own id, which names the call on screen.
     Call { tool: &'static str, id: String, rpc: Value, input: Value },
 }
@@ -74,7 +74,8 @@ pub struct Tools {
     pub verify: bool,
     /// The project's map (`crate::map`).
     pub map: bool,
-    /// The plan, the status and the closing box (`crate::progress`).
+    /// The plan, the status and the closing box (`crate::progress`), and with them the read-only `quota` and `catalog`
+    /// (`crate::toolbox`): a project's own agent in any permission mode, since they read nothing of the folder.
     pub progress: bool,
 }
 
@@ -114,6 +115,7 @@ pub fn mcp(message: &Value, tools: Tools) -> Mcp {
             }
             if tools.progress {
                 list.extend(crate::progress::mcp_tools());
+                list.extend(crate::toolbox::mcp_tools());
             }
             answer(json!({ "tools": list }))
         }
@@ -141,6 +143,8 @@ fn called(name: &Value, tools: Tools) -> Option<&'static str> {
         crate::progress::PLAN if tools.progress => Some(crate::progress::PLAN),
         crate::progress::STATUS if tools.progress => Some(crate::progress::STATUS),
         crate::progress::WRAP_UP if tools.progress => Some(crate::progress::WRAP_UP),
+        crate::toolbox::QUOTA if tools.progress => Some(crate::toolbox::QUOTA),
+        crate::toolbox::CATALOG if tools.progress => Some(crate::toolbox::CATALOG),
         _ => None,
     }
 }
@@ -321,6 +325,23 @@ mod tests {
             panic!("a tool not offered is never called")
         };
         assert_eq!(refused["error"]["code"], -32601);
+    }
+
+    #[test]
+    fn the_quota_and_the_catalog_come_with_the_project_agents_own_tools_and_with_no_other_session() {
+        let call =
+            |name: &str, tools| mcp(&json!({"method":"tools/call","params":{"name":name,"arguments":{}},"jsonrpc":"2.0","id":9}), tools);
+        let offered = Tools { progress: true, ..Tools::default() };
+        for name in ["quota", "catalog"] {
+            assert!(matches!(call(name, offered), Mcp::Call { tool, .. } if tool == name), "{name} is offered with the progress tools");
+            assert!(
+                matches!(call(name, Tools { verify: true, map: true, ..Tools::default() }), Mcp::Answer(_)),
+                "{name} is refused elsewhere"
+            );
+        }
+        let Mcp::Answer(list) = mcp(&json!({"method":"tools/list","jsonrpc":"2.0","id":1}), offered) else { panic!() };
+        let names: Vec<_> = list["result"]["tools"].as_array().unwrap().iter().map(|t| t["name"].as_str().unwrap()).collect();
+        assert_eq!(names, ["plan", "status", "wrap_up", "quota", "catalog"]);
     }
 
     #[test]
