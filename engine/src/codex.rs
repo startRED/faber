@@ -377,6 +377,15 @@ impl Subagents {
                 _ => None,
             })
             .collect();
+        // Each finished message of the subagent is words of its own, kept on its call in order with its commands. Its final answer
+        // (`phase`) is its report, which the call's result carries, so it is not kept twice.
+        if msg["method"] == "item/completed"
+            && item["type"] == "agentMessage"
+            && item["phase"] != "final_answer"
+            && item["text"].as_str().is_some_and(|t| !t.trim().is_empty())
+        {
+            events.push(EngineEvent::ChildWords { parent: call, text: s(&item["text"]) });
+        }
         // A subagent's own subagent works for the same conversation and folds into the step it started from.
         events.extend(self.track(key, turn.as_deref(), msg));
         Some(ChildNews { key, turn, events, used })

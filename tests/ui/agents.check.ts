@@ -1,7 +1,7 @@
 import { createComponent, createSignal } from 'solid-js';
 import { render } from 'solid-js/web';
-import { api, type Message, type ToolUse } from '../../ui/api.ts';
-import { useLanguage } from '../../ui/i18n.ts';
+import { api, type ChildWords, type Message, type ToolUse } from '../../ui/api.ts';
+import { t, useLanguage } from '../../ui/i18n.ts';
 import { AgentChat, openedAgent, showAgent } from '../../ui/AgentChat.tsx';
 import { Running } from '../../ui/Running.tsx';
 import { Thread } from '../../ui/Thread.tsx';
@@ -253,6 +253,119 @@ check('subagent in the column: a long brief and a long command wrap instead of b
   } finally {
     dispose();
     box.remove();
+  }
+});
+
+// R161 step 3: what the subagent wrote between its steps is read while its view is open and shows between runs of its steps,
+// drawn like the conversation's own words, in the column's narrowest width (a 720 px window) and in the longest language.
+check('subagent in the column: its own words load when it opens, show between its steps outside their chip rules, wrap in German at 720 px and say when they stop', async () => {
+  useLanguage('de');
+  const width = Object.getOwnPropertyDescriptor(window, 'innerWidth')!;
+  Object.defineProperty(window, 'innerWidth', { configurable: true, value: 720 });
+  window.dispatchEvent(new Event('resize'));
+  const settle = () => new Promise((resolve) => setTimeout(resolve, 30));
+  const before = api.childWords;
+  const asked: string[] = [];
+  const long = 'Donaudampfschifffahrtsgesellschaftskapitänsmützenaufbewahrungsvorschrift/crates/engine/src/sehr/tief/verschachtelt/';
+  let stored: ChildWords[] = [
+    { at: 0, text: `Ich suche zuerst im Ordner \`${long}\` nach der **Definition**.\n\n\`\`\`rust\nfn load_config() {}\n\`\`\`` },
+    { at: 1, text: 'Gefunden: sie steht in config.rs.' },
+  ];
+  const size = () => stored.reduce((n, w) => n + [...w.text].length, 0);
+  api.childWords = async (id, callId) => {
+    asked.push(`${id}/${callId}`);
+    return stored;
+  };
+  showAgent({ conversationId: 'c1', messageId: 'm1', callId: 'a1' });
+  const box = document.createElement('aside');
+  box.className = 'runcol';
+  box.style.cssText = 'position:fixed;left:0;top:0;width:360px;height:640px';
+  document.body.append(box);
+  const grep: ToolUse = { ...GREP, ok: true };
+  const [call, setCall] = createSignal<ToolUse>({ ...AGENT, wordsChars: size() });
+  const dispose = render(() => createComponent(AgentChat, { get step() { return agentSteps([call(), grep])[0]!; }, streaming: true, onBack: () => {}, onClose: () => {} }), box);
+  try {
+    await settle();
+    deepEqual(asked, ['c1/a1'], 'the words are read once, when the view opens');
+    const body = box.querySelector<HTMLElement>('.side-body')!;
+    const order = () => [...body.querySelectorAll('.side-said, .tools, .side-cut')].map((el) => (el.classList.contains('side-said') ? 'said' : el.classList.contains('side-cut') ? 'cut' : 'steps'));
+    deepEqual(order(), ['said', 'steps', 'said'], 'its words come before the step and after it, in the order they were written');
+    equal(body.querySelector('.tools .side-said'), null, 'the words are outside the steps, so no step rule reaches them');
+    const said = body.querySelectorAll<HTMLElement>('.side-said');
+    equal(said[0]!.querySelector('strong')?.textContent, 'Definition', "drawn with the conversation's own markdown");
+    ok(said[0]!.textContent!.includes(long), 'the words are whole');
+    // A fenced block in the words keeps its own look: none of the step chip's border or padding reaches its spans.
+    const language = said[0]!.querySelector<HTMLElement>('.cb-lang')!;
+    const swap = said[0]!.querySelector<HTMLElement>('.swap')!;
+    equal(language.textContent, 'rust');
+    for (const el of [language, swap]) {
+      const style = getComputedStyle(el);
+      deepEqual([style.borderTopWidth, style.paddingLeft], ['0px', '0px'], `${el.className} is not drawn as a step chip`);
+    }
+    equal(getComputedStyle(swap).display, 'grid');
+    ok(body.scrollWidth <= body.clientWidth, 'no sideways scroll');
+    for (const el of said) ok(el.getBoundingClientRect().right <= body.getBoundingClientRect().right + 1, 'the words stay inside the column');
+    // More words arrive with no step between (the engine joins them into the entry): they are read again and join the open view.
+    const first = said[0]!;
+    stored = [stored[0]!, { at: 1, text: `${stored[1]!.text}\n\nIch prüfe noch die Tests.` }];
+    setCall({ ...call(), wordsChars: size() });
+    await settle();
+    deepEqual(asked, ['c1/a1', 'c1/a1'], 'and read again when there are more');
+    deepEqual(order(), ['said', 'steps', 'said']);
+    equal(body.querySelectorAll('.side-said')[0], first, 'the first words are not drawn again');
+    ok(body.querySelectorAll('.side-said')[1]!.textContent!.includes('Ich prüfe noch die Tests.'), 'words with no step between join the last ones');
+    // The engine stopped keeping words: one calm line says so, right after the last ones kept.
+    setCall({ ...call(), wordsCut: true });
+    deepEqual(order(), ['said', 'steps', 'said', 'cut']);
+    equal(body.querySelector('.side-cut')!.textContent, t('agent.words.cut'));
+    ok(body.querySelector('.side-cut')!.textContent!.length > 20 && !/agent\./.test(body.querySelector('.side-cut')!.textContent!), 'in words, in German');
+    equal(asked.length, 2, 'nothing is read again for a change that adds no words');
+  } finally {
+    dispose();
+    box.remove();
+    api.childWords = before;
+    showAgent(undefined);
+    Object.defineProperty(window, 'innerWidth', width);
+    window.dispatchEvent(new Event('resize'));
+    useLanguage('en');
+  }
+});
+
+// The report is cut to 4,000 characters, and a failed, declined or stopped subagent's "report" is an error text, so the words after
+// its last step give way only to a report that starts with them; otherwise they say what the report does not.
+check('subagent in the column: the words after its last step give way only to a report that starts with them', async () => {
+  useLanguage('en');
+  const settle = () => new Promise((resolve) => setTimeout(resolve, 30));
+  const before = api.childWords;
+  let stored: ChildWords[] = [{ at: 1, text: 'The definition is in one file:' }];
+  api.childWords = async () => stored;
+  showAgent({ conversationId: 'c1', messageId: 'm1', callId: 'a1' });
+  const box = document.createElement('aside');
+  box.className = 'runcol';
+  box.style.cssText = 'position:fixed;left:0;top:0;width:360px;height:640px';
+  document.body.append(box);
+  const [call, setCall] = createSignal<ToolUse>({ ...AGENT, wordsChars: 30 });
+  const dispose = render(() => createComponent(AgentChat, { get step() { return agentSteps([call(), { ...GREP, ok: true }])[0]!; }, streaming: true, onBack: () => {}, onClose: () => {} }), box);
+  try {
+    await settle();
+    const body = box.querySelector<HTMLElement>('.side-body')!;
+    equal(body.querySelectorAll('.side-said').length, 1, 'while it works its last words are shown');
+    setCall({ ...call(), output: FRAMED, ok: true });
+    equal(body.querySelectorAll('.side-said').length, 0, 'the report starts with them, so they are not drawn twice');
+    equal(body.querySelectorAll('.agent-report').length, 1);
+    stored = [{ at: 1, text: 'I skipped the tests folder on purpose.' }];
+    setCall({ ...call(), wordsChars: 38 });
+    await settle();
+    equal(body.querySelector('.side-said')?.textContent?.trim(), 'I skipped the tests folder on purpose.', 'words the report does not start with are shown');
+    stored = [{ at: 1, text: 'Found it in config.rs.' }];
+    setCall({ ...call(), output: 'The subagent stopped before it finished.', ok: false, wordsChars: 22 });
+    await settle();
+    equal(body.querySelector('.side-said')?.textContent?.trim(), 'Found it in config.rs.', 'a failed subagent keeps the words its error text does not say');
+  } finally {
+    dispose();
+    box.remove();
+    api.childWords = before;
+    showAgent(undefined);
   }
 });
 

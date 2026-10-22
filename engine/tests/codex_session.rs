@@ -1437,6 +1437,48 @@ async fn r161_a_codex_subagent_is_a_step_of_the_reply_and_its_approval_is_the_co
     assert!(matches!(done, EngineEvent::Done { input_tokens: 129_470, output_tokens: 199, cost_total_usd: Some(_), .. }), "{done:?}");
 }
 
+/// R161 step 3: a Codex subagent's finished messages are its own words on its step, in order with its commands. The recording's
+/// subagent writes only its report (phase final_answer), so one line of words is added by hand before its command.
+#[tokio::test]
+async fn r161_a_codex_subagents_words_reach_its_step_in_order_with_its_commands() {
+    let mut entries = fixture("codex", "subagent");
+    let at = entries
+        .iter()
+        .position(|e| e.msg["method"] == "item/started" && e.msg["params"]["item"]["type"] == "commandExecution")
+        .expect("the subagent's command");
+    let thread = entries[at].msg["params"]["threadId"].clone();
+    let said = json!({ "method": "item/completed", "params": { "threadId": thread, "item": { "type": "agentMessage", "id": "m1", "text": "I will copy the file first.", "phase": "commentary" } } });
+    entries.insert(at, Entry { input: false, msg: said });
+    let (events, mismatches) = run(
+        entries,
+        "Spawn exactly one subagent named copier. Its task: create the file c.txt containing the word gamma using a shell command, then reply with the word done. Wait for it, then answer with its reply. Do not do the work yourself.",
+        None,
+        |e, s| {
+            if let EngineEvent::Permission { request_id, .. } = e {
+                drop(s.answer(request_id, true));
+            }
+            matches!(e, EngineEvent::Done { .. })
+        },
+    )
+    .await;
+    assert_eq!(mismatches, Vec::<String>::new());
+    let call = "call_abd8fed50e4141a6b7feaebc0a02089c";
+    let seen: Vec<String> = events
+        .iter()
+        .filter_map(|e| match e {
+            EngineEvent::ChildWords { parent, text } => Some(format!("words {parent} {text}")),
+            EngineEvent::Tool { name, parent: Some(parent), .. } => Some(format!("tool {parent} {name}")),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(
+        seen,
+        [format!("words {call} I will copy the file first."), format!("tool {call} commandExecution")],
+        "its words come before its command, and its final answer (the report) is not kept as words"
+    );
+    assert_eq!(text_of(&events), "done", "none of them join the answer");
+}
+
 /// R161: a subagent's approval belongs to the turn it serves. One still open when that turn ends, and one that arrives after
 /// it, are refused on the wire: neither hangs unseen nor becomes a card of another reply.
 #[tokio::test]

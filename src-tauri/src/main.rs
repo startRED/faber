@@ -659,6 +659,13 @@ async fn send_queued(faber: State<'_, Faber>, id: String, turn_id: String) -> Re
     faber.engine.send_queued(&id, &turn_id)
 }
 
+/// What a subagent wrote between its steps (R161 step 3), for its side chat while it is open. The screen's copy of a message
+/// carries only their length, so this is the one place they are read.
+#[tauri::command]
+async fn child_words(faber: State<'_, Faber>, id: String, call_id: String) -> Res<Vec<faber_engine::model::Words>> {
+    Ok(faber.engine.child_words(&id, &call_id))
+}
+
 #[tauri::command]
 async fn tell_helper(faber: State<'_, Faber>, id: String, call_id: String, text: String) -> Res<()> {
     faber.engine.tell_helper(&id, &call_id, &text)
@@ -1639,6 +1646,7 @@ fn main() {
                 edit_queued,
                 send_queued,
                 tell_helper,
+                child_words,
                 mentions,
                 commands,
                 compact_now,

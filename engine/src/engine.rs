@@ -854,6 +854,15 @@ impl Engine {
             Some(c)
         })
     }
+    /// What a subagent wrote between its steps, for its open side chat: the screen's copy of a message carries only their length.
+    pub fn child_words(&self, id: &str, call_id: &str) -> Vec<crate::model::Words> {
+        self.with(|c| {
+            let found = c
+                .load(id)
+                .and_then(|conversation| conversation.messages.iter().flat_map(|m| m.tools.iter().flatten()).find(|t| t.id == call_id));
+            found.map(|call| call.words.clone()).unwrap_or_default()
+        })
+    }
     pub fn open_for_screen(&self, id: &str) -> Option<Conversation> {
         self.open(id).map(Conversation::for_screen)
     }
@@ -2005,7 +2014,7 @@ impl Core {
                     }
                     return;
                 }
-                EngineEvent::Text(_) | EngineEvent::Thinking(_) | EngineEvent::Tool { .. } => return,
+                EngineEvent::Text(_) | EngineEvent::Thinking(_) | EngineEvent::Tool { .. } | EngineEvent::ChildWords { .. } => return,
                 _ => {}
             }
         }
@@ -2146,6 +2155,9 @@ impl Core {
                         sign: None,
                         facts: None,
                         told: vec![],
+                        words: vec![],
+                        words_cut: false,
+                        words_chars: None,
                         check: false,
                         started: Some(now()),
                         ended: None,
@@ -2154,6 +2166,16 @@ impl Core {
                     m.tools.get_or_insert_default().push(tool);
                 }
                 self.watch_started(conv, &id);
+            }
+            // A subagent's own words go where its steps go (this turn's message, and nothing once the turn is done), onto its call,
+            // after the steps it has run so far. A call from an earlier turn keeps none: its later steps are not shown with it either.
+            EngineEvent::ChildWords { parent, text } => {
+                if let Some(tools) = self.turn(conv).and_then(|m| m.tools.as_mut()) {
+                    let at = tools.iter().filter(|t| t.parent.as_deref() == Some(parent.as_str())).count();
+                    if let Some(call) = tools.iter_mut().find(|t| t.id == parent) {
+                        call.add_words(at, &text);
+                    }
+                }
             }
             EngineEvent::ToolResult { id, ok, declined, text } => {
                 let current = self.live.get(conv).and_then(|l| l.turn.clone());

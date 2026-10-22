@@ -14,7 +14,14 @@ stamps on the call, so no clock runs on the screen. A click opens the
 subagent in the running column (R161 step 3, R176), which is the one place on the right: its head has a back arrow to
 the running list, the subagent's title and the column's close; under it the meta line, the brief word for word in the
 person's own bubble (the agent wrote it to the subagent; Codex gives none, and then nothing shows), the tool chips it
-ran, then, once it ended, "What it did" (R161 step 4): a quiet block in the work log's surface with the files it changed
+ran in runs with what it wrote between its steps (R416) between the runs, drawn as the conversation's own Markdown in the
+second ink and the column's full width, outside the chips so no chip rule (border, padding, nowrap) reaches a fenced block's
+spans; the paragraphs lose the outer margins, so the gap above and below is the column's own 12 px. Its last words give way
+to its report only when the report starts with them, since a cut, failed or stopped report may not say them. The words are
+read when the view opens and again when they grow, never carried by the reply's updates. When the engine stops keeping words
+(16,000 characters per subagent, cut after a whole message or at a paragraph or sentence), one quiet line in the third ink
+right after the last words kept says "It wrote more than fits here. What it wrote after this point is not kept." Then,
+once it ended, "What it did" (R161 step 4): a quiet block in the work log's surface with the files it changed
 in the data face, its checks and how many failed (a failed count gets the error note's 2 px edge), and the changed files
 its brief never named. These are counted by the engine from its steps (`engine/src/engine/facts.rs`), never taken from the
 main agent's word. Then its report as Markdown. While it works, a quiet line says a CLI subagent cannot be written to while it runs and

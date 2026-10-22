@@ -333,6 +333,10 @@ svg.i.sm { width: 14px; height: 14px; }
 .rc-body.side-body pre { white-space: pre-wrap; overflow-wrap: anywhere; overflow-x: visible; }
 .side-body .md code { overflow-wrap: anywhere; }
 .side-body .tools span.full { cursor: default; align-items: baseline; }
+/* A subagent's own words sit between its runs of steps, outside .tools so no chip rule reaches their markup. They wrap like the brief, in the second ink; the paragraphs inside Markdown's wrapper lose the outer margins. */
+.side-body .side-said { min-width: 0; color: var(--ink-2); overflow-wrap: anywhere; }
+.side-said > div > :first-child { margin-top: 0; }
+.side-said > div > :last-child { margin-bottom: 0; }
 .side-body .tools span.full i { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; line-clamp: 2; white-space: normal; overflow-wrap: anywhere; text-overflow: clip; }
 .side-body .tools span.full.more i { -webkit-line-clamp: unset; line-clamp: unset; }
 /* What an ended subagent did: plain lines in the second ink, its files in the mono face, a failed check marked like an error note. */

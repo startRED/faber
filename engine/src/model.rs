@@ -148,6 +148,70 @@ pub struct ToolUse {
     /// On a helper's call: what the person wrote to the helper while it worked (R161 step 5), oldest first.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub told: Vec<Told>,
+    /// On a subagent's call: what the subagent itself wrote between its steps, oldest first (R161 step 3). Each entry sits after
+    /// the first `at` steps it ran under this call, so the side chat draws it in order with them.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub words: Vec<Words>,
+    /// Set once a word was left out because `WORDS_LIMIT` was reached, so the side chat can say later words are not kept.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not", rename = "wordsCut")]
+    pub words_cut: bool,
+    /// Only on the copy the screen gets (`Message::for_screen` takes `words` out): how many characters of words the call holds,
+    /// so the side chat loads them while it is open and again when this changes.
+    #[serde(default, skip_serializing_if = "Option::is_none", rename = "wordsChars")]
+    pub words_chars: Option<usize>,
+}
+
+impl ToolUse {
+    /// Keeps what a subagent wrote after its first `at` steps. Words with no step between join one entry (the blank line that
+    /// joins them counts). Past `WORDS_LIMIT` the text is cut at a clean place, never mid-sentence, and nothing later is kept.
+    pub(crate) fn add_words(&mut self, at: usize, text: &str) {
+        let text = text.trim();
+        if text.is_empty() || self.words_cut {
+            return;
+        }
+        let join = if self.words.last().is_some_and(|w| w.at == at) { 2 } else { 0 };
+        let used: usize = self.words.iter().map(|w| w.text.chars().count()).sum();
+        let room = WORDS_LIMIT.saturating_sub(used + join);
+        let kept = if text.chars().count() <= room {
+            Some(text)
+        } else {
+            self.words_cut = true;
+            // A whole entry or nothing, except one that is over the limit on its own.
+            if used == 0 { clean_cut(text, room) } else { None }
+        };
+        let Some(kept) = kept else { return };
+        match self.words.last_mut() {
+            Some(last) if last.at == at => {
+                last.text.push_str("\n\n");
+                last.text.push_str(kept);
+            }
+            _ => self.words.push(Words { at, text: kept.to_string() }),
+        }
+    }
+}
+
+/// The start of `text` that fits `room` characters and ends at its last paragraph or sentence break; None when it has none.
+fn clean_cut(text: &str, room: usize) -> Option<&str> {
+    let end = text.char_indices().nth(room).map_or(text.len(), |(i, _)| i);
+    let head = &text[..end];
+    let sentence = head
+        .char_indices()
+        .rev()
+        .find(|&(i, c)| matches!(c, '.' | '!' | '?' | '。') && text[i + c.len_utf8()..].chars().next().is_none_or(char::is_whitespace))
+        .map(|(i, c)| i + c.len_utf8());
+    let cut = head.rfind("\n\n").max(sentence)?;
+    Some(head[..cut].trim_end()).filter(|kept| !kept.is_empty())
+}
+
+/// The most a subagent's own words keep, in characters, over the whole call. A long run writes a line or two per step, so this
+/// holds a long task; past it the later words are dropped and the steps and the report still tell the rest.
+pub const WORDS_LIMIT: usize = 16_000;
+
+/// What a subagent wrote after its first `at` steps.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct Words {
+    pub at: usize,
+    pub text: String,
 }
 
 /// A message the person wrote to a helper at work. `taken` is empty while it is on its way, true once the helper took it
@@ -637,6 +701,11 @@ impl Message {
         // Sources are Arc-backed, so cloning the message never copies the snapshot bytes before removing them.
         self.visual_file_count = (!self.visual_files.is_empty()).then_some(self.visual_files.len());
         self.visual_files.clear();
+        // A subagent's words are loaded when its side chat opens (`Engine::child_words`), so they never ride in every update.
+        for call in self.tools.iter_mut().flatten().filter(|t| !t.words.is_empty()) {
+            call.words_chars = Some(call.words.iter().map(|w| w.text.chars().count()).sum());
+            call.words.clear();
+        }
         self
     }
 
@@ -1442,6 +1511,80 @@ impl Conversation {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn call() -> ToolUse {
+        serde_json::from_value(serde_json::json!({ "id": "a", "name": "Agent", "input": {} })).unwrap()
+    }
+
+    fn chars(call: &ToolUse) -> usize {
+        call.words.iter().map(|w| w.text.chars().count()).sum()
+    }
+
+    #[test]
+    fn a_subagents_words_keep_whole_entries_up_to_the_limit_and_then_say_they_stopped() {
+        let sentences = |n: usize| "One sentence here. ".repeat(n).trim().to_string();
+        let mut a = call();
+        a.add_words(0, &sentences(450));
+        a.add_words(0, "joined");
+        assert_eq!(a.words.len(), 1, "words with no step between join one entry");
+        assert!(a.words[0].text.ends_with("\n\njoined"));
+        assert!(!a.words_cut);
+        // The next entry does not fit: it is left out whole, never cut in the middle, and the call says words were left out.
+        a.add_words(1, &sentences(450));
+        assert_eq!((a.words.len(), a.words_cut), (1, true));
+        // A cut call keeps nothing later, even a short word that would fit.
+        a.add_words(2, "short");
+        assert_eq!(a.words.len(), 1);
+        assert!(chars(&a) <= WORDS_LIMIT);
+    }
+
+    #[test]
+    fn the_blank_line_that_joins_words_counts_against_the_limit() {
+        let mut a = call();
+        a.add_words(0, &"x".repeat(WORDS_LIMIT - 2));
+        a.add_words(0, "y");
+        assert_eq!((chars(&a), a.words_cut), (WORDS_LIMIT - 2, true), "y plus its two joining characters would be one over");
+        let mut b = call();
+        b.add_words(0, &"x".repeat(WORDS_LIMIT - 4));
+        b.add_words(0, "y");
+        assert_eq!((chars(&b), b.words_cut), (WORDS_LIMIT - 1, false), "one that fits with its joining characters is kept");
+        b.add_words(0, "zz");
+        assert_eq!((chars(&b), b.words_cut), (WORDS_LIMIT - 1, true), "and the next one, two over, is not");
+    }
+
+    #[test]
+    fn one_entry_over_the_limit_on_its_own_is_cut_at_its_last_paragraph_or_sentence() {
+        let mut paragraphs = call();
+        let text = format!("{}\n\n{}", "First paragraph. Still the first.", "word ".repeat(4000));
+        paragraphs.add_words(0, &text);
+        assert_eq!(paragraphs.words[0].text, "First paragraph. Still the first.", "the last paragraph break that fits");
+        assert!(paragraphs.words_cut);
+        let mut sentences = call();
+        sentences.add_words(0, &"Une phrase ici. ".repeat(2000));
+        let kept = &sentences.words[0].text;
+        assert!(
+            kept.ends_with("ici.") && kept.chars().count() <= WORDS_LIMIT && kept.chars().count() > WORDS_LIMIT - 20,
+            "{}",
+            kept.chars().count()
+        );
+        assert!(sentences.words_cut);
+        let mut solid = call();
+        solid.add_words(0, &"x".repeat(WORDS_LIMIT + 1));
+        assert!(solid.words.is_empty() && solid.words_cut, "no break to cut at: nothing is kept, and the call says so");
+    }
+
+    #[test]
+    fn the_screens_copy_of_a_message_holds_how_much_a_subagent_wrote_and_not_what() {
+        let mut a = call();
+        a.add_words(0, "héllo wörld");
+        let mut message = Message::new("m".into(), Role::Assistant, String::new(), 0);
+        message.tools = Some(vec![a, call()]);
+        let tools = message.for_screen().tools.unwrap();
+        assert_eq!((tools[0].words.len(), tools[0].words_chars), (0, Some(11)));
+        assert_eq!(tools[1].words_chars, None, "a call with no words says nothing");
+        let json = serde_json::to_value(&tools[0]).unwrap();
+        assert_eq!((&json["wordsChars"], json.get("words")), (&serde_json::json!(11), None));
+    }
 
     #[test]
     fn a_cleared_context_holds_only_the_messages_after_it_and_a_gone_mark_gives_them_all() {

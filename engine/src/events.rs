@@ -140,6 +140,12 @@ pub enum EngineEvent {
         /// The subagent that called it (the id of the agent tool call that started that subagent); None on the main thread.
         parent: Option<String>,
     },
+    /// A subagent wrote words of its own (`parent` is the agent call that started it). They never join the answer: they stay
+    /// on that call, in order with the steps it ran (R161 step 3).
+    ChildWords {
+        parent: String,
+        text: String,
+    },
     ToolResult {
         id: String,
         ok: bool,
@@ -288,7 +294,7 @@ impl EngineEvent {
         match self {
             EngineEvent::Text(_) | EngineEvent::Thinking(_) => Some(true),
             EngineEvent::Tool { parent, .. } => Some(parent.is_none()),
-            EngineEvent::ToolResult { .. } | EngineEvent::HelperDone { .. } => Some(false),
+            EngineEvent::ChildWords { .. } | EngineEvent::ToolResult { .. } | EngineEvent::HelperDone { .. } => Some(false),
             _ => None,
         }
     }

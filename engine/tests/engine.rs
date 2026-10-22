@@ -3561,6 +3561,226 @@ async fn r161_a_subagents_tools_are_kept_under_its_agent_call_and_its_report_is_
     assert!(!reply.thinking.as_deref().unwrap_or_default().contains("CHILD THINKING"));
 }
 
+/// R161 step 3: the subagent's own words between its steps stay on its call, each after the steps it had run, never join the
+/// answer, and are still there when the conversation is opened again. The recording has two lines of them added by hand (its
+/// messages carry the same `parent_tool_use_id` as the real ones in `background-steer`).
+#[tokio::test]
+async fn r161_a_subagents_own_words_are_kept_in_order_with_its_steps_and_survive_a_reload() {
+    const ASK: &str = "Use the Agent tool exactly once (subagent_type Explore) to find which file in this folder defines load_config. Then answer in one short sentence.";
+    let dir = tempfile::tempdir().unwrap();
+    let f = fake(fixture("claude", "subagent"));
+    let (first, _rx) = engine(dir.path(), Vendor::Claude, f.spawn.clone());
+    let id = first.send(ask(Area::Chat, ASK, choice("claude", Some("haiku")))).unwrap();
+    let c = until(&first, &id, |c| settled(c, 2)).await;
+    first.shutdown();
+    assert_eq!(f.mismatches.lock().unwrap().clone(), Vec::<String>::new());
+    let words = |c: &faber_engine::model::Conversation| {
+        c.messages[1].tools.as_ref().unwrap()[0].words.iter().map(|w| (w.at, w.text.clone())).collect::<Vec<_>>()
+    };
+    let expected = [
+        (0, "I will search the folder for the definition first.".to_string()),
+        (1, "Found it. The definition is in config.rs.".to_string()),
+    ];
+    assert_eq!(words(&c), expected, "before its Grep step and after it");
+    assert!(!c.messages[1].text.contains("I will search"), "{}", c.messages[1].text);
+    let (again, _rx) = engine(dir.path(), Vendor::Claude, fake(fixture("claude", "subagent")).spawn);
+    assert_eq!(words(&again.open(&id).unwrap()), expected, "kept on disk");
+    again.shutdown();
+}
+
+/// One line from a Claude subagent: `parent` is the agent call that started it, as on the real ones.
+fn child_line(parent: &str, content: serde_json::Value) -> Entry {
+    Entry {
+        input: false,
+        msg: json!({ "type": "assistant", "message": { "role": "assistant", "content": content }, "parent_tool_use_id": parent }),
+    }
+}
+
+fn child_said(parent: &str, text: &str) -> Entry {
+    child_line(parent, json!([{ "type": "text", "text": text }]))
+}
+
+fn child_step(parent: &str, id: &str, name: &str) -> Entry {
+    child_line(
+        parent,
+        json!([{ "type": "tool_use", "id": id, "name": name, "input": { "description": "d", "prompt": "p", "pattern": "x" } }]),
+    )
+}
+
+/// The start of a Claude turn whose agent starts these subagents together (the first turn of a conversation).
+fn claude_agents_start(prompt: &str, calls: &[&str], background: bool) -> Vec<Entry> {
+    let content: Vec<_> = calls
+        .iter()
+        .map(|id| json!({ "type": "tool_use", "id": id, "name": "Agent", "input": { "description": "d", "subagent_type": "Explore", "prompt": "p", "run_in_background": background } }))
+        .collect();
+    vec![
+        Entry {
+            input: true,
+            msg: json!({ "type": "user", "message": { "role": "user", "content": prompt }, "parent_tool_use_id": null, "session_id": "" }),
+        },
+        Entry { input: false, msg: json!({ "type": "system", "subtype": "init", "session_id": "queued", "model": "claude-haiku-5-5" }) },
+        Entry {
+            input: false,
+            msg: json!({ "type": "user", "message": { "role": "user", "content": prompt }, "isReplay": true, "session_id": "queued" }),
+        },
+        Entry {
+            input: false,
+            msg: json!({ "type": "assistant", "message": { "role": "assistant", "content": content }, "parent_tool_use_id": null }),
+        },
+    ]
+}
+
+/// The end of that turn: the report of each call (when they ran in the foreground), an answer and the result.
+fn claude_agents_end(reports: &[&str]) -> Vec<Entry> {
+    let mut entries: Vec<_> = reports
+        .iter()
+        .map(|id| Entry {
+            input: false,
+            msg: json!({ "type": "user", "message": { "role": "user", "content": [{ "type": "tool_result", "tool_use_id": id, "content": format!("report of {id}") }] }, "parent_tool_use_id": null }),
+        })
+        .collect();
+    entries.push(Entry {
+        input: false,
+        msg: json!({ "type": "assistant", "message": { "role": "assistant", "content": [{ "type": "text", "text": "answer" }] } }),
+    });
+    entries.push(Entry {
+        input: false,
+        msg: json!({ "type": "result", "subtype": "success", "is_error": false, "total_cost_usd": 0.0, "usage": {} }),
+    });
+    entries
+}
+
+fn words_of<'a>(c: &'a faber_engine::model::Conversation, message: usize, call: &str) -> Vec<(usize, &'a str)> {
+    let tools = c.messages[message].tools.as_ref().unwrap();
+    tools.iter().find(|t| t.id == call).unwrap().words.iter().map(|w| (w.at, w.text.as_str())).collect()
+}
+
+/// R161 step 3: each subagent's words stay on its own call after the steps that call ran, whatever the others write in between:
+/// two that run together, one that starts another, and words with no step between that join one entry.
+#[tokio::test]
+async fn r161_the_words_of_parallel_and_nested_subagents_each_stay_on_their_own_call_after_its_own_steps() {
+    let (a, b, n) = ("toolu_A", "toolu_B", "toolu_N");
+    let mut entries = claude_agents_start("go", &[a, b], false);
+    entries.extend([
+        child_said(a, "A looks first."),
+        child_said(b, "B looks first."),
+        child_step(a, "a1", "Grep"),
+        child_step(b, "b1", "Grep"),
+        child_step(b, "b2", "Read"),
+        child_said(b, "B found two files."),
+        // A starts a subagent of its own: that call is one of A's steps, and its words are its own.
+        child_step(a, n, "Agent"),
+        child_said(n, "N first."),
+        child_step(n, "n1", "Read"),
+        child_said(n, "N second."),
+        child_said(n, "N third."),
+        child_said(a, "A joined one."),
+        child_said(a, "A joined two."),
+    ]);
+    entries.extend(claude_agents_end(&[a, b]));
+    let dir = tempfile::tempdir().unwrap();
+    let f = fake(entries);
+    let (engine, _rx) = engine(dir.path(), Vendor::Claude, f.spawn.clone());
+    let id = engine.send(ask(Area::Chat, "go", choice("claude", Some("haiku")))).unwrap();
+    let c = until(&engine, &id, |c| settled(c, 2)).await;
+    engine.shutdown();
+    assert_eq!(f.mismatches.lock().unwrap().clone(), Vec::<String>::new());
+    assert_eq!(
+        words_of(&c, 1, a),
+        [(0, "A looks first."), (2, "A joined one.\n\nA joined two.")],
+        "a and the nested call are its two steps"
+    );
+    assert_eq!(words_of(&c, 1, b), [(0, "B looks first."), (2, "B found two files.")]);
+    assert_eq!(words_of(&c, 1, n), [(0, "N first."), (1, "N second.\n\nN third.")], "the nested call counts its own steps");
+    assert!(!c.messages[1].text.contains("looks first"), "none of it joins the answer");
+}
+
+/// R161 step 3: past 16,000 characters the later words are left out whole, the call says so, and the screen's copy of the
+/// message never carries the words: it reads them when the subagent's view opens.
+#[tokio::test]
+async fn r161_a_subagent_that_writes_more_than_is_kept_says_so_and_its_words_are_read_when_its_view_opens() {
+    let a = "toolu_A";
+    let long = "One sentence here. ".repeat(450).trim().to_string();
+    let mut entries = claude_agents_start("go", &[a], false);
+    entries.extend([
+        child_said(a, &long),
+        child_step(a, "a1", "Grep"),
+        child_said(a, &long),
+        child_step(a, "a2", "Grep"),
+        child_said(a, "Too late."),
+    ]);
+    entries.extend(claude_agents_end(&[a]));
+    let dir = tempfile::tempdir().unwrap();
+    let (engine, mut rx) = engine(dir.path(), Vendor::Claude, fake(entries).spawn);
+    let id = engine.send(ask(Area::Chat, "go", choice("claude", Some("haiku")))).unwrap();
+    let c = until(&engine, &id, |c| settled(c, 2)).await;
+    assert_eq!(words_of(&c, 1, a), [(0, long.as_str())], "the second entry did not fit, so nothing after the first is kept");
+    assert!(c.messages[1].tools.as_ref().unwrap()[0].words_cut);
+    let screen = engine.open_for_screen(&id).unwrap();
+    let call = &screen.messages[1].tools.as_ref().unwrap()[0];
+    assert!(call.words.is_empty() && call.words_cut, "the screen's copy says words were left out, not what they are");
+    assert_eq!(call.words_chars, Some(long.chars().count()));
+    assert_eq!(engine.child_words(&id, a).iter().map(|w| (w.at, w.text.as_str())).collect::<Vec<_>>(), [(0, long.as_str())]);
+    assert!(engine.child_words(&id, "nothing").is_empty() && engine.child_words("nothing", a).is_empty());
+    let mut told = false;
+    while let Ok(event) = rx.try_recv() {
+        if let AppEvent::Message { message, .. } = event {
+            for call in message.tools.iter().flatten() {
+                assert!(call.words.is_empty(), "no update to the screen carries the words");
+                told |= call.words_chars == Some(long.chars().count());
+            }
+        }
+    }
+    assert!(told, "an update told the screen how much there is");
+    engine.shutdown();
+}
+
+/// R161 step 3: a subagent's words follow its steps. Once the turn is done neither is kept, and a call from an earlier turn keeps
+/// no words from a later one (its later steps land in that later turn's message, where its view does not show them).
+#[tokio::test]
+async fn r161_a_background_subagents_words_after_its_turn_are_not_kept_like_its_steps() {
+    let a = "toolu_A";
+    let mut entries = claude_agents_start("go", &[a], true);
+    entries.extend([child_said(a, "before the end"), child_step(a, "a1", "Grep")]);
+    entries.extend(claude_agents_end(&[]));
+    // Still writing after its turn's result, and then in the next turn.
+    entries.extend([child_said(a, "after the turn ended"), child_step(a, "late1", "Grep")]);
+    entries.extend([
+        Entry {
+            input: true,
+            msg: json!({ "type": "user", "message": { "role": "user", "content": "next" }, "parent_tool_use_id": null, "session_id": "" }),
+        },
+        Entry {
+            input: false,
+            msg: json!({ "type": "user", "message": { "role": "user", "content": "next" }, "isReplay": true, "session_id": "queued" }),
+        },
+        child_said(a, "from an earlier turn"),
+        child_step(a, "a2", "Read"),
+        Entry {
+            input: false,
+            msg: json!({ "type": "assistant", "message": { "role": "assistant", "content": [{ "type": "text", "text": "answer 2" }] } }),
+        },
+        Entry {
+            input: false,
+            msg: json!({ "type": "result", "subtype": "success", "is_error": false, "total_cost_usd": 0.0, "usage": {} }),
+        },
+    ]);
+    let dir = tempfile::tempdir().unwrap();
+    let f = fake(entries);
+    let (engine, _rx) = engine(dir.path(), Vendor::Claude, f.spawn.clone());
+    let id = engine.send(ask(Area::Chat, "go", choice("claude", Some("haiku")))).unwrap();
+    until(&engine, &id, |c| settled(c, 2)).await;
+    say(&engine, &id, "claude", "next").unwrap();
+    let c = until(&engine, &id, |c| settled(c, 4)).await;
+    engine.shutdown();
+    assert_eq!(f.mismatches.lock().unwrap().clone(), Vec::<String>::new());
+    let ids = |message: usize| c.messages[message].tools.as_ref().unwrap().iter().map(|t| t.id.as_str()).collect::<Vec<_>>();
+    assert_eq!(ids(1), [a, "a1"], "its step after the turn ended was dropped");
+    assert_eq!(words_of(&c, 1, a), [(0, "before the end")], "and so were its words, which would have shown after the wrong step");
+    assert_eq!(ids(3), ["a2"], "a step in the next turn is that turn's");
+    assert!(c.messages[3].tools.as_ref().unwrap().iter().all(|t| t.words.is_empty()));
+}
+
 /// A helper sent to the background answers its call at once ("launched"); it is settled by its task notification instead.
 #[tokio::test]
 async fn r161_a_background_helper_stays_open_until_its_notification_settles_it() {

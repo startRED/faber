@@ -561,7 +561,7 @@ pub fn parse_claude_message(msg: &Value) -> Vec<EngineEvent> {
             events
         }
         // A subagent's own words stream too (`parent_tool_use_id` names the agent call that started it): they are its work, never
-        // the answer, so only its tool calls are shown, inside its step.
+        // the answer. They are kept from its finished messages (below), so a streamed copy adds nothing.
         "stream_event" if !msg["parent_tool_use_id"].is_null() => vec![],
         "stream_event" => {
             let event = &msg["event"];
@@ -598,8 +598,14 @@ pub fn parse_claude_message(msg: &Value) -> Vec<EngineEvent> {
                 })
                 .filter(|used| *used > 0)
                 .map(|used| EngineEvent::Context { used: Some(used), window: None });
-            context
-                .into_iter()
+            // A subagent's text blocks come first: the CLI sends one block per message, so the order against its calls holds.
+            let words = parent.iter().flat_map(|parent| {
+                items(&msg["message"]["content"])
+                    .filter(|c| c["type"] == "text" && c["text"].as_str().is_some_and(|t| !t.trim().is_empty()))
+                    .map(|c| EngineEvent::ChildWords { parent: parent.clone(), text: s(&c["text"]) })
+            });
+            words
+                .chain(context)
                 .chain(items(&msg["message"]["content"]).filter(|c| c["type"] == "tool_use").map(|c| {
                     let name = match c["name"].as_str() {
                         Some(crate::helper::CLAUDE_NAME) => crate::helper::TOOL.to_string(),

@@ -1,5 +1,5 @@
-import { createMemo, createSignal, For, Show } from 'solid-js';
-import { api, errorText, type ToolUse } from './api.ts';
+import { createMemo, createResource, createSignal, For, Show } from 'solid-js';
+import { api, errorText, type ChildWords, type ToolUse } from './api.ts';
 import { Icon } from './Glyphs.tsx';
 import { fromEngine, t } from './i18n.ts';
 import { Markdown, openLinks } from './markdown.tsx';
@@ -10,6 +10,14 @@ import { agentKind, agentState, changeOf, middle, toolRow, type AgentStep, type 
 
 // A subagent opened in the running column (R161 step 3): its brief word for word, the steps it ran and its report, drawn
 // with the conversation's own parts. The column is the one place on the right, so this replaces its list until "back".
+
+/** A part of the subagent's view: a run of its steps (their ids), words it wrote (their text), or the line saying later words are not kept. */
+interface Part {
+  key: string;
+  ids?: string[];
+  text?: string;
+}
+const sameIds = (a: string[] = [], b: string[] = []) => a.length === b.length && a.every((id, i) => id === b[i]);
 
 /** The subagent the person opened: the reply it belongs to and its agent call. */
 export interface OpenAgent {
@@ -264,7 +272,55 @@ export function AgentChat(props: {
   const state = () => agentState(props.step, props.streaming);
   const title = () => props.step.title || t('agent.untitled');
   const working = () => ['running', 'waiting', 'stuck'].includes(state());
-  const toolIds = createMemo(() => props.step.tools.map((tool) => tool.id), [], { equals: (a, b) => a.length === b.length && a.every((id, i) => id === b[i]) });
+  // What the subagent wrote between its steps comes from the engine while this view is open (the reply's own updates carry only
+  // how much there is), and again whenever that changes.
+  const [loaded] = createResource(
+    () => {
+      const open = opened();
+      const size = props.step.call.wordsChars;
+      // A string, so an update that adds no words (the call object is new on every update) does not read them again.
+      return open && size ? JSON.stringify([open.conversationId, props.step.call.id, size]) : undefined;
+    },
+    (key) => {
+      const [id, call] = JSON.parse(key) as [string, string, number];
+      return api.childWords(id, call).then((words) => ({ call, words }), () => ({ call, words: [] as ChildWords[] }));
+    },
+  );
+  // The subagent's steps in runs, with its own words between the runs (the engine counts `at` over the steps it ran itself), so
+  // the words are drawn outside the steps' chip rules. Keys, so a line the person opened stays open while more words and steps
+  // arrive. The last words give way to the report only when the report starts with them; otherwise they say what it does not.
+  const parts = createMemo<Part[]>(
+    () => {
+      const got = loaded.latest;
+      const words = got?.call === props.step.call.id ? got.words : [];
+      const report = props.step.report.trim();
+      const out: Part[] = [];
+      let run: string[] = [];
+      let steps = 0;
+      const flush = () => {
+        if (run.length) out.push({ key: `s${run[0]}`, ids: run });
+        run = [];
+      };
+      const said = (at: number, last = false) => {
+        const found = words.find((w) => w.at === at);
+        if (!found || (last && report && report.startsWith(found.text.trim()))) return;
+        flush();
+        out.push({ key: `w${at}`, text: found.text });
+      };
+      for (const tool of props.step.tools) {
+        if (tool.parent === props.step.call.id) said(steps++);
+        run.push(tool.id);
+      }
+      said(steps, true);
+      flush();
+      // Where the engine stopped keeping words: right after the last it kept.
+      if (props.step.call.wordsCut) out.splice(out.findLastIndex((part) => part.text !== undefined) + 1, 0, { key: 'cut' });
+      return out;
+    },
+    [],
+    { equals: (a, b) => a.length === b.length && a.every((part, i) => part.key === b[i]!.key && part.text === b[i]!.text && sameIds(part.ids, b[i]!.ids)) },
+  );
+  const keys = createMemo(() => parts().map((part) => part.key), [], { equals: (a, b) => a.length === b.length && a.every((key, i) => key === b[i]) });
   const start = (text: string) => (props.onTell ? props.onTell(text) : startMessage(text));
   return (
     <>
@@ -300,11 +356,23 @@ export function AgentChat(props: {
             </div>
           </section>
         </Show>
-        <Show when={props.step.tools.length}>
-          <div class="tools" aria-label={t('agent.steps')} ref={animateList}>
-            <For each={toolIds()}>{(id) => <StepChip id={id} tools={() => props.step.tools} />}</For>
-          </div>
-        </Show>
+        <For each={keys()}>
+          {(key) => {
+            const part = () => parts().find((p) => p.key === key);
+            const ids = createMemo(() => part()?.ids ?? [], [], { equals: sameIds });
+            return key === 'cut' ? (
+              <p class="side-meta side-cut">{t('agent.words.cut')}</p>
+            ) : key[0] === 'w' ? (
+              <div class="md side-said" onClick={openLinks}>
+                <Markdown text={part()?.text ?? ''} />
+              </div>
+            ) : (
+              <div class="tools" aria-label={t('agent.steps')} ref={animateList}>
+                <For each={ids()}>{(id) => <StepChip id={id} tools={() => props.step.tools} />}</For>
+              </div>
+            );
+          }}
+        </For>
         <Show when={props.step.call.told?.length}>
           <Told told={props.step.call.told!} />
         </Show>
