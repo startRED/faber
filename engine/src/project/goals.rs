@@ -5,10 +5,15 @@
 //! The goals live in `projects.json` under `extra.goals` and never in the project folder, where an agent writes. This file
 //! holds the data and the rules that need no clock or process: when a goal is due, what a failure is called, what a result
 //! means, the day's spending. Nothing here runs anything.
+//!
+//! A goal has one of two sources. A check goal runs one of the project's confirmed checks. A crash goal (phase 2) breaks when
+//! the installed Faber's crash file (`crate::crash`) gets a line it has not seen; only Faber's own repository offers it
+//! ([`faber_repo`]), since that is the only project whose crashes that file records.
 use super::Extra;
 use crate::model::Project;
 use crate::verify::{Outcome, Verdict};
 use serde::{Deserialize, Serialize};
+use std::path::Path;
 
 /// The project's key in `projects.json`.
 pub const KEY: &str = "goals";
@@ -28,6 +33,8 @@ pub const RECHECK: f64 = 600.0;
 pub const QUIET: f64 = 900.0;
 /// Lines of the failing check the fixing conversation is given.
 pub const BRIEF_LINES: usize = 20;
+/// Crash lines (the newest) the fixing conversation is given.
+pub const BRIEF_CRASHES: usize = 10;
 
 /// Where a goal stands. Checking and being fixed are not stored: the first is a check under way, the second a broken goal
 /// whose conversation works.
@@ -54,8 +61,11 @@ pub struct Goal {
     pub id: String,
     /// The person's words: "no crashes".
     pub words: String,
-    /// One of the project's confirmed checks, exactly as confirmed. Never free text.
+    /// One of the project's confirmed checks, exactly as confirmed. Never free text. Empty for a crash goal.
     pub check: String,
+    /// Set for a crash goal: what it has seen of the crash file so far.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub crashes: Option<CrashWatch>,
     #[serde(default)]
     pub state: State,
     /// When the check last gave an answer, in Unix seconds.
@@ -74,6 +84,74 @@ pub struct Goal {
     pub reason: Option<String>,
     #[serde(flatten)]
     pub extra: Extra,
+}
+
+/// What a crash goal has seen of the installed Faber's crash file. Lines are told apart by their time, never by a place in
+/// the file: the file drops its oldest half when it is full, so an offset would point at the wrong line afterwards.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct CrashWatch {
+    /// Lines with a time after this (Unix milliseconds) are new. It starts at the time the goal was added and moves up when a
+    /// fix is started for the lines that broke it; until then the same lines are seen again, as a failing check is.
+    // shortcut: two lines written in the very same millisecond after a look, the first of them seen, lose the second; a
+    // clock set back hides lines until it catches up. Upgrade when a crash file carries a counter.
+    pub since: u64,
+    /// The crashes a fix was started for (or that came back after one), with the build each came from: the installed app keeps
+    /// its bug until it is updated, so the same crash from that build is no news. The newest `HANDLED_MAX`.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub fixed: Vec<Handled>,
+}
+
+/// One crash, as `crash_name` calls it, and the build that wrote it.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Handled {
+    pub sig: String,
+    pub version: String,
+    pub commit: String,
+}
+
+/// How many crashes a goal remembers having handled.
+const HANDLED_MAX: usize = 50;
+
+impl Handled {
+    pub fn of(line: &crate::crash::Seen) -> Self {
+        Handled { sig: crash_name(line), version: line.version.clone(), commit: line.commit.clone() }
+    }
+}
+
+impl CrashWatch {
+    /// The new lines told apart: `(to fix, came back)`. Only panics can be fixed: every unclean exit has the same name and
+    /// nothing to reproduce. A panic already handled from the same build (or the same version) is no news, since that build
+    /// cannot hold the fix; the same one from another build means the fix did not work.
+    pub fn sort(&self, lines: Vec<crate::crash::Seen>) -> (Vec<crate::crash::Seen>, Vec<crate::crash::Seen>) {
+        let (mut fresh, mut again) = (vec![], vec![]);
+        for line in lines.into_iter().filter(|l| l.kind == "panic") {
+            let name = crash_name(&line);
+            let mut same = self.fixed.iter().filter(|h| h.sig == name).peekable();
+            if same.peek().is_none() {
+                fresh.push(line);
+            } else if !same.any(|h| h.commit == line.commit || h.version == line.version) {
+                again.push(line);
+            }
+        }
+        (fresh, again)
+    }
+
+    /// The lines up to `newest` are seen. The mark never goes past `now_ms`: a line dated a little ahead must not hide the
+    /// real ones that come before it.
+    pub fn seen(&mut self, newest: u64, now_ms: u64) {
+        self.since = self.since.max(newest.min(now_ms));
+    }
+
+    /// Notes crashes as handled, keeping the newest `HANDLED_MAX`.
+    pub fn remember(&mut self, lines: &[Handled]) {
+        for h in lines {
+            if !self.fixed.contains(h) {
+                self.fixed.push(h.clone());
+            }
+        }
+        let extra = self.fixed.len().saturating_sub(HANDLED_MAX);
+        self.fixed.drain(..extra);
+    }
 }
 
 /// The day's spending on fixes, by the PC's local day number.
@@ -104,6 +182,15 @@ pub struct Goals {
     pub extra: Extra,
 }
 
+impl Goal {
+    /// The fix could not be launched: the goal no longer points at it, and what it had seen of the crash file is as it was before
+    /// the start (`before`), since nobody was given those lines: they are new again once the person resumes the goal.
+    pub fn undo_start(&mut self, before: &Goal) {
+        (self.conversation, self.woke) = (None, None);
+        self.crashes.clone_from(&before.crashes);
+    }
+}
+
 impl Goals {
     /// The project's goals: none for a project that never had any, and an error key for a record that is there but cannot be
     /// read (damaged, or written by a newer Faber), so a change never writes an empty list over it.
@@ -130,14 +217,23 @@ impl Goals {
 
     /// Adds a goal. The check must be one the person confirmed for the project, word for word.
     pub fn add(&mut self, id: String, words: &str, check: &str, confirmed: &[String]) -> Result<(), &'static str> {
-        let words: String = words.chars().filter(|c| !c.is_control()).collect::<String>().split_whitespace().collect::<Vec<_>>().join(" ");
-        let words: String = words.chars().take(WORDS_MAX).collect();
-        if words.is_empty() {
-            return Err("reason.goal.words");
-        }
+        let words = tidy(words)?;
         if !confirmed.iter().any(|c| c == check) {
             return Err("reason.goal.check");
         }
+        self.push(id, words, check, None)
+    }
+
+    /// Adds a crash goal: lines older than `now_ms` are old. A project keeps one: two would start two fixes for the same lines.
+    pub fn add_crashes(&mut self, id: String, words: &str, now_ms: u64) -> Result<(), &'static str> {
+        let words = tidy(words)?;
+        if self.items.iter().any(|g| g.crashes.is_some()) {
+            return Err("reason.goal.crashesOne");
+        }
+        self.push(id, words, "", Some(CrashWatch { since: now_ms, ..CrashWatch::default() }))
+    }
+
+    fn push(&mut self, id: String, words: String, check: &str, crashes: Option<CrashWatch>) -> Result<(), &'static str> {
         if self.items.len() >= MAX_GOALS {
             return Err("reason.goal.many");
         }
@@ -145,6 +241,7 @@ impl Goals {
             id,
             words,
             check: check.into(),
+            crashes,
             state: State::Holding,
             last_run: None,
             failed: None,
@@ -194,6 +291,26 @@ impl Goals {
     pub fn any_on(&self) -> bool {
         self.auto && !self.items.is_empty()
     }
+}
+
+/// The person's words, tidied: one line of at most `WORDS_MAX` characters, never empty.
+fn tidy(words: &str) -> Result<String, &'static str> {
+    let words: String = words.chars().filter(|c| !c.is_control()).collect::<String>().split_whitespace().collect::<Vec<_>>().join(" ");
+    let words: String = words.chars().take(WORDS_MAX).collect();
+    if words.is_empty() { Err("reason.goal.words") } else { Ok(words) }
+}
+
+/// Whether `folder` is Faber's own repository: its engine and shell crates are named `faber-engine` and `faber`. Two small
+/// files read, nothing run. A copy of the repository passes too, which is the point; a folder that only imitates the names
+/// gets a crash file of Faber's read for it, scrubbed, and only because the person added the goal.
+pub fn faber_repo(folder: &Path) -> bool {
+    let named = |file: &str, name: &str| {
+        let Ok(text) = std::fs::File::open(folder.join(file)).and_then(|f| std::io::read_to_string(std::io::Read::take(f, 8192))) else {
+            return false;
+        };
+        text.lines().take_while(|l| !l.starts_with("[dependencies]")).any(|l| l.trim().replace(' ', "") == format!("name=\"{name}\""))
+    };
+    named("engine/Cargo.toml", "faber-engine") && named("src-tauri/Cargo.toml", "faber")
 }
 
 /// When a goal is due, in Unix seconds: never before `FIRST_AFTER` after Faber started. A goal whose fix just ended
@@ -261,6 +378,11 @@ pub fn signature(outcome: &Outcome) -> Option<(String, String)> {
         return None;
     }
     let shown = lines.join("\n");
+    Some((name_of(&shown), shown))
+}
+
+/// A failure's name: the text without digits and spacing, hashed.
+fn name_of(shown: &str) -> String {
     let mut name = String::new();
     for c in shown.to_lowercase().chars() {
         match c {
@@ -277,7 +399,37 @@ pub fn signature(outcome: &Outcome) -> Option<(String, String)> {
             _ => name.push(c),
         }
     }
-    Some((crate::project::lease::hash(name.as_bytes())[..16].to_string(), shown))
+    crate::project::lease::hash(name.as_bytes())[..16].to_string()
+}
+
+/// What makes one crash the same as another: kind, thread, message and place; never the time, version or build.
+fn crash_text(l: &crate::crash::Seen) -> String {
+    format!("{}|{}|{}|{}", l.kind, l.thread, l.message, l.location)
+}
+
+fn crash_name(l: &crate::crash::Seen) -> String {
+    name_of(&crash_text(l))
+}
+
+/// What new crash lines are called, and the newest of them for the conversation's brief (`BRIEF_CRASHES` lines, oldest first,
+/// with how many were left out). The name is that of the distinct crashes (kind, thread, message and place; never the time,
+/// version or build), so the same crash seen twice is one failure, and the same one after a fix is told apart from a new one.
+/// `None` when there is no line. The text is a file's, so the brief fences it as data.
+pub fn crash_signature(lines: &[crate::crash::Seen]) -> Option<(String, String)> {
+    if lines.is_empty() {
+        return None;
+    }
+    let mut kinds: Vec<String> = lines.iter().map(crash_text).collect();
+    kinds.sort();
+    kinds.dedup();
+    let line = |l: &crate::crash::Seen| {
+        format!("{} | version {} | build {} | thread {} | {} | {}", l.kind, l.version, l.commit, l.thread, l.location, l.message)
+    };
+    let mut text: Vec<String> = lines.iter().rev().take(BRIEF_CRASHES).rev().map(line).collect();
+    if lines.len() > BRIEF_CRASHES {
+        text.insert(0, format!("({} older new lines not shown)", lines.len() - BRIEF_CRASHES));
+    }
+    Some((name_of(&kinds.join("\n")), text.join("\n")))
 }
 
 /// What the screen shows of one goal.
@@ -287,6 +439,9 @@ pub struct Row {
     pub id: String,
     pub words: String,
     pub check: String,
+    /// A crash goal: it watches the installed Faber's crash file, and has no check.
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub crashes: bool,
     /// `holding`, `checking`, `fixing`, `needsYou` or `paused`.
     pub state: &'static str,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -309,6 +464,8 @@ pub struct View {
     pub spent_usd: f64,
     /// The project's confirmed checks a goal can use; none while the person has not confirmed the list.
     pub checks: Vec<String>,
+    /// A crash goal can be added: the project is Faber's own repository and the installed Faber's data folder is known.
+    pub can_watch_crashes: bool,
     pub goals: Vec<Row>,
 }
 
@@ -481,5 +638,117 @@ mod tests {
         Goals::default().store(&mut plain);
         assert!(!plain.extra.contains_key(KEY));
         assert_eq!(Goals::of(&plain), Goals::default());
+    }
+
+    #[test]
+    fn a_crash_goal_has_no_check_starts_at_the_time_it_was_added_and_counts_toward_the_twelve() {
+        let mut goals = Goals::default();
+        goals.add_crashes("c".into(), "  no\n new crashes ", 5_000).unwrap();
+        assert_eq!((goals.items[0].words.as_str(), goals.items[0].check.as_str()), ("no new crashes", ""));
+        assert_eq!(goals.items[0].crashes, Some(CrashWatch { since: 5_000, fixed: vec![] }));
+        assert_eq!(goals.add_crashes("d".into(), "  ", 1), Err("reason.goal.words"));
+        assert_eq!(goals.add_crashes("e".into(), "a second", 1), Err("reason.goal.crashesOne"), "one crash goal in a project");
+        for i in 1..MAX_GOALS {
+            goals.add(format!("g{i}"), "again", "cargo test", &["cargo test".into()]).unwrap();
+        }
+        let mut full = Goals { items: goals.items[1..].to_vec(), ..Goals::default() };
+        full.add("x".into(), "again", "cargo test", &["cargo test".into()]).unwrap();
+        assert_eq!(full.add_crashes("z".into(), "one more", 1), Err("reason.goal.many"), "a crash goal counts toward the twelve");
+        let mut project: Project = serde_json::from_str(r#"{"id":"p","name":"P","path":"/p"}"#).unwrap();
+        goals.store(&mut project);
+        assert_eq!(Goals::of(&project).items[0].crashes, Some(CrashWatch { since: 5_000, fixed: vec![] }), "what is watched is kept");
+    }
+
+    #[test]
+    fn crash_lines_are_named_by_the_crash_not_by_when_or_which_build() {
+        let line = |at: u64, build: &str, message: &str| crate::crash::Seen {
+            at,
+            kind: "panic".into(),
+            version: "0.1.0".into(),
+            commit: build.into(),
+            thread: "main".into(),
+            message: message.into(),
+            location: "a.rs:3:9".into(),
+        };
+        let (a, shown) = crash_signature(&[line(1, "aaaaaaaaaaaa", "index 7 out of range")]).unwrap();
+        let (b, _) =
+            crash_signature(&[line(9, "bbbbbbbbbbbb", "index 12 out of range"), line(10, "bbbbbbbbbbbb", "index 12 out of range")])
+                .unwrap();
+        let (c, _) = crash_signature(&[line(1, "aaaaaaaaaaaa", "something else")]).unwrap();
+        assert_eq!(a, b, "the same crash on another build, seen twice, is one failure");
+        assert_ne!(a, c);
+        assert!(shown.contains("build aaaaaaaaaaaa") && shown.contains("index 7 out of range"), "{shown}");
+        assert_eq!(crash_signature(&[]), None);
+        let many: Vec<_> = (0..15).map(|n| line(n, "a", &format!("m{n}"))).collect();
+        let (_, shown) = crash_signature(&many).unwrap();
+        assert_eq!(shown.lines().count(), BRIEF_CRASHES + 1);
+        assert!(shown.starts_with("(5 older new lines not shown)") && shown.contains("m14") && !shown.contains("| m4"), "{shown}");
+    }
+
+    #[test]
+    fn a_crash_handled_is_news_only_from_a_newer_build_and_an_unclean_exit_is_never_one_to_fix() {
+        let line = |at: u64, kind: &str, version: &str, build: &str, message: &str| crate::crash::Seen {
+            at,
+            kind: kind.into(),
+            version: version.into(),
+            commit: build.into(),
+            thread: "main".into(),
+            message: message.into(),
+            location: "a.rs:3:9".into(),
+        };
+        let first = line(1, "panic", "0.1.0", "aaaaaaaaaaaa", "boom");
+        let mut watch = CrashWatch::default();
+        let (fresh, again) = watch.sort(vec![first.clone(), line(2, "unclean-exit", "0.1.0", "aaaaaaaaaaaa", "")]);
+        assert_eq!((fresh.len(), again.len()), (1, 0), "an unclean exit starts nothing");
+        watch.remember(&[Handled::of(&first)]);
+        let same_build = line(3, "panic", "0.1.0", "aaaaaaaaaaaa", "boom");
+        let same_version = line(4, "panic", "0.1.0", "bbbbbbbbbbbb", "boom");
+        let newer = line(5, "panic", "0.1.1", "cccccccccccc", "boom");
+        let other = line(6, "panic", "0.1.0", "aaaaaaaaaaaa", "another");
+        let (fresh, again) = watch.sort(vec![same_build, same_version, newer.clone(), other.clone()]);
+        assert_eq!((fresh, again), (vec![other], vec![newer.clone()]));
+        watch.remember(&[Handled::of(&newer), Handled::of(&newer)]);
+        assert_eq!(watch.fixed.len(), 2, "no duplicate");
+        assert_eq!(watch.sort(vec![newer]), (vec![], vec![]), "once told, a build is no news again");
+        let many: Vec<_> = (0..60).map(|n| Handled { sig: format!("s{n}"), version: "v".into(), commit: "c".into() }).collect();
+        watch.remember(&many);
+        assert_eq!((watch.fixed.len(), watch.fixed[0].sig.as_str(), watch.fixed[49].sig.as_str()), (HANDLED_MAX, "s10", "s59"));
+        // The mark follows the newest line but never goes past now, and never back.
+        let mut mark = CrashWatch::default();
+        mark.seen(5_000, 1_000);
+        assert_eq!(mark.since, 1_000);
+        mark.seen(400, 9_000);
+        assert_eq!(mark.since, 1_000);
+        mark.seen(2_000, 9_000);
+        assert_eq!(mark.since, 2_000);
+    }
+
+    #[test]
+    fn a_fix_that_could_not_be_launched_gives_the_crash_lines_back() {
+        let mut goals = Goals::default();
+        goals.add_crashes("c".into(), "no new crashes", 5_000).unwrap();
+        let before = goals.items[0].clone();
+        let mut started = before.clone();
+        (started.conversation, started.woke) = (Some("conv".into()), Some("sig".into()));
+        started.crashes =
+            Some(CrashWatch { since: 9_000, fixed: vec![Handled { sig: "s".into(), version: "v".into(), commit: "c".into() }] });
+        started.undo_start(&before);
+        assert_eq!(started, before, "the mark and what was handled are as before the start");
+    }
+
+    #[test]
+    fn only_a_folder_with_fabers_engine_and_shell_crates_is_fabers_own_repository() {
+        let dir = tempfile::tempdir().unwrap();
+        let write = |file: &str, text: &str| {
+            std::fs::create_dir_all(dir.path().join(file).parent().unwrap()).unwrap();
+            std::fs::write(dir.path().join(file), text).unwrap();
+        };
+        assert!(!faber_repo(dir.path()));
+        write("engine/Cargo.toml", "[package]\nname = \"faber-engine\"\n");
+        assert!(!faber_repo(dir.path()), "the shell crate is missing");
+        write("src-tauri/Cargo.toml", "[package]\nname = \"faber\"\n[dependencies]\n");
+        assert!(faber_repo(dir.path()));
+        write("src-tauri/Cargo.toml", "[package]\nname = \"other\"\n[dependencies]\nname = \"faber\"\n");
+        assert!(!faber_repo(dir.path()), "a name outside the package table does not count");
     }
 }

@@ -101,8 +101,22 @@ fn git(exec: &mut dyn Executor, cwd: &Path, args: &[&str]) -> Option<String> {
     out.success.then(|| String::from_utf8_lossy(&out.stdout).trim_end_matches(['\r', '\n']).to_string())
 }
 
+/// The full id of the commit a build names (a crash line's `commit`: 7 to 40 hexadecimal digits) in the repository of `folder`,
+/// or `None` when the text is not such a name or the repository has no such commit. The text is checked before git sees it.
+pub fn resolve(exec: &mut dyn Executor, folder: &Path, name: &str) -> Option<String> {
+    let hex = (7..=40).contains(&name.len()) && name.bytes().all(|b| b.is_ascii_hexdigit());
+    if !hex {
+        return None;
+    }
+    // Hex text can also be a branch or tag name, which git prefers to an abbreviated id: only an id that begins with it counts.
+    let name = name.to_ascii_lowercase();
+    git(exec, folder, &["rev-parse", "--verify", "--quiet", &format!("{name}^{{commit}}")])
+        .filter(|oid| valid_oid(oid) && oid.starts_with(&name))
+}
+
 /// Makes the copy of conversation `id` for the project in `folder`, on `branch`, starting from `from` (another copy's
-/// branch, for a conversation branched from it) or the head the person has checked out. A copy already in place for this
+/// branch, for a conversation branched from it), else from `at` (a commit's full id, such as the build that crashed; one the
+/// repository does not have is left out) or the head the person has checked out. A copy already in place for this
 /// conversation is used as it is, and one removed earlier comes back at the same folder, so the CLI resumes its session.
 /// `Ok(None)`: the folder is not in a git repository with a commit, and the conversation works in the folder itself.
 pub fn make(
@@ -112,8 +126,9 @@ pub fn make(
     id: &str,
     branch: &str,
     from: Option<&str>,
+    at: Option<&str>,
 ) -> Result<Option<WorkCopy>, &'static str> {
-    if !valid_conversation(id) || !own_branch(branch) || from.is_some_and(|b| !own_branch(b)) {
+    if !valid_conversation(id) || !own_branch(branch) || from.is_some_and(|b| !own_branch(b)) || at.is_some_and(|c| !valid_oid(c)) {
         return Err("error.copy.failed");
     }
     let Some(top) = git(exec, folder, &["rev-parse", "--show-toplevel", "--show-prefix"]) else { return Ok(None) };
@@ -153,7 +168,9 @@ pub fn make(
         git(exec, root, &["worktree", "add", "--", &target, branch])
     } else {
         // A source branch removed since (its work merged) leaves the head the person has.
-        let start = from.filter(|from| exists(exec, from)).unwrap_or(&head);
+        let held =
+            at.filter(|oid| git(exec, root, &["rev-parse", "--verify", "--quiet", &format!("{oid}^{{commit}}")]).as_deref() == Some(*oid));
+        let start = from.filter(|from| exists(exec, from)).or(held).unwrap_or(&head);
         git(exec, root, &["worktree", "add", "-b", branch, "--", &target, start])
     };
     made.map(|_| Some(copy)).ok_or("error.copy.failed")
@@ -331,5 +348,83 @@ mod tests {
             WorkCopy { path: "C:/d/copies/c1".into(), branch: "faber/x-c1".into(), root: "C:/r".into(), sub: "app/web".into(), base: None };
         assert_eq!(copy.folder(), PathBuf::from("C:/d/copies/c1").join("app").join("web"));
         assert_eq!(WorkCopy { sub: String::new(), ..copy }.folder(), PathBuf::from("C:/d/copies/c1"));
+    }
+
+    /// Answers git by what it was asked, and keeps every call.
+    #[derive(Default)]
+    struct Scripted {
+        has: Vec<String>,
+        /// Names git resolves by something other than a commit id (a branch or a tag) to the commit they point at.
+        named: Vec<(String, String)>,
+        calls: Vec<Vec<String>>,
+    }
+
+    impl Executor for Scripted {
+        fn execute(&mut self, call: &Invocation) -> Result<super::super::git::Output, super::super::git::GitError> {
+            let mut args = call.args.as_slice();
+            while args.first().is_some_and(|a| a == "-c") {
+                args = &args[2..];
+            }
+            self.calls.push(args.to_vec());
+            let args: Vec<&str> = args.iter().map(String::as_str).collect();
+            let say = |text: &str| Ok(super::super::git::Output { success: true, stdout: text.as_bytes().to_vec() });
+            let no = || Ok(super::super::git::Output { success: false, stdout: vec![] });
+            match args.as_slice() {
+                ["rev-parse", "--show-toplevel", "--show-prefix"] => say("/repo\n\n"),
+                ["rev-parse", "--verify", "--quiet", "HEAD^{commit}"] => say(&format!("{HEAD}\n")),
+                ["rev-parse", "--verify", "--quiet", r] if r.ends_with("^{commit}") => {
+                    let name = r.trim_end_matches("^{commit}");
+                    let by_name = self.named.iter().find(|(n, _)| n == name).map(|(_, oid)| oid);
+                    by_name.or_else(|| self.has.iter().find(|oid| oid.starts_with(name))).map_or_else(no, |oid| say(&format!("{oid}\n")))
+                }
+                ["symbolic-ref", "--quiet", "HEAD"] => say("refs/heads/main\n"),
+                ["rev-parse", "--verify", "--quiet", r] if r.starts_with("refs/heads/") => no(),
+                ["worktree", ..] => say(""),
+                other => panic!("unexpected git command {other:?}"),
+            }
+        }
+    }
+
+    const HEAD: &str = "1111111111111111111111111111111111111111";
+    const BUILD: &str = "abcdef0123456789abcdef0123456789abcdef01";
+
+    #[test]
+    fn a_build_commit_is_resolved_only_when_it_is_a_hash_the_repository_has() {
+        let mut git = Scripted { has: vec![BUILD.into()], ..Scripted::default() };
+        let repo = Path::new("/repo");
+        assert_eq!(resolve(&mut git, repo, "abcdef012345").as_deref(), Some(BUILD));
+        assert_eq!(resolve(&mut git, repo, BUILD).as_deref(), Some(BUILD));
+        assert_eq!(resolve(&mut git, repo, "ABCDEF012345").as_deref(), Some(BUILD), "upper case is the same hash");
+        assert_eq!(resolve(&mut git, repo, "0123456789ab"), None, "a hash this repository does not have");
+        // A branch or tag named like a hash wins over the abbreviated id in git: what it points at is not the build.
+        git.named.push(("deadbeef0123".into(), HEAD.into()));
+        assert_eq!(resolve(&mut git, repo, "deadbeef0123"), None, "a name that resolves to a commit with another id");
+        let asked = git.calls.len();
+        for bad in ["", "unknown", "abc", "--upload-pack=x", "abcdef01234g", "abcdef012345 ", "HEAD", &"a".repeat(41), "-abcdef0123"] {
+            assert_eq!(resolve(&mut git, repo, bad), None, "{bad:?}");
+        }
+        assert_eq!(git.calls.len(), asked, "text that is not a hash never reaches git");
+    }
+
+    #[test]
+    fn a_copy_starts_at_the_commit_it_is_given_when_the_repository_has_it_and_refuses_what_is_not_a_hash() {
+        let temp = tempfile::tempdir().unwrap();
+        // The real path: macOS keeps temporary folders behind a link, and a copy is never made through one.
+        let data = temp.path().canonicalize().unwrap();
+        let id = "11111111-2222-3333-4444-555555555555";
+        let start = |git: &mut Scripted, at: Option<&str>| {
+            let made = make(git, Path::new("/repo"), &data, id, "faber/fix-1111", None, at);
+            let add = git.calls.iter().find(|c| c.starts_with(&["worktree".to_string(), "add".to_string()])).cloned();
+            (made.map(|m| m.is_some()), add.and_then(|c| c.last().cloned()))
+        };
+        assert_eq!(start(&mut Scripted { has: vec![BUILD.into()], ..Scripted::default() }, Some(BUILD)), (Ok(true), Some(BUILD.into())));
+        let (made, added) = start(&mut Scripted::default(), Some(BUILD));
+        assert_eq!((made, added), (Ok(true), Some(HEAD.into())), "a commit the repository lacks leaves the head");
+        for bad in ["abcdef012345", "--detach", "HEAD", "zzzz"] {
+            let mut git = Scripted::default();
+            assert_eq!(make(&mut git, Path::new("/repo"), &data, id, "faber/fix-1111", None, Some(bad)), Err("error.copy.failed"));
+            assert!(git.calls.is_empty(), "{bad}: nothing is asked of git");
+        }
+        assert_eq!(start(&mut Scripted::default(), None), (Ok(true), Some(HEAD.into())), "no commit: as before");
     }
 }

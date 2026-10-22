@@ -367,7 +367,10 @@ export interface ProofView {
 export interface GoalRow {
   id: string;
   words: string;
+  /** Empty for a crash goal. */
   check: string;
+  /** A crash goal: it watches the installed Faber's crash record instead of a check. */
+  crashes?: boolean;
   state: 'holding' | 'checking' | 'fixing' | 'needsYou' | 'paused';
   /** A `reason.goal.*` key: why the goal needs the person. */
   reason?: string;
@@ -384,6 +387,8 @@ export interface GoalsView {
   spentUsd: number;
   /** The project's confirmed checks a goal can use; none while the list is not confirmed. */
   checks: string[];
+  /** A crash goal can be added: this is Faber's own project. */
+  canWatchCrashes: boolean;
   goals: GoalRow[];
 }
 
@@ -1014,6 +1019,7 @@ export const api = {
   projectGoals: (projectId: string) => invoke<GoalsView>('project_goals', { projectId }),
   projectGoalsAuto: (projectId: string, on: boolean) => invoke<GoalsView>('project_goals_auto', { projectId, on }),
   projectGoalAdd: (projectId: string, words: string, check: string) => invoke<GoalsView>('project_goal_add', { projectId, words, check }),
+  projectGoalAddCrashes: (projectId: string, words: string) => invoke<GoalsView>('project_goal_add_crashes', { projectId, words }),
   projectGoalRemove: (projectId: string, goalId: string) => invoke<GoalsView>('project_goal_remove', { projectId, goalId }),
   projectGoalResume: (projectId: string, goalId: string) => invoke<GoalsView>('project_goal_resume', { projectId, goalId }),
   projectMemory: (projectId: string) => invoke<MemoryList>('project_memory', { projectId }),

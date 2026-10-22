@@ -34,6 +34,8 @@ pub(super) struct Plan {
     id: String,
     branch: String,
     from: Option<String>,
+    /// The commit the copy starts at (a standing goal's crashed build), when it is not the head.
+    at: Option<String>,
 }
 
 impl Engine {
@@ -44,7 +46,7 @@ impl Engine {
     pub(super) fn make_copy(plan: Option<Plan>) -> Result<Made, String> {
         let Some(plan) = plan else { return Ok(None) };
         let Some(mut exec) = (plan.run)() else { return Ok(None) };
-        copy::make(&mut *exec, &plan.folder, &plan.data, &plan.id, &plan.branch, plan.from.as_deref())
+        copy::make(&mut *exec, &plan.folder, &plan.data, &plan.id, &plan.branch, plan.from.as_deref(), plan.at.as_deref())
             .map(|made| made.map(|c| (plan.id, c)))
             .map_err(str::to_string)
     }
@@ -290,7 +292,15 @@ impl Core {
             None => return None,
         };
         let data = self.opts.data_dir.clone();
-        Some(Plan { run, folder: PathBuf::from(project.path), data, id: id.to_string(), branch, from: None })
+        Some(Plan {
+            run,
+            folder: PathBuf::from(project.path),
+            data,
+            id: id.to_string(),
+            branch,
+            from: None,
+            at: self.goals.at.get(id).cloned(),
+        })
     }
 
     fn copy_plan_branch(&mut self, req: &BranchRequest) -> Option<Plan> {
@@ -303,7 +313,7 @@ impl Core {
         let id = new_id();
         let branch = copy::branch_for(&req.text, &id);
         let data = self.opts.data_dir.clone();
-        Some(Plan { run, folder: PathBuf::from(project.path), data, id, branch, from: source.copy.map(|c| c.branch) })
+        Some(Plan { run, folder: PathBuf::from(project.path), data, id, branch, from: source.copy.map(|c| c.branch), at: None })
     }
 
     /// A conversation's copy, whether its agent is at work or about to be (a turn running, a reply still open while Auto
@@ -322,6 +332,7 @@ impl Core {
         match self.convs.get_mut(id) {
             Some(c) if c.copy.as_ref().map_or(c.messages.is_empty(), |had| had.path == copy.path) => {
                 c.copy = Some(copy);
+                self.goals.at.remove(id);
                 None
             }
             _ => Some((id.to_string(), copy)),

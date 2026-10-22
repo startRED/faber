@@ -11,7 +11,7 @@ import { check, equal, ok } from './check.ts';
 const settle = (ms = 30) => new Promise((resolve) => setTimeout(resolve, ms));
 const deliberate = () => settle(560);
 const row = (over: Partial<GoalRow> = {}): GoalRow => ({ id: 'g1', words: 'Every check passes', check: 'npm run lint', state: 'holding', lastRun: 1_800_000_000, ...over });
-const view = (over: Partial<GoalsView> = {}): GoalsView => ({ auto: false, capSeen: false, capUsd: 2, spentUsd: 0.4, checks: ['npm run lint', 'cargo t'], goals: [row()], ...over });
+const view = (over: Partial<GoalsView> = {}): GoalsView => ({ auto: false, capSeen: false, capUsd: 2, spentUsd: 0.4, checks: ['npm run lint', 'cargo t'], canWatchCrashes: false, goals: [row()], ...over });
 const button = (root: HTMLElement, key: Parameters<typeof t>[0]) => {
   const found = [...root.querySelectorAll<HTMLButtonElement>('button')].find((b) => b.textContent === t(key));
   ok(found, `missing button: ${key}`);
@@ -69,6 +69,33 @@ check('project goals: add takes words and one confirmed check; with no confirmed
     root.querySelector('form')!.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true })); await settle();
     equal(added.join('|'), 'It builds|cargo t');
     ok(root.textContent!.includes('It builds'));
+    equal(root.querySelector<HTMLInputElement>('.goal-add input')!.value, '', 'the words are cleared once it is added');
+  });
+});
+
+check('project goals: only Faber\'s own project offers a crash goal, beside the check one, with the same words and no check to pick', async () => {
+  let added: string[] = [];
+  let own = false;
+  await withFold(() => {
+    api.projectGoals = async () => view({ goals: [], checks: [], canWatchCrashes: own });
+    api.projectGoalAddCrashes = async (_id, words) => { added = [words]; return view({ goals: [row({ words, check: '', crashes: true })], checks: [], canWatchCrashes: true }); };
+  }, async (root) => {
+    button(root, 'goals.title').click(); await settle();
+    equal([...root.querySelectorAll('button')].some((b) => b.textContent === t('goals.addCrashes')), false, 'another project is not offered it');
+    own = true;
+    button(root, 'goals.refresh').click(); await settle();
+    ok(root.textContent!.includes(t('goals.noChecks')), 'with no confirmed check the check goal still says how to get one');
+    equal(root.querySelector('.goal-add select'), null, 'a crash goal has no check to pick');
+    const watch = button(root, 'goals.addCrashes');
+    ok(watch.disabled, 'it needs the words first, as the other add does');
+    const words = root.querySelector<HTMLInputElement>('.goal-add input')!;
+    words.value = 'No new crashes'; words.dispatchEvent(new Event('input', { bubbles: true }));
+    equal(watch.disabled, false);
+    watch.click(); await settle();
+    equal(added.join('|'), 'No new crashes');
+    const text = root.querySelector('.goal')!.textContent!;
+    ok(text.includes('No new crashes') && text.includes(t('goals.crashSource')), 'the row names the record it watches');
+    equal(root.querySelector('.goal code'), null, 'and shows no check');
     equal(root.querySelector<HTMLInputElement>('.goal-add input')!.value, '', 'the words are cleared once it is added');
   });
 });

@@ -1267,6 +1267,14 @@ async fn project_goal_add(
     faber.engine.add_project_goal(&project_id, &words, &check)
 }
 
+/// Adds a goal that breaks when the installed Faber's crash file gets a new line: Faber's own repository only.
+#[tauri::command]
+async fn project_goal_add_crashes(faber: State<'_, Faber>, project_id: String, words: String) -> Res<faber_engine::project::goals::View> {
+    project_commands::id(&project_id)?;
+    project_commands::text(&words)?;
+    faber.engine.add_project_crash_goal(&project_id, &words)
+}
+
 #[tauri::command]
 async fn project_goal_remove(faber: State<'_, Faber>, project_id: String, goal_id: String) -> Res<faber_engine::project::goals::View> {
     project_commands::id(&project_id)?;
@@ -1416,6 +1424,13 @@ pub(crate) fn shut_down(app: &AppHandle) {
 /// data folder. The folder is the one `data_dir` gives later, which Tauri reads from the same `dirs` call.
 fn crash_record_dir(is_test: bool) -> Option<PathBuf> {
     if is_test { None } else { dirs::config_dir().map(|config| default_data_dir(&config)) }
+}
+
+/// The installed Faber's data folder, whose crash file a standing goal of Faber's own repository reads (never writes). It is the
+/// default folder whatever `FABER_DATA_DIR` says, so a development run with a folder of its own still reads the installed
+/// one's. None for a test build and a hidden run, which never look at a real one.
+fn installed_data_dir(hidden: bool) -> Option<PathBuf> {
+    if cfg!(feature = "test-hooks") || hidden { None } else { dirs::config_dir().map(|config| default_data_dir(&config)) }
 }
 
 /// Brings the window back, building the screen again if it was closed to the tray.
@@ -1749,6 +1764,7 @@ fn main() {
                 project_goals,
                 project_goals_auto,
                 project_goal_add,
+                project_goal_add_crashes,
                 project_goal_remove,
                 project_goal_resume,
                 project_proof,
@@ -1859,6 +1875,9 @@ fn main() {
                 ask: None,
             };
             let engine = Engine::new(opts, emit);
+            if let Some(dir) = installed_data_dir(hidden) {
+                engine.set_installed_data(dir);
+            }
             // The test build's agent installs come from the loopback server of FABER_SETUP_SOURCE, as `tools_install` does: they never reach the network.
             #[cfg(feature = "test-hooks")]
             if let Ok(source) = std::env::var("FABER_SETUP_SOURCE") {

@@ -4441,6 +4441,7 @@ impl Core {
         self.kit_checks.retain(|_, check| check.owner != id);
         self.follows.remove(id);
         self.before.remove(id);
+        self.goals.at.remove(id);
         if existed {
             self.keep_family(id, heir);
             self.rewind_forget(id);

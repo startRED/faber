@@ -39,7 +39,9 @@ state word (Holding, Checking, Broke and being fixed, Needs you, Paused), when i
 Needs you is the only state word set heavier (the ink colour at weight 580, no amber) and carries its reason in plain
 words under the row. A goal that waits for the person or was paused offers Watch again; Remove asks once more with Cancel
 beside it (500 ms and the key released, as in Memory). The form is one field for the words, one list of the confirmed
-checks and Add; with no confirmed check a line says to confirm them first. A read that fails shows its reason above the
+checks and Add; with no confirmed check a line says to confirm them first. In Faber's own project one more quiet button,
+Watch for crashes, sits beside Add and takes the same words; its row shows the name of the record it watches where the
+other rows show a check as code. No other project is offered it, it has no list to pick from, and a project keeps one: a second is refused with a calm line above the list. A read that fails shows its reason above the
 list, also before anything was read; with no goal only the empty line shows, and the line that says the switch is off
 appears once there are goals. It works with no AI connected. The switch that lets Faber start a fix, and its US$2
 daily limit, are in Settings, Projects, never here. If that switch cannot be read, its row says why instead of the

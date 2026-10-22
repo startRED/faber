@@ -65,6 +65,10 @@ function GoalList(props: { projectId: string }) {
     if (!words().trim() || !check()) return;
     if (await run(() => api.projectGoalAdd(props.projectId, words(), check()))) setWords('');
   };
+  const addCrashes = async () => {
+    if (!words().trim()) return;
+    if (await run(() => api.projectGoalAddCrashes(props.projectId, words()))) setWords('');
+  };
   const remove = (goal: GoalRow) => {
     if (confirm() !== goal.id) {
       armedAt = performance.now();
@@ -95,7 +99,7 @@ function GoalList(props: { projectId: string }) {
                 <li class="memory-entry goal" data-goal={goal.id} data-state={goal.state}>
                   <p class="memory-text">{goal.words}</p>
                   <div class="memory-from">
-                    <span class="goal-state" classList={{ ask: goal.state === 'needsYou' }}>{t(`goals.state.${goal.state}` as Key)}</span> · {when(goal)} · <code>{goal.check}</code>
+                    <span class="goal-state" classList={{ ask: goal.state === 'needsYou' }}>{t(`goals.state.${goal.state}` as Key)}</span> · {when(goal)} · <Show when={goal.crashes} fallback={<code>{goal.check}</code>}>{t('goals.crashSource')}</Show>
                   </div>
                   <Show when={goal.state === 'needsYou' && goal.reason}><p class="hint" role="status">{fromEngine(goal.reason)}</p></Show>
                   <div class="memory-actions">
@@ -116,15 +120,21 @@ function GoalList(props: { projectId: string }) {
                 </li>
               )}</For>
             </ul>
-            <Show when={v().checks.length} fallback={<p class="hint">{t('goals.noChecks')}</p>}>
+            <Show when={v().checks.length || v().canWatchCrashes} fallback={<p class="hint">{t('goals.noChecks')}</p>}>
               <form class="goal-add" onSubmit={(event) => void add(event)}>
                 <label class="sr-only" for={`goal-words-${props.projectId}`}>{t('goals.words')}</label>
                 <input id={`goal-words-${props.projectId}`} class="field" type="text" maxlength={WORDS_MAX} placeholder={t('goals.placeholder')} value={words()} disabled={busy()} onInput={(e) => setWords(e.currentTarget.value)} />
-                <label class="sr-only" for={`goal-check-${props.projectId}`}>{t('goals.pickCheck')}</label>
-                <select id={`goal-check-${props.projectId}`} class="field" value={check()} disabled={busy()} onChange={(e) => setCheck(e.currentTarget.value)}>
-                  <For each={v().checks}>{(command) => <option value={command}>{command}</option>}</For>
-                </select>
-                <button type="submit" class="btn ghost" disabled={busy() || !words().trim()}>{t('goals.add')}</button>
+                <Show when={v().checks.length} fallback={<p class="hint">{t('goals.noChecks')}</p>}>
+                  <label class="sr-only" for={`goal-check-${props.projectId}`}>{t('goals.pickCheck')}</label>
+                  <select id={`goal-check-${props.projectId}`} class="field" value={check()} disabled={busy()} onChange={(e) => setCheck(e.currentTarget.value)}>
+                    <For each={v().checks}>{(command) => <option value={command}>{command}</option>}</For>
+                  </select>
+                  <button type="submit" class="btn ghost" disabled={busy() || !words().trim()}>{t('goals.add')}</button>
+                </Show>
+                {/* Faber's own project only: the words are the same, the source is the installed Faber's crash record. */}
+                <Show when={v().canWatchCrashes}>
+                  <button type="button" class="btn ghost" disabled={busy() || !words().trim()} onClick={() => void addCrashes()}>{t('goals.addCrashes')}</button>
+                </Show>
               </form>
             </Show>
           </>
