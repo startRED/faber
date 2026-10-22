@@ -1,6 +1,6 @@
 # Faber's own work method, for every project
 
-Status: proposal, waiting for the owner's yes. Nothing is built from it until then.
+Status: approved by the owner on 2026-10-22 (R435), as of commit 4fc1324d. Slices 1 to 4 are queued as tasks 991 to 994; none is built yet. The product-map step comes after them.
 
 - **The yes.** The approval is the owner's own answer on the question card, as for every decision in this repo. The
   decision row records it.
