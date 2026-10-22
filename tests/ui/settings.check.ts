@@ -653,7 +653,10 @@ check('settings: switching sections is a short cross-fade (the old one leaves as
     equal(view.host.querySelectorAll('.st-group').length, 0, 'and none of General');
     ok(document.querySelector('.motion-exit')?.shadowRoot?.querySelector('.st-group'), 'the old section leaves as an inert copy');
     ok(view.host.querySelector('.s-main > .st-card')!.getAnimations().length > 0, 'the new section arrives instead of appearing');
-    await new Promise((resolve) => setTimeout(resolve, 500));
+    // Waits for the fade to end rather than a fixed time: a slow runner (macOS CI) ends it later.
+    for (const start = Date.now(); (document.querySelector('.motion-exit') || main.getAnimations({ subtree: true }).length > 0) && Date.now() - start < 3000; ) {
+      await new Promise((resolve) => setTimeout(resolve, 50));
+    }
     equal(document.querySelector('.motion-exit'), null, 'the copy is removed once it has faded');
     equal(main.getAnimations({ subtree: true }).length, 0, 'and the stage rests');
     // Reduced motion: the same switch is instant.
