@@ -425,11 +425,32 @@ svg.i.sm { width: 14px; height: 14px; }
 .md a.file-ref { text-underline-offset: 3px; }
 .md a.file-ref:hover { text-decoration-color: currentColor; }
 .md a.file-ref code { color: inherit; text-decoration: inherit; text-decoration-color: inherit; text-underline-offset: 3px; }
-.aside { display: grid; justify-items: start; gap: 8px; }
-.aside .bad, .aside .side-meta { margin: 0; }
-.aside-answer { max-width: 100%; overflow-wrap: anywhere; }
-.side-write .aside-row { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
-.side-write .aside-row select.field { width: auto; max-width: 100%; resize: none; height: var(--h-sm); padding: 0 8px; }
+/* The side chat (R250): the person's questions in the thread's bubble on the right, the answers as the thread's own markdown
+   on the left under the model's mark, and a composer pinned under them in the main composer's look. */
+.side-head .side-clear { order: 2; margin-left: auto; height: var(--h-sm); padding: 0 10px; color: var(--ink-2); }
+.side-head .side-clear + .iconbtn { margin-left: 0; }
+.side-chat { align-content: stretch; grid-template-rows: minmax(0, 1fr); }
+.side-thread { display: grid; align-content: start; gap: 22px; margin: 0; padding: 4px 0 0; list-style: none; min-width: 0; }
+.side-thread .aside { display: grid; gap: 12px; min-width: 0; }
+.side-thread .you { max-width: 88%; padding: 9px 14px; font-size: var(--fs-sm); line-height: 1.5; box-shadow: none; }
+.aside-reply { display: grid; gap: 6px; min-width: 0; }
+.aside-reply .model { font-size: var(--fs-xs); }
+.aside-reply .bad, .aside-reply .side-meta { margin: 0; }
+.aside-answer { min-width: 0; font-size: var(--fs-sm); line-height: 1.6; overflow-wrap: anywhere; }
+.aside-actions { display: flex; }
+.aside-tell { height: var(--h-sm); gap: 6px; margin-left: -8px; padding: 0 8px; color: var(--ink-2); }
+/* An empty side chat: one line on what it is for and three suggestions, low in the column, near the box they fill. */
+.side-empty { align-self: end; display: grid; gap: 14px; padding-bottom: 4px; color: var(--ink-2); }
+.side-empty p { margin: 0; max-width: 34ch; text-wrap: pretty; }
+.chip.suggest { background: none; transition: color var(--dur-fast), background var(--dur-fast); }
+.chip.suggest:hover:not(:disabled) { color: var(--ink); background: var(--s2); }
+.chip.suggest:disabled { opacity: 0.45; }
+.side-compose { position: relative; display: grid; margin: 0 12px 12px; background: var(--card-bg); border-radius: var(--r-lg); box-shadow: var(--lift-shadow), var(--focus-light); transition: box-shadow var(--dur-ui) var(--ease); }
+.side-compose:focus-within { box-shadow: inset 0 0 0 1px var(--accent-line), var(--lift-shadow), var(--focus-light); }
+.side-compose textarea { resize: none; border: 0; outline: none; background: none; min-height: 46px; max-height: 30vh; field-sizing: content; overflow-y: auto; padding: 13px 14px 2px; font-size: var(--fs-sm); line-height: 1.5; }
+.side-compose textarea::placeholder { color: var(--ink-3); }
+.side-compose .cbar { padding: 6px 8px 8px 10px; }
+.side-compose .bad { margin: 4px 14px 0; color: var(--ink-2); font-size: var(--fs-sm); }
 .rc-body { flex: 1; min-height: 0; overflow-y: auto; overflow-x: hidden; padding: 0 12px 12px; display: grid; align-content: start; gap: 16px; }
 .proj-g h3 { display: flex; align-items: center; gap: 8px; margin: 0; padding: 0 6px 8px; font: 600 var(--fs-sm) var(--font-ui); color: var(--ink-2); }
 .proj-g h3 .t { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }

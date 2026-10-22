@@ -4609,7 +4609,7 @@ async fn r161_the_agent_hands_a_piece_of_work_to_the_other_vendor_and_gets_its_r
 
 /// R250: a quick question on the side, asked while the agent works, runs in a process of its own on a fork of the
 /// conversation's session at low effort. The running turn never hears it, the queue and the session stay as they were, its
-/// quota counts while it runs, and the answer goes once the turn after it ends.
+/// quota counts while it runs, and the answer stays through the turns after it (R430).
 #[tokio::test]
 async fn r250_a_quick_question_on_the_side_leaves_the_turn_its_queue_and_its_session_alone() {
     let dir = tempfile::tempdir().unwrap();
@@ -4649,7 +4649,7 @@ async fn r250_a_quick_question_on_the_side_leaves_the_turn_its_queue_and_its_ses
     assert!(has(["--resume", "s1"]) && args.iter().any(|a| a == "--fork-session") && has(["--tools", "Read,Grep,Glob"]), "{args:?}");
     assert!(has(["--effort", "low"]) && has(["--model", "claude-sonnet-5-5"]), "same model, low effort: {args:?}");
     let asked = engine.asides(&id);
-    assert_eq!((asked.len(), asked[0].state, asked[0].question.as_str()), (1, "running", "why that file?"));
+    assert_eq!((asked.len(), asked[0].state.as_str(), asked[0].question.as_str()), (1, "running", "why that file?"));
     assert!(engine.state().usage.iter().any(|u| u.vendor == Vendor::Claude && u.counting), "its quota counts while it runs");
     for _ in 0..300 {
         if side.lines.lock().unwrap().iter().any(|l| l["type"] == "user") {
@@ -4686,7 +4686,7 @@ async fn r250_a_quick_question_on_the_side_leaves_the_turn_its_queue_and_its_ses
         tokio::time::sleep(Duration::from_millis(10)).await;
     }
     let done = &engine.asides(&id)[0];
-    assert_eq!((done.state, done.answer.as_str(), done.id.as_str()), ("done", "It holds the parser.", aside.as_str()));
+    assert_eq!((done.state.as_str(), done.answer.as_str(), done.id.as_str()), ("done", "It holds the parser.", aside.as_str()));
     assert!(side.closed.load(std::sync::atomic::Ordering::SeqCst) || made.lock().unwrap().is_empty(), "gone once it answered");
 
     let after = engine.open(&id).unwrap();
@@ -4704,6 +4704,75 @@ async fn r250_a_quick_question_on_the_side_leaves_the_turn_its_queue_and_its_ses
         tokio::time::sleep(Duration::from_millis(10)).await;
     }
     assert!(ended(&engine) && engine.asides(&id).len() == 1, "it stays through the turn it was asked in");
+    engine.shutdown();
+}
+
+/// R430: the side chat stays with its conversation (extends R250). It keeps the newest 50 turns in a file of its own,
+/// a follow-up carries the side thread's last answered turns, a restart brings it back, and Clear removes it.
+#[tokio::test]
+async fn r_next_the_side_chat_is_kept_with_its_conversation_and_a_follow_up_carries_its_last_turns() {
+    let dir = tempfile::tempdir().unwrap();
+    let (spawn, made) = pipes();
+    let engine = two_vendors(dir.path(), spawn.clone());
+    let project = engine.add_project(&dir.path().to_string_lossy()).unwrap();
+    let id = engine
+        .send(SendRequest { project_id: Some(project.id), ..ask(Area::Project, "refactor it", choice("claude", Some("sonnet"))) })
+        .unwrap();
+    let mut main = next_pipe(&made).await;
+    main.say(json!({"type":"system","subtype":"init","session_id":"s1","model":"claude-sonnet-5-5"})).await;
+    main.say(json!({"type":"stream_event","parent_tool_use_id":null,"event":{"type":"content_block_delta","delta":{"type":"text_delta","text":"Done."}}})).await;
+    main.say(json!({"type":"result","subtype":"success","is_error":false,"total_cost_usd":0.01,"usage":{}})).await;
+    let idle = |engine: &Engine| {
+        engine.open(&id).is_some_and(|c| {
+            c.resumable(Vendor::Claude).is_some() && c.messages.last().is_some_and(|m| m.status != Some(Status::Streaming))
+        })
+    };
+    for _ in 0..300 {
+        if idle(&engine) {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(10)).await;
+    }
+    assert!(idle(&engine));
+
+    // A side thread already full, as an earlier session of Faber left it.
+    let file = dir.path().join("side-chats").join(format!("{id}.json"));
+    let old: Vec<_> = (0..50)
+        .map(|i| json!({"id": format!("old{i}"), "question": format!("question {i}"), "answer": format!("answer {i}"), "vendor": "claude", "state": "done"}))
+        .collect();
+    std::fs::create_dir_all(file.parent().unwrap()).unwrap();
+    std::fs::write(&file, serde_json::to_vec(&old).unwrap()).unwrap();
+    let kept = engine.asides(&id);
+    assert_eq!((kept.len(), kept[49].answer.as_str()), (50, "answer 49"), "the kept thread is read back");
+
+    engine.ask_aside(&id, "and the tests?", None).unwrap();
+    let mut side = next_pipe(&made).await;
+    for _ in 0..300 {
+        if side.lines.lock().unwrap().iter().any(|l| l["type"] == "user") {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(10)).await;
+    }
+    let said = side.lines.lock().unwrap().iter().find(|l| l["type"] == "user").cloned().unwrap();
+    let said = said["message"]["content"].as_str().unwrap().to_string();
+    assert!(said.contains("Question: question 49\nAnswer: answer 49") && said.contains("question 44"), "the last turns go with it: {said}");
+    assert!(!said.contains("question 43\n"), "only the last six: {said}");
+    assert!(said.ends_with("Question: and the tests?"), "{said}");
+    side.say(json!({"type":"stream_event","parent_tool_use_id":null,"event":{"type":"content_block_delta","delta":{"type":"text_delta","text":"They pass."}}})).await;
+    side.say(json!({"type":"result","subtype":"success","is_error":false,"total_cost_usd":0.001,"usage":{}})).await;
+    for _ in 0..300 {
+        if engine.asides(&id).last().is_some_and(|a| a.state == "done") {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(10)).await;
+    }
+    let thread = engine.asides(&id);
+    assert_eq!(thread.len(), 50, "the newest 50 stay");
+    assert_eq!((thread[0].question.as_str(), thread[49].answer.as_str()), ("question 1", "They pass."));
+    let saved: Vec<serde_json::Value> = serde_json::from_slice(&std::fs::read(&file).unwrap()).unwrap();
+    assert_eq!((saved.len(), saved[49]["answer"].as_str()), (50, Some("They pass.")), "written once it answered");
+
+    // The turn after it no longer takes it away.
     engine
         .send(SendRequest { conversation_id: Some(id.clone()), ..ask(Area::Project, "go on", choice("claude", Some("sonnet"))) })
         .unwrap();
@@ -4715,13 +4784,20 @@ async fn r250_a_quick_question_on_the_side_leaves_the_turn_its_queue_and_its_ses
     }
     main.say(json!({"type":"result","subtype":"success","is_error":false,"total_cost_usd":0.01,"usage":{}})).await;
     for _ in 0..300 {
-        if engine.asides(&id).is_empty() {
+        if idle(&engine) {
             break;
         }
         tokio::time::sleep(Duration::from_millis(10)).await;
     }
-    assert!(engine.asides(&id).is_empty(), "the answer goes once the turn after it ends");
+    assert_eq!(engine.asides(&id).len(), 50, "the next turn leaves the side chat alone");
     engine.shutdown();
+
+    let again = two_vendors(dir.path(), spawn);
+    let back = again.asides(&id);
+    assert_eq!((back.len(), back[49].answer.as_str(), back[49].state.as_str()), (50, "They pass.", "done"), "it survives a restart");
+    again.clear_asides(&id);
+    assert!(again.asides(&id).is_empty() && !file.exists(), "Clear empties it and its file goes");
+    again.shutdown();
 }
 
 /// R250, review: a quick question stops as soon as any reading of its AI's account shows paid use, which nobody approved for it.
@@ -4749,7 +4825,7 @@ async fn r250_a_quick_question_stops_when_a_reading_shows_paid_use() {
         tokio::time::sleep(Duration::from_millis(10)).await;
     }
     let a = &engine.asides(&id)[0];
-    assert_eq!((a.state, a.error.as_deref()), ("failed", Some("error.quotaOut")));
+    assert_eq!((a.state.as_str(), a.error.as_deref()), ("failed", Some("error.quotaOut")));
     engine.shutdown();
 }
 

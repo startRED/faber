@@ -139,7 +139,9 @@ check('quick question: asked while the agent works, it leaves the turn, its queu
     hear({ type: 'asides', conversationId: c.id, asides: [running] });
     await settle();
     ok(host.textContent!.includes(t('aside.looking')), 'it says it is looking');
-    equal(host.querySelector<HTMLButtonElement>('.side-write button[type="submit"]')!.disabled, true, 'one question at a time');
+    ok(host.querySelector('.side-compose .send.stop') && !host.querySelector('.side-compose button[type="submit"]'), 'one question at a time: the box offers Stop');
+    equal(host.querySelector('.aside .you')!.textContent, 'why that file?', 'the question sits in its own bubble');
+    equal(host.querySelector('.aside-reply .vm b')!.textContent, 'Sonnet 5.5', 'the answer carries the model mark');
     hear({ type: 'asides', conversationId: c.id, asides: [{ ...running, answer: 'It holds the **tokenizer**.', state: 'done' }] });
     await settle();
     ok(host.querySelector('.aside-answer strong')?.textContent === 'tokenizer', 'the answer reads like any reply');
@@ -210,6 +212,88 @@ check('quick question: before the agent has answered, the tab says when it can b
     dispose();
     host.remove();
     Object.assign(api, before);
+    if (storage === null) localStorage.removeItem('faber.place'); else localStorage.setItem('faber.place', storage);
+  }
+});
+
+check('side chat: the kept thread comes back when it opens again, and a follow-up, Esc, Clear and the draft work', async () => {
+  const settle = () => new Promise((resolve) => setTimeout(resolve, 30));
+  const host = document.createElement('div');
+  document.body.append(host);
+  const before = { open: api.open, state: api.state, warm: api.warm, routeDraft: api.routeDraft, setClock: api.setClock, setShellTexts: api.setShellTexts, askAside: api.askAside, stopAside: api.stopAside, asides: api.asides, clearAsides: api.clearAsides };
+  const storage = localStorage.getItem('faber.place');
+  const c: Conversation = {
+    id: 'side-kept', title: 'Parser', area: 'chat', createdAt: 1, updatedAt: 1, sessions: { claude: 's1' }, queued: [],
+    messages: [{ id: 'q', role: 'user', text: 'Refactor the parser', at: 0 }, { id: 'a', role: 'assistant', text: 'Done.', at: 1, status: 'done', vendor: 'claude', model: 'claude-sonnet-5-5' }],
+  };
+  const initial = { conversations: [{ id: c.id, title: c.title, area: c.area, updatedAt: 1 }], projects: [], vendors: ['claude'],
+    settings: { setup: 'done', tutorialDone: true, language: 'en', appearance: { base: 'sala' } }, running: { revision: 0, items: [] }, quotas: [], usage: [], models: [], version: 'test', look,
+  } as AppState;
+  // What the engine keeps with the conversation: it outlives the view, so it is read again each time the view opens.
+  let kept: Aside[] = [{ id: 'k1', question: 'Why the parser?', answer: 'It was **slow**.', vendor: 'claude', model: 'claude-sonnet-5-5', state: 'done' }];
+  const asked: string[] = [];
+  const stopped: string[] = [];
+  let cleared = 0;
+  api.open = async () => c; api.state = async () => initial;
+  api.warm = async () => {}; api.routeDraft = async () => {};
+  api.setClock = async () => {}; api.setShellTexts = async () => {};
+  api.asides = async () => kept;
+  api.askAside = async (_id, question) => { asked.push(question); return 'k2'; };
+  api.stopAside = async (id) => { stopped.push(id); };
+  api.clearAsides = async () => { cleared++; kept = []; };
+  localStorage.setItem('faber.place', JSON.stringify({ area: 'chat', id: c.id }));
+  localStorage.removeItem('faber.unsent.aside.side-kept');
+  let hear!: (event: AppEvent) => void;
+  const dispose = render(() => createComponent(App, { initial, inbox: { take: (listener?: (event: AppEvent) => void) => { if (listener) hear = listener; } } }), host);
+  const toggle = () => window.dispatchEvent(new KeyboardEvent('keydown', { key: ';', ctrlKey: true, bubbles: true, cancelable: true }));
+  try {
+    await settle();
+    toggle();
+    await settle();
+    equal(host.querySelector('.aside-answer strong')?.textContent, 'slow', 'the kept answer is there as soon as it opens');
+    ok(!host.querySelector('.side-empty'), 'a thread has no suggestions over it');
+    const box = () => host.querySelector<HTMLTextAreaElement>('#aside-box')!;
+    equal(box().placeholder, t('aside.followUp'), 'with a thread the box asks for a follow-up');
+    box().value = 'And the tests?';
+    box().dispatchEvent(new InputEvent('input', { bubbles: true }));
+    toggle();
+    await settle();
+    equal(host.querySelector('[data-surface="aside"]'), null, 'closed');
+    toggle();
+    await settle();
+    equal(box().value, 'And the tests?', 'the draft is kept across closing');
+    box().dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true }));
+    await settle();
+    deepEqual(asked, ['And the tests?'], 'Enter asks');
+    equal(box().value, '', 'and empties the box');
+    kept = [...kept, { id: 'k2', question: 'And the tests?', answer: '', vendor: 'claude', model: 'claude-sonnet-5-5', state: 'running' }];
+    hear({ type: 'asides', conversationId: c.id, asides: kept });
+    await settle();
+    box().dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }));
+    await settle();
+    deepEqual(stopped, ['k2'], 'Esc stops the answer under way');
+    ok(host.querySelector('[data-surface="aside"]'), 'and leaves the view open');
+    kept = [kept[0]!, { ...kept[1]!, state: 'stopped' }];
+    hear({ type: 'asides', conversationId: c.id, asides: kept });
+    await settle();
+    equal(host.querySelectorAll('.aside').length, 2);
+    const clear = [...host.querySelectorAll<HTMLButtonElement>('.side-head button')].find((b) => b.textContent === t('aside.clear'))!;
+    clear.click();
+    await settle();
+    equal(cleared, 1, 'Clear in the head empties the kept thread');
+    hear({ type: 'asides', conversationId: c.id, asides: [] });
+    await settle();
+    const chips = [...host.querySelectorAll<HTMLButtonElement>('.side-empty .chip')].map((b) => b.textContent);
+    deepEqual(chips, [t('aside.recap'), t('aside.left'), t('aside.lastStep')], 'an empty side chat suggests three questions');
+    equal(box().placeholder, t('aside.placeholder'));
+    host.querySelectorAll<HTMLButtonElement>('.side-empty .chip')[1]!.click();
+    await settle();
+    equal(asked.at(-1), t('aside.leftQuestion'), 'a suggestion asks at once');
+  } finally {
+    dispose();
+    host.remove();
+    Object.assign(api, before);
+    localStorage.removeItem('faber.unsent.aside.side-kept');
     if (storage === null) localStorage.removeItem('faber.place'); else localStorage.setItem('faber.place', storage);
   }
 });

@@ -1699,7 +1699,7 @@ fn recap_on_demand(ctx: &mut Ctx) -> Result {
     let before = page.eval(thread)?;
     page.click(&css(".topbar .pane-aside"))?;
     page.wait_visible(&css("#aside-box"))?;
-    for (i, entry) in ["button", "menu", "send"].iter().enumerate() {
+    for entry in ["button", "menu", "send"].iter() {
         match *entry {
             "button" => page.click(&css(".aside-recap"))?,
             "menu" => {
@@ -1720,13 +1720,19 @@ fn recap_on_demand(ctx: &mut Ctx) -> Result {
                 page.click(&css(".composer").role("button", &send).exact())?;
             }
         }
-        page.wait_count(&css(".aside[data-state=done]"), i + 1)?;
+        page.wait_count(&css(".aside[data-state=done]"), 1)?;
         same(
             page.inner_text(&css(".aside-answer").last())?,
             "You asked for a parser refactor. The parser is done. Tests remain open.".to_string(),
             "the fake CLI's side answer",
         )?;
         same(page.eval(thread)?, before.clone(), "the main thread after a recap")?;
+        // Clear in the head empties the side chat, so the next entry asks the recorded recap again with no earlier turns.
+        if *entry != "send" {
+            let clear = page.text_of("aside.clear")?;
+            page.click(&css(".side-head").role("button", &clear).exact())?;
+            page.wait_count(&css(".aside"), 0)?;
+        }
         same(page.eval("document.querySelector('.composer textarea').value")?, json!(""), "recap inserts nothing")?;
         let saved: serde_json::Value =
             serde_json::from_slice(&std::fs::read(&file).map_err(|e| e.to_string())?).map_err(|e| e.to_string())?;
@@ -1734,12 +1740,40 @@ fn recap_on_demand(ctx: &mut Ctx) -> Result {
             same(&saved[key], &conversation[key], &format!("saved {key} after {entry}"))?;
         }
     }
+    const SETTLED: &str =
+        "document.getAnimations().every((a) => a.effect.getTiming().iterations === Infinity || a.playState !== 'running')";
+    // The side chat is kept with the conversation: closed and opened again, the answer is still there.
+    let page = &mut app.page;
+    let close = page.text_of("run.close")?;
+    page.click(&css(".side-head").role("button", &close).exact())?;
+    page.click(&css(".topbar .pane-aside"))?;
+    page.wait_count(&css(".aside[data-state=done]"), 1)?;
+    // The column slides in; each picture is taken once it has settled.
+    page.wait_for("the side chat to settle", SETTLED)?;
     ctx.shot(&mut app, "recap-idle")?;
     ctx.close(app.id)?;
     let output = ctx.output(app.id);
     ensure(!output.contains("sent user") && !output.contains("recorded user"), || {
         format!("the fake CLI received a different question: {output}")
-    })
+    })?;
+    // And after a restart, from its own file beside the conversation, which it never touched.
+    let side = ctx.sb.data.join("side-chats").join("recap-idle.json");
+    let turns: Vec<serde_json::Value> =
+        serde_json::from_slice(&std::fs::read(&side).map_err(|e| format!("no side chat file: {e}"))?).map_err(|e| e.to_string())?;
+    same(turns.len(), 1, "turns kept in the side chat file")?;
+    let mut app = ctx.launch(Launch { claude: CliSlot::Fake, ..Launch::default() })?;
+    let page = &mut app.page;
+    page.click(&css(".list .item").has_text("Parser recap"))?;
+    page.wait_visible(&css("article.ai .actions"))?;
+    page.click(&css(".topbar .pane-aside"))?;
+    page.wait_count(&css(".aside[data-state=done]"), 1)?;
+    same(page.eval(thread)?, before, "the main thread after a restart")?;
+    page.wait_for("the side chat to settle", SETTLED)?;
+    ctx.shot(&mut app, "side-chat-kept")?;
+    super::shell::set_size(&mut app.page, 720, 800)?;
+    pause(0.5);
+    ctx.shot(&mut app, "side-chat-720")?;
+    ctx.close(app.id)
 }
 
 fn edits_queued(ctx: &mut Ctx) -> Result {

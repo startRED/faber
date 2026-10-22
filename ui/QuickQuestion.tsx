@@ -1,12 +1,12 @@
-import { createEffect, createSignal, For, on, Show } from 'solid-js';
+import { createEffect, createSignal, For, on, onCleanup, Show } from 'solid-js';
 import { createStore, reconcile } from 'solid-js/store';
 import { api, errorText, type Aside, type Conversation } from './api.ts';
-import { Icon } from './Glyphs.tsx';
+import { Icon, VendorMark } from './Glyphs.tsx';
 import { fromEngine, t } from './i18n.ts';
 import { Markdown, openLinks } from './markdown.tsx';
-import type { Option } from './models.ts';
+import { prettyModel, vendorName, type Option } from './models.ts';
 import { animateList } from './motion.ts';
-import { useDraft } from './unsent.ts';
+import { keep, kept, release, useDraft } from './unsent.ts';
 
 /** The quick question open in the running column (R250): the conversation it asks about, and a question `/btw` brought. */
 export interface OpenAside {
@@ -19,8 +19,8 @@ export const openedAside = opened;
 /** Opens the quick question in the running column, or goes back to the running list. */
 export const showAside = (open?: OpenAside) => setOpened(open);
 
-// The engine's list per conversation, all of it each time one changes; the answers go when the turn after them ends. Each
-// question keeps its row (by id) while its answer streams, so focus and a selection in it stay.
+// The engine's side thread per conversation, all of it each time one changes; it keeps the newest turns with the
+// conversation. Each question keeps its row (by id) while its answer streams, so focus and a selection in it stay.
 const [lists, setLists] = createStore<Record<string, Aside[]>>({});
 // How many lists the engine sent per conversation: a snapshot asked before the latest one is older than it.
 const heard = new Map<string, number>();
@@ -38,11 +38,18 @@ export function btw(text: string): string | undefined {
   return m ? (m[1] ?? '').trim() : undefined;
 }
 
-/** A quick question on the side of the conversation on screen: it asks a read-only copy of the conversation, and nothing
- * goes back to it unless the person sends an answer to the agent's box (`onTell`). */
+/** The suggestions of an empty side chat: Recap (R265) and two plain questions, each asked at once. */
+const SUGGESTIONS = [
+  { label: 'aside.recap', question: 'aside.recapQuestion' },
+  { label: 'aside.left', question: 'aside.leftQuestion' },
+  { label: 'aside.lastStep', question: 'aside.lastStepQuestion' },
+] as const;
+
+/** A side chat beside the conversation on screen: each question asks a read-only copy of the conversation, with the side
+ * thread's last turns, and nothing goes back to it unless the person sends an answer to the agent's box (`onTell`). */
 export function QuickQuestion(props: {
   conversation?: Conversation;
-  /** The models of the person's AIs; the picker offers those of the conversation's own AI. */
+  /** The models of the person's AIs; the chip offers those of the conversation's own AI. */
   options: Option[];
   onClose: () => void;
   onTell: (text: string) => void;
@@ -50,40 +57,83 @@ export function QuickQuestion(props: {
   const id = () => props.conversation?.id;
   const vendor = () => props.conversation?.messages.findLast((m) => m.role === 'assistant' && m.vendor)?.vendor;
   const asides = () => lists[id() ?? ''] ?? [];
-  const asking = () => asides().some((a) => a.state === 'running');
+  const running = () => asides().find((a) => a.state === 'running');
   const models = () => props.options.filter((o) => o.choice.vendor === vendor());
   const [text, setText] = createSignal('');
   const [model, setModel] = createSignal('');
   const [error, setError] = createSignal('');
+  let body: HTMLDivElement | undefined;
+  let box: HTMLTextAreaElement | undefined;
   useDraft(() => text().trim().length > 0);
-  createEffect(on(id, (conversation) => {
+  // The conversation on screen, kept here: after the view closes its props can no longer be read (an answer to an ask
+  // can come back then, and the cleanup runs then).
+  let shown: string | undefined;
+  // A draft belongs to the conversation it was typed for, even when an answer to it comes back after a switch.
+  const write = (value: string, conversation = id()) => {
+    if (!conversation) return;
+    keep(`aside.${conversation}`, value);
+    if (conversation === shown) setText(value);
+  };
+  createEffect(on(id, (conversation, previous) => {
     setError('');
+    if (previous) release(`aside.${previous}`);
+    shown = conversation;
+    // The draft of this conversation's side chat comes back, as the main box's does.
+    setText(conversation ? kept(`aside.${conversation}`) : '');
     if (!conversation) return;
     const seen = heard.get(conversation) ?? 0;
     void api.asides(conversation).then((list) => {
       if ((heard.get(conversation) ?? 0) === seen) heardAsides(conversation, list);
     }).catch(() => {});
   }));
-  const ask = async (question: string) => {
+  onCleanup(() => {
+    if (shown) release(`aside.${shown}`);
+    shown = undefined;
+  });
+  // The newest turn stays in view while it streams, unless the person scrolled up to read an earlier one.
+  let pinned = true;
+  createEffect(on(() => asides().map((a) => a.answer.length + a.state).join(), () => {
+    if (body && pinned) body.scrollTop = body.scrollHeight;
+  }));
+  // Where a question came from: the side box (it empties on success and gets the words back on failure), `/btw` in the
+  // conversation's box (a failure leaves the words in an empty side box), or a suggestion. Only the box's own words
+  // ever replace its draft.
+  const ask = async (question: string, from: 'box' | 'btw' | 'suggestion') => {
     const conversation = id();
     if (!conversation || !question.trim()) return;
     setError('');
-    // The recap's fixed question is not the person's: their draft in the box stays as it was.
-    const own = question !== t('aside.recapQuestion');
+    pinned = true;
+    if (from !== 'box') box?.focus();
     try {
       await api.askAside(conversation, question, model() || undefined);
-      if (own) setText('');
+      if (from === 'box') write('', conversation);
     } catch (err) {
-      if (own) setText(question);
-      setError(fromEngine(errorText(err)));
+      if (from === 'box' || (from === 'btw' && !kept(`aside.${conversation}`).trim())) write(question, conversation);
+      if (conversation === shown) setError(fromEngine(errorText(err)));
     }
   };
-  // A question `/btw` brought is asked at once, once.
+  const stop = () => {
+    const a = running();
+    if (a) void api.stopAside(a.id).catch(() => {});
+  };
+  // Esc stops the answer under way from anywhere in the column, before it would close the column.
+  const onEscape = (e: KeyboardEvent) => {
+    if (e.key !== 'Escape' || e.defaultPrevented || e.isComposing || !running()) return;
+    const at = e.target instanceof Element ? e.target : null;
+    if (at && at !== document.body && !at.closest('.runcol')) return;
+    e.preventDefault();
+    e.stopPropagation();
+    stop();
+  };
+  window.addEventListener('keydown', onEscape, true);
+  onCleanup(() => window.removeEventListener('keydown', onEscape, true));
+  // A question `/btw` brought is asked at once, once; the recap's fixed question is not the person's either.
   createEffect(on(opened, (open) => {
     if (!open?.question) return;
     setOpened({ conversationId: open.conversationId });
-    if (vendor()) void ask(open.question);
-    else setText(open.question);
+    const from = open.question === t('aside.recapQuestion') ? 'suggestion' : 'btw';
+    if (vendor()) void ask(open.question, from);
+    else if (from === 'btw' && !text().trim()) write(open.question);
   }));
   return (
     <>
@@ -91,89 +141,132 @@ export function QuickQuestion(props: {
         <h2 id="running-title" class="display">
           {t('aside.title')}
         </h2>
+        <Show when={asides().length > 0}>
+          <button class="btn ghost side-clear" onClick={() => id() && void api.clearAsides(id()!).catch(() => {})}>
+            {t('aside.clear')}
+          </button>
+        </Show>
         <button class="iconbtn" aria-label={t('run.close')} title={t('run.close')} onClick={() => props.onClose()}>
           <Icon name="close" />
         </button>
       </div>
-      <div class="rc-body side-body" data-surface="aside" ref={animateList}>
-        <p class="side-meta">{vendor() ? t('aside.note') : t('aside.none')}</p>
-        <For each={asides()}>
-          {(a) => (
-            <section class="aside" data-state={a.state} ref={animateList}>
-              <div class="side-brief">
-                <div class="you">{a.question}</div>
+      <div
+        ref={body}
+        class="rc-body side-body side-chat"
+        data-surface="aside"
+        onScroll={(e) => (pinned = e.currentTarget.scrollHeight - e.currentTarget.scrollTop - e.currentTarget.clientHeight < 48)}
+      >
+        <Show when={vendor()} fallback={<p class="side-meta side-empty">{t('aside.none')}</p>}>
+          <Show when={asides().length === 0}>
+            <div class="side-empty">
+              <p>{t('aside.note')}</p>
+              <div class="chips">
+                <For each={SUGGESTIONS}>
+                  {(s) => (
+                    <button type="button" class="chip suggest" classList={{ 'aside-recap': s.label === 'aside.recap' }} disabled={!!running()} onClick={() => void ask(t(s.question), 'suggestion')}>
+                      {t(s.label)}
+                    </button>
+                  )}
+                </For>
               </div>
-              <Show when={a.answer}>
-                <div class="aside-answer" onClick={openLinks}>
-                  <Markdown text={a.answer} />
-                </div>
-              </Show>
-              <Show when={a.state === 'running' && !a.answer}>
-                <p class="side-meta" role="status">
-                  {t('aside.looking')}
-                </p>
-              </Show>
-              <Show when={a.error}>{(key) => <p class="bad" role="alert">{fromEngine(key())}</p>}</Show>
-              <Show when={a.state === 'stopped'}>
-                <p class="side-meta">{t('aside.stopped')}</p>
-              </Show>
-              <Show when={a.state === 'running'}>
-                <button class="btn ghost" onClick={() => void api.stopAside(a.id).catch(() => {})}>
-                  {t('aside.stop')}
-                </button>
-              </Show>
-              <Show when={a.state === 'done' && a.answer}>
-                <button class="btn ghost" onClick={() => props.onTell(a.answer)}>
-                  {t('aside.send')}
-                </button>
-              </Show>
-            </section>
-          )}
-        </For>
-        <Show when={vendor()}>
-          <form
-            class="side-write"
-            onSubmit={(e) => {
+            </div>
+          </Show>
+          <ol class="side-thread" ref={animateList}>
+            <For each={asides()}>
+              {(a) => (
+                <li class="aside" data-state={a.state}>
+                  <div class="you">{a.question}</div>
+                  <div class="aside-reply">
+                    <div class="model">
+                      <span class="vm" classList={{ claude: a.vendor === 'claude', codex: a.vendor === 'codex' }}>
+                        <VendorMark vendor={a.vendor} />
+                        <b>{a.model ? prettyModel(a.model) : vendorName(a.vendor)}</b>
+                      </span>
+                    </div>
+                    <Show when={a.answer}>
+                      <div class="aside-answer md-small" onClick={openLinks}>
+                        <Markdown text={a.answer} />
+                      </div>
+                    </Show>
+                    <Show when={a.state === 'running' && !a.answer}>
+                      <p class="side-meta looking" role="status">
+                        {t('aside.looking')}
+                      </p>
+                    </Show>
+                    <Show when={a.error}>{(key) => <p class="bad" role="alert">{fromEngine(key())}</p>}</Show>
+                    <Show when={a.state === 'stopped'}>
+                      <p class="side-meta">{t('aside.stopped')}</p>
+                    </Show>
+                    <Show when={a.state === 'done' && a.answer}>
+                      <div class="aside-actions">
+                        <button type="button" class="btn ghost aside-tell" onClick={() => props.onTell(a.answer)}>
+                          <Icon name="up" small />
+                          {t('aside.send')}
+                        </button>
+                      </div>
+                    </Show>
+                  </div>
+                </li>
+              )}
+            </For>
+          </ol>
+        </Show>
+      </div>
+      <Show when={vendor()}>
+        <form
+          class="side-compose"
+          onSubmit={(e) => {
+            e.preventDefault();
+            if (!running()) void ask(text(), 'box');
+          }}
+        >
+          <textarea
+            ref={box}
+            id="aside-box"
+            rows={1}
+            value={text()}
+            aria-label={t('aside.label')}
+            placeholder={t(asides().length ? 'aside.followUp' : 'aside.placeholder')}
+            onInput={(e) => write(e.currentTarget.value)}
+            onKeyDown={(e) => {
+              if (e.key !== 'Enter' || e.shiftKey || e.isComposing) return;
               e.preventDefault();
-              void ask(text());
+              if (!running()) void ask(text(), 'box');
             }}
-          >
-            <label for="aside-box">{t('aside.label')}</label>
-            <textarea
-              id="aside-box"
-              class="field"
-              rows={2}
-              value={text()}
-              placeholder={t('aside.placeholder')}
-              onInput={(e) => setText(e.currentTarget.value)}
-              onKeyDown={(e) => {
-                if (e.key !== 'Enter' || e.shiftKey || e.isComposing) return;
-                e.preventDefault();
-                void ask(text());
-              }}
-            />
-            <div class="aside-row">
-              <button type="button" class="btn ghost aside-recap" disabled={asking()} onClick={() => void ask(t('aside.recapQuestion'))}>
-                {t('aside.recap')}
-              </button>
-              <Show when={models().length > 1}>
-                <select class="field" aria-label={t('aside.model')} value={model()} onChange={(e) => setModel(e.currentTarget.value)}>
+          />
+          <Show when={error()}>
+            <p class="bad" role="alert">
+              {error()}
+            </p>
+          </Show>
+          <div class="cbar">
+            <Show when={models().length > 1}>
+              <label class="chip choose">
+                <VendorMark vendor={vendor()} />
+                <select aria-label={t('aside.model')} value={model()} onChange={(e) => setModel(e.currentTarget.value)}>
                   <option value="">{t('aside.sameModel')}</option>
                   <For each={models()}>{(o) => <option value={o.choice.model}>{o.label}</option>}</For>
                 </select>
-              </Show>
-              <button type="submit" class="btn" disabled={!text().trim() || asking()}>
-                {t('aside.ask')}
-              </button>
-            </div>
-            <Show when={error()}>
-              <p class="bad" role="alert">
-                {error()}
-              </p>
+                <Icon name="down" small />
+              </label>
             </Show>
-          </form>
-        </Show>
-      </div>
+            <Show
+              when={running()}
+              fallback={
+                <button type="submit" class="send" disabled={!text().trim()} aria-label={t('aside.ask')}>
+                  <span aria-hidden="true">{t('aside.ask')}</span>
+                  <Icon name="up" small />
+                </button>
+              }
+            >
+              <button type="button" class="send stop" onClick={stop} aria-label={t('aside.stop')}>
+                <Icon name="stop" small />
+                <span aria-hidden="true">{t('aside.stop')}</span>
+              </button>
+            </Show>
+          </div>
+        </form>
+      </Show>
     </>
   );
 }

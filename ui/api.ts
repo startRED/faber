@@ -746,7 +746,7 @@ export interface RewindResult {
   recovery: boolean;
   notice: string | null;
 }
-/** A quick question on the side of a conversation (R250), as the engine keeps it until the turn after it ends. */
+/** A turn of the side chat of a conversation (R250): the engine keeps its newest 50 with the conversation. */
 export interface Aside {
   id: string;
   question: string;
@@ -946,6 +946,7 @@ export const api = {
   askAside: (id: string, question: string, model?: string) => invoke<string>('ask_aside', { id, question, model }),
   stopAside: (asideId: string) => invoke<void>('stop_aside', { asideId }),
   asides: (id: string) => invoke<Aside[]>('asides', { id }),
+  clearAsides: (id: string) => invoke<void>('clear_asides', { id }),
   unfollowPr: (id: string) => invoke<void>('unfollow_pr', { id }),
   removeProject: (id: string) => invoke<void>('remove_project', { id }),
   showProject: (id: string) => invoke<void>('show_project', { id }),

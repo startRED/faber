@@ -828,6 +828,12 @@ async fn stop_aside(faber: State<'_, Faber>, aside_id: String) -> Res<()> {
 }
 
 #[tauri::command]
+async fn clear_asides(faber: State<'_, Faber>, id: String) -> Res<()> {
+    faber.engine.clear_asides(&id);
+    Ok(())
+}
+
+#[tauri::command]
 async fn asides(faber: State<'_, Faber>, id: String) -> Res<Vec<faber_engine::engine::Aside>> {
     Ok(faber.engine.asides(&id))
 }
@@ -1743,6 +1749,7 @@ fn main() {
                 rewind_redo,
                 ask_aside,
                 stop_aside,
+                clear_asides,
                 asides,
                 unfollow_pr,
                 remove_project,

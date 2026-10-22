@@ -125,6 +125,8 @@ fn read<T: DeserializeOwned>(path: &Path) -> Option<T> {
 
 pub struct Store {
     conversations: PathBuf,
+    /// The side chat of each conversation (R250), a file of its own beside it, so the conversation and its search never read it.
+    side_chats: PathBuf,
     search: crate::search::Search,
     projects: PathBuf,
     chat_groups: PathBuf,
@@ -168,6 +170,7 @@ impl Store {
         Store {
             search: crate::search::Search::new(conversations.clone()),
             conversations,
+            side_chats: data_dir.join("side-chats"),
             projects: data_dir.join("projects.json"),
             chat_groups: data_dir.join("chat-groups.json"),
             settings: data_dir.join("settings.json"),
@@ -335,7 +338,32 @@ impl Store {
             Err(e) if e.kind() == io::ErrorKind::NotFound => {}
             Err(e) => return Err(Fault::of_write(&e)),
         }
+        // Its side chat goes with it; best effort, the conversation is gone already.
+        let _ = self.save_side_chat::<()>(id, &[]);
         Ok(())
+    }
+
+    fn side_file(&self, id: &str) -> Option<PathBuf> {
+        // Ids are UUIDs; anything else could point outside the folder.
+        id.chars().all(|c| c.is_ascii_alphanumeric() || c == '-').then(|| self.side_chats.join(format!("{id}.json")))
+    }
+
+    /// The side chat kept with conversation `id`: its newest turns, or none when it has no file or a damaged one.
+    pub fn side_chat<T: DeserializeOwned>(&self, id: &str) -> Vec<T> {
+        self.side_file(id).and_then(|path| read(&path)).unwrap_or_default()
+    }
+
+    /// Keeps the side chat of conversation `id`; an empty one removes its file.
+    pub fn save_side_chat<T: Serialize>(&self, id: &str, turns: &[T]) -> Result<(), Fault> {
+        let Some(path) = self.side_file(id) else { return Ok(()) };
+        if turns.is_empty() {
+            return match crate::tools::retry_busy(|| fs::remove_file(&path)) {
+                Err(e) if e.kind() != io::ErrorKind::NotFound => Err(Fault::of_write(&e)),
+                _ => Ok(()),
+            };
+        }
+        fs::create_dir_all(&self.side_chats).map_err(|e| Fault::of_write(&e))?;
+        self.write(&path, &turns)
     }
 
     pub fn search(&self) -> crate::search::Search {

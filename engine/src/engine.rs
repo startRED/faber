@@ -971,6 +971,10 @@ impl Engine {
     pub fn asides(&self, id: &str) -> Vec<aside::Aside> {
         self.with(|c| c.asides_of(id))
     }
+    /// Clears the side chat kept with conversation `id`, stopping a question still asking.
+    pub fn clear_asides(&self, id: &str) {
+        self.with(|c| c.clear_asides(id))
+    }
     pub fn warm(&self, req: WarmRequest) {
         self.with(|c| c.warm(req))
     }
@@ -1488,8 +1492,6 @@ impl Core {
         let Some(l) = self.live.get(conv).filter(|l| l.started > 0.0) else { return };
         let (vendor, start, model) = (l.vendor, l.started, l.running.clone().or_else(|| l.model.clone()).unwrap_or_default());
         self.note_span(vendor, start, &model, cost, incomplete);
-        // The turn ended: the quick questions asked before it began are over.
-        self.drop_asides(conv, start);
         if let Some(l) = self.live.get_mut(conv) {
             l.started = 0.0;
         }
