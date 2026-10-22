@@ -4528,8 +4528,8 @@ fn unseen(c: char) -> bool {
 }
 
 /// The row of the running list for a conversation, if its latest reply is streaming, has unanswered permissions or has parked
-/// requests (denied for want of anyone to answer; they wait for the person until the next message, and count as "needs you").
-/// Faber's checks of it count too: running, it is at work; failing with no fix asked, it needs the person (R146).
+/// requests (denied for want of anyone to answer; they wait for the person until the next message or until the person says they
+/// read them, and count as "needs you"). Faber's checks of it count too: running, it is at work; failing with no fix asked, it needs the person (R146).
 /// Cache warmth is not here: it is a quiet note on the reply itself.
 /// The same needs-you decision as the running row and the done card, scoped to the latest reply even after its card was seen.
 fn reply_needs_you(c: &Conversation, live: Option<&Live>) -> bool {
@@ -4541,8 +4541,9 @@ fn reply_needs_you(c: &Conversation, live: Option<&Live>) -> bool {
 fn running_item(c: &Conversation, live: Option<&Live>) -> Option<RunningItem> {
     let reply = c.messages.last().filter(|m| m.role == Role::Assistant)?;
     let permissions = reply.permissions.clone().unwrap_or_default();
-    let parked = reply.parked.clone().unwrap_or_default();
-    let parked_more = reply.parked_more.unwrap_or(0);
+    let seen = reply.parked_seen == Some(true);
+    let parked = reply.parked.clone().filter(|_| !seen).unwrap_or_default();
+    let parked_more = reply.parked_more.filter(|_| !seen).unwrap_or(0);
     let stuck: Vec<String> =
         reply.tools.iter().flatten().filter(|t| t.sign.is_some_and(crate::stuck::Sign::stuck)).map(|t| t.id.clone()).collect();
     let held = reply.follow.as_ref().filter(|f| f.held && f.state.open()).map(|f| (f.number, f.head.clone().unwrap_or_default()));

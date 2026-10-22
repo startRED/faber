@@ -524,9 +524,27 @@ export function Asks(props: { conversationId: string; turnId: string; permission
   );
 }
 
-/** Requests the CLI denied because nobody could answer them. No buttons: the CLI is past them, and what was held back was not
- * done. The words say so and what the person can do. */
-export function Parkeds(props: { parked: Parked[]; more?: number; surface?: string }) {
+const DOES = ['delete', 'history', 'publish', 'install', 'network'];
+
+/** Requests the CLI denied because nobody could answer them. Nothing to allow: the CLI is past them, and what was held back was
+ * not done. The words say so, what a command would have done, and what the person can do; "Got it" takes it off the "needs
+ * you" list, when `seen` is given. */
+export function Parkeds(props: { parked: Parked[]; more?: number; surface?: string; seen?: () => Promise<void> }) {
+  const [sending, setSending] = createSignal(false);
+  const [problem, setProblem] = createSignal<string>();
+  const seen = async (send: () => Promise<void>) => {
+    setProblem(undefined);
+    setSending(true);
+    try {
+      await send();
+    } catch (err) {
+      // Already read here, in the other copy or by a new message: the list drops it on its own.
+      const outcome = answerOutcome(err);
+      if (outcome !== 'stale') setProblem(fromEngine(outcome.problem));
+    } finally {
+      setSending(false);
+    }
+  };
   return (
     <Show when={props.parked.length > 0 || (props.more ?? 0) > 0}>
       <div class="ask parked" data-surface={props.surface} role="status">
@@ -534,13 +552,27 @@ export function Parkeds(props: { parked: Parked[]; more?: number; surface?: stri
         <For each={props.parked}>
           {(p) => (
             <span class="note">
-              {t(`parked.${p.kind}`, { tool: p.tool })}
+              {p.kind === 'command' && p.does && DOES.includes(p.does) ? t(`parked.does.${p.does}`) : t(`parked.${p.kind}`, { tool: p.tool })}
               {p.label ? ` ${p.label}` : ''}
             </span>
           )}
         </For>
         <Show when={props.more}>{(n) => <span class="note">{t('parked.more', { n: n() })}</span>}</Show>
         <span class="note">{t('ask.parkedHint')}</span>
+        <Show when={props.seen}>
+          {(send) => (
+            <div>
+              <button class="btn" disabled={sending()} onClick={() => void seen(send())}>
+                {t('parked.seen')}
+              </button>
+            </div>
+          )}
+        </Show>
+        <Show when={problem()}>
+          <div class="note err" role="alert">
+            {problem()}
+          </div>
+        </Show>
       </div>
     </Show>
   );

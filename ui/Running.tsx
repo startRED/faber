@@ -1,5 +1,5 @@
 import { createMemo, createSignal, For, Show, type Accessor, type ComponentProps } from 'solid-js';
-import type { BackgroundCommand, Conversation, FileChange, Project, RunningItem, Summary } from './api.ts';
+import { api, type BackgroundCommand, type Conversation, type FileChange, type Project, type RunningItem, type Summary } from './api.ts';
 import { AgentChat } from './AgentChat.tsx';
 import { DetailsPane } from './Details.tsx';
 import { Changes } from './Changes.tsx';
@@ -207,7 +207,7 @@ export function Running(props: {
                               {/* Always mounted: an answered question card keeps itself for its fold-away (Asks), as in the thread. */}
                               <Asks conversationId={item().conversationId} turnId={item().turnId} permissions={item().permissions} />
                               <Show when={item().parked?.length || item().parkedMore}>
-                                <Parkeds parked={item().parked ?? []} more={item().parkedMore} />
+                                <Parkeds parked={item().parked ?? []} more={item().parkedMore} seen={() => api.parkedSeen(item().conversationId, item().turnId)} />
                               </Show>
                               <Show when={item().held}>{(held) => <p class="run-held">{t('run.held', { pr: `#${held()[0]}` })}</p>}</Show>
                             </li>

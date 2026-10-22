@@ -246,7 +246,9 @@ impl Watch {
             // denials is one line, not a hundred. The tray number still counts them all.
             let turn = (item.conversation_id.clone(), item.turn_id.clone());
             let new_kept = item.parked.iter().filter(|p| self.seen.insert((turn.0.clone(), turn.1.clone(), p.tool_use_id.clone()))).count();
-            let counted = self.more_seen.insert(turn, item.parked_more as usize).unwrap_or(0);
+            // The highest count told so far: "Got it" hides the count, and a later denial must not tell the earlier ones again.
+            let counted = self.more_seen.get(&turn).copied().unwrap_or(0);
+            self.more_seen.insert(turn, counted.max(item.parked_more as usize));
             let fresh = new_kept + (item.parked_more as usize).saturating_sub(counted);
             let cooled = self.last_parked.is_none_or(|last| now - last >= PARKED_COOLDOWN);
             if fresh > 0 && !window_focused && cooled {
@@ -451,6 +453,7 @@ mod tests {
                 tool: "Bash".into(),
                 kind: "command".into(),
                 label: String::new(),
+                does: String::new(),
                 at: 1,
             })
             .collect();

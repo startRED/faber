@@ -244,6 +244,10 @@ pub struct Parked {
     #[serde(default)]
     /// A file path, or the host of a page; empty for a command and for any other tool. Cut short.
     pub label: String,
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    /// For a command, what it would have done, as one word of Faber's own ("delete", "history", "publish", "install",
+    /// "network"); empty when none fits. Read from the command's program names and never a word of the command itself.
+    pub does: String,
     #[serde(default)]
     /// When it was held back, in milliseconds.
     pub at: u64,
@@ -349,6 +353,9 @@ pub struct Message {
     /// How many more were denied in the turn beyond the few kept (see `parked::MAX_PARKED`).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub parked_more: Option<u32>,
+    /// True once the person said they read the held-back requests: they stay on the reply and no longer need the person.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub parked_seen: Option<bool>,
     /// True when the token numbers cover only part of the turn (sub-model work, or no usage was seen).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub incomplete: Option<bool>,
@@ -768,6 +775,7 @@ impl Message {
             cache_warm_until: None,
             parked: None,
             parked_more: None,
+            parked_seen: None,
             incomplete: None,
             pace: None,
             wait_until: None,

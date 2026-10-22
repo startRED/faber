@@ -81,6 +81,8 @@ export interface Parked {
   kind: "command" | "file" | "page" | "other";
   /** A file path, or the host of a page; empty otherwise. */
   label: string;
+  /** For a command, what it would have done, in one of the engine's own words; absent when none fits. */
+  does?: 'delete' | 'history' | 'publish' | 'install' | 'network';
   at: number;
 }
 export interface Message {
@@ -123,6 +125,8 @@ export interface Message {
   parked?: Parked[];
   /** How many more were denied beyond the few kept. */
   parkedMore?: number;
+  /** True once the person said they read the held-back requests: they no longer count as "needs you". */
+  parkedSeen?: boolean;
   incomplete?: boolean;
   pace?: { kind: 'step' | 'fast' | 'low' | 'learned'; vendor: Vendor };
   /** The mode that really ran this reply, as an engine key, only when it is not the one chosen (`mode.fallback.auto`). */
@@ -901,6 +905,8 @@ export const api = {
   answer: (id: string, turnId: string, requestId: string, allow: boolean, always = false) =>
     invoke<void>('answer', { id, turnId, requestId, allow, always }),
   approvePlan: (id: string, turnId: string, requestId: string, mode?: PermissionMode) => invoke<void>('approve_plan', { id, turnId, requestId, mode: mode ?? null }),
+  /** The person read the requests held back in a reply: it leaves the "needs you" list. */
+  parkedSeen: (id: string, turnId: string) => invoke<void>('parked_seen', { id, turnId }),
   /** The choices for a question the assistant asked: each question's text to the label picked (several joined by a comma). */
   answerQuestion: (id: string, turnId: string, requestId: string, answers: Record<string, string>) =>
     invoke<void>('answer_question', { id, turnId, requestId, answers }),

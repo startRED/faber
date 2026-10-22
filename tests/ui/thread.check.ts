@@ -3,9 +3,9 @@ import { render } from 'solid-js/web';
 import themes from '../../src-tauri/src/themes.json';
 import { Composer } from '../../ui/Composer.tsx';
 import { Thread } from '../../ui/Thread.tsx';
-import type { Message } from '../../ui/api.ts';
+import { api, type Message } from '../../ui/api.ts';
 import { t } from '../../ui/i18n.ts';
-import { check, equal, ok } from './check.ts';
+import { check, deepEqual, equal, ok } from './check.ts';
 
 check('thread: ten tool steps and narration fold into one activity row above the final answer', async () => {
   const root = document.createElement('div');
@@ -245,5 +245,38 @@ check('thread: while an answer streams every paragraph stays in the answer, and 
   } finally {
     dispose();
     root.remove();
+  }
+});
+
+check('thread: a held-back command says what it would have done, and Got it on the latest reply takes it off the needs-you list', async () => {
+  const original = api.parkedSeen;
+  const calls: [string, string][] = [];
+  api.parkedSeen = async (id, turn) => void calls.push([id, turn]);
+  const root = document.createElement('div');
+  document.body.append(root);
+  const held = (id: string, over: Partial<Message> = {}): Message => ({
+    id, role: 'assistant', at: 1, status: 'done', text: 'Done.',
+    parked: [{ toolUseId: `t-${id}`, tool: 'Bash', kind: 'command', label: '', does: 'delete', at: 1 }], ...over,
+  });
+  const [messages, setMessages] = createSignal<Message[]>([held('older'), held('latest')]);
+  const dispose = render(() => createComponent(Thread, {
+    get messages() { return messages(); }, from: 0, conversationId: 'held', options: [], onBranch: () => {},
+  }), root);
+  try {
+    const cards = () => [...root.querySelectorAll('.ask.parked')];
+    equal(cards().length, 2);
+    ok(cards()[0]!.textContent?.includes(t('parked.does.delete')), 'the kind of command, never its words');
+    equal(cards()[0]!.querySelector('button'), null, 'an older reply is only a record');
+    const got = cards()[1]!.querySelector('button')!;
+    equal(got.textContent, t('parked.seen'));
+    got.click();
+    await Promise.resolve();
+    deepEqual(calls, [['held', 'latest']]);
+    setMessages([held('older'), held('latest', { parkedSeen: true })]);
+    equal(cards()[1]!.querySelector('button'), null, 'once read, the note stays without the button');
+    setMessages([held('latest', { parked: [{ toolUseId: 't', tool: 'Bash', kind: 'command', label: '', at: 1 }] })]);
+    ok(cards()[0]!.textContent?.includes(t('parked.command')), 'a command with no known kind keeps the plain words');
+  } finally {
+    dispose(); root.remove(); api.parkedSeen = original;
   }
 });

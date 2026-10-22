@@ -548,6 +548,11 @@ fn approve_credits(faber: State<'_, Faber>, id: String, turn_id: String, vendor:
 fn move_turn(faber: State<'_, Faber>, id: String, turn_id: String) -> Res<()> {
     faber.engine.move_turn(&id, &turn_id)
 }
+/// The person read the requests held back in a reply: they leave the "needs you" list.
+#[tauri::command]
+fn parked_seen(faber: State<'_, Faber>, id: String, turn_id: String) -> Res<()> {
+    faber.engine.parked_seen(&id, &turn_id)
+}
 #[tauri::command]
 fn wait_turn(faber: State<'_, Faber>, id: String, turn_id: String) -> Res<()> {
     faber.engine.wait_turn(&id, &turn_id)
@@ -1701,6 +1706,7 @@ fn main() {
                 approve_credits,
                 move_turn,
                 wait_turn,
+                parked_seen,
                 route_draft,
                 forget_auto_learned,
                 interrupt,

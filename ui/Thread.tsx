@@ -534,7 +534,12 @@ function Answer(props: Shared & { m: Accessor<Message>; messages?: Message[]; pr
       </Show>
       <Show when={changing()}>{(change) => <ChangedLines change={change()} />}</Show>
       <Asks conversationId={props.conversationId} turnId={m().id} permissions={waiting()} surface="ask" />
-      <Parkeds parked={m().parked ?? []} more={m().parkedMore} surface="ask" />
+      <Parkeds
+        parked={m().parked ?? []}
+        more={m().parkedMore}
+        surface="ask"
+        seen={props.last && !m().parkedSeen ? () => api.parkedSeen(props.conversationId, m().id) : undefined}
+      />
       <div class="md" aria-busy={working()} onClick={openLinks} onKeyDown={pressImage}>
         <PieceReply text={finalText()} offset={boundary()} messageId={m().id} conversationId={props.conversationId} answers={props.visuals ?? []} revision={props.pieceRevision} />
         <VisualFiles answers={props.visuals ?? []} messageId={m().id} conversationId={props.conversationId} />
