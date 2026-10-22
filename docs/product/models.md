@@ -101,12 +101,11 @@ phase.
 9. **Keep each Haiku request under 100K tokens and each GPT-6 request under 272K.** Above those points the whole request
    is billed more.
 
-Rules 1, 2, 3, 5, 6, 8 and 9 hold today (rule 5's silence watch covers an answer; a tool step it reports as running, a helper's own process and a quick question are not watched). Every session start passes its mode, model and effort (the CLI probes that start no
+Rules 1 to 6, 8 and 9 hold today (rule 4 wherever work changes vendor: a conversation that moves to the other AI carries its earlier messages, or a summary of them, as text, `engine/src/handover.rs`, and the helper gets a written brief; rule 5's silence watch covers an answer; a tool step it reports as running, a helper's own process and a quick question are not watched). Every session start passes its mode, model and effort (the CLI probes that start no
 session carry no model: Codex's lists of models, quota and threads, and Claude Code's `--help` and its `/usage` read), the engine keeps each session's start-up
 `capabilities`, and every result becomes a `reason.*` key. The engine that already drives the CLIs has known legacy
 exceptions to the others. They are known defects of the old code, no new code may add to them, and each phase closes some:
 
 | Rule | What the engine does today | Closed in |
 | :--- | :--- | :--- |
-| 4 | There is no lead agent yet, so there is no hand-over | Phase 3 |
-| 7 | The engine keeps no running budget | Phase 3 |
+| 7 | Faber counts spend per turn itself (`engine/src/ledger.rs`), but no estimate warns before big work and nothing changes to economy mode | Phase 3 |
