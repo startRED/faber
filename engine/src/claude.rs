@@ -188,6 +188,9 @@ pub fn tool_deny(var: &dyn Fn(&str) -> Option<String>) -> Vec<String> {
         rules.push(format!("Read({path})"));
         rules.push(format!("Edit({path})"));
     }
+    // Faber's approval records may be read but never changed (`permissions::FABER_RECORDS`); an Edit rule covers Write too.
+    let [kept, trust] = crate::permissions::FABER_RECORDS;
+    rules.extend([format!("Edit(//**/{kept})"), format!("Edit(//**/{trust}/**)")]);
     rules
 }
 

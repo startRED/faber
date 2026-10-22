@@ -2062,6 +2062,7 @@ export const de: Messages = {
   'notes.202.better': 'Das Adressfeld von Fabers Browser sucht auch nach den Wörtern, die du eingibst, und Zurück, Vor und Neu laden stehen immer an derselben Stelle.',
   'notes.203.new': 'Du siehst jetzt, welche Werkzeuge aus dem Katalog eine Unterhaltung nutzt und warum: Klicke oben in einer Unterhaltung auf die Prozentzahl des Kontexts.',
   'notes.204.better': 'Strg 1, 2 und 3 öffnen Chat, Projekte und Katalog, und Alt mit Hoch oder Runter wechselt zur vorherigen oder nächsten Unterhaltung der Seitenleiste. Zwei Felder wiederholen ihren Titel nicht mehr.',
+  'notes.205.fixed': 'Eine KI, die in einem Projekt arbeitet, kann die Liste der Entscheidungen, die du behalten hast, nicht mehr ändern.',
   'update.checking': 'Suche nach einem Update…',
   'update.downloading': 'Update wird heruntergeladen…',
   'update.downloadingPercent': 'Update wird heruntergeladen… {percent} %',

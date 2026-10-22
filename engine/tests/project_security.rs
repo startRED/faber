@@ -701,3 +701,35 @@ fn r124_forbidden_folders_are_the_system_ones_and_the_credential_ones() {
         }
     }
 }
+
+/// Faber's approval records cannot be forged by an agent: Claude denies changing them in every mode, and a file change or
+/// command that names one is refused for both CLIs before any card, whatever folder it runs from. Reading stays allowed.
+#[test]
+fn an_agent_can_never_change_fabers_approval_records() {
+    use faber_engine::claude::tool_deny;
+    use faber_engine::permissions::touches_credentials;
+    let none = |_: &str| None;
+    let rules = tool_deny(&none);
+    assert!(rules.contains(&"Edit(//**/decisions-kept.json)".to_string()), "{rules:?}");
+    assert!(rules.contains(&"Edit(//**/faber-trust/**)".to_string()), "{rules:?}");
+    assert!(!rules.iter().any(|r| r.starts_with("Read(") && (r.contains("decisions-kept") || r.contains("faber-trust"))));
+    let data = "C:/Users/me/AppData/Roaming/Faber";
+    let attempts = [
+        // Claude's Write and Edit tools.
+        (json!({ "file_path": format!("{data}/decisions-kept.json"), "content": "{}" }), None),
+        (json!({ "file_path": format!("{data}/Faber-Trust/records.json") }), None),
+        // A command from a Chat folder inside the data folder, by a relative path.
+        (json!({ "command": "echo {} > ../../decisions-kept.json" }), Some(format!("{data}/chat/1"))),
+        // Codex's file-change request.
+        (json!([{ "path": format!("{data}/faber-trust/rules.json"), "kind": { "type": "update" }, "diff": "+x" }]), None),
+    ];
+    for (input, cwd) in attempts {
+        assert!(touches_credentials(&input, cwd.as_deref(), &none), "{input}");
+    }
+    assert!(!touches_credentials(&json!({ "file_path": format!("{data}/chat/1/notes.md") }), None, &none));
+    // Work that only mentions a record's name in what it writes goes on.
+    let text = "keep decisions-kept.json and faber-trust/ safe";
+    assert!(!touches_credentials(&json!({ "file_path": "E:/work/notes.md", "content": text }), None, &none));
+    assert!(!touches_credentials(&json!({ "file_path": "E:/work/notes.md", "old_string": "a", "new_string": text }), None, &none));
+    assert!(!touches_credentials(&json!([{ "path": "E:/work/notes.md", "kind": { "type": "update" }, "diff": text }]), None, &none));
+}

@@ -1942,6 +1942,7 @@ export const en = {
   'notes.202.better': "The address field of Faber's browser also searches the words you type, and Back, Forward and Reload are always in the same place.",
   'notes.203.new': 'You can see which Catalog tools a conversation is using and why: click the context percentage at the top of any conversation.',
   'notes.204.better': 'Ctrl 1, 2 and 3 open Chat, Projects and Catalog, and Alt with Up or Down moves to the previous or next conversation in the sidebar. Two search boxes no longer repeat their label.',
+  'notes.205.fixed': 'An AI working in a project can no longer change the record of the decisions you kept.',
   'update.checking': 'Looking for an update…',
   'update.downloading': 'Downloading update…',
   'update.downloadingPercent': 'Downloading update… {percent}%',

@@ -2049,6 +2049,7 @@ export const ptBR: Messages = {
   'notes.202.better': 'O campo de endereço do navegador do Faber também pesquisa as palavras que você digita, e Voltar, Avançar e Recarregar ficam sempre no mesmo lugar.',
   'notes.203.new': 'Agora dá para ver quais ferramentas do Catálogo uma conversa está usando e por quê: clique na porcentagem do contexto, no topo de qualquer conversa.',
   'notes.204.better': 'Ctrl 1, 2 e 3 abrem Chat, Projetos e Catálogo, e Alt com Cima ou Baixo vai para a conversa anterior ou a próxima da barra lateral. Duas caixas de busca não repetem mais o próprio nome.',
+  'notes.205.fixed': 'Uma IA trabalhando num projeto não consegue mais mudar o registro das decisões que você manteve.',
   'update.checking': 'Procurando atualização…',
   'update.downloading': 'Baixando atualização…',
   'update.downloadingPercent': 'Baixando atualização… {percent}%',

@@ -283,6 +283,11 @@ pub fn child_env(root: &Path) -> Value {
 const CREDENTIAL_FOLDERS: [&str; 8] = [".ssh", ".aws", ".claude", ".codex", ".gemini", ".docker", ".azure", ".kube"];
 const CREDENTIAL_FILES: [&str; 5] = [".claude.json", ".credentials.json", ".git-credentials", ".npmrc", "hosts.yml"];
 
+/// Faber's own records of what the person approved, in its data folder: the kept decisions (R16) and the `faber-trust`
+/// folder of the work method. An agent that wrote one could forge the person's approval, so no agent may change them in any
+/// mode, and a command that names one is refused like a sign-in. Their names are distinct enough to match anywhere.
+pub const FABER_RECORDS: [&str; 2] = ["decisions-kept.json", "faber-trust"];
+
 /// A variable the CLIs document for moving their sign-in somewhere else: the variable, whether it names a file, and the
 /// folder inside its value that holds the sign-in.
 const RELOCATED: [(&str, bool, &str); 8] = [
@@ -400,7 +405,10 @@ pub fn touches_credentials(input: &Value, cwd: Option<&str>, var: &dyn Fn(&str) 
     // A path is a credential when a piece of it is a credential name or it is inside a moved sign-in folder.
     let names_credential = |path: &str| inside_any(path, &moved) || path.split('/').any(credential_piece);
     let cwd = cwd.map(|c| normal(&std::fs::canonicalize(c).map_or_else(|_| c.to_string(), |p| p.to_string_lossy().into_owned())));
-    if cwd.as_deref().is_some_and(|c| inside_any(c, &moved) || c.split('/').any(credential_piece)) {
+    if cwd.as_deref().is_some_and(|c| inside_any(c, &moved) || c.split('/').any(|p| credential_piece(p) || record_piece(p))) {
+        return true;
+    }
+    if names_record(input) {
         return true;
     }
     texts.iter().any(|text| {
@@ -413,6 +421,22 @@ pub fn touches_credentials(input: &Value, cwd: Option<&str>, var: &dyn Fn(&str) 
                     .any(|token| names_credential(&resolve(cwd, token)))
             })
     })
+}
+
+fn record_piece(piece: &str) -> bool {
+    FABER_RECORDS.contains(&piece.trim_end_matches(['.', ' ']))
+}
+
+/// Does a path or a command of a tool's input name one of `FABER_RECORDS`? What is written (a file's text, an edit's old
+/// and new strings, a patch) is skipped: a source file or a note that mentions a record's name is ordinary work.
+fn names_record(input: &Value) -> bool {
+    const CONTENTS: [&str; 5] = ["content", "old_string", "new_string", "diff", "new_source"];
+    match input {
+        Value::String(s) => normal(s).split(|c: char| c == '/' || c.is_whitespace() || "\"'`;|&<>()=,".contains(c)).any(record_piece),
+        Value::Array(items) => items.iter().any(names_record),
+        Value::Object(map) => map.iter().any(|(key, value)| !CONTENTS.contains(&key.as_str()) && names_record(value)),
+        _ => false,
+    }
 }
 
 fn inside_any(path: &str, dirs: &[String]) -> bool {
