@@ -3,7 +3,7 @@
 //! tests run it (`engine/tests/all.rs`) and the runner (`engine/examples/bench.rs`) includes the same file.
 //! How to run the benchmark: docs/dev/benchmark.md.
 
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 // --- Requests -------------------------------------------------------------------------------------------------------
@@ -229,7 +229,7 @@ pub fn judge_prompt(request: &str, a: &str, b: &str) -> String {
 
 // --- What a CLI reported --------------------------------------------------------------------------------------------
 
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Usage {
     pub input: u64,
     pub output: u64,
@@ -548,6 +548,388 @@ pub fn render_tables(rows: &[Row], spent: &Spend, cap: &Cap) -> String {
     out
 }
 
+// --- Card pairs: the token gate of the start card ---------------------------------------------------------------------
+// Own work method, "Cost" (docs/superpowers/specs/2026-10-22-own-work-method.md); how to run: docs/dev/benchmark.md.
+
+/// A paired run is Faber with the start card on or off; everything else in the two is the same.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum Arm {
+    Card,
+    NoCard,
+}
+
+impl Arm {
+    pub fn name(self) -> &'static str {
+        match self {
+            Arm::Card => "card",
+            Arm::NoCard => "no card",
+        }
+    }
+    pub fn other(self) -> Arm {
+        match self {
+            Arm::Card => Arm::NoCard,
+            Arm::NoCard => Arm::Card,
+        }
+    }
+}
+
+/// Which arm of pair `pair` runs first: they alternate, so the prompt cache the first arm warms helps each arm equally often.
+/// It does not depend on the run, so a run that adds pairs (`--pair-start`) continues the alternation.
+pub fn first_arm(pair: usize) -> Arm {
+    if pair.is_multiple_of(2) { Arm::Card } else { Arm::NoCard }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum Condition {
+    /// The first conversation of a new engine, data folder and project.
+    Cold,
+    /// A second new conversation in the same project, right after the first.
+    Warm,
+    /// A follow-up message in the first conversation, after the engine (and its CLI processes) was closed and started again.
+    Resumed,
+}
+
+impl Condition {
+    pub fn name(self) -> &'static str {
+        match self {
+            Condition::Cold => "cold",
+            Condition::Warm => "warm",
+            Condition::Resumed => "resumed",
+        }
+    }
+}
+
+/// `cold,warm,resumed`, in any order and without repeats.
+pub fn parse_conditions(text: &str) -> Result<Vec<Condition>, String> {
+    let mut out = Vec::new();
+    for word in text.split(',').map(str::trim).filter(|w| !w.is_empty()) {
+        let condition = [Condition::Cold, Condition::Warm, Condition::Resumed]
+            .into_iter()
+            .find(|c| c.name() == word)
+            .ok_or_else(|| format!("a condition is cold, warm or resumed, not {word}"))?;
+        if !out.contains(&condition) {
+            out.push(condition);
+        }
+    }
+    if out.is_empty() { Err("name at least one condition".into()) } else { Ok(out) }
+}
+
+/// One session of one arm: what it cost and whether it succeeded. The gate reads only these.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct CardRun {
+    pub vendor: String,
+    pub request: String,
+    pub condition: Condition,
+    pub pair: usize,
+    pub arm: Arm,
+    /// The session ended well and its proof passed, or (no proof) the blind judge found the work acceptable.
+    pub success: bool,
+    /// For the condition's own turns only (the cold turn that led to a warm or resumed one is its own run).
+    pub usage: Usage,
+    /// Replies of the agent in these turns: more than one means Faber's checks sent it back to fix something.
+    pub replies: u64,
+    /// Tool uses in those replies. The CLIs do not report their model calls through the engine; this is the nearest count.
+    pub tool_calls: u64,
+    pub secs: f64,
+    pub cost_usd: Option<f64>,
+    pub proof: Option<bool>,
+    pub accepted: Option<bool>,
+    pub note: Option<String>,
+}
+
+/// What the gate compares in a run: input (not read from the cache), cache writes (input the model read for the first
+/// time and the cache stored) and output. Cache reads are the repeated, cheap part and are reported apart, never in it.
+pub fn gate_tokens(run: &CardRun) -> u64 {
+    run.usage.fresh()
+}
+
+/// The judge of a request with no proof: one answer, with no sign of the arm, acceptable or not.
+pub const ACCEPT_INSTRUCTIONS: &str = "You judge one answer to a request from a person. You do not know who or what wrote it, and names \
+inside it say nothing about it. Decide whether the person got what they asked for: it does what was asked, is correct, complete and \
+clear, without padding or invented facts, and they would not need to ask again or redo it. When work was done in a folder, the files \
+matter more than the words about them. An automatic check is a fact: a failed one is a real defect. A longer answer is not a better \
+one. Think briefly, then end with one line of JSON and nothing after it: \
+{\"acceptable\":true or false,\"score\":<1-10>,\"reason\":\"one or two plain sentences\"}.";
+
+pub fn accept_prompt(request: &str, entry: &str) -> String {
+    format!("## The request\n{}\n\n## The answer\n{entry}\n", request.trim())
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct Accept {
+    pub acceptable: bool,
+    pub score: Option<f64>,
+    pub reason: String,
+}
+
+/// The judge's last JSON object with an `acceptable` flag. Text before it is ignored.
+pub fn parse_accept(text: &str) -> Option<Accept> {
+    let mut end = text.len();
+    while let Some(close) = text[..end].rfind('}') {
+        let mut start = close;
+        while let Some(open) = text[..start].rfind('{') {
+            if let Ok(v) = serde_json::from_str::<Value>(&text[open..=close])
+                && let Some(acceptable) = v.get("acceptable").and_then(Value::as_bool)
+            {
+                return Some(Accept {
+                    acceptable,
+                    score: v.get("score").and_then(Value::as_f64),
+                    reason: v.get("reason").and_then(Value::as_str).unwrap_or_default().trim().to_string(),
+                });
+            }
+            start = open;
+        }
+        end = close;
+    }
+    None
+}
+
+/// The pairs a group runs before "three more pairs" has been used: the spec runs three, then three more when too close.
+pub const BASE_PAIRS: usize = 3;
+/// The most the card may add to input plus output, as a share of what the runs without it used.
+pub const ALLOWED_GROWTH: f64 = 0.05;
+
+/// One measure over a group's usable pairs: the sums for each arm, their difference and the spread of the per-pair
+/// differences (each pair's difference is summed over the requests; the spread is their sample standard deviation).
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct Delta {
+    pub card: u64,
+    pub no_card: u64,
+    pub diff: i64,
+    pub spread: f64,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum GateResult {
+    Pass,
+    Fail,
+    /// Within the spread of the paired runs: three more pairs run.
+    TooClose,
+}
+
+impl GateResult {
+    pub fn word(self) -> &'static str {
+        match self {
+            GateResult::Pass => "PASS",
+            GateResult::Fail => "FAIL",
+            GateResult::TooClose => "TOO CLOSE (three more pairs)",
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct GateRow {
+    pub vendor: String,
+    pub condition: Condition,
+    pub requests: usize,
+    pub pairs: usize,
+    /// Runs left out because the other arm of their pair is missing, or the pair is incomplete in another request.
+    pub left_out: usize,
+    /// The gate's measure: input + cache writes + output.
+    pub tokens: Delta,
+    /// `tokens.diff` as a share of the runs without the card.
+    pub percent: f64,
+    pub input: Delta,
+    pub cache_write: Delta,
+    pub output: Delta,
+    /// Reported apart; not in `tokens`.
+    pub cache_read: Delta,
+    pub replies: Delta,
+    pub tool_calls: Delta,
+    pub successes_card: usize,
+    pub successes_no_card: usize,
+    pub result: GateResult,
+    pub why: String,
+}
+
+type PairedRuns<'a> = Vec<(Vec<&'a CardRun>, Vec<&'a CardRun>)>;
+
+fn delta(pairs: &PairedRuns, measure: fn(&CardRun) -> u64) -> Delta {
+    let sums: Vec<(u64, u64)> =
+        pairs.iter().map(|(c, n)| (c.iter().map(|r| measure(r)).sum(), n.iter().map(|r| measure(r)).sum())).collect();
+    let (card, no_card) = sums.iter().fold((0, 0), |a, s| (a.0 + s.0, a.1 + s.1));
+    let diffs: Vec<f64> = sums.iter().map(|s| s.0 as f64 - s.1 as f64).collect();
+    let spread = if diffs.len() < 2 {
+        0.0
+    } else {
+        let mean = diffs.iter().sum::<f64>() / diffs.len() as f64;
+        (diffs.iter().map(|d| (d - mean).powi(2)).sum::<f64>() / (diffs.len() - 1) as f64).sqrt()
+    };
+    Delta { card, no_card, diff: card as i64 - no_card as i64, spread }
+}
+
+/// The gate, for each CLI and each condition apart. Only pairs that are complete in every request of the group count (the
+/// sums are over the same requests in both arms). It passes when the card has no fewer successes and its excess over
+/// the allowed 5% (the mean difference of the per-pair sums, less 5% of the mean tokens without the card) is below minus the
+/// spread; it fails beyond plus the spread; in between it is too close to call. With more than `BASE_PAIRS` pairs the
+/// three more have been run, and too close counts as failing.
+pub fn card_gate(runs: &[CardRun]) -> Vec<GateRow> {
+    let mut groups: Vec<(String, Condition)> = runs.iter().map(|r| (r.vendor.clone(), r.condition)).collect();
+    groups.sort();
+    groups.dedup();
+    groups.into_iter().map(|(vendor, condition)| gate_group(&vendor, condition, runs)).collect()
+}
+
+fn gate_group(vendor: &str, condition: Condition, runs: &[CardRun]) -> GateRow {
+    let group: Vec<&CardRun> = runs.iter().filter(|r| r.vendor == vendor && r.condition == condition).collect();
+    let mut requests: Vec<&str> = group.iter().map(|r| r.request.as_str()).collect();
+    requests.sort();
+    requests.dedup();
+    let mut indexes: Vec<usize> = group.iter().map(|r| r.pair).collect();
+    indexes.sort();
+    indexes.dedup();
+    let at =
+        |request: &str, pair: usize, arm: Arm| group.iter().rev().find(|r| r.request == request && r.pair == pair && r.arm == arm).copied();
+    let usable: Vec<usize> = indexes
+        .into_iter()
+        .filter(|p| requests.iter().all(|q| at(q, *p, Arm::Card).is_some() && at(q, *p, Arm::NoCard).is_some()))
+        .collect();
+    let pairs: PairedRuns = usable
+        .iter()
+        .map(|p| {
+            let side = |arm| requests.iter().filter_map(|q| at(q, *p, arm)).collect::<Vec<_>>();
+            (side(Arm::Card), side(Arm::NoCard))
+        })
+        .collect();
+    let left_out = group.len() - pairs.iter().map(|(c, n)| c.len() + n.len()).sum::<usize>();
+    let tokens = delta(&pairs, gate_tokens);
+    let percent = if tokens.no_card == 0 { 0.0 } else { tokens.diff as f64 * 100.0 / tokens.no_card as f64 };
+    let successes = |card: bool| pairs.iter().flat_map(|p| if card { &p.0 } else { &p.1 }).filter(|r| r.success).count();
+    let (successes_card, successes_no_card) = (successes(true), successes(false));
+    let n = pairs.len();
+    let (result, why) = if n == 0 {
+        (GateResult::TooClose, "no complete pair yet".to_string())
+    } else if successes_card < successes_no_card {
+        (GateResult::Fail, format!("fewer successes with the card ({successes_card} against {successes_no_card})"))
+    } else if tokens.no_card == 0 {
+        (GateResult::Fail, "nothing was measured without the card".to_string())
+    } else if n < 2 {
+        (GateResult::TooClose, "one pair has no spread to judge by".to_string())
+    } else {
+        let excess = (tokens.diff as f64 - ALLOWED_GROWTH * tokens.no_card as f64) / n as f64;
+        let spread = tokens.spread;
+        let line = format!(
+            "{percent:+.1}% tokens with the card; per pair {excess:+.0} beyond the allowed {:.0}%, spread {spread:.0}",
+            ALLOWED_GROWTH * 100.0
+        );
+        if excess > spread {
+            (GateResult::Fail, format!("more than 5% more tokens: {line}"))
+        } else if excess <= -spread {
+            (GateResult::Pass, format!("within 5% and no fewer successes: {line}"))
+        } else if n > BASE_PAIRS {
+            (GateResult::Fail, format!("still within the spread after more pairs, which counts as failing: {line}"))
+        } else {
+            (GateResult::TooClose, format!("within the spread: {line}"))
+        }
+    };
+    GateRow {
+        vendor: vendor.to_string(),
+        condition,
+        requests: requests.len(),
+        pairs: n,
+        left_out,
+        percent,
+        input: delta(&pairs, |r| r.usage.input),
+        cache_write: delta(&pairs, |r| r.usage.cache_write),
+        output: delta(&pairs, |r| r.usage.output),
+        cache_read: delta(&pairs, |r| r.usage.cache_read),
+        replies: delta(&pairs, |r| r.replies),
+        tool_calls: delta(&pairs, |r| r.tool_calls),
+        tokens,
+        successes_card,
+        successes_no_card,
+        result,
+        why,
+    }
+}
+
+/// The gate's table, the measures apart, and every run, in Markdown.
+pub fn render_card_tables(runs: &[CardRun], gate: &[GateRow]) -> String {
+    let mut out = String::from(
+        "| CLI | Condition | Requests | Pairs | Successes card / no card | Tokens card | Tokens no card | Difference | Spread | Result |\n\
+         | :--- | :--- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | :--- |\n",
+    );
+    for g in gate {
+        out.push_str(&format!(
+            "| {} | {} | {} | {} | {} / {} | {} | {} | {:+} ({:+.1}%) | {:.0} | {} |\n",
+            g.vendor,
+            g.condition.name(),
+            g.requests,
+            g.pairs,
+            g.successes_card,
+            g.successes_no_card,
+            g.tokens.card,
+            g.tokens.no_card,
+            g.tokens.diff,
+            g.percent,
+            g.tokens.spread,
+            g.result.word()
+        ));
+    }
+    out.push_str("\nTokens are input + cache writes + output; cache reads are listed apart and are not in them.\n");
+    for g in gate {
+        let left = if g.left_out > 0 { format!(", {} run(s) left out for want of a complete pair", g.left_out) } else { String::new() };
+        out.push_str(&format!(
+            "\n{} {}, {} pair(s) over {} request(s){left}: {}\n",
+            g.vendor,
+            g.condition.name(),
+            g.pairs,
+            g.requests,
+            g.why
+        ));
+    }
+    out.push_str("\n| CLI | Condition | Measure | Card | No card | Difference ± spread |\n| :--- | :--- | :--- | ---: | ---: | ---: |\n");
+    for g in gate {
+        for (name, d) in [
+            ("input (not cached)", &g.input),
+            ("cache writes", &g.cache_write),
+            ("output", &g.output),
+            ("cached input (cache reads, not in the gate)", &g.cache_read),
+            ("agent replies (more than one a session: checks sent it back)", &g.replies),
+            ("tool uses", &g.tool_calls),
+        ] {
+            out.push_str(&format!(
+                "| {} | {} | {name} | {} | {} | {:+} ± {:.0} |\n",
+                g.vendor,
+                g.condition.name(),
+                d.card,
+                d.no_card,
+                d.diff,
+                d.spread
+            ));
+        }
+    }
+    out.push_str(
+        "\n| CLI | Condition | Pair | Request | Arm | Success | Proof | Judge | Tokens | Cached | Replies | s | US$ |\n\
+         | :--- | :--- | ---: | :--- | :--- | :--- | :--- | :--- | ---: | ---: | ---: | ---: | ---: |\n",
+    );
+    let mut sorted: Vec<&CardRun> = runs.iter().collect();
+    sorted.sort_by(|a, b| (&a.vendor, a.condition, a.pair, &a.request, a.arm).cmp(&(&b.vendor, b.condition, b.pair, &b.request, b.arm)));
+    let yes = |v: Option<bool>| v.map_or("-", |b| if b { "pass" } else { "FAIL" });
+    for r in sorted {
+        out.push_str(&format!(
+            "| {} | {} | {} | {} | {} | {} | {} | {} | {} | {} | {} | {:.0} | {} |\n",
+            r.vendor,
+            r.condition.name(),
+            r.pair + 1,
+            r.request,
+            r.arm.name(),
+            if r.success { "yes" } else { "NO" },
+            yes(r.proof),
+            yes(r.accepted),
+            gate_tokens(r),
+            r.usage.cache_read,
+            r.replies,
+            r.secs,
+            usd_word(r.cost_usd)
+        ));
+    }
+    out
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -770,5 +1152,137 @@ mod tests {
             text.contains("Not run: research (the cap was reached)") && text.contains("US$0.600 for the sides, US$0.300 for the judge"),
             "{text}"
         );
+    }
+
+    fn card_run(request: &str, pair: usize, arm: Arm, tokens: u64, success: bool) -> CardRun {
+        CardRun {
+            vendor: "claude".into(),
+            request: request.into(),
+            condition: Condition::Cold,
+            pair,
+            arm,
+            success,
+            usage: Usage { input: tokens / 2, output: tokens / 4, cache_read: 9_000, cache_write: tokens - tokens / 2 - tokens / 4 },
+            replies: 1,
+            tool_calls: 3,
+            secs: 10.0,
+            cost_usd: None,
+            proof: None,
+            accepted: None,
+            note: None,
+        }
+    }
+
+    /// Two requests, one pair per entry of `pairs`: (tokens with the card, tokens without) of each request together.
+    fn card_runs(pairs: &[(u64, u64)]) -> Vec<CardRun> {
+        let mut runs = Vec::new();
+        for (p, (with, without)) in pairs.iter().enumerate() {
+            for request in ["a", "b"] {
+                runs.push(card_run(request, p, Arm::Card, with / 2, true));
+                runs.push(card_run(request, p, Arm::NoCard, without / 2, true));
+            }
+        }
+        runs
+    }
+
+    #[test]
+    fn the_arms_alternate_which_goes_first_and_the_conditions_parse() {
+        assert_eq!((first_arm(0), first_arm(1), first_arm(2), first_arm(5)), (Arm::Card, Arm::NoCard, Arm::Card, Arm::NoCard));
+        assert_eq!(Arm::Card.other(), Arm::NoCard);
+        assert_eq!(parse_conditions("warm, cold,warm").unwrap(), vec![Condition::Warm, Condition::Cold]);
+        assert!(parse_conditions("cold,hot").unwrap_err().contains("hot") && parse_conditions(" ").is_err());
+    }
+
+    #[test]
+    fn the_acceptance_verdict_is_the_last_json_with_the_flag() {
+        let a = parse_accept("It works. {not json}\n{\"acceptable\": false, \"score\": 4, \"reason\": \" Asks nothing. \"}").unwrap();
+        assert_eq!((a.acceptable, a.score, a.reason.as_str()), (false, Some(4.0), "Asks nothing."));
+        assert!(parse_accept("{\"acceptable\":true}").unwrap().acceptable);
+        for text in ["", "yes", "{\"winner\":\"A\"}", "{\"acceptable\":\"yes\"}"] {
+            assert!(parse_accept(text).is_none(), "{text:?}");
+        }
+    }
+
+    #[test]
+    fn the_gate_counts_input_cache_writes_and_output_and_never_cache_reads() {
+        assert_eq!(gate_tokens(&card_run("a", 0, Arm::Card, 1000, true)), 1000, "a run's cache reads of 9000 are not in it");
+        let row = &card_gate(&card_runs(&[(1000, 1000)]))[0];
+        assert_eq!((row.cache_read.card, row.tokens.card), (18_000, 1000));
+        assert_eq!(row.input.card + row.cache_write.card + row.output.card, row.tokens.card);
+    }
+
+    #[test]
+    fn a_card_that_adds_clearly_less_than_five_percent_passes() {
+        // Per pair (sums over the two requests): +2%, +1%, +3% against a spread of a pair's difference near 1% of the tokens.
+        let rows = card_gate(&card_runs(&[(10_200, 10_000), (10_100, 10_000), (10_300, 10_000)]));
+        assert_eq!(rows.len(), 1);
+        assert_eq!((rows[0].pairs, rows[0].requests, rows[0].left_out), (3, 2, 0));
+        assert_eq!((rows[0].tokens.card, rows[0].tokens.no_card, rows[0].tokens.diff), (30_600, 30_000, 600));
+        assert!((rows[0].tokens.spread - 100.0).abs() < 1e-9, "{}", rows[0].tokens.spread);
+        assert_eq!(rows[0].result, GateResult::Pass, "{}", rows[0].why);
+    }
+
+    #[test]
+    fn a_card_that_adds_clearly_more_than_five_percent_fails() {
+        let rows = card_gate(&card_runs(&[(11_000, 10_000), (11_100, 10_000), (10_900, 10_000)]));
+        assert_eq!(rows[0].result, GateResult::Fail, "{}", rows[0].why);
+        assert!(rows[0].why.contains("more than 5%"), "{}", rows[0].why);
+    }
+
+    #[test]
+    fn a_difference_near_the_line_is_too_close_then_fails_after_three_more_pairs() {
+        // About +5% with a noisy spread: neither side of the line is clear.
+        let noisy = [(10_900, 10_000), (10_100, 10_000), (10_800, 10_000)];
+        let rows = card_gate(&card_runs(&noisy));
+        assert_eq!(rows[0].result, GateResult::TooClose, "{}", rows[0].why);
+        let mut six = noisy.to_vec();
+        six.extend([(10_900, 10_000), (10_100, 10_000), (10_800, 10_000)]);
+        let rows = card_gate(&card_runs(&six));
+        assert_eq!((rows[0].pairs, rows[0].result), (6, GateResult::Fail), "{}", rows[0].why);
+        assert!(rows[0].why.contains("after more pairs"));
+        assert_eq!(card_gate(&card_runs(&[(10_000, 10_000)]))[0].result, GateResult::TooClose, "one pair has no spread");
+    }
+
+    #[test]
+    fn a_card_with_fewer_successes_fails_whatever_it_saves() {
+        let mut runs = card_runs(&[(5_000, 10_000), (5_000, 10_000), (5_000, 10_000)]);
+        assert_eq!(card_gate(&runs)[0].result, GateResult::Pass);
+        runs[0].success = false;
+        let row = &card_gate(&runs)[0];
+        assert_eq!((row.successes_card, row.successes_no_card, row.result), (5, 6, GateResult::Fail));
+        runs[1].success = false;
+        assert_eq!(card_gate(&runs)[0].result, GateResult::Pass, "as many successes with the card as without");
+    }
+
+    #[test]
+    fn only_pairs_complete_in_every_request_count_and_each_cli_and_condition_is_apart() {
+        let mut runs = card_runs(&[(10_000, 10_000), (10_000, 10_000), (10_000, 10_000)]);
+        // The second request's card run of pair 3 is missing: that pair is left out of both requests.
+        runs.push(card_run("a", 3, Arm::Card, 5_000, true));
+        runs.push(card_run("a", 3, Arm::NoCard, 5_000, true));
+        runs.push(card_run("b", 3, Arm::NoCard, 5_000, true));
+        let rows = card_gate(&runs);
+        assert_eq!((rows[0].pairs, rows[0].left_out), (3, 3));
+        let mut codex = card_runs(&[(10_000, 10_000)]);
+        for r in &mut codex {
+            r.vendor = "codex".into();
+            r.condition = Condition::Warm;
+        }
+        runs.extend(codex);
+        let keys: Vec<_> = card_gate(&runs).iter().map(|g| (g.vendor.clone(), g.condition)).collect();
+        assert_eq!(keys, vec![("claude".to_string(), Condition::Cold), ("codex".to_string(), Condition::Warm)]);
+    }
+
+    #[test]
+    fn the_card_tables_name_the_gate_the_measures_apart_and_every_run() {
+        let runs = card_runs(&[(10_200, 10_000), (10_100, 10_000), (10_300, 10_000)]);
+        let text = render_card_tables(&runs, &card_gate(&runs));
+        assert!(text.contains("| claude | cold | 2 | 3 | 6 / 6 | 30600 | 30000 | +600 (+2.0%) | 100 | PASS |"), "{text}");
+        assert!(
+            text.contains("cached input (cache reads, not in the gate)") && text.contains("| claude | cold | 1 | a | card | yes |"),
+            "{text}"
+        );
+        let saved: Vec<CardRun> = serde_json::from_str(&serde_json::to_string(&runs).unwrap()).unwrap();
+        assert_eq!(saved, runs, "results.json reads back into the same runs");
     }
 }
