@@ -52,6 +52,67 @@ pub(super) fn claude_resources(area: Area, delivery: &crate::tools::Delivery) ->
     }
 }
 
+/// Digest of Faber's own guide as a session was told of it (its line or its text), kept apart from the kit's resources: a
+/// kit that changes never sends it again, and a guide that changes never sends the kit again.
+pub(super) fn guide_digest(note: Option<&str>) -> String {
+    use sha2::Digest;
+    crate::hex(&sha2::Sha256::digest(format!("faber-guide\0{}", note.unwrap_or_default())))
+}
+
+/// What a live session knows of Faber's own guide (R18), apart from the kit's resources.
+#[derive(Default)]
+pub(super) struct LiveGuide {
+    /// The line (or text) that tells this session of the guide; none where Claude Code loads it as a skill.
+    pub note: Option<String>,
+    /// The digest of `note` once the session was told, so a kit that changes never sends it again.
+    pub digest: Option<String>,
+    /// Goes ahead of the next ordinary message.
+    pub pending: Option<String>,
+    /// The line reaches this session in a user message (Claude Code, a resumed Codex thread), which a compaction can drop;
+    /// a new Codex thread has it in its instructions, which a compaction keeps.
+    pub in_input: bool,
+}
+
+impl LiveGuide {
+    /// A session that starts or resumes. A new session, one saved before the guide existed, one told another line (a new screen
+    /// language, a moved folder) and one compacted since are told once. Claude Code and a resumed Codex thread take the line
+    /// with their first input; a new Codex thread took it with its instructions (`thread/start`), and a resumed one keeps
+    /// the instructions it had.
+    pub(super) fn start(
+        note: Option<String>,
+        mode: SessionStart,
+        first_input: bool,
+        saved: Option<&(String, Vec<String>, Option<String>)>,
+        resume: Option<&String>,
+        saved_digest: Option<&String>,
+    ) -> Self {
+        let digest = guide_digest(note.as_deref());
+        let told = saved.is_some_and(|(native, _, _)| Some(native) == resume) && saved_digest == Some(&digest);
+        let (pending, digest) = match &note {
+            _ if mode == SessionStart::Compact => (None, saved_digest.cloned()),
+            Some(note) if first_input && !told => (Some(note.clone()), None),
+            _ => (None, Some(digest)),
+        };
+        LiveGuide { in_input: first_input && note.is_some(), note, digest, pending }
+    }
+
+    /// The CLI compacted: a line that went in a user message is a summary now, so the next message carries it again. True
+    /// when it will, so the saved digest is dropped until it does.
+    pub(super) fn compacted(&mut self) -> bool {
+        if self.in_input {
+            self.digest = None;
+            self.pending = self.note.clone();
+        }
+        self.in_input
+    }
+
+    fn take(&mut self) -> Option<String> {
+        let note = self.pending.take()?;
+        self.digest = Some(guide_digest(Some(&note)));
+        Some(note)
+    }
+}
+
 pub(super) fn resources_changed(
     saved: Option<&(String, Vec<String>, Option<String>)>,
     resume: Option<&String>,
@@ -78,6 +139,19 @@ pub(super) fn with_resources(text: String, resources: Option<String>) -> String 
     }
 }
 
+/// A first input: the guide's line, then the changed catalog resources, then the words. A slash command goes alone, where
+/// Claude Code reads it, and what waits goes with the next ordinary message.
+pub(super) fn first_input(text: String, resources: &mut Option<String>, guide: &mut LiveGuide) -> String {
+    if text.starts_with('/') {
+        return text;
+    }
+    let text = with_resources(text, resources.take());
+    match guide.take() {
+        Some(note) => format!("{note}\n\n{text}"),
+        None => text,
+    }
+}
+
 pub(super) fn record_native_kit(conversation: &mut Conversation, native: String, live: Option<&Live>, store: Option<&crate::tools::Store>) {
     let Some(live) = live else { return };
     let mut ids = live.tool_kit.ids.clone();
@@ -93,10 +167,17 @@ pub(super) fn record_native_kit(conversation: &mut Conversation, native: String,
         }
     }
     conversation.session_kits.insert(live.vendor, (native, ids, live.kit_identity.clone()));
+    // shortcut: the kit's digest is saved when the session starts, even if its resources wait behind a `/` first message, so a
+    // process that ends before the next ordinary message never resends them; upgrade by saving it when the text goes out, as the guide's is.
     if let Some(digest) = &live.kit_resource_digest {
         conversation.session_resource_digests.insert(live.vendor, digest.clone());
     } else {
         conversation.session_resource_digests.remove(&live.vendor);
+    }
+    if let Some(digest) = &live.guide.digest {
+        conversation.session_guide_digests.insert(live.vendor, digest.clone());
+    } else {
+        conversation.session_guide_digests.remove(&live.vendor);
     }
 }
 
@@ -140,7 +221,29 @@ impl Core {
         let area = c.area;
         let project = c.project_id.clone();
         let request = c.messages.iter().rev().find(|m| m.role == Role::User).map(|m| m.text.clone()).unwrap_or_default();
-        self.session_tools(vendor, area, permissions, project.as_deref(), &request, cwd)
+        let mut kit = self.session_tools(vendor, area, permissions, project.as_deref(), &request, cwd);
+        kit.0.guide = self.guide_for(vendor, area, permissions);
+        kit
+    }
+
+    /// The language the screen shows: the choice in Settings, else the system's.
+    pub(super) fn screen_language(&self) -> crate::guide::Language {
+        crate::guide::Language::resolve(self.store.settings().language.as_deref(), &crate::guide::system_languages())
+    }
+
+    /// How Faber's own guide (R18) reaches a session, the same for every message of it: never to Faber's own internal requests.
+    pub(super) fn guide_for(&self, vendor: Vendor, area: Area, permissions: Permissions) -> crate::guide::Guide {
+        use crate::guide::Guide;
+        let language = self.screen_language();
+        if permissions == Permissions::Isolated {
+            return Guide::Off;
+        }
+        // Every session can read a file Faber points to, so the folder is written for all of them; only without it do the words go.
+        match crate::guide::plugin(&self.opts.data_dir, language) {
+            Some(dir) if vendor == Vendor::Claude && area == Area::Project => Guide::Plugin { dir, language },
+            Some(dir) => Guide::Index { dir, language },
+            None => Guide::Text(language),
+        }
     }
 }
 
@@ -773,6 +876,434 @@ mod tests {
         .expect("the current catalog resources must reach the Claude user input")
     }
 
+    /// The folders a Claude Code launch was handed with `--plugin-dir`.
+    fn plugin_dirs(args: &Arguments) -> Vec<PathBuf> {
+        let recorded = args.lock().unwrap();
+        let (_, argv) = recorded.iter().find(|(bin, _)| bin == "claude").expect("a Claude Code launch");
+        argv.windows(2).filter(|a| a[0] == "--plugin-dir").map(|a| PathBuf::from(&a[1])).collect()
+    }
+
+    fn guide_skill(plugins: &[PathBuf]) -> Option<String> {
+        plugins.iter().find_map(|dir| std::fs::read_to_string(dir.join("skills/guide/SKILL.md")).ok())
+    }
+
+    /// The rules a Claude Code launch may use with no card (`--allowedTools`, each rule its own argument).
+    fn allowed_tools(args: &Arguments) -> Vec<String> {
+        let recorded = args.lock().unwrap();
+        let (_, argv) = recorded.iter().find(|(bin, _)| bin == "claude").expect("a Claude Code launch");
+        argv.iter()
+            .position(|a| a == "--allowedTools")
+            .map(|at| argv[at + 1..].iter().take_while(|a| !a.starts_with("--")).cloned().collect())
+            .unwrap_or_default()
+    }
+
+    /// The deny rules in the settings a Claude Code launch was handed.
+    fn denied_tools(args: &Arguments) -> Vec<String> {
+        let recorded = args.lock().unwrap();
+        let (_, argv) = recorded.iter().find(|(bin, _)| bin == "claude").expect("a Claude Code launch");
+        let settings = argv.windows(2).find(|a| a[0] == "--settings").expect("settings");
+        let settings: Value = serde_json::from_str(&settings[1]).unwrap();
+        settings["permissions"]["deny"].as_array().unwrap().iter().map(|r| r.as_str().unwrap().to_string()).collect()
+    }
+
+    /// The rule path of a file the way Claude Code reads it: `//c/dir/file` on Windows, `/dir/file` elsewhere.
+    fn rule_path(path: &Path) -> String {
+        crate::permissions::claude_rule_path(&crate::project::git::native_path(path))
+    }
+
+    fn guide_file(folder: &Path) -> PathBuf {
+        folder.join("guide-plugin/skills/guide/SKILL.md")
+    }
+
+    fn set_screen(core: &mut Core, language: &str, permissions: Permissions) {
+        core.store
+            .save_settings(&Settings { language: Some(language.into()), permissions: Some(permissions), ..Default::default() })
+            .unwrap();
+    }
+
+    /// Marks the saved session as told of the guide as it stands, so a test about the kit sees no line ahead of its words.
+    fn told_of_guide(core: &mut Core, vendor: Vendor, area: Area) {
+        let digest = guide_digest(guide_note(core, vendor, area).as_deref());
+        core.convs.get_mut("kit").unwrap().session_guide_digests.insert(vendor, digest);
+    }
+
+    /// The line a session of this vendor and area is told of the guide.
+    fn guide_note(core: &Core, vendor: Vendor, area: Area) -> Option<String> {
+        core.guide_for(vendor, area, Permissions::Ask).note()
+    }
+
+    /// Faber's own guide (R18) reaches every fresh session, whatever the first message says, and lazily wherever a file can be
+    /// read: Claude Code in Projects loads it as a plugin of its own (nothing rides on the turn), Claude Code in Chat and
+    /// Codex carry one line that points at the file, in the language the screen shows.
+    #[tokio::test]
+    async fn faber_guide_is_a_line_or_a_skill_in_every_fresh_session_never_the_whole_text() {
+        for vendor in [Vendor::Claude, Vendor::Codex] {
+            for area in [Area::Chat, Area::Project] {
+                for task in ["How do I switch the theme?", "Debug this failing test"] {
+                    let dir = tempfile::tempdir().unwrap();
+                    let folder = dir.path().canonicalize().unwrap();
+                    let (spawn, args, messages) = fake();
+                    let engine = engine(&folder, spawn);
+                    let project = engine.add_project(&folder.to_string_lossy()).unwrap();
+                    let note = engine.with(|core| {
+                        set_screen(core, "de", Permissions::Ask);
+                        conversation(core, area, (area == Area::Project).then_some(project.id.as_str()), &folder, task);
+                        core.rewind.captured_for_test("reply");
+                        core.start("kit", "reply", &pick(vendor), task.into(), vec![], true).unwrap();
+                        guide_note(core, vendor, area)
+                    });
+                    let which = format!("{vendor:?} {area:?} {task}");
+                    assert_eq!(
+                        std::fs::read_to_string(guide_file(&folder)).unwrap(),
+                        crate::guide::skill_file(crate::guide::Language::De),
+                        "{which}: the file holds the guide in the screen's language"
+                    );
+                    let read = format!("Read({})", rule_path(&guide_file(&folder)));
+                    match (vendor, area) {
+                        (Vendor::Claude, Area::Chat) => {
+                            let text = claude_input(&messages).await;
+                            let note = note.unwrap();
+                            assert!(text.starts_with(&note) && text.ends_with(task), "{which}: {text}");
+                            assert!(note.contains("German") && note.contains("SKILL.md") && note.len() < 400, "{which}: {note}");
+                            assert!(!text.contains("Selbst weitermachen"), "{which}: the table stays in the file");
+                            assert!(plugin_dirs(&args).is_empty(), "{which}: Chat has no Skill tool to load a plugin");
+                            assert!(
+                                allowed_tools(&args).contains(&read),
+                                "{which}: reading the file needs no card: {:?}",
+                                allowed_tools(&args)
+                            );
+                        }
+                        (Vendor::Claude, Area::Project) => {
+                            let text = claude_input(&messages).await;
+                            assert!(
+                                note.is_none() && !text.contains("Faber's own guide"),
+                                "{which}: the CLI lists the skill itself: {text}"
+                            );
+                            let plugins = plugin_dirs(&args);
+                            assert_eq!(plugins.len(), 2, "{which}: the catalog's plugin and the guide's: {plugins:?}");
+                            assert_eq!(guide_skill(&plugins), Some(crate::guide::skill_file(crate::guide::Language::De)), "{which}");
+                            assert!(!text.contains("faber-guide"), "{which}: the kit's index never lists it");
+                            assert_eq!(allowed_tools(&args), ["Skill(faber-guide:guide)"], "{which}");
+                        }
+                        (Vendor::Codex, _) => {
+                            let thread = until_message(&messages, "thread/start").await;
+                            let instructions = thread["params"]["developerInstructions"].as_str().unwrap();
+                            let note = note.unwrap();
+                            assert!(instructions.contains(&note) && !instructions.contains("Selbst weitermachen"), "{which}");
+                            let turn = until_message(&messages, "turn/start").await;
+                            assert!(!turn["params"]["input"][0]["text"].as_str().unwrap().contains("Faber's own guide"), "{which}");
+                            assert!(
+                                core_guide_digest(&engine, Vendor::Codex).is_some(),
+                                "{which}: a new thread is told once, with its instructions"
+                            );
+                        }
+                    }
+                    engine.shutdown();
+                }
+            }
+        }
+    }
+
+    fn core_guide_digest(engine: &Engine, vendor: Vendor) -> Option<String> {
+        engine.with(|core| core.live["kit"].guide.digest.clone().filter(|_| core.live["kit"].vendor == vendor))
+    }
+
+    /// Where a file cannot be read the whole text goes (the folder is not Faber's to hand out), in the screen's language only; and
+    /// an older Claude Code with no plugin folder reads the file like Chat does.
+    #[tokio::test]
+    async fn faber_guide_falls_back_to_text_without_its_folder_and_to_a_line_in_an_older_claude_code() {
+        let dir = tempfile::tempdir().unwrap();
+        let folder = dir.path().canonicalize().unwrap();
+        std::fs::write(folder.join("guide-plugin"), "not a folder of Faber's").unwrap();
+        let (spawn, args, messages) = fake();
+        let first = engine(&folder, spawn);
+        first.with(|core| {
+            set_screen(core, "de", Permissions::Ask);
+            conversation(core, Area::Chat, None, &folder, "Debug this failing test");
+            core.rewind.captured_for_test("reply");
+            core.start("kit", "reply", &pick(Vendor::Claude), "Debug this failing test".into(), vec![], true).unwrap();
+        });
+        let text = claude_input(&messages).await;
+        assert!(text.contains("Faber guide.") && text.contains("Selbst weitermachen") && !text.contains("Continuar sozinho"), "{text}");
+        assert!(text.contains("The screen is shown in German"), "{text}");
+        assert!(allowed_tools(&args).iter().all(|rule| !rule.starts_with("Read(")), "no file, no rule: {:?}", allowed_tools(&args));
+        first.shutdown();
+
+        let dir = tempfile::tempdir().unwrap();
+        let folder = dir.path().canonicalize().unwrap();
+        let (spawn, args, messages) = fake();
+        let engine = engine(&folder, spawn);
+        let project = engine.add_project(&folder.to_string_lossy()).unwrap();
+        engine.with(|core| {
+            set_screen(core, "fr", Permissions::Ask);
+            core.claude_flags.plugin_dir = false;
+            conversation(core, Area::Project, Some(&project.id), &folder, "Debug this failing test");
+            core.rewind.captured_for_test("reply");
+            core.start("kit", "reply", &pick(Vendor::Claude), "Debug this failing test".into(), vec![], true).unwrap();
+        });
+        let text = claude_input(&messages).await;
+        assert!(text.starts_with("Faber's own guide: ") && text.contains("French") && !text.contains("Continuer seul"), "{text}");
+        assert!(plugin_dirs(&args).is_empty());
+        assert!(allowed_tools(&args).contains(&format!("Read({})", rule_path(&guide_file(&folder)))));
+        engine.shutdown();
+    }
+
+    /// The allow rules exist only where a card would stop the guide, and the guide's folder is closed to Edit and Write in every
+    /// mode that has the guide.
+    #[tokio::test]
+    async fn faber_guide_is_allowed_without_a_card_in_guarded_modes_only_and_its_folder_is_closed_to_writes() {
+        for permissions in [Permissions::Ask, Permissions::Plan, Permissions::FullAccess] {
+            for area in [Area::Chat, Area::Project] {
+                let dir = tempfile::tempdir().unwrap();
+                let folder = dir.path().canonicalize().unwrap();
+                let (spawn, args, messages) = fake();
+                let engine = engine(&folder, spawn);
+                let project = engine.add_project(&folder.to_string_lossy()).unwrap();
+                engine.with(|core| {
+                    set_screen(core, "en", permissions);
+                    conversation(core, area, (area == Area::Project).then_some(project.id.as_str()), &folder, "Debug this failing test");
+                    core.rewind.captured_for_test("reply");
+                    core.start("kit", "reply", &pick(Vendor::Claude), "Debug this failing test".into(), vec![], true).unwrap();
+                });
+                claude_input(&messages).await;
+                let which = format!("{permissions:?} {area:?}");
+                let allowed = allowed_tools(&args);
+                let expected = match (permissions.guarded(), area) {
+                    (false, _) => vec![],
+                    (true, Area::Chat) => vec![format!("Read({})", rule_path(&guide_file(&folder)))],
+                    (true, Area::Project) => vec!["Skill(faber-guide:guide)".to_string()],
+                };
+                assert!(
+                    expected.iter().all(|rule| allowed.contains(rule)) && (!expected.is_empty() || allowed.is_empty()),
+                    "{which}: {allowed:?}"
+                );
+                let folder_rule = rule_path(&folder.join("guide-plugin"));
+                let denied = denied_tools(&args);
+                for tool in ["Edit", "Write"] {
+                    assert!(denied.contains(&format!("{tool}({folder_rule}/**)")), "{which}: {tool} stays closed: {denied:?}");
+                }
+                engine.shutdown();
+            }
+        }
+    }
+
+    /// A session that resumes is told of the guide when it was never told, or told another line, and not when it was: the
+    /// guide has its own digest, so a kit that changes never sends it again and a guide that changes never sends the kit.
+    #[tokio::test]
+    async fn a_resumed_claude_session_is_told_of_the_guide_by_its_own_digest_apart_from_the_kit() {
+        for (guide_saved, kit_current, language) in
+            [(Some(true), true, "en"), (Some(true), false, "en"), (Some(false), true, "en"), (None, true, "en"), (Some(true), true, "de")]
+        {
+            let dir = tempfile::tempdir().unwrap();
+            let folder = dir.path().canonicalize().unwrap();
+            let (spawn, _, messages) = fake();
+            let engine = engine(&folder, spawn);
+            let note = engine.with(|core| {
+                set_screen(core, "en", Permissions::Ask);
+                conversation(core, Area::Chat, None, &folder, "Debug this failure");
+                let (delivery, report) = core.choose_session_tools("kit", Vendor::Claude, Permissions::Ask, &folder);
+                let identity = session_tool_identity(Vendor::Claude, &delivery);
+                let kit_digest = resource_digest(claude_resources(Area::Chat, &delivery).as_deref());
+                let saved_note = delivery.guide.note();
+                let c = core.convs.get_mut("kit").unwrap();
+                c.sessions.insert(Vendor::Claude, "native-history".into());
+                c.session_kits.insert(Vendor::Claude, ("native-history".into(), report.ids, identity));
+                c.session_resource_digests.insert(Vendor::Claude, if kit_current { kit_digest } else { "stale".into() });
+                match guide_saved {
+                    Some(true) => c.session_guide_digests.insert(Vendor::Claude, guide_digest(saved_note.as_deref())),
+                    Some(false) => c.session_guide_digests.insert(Vendor::Claude, "stale".into()),
+                    None => None,
+                };
+                set_screen(core, language, Permissions::Ask);
+                core.rewind.captured_for_test("reply");
+                core.start("kit", "reply", &pick(Vendor::Claude), "Debug this failure".into(), vec![], true).unwrap();
+                guide_note(core, Vendor::Claude, Area::Chat).unwrap()
+            });
+            let text = claude_input(&messages).await;
+            let which = format!("saved {guide_saved:?}, kit current {kit_current}, screen {language}");
+            let told = guide_saved != Some(true) || language != "en";
+            assert_eq!(text.starts_with(&note), told, "{which}: {text}");
+            assert_eq!(text.contains(RESOURCE_PREFIX), !kit_current, "{which}: {text}");
+            if !told && kit_current {
+                assert_eq!(text, "Debug this failure", "{which}");
+            }
+            let saved = engine.with(|core| core.convs["kit"].session_guide_digests.get(&Vendor::Claude).cloned());
+            assert_eq!(saved, Some(guide_digest(Some(&note))), "{which}: what the session was told is what is saved");
+            engine.shutdown();
+        }
+    }
+
+    /// Codex's thread keeps the instructions it started with: a resumed thread gets no guide line with them, and gets one with
+    /// its first input only when it was never told (an older thread) or told another line; a new thread was told at its start.
+    #[tokio::test]
+    async fn a_resumed_codex_thread_is_told_of_the_guide_in_its_first_input_only_when_it_was_not_told() {
+        for told in [false, true] {
+            let dir = tempfile::tempdir().unwrap();
+            let folder = dir.path().canonicalize().unwrap();
+            let (spawn, _, messages) = fake();
+            let engine = engine(&folder, spawn);
+            let note = engine.with(|core| {
+                set_screen(core, "es", Permissions::Ask);
+                conversation(core, Area::Chat, None, &folder, "Debug this failing test");
+                let (delivery, report) = core.choose_session_tools("kit", Vendor::Codex, Permissions::Ask, &folder);
+                let identity = session_tool_identity(Vendor::Codex, &delivery);
+                let note = delivery.guide.note().unwrap();
+                let c = core.convs.get_mut("kit").unwrap();
+                c.sessions.insert(Vendor::Codex, "native-history".into());
+                c.session_kits.insert(Vendor::Codex, ("native-history".into(), report.ids, identity));
+                if told {
+                    c.session_guide_digests.insert(Vendor::Codex, guide_digest(Some(&note)));
+                }
+                core.rewind.captured_for_test("reply");
+                core.start("kit", "reply", &pick(Vendor::Codex), "Debug this failing test".into(), vec![], true).unwrap();
+                note
+            });
+            let thread = until_message(&messages, "thread/resume").await;
+            assert!(!thread["params"]["developerInstructions"].as_str().unwrap_or_default().contains("Faber's own guide"), "told={told}");
+            let turn = until_message(&messages, "turn/start").await;
+            let sent = turn["params"]["input"][0]["text"].as_str().unwrap();
+            assert_eq!(sent.starts_with(&note), !told, "told={told}: {sent}");
+            engine.shutdown();
+        }
+    }
+
+    /// A first message that is a slash command goes alone, where Claude Code reads it; the line waits for the next ordinary
+    /// message. After a compaction the summary replaced the first input, so the line goes again, and its saved digest is gone
+    /// until it does. Codex keeps its thread's instructions through a compaction.
+    #[tokio::test]
+    async fn the_guide_line_waits_for_an_ordinary_message_and_returns_after_a_compaction() {
+        let dir = tempfile::tempdir().unwrap();
+        let folder = dir.path().canonicalize().unwrap();
+        let (spawn, _, messages) = fake();
+        let first = engine(&folder, spawn);
+        let note = first.with(|core| {
+            set_screen(core, "en", Permissions::Ask);
+            conversation(core, Area::Chat, None, &folder, "/compact");
+            core.rewind.captured_for_test("reply");
+            core.start("kit", "reply", &pick(Vendor::Claude), "/compact".into(), vec![], true).unwrap();
+            guide_note(core, Vendor::Claude, Area::Chat).unwrap()
+        });
+        assert_eq!(claude_input(&messages).await, "/compact", "a slash command is not preceded by anything");
+        first.with(|core| {
+            assert_eq!(core.live["kit"].guide.pending.as_deref(), Some(note.as_str()));
+            assert!(core.live["kit"].guide.digest.is_none() && core.convs["kit"].session_guide_digests.is_empty(), "not told yet");
+            let l = core.live.get_mut("kit").unwrap();
+            let next = first_input("How do I switch the theme?".into(), &mut l.kit_resources, &mut l.guide);
+            assert!(next.starts_with(&note) && next.ends_with("How do I switch the theme?"), "{next}");
+            assert!(l.guide.pending.is_none() && l.guide.digest.is_some(), "told now");
+            let again = first_input("And the language?".into(), &mut l.kit_resources, &mut l.guide);
+            assert_eq!(again, "And the language?", "told once");
+
+            let sid = core.live["kit"].sid;
+            core.convs.get_mut("kit").unwrap().session_guide_digests.insert(Vendor::Claude, "told".into());
+            core.handle("kit", sid, EngineEvent::Compacted { after: Some(1000) });
+            assert_eq!(core.live["kit"].guide.pending.as_deref(), Some(note.as_str()), "the summary lost the line");
+            assert!(core.convs["kit"].session_guide_digests.is_empty(), "a restart before the next message tells it too");
+            let l = core.live.get_mut("kit").unwrap();
+            assert!(first_input("Next".into(), &mut l.kit_resources, &mut l.guide).starts_with(&note));
+        });
+        first.shutdown();
+
+        let dir = tempfile::tempdir().unwrap();
+        let folder = dir.path().canonicalize().unwrap();
+        let (spawn, _, messages) = fake();
+        let engine = engine(&folder, spawn);
+        engine.with(|core| {
+            set_screen(core, "en", Permissions::Ask);
+            conversation(core, Area::Chat, None, &folder, "Debug this failing test");
+            core.rewind.captured_for_test("reply");
+            core.start("kit", "reply", &pick(Vendor::Codex), "Debug this failing test".into(), vec![], true).unwrap();
+        });
+        until_message(&messages, "turn/start").await;
+        engine.with(|core| {
+            let sid = core.live["kit"].sid;
+            core.handle("kit", sid, EngineEvent::Compacted { after: Some(1000) });
+            assert!(core.live["kit"].guide.pending.is_none(), "Codex's thread instructions are not part of what it compacts");
+        });
+        engine.shutdown();
+    }
+
+    /// A Codex thread told by its first input (one from before the guide, resumed) loses that message to a compaction, so the
+    /// line goes again, as for Claude Code; a thread that has it in its instructions keeps it (the test above).
+    #[tokio::test]
+    async fn a_resumed_codex_thread_told_by_its_input_is_told_again_after_a_compaction() {
+        let dir = tempfile::tempdir().unwrap();
+        let folder = dir.path().canonicalize().unwrap();
+        let (spawn, _, messages) = fake();
+        let engine = engine(&folder, spawn);
+        let note = engine.with(|core| {
+            set_screen(core, "en", Permissions::Ask);
+            conversation(core, Area::Chat, None, &folder, "Debug this failing test");
+            core.convs.get_mut("kit").unwrap().sessions.insert(Vendor::Codex, "native-history".into());
+            core.rewind.captured_for_test("reply");
+            core.start("kit", "reply", &pick(Vendor::Codex), "Debug this failing test".into(), vec![], true).unwrap();
+            guide_note(core, Vendor::Codex, Area::Chat).unwrap()
+        });
+        let turn = until_message(&messages, "turn/start").await;
+        assert!(turn["params"]["input"][0]["text"].as_str().unwrap().starts_with(&note));
+        engine.with(|core| {
+            let sid = core.live["kit"].sid;
+            core.convs.get_mut("kit").unwrap().session_guide_digests.insert(Vendor::Codex, "told".into());
+            core.handle("kit", sid, EngineEvent::Compacted { after: None });
+            assert_eq!(core.live["kit"].guide.pending.as_deref(), Some(note.as_str()), "the first input is a summary now");
+            assert!(core.convs["kit"].session_guide_digests.is_empty());
+        });
+        engine.shutdown();
+    }
+
+    /// The screen language the guide names is Faber's own language setting, the one the screen shows; the system's only
+    /// decides when Faber has none (or one it has no words for).
+    #[tokio::test]
+    async fn the_guide_names_the_language_of_fabers_own_setting_before_the_systems() {
+        let dir = tempfile::tempdir().unwrap();
+        let folder = dir.path().canonicalize().unwrap();
+        let (spawn, _, _) = fake();
+        let engine = engine(&folder, spawn);
+        engine.with(|core| {
+            use crate::guide::Language;
+            for (code, language) in
+                [("en", Language::En), ("pt-BR", Language::PtBr), ("es", Language::Es), ("fr", Language::Fr), ("de", Language::De)]
+            {
+                set_screen(core, code, Permissions::Ask);
+                assert_eq!(core.screen_language(), language, "{code}");
+                let note = guide_note(core, Vendor::Claude, Area::Chat).unwrap();
+                assert!(note.ends_with(&format!("The screen is shown in {}.", language.name())), "{code}: {note}");
+            }
+            core.store.save_settings(&Settings { language: None, ..Default::default() }).unwrap();
+            assert_eq!(
+                core.screen_language(),
+                Language::resolve(None, &crate::guide::system_languages()),
+                "with no language of Faber's own, the system's decides"
+            );
+        });
+        engine.shutdown();
+    }
+
+    /// The guide is Faber's, not the catalog's: no id in a kit's report, nothing installed, nothing under the catalog's folder,
+    /// and never in a request of Faber's own (`Isolated`).
+    #[tokio::test]
+    async fn faber_guide_is_no_catalog_item_and_never_reaches_an_internal_request() {
+        let dir = tempfile::tempdir().unwrap();
+        let folder = dir.path().canonicalize().unwrap();
+        let (spawn, _, _) = fake();
+        let engine = engine(&folder, spawn);
+        let project = engine.add_project(&folder.to_string_lossy()).unwrap();
+        engine.with(|core| {
+            conversation(core, Area::Project, Some(&project.id), &folder, "Debug this failing test");
+            let (delivery, report) = core.choose_session_tools("kit", Vendor::Claude, Permissions::FullAccess, &folder);
+            let crate::guide::Guide::Plugin { dir: plugin, .. } = &delivery.guide else { panic!("{:?}", delivery.guide) };
+            assert_eq!(report.ids, ["debug"], "the kit's choice is the catalog's alone");
+            assert!(core.catalog_store().installed().keys().all(|id| !id.contains("guide")));
+            let root = delivery.tools_root().unwrap();
+            assert!(!plugin.starts_with(&root), "the guide is not kept in the catalog's store");
+            for (vendor, area) in [(Vendor::Claude, Area::Chat), (Vendor::Codex, Area::Project)] {
+                assert_eq!(core.guide_for(vendor, area, Permissions::Isolated), crate::guide::Guide::Off);
+                assert_eq!(core.choose_session_tools("kit", vendor, Permissions::Isolated, &folder).0.guide, crate::guide::Guide::Off);
+            }
+        });
+        engine.shutdown();
+    }
+
     #[tokio::test]
     async fn claude_chat_receives_bounded_instructions_in_restricted_input_without_external_reads() {
         for permissions in [Permissions::Ask, Permissions::FullAccess] {
@@ -788,6 +1319,7 @@ mod tests {
                 assert_eq!(core.live["kit"].tool_kit.ids, ["debug"]);
             });
             let text = claude_input(&messages).await;
+            let text = crate::guide::without_note(&text);
             assert!(text.contains("debug_KIT_INSTRUCTIONS"));
             assert!(!text.contains("design_KIT_INSTRUCTIONS"));
             assert!(!text.contains("SKILL.md"), "Chat never needs a catalog path outside its working folder");
@@ -795,7 +1327,11 @@ mod tests {
             let recorded = args.lock().unwrap();
             let argv = &recorded[0].1;
             assert!(argv.windows(2).any(|a| a == ["--input-format", "stream-json"]));
-            assert!(!argv.iter().any(|a| a == "--plugin-dir" || a == "--add-dir" || a.starts_with("Read(")));
+            let guide = format!("Read({})", rule_path(&guide_file(&folder)));
+            assert!(
+                !argv.iter().any(|a| a == "--plugin-dir" || a == "--add-dir" || (a.starts_with("Read(") && *a != guide)),
+                "the only file Chat may read with no card is Faber's own guide"
+            );
             drop(recorded);
             engine.shutdown();
         }
@@ -856,6 +1392,7 @@ mod tests {
                         c.session_resource_digests.insert(Vendor::Claude, digest);
                     }
                     c.messages.iter_mut().find(|m| m.role == Role::User).unwrap().text = task.into();
+                    told_of_guide(core, Vendor::Claude, area);
                     if change == "snapshot" {
                         core.catalog_store = Some(catalog_version(&folder, "_UPDATED"));
                     }
@@ -902,6 +1439,7 @@ mod tests {
                 c.session_kits.insert(Vendor::Claude, ("native-history".into(), report.ids, identity));
                 c.session_resource_digests.insert(Vendor::Claude, digest);
                 c.messages.last_mut().unwrap().status = Some(Status::Done);
+                told_of_guide(core, Vendor::Claude, Area::Chat);
                 core.launch("kit", &pick(Vendor::Claude)).unwrap();
                 let sid = core.live["kit"].sid;
                 core.handle("kit", sid, EngineEvent::Started { session_id: "native-history".into(), model: "fixture".into() });
@@ -1007,6 +1545,20 @@ mod tests {
                 } else {
                     thread["params"]["developerInstructions"].as_str().unwrap().to_string()
                 };
+                // Faber's guide line rides apart from the kit, with the instructions of a new thread or ahead of a resumed first input.
+                let text = text
+                    .split(
+                        "
+
+",
+                    )
+                    .filter(|part| !part.starts_with("Faber's own guide: "))
+                    .collect::<Vec<_>>()
+                    .join(
+                        "
+
+",
+                    );
                 assert!(text.contains("design-small_KIT_INSTRUCTIONS"));
                 assert!(!text.contains("design-large_KIT_INSTRUCTIONS"));
                 assert_eq!(
@@ -1303,6 +1855,7 @@ mod tests {
                     c.messages[0].text = task.into();
                     let saved = serde_json::to_vec(c).unwrap();
                     core.convs.insert("kit".into(), serde_json::from_slice(&saved).unwrap());
+                    told_of_guide(core, Vendor::Codex, area);
                     if change == "contents" {
                         core.catalog_store = Some(catalog_version(&folder, "_UPDATED"));
                     }
@@ -1340,7 +1893,7 @@ mod tests {
                         "contents" => "debug_KIT_INSTRUCTIONS_UPDATED",
                         _ => "debug_KIT_INSTRUCTIONS",
                     }));
-                    assert_eq!(sent.contains("SKILL.md"), area == Area::Project);
+                    assert_eq!(crate::guide::without_note(sent).contains("SKILL.md"), area == Area::Project);
                 }
                 assert!(!messages.lock().unwrap().iter().any(|(_, msg)| msg["method"] == "thread/start"));
                 engine.shutdown();
@@ -1609,7 +2162,9 @@ mod tests {
             let resumed = until_message(&messages, "thread/resume").await;
             assert_eq!(resumed["params"]["threadId"], "external-native-thread");
             let turn = until_message(&messages, "turn/start").await;
-            assert_eq!(turn["params"]["input"][0]["text"], "Go on");
+            // Nothing records what it was told, so it is told of Faber's guide once, ahead of the person's words.
+            let sent = turn["params"]["input"][0]["text"].as_str().unwrap();
+            assert!(sent.starts_with("Faber's own guide: ") && crate::guide::without_note(sent) == "Go on", "{sent}");
             assert!(!messages.lock().unwrap().iter().any(|(_, msg)| msg["method"] == "thread/start"));
             engine.shutdown();
         }
@@ -1964,6 +2519,7 @@ mod tests {
                 let (delivery, _) = core.checked_session_tools("kit", Vendor::Codex, Permissions::FullAccess, &folder).unwrap();
                 let digest = resource_digest(codex_resources(Area::Chat, &delivery).as_deref());
                 core.convs.get_mut("kit").unwrap().session_resource_digests.insert(Vendor::Codex, digest);
+                told_of_guide(core, Vendor::Codex, Area::Chat);
                 if changed {
                     core.catalog_store = Some(catalog_version(&folder, "_UPDATED"));
                 }

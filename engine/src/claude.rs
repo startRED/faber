@@ -208,6 +208,23 @@ fn web_allowed(web: WebSearch) -> Option<&'static str> {
     }
 }
 
+/// Claude Code loads Faber's own guide as a plugin where Projects load the catalog's, when its CLI takes a plugin folder.
+fn guide_plugin_loaded(launch: &ClaudeLaunch) -> bool {
+    launch.area == Area::Project && offers_tools(launch.area, launch.permissions) && launch.flags.plugin_dir
+}
+
+/// The one rule that lets a guarded session use the guide with no card: its skill, or reading its file.
+fn guide_allowed(guide: &crate::guide::Guide, plugin_loaded: bool) -> Option<String> {
+    match guide {
+        crate::guide::Guide::Plugin { .. } if plugin_loaded => Some(crate::guide::SKILL_RULE.into()),
+        crate::guide::Guide::Index { .. } => {
+            let file = crate::project::git::native_path(&guide.file()?);
+            Some(format!("Read({})", crate::permissions::claude_rule_path(&file)))
+        }
+        _ => None,
+    }
+}
+
 /// The native permission mode for the next CLI launch.
 pub fn permission_mode(mode: Permissions) -> &'static str {
     match mode {
@@ -315,13 +332,19 @@ pub fn claude_args(launch: &ClaudeLaunch) -> Vec<String> {
                 mode if mode.guarded() => {
                     args.push("--strict-mcp-config".into());
                     args.push("--restricted".into());
-                    if let Some(allowed) = web_allowed(launch.tuning.web) {
-                        args.extend(["--allowedTools".into(), allowed.into()]);
-                    }
                 }
                 Permissions::Isolated => args.extend(["--strict-mcp-config".into(), "--safe-mode".into()]),
                 // Full access keeps the person's integrations; Skill is still excluded from Chat's native tools.
                 _ => {}
+            }
+        }
+        // What a guarded session may use without a card (R140): Chat's web tools and Faber's own guide, a skill or one file to read.
+        if launch.permissions.guarded() {
+            let web = web_allowed(launch.tuning.web).filter(|_| launch.area == Area::Chat).map(String::from);
+            let allowed: Vec<String> = web.into_iter().chain(guide_allowed(&tools.guide, guide_plugin_loaded(launch))).collect();
+            if !allowed.is_empty() {
+                args.push("--allowedTools".into());
+                args.extend(allowed);
             }
         }
         let web = web_deny(launch.tuning.web);
@@ -331,6 +354,10 @@ pub fn claude_args(launch: &ClaudeLaunch) -> Vec<String> {
         {
             let root = crate::project::git::native_path(&root);
             let path = crate::permissions::claude_rule_path(&root);
+            catalog_deny.extend([format!("Edit({path}/**)"), format!("Write({path}/**)")]);
+        }
+        if let Some(guide) = tools.guide.folder() {
+            let path = crate::permissions::claude_rule_path(&crate::project::git::native_path(guide));
             catalog_deny.extend([format!("Edit({path}/**)"), format!("Write({path}/**)")]);
         }
         let deny = || tool_deny(&env).into_iter().chain(web.iter().cloned()).chain(catalog_deny.iter().cloned()).collect::<Vec<_>>();
@@ -410,6 +437,12 @@ pub fn claude_args(launch: &ClaudeLaunch) -> Vec<String> {
             .filter(|_| launch.area == Area::Project && offers_tools(launch.area, launch.permissions) && launch.flags.plugin_dir)
         {
             args.extend(["--plugin-dir".into(), plugin.to_string_lossy().into_owned()]);
+        }
+        // Faber's own guide (R18), a plugin of its own, so only the skill's short description costs tokens on a turn.
+        if let crate::guide::Guide::Plugin { dir, .. } = &tools.guide
+            && guide_plugin_loaded(launch)
+        {
+            args.extend(["--plugin-dir".into(), dir.to_string_lossy().into_owned()]);
         }
         // The CLI echoes each line it is given when it takes it in, so a line the person wrote while it works is known to be
         // read, and by which turn. A helper keeps no history.

@@ -789,6 +789,9 @@ pub struct Conversation {
     /// Digest of the exact catalog resource prefix accepted by each native kit; old records resend once.
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub session_resource_digests: BTreeMap<Vendor, String>,
+    /// Digest of the line that told each native session of Faber's own guide (R18); kept apart so a kit that changes never resends it.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub session_guide_digests: BTreeMap<Vendor, String>,
     /// A session id whose first turn was accepted but has not shown any output yet. It is not resumable like `sessions` (the CLI may
     /// not have saved it), but a restart after a crash resumes it instead of starting a session that knows nothing of the turn.
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]

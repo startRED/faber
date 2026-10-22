@@ -1275,7 +1275,10 @@ async fn serve(
                 let (method, mut params) = thread_params(area, &$t.params);
                 let delivery = $t.tools.as_ref().unwrap_or(&tools);
                 // extraRoots is process-wide; discovery and bounded instructions belong only to this thread.
-                let instructions = [delivery.project_skill_descriptions(Vendor::Codex), delivery.skill_instructions()]
+                // Faber's own guide (R18): its line goes into a new thread only; a resumed one keeps what it was started with, and the
+                // first input carries the line when the thread has not had it.
+                let guide = delivery.guide.note().filter(|_| method == "thread/start");
+                let instructions = [delivery.project_skill_descriptions(Vendor::Codex), delivery.skill_instructions(), guide]
                     .into_iter().flatten().collect::<Vec<_>>().join("\n\n");
                 if !instructions.is_empty() {
                     let words = params["developerInstructions"].as_str().unwrap_or_default();

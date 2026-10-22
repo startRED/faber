@@ -1777,6 +1777,7 @@ export const en = {
   'notes.175.better': 'The usage bars and the arrows on folded sections now move smoothly instead of jumping.',
   'notes.176.fixed': 'When you answer a question in Running now, its card no longer vanishes at once: it folds away softly.',
   'notes.177.fixed': 'An answer that stopped by itself, at a limit or on an error, used to give no reason. Now it says why.',
+  'notes.178.new': 'Ask any conversation how Faber works, such as what Keep going does. It answers in your language, with the words on your screen.',
   'update.checking': 'Looking for an update…',
   'update.downloading': 'Downloading update…',
   'update.downloadingPercent': 'Downloading update… {percent}%',

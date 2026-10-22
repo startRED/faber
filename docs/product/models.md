@@ -11,7 +11,8 @@ Faber works with Claude only, Codex only, or both. It supports no other vendor.
 - **First run.** The user connects what they have. Faber finds or installs each official CLI and opens its own sign-in,
   and the router and the toolbox only use what is connected. A person who is new to Claude, Codex and AI apps gets a
   short tutorial; an experienced one skips it. After that Faber does not keep teaching: there is no help page, and
-  people ask Faber about Faber.
+  people ask Faber about Faber (built: Faber's own guide is a file every session can read, told by one short line,
+  [product map](../product-map.md#session-kits)).
 - **Both vendors:** reviews and second opinions come from the other vendor.
 - **One vendor:** reviews come from a different model of the same vendor in a fresh session, and the screen says the
   review is weaker.
@@ -68,7 +69,7 @@ phase.
    through `--resume` and cost Codex nothing measurable (13/10/2026, [quota-pacing.md](quota-pacing.md#cache-and-router-measured-on-13102026)). Facts that change travel as
    text inside the next message, never as a system-prompt edit. A change has need when the person made it (the model
    picker, the permission mode, a setting), when Codex's catalog tool servers were revoked or changed, when a plan limit
-   moves the conversation to the other AI (rule 4's hand-over), or once when Auto met an easy request first (a greeting)
+   moves the conversation to the other AI (rule 4's hand-over), once when Faber's guide is new to a session (an older session, a new screen language: one line in its next message), or once when Auto met an easy request first (a greeting)
    and the next one needed more; nothing else changes them
    (`engine/tests/auto.rs`, `a_second_message_keeps_the_process_the_model_and_the_effort_of_the_first`).
 4. **Hand work to another model through a written summary or a diff, not the conversation.** Thinking blocks are tied to

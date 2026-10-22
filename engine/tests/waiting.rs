@@ -165,7 +165,7 @@ async fn move_chat_to_project_quota_wait_keeps_history_and_attachment_locations_
                     _ => None,
                 })
                 .expect("the recovered turn reaches its fresh session");
-            assert_eq!(turn, expected, "vendor={vendor:?}, reopened={reopened}");
+            assert_eq!(support::person_string(turn), expected, "vendor={vendor:?}, reopened={reopened}");
             assert!(running.mismatches.lock().unwrap().is_empty());
             r.engine.shutdown();
         }
@@ -561,6 +561,7 @@ fn seed(dir: &Path, long: bool) -> Conversation {
     let c = Conversation {
         session_kits: Default::default(),
         session_resource_digests: Default::default(),
+        session_guide_digests: Default::default(),
         commands: BTreeMap::new(),
         working_folder: None,
         project_start_pending: false,

@@ -23,13 +23,37 @@ pub fn load(path: &Path) -> io::Result<Vec<Entry>> {
         .collect()
 }
 
+/// The person's own text of a first input: the line that points to the guide, which Faber puts ahead of it, is not part of it.
+fn person_text(content: &Value) -> Value {
+    let strip = |text: &str| {
+        let rest = faber_engine::guide::without_note(text);
+        (rest.len() != text.len()).then(|| rest.to_string())
+    };
+    match content {
+        Value::String(text) => strip(text).map_or_else(|| content.clone(), Value::from),
+        Value::Array(parts) => Value::Array(
+            parts
+                .iter()
+                .map(|part| {
+                    let mut part = part.clone();
+                    if let Some(text) = part["text"].as_str().and_then(strip) {
+                        part["text"] = text.into();
+                    }
+                    part
+                })
+                .collect(),
+        ),
+        _ => content.clone(),
+    }
+}
+
 /// What must match between what the app sends and what was recorded.
 pub fn key(msg: &Value) -> String {
     let method = msg["method"].as_str();
     let id = &msg["id"];
     // Codex app-server speaks JSON-RPC: requests and notifications have a method, answers have an id.
     if method == Some("turn/start") {
-        return format!("turn/start {} {}", id, msg["params"]["input"]);
+        return format!("turn/start {} {}", id, person_text(&msg["params"]["input"]));
     }
     if method == Some("turn/steer") {
         return format!("turn/steer {} {}", id, msg["params"]["input"]);
@@ -41,7 +65,7 @@ pub fn key(msg: &Value) -> String {
         return format!("answer {} {}", id, msg["result"]["decision"].as_str().unwrap_or(""));
     }
     match msg["type"].as_str().unwrap_or_default() {
-        "user" => format!("user {}", msg["message"]["content"]),
+        "user" => format!("user {}", person_text(&msg["message"]["content"])),
         "control_request" => format!("control_request {}", msg["request"]["subtype"].as_str().unwrap_or("")),
         "control_response" => {
             let r = &msg["response"];
@@ -97,6 +121,19 @@ mod tests {
 
     fn entry(input: bool, msg: Value) -> Entry {
         Entry { input, msg }
+    }
+
+    #[test]
+    fn the_line_to_the_guide_ahead_of_a_first_input_is_not_part_of_the_persons_text() {
+        let line = "Faber's own guide: when the person asks how Faber itself works, read \"guide/SKILL.md\" and answer from it. The screen is shown in English.";
+        let user = |content: Value| key(&json!({"type": "user", "message": {"content": content}}));
+        let sent = format!("{line}\n\nhi");
+        assert_eq!(user(json!(sent)), user(json!("hi")));
+        assert_eq!(user(json!([{"type": "text", "text": sent}])), user(json!([{"type": "text", "text": "hi"}])));
+        assert_ne!(user(json!("hello")), user(json!("hi")), "only the line is taken off");
+        let wrong = format!("Current catalog resources for this session:\nsomething\n\n{line}\n\nhi");
+        assert_ne!(user(json!(wrong)), user(json!("hi")), "anything else ahead of the words still fails a test");
+        assert_ne!(user(json!(format!("{line}\nhi"))), user(json!("hi")), "the line ends at its blank line");
     }
 
     #[test]

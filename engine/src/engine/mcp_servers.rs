@@ -196,7 +196,8 @@ impl Core {
                 })
             })
             .unwrap_or_default();
-        let raw = self.session_tools(vendor, area, permissions, project.as_deref(), &request, cwd);
+        let mut raw = self.session_tools(vendor, area, permissions, project.as_deref(), &request, cwd);
+        raw.0.guide = self.guide_for(vendor, area, permissions);
         let disabled = self.project_disabled_servers(project.as_deref());
         self.check_kit(conv, conv, vendor, area, permissions, cwd, request, native, previous, disabled, raw)
     }

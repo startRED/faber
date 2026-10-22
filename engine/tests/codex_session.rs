@@ -2941,6 +2941,7 @@ fn tools(skills: Option<&str>) -> faber_engine::tools::Delivery {
             env: [("NO_STATS".to_string(), "1".to_string())].into(),
         }],
         disabled_servers: vec![],
+        guide: Default::default(),
     }
 }
 

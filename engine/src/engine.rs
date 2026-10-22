@@ -227,6 +227,8 @@ struct Live {
     tool_kit: crate::tools::kits::Report,
     kit_identity: Option<String>,
     kit_resource_digest: Option<String>,
+    /// What this session knows of Faber's own guide (R18).
+    guide: kits::LiveGuide,
     kit_pending: bool,
     prepared: bool,
     kit_resources: Option<String>,
@@ -3294,7 +3296,12 @@ impl Core {
             l.by_hand = by_hand;
             l.approved = approved;
             l.break_pending |= self.convs.get(id).and_then(|c| c.messages.last()).is_some_and(|m| !m.text.is_empty());
-            let text = kits::with_resources(text, l.kit_resources.take());
+            let text = kits::first_input(text, &mut l.kit_resources, &mut l.guide);
+            // shortcut: saved when the message is dispatched, not when the CLI accepted it, so a process that dies before reading it
+            // and a retry that resumes the same native session skip the line once; upgrade by saving it on the first reply event.
+            if let (Some(c), Some(digest)) = (self.convs.get_mut(id), &l.guide.digest) {
+                c.session_guide_digests.insert(l.vendor, digest.clone());
+            }
             let (text, images) = match l.group_files.take() {
                 Some((paths, mut group_images)) => {
                     group_images.extend(images);
@@ -3350,7 +3357,7 @@ impl Core {
         let prepared_tools = if mode == kits::SessionStart::Turn && self.live.get(conv).is_some_and(|l| l.prepared) {
             let (mut delivery, report) = self.choose_session_tools(conv, pick.vendor, permissions, &cwd);
             if pick.vendor == Vendor::Claude && !flags.plugin_dir {
-                delivery.plugin = None;
+                delivery.without_plugin();
             }
             Some((delivery, report))
         } else {
@@ -3393,6 +3400,14 @@ impl Core {
                         .then_some(resources)
                         .flatten();
                         l.kit_resource_digest = Some(digest);
+                        l.guide = kits::LiveGuide::start(
+                            delivery.guide.note(),
+                            mode,
+                            true,
+                            c.session_kits.get(&pick.vendor),
+                            c.resumable(pick.vendor),
+                            c.session_guide_digests.get(&pick.vendor),
+                        );
                     }
                 }
                 if mode != kits::SessionStart::Prepare {
@@ -3413,7 +3428,7 @@ impl Core {
         }
         let (mut project_tools, mut tool_kit) = self.checked_session_tools(conv, pick.vendor, permissions, &cwd)?;
         if pick.vendor == Vendor::Claude && !flags.plugin_dir {
-            project_tools.plugin = None;
+            project_tools.without_plugin();
         }
         if cli.is_some() && pick.vendor == Vendor::Codex && self.codex_prepared.get(conv).is_some_and(|(key, _)| Some(*key) == prepared_key)
         {
@@ -3539,6 +3554,14 @@ impl Core {
         } else {
             None
         };
+        let guide = kits::LiveGuide::start(
+            project_tools.guide.note(),
+            mode,
+            pick.vendor == Vendor::Claude || resumed,
+            self.convs.get(conv).and_then(|c| c.session_kits.get(&pick.vendor)),
+            resume.as_ref(),
+            self.convs.get(conv).and_then(|c| c.session_guide_digests.get(&pick.vendor)),
+        );
         if mode == kits::SessionStart::Compact {
             tool_kit = previous_kit.unwrap_or_default();
             kit_identity = previous_identity;
@@ -3624,6 +3647,7 @@ impl Core {
                 tool_kit,
                 kit_identity,
                 kit_resource_digest,
+                guide,
                 kit_pending: mode != kits::SessionStart::Compact,
                 prepared: mode != kits::SessionStart::Turn,
                 kit_resources,
@@ -3700,6 +3724,7 @@ impl Core {
             sessions: BTreeMap::new(),
             session_kits: BTreeMap::new(),
             session_resource_digests: BTreeMap::new(),
+            session_guide_digests: BTreeMap::new(),
             tentative: BTreeMap::new(),
             command_gate: false,
             codex_plan: false,
@@ -4465,6 +4490,7 @@ mod tool_in_tests {
             tool_kit: Default::default(),
             kit_identity: None,
             kit_resource_digest: None,
+            guide: Default::default(),
             kit_pending: false,
             prepared: false,
             kit_resources: None,
@@ -4547,6 +4573,7 @@ mod tool_in_tests {
                         tool_kit: Default::default(),
                         kit_identity: None,
                         kit_resource_digest: None,
+                        guide: Default::default(),
                         kit_pending: false,
                         prepared: false,
                         kit_resources: None,

@@ -145,6 +145,8 @@ pub struct Delivery {
     pub lease: Option<std::sync::Arc<kits::Lease>>,
     /// Ready sessions read immutable, already checked text without filesystem work under the engine lock.
     pub prepared: Option<std::sync::Arc<kits::PreparedText>>,
+    /// How Faber's own guide (`crate::guide`) reaches this session, decided once when the session starts.
+    pub guide: crate::guide::Guide,
 }
 
 /// One server as both CLIs start it: Node, the package's script and Faber's arguments, and the environment Faber sets.
@@ -362,6 +364,7 @@ impl Store {
             disabled_servers: vec![],
             lease: None,
             prepared: None,
+            guide: Default::default(),
         }
     }
 
@@ -1712,6 +1715,25 @@ mod tests {
             ["CHROME_DEVTOOLS_MCP_NO_USAGE_STATISTICS", "CHROME_DEVTOOLS_MCP_NO_UPDATE_CHECKS", "CHROME_DEVTOOLS_MCP_NO_CONFIG_DISCOVERY"]
         {
             assert_eq!(measure.env.get(name).map(String::as_str), Some("1"), "{name}");
+        }
+    }
+
+    /// Faber's own guide (R18) is a skill like the catalog's in the one place that matters, the file the CLI reads: it passes the
+    /// same allowlist and the same description reading, and no catalog entry carries its name.
+    #[test]
+    fn faber_own_guide_passes_the_front_matter_checks_of_a_catalog_skill_and_is_no_catalog_item() {
+        let file = crate::guide::skill_file(crate::guide::Language::En);
+        assert_eq!(standalone_skill(&file), Ok(()));
+        assert_eq!(widening_key(&file), None, "nothing in it widens what the agent may do");
+        assert_eq!(
+            kits::checked_description(&file, "fallback"),
+            crate::guide::DESCRIPTION,
+            "the description is read whole and fits the cap every catalog description has"
+        );
+        assert!(crate::guide::DESCRIPTION.len() <= 160 && !crate::guide::DESCRIPTION.contains(": "), "a plain scalar says no `: `");
+        assert!(file.ends_with(&crate::guide::text_for(crate::guide::Language::En)), "the body is the guide, unchanged");
+        for item in catalog() {
+            assert!(!item.id.contains("guide") && item.cli_name.as_deref().is_none_or(|name| !name.contains("faber-guide")), "{}", item.id);
         }
     }
 }

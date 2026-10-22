@@ -211,11 +211,11 @@ async fn checks_preserve_compaction(vendor: Vendor, permissions: bool, stop: boo
         let sent = if vendor == Vendor::Codex {
             boot(&mut new).await;
             thread(&mut new, "thread/resume", "main").await;
-            wire(&new, |m| m["method"] == "turn/start").await["params"]["input"][0]["text"].as_str().unwrap().to_string()
+            support::person_string(wire(&new, |m| m["method"] == "turn/start").await["params"]["input"][0]["text"].as_str().unwrap())
         } else {
             let sent = wire(&new, |m| m["type"] == "user").await;
             new.say(json!({"type":"system","subtype":"init","session_id":"main","model":"claude-haiku-5-5"})).await;
-            sent["message"]["content"].as_str().unwrap().to_string()
+            support::person_string(sent["message"]["content"].as_str().unwrap())
         };
         assert_eq!(sent, queued.text, "the saved follow-up starts later on a new session");
         let resumed = app.open(&id).unwrap();
@@ -277,16 +277,20 @@ async fn checks_preserve_compaction(vendor: Vendor, permissions: bool, stop: boo
     };
     let continued = format!("The conversation was compacted. Continue: {next}");
     let sent = if vendor == Vendor::Codex {
-        let turn = wire(&new, |m| m["method"] == "turn/start" && m["params"]["input"][0]["text"] == continued).await;
+        let turn = wire(&new, |m| {
+            m["method"] == "turn/start" && support::person_string(m["params"]["input"][0]["text"].as_str().unwrap_or_default()) == continued
+        })
+        .await;
         if fail_first {
             new.say(json!({"id":turn["id"],"result":{"turn":{"id":"turn-main"}}})).await;
         }
-        turn["params"]["input"][0]["text"].as_str().unwrap().to_string()
+        support::person_string(turn["params"]["input"][0]["text"].as_str().unwrap())
     } else {
-        wire(&new, |m| m["type"] == "user" && m["message"]["content"] == continued).await["message"]["content"]
-            .as_str()
-            .unwrap()
-            .to_string()
+        let sent = wire(&new, |m| {
+            m["type"] == "user" && support::person_string(m["message"]["content"].as_str().unwrap_or_default()) == continued
+        })
+        .await;
+        support::person_string(sent["message"]["content"].as_str().unwrap())
     };
     assert_eq!(sent, continued);
     let c = app.open(&id).unwrap();

@@ -82,7 +82,7 @@ fn codex(disk: Shared) -> Spawner {
                         let thread = params["threadId"].as_str().unwrap_or_default().to_string();
                         let mut d = disk.lock().unwrap();
                         d.ran.insert(thread.clone());
-                        d.turns.push(params["input"][0]["text"].as_str().unwrap_or_default().into());
+                        d.turns.push(faber_engine::guide::without_note(params["input"][0]["text"].as_str().unwrap_or_default()).into());
                         let turn = json!({ "id": "turn-1", "items": [], "status": "inProgress" });
                         say.push(json!({ "id": id, "result": { "turn": turn } }));
                         say.push(json!({ "method": "turn/started", "params": { "threadId": thread, "turn": turn } }));

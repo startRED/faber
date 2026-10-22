@@ -433,6 +433,12 @@ impl Delivery {
         (count > 0).then_some(text)
     }
 
+    /// An older Claude Code takes no plugin folder: what the plugins carried then reaches it as text.
+    pub fn without_plugin(&mut self) {
+        self.plugin = None;
+        self.guide = std::mem::take(&mut self.guide).without_plugin();
+    }
+
     /// Native plugin discovery uses names; thread-local discovery otherwise reads the verified snapshot on demand.
     pub fn project_skill_descriptions(&self, vendor: Vendor) -> Option<String> {
         let prepared = self.prepared.as_ref()?;

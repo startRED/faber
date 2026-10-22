@@ -1897,6 +1897,7 @@ export const fr: Messages = {
   'notes.175.better': 'Les barres d’usage et les flèches des sections repliables bougent maintenant sans à-coup.',
   'notes.176.fixed': 'Quand vous répondez à une question dans En cours, sa carte ne disparaît plus d’un coup : elle se replie en douceur.',
   'notes.177.fixed': 'Une réponse qui s’arrêtait d’elle-même, à une limite ou sur une erreur, restait sans explication. Elle en donne maintenant la raison.',
+  'notes.178.new': 'Demandez à une conversation comment Faber fonctionne, par exemple Continuer seul. Elle répond dans votre langue, avec les mots de votre écran.',
   'update.checking': 'Recherche d’une mise à jour…',
   'update.downloading': 'Téléchargement de la mise à jour…',
   'update.downloadingPercent': 'Téléchargement de la mise à jour… {percent} %',

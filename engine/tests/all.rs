@@ -50,6 +50,8 @@ mod engine;
 mod export;
 #[path = "groups.rs"]
 mod groups;
+#[path = "guide.rs"]
+mod guide;
 #[path = "handover.rs"]
 mod handover;
 #[path = "install.rs"]

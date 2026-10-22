@@ -566,6 +566,7 @@ mod tests {
                     tool_kit: Default::default(),
                     kit_identity: None,
                     kit_resource_digest: None,
+                    guide: Default::default(),
                     kit_pending: false,
                     prepared: false,
                     kit_resources: None,

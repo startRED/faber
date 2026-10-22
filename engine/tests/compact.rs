@@ -97,7 +97,7 @@ fn turns(pipe: &Pipe) -> Vec<String> {
 
 fn text_of(content: &Value) -> String {
     match content {
-        Value::String(s) => s.clone(),
+        Value::String(s) => crate::support::person_string(s),
         Value::Array(parts) => parts.iter().filter_map(|p| p["text"].as_str()).collect::<Vec<_>>().join(""),
         _ => String::new(),
     }

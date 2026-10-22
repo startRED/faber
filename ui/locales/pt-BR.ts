@@ -1884,6 +1884,7 @@ export const ptBR: Messages = {
   'notes.175.better': 'As barras de uso e as setas das seções dobráveis agora se movem suavemente, sem pular.',
   'notes.176.fixed': 'Ao responder uma pergunta em Rodando agora, o cartão dela não some de repente: ele se recolhe aos poucos.',
   'notes.177.fixed': 'Uma resposta que parava sozinha, num limite ou por um erro, ficava sem explicação. Agora ela diz o motivo.',
+  'notes.178.new': 'Pergunte a uma conversa como o Faber funciona, por exemplo o Continuar sozinho. Ela responde no seu idioma, com as palavras da tela.',
   'update.checking': 'Procurando atualização…',
   'update.downloading': 'Baixando atualização…',
   'update.downloadingPercent': 'Baixando atualização… {percent}%',

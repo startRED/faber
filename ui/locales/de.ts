@@ -1897,6 +1897,7 @@ export const de: Messages = {
   'notes.175.better': 'Die Nutzungsbalken und die Pfeile an aufklappbaren Bereichen bewegen sich jetzt fließend statt zu springen.',
   'notes.176.fixed': 'Wenn du in Läuft gerade eine Frage beantwortest, verschwindet ihre Karte nicht mehr abrupt: Sie klappt sanft zu.',
   'notes.177.fixed': 'Eine Antwort, die von selbst stehen blieb, an einer Grenze oder bei einem Fehler, kam ohne Erklärung. Jetzt nennt sie den Grund.',
+  'notes.178.new': 'Frag jede Unterhaltung, wie Faber funktioniert, zum Beispiel was Selbst weitermachen tut. Sie antwortet in deiner Sprache, mit den Wörtern auf deinem Bildschirm.',
   'update.checking': 'Suche nach einem Update…',
   'update.downloading': 'Update wird heruntergeladen…',
   'update.downloadingPercent': 'Update wird heruntergeladen… {percent} %',

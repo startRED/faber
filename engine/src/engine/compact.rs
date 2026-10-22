@@ -80,6 +80,14 @@ impl Core {
     /// The CLI compacted the conversation: what it holds is the summary now. Claude Code says how big it is; Codex reports
     /// the new size as a context update of its own.
     pub(super) fn note_compacted(&mut self, conv: &str, vendor: Vendor, after: Option<u64>) {
+        // The summary replaces a first input that told the session of Faber's guide (Claude Code, a resumed Codex thread); a new
+        // Codex thread's instructions are kept.
+        if let Some(l) = self.live.get_mut(conv)
+            && l.guide.compacted()
+            && let Some(c) = self.convs.get_mut(conv)
+        {
+            c.session_guide_digests.remove(&vendor);
+        }
         if after.is_some() {
             self.note_context(conv, vendor, after, None);
         }

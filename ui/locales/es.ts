@@ -1897,6 +1897,7 @@ export const es: Messages = {
   'notes.175.better': 'Las barras de uso y las flechas de las secciones plegables ahora se mueven con fluidez, sin saltos.',
   'notes.176.fixed': 'Al responder una pregunta en En marcha ahora, su tarjeta ya no desaparece de golpe: se pliega con suavidad.',
   'notes.177.fixed': 'Una respuesta que se detenía sola, por un límite o por un error, quedaba sin explicación. Ahora dice el motivo.',
+  'notes.178.new': 'Pregunta a cualquier conversación cómo funciona Faber, por ejemplo qué hace Seguir solo. Responde en tu idioma, con las palabras de tu pantalla.',
   'update.checking': 'Buscando una actualización…',
   'update.downloading': 'Descargando actualización…',
   'update.downloadingPercent': 'Descargando actualización… {percent} %',
