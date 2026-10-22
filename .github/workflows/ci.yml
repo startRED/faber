@@ -190,8 +190,12 @@ jobs:
         run: cargo test --workspace --no-run
       - if: matrix.part == 'rust'
         run: cargo t --suite rust
+      # On macOS the hidden test window's page sometimes stopped mid-run (no progress, no error); App Nap and an idle
+      # display can park a window nobody looks at, so both stay off while the screen checks run.
+      - if: contains(matrix.part, 'ui') && runner.os == 'macOS'
+        run: defaults write NSGlobalDomain NSAppSleepDisabled -bool YES
       - if: contains(matrix.part, 'ui')
-        run: cargo t --suite ui
+        run: ${{ runner.os == 'macOS' && 'caffeinate -dimsu ' || '' }}cargo t --suite ui
       - uses: actions/upload-artifact@v7
         if: always()
         with:

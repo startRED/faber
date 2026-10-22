@@ -15,26 +15,33 @@ const RUN_CEILING: Duration = Duration::from_secs(20 * 60);
 
 /// Waits for the report, and for the page's progress notes in the meantime. Every note that differs from the last restarts the
 /// `quiet` allowance, so a run that is slow but moving never times out, while a page stuck inside one check, or one that
-/// never starts, fails after `quiet` and says where it stopped.
+/// never starts, fails after `quiet` and says where it stopped. The page's heartbeat (`BEAT`) never counts as progress: it
+/// only shows, in the failure, whether the page itself was still running when the checks stopped.
 struct Wait {
     quiet: Duration,
     ceiling: Instant,
     note: String,
+    last: String,
     moved: Instant,
 }
 
+/// What `tests/ui/crash.ts` appends to the last note while the page is alive.
+const BEAT: &str = " · page alive ";
+
 impl Wait {
     fn new(now: Instant, quiet: Duration, ceiling: Duration) -> Wait {
-        Wait { quiet, ceiling: now + ceiling, note: String::new(), moved: now }
+        Wait { quiet, ceiling: now + ceiling, note: String::new(), last: String::new(), moved: now }
     }
 
     /// The failure message when the wait is over, nothing while the run may go on.
     fn over(&mut self, now: Instant, note: &str) -> Option<String> {
-        if note != self.note {
-            self.note = note.to_string();
+        let check = note.split(BEAT).next().unwrap_or_default();
+        if check != self.note {
+            self.note = check.to_string();
             self.moved = now;
         }
-        let at = if self.note.is_empty() { "before its first check".to_string() } else { format!("at check {}", self.note) };
+        self.last = note.to_string();
+        let at = if self.last.is_empty() { "before its first check".to_string() } else { format!("at check {}", self.last) };
         if now >= self.ceiling {
             Some(format!("the checks did not finish within {} s ({at})", RUN_CEILING.as_secs()))
         } else if now.duration_since(self.moved) >= self.quiet {
@@ -164,6 +171,12 @@ mod tests {
         assert_eq!(wait.over(at(500), "7/400 a check"), None);
         let why = wait.over(at(510), "7/400 a check").unwrap();
         assert!(why.contains("no progress for 90 s") && why.contains("at check 7/400 a check"), "{why}");
+        // The heartbeat is no progress, but the failure keeps it: the page was alive, its checks were not.
+        let mut wait = Wait::new(start, Duration::from_secs(90), Duration::from_secs(1200));
+        assert_eq!(wait.over(at(10), "3/400 a check"), None);
+        assert_eq!(wait.over(at(60), "3/400 a check · page alive 50 s"), None);
+        let why = wait.over(at(100), "3/400 a check · page alive 90 s").unwrap();
+        assert!(why.contains("no progress for 90 s") && why.contains("3/400 a check · page alive 90 s"), "{why}");
         // Moving forever still ends at the ceiling.
         let mut wait = Wait::new(start, Duration::from_secs(90), Duration::from_secs(1200));
         assert!(wait.over(at(1200), "9/400 x").unwrap().contains("did not finish within 1200 s"));
