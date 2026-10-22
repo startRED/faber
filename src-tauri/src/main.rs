@@ -1239,6 +1239,49 @@ async fn project_copies(faber: State<'_, Faber>, project_id: String, on: bool) -
     faber.engine.update_project(&project, &updated)
 }
 
+/// Settings > Projects and the project page's Goals fold: a project's standing goals, the switch and the day's limit.
+#[tauri::command]
+async fn project_goals(faber: State<'_, Faber>, project_id: String) -> Res<faber_engine::project::goals::View> {
+    project_commands::id(&project_id)?;
+    faber.engine.project_goals(&project_id)
+}
+
+/// The project's switch for starting fixes by itself. Off until the person turns it on.
+#[tauri::command]
+async fn project_goals_auto(faber: State<'_, Faber>, project_id: String, on: bool) -> Res<faber_engine::project::goals::View> {
+    project_commands::id(&project_id)?;
+    faber.engine.set_project_goals(&project_id, on)
+}
+
+/// Adds a goal: the person's words and one of the project's confirmed checks.
+#[tauri::command]
+async fn project_goal_add(
+    faber: State<'_, Faber>,
+    project_id: String,
+    words: String,
+    check: String,
+) -> Res<faber_engine::project::goals::View> {
+    project_commands::id(&project_id)?;
+    project_commands::text(&words)?;
+    project_commands::text(&check)?;
+    faber.engine.add_project_goal(&project_id, &words, &check)
+}
+
+#[tauri::command]
+async fn project_goal_remove(faber: State<'_, Faber>, project_id: String, goal_id: String) -> Res<faber_engine::project::goals::View> {
+    project_commands::id(&project_id)?;
+    project_commands::id(&goal_id)?;
+    faber.engine.remove_project_goal(&project_id, &goal_id)
+}
+
+/// A paused goal, or one that needs the person, is checked again.
+#[tauri::command]
+async fn project_goal_resume(faber: State<'_, Faber>, project_id: String, goal_id: String) -> Res<faber_engine::project::goals::View> {
+    project_commands::id(&project_id)?;
+    project_commands::id(&goal_id)?;
+    faber.engine.resume_project_goal(&project_id, &goal_id)
+}
+
 #[tauri::command]
 async fn project_proof(faber: State<'_, Faber>, project_id: String) -> Res<checks::ProofView> {
     project_commands::id(&project_id)?;
@@ -1703,6 +1746,11 @@ fn main() {
                 open_link,
                 set_shell_texts,
                 project_copies,
+                project_goals,
+                project_goals_auto,
+                project_goal_add,
+                project_goal_remove,
+                project_goal_resume,
                 project_proof,
                 project_memory,
                 edit_project_memory,

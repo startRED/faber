@@ -228,8 +228,12 @@ impl Core {
                 match self.send_by_itself(conv, text, wake).map(|()| self.latest_reply(conv)) {
                     Ok(reply) => place = reply.unwrap_or(place),
                     // A turn that failed may have left an error reply: the line goes under the latest one, so the person sees it.
-                    Err(_) => {
+                    Err(error) => {
                         f.held = true;
+                        // The day's money for a fix is gone: the reply says so, never only the held line.
+                        if error == goals::CAP {
+                            self.goal_capped(conv);
+                        }
                         place = self.latest_reply(conv).unwrap_or(place);
                     }
                 }

@@ -363,6 +363,30 @@ export interface ProofView {
   setup?: string[];
 }
 
+/** One standing goal as the screen shows it (engine/src/project/goals.rs). */
+export interface GoalRow {
+  id: string;
+  words: string;
+  check: string;
+  state: 'holding' | 'checking' | 'fixing' | 'needsYou' | 'paused';
+  /** A `reason.goal.*` key: why the goal needs the person. */
+  reason?: string;
+  /** Unix seconds of the last answer of its check. */
+  lastRun?: number;
+  conversation?: string;
+}
+/** A project's standing goals, the switch for starting fixes by itself and the day's limit. */
+export interface GoalsView {
+  auto: boolean;
+  /** The person saw the limit when they first turned the switch on. */
+  capSeen: boolean;
+  capUsd: number;
+  spentUsd: number;
+  /** The project's confirmed checks a goal can use; none while the list is not confirmed. */
+  checks: string[];
+  goals: GoalRow[];
+}
+
 // The shapes the look engine sends and takes (src-tauri/src/look.rs). The screen never computes a colour.
 export type Motion = 'full' | 'reduced' | 'none';
 export interface Effects {
@@ -761,7 +785,7 @@ export interface Plural {
 }
 /** The words the shell shows by itself. Counts are `{n}` and the conversation is `{title}`; the shell fills them. */
 /** Why "keep going" stops by itself: the last part of the engine's `reason.keepGoing.*` keys. */
-export const STOPS = ['done', 'asked', 'failed', 'cap', 'pace', 'quota', 'billed'] as const;
+export const STOPS = ['done', 'asked', 'failed', 'cap', 'pace', 'quota', 'billed', 'goal'] as const;
 
 export interface ShellTexts {
   open: string;
@@ -987,6 +1011,11 @@ export const api = {
   saveNotesSeen: (id: number) => invoke<void>('save_notes_seen', { id }),
   projectCopies: (projectId: string, on: boolean) => invoke<void>('project_copies', { projectId, on }),
   projectProof: (projectId: string) => invoke<ProofView>('project_proof', { projectId }),
+  projectGoals: (projectId: string) => invoke<GoalsView>('project_goals', { projectId }),
+  projectGoalsAuto: (projectId: string, on: boolean) => invoke<GoalsView>('project_goals_auto', { projectId, on }),
+  projectGoalAdd: (projectId: string, words: string, check: string) => invoke<GoalsView>('project_goal_add', { projectId, words, check }),
+  projectGoalRemove: (projectId: string, goalId: string) => invoke<GoalsView>('project_goal_remove', { projectId, goalId }),
+  projectGoalResume: (projectId: string, goalId: string) => invoke<GoalsView>('project_goal_resume', { projectId, goalId }),
   projectMemory: (projectId: string) => invoke<MemoryList>('project_memory', { projectId }),
   editProjectMemory: (projectId: string, edit: MemoryEdit) => invoke<void>('edit_project_memory', { projectId, edit }),
   projectProofConfirm: (projectId: string, commands: string[], setup: string[], declared: string[]) =>

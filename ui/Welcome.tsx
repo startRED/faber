@@ -7,6 +7,7 @@ import { vendorName } from './models.ts';
 import { animateList } from './motion.ts';
 import { Peek } from './Mark.tsx';
 import { tail } from './ProjectSettings.tsx';
+import { ProjectGoals } from './ProjectGoals.tsx';
 import { ProjectMemory } from './ProjectMemory.tsx';
 import { pickUp } from './running.ts';
 
@@ -97,7 +98,7 @@ export function Welcome(props: {
             </For>
           </section>
         </Show>
-        <Show when={props.project}>{(project) => <ProjectMemory projectId={project().id} />}</Show>
+        <Show when={props.project}>{(project) => <><ProjectGoals projectId={project().id} /><ProjectMemory projectId={project().id} /></>}</Show>
         {/* Keyed by the project, so another project's home never shows this one's sessions. */}
         <Show when={props.terminal && props.project?.id} keyed>
           {(id) => <FromTerminal list={() => props.terminal!.list(id)} onPick={(s) => props.terminal!.onPick(id, s)} />}

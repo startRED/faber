@@ -904,6 +904,10 @@ pub struct Conversation {
     /// cannot start conversations of its own.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub started_by: Option<String>,
+    /// The project whose standing goal this conversation fixes, or whose goal fix started it: such a conversation is held to the
+    /// project's day of money (`engine/goals.rs`) for as long as it lives, whatever becomes of the goal's own pointer.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub goal_fix: Option<String>,
     /// What this conversation has cost in US$ at API price, counted where each cost is written: its turns, the helpers and
     /// quick side questions (`/btw`) of its agent, and those of the conversations that agent started. A running total that no
     /// rewind takes back, so the job's spend (rule 7) is never a scan of the conversations.

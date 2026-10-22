@@ -1,8 +1,8 @@
 import { createSignal, For, type JSX, onCleanup, onMount, Show } from 'solid-js';
-import { api, errorText, type Project, type ProofView } from './api.ts';
+import { api, errorText, type GoalsView, type Project, type ProofView } from './api.ts';
 import { Collapse, Opt, Toggle } from './controls.tsx';
 import { Icon } from './Glyphs.tsx';
-import { fromEngine, t } from './i18n.ts';
+import { fromEngine, money, t } from './i18n.ts';
 import { animateList } from './motion.ts';
 import { keep, kept, release, useDraft } from './unsent.ts';
 
@@ -143,6 +143,29 @@ function Body(props: { project: Project }) {
     return saved;
   };
 
+  // Standing goals: the one switch that lets Faber start a fix by itself, with the day's limit always in view.
+  const [goals, setGoals] = createSignal<GoalsView>();
+  const [goalsError, setGoalsError] = createSignal<string>();
+  onMount(() => {
+    api.projectGoals(id()).then((g) => !gone && setGoals(g), (err) => !gone && setGoalsError(errorText(err)));
+  });
+  const goalsAuto = async (on: boolean) => {
+    let saved = false;
+    await run(async () => {
+      const next = await api.projectGoalsAuto(id(), on);
+      if (!gone) setGoals(next);
+      saved = true;
+    });
+    return saved;
+  };
+  const goalsHint = () => {
+    const g = goals();
+    if (g) return t('set.projects.goalsHint', { cap: money(g.capUsd, 0), spent: money(g.spentUsd) });
+    // A read that failed says why in the row, instead of a switch that stays off and says nothing.
+    const failed = goalsError();
+    return failed ? fromEngine(failed) : undefined;
+  };
+
   const checksHint = () => {
     const p = proof();
     if (!p) return t('projects.status.reading');
@@ -162,6 +185,15 @@ function Body(props: { project: Project }) {
         more={[t('set.projects.copiesDesc'), t('set.projects.copiesTech')]}
         checked={separate()}
         onChange={copies}
+      />
+      <Toggle
+        id={row('goals')}
+        label={t('set.projects.goals')}
+        hint={goalsHint()}
+        more={[t('set.projects.goalsDesc'), t('set.projects.goalsTech')]}
+        checked={goals()?.auto === true}
+        disabled={!goals()}
+        onChange={goalsAuto}
       />
       <div class="pset-checks" data-testid="pset-checks" ref={animateList}>
         <Opt id={row('checks')} label={t('set.projects.checks')} hint={checksHint()} more={[t('projects.proof.desc')]}>

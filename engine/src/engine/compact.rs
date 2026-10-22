@@ -264,6 +264,10 @@ impl Core {
     /// calls `go_on`). Once per turn Faber sent, so a compaction that failed is not asked again in a loop; never before the
     /// check turn, which rereads the original request. True while it compacts.
     pub(super) fn compact_at_boundary(&mut self, conv: &str, reply_id: &str) -> bool {
+        // A compaction is a paid turn: a goal's fix with the day's money gone does not start one (`send_next` refuses next).
+        if self.goal_out_of_money(conv) {
+            return false;
+        }
         let Some(c) = self.convs.get(conv) else { return false };
         let Some(kg) = c.keep_going.as_ref() else { return false };
         let turns = kg.turns;

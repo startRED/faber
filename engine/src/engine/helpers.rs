@@ -78,6 +78,9 @@ impl Core {
     }
 
     fn launch_helper(&mut self, conv: &str, call: &str, input: &serde_json::Value) -> Result<(), &'static str> {
+        if self.goal_out_of_money(conv) {
+            return Err(super::siblings::GOAL_CAP);
+        }
         if self.rewind_blocked(conv) {
             return Err("error.rewind.busy");
         }

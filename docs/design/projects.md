@@ -31,6 +31,20 @@ mission board and the local build card left the bundle with their 30 s poll (R17
   with Auto in the picker; opening it again opens the same conversation, archived or not. Its earlier turns stay in the CLI: the conversation shows what is said from then on.
   Claude Code has no list to ask, so its sessions come from its history files of that folder only (parity F5).
 
+### Standing goals
+
+Above Memory, one more quiet fold (`ui/ProjectGoals.tsx`) built the same way: a text button, the shared Collapse, one
+column, read on open and on Refresh, nothing polling. Each goal is a row of the person's words, then one small line: the
+state word (Holding, Checking, Broke and being fixed, Needs you, Paused), when it was last checked and its check as code.
+Needs you is the only state word set heavier (the ink colour at weight 580, no amber) and carries its reason in plain
+words under the row. A goal that waits for the person or was paused offers Watch again; Remove asks once more with Cancel
+beside it (500 ms and the key released, as in Memory). The form is one field for the words, one list of the confirmed
+checks and Add; with no confirmed check a line says to confirm them first. A read that fails shows its reason above the
+list, also before anything was read; with no goal only the empty line shows, and the line that says the switch is off
+appears once there are goals. It works with no AI connected. The switch that lets Faber start a fix, and its US$2
+daily limit, are in Settings, Projects, never here. If that switch cannot be read, its row says why instead of the
+limit.
+
 ### Memory
 
 The project page extends its existing single column with one quiet Memory fold below the pick-up list

@@ -466,6 +466,15 @@ impl Core {
             let _ = self.queue(id);
             return;
         }
+        // A turn Faber wrote that waited for quota does not resume once the day's money for fixes is gone; the person's own
+        // message and the approval of a plan do. (A rerun, a recovery in the turn that runs and a compaction are parts of a turn
+        // already started, so they are not cut.)
+        let by_itself = self.convs.get(id).and_then(|c| c.messages.iter().rev().nth(1)).is_some_and(|q| {
+            q.role == Role::User && q.wake.as_ref().is_some_and(|w| !matches!(w.why.as_str(), "wake.approvedPlan" | "wake.goalBroke"))
+        });
+        if by_itself && self.goal_out_of_money(id) {
+            return self.fail_reply(id, reply, goals::CAP.into());
+        }
         // Pick only when the original vendor remains blocked; no move for balance.
         // A scheduled resend is automatic even when the original model was picked by hand.
         if self.gate_turn(&t.pick, false).is_ok() {

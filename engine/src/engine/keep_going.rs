@@ -489,6 +489,10 @@ impl Core {
             && !self.reported(conv, &error)
         {
             self.trouble(conv, &reply_id, &error);
+            // The halt dropped Faber's own turns; what the person queued behind the one the cap refused goes out now.
+            if error == super::goals::CAP {
+                self.drain(conv);
+            }
         }
     }
 
@@ -515,6 +519,8 @@ impl Core {
             "error.update.activeOperations" => self.arm(conv, reply_id, BUSY_RETRY * self.keep_pace, "busy"),
             "error.quotaOut" | "error.quotaWait" => self.wait_for_room(conv, reply_id, "reason.keepGoing.quota"),
             "error.billedPerUse" => self.wait_for_room(conv, reply_id, "reason.keepGoing.billed"),
+            // A goal's fix with the project's day out of money (`goals.rs`): it stops here, with no retry.
+            "reason.goal.cap" => self.halt(conv, reply_id, "reason.goal.cap"),
             _ => self.fail_wait(conv, reply_id, error),
         }
     }

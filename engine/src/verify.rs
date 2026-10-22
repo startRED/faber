@@ -419,6 +419,11 @@ impl Verifier {
         Verifier { guard: Some(guard), ..self }
     }
 
+    /// Whether a game is in front now, so a check nobody is waiting for does not even ask to start (standing goals).
+    pub fn game_in_front(&self) -> bool {
+        self.guard.as_ref().is_some_and(|in_front| in_front())
+    }
+
     /// While a game is in front, no new check starts: the run waits, reading the guard every `GUARD_EVERY`. A stop or a
     /// newer run ends the wait with the run.
     async fn game_over(&self) {

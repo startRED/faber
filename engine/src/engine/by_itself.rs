@@ -10,6 +10,12 @@ impl Core {
     /// own messages wait, it waits in the queue behind them and is never steered into the running turn; otherwise it
     /// starts now. A refusal (no subscription, no quota) comes back as its key, and nothing is sent.
     pub(super) fn send_by_itself(&mut self, conv: &str, text: String, wake: Wake) -> Result<(), String> {
+        self.load(conv).ok_or("error.conversationGone")?;
+        // A goal's fix, or a conversation its agent started, does not go on by itself once the project's day is out of money
+        // (the approval of a plan is the person's own, and goes on). The caller treats it like any refusal: the person decides.
+        if wake.why != "wake.approvedPlan" && self.goal_out_of_money(conv) {
+            return Err("reason.goal.cap".into());
+        }
         let busy = self.live.get(conv).is_some_and(|l| l.turn.is_some());
         let c = self.load(conv).ok_or("error.conversationGone")?;
         let choice = c.choice.clone().unwrap_or(Choice { vendor: "auto".into(), model: None, effort: None });

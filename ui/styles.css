@@ -1737,3 +1737,8 @@ button.work-chip:hover, a.work-chip:hover { color: var(--ink); }
 .work-reason { margin: 0; color: var(--amber-ink); font-size: var(--fs-sm); }
 .technical-reference { margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; }
 .live-reference { vertical-align: baseline; text-decoration: none; white-space: normal; }
+.project-goals { margin-top: 12px; }
+.goal-state.ask { color: var(--ink); font-weight: 580; }
+.goal-add { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; margin-top: 12px; }
+.goal-add .field { flex: 1 1 200px; min-width: 0; max-width: 100%; }
+.goal-add .btn { white-space: normal; height: auto; min-height: var(--h-sm); }

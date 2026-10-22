@@ -70,6 +70,7 @@ import { Thread } from './Thread.tsx';
 import { tutorialDue } from './tour.ts';
 import { Tutorial } from './Tutorial.tsx';
 import { Welcome } from './Welcome.tsx';
+import { ProjectGoals } from './ProjectGoals.tsx';
 import { ProjectMemory } from './ProjectMemory.tsx';
 import { UpdateStage } from './UpdateStage.tsx';
 import { WhatsNew } from './WhatsNew.tsx';
@@ -1604,7 +1605,7 @@ ${copy().path}`}>
                             }}>
                               <Show
                                 when={current()?.messages.length || current()?.rewindNotice ? current() : undefined}
-                                fallback={<><NoAiOrProject vendors={state().vendors.length} area={area()} project={project()} onConnect={openSetup} /><Show when={area() === 'project' ? project() : undefined}>{(project) => <ProjectMemory projectId={project().id} />}</Show></>}
+                                fallback={<><NoAiOrProject vendors={state().vendors.length} area={area()} project={project()} onConnect={openSetup} /><Show when={area() === 'project' ? project() : undefined}>{(project) => <><ProjectGoals projectId={project().id} /><ProjectMemory projectId={project().id} /></>}</Show></>}
                               >
                                 {(c) => (
                                   <Thread

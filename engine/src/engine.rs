@@ -43,6 +43,7 @@ mod ended;
 pub use aside::Aside;
 pub use copies::GitRunner;
 pub mod facts;
+mod goals;
 #[path = "groups.rs"]
 mod groups;
 mod helpers;
@@ -509,6 +510,8 @@ struct Core {
     asking: HashMap<String, aside::Asking>,
     /// The subagents of each running reply, followed for signs of being stuck.
     watched: HashMap<String, stuck_watch::Watched>,
+    /// Standing goals: what the 30 second loop keeps between looks (`goals.rs`).
+    goals: goals::Watch,
     /// When each running reply last heard from its CLI, and the one check that looks for silence (`silence.rs`).
     heard: HashMap<String, silence::Heard>,
     listening: bool,
@@ -638,6 +641,7 @@ impl Engine {
                 asides: HashMap::new(),
                 asking: HashMap::new(),
                 watched: HashMap::new(),
+                goals: Default::default(),
                 heard: HashMap::new(),
                 listening: false,
                 looked: 0.0,
@@ -796,6 +800,7 @@ impl Engine {
                 let engine = Engine { core, runtime: handle.clone() };
                 let now = engine.with(|c| {
                     c.quota_tick();
+                    c.goals_tick();
                     c.secs()
                 });
                 if !(0.0..PLAN_EVERY).contains(&(now - plan_checked)) {
@@ -1159,6 +1164,7 @@ impl Engine {
                 }
                 projects[pos] = project.clone();
                 if c.store.save_projects(&projects).is_ok() {
+                    c.goals.loaded = None;
                     c.list_changed();
                     Ok(())
                 } else {
@@ -1235,6 +1241,7 @@ impl Engine {
             }
             projects.retain(|p| p.id != id);
             c.store.save_projects(&projects).map_err(|_| "error.store.write".to_string())?;
+            c.goals.loaded = None;
             c.mcp_servers.retain(|(project, _), _| project != id);
             c.list_changed();
             Ok(())
@@ -1270,6 +1277,8 @@ impl Engine {
             !c.running.items.is_empty()
                 // An install the agent was allowed to make goes on after Stop, with nothing in the list.
                 || c.agent_installs > 0
+                // A standing goal's check runs for a while with nothing in the list.
+                || !c.goals.running.is_empty()
                 // A conversation that goes on by itself works between turns and while it waits too (R199).
                 || c.convs.values().any(|conv| conv.keep_going.is_some())
         })
@@ -1932,6 +1941,9 @@ impl Core {
             conv.send_after_stop = None;
             conv.queued.retain(|q| q.wake.as_ref().is_none_or(|w| w.why != "wake.approvedPlan"));
         }
+        if by_person {
+            self.goal_stopped(id);
+        }
         self.save(id);
         self.emit_queue(id);
         if by_person {
@@ -2483,6 +2495,14 @@ impl Core {
                 }
                 // A turn with no known cost adds 0 to the job's spend, so economy mode comes late rather than wrongly.
                 self.add_spend(conv, cost);
+                // In a goal's fix, a turn that used tokens but has no price (a model missing from the table) is not free: the
+                // day's money is unknown after it, so it counts as the whole cap (`goals.rs`).
+                if cost.is_none()
+                    && input_tokens + output_tokens > 0
+                    && let Some(project) = self.convs.get(conv).and_then(|c| c.goal_fix.clone())
+                {
+                    self.goal_spent(&project, crate::project::goals::DAILY_CAP_USD);
+                }
                 self.check_estimate(conv);
                 if let Some(sign) = offered {
                     self.count_look("offered", &sign, area);
@@ -3008,8 +3028,16 @@ impl Core {
         }
         let next = c.queued.remove(0);
         self.save(conv);
-        let _ = self.dispatch_queued(conv, next);
+        // A message Faber wrote that the day's money for a fix no longer allows is dropped, and the person is told why.
+        let capped = self.dispatch_queued(conv, next).is_err_and(|e| e == goals::CAP);
+        if capped {
+            self.goal_capped(conv);
+        }
         self.emit_queue(conv);
+        // What the person queued behind the dropped message goes out now; the queue is shorter each time, so this ends.
+        if capped {
+            self.drain(conv);
+        }
     }
 
     fn edit_queued(&mut self, id: &str, turn_id: &str, text: &str) -> Result<(), String> {
@@ -3091,6 +3119,12 @@ impl Core {
     /// lost; once the turn exists, a failure shows on that turn's reply like any other.
     fn dispatch_queued(&mut self, id: &str, item: QueuedTurn) -> Result<(), String> {
         self.load(id).ok_or("error.conversationGone")?;
+        // A message Faber wrote that waited in the queue is dropped, not kept, once a goal's day is out of money (`goals.rs`).
+        if item.wake.as_ref().is_some_and(|w| !matches!(w.why.as_str(), "wake.approvedPlan" | "wake.goalBroke"))
+            && self.goal_out_of_money(id)
+        {
+            return Err("reason.goal.cap".into());
+        }
         if self.rewind_blocked(id) {
             self.requeue(id, item);
             return Err("error.rewind.busy".into());
@@ -3901,6 +3935,7 @@ impl Core {
             allow_always_epochs: BTreeMap::new(),
             branch_of: None,
             started_by: None,
+            goal_fix: None,
             spent_usd: 0.0,
             estimate: None,
             user_name: self.store.settings().user_name.and_then(|name| clean_name(&name)),

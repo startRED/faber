@@ -52,6 +52,8 @@ mod engine;
 mod export;
 #[path = "failed_writes.rs"]
 mod failed_writes;
+#[path = "goals.rs"]
+mod goals;
 #[path = "groups.rs"]
 mod groups;
 #[path = "guide.rs"]

@@ -372,16 +372,21 @@ impl Core {
                 let wake = Wake { why: "wake.checksFixing".into(), pr: None, checks: names };
                 // A message the person left goes out first; the fix waits behind it.
                 if let Err(error) = self.send_by_itself(conv, format!("{FIX}\n\n{}", outcome.text()), wake)
-                    && !self.keeps_trying(conv, reply_id, &error)
+                    && (error == goals::CAP || !self.keeps_trying(conv, reply_id, &error))
                 {
-                    // Faber could not ask (a full queue, a plan it does not spend on by itself): the person decides. Keep going
-                    // tries again instead when Faber was busy with an update or the failure already set its own retry.
+                    // Faber could not ask (a full queue, a plan it does not spend on by itself, the day's money for a fix): the
+                    // person decides, and is told which. Keep going tries again instead when Faber was busy with an update or
+                    // the failure already set its own retry.
                     let mut row = checks_of(self, conv, reply_id);
                     if let Some(k) = row.as_mut() {
                         k.state = ChecksState::NeedsYou;
                     }
                     self.set_checks(conv, reply_id, row);
-                    self.halt(conv, reply_id, "reason.keepGoing.checks");
+                    let capped = error == goals::CAP;
+                    self.halt(conv, reply_id, if capped { goals::CAP } else { "reason.keepGoing.checks" });
+                    if capped {
+                        self.goal_capped(conv);
+                    }
                 }
                 self.drain(conv);
             }

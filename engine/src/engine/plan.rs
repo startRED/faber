@@ -12,9 +12,13 @@ impl Core {
         let Some(usd) = usd.filter(|usd| usd.is_finite() && *usd > 0.0) else { return };
         let Some(c) = self.convs.get_mut(conv) else { return };
         c.spent_usd += usd;
-        let parent = c.started_by.clone();
-        if let Some(parent) = parent.filter(|p| self.load(p).map(|p| p.spent_usd += usd).is_some()) {
+        let (parent, fix) = (c.started_by.clone(), c.goal_fix.clone());
+        if let Some(parent) = parent.clone().filter(|p| self.load(p).map(|p| p.spent_usd += usd).is_some()) {
             self.save(&parent);
+        }
+        // A fix Faber started for a standing goal counts against the project's day (`goals.rs`), helpers and children included.
+        if let Some(project) = fix {
+            self.goal_spent(&project, usd);
         }
     }
 

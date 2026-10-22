@@ -37,6 +37,7 @@ import './foot.check.ts';
 import './checks.check.ts';
 import './changes.check.ts';
 import './project-memory.check.ts';
+import './goals.check.ts';
 import './visual-answers.check.ts';
 import './visual-pieces.check.ts';
 import './commands.check.ts';

@@ -77,11 +77,14 @@ your best" (Locke and Latham's goal-setting research; [Rieseberg,
 learns these techniques or writes in a special way: they ask in plain words, and the lead applies them by itself (owner's
 direction, 2026-10-21). Five proposals for the lead agent; the owner chose on 2026-10-22:
 
-- **Standing goals** (approved for later, 2026-10-22; not built). A project can keep goals that never finish, such as "no crashes", "opens in under 2 s" or "every
+- **Standing goals** (approved 2026-10-22; phase 1 built). A project can keep goals that never finish, such as "no crashes", "opens in under 2 s" or "every
   check passes". The lead watches them and starts a mission by itself when one breaks, within the project's daily cost
   cap. First it gets what closes the loop without a person: the error logs on the user's PC (read there, never sent;
   telemetry stays off), the build each error came from, and a copy where it reproduces the error before fixing it.
-  Faber's own "no crashes", fed by its overnight bug log, is the first one.
+  Faber's own "no crashes", fed by its overnight bug log, is the first one. Phase 1 is built (2026-10-22, R422): the
+  goals, the switch per project in Settings (off by default), the check run through the verifier, a fix started as an
+  ordinary conversation in a separate copy, and US$2 a day per project. Of phase 2, the local crash file is built (R421);
+  the dev Faber reading the installed one's, the log-lines source and the copy at the build's commit are not.
 - **Offer the bigger ask** (approved and built, 2026-10-22: the `offer_bigger` tool of the toolbox below). When a request is small and the goal behind it is clear, the lead offers the larger version
   in a question card whose default is the request as asked, already chosen so one press of Send sends it: "You asked to fix this crash. Should I keep the app free of
   crashes?" At most one per conversation, so it never turns into noise; people new to AI gain the most from it.

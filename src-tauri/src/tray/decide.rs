@@ -54,6 +54,7 @@ fn default_stopped() -> BTreeMap<String, String> {
         ("pace", "{title}: stopped keeping going so {ai} stays on pace"),
         ("quota", "{title}: stopped keeping going until {ai} has quota again"),
         ("billed", "{title}: stopped keeping going, {ai} may be billed per use"),
+        ("goal", "{title}: Faber could not fix this goal by itself"),
     ]
     .into_iter()
     .map(|(k, v)| (k.to_string(), v.to_string()))
@@ -282,7 +283,8 @@ pub(super) fn parked_notice_text(texts: &ShellTexts, title: &str, n: usize) -> S
 
 /// The notification when "keep going" stopped by itself (R199), in the words the screen sent, English when it sent none.
 pub(super) fn stopped_text(texts: &ShellTexts, title: &str, why: &str, ai: Option<Vendor>) -> String {
-    let reason = why.strip_prefix("reason.keepGoing.").unwrap_or(why);
+    // A standing goal that needs the person tells through the same notice as a conversation that stopped by itself.
+    let reason = why.strip_prefix("reason.keepGoing.").or((why == "reason.goal.needsYou").then_some("goal")).unwrap_or(why);
     let template = texts.stopped.get(reason).cloned().or_else(|| default_stopped().remove(reason)).unwrap_or_else(|| texts.notify.clone());
     let ai = match ai {
         Some(Vendor::Claude) => "Claude",
@@ -550,6 +552,11 @@ mod tests {
             "Login: parou até Claude ter cota de novo"
         );
         assert_eq!(stopped_text(&sent, "Login", "reason.keepGoing.cap", None), "Login: stopped keeping going after a long run on its own");
+        // A standing goal that needs the person is told the same way, with the goal's words as the title.
+        assert_eq!(
+            stopped_text(&english, "every check passes", "reason.goal.needsYou", None),
+            "every check passes: Faber could not fix this goal by itself"
+        );
     }
 
     #[test]

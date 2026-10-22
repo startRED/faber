@@ -12,6 +12,10 @@ pub(super) fn offers(area: Area) -> bool {
     area == Area::Project
 }
 
+/// What the agent of a standing goal's fix is told once the project's day is out of money (`goals.rs`); said in a sentence the
+/// call's answer completes ("No conversation was started: ...").
+pub(super) const GOAL_CAP: &str = "the day's limit for fixes of the project's goals is used up, so this fix stops here for today";
+
 /// The conversations a list names at most.
 const MAX_LISTED: usize = 12;
 
@@ -75,7 +79,11 @@ impl Core {
     }
 
     fn start_sibling(&mut self, conv: &str, title: &str, brief: &str) -> Result<(String, bool), &'static str> {
+        if self.goal_out_of_money(conv) {
+            return Err(GOAL_CAP);
+        }
         let parent = self.convs.get(conv).ok_or("the conversation is gone")?;
+        let fix = parent.goal_fix.clone();
         if !offers(parent.area) || parent.started_by.is_some() {
             return Err("only a project's own agent can start conversations");
         }
@@ -108,6 +116,7 @@ impl Core {
         let id = self.blank(Area::Project, Some(project.clone()));
         if let Some(c) = self.convs.get_mut(&id) {
             c.started_by = Some(conv.to_string());
+            c.goal_fix = fix;
             c.title = title.to_string();
         }
         let req = SendRequest {
@@ -120,7 +129,7 @@ impl Core {
             choice,
         };
         // The common start path makes its copy off the lock and removes any copy that no longer belongs.
-        match self.launch_sibling(&id, req) {
+        match self.launch_sibling(&id, req, None) {
             Ok(()) => Ok((id, true)),
             // Saved with its first message before it failed: it stays, with the error in its reply, and the agent is told.
             Err(_) if self.convs.get(&id).is_some_and(|c| !c.messages.is_empty()) => Ok((id, false)),
@@ -141,8 +150,8 @@ impl Core {
     }
 
     /// Sends the agent's brief as the new conversation's first message.
-    fn launch_sibling(&mut self, id: &str, req: SendRequest) -> Result<(), String> {
-        match self.send(req, None) {
+    pub(super) fn launch_sibling(&mut self, id: &str, req: SendRequest, wake: Option<Wake>) -> Result<(), String> {
+        match self.send(req, wake) {
             Ok(_) => {
                 // The agent's brief is never the person's own turn, whatever model it runs: billing stops it like a helper. A
                 // message the person writes to the conversation later is theirs.
@@ -225,13 +234,26 @@ impl Core {
         if self.load(&parent).is_none_or(|p| p.archived_at.is_some()) {
             return;
         }
-        let _ = self.send_by_itself(&parent, text, Wake::of("wake.childDone"));
+        // A report the day's money refuses is not lost without a word: the parent's latest reply says the limit is why.
+        if self.send_by_itself(&parent, text, Wake::of("wake.childDone")).is_err_and(|e| e == goals::CAP) {
+            self.goal_capped(&parent);
+        }
     }
 
     /// Sends one agent's question to another conversation of its project, as a turn Faber writes (never the person's).
     fn ask_sibling(&mut self, conv: &str, id: &str, message: &str) -> Result<String, &'static str> {
+        if self.goal_out_of_money(conv) {
+            return Err(GOAL_CAP);
+        }
         self.same_project(conv, id)?;
         let target = self.convs.get(id).ok_or("the conversation is gone")?;
+        // A goal's fix works with what it started and with nothing else of the project: the day's money holds only what is counted.
+        if self.convs.get(conv).is_some_and(|c| c.goal_fix.is_some())
+            && target.started_by.as_deref() != Some(conv)
+            && self.convs.get(conv).and_then(|c| c.started_by.as_deref()) != Some(id)
+        {
+            return Err("a fix Faber started can ask only the conversations it started");
+        }
         if target.archived_at.is_some() {
             return Err("the person archived that conversation");
         }
