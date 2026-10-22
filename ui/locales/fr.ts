@@ -1891,6 +1891,8 @@ export const fr: Messages = {
   'notes.172.new': 'Détails techniques liste les aides et les tâches d’arrière-plan encore en cours, chacune avec son état, et les numéros de pull request connus affichent leur dernier état.',
   'notes.173.fixed': "Avec Auto, une nouvelle conversation de projet affiche sa branche en haut dès l'envoi, comme avec un modèle choisi.",
   'notes.174.fixed': 'Une réponse qui reste bloquée 15 minutes s’arrête maintenant avec un message, et ce qu’elle a écrit est conservé. Vos autres conversations continuent.',
+  'notes.175.better': 'Les barres d’usage et les flèches des sections repliables bougent maintenant sans à-coup.',
+  'notes.176.fixed': 'Quand vous répondez à une question dans En cours, sa carte ne disparaît plus d’un coup : elle se replie en douceur.',
   'update.checking': 'Recherche d’une mise à jour…',
   'update.downloading': 'Téléchargement de la mise à jour…',
   'update.downloadingPercent': 'Téléchargement de la mise à jour… {percent} %',

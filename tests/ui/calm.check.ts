@@ -456,3 +456,21 @@ check('calm: with no AI connected there is no composer to type in', async () => 
     equal(root.querySelector('.dock'), null);
   });
 });
+
+check('calm: the usage bar changes by a clip that eases, never by its width or a scale, and stands still with reduced motion', () => {
+  useLanguage('en');
+  const view = sidebar('chat');
+  try {
+    view.root.dataset.motion = 'full';
+    const bar = view.root.querySelector<HTMLElement>('.usage .vendor .meter i')!;
+    equal(bar.style.width, '', 'the share is not written as a width');
+    equal(bar.style.clipPath.replace(/0px/g, '0'), 'inset(0 56% 0 0)', 'it is the same 44 % as the number beside it, cut from the right');
+    equal(getComputedStyle(bar).transform, 'none', 'never a scale, which would squeeze a striped fill');
+    equal(bar.getBoundingClientRect().width, bar.parentElement!.getBoundingClientRect().width, 'the bar keeps its real width');
+    equal(getComputedStyle(bar).transitionProperty, 'clip-path', 'only the cut eases');
+    view.root.dataset.motion = 'reduced';
+    equal(getComputedStyle(bar).transitionDuration, '0s', 'reduced motion jumps');
+  } finally {
+    view.close();
+  }
+});

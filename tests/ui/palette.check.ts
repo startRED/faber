@@ -152,7 +152,7 @@ check('palette: Catalog uses the same browse action as the sidebar', async () =>
   } finally { dispose(); root.remove(); }
 });
 
-check('palette: Ctrl+K again closes it, a click outside closes it, and Ctrl N, Ctrl F wait under it', async () => {
+check('palette: Ctrl+K again closes it, a click outside closes it, and Ctrl N, Ctrl B, Ctrl F wait under it', async () => {
   const root = stage();
   const dispose = mount(root, []);
   try {
@@ -160,6 +160,8 @@ check('palette: Ctrl+K again closes it, a click outside closes it, and Ctrl N, C
     await settle();
     ok(box());
     equal(press({ key: 'n', ctrlKey: true }), false, 'the shortcut underneath is stopped');
+    equal(press({ key: 'b', ctrlKey: true }), false, 'focus mode does not toggle behind the box');
+    equal(press({ key: 'f', ctrlKey: true }), false, 'find waits too');
     ctrlK();
     await settle(300);
     equal(document.querySelector('.pal-scrim'), null, 'Ctrl K toggles');
@@ -201,7 +203,6 @@ check('palette: it does not open while the first run, the tutorial or an update 
 });
 
 check('palette: it scales and fades in, leaves with a shorter exit, and does not move in reduced motion', async () => {
-  if (matchMedia('(prefers-reduced-motion: reduce)').matches) return;
   const root = stage('full');
   const dispose = mount(root, []);
   try {

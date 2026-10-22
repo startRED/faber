@@ -106,6 +106,15 @@ own inks.
 - So a hover never moves a row (only theme cards and presets lift), a press gives way on buttons but not on list rows,
   and the sidebar's list changes at once while a search is typed (`tests/ui/motion.check.ts` reads the stylesheet).
 - Nothing teleports (the owner, 2026-10-17): whatever appears, leaves or moves on a screen eases, using `animateList` for lists and swaps, `keepForExit` and the `Collapse` of `ui/controls.tsx` for a row's "?" text, a fold, a project's settings and the update line (a height that grows from nothing and shrinks back), the right-click menu's scale-and-fade for the permission menu, and a plain fade for the update screen's phases and the tutorial ring. Section switches in Settings and the swap between the project and chat homes cross-fade. Counted by frequency like the rest: a row or tab change that happens dozens of times a minute still only fades.
+- What the same rule leaves out (task 009): the tutorial ring's size, which follows its target as a width and a height. Moving
+  it is a transform, but drawing it bigger or smaller by a transform would stretch its 1.5 px edge and the dimming shadow it
+  casts over the screen, and animating the box is the layout work the rule forbids, so the ring changes size at once while
+  it travels to the next target. The quota bars (`.meter i`) are the opposite case and do move: they keep their real width and ease a
+  `clip-path` cut from the right edge over `--dur-ui` (as `reveal()` does), so a new reading slides and a theme's striped fill is
+  not squeezed as a scale would squeeze it. A disclosure's chevron turns over `--dur-ui` with its 2 px drop folded into the
+  same transform. The tutorial's own exit is the screen's exit copy fading
+  (`animateList` on the app), and an answered question card in the running column folds away as it does in the thread: the column keeps each row by its
+  conversation and turn across the engine's lists, so the card's own exit runs once.
 - Reduced motion and no motion both remove every animation and transition. A system that asks for less motion
   caps the user's level, and a change in the system setting changes only the level.
 - The running column slides and fades; its thread uses a short measured width transition so glyphs never stretch.

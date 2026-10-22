@@ -163,7 +163,6 @@ check('find: the browser find shows nowhere in the window, with or without the b
 });
 
 check('find: the bar slides down from above and fades, leaves with a shorter exit, and stays still in reduced motion', async () => {
-  if (matchMedia('(prefers-reduced-motion: reduce)').matches) return;
   const { host, thread } = stage('full');
   const dispose = render(() => createComponent(Find, { enabled: true, root: () => thread }), host);
   try {

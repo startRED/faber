@@ -1891,6 +1891,8 @@ export const es: Messages = {
   'notes.172.new': 'Detalles técnicos muestra los ayudantes y el trabajo en segundo plano que siguen en curso, cada uno con su estado, y los números de pull request conocidos indican su último estado.',
   'notes.173.fixed': 'Con Auto, una conversación nueva de proyecto muestra su rama arriba en cuanto envías, igual que con un modelo elegido.',
   'notes.174.fixed': 'Una respuesta que se cuelga durante 15 minutos ahora se detiene con un aviso, y lo que escribió se conserva. Tus otras conversaciones siguen.',
+  'notes.175.better': 'Las barras de uso y las flechas de las secciones plegables ahora se mueven con fluidez, sin saltos.',
+  'notes.176.fixed': 'Al responder una pregunta en En marcha ahora, su tarjeta ya no desaparece de golpe: se pliega con suavidad.',
   'update.checking': 'Buscando una actualización…',
   'update.downloading': 'Descargando actualización…',
   'update.downloadingPercent': 'Descargando actualización… {percent} %',

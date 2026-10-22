@@ -1891,6 +1891,8 @@ export const de: Messages = {
   'notes.172.new': 'Technische Details listet die Helfer und die Hintergrundarbeit, die noch laufen, jeweils mit ihrem Zustand, und bekannte Pull-Request-Nummern zeigen ihren letzten Zustand.',
   'notes.173.fixed': 'Mit Auto zeigt ein neues Projektgespräch seinen Branch oben, sobald du sendest, wie schon mit einem gewählten Modell.',
   'notes.174.fixed': 'Eine Antwort, die 15 Minuten hängt, endet jetzt mit einer Meldung, und was sie geschrieben hat, bleibt. Deine anderen Unterhaltungen laufen weiter.',
+  'notes.175.better': 'Die Nutzungsbalken und die Pfeile an aufklappbaren Bereichen bewegen sich jetzt fließend statt zu springen.',
+  'notes.176.fixed': 'Wenn du in Läuft gerade eine Frage beantwortest, verschwindet ihre Karte nicht mehr abrupt: Sie klappt sanft zu.',
   'update.checking': 'Suche nach einem Update…',
   'update.downloading': 'Update wird heruntergeladen…',
   'update.downloadingPercent': 'Update wird heruntergeladen… {percent} %',

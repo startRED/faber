@@ -585,7 +585,7 @@ export function Sidebar(props: Props) {
                   <VendorMark vendor={v} />
                   <span class="sr">{vendorName(v)}</span>
                   <span class="meter" aria-hidden="true">
-                    <i style={{ width: `${Math.round(Math.min(1, Math.max(0, q()?.used ?? 0)) * 100)}%` }} />
+                    <i style={{ 'clip-path': `inset(0 ${100 - Math.round(Math.min(1, Math.max(0, q()?.used ?? 0)) * 100)}% 0 0)` }} />
                   </span>
                   <span class="share num">{share()}</span>
                   <Show when={q() && fresh().counting}>

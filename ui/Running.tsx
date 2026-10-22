@@ -1,4 +1,4 @@
-import { createSignal, For, Show, type ComponentProps } from 'solid-js';
+import { createMemo, createSignal, For, Show, type Accessor, type ComponentProps } from 'solid-js';
 import type { BackgroundCommand, Conversation, FileChange, Project, RunningItem, Summary } from './api.ts';
 import { AgentChat } from './AgentChat.tsx';
 import { DetailsPane } from './Details.tsx';
@@ -21,7 +21,7 @@ import type { VisualAnswer } from './api.ts';
 import { vendorName } from './models.ts';
 import { animateList } from './motion.ts';
 import { untilReset } from './Sidebar.tsx';
-import { blocksOf, elapsed } from './running.ts';
+import { blocksOf, type Block, elapsed } from './running.ts';
 import type { AgentStep } from './worklog.ts';
 
 /** The running column: what runs now, one block per project and one for Chat, in the order the engine sent. A question
@@ -69,7 +69,30 @@ export function Running(props: {
   // The times move while the column is open and stop with it.
   const [now, setNow] = createSignal(Date.now());
   everyWhileShown(15_000, () => setNow(Date.now()));
-  const blocks = () => blocksOf(props.items, props.done);
+  // The engine sends the whole list anew at every change, so its items are new objects each time. A row keyed by its object
+  // would be built again at every change and lose what it holds (an answered question card folding away): rows are kept by
+  // conversation and turn, and each reads its latest item.
+  const rowSignals = new Map<string, [Accessor<RunningItem>, (item: RunningItem) => void]>();
+  const rowKey = (item: RunningItem) => `${item.conversationId}:${item.turnId}`;
+  const rowOf = (item: RunningItem) => rowSignals.get(rowKey(item))![0];
+  const blocks = createMemo(() => {
+    const kept = new Set<string>();
+    for (const item of props.items) {
+      const key = rowKey(item);
+      kept.add(key);
+      const row = rowSignals.get(key);
+      if (row) row[1](item);
+      else {
+        const [get, set] = createSignal(item);
+        rowSignals.set(key, [get, set]);
+      }
+    }
+    for (const key of rowSignals.keys()) if (!kept.has(key)) rowSignals.delete(key);
+    return blocksOf(props.items, props.done);
+  });
+  // The blocks are kept by their key for the same reason.
+  const blockKeys = createMemo(() => blocks().map((b) => b.key), [], { equals: (a, b) => a.length === b.length && a.every((k, i) => k === b[i]) });
+  const noBlock: Block = { key: '', items: [], done: [], needs: 0 };
   const rows = () => props.items.length + (props.done?.length ?? 0);
   const commandCount = () => props.background?.filter((item) => item.state === 'running').length ?? 0;
   const ended = (c: Summary) => c.ended!;
@@ -133,47 +156,47 @@ export function Running(props: {
                   </div>
                 }
               >
-                <For each={blocks()}>
-                  {(block) => (
+                <For each={blockKeys()}>
+                  {(key) => { const block = () => blocks().find((b) => b.key === key) ?? noBlock; return (
                     <section class="proj-g">
                       <h3>
-                        <span class="t">{nameOf(block.key)}</span>
-                        <Show when={block.needs > 0}>
+                        <span class="t">{nameOf(key)}</span>
+                        <Show when={block().needs > 0}>
                           <span class="amber-tag">
                             <Icon name="ask" small />
-                            {t('run.needs', { n: block.needs })}
+                            {t('run.needs', { n: block().needs })}
                           </span>
                         </Show>
                       </h3>
                       <ul class="ritems" ref={animateList}>
-                        <For each={block.items}>
+                        <For each={block().items.map(rowOf)}>
                           {(item) => (
-                            <li class="ri" classList={{ need: item.state === 'needsYou' }} ref={animateList}>
+                            <li class="ri" classList={{ need: item().state === 'needsYou' }} ref={animateList}>
                               <div class="rhead">
-                                <Show when={item.state === 'needsYou'}>
+                                <Show when={item().state === 'needsYou'}>
                                   <span class="ask-label">
                                     <Icon name="ask" small />
-                                    {words(item)}
+                                    {words(item())}
                                   </span>
                                 </Show>
-                                <span class="vm" classList={{ claude: item.vendor === 'claude', codex: item.vendor === 'codex' }}>
-                                  <VendorMark vendor={item.vendor} />
-                                  <Show when={item.vendor}>{(v) => <b>{vendorName(v())}</b>}</Show>
-                                  <Show when={item.state !== 'needsYou'}>
-                                    <span class="verb">{words(item)}</span>
+                                <span class="vm" classList={{ claude: item().vendor === 'claude', codex: item().vendor === 'codex' }}>
+                                  <VendorMark vendor={item().vendor} />
+                                  <Show when={item().vendor}>{(v) => <b>{vendorName(v())}</b>}</Show>
+                                  <Show when={item().state !== 'needsYou'}>
+                                    <span class="verb">{words(item())}</span>
                                   </Show>
                                 </span>
-                                <span class="time num">{since(item)}</span>
+                                <span class="time num">{since(item())}</span>
                               </div>
-                              <button class="name" onClick={() => props.onOpen(item)}>
-                                <Show when={item.plan}>{(n) => <span class="plan-n num">{planWords(n())}</span>}</Show>
-                                {item.title || t('run.untitled')}
+                              <button class="name" onClick={() => props.onOpen(item())}>
+                                <Show when={item().plan}>{(n) => <span class="plan-n num">{planWords(n())}</span>}</Show>
+                                {item().title || t('run.untitled')}
                               </button>
-                              <Show when={item.area === 'project' && props.onDetails}>
-                                <button class="btn ghost" onClick={() => props.onDetails?.(item)}>{t('details.title')}</button>
+                              <Show when={item().area === 'project' && props.onDetails}>
+                                <button class="btn ghost" onClick={() => props.onDetails?.(item())}>{t('details.title')}</button>
                               </Show>
-                              <Show when={!item.keepProgress && item.now}>{(now) => <p class="run-kg"><span class="last" title={now()}>{now()}</span></p>}</Show>
-                              <Show when={item.keepProgress}>
+                              <Show when={!item().keepProgress && item().now}>{(now) => <p class="run-kg"><span class="last" title={now()}>{now()}</span></p>}</Show>
+                              <Show when={item().keepProgress}>
                                 {(p) => (
                                   <p class="run-kg">
                                     <span class="num">{progress(p())}</span>
@@ -181,17 +204,16 @@ export function Running(props: {
                                   </p>
                                 )}
                               </Show>
-                              <Show when={item.permissions.length > 0}>
-                                <Asks conversationId={item.conversationId} turnId={item.turnId} permissions={item.permissions} />
+                              {/* Always mounted: an answered question card keeps itself for its fold-away (Asks), as in the thread. */}
+                              <Asks conversationId={item().conversationId} turnId={item().turnId} permissions={item().permissions} />
+                              <Show when={item().parked?.length || item().parkedMore}>
+                                <Parkeds parked={item().parked ?? []} more={item().parkedMore} />
                               </Show>
-                              <Show when={item.parked?.length || item.parkedMore}>
-                                <Parkeds parked={item.parked ?? []} more={item.parkedMore} />
-                              </Show>
-                              <Show when={item.held}>{(held) => <p class="run-held">{t('run.held', { pr: `#${held()[0]}` })}</p>}</Show>
+                              <Show when={item().held}>{(held) => <p class="run-held">{t('run.held', { pr: `#${held()[0]}` })}</p>}</Show>
                             </li>
                           )}
                         </For>
-                        <For each={block.done}>
+                        <For each={block().done}>
                           {(c) => (
                             <li class="ri done" classList={{ need: ended(c).kind !== 'done' }} ref={animateList}>
                               <div class="rhead">
@@ -213,7 +235,7 @@ export function Running(props: {
                         </For>
                       </ul>
                     </section>
-                  )}
+                  ); }}
                 </For>
               </Show>
             </div>

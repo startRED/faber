@@ -1878,6 +1878,8 @@ export const ptBR: Messages = {
   'notes.172.new': 'Detalhes técnicos lista os ajudantes e o trabalho em segundo plano que ainda rodam, cada um com seu estado, e os números de pull request conhecidos mostram o último estado.',
   'notes.173.fixed': 'Com o Auto, uma conversa nova de projeto mostra o seu branch no topo assim que você envia, como já fazia com um modelo escolhido.',
   'notes.174.fixed': 'Uma resposta que trava por 15 minutos agora termina com um aviso, e o que ela escreveu fica. Suas outras conversas continuam.',
+  'notes.175.better': 'As barras de uso e as setas das seções dobráveis agora se movem suavemente, sem pular.',
+  'notes.176.fixed': 'Ao responder uma pergunta em Rodando agora, o cartão dela não some de repente: ele se recolhe aos poucos.',
   'update.checking': 'Procurando atualização…',
   'update.downloading': 'Baixando atualização…',
   'update.downloadingPercent': 'Baixando atualização… {percent}%',

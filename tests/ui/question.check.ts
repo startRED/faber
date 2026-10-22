@@ -1,8 +1,9 @@
 import { createComponent, createSignal } from 'solid-js';
 import { render } from 'solid-js/web';
-import { api, type Permission } from '../../ui/api.ts';
+import { api, type Permission, type RunningItem } from '../../ui/api.ts';
 import { askedQuestions, Asks } from '../../ui/Ask.tsx';
 import { useLanguage } from '../../ui/i18n.ts';
+import { Running } from '../../ui/Running.tsx';
 import { check, deepEqual, equal, ok } from './check.ts';
 
 // The assistant's own questions: a card in its message, one step per question, a tile per answer, answered by tapping
@@ -201,8 +202,6 @@ check('question card: an answered card folds away before it leaves, and the othe
   equal(root.querySelector('.ask-more')?.textContent, '1 more waiting');
   waiting([]);
   await settle(20);
-  // A PC that asks for less motion (CI's machines do) gets no fold: the card leaves at once, which is all that can be proven there.
-  if (matchMedia('(prefers-reduced-motion: reduce)').matches) return equal(root.querySelector('.ask.question'), null, 'reduced motion: the card leaves at once');
   ok(root.querySelector('.ask.question.gone'), 'the card folds while it still exists');
   equal(root.querySelector('.ask.question.gone .q-inner')?.hasAttribute('inert'), true, 'and can no longer be used');
   await settle(400);
@@ -218,3 +217,41 @@ check('question card: a question whose text is a built-in name still renders and
   await settle();
   deepEqual(calls[0], ['question', 'c1', 't1', 'r1', { constructor: 'Yes', toString: 'No' }]);
 }, { questions: [{ question: 'constructor', options: [{ label: 'Yes' }] }, { question: 'toString', options: [{ label: 'No' }] }] }));
+
+check('question card: in the running column an answered card folds away once, still showing its question, however often the list is rebuilt', async () => {
+  useLanguage('en');
+  const root = document.createElement('div');
+  document.body.append(root);
+  const row = (permissions: Permission[]): RunningItem => ({
+    conversationId: 'c1', turnId: 't1', title: 'Pick a stack', area: 'chat', vendor: 'claude', state: 'working', since: Date.now(), permissions,
+  });
+  const [items, setItems] = createSignal<RunningItem[]>([row([{ requestId: 'r1', tool: 'AskUserQuestion', input: INPUT }])]);
+  const dispose = render(() => createComponent(Running, {
+    get items() { return items(); }, projects: [], onOpen: () => {}, onClose: () => {}, modal: false, ref: () => {},
+  }), root);
+  try {
+    await settle();
+    ok(root.querySelector('.ask.question'), 'the question waits in the column');
+    const card = root.querySelector('.ask.question');
+    const line = root.querySelector('li.ri');
+    // The engine sends a new list (new objects) at every change: the answer, then two more inside the fold.
+    setItems([row([])]);
+    await settle(20);
+    ok(root.querySelector('.ask.question.gone'), 'the card folds while it still exists');
+    equal(root.querySelector('.ask.question.gone .q-text')?.textContent, 'Which stack?', 'and still shows its question');
+    setItems([{ ...row([]), now: 'Reading files' }]);
+    await settle(30);
+    setItems([{ ...row([]), now: 'Writing tests' }]);
+    await settle(30);
+    equal(root.querySelector('.ask.question'), card, 'the same card, so its fold ran once and was not started over');
+    equal(root.querySelector('li.ri'), line, 'in the same row');
+    ok(root.querySelector('.ask.question.gone'), 'still folding');
+    equal(document.querySelector('.motion-exit'), null, 'and no copy of an old row fades beside it');
+    await settle(400);
+    equal(root.querySelector('.ask.question'), null, 'then it is gone');
+    equal(root.querySelector('li.ri .run-kg .last')?.textContent, 'Writing tests', 'the row went on showing the latest list');
+  } finally {
+    dispose();
+    root.remove();
+  }
+});

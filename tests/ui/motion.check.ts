@@ -1,3 +1,4 @@
+import { createComponent, createSignal, Show } from 'solid-js';
 import { render } from 'solid-js/web';
 import themes from '../../src-tauri/src/themes.json';
 import { animateDetails, animateList } from '../../ui/motion.ts';
@@ -231,12 +232,68 @@ check('motion: a hover never moves a row and no card arrives in more than 300ms'
   root.innerHTML = '<div class="toast"></div><div class="ask"></div><div class="dv-card"></div><div class="notes"></div><div class="ask-more"></div>';
   document.body.append(root);
   try {
-    if (matchMedia('(prefers-reduced-motion: reduce)').matches) return;
     for (const el of root.children) {
       const ms = parseFloat(getComputedStyle(el).animationDuration) * 1000;
       ok(ms > 0 && ms <= 300, `${el.className} arrives in ${ms}ms`);
     }
   } finally {
+    root.remove();
+  }
+});
+
+check('motion: a disclosure chevron turns with a transform that eases, and nothing else about it changes', () => {
+  const root = document.createElement('div');
+  root.style.cssText = 'position:fixed;left:10px;top:10px;width:240px';
+  root.dataset.motion = 'full';
+  for (const [key, value] of Object.entries(themes.css.base)) root.style.setProperty(`--${key}`, value);
+  root.innerHTML = '<details class="disclosure"><summary>Work log</summary><div>Content</div></details>';
+  document.body.append(root);
+  try {
+    const details = root.querySelector('details')!;
+    const chevron = () => getComputedStyle(root.querySelector('summary')!, '::after');
+    equal(chevron().transitionProperty, 'transform');
+    ok(chevron().transitionDuration !== '0s', 'it takes time');
+    const margin = chevron().marginTop;
+    details.open = true;
+    equal(chevron().marginTop, margin, 'opening moves it by the transform alone, not by its margin');
+    root.dataset.motion = 'reduced';
+    equal(chevron().transitionDuration, '0s', 'reduced motion turns it at once');
+    // At rest, closed and open, so nothing is mid-way: the open one sits 2 px lower, where its old margin put it.
+    equal(new DOMMatrix(chevron().transform).f, 2, 'open: the 2 px drop is in the transform');
+    details.open = false;
+    equal(new DOMMatrix(chevron().transform).f, 0, 'closed: no drop');
+  } finally {
+    root.remove();
+  }
+});
+
+check('motion: the tutorial leaves with a fade of its own instead of vanishing', async () => {
+  // Imported here, not at the top: as a static import of this file it kept the checks page from starting at all (no check ran).
+  const { Tutorial } = await import('../../ui/Tutorial.tsx');
+  const root = document.createElement('div');
+  root.style.cssText = 'position:fixed;left:0;top:0;width:900px;height:600px';
+  root.dataset.motion = 'full';
+  for (const [key, value] of Object.entries(themes.css.base)) root.style.setProperty(`--${key}`, value);
+  document.body.append(root);
+  const [open, setOpen] = createSignal(true);
+  const dispose = render(() => {
+    animateList(root);
+    return createComponent(Show, { get when() { return open(); }, keyed: true, children: () => createComponent(Tutorial, { onEnd: () => {} }) });
+  }, root);
+  const settle = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+  try {
+    await settle(30);
+    ok(root.querySelector('.tour'), 'the tutorial is there');
+    setOpen(false);
+    await settle(30);
+    equal(root.querySelector('.tour'), null, 'it is out of the screen at once, so nothing under it is blocked');
+    const ghost = document.querySelector('.motion-exit')?.shadowRoot?.querySelector('.tour');
+    ok(ghost, 'but a copy of it is still fading');
+    equal(ghost!.getAnimations().length, 1);
+    await settle(400);
+    equal(document.querySelector('.motion-exit'), null, 'then the copy goes too');
+  } finally {
+    dispose();
     root.remove();
   }
 });

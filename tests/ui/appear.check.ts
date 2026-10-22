@@ -17,10 +17,8 @@ const until = async (done: () => unknown, limit = 4000) => {
 };
 
 /** A page that is in full motion whatever the PC asks for: the system preference is read through one media query. The mock
- * reaches the script only. A check that needs the stylesheet's own transitions (`css`) stands down when the PC asks for less
- * motion, like the other motion checks: the stylesheet cancels every transition then, and CI's machines ask for that. */
-async function inFullMotion(body: () => Promise<void>, css = true): Promise<void> {
-  if (css && matchMedia('(prefers-reduced-motion: reduce)').matches) return;
+ * reaches the script only; the checks page already hides the preference from the stylesheet (tests/ui/system-motion.ts). */
+async function inFullMotion(body: () => Promise<void>): Promise<void> {
   const preference = Object.getOwnPropertyDescriptor(MediaQueryList.prototype, 'matches')!;
   Object.defineProperty(MediaQueryList.prototype, 'matches', { ...preference, get(this: MediaQueryList) {
     return this.media === '(prefers-reduced-motion: reduce)' ? false : preference.get!.call(this);
@@ -149,4 +147,4 @@ check('appear: the home between a project and a chat swaps its header with a cro
     ok(document.querySelector('.motion-exit')?.shadowRoot?.querySelector('.p-header'), 'the project header leaves as a copy too');
     await until(() => !document.querySelector('.motion-exit'));
   } finally { view.stop(); }
-}, false));
+}));

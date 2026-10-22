@@ -54,7 +54,7 @@ rest of the shell are in [layout.md](layout.md).
   "Recommended" badge), two columns when the card is 640 px wide or more and one below; the chosen tile gets the amber
   ring. A preview the agent drew sits beside the tiles (below in a narrow card) in a quiet monospace box that fades when
   the tile in focus changes. Another answer is one quiet button that opens its field. The footer holds "n of m answered",
-  Skip and Send answers (amber, enabled once every question has an answer). Once answered the card in the thread folds away over the
+  Skip and Send answers (amber, enabled once every question has an answer). Once answered the card, in the thread and in the column alike, folds away over the
   exit time while the thread closes up under it. Tiles and steps change colour over the fast time and the mark scales in
   from half size; under reduced motion everything is instant and the state is still carried by the filled mark, the ring
   and the tick.

@@ -1771,6 +1771,8 @@ export const en = {
   'notes.172.new': 'Technical details lists the helpers and background work still running, each with its state, and known pull request numbers show their latest state.',
   'notes.173.fixed': 'With Auto, a new project conversation shows its branch at the top as soon as you send, as it does with a chosen model.',
   'notes.174.fixed': 'An answer that hangs for 15 minutes now stops with a message, and what it wrote stays. Your other conversations keep going.',
+  'notes.175.better': 'The usage bars and the arrows on folded sections now move smoothly instead of jumping.',
+  'notes.176.fixed': 'When you answer a question in Running now, its card no longer vanishes at once: it folds away softly.',
   'update.checking': 'Looking for an update…',
   'update.downloading': 'Downloading update…',
   'update.downloadingPercent': 'Downloading update… {percent}%',

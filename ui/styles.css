@@ -558,8 +558,8 @@ details.thinking div { white-space: pre-wrap; padding: 6px 0 0 12px; border-left
 .disclosure { border-radius: var(--r-sm); background: var(--s1); color: var(--ink-2); font-size: var(--fs-sm); }
 .disclosure summary { display: flex; align-items: center; gap: 10px; min-width: 0; cursor: default; padding: 10px 12px; border-radius: inherit; list-style: none; transition: background-color var(--dur-fast) var(--ease); }
 .disclosure summary::-webkit-details-marker { display: none; }
-.disclosure summary::after { content: ''; flex: none; margin: -2px 2px 0 auto; width: 6px; height: 6px; border-right: 1.5px solid currentColor; border-bottom: 1.5px solid currentColor; opacity: 0.6; transform: rotate(45deg); }
-.disclosure[open] > summary::after { margin-top: 2px; transform: rotate(225deg); }
+.disclosure summary::after { content: ''; flex: none; margin: -2px 2px 0 auto; width: 6px; height: 6px; border-right: 1.5px solid currentColor; border-bottom: 1.5px solid currentColor; opacity: 0.6; transform: translateY(0) rotate(45deg); transition: transform var(--dur-ui) var(--ease); }
+.disclosure[open] > summary::after { transform: translateY(2px) rotate(225deg); }
 .disclosure summary:hover { background: var(--s2); }
 .activity-body { display: grid; gap: 12px; padding: 0 12px 12px; }
 .activity-thinking { display: grid; gap: 4px; color: var(--ink-3); }
@@ -981,7 +981,8 @@ textarea.field { height: auto; max-width: none; padding: 8px 10px; resize: verti
 }
 /* Accounts, usage limits and privacy. */
 .meter { display: block; height: 6px; border-radius: 3px; overflow: hidden; background: var(--bar-track); }
-.meter i { display: block; height: 100%; background: var(--bar-fill); }
+/* The bar keeps its real width and is cut from its right edge: a new reading slides instead of jumping, no layout moves, and a theme's striped fill is not squeezed as a scale would. */
+.meter i { display: block; height: 100%; background: var(--bar-fill); transition: clip-path var(--dur-ui) var(--ease); }
 /* Accounts and limits: one card per AI, then privacy. */
 .acct-top { display: flex; align-items: center; justify-content: space-between; gap: 16px; }
 .acct-head { display: flex; align-items: center; flex-wrap: wrap; gap: 4px 12px; padding: 14px 16px; }

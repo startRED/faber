@@ -112,7 +112,7 @@ function Card(props: { vendor: Vendor; check: CheckResult | 'failed' | undefined
                       </span>
                       <span class="meter" aria-hidden="true">
                         <Show when={w()}>{(win) => <b class="expected" style={{ left: `${Math.round(win().expected * 100)}%` }} />}</Show>
-                        <i style={{ width: `${Math.round(Math.min(1, Math.max(0, row.used ?? 0)) * 100)}%` }} />
+                        <i style={{ 'clip-path': `inset(0 ${100 - Math.round(Math.min(1, Math.max(0, row.used ?? 0)) * 100)}% 0 0)` }} />
                       </span>
                       <span class="reset">{row.used !== undefined && row.resetsAt ? t('usage.resets', { when: untilReset(row.resetsAt) }) : ''}</span>
                     </div>
