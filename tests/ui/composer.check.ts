@@ -165,9 +165,13 @@ check('composer: a rejected message comes back with its pictures, files and text
     transfer.items.add(new File([Uint8Array.from(atob(PNG), (c) => c.charCodeAt(0))], 'shot.png', { type: 'image/png' }));
     transfer.items.add(new File(['hello notes'], 'notes.txt', { type: 'text/plain' }));
     form.dispatchEvent(new DragEvent('drop', { dataTransfer: transfer, bubbles: true, cancelable: true }));
-    await settle(150);
+    // Each state is waited for, not timed: a slow runner reads the dropped files later than a fixed pause.
+    const thumbs = async (n: number) => {
+      for (const start = Date.now(); root.querySelectorAll('.thumb').length !== n && Date.now() - start < 3000; ) await settle();
+    };
+    await thumbs(2);
     form.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
-    await settle(400);
+    await thumbs(0);
     equal(root.querySelectorAll('.thumb').length, 0, 'sent, the box is empty');
     ok(restore(sent!), 'the screen puts the rejected message back');
     await settle();
