@@ -76,7 +76,7 @@ never personal or external plugin skills; servers there need an explicit file-fr
 Moving files on Off or Remove may also affect ongoing work.
 
 Every shipped item has one hand-written `catalog.name.*` name in each of the five locales. Cards, details, installed
-catalog rows, removal messages and conversation work logs use that same source; CLI aliases remain a separate detail.
+catalog rows, removal messages, conversation work logs and the context panel's list of a conversation's tools use that same source; CLI aliases remain a separate detail.
 Codex Projects also receives a lazy index of all enabled skills, using their checked, shortened descriptions. Its 32 KiB
 cap is separate from the 16 KiB selected kit, so discovery cannot crowd out servers or pins. Chat skips oversized
 instructions and takes the next matching item that fits. Claude Projects names native plugin skills without outside

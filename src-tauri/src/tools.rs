@@ -155,6 +155,13 @@ pub async fn tools_restore(faber: State<'_, Faber>, id: String) -> Res<()> {
         .map_err(|_| "error.tools.restore".to_string())
 }
 
+/// The catalog tools a conversation's agent has now, each with its job group, for the context meter's panel: read from the
+/// engine's memory when the panel opens; nothing is prepared, polled or started.
+#[tauri::command]
+pub async fn tools_in_use(faber: State<'_, Faber>, id: String) -> Res<Vec<(String, String)>> {
+    Ok(faber.engine.tools_in_use(&id))
+}
+
 /// Called on entering Catalog, before any removal in this visit can offer Undo.
 #[tauri::command]
 pub async fn tools_clear_removed(faber: State<'_, Faber>) -> Res<()> {

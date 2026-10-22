@@ -62,7 +62,7 @@ import { createAutoOpen, doneCards, openPlace, type Place, placeOfRunning, shown
 import { type Keep, type Section, Settings } from './Settings.tsx';
 import { Setup } from './Setup.tsx';
 import { continuePatch, type FirstStep, firstRunStep, lookDue, setupPatch } from './setup.ts';
-import { Catalog } from './Catalog.tsx';
+import { Catalog, showInCatalog } from './Catalog.tsx';
 import { Sidebar } from './Sidebar.tsx';
 import { keepRows, seedQuotas, withQuota } from './sidebar.ts';
 import { ToEnd } from './Floating.tsx';
@@ -1604,6 +1604,7 @@ ${copy().path}`}>
                           current()?.messages.at(-1)?.status !== 'done'
                         }
                         onFail={fail}
+                        onCatalog={(id) => { showInCatalog(id); closeSide(false); setFocus(false); setCatalogOpen(true); }}
                       />
                     )}
                   </Show>

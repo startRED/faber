@@ -1027,6 +1027,8 @@ export const api = {
   toolsList: () => invoke<ToolRow[]>('tools_list'),
   toolsInstall: (id: string) => invoke<void>('tools_install', { id }),
   toolsClearRemoved: () => invoke<void>('tools_clear_removed'),
+  /** The catalog tools the conversation's agent has now, each with its job group; read once when the context panel opens. */
+  toolsInUse: (id: string) => invoke<[string, string][]>('tools_in_use', { id }),
   toolsRestore: (id: string) => invoke<void>('tools_restore', { id }),
   toolsSetEnabled: (id: string, enabled: boolean) => invoke<void>('tools_set_enabled', { id, enabled }),
   toolsRemove: (id: string) => invoke<void>('tools_remove', { id }),

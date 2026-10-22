@@ -135,7 +135,8 @@ and a useful file location is allowed when the person needs to find or open an a
   locales. Claude's available descriptions are not this selection.
   A reused prepared session records the sent task's choice, even when preparation started before the first message.
   It appears only when the session starts with different ids from the last recorded kit in that conversation; an idle
-  close and resume with the same kit does not repeat it.
+  close and resume with the same kit does not repeat it. The kit a conversation has now is always one click away in the
+  topbar's context panel ("Catalog tools in this conversation", [layout](layout.md)), in Chat and Projects alike.
   Claude also omits the resource prefix from an unchanged native resume, including a warmed one; changed ids or snapshot identity send the
   current resources while keeping native history. Projects names native plugin skills without outside Read paths when
   the installed CLI supports the plugin flag; older CLIs and helpers receive the checked Read index instead.

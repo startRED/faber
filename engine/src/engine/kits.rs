@@ -398,6 +398,35 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn tools_in_use_are_the_saved_kit_of_the_ai_at_work_with_each_job_group() {
+        let dir = tempfile::tempdir().unwrap();
+        let folder = dir.path().canonicalize().unwrap();
+        let (spawn, _, _) = fake();
+        let engine = engine(&folder, spawn);
+        assert!(engine.tools_in_use("kit").is_empty(), "an unknown conversation has none");
+        engine.with(|core| {
+            conversation(core, Area::Chat, None, &folder, "Debug this failure");
+            let c = core.convs.get_mut("kit").unwrap();
+            c.messages[1].vendor = Some(Vendor::Claude);
+            c.session_kits.insert(Vendor::Claude, ("claude-native".into(), vec!["systematic-debugging".into(), "gone".into()], None));
+            c.session_kits.insert(Vendor::Codex, ("codex-native".into(), vec!["design-taste-frontend".into()], None));
+        });
+        let pair = |id: &str, job: &str| (id.to_string(), job.to_string());
+        assert_eq!(
+            engine.tools_in_use("kit"),
+            [pair("systematic-debugging", "debugging"), pair("gone", "")],
+            "the newest reply's AI; an id the catalog no longer has keeps no job"
+        );
+        engine.with(|core| core.convs.get_mut("kit").unwrap().messages[1].vendor = Some(Vendor::Codex));
+        assert_eq!(engine.tools_in_use("kit"), [pair("design-taste-frontend", "design")], "a switch of AI shows that AI's own kit");
+        engine.with(|core| {
+            core.convs.get_mut("kit").unwrap().session_kits.insert(Vendor::Codex, ("codex-native".into(), vec![], None));
+        });
+        assert!(engine.tools_in_use("kit").is_empty(), "a session that started with an empty kit has none");
+        engine.shutdown();
+    }
+
+    #[tokio::test]
     async fn catalog_hint_is_once_for_the_app_and_survives_settings_changes_and_reopening() {
         let dir = tempfile::tempdir().unwrap();
         let folder = dir.path().canonicalize().unwrap();

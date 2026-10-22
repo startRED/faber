@@ -1,9 +1,9 @@
 import { createComponent, createSignal } from 'solid-js';
 import { render } from 'solid-js/web';
 import { ContextMeter } from '../../ui/Context.tsx';
-import type { ContextFill } from '../../ui/api.ts';
+import { api, type ContextFill } from '../../ui/api.ts';
 import { heardParts, NEAR, near, percentOf, share } from '../../ui/context.ts';
-import { t, useLanguage } from '../../ui/i18n.ts';
+import { catalogName, t, useLanguage } from '../../ui/i18n.ts';
 import { check, equal, ok } from './check.ts';
 
 const settle = () => new Promise((resolve) => setTimeout(resolve, 30));
@@ -84,6 +84,53 @@ check('context: a click opens what fills the context, part by part, and Compact 
     equal(meter.getAttribute('aria-expanded'), 'false');
     equal(document.activeElement, meter);
   } finally {
+    dispose();
+    root.remove();
+  }
+});
+
+check('context: the panel names the catalog tools the conversation has now, why each was picked, and opens its Catalog detail', async () => {
+  const root = document.createElement('div');
+  document.body.append(root);
+  const real = api.toolsInUse;
+  const asked: string[] = [];
+  let kit: [string, string][] = [['systematic-debugging', 'debugging'], ['design-taste-frontend', 'design']];
+  api.toolsInUse = async (id) => { asked.push(id); return kit; };
+  const opened: string[] = [];
+  const dispose = render(
+    () => createComponent(ContextMeter, { id: 'c3', fill: { used: 9_000, window: 150_000 }, busy: false, onFail: () => {}, onCatalog: (id: string) => opened.push(id) }),
+    root,
+  );
+  try {
+    await settle();
+    equal(asked.length, 0, 'nothing is read before the panel opens');
+    const meter = root.querySelector<HTMLButtonElement>('[data-testid=context]')!;
+    meter.click();
+    await settle();
+    const panel = () => root.querySelector('.ctx-panel')!;
+    equal(panel().querySelector('.ctx-head')?.textContent, t('ctx.tools'));
+    const links = [...panel().querySelectorAll<HTMLButtonElement>('.ctx-kit .ctx-tool')];
+    equal(links.map((b) => b.textContent?.trim()).join('|'), [catalogName('systematic-debugging'), catalogName('design-taste-frontend')].join('|'), 'the Catalog names');
+    equal([...panel().querySelectorAll('.ctx-why')].map((s) => s.textContent).join('|'), [t('ctx.toolsWhy', { job: t('catalog.job.debugging') }), t('ctx.toolsWhy', { job: t('catalog.job.design') })].join('|'), 'why each was picked');
+    equal(links[0].title, t('ctx.toolsOpen', { name: catalogName('systematic-debugging') }));
+    await settle();
+    equal(asked.join(','), 'c3', 'read once when it opens: no polling');
+    links[1].click();
+    await settle();
+    equal(opened.join(','), 'design-taste-frontend', 'a name opens its Catalog detail');
+    equal(meter.getAttribute('aria-expanded'), 'false', 'and the panel closes');
+    kit = [];
+    meter.click();
+    await settle();
+    equal(asked.join(','), 'c3,c3', 'each opening reads the tools again');
+    equal(panel().querySelector('.ctx-kit'), null);
+    equal(panel().querySelector('.ctx-none')?.textContent, t('ctx.toolsNone'), 'a calm line when none is in use');
+    useLanguage('pt-BR');
+    await settle();
+    equal(panel().querySelector('.ctx-none')?.textContent, 'Nenhuma ferramenta do Catálogo em uso nesta conversa.', 'in the language of the screen');
+  } finally {
+    useLanguage('en');
+    api.toolsInUse = real;
     dispose();
     root.remove();
   }

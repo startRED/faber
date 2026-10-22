@@ -881,6 +881,17 @@ impl Engine {
             Some(c)
         })
     }
+    /// The catalog tools the conversation's agent has now, each with its job group (why it was picked): the kit saved for the
+    /// session of the AI at work, else of the newest reply's AI. Read on request from what is in memory; nothing is prepared.
+    pub fn tools_in_use(&self, id: &str) -> Vec<(String, String)> {
+        self.with(|core| {
+            let live = core.live.get(id).map(|l| l.vendor);
+            let Some(c) = core.load(id) else { return Vec::new() };
+            let vendor = live.or_else(|| c.messages.iter().rev().filter(|m| m.role == Role::Assistant).find_map(|m| m.vendor));
+            let ids = vendor.and_then(|v| c.session_kits.get(&v)).map(|(_, ids, _)| ids.as_slice()).unwrap_or_default();
+            ids.iter().map(|id| (id.clone(), crate::tools::find(id).map(|item| item.job.clone()).unwrap_or_default())).collect()
+        })
+    }
     /// What a subagent wrote between its steps, for its open side chat: the screen's copy of a message carries only their length.
     pub fn child_words(&self, id: &str, call_id: &str) -> Vec<crate::model::Words> {
         self.with(|c| {

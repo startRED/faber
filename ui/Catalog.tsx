@@ -52,6 +52,9 @@ const held: { query: string; filter: Filter; page: number; selected?: string } =
 /** Back to an unfiltered list, for the screen checks that each start from a fresh Catalog. */
 export const forgetCatalogView = (): void => { Object.assign(held, { query: '', filter: 'all', page: 0, selected: undefined }); };
 
+/** The next Catalog opens on this item's detail: the context meter's list of the tools a conversation has links here. */
+export const showInCatalog = (id: string): void => { held.selected = id; };
+
 /** Browse only while open: no CLI launch, polling or hidden card tree. */
 export function Catalog(props: { projects: Project[]; projectId?: string; vendors: Vendor[] }) {
   const [rows, setRows] = createStore<ToolRow[]>([]);

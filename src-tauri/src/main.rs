@@ -1876,6 +1876,7 @@ fn main() {
                 tools::tools_set_enabled,
                 tools::tools_restore,
                 tools::tools_clear_removed,
+                tools::tools_in_use,
                 #[cfg(feature = "test-hooks")]
                 report_checks,
                 #[cfg(feature = "test-hooks")]
