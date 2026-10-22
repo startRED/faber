@@ -52,18 +52,31 @@ impl Wait {
     }
 }
 
-/// Where a stalled app and its page were stuck (macOS only, where the page has stopped mid-run): the main thread's call
-/// graph of the app and of the newest WebKit page process, as `sample` sees it in 2 s, at most 60 lines each.
+/// Where a stalled app and its pages were stuck (macOS only, where the page has stopped mid-run): the main thread's call
+/// graph of the app and of every WebKit page process (at most four; spare ones sit idle), as `sample` sees it in 2 s, at
+/// most 80 lines each.
 #[cfg(target_os = "macos")]
 fn stacks(pid: u32) -> String {
-    let newest_page = std::process::Command::new("pgrep").args(["-n", "com.apple.WebKit.WebContent"]).output().ok();
-    let page = newest_page.map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string()).filter(|p| !p.is_empty());
+    let pages = std::process::Command::new("pgrep").arg("com.apple.WebKit.WebContent").output().ok();
+    let pages: Vec<String> =
+        pages.map(|o| String::from_utf8_lossy(&o.stdout).split_whitespace().take(4).map(String::from).collect()).unwrap_or_default();
     let mut out = String::new();
-    for (name, pid) in [("app", Some(pid.to_string())), ("page", page)] {
-        let Some(pid) = pid else { continue };
+    for (name, pid) in std::iter::once(("app", pid.to_string())).chain(pages.into_iter().map(|p| ("page", p))) {
         let Ok(o) = std::process::Command::new("sample").args([pid.as_str(), "2"]).output() else { continue };
         let text = String::from_utf8_lossy(&o.stdout);
-        let graph: Vec<&str> = text.lines().skip_while(|l| !l.starts_with("Call graph:")).take(60).collect();
+        // The main thread comes first; the next thread at the top level ends it.
+        let mut threads = 0;
+        let graph: Vec<&str> = text
+            .lines()
+            .skip_while(|l| !l.starts_with("Call graph:"))
+            .skip(1)
+            .take_while(|l| {
+                let top = l.starts_with("    ") && !l.starts_with("     ") && l.contains("Thread_");
+                threads += usize::from(top);
+                threads < 2
+            })
+            .take(80)
+            .collect();
         out.push_str(&format!("\n{name} {pid} main thread:\n{}", graph.join("\n")));
     }
     out
