@@ -11,8 +11,8 @@ so the layout changes with its width:
 
 | Window width | Sidebar | Running column | Reading column |
 | :--- | :--- | :--- | :--- |
-| 1,100 px and wider | 288 px, beside the stage | 360 to 560 px when open, beside the stage | Shrinks with the stage, 760 px at most. The stage is never narrower than 440 px |
-| 900 to 1,099 px | 288 px, beside the stage | When open, an overlay on the stage | Up to 760 px |
+| About 1,030 px and wider (whenever the stage keeps 440 px beside the column) | 288 px, beside the stage; it folds away while a wide view would squeeze the stage under 560 px | Its view's usual width when open, beside the stage | Shrinks with the stage, 760 px at most. The stage is never narrower than 440 px |
+| 900 px to where the column no longer docks | 288 px, beside the stage | When open, an overlay on the stage | Up to 760 px |
 | 720 to 899 px | Hidden. A button in the topbar opens it as an overlay | When open, an overlay on the stage | Up to 760 px |
 
 Text size up to 18 px must not push the page past the window width at any of these widths: content wraps or scrolls
@@ -30,8 +30,8 @@ The numbers above are the usual widths. The person can change them, and the shel
   sidebar's edge and just inside the column's, never a line the window's height. It brightens while dragged, is accent when
   focused, and its name is its tooltip. The arrow keys move an edge 16 px (48 with Shift), Home and End go to its limits, a double
   click or Enter glides it back to the usual width. The sidebar has no edge below 900 px, where it is an overlay.
-- **The column's usual width follows the window** (`autoRun`): the window less the sidebar less 800 px, 360 to 560 px (`RUN_USUAL`); only a drag takes it wider. A
-  drag ending on it, a double click or Enter goes back to following. A subagent can fill the stage ([subagents.md](subagents.md)).
+- **Each view of the column has its own usual width** (`paneUsual`, R428). A page in Faber's browser, Changes, a visual answer and a file open at 60% of the work area (the window less the sidebar); the quick question at 420 px; the running list, Commands, Technical details and a helper keep `autoRun`: the window less the sidebar less 800 px, 360 to 560 px (`RUN_USUAL`). A drag is kept for the view's kind only (`faber.layout.panes`: `list`, `browser`, `changes`, `visual`, `file`, `aside`), so widening the browser leaves the running list alone. A drag ending on the usual width, a double click or Enter goes back to following it, for that kind. The width of the old single `run` value becomes every kind's, once. Switching views while the column stays open glides the width in the column's own motion (`.shell.glide`, instant with reduced or no motion); opening and closing it are the stage's move.
+- **Docking is by room.** The column sits beside the stage whenever the window leaves the sidebar (at most its usual 288 px, it gives way), the column's 300 px minimum and the stage's 440 px (`dockable`, about 1,030 px with the usual sidebar), instead of the fixed 1,100 px; under 900 px the sidebar is an overlay and the column covers the stage. When a wide view (browser, Changes, visual answer, file) would leave the stage under 560 px, the sidebar folds away like focus mode's (`.shell.folded`, the stage keeps the room) and the usual width is then 60% of the whole window; it comes back when the view closes or another kind replaces it. The fold is derived, never stored. A subagent can fill the stage ([subagents.md](subagents.md)).
 - **How a drag stays light.** The pointer events of the window (listened to only while dragging) set `--side-w` and `--run-w` on the
   shell once per frame; nothing is measured and no state changes until the drag ends, when the width is stored (`faber.layout`)
   once and the lists that animate layout measure again. `html.sizing` sets the cursor and stops text selection meanwhile.
@@ -62,7 +62,7 @@ The numbers above are the usual widths. The person can change them, and the shel
   buttons with their names in the tooltip: Quick question (Ctrl+;), Changes (only while the project conversation has
   changed files) and Faber's browser (a project conversation on Windows). Each puts its own view in the right column,
   apart from the running list; the one on screen stays lit (`aria-pressed`) and pressing it again closes the column.
-  The run button is the way to the running list, so these views have no back arrow. Below 1,100 px a column the person
+  The run button is the way to the running list, so these views have no back arrow. Where the column does not dock (about 1,030 px), a column the person
   opened sits over the stage as a modal dialog and the topbar waits behind it: its close button or Esc closes it.
 
 ### Sidebar
@@ -105,7 +105,7 @@ projects. Faber has no worktree creation for projects, so an environment has no 
 
 Its rows, cards, file changes and when it opens by itself: [running.md](running.md). The topbar's pane buttons put
 Changes, the quick question or Faber's browser in that same column in place of the running list, each a view of its own
-with its title and close; it never adds a second column. Docked (1,100 px and wider), the column is a card of its own beside
+with its title and close; it never adds a second column. Docked (about 1,030 px and wider), the column is a card of its own beside
 the stage, the frame between them and every corner as round as the stage's; a look with no inset keeps it flush. Faber's
 browser shows its page in a rounded box under the address field, with nothing repeating the site: the address names it.
 The pane is a native rectangle, so the shell draws the box's corners over the page in the card's colour, smooth, and gives

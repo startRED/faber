@@ -70,11 +70,18 @@ img, svg, a { -webkit-user-drag: none; }
 .toast button { flex: none; width: var(--h-sm); height: var(--h-sm); border-radius: var(--r-xs); color: var(--ink-2); }
 .toast button:hover { background: var(--s2); color: var(--ink); }
 
-/* Sidebar and the shell around the stage. From 1,100 px an open running column sits beside the stage (.docked); from 900 px
-   the sidebar does; below that the sidebar is behind a button. ui/layout.ts holds the same two numbers. */
-.shell { --side-w: 288px; --run-w: 360px; position: relative; display: grid; grid-template-columns: var(--side-w) minmax(0, 1fr) 0px; min-height: 0; overflow: clip; }
+/* Sidebar and the shell around the stage. An open running column sits beside the stage (.docked) whenever the stage keeps 440 px
+   beside it (about 1,030 px with the usual sidebar); from 900 px the sidebar does; below that the sidebar is behind a button.
+   ui/layout.ts (`dockable`) decides the first, and holds the same 900. --side-track is the sidebar's column: --side-w, or 0 while a wide
+   view has folded the sidebar away (.folded). */
+.shell { --side-w: 288px; --side-track: var(--side-w); --run-w: 360px; position: relative; display: grid; grid-template-columns: var(--side-track) minmax(0, 1fr) 0px; min-height: 0; overflow: clip; }
 /* The docked column keeps the stage 440 px (STAGE_MIN, ui/layout.ts) and is never under 300 px, whatever width was dragged. */
-.shell.docked { grid-template-columns: var(--side-w) minmax(0, 1fr) clamp(300px, var(--run-w), calc(100vw - var(--side-w) - 440px)); }
+.shell.docked { grid-template-columns: var(--side-track) minmax(0, 1fr) clamp(300px, var(--run-w), calc(100vw - var(--side-track) - 440px)); }
+/* Switching views while the column is open glides the width; a drag (html.sizing) and a window resize follow at once. */
+.shell.glide { transition: grid-template-columns var(--dur-ui) var(--ease); }
+.shell.glide > .main { transition: margin-left var(--dur-ui) var(--ease); }
+.shell.glide .work > .runcol { transition: width var(--dur-ui) var(--ease); }
+html.sizing :is(.shell, .shell > .main, .shell .work > .runcol) { transition: none; }
 .settings { display: grid; grid-template-columns: 288px 1fr; min-height: 0; }
 .side { display: flex; flex-direction: column; gap: 14px; padding: 8px 12px 40px; min-height: 0; min-width: 0; }
 .s-nav { padding: 8px 12px; align-content: start; }
@@ -463,8 +470,8 @@ svg.i.sm { width: 14px; height: 14px; }
   /* Focus mode: the tracks close at once and the stage's own move (ui/motion.ts) carries it across; the sidebar keeps its width,
      fades and slides out underneath it. */
   .shell.focus { grid-template-columns: 0px minmax(0, 1fr) 0px; }
-  .shell.focus > .main { margin-left: var(--stage-inset); }
-  .shell.focus > .side { opacity: 0; visibility: hidden; pointer-events: none; transform: translateX(calc(-1 * var(--motion-slide))); transition: transform var(--dur-exit) var(--ease-in), opacity var(--dur-exit) var(--ease-in), visibility 0s linear var(--dur-exit); }
+  .shell:is(.focus, .folded) > .main { margin-left: var(--stage-inset); }
+  .shell:is(.focus, .folded) > .side { opacity: 0; visibility: hidden; pointer-events: none; transform: translateX(calc(-1 * var(--motion-slide))); transition: transform var(--dur-exit) var(--ease-in), opacity var(--dur-exit) var(--ease-in), visibility 0s linear var(--dur-exit); }
 }
 .topbar .focus-exit { flex: none; margin: 0 0 0 -8px; overflow: hidden; transition: width var(--dur-ui) var(--ease), margin var(--dur-ui) var(--ease), opacity var(--dur-ui) var(--ease), visibility 0s, background-color var(--dur-fast) var(--ease), color var(--dur-fast) var(--ease); }
 .topbar .focus-exit.off { width: 0; margin: 0 -10px 0 0; opacity: 0; visibility: hidden; transition: width var(--dur-exit) var(--ease-in), margin var(--dur-exit) var(--ease-in), opacity var(--dur-exit) var(--ease-in), visibility 0s linear var(--dur-exit); }

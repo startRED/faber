@@ -2025,6 +2025,7 @@ export const es: Messages = {
   'notes.193.new': 'Faber puede arreglar por sí solo una meta rota del proyecto, hasta 2 $ al día (desactivado hasta que lo actives en Ajustes).',
   'notes.194.new': 'En el proyecto del propio Faber, una meta puede vigilar cierres inesperados nuevos y empezar un arreglo por sí sola, si lo activas en Ajustes.',
   'notes.195.better': 'Cuando el agente no puede ejecutar un comando, ves qué habría hecho, y Entendido quita el Te necesita.',
+  'notes.196.better': 'El navegador, los cambios, las respuestas visuales y los archivos ahora se abren anchos a la derecha, la pregunta rápida se abre más estrecha y cada uno recuerda el ancho que le des.',
   'update.checking': 'Buscando una actualización…',
   'update.downloading': 'Descargando actualización…',
   'update.downloadingPercent': 'Descargando actualización… {percent} %',

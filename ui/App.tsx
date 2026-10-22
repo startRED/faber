@@ -41,7 +41,7 @@ import { keysOf, pressed, pressedAny } from './keys.ts';
 import { homeHints } from './idle.ts';
 import { createFileDrop } from './drop.ts';
 import { Grip } from './Grip.tsx';
-import { autoRun, createWindowWidth, type Edge, fit, limitsOf, savedWidths, SIDE, widthClass } from './layout.ts';
+import { createWindowWidth, dockable, fit, isWide, type Kind, limitsOf, paneUsual, savedWidths, SIDE, STAGE_ROOMY, widthClass } from './layout.ts';
 import { Lockup } from './Mark.tsx';
 import { isFirstInstall, newestId, NOTES, type Note, whatsNew } from './notes.ts';
 import { modelOptions, vendorName } from './models.ts';
@@ -392,8 +392,18 @@ export function App(props: { initial: AppState; update?: UpdateStatus; inbox: { 
   // ---- The widths the person gave the sidebar and the running column by dragging their edges (ui/Grip.tsx), kept per window like the
   // other small conveniences, and focus mode (Ctrl+B): the sidebar and the column step aside to give the stage the whole window.
   const [widths, setWidths] = createSignal(savedWidths(recall('faber.layout', null)));
-  const setWidth = (edge: Edge, px: number | undefined) => {
-    setWidths((w) => ({ ...w, [edge]: px }));
+  const setSideWidth = (px: number) => {
+    setWidths((w) => ({ ...w, side: px }));
+    remember('faber.layout', widths());
+  };
+  // A drag of the column is kept for the kind of view it shows; undefined puts that kind back to its usual width.
+  const setPaneWidth = (kind: Kind, px: number | undefined) => {
+    setWidths((w) => {
+      const panes = { ...w.panes };
+      if (px === undefined) delete panes[kind];
+      else panes[kind] = px;
+      return { ...w, panes };
+    });
     remember('faber.layout', widths());
   };
   const [focus, setFocus] = createSignal(false);
@@ -425,17 +435,54 @@ export function App(props: { initial: AppState; update?: UpdateStatus; inbox: { 
   // the user over the stage it is modal; opened by itself it is never modal and never moves focus.
   const [columnOpen, setColumnOpen] = createSignal(false);
   const [byUser, setByUser] = createSignal(false);
-  const docked = () => width() === 'wide';
+  const docked = () => dockable(win(), widths().side);
   // The column belongs to the work area, outside focus mode and Catalog.
   const colShown = () => columnOpen() && !focus() && !catalogOpen();
   const sideLimits = createMemo(() => limitsOf('side', win(), widths().side, colShown() && docked()));
   // What the sidebar really measures: the width the person dragged it to, inside what the window leaves it.
   const sideWidth = () => fit(widths().side, sideLimits());
-  const runLimits = createMemo(() => limitsOf('run', win(), sideWidth(), docked()));
-  // What the column really measures: the width the person dragged it to, or until then the room the window leaves beside the
-  // reading column, inside what the window leaves it. A drag that ends on the usual width goes back to following the window.
-  const autoWidth = () => fit(autoRun(win(), sideWidth()), runLimits());
-  const runWidth = () => fit(widths().run ?? autoRun(win(), sideWidth()), runLimits());
+  // What the column shows decides its usual width (docs/design/layout.md): a page, a diff, a visual answer or a file reads wide,
+  // a quick question has a chat's width, and the lists keep the room beside the reading column.
+  const paneKind = (): Kind =>
+    sideAgent() || sideDetails() ? 'list'
+    : sideVisual() ? 'visual'
+    : sideSite() ? 'browser'
+    : sideAside() ? 'aside'
+    : sideFile() ? 'file'
+    : sideChanges() ? 'changes'
+    : 'list';
+  // A wide view that would leave the stage under STAGE_ROOMY folds the sidebar away while it is open. Nothing is stored.
+  const folded = () => {
+    if (!colShown() || !docked() || wide() || narrow() || !isWide(paneKind())) return false;
+    const side = sideWidth();
+    const column = fit(widths().panes[paneKind()] ?? paneUsual(paneKind(), win(), side), limitsOf('run', win(), side, true));
+    return win() - side - column < STAGE_ROOMY;
+  };
+  // The room the sidebar takes beside the work area: none when it is folded away or behind a button.
+  const sideTake = () => (folded() || narrow() ? 0 : sideWidth());
+  const runLimits = () => limitsOf('run', win(), sideTake(), docked());
+  // What the column really measures: the width the person dragged this kind to, or until then its usual one, inside what the
+  // window leaves it. A drag that ends on the usual width goes back to following the window.
+  const autoWidth = () => fit(paneUsual(paneKind(), win(), sideTake()), runLimits());
+  const runWidth = () => fit(widths().panes[paneKind()] ?? paneUsual(paneKind(), win(), sideTake()), runLimits());
+  // Switching views while the column stays open glides its width in the column's own motion (the stylesheet turns it off with
+  // reduced motion); opening and closing it are the list's own move.
+  const [glide, setGlide] = createSignal(false);
+  let glideTimer: ReturnType<typeof setTimeout> | undefined;
+  createEffect(on([paneKind, colShown], ([kind, shown], previous) => {
+    if (!previous || !previous[1] || !shown || previous[0] === kind) return;
+    setGlide(true);
+    clearTimeout(glideTimer);
+    glideTimer = setTimeout(() => setGlide(false), 450);
+  }, { defer: true }));
+  onCleanup(() => clearTimeout(glideTimer));
+  // The sidebar that folds away takes its focus with it: the column's first control gets it, as when focus mode steps aside.
+  createEffect(on(folded, (away) => {
+    if (away) queueMicrotask(() => {
+      const at = document.activeElement;
+      if (!at || at === document.body) column?.querySelector<HTMLElement>('button')?.focus();
+    });
+  }, { defer: true }));
   // An opened subagent can fill the stage as a full thread (R161 step 3): the column then sits over the work area, not beside it.
   // An opened subagent or a page of Faber's browser may fill the work area instead of the column.
   const wide = () => (!!sideAgent() && agentWide()) || (!!sideSite() && siteWide());
@@ -1267,7 +1314,7 @@ export function App(props: { initial: AppState; update?: UpdateStatus; inbox: { 
         // The column is drawn again where it now sits: focus goes back to the button that was pressed.
         queueMicrotask(() => column?.querySelector<HTMLElement>('.agent-wide, .site-wide')?.focus());
       }}
-      resize={wide() ? undefined : { value: runWidth(), limits: runLimits(), fallback: autoWidth(), onChange: (px) => setWidth('run', px === autoWidth() ? undefined : px) }}
+      resize={wide() ? undefined : { value: runWidth(), limits: runLimits(), fallback: autoWidth(), onChange: (px) => setPaneWidth(paneKind(), px === autoWidth() ? undefined : px) }}
       ref={(el) => (column = el)}
     />
   );
@@ -1381,8 +1428,8 @@ export function App(props: { initial: AppState; update?: UpdateStatus; inbox: { 
           <div
             class="shell"
             data-screen={catalogOpen() ? 'catalog' : `${area() === 'chat' ? 'chat' : 'project'}.${newChat() ? 'new' : 'thread'}`}
-            classList={{ docked: colShown() && docked() && !wide(), focus: focus() }}
-            style={{ '--side-w': `${sideWidth()}px`, '--run-w': `${runWidth()}px` }}
+            classList={{ docked: colShown() && docked() && !wide(), focus: focus(), folded: folded(), glide: glide() }}
+            style={{ '--side-w': `${sideWidth()}px`, '--run-w': `${runWidth()}px`, ...(folded() ? { '--side-track': '0px' } : {}) }}
             inert={tourOpen() || notesOpen() || startScreen()}
             ref={animateList}
           >
@@ -1394,8 +1441,8 @@ export function App(props: { initial: AppState; update?: UpdateStatus; inbox: { 
               aria-label={t('side.label')}
               role={sideOverlay() ? 'dialog' : undefined}
               aria-modal={sideOverlay() ? 'true' : undefined}
-              inert={trapped() || (narrow() && !sideOverlay()) || (focus() && !narrow())}
-              aria-hidden={(narrow() && !sideOverlay()) || (focus() && !narrow()) ? 'true' : undefined}
+              inert={trapped() || (narrow() && !sideOverlay()) || ((focus() || folded()) && !narrow())}
+              aria-hidden={(narrow() && !sideOverlay()) || ((focus() || folded()) && !narrow()) ? 'true' : undefined}
             >
               <Sidebar
                 conversations={state().conversations}
@@ -1443,7 +1490,7 @@ export function App(props: { initial: AppState; update?: UpdateStatus; inbox: { 
                 onError={(err) => setSaveError(failureText(err))}
               />
               <Show when={!narrow()}>
-                <Grip edge="side" label={t('side.resize')} value={sideWidth()} limits={sideLimits()} fallback={SIDE.fallback} onChange={(px) => setWidth('side', px)} />
+                <Grip edge="side" label={t('side.resize')} value={sideWidth()} limits={sideLimits()} fallback={SIDE.fallback} onChange={setSideWidth} />
               </Show>
             </aside>
             <Show when={sideOverlay()}>

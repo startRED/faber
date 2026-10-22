@@ -147,10 +147,14 @@ fn shown(v: &Value, part: &str) -> bool {
     v[part]["shown"].as_bool().unwrap_or(false)
 }
 
+/// The window width from which the column sits beside the stage: the usual 288 px sidebar, the column's 300 px minimum and the
+/// stage's 440 px (`dockable` in ui/layout.ts).
+const DOCKS_FROM: u32 = 1028;
+
 /// Closes the column the way the width allows: the button while the column sits beside the stage, its own close button
 /// while it is a modal dialog over the stage (the top bar is out of reach then).
 fn close_column(page: &mut Page, width: u32) -> Result {
-    if width >= 1100 {
+    if width >= DOCKS_FROM {
         run_button(page)?;
     } else {
         let close = page.named("button", "run.close")?;
@@ -207,7 +211,7 @@ fn follows_the_width(ctx: &mut Ctx) -> Result {
     ask(page, QUESTION)?;
     let actions = page.named("article", "answer.label")?.css(".actions");
     page.wait_visible(&actions)?;
-    for (width, height) in [(1440, 900), (1100, 700), (1099, 700), (900, 700), (899, 700), (720, 480)] {
+    for (width, height) in [(1440, 900), (1100, 700), (DOCKS_FROM, 700), (DOCKS_FROM - 1, 700), (900, 700), (899, 700), (720, 480)] {
         set_size(page, width, height)?;
         let at = format!("{width}x{height}");
         let closed = page.eval(SHELL)?;
@@ -218,7 +222,7 @@ fn follows_the_width(ctx: &mut Ctx) -> Result {
         page.wait_visible(&css(".runcol"))?;
         pause(0.45);
         let open = page.eval(SHELL)?;
-        check_shell(&format!("{at}, column open"), &open, width, width < 1100)?;
+        check_shell(&format!("{at}, column open"), &open, width, width < DOCKS_FROM)?;
         if width == 1440 {
             // Nothing runs: the column shows Curioso, 64 px, and his drawing does not move.
             let peek = page.eval(
@@ -227,12 +231,12 @@ fn follows_the_width(ctx: &mut Ctx) -> Result {
             same((peek["w"].as_f64(), peek["h"].as_f64()), (Some(64.0), Some(64.0)), "Curioso in the empty column")?;
             same(peek["still"].as_bool(), Some(true), "Curioso is still")?;
         }
-        if width >= 1100 {
+        if width >= DOCKS_FROM {
             // The room beside the 760 px reading column (the window less the sidebar and 800 px), 360 to 560 px, with the 8 px of
             // frame on each side of the column, its own card beside the stage.
             same(
                 num(&open, &["docked", "w"]) + 16.0,
-                (f64::from(width) - 288.0 - 800.0).clamp(360.0, 560.0),
+                (f64::from(width) - 288.0 - 800.0).clamp(360.0, 560.0).min(f64::from(width) - 288.0 - 440.0),
                 &format!("{at}: the docked column"),
             )?;
             ensure(num(&open, &["main", "w"]) >= 439.5, || format!("{at}: the stage is {} px", open["main"]["w"]))?;
@@ -296,7 +300,7 @@ fn fits_large_text(ctx: &mut Ctx) -> Result {
     let heading = page.named("heading", "empty.chatTitle")?;
     page.wait_visible(&heading)?;
     same(page.eval("parseFloat(getComputedStyle(document.body).fontSize)")?.as_f64(), Some(18.0), "the text size")?;
-    for (width, height) in [(1440, 900), (1100, 700), (1099, 700), (900, 700), (899, 700), (720, 480)] {
+    for (width, height) in [(1440, 900), (1100, 700), (DOCKS_FROM, 700), (DOCKS_FROM - 1, 700), (900, 700), (899, 700), (720, 480)] {
         set_size(page, width, height)?;
         let at = format!("{width}x{height} at 18 px");
         check_shell(&at, &page.eval(SHELL)?, width, false)?;
@@ -304,7 +308,7 @@ fn fits_large_text(ctx: &mut Ctx) -> Result {
         page.wait_visible(&css(".runcol"))?;
         pause(0.45);
         let open = page.eval(SHELL)?;
-        check_shell(&format!("{at}, column open"), &open, width, width < 1100)?;
+        check_shell(&format!("{at}, column open"), &open, width, width < DOCKS_FROM)?;
         // The run button and the model chip stay whole in the top bar, and the column's own text fits its width.
         let clipped = page.eval(
             "[...document.querySelectorAll('.topbar .right *, .runcol *')].filter((e) => e.scrollWidth > e.clientWidth + 1 && getComputedStyle(e).overflowX === 'visible' && e.children.length === 0).map((e) => e.className || e.tagName)",
@@ -714,14 +718,14 @@ fn leaves_the_greeting_composer(ctx: &mut Ctx) -> Result {
     let launch = two_writes(ctx)?;
     let mut app = ctx.launch(launch)?;
     let page = &mut app.page;
-    set_size(page, 1099, 700)?;
+    set_size(page, DOCKS_FROM - 1, 700)?;
     ask_two_writes(page)?;
     // The question is shown by itself, over the stage; then the user starts a new conversation without closing it.
     page.wait_visible(&css(".work > .runcol .ask").has_text("a.txt"))?;
     page.press("Control+n")?;
     let greeting = page.named("heading", "empty.chatTitle")?;
     page.wait_visible(&greeting)?;
-    for (width, height) in [(1099, 700), (899, 700), (720, 480)] {
+    for (width, height) in [(DOCKS_FROM - 1, 700), (899, 700), (720, 480)] {
         set_size(page, width, height)?;
         page.wait_visible(&css(".work.under .thread.welcome"))?;
         let at = format!("{width}x{height}, the greeting with the column over the stage");
@@ -886,7 +890,7 @@ fn dismissal_sticks_narrow(ctx: &mut Ctx) -> Result {
     dismissal(ctx, false, 1000)
 }
 
-/// The column the user opens and closes again before it would have opened itself. Below 1100 px it is a dialog over the
+/// The column the user opens and closes again before it would have opened itself. Where it does not dock (under `DOCKS_FROM`) it is a dialog over the
 /// stage and the run button behind it is inert, so Esc closes it there; the window is sized here because a CI runner's
 /// screen may open it narrower than a desk does.
 fn dismissal(ctx: &mut Ctx, reduce: bool, width: u32) -> Result {
@@ -922,7 +926,7 @@ fn dismissal(ctx: &mut Ctx, reduce: bool, width: u32) -> Result {
     page.press("ArrowLeft")?;
     run_button(page)?;
     page.wait_visible(&css(".runcol"))?;
-    if width >= 1100 {
+    if width >= DOCKS_FROM {
         run_button(page)?;
     } else {
         page.press("Escape")?;

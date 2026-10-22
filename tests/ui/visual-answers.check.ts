@@ -828,7 +828,7 @@ check('visual answers: Chat and Projects at 720 px reuse the resizable running p
         const oldWidth = Number(grip.getAttribute('aria-valuenow'));
         grip.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowLeft', bubbles: true }));
         ok(Number(grip.getAttribute('aria-valuenow')) > oldWidth, 'the existing keyboard resize widens the pane');
-        ok(JSON.parse(localStorage.getItem('faber.layout')!).run > oldWidth, 'the existing saved width is used');
+        ok(JSON.parse(localStorage.getItem('faber.layout')!).panes.visual > oldWidth, 'the existing saved width is used');
         ok(pane.getBoundingClientRect().width <= 720, 'the pane fits a 720 px window');
         equal(pane.getAnimations({ subtree: true }).length, 0, 'visual controls add no motion in the reduced path');
         host.querySelector<HTMLButtonElement>('.visual-pane .back')!.click();

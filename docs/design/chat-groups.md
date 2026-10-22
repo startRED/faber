@@ -10,7 +10,7 @@ Clicking the folder name opens one short, scrollable page, 720 px wide at most, 
 appears once as its heading; the crumb says Chat. Its main action is New chat here. There is no decorative art behind
 the instructions and no new motion, timer, preview or hidden file reader.
 It occupies the stage's first grid row and column, the same as a conversation, so an overlay running panel shares its
-area below 1,100 px. While that panel is modal (or fills the stage), the group page is inert: instructions, file controls
+area where the column does not dock (under about 1,030 px). While that panel is modal (or fills the stage), the group page is inert: instructions, file controls
 and New chat here cannot take clicks or keyboard focus. Closing the panel restores them.
 
 - Instructions are plain text, at most 8,000 characters, saved as typed through an ordered save queue. Saving keeps

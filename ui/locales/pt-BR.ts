@@ -2012,6 +2012,7 @@ export const ptBR: Messages = {
   'notes.193.new': 'O Faber pode consertar sozinho uma meta quebrada do projeto, até US$ 2 por dia (desligado até você ligar em Ajustes).',
   'notes.194.new': 'No projeto do próprio Faber, uma meta pode vigiar travamentos novos e começar um conserto sozinha, se você ligar isso em Ajustes.',
   'notes.195.better': 'Quando o agente é impedido de rodar um comando, você vê o que ele faria, e Entendi tira o Precisa de você.',
+  'notes.196.better': 'O navegador, as alterações, as respostas visuais e os arquivos agora abrem largos à direita, a pergunta rápida abre mais estreita, e cada um guarda a largura que você der.',
   'update.checking': 'Procurando atualização…',
   'update.downloading': 'Baixando atualização…',
   'update.downloadingPercent': 'Baixando atualização… {percent}%',

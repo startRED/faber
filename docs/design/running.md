@@ -93,7 +93,7 @@ rest of the shell are in [layout.md](layout.md).
 - With no items it shows an empty state with Curioso.
 - "Quick question" (R250) is the first of the topbar's pane buttons, and Ctrl+; does the same. It opens the quick
   question in place of the list, with its title and the close button in its head; `/btw`
-  in the conversation's box opens it the same way, from any width (over the stage below 1,100 px). Each question sits in
+  in the conversation's box opens it the same way, from any width (over the stage where the column does not dock, under about 1,030 px). Each question sits in
   the same bubble as a subagent's brief, its answer below it as a reply, and a quiet "Send to the agent" under a finished
   one; while it runs, "Looking…" and a quiet Stop. The box is the side chat's (Enter asks, Shift+Enter breaks the line),
   with the model picker beside Ask when the conversation's AI has more than one model. It is offered in any open

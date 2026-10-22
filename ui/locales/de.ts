@@ -2025,6 +2025,7 @@ export const de: Messages = {
   'notes.193.new': 'Faber kann ein gebrochenes Projektziel von selbst reparieren, bis zu 2 $ pro Tag (aus, bis du es in den Einstellungen einschaltest).',
   'notes.194.new': 'Im Projekt von Faber selbst kann ein Ziel auf neue Abstürze achten und von selbst eine Reparatur starten, wenn du das in den Einstellungen einschaltest.',
   'notes.195.better': 'Wenn der Agent einen Befehl nicht ausführen darf, siehst du, was er getan hätte, und Verstanden nimmt Braucht dich weg.',
+  'notes.196.better': 'Browser, Änderungen, visuelle Antworten und Dateien öffnen sich rechts jetzt breit, die schnelle Frage schmaler, und jede Ansicht merkt sich die Breite, die Sie ihr geben.',
   'update.checking': 'Suche nach einem Update…',
   'update.downloading': 'Update wird heruntergeladen…',
   'update.downloadingPercent': 'Update wird heruntergeladen… {percent} %',

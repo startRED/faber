@@ -3,9 +3,10 @@ import { render } from 'solid-js/web';
 import themes from '../../src-tauri/src/themes.json';
 import { api, type AppState, type Conversation } from '../../ui/api.ts';
 import { agentWide, showAgent } from '../../ui/AgentChat.tsx';
+import { showSite } from '../../ui/Site.tsx';
 import { App } from '../../ui/App.tsx';
 import { t, useLanguage } from '../../ui/i18n.ts';
-import { autoRun, fit, limitsOf, RUN, savedWidths, SIDE, STAGE_MIN, WIDE_FROM } from '../../ui/layout.ts';
+import { ASIDE_USUAL, autoRun, dockable, fit, KINDS, limitsOf, paneUsual, RUN, savedWidths, SIDE, STAGE_MIN } from '../../ui/layout.ts';
 import { check, deepEqual, equal, ok } from './check.ts';
 
 // Arranging the shell by hand: the edges of the sidebar and the running column, focus mode (Ctrl+B) and a file over the window.
@@ -25,10 +26,28 @@ check('layout: a dragged width keeps the stage 440 px wide, and what storage hol
   equal(fit(5000, SIDE), 420);
   equal(fit(10, SIDE), 200);
   equal(fit(250.6, SIDE), 251);
-  deepEqual(savedWidths(null), { side: 288, run: undefined });
-  deepEqual(savedWidths({ side: 'wide', run: NaN }), { side: 288, run: undefined });
-  deepEqual(savedWidths({ side: 9999, run: 1 }), { side: 420, run: 300 });
-  deepEqual(savedWidths({ side: 300, run: 400 }), { side: 300, run: 400 });
+  deepEqual(savedWidths(null), { side: 288, panes: {} });
+  deepEqual(savedWidths({ side: 'wide', panes: { list: NaN, browser: 'x' } }), { side: 288, panes: {} });
+  deepEqual(savedWidths({ side: 9999, panes: { list: 1, browser: 5000, nonsense: 400 } }), { side: 420, panes: { list: 300, browser: 4000 } });
+  deepEqual(savedWidths({ side: 300, panes: { aside: 400 } }), { side: 300, panes: { aside: 400 } });
+  // The one width of earlier versions becomes the width of every kind, once; a stored object of kinds wins over it.
+  const old = Object.fromEntries(KINDS.map((k) => [k, 400]));
+  deepEqual(savedWidths({ side: 300, run: 400 }), { side: 300, panes: old });
+  deepEqual(savedWidths({ side: 300, run: 400, panes: { browser: 700 } }), { side: 300, panes: { browser: 700 } });
+});
+
+check('layout: every kind of view has its own usual width, and the column docks by room', () => {
+  equal(paneUsual('browser', 1920, 288), Math.round(0.6 * (1920 - 288)), 'a page opens at 60% of the work area');
+  for (const kind of ['changes', 'visual', 'file'] as const) equal(paneUsual(kind, 1600, 288), paneUsual('browser', 1600, 288), kind + ' opens as wide as a page');
+  equal(paneUsual('aside', 1920, 288), ASIDE_USUAL);
+  equal(ASIDE_USUAL, 420);
+  equal(paneUsual('list', 1920, 288), 560, 'the running list keeps the room beside the reading column');
+  equal(paneUsual('list', 1920, 288), autoRun(1920, 288));
+  ok(paneUsual('browser', 1920, 288) > paneUsual('list', 1920, 288) + 300, 'the browser and the running list no longer share a width');
+  ok(!dockable(1000, 288) && dockable(1100, 288), 'the column docks whenever the stage keeps 440 px beside it');
+  ok(dockable(1040, 288) && !dockable(1020, 288), 'not at the old fixed 1,100 px');
+  ok(!dockable(899, 200), 'under 900 px the sidebar is an overlay and the column covers the stage');
+  ok(dockable(1050, 420), 'a wide stored sidebar gives way instead of keeping the column from docking');
 });
 
 check('layout: the running column takes the room beside the reading column, 360 to 560 px, and never the thread’s own width', () => {
@@ -142,7 +161,8 @@ check('shell: the sidebar edge is a separator that a drag, the arrow keys and a 
 
 check('shell: the running column has an edge of its own, and a stored width is the one that comes back', async () => {
   useLanguage('en');
-  await shell(['claude'], 'none', async (root) => {
+  // The room the stored 420 px needs beside the stage does not depend on the runner's own window.
+  await atWidth(1600, () => shell(['claude'], 'none', async (root) => {
     equal(root.querySelector<HTMLElement>('.grip.side')!.getAttribute('aria-valuenow'), '300', 'the sidebar comes back as it was left');
     root.querySelector<HTMLButtonElement>('.run-btn')!.click();
     await settle(60);
@@ -157,9 +177,9 @@ check('shell: the running column has an edge of its own, and a stored width is t
     // The column's edge is on its left, so the left arrow makes it wider.
     grip.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowLeft', bubbles: true, cancelable: true }));
     equal(Number(grip.getAttribute('aria-valuenow')), before + 16);
-    equal(JSON.parse(localStorage.getItem('faber.layout')!).run, before + 16);
+    equal(JSON.parse(localStorage.getItem('faber.layout')!).panes.list, before + 16);
     ok(column.getBoundingClientRect().width > 0 && column.getBoundingClientRect().width <= before + 16, 'the column is drawn at that width, less the frame');
-  }, { side: 300, run: 420 });
+  }, { side: 300, run: 420 }));
 });
 
 /** The window as `px` wide for what `run` does, put back after. The shell reads the width when it mounts and at every resize. */
@@ -195,7 +215,7 @@ check('shell: until it is dragged the running column follows the window, and a d
       equal(grip.getAttribute('aria-valuenow'), '560', 'and a bigger one gives it more again');
 
       grip.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowRight', bubbles: true, cancelable: true }));
-      equal(JSON.parse(localStorage.getItem('faber.layout')!).run, 544, 'a drag is the person’s width and is kept');
+      equal(JSON.parse(localStorage.getItem('faber.layout')!).panes.list, 544, 'a drag is the person’s width and is kept');
       await atWidth(1280, async () => {
         await settle(60);
         equal(grip.getAttribute('aria-valuenow'), '544', 'a chosen width stays whatever the window does');
@@ -203,7 +223,7 @@ check('shell: until it is dragged the running column follows the window, and a d
       grip.dispatchEvent(new MouseEvent('dblclick', { bubbles: true, cancelable: true }));
       await settle(450);
       equal(grip.getAttribute('aria-valuenow'), '560');
-      equal(JSON.parse(localStorage.getItem('faber.layout')!).run, undefined, 'a double click goes back to following the window');
+      equal(JSON.parse(localStorage.getItem('faber.layout')!).panes.list, undefined, 'a double click goes back to following the window');
     }),
   );
 });
@@ -217,7 +237,7 @@ check('shell: a stored width that happens to equal the usual one still goes back
       const grip = root.querySelector<HTMLElement>('.runcol .grip.run')!;
       grip.dispatchEvent(new MouseEvent('dblclick', { bubbles: true, cancelable: true }));
       await settle(450);
-      equal(JSON.parse(localStorage.getItem('faber.layout')!).run, undefined, 'the stored 560 px is let go');
+      equal(JSON.parse(localStorage.getItem('faber.layout')!).panes.list, undefined, 'the stored 560 px is let go');
     }, { side: 248, run: 560 }),
   );
 });
@@ -318,7 +338,7 @@ check('shell: Ctrl+B steps the sidebar and the column aside and brings them back
     ok(root.querySelector('.runcol'), 'the column that was open is open again');
     equal(firstTrack(frame), 288);
     // Beside the stage the column leaves the sidebar alone; over it (a window under 1,100 px) the column is modal and keeps it shut.
-    equal(side.inert, innerWidth < WIDE_FROM, 'the sidebar can be reached again unless the column is a dialog over the stage');
+    equal(side.inert, !dockable(innerWidth, 288), 'the sidebar can be reached again unless the column is a dialog over the stage');
 
     // The button and the run button leave focus mode too.
     key('b', { ctrlKey: true });
@@ -443,4 +463,144 @@ check('screen: it reads as an app, with no system scrollbar and no stray selecti
     answer.remove();
     button.remove();
   }
+});
+
+/** Faber's browser, with the native box stubbed: the page is blank, which is what the column shows for a person's own address. */
+async function withBrowser(run: () => Promise<void>) {
+  const [siteSize, sitePlace, sitePark, onSite] = [api.siteSize, api.sitePlace, api.sitePark, api.onSite];
+  api.siteSize = async () => ({ now: null, sizes: [] });
+  api.sitePlace = async () => true;
+  api.sitePark = async () => {};
+  api.onSite = async () => () => {};
+  try {
+    await run();
+  } finally {
+    showSite(undefined);
+    Object.assign(api, { siteSize, sitePlace, sitePark, onSite });
+  }
+}
+const openBrowser = () => showSite({ conversationId: talk.id, url: '', title: '' });
+
+check('shell: the browser opens at 60% of the work area and the running list at its own width, and a drag on one leaves the other alone', async () => {
+  useLanguage('en');
+  await withBrowser(() =>
+    atWidth(1920, () =>
+      shell(['claude'], 'none', async (root) => {
+        const frame = root.querySelector<HTMLElement>('.shell')!;
+        const grip = () => root.querySelector<HTMLElement>('.runcol .grip.run')!;
+        openBrowser();
+        await settle(80);
+        equal(grip().getAttribute('aria-valuenow'), String(Math.round(0.6 * (1920 - 288))), 'the browser opens at about 60%');
+        equal(frame.style.getPropertyValue('--run-w'), '979px');
+        ok(!frame.classList.contains('folded'), 'a 1,920 px window keeps the sidebar beside it');
+        showSite(undefined);
+        await settle(80);
+        equal(grip().getAttribute('aria-valuenow'), '560', 'the running list keeps its own width');
+        equal(frame.style.getPropertyValue('--run-w'), '560px');
+
+        // A drag made on the list is the list's only.
+        grip().dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowRight', bubbles: true, cancelable: true }));
+        let stored = JSON.parse(localStorage.getItem('faber.layout')!);
+        equal(stored.panes.list, 544);
+        equal(stored.panes.browser, undefined);
+        openBrowser();
+        await settle(80);
+        equal(grip().getAttribute('aria-valuenow'), '979', 'the browser is untouched');
+        // ... and a drag on the browser is the browser's only.
+        grip().dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowRight', bubbles: true, cancelable: true }));
+        stored = JSON.parse(localStorage.getItem('faber.layout')!);
+        equal(stored.panes.browser, 963);
+        equal(stored.panes.list, 544);
+        showSite(undefined);
+        await settle(80);
+        equal(grip().getAttribute('aria-valuenow'), '544', 'the list is where it was left');
+        // A double click on the browser's grip gives its usual width back, and only its own.
+        openBrowser();
+        await settle(80);
+        grip().dispatchEvent(new MouseEvent('dblclick', { bubbles: true, cancelable: true }));
+        await settle(450);
+        equal(grip().getAttribute('aria-valuenow'), '979');
+        stored = JSON.parse(localStorage.getItem('faber.layout')!);
+        equal(stored.panes.browser, undefined);
+        equal(stored.panes.list, 544);
+      }),
+    ),
+  );
+});
+
+check('shell: a width kept for the browser survives a restart, and the single width of earlier versions is every view’s', async () => {
+  useLanguage('en');
+  await withBrowser(() =>
+    atWidth(1920, async () => {
+      await shell(['claude'], 'none', async (root) => {
+        openBrowser();
+        await settle(80);
+        equal(root.querySelector<HTMLElement>('.runcol .grip.run')!.getAttribute('aria-valuenow'), '800');
+        showSite(undefined);
+        await settle(80);
+        equal(root.querySelector<HTMLElement>('.runcol .grip.run')!.getAttribute('aria-valuenow'), '560', 'the list keeps following the window');
+      }, { side: 288, panes: { browser: 800 } });
+      await shell(['claude'], 'none', async (root) => {
+        openBrowser();
+        await settle(80);
+        equal(root.querySelector<HTMLElement>('.runcol .grip.run')!.getAttribute('aria-valuenow'), '450', 'the old width, once, for the browser');
+        showSite(undefined);
+        await settle(80);
+        equal(root.querySelector<HTMLElement>('.runcol .grip.run')!.getAttribute('aria-valuenow'), '450', 'and for the list');
+      }, { side: 288, run: 450 });
+    }),
+  );
+});
+
+check('shell: a wide view that would squeeze the stage folds the sidebar away until it closes, and nothing is stored', async () => {
+  useLanguage('en');
+  await withBrowser(() =>
+    atWidth(1440, () =>
+      shell(['claude'], 'none', async (root) => {
+        const frame = root.querySelector<HTMLElement>('.shell')!;
+        const side = root.querySelector<HTMLElement>('.side')!;
+        equal(firstTrack(frame), 288);
+        openBrowser();
+        await settle(100);
+        ok(frame.classList.contains('folded'), 'the sidebar folds away');
+        ok(side.inert && side.getAttribute('aria-hidden') === 'true', 'and cannot be reached while it is');
+        equal(firstTrack(frame), 0, 'and takes no room');
+        equal(root.querySelector<HTMLElement>('.runcol .grip.run')!.getAttribute('aria-valuenow'), String(Math.round(0.6 * 1440)), '60% of the whole window now');
+        equal(localStorage.getItem('faber.layout'), null, 'the fold is not stored');
+        showSite(undefined);
+        await settle(100);
+        ok(!frame.classList.contains('folded'), 'the sidebar comes back with the list');
+        ok(!side.inert);
+        equal(firstTrack(frame), 288);
+        equal(root.querySelector<HTMLElement>('.runcol .grip.run')!.getAttribute('aria-valuenow'), '360', 'the list at its own width');
+      }),
+    ),
+  );
+});
+
+check('shell: the column docks by room, not at a fixed 1,100 px', async () => {
+  useLanguage('en');
+  for (const [win, docked] of [[1060, true], [1000, false]] as const) {
+    await atWidth(win, () =>
+      shell(['claude'], 'none', async (root) => {
+        root.querySelector<HTMLButtonElement>('.run-btn')!.click();
+        await settle(80);
+        equal(root.querySelector('.shell')!.classList.contains('docked'), docked, win + ' px');
+      }),
+    );
+  }
+});
+
+check('shell: while the sidebar edge is dragged the stage follows the pointer, before the width is stored', async () => {
+  useLanguage('en');
+  await shell(['claude'], 'none', async (root) => {
+    const frame = root.querySelector<HTMLElement>('.shell')!;
+    const grip = root.querySelector<HTMLElement>('.grip.side')!;
+    grip.dispatchEvent(pointer('pointerdown', 288));
+    window.dispatchEvent(pointer('pointermove', 340));
+    await settle(60);
+    equal(firstTrack(frame), 340, 'the grid track moves with the drag, not after it');
+    window.dispatchEvent(pointer('pointerup', 340));
+    equal(firstTrack(frame), 340);
+  });
 });

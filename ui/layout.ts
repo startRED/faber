@@ -32,10 +32,13 @@ export function createWidth(): Accessor<Width> {
 // stage beside them never gets narrower than STAGE_MIN: ui/styles.css clamps a docked column with the same numbers, so a
 // window that shrinks after a drag is right before any script runs.
 export type Edge = 'side' | 'run';
+/** What the right column shows. Each kind has its own usual width and its own stored drag (docs/design/layout.md). */
+export type Kind = 'list' | 'browser' | 'changes' | 'visual' | 'file' | 'aside';
+export const KINDS: readonly Kind[] = ['list', 'browser', 'changes', 'visual', 'file', 'aside'];
 export interface Widths {
   side: number;
-  /** Absent until the person drags the column: then it follows the window (`autoRun`). */
-  run?: number;
+  /** A kind is absent until the person drags the column while it shows that kind: then it follows the window (`paneUsual`). */
+  panes: Partial<Record<Kind, number>>;
 }
 export interface Limits {
   min: number;
@@ -65,9 +68,38 @@ export const fit = (px: number, { min, max }: Limits) => Math.round(Math.max(min
 /** The running column's usual width: the room the window leaves beside the reading column and 20 px of air on each side of it, 360 to 560 px. */
 export const autoRun = (win: number, side: number) => fit(win - side - READING - 40, { min: 360, max: RUN_USUAL });
 
-/** The widths kept in storage, or the usual ones for anything that is not a width. */
+/** The share of the work area that a page, a diff, a visual answer or a file opens at. */
+export const PANE_SHARE = 0.6;
+/** A quick question reads well at this width. */
+export const ASIDE_USUAL = 420;
+/** The stage keeps at least this much when a wide view opens; under it the sidebar folds away until the view closes. */
+export const STAGE_ROOMY = 560;
+/** Whether a kind reads best wide (a page, a diff, a visual answer, a file). */
+export const isWide = (kind: Kind) => kind !== 'list' && kind !== 'aside';
+
+/** The width a kind opens at before anyone drags it, for a work area of `win` less `side` pixels. */
+export function paneUsual(kind: Kind, win: number, side: number): number {
+  if (kind === 'aside') return ASIDE_USUAL;
+  if (isWide(kind)) return Math.round((win - side) * PANE_SHARE);
+  return autoRun(win, side);
+}
+
+/** Whether the column sits beside the stage: the window has room for the sidebar (counted at most at its usual width, it gives
+ * way), the column's minimum and the stage's. Under 900 px the sidebar is an overlay and the column covers the stage. */
+export const dockable = (win: number, side: number) =>
+  win >= MID_FROM && win - fit(side, { min: SIDE.min, max: SIDE.fallback }) - RUN.min - STAGE_MIN >= 0;
+
+/** The widths kept in storage, or the usual ones for anything that is not a width. The single `run` width of earlier versions
+ * becomes the width of every kind, once. */
 export function savedWidths(raw: unknown): Widths {
   const r = (raw && typeof raw === 'object' ? raw : {}) as Record<string, unknown>;
   const pick = (value: unknown, limits: Limits) => (typeof value === 'number' && Number.isFinite(value) ? fit(value, limits) : undefined);
-  return { side: pick(r.side, SIDE) ?? SIDE.fallback, run: pick(r.run, RUN) };
+  const stored = (r.panes && typeof r.panes === 'object' ? r.panes : {}) as Record<string, unknown>;
+  const old = r.panes === undefined ? pick(r.run, RUN) : undefined;
+  const panes: Partial<Record<Kind, number>> = {};
+  for (const kind of KINDS) {
+    const px = pick(stored[kind], RUN) ?? old;
+    if (px !== undefined) panes[kind] = px;
+  }
+  return { side: pick(r.side, SIDE) ?? SIDE.fallback, panes };
 }
