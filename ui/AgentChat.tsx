@@ -4,6 +4,7 @@ import { Icon } from './Glyphs.tsx';
 import { fromEngine, t } from './i18n.ts';
 import { Markdown, openLinks } from './markdown.tsx';
 import { animateList } from './motion.ts';
+import { elapsed } from './running.ts';
 import { useDraft } from './unsent.ts';
 import { agentKind, agentState, changeOf, middle, toolRow, type AgentStep, type Change, type Sources } from './worklog.ts';
 
@@ -128,9 +129,12 @@ export function startMessage(text: string) {
   box.dispatchEvent(new Event('input', { bubbles: true }));
 }
 
-/** The words under a subagent's name: its kind, where it is and how many steps it ran. */
+/** The words under a subagent's name: its kind, where it is, how many steps it ran and, once it ended, how long it took (a
+ * second or more; a refused one never ran). */
 export function agentMeta(step: AgentStep, streaming: boolean): string {
-  return [agentKind(step.kind), t(`agent.${agentState(step, streaming)}`), t('activity.steps', { n: step.tools.length })].filter(Boolean).join(' · ');
+  const { started, ended, declined } = step.call;
+  const took = started !== undefined && ended !== undefined && ended - started >= 1000 && !declined ? elapsed(started, ended) : undefined;
+  return [agentKind(step.kind), t(`agent.${agentState(step, streaming)}`), t('activity.steps', { n: step.tools.length }), took && t(took.key, { n: took.n })].filter(Boolean).join(' · ');
 }
 
 /** What an ended subagent did, counted by the engine from its steps (R161 step 4): never the main agent's word for it. */

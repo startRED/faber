@@ -2085,6 +2085,7 @@ impl Core {
                         told: vec![],
                         check: false,
                         started: Some(now()),
+                        ended: None,
                     };
                     tool.check = crate::nudge::is_check(&tool);
                     m.tools.get_or_insert_default().push(tool);
@@ -2100,6 +2101,7 @@ impl Core {
                         return;
                     }
                     tool.ok = Some(ok);
+                    tool.ended = Some(now());
                     tool.declined = declined;
                     tool.output = Some(text.chars().take(4000).collect());
                     let committed = ok
@@ -2122,6 +2124,7 @@ impl Core {
                 // A helper that ran with its call is already settled by the call's own result, its full report included.
                 if let Some(tool) = self.tool_of(conv, &id).filter(|t| t.ok.is_none()) {
                     tool.ok = Some(ok);
+                    tool.ended = Some(now());
                     tool.output = Some(text.chars().take(4000).collect());
                 }
                 self.settle_facts(conv, &id);

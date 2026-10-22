@@ -88,6 +88,7 @@ mod tests {
             told: vec![],
             check: false,
             started: None,
+            ended: None,
         }
     }
 

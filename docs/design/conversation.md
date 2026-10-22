@@ -146,6 +146,14 @@ and a useful file location is allowed when the person needs to find or open an a
   comes with it. Chat and Projects use the same line, including at 720 px and with reduced motion.
 - Each step is a quiet chip: a verb in the ink color ("Reading", "Running") and what it acts on in the mono face, cut
   in the middle. A tool Faber does not know keeps its own name; an MCP tool reads "Using a tool" with its server's name.
+- Steps of one kind in a row (changing, reading, running, searching) read as one phrase with a count: "Changing 3 files",
+  "Reading 4 files", "Running 2 commands" (R411). It is the step chip's size and look with a small chevron, and opened it
+  takes the whole row and shows the single chips under it, indented. A file counts once however many steps touch it, so three
+  edits to one file stay three chips; a tool server's tool, a skill, a plan or a question is never grouped. When a step in
+  the run failed, "1 failed" sits beside the phrase in the error ink, since the phrase itself is not struck through. A run the
+  person opened stays open as it grows. The status line follows the run: "Reading 3 files · a.ts" (the count so far, then
+  the newest step) instead of each file in turn. Nothing moves and nothing animates beyond the chevron's turn (none in
+  reduced motion). Every step chip, single or grouped, has a real 1 px border, so forced colours still draws its edge.
 - A conversation the agent starts by itself (R198) is one chip like any other, "Working in parallel" with its title (or
   the id when the agent reads it back); the conversation itself is a normal row in the sidebar, never a step inside.
 - The agent running Faber's checks (the `verify` tool) is one chip with no detail: "Running the quick checks", or

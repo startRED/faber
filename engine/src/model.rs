@@ -141,6 +141,10 @@ pub struct ToolUse {
     /// a clock of its own (R161 step 9). Absent on calls recorded before it existed.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub started: Option<u64>,
+    /// When the engine saw the call end, in Unix milliseconds, so a subagent's row can say how long it took. Absent while it
+    /// runs and on calls recorded before it existed.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub ended: Option<u64>,
     /// On a helper's call: what the person wrote to the helper while it worked (R161 step 5), oldest first.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub told: Vec<Told>,

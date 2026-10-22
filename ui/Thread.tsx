@@ -7,6 +7,7 @@ import {
   type Plan,
   type QueuedTurn,
   type RewindRedoInfo,
+  type ToolUse,
   type VendorUsage,
   type VersionAt,
   type Versions,
@@ -37,7 +38,7 @@ import { windowHidden } from './appearance.ts';
 import { elapsed, warmLeft } from './running.ts';
 import { agePending, ageNow, footText, tickWhile } from './foot.ts';
 import { quotaPending } from './QuotaCard.tsx';
-import { agentState, agentSteps, changeOf, isAgentCall, isProgressCall, middle, sameTools, sourcesOf, thinkingParts, toolLine, type AgentStep } from './worklog.ts';
+import { agentState, agentSteps, changeOf, groupLabel, groupSteps, isAgentCall, isProgressCall, middle, sameTools, sourcesOf, stepLine, thinkingParts, type AgentStep, type StepGroup } from './worklog.ts';
 
 const IMAGE = /\.(png|jpe?g|gif|webp|svg)$/i;
 
@@ -196,6 +197,26 @@ function AgentRow(props: { step: Accessor<AgentStep>; streaming: boolean; conver
   );
 }
 
+// One step of the work log, or a run of the same kind as one phrase with a count ("Changing 3 files") that opens into its steps.
+// A failed step inside says so beside the phrase, since the phrase itself cannot be struck through.
+function StepRow(props: { group: Accessor<StepGroup> }) {
+  const group = () => props.group();
+  const failed = () => group().tools.filter((tool) => tool.ok === false && !tool.declined).length;
+  return (
+    <Show when={group().kind} fallback={<ToolChip tool={group().tools[0]!} />}>
+      <details class="step-group">
+        <summary>
+          <b>{groupLabel(group())}</b>
+          <Show when={failed()}><span class="sr-only">, </span><em>{t('agent.facts.failed', { n: failed() })}</em></Show>
+        </summary>
+        <div class="tools">
+          <For each={group().tools}>{(tool) => <ToolChip tool={tool} />}</For>
+        </div>
+      </details>
+    </Show>
+  );
+}
+
 type OnBranch =(messageId: string, text: string, choice?: Choice) => void;
 
 interface Shared {
@@ -308,6 +329,9 @@ function Answer(props: Shared & { m: Accessor<Message>; messages?: Message[]; pr
   // A helper always comes from the AI that is not running the reply.
   const helperKind = () => (m().vendor ? vendorName(m().vendor === 'claude' ? 'codex' : 'claude') : '');
   const agents = createMemo(() => agentSteps(tools(), helperKind()));
+  const groups = createMemo(() => groupSteps(own()));
+  // The living sentence reads a run of one kind as its phrase and the newest step ("Reading 3 files · a.ts").
+  const lineOf = (tool: ToolUse) => stepLine(groups(), tool);
   const steps = createMemo(() => narration().length + own().length + (thinking().length ? 1 : 0));
   const hasKit = () => !!(m().toolKit?.ids.length || m().toolKit?.suggested || m().toolKit?.error);
   const kitLine = () => {
@@ -345,9 +369,9 @@ function Answer(props: Shared & { m: Accessor<Message>; messages?: Message[]; pr
     const now = nowLine();
     if (now && !finalText().trim()) return now;
     const tool = tools().at(-1);
-    if (tool && tool.ok === undefined) return toolLine(tool);
+    if (tool && tool.ok === undefined) return lineOf(tool);
     if (finalText().trim()) return '';
-    return tool ? toolLine(tool) : middle(thinking().at(-1)?.text ?? '');
+    return tool ? lineOf(tool) : middle(thinking().at(-1)?.text ?? '');
   });
   // A long step says how long it has run, from when the engine saw it start (R161 step 9). Only past half a minute, so a
   // quick step never shows a number that changes before it can be read; the clock ticks only while such a step runs and
@@ -361,7 +385,7 @@ function Answer(props: Shared & { m: Accessor<Message>; messages?: Message[]; pr
     if (!working() || !finalText().trim() || waiting().length || m().waitUntil) return '';
     // A running step shows at once (the caret never blinks over one); "Thinking…" waits until the words stop.
     const tool = runningStep();
-    if (tool) return nowLine() || toolLine(tool);
+    if (tool) return nowLine() || lineOf(tool);
     return typing() ? '' : nowLine() || t('activity.thinkingNow');
   };
   const [clock, setClock] = createSignal(Date.now());
@@ -472,7 +496,7 @@ function Answer(props: Shared & { m: Accessor<Message>; messages?: Message[]; pr
             <For each={narration()}>{(text) => <Narration text={text} conversationId={props.conversationId} messageId={m().id} visuals={props.visuals} pieceRevision={props.pieceRevision} />}</For>
             <Show when={own().length}>
               <div class="tools">
-                <For each={own()}>{(tool) => <ToolChip tool={tool} />}</For>
+                <Index each={groups()}>{(group) => <StepRow group={group} />}</Index>
               </div>
             </Show>
           </div>

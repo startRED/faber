@@ -1,9 +1,9 @@
 import { createComponent, createSignal } from 'solid-js';
 import { render } from 'solid-js/web';
 import { Thread } from '../../ui/Thread.tsx';
-import type { Message } from '../../ui/api.ts';
+import type { Message, ToolUse } from '../../ui/api.ts';
 import { t, useLanguage } from '../../ui/i18n.ts';
-import { changeOf, sourcesOf, toolRow } from '../../ui/worklog.ts';
+import { changeOf, groupLabel, groupSteps, sourcesOf, stepLine, toolLine, toolRow } from '../../ui/worklog.ts';
 import { check, deepEqual, equal, ok } from './check.ts';
 
 check('worklog: every Claude Code tool reads as what it does, in words', () => {
@@ -148,6 +148,168 @@ check('worklog: a step that runs long says for how long, and a quick one never d
     equal(long(), null, 'an ended step has no running time');
     setMessage({ ...message(), tools: [{ id: 'old', name: 'Bash', input: { command: 'cargo build' } }] });
     equal(long(), null, 'a step recorded before the stamp existed shows none');
+  } finally {
+    dispose();
+    root.remove();
+  }
+});
+
+// Steps of one kind in a row read as one phrase with a count, opening into the single steps (Watching the agent work, step 1).
+check('worklog: steps of one kind in a row group into one phrase, and a run that counts one thing stays as it is', () => {
+  useLanguage('en');
+  const edit = (id: string, file: string) => ({ id, name: 'Edit', input: { file_path: file, old_string: 'a', new_string: 'b' } });
+  const read = (id: string, file: string) => ({ id, name: 'Read', input: { file_path: file } });
+  const run = (id: string) => ({ id, name: 'Bash', input: { command: 'ls' } });
+  const label = (tools: Parameters<typeof groupSteps>[0]) => groupSteps(tools).map((g) => (g.kind ? groupLabel(g) : g.tools[0]!.id));
+  deepEqual(label([edit('a', 'a.rs'), edit('b', 'b.rs'), { id: 'w', name: 'Write', input: { file_path: 'c.rs', content: 'x' } }]), ['Changing 3 files'], 'a write joins the edits');
+  deepEqual(label([edit('a', 'a.rs'), edit('b', 'a.rs'), edit('c', 'a.rs')]), ['a', 'b', 'c'], 'three edits to one file are not three files');
+  deepEqual(label([edit('a', 'a.rs'), edit('b', 'a.rs'), edit('c', 'b.rs')]), ['Changing 2 files'], 'the steps stay three, the files are two');
+  deepEqual(label([read('a', 'a.rs'), read('b', 'b.rs'), run('x'), read('c', 'c.rs')]), ['Reading 2 files', 'x', 'c'], 'another kind between ends the run');
+  deepEqual(label([run('a'), run('b'), run('c')]), ['Running 3 commands'], 'commands count each run, even the same command');
+  deepEqual(
+    label([
+      { id: 'p', name: 'WebFetch', input: { url: 'https://a.dev' } },
+      { id: 'q', name: 'WebFetch', input: { url: 'https://b.dev' } },
+      { id: 's', name: 'Grep', input: { pattern: 'x' } },
+      { id: 't', name: 'Glob', input: { pattern: '*.rs' } },
+      { id: 'u', name: 'WebSearch', input: { query: 'x' } },
+      { id: 'v', name: 'WebSearch', input: { query: 'y' } },
+    ]),
+    ['Reading 2 pages', 'Searching 2 times', 'Searching the web 2 times'],
+  );
+  deepEqual(label([{ id: 'm1', name: 'mcp__github__get_issue', input: {} }, { id: 'm2', name: 'mcp__github__get_issue', input: {} }, { id: 'k1', name: 'Skill', input: { skill: 'x' } }]), ['m1', 'm2', 'k1'], 'a tool server or a skill is always its own step');
+  // Codex names its changes in one step, as a list or keyed by path.
+  deepEqual(label([{ id: 'f1', name: 'fileChange', input: [{ path: 'a.txt', diff: '' }, { path: 'b.txt', diff: '' }] }]), ['f1'], 'one step is no run');
+  deepEqual(label([{ id: 'f1', name: 'fileChange', input: [{ path: 'a.txt' }, { path: 'b.txt' }] }, { id: 'f2', name: 'fileChange', input: { 'c.txt': { add: { content: 'x' } } } }]), ['Changing 3 files']);
+  deepEqual(groupSteps([]), []);
+  // The living sentence follows: inside a run it counts so far and names the newest step, elsewhere it is the step's own line.
+  const reads = [read('a', 'a.rs'), read('b', 'b.rs'), read('c', 'c.rs')];
+  equal(stepLine(groupSteps(reads), reads[0]!), 'Reading · a.rs', 'the first is a single step');
+  equal(stepLine(groupSteps(reads), reads[2]!), 'Reading 3 files · c.rs');
+  equal(stepLine(groupSteps([run('x')]), run('x')), toolLine(run('x')));
+  equal(stepLine([], run('lost')), 'Running · ls', 'a step no group holds reads on its own');
+});
+
+check('worklog: a work log with a run of steps shows one phrase that opens into the steps, and the status line counts them', () => {
+  useLanguage('en');
+  const root = document.createElement('div');
+  document.body.append(root);
+  const read = (id: string, file: string, ok?: boolean) => ({ id, name: 'Read', input: { file_path: file }, ok });
+  const [message, setMessage] = createSignal<Message>({
+    id: 'grouped', role: 'assistant', at: 0, status: 'streaming', text: '',
+    tools: [read('a', 'a.ts', true), read('b', 'b.ts', true), { id: 'x', name: 'Bash', input: { command: 'npm test' }, ok: true }],
+  });
+  const dispose = render(() => createComponent(Thread, { get messages() { return [message()]; }, from: 0, conversationId: 'grouped', options: [], onBranch: () => {} }), root);
+  try {
+    const group = () => root.querySelector<HTMLDetailsElement>('.tools details.step-group');
+    equal(group()!.querySelector('summary')!.textContent, 'Reading 2 files');
+    equal([...group()!.querySelectorAll('.tools > span')].length, 2, 'it opens into the single steps');
+    equal(root.querySelectorAll('.activity-body > .tools > span').length, 1, 'the command after it is its own step');
+    equal(root.querySelector('.activity-latest .step')!.textContent, 'Running · npm test', 'the newest step is a command alone');
+    group()!.open = true;
+    setMessage({ ...message(), tools: [...message().tools!, read('c', 'c.ts')] });
+    equal(root.querySelector('.activity-latest .step')!.textContent, 'Reading · c.ts', 'a new kind starts its own run');
+    setMessage({ ...message(), tools: [read('a', 'a.ts', true), read('b', 'b.ts', true), read('c', 'c.ts'), read('d', 'd.ts')] });
+    equal(root.querySelector('.activity-latest .step')!.textContent, 'Reading 4 files · d.ts', 'the sentence counts the run so far');
+    ok(group()!.open, 'a run the person opened stays open while it grows');
+    equal(group()!.querySelector('summary')!.textContent, 'Reading 4 files');
+    setMessage({ ...message(), tools: [read('a', 'a.ts', true), read('b', 'b.ts', false), read('c', 'c.ts', true), read('d', 'd.ts', true)] });
+    equal(group()!.querySelector('summary')!.textContent, 'Reading 4 files, 1 failed', 'a failed step is said beside the phrase, with a separator a screen reader hears');
+    equal(getComputedStyle(group()!.querySelector('summary .sr-only')!).position, 'absolute', 'and the separator is not drawn');
+    setMessage({ ...message(), status: 'done', text: 'Done.' });
+    ok(group(), 'the phrase stays in the finished log');
+  } finally {
+    dispose();
+    root.remove();
+  }
+});
+
+// The group is a chip like the single steps beside it. The work log's `.disclosure summary` rules have the same specificity and
+// come later in the sheet, so the chip's own rules must outrank them: otherwise it is a taller, square, full-width bar.
+check('worklog: a group of steps is a chip like its neighbours, closed and open, for Claude and Codex steps in English and in German at 720 px', () => {
+  const claude: ToolUse[] = [
+    { id: 'r1', name: 'Read', input: { file_path: 'a.ts' }, ok: true },
+    { id: 'r2', name: 'Read', input: { file_path: 'b.ts' }, ok: false },
+    { id: 'x', name: 'Bash', input: { command: 'npm test' }, ok: true },
+  ];
+  const codex: ToolUse[] = [
+    { id: 'c1', name: 'commandExecution', input: 'ls', ok: true },
+    { id: 'c2', name: 'commandExecution', input: 'pwd', ok: true },
+    { id: 'f1', name: 'fileChange', input: [{ path: 'a.txt', diff: '' }], ok: true },
+    { id: 'f2', name: 'fileChange', input: [{ path: 'b.txt', diff: '' }], ok: true },
+    { id: 'w', name: 'webSearch', input: 'faber', ok: true },
+  ];
+  const cases = [
+    ['en', claude, ['tool.group.read']],
+    ['de', claude, ['tool.group.read']],
+    ['en', codex, ['tool.group.command', 'tool.group.change']],
+    ['de', codex, ['tool.group.command', 'tool.group.change']],
+  ] as const;
+  try {
+    for (const [lang, tools, keys] of cases) {
+      useLanguage(lang);
+      const root = document.createElement('div');
+      root.dataset.motion = 'none';
+      root.style.width = '720px';
+      document.body.append(root);
+      const message: Message = { id: 'look', role: 'assistant', at: 0, status: 'done', text: 'Done.', tools: [...tools] };
+      const dispose = render(() => createComponent(Thread, { messages: [message], from: 0, conversationId: 'look', options: [], onBranch: () => {} }), root);
+      try {
+        root.querySelector<HTMLDetailsElement>('details.activity')!.open = true;
+        const groups = [...root.querySelectorAll<HTMLDetailsElement>('.activity-body > .tools > details.step-group')];
+        const chip = root.querySelector<HTMLElement>('.activity-body > .tools > span')!;
+        equal(groups.length, keys.length, `${lang}: ${keys.length} group(s) next to a single chip`);
+        const limit = root.getBoundingClientRect().right;
+        groups.forEach((group, i) => {
+          const summary = group.querySelector<HTMLElement>('summary')!;
+          ok(summary.textContent!.startsWith(t(keys[i]!, { n: 2 })), `${lang}: the group says its phrase: ${summary.textContent}`);
+          for (const open of [false, true]) {
+            group.open = open;
+            const when = `${lang}, ${keys[i]}, ${open ? 'open' : 'closed'}`;
+            const s = getComputedStyle(summary);
+            const c = getComputedStyle(chip);
+            equal(`${s.paddingTop} ${s.paddingRight}`, `${c.paddingTop} ${c.paddingRight}`, `${when}: the padding is the chip's`);
+            equal(s.borderTopLeftRadius, c.borderTopLeftRadius, `${when}: the corners are the chip's`);
+            ok(s.borderTopLeftRadius !== '0px', `${when}: the corners are round`);
+            equal(getComputedStyle(summary, '::after').marginLeft, '0px', `${when}: the chevron sits beside the phrase, not at the far edge`);
+            const box = summary.getBoundingClientRect();
+            const chipBox = chip.getBoundingClientRect();
+            ok(Math.abs(box.height - chipBox.height) <= 3, `${when}: as tall as a chip (${box.height} against ${chipBox.height})`);
+            ok(box.width < group.getBoundingClientRect().width - (open ? 100 : -1), `${when}: the header is not a full-width bar (${box.width} in ${group.getBoundingClientRect().width})`);
+            ok(box.right <= limit + 1, `${when}: stays inside 720 px`);
+          }
+        });
+      } finally {
+        dispose();
+        root.remove();
+      }
+    }
+  } finally {
+    useLanguage('en');
+  }
+});
+
+// The time a subagent took, from the engine's own stamps on its call: shown once it ended, never for a quick or a refused one.
+check('worklog: a subagent that ended says how long it took, and a quick or unfinished one does not', () => {
+  useLanguage('en');
+  const root = document.createElement('div');
+  document.body.append(root);
+  const agent = (over: object) => ({ id: 'ag', name: 'Agent', input: { description: 'Read the docs', subagent_type: 'Explore', prompt: 'Read.' }, started: 1_000_000, ...over });
+  const [message, setMessage] = createSignal<Message>({ id: 'took', role: 'assistant', at: 0, status: 'streaming', text: '', tools: [agent({})] });
+  const dispose = render(() => createComponent(Thread, { get messages() { return [message()]; }, from: 0, conversationId: 'took', options: [], onBranch: () => {} }), root);
+  try {
+    const meta = () => root.querySelector('.agents .agent-meta')!.textContent;
+    equal(meta(), 'Explore · working · 0 steps', 'a running subagent has no time');
+    setMessage({ ...message(), tools: [agent({ ok: true, ended: 1_000_000 + 150_000 })] });
+    equal(meta(), 'Explore · done · 0 steps · 2 min');
+    setMessage({ ...message(), tools: [agent({ ok: false, ended: 1_000_000 + 45_000 })] });
+    equal(meta(), 'Explore · failed · 0 steps · 45 s');
+    setMessage({ ...message(), tools: [agent({ ok: true, ended: 1_000_400 })] });
+    equal(meta(), 'Explore · done · 0 steps', 'under a second is no time worth saying');
+    setMessage({ ...message(), tools: [agent({ ok: false, declined: true, ended: 1_000_000 + 45_000 })] });
+    equal(meta(), 'Explore · declined · 0 steps', 'a refused one never ran');
+    setMessage({ ...message(), tools: [{ id: 'ag', name: 'Agent', input: { description: 'Old', prompt: 'x' }, ok: true }] });
+    equal(meta(), 'done · 0 steps', 'a subagent recorded before the stamps existed shows none');
   } finally {
     dispose();
     root.remove();

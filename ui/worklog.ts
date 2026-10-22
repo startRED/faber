@@ -114,6 +114,69 @@ export const toolLine = (tool: ToolUse): string => {
   return row.detail ? `${row.label} · ${middle(row.detail)}` : row.label;
 };
 
+// Steps of one kind in a row read as one phrase with a count ("Changing 3 files"), opening into the single steps. A tool not
+// listed here (a tool server's, a plan, a question) is always its own step.
+type GroupKind = 'change' | 'read' | 'page' | 'search' | 'web' | 'command';
+const GROUPED: Record<string, GroupKind> = {
+  Edit: 'change', MultiEdit: 'change', NotebookEdit: 'change', Write: 'change', fileChange: 'change',
+  Read: 'read', WebFetch: 'page', Glob: 'search', Grep: 'search', WebSearch: 'web', webSearch: 'web',
+  Bash: 'command', PowerShell: 'command', commandExecution: 'command',
+};
+
+/** One step, or two or more of one kind in a row (`kind` and `n`, how many things the phrase counts). */
+export interface StepGroup {
+  tools: ToolUse[];
+  kind?: GroupKind;
+  n: number;
+}
+
+/** The files a step names: Claude Code's `file_path`, Codex's list of changes or its changes keyed by path. */
+function filesOf(tool: ToolUse): string[] {
+  const input = tool.input as Record<string, unknown> | unknown[] | null | undefined;
+  if (Array.isArray(input)) return input.map((c) => (c as { path?: unknown } | null)?.path).filter((p): p is string => typeof p === 'string');
+  if (!input || typeof input !== 'object') return [];
+  const one = input.file_path ?? input.notebook_path;
+  return typeof one === 'string' ? [one] : tool.name === 'fileChange' ? Object.keys(input) : [];
+}
+
+/** What a phrase counts: files for file steps (the same file twice is one), steps for anything else. */
+function countOf(kind: GroupKind, tools: ToolUse[]): number {
+  if (kind !== 'change' && kind !== 'read') return tools.length;
+  return new Set(tools.flatMap((tool) => { const files = filesOf(tool); return files.length ? files : [`#${tool.id}`]; })).size;
+}
+
+const groupPhrase = (kind: GroupKind, n: number) => t(`tool.group.${kind}`, { n });
+
+/** The steps in order, a run of one kind that touches at least two things as one group. A run that counts only one thing
+ * (three edits to one file) stays as the single steps. */
+export function groupSteps(tools: ToolUse[]): StepGroup[] {
+  const runs: ToolUse[][] = [];
+  for (const tool of tools) {
+    const last = runs.at(-1);
+    if (GROUPED[tool.name] && last && GROUPED[last[0]!.name] === GROUPED[tool.name]) last.push(tool);
+    else runs.push([tool]);
+  }
+  return runs.flatMap((run) => {
+    const kind = GROUPED[run[0]!.name];
+    const n = kind ? countOf(kind, run) : 0;
+    return kind && run.length > 1 && n >= 2 ? [{ tools: run, kind, n }] : run.map((tool) => ({ tools: [tool], n: 1 }));
+  });
+}
+
+/** What a group is called: its phrase with the count. */
+export const groupLabel = (group: StepGroup): string => (group.kind ? groupPhrase(group.kind, group.n) : '');
+
+/** The living sentence for a step: inside a group it reads the group so far and then the step ("Reading 3 files · a.ts"), so
+ * a burst of reads does not flash by file name; anywhere else it is the step's own line. */
+export function stepLine(groups: StepGroup[], tool: ToolUse): string {
+  const group = groups.find((g) => g.kind && g.tools.some((s) => s.id === tool.id));
+  if (!group) return toolLine(tool);
+  const n = countOf(group.kind!, group.tools.slice(0, group.tools.findIndex((s) => s.id === tool.id) + 1));
+  if (n < 2) return toolLine(tool);
+  const { detail } = toolRow(tool);
+  return detail ? `${groupPhrase(group.kind!, n)} · ${middle(detail)}` : groupPhrase(group.kind!, n);
+}
+
 /** A piece of work the agent handed on: a subagent of its own CLI (`Agent`, `Task`), or a helper from the other AI (`Helper`,
  * Faber's own tool, R161). */
 /** A call of the plan, the now line or the closing box (task 017): drawn as themselves, never as a step. */

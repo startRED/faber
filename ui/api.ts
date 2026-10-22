@@ -55,6 +55,8 @@ export interface ToolUse {
   told?: { id: string; text: string; taken?: boolean }[];
   /** When the engine saw the call start, in Unix milliseconds; absent on older conversations. */
   started?: number;
+  /** When the engine saw the call end, in Unix milliseconds; absent while it runs and on older conversations. */
+  ended?: number;
 }
 export interface Permission {
   requestId: string;

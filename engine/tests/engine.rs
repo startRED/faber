@@ -3499,6 +3499,8 @@ async fn r161_a_background_helper_stays_open_until_its_notification_settles_it()
     assert_eq!(f.mismatches.lock().unwrap().clone(), Vec::<String>::new());
     let call = &c.messages[1].tools.as_ref().unwrap()[0];
     assert_eq!((call.ok, call.output.as_deref()), (Some(true), Some("Two pages name an old setting.")), "{call:?}");
+    // Its end is stamped when the notice arrives, which is when Faber heard of it, so its row can say how long it took.
+    assert!(call.ended.zip(call.started).is_some_and(|(end, start)| end >= start), "the notice stamps the end: {call:?}");
 }
 
 #[tokio::test]
