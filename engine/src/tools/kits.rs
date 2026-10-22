@@ -121,6 +121,9 @@ pub struct Report {
     pub method: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub error: Option<String>,
+    /// The start card sent with this session, word for word, for Technical details.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub card: Option<String>,
 }
 
 /// Catalog controls use the same persisted switches; uninstalling remains a separate operation.

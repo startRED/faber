@@ -599,6 +599,7 @@ export const fr: Messages = {
   'details.group.checks': 'Vérifications',
   'details.group.files': 'Fichiers modifiés',
   'details.group.reviews': 'Relectures et rapports des autres IA',
+  'details.group.startCard': "Ce que l'IA a reçu au départ",
   'details.state.unknown': 'résultat indisponible',
   'details.line': 'Le travail accompli',
   'details.output': 'Résultat',

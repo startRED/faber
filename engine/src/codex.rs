@@ -1292,7 +1292,7 @@ async fn serve(
                 // Faber's own guide (R18): its line goes into a new thread only; a resumed one keeps what it was started with, and the
                 // first input carries the line when the thread has not had it.
                 let guide = delivery.guide.note().filter(|_| method == "thread/start");
-                let instructions = [delivery.project_skill_descriptions(Vendor::Codex), delivery.skill_instructions(), guide]
+                let instructions = [delivery.card.clone(), delivery.project_skill_descriptions(Vendor::Codex), delivery.skill_instructions(), guide]
                     .into_iter().flatten().collect::<Vec<_>>().join("\n\n");
                 if !instructions.is_empty() {
                     let words = params["developerInstructions"].as_str().unwrap_or_default();

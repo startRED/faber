@@ -759,6 +759,7 @@ export const en = {
   'details.group.checks': 'Checks',
   'details.group.files': 'Files changed',
   'details.group.reviews': 'Reviews and agent reports',
+  'details.group.startCard': 'What the AI got at the start',
   'details.state.unknown': 'outcome unavailable',
   'details.line': 'The work so far',
   'details.output': 'Output',

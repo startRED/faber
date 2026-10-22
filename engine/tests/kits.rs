@@ -361,3 +361,23 @@ fn chat_servers_require_an_explicit_review_and_never_cross_guarded_modes_or_proj
     assert_eq!(resumed.servers[0].args[0], script, "a cached native server definition finds the recreated script at the same path");
     assert!(Path::new(&script).is_file());
 }
+
+/// Own work method, slice 1: a project's start card reaches Claude Code's appended system prompt and a new Codex thread's
+/// developer instructions, after the persona.
+#[tokio::test]
+async fn the_start_card_reaches_both_cli_sessions_after_the_persona() {
+    let card = "```faber-start-card\nSTART_CARD_MARK\n```";
+    for vendor in [Vendor::Claude, Vendor::Codex] {
+        let dir = tempfile::tempdir().unwrap();
+        let tools = Delivery { card: Some(card.into()), ..Default::default() };
+        let (args, messages) = replay(vendor, Area::Project, Permissions::FullAccess, tools, dir.path(), false).await;
+        let instructions = if vendor == Vendor::Claude {
+            args.windows(2).find(|args| args[0] == "--append-system-prompt").map(|args| args[1].clone()).unwrap_or_default()
+        } else {
+            let thread = messages.iter().find(|m| m["method"] == "thread/start").unwrap();
+            thread["params"]["developerInstructions"].as_str().unwrap_or_default().to_string()
+        };
+        let at = instructions.find(card).unwrap_or_else(|| panic!("{vendor:?}: {instructions}"));
+        assert!(at > instructions.find(faber_engine::persona::PROJECT_DETAILS.trim()).unwrap(), "{vendor:?}: after the persona");
+    }
+}

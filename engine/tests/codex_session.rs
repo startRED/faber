@@ -2988,6 +2988,7 @@ fn tools(skills: Option<&str>) -> faber_engine::tools::Delivery {
         }],
         disabled_servers: vec![],
         guide: Default::default(),
+        card: None,
     }
 }
 

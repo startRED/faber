@@ -1626,6 +1626,28 @@ impl Core {
         }
     }
 
+    /// The start card of a project's conversation (own work method), built at each session start from the project folder:
+    /// the rules' facts and the decisions Faber's record says the person kept or wrote, newest (last in the file) first.
+    fn start_card(&self, conv: &str) -> Option<String> {
+        let c = self.convs.get(conv).filter(|c| c.area == Area::Project)?;
+        let project = self.store.projects().into_iter().find(|p| Some(&p.id) == c.project_id.as_ref())?;
+        let path = Path::new(&project.path);
+        let facts = crate::project::rules::facts(path).ok()?;
+        let mut notes = crate::project::memory::list_faber(path).unwrap_or_default();
+        crate::project::memory::mark_kept(&mut notes, &self.store.kept_decisions(&project.id));
+        let decisions = notes.files.iter().filter(|f| f.path == ".faber/decisions.md" || f.path.starts_with(".faber/decisions/"));
+        let (mut kept, mut unreviewed) = (Vec::new(), 0);
+        for entry in decisions.flat_map(|f| &f.entries) {
+            match (entry.author, entry.reviewed) {
+                (Some("person"), _) | (Some("ai"), true) => kept.push(entry.body.clone().unwrap_or_default()),
+                (Some("ai"), false) => unreviewed += 1,
+                _ => {}
+            }
+        }
+        kept.reverse();
+        Some(crate::project::rules::card(&facts, &kept, unreviewed))
+    }
+
     fn folder_of(&self, c: &Conversation) -> Result<PathBuf, String> {
         if c.area == Area::Chat {
             return Ok(self.workspace_of(&c.id));
@@ -3654,6 +3676,10 @@ impl Core {
             }
         }
         let (mut project_tools, mut tool_kit) = self.checked_session_tools(conv, pick.vendor, permissions, &cwd)?;
+        if let Some(card) = self.start_card(conv) {
+            tool_kit.card = Some(card.clone());
+            project_tools.card = Some(card);
+        }
         if pick.vendor == Vendor::Claude && !flags.plugin_dir {
             project_tools.without_plugin();
         }

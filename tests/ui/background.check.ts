@@ -66,6 +66,27 @@ check('background review 1: R174 helper words and neutral missing reports share 
   } finally { dispose(); host.remove(); view.close(); }
 });
 
+check('technical details shows the newest session start card as sent, folded until opened', async () => {
+  const sent = '```faber-start-card\n<b>Rules</b> of this project\n```';
+  const [messages] = createSignal<Message[]>([
+    { ...reply(), id: 'old', status: 'done', tools: [], toolKit: { ids: [], jobs: [], method: 'x', card: 'older card' } },
+    { ...reply(), status: 'done', tools: [], toolKit: { ids: [], jobs: [], method: 'x', card: sent } },
+  ]);
+  const view = pane(messages);
+  try {
+    const group = view.host.querySelector('.start-card')!;
+    equal(group.querySelector('h3')!.textContent, t('details.group.startCard'));
+    equal(group.querySelector('pre'), null, 'folded until opened');
+    const details = group.querySelector<HTMLDetailsElement>('details')!;
+    details.open = true; details.dispatchEvent(new Event('toggle')); await settle();
+    equal(group.querySelector('pre')!.textContent, sent, 'word for word, never as markup');
+    equal(group.querySelector('b'), null);
+  } finally { view.close(); }
+  const [bare] = createSignal<Message[]>([{ ...reply(), status: 'done', tools: [] }]);
+  const none = pane(bare);
+  try { equal(none.host.querySelector('.start-card'), null, 'no card, no group'); } finally { none.close(); }
+});
+
 check('background review 2 and 4: terminal follows move to saved changes; reply references cannot claim a save', async () => {
   const [messages, setMessages] = createSignal<Message[]>([{ ...reply(), status: 'done', tools: [], text: 'Read issue #12 and step #2.', follow: undefined }]);
   const view = pane(messages);

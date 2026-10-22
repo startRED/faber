@@ -599,6 +599,7 @@ export const de: Messages = {
   'details.group.checks': 'Prüfungen',
   'details.group.files': 'Geänderte Dateien',
   'details.group.reviews': 'Prüfungen und Berichte anderer KIs',
+  'details.group.startCard': 'Was die KI zu Beginn bekam',
   'details.state.unknown': 'Ergebnis nicht verfügbar',
   'details.line': 'Die bisherige Arbeit',
   'details.output': 'Ausgabe',

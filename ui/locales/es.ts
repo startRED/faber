@@ -760,6 +760,7 @@ export const es: Messages = {
   'details.group.checks': 'Comprobaciones',
   'details.group.files': 'Archivos cambiados',
   'details.group.reviews': 'Revisiones e informes de otras IA',
+  'details.group.startCard': 'Lo que la IA recibió al empezar',
   'details.state.unknown': 'resultado no disponible',
   'details.line': 'El trabajo hasta ahora',
   'details.output': 'Resultado',

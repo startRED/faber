@@ -147,6 +147,8 @@ pub struct Delivery {
     pub prepared: Option<std::sync::Arc<kits::PreparedText>>,
     /// How Faber's own guide (`crate::guide`) reaches this session, decided once when the session starts.
     pub guide: crate::guide::Guide,
+    /// A project's start card (own work method, `project::rules::card`), placed after the persona.
+    pub card: Option<String>,
 }
 
 /// One server as both CLIs start it: Node, the package's script and Faber's arguments, and the environment Faber sets.
@@ -386,6 +388,7 @@ impl Store {
             lease: None,
             prepared: None,
             guide: Default::default(),
+            card: None,
         }
     }
 

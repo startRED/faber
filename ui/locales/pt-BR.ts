@@ -758,6 +758,7 @@ export const ptBR: Messages = {
   'details.group.checks': 'Verificações',
   'details.group.files': 'Arquivos alterados',
   'details.group.reviews': 'Revisões e relatos das outras IAs',
+  'details.group.startCard': 'O que a IA recebeu ao começar',
   'details.state.unknown': 'resultado indisponível',
   'details.line': 'O trabalho até aqui',
   'details.output': 'Resultado',

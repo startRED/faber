@@ -425,6 +425,10 @@ pub fn claude_args(launch: &ClaudeLaunch) -> Vec<String> {
             words.push_str("\n\nThe person's instructions for this chat group:\n");
             words.push_str(instructions);
         }
+        if let Some(card) = &tools.card {
+            words.push_str("\n\n");
+            words.push_str(card);
+        }
         // Catalog context travels in the current user turn: resumed CLIs can retain the original system prompt.
         args.push(words);
         // R161: Faber's own MCP server, answered by this driver over stdio, holds the helper tool and the browser.

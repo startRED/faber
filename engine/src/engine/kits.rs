@@ -200,7 +200,7 @@ impl Core {
         {
             kit.suggested = None;
         }
-        (!kit.ids.is_empty() || kit.suggested.is_some() || kit.error.is_some()).then_some(kit)
+        (!kit.ids.is_empty() || kit.suggested.is_some() || kit.error.is_some() || kit.card.is_some()).then_some(kit)
     }
 
     pub(super) fn catalog_store(&self) -> crate::tools::Store {

@@ -116,7 +116,7 @@ export interface Message {
   thinking?: string;
   tools?: ToolUse[];
   /** The catalog kit fixed when this reply's session started. */
-  toolKit?: { ids: string[]; jobs: string[]; suggested?: string; method: string; error?: string };
+  toolKit?: { ids: string[]; jobs: string[]; suggested?: string; method: string; error?: string; card?: string };
   /** Successful commit tool ids, recognised and confirmed by the engine. */
   commits?: string[];
   /** The engine's latest-reply needs-you state, shared with the running row and done card. */

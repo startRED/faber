@@ -164,6 +164,9 @@ export function DetailsPane(props: {
   const cache = createBackgroundCache();
   const d = createMemo(() => detailsOf(props.messages, cache.tools));
   const [referencesOpen, setReferencesOpen] = createSignal(false);
+  const [cardOpen, setCardOpen] = createSignal(false);
+  // The start card of the newest session, word for word as the AI got it (own work method).
+  const card = createMemo(() => props.messages.findLast((m) => m.toolKit?.card)?.toolKit?.card);
   const work = createMemo(() => backgroundOf(props.messages, props.background, props.conversationId, cache));
   const follows = createMemo(() => followedIn(props.messages));
   const checks = () => d().replies.filter((m) => m.checks && !work().some((row) => row.id === `${m.id}:checks`));
@@ -186,6 +189,7 @@ export function DetailsPane(props: {
         <For each={finishedFollows().map((f) => `${f.repo.toLowerCase()}#${f.number}`)}>{(id) => <FollowLine conversationId={props.conversationId} f={finishedFollows().find((f) => `${f.repo.toLowerCase()}#${f.number}` === id)!} />}</For>
       </section></Show>
       <Show when={references().length}><section class="det-g reply-references"><h3>{t('background.references')}</h3><details class="disclosure" onToggle={(e) => setReferencesOpen(e.currentTarget.open)}><summary>{t('details.open')}</summary><Show when={referencesOpen()}><For each={references()}>{(line) => <p class="technical-reference"><LiveText text={line} follows={follows()} /></p>}</For></Show></details></section></Show>
+      <Show when={card()}>{(text) => <section class="det-g start-card"><h3>{t('details.group.startCard')}</h3><details class="disclosure" onToggle={(e) => setCardOpen(e.currentTarget.open)}><summary>{t('details.open')}</summary><Show when={cardOpen()}><pre class="command-output">{text()}</pre></Show></details></section>}</Show>
       <Show when={checkTools().length || checks().length}><section class="det-g"><h3>{t('details.group.checks')}</h3>
         <Facts tools={checkTools()} follows={follows()} />
         <For each={checks().map((m) => m.id)}>{(id) => <ChecksLine c={checks().find((m) => m.id === id)!.checks!} />}</For>
