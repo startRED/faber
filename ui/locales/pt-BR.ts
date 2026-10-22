@@ -2050,6 +2050,8 @@ export const ptBR: Messages = {
   'notes.203.new': 'Agora dá para ver quais ferramentas do Catálogo uma conversa está usando e por quê: clique na porcentagem do contexto, no topo de qualquer conversa.',
   'notes.204.better': 'Ctrl 1, 2 e 3 abrem Chat, Projetos e Catálogo, e Alt com Cima ou Baixo vai para a conversa anterior ou a próxima da barra lateral. Duas caixas de busca não repetem mais o próprio nome.',
   'notes.205.fixed': 'Uma IA trabalhando num projeto não consegue mais mudar o registro das decisões que você manteve.',
+  'notes.206.new': 'Cada projeto ganha um arquivo de regras que o Faber monta com os arquivos do próprio projeto: como conferir o trabalho, onde ele acontece e o que precisa do seu sim.',
+  'notes.207.better': 'Uma decisão que a IA marca como sua só passa a valer como sua depois que você a mantém em Memória.',
   'update.checking': 'Procurando atualização…',
   'update.downloading': 'Baixando atualização…',
   'update.downloadingPercent': 'Baixando atualização… {percent}%',

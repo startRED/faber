@@ -1616,6 +1616,16 @@ impl Core {
     }
 
     /// Where conversation `c` works, before it is checked (`cwd_of`). Reads only the engine's own state.
+    /// A project's `.faber/rules.md` follows its sources: rebuilt in the project folder (where Memory reads) at each turn start
+    /// of one of its conversations, and written only when it differs. A project that refuses it (a link, a read-only file)
+    /// keeps its turn: the rules are an addition, never a condition.
+    fn refresh_rules(&self, id: &str) {
+        let Some(c) = self.convs.get(id).filter(|c| c.area == Area::Project) else { return };
+        if let Some(project) = self.store.projects().into_iter().find(|p| Some(&p.id) == c.project_id.as_ref()) {
+            let _ = crate::project::rules::refresh(Path::new(&project.path));
+        }
+    }
+
     fn folder_of(&self, c: &Conversation) -> Result<PathBuf, String> {
         if c.area == Area::Chat {
             return Ok(self.workspace_of(&c.id));
@@ -3433,6 +3443,7 @@ impl Core {
         {
             live.session.close();
         }
+        self.refresh_rules(id);
         let kit_reset = match self.launch(id, pick) {
             Err(error) if error == mcp_servers::CHECK_PENDING => {
                 let (id, reply, pick) = (id.to_string(), reply_id.to_string(), pick.clone());

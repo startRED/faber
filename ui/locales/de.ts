@@ -2063,6 +2063,8 @@ export const de: Messages = {
   'notes.203.new': 'Du siehst jetzt, welche Werkzeuge aus dem Katalog eine Unterhaltung nutzt und warum: Klicke oben in einer Unterhaltung auf die Prozentzahl des Kontexts.',
   'notes.204.better': 'Strg 1, 2 und 3 öffnen Chat, Projekte und Katalog, und Alt mit Hoch oder Runter wechselt zur vorherigen oder nächsten Unterhaltung der Seitenleiste. Zwei Felder wiederholen ihren Titel nicht mehr.',
   'notes.205.fixed': 'Eine KI, die in einem Projekt arbeitet, kann die Liste der Entscheidungen, die du behalten hast, nicht mehr ändern.',
+  'notes.206.new': 'Jedes Projekt bekommt eine Regeldatei, die Faber aus seinen eigenen Dateien schreibt: wie die Arbeit geprüft wird, wo sie passiert und was dein Ja braucht.',
+  'notes.207.better': 'Eine Entscheidung, die eine KI als deine markiert, zählt erst als deine, wenn du sie im Gedächtnis behältst.',
   'update.checking': 'Suche nach einem Update…',
   'update.downloading': 'Update wird heruntergeladen…',
   'update.downloadingPercent': 'Update wird heruntergeladen… {percent} %',

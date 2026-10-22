@@ -1943,6 +1943,8 @@ export const en = {
   'notes.203.new': 'You can see which Catalog tools a conversation is using and why: click the context percentage at the top of any conversation.',
   'notes.204.better': 'Ctrl 1, 2 and 3 open Chat, Projects and Catalog, and Alt with Up or Down moves to the previous or next conversation in the sidebar. Two search boxes no longer repeat their label.',
   'notes.205.fixed': 'An AI working in a project can no longer change the record of the decisions you kept.',
+  'notes.206.new': 'Each project gets a rules file Faber writes from its own files: what it checks with, where the work happens, and what needs your yes.',
+  'notes.207.better': 'A decision an AI marks as yours now counts as yours only after you keep it in Memory.',
   'update.checking': 'Looking for an update…',
   'update.downloading': 'Downloading update…',
   'update.downloadingPercent': 'Downloading update… {percent}%',

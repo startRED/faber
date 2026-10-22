@@ -159,6 +159,13 @@ impl MemoryDirectory {
         Ok(Self { parents })
     }
 
+    /// Creates a child directory through this handle, never following a link in its place, and holds it.
+    pub fn create_under(&self, name: &str) -> io::Result<Self> {
+        let mut parents = self.parents.iter().map(File::try_clone).collect::<io::Result<Vec<_>>>()?;
+        parents.push(child(self.directory(), name, true, true, false)?);
+        Ok(Self { parents })
+    }
+
     pub fn identity(&self) -> io::Result<String> {
         Self::file_identity(self.directory())
     }

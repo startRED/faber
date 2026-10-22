@@ -235,6 +235,18 @@ impl Directory {
         }
     }
 
+    /// A new child folder, created through this handle and opened without following a link put in its place.
+    fn create_dir(&self, name: &str) -> std::io::Result<Self> {
+        #[cfg(windows)]
+        return Ok(Self { dir: self.dir.create_under(name)? });
+        #[cfg(unix)]
+        {
+            use rustix::fs::{Mode, mkdirat};
+            mkdirat(&self.fd, name, Mode::RWXU | Mode::RGRP | Mode::XGRP | Mode::ROTH | Mode::XOTH)?;
+            self.under(Path::new(name))
+        }
+    }
+
     fn identity(&self) -> std::io::Result<String> {
         #[cfg(windows)]
         return self.dir.identity();
@@ -284,6 +296,18 @@ impl Directory {
                 return Err(std::io::ErrorKind::PermissionDenied.into());
             }
             Ok(file)
+        }
+    }
+
+    /// A new, empty file; an existing name (or a link in its place) is an error.
+    fn create(&self, name: &str) -> std::io::Result<File> {
+        #[cfg(windows)]
+        return self.dir.file(name, true);
+        #[cfg(unix)]
+        {
+            use rustix::fs::{Mode, OFlags, openat};
+            let flags = OFlags::RDONLY | OFlags::CREATE | OFlags::EXCL | OFlags::NOFOLLOW | OFlags::CLOEXEC;
+            Ok(openat(&self.fd, name, flags, Mode::RUSR | Mode::WUSR | Mode::RGRP | Mode::ROTH)?.into())
         }
     }
 
@@ -387,6 +411,64 @@ impl Directory {
     }
 }
 
+/// The files `rules.md` is built from, read through the same no-follow handles as the notes: the root files named in `names`,
+/// opened by name, and the first `listed` files of `folder` whose name `wanted` accepts, in name order (a listing stops at
+/// Memory's 20,000 names). A folder or file that is absent, a link, private, over `MAX_BYTES` or not UTF-8 is skipped.
+/// Returns each file's relative path and text.
+pub(super) fn read_sources(
+    project: &Path,
+    names: &[&str],
+    folder: &str,
+    wanted: &dyn Fn(&str) -> bool,
+    listed: usize,
+) -> Result<Vec<(String, String)>, &'static str> {
+    let protected = resolved_private(&private_roots());
+    let (root, project_dir) = project_directory(project, &protected)?;
+    let read = |dir: &Directory, name: &str, path: String| -> Option<(String, String)> {
+        if private(&root.join(&path), &protected) {
+            return None;
+        }
+        let mut bytes = Vec::new();
+        dir.file(name).ok()?.take(MAX_BYTES as u64 + 1).read_to_end(&mut bytes).ok()?;
+        (bytes.len() <= MAX_BYTES).then_some(())?;
+        String::from_utf8(bytes).ok().map(|text| (path, text))
+    };
+    let mut out: Vec<_> = names.iter().filter_map(|name| read(&project_dir, name, name.to_string())).collect();
+    if let Ok(dir) = project_dir.under(Path::new(folder)) {
+        let mut found: Vec<String> = dir.names().unwrap_or_default().into_iter().filter(|n| wanted(n)).collect();
+        found.sort();
+        out.extend(found.iter().take(listed).filter_map(|name| read(&dir, name, format!("{folder}/{name}"))));
+    }
+    Ok(out)
+}
+
+/// Writes `.faber/<name>` in the project when its bytes differ, creating the folder and the file if needed, through the
+/// same no-follow handles and atomic replacement as an edit: a link planted in place of either is refused, never followed.
+/// Returns whether it wrote.
+pub(super) fn write_faber_file(project: &Path, name: &str, bytes: &[u8]) -> Result<bool, &'static str> {
+    let _write = WRITES.lock().map_err(|_| "error.memory.write")?;
+    let protected = resolved_private(&private_roots());
+    let (_, project_dir) = project_directory(project, &protected)?;
+    let dir = match project_dir.under(Path::new(".faber")) {
+        Ok(dir) => dir,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => project_dir.create_dir(".faber").map_err(|_| REFUSED)?,
+        Err(_) => return Err(REFUSED),
+    };
+    let file = match dir.file(name) {
+        Ok(file) => file,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => dir.create(name).map_err(|_| REFUSED)?,
+        Err(_) => return Err(REFUSED),
+    };
+    let permissions = file.metadata().map_err(|_| READ)?.permissions();
+    let mut current = Vec::new();
+    file.take(MAX_BYTES as u64 + 1).read_to_end(&mut current).map_err(|_| READ)?;
+    if current == bytes {
+        return Ok(false);
+    }
+    dir.replace(name, bytes, permissions, &revision(&current)).map_err(|_| "error.memory.write")?;
+    Ok(true)
+}
+
 fn codex_file(dir: &Directory, folder: &Path, protected: &[String]) -> Result<Option<&'static str>, &'static str> {
     for name in ["AGENTS.override.md", "AGENTS.md"] {
         if private(&folder.join(name), protected) {
@@ -419,10 +501,15 @@ fn digest(body: &str) -> String {
     revision(body.trim().as_bytes())[..32].into()
 }
 
-/// Marks the AI decisions the person kept (`kept` is what Faber stored outside the project).
+/// Marks the decisions the person kept or wrote (`kept` is what Faber stored outside the project). A `[by person]` mark
+/// with no record is an agent's claim, so it reads as an AI decision not yet reviewed, whatever the file says.
 pub fn mark_kept(list: &mut MemoryList, kept: &[String]) {
     for entry in list.files.iter_mut().flat_map(|f| &mut f.entries) {
-        entry.reviewed = entry.author == Some("ai") && entry.body.as_deref().is_some_and(|b| kept.contains(&digest(b)));
+        let recorded = entry.body.as_deref().is_some_and(|b| kept.contains(&digest(b)));
+        if entry.author == Some("person") && !recorded {
+            entry.author = Some("ai");
+        }
+        entry.reviewed = entry.author == Some("ai") && recorded;
     }
 }
 
@@ -639,8 +726,10 @@ pub fn apply(project: &Path, edit: &Edit) -> Result<Option<String>, &'static str
     edit_with_private(project, edit, &private_roots())
 }
 
+/// One writer at a time for the notes and `rules.md`.
+static WRITES: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
 fn edit_with_private(project: &Path, edit: &Edit, protected: &[String]) -> Result<Option<String>, &'static str> {
-    static WRITES: std::sync::Mutex<()> = std::sync::Mutex::new(());
     let _write = WRITES.lock().map_err(|_| "error.memory.write")?;
     let source = source(&edit.path).ok_or(REFUSED)?;
     let protected = resolved_private(protected);
@@ -672,7 +761,7 @@ fn edit_with_private(project: &Path, edit: &Edit, protected: &[String]) -> Resul
     let mut replacement = String::new();
     if edit.keep {
         let text = &original[entry.start..entry.end];
-        let kept = decisions(&edit.path).then(|| mark(text)).flatten().filter(|m| m.author == "ai").ok_or(REFUSED)?;
+        let kept = decisions(&edit.path).then(|| mark(text)).flatten().ok_or(REFUSED)?;
         return Ok(Some(digest(&text[..kept.open])));
     }
     if let Some(text) = &edit.text {
@@ -697,7 +786,9 @@ fn edit_with_private(project: &Path, edit: &Edit, protected: &[String]) -> Resul
     drop(file);
     dir.replace(name, &next, permissions, expected)
         .map_err(|error| if error.kind() == std::io::ErrorKind::AlreadyExists { CHANGED } else { "error.memory.write" })?;
-    Ok(None)
+    // Words the person wrote themselves in Memory and marked theirs are recorded as theirs, like a Keep.
+    let written = edit.text.as_deref().filter(|_| decisions(&edit.path)).map(str::trim_end);
+    Ok(written.and_then(|text| mark(text).filter(|m| m.author == "person").map(|m| digest(&text[..m.open]))))
 }
 
 #[cfg(test)]
@@ -1010,7 +1101,8 @@ mod tests {
             seen,
             [
                 (Some("ai"), false, Some("- Use SQLite for the cache.")),
-                (Some("person"), false, Some("- Keep the old export, it is\n  what customers use.")),
+                // A person's mark with no record of the person is an agent's claim: an AI decision not yet reviewed.
+                (Some("ai"), false, Some("- Keep the old export, it is\n  what customers use.")),
                 (None, false, None),
                 // A review written in the file is no review: an agent could write it.
                 (Some("ai"), false, Some("- Drop the beta flag")),
@@ -1028,8 +1120,8 @@ mod tests {
     #[test]
     fn project_memory_keep_stores_the_hash_outside_the_file_and_binds_it_to_the_words() {
         let (project, file) = decisions_file(DECISIONS);
-        for refused in [1, 2, 4, 5, 6] {
-            assert_eq!(keep(project.path(), &file, refused), Err(REFUSED), "only an AI decision can be kept (entry {refused})");
+        for refused in [2, 4, 5, 6] {
+            assert_eq!(keep(project.path(), &file, refused), Err(REFUSED), "only a marked decision can be kept (entry {refused})");
         }
         let hash = keep(project.path(), &file, 0).unwrap().expect("a kept decision returns its hash");
         assert_eq!(
@@ -1041,9 +1133,10 @@ mod tests {
         let again = listed(project.path(), ".faber/decisions.md", std::slice::from_ref(&hash));
         assert_eq!((again.entries[0].author, again.entries[0].reviewed), (Some("ai"), true));
         assert_eq!(again.entries.iter().filter(|e| e.reviewed).count(), 1, "the other decisions stay as they were");
-        // A person's entry never reads as reviewed, even with a hash of its words; a legacy "[by AI, reviewed]" is plain AI.
-        let person = digest("- Keep the old export, it is\n  what customers use.");
-        assert!(!listed(project.path(), ".faber/decisions.md", &[person]).entries[1].reviewed);
+        // Keeping an entry marked as the person's makes it theirs; a legacy "[by AI, reviewed]" is plain AI.
+        let person = keep(project.path(), &file, 1).unwrap().unwrap();
+        let theirs = &listed(project.path(), ".faber/decisions.md", &[person]).entries[1];
+        assert_eq!((theirs.author, theirs.reviewed), (Some("person"), false));
         let legacy = keep(project.path(), &file, 3).unwrap().unwrap();
         assert!(listed(project.path(), ".faber/decisions.md", &[legacy]).entries[3].reviewed);
         // The agent rewords the kept decision: the stored hash no longer matches, so it reads "not reviewed" again.
@@ -1055,6 +1148,27 @@ mod tests {
         let attempt =
             Edit { path: note.path.clone(), revision: note.revision.clone(), start: 0, end: note.entries[0].end, text: None, keep: true };
         assert_eq!(apply(project.path(), &attempt), Err(REFUSED), "keeping is for the decision list only");
+    }
+
+    #[test]
+    fn project_memory_words_the_person_writes_and_marks_theirs_are_recorded_as_theirs() {
+        let (project, file) = decisions_file(DECISIONS);
+        let edit = |text: &str, file: &MemoryFile| {
+            let entry = &file.entries[0];
+            let edit = Edit {
+                path: file.path.clone(),
+                revision: file.revision.clone(),
+                start: entry.start,
+                end: entry.end,
+                text: Some(text.into()),
+                keep: false,
+            };
+            apply(project.path(), &edit).unwrap()
+        };
+        assert_eq!(edit("- Use SQLite for the cache, always. [by AI]", &file), None, "an edit that leaves it the AI's records nothing");
+        let file = listed(project.path(), ".faber/decisions.md", &[]);
+        let hash = edit("- Use Postgres for the cache. [by person]", &file).expect("the person's own words are recorded");
+        assert_eq!(listed(project.path(), ".faber/decisions.md", &[hash]).entries[0].author, Some("person"));
     }
 
     #[test]

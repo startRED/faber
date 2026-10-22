@@ -14,6 +14,7 @@ pub mod lease;
 pub mod memory;
 pub mod proof;
 pub mod remote;
+pub mod rules;
 
 use serde::{Deserialize, Serialize};
 use serde_json::Value;

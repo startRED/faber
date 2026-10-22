@@ -365,9 +365,10 @@ async fn claude_code_searches_only_this_projects_other_conversations_and_its_fab
             assert!(!found.contains(stranger.as_str()), "{stranger} is not this project's other conversation: {found}");
         }
         for note in [
-            ".faber/decisions.md:1 · marked [by person] · Zebra storage is the choice",
+            // A person's mark with no record of the person is an AI proposal.
+            ".faber/decisions.md:1 · an AI proposal, not reviewed · Zebra storage is the choice",
             ".faber/decisions.md:2 · marked [by AI], kept by the person · Zebra cache stays in memory",
-            ".faber/decisions.md:3 · marked [by AI], not reviewed · Zebra logs go to disk",
+            ".faber/decisions.md:3 · an AI proposal, not reviewed · Zebra logs go to disk",
             ".faber/taste.md:1 · author unknown · Zebra stripes stay subtle",
         ] {
             assert!(lines.contains(&note), "{note} missing: {found}");

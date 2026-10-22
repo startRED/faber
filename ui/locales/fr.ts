@@ -2063,6 +2063,8 @@ export const fr: Messages = {
   'notes.203.new': 'Vous pouvez voir quels outils du Catalogue une conversation utilise, et pourquoi : cliquez sur le pourcentage du contexte, en haut de n’importe quelle conversation.',
   'notes.204.better': 'Ctrl 1, 2 et 3 ouvrent Chat, Projets et Catalogue, et Alt avec Haut ou Bas passe à la conversation précédente ou suivante de la barre latérale. Deux champs ne répètent plus leur propre titre.',
   'notes.205.fixed': 'Une IA qui travaille dans un projet ne peut plus modifier la liste des décisions que vous avez gardées.',
+  'notes.206.new': 'Chaque projet a un fichier de règles que Faber écrit à partir de ses propres fichiers : comment vérifier le travail, où il se fait et ce qui demande votre accord.',
+  'notes.207.better': "Une décision qu'une IA marque comme la vôtre ne compte comme telle qu'une fois gardée dans Mémoire.",
   'update.checking': 'Recherche d’une mise à jour…',
   'update.downloading': 'Téléchargement de la mise à jour…',
   'update.downloadingPercent': 'Téléchargement de la mise à jour… {percent} %',
