@@ -1,6 +1,6 @@
 # Look around: the same mistake elsewhere
 
-Status: in progress. Steps 1 and 2 landed (R369), step 3 landed (R386), step 4 is planned.
+Status: in progress. Steps 1 and 2 landed (R369), step 3 landed (R386), step 4: the counting is built (R403), the week of use and the decision to narrow are still to come.
 
 Asked by the owner on 2026-10-21 (direction, "um senso comum mas sem ser uma regra que atrapalha em outras coisas e só
 usado onde importa"); the details are the AI's (owner delegated).
@@ -79,6 +79,18 @@ Rules it keeps:
 - [ ] **4. Measure, then quiet it if needed.** Count, in the local `cache-health.jsonl`-style log that never leaves the
   PC, how often each sign is offered and used, per area. After a week of the owner's use: a sign used under one time in
   ten is narrowed or removed. Telemetry stays off.
+  - [x] *Counting built (R403).* `look.jsonl` in the data folder (`engine/src/look_log.rs`): one line when a reply is
+    offered a sign (`look.fixed` or `look.sameText`; at the reply's end, or when the read of step 3 makes the offer) and
+    one when the offer is used, with the area and the time, never text, paths or ids. It is bounded at 200 KB like
+    `cache-health.jsonl` (they share `append_bounded`) and is written on a blocking thread, off the turn's path. "Used"
+    is known by the engine from the message itself: a sent text that starts with the words of the button's request (the
+    five `look.ask` starts in `look_log::REQUESTS`, kept in step with `ui/locales` by a test) while the newest answer
+    carries an offer. Chosen over a marker through the send path because `SendRequest` is built in some two hundred
+    places and the screen would need a field only this feature reads; the limit is that a person who rewrites the
+    request's first words is not counted, and a use is counted when it is sent, so a failed send or a retry of the same request counts again, and an offer replaced before anyone saw it still counts (all rare; they move the rate a little either way, so the decision reads it with that in mind). `look_log::counts` reads it back per sign and area (unit tests only, no
+    screen). Cost: one small append per offer and per use on a blocking thread; nothing stays in memory.
+  - [ ] *The week of use, then the decision.* The owner's week of use, then `counts`: a sign used under one time in ten
+    is narrowed or removed.
 
 ## Not doing
 

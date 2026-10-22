@@ -2292,6 +2292,7 @@ impl Core {
                 self.note_turn(conv, cost, missing);
                 let can_run = crate::route::candidates(&self.vendors(), &self.codex_models);
                 let mut looked = None;
+                let mut offered = None;
                 if let Some(m) = self.turn(conv) {
                     m.status = Some(if ok { Status::Done } else { Status::Stopped });
                     // The silence cut says its own key; any other ending says what the CLI reported.
@@ -2324,6 +2325,10 @@ impl Core {
                     m.nudge = nudge::of(m, area, &can_run);
                     m.look = crate::look::of(m);
                     looked = ok.then(|| m.id.clone());
+                    offered = m.look.as_ref().map(|l| l.reason.clone());
+                }
+                if let Some(sign) = offered {
+                    self.count_look("offered", &sign, area);
                 }
                 if let Some(reply) = looked {
                     self.look_around(conv, &reply);
@@ -3777,6 +3782,9 @@ impl Core {
         });
         if existing.as_ref().is_some_and(|id| self.rewind_blocked(id)) {
             return Err("error.rewind.busy".into());
+        }
+        if let Some(id) = &existing {
+            self.look_used(id, &req.text);
         }
         // Writing to an archived conversation brings it back.
         if let Some(id) = &existing

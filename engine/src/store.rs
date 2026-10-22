@@ -549,23 +549,20 @@ fn restore_removal(path: &Path) -> Result<(), Fault> {
 // ponytail: size cap, rotate if it ever matters.
 const CACHE_HEALTH_MAX: u64 = 1_000_000;
 
+/// Adds one line to a local log that nothing reads back for sending: it stops growing at `max` bytes and a failed write is
+/// ignored, so it can never break a turn.
+pub(crate) fn append_bounded(path: &Path, max: u64, line: &serde_json::Value) {
+    use std::io::Write;
+    if fs::metadata(path).is_ok_and(|m| m.len() >= max) {
+        return;
+    }
+    let _ = fs::OpenOptions::new().create(true).append(true).open(path).and_then(|mut f| f.write_all(format!("{line}\n").as_bytes()));
+}
+
 impl Store {
-    /// Adds one line to the local cache-health log. Nothing reads it back and nothing sends it anywhere; it stops growing
-    /// at 1 MB and a failed write is ignored, so it can never break a turn.
+    /// Adds one line to the local cache-health log. Nothing reads it back and nothing sends it anywhere.
     pub fn log_cache_health(&self, line: &serde_json::Value) {
-        use std::io::Write;
-        if fs::metadata(&self.cache_health).is_ok_and(|m| m.len() >= CACHE_HEALTH_MAX) {
-            return;
-        }
-        let _ = fs::OpenOptions::new().create(true).append(true).open(&self.cache_health).and_then(|mut f| {
-            f.write_all(
-                format!(
-                    "{line}
-"
-                )
-                .as_bytes(),
-            )
-        });
+        append_bounded(&self.cache_health, CACHE_HEALTH_MAX, line);
     }
 }
 

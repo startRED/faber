@@ -3,8 +3,27 @@
 //! before. The places found go on the reply's offer, or make one of their own, and the screen gets the reply again.
 use super::*;
 use crate::look::{self, Limits};
+use crate::look_log;
 
 impl Core {
+    /// Step 4: one line in the local count (`look_log`), written on a blocking thread so no turn waits for the disk.
+    pub(super) fn count_look(&self, event: &'static str, sign: &str, area: Area) {
+        let (dir, at, sign) = (self.opts.data_dir.clone(), now(), sign.to_string());
+        self.opts.runtime.spawn_blocking(move || look_log::note(&dir, at, event, &sign, area));
+    }
+
+    /// A message is being sent: when it is the request the "Look around" button writes, and the newest answer carries an
+    /// offer, that offer was used. The engine knows it from the text itself, the screen passes nothing.
+    pub(super) fn look_used(&self, conv: &str, text: &str) {
+        if !look_log::is_request(text) {
+            return;
+        }
+        let Some(c) = self.convs.get(conv) else { return };
+        if let Some(look) = c.messages.iter().rev().find(|m| m.role == Role::Assistant).and_then(|m| m.look.as_ref()) {
+            self.count_look("used", &look.reason, c.area);
+        }
+    }
+
     /// After a reply ended: look for what its changes removed. A reply that removed nothing, or a conversation with no
     /// folder that passes the launch's check, starts no read.
     pub(super) fn look_around(&mut self, conv: &str, reply: &str) {
@@ -33,7 +52,12 @@ impl Core {
         if offer == m.look {
             return;
         }
+        // An offer that only gained its places was counted when the reply ended; one made by the places is new.
+        let fresh = if m.look.is_none() { offer.as_ref().map(|o| o.reason.clone()) } else { None };
         m.look = offer;
+        if let (Some(sign), Some(area)) = (fresh, self.convs.get(conv).map(|c| c.area)) {
+            self.count_look("offered", &sign, area);
+        }
         self.save(conv);
         self.emit_message(conv, reply);
     }

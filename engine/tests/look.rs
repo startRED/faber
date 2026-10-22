@@ -143,3 +143,134 @@ async fn r369_text_a_change_removed_that_is_still_elsewhere_is_offered_on_its_ow
     engine.shutdown();
     assert_eq!(after.look, None);
 }
+
+// Step 4: the local count (`look.jsonl`). The lines are written on a blocking thread, so the tests wait for them.
+
+async fn lines(dir: &Path, want: usize) -> Vec<Value> {
+    for _ in 0..300 {
+        let text = std::fs::read_to_string(dir.join("look.jsonl")).unwrap_or_default();
+        let found: Vec<Value> = text.lines().map(|l| serde_json::from_str(l).unwrap()).collect();
+        if found.len() >= want {
+            return found;
+        }
+        tokio::time::sleep(Duration::from_millis(10)).await;
+    }
+    panic!("fewer than {want} lines in look.jsonl");
+}
+
+fn event(e: &str, sign: &str, area: &str) -> Value {
+    json!({ "event": e, "sign": sign, "area": area })
+}
+
+/// Without the time, which changes, a line is the event, the sign and the area, and nothing of the person's work.
+fn plain(lines: Vec<Value>) -> Vec<Value> {
+    lines
+        .into_iter()
+        .map(|mut l| {
+            assert!(l["at"].as_u64().is_some_and(|at| at > 0), "a time is kept: {l}");
+            l.as_object_mut().unwrap().remove("at");
+            l
+        })
+        .collect()
+}
+
+async fn red_to_green(pipe: &mut support::Pipe) {
+    pipe.say(json!({ "type": "system", "subtype": "init", "session_id": "s", "model": "haiku" })).await;
+    pipe.say(step("t1", "Bash", json!({ "command": "cargo test" }))).await;
+    pipe.say(result("t1", false)).await;
+    pipe.say(step("e1", "Edit", json!({ "file_path": "src/a.rs", "old_string": BAD, "new_string": "let d = parse(s)?;" }))).await;
+    pipe.say(result("e1", true)).await;
+    pipe.say(step("t2", "Bash", json!({ "command": "cargo test" }))).await;
+    pipe.say(result("t2", true)).await;
+    pipe.say(json!({ "type": "result", "subtype": "success", "is_error": false, "total_cost_usd": 0.0, "usage": {} })).await;
+}
+
+fn request(id: &str, text: &str) -> SendRequest {
+    let choice = Choice { vendor: "claude".into(), model: Some("haiku".into()), effort: None };
+    SendRequest {
+        conversation_id: Some(id.into()),
+        area: Area::Chat,
+        project_id: None,
+        text: text.into(),
+        images: vec![],
+        files: vec![],
+        choice,
+    }
+}
+
+const ASK: &str = "Look for the same kind of mistake you just fixed in the other places it could be.";
+
+/// An offer is one line when the reply ends (and not again when the read adds its places), and sending the request the
+/// button writes is one more, for the sign that was offered.
+#[tokio::test]
+async fn an_offer_and_its_use_are_counted_in_the_local_log() {
+    let dir = tempfile::tempdir().unwrap();
+    let (spawn, made) = pipes();
+    let engine = engine(dir.path(), spawn);
+    let id = send(&engine, "fix the date parsing");
+    let folder = dir.path().join("chat").join(&id);
+    write(&folder, "src/b.rs", &format!("fn b() {{\n    {BAD}\n}}\n"));
+    let mut pipe = next_pipe(&made).await;
+    red_to_green(&mut pipe).await;
+    reply_until(&engine, &id, "the read after the reply", |m| m.look.as_ref().is_some_and(|l| !l.places.is_empty())).await;
+    assert_eq!(plain(lines(dir.path(), 1).await), vec![event("offered", "look.fixed", "chat")]);
+
+    engine.send(request(&id, ASK)).unwrap();
+    let all = plain(lines(dir.path(), 2).await);
+    engine.shutdown();
+    assert_eq!(all, vec![event("offered", "look.fixed", "chat"), event("used", "look.fixed", "chat")]);
+    assert_eq!(faber_engine::look_log::counts(dir.path()).get(&("look.fixed".into(), "chat".into())), Some(&(1, 1)));
+}
+
+/// An offer made by the read alone (no check ran) is counted when the read makes it, under its own sign.
+#[tokio::test]
+async fn an_offer_made_by_the_read_is_counted_under_its_own_sign() {
+    let dir = tempfile::tempdir().unwrap();
+    let (spawn, made) = pipes();
+    let engine = engine(dir.path(), spawn);
+    let id = send(&engine, "fix the spelling in the intro");
+    let folder = dir.path().join("chat").join(&id);
+    write(&folder, "intro.md", "The color of the sky\n");
+    write(&folder, "notes/later.md", "# Later\n\nThe colour of the sky changes at dusk.\n");
+    let mut pipe = next_pipe(&made).await;
+    pipe.say(json!({ "type": "system", "subtype": "init", "session_id": "s", "model": "haiku" })).await;
+    pipe.say(step(
+        "e1",
+        "Edit",
+        json!({ "file_path": "intro.md", "old_string": "The colour of the sky", "new_string": "The color of the sky" }),
+    ))
+    .await;
+    pipe.say(result("e1", true)).await;
+    pipe.say(json!({ "type": "result", "subtype": "success", "is_error": false, "total_cost_usd": 0.0, "usage": {} })).await;
+    reply_until(&engine, &id, "the read after the reply", |m| m.look.is_some()).await;
+    let all = plain(lines(dir.path(), 1).await);
+    engine.shutdown();
+    assert_eq!(all, vec![event("offered", "look.sameText", "chat")]);
+}
+
+/// A turn with no sign leaves no log, and the request sent after it is no use of anything.
+#[tokio::test]
+async fn nothing_is_written_without_a_sign() {
+    let dir = tempfile::tempdir().unwrap();
+    let (spawn, made) = pipes();
+    let engine = engine(dir.path(), spawn);
+    let id = send(&engine, "hello");
+    let mut pipe = next_pipe(&made).await;
+    pipe.say(json!({ "type": "system", "subtype": "init", "session_id": "s", "model": "haiku" })).await;
+    pipe.say(json!({ "type": "result", "subtype": "success", "is_error": false, "total_cost_usd": 0.0, "usage": {} })).await;
+    reply_until(&engine, &id, "the reply", |m| m.status == Some(Status::Done)).await;
+    engine.send(request(&id, ASK)).unwrap();
+    tokio::time::sleep(Duration::from_millis(300)).await;
+    engine.shutdown();
+    assert!(!dir.path().join("look.jsonl").exists());
+}
+
+/// The engine knows the request by its first words, so they must stay the words of the button in every language.
+#[test]
+fn the_request_is_recognised_in_every_language_of_the_screen() {
+    for (file, start) in ["en", "pt-BR", "es", "fr", "de"].into_iter().zip(faber_engine::look_log::REQUESTS) {
+        let text = std::fs::read_to_string(Path::new(env!("CARGO_MANIFEST_DIR")).join("../ui/locales").join(format!("{file}.ts"))).unwrap();
+        let ask = text.lines().find_map(|l| l.trim().strip_prefix("'look.ask': '")).unwrap_or_else(|| panic!("{file} has no look.ask"));
+        assert!(ask.starts_with(start) && faber_engine::look_log::is_request(ask), "{file}: {ask}");
+    }
+}
