@@ -157,7 +157,8 @@ function child(program, args, options) {
   return p;
 }
 
-/** The panel: `ade serve` and a headless Chrome on it, inside the meter's job. */
+/** The panel: `ade serve` and a headless Chrome on it, inside the meter's job. Chrome's own updates are off: they
+ * download through a Windows service outside the job, cost what TL-ADE does not, and leave files in the temp folder. */
 async function start(s) {
   const serve = child(process.execPath, [join(s.tlade, 'bin', 'ade.js'), 'serve', '--repo', s.repo, '--port', String(s.port), '--no-open'], { cwd: s.tlade, env: s.env });
   const panel = { serve, chrome: null, page: null };
@@ -165,7 +166,7 @@ async function start(s) {
     const url = `http://127.0.0.1:${s.port}/`;
     await until('the panel to answer', async () => (await fetch(url, { signal: AbortSignal.timeout(5_000) })).ok);
     const profile = join(s.tmp, `chrome-${s.starts++}`);
-    panel.chrome = child(CHROME, ['--headless=new', '--remote-debugging-port=0', `--user-data-dir=${profile}`, '--no-first-run', '--no-default-browser-check', '--disable-extensions', 'about:blank'], {
+    panel.chrome = child(CHROME, ['--headless=new', '--remote-debugging-port=0', `--user-data-dir=${profile}`, '--no-first-run', '--no-default-browser-check', '--disable-extensions', '--disable-component-update', '--disable-background-networking', 'about:blank'], {
       env: { ...s.env, ...WINDOWS },
     });
     panel.page = await devtools(profile);

@@ -42,7 +42,8 @@ export const REAL_WORK = [
 export function plan(only, tlade, { standin = 'faber-standin.exe', notes = 'notes.json' } = {}) {
   const vitest = ['node_modules/vitest/vitest.mjs', 'run'];
   const suites = [
-    { label: 'tlade suite', dir: tlade, program: 'node', args: vitest },
+    // TL-ADE's own suite fails 62 of its 3446 tests at its commit 9c883376, so it exits 1 after running them all.
+    { label: 'tlade suite', dir: tlade, program: 'node', args: vitest, exits: [0, 1] },
     { label: 'faber suite', dir: root, program: 'cargo', args: ['t', '--all'] },
   ];
   // A Faber scenario with several test modules is one run per module (`--filter` is a substring of the test's path in the
@@ -141,7 +142,8 @@ function main() {
       const line = JSON.parse(run.stdout.trim().split('\n').pop());
       lines.push({ ...line, warmup });
       console.error(`${label}: ${line.wall_s} s, exit ${line.exit}`);
-      if (step.task && line.exit !== 0) throw new Error(`${label} failed (exit ${line.exit}): see ${from}`);
+      // A run that failed measured something else (a refused start takes 2 s), so it never becomes a number.
+      if (!(step.exits ?? [0]).includes(line.exit)) throw new Error(`${label} failed (exit ${line.exit})${step.task ? `: see ${from}` : ''}`);
       if (step.task && !warmup) {
         if (!existsSync(from)) throw new Error(`${label} wrote no notes: see ${from}`);
         const noted = step.notes ? JSON.parse(readFileSync(from, 'utf8')) : notes(readFileSync(from, 'utf8'), step.task);
