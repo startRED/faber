@@ -71,7 +71,8 @@ one is never touched again, and its boxes say nothing.
 | superpowers/specs/2026-10-12-faber-rework-design.md | Proposal, nothing built |
 | superpowers/specs/2026-10-12-generated-pipelines-design.md, 2026-10-12-tool-selection-rework-design.md | Proposals, partly superseded by the rework design |
 | superpowers/specs/2026-10-12-ux-sentinel-design.md, plans/2026-10-13-ux-sentinel-s0.md | Slice S0 shipped (dev/sentinel.md); the rest is a proposal |
-| superpowers/specs/2026-10-14-test-system-rework-design.md, plans/2026-10-14-test-system-rework.md | In progress |
+| superpowers/specs/2026-10-14-test-system-rework-design.md, plans/2026-10-14-test-system-rework.md | In progress: step 0, R189's waits, parallel scenarios and build skip, and the meter (`faber-bench`) landed; the shared app shelved (R395); the measured report and the real-work tier still to come |
+| superpowers/plans/2026-10-22-real-work-bench.md | In progress: step 1 done (how TL-ADE is fed a recorded answer and its quota); the real-work tier of R113, 7 tasks through each app's screen inside the meter |
 | superpowers/specs/2026-10-16-browser-preview.md | Proposal, nothing built (recommends yes, after a week of visual critiques) |
 | superpowers/plans/2026-10-14-parallel-work-loop.md | The development loop (R128, R129); its rounds table is kept current |
 | superpowers/specs/2026-10-16-own-lessons-into-faber.md | Proposal, nothing built (lessons from building Faber by hand, mapped to features for 1a) |

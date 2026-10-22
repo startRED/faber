@@ -57,7 +57,7 @@ change rebuilt the test app) and must be measured again in Task 0.
 - Produces: test program `engine` (all engine test files) and `install_memory` (alone); test names gain the file as a
   prefix (`account::name`).
 
-- [ ] **Step 1: Apply the changes**
+- [x] **Step 1: Apply the changes**
 
 `engine/Cargo.toml`, after `repository.workspace = true`:
 
@@ -195,19 +195,19 @@ If the branch has gained engine test files since 2026-10-14, list them too (the 
 `mod support;` (or `mod loopback;` in `install.rs`) with `use crate::support;` (`use crate::loopback;`): Clippy's
 `duplicate_mod` refuses a module loaded once per file. `install_memory.rs` keeps its own `mod loopback;`.
 
-- [ ] **Step 2: Prove the guard fails, then passes**
+- [x] **Step 2: Prove the guard fails, then passes**
 
 Create an empty `engine/tests/zz_probe.rs`, run `cargo test -p faber-engine --test engine every_test_file_is_listed`.
 Expected: FAIL naming `zz_probe.rs`. Delete the file and run again. Expected: PASS.
 
-- [ ] **Step 3: Verify the release build links with rust-lld**
+- [x] **Step 3: Verify the release build links with rust-lld**
 
 Run: `cargo build -p faber --release` (long; LTO). Expected: exit 0, and `target/release/faber.exe` starts and shows its
 icon (Windows resources linked). If it fails, scope the linker to the test runner instead: remove the
 `[target.x86_64-pc-windows-msvc]` block and set `CARGO_TARGET_X86_64_PC_WINDOWS_MSVC_LINKER=rust-lld.exe` on the
 `cargo test` command in `testkit/src/runner.rs:run_rust` and in `testbuild.rs:ensure_fake_cli`.
 
-- [ ] **Step 4: Run every proof command**
+- [x] **Step 4: Run every proof command**
 
 ```bash
 npm run lint && npm run typecheck && npm run build && cargo fmt --all --check \
@@ -217,7 +217,7 @@ npm run lint && npm run typecheck && npm run build && cargo fmt --all --check \
 
 Expected: all exit 0.
 
-- [ ] **Step 5: Commit and push**
+- [x] **Step 5: Commit and push**
 
 ```bash
 git add engine/tests/all.rs engine/Cargo.toml Cargo.toml .cargo/config.toml testkit/src/bin/faber-test.rs
@@ -225,7 +225,7 @@ git commit -m "build(test): one engine test program, rust-lld, lighter debug inf
 git push
 ```
 
-### Task 1: The meter (`scripts/bench/measure.ps1`)
+### Task 1: The meter (`scripts/bench/measure.ps1`) — done 2026-10-22 in Rust, as the spec has it: `testkit/src/bin/faber-bench.rs`, run by `scripts/bench/run.mjs`
 
 **Files:**
 - Create: `scripts/bench/measure.ps1`, `scripts/bench/JobMeter.cs`
@@ -235,7 +235,7 @@ git push
 - Produces: `measure.ps1 -Label <s> -Dir <path> -Exe <path> -ArgLine <s> -Out <jsonl>` appends one JSON line:
   `{label, exit, wall_s, procs_started, cpu_s, peak_commit_mb, written_mb, repo_commit, date}`.
 
-- [ ] **Step 1: Write the C# helper**
+- [x] **Step 1: Write the C# helper**
 
 `scripts/bench/JobMeter.cs`: a static class loaded with `Add-Type -Path`. `Run(string exe, string args, string dir)`
 creates a job object (`CreateJobObject`), starts the process with `CreateProcess` and `CREATE_SUSPENDED |
@@ -246,20 +246,20 @@ root still count), and reads `QueryInformationJobObject` with `JobObjectBasicAcc
 `JobObjectBasicAndIoAccountingInformation` (`WriteTransferCount`). It returns those numbers, the exit code and the wall
 time. Standard output and error go to files next to the JSON line.
 
-- [ ] **Step 2: Write the conditions into `measure.ps1`**
+- [x] **Step 2: Write the conditions into `measure.ps1`**
 
 Before starting: refuse while another `cargo.exe`, `rustc.exe` or `vitest` runs outside this job (another session's
 build); wait until `GetLastInputInfo` shows no input for 60 s; refuse while a full-screen app runs
 (`SHQueryUserNotificationState` not `QUNS_ACCEPTS_NOTIFICATIONS`). Set `CARGO_BUILD_JOBS` and TL-ADE's worker cap to half
 the logical cores. Record `git rev-parse HEAD` of `-Dir` and the date.
 
-- [ ] **Step 3: Write the check**
+- [x] **Step 3: Write the check**
 
 `measure.check.ps1` measures `faber-test`'s helper `fake-cli --family` (it starts two `--idle` copies of itself, which
 end after a minute): expected `procs_started` = 3, `wall_s` ≥ 60, `exit` = 0. Run it; it must fail before Step 1 exists
 and pass after.
 
-- [ ] **Step 4: Commit**
+- [x] **Step 4: Commit**
 
 ```bash
 git add scripts/bench
@@ -300,7 +300,7 @@ git add scripts/bench docs/research/bench
 git commit -m "docs(bench): first fair report of Faber against TL-ADE"
 ```
 
-### Task 3: Waits follow events
+### Task 3: Waits follow events — partly replaced by R189 (waits inside the page, `Cdp::settle`)
 
 **Files:**
 - Modify: `testkit/src/screen/mod.rs` (add `settle`), `testkit/src/page.rs` (if a page helper is needed),
@@ -355,7 +355,7 @@ and `run.ps1 -Only suites` must show a gain. Commit only then:
 git commit -am "test(screen): wait for motion to settle instead of fixed pauses"
 ```
 
-### Task 4: Parallel lanes
+### Task 4: Parallel lanes — replaced by R189 (four scenarios at a time)
 
 **Files:**
 - Modify: `testkit/src/screen/mod.rs` (`Scenario`, `run_all`), `testkit/src/app.rs` (`free_port`, `Ctx::launch`),
@@ -411,7 +411,7 @@ running; the other asserts it sees neither. Expected: both pass, and the first o
 git commit -am "test(screen): run independent scenarios on parallel lanes"
 ```
 
-### Task 5: Skip Vite when the screen did not change
+### Task 5: Skip Vite when the screen did not change — done under R189 (`testbuild.rs`)
 
 **Files:**
 - Modify: `testkit/src/testbuild.rs:84-98`
@@ -450,7 +450,7 @@ incremental).
 git commit -am "test(build): skip the Vite test build when the screen did not change"
 ```
 
-### Task 6: Shared running app (own plan)
+### Task 6: Shared running app (own plan) — measured and shelved (R395)
 
 Write `docs/superpowers/plans/2026-10-xx-shared-test-app.md` after Task 5, from the report's numbers. It covers spec
 section 4.1: the `alone` flag from Task 4 marks the fresh-start scenarios; a test-hooks-only `test_reset` command in
@@ -462,13 +462,13 @@ shared app cannot change its environment after launch.
 
 ### Task 7: Real-work tier (own plan)
 
-Write `docs/superpowers/plans/2026-10-xx-real-work-bench.md`: the 7 tasks of spec section 3.1, scripted once per app over
+Written: [`2026-10-22-real-work-bench.md`](2026-10-22-real-work-bench.md), for the 7 tasks of spec section 3.1, scripted once per app over
 DevTools on the hidden desktop, inside the meter. It starts by finding how TL-ADE starts its engine and panel with a fake
 CLI (read its docs and `bin/`, never copy its code), and which tasks it cannot do.
 
 ### Task 8: Final report
 
-- [ ] Run `run.ps1` with every tier; write the table into `docs/research/bench/README.md`.
+- [ ] Run `run.mjs` with every tier; write the table into `docs/research/bench/README.md`.
 - [ ] Update the "Screen tests" section of `docs/design.md` (lanes, settle, shared app if Task 6 landed).
 - [ ] If a row is still under the R113 floor, the next round starts on the largest cost in the report (R116).
 - [ ] Commit and push.

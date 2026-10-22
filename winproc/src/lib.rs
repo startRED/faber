@@ -20,8 +20,21 @@ pub fn background_thread() -> std::io::Result<()> {
 
 #[cfg(windows)]
 pub use imp::{
-    background_thread, job_active_processes, job_cpu_cap, job_memory_cap, job_peak_memory, job_terminate, process_ended, resume_process,
+    background_thread, full_screen_in_front, job_accounting, job_active_processes, job_cpu_cap, job_memory_cap, job_peak_memory,
+    job_terminate, process_ended, resume_process,
 };
+
+/// What a job object's processes used together since it was made (`job_accounting`).
+#[cfg(windows)]
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct JobAccounting {
+    /// Every process ever started in the job, ended ones included.
+    pub processes: u32,
+    /// Their processor time, user and kernel, in seconds.
+    pub cpu_seconds: f64,
+    /// The bytes they wrote, to files and devices.
+    pub written_bytes: u64,
+}
 
 mod files;
 pub use files::open_plain_file;
@@ -120,6 +133,47 @@ mod imp {
             );
             if ok == 0 { Err(io::Error::last_os_error()) } else { Ok(info.ActiveProcesses) }
         }
+    }
+
+    /// What the job object `job` (a handle) has used so far: every process ever started in it, their processor time (user
+    /// and kernel, in seconds) and the bytes they wrote.
+    pub fn job_accounting(job: isize) -> io::Result<super::JobAccounting> {
+        use windows_sys::Win32::System::JobObjects::{
+            JOBOBJECT_BASIC_AND_IO_ACCOUNTING_INFORMATION, JobObjectBasicAndIoAccountingInformation, QueryInformationJobObject,
+        };
+        // SAFETY: `info` is a plain-data struct the call fills in, and the size passed is its size; the handle is only read.
+        unsafe {
+            let mut info: JOBOBJECT_BASIC_AND_IO_ACCOUNTING_INFORMATION = std::mem::zeroed();
+            let ok = QueryInformationJobObject(
+                job as _,
+                JobObjectBasicAndIoAccountingInformation,
+                (&mut info as *mut JOBOBJECT_BASIC_AND_IO_ACCOUNTING_INFORMATION).cast(),
+                std::mem::size_of::<JOBOBJECT_BASIC_AND_IO_ACCOUNTING_INFORMATION>() as u32,
+                std::ptr::null_mut(),
+            );
+            if ok == 0 {
+                return Err(io::Error::last_os_error());
+            }
+            // The times are in 100-nanosecond units.
+            let ticks = info.BasicInfo.TotalUserTime.saturating_add(info.BasicInfo.TotalKernelTime).max(0) as u64;
+            Ok(super::JobAccounting {
+                processes: info.BasicInfo.TotalProcesses,
+                cpu_seconds: ticks as f64 / 1e7,
+                written_bytes: info.IoInfo.WriteTransferCount,
+            })
+        }
+    }
+
+    /// Whether Windows names a full-screen, Direct3D, presentation or store app in front (the states the tray reads, R191);
+    /// false when Windows does not say. A borderless game is not seen here.
+    pub fn full_screen_in_front() -> bool {
+        use windows_sys::Win32::UI::Shell::{
+            QUNS_APP, QUNS_BUSY, QUNS_PRESENTATION_MODE, QUNS_RUNNING_D3D_FULL_SCREEN, SHQueryUserNotificationState,
+        };
+        let mut state = 0;
+        // SAFETY: the call only writes the state into the integer it is given, which lives across it.
+        let ok = unsafe { SHQueryUserNotificationState(&mut state) } >= 0;
+        ok && [QUNS_BUSY, QUNS_RUNNING_D3D_FULL_SCREEN, QUNS_PRESENTATION_MODE, QUNS_APP].contains(&state)
     }
 
     /// Caps the processor the job object `job` (a handle) may use at `percent` of the whole machine, as a hard cap, or lifts
