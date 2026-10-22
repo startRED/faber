@@ -415,6 +415,8 @@ struct Core {
     browser: Option<std::sync::Arc<dyn crate::browser::Browser>>,
     /// Runs a project's checks (`crate::verify`), given by the shell; without it the tool is not offered.
     verifier: Option<std::sync::Arc<crate::verify::Verifier>>,
+    /// Whether a project's sessions start with the start card; only the token benchmark turns it off.
+    start_cards: bool,
     /// Where the catalog install of a project's agent downloads from instead of the real hosts (tests; a loopback address only).
     setup_source: Option<String>,
     /// Tests: this computer is taken to have no Node, so a tool that needs it is refused before any card.
@@ -651,6 +653,7 @@ impl Engine {
                 pr_reader,
                 browser: None,
                 verifier: None,
+                start_cards: true,
                 setup_source: None,
                 node_missing: false,
                 installs: HashMap::new(),
@@ -1629,7 +1632,7 @@ impl Core {
     /// The start card of a project's conversation (own work method), built at each session start from the project folder:
     /// the rules' facts and the decisions Faber's record says the person kept or wrote, newest (last in the file) first.
     fn start_card(&self, conv: &str) -> Option<String> {
-        let c = self.convs.get(conv).filter(|c| c.area == Area::Project)?;
+        let c = self.convs.get(conv).filter(|c| c.area == Area::Project && self.start_cards)?;
         let project = self.store.projects().into_iter().find(|p| Some(&p.id) == c.project_id.as_ref())?;
         let path = Path::new(&project.path);
         let facts = crate::project::rules::facts(path).ok()?;

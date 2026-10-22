@@ -76,6 +76,11 @@ impl Engine {
     pub fn set_verifier(&self, verifier: Arc<Verifier>) {
         self.with(|c| c.verifier = Some(verifier));
     }
+
+    /// Turns the start card of project sessions off or on (own work method); the token benchmark compares both.
+    pub fn set_start_cards(&self, on: bool) {
+        self.with(|c| c.start_cards = on);
+    }
 }
 
 /// What a verify of a conversation needs, read under the lock: the request (folder, checks, the PC's environment), how
