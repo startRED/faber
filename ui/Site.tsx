@@ -2,6 +2,7 @@ import { type Accessor, createEffect, createResource, createSignal, For, Index, 
 import { api, type Message, type ToolUse } from './api.ts';
 import { appliedLook } from './appearance.ts';
 import { Cookies, cookieProfiles } from './Cookies.tsx';
+import { openMenu } from './contextmenu.ts';
 import { Icon } from './Glyphs.tsx';
 import { t } from './i18n.ts';
 
@@ -125,7 +126,22 @@ const boxId = () => ++boxes;
 /** The page open in the running column, if any. */
 export const openedSite = opened;
 /** Opens a page in the running column, or goes back to the running list. */
-export const showSite = (site?: OpenSite) => setOpened(site);
+export const showSite = (site?: OpenSite) => {
+  setOpened(site);
+  if (!site) setWide(false);
+};
+
+const [wide, setWide] = createSignal(false);
+// Where each opened page is now, by the card's conversation and address: widening the column draws the pane again, and the
+// page it shows has not moved meanwhile.
+const lives = new Map<string, string>();
+/** The page fills the work area over the conversation instead of sitting in the column, as an opened subagent can. */
+export const siteWide = wide;
+export const toggleSiteWide = () => setWide((on) => !on);
+
+type Screen = 'pc' | 'mac' | 'tablet' | 'phone';
+/** The screen sizes the pane can draw its pages at (the agent's own list) and the one in use; none is the pane's own. */
+type Sizes = { now: string | null; sizes: { name: string; screen: Screen; width: number; height: number }[] };
 
 /** What on a page only the person does (`engine/src/browser.rs`, `Turn`), and the words the card says it with. */
 const TURNS = { 'a login': 'site.turn.login', 'a captcha': 'site.turn.captcha', 'a payment': 'site.turn.payment' } as const;
@@ -357,12 +373,17 @@ export function covered(box: HTMLElement): boolean {
 /** The page in the right column: Faber's browser sits over this box, measured here, and leaves when the box goes. Every
  * move of the box moves it, and it is placed again whenever the window changes size. The address field above it takes
  * the person anywhere on the web; with no page yet, only the field shows. */
-export function SitePane(props: { site: OpenSite; onClose: () => void }) {
+export function SitePane(props: { site: OpenSite; onClose: () => void; wide?: boolean; onWide?: () => void }) {
   let box: HTMLDivElement | undefined;
   // The shell never places a box again once it let the page go, so coming back from a step of the log takes a new one.
   let id = boxId();
   // Where the page is now: a link or a redirect moves it off the card's site, and the head then names the new one.
-  const [live, setLive] = createSignal(props.site.url);
+  const liveKey = () => `${props.site.conversationId} ${props.site.url}`;
+  const [live, setLiveNow] = createSignal(lives.get(liveKey()) ?? props.site.url);
+  const setLive = (url: string) => {
+    lives.set(liveKey(), url);
+    setLiveNow(url);
+  };
   const stop = api.onSite(setLive);
   onCleanup(() => void stop.then((unlisten) => unlisten()).catch(() => {}));
   const place = () => {
@@ -437,6 +458,8 @@ export function SitePane(props: { site: OpenSite; onClose: () => void }) {
         if (gone) return void api.sitePark(id);
         id = boxId();
         place();
+        // The agent may have picked another screen size while the page was out of sight.
+        void readSizes();
       },
       { defer: true },
     ),
@@ -476,6 +499,21 @@ export function SitePane(props: { site: OpenSite; onClose: () => void }) {
     if (blank() || hostOf(to) !== hostOf(props.site.url)) showSite({ conversationId: props.site.conversationId, url: to, title: '' });
   };
   const [profiles] = createResource(cookieProfiles);
+  // The screen size the page is drawn at, shrunk to fit the box: the agent may change it too, so it is read again with
+  // each page.
+  const [sizes, { mutate: setSizes, refetch: readSizes }] = createResource<Sizes | undefined>(() => api.siteSize(false).catch(() => undefined));
+  createEffect(on(live, () => void readSizes(), { defer: true }));
+  const sizeWords = (name: string | null | undefined) => {
+    const size = sizes()?.sizes.find((s) => s.name === name);
+    return size ? t('site.size', { screen: t(`site.screen.${size.screen}`), width: String(size.width), height: String(size.height) }) : t('site.size.own');
+  };
+  const pickSize = async (name: string | null) => setSizes((await api.siteSize(true, name).catch(() => undefined)) ?? sizes());
+  const sizeMenu = (e: MouseEvent) =>
+    openMenu(e, [null, ...(sizes()?.sizes.map((s) => s.name) ?? [])].map((name) => ({
+      id: name ?? 'own',
+      label: `${sizes()?.now === name ? '✓ ' : ''}${sizeWords(name)}`,
+      run: () => void pickSize(name),
+    })), e.currentTarget as HTMLElement);
   const [signingIn, setSigningIn] = createSignal(false);
   const addressKeys = (e: KeyboardEvent) => {
     if (e.key === 'Enter') {
@@ -490,10 +528,15 @@ export function SitePane(props: { site: OpenSite; onClose: () => void }) {
   };
   return (
     <>
-      <div class="rc-head side-head">
+      <div class="rc-head side-head site-head">
         <h2 id="running-title" class="display" title={live()}>
           {title()}
         </h2>
+        <Show when={props.onWide}>
+          <button class="iconbtn site-wide" aria-label={t(props.wide ? 'agent.narrow' : 'site.widen')} title={t(props.wide ? 'agent.narrow' : 'site.widen')} onClick={() => props.onWide!()}>
+            <Icon name={props.wide ? 'shrink' : 'expand'} />
+          </button>
+        </Show>
         <button class="iconbtn" aria-label={t('run.close')} title={t('run.close')} onClick={() => props.onClose()}>
           <Icon name="close" />
         </button>
@@ -527,6 +570,13 @@ export function SitePane(props: { site: OpenSite; onClose: () => void }) {
         <Show when={!blank()}>
           <button class="iconbtn site-external" aria-label={t('site.external')} title={t('site.external')} onClick={() => void api.openLink(live()).catch(() => {})}>
             <Icon name="external" />
+          </button>
+        </Show>
+        {/* The screen the page is drawn at, for the person and the agent alike: a PC, a MacBook, a tablet or a phone. */}
+        <Show when={!blank() && sizes()?.sizes.length}>
+          <button class="btn ghost site-size" aria-haspopup="menu" aria-label={t('site.screenSize', { size: sizeWords(sizes()?.now) })} title={t('site.screenSize', { size: sizeWords(sizes()?.now) })} onClick={sizeMenu}>
+            <Icon name="monitor" small />
+            <span>{sizes()?.now ? sizes()!.now!.replace('x', '×') : t('site.size.fit')}</span>
           </button>
         </Show>
         {/* The person's own sign-ins, from their Firefox, for this conversation's pages: only where a profile exists. */}

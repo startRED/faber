@@ -909,6 +909,9 @@ export const api = {
   /** The page's corners: the box's radius over the colour of the card around it, as red, green and blue. */
   siteRound: (radius: number, color: [number, number, number]) => invoke<void>('site_round', { radius, color }),
   sitePark: (boxId: number) => invoke<void>('site_park', { load: LOAD, boxId }),
+  /** The screen sizes the pane can draw at and the one in use (none: the pane's own); with `pick`, `size` becomes it. */
+  siteSize: (pick: boolean, size?: string | null) =>
+    invoke<{ now: string | null; sizes: { name: string; screen: 'pc' | 'mac' | 'tablet' | 'phone'; width: number; height: number }[] }>('site_size', { pick, size: size ?? null }),
   siteOpen: (id: string, url: string) => invoke<boolean>('site_open', { id, url }),
   /** Back, forward or reload in Faber's browser, on that conversation's page only. */
   siteStep: (id: string, step: 'back' | 'forward' | 'reload') => invoke<boolean>('site_step', { id, step }),

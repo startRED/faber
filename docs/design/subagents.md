@@ -59,6 +59,11 @@ helper tool existed keeps its Codex thread without it, since Codex takes dynamic
 
 ### Pages in Faber's browser
 
+The page's head has an expand button, the subagent's own: the page fills the work area over the conversation, the composer
+below, and the same button (then "Back to the side column") returns it. Its bar names the screen size the page is drawn at,
+"Panel" or the size in figures, a quiet ghost button opening the right-click menu's list of sizes; a desktop size is drawn
+whole and shrunk to fit the box, so 1920×1080 in a 560 px column shows the full page small.
+
 A page a project's agent opened in Faber's browser (R161 step 7) is a card among the reply's files, in the file card's
 surface: the picture the browser took of the page's top (a 16:10 crop at most 480 px wide, the page loaded at 1280 by 800
 and drawn at 0.375), then the page's title over its site in the third ink, both ellipsized, and "See the page". The

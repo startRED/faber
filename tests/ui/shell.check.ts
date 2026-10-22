@@ -17,10 +17,11 @@ check('layout: a dragged width keeps the stage 440 px wide, and what storage hol
   equal(limitsOf('side', 1100, 288, true).max, 1100 - RUN.min - STAGE_MIN, 'at 1,100 px the sidebar leaves the docked column and the stage their minimums');
   equal(limitsOf('side', 1100, 288, false).max, SIDE.max, 'with the column over the stage it has its whole range');
   // The docked column gives up room before the stage does; over the stage it may take all of its range.
-  equal(limitsOf('run', 1280, 248, true).max, RUN.max);
+  equal(limitsOf('run', 1280, 248, true).max, 1280 - 248 - STAGE_MIN, 'a docked column may take everything but the stage minimum');
+  equal(limitsOf('run', 1920, 288, true).max, 1920 - 288 - STAGE_MIN, 'far past the usual 560 px on a wide window');
   equal(limitsOf('run', 1100, 360, true).max, 1100 - 360 - STAGE_MIN);
   equal(limitsOf('run', 1000, 360, true).max, RUN.min, 'never under its own minimum');
-  equal(limitsOf('run', 1000, 360, false).max, RUN.max);
+  equal(limitsOf('run', 1000, 360, false).max, 1000, 'over the stage it may take the whole window, no more');
   equal(fit(5000, SIDE), 420);
   equal(fit(10, SIDE), 200);
   equal(fit(250.6, SIDE), 251);

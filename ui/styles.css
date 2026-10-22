@@ -650,6 +650,12 @@ details.thinking div { white-space: pre-wrap; padding: 6px 0 0 12px; border-left
 .cookies-kind { flex: none; padding: 1px 8px; color: var(--amber-ink); font-size: var(--fs-sm); background: var(--amber-soft); border-radius: var(--r-pill); }
 /* The address field of Faber's browser, under the head: where the page is, and where the person goes next. */
 .site-bar { display: flex; align-items: center; gap: 4px; padding: 0 12px 8px 18px; }
+/* The screen the page is drawn at: its size in figures, or Panel for the pane's own. */
+.site-size { flex: none; gap: 6px; padding-inline: 8px; color: var(--ink-3); font-variant-numeric: tabular-nums; }
+.site-head .iconbtn + .iconbtn { margin-left: 0; }
+/* Over the work area the page takes all of it: no reading-column margins, as a subagent's thread has. */
+.runcol.wide .site-head { padding-inline: 18px 12px; }
+.runcol.wide .site-body { padding-inline: 12px; }
 .field.site-address { flex: 1; min-width: 0; max-width: none; height: var(--h-sm); padding: 0 10px; font-family: var(--font-data); font-size: var(--fs-xs); }
 .site-bar + .bad { margin: 0 18px 8px; }
 /* A step of the log stands in for the live page: the picture the browser took after it, from the page's top. */

@@ -23,14 +23,14 @@ inside its own area.
 The numbers above are the usual widths. The person can change them, and the shell keeps what they choose (R211).
 
 - **Edges.** The sidebar's right edge and the running column's left edge are separators (`role="separator"`, focusable).
-  A drag moves them between 200 and 420 px (sidebar, 288 by default, as Claude Desktop opens its own) and 300 and 560 px (column). While the column is docked beside the stage, the sidebar
+  A drag moves them between 200 and 420 px (sidebar, 288 by default, as Claude Desktop opens its own) and from 300 px to as wide as the window lets it (column: a docked one leaves the stage 440 px; one over the stage, the work area). While the column is docked beside the stage, the sidebar
   leaves the column and the stage their minimums (360 px at most in a 1,100 px window). A docked column also leaves the stage 440 px:
   the stylesheet clamps it with the same numbers, so a window that shrinks after a drag is right before any script runs.
   Only a short rounded grip appears on hover (after the fast duration, so crossing the edge flashes nothing): on the frame's side of the
   sidebar's edge and just inside the column's, never a line the window's height. It brightens while dragged, is accent when
   focused, and its name is its tooltip. The arrow keys move an edge 16 px (48 with Shift), Home and End go to its limits, a double
   click or Enter glides it back to the usual width. The sidebar has no edge below 900 px, where it is an overlay.
-- **The column's usual width follows the window** (`autoRun`): the window less the sidebar less 800 px, 360 to 560 px. A
+- **The column's usual width follows the window** (`autoRun`): the window less the sidebar less 800 px, 360 to 560 px (`RUN_USUAL`); only a drag takes it wider. A
   drag ending on it, a double click or Enter goes back to following. A subagent can fill the stage ([subagents.md](subagents.md)).
 - **How a drag stays light.** The pointer events of the window (listened to only while dragging) set `--side-w` and `--run-w` on the
   shell once per frame; nothing is measured and no state changes until the drag ends, when the width is stored (`faber.layout`)

@@ -54,7 +54,7 @@ import { Running } from './Running.tsx';
 import { openedDetails, showDetails } from './Details.tsx';
 import { agentWide, openedAgent, showAgent, startMessage, toggleAgentWide } from './AgentChat.tsx';
 import { openedVisual, showVisual } from './VisualAnswer.tsx';
-import { openedSite, showSite, sitesOf } from './Site.tsx';
+import { openedSite, showSite, siteWide, sitesOf, toggleSiteWide } from './Site.tsx';
 import { openedFile, showFile } from './fileref.ts';
 import { answered, btw, heardAsides, openedAside, showAside } from './QuickQuestion.tsx';
 import { agentSteps, helpersAtWork } from './worklog.ts';
@@ -436,7 +436,8 @@ export function App(props: { initial: AppState; update?: UpdateStatus; inbox: { 
   const autoWidth = () => fit(autoRun(win(), sideWidth()), runLimits());
   const runWidth = () => fit(widths().run ?? autoRun(win(), sideWidth()), runLimits());
   // An opened subagent can fill the stage as a full thread (R161 step 3): the column then sits over the work area, not beside it.
-  const wide = () => !!sideAgent() && agentWide();
+  // An opened subagent or a page of Faber's browser may fill the work area instead of the column.
+  const wide = () => (!!sideAgent() && agentWide()) || (!!sideSite() && siteWide());
   const trapped = () => colShown() && byUser() && !docked() && !wide();
   let column: HTMLElement | undefined;
   let runButton: HTMLButtonElement | undefined;
@@ -1259,9 +1260,10 @@ export function App(props: { initial: AppState; update?: UpdateStatus; inbox: { 
       }}
       wide={wide()}
       onWide={() => {
-        toggleAgentWide();
+        if (sideSite()) toggleSiteWide();
+        else toggleAgentWide();
         // The column is drawn again where it now sits: focus goes back to the button that was pressed.
-        queueMicrotask(() => column?.querySelector<HTMLElement>('.agent-wide')?.focus());
+        queueMicrotask(() => column?.querySelector<HTMLElement>('.agent-wide, .site-wide')?.focus());
       }}
       resize={wide() ? undefined : { value: runWidth(), limits: runLimits(), fallback: autoWidth(), onChange: (px) => setWidth('run', px === autoWidth() ? undefined : px) }}
       ref={(el) => (column = el)}

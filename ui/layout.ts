@@ -42,7 +42,11 @@ export interface Limits {
   max: number;
 }
 export const SIDE: Limits & { fallback: number } = { min: 200, max: 420, fallback: 288 };
-export const RUN: Limits = { min: 300, max: 560 };
+// The column may be dragged as wide as the window lets it (a page in Faber's browser reads best wide): only the stage's
+// minimum beside a docked column, and the work area under one over the stage, hold it back.
+export const RUN: Limits = { min: 300, max: 4000 };
+/** The widest the column opens by itself, before anyone drags it. */
+export const RUN_USUAL = 560;
 export const STAGE_MIN = 440;
 /** The reading column's width, which the running column never takes. */
 export const READING = 760;
@@ -51,14 +55,15 @@ export const READING = 760;
  * the column docks, the sidebar leaves room for the column's minimum and the stage's. */
 export function limitsOf(edge: Edge, win: number, side: number, docked: boolean): Limits {
   if (edge === 'side') return docked ? { ...SIDE, max: Math.max(SIDE.min, Math.min(SIDE.max, win - RUN.min - STAGE_MIN)) } : SIDE;
-  return { min: RUN.min, max: docked ? Math.max(RUN.min, Math.min(RUN.max, win - side - STAGE_MIN)) : RUN.max };
+  // Over the stage the column covers at most the window, whatever was dragged.
+  return { min: RUN.min, max: docked ? Math.max(RUN.min, Math.min(RUN.max, win - side - STAGE_MIN)) : Math.max(RUN.min, Math.min(RUN.max, win)) };
 }
 
 /** A width brought into its limits, in whole pixels. */
 export const fit = (px: number, { min, max }: Limits) => Math.round(Math.max(min, Math.min(max, px)));
 
 /** The running column's usual width: the room the window leaves beside the reading column and 20 px of air on each side of it, 360 to 560 px. */
-export const autoRun = (win: number, side: number) => fit(win - side - READING - 40, { min: 360, max: RUN.max });
+export const autoRun = (win: number, side: number) => fit(win - side - READING - 40, { min: 360, max: RUN_USUAL });
 
 /** The widths kept in storage, or the usual ones for anything that is not a width. */
 export function savedWidths(raw: unknown): Widths {

@@ -1039,6 +1039,26 @@ async fn site_round(app: AppHandle, radius: f64, color: [u8; 3]) {
     let _ = (app, radius, color);
 }
 
+/// The screen sizes Faber's browser can draw its pages at (`faber_engine::screens::SIZES`, the agent's own list) and the one in
+/// use, by its `1920x1080` name; none is the pane's own. With `pick`, `size` becomes the pane's first: a name not in the list
+/// (or none) is the pane's own. The agent's next calls use it too.
+#[tauri::command]
+async fn site_size(app: AppHandle, pick: bool, size: Option<String>) -> serde_json::Value {
+    let sizes: Vec<_> = faber_engine::screens::SIZES
+        .iter()
+        .map(|v| serde_json::json!({ "name": v.name(), "screen": v.screen.name(), "width": v.width, "height": v.height }))
+        .collect();
+    #[cfg(windows)]
+    if let Some(pane) = app.try_state::<Arc<pane::Pane>>().map(|p| p.inner().clone()) {
+        if pick {
+            pane.set_size(size.as_deref().and_then(faber_engine::screens::named)).await;
+        }
+        return serde_json::json!({ "now": pane.size().map(|v| v.name()), "sizes": sizes });
+    }
+    let _ = (app, pick, size);
+    serde_json::json!({ "now": null, "sizes": sizes })
+}
+
 /// The browser pane leaves the screen for the screen's box `box_id` and every older one; it keeps its page.
 #[tauri::command]
 async fn site_park(app: AppHandle, load: u32, box_id: u64) {
@@ -1553,6 +1573,7 @@ fn main() {
                 site_place,
                 site_round,
                 site_park,
+                site_size,
                 site_open,
                 site_step,
                 site_picture,

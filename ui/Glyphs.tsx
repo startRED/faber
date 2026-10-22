@@ -57,6 +57,8 @@ const PATHS = {
   // The page in the person's own browser, out of Faber.
   external: ['M15 3h6v6', 'M10 14 21 3', 'M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6'],
   globe: ['M3 12a9 9 0 1 0 18 0 9 9 0 1 0-18 0', 'M3 12h18', 'M12 3c2.5 2.6 3.8 5.6 3.8 9s-1.3 6.4-3.8 9c-2.5-2.6-3.8-5.6-3.8-9s1.3-6.4 3.8-9Z'],
+  // The screen a page of Faber's browser is drawn at.
+  monitor: ['M4 4h16a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2Z', 'M8 21h8', 'M12 17v4'],
   // The jobs of the catalog: one drawing per kind of tool, beside its name.
   bug: ['M8 10a4 4 0 0 1 8 0v4a4 4 0 0 1-8 0Z', 'M12 10v8', 'M4 13h4M16 13h4', 'm5 8 3 2M19 8l-3 2', 'm5 19 3-2M19 19l-3-2', 'M10 6 9 4M14 6l1-2'],
   flask: ['M9 3h6', 'M10 3v6l-5.5 9.5A1.7 1.7 0 0 0 6 21h12a1.7 1.7 0 0 0 1.5-2.5L14 9V3', 'M7.5 15h9'],

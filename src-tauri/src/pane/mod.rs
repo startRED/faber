@@ -79,6 +79,11 @@ fn metrics(size: &Viewport) -> (Value, Value) {
     )
 }
 
+/// How much a page drawn at `size` shrinks so all of it fits a box of `width` by `height` logical pixels; never past its real size.
+fn fit_scale(size: &Viewport, width: f64, height: f64) -> f64 {
+    (width / f64::from(size.width)).min(height / f64::from(size.height)).clamp(0.05, 1.0)
+}
+
 /// Whether the pane may load `url`: a web page, never one of Faber's own origins (nor, in a development build, the screen's
 /// own dev server).
 fn allowed(url: &Url) -> bool {
@@ -137,10 +142,16 @@ struct State {
     /// Pages Faber loaded (the agent's, or a card's) that have not finished: that many next finishes are not sites the
     /// person went to. A load that never finishes leaves one more skipped: the list can fall short, never say more.
     skip_finish: u32,
-    /// The screen size the agent chose for its pages (`Request::Size`), none for the pane's own; kept until it closes.
+    /// The screen size of the pane's pages, chosen by the agent (`Request::Size`) or the person (`set_size`), none for the
+    /// pane's own; kept until it closes. The person sees it shrunk to fit the box, the agent at its real size.
     size: Option<Viewport>,
+    /// The box the page was last placed over, in the screen's logical pixels: a screen size is fitted into it.
+    placed: Option<(f64, f64)>,
     /// The page is drawn at a size of the agent's, not the pane's: the person taking the pane gets the pane's own back.
     emulated: bool,
+    /// The size and scale the person's view was last drawn at (`show_size`), so placing the same box again sends nothing;
+    /// the agent drawing its own size, or a new page, forgets it.
+    fitted: Option<(Viewport, f64)>,
     /// The sign-ins the person brought over from their own browser, per conversation (`bring_in`), and whether this pane
     /// already has its owner's. Only in this process: never written anywhere, gone when Faber quits.
     held: Vec<Held>,
@@ -336,11 +347,20 @@ impl Pane {
                     loads.send_modify(|(started, finished)| *finished = *started);
                     // A page that finished while the person had the pane is one they went to: the agent hears its site next time.
                     if let Some(pane) = pane.upgrade() {
-                        let mut s = crate::lock(&pane.state);
-                        if s.skip_finish > 0 {
-                            s.skip_finish -= 1;
-                        } else if s.shown {
-                            went_to(&mut s.visited, payload.url());
+                        let redraw = {
+                            let mut s = crate::lock(&pane.state);
+                            if s.skip_finish > 0 {
+                                s.skip_finish -= 1;
+                            } else if s.shown {
+                                went_to(&mut s.visited, payload.url());
+                            }
+                            // A new page may have left the screen size behind (another process draws it): the person's
+                            // view is drawn at it again rather than trusted.
+                            s.fitted = None;
+                            s.size.is_some() && *pane.looking.borrow()
+                        };
+                        if redraw {
+                            tauri::async_runtime::spawn(async move { pane.show_size().await });
                         }
                     }
                     // The screen names the page it shows by where it is now, never by the card it was opened from.
@@ -393,8 +413,9 @@ impl Pane {
                     if left.is_zero() && !s.shown {
                         s.idle_watch = false;
                         s.visited.clear();
-                        // The next pane is a new page: it gets its corners again.
+                        // The next pane is a new page: it gets its corners again, and its screen size drawn again.
                         (s.rounded, s.round_script) = (None, None);
+                        (s.emulated, s.fitted) = (false, None);
                         s.brought = false;
                         Err(s.webview.take())
                     } else {
@@ -420,7 +441,7 @@ impl Pane {
             s.shown = false;
             s.reported = None;
             s.visited.clear();
-            (s.size, s.emulated) = (None, false);
+            (s.size, s.emulated, s.fitted) = (None, false, None);
             (s.rounded, s.round_script) = (None, None);
             s.brought = false;
             s.webview.take()
@@ -449,18 +470,15 @@ impl Pane {
             s.shown = true;
             s.handed_back = true;
             s.taken += 1;
+            s.placed = Some((width, height));
             self.looking.send_replace(true);
             webview.set_size(LogicalSize { width, height }).is_ok() && webview.set_position(LogicalPosition { x, y }).is_ok()
         })
         .await;
-        // The person sees the page at the pane's own size, never at a screen size the agent chose; its next call draws it so
-        // again. Under `acting`, so a check at several sizes never changes the size under their hands.
-        if placed && crate::lock(&self.state).emulated {
-            let _acting = self.acting.lock().await;
-            if self.call("Emulation.clearDeviceMetricsOverride", json!({})).await.is_ok() {
-                let _ = self.call("Emulation.setTouchEmulationEnabled", json!({ "enabled": false })).await;
-                crate::lock(&self.state).emulated = false;
-            }
+        // The person sees the page at the pane's screen size shrunk into the box, or at the box's own size when none is chosen;
+        // the agent's next call draws it at the real size again.
+        if placed {
+            self.show_size().await;
         }
         // The corners are a look: the page shows at once, and a page slow to take them never holds the placing up.
         if placed {
@@ -469,6 +487,60 @@ impl Pane {
         }
         self.touch();
         placed
+    }
+
+    /// The screen size of the pane's pages; none is the pane's own.
+    pub fn size(&self) -> Option<Viewport> {
+        crate::lock(&self.state).size
+    }
+
+    /// The person picked the screen size the pane's pages are drawn at (none: the pane's own). The agent's next calls use it too.
+    pub async fn set_size(self: &Arc<Self>, size: Option<Viewport>) {
+        crate::lock(&self.state).size = size;
+        if *self.looking.borrow() {
+            self.show_size().await;
+        }
+        self.touch();
+    }
+
+    /// Draws the page for the person: at the pane's screen size, scaled down so all of it fits the box (never up), or at the
+    /// box's own size when there is none. Under `acting`, so a check at several sizes never changes the size under their hands.
+    async fn show_size(&self) {
+        let _acting = self.acting.lock().await;
+        let (size, placed, emulated, fitted) = {
+            let s = crate::lock(&self.state);
+            (s.size, s.placed, s.emulated, s.fitted)
+        };
+        match (size, placed) {
+            (Some(size), Some((width, height))) => {
+                let scale = fit_scale(&size, width, height);
+                if emulated && fitted == Some((size, scale)) {
+                    return;
+                }
+                // Touch changes only with the size: a new scale of the same size (a drag of the column) sends one call.
+                let same_size = emulated && fitted.is_some_and(|(drawn, _)| drawn == size);
+                let (mut screen, touch) = metrics(&size);
+                screen["scale"] = json!(scale);
+                {
+                    let mut s = crate::lock(&self.state);
+                    s.emulated = true;
+                    s.fitted = None;
+                }
+                if self.call("Emulation.setDeviceMetricsOverride", screen).await.is_ok() {
+                    if !same_size {
+                        let _ = self.call("Emulation.setTouchEmulationEnabled", touch).await;
+                    }
+                    crate::lock(&self.state).fitted = Some((size, scale));
+                }
+            }
+            _ if emulated && self.call("Emulation.clearDeviceMetricsOverride", json!({})).await.is_ok() => {
+                let _ = self.call("Emulation.setTouchEmulationEnabled", json!({ "enabled": false })).await;
+                let mut s = crate::lock(&self.state);
+                s.emulated = false;
+                s.fitted = None;
+            }
+            _ => {}
+        }
     }
 
     /// The card around the pane changed its corners or colour (a look, a corner setting): the page follows.
@@ -867,10 +939,12 @@ impl Pane {
     }
 
     /// Draws the page at `size` (none: the pane's own), unless the person took the pane since the call began: under `acting`,
-    /// so their taking it waits for the change and then gets the pane's own size back (`place`).
+    /// so their taking it waits for the change and then gets their own view back (`place`).
     async fn emulate(&self, size: Option<Viewport>, taken: u64) -> Result<(), String> {
         let _acting = self.acting.lock().await;
         self.person_took_it(taken)?;
+        // The agent's drawing replaces the person's fitted one: their next look draws theirs again.
+        crate::lock(&self.state).fitted = None;
         let Some(size) = size else {
             if crate::lock(&self.state).emulated {
                 self.call("Emulation.clearDeviceMetricsOverride", json!({})).await?;
@@ -1212,6 +1286,16 @@ impl Browser for PaneBrowser {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_screen_size_the_person_picked_shrinks_to_fit_its_box_and_never_grows() {
+        let pc = faber_engine::screens::named("1920x1080").unwrap();
+        assert!((fit_scale(&pc, 960.0, 1000.0) - 0.5).abs() < 1e-9, "the width holds it back");
+        assert!((fit_scale(&pc, 1920.0, 540.0) - 0.5).abs() < 1e-9, "the height holds it back");
+        let phone = faber_engine::screens::named("390x844").unwrap();
+        assert_eq!(fit_scale(&phone, 1600.0, 1000.0), 1.0, "a small screen in a big box keeps its real size");
+        assert_eq!(fit_scale(&pc, 1.0, 1.0), 0.05, "a tiny box still draws something");
+    }
 
     #[test]
     fn the_agent_hears_the_sites_the_person_went_to_by_name_once_each_in_a_row_and_only_the_latest() {

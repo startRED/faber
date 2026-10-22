@@ -57,7 +57,7 @@ export function Running(props: {
   onCommands?: () => void;
   /** Back from an opened subagent or the commands to the list. */
   onBack?: () => void;
-  /** The open subagent fills the stage as a full thread (the column sits over the work area), and the control in its head that swaps the two. */
+  /** The open subagent or browser page fills the stage (the column sits over the work area), and the control in its head that swaps the two. */
   wide?: boolean;
   onWide?: () => void;
   /** "Tell it…" from the open subagent: the conversation's box, reached through the column. */
@@ -248,7 +248,7 @@ export function Running(props: {
           </Show>}>
             {(aside) => <QuickQuestion conversation={aside().conversation} options={aside().options} onClose={props.onClose} onTell={(text) => props.onTell?.(text)} />}
           </Show>}>
-            {(site) => <SitePane site={site()} onClose={props.onClose} />}
+            {(site) => <SitePane site={site()} onClose={props.onClose} wide={props.wide} onWide={props.onWide} />}
           </Show>
           }>{(visual) => <VisualPane answer={visual().answer} open={visual().open} onBack={() => props.onBack?.()} onClose={props.onClose} />}</Show>
         }

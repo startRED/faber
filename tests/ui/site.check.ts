@@ -6,6 +6,7 @@ import { Running } from '../../ui/Running.tsx';
 import { addressOf, appsOf, awaySites, cornersOf, covered, looksOf, openedSite, showSite, siteOf, sitesOf, stepsOf, type OpenSite } from '../../ui/Site.tsx';
 import { Thread } from '../../ui/Thread.tsx';
 import { Cookies } from '../../ui/Cookies.tsx';
+import { closeMenu, menu } from '../../ui/contextmenu.ts';
 import { check, deepEqual, equal, frames, matches, ok } from './check.ts';
 import act from '../../src-tauri/src/pane/act.js';
 
@@ -94,7 +95,9 @@ check('page in the browser: the column places Faber’s browser over its box, an
   useLanguage('en');
   const placed: number[][] = [];
   let parked = 0;
-  const [sitePlace, sitePark, onSite] = [api.sitePlace, api.sitePark, api.onSite];
+  const [siteSize, sitePlace, sitePark, onSite] = [api.siteSize, api.sitePlace, api.sitePark, api.onSite];
+  // The size button has its words before the first placing: they change the bar, so the box, once they arrive.
+  api.siteSize = async () => ({ now: null, sizes: [] });
   let boxPlaced = 0;
   let boxParked = 0;
   api.sitePlace = async (id, x, y, w, h) => ((boxPlaced = id), placed.push([x, y, w, h]), true);
@@ -182,6 +185,7 @@ check('page in the browser: the column places Faber’s browser over its box, an
     ok(boxPlaced > first, 'and the next box has a larger one');
   } finally {
     setSite(undefined);
+    api.siteSize = siteSize;
     api.sitePlace = sitePlace;
     api.sitePark = sitePark;
     api.onSite = onSite;
@@ -873,5 +877,67 @@ check('sign-ins from Firefox: the person picks the profile and the sites, and on
     Object.assign(api, saved);
     dispose();
     root.remove();
+  }
+});
+
+check('page in the browser: the person picks the screen size the page is drawn at, and can show it over the conversation', async () => {
+  useLanguage('en');
+  const [siteSize, sitePlace, sitePark, onSite] = [api.siteSize, api.sitePlace, api.sitePark, api.onSite];
+  const sizes = [{ name: '1920x1080', screen: 'pc' as const, width: 1920, height: 1080 }, { name: '390x844', screen: 'phone' as const, width: 390, height: 844 }];
+  let now: string | null = null;
+  const picks: (string | null)[] = [];
+  api.siteSize = async (pick, size) => {
+    if (pick) (picks.push(size ?? null), (now = size ?? null));
+    return { now, sizes };
+  };
+  api.sitePlace = async () => true;
+  api.sitePark = async () => {};
+  api.onSite = async () => () => {};
+  const root = document.createElement('div');
+  root.style.cssText = 'position: fixed; left: 0; top: 0; width: 480px; height: 600px; display: flex;';
+  document.body.append(root);
+  const [wide, setWide] = createSignal(false);
+  let widened = 0;
+  const dispose = render(
+    () =>
+      createComponent(Running, {
+        items: [],
+        projects: [],
+        modal: false,
+        onOpen: () => {},
+        onClose: () => {},
+        ref: () => {},
+        site: { conversationId: 'c1', url: 'https://docs.example.org/guide', title: 'The guide' },
+        get wide() {
+          return wide();
+        },
+        onWide: () => (widened++, setWide(!wide())),
+      }),
+    root,
+  );
+  try {
+    await frames(2);
+    const button = root.querySelector<HTMLButtonElement>('.site-size')!;
+    ok(button, 'the bar has the screen size');
+    equal(button.textContent?.trim(), 'Panel', 'with none chosen, the page is drawn at the panel’s own size');
+    equal(button.getAttribute('aria-label'), 'Screen size: The panel’s own size');
+    button.click();
+    const items = menu()?.items ?? [];
+    deepEqual(items.map((item) => item.label), ['✓ The panel’s own size', 'PC · 1920 × 1080', 'Phone · 390 × 844'], 'every size the agent can use, the one in use ticked');
+    items[1]!.run();
+    await frames(2);
+    deepEqual(picks, ['1920x1080'], 'the pick goes to the pane, which the agent’s next calls use too');
+    equal(button.textContent?.trim(), '1920×1080');
+    const widen = root.querySelector<HTMLButtonElement>('.site-wide')!;
+    equal(widen.getAttribute('aria-label'), 'Show the page over the conversation');
+    widen.click();
+    await frames(1);
+    equal(widened, 1);
+    equal(root.querySelector('.site-wide')?.getAttribute('aria-label'), 'Back to the side column', 'the same button brings it back');
+  } finally {
+    closeMenu();
+    dispose();
+    root.remove();
+    Object.assign(api, { siteSize, sitePlace, sitePark, onSite });
   }
 });
