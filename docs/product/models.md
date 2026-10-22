@@ -46,7 +46,20 @@ name. Auto aims to pick a model that does the task well, without waste and quick
 - An answer whose last check failed, or whose code changed with nothing checking it, offers one step up: the same
   model one effort higher, else the next model at medium. It runs as a new branch, so a conversation's model and effort
   never change (done, `engine/src/nudge.rs`).
-- **Still to build.** The table learns from what the user approves or redoes.
+- **The table learns from what the person retries and keeps** (done, `engine/src/auto_learned.rs`; the owner said yes, with a
+  notice). Only two things count, and only for a conversation's first answer, the one Auto itself picked (later answers keep
+  its model): a retry of a finished Auto answer (the same request asked again) says the pick was not good enough, and
+  counts twice when it takes the step up above; the next message of that conversation says the answer was kept. An edited request is a new request, a stopped answer may only have been slow, and a failed check is Faber's own
+  reading that the person has not judged, so none of them counts, nor does a retry on a model picked by hand that is
+  weaker than the one that answered. Per kind of task, over the last ten answers: three retry points that are at least half
+  of them lift the kind one rung of the table's ladder (the next level's bar), and eight kept answers in a row bring it
+  back down; a kind not marked for 60 days is forgotten. The lift only picks from what the table already may pick (models
+  the account lists, vendors the gate admits), never from a vendor with a window past 90% or running fast (four times its daily
+  line or more), and inside the time cap of a step up; when the quota already spoke (a step up, fast or low note) the table's pick stands, so the total is never more than one rung over the table and a shown change always says it is learned; otherwise the table's pick stands too. Rule 3 holds: it applies only to the
+  first message of a conversation, never to a conversation under way. It lives in `auto-learned.json` in the data folder,
+  never leaves the PC, and a missing or damaged file means nothing learned. The answer says so in its pace line ("Auto
+  chose a stronger model here because you often retry this kind of task"), and Settings > Accounts and limits has an
+  "Auto" card with one "What Auto learned" row and a Forget button.
 - **Quota pacing** (built; [spec](../superpowers/specs/2026-10-11-auto-quota-pacing-design.md)). Auto
   reads each window against its reset time, the weekday and the plan (detected at start and watched while open, on a
   shared account), and spends quota that would expire on quality: one rung up when a vendor has spare quota.

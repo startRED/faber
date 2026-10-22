@@ -560,6 +560,11 @@ async fn warm(faber: State<'_, Faber>, req: WarmRequest) -> Res<()> {
 }
 
 #[tauri::command]
+async fn forget_auto_learned(faber: State<'_, Faber>) -> Res<()> {
+    faber.engine.forget_auto_learned()
+}
+
+#[tauri::command]
 async fn route_draft(faber: State<'_, Faber>, req: WarmRequest, text: String) -> Res<()> {
     faber.engine.route_draft(req, text);
     Ok(())
@@ -1615,6 +1620,7 @@ fn main() {
                 move_turn,
                 wait_turn,
                 route_draft,
+                forget_auto_learned,
                 interrupt,
                 keep_going,
                 seen,

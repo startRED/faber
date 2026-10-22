@@ -441,6 +441,8 @@ struct Core {
     guess: Option<auto::Guess>,
     next_draft: Option<auto::Draft>,
     spare: Option<auto::Spare>,
+    /// What Auto learned from the answers the person redid or kept (`auto-learned.json`).
+    learned: crate::auto_learned::Learned,
     /// What Faber remembers about each vendor's quota (`budget.json`).
     ledger: Ledger,
     ledger_saved: f64,
@@ -535,6 +537,7 @@ impl Engine {
                 }
             }
         }
+        let learned = store.auto_learned();
         let owned = store.claim_budget().is_ok();
         let mut ledger = store.ledger();
         let projects_closed = !owned
@@ -584,6 +587,7 @@ impl Engine {
                 guess: None,
                 next_draft: None,
                 spare: None,
+                learned,
                 ledger,
                 ledger_saved: 0.0,
                 ledger_failed: false,
@@ -3033,7 +3037,7 @@ impl Core {
                 let verdict = tokio::time::timeout(auto::ROUTE_BUDGET, route).await.ok().and_then(|r| r.ok()).flatten();
                 if let Some(core) = me.upgrade() {
                     let mut core = core.lock().unwrap_or_else(|e| e.into_inner());
-                    let routed = verdict.and_then(|v| core.table(&v, only)).filter(|r| before.as_ref().is_none_or(|p| !r.weaker_than(p)));
+                    let routed = verdict.and_then(|v| core.table_at(&v, only, before.as_ref()));
                     core.after_route(&conv, &reply_id, routed, pick, text, images);
                 }
             });
@@ -3181,6 +3185,10 @@ impl Core {
             m.model = pick.model.clone();
             m.effort = Some(pick.effort.clone());
             m.wait_until = None;
+            // A model re-picked by recovery is not the one learning lifted: its note goes, or becomes the quota's.
+            if m.pace.as_ref().is_some_and(|p| p.kind == "learned") {
+                m.pace = pick.pace.clone();
+            }
             if m.reason.as_deref() == Some("reason.waiting") {
                 m.reason = Some(pick.reason.clone());
             }
@@ -3925,7 +3933,7 @@ impl Core {
                     let mut core = core.lock().unwrap_or_else(|e| e.into_inner());
                     // The table runs now, on the quota of this moment, not on the quota the user saw while typing. A
                     // conversation under way only moves up.
-                    let routed = verdict.and_then(|v| core.table(&v, only)).filter(|r| before.as_ref().is_none_or(|p| !r.weaker_than(p)));
+                    let routed = verdict.and_then(|v| core.table_at(&v, only, before.as_ref()));
                     core.after_route(&conv, &reply_id, routed, pick, text, images);
                 }
             });
@@ -4003,6 +4011,11 @@ impl Core {
         // The resend carries what the selected message carried: its images and attached files. A chat workspace copy already
         // holds the files, so they are taken out of it and saved again under the same names by the send.
         let picked = &source.messages[at];
+        // Counted once the resend is accepted (a retry refused for no subscription or an install running teaches nothing). The
+        // route runs later, in a task that needs the lock this call holds, so the retry that completes a habit still gets the
+        // stronger pick.
+        let lesson = (picked.role == Role::User && source.messages.get(at + 1).is_some_and(|m| m.role == Role::Assistant))
+            .then(|| (at == 0 && req.text == picked.text, req.choice.clone()));
         // Retry keeps research approval metadata, without treating edited prompts or ordinary plan retries as research.
         let wake = picked.wake.clone().filter(|_| {
             req.text == picked.text && research::phase(&source.messages[..=at], Permissions::Ask) == Some(crate::persona::Research::Report)
@@ -4023,7 +4036,7 @@ impl Core {
             })
             .collect();
         self.save(&id);
-        self.send(
+        let sent = self.send(
             SendRequest {
                 conversation_id: Some(id),
                 area: source.area,
@@ -4034,7 +4047,13 @@ impl Core {
                 choice: req.choice,
             },
             wake,
-        )
+        );
+        if sent.is_ok()
+            && let Some((again, choice)) = lesson
+        {
+            self.learn_from_redo(&source.messages[at + 1], again, &choice);
+        }
+        sent
     }
 
     // Starts the CLI before the user finishes typing, so the first word arrives sooner.

@@ -1,6 +1,6 @@
 import { createSignal, For, onCleanup, onMount, Show } from 'solid-js';
 import { api, type CheckResult, type Vendor, type VendorUsage } from './api.ts';
-import { Fold } from './controls.tsx';
+import { Fold, Group, Opt } from './controls.tsx';
 import { VendorMark } from './Glyphs.tsx';
 import { fromEngine, lang, money, percent, t } from './i18n.ts';
 import { vendorName } from './models.ts';
@@ -45,6 +45,47 @@ function PlanAsk(props: { vendor: Vendor }) {
         <p class="note err">{error()}</p>
       </Show>
     </>
+  );
+}
+
+/** "What Auto learned": the one way back from what Auto took from the answers retried or kept on this PC. It sits with the
+ * limits because Auto's picks follow them, and Auto has no section of its own. */
+function ForgetLearned() {
+  const [done, setDone] = createSignal(false);
+  const [pending, setPending] = createSignal(false);
+  const [error, setError] = createSignal<string>();
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  onCleanup(() => clearTimeout(timer));
+  return (
+    <Group title={t('model.auto')}>
+      <Opt id="set-auto-learned" label={t('set.autoLearned')} hint={t('set.autoLearned.line')} more={t('set.autoLearned.more')}>
+        <button
+          type="button"
+          class="btn"
+          disabled={done() || pending()}
+          onClick={() => {
+            setError(undefined);
+            setPending(true);
+            void api
+              .forgetAutoLearned()
+              .then(
+                () => {
+                  setDone(true);
+                  timer = setTimeout(() => setDone(false), 2500);
+                },
+                (err: unknown) => setError(fromEngine(String(err))),
+              )
+              .finally(() => setPending(false));
+          }}
+        >
+          {done() ? t('set.autoLearned.forgotten') : t('set.autoLearned.forget')}
+        </button>
+        <span class="sr-only" role="status" aria-live="polite">{done() ? t('set.autoLearned.forgotten') : ''}</span>
+      </Opt>
+      <Show when={error()}>
+        <p class="note err" role="alert">{error()}</p>
+      </Show>
+    </Group>
   );
 }
 
@@ -175,6 +216,7 @@ export function AccountsSection(props: { vendors: Vendor[]; quotas: Quotas; usag
       <For each={VENDORS}>
         {(v) => <Card vendor={v} check={checks()[v]} shown={props.vendors.includes(v)} quotas={props.quotas} usage={props.usage} now={props.now} />}
       </For>
+      <ForgetLearned />
     </>
   );
 }

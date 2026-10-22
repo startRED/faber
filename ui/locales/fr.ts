@@ -1067,6 +1067,11 @@ export const fr: Messages = {
   'set.replyStyle': "Style des réponses",
   'set.replyStyle.line': "Dès le prochain message, dans Chat et Projets.",
   'set.replyStyle.more': "Choisissez comment les deux IA répondent. Votre texte peut contenir jusqu’à 400 caractères et reste enregistré quand vous changez de style. Une réponse en cours garde son style.",
+  'set.autoLearned': "Ce qu’Auto a appris",
+  'set.autoLearned.line': "Gardé sur ce PC seulement. Oubliez-le pour revenir aux choix habituels d’Auto.",
+  'set.autoLearned.more': "Quand vous réessayez sans cesse les réponses d’un type de tâche, Auto commence ce type un niveau plus haut dans les nouvelles conversations, et revient quand vous gardez ses réponses. La réponse le signale. Rien ne quitte ce PC.",
+  'set.autoLearned.forget': "Oublier",
+  'set.autoLearned.forgotten': "Oublié",
   'set.replyStyle.default': "Au choix de l’IA",
   'set.replyStyle.short': "Court",
   'set.replyStyle.explained': "Avec des explications",
@@ -1468,6 +1473,7 @@ export const fr: Messages = {
   "reason.pace.step": "Un niveau au-dessus : {vendor} a du quota disponible.",
   "reason.pace.fast": "{vendor} est utilisé rapidement cette semaine ; Auto a utilisé {other} pour l’économiser.",
   "reason.pace.low": "{vendor} approche de sa limite ; Auto a utilisé {other} à la place.",
+  "reason.pace.learned": "Auto a choisi ici un modèle plus fort, car vous réessayez souvent ce type de tâche.",
   "run.waiting": "En attente de quota jusqu’à {when}",
   "quota.credits.offer": "Utiliser des crédits payants pour ce message",
   "quota.credits.confirm": "Ce message utilisera les crédits payants de votre compte {vendor}. Envoyer ?",
@@ -1636,6 +1642,7 @@ export const fr: Messages = {
   "error.journal.badId": "L'identifiant du projet n'est pas valide.",
   // Native speaker must translate (needs native review).
   "error.store.write": "Les modifications n'ont pas pu être enregistrées. Rien n'a été approuvé.",
+  "error.autoLearned.forget": "Auto l'a oublié pour l'instant, mais n'a pas pu l'écrire sur le disque. Cela peut revenir après un redémarrage.",
   // Native speaker must translate (needs native review).
   "error.store.read": "Les enregistrements sauvegardés n'ont pas pu être lus.",
   // Native speaker must translate (needs native review).
@@ -1925,6 +1932,7 @@ export const fr: Messages = {
   'notes.179.better': 'Dans le Catalogue, chaque carte a un dessin, son bouton Installer, son interrupteur et son lien source ; sélectionnez-en plusieurs pour les changer ensemble.',
   'notes.180.better': 'Le navigateur de Faber s’élargit désormais jusqu’à la largeur de la fenêtre, peut occuper la zone de la conversation et montre la page en taille PC, MacBook, tablette ou téléphone.',
   'notes.181.new': 'Une nouvelle conversation coûte bien moins cher si vous avez beaucoup de serveurs d’outils : leurs outils ne se chargent que quand la conversation en a besoin.',
+  'notes.182.new': 'Auto démarre sur un modèle plus fort une tâche que vous recommencez souvent, et le dit, en apprenant seulement sur ce PC. Les Réglages permettent de lui faire oublier.',
   'update.checking': 'Recherche d’une mise à jour…',
   'update.downloading': 'Téléchargement de la mise à jour…',
   'update.downloadingPercent': 'Téléchargement de la mise à jour… {percent} %',

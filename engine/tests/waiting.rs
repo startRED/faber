@@ -705,3 +705,38 @@ async fn a_quota_recovery_keeps_the_blind_quality_floor_of_the_original_verdict(
     assert_eq!(flag("--effort").as_deref(), Some("high"), "blind code keeps its step up after the move");
     r.engine.shutdown();
 }
+
+#[tokio::test]
+async fn a_lifted_pick_that_runs_out_of_quota_is_re_picked_and_the_answer_no_longer_says_learned() {
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::write(dir.path().join("auto-learned.json"), format!(r#"{{"kinds":{{"code":{{"marks":[],"lifted":true,"at":{WHEN}}}}}}}"#))
+        .unwrap();
+    // Codex runs out of quota right after the turn starts, so recovery moves the answer to Claude.
+    let mut codex = fixture("codex", "chat");
+    let end = codex.iter().position(|e| e.msg["method"] == "turn/completed").unwrap();
+    let start = codex.iter().position(|e| e.msg["method"] == "item/started").unwrap();
+    let mut done = codex[end].clone();
+    done.msg["params"]["turn"]["status"] = json!("failed");
+    done.msg["params"]["turn"]["error"] = json!({"message":"usage limit reached"});
+    codex.truncate(start);
+    codex.push(done);
+    let r = asking(
+        dir.path(),
+        &Vendor::ALL,
+        fake(fixture("claude", "chat")),
+        fake(codex),
+        r#"{"kind":"code","difficulty":"medium","check":"blind","confidence":0.95}"#,
+    );
+    let id = r.engine.send(request(None, "auto")).unwrap();
+    for _ in 0..300 {
+        if !r.claude.args.lock().unwrap().is_empty() {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(20)).await;
+    }
+    let m = r.engine.open(&id).unwrap().messages.last().unwrap().clone();
+    assert!(!r.codex.args.lock().unwrap().is_empty(), "the lifted pick started at Codex");
+    assert!(!r.claude.args.lock().unwrap().is_empty(), "recovery moved the turn to Claude");
+    assert!(m.pace.as_ref().is_none_or(|p| p.kind != "learned"), "{:?}", m.pace);
+    r.engine.shutdown();
+}

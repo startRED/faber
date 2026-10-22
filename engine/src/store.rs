@@ -122,6 +122,7 @@ pub struct Store {
     settings: PathBuf,
     recents: PathBuf,
     budget: PathBuf,
+    auto_learned: PathBuf,
     cache_health: PathBuf,
     disk: Arc<dyn Disk>,
     budget_owner: Option<fs::File>,
@@ -162,6 +163,7 @@ impl Store {
             settings: data_dir.join("settings.json"),
             recents: data_dir.join("recents.json"),
             budget: data_dir.join("budget.json"),
+            auto_learned: data_dir.join("auto-learned.json"),
             disk,
             budget_owner: None,
             owner_required: false,
@@ -527,6 +529,17 @@ impl Store {
             return Err(Fault::Corrupt);
         }
         Ok(ledger)
+    }
+
+    /// What Auto learned from the person's redone and kept answers. A missing, damaged or unreadable file is nothing learned: it
+    /// only holds a nudge, and learning starts again.
+    pub fn auto_learned(&self) -> crate::auto_learned::Learned {
+        let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_secs());
+        read::<crate::auto_learned::Learned>(&self.auto_learned).unwrap_or_default().sanitized(now)
+    }
+
+    pub fn save_auto_learned(&self, learned: &crate::auto_learned::Learned) -> Result<(), Fault> {
+        self.write(&self.auto_learned, learned)
     }
 
     /// Compact on purpose: it is rewritten often and a person never has to read it.

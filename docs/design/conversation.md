@@ -9,7 +9,7 @@ above an answer. The window widths, the sidebar and the running column are in [l
 - Native visual pieces, HTML/SVG cards and their web-access rules are in [visual-answers.md](visual-answers.md).
 - The header is the vendor's mark, the model's name and its effort in the quiet header ink ("· high effort"; the owner,
   2026-10-17), nothing else (Auto shows its reason beside the name only while it is still choosing). Auto's reason is its
-  tooltip. The pace line stays (C002). A wait for quota is told once,
+  tooltip. The pace line stays (C002); it also says, in the same calm words, when Auto started a conversation one rung up because the person often retries that kind of task ("Auto chose a stronger model here because you often retry this kind of task"), only when that changed the pick. A wait for quota is told once,
   by the quota card, never also in the header or the red note.
 - Under the answer, one line that never wraps, at a 760 px column or a 720 px window: four icon buttons from
   `ui/Glyphs.tsx` (copy, read aloud, retry, open in terminal, each with a tooltip and an accessible name), a short

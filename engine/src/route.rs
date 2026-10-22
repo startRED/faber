@@ -94,7 +94,7 @@ pub struct Routed {
     pub confidence: f64,
     /// What the table compared for the pick: cost x weight x quota factor. Kept for tests and logs.
     pub price: f64,
-    /// Set only when the quota changed the pick (see `choose_paced`).
+    /// Set only when the quota changed the pick (see `choose_paced`), or when what the person redid did (see `lifted`).
     pub pace: Option<PaceNote>,
 }
 
@@ -301,4 +301,28 @@ pub fn choose_paced(
         None
     };
     Some(Routed { profile, kind, difficulty, check, confidence, price, pace })
+}
+
+/// What the person's own redoing adds to the table's pick: for a kind of task they keep redoing (`auto_learned`), one rung up.
+/// The rung is the next level's bar (`LADDER`), bought only where a plan limit, a vendor's pace and the time cap of the step up
+/// already allow it, never from a vendor running fast (`LOW_M`: four times its daily line or more), and only from `candidates`, which are what the
+/// account can run and the gate admits. When no such candidate exists, or the quota already spoke (`pace` is a `step`, `fast` or `low`),
+/// the table's pick stands: the total is one rung over the table, never two, and a shown change always says it is learned.
+pub fn lifted(base: Routed, candidates: &[Profile], factor: &dyn Fn(&Profile) -> Factor) -> Routed {
+    if base.pace.is_some() {
+        return base;
+    }
+    let level = level_of(base.kind, base.difficulty, base.check, base.confidence);
+    let Some(up) = LADDER.iter().position(|l| *l == level).and_then(|at| LADDER.get(at + 1)) else { return base };
+    let (cap, here) = (cap_secs(base.kind, level), (base.profile.iq, base.profile.agent));
+    let room: Vec<Profile> = candidates
+        .iter()
+        .filter(|p| {
+            let f = factor(p);
+            (p.iq, p.agent) > here && p.secs <= cap && f.step_ok && f.m < LOW_M
+        })
+        .copied()
+        .collect();
+    let Some((profile, price, _)) = cheapest(base.kind, up, &room, factor, false) else { return base };
+    Routed { profile, price, pace: Some(PaceNote { kind: "learned".into(), vendor: profile.vendor }), ..base }
 }

@@ -1089,11 +1089,12 @@ pub struct QuotaReading {
     pub resets_at: f64,
 }
 
-/// Why the quota changed the pick of Auto, shown under the model name.
+/// Why something other than the table alone changed the pick of Auto, shown under the model name.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct PaceNote {
     /// `step` (one rung up, bought with quota that would expire), `fast` (moved away from a vendor that is being used faster than
-    /// its daily line) or `low` (moved away from a vendor that is really near its limit).
+    /// its daily line), `low` (moved away from a vendor that is really near its limit) or `learned` (one rung up because the person
+    /// often redoes this kind of task, `auto_learned`).
     pub kind: String,
     pub vendor: Vendor,
 }

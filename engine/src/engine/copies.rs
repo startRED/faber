@@ -52,7 +52,20 @@ impl Engine {
     /// Sends a message. A project conversation's copy is made after the message is recorded, away from the lock, and the
     /// answer starts once it is there (`Core::hold_for_copy`), so the screen never waits for git.
     pub fn send(&self, req: SendRequest) -> Result<String, String> {
-        self.with(|c| c.send(req, None))
+        self.with(|c| {
+            let kept = c.kept_kind(&req);
+            let sent = c.send(req, None);
+            if let (Ok(_), Some(kind)) = (&sent, kept) {
+                c.learn_kept(&kind);
+            }
+            sent
+        })
+    }
+
+    /// "Forget what Auto learned": every nudge Auto took from the answers this person redid or kept, here and on disk. The error
+    /// key says the file could not be written: what is in memory is forgotten, but the next start would load the old file.
+    pub fn forget_auto_learned(&self) -> Result<(), String> {
+        self.with(|c| c.forget_learned()).map_err(|_| "error.autoLearned.forget".to_string())
     }
 
     /// Edits a message or redoes an answer as a new conversation; in a project it gets a copy of its own, from the

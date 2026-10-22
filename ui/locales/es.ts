@@ -1228,6 +1228,11 @@ export const es: Messages = {
   'set.replyStyle': "Estilo de respuesta",
   'set.replyStyle.line': "Desde el próximo mensaje, en Chat y Proyectos.",
   'set.replyStyle.more': "Elige cómo responden las dos IA. Tu texto admite hasta 400 caracteres y se guarda al cambiar de estilo. Una respuesta en curso conserva su estilo.",
+  'set.autoLearned': "Lo que Auto aprendió",
+  'set.autoLearned.line': "Se guarda solo en este PC. Olvídalo para volver a las elecciones habituales de Auto.",
+  'set.autoLearned.more': "Cuando reintentas una y otra vez las respuestas de un tipo de tarea, Auto empieza ese tipo un nivel más arriba en las conversaciones nuevas, y vuelve cuando conservas sus respuestas. La respuesta avisa cuando lo hizo. Nada sale de este PC.",
+  'set.autoLearned.forget': "Olvidar",
+  'set.autoLearned.forgotten': "Olvidado",
   'set.replyStyle.default': "Como prefiera la IA",
   'set.replyStyle.short': "Breve",
   'set.replyStyle.explained': "Con explicación",
@@ -1468,6 +1473,7 @@ export const es: Messages = {
   "reason.pace.step": "Un nivel más: a {vendor} le sobra cuota.",
   "reason.pace.fast": "{vendor} se está usando rápido esta semana; Auto usó {other} para ahorrarlo.",
   "reason.pace.low": "{vendor} está cerca de su límite; Auto usó {other} en su lugar.",
+  "reason.pace.learned": "Auto eligió aquí un modelo más fuerte porque sueles reintentar este tipo de tarea.",
   "run.waiting": "Esperando cuota hasta {when}",
   "quota.credits.offer": "Usar créditos de pago para este mensaje",
   "quota.credits.confirm": "Este mensaje usará créditos de pago de tu cuenta de {vendor}. ¿Enviar?",
@@ -1636,6 +1642,7 @@ export const es: Messages = {
   "error.journal.badId": "El identificador del proyecto no es válido.",
   // Native speaker must translate (needs native review).
   "error.store.write": "No se pudieron guardar los cambios. No se aprobó nada.",
+  "error.autoLearned.forget": "Auto lo olvidó por ahora, pero no pudo guardarlo en el disco. Puede volver tras reiniciar.",
   // Native speaker must translate (needs native review).
   "error.store.read": "No se pudieron leer los registros guardados.",
   // Native speaker must translate (needs native review).
@@ -1925,6 +1932,7 @@ export const es: Messages = {
   'notes.179.better': 'En el Catálogo, cada tarjeta tiene un dibujo y su propio Instalar, interruptor y enlace de origen; selecciona varias para cambiarlas a la vez.',
   'notes.180.better': 'El navegador de Faber ahora se estira hasta el ancho de la ventana, puede ocupar el área de la conversación y muestra la página en tamaño de PC, MacBook, tableta o móvil.',
   'notes.181.new': 'Una conversación nueva cuesta mucho menos si tienes muchos servidores de herramientas: sus herramientas solo se cargan cuando la conversación las necesita.',
+  'notes.182.new': 'Auto empieza con un modelo más fuerte una tarea que repites a menudo y lo avisa, aprendiendo solo en este PC. En Ajustes puedes hacerle olvidar.',
   'update.checking': 'Buscando una actualización…',
   'update.downloading': 'Descargando actualización…',
   'update.downloadingPercent': 'Descargando actualización… {percent} %',

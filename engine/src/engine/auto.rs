@@ -2,8 +2,10 @@
 //! moment it is sent. Once a message needed more than an easy model, the conversation stays with it.
 
 use super::*;
+use crate::auto_learned::{self, Signal};
 use crate::budget::{Purpose, Shape, Snap, Why, family_of, gate};
-use crate::route::{Asked, Factor, INSTRUCTIONS, Profile, ROUTER, Routed, asked, candidates, choose_paced, question};
+use crate::route::{Asked, Factor, INSTRUCTIONS, PROFILES, Profile, ROUTER, Routed, asked, candidates, choose_paced, lifted, question};
+use crate::router::pinned;
 use tokio::sync::oneshot;
 
 /// How long a sent message may wait for its route before the everyday default answers: a timeout, not a target (Erick,
@@ -89,7 +91,20 @@ impl Core {
     /// The table's pick for the router's verdict, on the quota as it is now. Profiles the gate would refuse are not in the
     /// pool; with every multiplier and weight at 1 the pick is exactly the table without quota (`choose`).
     pub(super) fn table(&self, verdict: &Asked, only: Option<Vendor>) -> Option<Routed> {
-        self.table_for(verdict, only, false, |_| true)
+        self.table_for(verdict, only, false, false, |_| true)
+    }
+
+    /// The same pick for the first message of a conversation, one rung up for a kind of task the person keeps redoing. Only a
+    /// conversation's start learns: rule 3 lets nothing else change a model.
+    pub(super) fn table_first(&self, verdict: &Asked, only: Option<Vendor>) -> Option<Routed> {
+        self.table_for(verdict, only, false, true, |_| true)
+    }
+
+    /// The pick of a message that may be the first of its conversation (`before` is the model so far, none for the first); a
+    /// conversation under way only moves up.
+    pub(super) fn table_at(&self, verdict: &Asked, only: Option<Vendor>, before: Option<&Pick>) -> Option<Routed> {
+        let routed = if before.is_none() { self.table_first(verdict, only) } else { self.table(verdict, only) };
+        routed.filter(|r| before.is_none_or(|p| !r.weaker_than(p)))
     }
 
     pub(super) fn table_for(
@@ -97,6 +112,7 @@ impl Core {
         verdict: &Asked,
         only: Option<Vendor>,
         mission: bool,
+        learned: bool,
         eligible: impl Fn(&Profile) -> bool,
     ) -> Option<Routed> {
         let now = self.secs();
@@ -122,7 +138,52 @@ impl Core {
                 step_ok: snap.step_ok(now),
             }
         };
-        choose_paced(verdict.kind, verdict.difficulty, verdict.check, verdict.confidence, &usable, &factor)
+        let routed = choose_paced(verdict.kind, verdict.difficulty, verdict.check, verdict.confidence, &usable, &factor)?;
+        Some(if learned && self.learned.lifted(routed.kind, now as u64) { lifted(routed, &usable, &factor) } else { routed })
+    }
+
+    /// What a redone or kept answer says about the pick that made it. Rare events, written at once; a failed write only
+    /// loses a nudge.
+    fn learn(&mut self, kind: &str, signal: Signal) {
+        self.learned.note(kind, signal, self.secs() as u64);
+        let _ = self.store.save_auto_learned(&self.learned);
+    }
+
+    /// An answer that was just sent again: the same request asked once more says the pick was not good enough, and asked on the
+    /// step up Faber offered it says so twice. An edited request is a new request and says nothing; nor does a redo on a model
+    /// the person picked by hand that is weaker than the one that answered. `answer` is the reply to the question being redone,
+    /// and `again` says that question is the first of its conversation and was asked word for word: only a first answer is
+    /// Auto's own pick, the later ones keep its model.
+    pub(super) fn learn_from_redo(&mut self, answer: &Message, again: bool, choice: &Choice) {
+        let Some(kind) = answer.reason.as_deref().and_then(auto_learned::kind_of).map(str::to_string) else { return };
+        if !again || answer.status != Some(Status::Done) || weaker_choice(answer, choice) {
+            return;
+        }
+        let step_up = answer.nudge.as_ref().is_some_and(|n| {
+            choice.vendor == n.vendor.name()
+                && choice.model.as_deref().map(|m| pinned(n.vendor, m)) == Some(n.model.as_str())
+                && choice.effort.map(|e| e.name()) == Some(n.effort.as_str())
+        });
+        self.learn(&kind, if step_up { Signal::StepUp } else { Signal::Redo });
+    }
+
+    /// A message sent after a conversation's first answer finished says that answer was kept; once per conversation, because
+    /// only the first answer is Auto's own pick.
+    pub(super) fn kept_kind(&mut self, req: &SendRequest) -> Option<String> {
+        let c = self.load(req.conversation_id.as_deref()?)?;
+        let last = c.messages.last().filter(|m| c.messages.len() == 2 && m.role == Role::Assistant && m.status == Some(Status::Done))?;
+        last.reason.as_deref().and_then(auto_learned::kind_of).map(str::to_string)
+    }
+
+    pub(super) fn learn_kept(&mut self, kind: &str) {
+        self.learn(kind, Signal::Kept);
+    }
+
+    /// Forgets everything Auto learned, in memory and on disk. Memory is cleared even when the file cannot be written, and the
+    /// fault comes back so the screen can say Forget did not stick.
+    pub(super) fn forget_learned(&mut self) -> Result<(), crate::store::Fault> {
+        self.learned.forget();
+        self.store.save_auto_learned(&self.learned)
     }
 
     /// While the user types in Auto.
@@ -179,7 +240,7 @@ impl Core {
         }
         // A new conversation's CLI gets ready for the pick of this moment; the pick at dispatch may differ, and then the
         // process started here is replaced.
-        if let (Some(r), Some(id)) = (verdict.and_then(|v| self.table(&v, only)), warm)
+        if let (Some(r), Some(id)) = (verdict.and_then(|v| self.table_first(&v, only)), warm)
             && self.convs.get(&id).is_some_and(|c| c.messages.is_empty())
         {
             self.warm_launch(&id, &r.pick());
@@ -445,6 +506,18 @@ impl Core {
     }
 }
 
+/// True when the person asked for a model by hand that the table knows to be weaker than the one that answered.
+fn weaker_choice(answer: &Message, choice: &Choice) -> bool {
+    let Some(vendor) = Vendor::ALL.into_iter().find(|v| v.name() == choice.vendor) else { return false };
+    let rank = |vendor, model: &str, effort: &str| {
+        PROFILES.iter().find(|p| p.vendor == vendor && p.model == model && p.effort == effort).map(|p| (p.iq, p.agent))
+    };
+    let (Some(then), Some(model), Some(now)) = (answer.vendor, choice.model.as_deref(), answer.model.as_deref()) else { return false };
+    let asked = rank(vendor, pinned(vendor, model), choice.effort.unwrap_or_default().name());
+    let had = rank(then, now, answer.effort.as_deref().unwrap_or("medium"));
+    matches!((asked, had), (Some(a), Some(h)) if a < h)
+}
+
 pub(super) fn stop_router(stop: Option<Stop>) {
     if let Some(session) = stop.and_then(|s| s.lock().unwrap_or_else(|e| e.into_inner()).take()) {
         session.close();
@@ -517,6 +590,168 @@ mod tests {
             assert_eq!(same_as_before(&c.convs[&id], c.live.get(&id)).unwrap().model.as_deref(), Some("asked"));
             // No process (after a restart): the last reply's model is all there is.
             assert_eq!(same_as_before(&c.convs[&id], None).unwrap().model.as_deref(), Some("the-name-the-cli-reported"));
+        });
+        engine.shutdown();
+    }
+
+    fn answer(reason: &str, status: Status) -> Message {
+        let mut m = Message::new("answer".into(), Role::Assistant, "x".into(), 1);
+        m.vendor = Some(Vendor::Claude);
+        m.model = Some("claude-sonnet-5-5".into());
+        m.effort = Some("medium".into());
+        m.reason = Some(reason.into());
+        m.status = Some(status);
+        m
+    }
+
+    fn choice(vendor: &str, model: Option<&str>) -> Choice {
+        Choice { vendor: vendor.into(), model: model.map(String::from), effort: None }
+    }
+
+    /// Three times over, as the person would.
+    fn retried(core: &mut Core, answer: &Message, same: bool, choice: &Choice) {
+        for _ in 0..crate::auto_learned::UP_AT {
+            core.learn_from_redo(answer, same, choice);
+        }
+    }
+
+    fn lifted(core: &Core) -> bool {
+        core.learned.lifted("code", core.secs() as u64)
+    }
+
+    #[tokio::test]
+    async fn only_a_retry_of_a_finished_auto_answer_says_the_pick_was_not_good_enough() {
+        let dir = tempfile::tempdir().unwrap();
+        let (engine, _) = super::super::answer::tests::engine(dir.path());
+        engine.with(|c| {
+            let auto = choice("auto", None);
+            let done = answer("reason.route.code.medium", Status::Done);
+            // An edited request, or a question that is not the first of its conversation, is not Auto's pick asked again.
+            retried(c, &done, false, &auto);
+            // An answer that was stopped, still running, or that failed says nothing about the pick.
+            for status in [Status::Stopped, Status::Streaming] {
+                retried(c, &answer("reason.route.code.medium", status), true, &auto);
+            }
+            // An answer nobody routed: a model picked by hand, the default, or a key Auto never wrote.
+            for reason in ["reason.chosen", "reason.autoDefault", "reason.route.poetry.easy"] {
+                retried(c, &answer(reason, Status::Done), true, &auto);
+            }
+            // A hand-picked model weaker than the one that answered is exploring; the same or a stronger one is not.
+            retried(c, &done, true, &choice("claude", Some("haiku")));
+            assert!(!lifted(c), "none of these taught anything");
+            retried(c, &done, true, &choice("claude", Some("opus")));
+            assert!(lifted(c), "a retry on a stronger model counts");
+        });
+        engine.with(|c| {
+            c.forget_learned().unwrap();
+            retried(c, &answer("reason.route.code.medium", Status::Done), true, &choice("auto", None));
+            assert!(lifted(c), "a retry on Auto counts");
+            c.forget_learned().unwrap();
+            retried(c, &answer("reason.route.code.medium", Status::Done), true, &choice("claude", Some("sonnet")));
+            assert!(lifted(c), "and so does the same model again");
+        });
+        engine.shutdown();
+    }
+
+    #[tokio::test]
+    async fn taking_the_offered_step_up_counts_twice() {
+        let dir = tempfile::tempdir().unwrap();
+        let (engine, _) = super::super::answer::tests::engine(dir.path());
+        engine.with(|c| {
+            let mut done = answer("reason.route.code.medium", Status::Done);
+            done.nudge = Some(crate::nudge::Nudge {
+                reason: "reason.nudge.failed".into(),
+                vendor: Vendor::Claude,
+                model: "claude-sonnet-5-5".into(),
+                effort: "high".into(),
+            });
+            let step = Choice { vendor: "claude".into(), model: Some("sonnet".into()), effort: Some(crate::router::Effort::High) };
+            c.learn_from_redo(&done, true, &step);
+            assert!(!lifted(c), "one step up is two points, not three");
+            c.learn_from_redo(&done, true, &choice("auto", None));
+            assert!(lifted(c), "two points and a plain retry make three");
+        });
+        engine.shutdown();
+    }
+
+    #[tokio::test]
+    async fn a_message_after_a_finished_auto_answer_keeps_it() {
+        let dir = tempfile::tempdir().unwrap();
+        let (engine, _) = super::super::answer::tests::engine(dir.path());
+        let id = super::super::answer::tests::seed(&engine, Session::from_fn(|_| {}), &[("t1", &[])]);
+        engine.with(|c| {
+            let req = SendRequest {
+                conversation_id: Some(id.clone()),
+                area: Area::Chat,
+                project_id: None,
+                text: "next".into(),
+                images: vec![],
+                files: vec![],
+                choice: choice("auto", None),
+            };
+            let set = |c: &mut Core, reason: &str, status: Status| {
+                let m = c.convs.get_mut(&id).unwrap().messages.last_mut().unwrap();
+                (m.reason, m.status) = (Some(reason.into()), Some(status));
+            };
+            set(c, "reason.route.code.hard", Status::Streaming);
+            assert_eq!(c.kept_kind(&req), None, "an answer still arriving is not kept yet");
+            set(c, "reason.route.code.hard", Status::Stopped);
+            assert_eq!(c.kept_kind(&req), None, "a stopped answer says nothing");
+            set(c, "reason.chosen", Status::Done);
+            assert_eq!(c.kept_kind(&req), None, "a model picked by hand is not Auto's pick");
+            set(c, "reason.route.code.hard", Status::Done);
+            assert_eq!(c.kept_kind(&req).as_deref(), Some("code"));
+            assert_eq!(c.kept_kind(&SendRequest { conversation_id: None, ..req.clone() }), None, "a new conversation keeps nothing");
+            // Later answers keep the first one's model: they are not Auto's pick, so they are not marked again.
+            let mut later = Message::new("later".into(), Role::Assistant, "x".into(), 3);
+            (later.reason, later.status) = (Some("reason.route.code.hard".into()), Some(Status::Done));
+            c.convs.get_mut(&id).unwrap().messages.extend([Message::new("q2".into(), Role::User, "more".into(), 3), later]);
+            assert_eq!(c.kept_kind(&req), None, "a second answer says nothing about Auto's pick");
+        });
+        engine.shutdown();
+    }
+
+    #[tokio::test]
+    async fn only_the_first_question_of_a_conversation_asked_again_teaches() {
+        let dir = tempfile::tempdir().unwrap();
+        let (engine, _) = super::super::answer::tests::engine(dir.path());
+        let id = super::super::answer::tests::seed(&engine, Session::from_fn(|_| {}), &[("t1", &[])]);
+        engine.with(|c| {
+            let conversation = c.convs.get_mut(&id).unwrap();
+            let mut second = Message::new("answer-2".into(), Role::Assistant, "x".into(), 4);
+            conversation.messages.extend([Message::new("question-1".into(), Role::User, "more".into(), 3)]);
+            second.vendor = Some(Vendor::Claude);
+            conversation.messages.push(second);
+            for m in conversation.messages.iter_mut().filter(|m| m.role == Role::Assistant) {
+                (m.status, m.reason, m.vendor) = (Some(Status::Done), Some("reason.route.code.medium".into()), Some(Vendor::Claude));
+            }
+            // A refused retry teaches nothing, so the CLI must exist for the resend to start.
+            c.opts.clis.insert(Vendor::Claude, crate::cli::Cli { command: "fake".into(), prefix: vec![] });
+            let again = |c: &mut Core, message: &str, text: &str| {
+                let request = BranchRequest {
+                    conversation_id: id.clone(),
+                    message_id: message.into(),
+                    text: text.into(),
+                    choice: choice("auto", None),
+                };
+                // The fake session answers nothing: only whether the resend started matters.
+                let _ = c.branch(request, None, false);
+            };
+            for _ in 0..3 {
+                again(c, "question-1", "more");
+            }
+            assert!(!lifted(c), "a later answer keeps the first one's model: it is not Auto's pick");
+            // A retry the engine refuses (no AI to start) teaches nothing, however often it is clicked.
+            c.opts.clis.clear();
+            for _ in 0..3 {
+                again(c, "question-0", "question");
+            }
+            assert!(!lifted(c), "a refused retry is not counted");
+            c.opts.clis.insert(Vendor::Claude, crate::cli::Cli { command: "fake".into(), prefix: vec![] });
+            for _ in 0..3 {
+                again(c, "question-0", "question");
+            }
+            assert!(lifted(c), "the first question asked again word for word is");
         });
         engine.shutdown();
     }

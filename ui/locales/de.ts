@@ -1067,6 +1067,11 @@ export const de: Messages = {
   'set.replyStyle': "Antwortstil",
   'set.replyStyle.line': "Ab der nächsten Nachricht, in Chat und Projekte.",
   'set.replyStyle.more': "Wähle, wie beide KIs antworten. Dein Text darf bis zu 400 Zeichen haben und bleibt beim Stilwechsel gespeichert. Eine laufende Antwort behält ihren Stil.",
+  'set.autoLearned': "Was Auto gelernt hat",
+  'set.autoLearned.line': "Nur auf diesem PC gespeichert. Vergiss es, um zur üblichen Auswahl von Auto zurückzukehren.",
+  'set.autoLearned.more': "Wenn du die Antworten einer Aufgabenart immer wieder erneut versuchst, startet Auto diese Art in neuen Unterhaltungen eine Stufe stärker und geht zurück, sobald du seine Antworten behältst. Die Antwort sagt, wann Auto das getan hat. Nichts verlässt diesen PC.",
+  'set.autoLearned.forget': "Vergessen",
+  'set.autoLearned.forgotten': "Ist vergessen",
   'set.replyStyle.default': "Wie die KI möchte",
   'set.replyStyle.short': "Kurz",
   'set.replyStyle.explained': "Mit Erklärung",
@@ -1468,6 +1473,7 @@ export const de: Messages = {
   "reason.pace.step": "Eine Stufe höher: {vendor} hat Kontingent übrig.",
   "reason.pace.fast": "{vendor} wird diese Woche schnell verbraucht; Auto hat {other} genommen, um es zu schonen.",
   "reason.pace.low": "{vendor} ist nahe am Limit; Auto hat stattdessen {other} genommen.",
+  "reason.pace.learned": "Auto hat hier ein stärkeres Modell gewählt, weil du diese Art von Aufgabe oft erneut versuchst.",
   "run.waiting": "Warten auf Kontingent bis {when}",
   "quota.credits.offer": "Bezahltes Guthaben für diese Nachricht nutzen",
   "quota.credits.confirm": "Diese Nachricht nutzt bezahltes Guthaben deines {vendor}-Kontos. Senden?",
@@ -1636,6 +1642,7 @@ export const de: Messages = {
   "error.journal.badId": "Die Kennung des Projekts ist ungültig.",
   // Native speaker must translate (needs native review).
   "error.store.write": "Die Änderungen konnten nicht gespeichert werden. Es wurde nichts genehmigt.",
+  "error.autoLearned.forget": "Auto hat es vorerst vergessen, konnte das aber nicht auf die Festplatte schreiben. Nach einem Neustart kann es zurückkommen.",
   // Native speaker must translate (needs native review).
   "error.store.read": "Gespeicherte Einträge konnten nicht gelesen werden.",
   // Native speaker must translate (needs native review).
@@ -1925,6 +1932,7 @@ export const de: Messages = {
   'notes.179.better': 'Im Katalog hat jede Karte ein Bild, eigenes Installieren, einen Schalter und einen Link zur Quelle; wähle mehrere aus, um sie gemeinsam zu ändern.',
   'notes.180.better': 'Fabers Browser lässt sich jetzt bis zur Fensterbreite ziehen, kann den Bereich des Gesprächs füllen und zeigt die Seite in PC-, MacBook-, Tablet- oder Handygröße.',
   'notes.181.new': 'Ein neuer Chat kostet viel weniger, wenn du viele Werkzeugserver eingerichtet hast: Ihre Werkzeuge werden erst geladen, wenn der Chat sie braucht.',
+  'notes.182.new': 'Auto startet eine Aufgabe, die du oft wiederholst, mit einem stärkeren Modell und sagt es dir, gelernt wird nur auf diesem PC. In den Einstellungen kannst du es vergessen lassen.',
   'update.checking': 'Suche nach einem Update…',
   'update.downloading': 'Update wird heruntergeladen…',
   'update.downloadingPercent': 'Update wird heruntergeladen… {percent} %',

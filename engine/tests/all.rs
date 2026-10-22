@@ -24,6 +24,8 @@ mod approve_plan_review;
 mod auto;
 #[path = "auto_archive.rs"]
 mod auto_archive;
+#[path = "auto_learned.rs"]
+mod auto_learned;
 #[path = "background.rs"]
 mod background;
 #[path = "background_live.rs"]

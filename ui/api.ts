@@ -112,7 +112,7 @@ export interface Message {
   /** How many more were denied beyond the few kept. */
   parkedMore?: number;
   incomplete?: boolean;
-  pace?: { kind: 'step' | 'low'; vendor: Vendor };
+  pace?: { kind: 'step' | 'fast' | 'low' | 'learned'; vendor: Vendor };
   /** The mode that really ran this reply, as an engine key, only when it is not the one chosen (`mode.fallback.auto`). */
   mode?: string;
   /** A note under the reply, as an engine key (`note.historyResent`). */
@@ -835,6 +835,8 @@ export const api = {
   warm: (req: { conversationId?: string; area: Area; projectId?: string; choice: Choice }) => invoke<void>('warm', { req }),
   routeDraft: (req: { conversationId?: string; area: Area; projectId?: string; choice: Choice }, text: string) =>
     invoke<void>('route_draft', { req, text }),
+  /** Settings > Accounts and limits: Auto forgets what it learned from the answers redone or kept on this PC. */
+  forgetAutoLearned: () => invoke<void>('forget_auto_learned'),
   interrupt: (id: string) => invoke<void>('interrupt', { id }),
   keepGoing: (id: string, on: boolean) => invoke<void>('keep_going', { id, on }),
   /** The person has the conversation open on a visible window: the done card and the dot of its last run go. */
