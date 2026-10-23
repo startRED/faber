@@ -71,6 +71,12 @@ Windows reproduction confirmed that focus and the temporary marker could follow 
 The separate repair retains the existing list structure and must preserve newer focus choices and marker expiry.
 The frontend guidance now asks for those checks; this wording has delivery proofs, not another generated-output pair.
 
+The search repair's independent visual review initially deducted points for Chat's cross-area pick-up list and
+permission chip. The living layout page and R175 explicitly require both. The reviewer withdrew those deductions
+after checking those sources and approved the same 16 photos at 40/40 before and after; its initial report remains
+retained. The local composition and visual-critique skills now follow documented scope and task controls instead
+of conflicting blanket wording. No screen or score was changed by the writer, and the quality thresholds remain.
+
 Failures remain evidence: the original large-conversation check failed at 4,257 ms against its unchanged 3,000 ms
 limit. An exact-source control passed at 1,163 ms. A purported 2,163 ms candidate pass was invalidated when executable
 inspection showed a stale control runner after timestamp-preserving restoration. A fresh rebuilt, identified runner
