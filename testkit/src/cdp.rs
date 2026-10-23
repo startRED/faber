@@ -72,6 +72,21 @@ impl Write for Limited {
 }
 
 impl Cdp {
+    /// Process roles from this fixture's own loopback browser, under one discovery/connect/call deadline.
+    pub fn process_roles(&self) -> Result<Value, String> {
+        let port = self.socket.get_ref().stream.peer_addr().map_err(|e| e.to_string())?.port();
+        let deadline = Instant::now() + Duration::from_secs(3);
+        let version = endpoint_json(port, deadline, "/json/version")?;
+        let url = version["webSocketDebuggerUrl"].as_str().ok_or("no fixture browser endpoint")?;
+        let expected = format!("ws://127.0.0.1:{port}/devtools/browser/");
+        if !url.starts_with(&expected) {
+            return Err("the browser endpoint must belong to the same loopback fixture".into());
+        }
+        let mut browser = open(url, deadline)?;
+        browser.set_deadline(Some(deadline));
+        browser.call("SystemInfo.getProcessInfo", json!({}))
+    }
+
     /// Waits for the app's DevTools port to list a page, then connects to it. The whole of it, every connect, write and
     /// read, shares one deadline.
     pub fn connect(port: u16, timeout: Duration) -> Result<Cdp, String> {
@@ -598,13 +613,26 @@ fn key_info(key: &str) -> Result<(String, String, u32, Option<&'static str>), St
 
 /// The page's own address on the DevTools socket, from `GET /json/list`.
 fn page_url(port: u16, deadline: Instant, wanted: fn(&str) -> bool) -> Result<String, String> {
+    let targets = endpoint_json(port, deadline, "/json/list")?;
+    targets
+        .as_array()
+        .ok_or("the target list is not an array")?
+        .iter()
+        .filter(|t| t["type"] == "page" && t["url"].as_str().is_some_and(wanted))
+        .find_map(|t| t["webSocketDebuggerUrl"].as_str())
+        .map(str::to_string)
+        .ok_or_else(|| "no page is listed yet".to_string())
+}
+
+/// A fixed metadata path on the fixture's already-owned DevTools server.
+fn endpoint_json(port: u16, deadline: Instant, path: &str) -> Result<Value, String> {
     let addr = SocketAddr::from((Ipv4Addr::LOCALHOST, port));
     // One request gets 3 s at most, and never more than what is left of the caller's deadline; all of it, the headers
     // and the body included, is inside that.
     let request_deadline = deadline.min(Instant::now() + Duration::from_secs(3));
     let stream = TcpStream::connect_timeout(&addr, left(request_deadline, "the DevTools port")?).map_err(|e| e.to_string())?;
     let mut stream = Limited { stream, deadline: request_deadline };
-    write!(stream, "GET /json/list HTTP/1.1\r\nHost: 127.0.0.1:{port}\r\nConnection: close\r\n\r\n").map_err(|e| e.to_string())?;
+    write!(stream, "GET {path} HTTP/1.1\r\nHost: 127.0.0.1:{port}\r\nConnection: close\r\n\r\n").map_err(|e| e.to_string())?;
     // WebView2's server keeps the connection open after it answers, whatever `Connection` says, so waiting for the end of
     // the stream would never finish: the body is read by the length the headers give.
     let mut reader = BufReader::new(stream);
@@ -632,13 +660,7 @@ fn page_url(port: u16, deadline: Instant, wanted: fn(&str) -> bool) -> Result<St
         None => reader.read_to_end(&mut body),
     }
     .map_err(|e| e.to_string())?;
-    let targets: Vec<Value> = serde_json::from_slice(&body).map_err(|e| format!("the target list is not JSON: {e}"))?;
-    targets
-        .iter()
-        .filter(|t| t["type"] == "page" && t["url"].as_str().is_some_and(wanted))
-        .find_map(|t| t["webSocketDebuggerUrl"].as_str())
-        .map(str::to_string)
-        .ok_or_else(|| "no page is listed yet".to_string())
+    serde_json::from_slice(&body).map_err(|e| format!("the DevTools metadata is not JSON: {e}"))
 }
 
 fn app_url(url: &Value) -> bool {

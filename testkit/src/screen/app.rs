@@ -1138,7 +1138,17 @@ fn visual_frames_collected(ctx: &mut Ctx, app: &mut Opened, baseline: f64, befor
         started.elapsed().as_secs_f64()
     );
     ctx.notes.push(numbers.clone());
-    ensure(retained == json!([]), || format!("{numbers}; retired frames must be collectible"))?;
+    if retained != json!([]) || closed > baseline + 15.0 {
+        // These observations follow the captured failure; diagnostic errors cannot change its result.
+        let capture_started = Instant::now();
+        let processes = crate::proctree::private_processes(app.pid);
+        let previous_deadline = app.page.cdp.set_deadline(Some(Instant::now() + Duration::from_secs(3)));
+        let heap = app.page.cdp.call("Runtime.getHeapUsage", json!({}));
+        app.page.cdp.set_deadline(previous_deadline);
+        let roles = app.page.cdp.process_roles();
+        ctx.notes.push(format!("POST-FAILURE ONLY: capture ended {:.3}s after predicate; owned process memory {processes:?}; heap {heap:?}; process roles {roles:?}", capture_started.elapsed().as_secs_f64()));
+    }
+    ensure(retained == json!([]), || format!("{numbers}; retired frames must be collectible\n{}", ctx.notes.join("\n")))?;
     ensure(closed <= baseline + 15.0, || {
         format!("{numbers}; exceeds the 15 MB post-close margin after collection\n{}", ctx.notes.join("\n"))
     })?;
