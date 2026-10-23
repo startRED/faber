@@ -3,6 +3,7 @@
 
 import assert from 'node:assert/strict';
 import test from 'node:test';
+import { runInNewContext } from 'node:vm';
 import { basename, dirname, join } from 'node:path';
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -13,6 +14,50 @@ const controls = [
   { role: 'button', name: 'Continuar', x: 10, y: 10, disabled: false },
   { role: 'input', name: 'Escreva aqui', x: 20, y: 20, disabled: true },
 ];
+
+test('native choices require an observed enabled selector and an exact enabled option', () => {
+  const lists = [{ role: 'list', name: 'Modelo', disabled: false, options: [
+    { label: 'Claude Haiku', value: 'haiku', disabled: false },
+    { label: 'Unavailable', value: 'no', disabled: true },
+  ] }];
+  const choose = (n, option, snapshot = lists) => parseStep(JSON.stringify({ action: { type: 'select', n, option } }), snapshot).action.type;
+  assert.equal(choose(1, 'Claude Haiku'), 'select');
+  assert.equal(choose(1, 'Unavailable'), 'stuck');
+  assert.equal(choose(1, 'haiku'), 'stuck');
+  assert.equal(choose(2, 'Claude Haiku'), 'stuck');
+  assert.equal(choose(1, 'Claude Haiku', [{ ...lists[0], disabled: true }]), 'stuck');
+  assert.equal(choose(1, 'Claude Haiku', [{ ...lists[0], options: undefined }]), 'stuck');
+  const prompt = stepPrompt(TASKS[0], [], { controls: lists }, { width: 720, height: 480 });
+  assert.match(prompt, /Claude Haiku/);
+  assert.match(prompt, /"type": "select"/);
+  assert.match(describe({ type: 'select', n: 1, option: 'Claude Haiku' }), /Claude Haiku/);
+});
+
+test('native selection rechecks identity, visibility and current option state and safely quotes labels', () => {
+  const label = 'Haiku "quoted" ${notCode}';
+  const option = { label, value: 'haiku', disabled: false, closest: () => null };
+  const events = [];
+  const el = { isConnected: true, tagName: 'SELECT', disabled: false, options: [option],
+    getAttribute: () => null, dispatchEvent: (event) => events.push(event.type), contains: (other) => other === el,
+    getBoundingClientRect: () => ({ left: 0, top: 0, right: 100, bottom: 30, width: 100, height: 30 }) };
+  const context = { window: { __faberFirstUserControls: [el] }, document: { elementFromPoint: () => el }, innerWidth: 720, innerHeight: 480,
+    Event: class { constructor(type) { this.type = type; } } };
+  const script = firstUser.selectionScript({ n: 1, option: label }, { controls: [{ options: [{ label, value: 'haiku' }] }] });
+  assert.equal(runInNewContext(script, context), true);
+  assert.equal(el.value, 'haiku');
+  assert.deepEqual(events, ['input', 'change']);
+  for (const mutate of [() => { el.isConnected = false; }, () => { el.disabled = true; },
+    () => { context.document.elementFromPoint = () => null; }, () => { option.disabled = true; },
+    () => { option.value = 'other'; }, () => { el.options = [option, option]; },
+    () => { option.closest = () => ({ disabled: true }); }]) {
+    el.isConnected = true; el.disabled = false; context.document.elementFromPoint = () => el;
+    option.disabled = false; option.value = 'haiku'; option.closest = () => null; el.options = [option];
+    events.length = 0;
+    mutate();
+    assert.equal(runInNewContext(script, context), false);
+    assert.deepEqual(events, []);
+  }
+});
 
 test('a focused newcomer review rejects missing selections before starting the app', () => {
   assert.throws(() => firstUser.selectTasks(['--task']), /missing task/);

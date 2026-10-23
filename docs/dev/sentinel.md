@@ -51,7 +51,9 @@ Checks and the critique know what Faber should look like; a newcomer only knows 
 720x480, pt-BR by default; `--size`, `--lang`, `--steps`, `--no-build`) and gives a fresh AI one step at a time: a
 screenshot and the controls a screen reader would name, numbered. Text is read from the image, never copied from the
 page body: that would also reveal text below the viewport. It answers with one action (click a
-number, type, a key, scroll, wait, done or stuck) and what confused it. Wait uses the same fixed 1.2-second pause as
+number, select an option, type, a key, scroll, wait, done or stuck) and what confused it. A reachable native selector
+exposes its accessible option labels; selection requires an exact, unique enabled label in the observation and rechecks
+the same connected, reachable element and enabled option before dispatching input and change events. Wait uses the same fixed 1.2-second pause as
 other actions and counts toward the step limit; it cannot request an unlimited delay. The chat task follows sending
 until a response appears, rather than treating a loading screen as completion. The tasks are the first run, a first chat, Projects
 and the language in Settings (`TASKS`), in one app, each starting where the last ended. The Catalog task comes after

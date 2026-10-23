@@ -73,6 +73,7 @@ export const OBSERVE = `(() => {
       .replace(/\\s+/g, ' ').trim().slice(0, 80);
   };
   const controls = [];
+  window.__faberFirstUserControls = [];
   for (const el of document.querySelectorAll(sel)) {
     const r = el.getBoundingClientRect();
     if (r.width < 2 || r.height < 2 || r.right < 0 || r.bottom < 0 || r.left > vw || r.top > vh) continue;
@@ -84,7 +85,11 @@ export const OBSERVE = `(() => {
     if (top && !el.contains(top) && !top.contains(el)) continue;
     const role = el.getAttribute('role') || ({ A: 'link', INPUT: 'input', TEXTAREA: 'input', SELECT: 'list' }[el.tagName]) ||
       (el.isContentEditable ? 'input' : 'button');
-    controls.push({ role, name: named(el), x, y, disabled: !!el.disabled || el.getAttribute('aria-disabled') === 'true' });
+    const options = el.tagName === 'SELECT'
+      ? Array.from(el.options, (o) => ({ label: o.label, value: o.value, disabled: o.disabled || !!o.closest('optgroup')?.disabled }))
+      : undefined;
+    controls.push({ role, name: named(el), x, y, disabled: !!el.disabled || el.getAttribute('aria-disabled') === 'true', options });
+    window.__faberFirstUserControls.push(el);
     if (controls.length >= 80) break;
   }
   return { controls };
@@ -99,7 +104,8 @@ export function insideRepo(path, root = ROOT) {
 /** The prompt for one step: who the reviewer is, the task, what it did so far, and the screen as words. */
 export function stepPrompt(task, history, seen, size, language = 'pt-BR') {
   const controls = seen.controls
-    .map((c, i) => `[${i + 1}] ${c.role}: ${c.name || '(sem nome)'}${c.disabled ? ' (desativado)' : ''}`)
+    .map((c, i) => `[${i + 1}] ${c.role}: ${c.name || '(sem nome)'}${c.disabled ? ' (desativado)' : ''}` +
+      (c.options ? `; opções: ${c.options.map((o) => `${JSON.stringify(o.label)}${o.disabled ? ' (desativado)' : ''}`).join(', ')}` : ''))
     .join('\n');
   const done = history.length
     ? history.map((h, i) => `${i + 1}. ${h.thought} -> ${describe(h.action)}`).join('\n')
@@ -121,8 +127,9 @@ export function stepPrompt(task, history, seen, size, language = 'pt-BR') {
     '{"thought": "o que você pensa ao ver a tela, em uma frase", "confusion": "o que te confundiu aqui, ou null",',
     ' "action": {"type": "click", "n": 3} | {"type": "type", "text": "..."} | {"type": "key", "key": "Enter"} | {"type": "wait"} |',
     '           {"type": "scroll", "dy": 400} | {"type": "done", "summary": "como conseguiu"} |',
+    '           {"type": "select", "n": 3, "option": "texto exato da opção"} |',
     '           {"type": "stuck", "where": "onde e por que travou"}}',
-    'Para escrever num campo, clique nele primeiro. Use "wait" enquanto o app prepara ou responde. Diga "done" só quando a tarefa estiver feita de verdade.',
+    'Para escrever num campo, clique nele primeiro. Para escolher numa lista, use "select" com uma opção habilitada mostrada. Use "wait" enquanto o app prepara ou responde. Diga "done" só quando a tarefa estiver feita de verdade.',
   ].join('\n');
 }
 
@@ -162,7 +169,7 @@ export function firstJson(text) {
   return null;
 }
 
-const TYPES = new Set(['click', 'type', 'key', 'scroll', 'wait', 'done', 'stuck']);
+const TYPES = new Set(['click', 'select', 'type', 'key', 'scroll', 'wait', 'done', 'stuck']);
 
 /** The step an answer asks for, checked against the controls on screen; an answer that is not one ends the task. */
 export function parseStep(text, controls) {
@@ -172,12 +179,21 @@ export function parseStep(text, controls) {
   if (action.type === 'click' && !(Number.isInteger(action.n) && action.n >= 1 && action.n <= controls.length)) {
     return { thought: json.thought || '', confusion: json.confusion || null, action: { type: 'stuck', where: `clicou num controle que não existe (${action.n})` } };
   }
+  if (action.type === 'select') {
+    const control = Number.isInteger(action.n) && controls[action.n - 1];
+    const choices = control?.options?.filter((o) => o.label === action.option);
+    if (!control || control.role !== 'list' || control.disabled || choices?.length !== 1 || choices[0].disabled) {
+      return { thought: String(json.thought || ''), confusion: null, action: { type: 'stuck', where: 'opção indisponível na lista observada' } };
+    }
+  }
   return { thought: String(json.thought || ''), confusion: json.confusion ? String(json.confusion) : null, action };
 }
 
 /** One line for an action, in the words of the report. */
 export function describe(action) {
   switch (action.type) {
+    case 'select':
+      return `escolheu "${action.option}" em [${action.n}]`;
     case 'click':
       return `clicou em [${action.n}]${action.name ? ` "${action.name}"` : ''}`;
     case 'type':
@@ -340,12 +356,35 @@ function driver(exe, flags) {
 
 const pause = (ms) => new Promise((done) => setTimeout(done, ms));
 
+/** Recheck the observed element and option before dispatching the same events as a native selection. */
+export function selectionScript(action, seen) {
+  const choice = seen.controls[action.n - 1].options.find((o) => o.label === action.option);
+  return `(() => {
+    const el = window.__faberFirstUserControls?.[${JSON.stringify(action.n - 1)}];
+    if (!el?.isConnected || el.tagName !== 'SELECT' || el.disabled || el.getAttribute('aria-disabled') === 'true') return false;
+    const r = el.getBoundingClientRect();
+    const x = Math.min(Math.max(r.left + r.width / 2, 1), innerWidth - 1);
+    const y = Math.min(Math.max(r.top + r.height / 2, 1), innerHeight - 1);
+    const top = document.elementFromPoint(x, y);
+    if (r.width < 2 || r.height < 2 || r.right < 0 || r.bottom < 0 || r.left > innerWidth || r.top > innerHeight || !top || (!el.contains(top) && !top.contains(el))) return false;
+    const matches = Array.from(el.options).filter((o) => o.label === ${JSON.stringify(choice.label)});
+    const option = matches[0];
+    if (matches.length !== 1 || option.value !== ${JSON.stringify(choice.value)} || option.disabled || option.closest('optgroup')?.disabled) return false;
+    el.value = option.value;
+    el.dispatchEvent(new Event('input', { bubbles: true }));
+    el.dispatchEvent(new Event('change', { bubbles: true }));
+    return true;
+  })()`;
+}
+
 async function act(app, action, seen, size) {
   if (action.type === 'click') {
     const { x, y } = seen.controls[action.n - 1];
     for (const type of ['mouseMoved', 'mousePressed', 'mouseReleased']) {
       await app.op('call', 'Input.dispatchMouseEvent', { params: { type, x, y, button: 'left', clickCount: 1 } });
     }
+  } else if (action.type === 'select') {
+    if (!await app.op('eval', selectionScript(action, seen))) throw new Error('native selection changed since observation');
   } else if (action.type === 'type') {
     await app.op('call', 'Input.insertText', { params: { text: String(action.text) } });
   } else if (action.type === 'key') {
