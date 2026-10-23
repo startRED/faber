@@ -333,3 +333,15 @@ check('worklog: a subagent that ended says how long it took, and a quick or unfi
     root.remove();
   }
 });
+
+check('settings_search: the settings operation reads as the changed choice without raw input', () => {
+  useLanguage('en');
+  deepEqual(toolRow({ id: 'settings-search', name: 'Settings', input: { web_search: 'cached' } }), {
+    label: 'Changing web search', detail: t('set.webSearch.cached'),
+  });
+});
+
+check('settings_search: unknown choices never leak into the settings work log', () => {
+  useLanguage('en');
+  deepEqual(toolRow({ id: 'bad-settings-search', name: 'Settings', input: { web_search: '<script>not a choice</script>' } }), { label: t('tool.settingsWebSearch'), detail: '' });
+});

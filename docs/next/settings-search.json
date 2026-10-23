@@ -1,0 +1,10 @@
+{
+  "notes": { "new": {
+    "en": "In Projects, you can ask to change web search and review the current and proposed choices before allowing it.",
+    "pt-BR": "Em Projetos, você pode pedir pra mudar a busca na web e conferir a escolha atual e a nova antes de permitir.",
+    "es": "En Proyectos, puedes pedir cambiar la búsqueda web y revisar la opción actual y la propuesta antes de permitirlo.",
+    "fr": "Dans Projets, vous pouvez demander une modification de la recherche web et comparer les choix avant de donner votre accord.",
+    "de": "In Projekten kannst du eine Änderung der Websuche anfragen und vor deiner Zustimmung die bisherige und die vorgeschlagene Wahl vergleichen."
+  } },
+  "decisions": ["| R-next | 2026-10-23 | The project agent's settings tool exposes only the closed web_search preference. Its own consent or existing full trust authorizes a typed audited change through the ordinary settings save; permissions and trust are never tool inputs. A saved tool result is queued after persistence and before stricter settings retire all replies, including the caller. | AI |"]
+}

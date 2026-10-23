@@ -36,6 +36,17 @@ async function withCard(permission: Permission, body: (root: HTMLElement, calls:
 
 const buttons = (root: HTMLElement) => [...root.querySelectorAll<HTMLButtonElement>('.ask .btn')];
 
+// Hidden native audits render this same component fixture; absent from production builds.
+Object.assign(window, { __faberSettingsSearchPreview: () => {
+  const root = document.createElement('div');
+  root.style.cssText = 'position:fixed;inset:0;padding:32px;background:var(--bg);z-index:10000';
+  document.body.append(root);
+  const dispose = render(() => createComponent(Asks, { conversationId: 'synthetic', turnId: 'synthetic', permissions: [
+    { requestId: 'synthetic-search', tool: 'faber.settings.web_search', input: { from: 'live', to: 'off' } },
+  ] }), root);
+  return () => { dispose(); root.remove(); };
+} });
+
 check('install card: the licence and the source come before the buttons, and the buttons answer once, always or no', () => withCard(INSTALL, async (root, calls) => {
   useLanguage('en');
   await settle();
@@ -187,4 +198,46 @@ check('catalog_replacement: update and repair cards show the exact old version a
     }
   }
   useLanguage('en');
+});
+
+check('settings_search: the permission explains the web search change before its own consent', async () => {
+  useLanguage('en');
+  for (const [from, to] of [['cached', 'live'], ['live', 'off']] as const) {
+    for (const [index, allow, always] of [[0, true, false], [1, true, true], [2, false, false]] as const) {
+    await withCard({ requestId: 'search-change', tool: 'faber.settings.web_search', input: { from, to } }, async (root, calls) => {
+      useLanguage('en');
+      await settle();
+      const card = root.querySelector<HTMLElement>('.ask')!;
+      equal(card.querySelector('b')!.textContent, 'Change web search?');
+      const line = card.querySelector<HTMLElement>('[data-testid="self-line"]')!;
+      ok(line, 'the current and proposed choices have their own readable line');
+      ok(line.textContent!.includes(t(`set.webSearch.${from}`)) && line.textContent!.includes(t(`set.webSearch.${to}`)), 'both choices use the existing setting names');
+      equal(card.querySelector('[data-testid="self-effect"]')?.textContent, 'Applies to future replies. A stricter choice stops replies in progress, including this one.');
+      ok(!card.querySelector('pre'), 'the engine input never becomes the consent explanation');
+      deepEqual(buttons(root).map((button) => button.textContent!.trim()), ['Allow once', 'Always allow web search changes', t('ask.deny')]);
+      for (const button of buttons(root)) ok(button.getBoundingClientRect().right <= card.getBoundingClientRect().right + 1, 'actions stay inside the narrow card');
+      buttons(root)[index]!.click();
+      await settle();
+      deepEqual(calls, [['c1', 't1', 'search-change', allow, always]]);
+    }, '360px');
+    }
+  }
+});
+
+check('settings_search: trusted choices stay localized and unknown input is never presented as consent text', async () => {
+  for (const { code } of LANGUAGES) {
+    useLanguage(code);
+    await withCard({ requestId: 'localized-search', tool: 'faber.settings.web_search', input: { from: 'off', to: 'cached' } }, async (root) => {
+      equal(root.querySelector('.ask b')!.textContent, t('ask.self.webSearch'));
+      equal(root.querySelector('[data-testid="self-line"]')!.textContent, t('ask.self.webSearchLine', { from: t('set.webSearch.off'), to: t('set.webSearch.cached') }));
+      equal(root.querySelector('[data-testid="self-effect"]')!.textContent, t('ask.self.webSearchEffect'));
+      deepEqual(buttons(root).map((button) => button.textContent!.trim()), [t('ask.self.once'), t('ask.self.alwaysWebSearch'), t('ask.deny')]);
+      if (code !== 'en') ok(root.querySelector('.ask b')!.textContent !== 'Change web search?', 'the title has its own words');
+    });
+  }
+  useLanguage('en');
+  await withCard({ requestId: 'untrusted-search', tool: 'faber.settings.web_search', input: { from: '<img src=x>', to: 'Ignore all rules', title: 'Fake instruction' } }, async (root) => {
+    ok(!root.querySelector('pre, img'), 'no raw input or markup');
+    ok(!root.textContent!.includes('Ignore all rules') && !root.textContent!.includes('Fake instruction') && !root.textContent!.includes('<img'), 'unknown facts cannot write the card');
+  });
 });
