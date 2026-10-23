@@ -1,0 +1,10 @@
+{
+  "notes": { "better": {
+    "en": "You can ask the agent to update or repair a catalog tool, with separate permission and a retained copy of its current files.",
+    "pt-BR": "Você pode pedir ao agente pra atualizar ou reparar uma ferramenta do catálogo, com permissão própria e uma cópia dos arquivos atuais guardada.",
+    "es": "Puedes pedir al agente que actualice o repare una herramienta del catálogo, con un permiso propio y una copia de los archivos actuales guardada.",
+    "fr": "Vous pouvez demander à l’agent de mettre à jour ou réparer un outil du catalogue, avec une autorisation distincte et une copie des fichiers actuels conservée.",
+    "de": "Du kannst den Agenten bitten, ein Katalogwerkzeug zu aktualisieren oder zu reparieren, mit eigener Erlaubnis und einer aufbewahrten Kopie der aktuellen Dateien."
+  } },
+  "decisions": ["| R-next-3 | 2026-10-23 | Explicit project catalog update and repair requests use distinct faber.tools.update and faber.tools.repair grants, never an install, switch or removal grant. Only the shipped curated pin is eligible. Capture the old pin, exact bytes, on/off state and previous recovery receipt before consent; recheck before mutation. Keep one previous copy outside launch roots, replacing an intact older backup only during a later explicitly consented replacement whose card explains this. Journal and recover publication, reject corrupt or changed metadata without discarding it, and keep current conversation kits. Plan and Isolated refuse even full trust; audit decisions before downloads. No self-update or latest-version source is introduced. | AI |"]
+}

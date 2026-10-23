@@ -68,6 +68,7 @@ mod siblings;
 mod silence;
 mod stuck_watch;
 mod toolbox;
+mod toolbox_replace;
 mod unbounded;
 mod usage_view;
 mod verifying;
@@ -421,6 +422,8 @@ struct Core {
     node_missing: bool,
     /// The install card each conversation waits on: the call it answers and the process that made it (`engine/toolbox.rs`).
     installs: HashMap<String, toolbox::PendingChange>,
+    replacements: HashMap<String, toolbox_replace::PendingReplacement>,
+    replacement_runs: HashMap<String, Arc<std::sync::atomic::AtomicBool>>,
     /// The question card of `offer_bigger` each conversation waits on: the call it answers and the process that made it. Its answer
     /// goes back as the tool's result, never to the CLI as a control response (`engine/toolbox.rs`, `engine/answer.rs`).
     bigger: HashMap<String, (String, u64)>,
@@ -654,6 +657,8 @@ impl Engine {
                 setup_source: None,
                 node_missing: false,
                 installs: HashMap::new(),
+                replacements: HashMap::new(),
+                replacement_runs: HashMap::new(),
                 bigger: HashMap::new(),
                 agent_installs: 0,
                 test_items: Vec::new(),
@@ -1953,6 +1958,7 @@ impl Core {
     /// way, but nobody pressed Stop, so the conversation is not marked stopped, its waiting messages stay, and Keep going sees a
     /// turn that failed.
     fn interrupt(&mut self, id: &str, by_person: bool) {
+        self.revoke_replacement(id);
         self.kit_checks.retain(|_, check| check.owner != id);
         self.release_codex_preparation(id);
         if !self.live.contains_key(id)
@@ -2314,7 +2320,7 @@ impl Core {
                     fields.remove("bigger");
                 }
                 // The install card is Faber's own: a CLI's request under its name is never shown, so no CLI can dress a card as ours.
-                if tool == crate::toolbox::SELF_INSTALL || tool == crate::toolbox::SELF_SWITCH || tool == crate::toolbox::SELF_REMOVE {
+                if crate::toolbox::is_self_change(&tool) {
                     if let Some(l) = self.live.get(conv) {
                         drop(l.session.answer(&request_id, false));
                     }
@@ -2679,6 +2685,7 @@ impl Core {
     fn end_turn(&mut self, conv: &str, turn_id: Option<String>, read: Option<Option<String>>) {
         self.transfers.remove(conv);
         self.installs.remove(conv);
+        self.revoke_replacement(conv);
         self.bigger.remove(conv);
         if let Some(l) = self.live.get_mut(conv) {
             l.held = None;

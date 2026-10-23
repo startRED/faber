@@ -165,3 +165,26 @@ check('catalog_remove: card: its own consent names Undo and preserves current co
   }
   useLanguage('en');
 });
+
+check('catalog_replacement: update and repair cards show the exact old version and preserve local edits notice', async () => {
+  for (const tool of ['update', 'repair']) {
+    for (const { code } of LANGUAGES) {
+      useLanguage(code);
+      await withCard({ ...INSTALL, tool: `faber.tools.${tool}`, input: { ...INSTALL.input as Record<string, unknown>, from: 'old-pin' } }, async (root, calls) => {
+        const card = root.querySelector<HTMLElement>('.ask')!;
+        ok(card.querySelector('[data-testid="self-effect"]'), 'replacement has its own effect notice');
+        equal(card.querySelector('b')!.textContent, t(tool === 'update' ? 'ask.self.update' : 'ask.self.repair', { name: catalogName('ponytail') }));
+        equal(card.querySelector('[data-testid="self-effect"]')!.textContent, t('ask.self.replaceEffect'));
+        deepEqual(buttons(root).map((button) => button.textContent!.trim()), [t('ask.self.once'), t(tool === 'update' ? 'ask.self.alwaysUpdate' : 'ask.self.alwaysRepair'), t('ask.deny')]);
+        ok(card.textContent?.includes('old-pin'), 'old pinned version shown before consent');
+        ok(!card.querySelector('pre'), 'engine facts use the trusted permission presentation');
+        ok(buttons(root).length === 3, 'once, own standing grant and deny');
+        for (const button of buttons(root)) ok(button.getBoundingClientRect().right <= card.getBoundingClientRect().right + 1, `${code}: actions fit`);
+        buttons(root)[0]!.click();
+        await settle();
+        deepEqual(calls, [['c1', 't1', 'toolu_i1', true, false]]);
+      }, '360px');
+    }
+  }
+  useLanguage('en');
+});

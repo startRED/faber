@@ -2,3 +2,4 @@
 - Extend the existing composer draft keys with native IndexedDB Blob attachments, preserving synchronous text writes and explicit storage-failure recovery; a draft save does not establish delivery to the engine. [by AI]
 - Extend the existing catalog tool with set_enabled: {id, enabled}; reuse the Catalog switch and self-change consent, with a separate persistent switch grant, and apply changes only to new conversation kits. [by AI]
 - Agent catalog removal extends the existing reversible removal receipt and Catalog Undo. Its own permission kind never inherits install or switch grants; an agent receipt survives opening Catalog but expires at engine restart. [by AI]
+- Catalog updates and repairs retain one previous copy outside launch roots. A later explicitly consented replacement may replace an unchanged prior backup, and its permission card says so; corrupt or changed backups are preserved and block replacement. [by AI]

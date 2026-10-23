@@ -12,6 +12,8 @@ use std::sync::{Mutex, OnceLock};
 
 pub mod kits;
 mod plugin_delivery;
+pub mod replacement;
+pub use replacement::ReplacementPlan;
 pub mod plugins;
 
 /// One skill of the catalog.
@@ -748,6 +750,7 @@ impl Store {
 
     /// Completes a journaled Undo before pruning can discard its moved, not-yet-ledgered copy.
     fn recover_restores(&self) -> Result<(), String> {
+        self.recover_replacements()?;
         if [self.root.clone(), self.plugin(), self.skills(), self.servers(), self.root.join("plugins"), self.disabled(), self.removed()]
             .iter()
             .any(|p| std::fs::symlink_metadata(p).is_ok_and(|m| !m.is_dir()))
@@ -1281,6 +1284,49 @@ pub async fn install(store: &Store, item: &Item, loopback: Option<&str>) -> Resu
 }
 
 async fn download_and_install(store: &Store, item: &Item, loopback: Option<&str>, agent: bool) -> Result<(), String> {
+    let downloaded = download_sources(store, item, loopback).await?;
+    let (store, item) = (store.clone(), item.clone());
+    tokio::task::spawn_blocking(move || store.install_sources_as(&item, &downloaded.files[0], &downloaded.packages, agent))
+        .await
+        .map_err(|e| e.to_string())?
+}
+
+/// Download files stay private and are removed on failure, cancellation or publication.
+pub(crate) struct Downloaded {
+    files: Vec<PathBuf>,
+    packages: BTreeMap<String, PathBuf>,
+    slot: Option<AgentSlot>,
+}
+
+impl Drop for Downloaded {
+    fn drop(&mut self) {
+        for path in &self.files {
+            let _ = std::fs::remove_file(path);
+        }
+    }
+}
+
+impl Downloaded {
+    pub(crate) fn replace(&self, store: &Store, plan: &ReplacementPlan, authorized: impl FnOnce() -> bool) -> Result<(), String> {
+        store.replace_sources_if(plan, &self.files[0], &self.packages, authorized)
+    }
+}
+
+pub(crate) async fn download_replacement(store: &Store, plan: &ReplacementPlan, source: Option<&str>) -> Result<Downloaded, InstallError> {
+    let key = store.root.join(&plan.item().id);
+    if !AGENT_INSTALLING.lock().unwrap_or_else(|e| e.into_inner()).insert(key.clone()) {
+        return Err(InstallError::Held(crate::toolbox::BUSY));
+    }
+    let slot = AgentSlot(key);
+    if store.lacks_node(plan.item()) {
+        return Err(InstallError::Node);
+    }
+    let mut downloaded = download_sources(store, plan.item(), source).await.map_err(InstallError::Failed)?;
+    downloaded.slot = Some(slot);
+    Ok(downloaded)
+}
+
+async fn download_sources(store: &Store, item: &Item, loopback: Option<&str>) -> Result<Downloaded, String> {
     if let Some(definition) = store.plugin_definition(&item.id) {
         definition.validate()?;
         if definition.item != *item {
@@ -1293,20 +1339,18 @@ async fn download_and_install(store: &Store, item: &Item, loopback: Option<&str>
     };
     let loopback = loopback.as_deref();
     std::fs::create_dir_all(&store.root).map_err(|e| e.to_string())?;
-    let mut downloads = Vec::new();
-    let mut packages = BTreeMap::new();
+    let mut downloaded = Downloaded { files: Vec::new(), packages: BTreeMap::new(), slot: None };
     let mut sources = vec![(None, item.clone())];
     if let Some(definition) = store.plugin_definition(&item.id) {
         sources.extend(definition.parts.iter().filter_map(|part| part.server.clone().map(|server| (Some(part.id.clone()), server))));
     }
-    let mut result = Ok(());
     for (id, source) in sources {
         let part = store.root.join(format!(".download-{}", uuid::Uuid::new_v4()));
         let url = match loopback {
             Some(origin) => source.archive_path(origin),
             None => source.archive_url(),
         };
-        downloads.push(part.clone());
+        downloaded.files.push(part.clone());
         match crate::install::download_with(&url, &part, loopback, crate::install::IDLE_TIMEOUT, |path| {
             std::fs::File::create(path).map(Capped::new)
         })
@@ -1314,26 +1358,15 @@ async fn download_and_install(store: &Store, item: &Item, loopback: Option<&str>
         {
             Ok(_) => {
                 if let Some(id) = id {
-                    packages.insert(id, part);
+                    downloaded.packages.insert(id, part);
                 }
             }
             Err(error) => {
-                result = Err(error.to_string());
-                break;
+                return Err(error.to_string());
             }
         }
     }
-    if result.is_ok() {
-        let (store, item, first) = (store.clone(), item.clone(), downloads[0].clone());
-        result = tokio::task::spawn_blocking(move || store.install_sources_as(&item, &first, &packages, agent))
-            .await
-            .map_err(|e| e.to_string())
-            .and_then(|installed| installed);
-    }
-    for path in downloads {
-        let _ = std::fs::remove_file(path);
-    }
-    result
+    Ok(downloaded)
 }
 
 /// Why `install_checked` installed nothing.

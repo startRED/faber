@@ -185,4 +185,5 @@ no prefix. Older native history stays intact. Chat
 never needs to read catalog files outside its working folder; its supporting files remain unavailable. A preparation
 error uses the existing quiet work-log line, and a later retry does not insert resources mid-turn.
 
-Agent catalog removals use the existing self-change permission card with separate removal consent. Its calm effect line says Undo remains in Catalog until restart and current conversation tools stay available.
+Agent catalog changes share the existing self-change permission card; [Catalog](catalog.md#agent-requests) describes
+their separate grants, version disclosure, backups and preservation of current conversation tools.

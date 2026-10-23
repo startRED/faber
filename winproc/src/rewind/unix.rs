@@ -600,6 +600,17 @@ pub fn open_plain_file(root: &Path, relative: &Path) -> io::Result<File> {
     Root::open(root)?.open_file(text)
 }
 
+/// Catalog snapshots may share regular files; the held directory traversal and leaf still reject symbolic links.
+pub fn open_catalog_file(root: &Path, path: &Path) -> io::Result<File> {
+    let root = Root::open(root)?;
+    let (dir, name) = root.parent(path, false)?;
+    let file: File = openat(&dir, &name, FLAGS, Mode::empty())?.into();
+    if !file.metadata()?.is_file() {
+        return Err(io::ErrorKind::PermissionDenied.into());
+    }
+    Ok(file)
+}
+
 pub fn protection(file: &File) -> io::Result<Vec<u8>> {
     let meta = file.metadata()?;
     Ok([meta.gid().to_le_bytes(), (meta.mode() & 0o7777).to_le_bytes()].concat())

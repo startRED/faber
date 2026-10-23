@@ -37,7 +37,7 @@ pub struct JobAccounting {
 }
 
 mod files;
-pub use files::open_plain_file;
+pub use files::{open_catalog_file, open_plain_file};
 #[cfg(windows)]
 mod memory;
 #[cfg(windows)]

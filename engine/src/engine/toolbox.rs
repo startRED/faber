@@ -61,7 +61,7 @@ fn change_tool(enabled: Option<bool>, remove: bool) -> &'static str {
 }
 
 /// An allowed catalog change counts as work until the task ends, including a panic or Stop: an app update waits for it.
-struct Running(std::sync::Weak<std::sync::Mutex<Core>>);
+pub(super) struct Running(pub(super) std::sync::Weak<std::sync::Mutex<Core>>);
 
 impl Drop for Running {
     fn drop(&mut self) {
@@ -88,14 +88,20 @@ impl Core {
         let install = input.get("install");
         let switch = input.get("set_enabled");
         let remove = input.get("remove");
-        if (install.is_some() || switch.is_some() || remove.is_some()) && input.as_object().is_none_or(|args| args.len() != 1) {
+        let replacement = input.get("repair").map(|id| (id, true)).or_else(|| input.get("update").map(|id| (id, false)));
+        if (install.is_some() || switch.is_some() || remove.is_some() || replacement.is_some())
+            && input.as_object().is_none_or(|args| args.len() != 1)
+        {
             return self.answer_toolbox(
                 conv,
                 sid,
                 &call,
                 false,
-                "Use exactly one catalog action: query, install, set_enabled or remove.".into(),
+                "Use exactly one catalog action: query, install, set_enabled, remove, update or repair.".into(),
             );
+        }
+        if let Some((wanted, repair)) = replacement {
+            return self.replacement_call(conv, sid, call, wanted, repair);
         }
         if let Some(switch) = switch {
             let enabled = switch["enabled"].as_bool();
@@ -194,8 +200,11 @@ impl Core {
 
     /// Whether this conversation's agent may install now, and which tool of the catalog it named. The area and the mode are read
     /// from the process in use: Codex keeps the tool definitions of a thread, so being offered the tool proves nothing.
-    fn install_target(&self, conv: &str, sid: u64, wanted: &serde_json::Value) -> Result<&'static Item, &'static str> {
+    pub(super) fn install_target(&self, conv: &str, sid: u64, wanted: &serde_json::Value) -> Result<&'static Item, &'static str> {
         let c = self.convs.get(conv).filter(|c| c.area == Area::Project).ok_or(toolbox::NOT_HERE)?;
+        if c.stopped {
+            return Err("The turn was stopped.");
+        }
         let l = self.live.get(conv).filter(|l| l.sid == sid).ok_or(toolbox::NOT_HERE)?;
         if !may_change(l.permissions) {
             return Err(toolbox::PLAN);
@@ -203,12 +212,11 @@ impl Core {
         if !c.messages.iter().any(|m| Some(&m.id) == l.turn.as_ref() && m.status == Some(Status::Streaming)) {
             return Err("The turn has ended.");
         }
-        let waiting = c.messages.iter().find(|m| Some(&m.id) == l.turn.as_ref()).is_some_and(|m| {
-            m.permissions
-                .iter()
-                .flatten()
-                .any(|p| p.tool == toolbox::SELF_INSTALL || p.tool == toolbox::SELF_SWITCH || p.tool == toolbox::SELF_REMOVE)
-        });
+        let waiting = c
+            .messages
+            .iter()
+            .find(|m| Some(&m.id) == l.turn.as_ref())
+            .is_some_and(|m| m.permissions.iter().flatten().any(|p| toolbox::is_self_change(&p.tool)));
         if waiting {
             return Err(toolbox::WAITING);
         }
@@ -308,6 +316,9 @@ impl Core {
         allow: bool,
         always: bool,
     ) -> Option<Result<(), String>> {
+        if let Some(answered) = self.answer_replacement(conv, turn_id, request_id, allow, always) {
+            return Some(answered);
+        }
         let reply = self.convs.get(conv)?.messages.iter().find(|m| m.id == turn_id)?;
         let card = reply
             .permissions

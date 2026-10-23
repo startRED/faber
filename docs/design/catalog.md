@@ -148,3 +148,18 @@ states alive while needed; startup cleanup expires all Undo files; entry cleanup
 working-set/processor measurements were not available in this sandbox, so no measured MB or CPU improvement is claimed.
 Undo metadata is one item id and its prior on/off choice; a restore attempt adds a bounded receipt read before the
 existing checks. Completed receipts add no per-session hashing or writes. No background work or process is added.
+
+## Agent requests
+
+Agent removals use the existing self-change card with separate removal consent. Its effect line says Undo remains in
+Catalog until restart and current conversation tools stay available.
+
+Agent-requested update and repair use that same card rather than another Catalog flow.
+Each action has its own grant and shows the original and selected curated pins. The card states that local edits and
+an earlier backup are replaced; the current files become the one retained backup outside all launch roots. It keeps
+the tool's on/off state, and running conversations keep their leased kits. An incomplete journal is recovered before
+new catalog preparation, while unknown or changed recovery files remain preserved and block new delivery.
+
+Replacement hashes stream through a 64 KiB buffer, with the existing 64 MiB tool-file cap, and run during explicit
+capture/publication and the preparation worker. Ready-cache reads gain no filesystem scan. No new timer, process or
+persistent screen is added. Runtime memory and processor costs still require the queued commit's measurements.
