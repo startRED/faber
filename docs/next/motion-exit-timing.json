@@ -1,0 +1,12 @@
+{
+  "notes": {
+    "fixed": {
+      "en": "Rows and the running column no longer linger when you close them.",
+      "pt-BR": "As linhas e a coluna de tarefas em andamento deixam de demorar pra desaparecer quando você as fecha.",
+      "es": "Las filas y la columna de tareas en curso dejan de tardar en desaparecer al cerrarlas.",
+      "fr": "Les lignes et la colonne des tâches en cours disparaissent sans délai superflu à la fermeture.",
+      "de": "Zeilen und die Spalte der laufenden Aufgaben verschwinden beim Schließen ohne unnötige Verzögerung."
+    }
+  },
+  "decisions": []
+}

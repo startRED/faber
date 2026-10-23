@@ -50,6 +50,92 @@ check('motion: panel content staggers within 300ms and reduced motion disables a
   }
 });
 
+check('motion: list exits honor the 80ms exit token and are shorter than their entrance', async () => {
+  const root = document.createElement('div');
+  root.className = 's-main';
+  root.dataset.motion = 'full';
+  root.style.cssText = 'position:fixed;left:10px;top:10px;width:240px';
+  for (const [key, value] of Object.entries(themes.css.base)) root.style.setProperty(`--${key}`, value);
+  // Keep the real timing tokens on the row so its exit copy retains them inside the isolated shadow tree.
+  root.innerHTML = '<div data-motion-exit-timing style="height:40px;--dur-ui:220ms;--dur-exit:80ms">Timing probe</div>';
+  document.body.append(root);
+  const dispose = render(() => { animateList(root); return [...root.children] as HTMLElement[]; }, root);
+  try {
+    const row = root.firstElementChild as HTMLElement;
+    const entrance = row.getAnimations()[0];
+    ok(entrance, 'the real list observer creates an entrance animation');
+    const entranceMs = Number(entrance.effect!.getComputedTiming().duration);
+    equal(entranceMs, 220, 'the entrance keeps its own token');
+    entrance.finish();
+    await finished([entrance]);
+    row.remove();
+    // MutationObserver delivers the exit before a rendering frame can finish the 80ms animation.
+    await Promise.resolve();
+    const copy = document.querySelector('.motion-exit')?.shadowRoot?.querySelector<HTMLElement>('[data-motion-exit-timing]');
+    ok(copy?.inert && copy.getAttribute('aria-hidden') === 'true', 'inspect the real isolated inert exit copy');
+    const exit = copy.getAnimations()[0];
+    ok(exit, 'removing the row creates its real exit animation');
+    exit.pause();
+    const exitMs = Number(exit.effect!.getComputedTiming().duration);
+    equal(exitMs, 80, `the 80ms exit token must not be raised by the entrance clamp (got ${exitMs}ms)`);
+    ok(exitMs < entranceMs, `exit ${exitMs}ms is shorter than entrance ${entranceMs}ms`);
+  } finally {
+    dispose();
+    root.remove();
+  }
+});
+
+check('motion: closing a column keeps the surviving main width and uses the 80ms exit token', async () => {
+  const root = document.createElement('div');
+  root.className = 'shell';
+  root.dataset.motion = 'full';
+  root.style.cssText = 'position:fixed;left:10px;top:10px;width:600px;height:160px;grid-template-columns:0 minmax(0,1fr) 240px;transition:none';
+  for (const [key, value] of Object.entries(themes.css.base)) root.style.setProperty(`--${key}`, value);
+  root.innerHTML = '<main class="main" style="grid-column:2;margin:0;transition:none;--dur-ui:220ms;--dur-exit:80ms"></main><aside class="runcol" style="grid-column:3;margin:0;--dur-exit:80ms"></aside>';
+  document.body.append(root);
+  const dispose = render(() => { animateList(root); return [...root.children] as HTMLElement[]; }, root);
+  try {
+    const main = root.querySelector<HTMLElement>('.main')!;
+    const column = root.querySelector<HTMLElement>('.runcol')!;
+    const before = main.getBoundingClientRect();
+    const resting = { shadow: getComputedStyle(main).boxShadow, radius: getComputedStyle(main).borderRadius };
+    ok(before.width > 0 && column.getBoundingClientRect().width > 0, 'both real grid columns have measurable width');
+    equal(main.getAnimations().length, 0, 'the survivor starts at rest');
+    root.style.gridTemplateColumns = '0 minmax(0,1fr) 0';
+    column.remove();
+    // Measure the new layout before MutationObserver installs the real closing-column animation.
+    const target = main.getBoundingClientRect();
+    ok(target.width > before.width, 'removing the right column gives the same main more room');
+    await Promise.resolve();
+    const animation = main.getAnimations()[0];
+    ok(animation, 'the real list observer animates the surviving main');
+    animation.pause();
+    equal(root.querySelector('.main'), main, 'the same main owns the animation');
+    equal(document.querySelector('.motion-exit')?.shadowRoot?.querySelector('.main'), null, 'the main is never cloned');
+    const duration = Number(animation.effect!.getComputedTiming().duration);
+    equal(duration, 80, 'closing-column survivors honor the exit token');
+    ok(duration < 220, 'closure remains shorter than the entrance token');
+    const keys = (animation.effect as KeyframeEffect).getKeyframes();
+    ok(Math.abs(parseFloat(String(keys[0]!.width)) - before.width) < 0.5, 'width starts at the measured old size');
+    ok(Math.abs(parseFloat(String(keys.at(-1)!.width)) - target.width) < 0.5, 'width ends at the measured target');
+    const from = new DOMMatrix(String(keys[0]!.transform));
+    ok(Math.abs(from.m41 - (before.x - target.x)) < 0.5, 'translation matches the actual layout delta, including zero');
+    ok(new DOMMatrix(String(keys.at(-1)!.transform)).isIdentity, 'travel ends without translation or glyph scaling');
+    const exits = document.querySelector('.motion-exit')?.shadowRoot?.querySelector<HTMLElement>('.runcol')?.getAnimations() ?? [];
+    for (const active of [animation, ...exits]) active.finish();
+    await finished([animation, ...exits]);
+    equal(main.getAnimations().length, 0, 'the animation releases the surviving main');
+    ok(Math.abs(main.getBoundingClientRect().width - target.width) < 0.5, 'layout owns the final width');
+    equal(main.style.width, '', 'no inline animation width remains');
+    equal(getComputedStyle(main).boxShadow, resting.shadow, 'the resting shadow returns');
+    equal(getComputedStyle(main).borderRadius, resting.radius, 'the resting corners return');
+    equal(document.querySelector('.motion-exit'), null, 'the removed column copy is cleaned up');
+  } finally {
+    dispose();
+    root.remove();
+  }
+});
+
 check('motion: removing a row has inert exits with full motion and stays instant with reduced motion', async () => {
   const preference = Object.getOwnPropertyDescriptor(MediaQueryList.prototype, 'matches')!;
   try {
