@@ -31,7 +31,7 @@ virtualizer, animation or setting does not become useful merely because it appea
 | Durable admission guard before send/steer/queue dispatch | Fourteen admission checks passed after an actual new step-handover negative control; six final UI checks with clean audit; native refused-write/retry preserved exact words/PNG/PDF; two new security reviews of the deferred-queue composition; 16 normal captures independently 40/40 before and after | Corrected-base retry queued all remote suites without a local full-suite claim; macOS reported 715 UI passes and one search-viewport failure. Investigation remains open |
 | Native resource and interaction workload on 1,000 messages/500 collapsed tools | Actual operation/count assertions, fixture bytes and executable identities; same-base sequential before/after reading pair passed the unchanged resource budget | After the historical style and inherited search failures, corrected-base ordinary confirmation passed 2,241 engine, 713 UI and 125 native scenarios with zero failed/not run/skipped; queued gate and integration passed, and the numbered candidate was observed on the development base and main |
 | Search focus and temporary marker after earlier messages load | Two actual regressions reproduced: result 100 became 60 after paging; focus disappeared after marker expiry. The narrow repair preserves logical focus, the original marker deadline and a newer composer focus; 706 UI checks and independent review passed | Observed on the development base after corrected-base confirmation |
-| Search viewport after reconnecting focus during earlier-page loading | macOS tracing reproduced a 74.91 px target-geometry change inside focus after successful restoration, with unchanged thread scrollTop. The narrow repair moves the existing restoration after focus; one focused Windows scenario and fresh source/visual reviews passed | Ordinary confirmation passed 2,241 engine and 713 UI checks; 124 native scenarios passed and the visual-version memory scenario failed. Nothing was queued; corrected macOS runtime remains unverified |
+| Search viewport after reconnecting focus during earlier-page loading | macOS tracing reproduced a 74.91 px target-geometry change inside focus after successful restoration, with unchanged thread scrollTop. The narrow repair moves the existing restoration after focus; one focused Windows scenario and fresh source/visual reviews passed | After a retained native failure and focused non-reproduction, ordinary confirmation passed 2,241 engine, 713 UI and 125 native scenarios. Its gate and integration passed; the candidate was observed on base and main. The separate original-test cleanup executed 713 macOS UI checks, zero failed/not run/skipped, and integrated |
 | Frontend guidance for logical record identity during paging, reordering and filtering | Selected delivery and delivery-mode checks; fresh instruction review with three paper cases; the separate whole-tree confirmation below identifies its executed build | GitHub reported the instruction change closed and merged; numbered candidate observed on the development base and main |
 
 These selected changes strengthen specific blueprint criteria; none replaces the initial 243-row inventory with a
@@ -49,6 +49,8 @@ whole-product pass. Each scope keeps the limitations below and its separate inte
 The skills reuse the first-party guide/session-kit delivery for both vendors and areas, including guarded modes,
 fallback, resumed sessions and Windows junction rejection. Existing external catalog art direction remains separate.
 Instruction delivery does not prove spontaneous selection or that a model followed the whole workflow.
+A read-only comparison found that this already-running installed guide lacks later source refinements; its files
+were left unchanged. Source delivery checks do not establish that the current installed session loaded every refinement.
 
 ## Generated-interface evidence
 
@@ -158,10 +160,34 @@ Windows scenario and an independent review of all sixteen ordinary before/after 
 exercise macOS search. Its ordinary whole-tree confirmation then passed 2,241 engine and 713 UI checks but failed the
 visual-version lifecycle scenario (124 other native scenarios passed). After Escape at 720 px, it retained 15.1 MiB
 above a 131.9 MiB baseline after 15.0 seconds, exceeding the unchanged 15 MiB margin; tracked frame WeakRefs were empty.
-Nothing was queued. This recurrence is not attributed to the viewport repair, and corrected macOS runtime is unverified.
+Nothing was queued. At that checkpoint, this recurrence was not attributed to the viewport repair and corrected macOS runtime was unverified.
 Fresh independent inspection found that failed native outcomes discard the detailed per-process notes. A scoped
 diagnostic now appends the existing notes only after the margin assertion fails, without changing measurement, waits,
 events, limits or application code. The repeated retention's cause remains unknown.
+
+The scoped error-only diagnostic then executed one identified scenario on the same composed application source:
+141.8 MiB baseline, 149.3 MiB after Escape, 7.5 MiB retained at 10.9 seconds. This is a non-reproduction, not a
+memory repair or explanation. The subsequent ordinary confirmation passed 2,241 engine, 713 UI and 125 native
+scenarios, all zero failed/not run/skipped. Baseline samples were 139.9/132.4/132.4 MiB; the unchanged maximum
+policy selected 139.9. Close/Escape retention was 6.6/7.5 MiB, both at 10.7 seconds. Actual source/executable
+identities and full native output were preserved before reuse of the shared proof folder. Its queued gate and
+integration passed, and the numbered candidate was observed directly on the development base and main.
+The ordinary Windows receipt skipped remote macOS UI, so macOS lints supplied no corrected runtime proof.
+
+A separate test-only cleanup removed temporary failure-message geometry reads. The complete resulting search
+check matches the original check from the integrated logical-focus correction byte-for-byte; all event ordering,
+focus/composer/expiry assertions and the three-pixel tolerance remain. Production application and native diagnostic
+helper source were unchanged. Fresh source review and all seven local commands passed on the composed base.
+Its ordinary queued macOS UI execution then passed 713 checks, zero failed/not run/skipped. Its gate and integration
+passed, and its source was observed directly on both base and main. Removing geometry reads can affect layout timing;
+this success does not erase the prior instrumented failures or establish any browser-internal cause.
+
+The original repository frontend checklist also now follows AGENTS.md: required local commands, ordinary queue and
+observed queued gate; extra heavy local runs are for a new negative control or reported failure, while normal landing
+may run its required suites. It preserves failure attribution by actual source, executable and process, distinguishes
+collectible iframe objects from total browser memory, and points slow-motion playback to the living sentinel page.
+Three fresh independently reviewed paper workflow cases remove the instruction contradiction; they establish no
+model, generated-design or runtime gain.
 
 The separate resource candidate's complete corrected-base native log was retained before another run could replace it:
 125 scenarios passed, including draft attachment restart and the synthetic performance workload. Its full ordinary
