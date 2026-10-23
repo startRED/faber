@@ -10,7 +10,7 @@ import { createInbox } from './inbox.ts';
 import { createHold, onQuiet, watchGames } from './quiet.ts';
 import { store } from './running.ts';
 
-// Only a test build (`vite build --mode test`) carries the screen's checks; a production build drops this line.
+// Catch startup failures in test builds; a production build drops this import.
 if (import.meta.env.MODE === 'test') {
   await import('../tests/ui/crash.ts');
   await import('../tests/ui/index.ts');
@@ -57,6 +57,11 @@ render(
   ),
   document.getElementById('root')!,
 );
+// Start checks after the app has applied its initial language and settings, before a check mocks the shared API.
+if (import.meta.env.MODE === 'test') {
+  const { startChecks } = await import('../tests/ui/index.ts');
+  startChecks();
+}
 // The static first frame (ui/index.html) has done its job: the real screen is in the page now.
 document.getElementById('first')?.remove();
 

@@ -135,6 +135,8 @@ window.__faberChecks = runAll;
 window.__faberText = textFor;
 window.__faberMojibake = mojibake;
 
-if (new URLSearchParams(location.search).has('checks')) {
-  ignoreSystemMotion().then(() => runAll(progress, window.__faberChecksFilter)).then(report, (error: unknown) => crash(String(error)));
+export function startChecks(): void {
+  if (new URLSearchParams(location.search).has('checks')) {
+    ignoreSystemMotion().then(() => runAll(progress, window.__faberChecksFilter)).then(report, (error: unknown) => crash(String(error)));
+  }
 }
