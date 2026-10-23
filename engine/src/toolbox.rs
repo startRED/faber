@@ -39,7 +39,7 @@ window, when it renews, and whether it is billed per use. Starts no request. Use
 const CATALOG_DESCRIPTION: &str = "Searches Faber's catalog of skills, plugins and tool servers by words, offline. With `install` set \
 to a catalog id it installs that tool from its original source, but only after the person allows it on a card in Faber (or has \
 turned on full trust for Faber's own setup), and only a tool Faber holds no copy of: it never updates, repairs or replaces one. A \
-tool installed loads in a new conversation, not this one.";
+tool installed loads in a new conversation, not this one. With `set_enabled` set to an object with `id` and boolean `enabled`, it turns a healthy installed tool on or off with separate permission; new conversations receive the change. Never combine query, install and set_enabled.";
 
 const MEMORY_SEARCH_DESCRIPTION: &str = "Searches this project's own past conversations (the person's words and the final answers, \
 archived ones too) and its notes in `.faber` (decisions, taste, plans, recipes) by words, offline. Words match the start of a word, \
@@ -56,6 +56,7 @@ result says the person is away or that it was offered already, do the request as
 
 /// The permission card of an install: its tool name in the turn's list. It is Faber's own, never a CLI's request.
 pub const SELF_INSTALL: &str = "faber.tools.install";
+pub const SELF_SWITCH: &str = "faber.tools.switch";
 /// Every decision about a self-change, one line each, in the data folder.
 pub const SELF_CHANGES: &str = "self-changes.jsonl";
 /// About 1,000 lines of about 200 bytes. At the cap the oldest half goes and the newest lines stay, so a decision is never lost
@@ -71,7 +72,10 @@ fn catalog_schema() -> Value {
         "type": "object",
         "properties": {
             "query": { "type": "string", "description": "Words for the job, e.g. \"fix a bug\". Empty lists the recommended tools." },
-            "install": { "type": "string", "description": "The id of one catalog tool, from a search, to install after the person allows it." }
+            "install": { "type": "string", "description": "The id of one catalog tool, from a search, to install after the person allows it." },
+            "set_enabled": { "type": "object", "description": "Turn one healthy installed tool on or off after permission. Changes apply to new conversations. Never combine with query or install.",
+                "properties": { "id": { "type": "string" }, "enabled": { "type": "boolean" } },
+                "required": ["id", "enabled"], "additionalProperties": false }
         },
         "additionalProperties": false
     })
@@ -448,6 +452,12 @@ pub struct SelfChange<'a> {
 pub fn log_self_change(dir: &std::path::Path, change: &SelfChange) -> bool {
     let SelfChange { at, id, from, to, how, result, conv } = change;
     let line = json!({ "at": at, "kind": "tools.install", "id": id, "from": from, "to": to, "how": how, "result": result, "conv": conv });
+    append_capped_line(&dir.join(SELF_CHANGES), &line.to_string(), SELF_CHANGES_MAX)
+}
+
+pub fn log_switch(dir: &std::path::Path, change: &SelfChange, enabled: bool) -> bool {
+    let SelfChange { at, id, to, how, result, conv, .. } = change;
+    let line = json!({ "at": at, "kind": "tools.switch", "id": id, "from": to, "to": to, "enabled": enabled, "how": how, "result": result, "conv": conv });
     append_capped_line(&dir.join(SELF_CHANGES), &line.to_string(), SELF_CHANGES_MAX)
 }
 

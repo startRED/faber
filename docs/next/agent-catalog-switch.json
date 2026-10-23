@@ -1,0 +1,10 @@
+{
+  "notes": { "better": {
+    "en": "You can let the agent turn installed catalog tools on or off for new conversations, with your permission.",
+    "pt-BR": "Você pode permitir que o agente ligue ou desligue ferramentas instaladas do catálogo para novas conversas.",
+    "es": "Puedes permitir que el agente active o desactive herramientas instaladas del catálogo para las conversaciones nuevas.",
+    "fr": "Vous pouvez autoriser l’agent à activer ou désactiver les outils installés du catalogue pour les nouvelles conversations.",
+    "de": "Du kannst dem Agenten erlauben, installierte Katalogwerkzeuge für neue Gespräche ein- oder auszuschalten."
+  } },
+  "decisions": ["| R-next | 2026-10-22 | Extend the project agent's catalog tool with set_enabled: an explicit catalog id and boolean state for an installed healthy copy, through Catalog's own switch. It requires its own self-change consent or full trust, never install's always grant; Plan and Isolated refuse it. Bind consent to process and turn, recheck the copy under the store lock, never repair or discard corrupt copies, record the decision before changing the state and its result after in the bounded self-change log. Existing conversation kits stay unchanged; new conversations receive the selected state. | AI |"]
+}

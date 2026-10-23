@@ -321,16 +321,52 @@ impl Store {
             return Err(format!("Invalid tool id: {id}"));
         }
         let _store = lock();
+        self.set_enabled_locked(id, enabled, false)
+    }
+
+    /// Agent changes never recover, repair or discard a copy, including one changed while consent waited.
+    pub fn check_agent_switch(&self, id: &str) -> Result<(), &'static str> {
+        let _store = lock();
+        self.check_agent_switch_locked(id)
+    }
+
+    fn check_agent_switch_locked(&self, id: &str) -> Result<(), &'static str> {
+        let item = self.items.iter().find(|item| item.id == id).ok_or(crate::toolbox::UNKNOWN)?;
+        let installed = self.installed();
+        let commit = installed.get(id).ok_or("The tool is not installed. Install it first.")?;
+        let (active, disabled) = (self.dir(item), self.disabled().join(id));
+        let copy = if disabled.exists() { &disabled } else { &active };
+        if commit != &item.commit
+            || (active.exists() && disabled.exists())
+            || !std::fs::symlink_metadata(copy).is_ok_and(|m| m.is_dir() && !m.file_type().is_symlink())
+            || !self.verify_item(copy, item)
+        {
+            return Err(crate::toolbox::REINSTALL);
+        }
+        Ok(())
+    }
+
+    pub fn set_enabled_for_agent(&self, id: &str, enabled: bool) -> Result<(), String> {
+        let _store = lock();
+        self.check_agent_switch_locked(id).map_err(String::from)?;
+        self.set_enabled_locked(id, enabled, true)
+    }
+
+    fn set_enabled_locked(&self, id: &str, enabled: bool, agent: bool) -> Result<(), String> {
         let item = self.items.iter().find(|i| i.id == id).ok_or("Unknown tool")?;
         let mut selection = self.read_selection().ok_or("Could not read catalog switches")?;
-        self.recover_restores()?;
+        if !agent {
+            self.recover_restores()?;
+        }
         if !self.installed().contains_key(id) {
             return Err("The tool is not installed".into());
         }
         let active = self.dir(item);
         let disabled = self.disabled().join(id);
         if enabled && disabled.exists() && !self.verify_item(&disabled, item) {
-            self.discard(&disabled).map_err(|e| e.to_string())?;
+            if !agent {
+                self.discard(&disabled).map_err(|e| e.to_string())?;
+            }
             return Err("The disabled tool does not match the catalog".into());
         }
         let (from, to) = if enabled { (disabled, active) } else { (active, disabled) };

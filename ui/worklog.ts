@@ -73,7 +73,7 @@ function detailOf(input: unknown): string {
 }
 
 export function toolRow(tool: ToolUse): ToolRow {
-  const input = tool.input as { description?: unknown; title?: unknown; id?: unknown; level?: unknown; kind?: unknown; query?: unknown; install?: unknown } | undefined;
+  const input = tool.input as { description?: unknown; title?: unknown; id?: unknown; level?: unknown; kind?: unknown; query?: unknown; install?: unknown; set_enabled?: unknown } | undefined;
   // Faber's checks (R190) read as what they run, with nothing after: the folder is the conversation's own.
   if (tool.name === 'Verify') return { label: t(input?.level === 'full' ? 'tool.verifyFull' : 'tool.verify'), detail: '' };
   // The project map (R146) reads as reading it, with what was looked up.
@@ -84,6 +84,10 @@ export function toolRow(tool: ToolUse): ToolRow {
   if (tool.name === 'MemorySearch') return { label: t('tool.memorySearch'), detail: typeof input?.query === 'string' ? input.query : '' };
   // With an id to install it reads as installing, with the id; the person's card comes before anything is installed.
   if (tool.name === 'Catalog' && typeof input?.install === 'string') return { label: t('tool.catalogInstall'), detail: input.install };
+  if (tool.name === 'Catalog' && input?.set_enabled && typeof input.set_enabled === 'object') {
+    const change = input.set_enabled as Record<string, unknown>;
+    return { label: t(change.enabled === true ? 'tool.catalogEnable' : 'tool.catalogDisable'), detail: typeof change.id === 'string' ? change.id : '' };
+  }
   if (tool.name === 'Catalog') return { label: t('tool.catalog'), detail: typeof input?.query === 'string' ? input.query : '' };
   // Its own context, and compacting or clearing it, read as what they are, with nothing after.
   const action = tool.name === 'Conversation' ? (tool.input as { action?: unknown } | undefined)?.action : undefined;
