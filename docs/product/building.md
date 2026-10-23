@@ -114,10 +114,11 @@ see (`cargo fmt --check`): Faber's check fails on the reply, Faber sends the fix
 `passed`. On 2026-10-17 both passed on Haiku (26 s and 44 s, about US$0.01 each), and with `--review` the helper from the
 other AI sent its report back.
 
-Approved, not built (R190): the serial proof queue, `cargo t`'s plan and R146's "Faber decides done" become one
-verifier in the engine. It checks each change in seconds on the PC with no extra process while idle, posts the result
-to GitHub so CI only confirms, and later serves every project
-([spec](../superpowers/specs/2026-10-17-built-in-verifier.md)).
+Partly built (R190): the engine's `verify` tool runs a project's declared checks on the PC, summarizes failures and
+keeps the full output, with no extra process while idle. Faber's landing workflow also checks its exact queued tree
+locally and posts that coverage to GitHub. The wider evidence-bound review and completion contract remains planned;
+the existing checks tool does not enforce it ([current inventory](areas.md#toolbox),
+[spec](../superpowers/specs/2026-10-17-built-in-verifier.md)).
 
 ## Coherence of a project's work (R146)
 
