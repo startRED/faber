@@ -90,7 +90,7 @@ one is never touched again, and its boxes say nothing.
 | research/2026-10-21/catalog-list.md | Catalog step 2 curation completed locally; proof results and remaining native validation |
 | research/2026-10-22/benchmark-light.md | First run of the light benchmark: Faber against plain Claude Code on 5 requests; Codex rows wait for its quota |
 | research/ | Measurements, probes and reviews of the day in their name; model names and prices in them go stale fast. The UX, notification and screen-flake reviews of 2026-10-12 live here; their conclusions are in design/ and product/ |
-| superpowers/plans/2026-10-22-frontend-excellence.md | In progress: 243-item static audit and original frontend skills; reliability, runtime proof and measured quality work recorded separately |
+| superpowers/plans/2026-10-22-frontend-excellence.md | Completed selected changes: original frontend skills, reliability repairs and scoped proofs; initial 243-item audit and unverified criteria retained |
 
 A new spec or plan goes to `superpowers/specs` or `superpowers/plans` with the date in its name and a `Status:` line at the
 top (proposal, in progress, shipped, superseded by …), and gets a row here. While it is in progress, each landed step

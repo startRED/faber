@@ -24,9 +24,11 @@ it touches none, as before the first edit), in
 
 ## 2. Score them (a fresh session)
 
-Give the reviewer the two folders, the diff, `docs/product-rules.md` (the cards) and section 4 of
-`.claude/skills/faber-ui/SKILL.md` (composition). Nothing of the writer's reasoning. "Nothing to report" is a correct
-answer. Score each screen, before and after, 0 to 5 on each line, from the photo alone:
+Give the reviewer the two folders, the diff, `docs/product-rules.md` (the cards), the affected living design page and
+section 4 of `.claude/skills/faber-ui/SKILL.md` (composition). Nothing of the writer's reasoning. "Nothing to report"
+is a correct answer. Judge visible composition from the photos; use the current design and relevant decisions to
+interpret intended behavior. A stale checklist is not authority to remove a documented control or scope exception.
+Score each screen, before and after, 0 to 5 on each line:
 
 | # | Line | 5 means |
 | :--- | :--- | :--- |
@@ -35,8 +37,8 @@ answer. Score each screen, before and after, 0 to 5 on each line, from the photo
 | 3 | Type | At most three strong weights in view; sizes step clearly |
 | 4 | Art and text | Art never behind text a person reads; only a faint veil (C011) |
 | 5 | Alignment | Columns share a baseline; edges line up or differ on purpose |
-| 6 | Its own area | Only this area's words, hints and rows (C005) |
-| 7 | Calm | Only the work on a work screen; no crowding, no settings (C011) |
+| 6 | Its own area | Words and rows follow the documented area scope; Chat's pick-up list includes both areas (C005, R175) |
+| 7 | Calm | Only the work and its documented controls; no crowding or unrelated settings (C011, R175) |
 | 8 | Fits | Reads at both sizes: nothing cut, no awkward wrap, no empty band |
 
 The score of a screen is the sum, out of 40. For each point lost, one row: the photo, what is there, what it should be,

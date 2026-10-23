@@ -75,7 +75,8 @@ Code checks and motion checks do not see the whole screen. Look at a screenshot 
 - At most three strong text weights in view (a heading, a label, the body); the rest is regular or muted.
 - Decorative art (the black hole, the light, the dust) is never behind text a person reads: under it, only a faint veil.
 - Neighbouring columns share a baseline: their bottoms (or their first lines) line up.
-- A screen of one area never borrows another area's words, hints or rows (the Projects home says nothing of Chat).
+- Words, hints and rows follow the area's documented scope. The Projects home stays within its project; the Chat
+  home's pick-up list deliberately includes both areas (`docs/design/layout.md`, R175).
 
 The UX sentinel catches art under text, a name in three places and uneven columns (`docs/dev/sentinel.md`); the
 rest needs the visual critique (`.claude/skills/visual-critique/SKILL.md`).
@@ -84,8 +85,11 @@ rest needs the visual critique (`.claude/skills/visual-critique/SKILL.md`).
 
 - Every motion has its reduced/none path and a static cue (colour, icon or label); motion is never the only signal.
 - Every new word is a key in `ui/locales/` (English first), not a string in the component.
-- Run the screen check for what you touched (`cargo t`; `cargo t --all` when the screen or shell changed) and play any new
-  motion slowed down (the test build has the 0.25x playback described in `docs/dev/testing.md`) before calling it done.
+- Follow `AGENTS.md`'s local proof commands and normal queue; observe the queued gate before calling the change done.
+  Run a heavy suite locally only for a new negative control or a reported failure, not by habit. Play new motion slowed
+  down with the existing test build's 0.25x playback (`docs/dev/sentinel.md`).
+- Keep complete failure evidence with its actual source, executable and process identities; a different launch's
+  measurements cannot explain it. Collected iframe elements do not prove release of all browser memory.
 - Say what you could not check. Feel (a spring, a crossfade) cannot be judged from code: say so instead of guessing.
 
 ## Reviewing instead of building
