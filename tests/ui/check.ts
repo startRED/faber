@@ -29,13 +29,14 @@ export const finished = (animations: Animation[], limit = 1500): Promise<unknown
   Promise.race([Promise.all(animations.map((animation) => animation.finished)), new Promise((done) => setTimeout(done, limit))]);
 
 /**
- * Runs every registered check, in the order they were registered, and reports each one. `onStart` hears each check just
+ * Runs matching registered checks, in registration order, and reports each one. `onStart` hears each check just
  * before it runs, so a runner can tell a slow page from a stuck one.
  */
-export async function runAll(onStart?: (index: number, total: number, name: string) => void): Promise<Result[]> {
+export async function runAll(onStart?: (index: number, total: number, name: string) => void, filter?: string, checks = registry): Promise<Result[]> {
   const results: Result[] = [];
-  for (const [index, { name, run }] of registry.entries()) {
-    onStart?.(index, registry.length, name);
+  const selected = checks.filter(({ name }) => filter === undefined || name.includes(filter));
+  for (const [index, { name, run }] of selected.entries()) {
+    onStart?.(index, selected.length, name);
     // Every check starts in English: the language the system starts with (a Portuguese PC), or one a check before it left, must not decide which pass.
     useLanguage('en');
     // What Faber keeps for the person while it runs must not carry from one check to the next.

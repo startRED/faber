@@ -112,6 +112,7 @@ type Vars = Record<string, string | number>;
 declare global {
   interface Window {
     __faberChecks: () => Promise<Result[]>;
+    __faberChecksFilter?: string;
     __faberText: (key: string, vars?: Vars, language?: string | null) => string;
     __faberMojibake: (text: string) => string | undefined;
   }
@@ -135,5 +136,5 @@ window.__faberText = textFor;
 window.__faberMojibake = mojibake;
 
 if (new URLSearchParams(location.search).has('checks')) {
-  ignoreSystemMotion().then(() => runAll(progress)).then(report, (error: unknown) => crash(String(error)));
+  ignoreSystemMotion().then(() => runAll(progress, window.__faberChecksFilter)).then(report, (error: unknown) => crash(String(error)));
 }

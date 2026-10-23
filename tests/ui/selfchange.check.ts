@@ -121,3 +121,27 @@ check('install card: another tool’s request keeps the ordinary card with its o
     ok(!root.querySelector('[data-testid="self-line"]'));
   },
 ));
+
+check('catalog_switch: explicit state, separate consent and new-conversation notice in every language', async () => {
+  for (const language of LANGUAGES) {
+    useLanguage(language.code);
+    for (const enabled of [true, false]) {
+      for (const width of [360, 720]) {
+      await withCard({ ...INSTALL, tool: 'faber.tools.switch', input: { ...INSTALL.input as Record<string, unknown>, enabled } }, async (root) => {
+        const card = root.querySelector<HTMLElement>('.ask')!;
+        equal(card.querySelector('b')!.textContent, t(enabled ? 'ask.self.enable' : 'ask.self.disable', { name: catalogName('ponytail') }));
+        equal(card.querySelector('[data-testid=self-effect]')?.textContent, t('ask.self.newConversations'), 'the effect is its own paragraph, separate from the catalog description');
+        const bounds = card.getBoundingClientRect();
+        ok(bounds.width > 0 && bounds.width <= width, `${language.code}: the card fits the ${width}px column`);
+        for (const button of buttons(root)) {
+          const box = button.getBoundingClientRect();
+          ok(box.left >= bounds.left - 0.5 && box.right <= bounds.right + 0.5, `${language.code}: buttons stay inside the card`);
+        }
+        deepEqual(buttons(root).map((b) => b.textContent!.trim()), [t('ask.self.once'), t('ask.self.alwaysSwitch'), t('ask.deny')]);
+        ok(!card.querySelector('pre'), 'the agent cannot write the consent text');
+      }, `${width}px`);
+      }
+    }
+  }
+  useLanguage('en');
+});

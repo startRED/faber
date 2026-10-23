@@ -131,3 +131,11 @@ test('a batch is read oldest first from the log, and a commit that is not a land
   assert.equal(stacked('ccc\0chore: by hand\0\n\x1e'), null);
   assert.deepEqual(stacked(''), []);
 });
+
+test('a failed local proof names the suite and its exit status even when its output was empty', async () => {
+  const { localProofFailure } = await import('./land.mjs');
+  assert.equal(localProofFailure('rust', { status: 1, signal: null }), 'Local rust proof failed (exit 1). Nothing was queued.');
+  assert.equal(localProofFailure('ui', { status: null, signal: 'SIGTERM' }), 'Local ui proof failed (signal SIGTERM). Nothing was queued.');
+  assert.equal(localProofFailure('screen', { code: 'ENOENT' }), 'Local screen proof failed (start error ENOENT). Nothing was queued.');
+  assert.equal(localProofFailure('rust', {}), 'Local rust proof failed (no exit status). Nothing was queued.');
+});

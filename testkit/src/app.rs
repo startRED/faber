@@ -37,9 +37,18 @@ fn test_target(root: &Path, configured: Option<&std::ffi::OsStr>) -> PathBuf {
     root.join(configured.unwrap_or_else(|| std::ffi::OsStr::new("target"))).join("faber-test")
 }
 
+fn repository_root(start: &Path) -> Result<PathBuf, String> {
+    start
+        .ancestors()
+        .find(|root| ["Cargo.toml", "testkit/Cargo.toml", "engine/Cargo.toml"].iter().all(|marker| root.join(marker).is_file()))
+        .map(Path::to_path_buf)
+        .ok_or_else(|| format!("cannot find the Faber repository from {}: run inside its workspace", start.display()))
+}
+
 impl Paths {
     pub fn discover() -> Result<Paths, String> {
-        let root = Path::new(env!("CARGO_MANIFEST_DIR")).parent().ok_or("the testkit has no parent folder")?.to_path_buf();
+        let cwd = std::env::current_dir().map_err(|e| format!("cannot read the runner's current folder: {e}"))?;
+        let root = repository_root(&cwd)?;
         let exe = std::env::current_exe().map_err(|e| format!("cannot find the runner's own path: {e}"))?;
         let bin = exe.parent().ok_or("the runner has no folder")?.to_path_buf();
         let suffix = std::env::consts::EXE_SUFFIX;
@@ -686,6 +695,33 @@ impl Drop for Ctx {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn repository_root_follows_the_invocation_workspace_and_its_descendants() {
+        let dir = tempfile::tempdir().unwrap();
+        let roots = [dir.path().join("compiled-checkout"), dir.path().join("invoked-worktree")];
+        for root in &roots {
+            for marker in ["Cargo.toml", "testkit/Cargo.toml", "engine/Cargo.toml"] {
+                let path = root.join(marker);
+                std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+                std::fs::write(path, "").unwrap();
+            }
+        }
+        let nested = roots[1].join("engine/src/deep");
+        std::fs::create_dir_all(&nested).unwrap();
+        assert_eq!(repository_root(&roots[1]).unwrap(), roots[1]);
+        assert_eq!(repository_root(&nested).unwrap(), roots[1]);
+        assert_eq!(repository_root(&roots[0]).unwrap(), roots[0]);
+    }
+
+    #[test]
+    fn repository_root_rejects_an_unrelated_or_incomplete_workspace() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join("Cargo.toml"), "").unwrap();
+        let error = repository_root(dir.path()).unwrap_err();
+        assert!(error.contains("cannot find the Faber repository"));
+        assert!(error.contains(&dir.path().display().to_string()));
+    }
 
     #[test]
     fn test_build_paths_follow_default_relative_and_absolute_cargo_targets() {
