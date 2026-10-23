@@ -28,8 +28,8 @@ virtualizer, animation or setting does not become useful merely because it appea
 | Durable unsent PNG/PDF/inline draft attachments and removal recovery | 703 UI checks; two native scenarios with actual same-profile process restarts and byte equality; two security reviews; visual minimum 39/40 before and after | Numbered change observed on main by ancestry check |
 | Durable reading anchor and offset, bounded to 100 entries; true final-message jump | Five focused UI checks; real app/WebView2 exit, changed earlier content, same-profile restart, wheel input and one jump to message 159; 16 normal captures independently 40/40 before and after | Numbered change observed integrated; the compared functional UI/scenario sources match |
 | Refined frontend workflow, actual slow completion and executed-artifact identity | Frozen paired examples and fresh instruction review; real delayed IndexedDB deletion reproduced an existing failure, then three focused checks and cleanup passed; normal landing subsequently passed 2,189 engine, 706 UI and 123 native scenarios | GitHub subsequently reported the change closed and merged; numbered candidate observed on the development base |
-| Durable admission guard before send/steer/queue dispatch | Thirteen engine scenarios plus aggregate passed; six final UI checks with clean audit; native refused-write/retry preserved exact words/PNG/PDF; two security reviews; 16 normal captures independently 40/40 before and after | Remote gate failed an inherited reading/search scenario on macOS; repair is in progress, not waived |
-| Native resource and interaction workload on 1,000 messages/500 collapsed tools | Actual operation/count assertions, fixture bytes and executable identities; same-base sequential before/after reading pair passed the unchanged resource budget | Remote style failure repaired and independently reviewed; normal requeue passed 2,190 engine, 706 UI and 124 native scenarios, but the subsequent macOS gate failed the inherited reading/search assertion (705 UI passed, one failed); corrected-base confirmation remains required |
+| Durable admission guard before send/steer/queue dispatch | Fourteen admission checks passed after an actual new step-handover negative control; six final UI checks with clean audit; native refused-write/retry preserved exact words/PNG/PDF; two new security reviews of the deferred-queue composition; 16 normal captures independently 40/40 before and after | Corrected-base retry queued all remote suites without a local full-suite claim; macOS reported 715 UI passes and one search-viewport failure. Investigation remains open |
+| Native resource and interaction workload on 1,000 messages/500 collapsed tools | Actual operation/count assertions, fixture bytes and executable identities; same-base sequential before/after reading pair passed the unchanged resource budget | After the historical style and inherited search failures, corrected-base ordinary confirmation passed 2,241 engine, 713 UI and 125 native scenarios with zero failed/not run/skipped; queued gate and integration passed, and the numbered candidate was observed on the development base and main |
 | Search focus and temporary marker after earlier messages load | Two actual regressions reproduced: result 100 became 60 after paging; focus disappeared after marker expiry. The narrow repair preserves logical focus, the original marker deadline and a newer composer focus; 706 UI checks and independent review passed | Observed on the development base after corrected-base confirmation |
 | Frontend guidance for logical record identity during paging, reordering and filtering | Selected delivery and delivery-mode checks; fresh instruction review with three paper cases; the separate whole-tree confirmation below identifies its executed build | GitHub reported the instruction change closed and merged; numbered candidate observed on the development base and main |
 
@@ -127,6 +127,25 @@ Required local commands passed for each final package, with receipts retaining t
 the existing bundle warning and script result 101 passed/one branch-only skip. Claims were rechecked after other
 lanes narrowed disjoint reservations. A passing local scenario or a queued commit is not an observed remote gate.
 Raw logs, source/artifact hashes, photos and independent reviews remain in each working copy's ignored target folder.
+
+The send retry encountered a real conflict with separately integrated editable step-boundary queuing. Its resolution
+keeps that waiting period and durable admission; it does not restore immediate steering. A new negative control
+proved an unsaved queued edit could reach native input at step handover. Saving the current intent before removal
+and dispatch made all 14 admission checks pass. Two fresh security reviews and seven local commands passed on the
+exact complete resolved tree, independently checked in a detached proof workspace. The guard adds an existing atomic
+record write at handover, without a timer or process; isolated storage latency and processor overhead were not measured.
+
+That send candidate's remote macOS run then reported a different assertion: loading an earlier page changed the search
+viewport (715 UI passed, one failed). This is not the previous logical-focus assertion. No cause or repair is established.
+A narrow diagnostic change retains the event sequence, focus checks and three-pixel tolerance while reporting before
+and after geometry. It has independent source review and seven passing local commands; extra geometry reads can affect
+layout timing, so a subsequent pass alone would not diagnose or repair the original failure.
+
+The separate resource candidate's complete corrected-base native log was retained before another run could replace it:
+125 scenarios passed, including draft attachment restart and the synthetic performance workload. Its full ordinary
+confirmation is a newer-tree result, not another trial of the historical paired comparison or evidence of a speedup.
+Its queued gate and integration subsequently passed; GitHub reported it merged, and the same candidate was observed
+on the development base and directly on main. The following warmed-cache workflow is separate from the native proof.
 
 ## Contracts not established by this work
 
