@@ -471,8 +471,11 @@ checks in `tests/ui/index.ts`, real-app scenarios in `testkit/src/screen/mod.rs`
 | Attachment file reselection | The composer copies the chosen files and clears its native picker so a removed file can be selected again. This does not change draft persistence. | `tests/ui/composer.check.ts` (`composer: removing a picked file allows picking the same file again`) |
 | This map | Done | `engine/tests/product_map.rs`; the trap tasks and the weekly coherence pass in `testkit/coherence/` (R151) |
 
-Not built yet, so nothing may assume it: command-line tools and the live manifest, the toolbox, Livre, the remaining visual
-answers, the full benchmark (its light version of 5 requests runs from `docs/dev/benchmark.md`), Equilibrado on screen.
+Not built yet, so nothing may assume it: command-line tools and the live manifest; the toolbox's enforced review gate,
+up-front proof contract, blind creative judges, per-step agent snapshot/undo API, agent-driven tool lifecycle and setting
+changes, and native desktop control (the [toolbox inventory](product/areas.md#toolbox) names the tools already built);
+Safe, Balanced and Free git modes on screen (R83, separate from CLI permissions and Keep going); the remaining visual
+answers; and the full benchmark (its light version of 5 requests runs from `docs/dev/benchmark.md`).
 
 ## Portable catalog plugins
 

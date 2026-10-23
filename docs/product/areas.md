@@ -117,19 +117,29 @@ wait. Everything persists across closing, crashes and reboots.
 
 ## Toolbox
 
-| Tool | What it does |
+The names in the first column are the original plan, not additional APIs. Reuse the current tools named below;
+a planned name does not mean that a callable tool exists.
+
+| Planned tool | Current implementation and remaining work |
 | :--- | :--- |
 | `mission.start` / `mission.amend` | retired with missions (R215); a project conversation the agent starts does this now |
-| `worker.spawn(role, vendor)` | built as the helper from the other AI (R161) and conversations the agent starts (R198) |
-| `review.request` | Faber picks a reviewer from another vendor, in a fresh session |
-| `proof.define` / `proof.run` | states up front how success will be checked, then runs it and keeps the evidence |
-| `judge.creative` | two judges from different vendors, in fresh sessions |
-| `snapshot` / `undo` | snapshot before touching files; undo any local step |
-| `catalog.search` / `catalog.install` | finds and installs a tool from its original source, license shown first |
-| `faber.tools` / `faber.settings` | manages Faber itself: installs, updates, configures and removes any tool (catalog or the user's own) and changes settings, behind the approval gate |
-| `pc.*` | computer control through the accessibility tree, screenshots as a fallback |
-| `memory.search` | searches past conversations, decisions and the user's taste |
-| `quota.get` | remaining quota per subscription and when it renews |
+| `worker.spawn(role, vendor)` | Built as `helper` for the other AI (R161), native CLI subagents, and `conversation` for separate work (R198). A general helper has the caller's permissions; it is not an enforced read-only review. |
+| `review.request` | Not built. The own work method's review gate belongs to task 994; it requires a fresh read-only session and a recorded result. |
+| `proof.define` / `proof.run` | Partial: `verify` runs the project's checks and records their results. The up-front contract and receipts tied to file hashes belong to task 994. Running checks alone is not that contract. |
+| `judge.creative` | Not built: two blind judges from different vendors, in fresh sessions, with recorded scores. |
+| `snapshot` / `undo` | Private file history and the message menu's Go back and Redo are built in both areas, with bounded coverage reported. No per-step agent API with these names exists. Remote effects cannot be undone. See [Rewind](../design/rewind.md). |
+| `catalog.search` / `catalog.install` | Built as `catalog`: offline search and installation of a tool Faber does not hold, through the approval gate below. |
+| `faber.tools` / `faber.settings` | Partial: `catalog` installs, and the person manages installed tools in Catalog. Agent-driven update, repair, removal, on/off and setting changes are not built. Task 995 curates content; it does not implement these agent actions. |
+| `pc.*` | Partial: `browse` drives Faber's browser, with login, captcha and payment handed to the person. Native desktop control through accessibility and screenshot fallback is not built into Faber. An external installed server is not that first-party API. |
+| `memory.search` | Built as `memory_search`, over this project's conversations and `.faber` notes only. |
+| `quota.get` | Built as `quota`, from limits Faber already measured, without starting a request. |
+| Progress and delivery | Built as `plan`, `status` and `wrap_up`; these present work, not proof that it passed. |
+| Discover the project | Built as `map`, derived from source, and `verify` for the declared checks. |
+| Offer the bigger ask | Built as `offer_bigger`, once per conversation, with the request as asked as its default. |
+
+The product map's shell-command entries and feature rows describe these tools and their checks. Existing permissions
+and per-session availability still apply; this inventory adds no tools or grants. The separate git modes of R83
+(Safe, Balanced and Free) are not the CLI permission modes or the Keep going control, and are not built on screen.
 
 Built so far, as tools of a project's own agent (R412): `memory.search` as `memory_search` (this project's other conversations, through the sidebar's own search index, and the notes in `.faber` with their authors, never `CLAUDE.md`, another project or Chat; read-only, in every permission mode, quoted as data), `quota.get` as `quota` (the limits Faber already holds, no new CLI call), and the bigger-ask offer of "Aiming higher" as `offer_bigger` (a question card, once per conversation, whose default is the request as asked) and `catalog.search` and `catalog.install` as `catalog` (search: the shipped catalog, no network and no card, in every permission mode; install: refused with no card in Plan and Isolated, even with full trust, and otherwise by id, from the tool's original source, only after the person's card of guardrail 3 or their "full trust for Faber's own setup" switch, with the version, licence and source shown first). It installs only a tool Faber holds nothing of: a copy that is installed (healthy, outdated, corrupt or switched off) or removed with its Undo copy still there is left as it is, and the agent is told the person does it in Catalog. Each install is logged in `self-changes.jsonl` as the decision, written before anything is downloaded, and its result; the newest lines stay once the log reaches 200 KB. A decision that cannot be written stops the install however it was allowed, what Faber holds of the tool is checked again under the store lock before anything is written, and a second install of one id while one runs is refused. Updating, repairing and removing a tool, and changing a setting, from the agent are not built. Together the three tools add about 400 tokens to every request of a project agent, and `offer_bigger` with its line of the prompt about 350 more. See "Faber's AI limits", "Faber's catalog search and install", "Faber's project memory search" and "Offer the bigger ask" in [the product map](../product-map.md).
 
