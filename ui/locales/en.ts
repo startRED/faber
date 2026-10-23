@@ -1993,6 +1993,7 @@ export const en = {
   'notes.224.fixed': 'Catalog replacements ask for confirmation and preserve the previous files and on/off choice if installation fails.',
   'notes.225.fixed': 'Messages that cannot be saved stay available to retry, without starting the AI or adding duplicates.',
   'notes.226.better': 'When building forms, Faber checks that browsers can identify fields for your name, email and phone number.',
+  'notes.227.fixed': "You can return to the Catalog list without scrolling back to the top of a tool's details.",
   'update.checking': 'Looking for an update…',
   'update.downloading': 'Downloading update…',
   'update.downloadingPercent': 'Downloading update… {percent}%',

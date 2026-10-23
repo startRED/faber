@@ -322,6 +322,36 @@ check('catalog: the full curated list pages without duplicates and searches beyo
   } finally { view.close(); }
 });
 
+check('catalog: return stays reachable after reading a small-window detail', async () => {
+  const view = await panel({ vendors: [] });
+  try {
+    view.root.style.height = '480px';
+    // This isolated component must sit above the running test app's caption.
+    view.root.style.zIndex = '10000';
+    for (const locale of LANGUAGES) {
+      useLanguage(locale.code);
+      for (const enlarged of [false, true]) {
+        view.root.style.setProperty('--fs-sm', enlarged ? '24px' : themes.css.base['fs-sm']);
+        view.root.style.setProperty('--fs-ui', enlarged ? '28px' : themes.css.base['fs-ui']);
+        await tap(cards(view.root)[0]);
+        const surface = view.root.querySelector<HTMLElement>('[data-catalog]')!;
+        surface.scrollTop = surface.scrollHeight;
+        await tick();
+        ok(surface.scrollTop > 0, 'the detail was scrolled');
+        const back = button(view.root, 'catalog.back');
+        const bounds = back.getBoundingClientRect(), viewport = surface.getBoundingClientRect();
+        ok(bounds.top >= viewport.top && bounds.bottom <= viewport.bottom, `${locale.code}: return stays inside the reading viewport`);
+        ok(bounds.right <= viewport.right, `${locale.code}: the whole return label fits`);
+        const hit = document.elementFromPoint(bounds.left + bounds.width / 2, bounds.top + bounds.height / 2);
+        equal(hit?.closest('button'), back, `return is not covered: ${hit?.outerHTML.slice(0, 180)}`);
+        await tap(back);
+        equal(view.root.querySelector('.catalog-detail'), null);
+        equal((document.activeElement as HTMLElement).dataset.catalogCard, 'systematic-debugging');
+      }
+    }
+  } finally { view.close(); }
+});
+
 check('catalog: details open their original source in the system browser and install, switch, cancel removal and undo preserve state', async () => {
   const view = await panel();
   try {

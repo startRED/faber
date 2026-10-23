@@ -358,7 +358,7 @@ export function Catalog(props: { projects: Project[]; projectId?: string; vendor
           </div></Show>
         </>}>
           {(row) => <article class="catalog-detail" aria-busy={busy()} data-tone={tone(row())}>
-            <button class="btn" onClick={back}><Icon name="left" small />{t('catalog.back')}</button>
+            <div class="catalog-return"><button class="btn" onClick={back}><Icon name="left" small />{t('catalog.back')}</button></div>
             <header class="catalog-hero">
               <span class="catalog-icon"><Icon name={glyph(row())} /></span>
               <div class="catalog-hero-text">

@@ -2100,6 +2100,7 @@ export const ptBR: Messages = {
   'notes.224.fixed': 'As trocas no catálogo pedem confirmação e preservam os arquivos anteriores e a escolha de ativação se a instalação falhar.',
   'notes.225.fixed': 'Se a mensagem não puder ser salva, dá pra tentar de novo sem iniciar a IA nem duplicar a mensagem.',
   'notes.226.better': 'Ao criar formulários, o Faber confere se o navegador reconhece os campos do seu nome, email e telefone.',
+  'notes.227.fixed': 'Você pode voltar à lista do Catálogo sem rolar até o início dos detalhes de uma ferramenta.',
   'update.checking': 'Procurando atualização…',
   'update.downloading': 'Baixando atualização…',
   'update.downloadingPercent': 'Baixando atualização… {percent}%',

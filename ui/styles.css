@@ -1753,6 +1753,7 @@ html.away-win :is(.amb, .amb *) { animation-play-state: paused !important; }
 .catalog-batch-count { font-weight: 580; font-variant-numeric: tabular-nums; }
 .catalog-batch-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
 .catalog-detail { max-width: 720px; margin: 0 auto; }
+.catalog-return { position: sticky; top: 0; z-index: 1; padding: 12px 0; background: var(--bg); }
 .catalog-detail h1 { margin: 0 0 6px; overflow-wrap: anywhere; }
 .catalog-hero { display: flex; flex-wrap: wrap; align-items: center; gap: 16px 18px; margin: 28px 0 8px; }
 .catalog-hero .catalog-icon { width: 56px; height: 56px; border-radius: var(--r-md); }
