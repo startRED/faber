@@ -2,7 +2,7 @@
 
 Chat and Projects, the lead agent that picks its own path, its modes, its toolbox and the guardrails code enforces.
 
-Catalog is a separate browsing and management tab beside Chat and Projects, not a third work area. It has no composer or conversation, and its manual controls preserve the existing tool delivery boundaries. Automatic tool choice for Chat, child sessions and subagents is still planned.
+Catalog is a separate browsing and management tab beside Chat and Projects, not a third work area. It has no composer or conversation, and its manual controls preserve the existing tool delivery boundaries. Automatic tool choice is built as session kits (product map, "Session kits"): code picks installed skills and servers at session boundaries, and native subagents inherit the session's kit.
 
 ## Two areas
 
@@ -119,8 +119,8 @@ wait. Everything persists across closing, crashes and reboots.
 
 | Tool | What it does |
 | :--- | :--- |
-| `mission.start` / `mission.amend` | runs a plan written by the agent as a durable graph of steps across several CLIs |
-| `worker.spawn(role, vendor)` | opens a worker in another CLI to research, write or review |
+| `mission.start` / `mission.amend` | retired with missions (R215); a project conversation the agent starts does this now |
+| `worker.spawn(role, vendor)` | built as the helper from the other AI (R161) and conversations the agent starts (R198) |
 | `review.request` | Faber picks a reviewer from another vendor, in a fresh session |
 | `proof.define` / `proof.run` | states up front how success will be checked, then runs it and keeps the evidence |
 | `judge.creative` | two judges from different vendors, in fresh sessions |
