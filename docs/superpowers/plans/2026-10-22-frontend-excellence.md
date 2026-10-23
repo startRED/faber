@@ -31,6 +31,7 @@ virtualizer, animation or setting does not become useful merely because it appea
 | Durable admission guard before send/steer/queue dispatch | Fourteen admission checks passed after an actual new step-handover negative control; six final UI checks with clean audit; native refused-write/retry preserved exact words/PNG/PDF; two new security reviews of the deferred-queue composition; 16 normal captures independently 40/40 before and after | Corrected-base retry queued all remote suites without a local full-suite claim; macOS reported 715 UI passes and one search-viewport failure. Investigation remains open |
 | Native resource and interaction workload on 1,000 messages/500 collapsed tools | Actual operation/count assertions, fixture bytes and executable identities; same-base sequential before/after reading pair passed the unchanged resource budget | After the historical style and inherited search failures, corrected-base ordinary confirmation passed 2,241 engine, 713 UI and 125 native scenarios with zero failed/not run/skipped; queued gate and integration passed, and the numbered candidate was observed on the development base and main |
 | Search focus and temporary marker after earlier messages load | Two actual regressions reproduced: result 100 became 60 after paging; focus disappeared after marker expiry. The narrow repair preserves logical focus, the original marker deadline and a newer composer focus; 706 UI checks and independent review passed | Observed on the development base after corrected-base confirmation |
+| Search viewport after reconnecting focus during earlier-page loading | macOS tracing reproduced a 74.91 px target-geometry change inside focus after successful restoration, with unchanged thread scrollTop. The narrow repair moves the existing restoration after focus; one focused Windows scenario and fresh source/visual reviews passed | Ordinary confirmation passed 2,241 engine and 713 UI checks; 124 native scenarios passed and the visual-version memory scenario failed. Nothing was queued; corrected macOS runtime remains unverified |
 | Frontend guidance for logical record identity during paging, reordering and filtering | Selected delivery and delivery-mode checks; fresh instruction review with three paper cases; the separate whole-tree confirmation below identifies its executed build | GitHub reported the instruction change closed and merged; numbered candidate observed on the development base and main |
 
 These selected changes strengthen specific blueprint criteria; none replaces the initial 243-row inventory with a
@@ -136,7 +137,8 @@ exact complete resolved tree, independently checked in a detached proof workspac
 record write at handover, without a timer or process; isolated storage latency and processor overhead were not measured.
 
 That send candidate's remote macOS run then reported a different assertion: loading an earlier page changed the search
-viewport (715 UI passed, one failed). This is not the previous logical-focus assertion. No cause or repair is established.
+viewport (715 UI passed, one failed). This is not the previous logical-focus assertion. At that checkpoint no cause
+or repair was established.
 A narrow diagnostic change retains the event sequence, focus checks and three-pixel tolerance while reporting before
 and after geometry. It has independent source review and seven passing local commands; extra geometry reads can affect
 layout timing, so a subsequent pass alone would not diagnose or repair the original failure.
@@ -145,6 +147,21 @@ from 22 to 97 pixels, scrollTop from 0 to 10,925 and scrollHeight from 10,989 to
 observed, not explained. Scoped native scroll/focus tracing preserves the same assertions and tolerance; its one
 explicitly selected Windows scenario passed. The first earlier diagnostic invocation ran no scenario after an
 overlapping production build changed its assets, and a later default selection ran nothing; neither is runtime proof.
+
+The subsequent scoped macOS trace also failed the unchanged check (712 UI passed, one failed). Viewport restoration
+first put the target at 22.09 pixels; reconnecting its focus changed its relative position to 97 pixels while thread
+scrollTop remained 10,925. This isolates the synchronous focus boundary, not a browser-internal mechanism or ignored
+scroll-prevention option. The repair reconnects logical focus before the existing viewport restoration, with no extra
+scroll write, timer, observer or retained state. The final test matches the earlier uninstrumented diagnostic source;
+all focus, composer, outline-expiry and less-than-three-pixel assertions remain. Seven local commands, one focused
+Windows scenario and an independent review of all sixteen ordinary before/after captures passed. The captures do not
+exercise macOS search. Its ordinary whole-tree confirmation then passed 2,241 engine and 713 UI checks but failed the
+visual-version lifecycle scenario (124 other native scenarios passed). After Escape at 720 px, it retained 15.1 MiB
+above a 131.9 MiB baseline after 15.0 seconds, exceeding the unchanged 15 MiB margin; tracked frame WeakRefs were empty.
+Nothing was queued. This recurrence is not attributed to the viewport repair, and corrected macOS runtime is unverified.
+Fresh independent inspection found that failed native outcomes discard the detailed per-process notes. A scoped
+diagnostic now appends the existing notes only after the margin assertion fails, without changing measurement, waits,
+events, limits or application code. The repeated retention's cause remains unknown.
 
 The separate resource candidate's complete corrected-base native log was retained before another run could replace it:
 125 scenarios passed, including draft attachment restart and the synthetic performance workload. Its full ordinary
