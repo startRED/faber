@@ -87,6 +87,9 @@ written requirement it breaks. A scoped fix is not permission to redesign neighb
   Retain the existing project budget. Do not claim zero cost from source inspection or a quiet-looking screen.
 - Run affected project checks and the required final checks. Keep the receipt and report actual failures; a larger
   bundle or failed resource budget cannot be waived by an attractive screenshot.
+- After restoring a negative control or switching sources, verify the executable or served bundle actually exercised.
+  A source checksum alone does not establish its build identity. Invalidate stale artifacts through the build system
+  and retain the running build's identity before treating its result as proof of the corrected version.
 
 ## Report and stop
 

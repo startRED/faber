@@ -37,7 +37,7 @@ an unnecessary frontend/screenshot workflow. These are not three executed interf
 
 Generated output evidence is recorded below. No general quality gain, latency reduction,
 new trigger accuracy or all-theme/accessibility result is claimed. The two lazy descriptions remain 151/152 bytes;
-the complete revised bodies are 9,202 and 7,466 UTF-8 bytes, loaded only when relevant. No dependency, setting, process,
+the complete revised files are 9,202 and 7,805 UTF-8 bytes, loaded only when relevant. No dependency, setting, process,
 timer or catalog download is added by the instruction change. Existing guide delivery/permissions remain intact;
 the exact queued tree must still prove them through normal integration.
 
@@ -95,6 +95,28 @@ Instruction-body review and the queued exact-tree delivery checks are separate f
 The fresh read-only instruction review found no blocker in scope, preservation of existing identity, conditional
 viewport guidance or the two paper routing examples. Its indefinite-wait caveat led to a final clarification:
 completion is required for operations designed to finish; deliberately indefinite waits are checked against their
-own cancellation/recovery contract. This changed the proof body from 7,343 to 7,466 bytes after generation. The pair
+own cancellation/recovery contract. This changed the proof file from 7,343 to 7,466 bytes after generation. The pair
 tested the earlier wording; its scores were not changed or rerun and do not measure this later clarification.
 The same independent reviewer read the clarification and found no remaining blocker.
+
+## Integration follow-up
+
+The queued instruction change exposed one existing UI failure: 702 checks passed and the confirmed draft-deletion
+check read a remaining `forget` marker after a fixed 40 ms delay. A local real-IndexedDB characterization defers its
+success callback by 80 ms; it reproduced the same expected-null/actual-forget failure (two focused checks passed,
+one failed). The updated check waits for both durable markers to clear, with a bounded two-second safety wait, and
+retains the existing assertions on words, markers, refusal and the actual retry control. The adjacent single-draft
+retry uses the same completion wait. No product state machine or storage implementation changes for this repair.
+The slowed open still exercises real IndexedDB requests and transactions. The first final run passed all three affected
+checks, including the two-draft case at 358 ms, but failed its separate cleanup audit: a synthetic-profile NVIDIA
+DXCache file remained after the app tree exited. No retained cache was removed or cleanup failure waived. A fresh
+ordinary run then exited zero: three focused checks passed, no failures or skips, and its cleanup audit passed
+(386.9 s total including shared-slot admission; 5.1 s build, 155.4 s UI). The two-draft case completed at 338 ms.
+The first cleanup failure remains a separate failure; its cause was not established or repaired by the test change.
+
+Separate negative-control work found that copying restored source files with old timestamps could leave Cargo using
+an earlier executable. Source checksum equality did not prove the executed artifact's identity. A final three-line
+proof addition now requires checking the executable or served bundle after changing/restoring sources and invalidating
+stale artifacts through the build system. This changed the proof file from 7,466 to 7,805 bytes after the frozen pair;
+the generated-page scores do not measure it. A fresh read-only instruction/test review found no blocker; final
+integration remains separate.

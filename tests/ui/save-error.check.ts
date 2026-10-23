@@ -11,6 +11,12 @@ const look = {
   appearance: { base: 'sala', ground: 'sala', accent: '#ffffff', textFont: 'archivo', headingFont: 'narrow', textSize: 14, density: 1, corners: 1, motion: 'none', effects: { ambient: false, texture: false, glow: false } },
 };
 
+const removalFinished = async (keys: string[]) => {
+  const deadline = performance.now() + 2000;
+  while (keys.some((key) => localStorage.getItem(`faber.unsent-attachments.${key}`) !== null) && performance.now() < deadline)
+    await new Promise((resolve) => setTimeout(resolve, 10));
+};
+
 check('save error: a conversation the engine could not write shows in the same toast as a refused command', async () => {
   const settle = () => new Promise((resolve) => setTimeout(resolve, 30));
   const host = document.createElement('div');
@@ -72,7 +78,7 @@ check('save error: a failed draft removal is recovered after reopening and can b
     ok(retry, 'the existing toast offers a keyboard-operable retry');
     IDBFactory.prototype.open = open;
     retry!.click();
-    await settle();
+    await removalFinished([key]);
     equal(localStorage.getItem(`faber.unsent-attachments.${key}`), null, 'successful retry removes the durable marker');
     equal(kept(key), 'A new text draft written after the attachments were removed', 'retrying an attachment removal never discards newer words');
     equal(host.querySelector('.toast'), null, 'the failure clears only after the removal succeeds');
@@ -126,8 +132,15 @@ check('save error: refusing conversation deletion keeps its drafts, while a conf
     for (const key of keys) equal(localStorage.getItem(`faber.unsent-attachments.${key}`), 'forget', 'confirmed removal keeps its complete deletion intent');
     const retry = [...host.querySelectorAll<HTMLButtonElement>('.toast button')].find((button) => button.textContent === t('changes.retry'));
     ok(retry);
-    IDBFactory.prototype.open = open;
-    retry!.click(); await settle();
+    // Real storage can finish after a rendering tick; retain that delay even on a fast local disk.
+    IDBFactory.prototype.open = function (name, version) {
+      const request = open.call(this, name, version);
+      Object.defineProperty(request, 'onsuccess', { set: (listener: IDBRequest['onsuccess']) => {
+        request.addEventListener('success', (event) => setTimeout(() => listener?.call(request, event), 80), { once: true });
+      } });
+      return request;
+    };
+    retry!.click(); await removalFinished(keys);
     for (const key of keys) {
       equal(kept(key), '', 'both main and side draft words are removed');
       equal(localStorage.getItem(`faber.unsent-attachments.${key}`), null, 'both draft deletion transactions completed');
