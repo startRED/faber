@@ -59,7 +59,8 @@ impl Options {
         let plain = vendor(&value("--plain").unwrap_or_else(|| "claude".into()))?;
         let vendors = value("--vendors").unwrap_or_else(|| "claude".into()).split(',').map(vendor).collect::<Result<Vec<_>, _>>()?;
         let number = |name: &str, default: f64| -> Result<f64, Failure> {
-            value(name).map_or(Ok(default), |v| v.parse().map_err(|_| format!("{name} takes a number").into()))
+            let number = value(name).map_or(Ok(default), |v| v.parse::<f64>().map_err(|_| format!("{name} takes a number")))?;
+            if number.is_finite() && number > 0.0 { Ok(number) } else { Err(format!("{name} takes a positive finite number").into()) }
         };
         let (default_model, default_effort) = match plain {
             Vendor::Claude => ("claude-sonnet-5-5", "medium"),
@@ -250,6 +251,7 @@ fn failed(side: Side, secs: f64, error: impl Into<String>) -> SideResult {
         secs,
         wall_secs: secs,
         usage: Usage::default(),
+        usage_incomplete: true,
         cost_usd: None,
         models: vec![],
         reply: String::new(),
@@ -257,6 +259,13 @@ fn failed(side: Side, secs: f64, error: impl Into<String>) -> SideResult {
         proof: None,
         stopped_by_cap: false,
     }
+}
+
+fn not_run(side: Side, why: String) -> SideResult {
+    let mut result = failed(side, 0.0, format!("not run: {why}"));
+    result.cost_usd = Some(0.0);
+    result.usage_incomplete = false;
+    result
 }
 
 async fn run_plain(options: &Options, cli: &Cli, request: &Request, work: &Work, allowance: f64) -> SideResult {
@@ -303,7 +312,14 @@ async fn run_plain(options: &Options, cli: &Cli, request: &Request, work: &Work,
     };
     let tail: String = run.stderr.chars().rev().take(300).collect::<Vec<_>>().into_iter().rev().collect();
     let outcome = match parsed {
-        Ok(outcome) => outcome,
+        Ok(mut outcome) => {
+            if options.plain == Vendor::Codex {
+                pure::price_codex(&mut outcome, &options.plain_model, |input, output, read, write| {
+                    faber_engine::usage::api_price_for_prompt(&options.plain_model, input, output, read, write, 0, input)
+                });
+            }
+            outcome
+        }
         Err(error) => return failed(Side::Plain, secs, format!("{error}; exit {:?}; stderr: {tail}", run.code)),
     };
     let models = if outcome.models.is_empty() { vec![options.plain_model.clone()] } else { outcome.models.clone() };
@@ -314,6 +330,7 @@ async fn run_plain(options: &Options, cli: &Cli, request: &Request, work: &Work,
         secs,
         wall_secs: secs,
         usage: outcome.usage,
+        usage_incomplete: outcome.usage_incomplete,
         cost_usd: outcome.cost_usd,
         models,
         reply: outcome.text,
@@ -323,9 +340,8 @@ async fn run_plain(options: &Options, cli: &Cli, request: &Request, work: &Work,
     }
 }
 
-fn message_usage(messages: &[&Message]) -> (Usage, Option<f64>) {
+fn message_usage(messages: &[&Message]) -> Usage {
     let mut usage = Usage::default();
-    let mut cost: Option<f64> = None;
     for m in messages {
         let (read, write) = (m.cache_read_tokens.unwrap_or(0), m.cache_write_tokens.unwrap_or(0));
         // A message's input is the whole prompt, cache included (`claude::result_events`).
@@ -335,27 +351,55 @@ fn message_usage(messages: &[&Message]) -> (Usage, Option<f64>) {
             cache_read: read,
             cache_write: write,
         });
-        if let Some(c) = m.cost_usd {
-            *cost.get_or_insert(0.0) += c;
-        }
     }
-    (usage, cost)
+    usage
 }
 
-fn spent_by(conversation: &Conversation) -> f64 {
-    conversation.messages.iter().filter_map(|m| m.cost_usd).sum()
+fn ledger_snapshot(ledger: &faber_engine::ledger::Ledger) -> (f64, u64) {
+    [&ledger.claude, &ledger.codex].iter().fold((0.0, 0), |(cost, unknown), vendor| {
+        (cost + vendor.own_spend.values().sum::<f64>(), unknown + vendor.unmetered.values().map(|n| u64::from(*n)).sum::<u64>())
+    })
+}
+
+#[cfg(test)]
+mod cost_tests {
+    use super::*;
+
+    #[test]
+    fn both_vendors_and_auxiliary_work_count_after_the_baseline() {
+        let mut ledger = faber_engine::ledger::Ledger::default();
+        ledger.claude.spend(Some(10.0), false, 1.0, 0);
+        let before = ledger_snapshot(&ledger);
+        ledger.claude.spend(Some(0.05), false, 2.0, 0); // Router.
+        ledger.codex.spend(Some(0.25), false, 3.0, 0); // Auxiliary.
+        ledger.claude.spend(Some(0.5), false, 4.0, 0); // Main reply.
+        assert!((pure::ledger_cost(before, ledger_snapshot(&ledger)).unwrap() - 0.8).abs() < 1e-9);
+        ledger.codex.spend(None, true, 5.0, 0);
+        assert_eq!(pure::ledger_cost(before, ledger_snapshot(&ledger)), None);
+    }
+
+    #[test]
+    fn an_exhausted_budget_does_not_make_unstarted_work_unknown() {
+        let cap = Cap { max_usd: 1.0, max_fresh_tokens: 1000 };
+        let mut spent = Spend::default();
+        spent.add(&Usage::default(), Some(1.0));
+        let skipped = not_run(Side::Faber, cap.reached(&spent).unwrap());
+        spent.add(&skipped.usage, skipped.cost_usd);
+        assert_eq!(skipped.cost_usd, Some(0.0));
+        assert!(!spent.unknown_cost);
+        assert_eq!(spent.usd, 1.0);
+    }
 }
 
 /// Waits for the reply to settle: it ended and Faber's checks on it ended (or a project has none to run), or it needs the
-/// person. The cost is read only when a turn ends (the engine writes it then), so one long reply is not interrupted and a
-/// project's fix loop runs until RUN_LIMIT; Codex reports no cost, so this never stops a Codex side.
-async fn settle(engine: &Engine, id: &str, project: bool, allowance: f64) -> (Option<Conversation>, bool) {
+/// person. Ledger costs arrive at completed work boundaries; internal and auxiliary calls already in flight can overshoot.
+async fn settle(engine: &Engine, id: &str, project: bool, allowance: f64, baseline: (f64, u64)) -> (Option<Conversation>, bool) {
     let started = Instant::now();
     let (mut quiet, mut capped): (Option<(String, Instant)>, bool) = (None, false);
     while started.elapsed() < RUN_LIMIT {
         tokio::time::sleep(Duration::from_millis(500)).await;
         let Some(conversation) = engine.open(id) else { continue };
-        if !capped && spent_by(&conversation) >= allowance {
+        if !capped && pure::ledger_cost(baseline, ledger_snapshot(&engine.ledger())).is_none_or(|cost| cost >= allowance) {
             capped = true;
             engine.interrupt(id);
         }
@@ -425,6 +469,7 @@ async fn run_faber(clis: &BTreeMap<Vendor, Cli>, request: &Request, work: &Work,
         },
         Arc::new(|_| {}),
     );
+    let baseline = ledger_snapshot(&engine.ledger());
     // What the app's shell gives the engine: the native git for separate copies, and the verifier for the checks.
     engine.set_git(Arc::new(|| {
         faber_engine::project::git::Process::find().ok().map(|git| Box::new(git) as Box<dyn faber_engine::project::git::Executor + Send>)
@@ -449,6 +494,9 @@ async fn run_faber(clis: &BTreeMap<Vendor, Cli>, request: &Request, work: &Work,
             let recommended = list.iter().find(|m| m.is_default).map(|m| m.id.clone());
             engine.set_codex_models(list.iter().map(|m| m.id.clone()).collect(), recommended);
         }
+        if pure::ledger_cost(baseline, ledger_snapshot(&engine.ledger())).is_none_or(|cost| cost >= allowance) {
+            return Err("the budget is exhausted or setup cost is unknown; no request started".into());
+        }
         let (area, project_id) = match request.kind {
             Kind::Chat => (Area::Chat, None),
             Kind::Project => (Area::Project, Some(engine.add_project(&work.repo.to_string_lossy())?.id)),
@@ -462,16 +510,16 @@ async fn run_faber(clis: &BTreeMap<Vendor, Cli>, request: &Request, work: &Work,
             files: vec![],
             choice: Choice { vendor: "auto".into(), model: None, effort: None },
         })?;
-        Ok::<_, String>((id.clone(), settle(&engine, &id, request.kind == Kind::Project, allowance).await))
+        Ok::<_, String>((id.clone(), settle(&engine, &id, request.kind == Kind::Project, allowance, baseline).await))
     }
     .await;
     let wall = started.elapsed().as_secs_f64();
-    let side = match result {
+    let mut side = match result {
         Err(error) => failed(Side::Faber, wall, error),
         Ok((_, (None, _))) => failed(Side::Faber, wall, "the engine lost the conversation"),
         Ok((_, (Some(conversation), capped))) => {
             let replies: Vec<&Message> = conversation.messages.iter().filter(|m| m.role == Role::Assistant).collect();
-            let (usage, cost_usd) = message_usage(&replies);
+            let usage = message_usage(&replies);
             let last = replies.last();
             let reply = last.map_or("", |m| {
                 let tail = pure::from_utf16(&m.text, m.activity_end.unwrap_or(0));
@@ -501,7 +549,8 @@ async fn run_faber(clis: &BTreeMap<Vendor, Cli>, request: &Request, work: &Work,
                 secs: Some(replies.iter().filter_map(|m| m.took).sum::<u64>()).filter(|t| *t > 0).map_or(wall, |t| t as f64 / 1000.0),
                 wall_secs: wall,
                 usage,
-                cost_usd,
+                usage_incomplete: true,
+                cost_usd: None, // The complete ledger delta is taken after shutdown, including late usage.
                 models,
                 reply: reply.to_string(),
                 folder: (request.kind == Kind::Project)
@@ -514,6 +563,7 @@ async fn run_faber(clis: &BTreeMap<Vendor, Cli>, request: &Request, work: &Work,
     engine.shutdown();
     // The engine's processes end with it; give Windows a moment to release the folders before the next step reads them.
     tokio::time::sleep(Duration::from_millis(500)).await;
+    side.cost_usd = pure::ledger_cost(baseline, ledger_snapshot(&engine.ledger()));
     side
 }
 
@@ -692,6 +742,7 @@ async fn main() -> Result<(), Failure> {
             faber: None,
             plain: None,
             judge_cost_usd: None,
+            judge_attempted: false,
             judge_usage: Usage::default(),
             skipped: None,
         };
@@ -707,7 +758,7 @@ async fn main() -> Result<(), Failure> {
         spent.add(&plain.usage, plain.cost_usd);
         println!("  plain: ok {}, {:.0}s, US${:?}, {}", plain.ok, plain.secs, plain.cost_usd, plain.error.as_deref().unwrap_or(""));
         let mut faber = if let Some(why) = options.cap.reached(&spent) {
-            failed(Side::Faber, 0.0, format!("not run: {why}"))
+            not_run(Side::Faber, why)
         } else {
             run_faber(&clis, request, &work, &root, options.cap.allowance(&spent, options.per_run_usd), false).await
         };
@@ -723,6 +774,7 @@ async fn main() -> Result<(), Failure> {
             row.skipped = Some(format!("not judged, the cap was reached: {why}"));
         } else {
             let (first, second) = if a == Side::Faber { (&faber, &plain) } else { (&plain, &faber) };
+            row.judge_attempted = true;
             let judged =
                 judge(&options, &claude, request, first, second, &judge_dir, options.cap.allowance(&spent, options.per_run_usd)).await;
             spent.add(&judged.usage, judged.cost_usd);

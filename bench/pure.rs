@@ -256,7 +256,8 @@ pub struct Outcome {
     pub ok: bool,
     pub error: Option<String>,
     pub usage: Usage,
-    /// API-equivalent dollars as the CLI reports them; none when it reports none (Codex).
+    pub usage_incomplete: bool,
+    /// API-equivalent dollars; none when the native report or model/context pricing is unavailable.
     pub cost_usd: Option<f64>,
     pub models: Vec<String>,
     pub turns: Option<u64>,
@@ -287,14 +288,17 @@ pub fn parse_claude_result(stdout: &str) -> Result<Outcome, String> {
             cache_read: number(&usage, "cache_read_input_tokens"),
             cache_write: number(&usage, "cache_creation_input_tokens"),
         },
-        cost_usd: result.get("total_cost_usd").and_then(Value::as_f64),
+        usage_incomplete: !["input_tokens", "output_tokens", "cache_read_input_tokens", "cache_creation_input_tokens"]
+            .iter()
+            .all(|key| usage[*key].as_u64().is_some()),
+        cost_usd: result.get("total_cost_usd").and_then(Value::as_f64).filter(|cost| cost.is_finite() && *cost >= 0.0),
         models: result.get("modelUsage").and_then(Value::as_object).map(|m| m.keys().cloned().collect()).unwrap_or_default(),
         turns: result.get("num_turns").and_then(Value::as_u64),
     })
 }
 
 /// `codex exec --json`: one event per line; the last agent message is the reply and each finished turn adds its usage.
-/// Codex reports no price, so there is no cost. Written from Codex's documented event names and not yet run against a
+/// Codex reports no price; `price_codex` applies the shared model prices when context evidence permits. Not yet run against a
 /// live account (its quota was out on 2026-10-22), so a first real run must check it.
 pub fn parse_codex_events(stdout: &str) -> Result<Outcome, String> {
     let mut out = Outcome::default();
@@ -315,11 +319,16 @@ pub fn parse_codex_events(stdout: &str) -> Result<Outcome, String> {
                 let u = &event["usage"];
                 // Codex's input count includes what it read from the cache.
                 let cached = number(u, "cached_input_tokens");
+                let written = number(u, "cache_write_input_tokens");
+                out.usage_incomplete |= !["input_tokens", "output_tokens", "cached_input_tokens", "cache_write_input_tokens"]
+                    .iter()
+                    .all(|key| u[*key].as_u64().is_some())
+                    || cached.checked_add(written).is_none_or(|cache| cache > number(u, "input_tokens"));
                 out.usage.add(&Usage {
-                    input: number(u, "input_tokens").saturating_sub(cached),
+                    input: number(u, "input_tokens").saturating_sub(cached.saturating_add(written)),
                     output: number(u, "output_tokens"),
                     cache_read: cached,
-                    cache_write: 0,
+                    cache_write: written,
                 });
                 out.turns = Some(out.turns.unwrap_or(0) + 1);
             }
@@ -333,6 +342,25 @@ pub fn parse_codex_events(stdout: &str) -> Result<Outcome, String> {
     out.ok = failed.is_none() && !out.text.is_empty();
     out.error = failed.or_else(|| out.text.is_empty().then(|| "Codex gave no reply".into()));
     Ok(out)
+}
+
+/// CLI turn totals do not identify each request's context tier. Large totals stay unknown.
+pub fn price_codex(out: &mut Outcome, model: &str, price: impl Fn(u64, u64, u64, u64) -> Option<f64>) {
+    out.models = vec![model.to_string()];
+    out.cost_usd = None;
+    if !out.usage_incomplete && out.turns == Some(1) && out.usage.input + out.usage.cache_read + out.usage.cache_write <= 272_000 {
+        out.cost_usd = price(
+            out.usage.input + out.usage.cache_read + out.usage.cache_write,
+            out.usage.output,
+            out.usage.cache_read,
+            out.usage.cache_write,
+        );
+    }
+}
+
+/// A private benchmark engine's ledger delta includes routing and auxiliary work, unlike messages alone.
+pub fn ledger_cost(before: (f64, u64), after: (f64, u64)) -> Option<f64> {
+    (before.0.is_finite() && after.0.is_finite() && after.0 >= before.0 && after.1 == before.1).then_some(after.0 - before.0)
 }
 
 /// The reply of a Faber answer from its UTF-16 offset (`Message.activity_end`): the part after the working notes.
@@ -392,12 +420,16 @@ pub struct Cap {
 #[derive(Debug, Clone, Copy, Default, PartialEq, Serialize)]
 pub struct Spend {
     pub usd: f64,
+    pub unknown_cost: bool,
     pub usage: Usage,
 }
 
 impl Spend {
     pub fn add(&mut self, usage: &Usage, usd: Option<f64>) {
-        self.usd += usd.unwrap_or(0.0);
+        match usd.filter(|c| c.is_finite() && *c >= 0.0) {
+            Some(cost) => self.usd += cost,
+            None => self.unknown_cost = true,
+        }
         self.usage.add(usage);
     }
 }
@@ -409,13 +441,15 @@ impl Cap {
             Some(format!("US${:.2} spent, cap US${:.2}", spent.usd, self.max_usd))
         } else if spent.usage.fresh() >= self.max_fresh_tokens {
             Some(format!("{} first-time tokens spent, cap {}", spent.usage.fresh(), self.max_fresh_tokens))
+        } else if spent.unknown_cost {
+            Some("cost unknown: no further paid work admitted".into())
         } else {
             None
         }
     }
     /// The dollars one more run may still spend, at most `per_run`.
     pub fn allowance(&self, spent: &Spend, per_run: f64) -> f64 {
-        (self.max_usd - spent.usd).clamp(0.0, per_run)
+        if self.reached(spent).is_some() { 0.0 } else { (self.max_usd - spent.usd).clamp(0.0, per_run) }
     }
 }
 
@@ -432,6 +466,8 @@ pub struct SideResult {
     /// From starting the side to its end: for Faber also the engine's start, its plan check and the wait for a project's checks.
     pub wall_secs: f64,
     pub usage: Usage,
+    /// Routing and auxiliary token counters are not exposed by the engine ledger.
+    pub usage_incomplete: bool,
     pub cost_usd: Option<f64>,
     pub models: Vec<String>,
     pub reply: String,
@@ -451,6 +487,7 @@ pub struct Row {
     pub faber: Option<SideResult>,
     pub plain: Option<SideResult>,
     pub judge_cost_usd: Option<f64>,
+    pub judge_attempted: bool,
     pub judge_usage: Usage,
     pub skipped: Option<String>,
 }
@@ -463,11 +500,13 @@ fn proof_word(side: &Option<SideResult>) -> String {
 }
 
 fn tokens_word(side: &Option<SideResult>) -> String {
-    side.as_ref().map_or("-".into(), |s| format!("{} ({} cached)", s.usage.fresh(), s.usage.cache_read))
+    side.as_ref().map_or("-".into(), |s| {
+        format!("{} ({} cached){}", s.usage.fresh(), s.usage.cache_read, if s.usage_incomplete { " partial" } else { "" })
+    })
 }
 
 fn usd_word(usd: Option<f64>) -> String {
-    usd.map_or("n/a".into(), |u| format!("{u:.3}"))
+    usd.map_or("unknown".into(), |u| format!("{u:.3}"))
 }
 
 fn secs_word(side: &Option<SideResult>) -> String {
@@ -507,11 +546,11 @@ pub fn render_tables(rows: &[Row], spent: &Spend, cap: &Cap) -> String {
     }
     let side_total = |pick: fn(&Row) -> &Option<SideResult>| {
         let mut usage = Usage::default();
-        let (mut usd, mut secs) = (0.0, 0.0);
+        let (mut usd, mut secs) = (Some(0.0), 0.0);
         for r in rows {
             if let Some(s) = pick(r) {
                 usage.add(&s.usage);
-                usd += s.cost_usd.unwrap_or(0.0);
+                usd = usd.zip(s.cost_usd).map(|(total, cost)| total + cost);
                 secs += s.secs;
             }
         }
@@ -521,10 +560,12 @@ pub fn render_tables(rows: &[Row], spent: &Spend, cap: &Cap) -> String {
     let (pu, pusd, ps) = side_total(|r| &r.plain);
     let wins = |side| rows.iter().filter(|r| r.verdict.is_some() && r.winner == Some(side)).count();
     let ties = rows.iter().filter(|r| r.verdict.is_some() && r.winner.is_none()).count();
-    let judge_usd: f64 = rows.iter().filter_map(|r| r.judge_cost_usd).sum();
+    let judge_usd: Option<f64> =
+        rows.iter().filter(|r| r.judge_attempted).try_fold(0.0, |total, r| r.judge_cost_usd.map(|cost| total + cost));
+    let (fword, pword) = (usd_word(fusd), usd_word(pusd));
     out.push_str(&format!(
         "\n| Totals | Faber | Plain |\n| :--- | ---: | ---: |\n| Judge wins (ties {ties}) | {} | {} |\n| Time (s) | {fs:.0} | {ps:.0} |\n\
-         | First-time tokens (input, output, cache writes) | {} | {} |\n| Cache-read tokens | {} | {} |\n| API-equivalent US$ | {fusd:.3} | {pusd:.3} |\n",
+         | First-time tokens (input, output, cache writes) | {} | {} |\n| Cache-read tokens | {} | {} |\n| API-equivalent US$ | {fword} | {pword} |\n",
         wins(Side::Faber),
         wins(Side::Plain),
         fu.fresh(),
@@ -532,16 +573,23 @@ pub fn render_tables(rows: &[Row], spent: &Spend, cap: &Cap) -> String {
         fu.cache_read,
         pu.cache_read,
     ));
-    if pusd > 0.0 {
+    if let Some((fusd, pusd)) = fusd.zip(pusd).filter(|(_, plain)| *plain > 0.0) {
         out.push_str(&format!("| Faber cost as a share of plain | {:.0}% | 100% |\n", fusd * 100.0 / pusd));
     }
     out.push_str(&format!(
-        "\nSpend of the whole run: US${:.3} for the sides, US${judge_usd:.3} for the judge; cap US${:.2} or {} first-time tokens ({} used).\n",
-        spent.usd - judge_usd,
+        "\nSpend of the whole run: US${} for the sides, US${} for the judge; cap US${:.2} or {} first-time tokens ({} used).\n",
+        usd_word(fusd.zip(pusd).map(|(f, p)| f + p)),
+        usd_word(judge_usd),
         cap.max_usd,
         cap.max_fresh_tokens,
         spent.usage.fresh()
     ));
+    if spent.unknown_cost {
+        out.push_str("\nWhole-run cost unknown; reported dollars are only a lower bound. No further paid work was admitted.\n");
+    }
+    if rows.iter().any(|r| r.faber.as_ref().is_some_and(|s| s.usage_incomplete)) {
+        out.push_str("\nFaber tokens are partial: routing and auxiliary token counters are unavailable; their costs are included through the ledger. Token totals are lower bounds.\n");
+    }
     for r in rows.iter().filter_map(|r| r.skipped.as_ref().map(|why| (r, why))) {
         out.push_str(&format!("\nNot run: {} ({}).\n", r.0.request, r.1));
     }
@@ -673,6 +721,7 @@ mod tests {
         let o = parse_codex_events(lines).unwrap();
         assert_eq!((o.text.as_str(), o.ok, o.turns, o.cost_usd), ("last", true, Some(2), None));
         assert_eq!((o.usage.input, o.usage.cache_read, o.usage.output), (700, 800, 55));
+        assert!(o.usage_incomplete, "older events without cache-write counters have incomplete pricing");
         assert!(!parse_codex_events("{\"type\":\"turn.failed\",\"error\":{}}\n").unwrap().ok);
         assert!(parse_codex_events("no events").is_err());
     }
@@ -683,6 +732,58 @@ mod tests {
         assert_eq!(from_utf16("é😀 rest", 3), " rest");
         assert_eq!(from_utf16("short", 99), "");
         assert_eq!(from_utf16("all", 0), "all");
+    }
+
+    #[test]
+    fn missing_cost_blocks_further_work_and_is_not_a_free_total() {
+        let cap = Cap { max_usd: 8.0, max_fresh_tokens: 1000 };
+        let mut spent = Spend::default();
+        spent.add(&Usage::default(), None);
+        assert!(cap.reached(&spent).is_some(), "unknown spending must close admission");
+        assert_eq!(cap.allowance(&spent, 1.5), 0.0);
+        let mut row = Row {
+            request: "x".into(),
+            title: "x".into(),
+            kind: Kind::Chat,
+            a: Side::Plain,
+            verdict: None,
+            winner: None,
+            faber: Some(side(Side::Faber, 0.2, None)),
+            plain: Some(side(Side::Plain, 0.4, None)),
+            judge_cost_usd: None,
+            judge_attempted: false,
+            judge_usage: Usage::default(),
+            skipped: None,
+        };
+        row.plain.as_mut().unwrap().cost_usd = None;
+        let table = render_tables(&[row], &spent, &cap);
+        assert!(table.contains("unknown"));
+        assert!(!table.contains("Faber cost as a share"));
+    }
+
+    #[test]
+    fn ledger_delta_includes_routing_and_unknown_work_is_never_free() {
+        assert_eq!(ledger_cost((10.0, 2), (10.75, 2)), Some(0.75));
+        assert_eq!(ledger_cost((10.0, 2), (10.75, 3)), None);
+        assert_eq!(ledger_cost((10.0, 2), (9.0, 2)), None);
+        let mut out =
+            parse_codex_events(r#"{"type":"turn.completed","usage":{"input_tokens":100,"cached_input_tokens":20,"cache_write_input_tokens":0,"output_tokens":5}}"#)
+                .unwrap();
+        price_codex(&mut out, "known", |input, output, read, prompt| {
+            assert_eq!((input, output, read, prompt), (100, 5, 20, 0));
+            Some(0.25)
+        });
+        assert_eq!(out.cost_usd, Some(0.25));
+        let mut missing =
+            parse_codex_events(r#"{"type":"turn.completed","usage":{"input_tokens":100,"cached_input_tokens":20,"output_tokens":5}}"#)
+                .unwrap();
+        price_codex(&mut missing, "known", |_, _, _, _| panic!("missing writes are not zero"));
+        assert_eq!(missing.cost_usd, None);
+        price_codex(&mut out, "unknown", |_, _, _, _| None);
+        assert_eq!(out.cost_usd, None);
+        out.usage.input = 300_000;
+        price_codex(&mut out, "known", |_, _, _, _| panic!("unknown request tier must not be guessed"));
+        assert_eq!(out.cost_usd, None);
     }
 
     #[test]
@@ -718,6 +819,7 @@ mod tests {
             secs: 90.0,
             wall_secs: 120.0,
             usage: Usage { input: 10, output: 20, cache_read: 500, cache_write: 70 },
+            usage_incomplete: false,
             cost_usd: Some(usd),
             models: vec![],
             reply: String::new(),
@@ -741,6 +843,7 @@ mod tests {
                 faber: Some(side(Side::Faber, 0.2, Some(true))),
                 plain: Some(side(Side::Plain, 0.4, Some(false))),
                 judge_cost_usd: Some(0.3),
+                judge_attempted: true,
                 judge_usage: Usage::default(),
                 skipped: None,
             },
@@ -754,6 +857,7 @@ mod tests {
                 faber: None,
                 plain: None,
                 judge_cost_usd: None,
+                judge_attempted: false,
                 judge_usage: Usage::default(),
                 skipped: Some("the cap was reached".into()),
             },
