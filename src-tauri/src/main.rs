@@ -1632,6 +1632,9 @@ fn create_window(app: &AppHandle, hidden: bool, data_dir: &Path) -> tauri::Resul
     #[cfg(feature = "test-hooks")]
     if std::env::var_os("FABER_CHECKS_OUT").is_some() {
         builder = builder.initialization_script(include_str!("../../tests/ui/system-motion.js"));
+        if let Ok(filter) = std::env::var("FABER_CHECKS_FILTER") {
+            builder = builder.initialization_script(format!("window.__faberChecksFilter = {};", serde_json::to_string(&filter)?));
+        }
     }
     // The top bar of the page is the title bar (ui/WindowControls.tsx); macOS keeps its traffic lights over it.
     #[cfg(target_os = "macos")]

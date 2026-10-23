@@ -45,6 +45,8 @@ pub struct ToolRow {
     repo: String,
     home: String,
     installed: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    removed_enabled: Option<bool>,
     /// An engine key explaining why a present item needs reinstalling.
     status: Option<String>,
     enabled: bool,
@@ -87,6 +89,7 @@ pub async fn tools_list(faber: State<'_, Faber>) -> Res<Vec<ToolRow>> {
                 repo: i.repo.clone(),
                 home: i.home(),
                 installed: installed.contains_key(&i.id),
+                removed_enabled: store.agent_removed_enabled(&i.id),
                 status: statuses.get(&i.id).cloned(),
                 enabled: installed.contains_key(&i.id) && store.enabled(&i.id),
                 version: i.server.as_ref().map_or_else(|| i.commit.clone(), |s| s.version.clone()),
@@ -166,7 +169,7 @@ pub async fn tools_in_use(faber: State<'_, Faber>, id: String) -> Res<Vec<(Strin
 #[tauri::command]
 pub async fn tools_clear_removed(faber: State<'_, Faber>) -> Res<()> {
     let data = faber.data_dir.clone();
-    tauri::async_runtime::spawn_blocking(move || Store::new(&data).clear_removed())
+    tauri::async_runtime::spawn_blocking(move || Store::new(&data).clear_removed_for_catalog())
         .await
         .map_err(|_| "error.tools.remove".to_string())?
         .map_err(|_| "error.tools.remove".to_string())
