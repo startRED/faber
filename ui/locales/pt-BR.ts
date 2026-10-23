@@ -1475,7 +1475,7 @@ export const ptBR: Messages = {
   'projects.home.title': 'O que vamos resolver?',
   'projects.chat.lead': 'Peça o que quiser nesta pasta. O assistente trabalha aqui mesmo e pergunta quando precisar.',
   'setup.title': 'Conecte as suas assinaturas',
-  'setup.body': 'O Claude funciona com um plano do Claude, como Pro ou Max; o Codex, com um plano do ChatGPT, como Plus ou Pro. Basta um: escolha o que você já paga.',
+  'setup.body': 'Claude: Pro ou Max. Codex: ChatGPT Plus ou Pro. Basta um plano. Escolher só confere a instalação e a conta; instalar ou entrar é outra ação.',
   'setup.claude': 'Claude',
   'setup.chatgpt': 'Codex',
   'setup.none': 'Nenhuma por enquanto',
