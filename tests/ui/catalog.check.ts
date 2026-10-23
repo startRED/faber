@@ -549,3 +549,35 @@ check('catalog: the filter and the search are still there when the Catalog is op
     again.close();
   }
 });
+
+check('catalog_remove: an agent removal is shown with the existing Undo when Catalog opens', async () => {
+  const rows = sample();
+  rows[0].removedEnabled = false;
+  const view = await panel({ rows });
+  try {
+    ok(view.root.querySelector('[role=status]')?.textContent?.includes(t('catalog.removed', { name: catalogName(rows[0].id) })));
+    ok(button(view.root, 'catalog.undo'));
+  } finally { view.close(); }
+});
+
+check('catalog_remove: Undo keeps the next agent removal available without reopening Catalog', async () => {
+  const rows = sample();
+  rows[0].removedEnabled = false;
+  rows[1].installed = false; rows[1].removedEnabled = true;
+  const view = await panel({ rows });
+  const restored: string[] = [];
+  api.toolsRestore = async (id) => {
+    restored.push(id);
+    const row = view.store.find((row) => row.id === id)!;
+    row.installed = true; row.enabled = row.removedEnabled ?? undefined;
+    delete row.removedEnabled;
+  };
+  try {
+    await tap(button(view.root, 'catalog.undo'));
+    ok(view.root.querySelector('[role=status]')?.textContent?.includes(t('catalog.removed', { name: catalogName(rows[1].id) })), 'the next pending removal remains reachable');
+    await tap(button(view.root, 'catalog.undo'));
+    deepEqual(restored, [rows[0].id, rows[1].id]);
+    equal(view.store[0].enabled, false); equal(view.store[1].enabled, true);
+    ok(!view.root.querySelector('[role=status]'), 'all restored receipts leave no Undo notice');
+  } finally { view.close(); }
+});

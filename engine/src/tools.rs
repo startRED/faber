@@ -176,6 +176,8 @@ pub struct Store {
 
 #[derive(Serialize, Deserialize)]
 struct Removed {
+    #[serde(default)]
+    agent: bool,
     commit: String,
     enabled: bool,
     #[serde(default)]
@@ -607,14 +609,63 @@ impl Store {
         result
     }
 
+    pub fn check_agent_remove(&self, id: &str) -> Result<(), &'static str> {
+        let _store = lock();
+        self.check_agent_remove_locked(id)
+    }
+
+    fn check_agent_remove_locked(&self, id: &str) -> Result<(), &'static str> {
+        let attention = "The stored copy needs attention. Check it in Catalog; nothing was removed.";
+        if [self.root.clone(), self.plugin(), self.skills(), self.servers(), self.root.join("plugins"), self.disabled(), self.removed()]
+            .iter()
+            .any(|path| std::fs::symlink_metadata(path).is_ok_and(|m| !m.is_dir() || m.file_type().is_symlink()))
+            || self.read_selection().is_none()
+        {
+            return Err(attention);
+        }
+        self.check_agent_switch_locked(id)?;
+        let removed = self.removed().join(id);
+        let receipt_exists = match std::fs::symlink_metadata(&removed) {
+            Ok(_) => true,
+            Err(e) if e.kind() == io::ErrorKind::NotFound => false,
+            Err(_) => return Err(attention),
+        };
+        if receipt_exists {
+            let completed = std::fs::symlink_metadata(&removed).is_ok_and(|m| m.is_dir() && !m.file_type().is_symlink())
+                && small_file(&removed.join("state.json"))
+                    .and_then(|bytes| serde_json::from_slice::<Removed>(&bytes).ok())
+                    .is_some_and(|state| state.restored && !state.restoring && self.installed().get(id) == Some(&state.commit))
+                && entries(&removed).is_some_and(|entries| entries.len() == 1 && entries[0].file_name() == "state.json");
+            if !completed {
+                return Err(attention);
+            }
+        }
+        if self.item_status(id).is_some() {
+            return Err(attention);
+        }
+        Ok(())
+    }
+
+    pub fn remove_for_agent(&self, id: &str) -> Result<(), String> {
+        self.remove_checked(id, true)
+    }
+
     /// Quarantines one installed copy outside the launch roots, retaining its state for Undo.
     pub fn remove(&self, id: &str) -> Result<(), String> {
+        self.remove_checked(id, false)
+    }
+
+    fn remove_checked(&self, id: &str, agent: bool) -> Result<(), String> {
         if !valid_id(id) {
             return Err(format!("Invalid tool id: {id}"));
         }
         let _store = lock();
         let item = self.items.iter().find(|i| i.id == id).ok_or("Unknown tool")?;
-        self.prune().ok_or("The tool store cannot be checked")?;
+        if agent {
+            self.check_agent_remove_locked(id).map_err(String::from)?;
+        } else {
+            self.prune().ok_or("The tool store cannot be checked")?;
+        }
         let mut ledger = self.installed();
         let Some(commit) = ledger.remove(id) else { return Ok(()) };
         let enabled = self.enabled(id);
@@ -625,7 +676,7 @@ impl Store {
         }
         self.discard(&removed).map_err(|e| e.to_string())?;
         std::fs::create_dir_all(&removed).map_err(|e| e.to_string())?;
-        Removed { commit, enabled, restoring: false, restored: false }.write(&removed).map_err(|e| e.to_string())?;
+        Removed { commit, enabled, agent, restoring: false, restored: false }.write(&removed).map_err(|e| e.to_string())?;
         let files = removed.join("files");
         retry_busy(|| std::fs::rename(&source, &files)).map_err(|e| e.to_string())?;
         self.write_ledger(&ledger).map_err(|e| {
@@ -752,7 +803,50 @@ impl Store {
         Ok(())
     }
 
-    /// Expires Undo when Catalog opens or the engine restarts, after finishing any interrupted restore.
+    /// Only a pending agent removal survives entering Catalog; startup still expires every receipt.
+    pub fn agent_removed_enabled(&self, id: &str) -> Option<bool> {
+        if !valid_id(id) {
+            return None;
+        }
+        let removed = self.removed().join(id);
+        if [self.root.clone(), self.removed(), removed.clone()]
+            .iter()
+            .any(|path| !std::fs::symlink_metadata(path).is_ok_and(|m| m.is_dir() && !m.file_type().is_symlink()))
+        {
+            return None;
+        }
+        let state: Removed = serde_json::from_slice(&small_file(&removed.join("state.json"))?).ok()?;
+        let item = self.items.iter().find(|item| item.id == id)?;
+        if self.installed().contains_key(id) {
+            return None;
+        }
+        (state.agent && !state.restoring && !state.restored && state.commit == item.commit).then_some(state.enabled)
+    }
+
+    pub fn clear_removed_for_catalog(&self) -> Result<(), String> {
+        let _store = lock();
+        match std::fs::symlink_metadata(self.removed()) {
+            Ok(m) if m.is_dir() && !m.file_type().is_symlink() => (),
+            Err(e) if e.kind() == io::ErrorKind::NotFound => (),
+            _ => return Err("Could not read removed tools".into()),
+        }
+        self.recover_restores()?;
+        for entry in entries(&self.removed()).ok_or("Could not read removed tools")? {
+            if !entry.file_type().is_ok_and(|kind| kind.is_dir() && !kind.is_symlink()) {
+                return Err("Could not read the removal receipt".into());
+            }
+            let state: Removed = small_file(&entry.path().join("state.json"))
+                .and_then(|bytes| serde_json::from_slice(&bytes).ok())
+                .ok_or("Could not read the removal receipt")?;
+            if !state.agent {
+                self.discard(&entry.path()).map_err(|e| e.to_string())?;
+            }
+        }
+        self.refresh_ready();
+        Ok(())
+    }
+
+    /// Expires every Undo receipt at engine restart, after finishing any interrupted restore.
     pub fn clear_removed(&self) -> Result<(), String> {
         let _store = lock();
         self.recover_restores()?;

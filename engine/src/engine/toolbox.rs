@@ -16,10 +16,21 @@ fn may_change(mode: Permissions) -> bool {
 }
 
 /// One decision or result line of the log, written away from the engine's lock.
-async fn record(dir: PathBuf, conv: String, item: &'static Item, enabled: Option<bool>, how: &'static str, result: &'static str) -> bool {
+async fn record(
+    dir: PathBuf,
+    conv: String,
+    item: &'static Item,
+    enabled: Option<bool>,
+    remove: bool,
+    how: &'static str,
+    result: &'static str,
+) -> bool {
     tokio::task::spawn_blocking(move || {
         // `from` is always empty: the agent installs only what the store holds nothing of, so no version is ever replaced.
         let change = toolbox::SelfChange { at: now(), id: &item.id, from: None, to: &item.commit, how, result, conv: &conv };
+        if remove {
+            return toolbox::log_remove(&dir, &change);
+        }
         match enabled {
             Some(enabled) => toolbox::log_switch(&dir, &change, enabled),
             None => toolbox::log_self_change(&dir, &change),
@@ -36,10 +47,17 @@ pub(super) struct PendingChange {
     turn: String,
     item: &'static Item,
     enabled: Option<bool>,
+    remove: bool,
 }
 
-fn change_tool(enabled: Option<bool>) -> &'static str {
-    if enabled.is_some() { toolbox::SELF_SWITCH } else { toolbox::SELF_INSTALL }
+fn change_tool(enabled: Option<bool>, remove: bool) -> &'static str {
+    if remove {
+        toolbox::SELF_REMOVE
+    } else if enabled.is_some() {
+        toolbox::SELF_SWITCH
+    } else {
+        toolbox::SELF_INSTALL
+    }
 }
 
 /// An allowed catalog change counts as work until the task ends, including a panic or Stop: an app update waits for it.
@@ -69,8 +87,15 @@ impl Core {
         }
         let install = input.get("install");
         let switch = input.get("set_enabled");
-        if (install.is_some() || switch.is_some()) && input.as_object().is_none_or(|args| args.len() != 1) {
-            return self.answer_toolbox(conv, sid, &call, false, "Use exactly one catalog action: query, install or set_enabled.".into());
+        let remove = input.get("remove");
+        if (install.is_some() || switch.is_some() || remove.is_some()) && input.as_object().is_none_or(|args| args.len() != 1) {
+            return self.answer_toolbox(
+                conv,
+                sid,
+                &call,
+                false,
+                "Use exactly one catalog action: query, install, set_enabled or remove.".into(),
+            );
         }
         if let Some(switch) = switch {
             let enabled = switch["enabled"].as_bool();
@@ -83,10 +108,13 @@ impl Core {
                     "set_enabled requires only a catalog id and a boolean enabled state.".into(),
                 );
             }
-            return self.install_call(conv, sid, call, &switch["id"], enabled);
+            return self.install_call(conv, sid, call, &switch["id"], enabled, false);
         }
         if let Some(install) = install {
-            return self.install_call(conv, sid, call, install, None);
+            return self.install_call(conv, sid, call, install, None, false);
+        }
+        if let Some(remove) = remove {
+            return self.install_call(conv, sid, call, remove, None, true);
         }
         // The ledger is a small file and a few checks of the store's folders: read away from the lock.
         let store = self.catalog_store();
@@ -175,11 +203,12 @@ impl Core {
         if !c.messages.iter().any(|m| Some(&m.id) == l.turn.as_ref() && m.status == Some(Status::Streaming)) {
             return Err("The turn has ended.");
         }
-        let waiting = c
-            .messages
-            .iter()
-            .find(|m| Some(&m.id) == l.turn.as_ref())
-            .is_some_and(|m| m.permissions.iter().flatten().any(|p| p.tool == toolbox::SELF_INSTALL || p.tool == toolbox::SELF_SWITCH));
+        let waiting = c.messages.iter().find(|m| Some(&m.id) == l.turn.as_ref()).is_some_and(|m| {
+            m.permissions
+                .iter()
+                .flatten()
+                .any(|p| p.tool == toolbox::SELF_INSTALL || p.tool == toolbox::SELF_SWITCH || p.tool == toolbox::SELF_REMOVE)
+        });
         if waiting {
             return Err(toolbox::WAITING);
         }
@@ -194,7 +223,7 @@ impl Core {
     /// The agent asked to install a tool of the catalog by its id. What needs no answer from the person is answered now (an id
     /// that is not in the catalog, Plan mode, a tool already installed, no Node); the rest waits for them, away from the store's
     /// lock, as the other long calls do.
-    fn install_call(&mut self, conv: &str, sid: u64, call: String, wanted: &serde_json::Value, enabled: Option<bool>) {
+    fn install_call(&mut self, conv: &str, sid: u64, call: String, wanted: &serde_json::Value, enabled: Option<bool>, remove: bool) {
         let item = match self.install_target(conv, sid, wanted) {
             Ok(item) => item,
             Err(text) => return self.answer_toolbox(conv, sid, &call, false, text.into()),
@@ -204,6 +233,9 @@ impl Core {
         let node_missing = self.node_missing;
         let (me, conv) = (self.me.clone(), conv.to_string());
         let checked = self.opts.runtime.spawn_blocking(move || {
+            if remove {
+                return store.check_agent_remove(&item.id).map_err(|text| (false, text.to_string()));
+            }
             if enabled.is_some() {
                 return store.check_agent_switch(&item.id).map_err(|text| (false, text.to_string()));
             }
@@ -221,7 +253,7 @@ impl Core {
             let mut core = core.lock().unwrap_or_else(|e| e.into_inner());
             match checked {
                 Ok(()) if core.live.get(&conv).and_then(|l| l.turn.as_ref()) == Some(&turn) => {
-                    core.install_decide(&conv, sid, call, item, enabled)
+                    core.install_decide(&conv, sid, call, item, enabled, remove)
                 }
                 Ok(()) => core.answer_toolbox(&conv, sid, &call, false, "The turn has ended.".into()),
                 Err((ok, text)) => core.answer_toolbox(&conv, sid, &call, ok, text),
@@ -231,7 +263,7 @@ impl Core {
 
     /// Under the lock again: the person's standing trust or an "always" they gave installs at once; otherwise the card goes on the
     /// turn and the call waits for the answer (`answer_self_change`). Nothing is written to the CLI for the card.
-    fn install_decide(&mut self, conv: &str, sid: u64, call: String, item: &'static Item, enabled: Option<bool>) {
+    fn install_decide(&mut self, conv: &str, sid: u64, call: String, item: &'static Item, enabled: Option<bool>, remove: bool) {
         // The turn may have ended, the mode changed or a second call come in while the checks ran.
         if let Err(text) = self.install_target(conv, sid, &serde_json::json!(item.id)) {
             return self.answer_toolbox(conv, sid, &call, false, text.into());
@@ -240,10 +272,10 @@ impl Core {
             return self.answer_toolbox(conv, sid, &call, false, "The turn has ended.".into());
         }
         if self.store.settings().faber_trust() {
-            return self.run_install(conv, sid, call, item, enabled, "trust");
+            return self.run_install(conv, sid, call, item, (enabled, remove), "trust");
         }
-        if self.grant_stands(conv, change_tool(enabled)) {
-            return self.run_install(conv, sid, call, item, enabled, "always");
+        if self.grant_stands(conv, change_tool(enabled, remove)) {
+            return self.run_install(conv, sid, call, item, (enabled, remove), "always");
         }
         let store = self.catalog_store();
         let (plugin, runs_code) = (store.plugin_definition(&item.id).is_some(), store.requires_node(item));
@@ -253,11 +285,15 @@ impl Core {
         if let Some(enabled) = enabled {
             input["enabled"] = enabled.into();
         }
-        let card = Permission { request_id: call.clone(), tool: change_tool(enabled).into(), input, epoch };
+        if remove {
+            input["remove"] = true.into();
+        }
+        let card = Permission { request_id: call.clone(), tool: change_tool(enabled, remove).into(), input, epoch };
         if let Some(m) = self.turn(conv) {
             m.permissions.get_or_insert_default().push(card);
         }
-        self.installs.insert(conv.to_string(), PendingChange { call, sid, turn: turn_id.clone().unwrap_or_default(), item, enabled });
+        self.installs
+            .insert(conv.to_string(), PendingChange { call, sid, turn: turn_id.clone().unwrap_or_default(), item, enabled, remove });
         self.weigh(conv);
         self.push(conv, turn_id.as_deref(), true);
     }
@@ -277,7 +313,10 @@ impl Core {
             .permissions
             .iter()
             .flatten()
-            .find(|p| p.request_id == request_id && (p.tool == toolbox::SELF_INSTALL || p.tool == toolbox::SELF_SWITCH))?
+            .find(|p| {
+                p.request_id == request_id
+                    && (p.tool == toolbox::SELF_INSTALL || p.tool == toolbox::SELF_SWITCH || p.tool == toolbox::SELF_REMOVE)
+            })?
             .clone();
         Some(self.settle_install(conv, turn_id, request_id, &card, allow, always))
     }
@@ -299,27 +338,31 @@ impl Core {
                 && asked.turn == turn_id
                 && asked.item.id == card.input["id"].as_str().unwrap_or_default()
                 && asked.enabled == card.input.get("enabled").and_then(|v| v.as_bool())
-                && card.tool == change_tool(asked.enabled)
+                && asked.remove == card.input.get("remove").and_then(|v| v.as_bool()).unwrap_or(false)
+                && card.tool == change_tool(asked.enabled, asked.remove)
         });
         // Either way the card is spent: an answer to one that belonged to another process or turn does nothing.
         if let Some(waiting) =
             self.convs.get_mut(conv).and_then(|c| c.messages.iter_mut().find(|m| m.id == turn_id)).and_then(|m| m.permissions.as_mut())
         {
-            waiting.retain(|p| !(p.request_id == request_id && (p.tool == toolbox::SELF_INSTALL || p.tool == toolbox::SELF_SWITCH)));
+            waiting.retain(|p| {
+                !(p.request_id == request_id
+                    && (p.tool == toolbox::SELF_INSTALL || p.tool == toolbox::SELF_SWITCH || p.tool == toolbox::SELF_REMOVE))
+            });
         }
         let Some(asked) = asked else {
             self.save(conv);
             self.push(conv, Some(turn_id), true);
             return Err(STALE.into());
         };
-        let (item, enabled) = (asked.item, asked.enabled);
+        let (item, enabled, remove) = (asked.item, asked.enabled, asked.remove);
         if let Err(text) = self.install_target(conv, sid, &serde_json::json!(item.id)) {
             self.save(conv);
             self.push(conv, Some(turn_id), true);
             self.answer_toolbox(conv, sid, request_id, false, text.into());
             return Err(STALE.into());
         }
-        let tool = change_tool(enabled);
+        let tool = change_tool(enabled, remove);
         // Not in Plan, and not for a card made under a grants epoch that is gone: that answer lets only this install through.
         let remember = allow && always && !plan && card.epoch == self.store.settings().grants_epoch;
         if remember && let Some(c) = self.convs.get_mut(conv) {
@@ -336,13 +379,13 @@ impl Core {
         self.weigh(conv);
         self.push(conv, Some(turn_id), true);
         if allow {
-            self.run_install(conv, sid, request_id.to_string(), item, enabled, if remember { "always" } else { "once" });
+            self.run_install(conv, sid, request_id.to_string(), item, (enabled, remove), if remember { "always" } else { "once" });
         } else {
             let (me, dir, conv, call) = (self.me.clone(), self.opts.data_dir.clone(), conv.to_string(), request_id.to_string());
             self.opts.runtime.spawn(async move {
-                record(dir, conv.clone(), item, enabled, "once", "declined").await;
+                record(dir, conv.clone(), item, enabled, remove, "once", "declined").await;
                 let Some(core) = me.upgrade() else { return };
-                let text = if enabled.is_some() {
+                let text = if remove || enabled.is_some() {
                     "The person said no. Do not retry; they can change it in Catalog."
                 } else {
                     toolbox::NOT_ALLOWED
@@ -356,12 +399,23 @@ impl Core {
     /// Writes the decision, installs through the one installer and writes the result, all away from the lock, then tells the agent
     /// how it ended. The decision line comes first: an install the person can read about is never one that happened unrecorded, and
     /// whatever the way it was allowed (once, always or trust), a decision that cannot be written is not acted on.
-    fn run_install(&mut self, conv: &str, sid: u64, call: String, item: &'static Item, enabled: Option<bool>, how: &'static str) {
+    fn run_install(&mut self, conv: &str, sid: u64, call: String, item: &'static Item, change: (Option<bool>, bool), how: &'static str) {
+        let (enabled, remove) = change;
         if let Err(text) = self.install_target(conv, sid, &serde_json::json!(item.id)) {
             return self.answer_toolbox(conv, sid, &call, false, text.into());
         }
         if self.installing {
-            return self.answer_toolbox(conv, sid, &call, false, toolbox::UPDATING.into());
+            return self.answer_toolbox(
+                conv,
+                sid,
+                &call,
+                false,
+                if remove {
+                    "Faber is about to restart for an update, so nothing was removed. Ask again afterwards.".into()
+                } else {
+                    toolbox::UPDATING.into()
+                },
+            );
         }
         self.agent_installs += 1;
         let (store, source, dir) = (self.catalog_store(), self.setup_source.clone(), self.opts.data_dir.clone());
@@ -371,16 +425,26 @@ impl Core {
             // The store may have changed while the card waited: the same check as before it.
             let read = store.clone();
             let refused = tokio::task::spawn_blocking(move || {
+                if remove { return read.check_agent_remove(&item.id).err().map(|text| (false, text)); }
                 if enabled.is_some() { read.check_agent_switch(&item.id).err().map(|text| (false, text)) } else { read.held(item) }
             })
             .await
             .unwrap_or(Some((false, toolbox::FAILED)));
-            let (ok, text) = match (refused, enabled) {
-                (Some((ok, text)), _) => (ok, text.to_string()),
-                (None, _) if !record(dir.clone(), conv.clone(), item, enabled, how, "allowed").await => {
-                    (false, toolbox::NO_RECORD.to_string())
+            let (ok, text) = match (refused, enabled, remove) {
+                (Some((ok, text)), _, _) => (ok, text.to_string()),
+                (None, _, _) if !record(dir.clone(), conv.clone(), item, enabled, remove, how, "allowed").await => {
+                    (false, if remove { "Nothing was changed: Faber could not write its record of the removal.".to_string() } else { toolbox::NO_RECORD.to_string() })
                 }
-                (None, Some(enabled)) => {
+                (None, _, true) => {
+                    let changed = tokio::task::spawn_blocking(move || store.remove_for_agent(&item.id)).await;
+                    let (ok, text, outcome) = match changed {
+                        Ok(Ok(())) => (true, format!("Removed {}. Undo is available in Catalog until Faber restarts. New conversations receive the change; this conversation keeps its existing tools.", item.id), "removed"),
+                        _ => (false, "Could not remove the tool. Check its state in Catalog.".into(), "failed"),
+                    };
+                    record(dir, conv.clone(), item, None, true, how, outcome).await;
+                    (ok, text)
+                }
+                (None, Some(enabled), false) => {
                     let changed = tokio::task::spawn_blocking(move || store.set_enabled_for_agent(&item.id, enabled)).await;
                     let (ok, text, outcome) = match changed {
                         Ok(Ok(())) => (
@@ -394,10 +458,10 @@ impl Core {
                         ),
                         _ => (false, "Could not change the catalog switch. Check its state in Catalog.".into(), "failed"),
                     };
-                    record(dir, conv.clone(), item, Some(enabled), how, outcome).await;
+                    record(dir, conv.clone(), item, Some(enabled), false, how, outcome).await;
                     (ok, text)
                 }
-                (None, None) => {
+                (None, None, false) => {
                     let (ok, text, outcome) = match crate::tools::install_for_agent(&store, item, source.as_deref()).await {
                         Ok(()) => (true, toolbox::installed(item, store.plugin_definition(&item.id).is_some()), "installed"),
                         Err(InstallError::Node) => (false, toolbox::NO_NODE.to_string(), "failed"),
@@ -407,7 +471,7 @@ impl Core {
                             (false, toolbox::FAILED.to_string(), "failed")
                         }
                     };
-                    record(dir, conv.clone(), item, enabled, how, outcome).await;
+                    record(dir, conv.clone(), item, enabled, remove, how, outcome).await;
                     (ok, text)
                 }
             };

@@ -145,3 +145,23 @@ check('catalog_switch: explicit state, separate consent and new-conversation not
   }
   useLanguage('en');
 });
+
+check('catalog_remove: card: its own consent names Undo and preserves current conversation tools in every language', async () => {
+  for (const { code } of LANGUAGES) {
+    for (const width of ['360px', '720px']) {
+    await withCard({ ...INSTALL, tool: 'faber.tools.remove' }, async (root, calls) => {
+      useLanguage(code);
+      await settle();
+      equal(root.querySelector('.ask b')!.textContent, t('ask.self.remove', { name: catalogName('ponytail') }));
+      equal(root.querySelector('[data-testid="self-effect"]')!.textContent, t('ask.self.removeEffect'));
+      deepEqual(buttons(root).map((b) => b.textContent!.trim()), [t('ask.self.once'), t('ask.self.alwaysRemove'), t('ask.deny')]);
+      const bounds = root.querySelector<HTMLElement>('.ask')!.getBoundingClientRect();
+      for (const button of buttons(root)) ok(button.getBoundingClientRect().right <= bounds.right + 1, `${code} ${width}: buttons fit`);
+      buttons(root)[0]!.click();
+      await settle();
+      deepEqual(calls, [['c1', 't1', 'toolu_i1', true, false]]);
+    }, width);
+    }
+  }
+  useLanguage('en');
+});

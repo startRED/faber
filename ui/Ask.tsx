@@ -26,19 +26,20 @@ function describe(tool: string, input: unknown): { title: string; note?: string;
 const SELF = 'faber'; // not written as one quoted word: the map's check reads that as a browser storage key
 function selfInstall(tool: string, input: unknown): { title: string; what: string; effect: string; line: string; code: string } | undefined {
   const switching = tool === `${SELF}.tools.switch`;
-  if (tool !== `${SELF}.tools.install` && !switching) return undefined;
+  const removing = tool === `${SELF}.tools.remove`;
+  if (tool !== `${SELF}.tools.install` && !switching && !removing) return undefined;
   const i = (input && typeof input === 'object' ? input : {}) as Record<string, unknown>;
   const text = (v: unknown) => (typeof v === 'string' ? v : '');
   const id = text(i.id);
   const kind = ['skill', 'plugin', 'server'].includes(text(i.kind)) ? text(i.kind) : 'skill';
   const purpose = `tools.${id}`;
   return {
-    title: t(switching ? (i.enabled === true ? 'ask.self.enable' : 'ask.self.disable') : 'ask.self.install', { name: catalogName(id) }),
+    title: t(removing ? 'ask.self.remove' : switching ? (i.enabled === true ? 'ask.self.enable' : 'ask.self.disable') : 'ask.self.install', { name: catalogName(id) }),
     what: purpose in en ? t(purpose as Key) : '',
-    effect: switching ? t('ask.self.newConversations') : '',
+    effect: removing ? t('ask.self.removeEffect') : switching ? t('ask.self.newConversations') : '',
     line: t('ask.self.line', { kind: t(`catalog.kind.${kind}` as Key), version: text(i.version), repo: text(i.repo), licence: text(i.license) }),
     // A tool server, or a plugin that brings one, runs code on this computer: said once, calmly.
-    code: i.code === true ? t('ask.self.code') : '',
+    code: !removing && i.code === true ? t('ask.self.code') : '',
   };
 }
 
@@ -472,7 +473,7 @@ function Card(props: { conversationId: string; turnId: string; permission: Permi
             {own() ? t('ask.self.once') : t('ask.allow')}
           </button>
           <button class="btn" disabled={sending()} onClick={() => void answer(true, true)}>
-            {own() ? t(props.permission.tool === `${SELF}.tools.switch` ? 'ask.self.alwaysSwitch' : 'ask.self.always') : t('ask.always')}
+            {own() ? t(props.permission.tool === `${SELF}.tools.remove` ? 'ask.self.alwaysRemove' : props.permission.tool === `${SELF}.tools.switch` ? 'ask.self.alwaysSwitch' : 'ask.self.always') : t('ask.always')}
           </button>
           <button class="btn" disabled={sending()} onClick={() => void answer(false)}>
             {t('ask.deny')}

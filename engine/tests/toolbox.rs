@@ -574,7 +574,15 @@ impl Agent {
     /// The install cards on the turn now, with the turn's id.
     fn cards(&self) -> (String, Vec<Permission>) {
         let reply = self.conversation().messages.last().cloned().unwrap();
-        (reply.id, reply.permissions.unwrap_or_default().into_iter().filter(|p| p.tool == CARD || p.tool == "faber.tools.switch").collect())
+        (
+            reply.id,
+            reply
+                .permissions
+                .unwrap_or_default()
+                .into_iter()
+                .filter(|p| p.tool == CARD || p.tool == "faber.tools.switch" || p.tool == "faber.tools.remove")
+                .collect(),
+        )
     }
 
     async fn card(&self) -> (String, Permission) {
@@ -1041,7 +1049,7 @@ async fn a_reloaded_engine_shows_no_install_card_and_an_answer_to_the_old_one_in
         .messages
         .iter()
         .flat_map(|m| m.permissions.iter().flatten())
-        .filter(|p| p.tool == CARD || p.tool == "faber.tools.switch")
+        .filter(|p| p.tool == CARD || p.tool == "faber.tools.switch" || p.tool == "faber.tools.remove")
         .count();
     assert_eq!(cards, 0, "no card survives a restart");
     assert!(again.answer(&agent.id, &turn, "toolu_i1", true, false).await.is_err());
@@ -1666,4 +1674,207 @@ async fn catalog_switch_restarted_and_forged_cards_cannot_authorize_a_change() {
     assert_eq!(tree(&agent.dir.path().join("data")), before);
     assert!(agent.log().is_empty());
     restarted.shutdown();
+}
+
+#[tokio::test]
+async fn catalog_remove_requires_own_consent_and_keeps_undo_without_download() {
+    let item = careful("0123");
+    let mut agent = claude_project_with(Permissions::Ask, Serve::new(vec![], false), vec![item.clone()]).await;
+    let store = seed(&agent, &item);
+    let (held, _) = store.kit_for(Vendor::Claude, "debug my app crash", None, Area::Project, Permissions::Ask, &[]);
+    let held_path = held.skills.as_ref().unwrap().join("careful/SKILL.md");
+    store.set_enabled("careful", false).unwrap();
+    agent.call("remove", "remove_call", json!({ "remove": "careful" })).await;
+    let (turn, card) = agent.card().await;
+    assert_eq!(card.tool, "faber.tools.remove");
+    assert!(store.installed().contains_key("careful"));
+    agent.app.answer(&agent.id, &turn, "remove_call", true, true).await.unwrap();
+    let (text, failed) = agent.reply("remove").await;
+    assert!(!failed && text.contains("Undo"), "{text}");
+    assert!(!store.installed().contains_key("careful"));
+    assert_eq!(steps(&agent.log()), [pair("always", "allowed"), pair("always", "removed")]);
+    assert!(agent.log().iter().all(|l| l["kind"] == "tools.remove"));
+    assert_eq!(std::fs::read(&held_path).unwrap(), SKILL, "the held conversation keeps its checked files");
+    store.clear_removed_for_catalog().unwrap();
+    assert_eq!(store.agent_removed_enabled("careful"), Some(false));
+    store.restore("careful").unwrap();
+    assert!(!store.enabled("careful"));
+    store.set_enabled("careful", true).unwrap();
+    agent.call("again", "again_call", json!({ "remove": "careful" })).await;
+    assert!(!agent.reply("again").await.1, "only removal has a standing grant");
+    assert!(agent.cards().1.is_empty());
+    agent.call("repeat", "repeat_call", json!({ "remove": "careful" })).await;
+    assert!(agent.reply("repeat").await.1, "an already removed item is refused without another card");
+    store.restore("careful").unwrap();
+    assert!(store.enabled("careful"), "the next removal keeps the current switch, not the old completed receipt");
+    store.clear_removed().unwrap();
+    assert_eq!(store.agent_removed_enabled("careful"), None, "startup expires the agent receipt too");
+    assert_eq!(agent.serve.hits(), 0);
+    agent.app.shutdown();
+}
+
+#[tokio::test]
+async fn catalog_remove_decline_log_failure_and_changed_copy_preserve_data() {
+    for action in ["deny", "log", "changed", "removed"] {
+        let item = careful("0123");
+        let mut agent = claude_project_with(Permissions::Ask, Serve::new(vec![], false), vec![item.clone()]).await;
+        let store = seed(&agent, &item);
+        agent.call("remove", "remove_call", json!({ "remove": "careful" })).await;
+        let (turn, _) = agent.card().await;
+        match action {
+            "log" => std::fs::create_dir(agent.log_path()).unwrap(),
+            "changed" => std::fs::write(agent.dir.path().join("data/tools/plugin/skills/careful/SKILL.md"), "changed").unwrap(),
+            "removed" => store.remove("careful").unwrap(),
+            _ => (),
+        }
+        let before = tree(&agent.dir.path().join("data"));
+        agent.app.answer(&agent.id, &turn, "remove_call", action != "deny", false).await.unwrap();
+        assert!(agent.reply("remove").await.1);
+        assert_eq!(tree(&agent.dir.path().join("data")), before, "{action}");
+        assert_eq!(agent.serve.hits(), 0);
+        agent.app.shutdown();
+    }
+}
+
+#[tokio::test]
+async fn catalog_remove_does_not_inherit_install_or_switch_grants_or_read_only_trust() {
+    for mode in [Permissions::Ask, Permissions::Plan] {
+        let item = careful("0123");
+        let mut agent = claude_project_with(mode, Serve::new(vec![], false), vec![item.clone()]).await;
+        let store = seed(&agent, &item);
+        if mode == Permissions::Ask {
+            agent.call("switch", "switch_call", json!({ "set_enabled": { "id": "careful", "enabled": false } })).await;
+            agent.answer("switch_call", true, true).await.unwrap();
+            assert!(!agent.reply("switch").await.1);
+            agent.call("install", "install_call", json!({ "install": "ponytail" })).await;
+            agent.answer("install_call", true, true).await.unwrap();
+            assert!(agent.reply("install").await.1);
+        }
+        if mode == Permissions::Plan {
+            agent.app.save_settings(Settings { permissions: Some(mode), faber_trust: Some(true), ..Settings::default() }).unwrap();
+        }
+        let hits = agent.serve.hits();
+        agent.call("remove", "remove_call", json!({ "remove": "careful" })).await;
+        if mode == Permissions::Plan {
+            assert!(agent.reply("remove").await.1);
+            assert!(agent.cards().1.is_empty());
+        } else {
+            let (turn, card) = agent.card().await;
+            assert_eq!(card.tool, "faber.tools.remove");
+            agent.app.answer(&agent.id, &turn, "remove_call", false, false).await.unwrap();
+            assert!(agent.reply("remove").await.1);
+        }
+        assert!(store.installed().contains_key("careful"));
+        assert_eq!(agent.serve.hits(), hits);
+        agent.app.shutdown();
+    }
+}
+
+#[tokio::test]
+async fn catalog_remove_stale_turn_and_parallel_calls_cannot_spend_consent() {
+    let item = careful("0123");
+    let mut agent = claude_project_with(Permissions::Ask, Serve::new(vec![], false), vec![item.clone()]).await;
+    let store = seed(&agent, &item);
+    agent.call("remove", "remove_call", json!({ "remove": "careful" })).await;
+    let (turn, _) = agent.card().await;
+    agent.call("parallel", "parallel", json!({ "remove": "careful" })).await;
+    assert!(agent.reply("parallel").await.1);
+    agent.pipe.say(json!({ "type": "result", "subtype": "success", "is_error": false, "usage": {} })).await;
+    for _ in 0..300 {
+        if agent.cards().1.is_empty() {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(10)).await;
+    }
+    assert!(agent.app.answer(&agent.id, &turn, "remove_call", true, true).await.is_err());
+    assert!(store.installed().contains_key("careful"));
+    assert!(agent.log().is_empty());
+    agent.app.shutdown();
+}
+
+#[tokio::test]
+async fn catalog_remove_codex_full_trust_keeps_local_undo() {
+    let (dir, folder) = (support::canonical_tempdir().unwrap(), support::work_folder());
+    let (spawn, made) = pipes();
+    let app = engine(dir.path(), Vendor::Codex, spawn);
+    app.save_settings(Settings { permissions: Some(Permissions::Ask), faber_trust: Some(true), ..Settings::default() }).unwrap();
+    let item = careful("0123");
+    app.set_catalog_items(vec![item.clone()]);
+    let store = Store::with_catalog(&dir.path().join("data"), vec![item.clone()]);
+    let zip = dir.path().join("seed.zip");
+    std::fs::write(&zip, careful_zip()).unwrap();
+    store.install_from(&item, &zip).unwrap();
+    let project = app.add_project(&folder.path().to_string_lossy()).unwrap().id;
+    app.send(request(Vendor::Codex, Area::Project, Some(project))).unwrap();
+    let mut pipe = next_pipe(&made).await;
+    codex_boot(&mut pipe).await;
+    let (text, failed) = codex_call(&mut pipe, 981, "catalog", json!({ "remove": "careful" })).await;
+    assert!(!failed && text.contains("Undo"), "{text}");
+    assert!(!store.installed().contains_key("careful"));
+    store.restore("careful").unwrap();
+    assert!(store.enabled("careful"));
+    app.shutdown();
+}
+
+#[tokio::test]
+async fn catalog_remove_rejects_unknown_paths_mixed_actions_and_pending_receipts() {
+    let item = careful("0123");
+    let mut agent = claude_project_with(Permissions::Ask, Serve::new(vec![], false), vec![item.clone()]).await;
+    seed(&agent, &item);
+    std::fs::create_dir_all(agent.dir.path().join("data/tools/removed/careful")).unwrap();
+    let before = tree(&agent.dir.path().join("data"));
+    for (n, input) in [
+        json!({ "remove": "careful" }),
+        json!({ "remove": "../careful" }),
+        json!({ "remove": null }),
+        json!({ "remove": "careful", "install": "careful" }),
+        json!({ "remove": "careful", "query": "careful" }),
+    ]
+    .into_iter()
+    .enumerate()
+    {
+        let call = format!("bad{n}");
+        agent.call(&call, &call, input).await;
+        assert!(agent.reply(&call).await.1);
+        assert!(agent.cards().1.is_empty());
+        assert_eq!(tree(&agent.dir.path().join("data")), before);
+    }
+    assert!(agent.log().is_empty());
+    assert_eq!(agent.serve.hits(), 0);
+    agent.app.shutdown();
+}
+
+#[tokio::test]
+async fn catalog_remove_keeps_changed_undo_files_for_the_person() {
+    let item = careful("0123");
+    let mut agent = claude_project_with(Permissions::Ask, Serve::new(vec![], false), vec![item.clone()]).await;
+    let store = seed(&agent, &item);
+    agent.app.save_settings(Settings { permissions: Some(Permissions::Ask), faber_trust: Some(true), ..Settings::default() }).unwrap();
+    agent.call("remove", "remove_call", json!({ "remove": "careful" })).await;
+    assert!(!agent.reply("remove").await.1);
+    let files = agent.dir.path().join("data/tools/removed/careful/files/SKILL.md");
+    std::fs::write(&files, "a local change after removal").unwrap();
+    store.clear_removed_for_catalog().unwrap();
+    assert_eq!(
+        std::fs::read_to_string(&files).unwrap(),
+        "a local change after removal",
+        "opening Catalog must not discard the agent's Undo copy"
+    );
+    assert!(store.restore("careful").is_err());
+    assert_eq!(std::fs::read_to_string(&files).unwrap(), "a local change after removal");
+    agent.app.shutdown();
+}
+
+#[tokio::test]
+async fn catalog_remove_unreadable_receipt_cannot_be_cleaned_implicitly() {
+    let item = careful("0123");
+    let mut agent = claude_project_with(Permissions::Ask, Serve::new(vec![], false), vec![item.clone()]).await;
+    let store = seed(&agent, &item);
+    agent.app.save_settings(Settings { permissions: Some(Permissions::Ask), faber_trust: Some(true), ..Settings::default() }).unwrap();
+    agent.call("remove", "remove_call", json!({ "remove": "careful" })).await;
+    assert!(!agent.reply("remove").await.1);
+    std::fs::write(agent.dir.path().join("data/tools/removed/careful/state.json"), "broken receipt").unwrap();
+    assert!(store.clear_removed_for_catalog().is_err(), "an unreadable receipt must be left for the person");
+    assert_eq!(std::fs::read(agent.dir.path().join("data/tools/removed/careful/files/SKILL.md")).unwrap(), SKILL);
+    agent.app.shutdown();
 }

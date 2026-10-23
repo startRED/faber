@@ -600,6 +600,7 @@ export interface Attachment {
 export type AccountStatus = 'signedIn' | 'signedOut' | 'unknown';
 /** One skill of Faber's catalog (src-tauri/src/tools.rs). */
 export interface ToolRow {
+  removedEnabled?: boolean | null;
   id: string;
   cliName?: string | null;
   job: string;
