@@ -813,6 +813,7 @@ export const de: Messages = {
   'tool.verifyFull': 'Führt alle Prüfungen aus',
   'tool.map': 'Liest die Projektkarte',
   'tool.quota': 'Prüft die KI-Limits',
+  'tool.judgeCreative': 'Vergleicht Entwürfe',
   'tool.catalog': 'Durchsucht den Katalog',
   "tool.catalogInstall": "Installiert aus dem Katalog",
   'tool.memorySearch': 'Durchsucht das Gedächtnis des Projekts',

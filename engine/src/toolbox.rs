@@ -1,9 +1,10 @@
-//! Four tools of a project's agent (the "Toolbox" of docs/product/areas.md): `quota`, what Faber already knows of each connected
+//! Tools of a project's agent (the "Toolbox" of docs/product/areas.md): `quota`, what Faber already knows of each connected
 //! AI's limits, `catalog`, a search of the tool catalog, and `memory_search` (`crate::memory_search`), a search of the project's
 //! own past conversations and notes, and `offer_bigger`, one question card per conversation that offers the larger version of a small
 //! request (`engine/src/engine/toolbox.rs`). Searching starts no request, process or download, and no tool shows a token, an account id
 //! or an e-mail: they answer from what Faber keeps in memory and ships. Both CLIs call them like the other tools of Faber's server. `catalog` also installs, by id (`install`): that changes Faber itself, so it waits for the
 //! person's card (guardrail 3, `engine/src/engine/toolbox.rs`); the words of the card and of the log live here.
+//! `judge_creative` separately spends included quota on two fresh isolated textual judges, with no paid fallback.
 
 use crate::engine::VendorUsage;
 use crate::model::Vendor;
@@ -17,11 +18,13 @@ pub const QUOTA_TOOL: &str = "Quota";
 pub const CATALOG_TOOL: &str = "Catalog";
 pub const MEMORY_SEARCH_TOOL: &str = "MemorySearch";
 pub const OFFER_BIGGER_TOOL: &str = "OfferBigger";
+pub const JUDGE_CREATIVE_TOOL: &str = "JudgeCreative";
 /// The tools as Codex knows them, and as Faber's MCP server lists them to Claude Code.
 pub const QUOTA: &str = "quota";
 pub const CATALOG: &str = "catalog";
 pub const MEMORY_SEARCH: &str = "memory_search";
 pub const OFFER_BIGGER: &str = "offer_bigger";
+pub const JUDGE_CREATIVE: &str = "judge_creative";
 /// The tools as Claude Code names them: `mcp__<server>__<tool>`.
 pub const CLAUDE_QUOTA: &str = "mcp__faber__quota";
 pub const CLAUDE_CATALOG: &str = "mcp__faber__catalog";
@@ -70,6 +73,17 @@ pub const SELF_CHANGES: &str = "self-changes.jsonl";
 /// for being late.
 const SELF_CHANGES_MAX: u64 = 200_000;
 
+const JUDGE_DESCRIPTION: &str = "Compares two anonymized draft texts against your request and rubric using two fresh isolated judges, one from each connected AI vendor. Supply text only, without author identities. Each judge sees the drafts as A and B in opposite randomized orders and never sees the other's scores. Both subscription accounts must be available; there is no paid or same-vendor fallback. Returns recorded scores from 1 to 10, reasons and shown order, or an explicit incomplete result. Scores are evidence, never approval. Stop cancels both judges. Do not use it to run code or inspect files or images.";
+
+fn judge_schema() -> Value {
+    json!({"type":"object", "properties": {
+        "request":{"type":"string", "description":"The original creative request, at most 8192 UTF-8 bytes."},
+        "rubric":{"type":"string", "description":"The criteria to score, at most 4096 UTF-8 bytes."},
+        "first":{"type":"string", "description":"First anonymized draft text, at most 65536 UTF-8 bytes."},
+        "second":{"type":"string", "description":"Second anonymized draft text, at most 65536 UTF-8 bytes."}
+    }, "required":["request","rubric","first","second"], "additionalProperties":false})
+}
+
 fn quota_schema() -> Value {
     json!({ "type": "object", "properties": {}, "additionalProperties": false })
 }
@@ -114,22 +128,24 @@ fn offer_bigger_schema() -> Value {
 }
 
 /// The tools as Codex `dynamicTools` entries.
-pub fn codex_tools() -> [Value; 4] {
+pub fn codex_tools() -> [Value; 5] {
     [
         json!({ "type": "function", "name": QUOTA, "description": QUOTA_DESCRIPTION, "inputSchema": quota_schema() }),
         json!({ "type": "function", "name": CATALOG, "description": CATALOG_DESCRIPTION, "inputSchema": catalog_schema() }),
         json!({ "type": "function", "name": MEMORY_SEARCH, "description": MEMORY_SEARCH_DESCRIPTION, "inputSchema": memory_search_schema() }),
         json!({ "type": "function", "name": OFFER_BIGGER, "description": OFFER_BIGGER_DESCRIPTION, "inputSchema": offer_bigger_schema() }),
+        json!({ "type": "function", "name": JUDGE_CREATIVE, "description": JUDGE_DESCRIPTION, "inputSchema": judge_schema() }),
     ]
 }
 
 /// The tools as Faber's MCP server lists them to Claude Code.
-pub fn mcp_tools() -> [Value; 4] {
+pub fn mcp_tools() -> [Value; 5] {
     [
         json!({ "name": QUOTA, "description": QUOTA_DESCRIPTION, "inputSchema": quota_schema() }),
         json!({ "name": CATALOG, "description": CATALOG_DESCRIPTION, "inputSchema": catalog_schema() }),
         json!({ "name": MEMORY_SEARCH, "description": MEMORY_SEARCH_DESCRIPTION, "inputSchema": memory_search_schema() }),
         json!({ "name": OFFER_BIGGER, "description": OFFER_BIGGER_DESCRIPTION, "inputSchema": offer_bigger_schema() }),
+        json!({ "name": JUDGE_CREATIVE, "description": JUDGE_DESCRIPTION, "inputSchema": judge_schema() }),
     ]
 }
 
@@ -140,6 +156,7 @@ pub fn tool_of(name: &str) -> Option<&'static str> {
         CATALOG => Some(CATALOG_TOOL),
         MEMORY_SEARCH => Some(MEMORY_SEARCH_TOOL),
         OFFER_BIGGER => Some(OFFER_BIGGER_TOOL),
+        JUDGE_CREATIVE => Some(JUDGE_CREATIVE_TOOL),
         _ => None,
     }
 }

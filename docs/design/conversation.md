@@ -45,6 +45,9 @@ above an answer. The window widths, the sidebar and the running column are in [l
   `ui/locales/`, never the CLI's own word.
 - In the work log, what the agent wrote between its steps shows its last two paragraphs; earlier ones wait under a quiet
   "1 more" link in the third ink (R251). A code block keeps the narration whole. The answer itself never folds.
+- A creative comparison uses the existing work-log row, "Comparing drafts", without repeating the draft texts in its
+  detail. Its result tooltip and saved tool record hold both judges' scores, reasons, shown orders and incomplete states;
+  scores never approve delivery. Stop cancels both isolated judges with the owning reply. No new panel or motion.
 - The caret blinks only while words arrive; a reply at work after its words shows its step under them, in the status
   line's style. Faber's plumbing takes no row: its own message is a loop mark after the next reply's model (R241; the
   product map's Work log and Faber's own message say the rest).

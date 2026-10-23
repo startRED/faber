@@ -27,6 +27,7 @@ check('worklog: every Claude Code tool reads as what it does, in words', () => {
   deepEqual(toolRow({ id: '12', name: 'Map', input: { kind: 'setting', query: 'theme' } }), { label: t('tool.map'), detail: 'setting theme' });
   // The limits and the catalog search read as what they do; the search shows its words, in every language of the screen.
   deepEqual(toolRow({ id: '13', name: 'Quota', input: {} }), { label: t('tool.quota'), detail: '' });
+  deepEqual(toolRow({ id: 'judge', name: 'JudgeCreative', input: { first: 'Private draft', second: 'Another draft' } }), { label: t('tool.judgeCreative'), detail: '' });
   deepEqual(toolRow({ id: '14', name: 'Catalog', input: { query: 'fix a bug' } }), { label: t('tool.catalog'), detail: 'fix a bug' });
   deepEqual(toolRow({ id: '15', name: 'Catalog', input: {} }), { label: t('tool.catalog'), detail: '' });
   // The project's memory search reads as that, with its words, in every language.
@@ -40,6 +41,7 @@ check('worklog: every Claude Code tool reads as what it does, in words', () => {
     useLanguage(lang);
     ok(t('tool.quota') !== 'Checking the AI limits' && t('tool.catalog') !== 'Searching the catalog', `${lang} has its own words`);
     ok(t('tool.catalogInstall') !== 'Installing from the catalog', `${lang} names the install in its own words`);
+    ok(t('tool.judgeCreative') !== 'Comparing drafts', `${lang} names the comparison in its own words`);
     ok(t('tool.memorySearch') !== "Searching the project's memory", `${lang} names the memory search in its own words`);
   }
   useLanguage('en');

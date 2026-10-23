@@ -12,10 +12,14 @@ use std::sync::Arc;
 use std::time::Duration;
 
 fn engine(dir: &std::path::Path, vendor: Vendor, spawn: faber_engine::proc::Spawner) -> Engine {
+    engine_vendors(dir, &[vendor], spawn)
+}
+
+fn engine_vendors(dir: &std::path::Path, vendors: &[Vendor], spawn: faber_engine::proc::Spawner) -> Engine {
     let app = Engine::new(
         EngineOptions {
             data_dir: dir.join("data"),
-            clis: BTreeMap::from([(vendor, Cli { command: vendor.name().into(), prefix: vec![] })]),
+            clis: vendors.iter().map(|v| (*v, Cli { command: v.name().into(), prefix: vec![] })).collect(),
             spawn,
             windows: false,
             claude_env_billed: false,
@@ -34,7 +38,9 @@ fn engine(dir: &std::path::Path, vendor: Vendor, spawn: faber_engine::proc::Spaw
         .map(|(window, used, ahead)| EngineEvent::Quota { window: window.to_string(), used: *used, resets_at: now + ahead })
         .collect();
     events.push(EngineEvent::Signals(signals));
-    app.note_account_events(vendor, events);
+    for vendor in vendors {
+        app.note_account_events(*vendor, events.clone());
+    }
     app
 }
 
@@ -100,6 +106,225 @@ async fn claude_agent(area: Area) -> (Engine, Pipe, tempfile::TempDir, tempfile:
     wire(&pipe, |m| m["type"] == "user").await;
     pipe.say(json!({ "type": "system", "subtype": "init", "session_id": "s1", "model": "claude-haiku-5-5" })).await;
     (app, pipe, dir, folder)
+}
+
+#[tokio::test]
+async fn creative_judge_is_offered_but_never_falls_back_to_one_vendor() {
+    let (_app, mut pipe, _dir, _folder) = claude_agent(Area::Project).await;
+    assert!(names(&claude_list(&mut pipe, "creative-list").await).contains(&"judge_creative".into()));
+    let (text, error) = claude_call(
+        &mut pipe,
+        "creative",
+        "judge_creative",
+        json!({
+            "request":"Write a headline", "rubric":"Clarity", "first":"First", "second":"Second"
+        }),
+    )
+    .await;
+    assert!(error && text.contains("both"), "{error}: {text}");
+}
+
+async fn creative_panel() -> (Engine, Pipe, Pipe, Pipe, tempfile::TempDir, tempfile::TempDir, String, Value, Value) {
+    let (dir, folder) = (support::canonical_tempdir().unwrap(), support::work_folder());
+    let (spawn, made) = pipes();
+    let app = engine_vendors(dir.path(), &Vendor::ALL, spawn);
+    app.set_codex_models(vec!["gpt-6.1-sol".into()], Some("gpt-6.1-sol".into()));
+    let project = app.add_project(&folder.path().to_string_lossy()).unwrap().id;
+    let id = app.send(request(Vendor::Claude, Area::Project, Some(project))).unwrap();
+    let mut lead = next_pipe(&made).await;
+    wire(&lead, |m| m["type"] == "user").await;
+    lead.say(json!({"type":"system","subtype":"init","session_id":"lead","model":"claude-haiku-5-5"})).await;
+    lead.say(json!({"type":"assistant","message":{"content":[{"type":"tool_use","id":"creative-tool",
+        "name":"mcp__faber__judge_creative","input":{"request":"Write a headline","rubric":"Clarity","first":"Old announcement","second":"Original second"}}]}})).await;
+    lead.say(json!({"type":"control_request","request_id":"panel","request":{"subtype":"mcp_message","server_name":"faber",
+        "message":{"jsonrpc":"2.0","id":7,"method":"tools/call","params":{"name":"judge_creative","_meta":{"claudecode/toolUseId":"creative-tool"},"arguments":{
+            "request":"Write a headline","rubric":"Clarity","first":"Original first","second":"Original second"}}}}}))
+        .await;
+    let claude = next_pipe(&made).await;
+    let mut codex = next_pipe(&made).await;
+    let first = wire(&claude, |m| m["type"] == "user").await;
+    let init = wire(&codex, |m| m["method"] == "initialize").await;
+    codex.say(json!({"id":init["id"],"result":{}})).await;
+    let config = wire(&codex, |m| m["method"] == "config/read").await;
+    codex.say(json!({"id":config["id"],"result":{"config":{}}})).await;
+    let start = wire(&codex, |m| m["method"] == "thread/start").await;
+    codex.say(json!({"id":start["id"],"result":{"thread":{"id":"main"}}})).await;
+    let turn = wire(&codex, |m| m["method"] == "turn/start").await;
+    codex.say(json!({"id":turn["id"],"result":{"turn":{"id":"turn-main"}}})).await;
+    assert_eq!(start["params"]["ephemeral"], true);
+    assert_eq!(start["params"]["approvalPolicy"], "never");
+    assert_eq!(start["params"]["config"]["features.shell_tool"], false);
+    assert!(start["params"].get("dynamicTools").is_none());
+    let second = wire(&codex, |m| m["method"] == "turn/start").await;
+    let a: Value = serde_json::from_str(first["message"]["content"].as_str().unwrap()).unwrap();
+    let b: Value = serde_json::from_str(second["params"]["input"][0]["text"].as_str().unwrap()).unwrap();
+    assert_eq!(a["A"], b["B"]);
+    assert_eq!(a["B"], b["A"]);
+    assert!(a.get("first").is_none() && a.get("author").is_none());
+    (app, lead, claude, codex, dir, folder, id, a, b)
+}
+
+async fn creative_claude_text(pipe: &mut Pipe, text: &str) {
+    pipe.say(json!({"type":"stream_event","parent_tool_use_id":null,"event":{"type":"content_block_delta","delta":{"type":"text_delta","text":text}}})).await;
+}
+
+async fn creative_codex_score(pipe: &mut Pipe, text: &str) {
+    pipe.say(json!({"method":"item/agentMessage/delta","params":{"threadId":"main","turnId":"turn-main","itemId":"score","delta":text}}))
+        .await;
+    pipe.say(json!({"method":"turn/completed","params":{"threadId":"main","turn":{"id":"turn-main","status":"completed"}}})).await;
+}
+
+async fn creative_result(lead: &Pipe) -> (Value, bool) {
+    let result = wire(lead, |m| m["response"]["request_id"] == "panel").await;
+    let (text, error) = said(&result["response"]["response"]["mcp_response"]["result"]);
+    (serde_json::from_str(&text).unwrap(), error)
+}
+
+#[tokio::test]
+async fn creative_judges_return_two_blind_mapped_scores_and_charge_the_owning_reply() {
+    let (app, lead, mut claude, mut codex, _dir, _folder, id, shown, _) = creative_panel().await;
+    creative_claude_text(&mut claude, r#"{"a":3,"b":9,"reason":"B is clearer."}"#).await;
+    claude.say(json!({"type":"result","subtype":"success","is_error":false,"total_cost_usd":0.17,"usage":{}})).await;
+    creative_codex_score(&mut codex, r#"{"a":8,"b":4,"reason":"A is clearer."}"#).await;
+    let (result, error) = creative_result(&lead).await;
+    assert!(!error && result["complete"] == true && result["approval"] == false, "{result}");
+    let scores = result["judges"].as_array().unwrap();
+    assert_eq!(scores.len(), 2);
+    assert_ne!(scores[0]["vendor"], scores[1]["vendor"]);
+    assert_eq!(scores[0]["score"]["first"], if shown["A"] == "Original first" { 3 } else { 9 });
+    assert_ne!(scores[0]["score"]["a_is"], scores[1]["score"]["a_is"]);
+    assert_eq!(scores[0]["score"]["reason"], "B is clearer.");
+    let conversation = app.open(&id).unwrap();
+    assert!((conversation.spent_usd - 0.17).abs() < 0.0001, "{}", conversation.spent_usd);
+    assert_eq!(conversation.messages.last().unwrap().cost_usd, Some(0.17));
+    let recorded = conversation.messages.last().unwrap().tools.as_ref().unwrap().iter().find(|t| t.id == "creative-tool").unwrap();
+    assert_eq!(recorded.input["first"], "Original first", "record the actual validated request, not a prior announcement");
+    assert_eq!(recorded.output.as_deref(), Some(result.to_string().as_str()), "the engine records the actual scores before any CLI echo");
+    app.shutdown();
+}
+
+#[tokio::test]
+async fn creative_judges_reject_accumulated_multibyte_overflow_and_keep_partial_results_honest() {
+    let (app, lead, mut claude, mut codex, _dir, _folder, _id, _, _) = creative_panel().await;
+    creative_claude_text(&mut claude, &"é".repeat(1024)).await;
+    creative_claude_text(&mut claude, &"é".repeat(1024)).await;
+    creative_claude_text(&mut claude, "界").await;
+    creative_codex_score(&mut codex, r#"{"a":8,"b":4,"reason":"A is clearer."}"#).await;
+    let (result, error) = creative_result(&lead).await;
+    assert!(error && result["complete"] == false, "{result}");
+    assert_eq!(result["judges"][0]["status"], "incomplete");
+    assert_eq!(result["judges"][1]["status"], "scored");
+    app.shutdown();
+}
+
+#[tokio::test]
+async fn creative_judges_preserve_full_recorded_reasons_when_the_cli_echoes_a_result() {
+    let (app, mut lead, mut claude, mut codex, dir, _folder, id, _, _) = creative_panel().await;
+    let score = json!({"a":3,"b":9,"reason":"R".repeat(2000)}).to_string();
+    creative_claude_text(&mut claude, &score).await;
+    claude.say(json!({"type":"result","subtype":"success","is_error":false,"total_cost_usd":0.17,"usage":{}})).await;
+    creative_codex_score(&mut codex, &score).await;
+    let (result, error) = creative_result(&lead).await;
+    assert!(!error && result.to_string().len() > 4000, "both reasons exceed the ordinary output cut");
+    lead.say(json!({"type":"user","message":{"content":[{"type":"tool_result","tool_use_id":"creative-tool","is_error":true,"content":"A changed CLI echo"}]}})).await;
+    lead.say(json!({"type":"stream_event","event":{"type":"content_block_delta","delta":{"type":"text_delta","text":"after echo"}}})).await;
+    for _ in 0..100 {
+        if app.open(&id).unwrap().messages.last().unwrap().text.contains("after echo") {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(10)).await;
+    }
+    let conversation = app.open(&id).unwrap();
+    assert!(
+        conversation.messages.last().unwrap().text.contains("after echo"),
+        "the altered CLI echo was processed before checking the saved record"
+    );
+    let recorded = conversation.messages.last().unwrap().tools.as_ref().unwrap().iter().find(|t| t.id == "creative-tool").unwrap();
+    assert_eq!(recorded.ok, Some(true));
+    assert_eq!(recorded.output.as_deref(), Some(result.to_string().as_str()));
+    let saved: Value =
+        serde_json::from_slice(&std::fs::read(dir.path().join("data").join("conversations").join(format!("{id}.json"))).unwrap()).unwrap();
+    let saved_tool = saved["messages"].as_array().unwrap().last().unwrap()["tools"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|t| t["id"] == "creative-tool")
+        .unwrap();
+    assert_eq!(saved_tool["output"], result.to_string());
+    app.shutdown();
+}
+
+#[tokio::test]
+async fn creative_judges_report_failure_when_the_actual_scores_cannot_be_saved() {
+    let (app, lead, mut claude, mut codex, dir, _folder, id, _, _) = creative_panel().await;
+    // Replace only this test's conversation file with an empty directory to refuse its atomic save.
+    let file = dir.path().join("data").join("conversations").join(format!("{id}.json"));
+    std::fs::remove_file(&file).unwrap();
+    std::fs::create_dir(&file).unwrap();
+    creative_claude_text(&mut claude, r#"{"a":3,"b":9,"reason":"B is clearer."}"#).await;
+    claude.say(json!({"type":"result","subtype":"success","is_error":false,"total_cost_usd":0.0,"usage":{}})).await;
+    creative_codex_score(&mut codex, r#"{"a":8,"b":4,"reason":"A is clearer."}"#).await;
+    let (result, error) = creative_result(&lead).await;
+    assert!(error && result["complete"] == false, "{result}");
+    assert!(result["error"].as_str().unwrap().contains("could not be saved"), "{result}");
+    assert!(result["judges"].as_array().unwrap().iter().all(|j| j["status"] == "scored"));
+    app.shutdown();
+}
+
+#[tokio::test]
+async fn creative_judges_stop_with_the_owner_close_both_sessions_and_send_no_late_reply() {
+    let (app, lead, mut claude, mut codex, _dir, _folder, id, _, _) = creative_panel().await;
+    app.interrupt(&id);
+    wire(&claude, |m| m["request"]["subtype"] == "interrupt").await;
+    claude.say(json!({"type":"result","subtype":"error_during_execution","is_error":true,"total_cost_usd":0.0,"usage":{}})).await;
+    let interrupt = wire(&codex, |m| m["method"] == "turn/interrupt").await;
+    codex.say(json!({"id":interrupt["id"],"result":{}})).await;
+    codex.say(json!({"method":"turn/completed","params":{"threadId":"main","turn":{"id":"turn-main","status":"interrupted"}}})).await;
+    tokio::time::timeout(Duration::from_secs(5), async {
+        while !claude.closed.load(std::sync::atomic::Ordering::SeqCst) || !codex.closed.load(std::sync::atomic::Ordering::SeqCst) {
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+    })
+    .await
+    .expect("both isolated sessions closed");
+    assert!(!lead.lines.lock().unwrap().iter().any(|m| m["response"]["request_id"] == "panel"));
+    assert_eq!(app.open(&id).unwrap().messages.last().unwrap().incomplete, Some(true));
+    app.shutdown();
+}
+
+#[tokio::test]
+async fn creative_judges_share_the_helper_limit_and_stop_when_an_account_becomes_paid() {
+    let (app, mut lead, _claude, _codex, _dir, _folder, id, _, _) = creative_panel().await;
+    let (text, error) = claude_call(&mut lead, "extra-helper", "helper", json!({"title":"Extra", "brief":"Do another job"})).await;
+    assert!(error && text.contains("two helpers"), "{error}: {text}");
+    let signals = faber_engine::signals::Signals { overage_active: Some(true), ..Default::default() };
+    app.note_account_events(Vendor::Codex, vec![EngineEvent::Signals(signals)]);
+    let (result, error) = creative_result(&lead).await;
+    assert!(error && result["complete"] == false, "{result}");
+    assert!(result["judges"].as_array().unwrap().iter().all(|j| j["status"] == "incomplete"));
+    assert_eq!(app.open(&id).unwrap().messages.last().unwrap().incomplete, Some(true));
+    app.shutdown();
+}
+
+#[tokio::test]
+async fn creative_judges_keep_a_finished_score_when_the_other_judge_times_out() {
+    let (app, lead, mut claude, _codex, _dir, _folder, id, _, _) = creative_panel().await;
+    tokio::time::pause();
+    creative_claude_text(&mut claude, r#"{"a":3,"b":9,"reason":"B is clearer."}"#).await;
+    claude.say(json!({"type":"result","subtype":"success","is_error":false,"total_cost_usd":0.17,"usage":{}})).await;
+    for _ in 0..100 {
+        if app.open(&id).unwrap().spent_usd > 0.0 {
+            break;
+        }
+        tokio::task::yield_now().await;
+    }
+    assert!(app.open(&id).unwrap().spent_usd > 0.0, "the completed judge settled before timeout");
+    tokio::time::advance(Duration::from_secs(121)).await;
+    let (result, error) = creative_result(&lead).await;
+    assert!(error && result["complete"] == false, "{result}");
+    assert_eq!(result["judges"][0]["status"], "scored");
+    assert_eq!(result["judges"][1]["status"], "incomplete");
+    app.shutdown();
 }
 
 #[tokio::test]

@@ -45,7 +45,7 @@ struct Ended {
 
 impl Core {
     pub(super) fn helpers_in(&self, conv: &str) -> bool {
-        self.helpers.values().any(|h| h.conv == conv)
+        self.helpers.values().any(|h| h.conv == conv) || self.judges_in(conv)
     }
     /// Whether a project conversation on `vendor` offers the helper tool: the other vendor's CLI is connected.
     pub(super) fn offers_helper(&self, area: Area, vendor: Vendor) -> Helper {
@@ -97,6 +97,7 @@ impl Core {
         }
         let check_name = format!("helper:{call}");
         if self.helpers.values().filter(|h| h.conv == conv).count()
+            + if self.judges_in(conv) { 2 } else { 0 }
             + self
                 .kit_checks
                 .iter()
@@ -420,12 +421,13 @@ impl Core {
 
     /// Whether a helper of this vendor is at work: its quota is being spent now.
     pub(super) fn helper_running(&self, vendor: Vendor) -> bool {
-        self.helpers.values().any(|h| h.vendor == vendor)
+        self.helpers.values().any(|h| h.vendor == vendor) || self.judges_running(vendor)
     }
 
     /// A helper is never picked by hand nor approved for paid use, so it stops as soon as its vendor may bill beyond the
     /// subscription (R86), and the agent hears why.
     pub(super) fn stop_paid_helpers(&mut self, vendor: Vendor) {
+        self.stop_judges(None, Some(vendor), true);
         let calls: Vec<String> = self.helpers.iter().filter(|(_, h)| h.vendor == vendor).map(|(call, _)| call.clone()).collect();
         for call in calls {
             self.end_helper(&call, false, Some("the other AI would be billed beyond its subscription"), None, true);
@@ -434,6 +436,7 @@ impl Core {
 
     /// The engine is closing: every helper stops, and what it spent so far is noted as unknown.
     pub(super) fn close_helpers(&mut self) {
+        self.stop_judges(None, None, false);
         let convs: HashSet<String> = self.helpers.values().map(|h| h.conv.clone()).collect();
         for conv in convs {
             self.stop_helpers(&conv, true);
@@ -442,6 +445,7 @@ impl Core {
 
     /// The agent's turn stopped or ended: its helpers stop with it. An interrupted helper still reports what it had.
     pub(super) fn stop_helpers(&mut self, conv: &str, close: bool) {
+        self.stop_judges(Some(conv), None, false);
         self.kit_checks.retain(|name, check| !name.starts_with("helper:") || check.owner != conv);
         // The checks it was waiting for stop too (`verifying.rs`).
         self.stop_verify(conv);

@@ -973,6 +973,7 @@ export const en = {
   'tool.verifyFull': 'Running every check',
   'tool.map': 'Reading the project map',
   'tool.quota': 'Checking the AI limits',
+  'tool.judgeCreative': 'Comparing drafts',
   'tool.catalog': 'Searching the catalog',
   "tool.catalogInstall": "Installing from the catalog",
   'tool.memorySearch': "Searching the project's memory",

@@ -148,6 +148,7 @@ fn called(name: &Value, tools: Tools) -> Option<&'static str> {
         crate::toolbox::CATALOG if tools.progress => Some(crate::toolbox::CATALOG),
         crate::toolbox::MEMORY_SEARCH if tools.progress => Some(crate::toolbox::MEMORY_SEARCH),
         crate::toolbox::OFFER_BIGGER if tools.progress => Some(crate::toolbox::OFFER_BIGGER),
+        crate::toolbox::JUDGE_CREATIVE if tools.progress => Some(crate::toolbox::JUDGE_CREATIVE),
         _ => None,
     }
 }

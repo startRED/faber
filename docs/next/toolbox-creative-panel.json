@@ -1,0 +1,14 @@
+{
+  "notes": {
+    "new": {
+      "en": "Your project agent can compare two drafts with two independent AIs and keep their scores and reasons in the work log.",
+      "pt-BR": "A IA do projeto pode comparar dois rascunhos com duas IAs independentes e guardar as notas e os motivos no histórico do trabalho.",
+      "es": "La IA del proyecto puede comparar dos borradores con dos IA independientes y guardar sus notas y motivos en el registro de trabajo.",
+      "fr": "L’IA du projet peut faire comparer deux propositions par deux IA indépendantes et conserver leurs notes et leurs raisons dans le journal.",
+      "de": "Die Projekt-KI kann zwei Entwürfe von zwei unabhängigen KIs vergleichen lassen und deren Bewertungen und Begründungen im Arbeitsverlauf festhalten."
+    }
+  },
+  "decisions": [
+    "| R-next | 2026-10-23 | Creative draft comparison reuses isolated internal sessions, both helper places and subscription gates. Opposite randomized labels and strict bounded scores remain evidence, never delivery approval; Stop retires both sessions and their usage. | AI |"
+  ]
+}
