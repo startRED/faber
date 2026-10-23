@@ -140,6 +140,11 @@ viewport (715 UI passed, one failed). This is not the previous logical-focus ass
 A narrow diagnostic change retains the event sequence, focus checks and three-pixel tolerance while reporting before
 and after geometry. It has independent source review and seven passing local commands; extra geometry reads can affect
 layout timing, so a subsequent pass alone would not diagnose or repair the original failure.
+The diagnostic macOS run also failed (712 UI passed, one failed): message 100 stayed focused while its offset changed
+from 22 to 97 pixels, scrollTop from 0 to 10,925 and scrollHeight from 10,989 to 21,989. The 75-pixel displacement is
+observed, not explained. Scoped native scroll/focus tracing preserves the same assertions and tolerance; its one
+explicitly selected Windows scenario passed. The first earlier diagnostic invocation ran no scenario after an
+overlapping production build changed its assets, and a later default selection ran nothing; neither is runtime proof.
 
 The separate resource candidate's complete corrected-base native log was retained before another run could replace it:
 125 scenarios passed, including draft attachment restart and the synthetic performance workload. Its full ordinary
@@ -165,5 +170,6 @@ The combined search correction subsequently passed the ordinary full local confi
 integration job both completed successfully, and the source was observed on the development base and main.
 The two earlier stale-control passes remain invalid evidence for this composition. The visual-version scenario
 also passed with the unchanged 15 MB allowance (133.6 MB baseline, 147.6 MB after close at 10.9 seconds); this
-newer-tree result does not diagnose or repair the earlier 16.1 MB overage. Send admission and the resource fixture
-still require their separate final integration; the send route reported a real conflict with deferred queue editing.
+newer-tree result does not diagnose or repair the earlier 16.1 MB overage. The resource fixture's subsequent integration
+is recorded above. Send admission remains unintegrated after the separate macOS viewport failure; its actual final gate
+failed, while both Rust jobs, Windows UI and all eight native screen shards passed.
