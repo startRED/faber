@@ -1,76 +1,92 @@
 # Frontend excellence implementation record
 
-Status: in progress. Scope: the person's request to apply useful parts of the 243-technique blueprint and improve
-the frontend expertise Faber uses for its own screen and generated interfaces. This is not approval for a new visual
-identity, voice/remote infrastructure, copying third-party skills or speculative performance dependencies.
+Status: selected changes proved locally; final integration and consolidated documentation in progress.
+Scope: the person's request to apply useful parts of the 243-technique blueprint and improve the frontend expertise
+Faber uses for its own screen and generated interfaces. No new visual identity, copied third-party skills,
+voice/remote infrastructure or speculative performance dependency was introduced.
 
-## Recorded input and audit
+## Input, research and selection
 
-The complete ID inventory and static evidence are in the
-[audit](../../research/2026-10-22-frontend-blueprint-audit.md) and its linked second part. This retains all 243 IDs,
-including unknowns. The priorities P0/P1/P2 are the source study's proposals, not proof a feature is absent.
-The [source study](../../research/2026-10-22-frontend-sources.md) records checked sources and unavailable pages.
+The [audit](../../research/2026-10-22-frontend-blueprint-audit.md) and its linked second part retain every one of the
+243 supplied IDs. Its initial static inventory was 13 existing, 186 partial, 11 missing and 33 unknown. These are
+snapshot judgments, not freshly executed checks or the status of every criterion after implementation. Blueprint
+priorities are proposals, not evidence of absence. Existing panes, tabs and side chat were extended, not rebuilt.
 
-## Current slice
+The [source study](../../research/2026-10-22-frontend-sources.md) distinguishes normative accessibility requirements,
+platform guidance, practitioner judgment, proposed budgets and unavailable pages. It uses original standards and
+author guidance rather than treating collected tips as requirements. No current competitor-parity benchmark exists.
 
-- [x] Work from the current development snapshot in a separate checkout; preserve the older conversation checkout.
-- [x] Record one status/evidence/recommendation for each of the 243 IDs, explicitly as static inspection.
-- [x] Write original frontend-craft and frontend-proof skills with selective loading and project-aware boundaries.
-- [x] Verify their delivery through the existing guide path for both vendors, fallback and permission modes.
-- [x] Extend the existing Faber UI skill beyond motion with the same interaction and proof workflow.
-- [x] Prove and repair same-file attachment reselection without changing attachment persistence.
-- [x] Complete local proofs, independent code/security review and skill scenario review; record remaining limits.
-- [x] Queue the proven change through the normal workflow. Its local integration run passed 2,189 engine checks,
-  687 UI checks and 120 native scenarios; the remote integration result is separate from those local receipts.
+Selection favored observed reliability problems, reusable frontend instruction and a measurable resource baseline.
+An existing capability with incomplete evidence needs inspection before another implementation; a proposed worker,
+virtualizer, animation or setting does not become useful merely because it appears in the blueprint.
 
-## Remaining reliability work, in dependency order
+## Delivered and independently reviewed changes
 
-These are unfinished implementation items, not automatically solved by instruction skills. Each needs its own narrow
-contract and failing-before/passing-after proof, extending the existing send/draft/navigation path.
+| Change | Program evidence | Integration state |
+| --- | --- | --- |
+| Original frontend-craft and frontend-proof skills, extended original Faber UI skill, same-file attachment reselection | 14 guide/delivery checks; reselection failed before and passed after; local integration 2,189 engine, 687 UI and 120 native scenarios | Observed on the development base |
+| Durable unsent PNG/PDF/inline draft attachments and removal recovery | 703 UI checks; two native scenarios with actual same-profile process restarts and byte equality; two security reviews; visual minimum 39/40 before and after | Numbered change observed on main by ancestry check |
+| Durable reading anchor and offset, bounded to 100 entries; true final-message jump | Five focused UI checks; real app/WebView2 exit, changed earlier content, same-profile restart, wheel input and one jump to message 159; 16 normal captures independently 40/40 before and after | Numbered change observed integrated; the compared functional UI/scenario sources match |
+| Refined frontend workflow, actual slow completion and executed-artifact identity | Frozen paired examples and fresh instruction review; real delayed IndexedDB deletion reproduced an existing failure, then three focused checks and cleanup passed | Repair pushed; normal landing script is checking before requeue |
+| Durable admission guard before send/steer/queue dispatch | Thirteen engine scenarios plus aggregate passed; six final UI checks with clean audit; native refused-write/retry preserved exact words/PNG/PDF; two security reviews; 16 normal captures independently 40/40 before and after | Queued through the normal workflow; exact-tree gate unobserved |
+| Native resource and interaction workload on 1,000 messages/500 collapsed tools | Actual operation/count assertions, fixture bytes and executable identities; same-base sequential before/after reading pair passed the unchanged resource budget | Rebased after a real scenario-registration conflict, final local proofs and fresh review passed; normal queue accepted, gate unobserved |
 
-1. **Durable draft attachments (C03/S06/F05).** Persist references/bytes with bounded storage and cleanup in the
-   existing draft store; cover reload, restart, removed files, failed storage, branch/conversation changes and privacy.
-   Do not write large base64 blobs into localStorage or pretend an OS path alone preserves pasted files.
-   Implemented locally: the complete UI suite passed 703 checks after the final metadata cleanup/race fix;
-   two native scenarios now pass, including three actual process launches, failed-save/retry and byte equality.
-   Required local proofs and independent visual recheck passed (lowest 39/40 before and after). Exact-tree queue
-   integration remains separate; no final integration result is claimed yet.
-2. **Durable outgoing intent and reconciliation (R01/R03/R04/R05/T01/T07).** Establish stable message identity and
-   durable acknowledgement at the engine boundary before an optimistic UI. Cover repeated submit, cancel/late ACK,
-   crash at each persistence boundary and restart; never replay ambiguous external effects blindly.
-3. **Exact reading restoration (S02/C15/C16/F05).** Extend existing scroll/navigation memory with a message anchor
-   and relative offset. Cover late layout/image changes, streaming above the viewport, removed messages, branch
-   switches and bounded storage. A durable raw scrollTop is not enough.
-4. **Measure before optimization (P01/P06/P08/P14/M03/M10).** Record representative input/scroll/resize frame and
-   memory/CPU baselines, including hidden state and long tool logs. Add only the optimization the trace justifies.
-5. **Generated frontend evaluation (D13/M01/M14).** Run the source study's paired fixtures and independent visual
-   review. Skills delivered successfully do not prove the generated interfaces improved.
-   The first [bakery pair](../../research/2026-10-22-frontend-evaluation.md) is complete: 17/20 each in a fresh blind
-   review, with different strengths. N=1 and differing design-skill consultation prevent a causal improvement claim.
+The skills reuse the first-party guide/session-kit delivery for both vendors and areas, including guarded modes,
+fallback, resumed sessions and Windows junction rejection. Existing external catalog art direction remains separate.
+Instruction delivery does not prove spontaneous selection or that a model followed the whole workflow.
 
-Other partial/unknown audit rows stay open until their own evidence exists. Existing pane/tab/side-chat work is
-extended rather than rebuilt. Voice, remote machines/devices, scheduling and comparator products are separate
-capability work, not cosmetic improvements or claims of parity made by this slice.
+## Generated-interface evidence
 
-## Local evidence for this slice
+The [first exploratory pair](../../research/2026-10-22-frontend-evaluation.md), a bakery, scored 17/20 in both
+conditions in a fresh blind review. Differing consultation of the installed art-direction skill confounded it.
+The [refinement pair](../../research/2026-10-22-frontend-skill-refinement.md), a Pilates studio, supplied the full
+same design workflow in both conditions: 16/20 old and 18/20 refined after both sources and 12 matching captures were
+reviewed blind. The refined page clarified the task and form; the old page compared classes better on desktop.
+Both exercised slow completion, cancel, failure preservation and keyboard completion. Retained visual defects,
+different references/author choices, one sample per condition and an unexposed exact runtime model variant prevent
+causal or general superiority claims. Later indefinite-wait and artifact-identity wording was reviewed separately,
+not retroactively assigned those scores. Two extra routing examples were paper checks, not implemented applications.
 
-- Frontend/guide integration: 14 passed, including both vendors, both areas, native/index/fallback, guarded modes,
-  resumed/compacted sessions and Windows junction rejection. The first expanded run found two index assumptions
-  (old 400-byte bound and language suffix); both were corrected and the 14 passed again.
-- File reselection: a new UI check failed before the change on the retained native fakepath; after the change the
-  full UI suite passed, 687 checks, no failures or skips. File bytes and a single sent attachment are checked.
-- Script checks: 101 passed, one skipped, zero failures. Types, source analysis, documentation, production bundle,
-  formatting and lane claims passed. Source analysis has five pre-existing warnings outside the touched files.
-- Two independent read-only reviews found no security blocker. A separate scenario review exercised six proposed
-  skill plans by reading, without building sample interfaces; it found no scope or routing blocker.
-- Before photos: eight real screenshots; the existing composition scenario passed without findings. A fresh
-  reviewer scored all four screens at both sizes 40/40. The six affected before/after pairs were then compared by the same independent reviewer, 40/40 to 40/40, no findings.
-- An after-photo attempt was invalidated by running the production bundle command concurrently: the harness
-  detected the changed dist directory and refused the run. The serialized retry passed and produced the six affected after photos.
-- The new skill bodies total 15,655 UTF-8 bytes; each discovery description is <=160 bytes. This is text size,
-  not a whole-app memory/CPU measurement. No resident process, library dependency, timer or visible window was added.
+The complete refined instruction files total 17,007 UTF-8 bytes, including frontmatter. Native plugin discovery uses
+their 151/152-byte descriptions; other delivery modes use the existing short index or fallback instructions. Full
+files are read on relevant use when available, rather than being injected into every task. No resident service, new dependency or application timer was
+added by the wording; marginal whole-app resource cost of wording was not measured.
 
-Receipts remain in the working copy's target/frontend-guide-cargo.log, target/faber-test/run.log and
-target/faber-test/critique/. The UI suite's 687-result receipt was produced before screenshot runs reused run.log;
-the tool log retains its full result. The first package's local integration receipts cover the engine, UI and native
-suites. Generated-design quality measurements remain unverified.
+## Cost, failures and proof limits
+
+The native admission flow observed an app tree of 148.2/154.1/174.2 MB before refusal, after refusal and after accepted
+retry. It used 2,047 ms CPU over 1,041 ms of active flow; this is not an idle or marginal overhead measurement.
+
+The same-base resource pair used identical real fixture bytes and unchanged generator/scenario source, in sequence
+in one worktree, with recorded app and runner identities. Peak tree memory was 292.3 MiB before reading and 306.6
+after; loaded memory was 210.9/214.2. CPU without scenario action was 94/5,005 and 125/5,006 ms; active CPU was
+8,250/5,053 and 7,891/5,002 ms, completing 55/57 cycles. Both passed the unchanged 400 MiB gate. The observed memory
+and idle-window CPU increases are retained. External activity and one window per version prevent causal attribution,
+absence-of-regression or speedup claims. Two animation frames estimate scheduling, not acknowledged paint or INP.
+The hidden harness does not establish product occlusion or hidden-document behavior; fake warmup processes may be
+inside the measured tree. The full resource report supplies sample definitions and additional limits.
+
+Failures remain evidence: the original large-conversation check failed at 4,257 ms against its unchanged 3,000 ms
+limit. An exact-source control passed at 1,163 ms. A purported 2,163 ms candidate pass was invalidated when executable
+inspection showed a stale control runner after timestamp-preserving restoration. A fresh rebuilt, identified runner
+then passed at 1,085 ms; this does not diagnose the original slowdown. The completion repair first passed all three
+task assertions but failed a separate NVIDIA cache cleanup audit. A fresh ordinary confirmation passed three checks
+and cleanup; the old cache was not removed, its failure was not waived and its cause remains unestablished.
+
+Required local commands passed for each final package, with receipts retaining the five pre-existing source warnings,
+the existing bundle warning and script result 101 passed/one branch-only skip. Claims were rechecked after other
+lanes narrowed disjoint reservations. A passing local scenario or a queued commit is not an observed remote gate.
+Raw logs, source/artifact hashes, photos and independent reviews remain in each working copy's ignored target folder.
+
+## Contracts not established by this work
+
+A draft save is not engine delivery. The admission guard prevents dispatch after a refused durable write; it does
+not provide a stable client receipt, crash-safe outgoing journal or exactly-once reconciliation after a lost IPC
+reply. Never automatically replay an ambiguous external effect. Pre-admission attachment copies may remain after a
+refusal; no cleanup guarantee was added for those copies.
+
+Full AA conformance, native screen-reader coverage, native Projects reading restart, smooth-motion restoration,
+physical phones, all browser engines, hidden/occluded power cost, quiet repeated latency/cost trials and competitor
+parity remain unverified. Other partial/unknown blueprint rows remain product backlog, not completed features.
+Voice, SSH, remote devices, scheduling and proprietary cloud capabilities are separate product work. No claim of
+all 243 techniques implemented, general design mastery or generalized performance improvement is made.
