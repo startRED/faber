@@ -25,6 +25,11 @@ function describe(tool: string, input: unknown): { title: string; note?: string;
  * screen's own, from the Catalog's names and purposes, so the agent cannot write any of them. Any other tool is not one. */
 const SELF = 'faber'; // not written as one quoted word: the map's check reads that as a browser storage key
 function selfInstall(tool: string, input: unknown): { title: string; what: string; effect: string; line: string; code: string } | undefined {
+  if (tool === `${SELF}.settings.web_search`) {
+    const i = (input && typeof input === 'object' ? input : {}) as Record<string, unknown>;
+    const choice = (value: unknown) => value === 'off' || value === 'cached' || value === 'live' ? t(`set.webSearch.${value}`) : '';
+    return { title: t('ask.self.webSearch'), what: t('set.webSearch.line'), effect: t('ask.self.webSearchEffect'), line: t('ask.self.webSearchLine', { from: choice(i.from), to: choice(i.to) }), code: '' };
+  }
   const switching = tool === `${SELF}.tools.switch`;
   const removing = tool === `${SELF}.tools.remove`;
   const updating = tool === `${SELF}.tools.update`;
@@ -476,7 +481,7 @@ function Card(props: { conversationId: string; turnId: string; permission: Permi
             {own() ? t('ask.self.once') : t('ask.allow')}
           </button>
           <button class="btn" disabled={sending()} onClick={() => void answer(true, true)}>
-            {own() ? t(props.permission.tool === `${SELF}.tools.update` ? 'ask.self.alwaysUpdate' : props.permission.tool === `${SELF}.tools.repair` ? 'ask.self.alwaysRepair' : props.permission.tool === `${SELF}.tools.remove` ? 'ask.self.alwaysRemove' : props.permission.tool === `${SELF}.tools.switch` ? 'ask.self.alwaysSwitch' : 'ask.self.always') : t('ask.always')}
+            {own() ? t(props.permission.tool === `${SELF}.settings.web_search` ? 'ask.self.alwaysWebSearch' : props.permission.tool === `${SELF}.tools.update` ? 'ask.self.alwaysUpdate' : props.permission.tool === `${SELF}.tools.repair` ? 'ask.self.alwaysRepair' : props.permission.tool === `${SELF}.tools.remove` ? 'ask.self.alwaysRemove' : props.permission.tool === `${SELF}.tools.switch` ? 'ask.self.alwaysSwitch' : 'ask.self.always') : t('ask.always')}
           </button>
           <button class="btn" disabled={sending()} onClick={() => void answer(false)}>
             {t('ask.deny')}

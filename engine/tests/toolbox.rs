@@ -118,7 +118,7 @@ async fn claude_code_reads_the_limits_and_searches_the_catalog_in_any_permission
 
         let tools = names(&claude_list(&mut pipe, "list").await);
         assert!(
-            ["quota", "catalog", "memory_search", "offer_bigger"].iter().all(|t| tools.contains(&t.to_string())),
+            ["quota", "catalog", "memory_search", "offer_bigger", "settings"].iter().all(|t| tools.contains(&t.to_string())),
             "{mode:?}: {tools:?}"
         );
 
@@ -202,7 +202,7 @@ async fn codex_reads_the_limits_and_searches_the_catalog_through_its_dynamic_too
     let start = codex_boot(&mut pipe).await;
     let tools: Vec<String> =
         start["params"]["dynamicTools"].as_array().unwrap().iter().map(|t| t["name"].as_str().unwrap().into()).collect();
-    assert!(["quota", "catalog", "memory_search", "offer_bigger"].iter().all(|t| tools.contains(&t.to_string())), "{tools:?}");
+    assert!(["quota", "catalog", "memory_search", "offer_bigger", "settings"].iter().all(|t| tools.contains(&t.to_string())), "{tools:?}");
 
     pipe.say(json!({"method":"item/started","params":{"threadId":"main","turnId":"turn-main","item":{"id":"c1","type":"dynamicToolCall",
         "tool":"catalog","arguments":{"query":"bug"}}}}))
@@ -231,7 +231,7 @@ async fn codex_in_chat_gets_neither_tool() {
         .as_array()
         .map(|t| t.iter().map(|t| t["name"].as_str().unwrap().into()).collect())
         .unwrap_or_default();
-    assert!(!["quota", "catalog", "memory_search", "offer_bigger"].iter().any(|t| tools.contains(&t.to_string())), "{tools:?}");
+    assert!(!["quota", "catalog", "memory_search", "offer_bigger", "settings"].iter().any(|t| tools.contains(&t.to_string())), "{tools:?}");
     let (refused, failed) = codex_call(&mut pipe, 902, "quota", json!({})).await;
     assert!(failed && refused.contains("not available"), "{refused}");
     let (refused, failed) = codex_call(&mut pipe, 903, "memory_search", json!({ "query": "plan" })).await;
@@ -528,6 +528,8 @@ struct Agent {
     dir: tempfile::TempDir,
     _folder: tempfile::TempDir,
     serve: Serve,
+    made: Arc<std::sync::Mutex<Vec<Pipe>>>,
+    args: Arc<std::sync::Mutex<Vec<Vec<String>>>>,
 }
 
 async fn claude_project(mode: Permissions) -> Agent {
@@ -536,10 +538,25 @@ async fn claude_project(mode: Permissions) -> Agent {
 
 /// The same with `serve` as the source and, when `items` is not empty, those items as the whole catalog.
 async fn claude_project_with(mode: Permissions, serve: Serve, items: Vec<faber_engine::tools::Item>) -> Agent {
+    claude_project_with_web(mode, serve, items, None).await
+}
+
+async fn claude_project_with_web(
+    mode: Permissions,
+    serve: Serve,
+    items: Vec<faber_engine::tools::Item>,
+    web: Option<faber_engine::model::WebSearch>,
+) -> Agent {
     let (dir, folder) = (support::canonical_tempdir().unwrap(), support::work_folder());
     let (spawn, made) = pipes();
-    let app = engine(dir.path(), Vendor::Claude, spawn);
-    app.save_settings(Settings { permissions: Some(mode), ..Settings::default() }).unwrap();
+    let args: Arc<std::sync::Mutex<Vec<Vec<String>>>> = Arc::default();
+    let record = args.clone();
+    let observed: faber_engine::proc::Spawner = Arc::new(move |binary, argv, cwd| {
+        record.lock().unwrap().push(argv.to_vec());
+        spawn(binary, argv, cwd)
+    });
+    let app = engine(dir.path(), Vendor::Claude, observed);
+    app.save_settings(Settings { permissions: Some(mode), web_search: web, ..Settings::default() }).unwrap();
     app.set_setup_source(&serve.server.origin);
     if !items.is_empty() {
         app.set_catalog_items(items);
@@ -549,7 +566,7 @@ async fn claude_project_with(mode: Permissions, serve: Serve, items: Vec<faber_e
     let mut pipe = next_pipe(&made).await;
     wire(&pipe, |m| m["type"] == "user").await;
     pipe.say(json!({ "type": "system", "subtype": "init", "session_id": "s1", "model": "claude-haiku-5-5" })).await;
-    Agent { app, pipe, id, dir, _folder: folder, serve }
+    Agent { app, pipe, id, dir, _folder: folder, serve, made, args }
 }
 
 impl Agent {
@@ -586,6 +603,7 @@ impl Agent {
                         || p.tool == "faber.tools.remove"
                         || p.tool == "faber.tools.update"
                         || p.tool == "faber.tools.repair"
+                        || p.tool == "faber.settings.web_search"
                 })
                 .collect(),
         )
@@ -630,6 +648,38 @@ impl Agent {
         let lines = self.pipe.lines.lock().unwrap();
         assert!(!lines.iter().any(|m| m["response"]["request_id"] == rpc || m["response"]["request_id"] == call), "{lines:?}");
     }
+}
+
+#[tokio::test]
+async fn settings_search_waits_for_its_own_card_and_denial_keeps_the_saved_choice() {
+    let mut agent = claude_project(Permissions::FullAccess).await;
+    let before = agent.app.settings();
+    agent
+        .pipe
+        .say(json!({ "type": "control_request", "request_id": "rpc_web",
+            "request": { "subtype": "mcp_message", "server_name": "faber", "message": {
+                "jsonrpc": "2.0", "id": 7, "method": "tools/call", "params": {
+                    "name": "settings", "arguments": { "web_search": "off" },
+                    "_meta": { "claudecode/toolUseId": "toolu_web" }
+                }
+            }}
+        }))
+        .await;
+    let (turn, card) = agent.card().await;
+    assert_eq!(card.tool, "faber.settings.web_search");
+    assert_eq!(card.input, json!({ "from": "live", "to": "off" }));
+    assert_eq!(agent.app.settings().web_search, before.web_search, "a question saves nothing");
+    agent.silent("rpc_web", "toolu_web");
+    agent.app.answer(&agent.id, &turn, "toolu_web", false, false).await.unwrap();
+    let (text, error) = agent.reply("rpc_web").await;
+    assert!(error && text.contains("person said no"), "{text}");
+    assert_eq!(agent.app.settings().web_search, before.web_search);
+    assert!(agent.cards().1.is_empty());
+    let log = agent.log();
+    assert_eq!(log.len(), 1);
+    assert_eq!(log[0]["kind"], "settings.web_search");
+    assert_eq!(log[0]["result"], "declined");
+    agent.app.shutdown();
 }
 
 #[tokio::test]
@@ -2105,5 +2155,234 @@ async fn catalog_repair_stop_before_cli_ack_revokes_a_downloaded_replacement() {
     agent.call("late", "late_call", json!({ "repair": "careful" })).await;
     assert!(agent.reply("late").await.1, "a stopped CLI cannot request fresh replacement permission before acknowledging Stop");
     assert_eq!(agent.serve.hits(), 1);
+    agent.app.shutdown();
+}
+
+impl Agent {
+    async fn web_call(&mut self, rpc: &str, call: &str, arguments: Value) {
+        self.pipe
+            .say(json!({ "type":"control_request", "request_id":rpc, "request": {
+            "subtype":"mcp_message", "server_name":"faber", "message": { "jsonrpc":"2.0", "id":7,
+            "method":"tools/call", "params": { "name":"settings", "arguments":arguments,
+            "_meta": { "claudecode/toolUseId":call } } } } }))
+            .await;
+    }
+}
+
+#[tokio::test]
+async fn settings_search_strict_success_is_written_before_interrupt_and_remains_saved() {
+    use faber_engine::model::{Status, WebSearch};
+    for (from, to) in [(WebSearch::Live, WebSearch::Cached), (WebSearch::Live, WebSearch::Off), (WebSearch::Cached, WebSearch::Off)] {
+        let mut agent = claude_project_with_web(Permissions::Ask, Serve::new(vec![], false), vec![], Some(from)).await;
+        agent.web_call("web", "toolu_web", json!({"web_search":to})).await;
+        let (turn, _) = agent.card().await;
+        agent.app.answer(&agent.id, &turn, "toolu_web", true, false).await.unwrap();
+        let (text, error) = agent.reply("web").await;
+        assert!(!error && text.contains("Saved"), "{text}");
+        wire(&agent.pipe, |m| m["request"]["subtype"] == "interrupt").await;
+        let lines = agent.pipe.lines.lock().unwrap().clone();
+        let saved = lines.iter().position(|m| m["response"]["request_id"] == "web").unwrap();
+        let interrupt = lines.iter().position(|m| m["request"]["subtype"] == "interrupt").unwrap();
+        assert!(saved < interrupt, "the original request is settled before retirement: {lines:?}");
+        assert_eq!(agent.app.settings().tuning().web, to);
+        let reply = agent.conversation().messages.last().cloned().unwrap();
+        assert_eq!(reply.status, Some(Status::Stopped));
+        assert!(reply.permissions.iter().flatten().next().is_none());
+        assert!(reply.tools.iter().flatten().any(|t| t.id == "toolu_web" && t.ok == Some(true)));
+        assert!(agent.app.answer(&agent.id, &turn, "toolu_web", true, true).await.is_err());
+        agent.app.shutdown();
+    }
+}
+
+#[tokio::test]
+async fn settings_search_rejects_extra_fields_and_stale_explicit_same_value_save() {
+    use faber_engine::model::WebSearch;
+    let mut agent = claude_project(Permissions::Ask).await;
+    for (i, bad) in
+        [json!({"web_search":"off", "permissions":"fullAccess"}), json!({"web_search":"unlimited"}), json!({})].into_iter().enumerate()
+    {
+        agent.web_call(&format!("bad-{i}"), &format!("bad-{i}"), bad).await;
+        assert!(agent.reply(&format!("bad-{i}")).await.1);
+    }
+    assert!(agent.cards().1.is_empty());
+    agent.web_call("web", "toolu_web", json!({"web_search":"off"})).await;
+    let (turn, _) = agent.card().await;
+    agent.app.save_settings(Settings { web_search: Some(WebSearch::Live), ..Settings::default() }).unwrap();
+    assert!(agent.app.answer(&agent.id, &turn, "toolu_web", true, true).await.unwrap_err().contains("stale"));
+    assert_eq!(agent.app.settings().tuning().web, WebSearch::Live);
+    assert!(agent.log().is_empty());
+    agent.app.shutdown();
+}
+
+#[tokio::test]
+async fn settings_search_refuses_unrecordable_decision_without_saving_or_interrupting() {
+    use faber_engine::model::WebSearch;
+    let mut agent = claude_project(Permissions::Ask).await;
+    std::fs::create_dir(agent.log_path()).unwrap();
+    agent.web_call("web", "toolu_web", json!({"web_search":"off"})).await;
+    agent.answer("toolu_web", true, true).await.unwrap();
+    assert!(agent.reply("web").await.1);
+    assert_eq!(agent.app.settings().tuning().web, WebSearch::Live);
+    assert!(!agent.pipe.lines.lock().unwrap().iter().any(|m| m["request"]["subtype"] == "interrupt"));
+    assert!(agent.conversation().allow_always.is_none());
+    agent.app.shutdown();
+}
+
+#[tokio::test]
+async fn settings_search_mode_revision_and_stop_invalidate_consent() {
+    for stop in [false, true] {
+        let mut agent = claude_project(Permissions::Ask).await;
+        agent.web_call("web", "toolu_web", json!({"web_search":"off"})).await;
+        let (turn, _) = agent.card().await;
+        if stop {
+            agent.app.interrupt(&agent.id);
+        } else {
+            agent.app.save_settings(Settings { permissions: Some(Permissions::Ask), ..Settings::default() }).unwrap();
+        }
+        assert!(agent.app.answer(&agent.id, &turn, "toolu_web", true, true).await.is_err());
+        assert_eq!(agent.app.settings().tuning().web, faber_engine::model::WebSearch::Live);
+        assert!(agent.log().is_empty());
+        agent.app.shutdown();
+    }
+}
+
+#[tokio::test]
+async fn settings_search_failed_persistence_never_reports_success_or_interrupts() {
+    use faber_engine::model::WebSearch;
+    let mut agent = claude_project(Permissions::Ask).await;
+    agent.web_call("web", "toolu_web", json!({"web_search":"off"})).await;
+    agent.card().await;
+    let path = agent.dir.path().join("data/settings.json.tmp");
+    std::fs::create_dir(&path).unwrap();
+    agent.answer("toolu_web", true, true).await.unwrap();
+    let (text, error) = agent.reply("web").await;
+    assert!(error && text.contains("Could not save"), "{text}");
+    assert!(!agent.pipe.lines.lock().unwrap().iter().any(|m| m["request"]["subtype"] == "interrupt"));
+    assert_ne!(agent.app.settings().web_search, Some(WebSearch::Off));
+    assert!(agent.conversation().allow_always.is_none());
+    agent.app.shutdown();
+}
+
+#[tokio::test]
+async fn settings_search_own_always_grant_does_not_authorize_catalog_and_looser_choice_continues() {
+    use faber_engine::model::{Status, WebSearch};
+    let mut agent = claude_project_with_web(Permissions::Ask, Serve::new(vec![], false), vec![], Some(WebSearch::Off)).await;
+    agent.web_call("web", "toolu_web", json!({"web_search":"cached"})).await;
+    agent.answer("toolu_web", true, true).await.unwrap();
+    assert!(!agent.reply("web").await.1);
+    assert_eq!(agent.app.settings().tuning().web, WebSearch::Cached);
+    assert_eq!(agent.conversation().messages.last().unwrap().status, Some(Status::Streaming));
+    agent.web_call("web2", "toolu_web2", json!({"web_search":"live"})).await;
+    assert!(!agent.reply("web2").await.1);
+    assert!(agent.cards().1.is_empty());
+    agent.call("catalog", "toolu_catalog", json!({"install":"ponytail"})).await;
+    let (_, card) = agent.card().await;
+    assert_eq!(card.tool, "faber.tools.install");
+    agent.app.shutdown();
+}
+
+#[tokio::test]
+async fn settings_search_plan_and_chat_refuse_even_full_trust() {
+    let mut agent = claude_project(Permissions::Plan).await;
+    agent.app.save_settings(Settings { faber_trust: Some(true), ..Settings::default() }).unwrap();
+    agent.web_call("web", "toolu_web", json!({"web_search":"off"})).await;
+    assert!(agent.reply("web").await.1);
+    assert!(agent.cards().1.is_empty() && agent.log().is_empty());
+    agent.app.shutdown();
+    let dir = support::canonical_tempdir().unwrap();
+    let (spawn, made) = pipes();
+    let app = engine(dir.path(), Vendor::Codex, spawn);
+    app.save_settings(Settings { faber_trust: Some(true), ..Settings::default() }).unwrap();
+    app.send(request(Vendor::Codex, Area::Chat, None)).unwrap();
+    let mut pipe = next_pipe(&made).await;
+    codex_boot(&mut pipe).await;
+    assert!(codex_call(&mut pipe, 991, "settings", json!({"web_search":"off"})).await.1);
+    app.shutdown();
+}
+
+#[tokio::test]
+async fn settings_search_codex_saved_response_precedes_strict_interrupt() {
+    use faber_engine::model::{Status, WebSearch};
+    let (dir, folder) = (support::canonical_tempdir().unwrap(), support::work_folder());
+    let (spawn, made) = pipes();
+    let app = engine(dir.path(), Vendor::Codex, spawn);
+    app.save_settings(Settings { permissions: Some(Permissions::Ask), faber_trust: Some(true), ..Settings::default() }).unwrap();
+    let project = app.add_project(&folder.path().to_string_lossy()).unwrap().id;
+    let id = app.send(request(Vendor::Codex, Area::Project, Some(project))).unwrap();
+    let mut pipe = next_pipe(&made).await;
+    codex_boot(&mut pipe).await;
+    pipe.say(json!({"id":992,"method":"item/tool/call","params":{"threadId":"main","turnId":"turn-main","callId":"call-992", "tool":"settings","arguments":{"web_search":"off"}}})).await;
+    let result = wire(&pipe, |m| m["id"] == 992 && m.get("result").is_some()).await;
+    assert_eq!(result["result"]["success"], true, "{result}");
+    wire(&pipe, |m| m["method"] == "turn/interrupt").await;
+    let lines = pipe.lines.lock().unwrap().clone();
+    assert!(lines.iter().position(|m| m["id"] == 992).unwrap() < lines.iter().position(|m| m["method"] == "turn/interrupt").unwrap());
+    assert_eq!(app.settings().tuning().web, WebSearch::Off);
+    assert_eq!(app.open(&id).unwrap().messages.last().unwrap().status, Some(Status::Stopped));
+    let mut next = request(Vendor::Codex, Area::Project, app.open(&id).unwrap().project_id);
+    next.conversation_id = Some(id.clone());
+    next.text = "Continue without changing the preference".into();
+    app.send(next).unwrap();
+    let mut resumed = next_pipe(&made).await;
+    let init = wire(&resumed, |m| m["method"] == "initialize").await;
+    resumed.say(json!({"id":init["id"],"result":{}})).await;
+    let resume = wire(&resumed, |m| m["method"] == "thread/resume").await;
+    assert_eq!(resume["params"]["threadId"], "main");
+    assert_eq!(resume["params"]["config"]["web_search"], "disabled");
+    resumed.say(json!({"id":resume["id"],"result":{"thread":{"id":"main"}}})).await;
+    let turn = wire(&resumed, |m| m["method"] == "turn/start").await;
+    resumed.say(json!({"id":turn["id"],"result":{"turn":{"id":"next"}}})).await;
+    resumed
+        .say(json!({"method":"item/agentMessage/delta","params":{"threadId":"main","turnId":"next","itemId":"reply","delta":"Continued."}}))
+        .await;
+    resumed.say(json!({"method":"turn/completed","params":{"threadId":"main","turn":{"id":"next","status":"completed"}}})).await;
+    tokio::time::timeout(Duration::from_secs(3), async {
+        loop {
+            if app.open(&id).unwrap().messages.last().unwrap().status == Some(Status::Done) {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+    })
+    .await
+    .unwrap();
+    assert!(!resumed.lines.lock().unwrap().iter().any(|m| m["id"] == 992));
+    app.shutdown();
+}
+
+#[tokio::test]
+async fn settings_search_strict_reply_then_next_turn_resumes_without_replaying_permission() {
+    use faber_engine::model::Status;
+    let mut agent = claude_project(Permissions::Ask).await;
+    let project = agent.conversation().project_id.clone();
+    agent.web_call("web", "toolu_web", json!({"web_search":"off"})).await;
+    agent.answer("toolu_web", true, false).await.unwrap();
+    assert!(!agent.reply("web").await.1);
+    let mut next = request(Vendor::Claude, Area::Project, project);
+    next.conversation_id = Some(agent.id.clone());
+    next.text = "Continue with the saved preference".into();
+    agent.app.send(next).unwrap();
+    let mut pipe = next_pipe(&agent.made).await;
+    let argv = agent.args.lock().unwrap().last().cloned().unwrap();
+    assert!(argv.windows(2).any(|pair| pair == ["--resume", "s1"]), "native identity retained: {argv:?}");
+    assert!(argv.iter().any(|arg| arg.contains("WebSearch")), "fresh process receives the strict web tuning: {argv:?}");
+    wire(&pipe, |m| m["type"] == "user").await;
+    pipe.say(json!({"type":"system", "subtype":"init", "session_id":"s1", "model":"claude-haiku-5-5"})).await;
+    pipe.say(json!({"type":"assistant", "message":{"content":[{"type":"text", "text":"Continued."}]}})).await;
+    pipe.say(json!({"type":"result", "subtype":"success", "is_error":false,"usage":{}})).await;
+    tokio::time::timeout(Duration::from_secs(3), async {
+        loop {
+            if agent.conversation().messages.last().unwrap().status == Some(Status::Done) {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+    })
+    .await
+    .unwrap();
+    assert!(agent.cards().1.is_empty());
+    assert!(!pipe.lines.lock().unwrap().iter().any(|m| m["response"]["request_id"] == "web"));
+    assert_eq!(agent.log().iter().filter(|l| l["result"] == "allowed").count(), 1);
+    assert_eq!(agent.app.settings().tuning().web, faber_engine::model::WebSearch::Off);
     agent.app.shutdown();
 }

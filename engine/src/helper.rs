@@ -144,6 +144,7 @@ fn called(name: &Value, tools: Tools) -> Option<&'static str> {
         crate::progress::PLAN if tools.progress => Some(crate::progress::PLAN),
         crate::progress::STATUS if tools.progress => Some(crate::progress::STATUS),
         crate::progress::WRAP_UP if tools.progress => Some(crate::progress::WRAP_UP),
+        crate::toolbox::SETTINGS if tools.progress => Some(crate::toolbox::SETTINGS),
         crate::toolbox::QUOTA if tools.progress => Some(crate::toolbox::QUOTA),
         crate::toolbox::CATALOG if tools.progress => Some(crate::toolbox::CATALOG),
         crate::toolbox::MEMORY_SEARCH if tools.progress => Some(crate::toolbox::MEMORY_SEARCH),
@@ -335,7 +336,7 @@ mod tests {
         let call =
             |name: &str, tools| mcp(&json!({"method":"tools/call","params":{"name":name,"arguments":{}},"jsonrpc":"2.0","id":9}), tools);
         let offered = Tools { progress: true, ..Tools::default() };
-        for name in ["quota", "catalog", "memory_search", "offer_bigger"] {
+        for name in ["settings", "quota", "catalog", "memory_search", "offer_bigger"] {
             assert!(matches!(call(name, offered), Mcp::Call { tool, .. } if tool == name), "{name} is offered with the progress tools");
             assert!(
                 matches!(call(name, Tools { verify: true, map: true, ..Tools::default() }), Mcp::Answer(_)),
@@ -344,7 +345,7 @@ mod tests {
         }
         let Mcp::Answer(list) = mcp(&json!({"method":"tools/list","jsonrpc":"2.0","id":1}), offered) else { panic!() };
         let names: Vec<_> = list["result"]["tools"].as_array().unwrap().iter().map(|t| t["name"].as_str().unwrap()).collect();
-        assert_eq!(names, ["plan", "status", "wrap_up", "quota", "catalog", "memory_search", "offer_bigger"]);
+        assert_eq!(names, ["plan", "status", "wrap_up", "settings", "quota", "catalog", "memory_search", "offer_bigger"]);
     }
 
     #[test]
