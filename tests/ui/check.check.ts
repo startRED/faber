@@ -1,6 +1,28 @@
-import { check, deepEqual, doesNotMatch, equal, finished, frames, matches, notEqual, ok } from './check.ts';
+import { check, deepEqual, doesNotMatch, equal, finished, frames, matches, notEqual, ok, runAll } from './check.ts';
 
-// An assertion that never throws would turn every other check green, so the helpers are checked first.
+check('check: a name filter executes only matching bodies and no filter executes every body', async () => {
+  let selected = 0, second = 0, other = 0;
+  const checks = [
+    { name: 'prefix selected suffix', run: () => { selected++; } },
+    { name: 'other', run: () => { other++; } },
+    { name: 'second selected', run: () => { second++; } },
+  ];
+  const progress: unknown[] = [];
+  const results = await runAll((...args) => { progress.push(args); }, 'selected', checks);
+  deepEqual([selected, second, other], [1, 1, 0], 'every selected body runs and unselected bodies never run');
+  deepEqual(results.map((result) => result.name), ['prefix selected suffix', 'second selected']);
+  ok(results.every((result) => result.ok), 'every selected result must pass');
+  deepEqual(progress, [[0, 2, 'prefix selected suffix'], [1, 2, 'second selected']]);
+  await runAll(undefined, undefined, checks);
+  deepEqual([selected, second, other], [2, 2, 1], 'the default still runs every body');
+  deepEqual(await runAll(undefined, 'missing', checks), []);
+  deepEqual([selected, second, other], [2, 2, 1], 'no match executes no bodies');
+  deepEqual(await runAll(undefined, 'SELECTED', checks), [], 'matching remains case-sensitive');
+  await runAll(undefined, '', checks);
+  deepEqual([selected, second, other], [3, 3, 2], 'an empty filter still matches every name');
+});
+
+// An assertion that never throws would turn every other check green, so the helpers are checked too.
 const throws = (run: () => void) => {
   try {
     run();

@@ -71,13 +71,13 @@ that Undo unchanged. Retry recognizes when recovery completed that exact restore
 session launch, and updates the screen. A small completed receipt remains until the next successful removal, Catalog
 entry or engine restart; it retains no removed files and is checked against the restored copy before acknowledgement. An intent
 record precedes the file move; interrupted restores complete before launch pruning or cleanup, and a failed ledger
-save leaves the recoverable copy and intent in place. Only the latest removal retains Undo; opening Catalog or restarting
-the engine expires unreachable copies after recovery. Disabled copies are checked by name, ledger and folder type on
+save leaves the recoverable copy and intent in place. Only the latest manual removal is shown for Undo; opening Catalog or restarting
+the engine expires unreachable copies after recovery. An agent removal uses this same Undo notice and retains its prior on/off choice; its receipt survives opening Catalog so the person can reach Undo, then expires at engine restart. Restoring one offers the next pending agent removal through that same notice, without reopening Catalog. Disabled copies are checked by name, ledger and folder type on
 launch; their files are hashed when enabling. Future sessions in Chat and Projects follow the saved choice and existing
 permission boundaries. The session kit selects verified installed instructions and servers for each task; Claude
 Projects also discovers descriptions of all enabled catalog skills. Chat receives only selected catalog instructions,
 never personal or external plugin skills; servers there need an explicit file-free, setup-free catalog review and Full access.
-Moving files on Off or Remove may also affect ongoing work.
+Existing conversation kits retain their checked files; these choices apply to new sessions.
 
 Every shipped item has one hand-written `catalog.name.*` name in each of the five locales. Cards, details, installed
 catalog rows, removal messages, conversation work logs and the context panel's list of a conversation's tools use that same source; CLI aliases remain a separate detail.
@@ -123,7 +123,7 @@ or per-frame work. Catalog pages draw at most 48 cards; inventory pages draw at 
 folder entries/depth and manifest bytes before building its snapshot. CPU work is finite filtering and one snapshot per
 open/project/action. Filesystem commands run on blocking workers rather than the window's command thread. Inventory
 returns an unavailable state within two seconds; one scanner owns its permit until it actually finishes, even after
-timeout, so retries cannot accumulate stalled readers. Disk cost includes disabled items, the latest Undo copy and leased snapshots.
+timeout, so retries cannot accumulate stalled readers. Disk cost includes disabled items, manual and pending agent Undo copies and leased snapshots.
 Metadata is capped at 36 KiB; stored job limits are 32 for building games, 11 for marketing, 23 for game design
 and 14 for any remaining job, checked in engine tests. Only metadata and localized words ship. Actual working-set/CPU
 measurements and the native screen suite belong to the lead's unsandboxed validation; no measured saving is claimed.
@@ -144,7 +144,22 @@ rehash the whole folders they may use before launch, outside the engine lock, in
 One launch check runs at a time per engine, so simultaneous conversations cannot multiply its file buffers.
 Transient preparation failures back off from one to sixty seconds; a catalog change allows an immediate retry. A snapshot shares
 verified files through hardlinks where supported, with streamed-copy fallback and a 256 MiB aggregate cap. Leases keep old
-states alive while needed; startup/entry cleanup also expires the previous visit's Undo files. Native
+states alive while needed; startup cleanup expires all Undo files; entry cleanup expires only manual Undo files from the previous visit. Native
 working-set/processor measurements were not available in this sandbox, so no measured MB or CPU improvement is claimed.
 Undo metadata is one item id and its prior on/off choice; a restore attempt adds a bounded receipt read before the
 existing checks. Completed receipts add no per-session hashing or writes. No background work or process is added.
+
+## Agent requests
+
+Agent removals use the existing self-change card with separate removal consent. Its effect line says Undo remains in
+Catalog until restart and current conversation tools stay available.
+
+Agent-requested update and repair use that same card rather than another Catalog flow.
+Each action has its own grant and shows the original and selected curated pins. The card states that local edits and
+an earlier backup are replaced; the current files become the one retained backup outside all launch roots. It keeps
+the tool's on/off state, and running conversations keep their leased kits. An incomplete journal is recovered before
+new catalog preparation, while unknown or changed recovery files remain preserved and block new delivery.
+
+Replacement hashes stream through a 64 KiB buffer, with the existing 64 MiB tool-file cap, and run during explicit
+capture/publication and the preparation worker. Ready-cache reads gain no filesystem scan. No new timer, process or
+persistent screen is added. Runtime memory and processor costs still require the queued commit's measurements.

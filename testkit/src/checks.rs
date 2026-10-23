@@ -136,7 +136,13 @@ pub fn run(paths: &Paths, filter: Option<&str>) -> Vec<Outcome> {
     };
     let out = ctx.sb.sandbox.join("checks.json");
     // The `ui` suite never lets the engine look for a CLI: it cannot redirect `/usr/local/bin` on macOS or Linux.
-    let launch = Launch { claude: CliSlot::Off, codex: CliSlot::Off, checks_out: Some(out.clone()), ..Launch::default() };
+    let launch = Launch {
+        claude: CliSlot::Off,
+        codex: CliSlot::Off,
+        checks_out: Some(out.clone()),
+        checks_filter: filter.map(str::to_owned),
+        ..Launch::default()
+    };
     let mut result = ctx.spawn(launch).and_then(|id| {
         let progress = out.with_extension("progress");
         let mut wait = Wait::new(Instant::now(), startup(), RUN_CEILING);
@@ -166,7 +172,9 @@ pub fn run(paths: &Paths, filter: Option<&str>) -> Vec<Outcome> {
     }
     let audit = ctx.finish();
     let mut outcomes = match result {
-        Ok(checks) if checks.is_empty() => vec![Outcome::fail(Suite::Ui, "report", None, "the page reported no checks")],
+        Ok(checks) if checks.is_empty() && filter.is_none() => {
+            vec![Outcome::fail(Suite::Ui, "report", None, "the page reported no checks")]
+        }
         Ok(checks) => to_outcomes(checks, filter),
         Err(e) => vec![Outcome::fail(Suite::Ui, "launch", Some(started.elapsed()), &e)],
     };

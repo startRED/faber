@@ -121,3 +121,70 @@ check('install card: another tool’s request keeps the ordinary card with its o
     ok(!root.querySelector('[data-testid="self-line"]'));
   },
 ));
+
+check('catalog_switch: explicit state, separate consent and new-conversation notice in every language', async () => {
+  for (const language of LANGUAGES) {
+    useLanguage(language.code);
+    for (const enabled of [true, false]) {
+      for (const width of [360, 720]) {
+      await withCard({ ...INSTALL, tool: 'faber.tools.switch', input: { ...INSTALL.input as Record<string, unknown>, enabled } }, async (root) => {
+        const card = root.querySelector<HTMLElement>('.ask')!;
+        equal(card.querySelector('b')!.textContent, t(enabled ? 'ask.self.enable' : 'ask.self.disable', { name: catalogName('ponytail') }));
+        equal(card.querySelector('[data-testid=self-effect]')?.textContent, t('ask.self.newConversations'), 'the effect is its own paragraph, separate from the catalog description');
+        const bounds = card.getBoundingClientRect();
+        ok(bounds.width > 0 && bounds.width <= width, `${language.code}: the card fits the ${width}px column`);
+        for (const button of buttons(root)) {
+          const box = button.getBoundingClientRect();
+          ok(box.left >= bounds.left - 0.5 && box.right <= bounds.right + 0.5, `${language.code}: buttons stay inside the card`);
+        }
+        deepEqual(buttons(root).map((b) => b.textContent!.trim()), [t('ask.self.once'), t('ask.self.alwaysSwitch'), t('ask.deny')]);
+        ok(!card.querySelector('pre'), 'the agent cannot write the consent text');
+      }, `${width}px`);
+      }
+    }
+  }
+  useLanguage('en');
+});
+
+check('catalog_remove: card: its own consent names Undo and preserves current conversation tools in every language', async () => {
+  for (const { code } of LANGUAGES) {
+    for (const width of ['360px', '720px']) {
+    await withCard({ ...INSTALL, tool: 'faber.tools.remove' }, async (root, calls) => {
+      useLanguage(code);
+      await settle();
+      equal(root.querySelector('.ask b')!.textContent, t('ask.self.remove', { name: catalogName('ponytail') }));
+      equal(root.querySelector('[data-testid="self-effect"]')!.textContent, t('ask.self.removeEffect'));
+      deepEqual(buttons(root).map((b) => b.textContent!.trim()), [t('ask.self.once'), t('ask.self.alwaysRemove'), t('ask.deny')]);
+      const bounds = root.querySelector<HTMLElement>('.ask')!.getBoundingClientRect();
+      for (const button of buttons(root)) ok(button.getBoundingClientRect().right <= bounds.right + 1, `${code} ${width}: buttons fit`);
+      buttons(root)[0]!.click();
+      await settle();
+      deepEqual(calls, [['c1', 't1', 'toolu_i1', true, false]]);
+    }, width);
+    }
+  }
+  useLanguage('en');
+});
+
+check('catalog_replacement: update and repair cards show the exact old version and preserve local edits notice', async () => {
+  for (const tool of ['update', 'repair']) {
+    for (const { code } of LANGUAGES) {
+      useLanguage(code);
+      await withCard({ ...INSTALL, tool: `faber.tools.${tool}`, input: { ...INSTALL.input as Record<string, unknown>, from: 'old-pin' } }, async (root, calls) => {
+        const card = root.querySelector<HTMLElement>('.ask')!;
+        ok(card.querySelector('[data-testid="self-effect"]'), 'replacement has its own effect notice');
+        equal(card.querySelector('b')!.textContent, t(tool === 'update' ? 'ask.self.update' : 'ask.self.repair', { name: catalogName('ponytail') }));
+        equal(card.querySelector('[data-testid="self-effect"]')!.textContent, t('ask.self.replaceEffect'));
+        deepEqual(buttons(root).map((button) => button.textContent!.trim()), [t('ask.self.once'), t(tool === 'update' ? 'ask.self.alwaysUpdate' : 'ask.self.alwaysRepair'), t('ask.deny')]);
+        ok(card.textContent?.includes('old-pin'), 'old pinned version shown before consent');
+        ok(!card.querySelector('pre'), 'engine facts use the trusted permission presentation');
+        ok(buttons(root).length === 3, 'once, own standing grant and deny');
+        for (const button of buttons(root)) ok(button.getBoundingClientRect().right <= card.getBoundingClientRect().right + 1, `${code}: actions fit`);
+        buttons(root)[0]!.click();
+        await settle();
+        deepEqual(calls, [['c1', 't1', 'toolu_i1', true, false]]);
+      }, '360px');
+    }
+  }
+  useLanguage('en');
+});

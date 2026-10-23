@@ -2,6 +2,11 @@
 
 Faber's own test system: `cargo t`, screen tests, the build folder and what a run prints.
 
+The runner resolves the repository from its current folder or the nearest ancestor containing `Cargo.toml`,
+`testkit/Cargo.toml` and `engine/Cargo.toml`. Run it inside the intended checkout, even when reusing a warmed
+`CARGO_TARGET_DIR`; outside a Faber workspace it fails instead of using the checkout where it was compiled.
+The fake CLI stays beside the runner executable, and the configured target folder is preserved.
+
 ## Screen tests
 
 Faber's own test runner (`cargo t`, the `testkit/` crate) tests the screen in two ways, both against a hidden test build
@@ -10,6 +15,7 @@ of the app. `FABER_HIDDEN=1` keeps the window offscreen with its own browser pro
 - **Checks** (`tests/ui/*.check.ts`) test the screen's own logic. The test build opens `index.html?checks`, runs them when
   the page loads, writes the result to the file named by `FABER_CHECKS_OUT` and exits. No DevTools port is involved, so
   they run on Windows, macOS and Linux (Linux under `xvfb-run -a`).
+  With `--filter`, only check bodies whose names contain that text run; startup and module registration remain shared.
 - **Scenarios** (`testkit/src/screen/`, written in Rust) drive the real app like a person: they read the page, click and
   type, and save screenshots (named checkpoints, and every failure) to `target/faber-test/shots/`. On Windows the UI
   runs in WebView2, which exposes Chromium's DevTools port (`FABER_CDP_PORT`); the macOS and Linux webviews have no such

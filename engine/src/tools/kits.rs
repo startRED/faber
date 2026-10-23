@@ -968,6 +968,18 @@ impl Store {
     }
 
     fn prepare_catalog(&self) {
+        {
+            let _store = lock();
+            if self.recover_replacements().is_err() {
+                let mut data = self.ready.data.lock().unwrap_or_else(|e| e.into_inner());
+                data.generation += 1;
+                data.entry = None;
+                drop(data);
+                self.ready.snapshot_error();
+                return;
+            }
+            self.refresh_ready_inventory_locked();
+        }
         let (generation, items, plugins) = {
             let data = self.ready.data.lock().unwrap_or_else(|e| e.into_inner());
             let items: Vec<_> = self

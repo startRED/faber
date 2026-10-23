@@ -85,8 +85,15 @@ pub fn resolved_path(file: &File) -> io::Result<Option<PathBuf>> {
 }
 
 fn checked(file: File, directory: bool) -> io::Result<File> {
+    checked_links(file, directory, false)
+}
+
+fn checked_links(file: File, directory: bool, allow_hardlinks: bool) -> io::Result<File> {
     let meta = file.metadata()?;
-    if meta.file_attributes() & REPARSE != 0 || meta.is_dir() != directory || (!directory && (!meta.is_file() || !single_link(&file)?)) {
+    if meta.file_attributes() & REPARSE != 0
+        || meta.is_dir() != directory
+        || (!directory && (!meta.is_file() || (!allow_hardlinks && !single_link(&file)?)))
+    {
         return Err(io::ErrorKind::PermissionDenied.into());
     }
     Ok(file)
@@ -146,7 +153,7 @@ fn open_at(
     deleting: bool,
     security: Option<&Security>,
 ) -> io::Result<File> {
-    open_at_access(parent, name, directory, disposition, write, deleting, security, false)
+    open_at_access(parent, name, directory, disposition, write, deleting, security, false, false)
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -159,6 +166,7 @@ fn open_at_access(
     deleting: bool,
     security: Option<&Security>,
     metadata_only: bool,
+    allow_hardlinks: bool,
 ) -> io::Result<File> {
     let name: Vec<u16> = name.encode_wide().collect();
     let bytes = u16::try_from(name.len().checked_mul(2).ok_or(io::ErrorKind::InvalidInput)?).map_err(|_| io::ErrorKind::InvalidInput)?;
@@ -205,7 +213,7 @@ fn open_at_access(
         return Err(io::Error::from_raw_os_error(unsafe { RtlNtStatusToDosError(result) } as i32));
     }
     // SAFETY: NtCreateFile transferred ownership of one valid file handle.
-    checked(unsafe { File::from_raw_handle(file) }, directory)
+    checked_links(unsafe { File::from_raw_handle(file) }, directory, allow_hardlinks)
 }
 
 pub struct Root {
@@ -340,7 +348,7 @@ impl Root {
         let to = Path::new(to);
         let (source, _, _source_parents) = self.parent(from, false)?;
         let (_target, target_path, _target_parents) = self.parent(to, false)?;
-        let file = open_at_access(&source, from.file_name().unwrap(), false, FILE_OPEN, false, true, None, true)?;
+        let file = open_at_access(&source, from.file_name().unwrap(), false, FILE_OPEN, false, true, None, true, false)?;
         rename_handle(&file, &target_path.join(to.file_name().unwrap()), false)
     }
     /// Atomic replacement is restricted to metadata in the caller's owner-only history namespace.
@@ -546,6 +554,13 @@ fn rename_handle(file: &File, destination: &Path, replace: bool) -> io::Result<(
 
 pub fn open_plain_file(root: &Path, path: &Path) -> io::Result<File> {
     Root::open(root)?.open_file(path.to_str().ok_or(io::ErrorKind::InvalidInput)?)
+}
+
+/// Catalog snapshots legitimately share plain files by hardlink; traversal still pins every ancestor and refuses reparse points.
+pub fn open_catalog_file(root: &Path, path: &Path) -> io::Result<File> {
+    let root = Root::open(root)?;
+    let (dir, _, _parents) = root.parent(path, false)?;
+    open_at_access(&dir, path.file_name().ok_or(io::ErrorKind::InvalidInput)?, false, FILE_OPEN, false, false, None, false, true)
 }
 
 pub fn protection(file: &File) -> io::Result<Vec<u8>> {
@@ -879,7 +894,7 @@ mod tests {
         let folder = tempfile::tempdir().unwrap();
         std::fs::write(folder.path().join("displaced"), b"cannot read through the returning handle").unwrap();
         let root = Root::open(folder.path()).unwrap();
-        let mut metadata = open_at_access(&root.dir, OsStr::new("displaced"), false, FILE_OPEN, false, true, None, true).unwrap();
+        let mut metadata = open_at_access(&root.dir, OsStr::new("displaced"), false, FILE_OPEN, false, true, None, true, false).unwrap();
         assert_eq!(metadata.read(&mut [0u8; 1]).unwrap_err().kind(), io::ErrorKind::PermissionDenied);
         drop(metadata);
         root.rename_new("displaced", "original").unwrap();

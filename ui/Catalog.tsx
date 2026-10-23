@@ -95,13 +95,17 @@ export function Catalog(props: { projects: Project[]; projectId?: string; vendor
       readStarted = true;
       const current = ++read;
       const list = await api.toolsList();
-      if (!gone && current === read) setRows(reconcile(list));
+      if (!gone && current === read) { setRows(reconcile(list)); rememberRemoved(list); }
     } catch (err) {
       if (!gone) { setError(failureText(err)); setRetry(() => () => void load()); }
     } finally { if (!gone) setLoading(false); }
   };
   // The screen's optimistic rows and the engine's replies differ in shape (absent or null status, the flag of a removed item): compare what the screen shows.
   const same = (list: readonly ToolRow[]) => JSON.stringify(list.map((r) => [r.id, r.installed, r.installed ? r.enabled !== false : true, r.status ?? null, r.version ?? null, r.nodeAvailable ?? null]));
+  const rememberRemoved = (list: readonly ToolRow[]) => {
+    const row = list.find((row) => !row.installed && typeof row.removedEnabled === 'boolean');
+    if (row) setRemoved({ id: row.id, enabled: row.removedEnabled! });
+  };
   const refresh = async () => {
     if (gone) return;
     if (busy()) { refreshAfterAction = true; return; }
@@ -112,6 +116,7 @@ export function Catalog(props: { projects: Project[]; projectId?: string; vendor
         // Rereading the inventory remounts the server switches: only when the catalog really changed, never for an identical catch-up read.
         const changed = same(list) !== same(rows);
         setRows(reconcile(list));
+        rememberRemoved(list);
         if (changed) setRevision((v) => v + 1);
       }
     } catch (err) {
@@ -253,6 +258,7 @@ export function Catalog(props: { projects: Project[]; projectId?: string; vendor
       if (index >= 0) setRows(index, { installed: action !== 'remove', enabled: action === 'toggle' ? enabled : action === 'restore' ? restoring?.enabled !== false : true, status: undefined });
       if (action === 'remove') { setRemoved({ id, enabled: wasEnabled }); setConfirming(false); queueMicrotask(() => undo?.focus()); }
       else if (removed()?.id === id) setRemoved(undefined);
+      if (action === 'restore') rememberRemoved(rows);
       if (action === 'install' || action === 'restore') queueMicrotask(() => detail?.focus());
       setRevision((v) => v + 1);
       return true;

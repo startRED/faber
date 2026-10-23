@@ -12,6 +12,8 @@ use std::sync::{Mutex, OnceLock};
 
 pub mod kits;
 mod plugin_delivery;
+pub mod replacement;
+pub use replacement::ReplacementPlan;
 pub mod plugins;
 
 /// One skill of the catalog.
@@ -176,6 +178,8 @@ pub struct Store {
 
 #[derive(Serialize, Deserialize)]
 struct Removed {
+    #[serde(default)]
+    agent: bool,
     commit: String,
     enabled: bool,
     #[serde(default)]
@@ -321,16 +325,52 @@ impl Store {
             return Err(format!("Invalid tool id: {id}"));
         }
         let _store = lock();
+        self.set_enabled_locked(id, enabled, false)
+    }
+
+    /// Agent changes never recover, repair or discard a copy, including one changed while consent waited.
+    pub fn check_agent_switch(&self, id: &str) -> Result<(), &'static str> {
+        let _store = lock();
+        self.check_agent_switch_locked(id)
+    }
+
+    fn check_agent_switch_locked(&self, id: &str) -> Result<(), &'static str> {
+        let item = self.items.iter().find(|item| item.id == id).ok_or(crate::toolbox::UNKNOWN)?;
+        let installed = self.installed();
+        let commit = installed.get(id).ok_or("The tool is not installed. Install it first.")?;
+        let (active, disabled) = (self.dir(item), self.disabled().join(id));
+        let copy = if disabled.exists() { &disabled } else { &active };
+        if commit != &item.commit
+            || (active.exists() && disabled.exists())
+            || !std::fs::symlink_metadata(copy).is_ok_and(|m| m.is_dir() && !m.file_type().is_symlink())
+            || !self.verify_item(copy, item)
+        {
+            return Err(crate::toolbox::REINSTALL);
+        }
+        Ok(())
+    }
+
+    pub fn set_enabled_for_agent(&self, id: &str, enabled: bool) -> Result<(), String> {
+        let _store = lock();
+        self.check_agent_switch_locked(id).map_err(String::from)?;
+        self.set_enabled_locked(id, enabled, true)
+    }
+
+    fn set_enabled_locked(&self, id: &str, enabled: bool, agent: bool) -> Result<(), String> {
         let item = self.items.iter().find(|i| i.id == id).ok_or("Unknown tool")?;
         let mut selection = self.read_selection().ok_or("Could not read catalog switches")?;
-        self.recover_restores()?;
+        if !agent {
+            self.recover_restores()?;
+        }
         if !self.installed().contains_key(id) {
             return Err("The tool is not installed".into());
         }
         let active = self.dir(item);
         let disabled = self.disabled().join(id);
         if enabled && disabled.exists() && !self.verify_item(&disabled, item) {
-            self.discard(&disabled).map_err(|e| e.to_string())?;
+            if !agent {
+                self.discard(&disabled).map_err(|e| e.to_string())?;
+            }
             return Err("The disabled tool does not match the catalog".into());
         }
         let (from, to) = if enabled { (disabled, active) } else { (active, disabled) };
@@ -571,14 +611,63 @@ impl Store {
         result
     }
 
+    pub fn check_agent_remove(&self, id: &str) -> Result<(), &'static str> {
+        let _store = lock();
+        self.check_agent_remove_locked(id)
+    }
+
+    fn check_agent_remove_locked(&self, id: &str) -> Result<(), &'static str> {
+        let attention = "The stored copy needs attention. Check it in Catalog; nothing was removed.";
+        if [self.root.clone(), self.plugin(), self.skills(), self.servers(), self.root.join("plugins"), self.disabled(), self.removed()]
+            .iter()
+            .any(|path| std::fs::symlink_metadata(path).is_ok_and(|m| !m.is_dir() || m.file_type().is_symlink()))
+            || self.read_selection().is_none()
+        {
+            return Err(attention);
+        }
+        self.check_agent_switch_locked(id)?;
+        let removed = self.removed().join(id);
+        let receipt_exists = match std::fs::symlink_metadata(&removed) {
+            Ok(_) => true,
+            Err(e) if e.kind() == io::ErrorKind::NotFound => false,
+            Err(_) => return Err(attention),
+        };
+        if receipt_exists {
+            let completed = std::fs::symlink_metadata(&removed).is_ok_and(|m| m.is_dir() && !m.file_type().is_symlink())
+                && small_file(&removed.join("state.json"))
+                    .and_then(|bytes| serde_json::from_slice::<Removed>(&bytes).ok())
+                    .is_some_and(|state| state.restored && !state.restoring && self.installed().get(id) == Some(&state.commit))
+                && entries(&removed).is_some_and(|entries| entries.len() == 1 && entries[0].file_name() == "state.json");
+            if !completed {
+                return Err(attention);
+            }
+        }
+        if self.item_status(id).is_some() {
+            return Err(attention);
+        }
+        Ok(())
+    }
+
+    pub fn remove_for_agent(&self, id: &str) -> Result<(), String> {
+        self.remove_checked(id, true)
+    }
+
     /// Quarantines one installed copy outside the launch roots, retaining its state for Undo.
     pub fn remove(&self, id: &str) -> Result<(), String> {
+        self.remove_checked(id, false)
+    }
+
+    fn remove_checked(&self, id: &str, agent: bool) -> Result<(), String> {
         if !valid_id(id) {
             return Err(format!("Invalid tool id: {id}"));
         }
         let _store = lock();
         let item = self.items.iter().find(|i| i.id == id).ok_or("Unknown tool")?;
-        self.prune().ok_or("The tool store cannot be checked")?;
+        if agent {
+            self.check_agent_remove_locked(id).map_err(String::from)?;
+        } else {
+            self.prune().ok_or("The tool store cannot be checked")?;
+        }
         let mut ledger = self.installed();
         let Some(commit) = ledger.remove(id) else { return Ok(()) };
         let enabled = self.enabled(id);
@@ -589,7 +678,7 @@ impl Store {
         }
         self.discard(&removed).map_err(|e| e.to_string())?;
         std::fs::create_dir_all(&removed).map_err(|e| e.to_string())?;
-        Removed { commit, enabled, restoring: false, restored: false }.write(&removed).map_err(|e| e.to_string())?;
+        Removed { commit, enabled, agent, restoring: false, restored: false }.write(&removed).map_err(|e| e.to_string())?;
         let files = removed.join("files");
         retry_busy(|| std::fs::rename(&source, &files)).map_err(|e| e.to_string())?;
         self.write_ledger(&ledger).map_err(|e| {
@@ -661,6 +750,7 @@ impl Store {
 
     /// Completes a journaled Undo before pruning can discard its moved, not-yet-ledgered copy.
     fn recover_restores(&self) -> Result<(), String> {
+        self.recover_replacements()?;
         if [self.root.clone(), self.plugin(), self.skills(), self.servers(), self.root.join("plugins"), self.disabled(), self.removed()]
             .iter()
             .any(|p| std::fs::symlink_metadata(p).is_ok_and(|m| !m.is_dir()))
@@ -716,7 +806,50 @@ impl Store {
         Ok(())
     }
 
-    /// Expires Undo when Catalog opens or the engine restarts, after finishing any interrupted restore.
+    /// Only a pending agent removal survives entering Catalog; startup still expires every receipt.
+    pub fn agent_removed_enabled(&self, id: &str) -> Option<bool> {
+        if !valid_id(id) {
+            return None;
+        }
+        let removed = self.removed().join(id);
+        if [self.root.clone(), self.removed(), removed.clone()]
+            .iter()
+            .any(|path| !std::fs::symlink_metadata(path).is_ok_and(|m| m.is_dir() && !m.file_type().is_symlink()))
+        {
+            return None;
+        }
+        let state: Removed = serde_json::from_slice(&small_file(&removed.join("state.json"))?).ok()?;
+        let item = self.items.iter().find(|item| item.id == id)?;
+        if self.installed().contains_key(id) {
+            return None;
+        }
+        (state.agent && !state.restoring && !state.restored && state.commit == item.commit).then_some(state.enabled)
+    }
+
+    pub fn clear_removed_for_catalog(&self) -> Result<(), String> {
+        let _store = lock();
+        match std::fs::symlink_metadata(self.removed()) {
+            Ok(m) if m.is_dir() && !m.file_type().is_symlink() => (),
+            Err(e) if e.kind() == io::ErrorKind::NotFound => (),
+            _ => return Err("Could not read removed tools".into()),
+        }
+        self.recover_restores()?;
+        for entry in entries(&self.removed()).ok_or("Could not read removed tools")? {
+            if !entry.file_type().is_ok_and(|kind| kind.is_dir() && !kind.is_symlink()) {
+                return Err("Could not read the removal receipt".into());
+            }
+            let state: Removed = small_file(&entry.path().join("state.json"))
+                .and_then(|bytes| serde_json::from_slice(&bytes).ok())
+                .ok_or("Could not read the removal receipt")?;
+            if !state.agent {
+                self.discard(&entry.path()).map_err(|e| e.to_string())?;
+            }
+        }
+        self.refresh_ready();
+        Ok(())
+    }
+
+    /// Expires every Undo receipt at engine restart, after finishing any interrupted restore.
     pub fn clear_removed(&self) -> Result<(), String> {
         let _store = lock();
         self.recover_restores()?;
@@ -1151,6 +1284,49 @@ pub async fn install(store: &Store, item: &Item, loopback: Option<&str>) -> Resu
 }
 
 async fn download_and_install(store: &Store, item: &Item, loopback: Option<&str>, agent: bool) -> Result<(), String> {
+    let downloaded = download_sources(store, item, loopback).await?;
+    let (store, item) = (store.clone(), item.clone());
+    tokio::task::spawn_blocking(move || store.install_sources_as(&item, &downloaded.files[0], &downloaded.packages, agent))
+        .await
+        .map_err(|e| e.to_string())?
+}
+
+/// Download files stay private and are removed on failure, cancellation or publication.
+pub(crate) struct Downloaded {
+    files: Vec<PathBuf>,
+    packages: BTreeMap<String, PathBuf>,
+    slot: Option<AgentSlot>,
+}
+
+impl Drop for Downloaded {
+    fn drop(&mut self) {
+        for path in &self.files {
+            let _ = std::fs::remove_file(path);
+        }
+    }
+}
+
+impl Downloaded {
+    pub(crate) fn replace(&self, store: &Store, plan: &ReplacementPlan, authorized: impl FnOnce() -> bool) -> Result<(), String> {
+        store.replace_sources_if(plan, &self.files[0], &self.packages, authorized)
+    }
+}
+
+pub(crate) async fn download_replacement(store: &Store, plan: &ReplacementPlan, source: Option<&str>) -> Result<Downloaded, InstallError> {
+    let key = store.root.join(&plan.item().id);
+    if !AGENT_INSTALLING.lock().unwrap_or_else(|e| e.into_inner()).insert(key.clone()) {
+        return Err(InstallError::Held(crate::toolbox::BUSY));
+    }
+    let slot = AgentSlot(key);
+    if store.lacks_node(plan.item()) {
+        return Err(InstallError::Node);
+    }
+    let mut downloaded = download_sources(store, plan.item(), source).await.map_err(InstallError::Failed)?;
+    downloaded.slot = Some(slot);
+    Ok(downloaded)
+}
+
+async fn download_sources(store: &Store, item: &Item, loopback: Option<&str>) -> Result<Downloaded, String> {
     if let Some(definition) = store.plugin_definition(&item.id) {
         definition.validate()?;
         if definition.item != *item {
@@ -1163,20 +1339,18 @@ async fn download_and_install(store: &Store, item: &Item, loopback: Option<&str>
     };
     let loopback = loopback.as_deref();
     std::fs::create_dir_all(&store.root).map_err(|e| e.to_string())?;
-    let mut downloads = Vec::new();
-    let mut packages = BTreeMap::new();
+    let mut downloaded = Downloaded { files: Vec::new(), packages: BTreeMap::new(), slot: None };
     let mut sources = vec![(None, item.clone())];
     if let Some(definition) = store.plugin_definition(&item.id) {
         sources.extend(definition.parts.iter().filter_map(|part| part.server.clone().map(|server| (Some(part.id.clone()), server))));
     }
-    let mut result = Ok(());
     for (id, source) in sources {
         let part = store.root.join(format!(".download-{}", uuid::Uuid::new_v4()));
         let url = match loopback {
             Some(origin) => source.archive_path(origin),
             None => source.archive_url(),
         };
-        downloads.push(part.clone());
+        downloaded.files.push(part.clone());
         match crate::install::download_with(&url, &part, loopback, crate::install::IDLE_TIMEOUT, |path| {
             std::fs::File::create(path).map(Capped::new)
         })
@@ -1184,26 +1358,15 @@ async fn download_and_install(store: &Store, item: &Item, loopback: Option<&str>
         {
             Ok(_) => {
                 if let Some(id) = id {
-                    packages.insert(id, part);
+                    downloaded.packages.insert(id, part);
                 }
             }
             Err(error) => {
-                result = Err(error.to_string());
-                break;
+                return Err(error.to_string());
             }
         }
     }
-    if result.is_ok() {
-        let (store, item, first) = (store.clone(), item.clone(), downloads[0].clone());
-        result = tokio::task::spawn_blocking(move || store.install_sources_as(&item, &first, &packages, agent))
-            .await
-            .map_err(|e| e.to_string())
-            .and_then(|installed| installed);
-    }
-    for path in downloads {
-        let _ = std::fs::remove_file(path);
-    }
-    result
+    Ok(downloaded)
 }
 
 /// Why `install_checked` installed nothing.
