@@ -12,6 +12,7 @@ use std::path::Path;
 use std::sync::Arc;
 use std::time::Duration;
 use support::{Pipe, next_pipe, pipes};
+use tokio::io::AsyncWriteExt;
 use tokio::sync::mpsc::UnboundedReceiver;
 
 fn engine(dir: &Path, spawn: faber_engine::proc::Spawner) -> (Engine, UnboundedReceiver<AppEvent>) {
@@ -1340,5 +1341,171 @@ async fn keep_going_turned_on_after_a_closing_question_still_waits_before_answer
     assert_eq!(turns(&pipe).len(), 1, "nothing is sent while the person may still answer");
     until_turns(&pipe, 2).await;
     assert!(turns(&pipe)[1].contains("\"Yes\""), "{:?}", turns(&pipe));
+    engine.shutdown();
+}
+
+#[tokio::test]
+async fn failed_turns_drain_sibling_questions_in_order_without_retrying_or_sending_human_messages() {
+    let (dir, project) = (tempfile::tempdir().unwrap(), support::work_folder());
+    let (engine, mut agent, id, made) = started_made(dir.path(), project.path(), &[Vendor::Claude]).await;
+    let (said, error) = calls(&mut agent, "start", "conversation", json!({ "title": "Questions", "brief": "Check the docs." })).await;
+    assert!(!error, "{said}");
+    let mut sibling = next_pipe(&made).await;
+    until_turns(&sibling, 1).await;
+    sibling.say(json!({ "type": "system", "subtype": "init", "session_id": "questions", "model": "claude-haiku-5-5" })).await;
+    for n in 0..3 {
+        let (said, error) = calls(
+            &mut sibling,
+            &format!("ask{n}"),
+            "conversation",
+            json!({ "action": "ask", "id": id, "message": format!("Question {n}") }),
+        )
+        .await;
+        assert!(!error, "{said}");
+        if n == 0 {
+            engine
+                .send(SendRequest {
+                    conversation_id: Some(id.clone()),
+                    area: Area::Project,
+                    project_id: None,
+                    text: "Also the footer".into(),
+                    images: vec![],
+                    files: vec![],
+                    choice: Choice { vendor: "claude".into(), model: Some("haiku".into()), effort: None },
+                })
+                .unwrap();
+        }
+    }
+    assert_eq!(engine.open(&id).unwrap().queued.len(), 4);
+    let mut finished = vec![];
+    for n in 0..3 {
+        // EOF is a fatal Error; an unsuccessful result is Stopped and deliberately holds the queue.
+        agent.out.shutdown().await.unwrap();
+        finished.push(agent);
+        agent = next_pipe(&made).await;
+        until_turns(&agent, 1).await;
+        agent.say(json!({ "type": "system", "subtype": "init", "session_id": format!("wake{n}"), "model": "claude-haiku-5-5" })).await;
+        assert!(turns(&agent)[0].contains(&format!("Question {n}")), "{:?}", turns(&agent));
+        let c = engine.open(&id).unwrap();
+        assert_eq!(c.queued.len(), 3 - n, "each wake is removed exactly once");
+        assert!(c.queued.iter().any(|q| q.wake.is_none() && q.text == "Also the footer"));
+    }
+    agent.out.shutdown().await.unwrap();
+    let c = until(&engine, &id, idle).await;
+    assert_eq!(c.messages.last().unwrap().status, Some(Status::Error));
+    assert_eq!(c.queued.len(), 1);
+    assert_eq!(c.queued[0].text, "Also the footer");
+    tokio::time::sleep(Duration::from_millis(100)).await;
+    finished.push(agent);
+    assert!(finished.iter().all(|pipe| turns(pipe).len() == 1), "failed wake turns are never retried");
+    assert!(made.lock().unwrap().is_empty(), "no extra process retries a failed wake");
+    engine.shutdown();
+}
+
+#[tokio::test]
+async fn a_new_sibling_question_after_an_error_waits_behind_older_questions() {
+    let (dir, project) = (tempfile::tempdir().unwrap(), support::work_folder());
+    let (engine, mut agent, id, made) = started_made(dir.path(), project.path(), &[Vendor::Claude]).await;
+    let (said, error) = calls(&mut agent, "start", "conversation", json!({ "title": "Questions", "brief": "Check the docs." })).await;
+    assert!(!error, "{said}");
+    let mut sibling = next_pipe(&made).await;
+    until_turns(&sibling, 1).await;
+    sibling.say(json!({ "type": "system", "subtype": "init", "session_id": "questions", "model": "claude-haiku-5-5" })).await;
+    for n in 0..3 {
+        let (said, error) = calls(
+            &mut sibling,
+            &format!("ask{n}"),
+            "conversation",
+            json!({ "action": "ask", "id": id, "message": format!("Question {n}") }),
+        )
+        .await;
+        assert!(!error, "{said}");
+    }
+    let mut saved = engine.open(&id).unwrap();
+    engine.shutdown();
+    // Reproduce an existing Error with older asks still saved, as in a conversation left by an earlier version.
+    saved.messages.last_mut().unwrap().status = Some(Status::Error);
+    let file = dir.path().join("conversations").join(format!("{id}.json"));
+    std::fs::write(file, serde_json::to_vec(&saved).unwrap()).unwrap();
+    let (spawn, made) = pipes();
+    let (again, _rx) = engine_with(dir.path(), spawn, &[Vendor::Claude]);
+    again
+        .send(SendRequest {
+            conversation_id: None,
+            area: Area::Project,
+            project_id: saved.project_id,
+            text: "Ask the other agent".into(),
+            images: vec![],
+            files: vec![],
+            choice: Choice { vendor: "claude".into(), model: Some("haiku".into()), effort: None },
+        })
+        .unwrap();
+    let mut sibling = next_pipe(&made).await;
+    until_turns(&sibling, 1).await;
+    sibling.say(json!({ "type": "system", "subtype": "init", "session_id": "new-questions", "model": "claude-haiku-5-5" })).await;
+    let (said, error) =
+        calls(&mut sibling, "newest", "conversation", json!({ "action": "ask", "id": id, "message": "Newest question" })).await;
+    assert!(!error, "{said}");
+    let mut target = next_pipe(&made).await;
+    until_turns(&target, 1).await;
+    target.say(json!({ "type": "system", "subtype": "init", "session_id": "resumed", "model": "claude-haiku-5-5" })).await;
+    assert!(turns(&target)[0].contains("Question 0"), "{:?}", turns(&target));
+    let mut finished = vec![];
+    for n in 1..3 {
+        target.out.shutdown().await.unwrap();
+        finished.push(target);
+        target = next_pipe(&made).await;
+        until_turns(&target, 1).await;
+        target.say(json!({ "type": "system", "subtype": "init", "session_id": format!("resumed{n}"), "model": "claude-haiku-5-5" })).await;
+        assert!(turns(&target)[0].contains(&format!("Question {n}")), "{:?}", turns(&target));
+    }
+    target.out.shutdown().await.unwrap();
+    finished.push(target);
+    let mut target = next_pipe(&made).await;
+    until_turns(&target, 1).await;
+    assert!(turns(&target)[0].contains("Newest question"));
+    target.say(json!({ "type": "system", "subtype": "init", "session_id": "newest", "model": "claude-haiku-5-5" })).await;
+    target.out.shutdown().await.unwrap();
+    let c = until(&again, &id, idle).await;
+    assert_eq!(c.messages.last().unwrap().status, Some(Status::Error));
+    tokio::time::sleep(Duration::from_millis(100)).await;
+    finished.push(target);
+    assert!(finished.iter().all(|pipe| turns(pipe).len() == 1), "each question is sent once");
+    assert!(made.lock().unwrap().is_empty(), "no extra process retries a failed wake");
+    again.shutdown();
+}
+
+#[tokio::test]
+async fn wakes_that_cannot_start_fail_once_and_drain_the_remaining_wakes() {
+    let (dir, project) = (tempfile::tempdir().unwrap(), support::work_folder());
+    let (engine, mut agent, id, made) = started_made(dir.path(), project.path(), &[Vendor::Claude]).await;
+    let (said, error) = calls(&mut agent, "start", "conversation", json!({ "title": "Questions", "brief": "Check the docs." })).await;
+    assert!(!error, "{said}");
+    let mut sibling = next_pipe(&made).await;
+    until_turns(&sibling, 1).await;
+    sibling.say(json!({ "type": "system", "subtype": "init", "session_id": "questions", "model": "claude-haiku-5-5" })).await;
+    for n in 0..3 {
+        let (said, error) = calls(
+            &mut sibling,
+            &format!("ask{n}"),
+            "conversation",
+            json!({ "action": "ask", "id": id, "message": format!("Question {n}") }),
+        )
+        .await;
+        assert!(!error, "{said}");
+    }
+    let billing = faber_engine::signals::Signals { billing: Some(faber_engine::budget::Billing::UsageBilled), ..Default::default() };
+    engine.note_account_events(Vendor::Claude, vec![faber_engine::events::EngineEvent::Signals(billing)]);
+    agent.out.shutdown().await.unwrap();
+    let c = until(&engine, &id, |c| idle(c) && c.queued.is_empty()).await;
+    // Three refused questions, then the report of the conversation it started (a wake too): one failed reply each.
+    assert_eq!(c.messages.len(), 10, "each refused wake has one failed reply");
+    for n in 0..3 {
+        assert!(c.messages[2 * n + 2].text.contains(&format!("Question {n}")));
+        assert_eq!(c.messages[2 * n + 3].status, Some(Status::Error));
+    }
+    tokio::time::sleep(Duration::from_millis(80)).await;
+    assert_eq!(turns(&agent).len(), 1, "the billing gate starts no wake turn");
+    assert_eq!(engine.open(&id).unwrap().messages.len(), 10, "no failed reply retries itself");
     engine.shutdown();
 }

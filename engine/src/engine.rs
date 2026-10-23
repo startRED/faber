@@ -2812,7 +2812,7 @@ impl Core {
         let requested = self.convs.get_mut(conv).and_then(|c| c.send_after_stop.take());
         if let Some(requested) = requested {
             let _ = self.send_queued(conv, &requested);
-        } else if completed_ok && !checking && !approving {
+        } else if !checking && !approving {
             // A changed CLI was replaced above before the next turn starts, never under it.
             self.drain(conv);
         }
@@ -3146,27 +3146,29 @@ impl Core {
         self.drain(conv);
     }
 
-    /// After an answer that finished well, the next message in the queue goes out. Anything else (a stop, a failure) leaves
-    /// the queue for the person to decide.
+    /// After success, send the queue head. After Error without Keep going, send the oldest wake and leave human messages
+    /// for the person. Each wake is consumed once; Stop and Keep going's failure backoff still hold the queue.
     fn drain(&mut self, conv: &str) {
         // A compaction the agent asked for comes first; the queue goes out when it ended (`compact.rs`).
         if self.compact_due(conv) {
             return;
         }
         let idle = !self.live.get(conv).is_some_and(|l| l.turn.is_some());
-        if self.convs.get(conv).and_then(|c| c.queued.first()).is_some_and(|item| self.preparing_rewind_steer(&item.id)) {
+        let Some(c) = self.convs.get(conv) else { return };
+        let next = match c.messages.last().and_then(|m| m.status) {
+            Some(Status::Done) => (!c.queued.is_empty()).then_some(0),
+            Some(Status::Error) if c.keep_going.is_none() => c.queued.iter().position(|q| q.wake.is_some()),
+            _ => None,
+        };
+        let Some(next) = next else { return };
+        if self.preparing_rewind_steer(&c.queued[next].id) {
             return;
         }
         let Some(c) = self.convs.get_mut(conv) else { return };
-        if !idle
-            || c.stopped
-            || c.messages.last().is_none_or(|m| m.status != Some(Status::Done))
-            || c.queued.is_empty()
-            || verifying::checking(c)
-        {
+        if !idle || c.stopped || verifying::checking(c) {
             return;
         }
-        let next = c.queued.remove(0);
+        let next = c.queued.remove(next);
         self.save(conv);
         // A message Faber wrote that the day's money for a fix no longer allows is dropped, and the person is told why.
         let capped = self.dispatch_queued(conv, next).is_err_and(|e| e == goals::CAP);
@@ -3465,7 +3467,9 @@ impl Core {
         }
         self.save(id);
         self.push(id, Some(reply_id), true);
+        self.compacts.remove(id);
         self.keep_going_failed(id, reply_id, &error);
+        self.drain(id);
     }
 
     /// A loaded Codex thread ignores resume overrides: use a fresh server without stopping its active peers.

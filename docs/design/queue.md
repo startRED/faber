@@ -17,6 +17,10 @@
   even after Settings or a restart, into that conversation's message box. A recovered edit is consumed once. While
   its message still waits, an edit returns to its own row instead. The editor counts as unsent work so an unattended
   update cannot close it. Chat and Projects use the same chip; the composer itself is unchanged.
+- Compact and clear continuations wait behind existing messages. After an error, Faber's own queued messages can
+  continue oldest first while the person's queued messages remain held; Stop holds both. Keep going keeps its failure
+  waits and limit. Clearing starts the fresh session with any waiting messages before the handoff note.
+- Checks: `engine/tests/compact.rs` and `engine/tests/keep_going.rs` cover continuation order and failed-turn wakes.
 - Checks: `tests/ui/edit-queued.check.ts` covers keys, focus and draft recovery, including a recreated app;
   `testkit/src/screen/app.rs` sends the edited words through the real command to the fake CLI.
 

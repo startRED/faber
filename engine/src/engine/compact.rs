@@ -5,7 +5,7 @@
 //! turn that goes on would lose what it still needs. When the turn ends well and nothing else runs (Faber's checks included),
 //! Faber asks the CLI to compact (`Session::compact`); the conversation counts as at work meanwhile (`Conversation::compacting`),
 //! so what the person writes and what Faber sends by itself wait in the queue. When the CLI says it ended, the agent's own
-//! `next` is sent to it as a message Faber writes (`wake.compacted`), ahead of whatever waited, and the conversation goes on.
+//! `next` joins the end of the queue as a message Faber writes (`wake.compacted`), after whatever already waited.
 //!
 //! Under Keep going Faber also compacts by itself, at the moments a careful person would, before it sends the next turn
 //! (`compact_at_boundary`): when the reply closed a task and the context is already large, or when it is large whatever
@@ -296,7 +296,7 @@ impl Core {
     }
 
     /// The agent's context starts fresh, at once: its session ends, every session of the conversation is forgotten, and the
-    /// first turn of the new one waits first in the queue, so whatever goes on after a turn (the queue, Keep going) sends it.
+    /// handoff waits behind existing messages, which enter the fresh session first; Keep going follows the whole queue.
     fn clear(&mut self, conv: &str) {
         let Some(Plan { next: Some(next), .. }) = self.compacts.remove(conv) else { return };
         if let Some(l) = self.retire(conv) {
@@ -311,19 +311,16 @@ impl Core {
         c.reported = (None, None);
         c.context = None;
         let choice = c.choice.clone().unwrap_or(Choice { vendor: "auto".into(), model: None, effort: None });
-        c.queued.insert(
-            0,
-            QueuedTurn {
-                id: new_id(),
-                text,
-                images: None,
-                attachments: None,
-                choice,
-                at: now(),
-                sending: false,
-                wake: Some(Wake::of("wake.cleared")),
-            },
-        );
+        c.queued.push(QueuedTurn {
+            id: new_id(),
+            text,
+            images: None,
+            attachments: None,
+            choice,
+            at: now(),
+            sending: false,
+            wake: Some(Wake::of("wake.cleared")),
+        });
         c.updated_at = now();
         self.save(conv);
         self.emit_queue(conv);
@@ -388,7 +385,7 @@ impl Core {
         }
     }
 
-    /// The CLI finished compacting, or could not. The agent's `next` goes to it as a message of Faber's, first in the queue;
+    /// The CLI finished compacting, or could not. The agent's `next` joins the queue after messages already waiting;
     /// then the queue, Keep going and the report to a parent go on as after any turn.
     fn compaction_ended(&mut self, conv: &str, ok: bool) {
         let plan = self.compacts.remove(conv);
@@ -407,19 +404,16 @@ impl Core {
                 false => (sibling::compact_failed_prompt(&next), "wake.compactFailed"),
             };
             let choice = c.choice.clone().unwrap_or(Choice { vendor: "auto".into(), model: None, effort: None });
-            c.queued.insert(
-                0,
-                QueuedTurn {
-                    id: new_id(),
-                    text,
-                    images: None,
-                    attachments: None,
-                    choice,
-                    at: now(),
-                    sending: false,
-                    wake: Some(Wake::of(why)),
-                },
-            );
+            c.queued.push(QueuedTurn {
+                id: new_id(),
+                text,
+                images: None,
+                attachments: None,
+                choice,
+                at: now(),
+                sending: false,
+                wake: Some(Wake::of(why)),
+            });
         }
         c.updated_at = now();
         self.save(conv);

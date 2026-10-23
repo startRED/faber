@@ -461,8 +461,8 @@ impl Core {
     }
 
     /// After the queue went out. While a turn of the person's runs or is being routed, the end of it decides again. A
-    /// message of theirs still waiting (the queue does not go out after a failed turn) is the next turn, as they wrote it;
-    /// otherwise Faber sends its own.
+    /// message still waiting after a failure is the next turn once Keep going's backoff ends; without Keep going only
+    /// wakes drain after Error. With an empty queue Faber sends its own next turn.
     pub(super) fn keep_going_after(&mut self, conv: &str, reply_id: Option<String>) {
         let Some(reply_id) = reply_id else { return };
         let Some(c) = self.convs.get_mut(conv).filter(|c| c.keep_going.is_some()) else { return };

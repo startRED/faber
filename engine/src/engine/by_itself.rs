@@ -34,6 +34,8 @@ impl Core {
             }
             self.save(conv);
             self.emit_queue(conv);
+            // An idle Error may hold older wakes: always drain the queue, never dispatch this new item ahead of them.
+            self.drain(conv);
             return Ok(());
         }
         let id = item.id.clone();

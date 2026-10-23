@@ -264,11 +264,14 @@ async fn the_agent_compacts_itself_when_its_turn_ends_and_gets_its_own_next_word
 
     compacts(&mut agent, 1_166).await;
     until_turns(&agent, 3).await;
-    assert_eq!(
-        turns(&agent)[2],
-        format!("The conversation was compacted. Continue: {next}"),
-        "its own words, first, ahead of the person's message"
-    );
+    assert_eq!(turns(&agent)[2], "Also the footer", "the person's waiting message goes first");
+    let c = engine.open(&id).unwrap();
+    assert_eq!(c.queued.len(), 1);
+    assert_eq!(c.queued[0].wake.as_ref().map(|w| w.why.as_str()), Some("wake.compacted"));
+    assert_eq!(c.context.map(|c| c.used), Some(1_166), "the meter shows what is left");
+    answers(&mut agent, "The footer is fixed.", true).await;
+    until_turns(&agent, 4).await;
+    assert_eq!(turns(&agent)[3], format!("The conversation was compacted. Continue: {next}"));
     let c = engine.open(&id).unwrap();
     let woke = c
         .messages
@@ -276,8 +279,11 @@ async fn the_agent_compacts_itself_when_its_turn_ends_and_gets_its_own_next_word
         .find(|m| m.wake.as_ref().is_some_and(|w| w.why == "wake.compacted"))
         .expect("a quiet line says Faber compacted it");
     assert!(woke.text.ends_with(next));
-    assert_eq!(c.queued.len(), 1, "the person's message still waits for the next turn: {:?}", c.queued);
-    assert_eq!(c.context.map(|c| c.used), Some(1_166), "the meter shows what is left");
+    assert!(c.queued.is_empty(), "the continuation follows the waiting message");
+    answers(&mut agent, "", false).await;
+    until(&engine, &id, idle).await;
+    tokio::time::sleep(Duration::from_millis(80)).await;
+    assert_eq!(turns(&agent).len(), 4, "a failed continuation neither retries nor compacts again");
     engine.shutdown();
 }
 
@@ -812,5 +818,68 @@ async fn the_agent_clears_its_context_and_a_new_session_starts_from_the_persons_
     assert!(c.messages.iter().any(|m| m.wake.as_ref().is_some_and(|w| w.why == "wake.cleared")), "a quiet line says so");
     assert!(context_events(&mut rx).contains(&None), "the meter empties");
     assert_eq!(c.messages.len(), 4, "the person still sees the whole conversation");
+    engine.shutdown();
+}
+
+#[tokio::test]
+async fn a_failed_compaction_continues_after_messages_already_waiting() {
+    let (dir, project) = (tempfile::tempdir().unwrap(), crate::support::work_folder());
+    let (engine, _rx, mut agent, id) = started(dir.path(), project.path()).await;
+    let (ok, text) = tool(&mut agent, 1, json!({ "action": "compact", "next": "Finish the docs." })).await;
+    assert!(ok, "{text}");
+    answers(&mut agent, "Ready to compact.", true).await;
+    until_turns(&agent, 2).await;
+    engine
+        .send(SendRequest {
+            conversation_id: Some(id.clone()),
+            area: Area::Project,
+            project_id: None,
+            text: "Also the footer".into(),
+            images: vec![],
+            files: vec![],
+            choice: Choice { vendor: "claude".into(), model: Some("haiku".into()), effort: None },
+        })
+        .unwrap();
+    answers(&mut agent, "", false).await;
+    until_turns(&agent, 3).await;
+    assert_eq!(turns(&agent)[2], "Also the footer");
+    let c = engine.open(&id).unwrap();
+    assert_eq!(c.queued.len(), 1);
+    assert_eq!(c.queued[0].wake.as_ref().map(|w| w.why.as_str()), Some("wake.compactFailed"));
+    answers(&mut agent, "Footer fixed.", true).await;
+    until_turns(&agent, 4).await;
+    assert!(turns(&agent)[3].ends_with("Finish the docs."));
+    engine.shutdown();
+}
+
+#[tokio::test]
+async fn clearing_context_delivers_waiting_messages_before_the_handoff() {
+    let (dir, project) = (tempfile::tempdir().unwrap(), crate::support::work_folder());
+    let (engine, _rx, mut agent, id, made) = started_with(dir.path(), project.path(), Duration::from_secs(120), 3).await;
+    let (ok, text) = tool(&mut agent, 1, json!({ "action": "clear", "next": "Finish the docs." })).await;
+    assert!(ok, "{text}");
+    engine
+        .send(SendRequest {
+            conversation_id: Some(id.clone()),
+            area: Area::Project,
+            project_id: None,
+            text: "Also the footer".into(),
+            images: vec![],
+            files: vec![],
+            choice: Choice { vendor: "claude".into(), model: Some("haiku".into()), effort: None },
+        })
+        .unwrap();
+    agent.say(result(1_000_000)).await;
+    let mut fresh = next_pipe(&made).await;
+    until_turns(&fresh, 1).await;
+    assert_eq!(turns(&fresh)[0], "Also the footer");
+    assert!(!turns(&fresh)[0].contains("Earlier in this conversation"));
+    fresh.say(json!({ "type": "system", "subtype": "init", "session_id": "fresh", "model": "claude-haiku-5-5" })).await;
+    answers(&mut fresh, "Footer fixed.", true).await;
+    until_turns(&fresh, 2).await;
+    let text = &turns(&fresh)[1];
+    assert!(text.contains("Fix the login page, then the rest of the list"), "{text}");
+    assert!(text.ends_with("Your handoff note: Finish the docs."), "{text}");
+    assert_eq!(engine.open(&id).unwrap().messages[4].wake.as_ref().map(|w| w.why.as_str()), Some("wake.cleared"));
     engine.shutdown();
 }
