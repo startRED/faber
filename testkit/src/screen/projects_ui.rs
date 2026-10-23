@@ -6,7 +6,7 @@ use crate::sandbox::Launch;
 use std::path::Path;
 
 /// Settings done, and one project, "Demo", whose folder is a git repository with a single commit.
-pub(super) fn fixture(ctx: &mut Ctx) -> Result<Launch> {
+pub fn fixture(ctx: &mut Ctx) -> Result<Launch> {
     start_settings(ctx, "en")?;
     let git_cli = faber_engine::cli::find_cli("git").ok_or("git is unavailable")?;
     let program = &git_cli.command;
