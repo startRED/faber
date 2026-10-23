@@ -15,19 +15,19 @@ board, agent network, new application area or competing running list.
 The following is example content, not the status of Faber or this proposal:
 
 ```text
-Faber / Your project
-The export works. Faber is checking a large file.
+Faber / Your report
+The sources are collected. Faber is checking conflicting figures.
 
 2 of 5 required outcomes verified · scope revision 3
 
-✓ Understand the input
-✓ Make the export work             Open result
-● Handle a large file               Checking
-○ Add the preview                   Next, after the file check
-○ Prepare final delivery            Later
+✓ Define the question
+✓ Collect the sources              Open sources
+● Check conflicting figures        Checking
+○ Compare the conclusions          Next, after the figures
+○ Deliver the report               Later
 
 Needs your decision                shown only when a real decision exists
-Which preview style should stay?   Open comparison
+Which audience is the report for?  Open the choices
 
 Details: request · files · evidence · choices · cost · history
 ```
@@ -40,6 +40,11 @@ settings remain in Settings. Priority and scope changes are work actions that re
 The native plan already counts reported steps. The proposed verified-outcome count must be labeled separately
 until those steps have trustworthy evidence links. Never relabel an agent-written checkbox as engine verification.
 Use the current status/closing-box and artifact grammar; do not create a second completion receipt.
+
+The readable status can explain the chosen work path: collecting sources independently, asking a stronger helper
+to resolve a difficult point, or keeping one worker on a sequential task. Do not expose a required workflow editor
+or ask the person to manage model assignments. Technical details retains actual model/effort, route reason,
+evidence coverage and cost completeness. A light-only route never displays a hidden frontier contribution as its win.
 
 ## Honest progress
 
@@ -78,67 +83,69 @@ Read-only discovery can proceed now; contracts, trust, adapters and review-gate 
 approved slices being completed. This roadmap does not reorder Faber's main product phases.
 
 ```text
-F0 Current truth
-  -> F1 One readable view
-    -> F2 Durable outcome links
-      -> F3 Reliable coordination
-        -> F4 Full-product acceptance
-          -> F5 Comparative qualification
+F0 Current truth and fair baselines
+  -> F1 Complete task packets and evidence
+    -> F2 Qualified path/model selection
+      -> F3 Selective collaboration and recovery
+        -> F4 Full-product outcomes and readable route
+          -> F5 Comparative qualification and simplification
 ```
 
-### F0 — Establish the current truth
+### F0 — Establish current truth and baselines
 
-Pin current engine/model/store schemas, product decisions and the approved work-method revision. Resolve only the
-documentation discrepancies this feature relies on. Map the native plan, goal, check, memory and artifact records.
-Build fixtures for current conversations, legacy plans and incomplete evidence.
-Exit: a reviewer can identify one owner per fact; no mission revival or competing queue.
+Pin current Faber schemas, approved decisions and method revision. Pin current BMAD, GSD Core and GSD Pi separately.
+Resolve only relied-on documentation discrepancies. Establish a small balanced task set and plain-light,
+plain-frontier and current-Faber baselines before changing model selection. Add the audit's failure scenarios.
+Exit: source/record ownership is clear; budget, outcome criteria and comparison conditions are declared in advance.
 
-### F1 — Make today's work understandable
+### F1 — Supply complete context and trustworthy evidence
 
-Improve the current native plan/detail using facts already available. Distinguish reported steps from verified
-results; show current artifacts and missing links honestly. Reuse the existing running and closing surfaces.
-Exit: a non-programmer identifies now/next/blocker; no fabricated historical verification; keyboard, width,
-long-language, reduced-motion and idle-resource checks pass. No new scheduler is required for this slice.
+Extend native saved plans with stable outcome/source IDs and revision-aware evidence links. Compile bounded task
+packets using approved memory, kits, examples and current sources. Keep mandatory requirements intact. Surface
+reported versus verified progress in the current native plan without pretending all linking is already built.
+Exit: negative requirements survive handoff/compaction; changed inputs invalidate applicable evidence; a light
+worker receives the exact bounded task; no benchmark gain depends on leaked answers or hidden strong assistance.
 
-### F2 — Add stable outcomes and a persistent route
+### F2 — Qualify work-path and model selection
 
-Extend saved plans with stable step/outcome IDs, acceptance source refs and revision history. Add versioned milestone
-membership under the existing project record, referencing those plans. Bind applicable verifier results/review
-receipts to outcomes. Keep original requirements intact and use approved adopted task sources.
-Exit: fresh sessions resume with complete required context; concurrent edits cannot silently overwrite scope;
-changed inputs invalidate affected acceptance. No `.faber/plan`, roadmap task database or copied backlog.
+Extend Auto and capability profiles with domain, difficulty, checkability, dependencies and whole-path costs.
+Start with direct, grounded and strong-direct/escalation policies. Preserve conversation choice/cache invariants;
+new helper selection requires explicit qualification. Record validity separately from keep/retry preference.
+Exit: hard weakly-checkable work does not automatically start with an inadequate light worker; missing capabilities
+are explicit; role defaults cannot override policy; matched-budget results justify each admitted path.
 
-### F3 — Coordinate safely across conversations
+### F3 — Add selective collaboration and bounded recovery
 
-Use existing helpers, started conversations, separate copies, budgets and repair behavior. Add validated dependency
-readiness, integration checks and candidate invalidation across plans. Strengthen write-scope ownership where needed
-in the current architecture. Measure admission headroom and reserve independent-review capacity.
-Exit: cancellation, crashes, quota loss, overlapping writers and changed dependencies cannot produce false accepted
-outcomes or blind replay of ambiguous external effects. Do not claim process guarantees borrowed from removed code.
+Add guided strong-to-light execution, independent evidence collection and reversible alternatives only for
+qualified task families. Integrate checked dependency outputs, reviewer coverage reuse and scope attribution.
+Persist non-progress detection and safe reconciliation, including work produced outside the nominal dispatch path.
+Exit: these paths improve appropriate cases without degrading sequential ones; missing summaries do not cause
+infinite loops; cancellation/quota loss cannot forge acceptance or replay ambiguous external effects.
 
-### F4 — Establish complete-product acceptance
+### F4 — Cover complete-product outcomes and make the route readable
 
-Apply the same outcome links to representative research, visual assets, rendered documents, media and automation.
-Add only checks supported by actual installed tools. Exercise a long-running project across session compaction and
-vendor switching. Optional user-requested reproducibility files are deliverables, not new memory-library writers.
-Exit: supported work has concrete evidence and an explicit human-judgment boundary; unsupported checks stay not run.
+Qualify domain recipes in [domains.md](domains.md). Connect milestones in existing project metadata to saved plans,
+files, evidence and choices; keep one current running/closing experience and an optional dated export. Exercise a
+long mixed project with shared claims/identity and invalidation across deliveries. Page large histories and bound logs.
+Exit: actual artifacts are inspected with supported tools; technical validity and taste stay distinct; a newcomer
+identifies now/next/blocker; layout, language, keyboard, hidden-window and memory/resource scenarios pass.
 
 ### F5 — Compare, simplify and qualify
 
-Compare with current Faber, plain CLIs and pinned BMAD/GSD versions using [evaluation.md](evaluation.md).
-Remove stages that spend more without improving accepted results. Keep legacy reading and a read-only fallback.
-Exit: independent scorecard reports quality, total tokens, corrections, recovery and usability, with losses included.
-The owner chooses adoption; no performance claim is made merely because a design looks comprehensive.
+Compare light-only, mixed and frontier-led Flow with matched plain models, current Faber and pinned current
+BMAD/Core/Pi configurations using [evaluation.md](evaluation.md). Ablate support stages and retain only justified ones.
+Exit: independent scorecards show domain-level gains/losses, all assistance costs, safety and uncertainty. The owner
+chooses adoption. Keep prior qualified paths when a candidate policy does not improve the measured frontier.
 
 ## Ranked priorities after preparation
 
 | Rank | Capability | Impact / effort / uncertainty | Trade-off |
 | :--- | :--- | :--- | :--- |
-| 1 | Clear current native progress | High clarity; moderate effort; bounded integration risk | Does not automate more work yet |
-| 2 | Outcome IDs, source refs and evidence links | High continuity/trust; moderate effort; schema risk | Needs compatibility and R435 integration |
-| 3 | Cross-plan dependencies and integration checks | High coordination value; high effort and concurrency risk | Wait until records are reliable |
-| 4 | Domain-specific acceptance | Full-product fit; variable effort/tool availability | Admit only what can be verified |
-| 5 | Comparative evaluation and simplification | Establishes value; recurring benchmark cost | Avoids unsupported superiority claims |
+| 1 | Complete task packets plus evidence identity | High effect on light-model usefulness and trust; moderate schema effort | Must preserve original constraints |
+| 2 | Capability-based work-path selection | High quality/economy potential; calibration risk | Keep conservative defaults before evidence accumulates |
+| 3 | Guided/independent collaboration and recovery | High value on separable hard work; substantial coordination risk | No blanket fan-out or cheap-first rule |
+| 4 | Domain checks and readable linked outcomes | Full-product utility; variable tooling effort | Admit only actual checks; maintain one native experience |
+| 5 | Fair qualification and removing waste | Establishes whether changes are worth keeping | Aggregate wins cannot hide domain or safety regressions |
 
 Defer a workflow editor, role marketplace, cloud sync, separate dashboard service, vector memory and elaborate
 estimation engine. None is necessary to show honest progress or resume useful work.

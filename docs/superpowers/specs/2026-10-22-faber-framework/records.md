@@ -117,3 +117,25 @@ behind disclosure; a person should not need JSON or an editor to understand the 
 Adopt its R-numbered decisions, taste cards and `docs/tasks/` exactly through the R435 adapters. Claims, lanes,
 number allocation and the landing queue remain Faber-repository conventions; do not impose them on user projects.
 Do not migrate the product map as an incidental framework step: R435 reserves that later change for owner approval.
+
+## Revision 2: adaptive work records
+
+Add optional versioned fields to existing plan, artifact, check and Auto records, preserving older readers:
+
+| Record extension | Needed fields | Owner |
+| :--- | :--- | :--- |
+| Derived task packet | Source/requirement refs, selected examples, current inputs, allowed scope, output shape, checker refs, stop conditions | Deterministic compilation from canonical sources; not another editable plan |
+| Selected work path | Eligible capability snapshot, path/reason, selected model/effort, budget reservation and fallback condition | Existing Auto/admission services |
+| Outcome evidence | Requirement/input/output/checker revisions, machine result, independent judgment and preference as distinct fields | Existing verifier/closing records |
+| Review coverage | Candidate and source digests, rubric dimensions, independence/session provenance, decided findings | Independent reviewer plus engine receipt |
+| Route observations | Task family, model/tool version, path, full cost completeness, validity and preference signals separated | Existing private Auto learning state |
+| Recovery checkpoint | Last durable output, unresolved criteria, attributed effect intent/result, next permitted action and non-progress fingerprint | Existing execution/conversation state, extended explicitly |
+
+These are proposed relationships, not five new stores or tools. Capability records never override permissions.
+Generated evidence refs cannot make an imported artifact authoritative without identity/integrity checks and
+applicable independent validation. A previous review name alone is insufficient to reuse its verdict.
+
+Bound caches, observation windows and raw logs; keep small acceptance summaries and disclose unavailable pruned
+evidence. Never auto-delete user-authored requests, accepted decisions or current artifacts as a retention shortcut.
+Preserve R435's approved provenance and startup-card shares. No catalog dump, copied conversation history,
+unreviewed lesson injection or new framework-written plan/recipe directory.

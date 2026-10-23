@@ -2,6 +2,9 @@
 
 Status: Extension proposal. The approved R435 method takes precedence.
 
+Revision 2: [adaptive work](intelligence.md) selects the execution path, and [domains.md](domains.md) defines
+non-code acceptance. The risk-sized loop here controls authority and completion regardless of that selection.
+
 ## The current execution unit
 
 Use normal project conversations, their separate copies, helpers, started conversations, saved plans and engine

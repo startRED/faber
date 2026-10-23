@@ -73,3 +73,19 @@ The former GSD repository points to [GSD Core](https://github.com/open-gsd/gsd-c
 
 The intended advantage is native integration: subscription pacing, runtime facts, visible output and continuity in
 one app. This does not establish that competitors lack equivalent guarantees or that Faber already performs better.
+
+## Revision 2 findings
+
+The refreshed audit includes both GSD Core and GSD Pi, not just the archived original. Pi already documents an
+authoritative state engine, derived Markdown, progressive planning, per-unit cost, model profiles, lightweight
+models, liveness recovery and a visualizer. BMAD already has selective context and risk-sized planning. These
+features cannot be used as invented competitive gaps. See [BMAD](research-bmad.md) and [GSD](research-gsd.md).
+
+The current Faber integration gaps for adaptive work are concrete: plans lack stable outcome/evidence identity;
+Auto's learned keep/retry signal does not certify correctness; helper selection currently has fixed qualification
+defaults; domain/modal/tool suitability needs measured profiles; cross-plan recovery and exact-outcome invalidation
+are new work. Extend these points in existing modules instead of adding a second orchestrator.
+
+The proposed planner/worker/checker responsibilities can use one model, multiple models or deterministic tools.
+Their availability must be probed through current official CLIs. Flash is an example in the person's request,
+not an authorization to bypass the product's supported-provider scope. See [adaptive work](intelligence.md).
