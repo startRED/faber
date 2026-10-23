@@ -1329,56 +1329,106 @@ fn visual_answers_memory(ctx: &mut Ctx) -> Result {
     let before_processes = crate::proctree::live_tree(&crate::proctree::snapshot()?, app.pid);
     let baseline = super::setup::measure(ctx, &app, "visual versions before opening")?;
     let dom = app.page.cdp.call("Memory.getDOMCounters", json!({}))?;
-    ctx.notes.push(format!("visual versions before opening: renderer DOM counters {dom}"));
+    let heap = app.page.cdp.call("Runtime.getHeapUsage", json!({}))?;
+    ctx.notes.push(format!("visual versions before opening: renderer heap {heap}; DOM counters {dom}"));
+    // Diagnostic only: equal collection windows compare retention without a memory-margin predicate.
+    let collect_round = |ctx: &mut Ctx, app: &mut Opened, previous: f64, what: &str| -> Result<f64> {
+        let started = Instant::now();
+        let mut closed;
+        let mut retained;
+        loop {
+            app.page.cdp.call("HeapProfiler.collectGarbage", json!({}))?;
+            let label = format!("{what} +{:.1}s", started.elapsed().as_secs_f64());
+            closed = super::setup::measure(ctx, app, &label)?;
+            let rows = crate::proctree::live_tree(&crate::proctree::snapshot()?, app.pid);
+            let extra: Vec<_> = rows
+                .iter()
+                .filter(|row| row.name.to_lowercase().contains("msedgewebview2") && !crate::proctree::same_process(row, &before_processes))
+                .map(|row| row.pid)
+                .collect();
+            retained = app.page.eval(
+                "window.__visualFrames.flatMap((ref,i)=>{const frame=ref.deref();return frame?[{i,connected:frame.isConnected,srcdocBytes:frame.srcdoc.length,urlBytes:frame.src.length}]:[]})",
+            )?;
+            ctx.notes.push(format!("{label}: extra WebView2 pids {extra:?}; remaining frame references: {retained}"));
+            if started.elapsed() >= Duration::from_secs(15) {
+                break;
+            }
+            pause(1.0);
+        }
+        let heap = app.page.cdp.call("Runtime.getHeapUsage", json!({}))?;
+        let dom = app.page.cdp.call("Memory.getDOMCounters", json!({}))?;
+        let processes = crate::proctree::private_processes(app.pid)?;
+        let parts: Vec<_> = processes
+            .iter()
+            .map(|(row, mb)| format!("{} pid={} parent={} born={}: {mb:.1} MB", row.name, row.pid, row.parent, row.born))
+            .collect();
+        ctx.notes.push(format!(
+            "{what}: closed {closed:.1} MB, delta vs baseline {:+.1} MB, delta vs previous round {:+.1} MB after {:.1}s; private working sets [{}]; renderer heap {heap}; DOM counters {dom}; remaining frame references: {retained}",
+            closed - baseline, closed - previous, started.elapsed().as_secs_f64(), parts.join("; ")
+        ));
+        ensure(retained == json!([]), || format!("retired frames must be collectible\n{}", ctx.notes.join("\n")))?;
+        Ok(closed)
+    };
     let before_idle = ctx.cpu_ms(app.id)?;
     let idle_started = Instant::now();
     pause(2.0);
     let idle_cpu = (ctx.cpu_ms(app.id)? - before_idle) / idle_started.elapsed().as_secs_f64() / 10.0;
     app.page.eval("window.addEventListener('message',e=>{if(e.source!==document.querySelector('.visual-frame')?.contentWindow)return; if(e.data?.visualTestReady)document.body.dataset.visualReadyVersion=e.data.visualTestReady; if(e.data?.visualTestFocus)document.body.dataset.visualFocused=e.data.visualTestFocus; if(e.data?.visualTestCounter)document.body.dataset.visualCounter=e.data.version+':'+e.data.visualTestCounter; if(e.data?.visualTestInput && e.data.focused)document.body.dataset.visualTyped=e.data.version+':'+e.data.visualTestInput; if(e.data?.visualTestMenu===true && e.data.trusted)document.body.dataset.visualMenuBlocked='yes';})")?;
     app.page.eval("window.__visualLoads=0;document.addEventListener('load',e=>{if(e.target===document.querySelector('.visual-frame'))window.__visualLoads++;},true)")?;
-    app.page.click(&css(".visual-card .visual-open").last())?;
-    app.page.wait_visible(&css(".visual-pane"))?;
-    app.page.wait_count(&css(".visual-frame"), 1)?;
-    app.page.wait_for("the first visual version to load", "window.__visualLoads===1")?;
-    app.page.eval("window.__visualFrames=[new WeakRef(document.querySelector('.visual-frame'))];void 0")?;
-    let before_open = ctx.cpu_ms(app.id)?;
-    let open_started = Instant::now();
-    pause(2.0);
-    let open_cpu = (ctx.cpu_ms(app.id)? - before_open) / open_started.elapsed().as_secs_f64() / 10.0;
-    let opened = super::setup::measure(ctx, &app, "visual versions while open")?;
-    let mut peak = opened.max(baseline);
-    let cpu_before = ctx.cpu_ms(app.id)?;
-    let switch_started = Instant::now();
-    let mut loads = 1;
-    for _ in 0..10 {
-        for (control, version) in [(".visual-prev", 1), (".visual-next", 2)] {
-            loads += 1;
-            app.page.click(&css(control))?;
-            app.page.wait_for(
-                "the chosen visual version to load in the same frame",
-                &format!("window.__visualLoads==={loads} && document.body.dataset.visualReadyVersion==='{version}'"),
-            )?;
-            same(app.page.count(&css("iframe"))?, 1, "switching versions keeps only one frame mounted")?;
-            same(
-                app.page.eval("document.querySelector('.visual-frame')===window.__visualFrames[0].deref()")?,
-                json!(true),
-                "every version reuses the original frame",
-            )?;
-            peak = peak.max(super::setup::measure(ctx, &app, &format!("visual version switch {} to {version}", loads - 1))?);
-        }
-    }
-    let switch_ms = switch_started.elapsed().as_secs_f64() * 1000.0;
-    let switch_cpu = ctx.cpu_ms(app.id)? - cpu_before;
+    app.page.eval("window.__visualFrames=[];void 0")?;
     let close = app.page.named("button", "run.close")?;
-    app.page.click(&close)?;
-    app.page.wait_gone(&css(".visual-pane"))?;
-    same(app.page.count(&css("iframe"))?, 0, "closing the visual answer removes its frame")?;
-    let numbers = format!(
-        "visual answers: before {baseline:.1} MB, open {opened:.1} MB, sampled peak {peak:.1} MB; processor of one core idle {idle_cpu:.1}%, open {open_cpu:.1}%; twenty version switches {switch_cpu:.0} ms CPU ({:.1}% of one core over {switch_ms:.0} ms)",
-        switch_cpu / switch_ms * 100.0
-    );
-    ctx.notes.push(numbers.clone());
-    let closed = visual_frames_collected(ctx, &mut app, baseline, &before_processes, "visual versions after closing")?;
+    let mut loads = 0;
+    let mut previous = baseline;
+    let mut closed = baseline;
+    let mut peak = baseline;
+    let mut numbers = String::new();
+    for (index, switches) in [20, 20, 20, 60].into_iter().enumerate() {
+        let round = index + 1;
+        app.page.click(&css(".visual-card .visual-open").last())?;
+        app.page.wait_visible(&css(".visual-pane"))?;
+        app.page.wait_count(&css(".visual-frame"), 1)?;
+        loads += 1;
+        app.page.wait_for("the first visual version to load", &format!("window.__visualLoads==={loads}"))?;
+        app.page.eval("window.__visualFrames.push(new WeakRef(document.querySelector('.visual-frame')));void 0")?;
+        let before_open = ctx.cpu_ms(app.id)?;
+        let open_started = Instant::now();
+        pause(2.0);
+        let open_cpu = (ctx.cpu_ms(app.id)? - before_open) / open_started.elapsed().as_secs_f64() / 10.0;
+        let opened = super::setup::measure(ctx, &app, "visual versions while open")?;
+        peak = peak.max(opened);
+        let cpu_before = ctx.cpu_ms(app.id)?;
+        let switch_started = Instant::now();
+        for _ in 0..switches / 2 {
+            for (control, version) in [(".visual-prev", 1), (".visual-next", 2)] {
+                loads += 1;
+                app.page.click(&css(control))?;
+                app.page.wait_for(
+                    "the chosen visual version to load in the same frame",
+                    &format!("window.__visualLoads==={loads} && document.body.dataset.visualReadyVersion==='{version}'"),
+                )?;
+                same(app.page.count(&css("iframe"))?, 1, "switching versions keeps only one frame mounted")?;
+                same(
+                    app.page.eval("document.querySelector('.visual-frame')===window.__visualFrames.at(-1).deref()")?,
+                    json!(true),
+                    "every version reuses the original frame",
+                )?;
+                peak =
+                    peak.max(super::setup::measure(ctx, &app, &format!("visual round {round} version switch {} to {version}", loads - 1))?);
+            }
+        }
+        let switch_ms = switch_started.elapsed().as_secs_f64() * 1000.0;
+        let switch_cpu = ctx.cpu_ms(app.id)? - cpu_before;
+        app.page.click(&close)?;
+        app.page.wait_gone(&css(".visual-pane"))?;
+        same(app.page.count(&css("iframe"))?, 0, "closing the visual answer removes its frame")?;
+        numbers = format!(
+            "visual round {round} ({switches} switches): before {baseline:.1} MB, open {opened:.1} MB, sampled peak so far {peak:.1} MB; processor of one core idle {idle_cpu:.1}%, open {open_cpu:.1}%; {switches} version switches {switch_cpu:.0} ms CPU ({:.1}% of one core over {switch_ms:.0} ms)",
+            switch_cpu / switch_ms * 100.0
+        );
+        ctx.notes.push(numbers.clone());
+        closed = collect_round(ctx, &mut app, previous, &format!("visual round {round} after {switches} switches"))?;
+        previous = closed;
+    }
     // Real browser input must cross the opaque frame, including the modal pane at the minimum window width.
     super::shell::set_size(&mut app.page, 720, 600)?;
     app.page.click(&css(".visual-card .visual-open").last())?;
@@ -1401,7 +1451,7 @@ fn visual_answers_memory(ctx: &mut Ctx) -> Result {
         &format!("window.__visualLoads==={loads} && document.body.dataset.visualReadyVersion==='1'"),
     )?;
     same(
-        app.page.eval("document.querySelector('.visual-frame')===window.__visualFrames[1].deref()")?,
+        app.page.eval("document.querySelector('.visual-frame')===window.__visualFrames.at(-1).deref()")?,
         json!(true),
         "the keyboard version switch reuses the reopened frame",
     )?;
@@ -1422,7 +1472,11 @@ fn visual_answers_memory(ctx: &mut Ctx) -> Result {
     app.page.press("Escape")?;
     app.page.wait_gone(&css(".visual-pane"))?;
     same(app.page.count(&css("iframe"))?, 0, "Escape from the page input removes the frame at 720 px")?;
-    visual_frames_collected(ctx, &mut app, baseline, &before_processes, "visual answer after Escape at 720 px")?;
+    collect_round(ctx, &mut app, previous, "visual answer after Escape at 720 px")?;
+    // Memory notes are printed on a pass; retain line breaks in the runner's comma-joined output.
+    for note in &mut ctx.notes {
+        note.push('\n');
+    }
     ensure(peak <= BUDGET_MB && closed <= BUDGET_MB, || format!("{numbers}; over the {BUDGET_MB} MB budget"))
 }
 
