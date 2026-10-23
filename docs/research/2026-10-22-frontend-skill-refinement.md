@@ -120,3 +120,7 @@ proof addition now requires checking the executable or served bundle after chang
 stale artifacts through the build system. This changed the proof file from 7,466 to 7,805 bytes after the frozen pair;
 the generated-page scores do not measure it. A fresh read-only instruction/test review found no blocker; final
 integration remains separate.
+
+A later consolidated follow-up adds a list-identity check after a separately reproduced paging/focus regression.
+It adds 301 bytes to the craft file (9,503; proof remains 7,805), keeping discovery descriptions unchanged. This is
+an instruction addition, not another generated-page experiment; the frozen scores do not measure its effect.

@@ -62,6 +62,7 @@ The [source study](../research/2026-10-22-frontend-sources.md) distinguishes sta
 proposed measurements. The [243-item audit](../research/2026-10-22-frontend-blueprint-audit.md) records static evidence
 and uncertainty per ID. Existing tests cited there were not executed by the audit.
 
-The [implementation record](../superpowers/plans/2026-10-22-frontend-excellence.md) keeps unfinished reliability and
-measurement work explicit. No instruction skill makes durable attachments, an outgoing journal or exact reading
-anchors exist by itself.
+The [implementation record](../superpowers/plans/2026-10-22-frontend-excellence.md) separates implemented reliability
+changes, measured observations and remaining contracts. Draft persistence, reading anchors and engine admission
+need their own implementation and runtime proofs; instruction delivery alone establishes none of them. In particular,
+a saved draft or admission guard is not a crash-safe outgoing journal or reconciliation after a lost acknowledgement.

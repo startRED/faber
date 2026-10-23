@@ -27,9 +27,9 @@ virtualizer, animation or setting does not become useful merely because it appea
 | Original frontend-craft and frontend-proof skills, extended original Faber UI skill, same-file attachment reselection | 14 guide/delivery checks; reselection failed before and passed after; local integration 2,189 engine, 687 UI and 120 native scenarios | Observed on the development base |
 | Durable unsent PNG/PDF/inline draft attachments and removal recovery | 703 UI checks; two native scenarios with actual same-profile process restarts and byte equality; two security reviews; visual minimum 39/40 before and after | Numbered change observed on main by ancestry check |
 | Durable reading anchor and offset, bounded to 100 entries; true final-message jump | Five focused UI checks; real app/WebView2 exit, changed earlier content, same-profile restart, wheel input and one jump to message 159; 16 normal captures independently 40/40 before and after | Numbered change observed integrated; the compared functional UI/scenario sources match |
-| Refined frontend workflow, actual slow completion and executed-artifact identity | Frozen paired examples and fresh instruction review; real delayed IndexedDB deletion reproduced an existing failure, then three focused checks and cleanup passed | Repair pushed; normal landing script is checking before requeue |
-| Durable admission guard before send/steer/queue dispatch | Thirteen engine scenarios plus aggregate passed; six final UI checks with clean audit; native refused-write/retry preserved exact words/PNG/PDF; two security reviews; 16 normal captures independently 40/40 before and after | Queued through the normal workflow; exact-tree gate unobserved |
-| Native resource and interaction workload on 1,000 messages/500 collapsed tools | Actual operation/count assertions, fixture bytes and executable identities; same-base sequential before/after reading pair passed the unchanged resource budget | Rebased after a real scenario-registration conflict, final local proofs and fresh review passed; normal queue accepted, gate unobserved |
+| Refined frontend workflow, actual slow completion and executed-artifact identity | Frozen paired examples and fresh instruction review; real delayed IndexedDB deletion reproduced an existing failure, then three focused checks and cleanup passed; normal landing subsequently passed 2,189 engine, 706 UI and 123 native scenarios | GitHub subsequently reported the change closed and merged; numbered candidate observed on the development base |
+| Durable admission guard before send/steer/queue dispatch | Thirteen engine scenarios plus aggregate passed; six final UI checks with clean audit; native refused-write/retry preserved exact words/PNG/PDF; two security reviews; 16 normal captures independently 40/40 before and after | Remote gate failed an inherited reading/search scenario on macOS; repair is in progress, not waived |
+| Native resource and interaction workload on 1,000 messages/500 collapsed tools | Actual operation/count assertions, fixture bytes and executable identities; same-base sequential before/after reading pair passed the unchanged resource budget | Remote style check rejected a modulo expression; equivalent native integer method, fresh review and all local proofs passed; normal requeue passed 2,190 engine, 706 UI and 124 native scenarios, remote gate not yet observed |
 
 The skills reuse the first-party guide/session-kit delivery for both vendors and areas, including guarded modes,
 fallback, resumed sessions and Windows junction rejection. Existing external catalog art direction remains separate.
@@ -44,10 +44,10 @@ same design workflow in both conditions: 16/20 old and 18/20 refined after both 
 reviewed blind. The refined page clarified the task and form; the old page compared classes better on desktop.
 Both exercised slow completion, cancel, failure preservation and keyboard completion. Retained visual defects,
 different references/author choices, one sample per condition and an unexposed exact runtime model variant prevent
-causal or general superiority claims. Later indefinite-wait and artifact-identity wording was reviewed separately,
+causal or general superiority claims. Later indefinite-wait, artifact-identity and list-focus wording was reviewed separately,
 not retroactively assigned those scores. Two extra routing examples were paper checks, not implemented applications.
 
-The complete refined instruction files total 17,007 UTF-8 bytes, including frontmatter. Native plugin discovery uses
+The current original instruction files total 17,308 UTF-8 bytes, including frontmatter. Native plugin discovery uses
 their 151/152-byte descriptions; other delivery modes use the existing short index or fallback instructions. Full
 files are read on relevant use when available, rather than being injected into every task. No resident service, new dependency or application timer was
 added by the wording; marginal whole-app resource cost of wording was not measured.
@@ -65,6 +65,11 @@ and idle-window CPU increases are retained. External activity and one window per
 absence-of-regression or speedup claims. Two animation frames estimate scheduling, not acknowledged paint or INP.
 The hidden harness does not establish product occlusion or hidden-document behavior; fake warmup processes may be
 inside the measured tree. The full resource report supplies sample definitions and additional limits.
+
+A later macOS gate exposed a reading/search failure when earlier messages were paged into a positional list.
+Windows reproduction confirmed that focus and the temporary marker could follow a reused element to another record.
+The separate repair retains the existing list structure and must preserve newer focus choices and marker expiry.
+The frontend guidance now asks for those checks; this wording has delivery proofs, not another generated-output pair.
 
 Failures remain evidence: the original large-conversation check failed at 4,257 ms against its unchanged 3,000 ms
 limit. An exact-source control passed at 1,163 ms. A purported 2,163 ms candidate pass was invalidated when executable

@@ -1,0 +1,11 @@
+{
+  "notes": {
+    "fixed": {
+      "en": "Frontend guidance now covers keeping the right item highlighted and focused when lists change.",
+      "pt-BR": "As orientações pra criar telas agora incluem manter o destaque e o foco no item certo quando uma lista muda.",
+      "es": "Las pautas de interfaz ahora incluyen mantener el foco y el resaltado en el elemento correcto cuando cambia una lista.",
+      "fr": "Les conseils de création d’interfaces incluent le maintien du focus et du surlignage sur le bon élément quand une liste change.",
+      "de": "Die Anleitung für Oberflächen behandelt jetzt, wie Fokus und Hervorhebung beim richtigen Eintrag bleiben, wenn sich eine Liste ändert."
+    }
+  }
+}
