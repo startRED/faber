@@ -49,9 +49,13 @@ with `.claude/skills/visual-critique/SKILL.md`; the score never drops and a touc
 Checks and the critique know what Faber should look like; a newcomer only knows what the screen says (R244).
 `node scripts/first-user.mjs` starts the hidden test build through `testkit/examples/ux_audit.rs` (first run, no CLI,
 720x480, pt-BR by default; `--size`, `--lang`, `--steps`, `--no-build`) and gives a fresh AI one step at a time: a
-screenshot, the visible text and the controls a screen reader would name, numbered. It answers with one action (click a
+screenshot and the controls a screen reader would name, numbered. Text is read from the image, never copied from the
+page body: that would also reveal text below the viewport. It answers with one action (click a
 number, type, a key, scroll, done or stuck) and what confused it. The tasks are the first run, a first chat, Projects
-and the language in Settings (`TASKS`), in one app, each starting where the last ended.
+and the language in Settings (`TASKS`), in one app, each starting where the last ended. The Catalog task comes after
+onboarding: find a debugging tool, read its purpose and automatic-use explanation, then return to the list. This task
+only browses; it does not test installation, removal or switches. `--task catalogo` runs this task alone, while an
+unknown task name fails before launching the app. Other task ids are in `TASKS`.
 
 The reviewer never sees the code. The default is Haiku through `claude -p --tools ""` with no MCP server, which starts
 with no tool at all (its `init` line lists none); `--agent codex` is gpt-6-luna with its shell, apps, browser and
@@ -63,5 +67,6 @@ Each run gets a unique `<date>-<suffix>` name, including repeat runs with the sa
 `docs/research/first-user-<date>-<suffix>.md`, most serious first, each with what it tried, where it got stuck and the
 step's screenshot in `target/faber-test/first-user/<date>-<suffix>/` (local only). `--out` overrides only the report;
 screenshots still get their own folder. Nothing is fixed from it directly:
-a person reads the list and turns what is real into tasks. `scripts/first-user.test.mjs` keeps the answer parsing, the
+a person reads the list and turns what is real into tasks. A reviewer's `done` is labeled as its own claim, requiring
+image inspection; it is not verified completion. `scripts/first-user.test.mjs` keeps the answer parsing, the
 folder check and the report.
