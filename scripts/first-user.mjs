@@ -7,9 +7,10 @@
 //   node scripts/first-user.mjs --agent codex      (Codex gpt-6-luna instead)
 //   node scripts/first-user.mjs --size 1280x800 --steps 10 --no-build
 //   node scripts/first-user.mjs --task catalogo  (browse and read only; no installation task)
+//   node scripts/first-user.mjs --task conversa-projeto  (seeded Demo project, fake recorded response)
 //
 // Faber runs as the hidden, sandboxed test build that `testkit/examples/ux_audit.rs` drives (C006: the window lives on a
-// desktop no monitor shows), with no CLI connected, so no subscription is spent inside it; the reviewer's own calls are
+// desktop no monitor shows), with no real CLI connected, so no subscription is spent inside it; the reviewer's own calls are
 // its only cost. Builds run at idle priority. Findings go to `docs/research/first-user-<date>-<suffix>.md`, screenshots
 // to `<target>/faber-test/first-user/<date>-<suffix>/`. Each run keeps its own evidence. Nothing is fixed by the review.
 import { spawn, spawnSync } from 'node:child_process';
@@ -50,15 +51,28 @@ export const TASKS = [
   { id: 'configuracoes', goal: 'Encontre as Configurações do app e descubra onde se muda o idioma.' },
 ];
 
+const PROJECT_TASK = {
+  id: 'conversa-projeto',
+  goal: 'O projeto de demonstração Demo já foi preparado para este teste. Abra uma conversa nesse projeto, ' +
+    'escolha Claude Haiku no seletor de modelo e envie exatamente "In one sentence: why is the sky blue?". ' +
+    'Acompanhe até aparecer uma resposta. É uma resposta gravada: não avalie edição de arquivos nem criação do projeto.',
+};
+
 /** A focused walk uses the same tasks and refuses a typo before launching the app or spending a model call. */
 export function selectTasks(args = []) {
   const at = args.indexOf('--task');
   if (at < 0) return TASKS;
   const id = args[at + 1];
   if (!id || id.startsWith('--')) throw new Error('missing task after --task');
-  const selected = TASKS.filter((task) => task.id === id);
+  const selected = [...TASKS, PROJECT_TASK].filter((task) => task.id === id);
   if (!selected.length) throw new Error(`unknown task: ${id}`);
   return selected;
+}
+
+export function driverFlags(tasks, lang, build) {
+  const project = tasks.some((task) => task.id === PROJECT_TASK.id);
+  if (project && tasks.length !== 1) throw new Error('the seeded project needs one focused task');
+  return [...(project ? ['--project-demo'] : ['--first-run', '--no-ai']), '--lang', lang, ...(build ? ['--build'] : [])];
 }
 
 /** Runs in the page: controls a person can see and reach, numbered, with their centre; text comes from the screenshot. */
@@ -223,12 +237,15 @@ export function fallback(results) {
 /** The report, in plain pt-BR. */
 export function report({ date, agent, size, lang, findings, results, shots }) {
   const outcome = { done: 'conclusão declarada pela IA; precisa conferir as imagens', stuck: 'travou', steps: 'não terminou no limite de passos' };
+  const context = results.some((r) => r.task.id === PROJECT_TASK.id)
+    ? 'projeto Demo já preparado, com resposta gravada e sem uma IA real dentro do app'
+    : 'primeira abertura sem nenhuma IA conectada';
   const lines = [
     `# Primeiro usuário, ${date}`,
     '',
     `Uma IA que nunca viu o Faber (${agent}) usou o app como um novato, lendo o texto na imagem da tela e vendo os`,
-    `nomes dos controles, nunca o código. Janela de ${size.width}x${size.height}, idioma ${lang}, primeira abertura sem nenhuma IA`,
-    'conectada. Gerado por `node scripts/first-user.mjs`; nada aqui foi corrigido, é uma lista para ler.',
+    `nomes dos controles, nunca o código. Janela de ${size.width}x${size.height}, idioma ${lang}, ${context}.`,
+    'Gerado por `node scripts/first-user.mjs`; nada aqui foi corrigido, é uma lista para ler.',
     '',
     `As imagens ficam em \`${shots}\` (só neste computador).`,
     '',
@@ -419,13 +436,18 @@ async function main(args) {
   }
   const built = spawnSync('cargo', ['build', '--quiet', '-p', 'faber-testkit', '--example', 'ux_audit'], { cwd: ROOT, stdio: 'inherit', windowsHide: true });
   if (built.status !== 0) throw new Error('the build of testkit/examples/ux_audit.rs failed');
-  const flags = ['--first-run', '--no-ai', '--lang', lang, ...(args.includes('--no-build') ? [] : ['--build'])];
+  const flags = driverFlags(tasks, lang, !args.includes('--no-build'));
   const app = driver(join(TARGET, `debug/examples/ux_audit${EXE}`), flags);
   await app.ready();
   const results = [];
   try {
     await app.op('call', 'Emulation.setDeviceMetricsOverride', { params: { width, height, deviceScaleFactor: 1, mobile: false } });
     await pause(1500);
+    const actualLang = await app.op('eval', 'document.documentElement.lang');
+    if (actualLang !== lang) {
+      await app.op('shot', join(shots, 'language-mismatch.png'));
+      throw new Error(`the app language is ${actualLang}, expected ${lang}; refusing a mislabeled review`);
+    }
     for (const task of tasks) {
       const steps = [];
       let outcome = 'steps';

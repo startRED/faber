@@ -59,6 +59,25 @@ test('native selection rechecks identity, visibility and current option state an
   }
 });
 
+test('a seeded project conversation is opt-in and never launches without its fake AI', () => {
+  const tasks = firstUser.selectTasks(['--task', 'conversa-projeto']);
+  assert.equal(tasks.length, 1);
+  assert.match(tasks[0].goal, /In one sentence: why is the sky blue\?/);
+  assert.equal(firstUser.selectTasks().some((task) => task.id === 'conversa-projeto'), false);
+  assert.deepEqual(firstUser.driverFlags(tasks, 'pt-BR', false), ['--project-demo', '--lang', 'pt-BR']);
+  assert.deepEqual(firstUser.driverFlags(TASKS, 'en', true), ['--first-run', '--no-ai', '--lang', 'en', '--build']);
+  assert.throws(() => firstUser.driverFlags([...TASKS, ...tasks], 'en', false), /one focused task/);
+});
+
+test('the project report identifies the seeded replay rather than claiming first-run evidence', () => {
+  const [task] = firstUser.selectTasks(['--task', 'conversa-projeto']);
+  const text = report({ date: '2026-10-23', agent: 'fixture', size: { width: 720, height: 480 }, lang: 'en',
+    findings: [], results: [{ task, steps: [], outcome: 'done' }], shots: 'fixture' });
+  assert.match(text, /projeto Demo já preparado/);
+  assert.match(text, /resposta gravada/);
+  assert.doesNotMatch(text, /primeira abertura sem nenhuma IA/);
+});
+
 test('a focused newcomer review rejects missing selections before starting the app', () => {
   assert.throws(() => firstUser.selectTasks(['--task']), /missing task/);
   assert.throws(() => firstUser.selectTasks(['--task', '--agent', 'codex']), /missing task/);

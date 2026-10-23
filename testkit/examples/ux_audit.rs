@@ -4,11 +4,12 @@
 //! Options: `--lang <code>` (default pt-BR), `--first-run` (no settings but the language, so the first run shows),
 //! `--no-ai` (no CLI at all; the default is the fake Claude replaying `claude/chat.jsonl`), `--build` (builds the fake CLI
 //! and the test app first, at the build priority). `scripts/first-user.mjs` uses it for the first-user review.
+//! `--project-demo` seeds the existing isolated Demo repository and uses the fake chat replay, without first run.
 
 use faber_testkit::{
     app::{Ctx, Paths},
     page::css,
-    screen::{claude_chat, no_cli, start_settings},
+    screen::{claude_chat, no_cli, projects_ui, start_settings},
     testbuild::build_for_run,
 };
 use serde_json::{Value, json};
@@ -17,6 +18,9 @@ use std::io::{self, BufRead, Write};
 fn main() -> Result<(), String> {
     let args: Vec<String> = std::env::args().skip(1).collect();
     let has = |flag: &str| args.iter().any(|a| a == flag);
+    if has("--project-demo") && (has("--first-run") || has("--no-ai")) {
+        return Err("--project-demo cannot be combined with --first-run or --no-ai".into());
+    }
     let lang = args.iter().position(|a| a == "--lang").and_then(|i| args.get(i + 1)).map_or("pt-BR", String::as_str);
     let mut paths = Paths::discover()?;
     // The example lives in `<target>/debug/examples`; the fake CLI is built beside the runner, in `<target>/debug`.
@@ -31,7 +35,11 @@ fn main() -> Result<(), String> {
     } else {
         start_settings(&ctx, lang)?;
     }
-    let launch = if has("--no-ai") { no_cli() } else { claude_chat(&ctx) };
+    let project = if has("--project-demo") { Some(projects_ui::fixture(&mut ctx)?) } else { None };
+    let mut launch = if has("--no-ai") { no_cli() } else { claude_chat(&ctx) };
+    if let Some(project) = project {
+        launch.git_bin = project.git_bin;
+    }
     let mut app = ctx.launch(launch)?;
     println!("READY");
     for line in io::stdin().lock().lines() {

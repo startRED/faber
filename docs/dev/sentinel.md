@@ -61,6 +61,16 @@ onboarding: find a debugging tool, read its purpose and automatic-use explanatio
 only browses; it does not test installation, removal or switches. `--task catalogo` runs this task alone, while an
 unknown task name fails before launching the app. Other task ids are in `TASKS`.
 
+`--task conversa-projeto` is an opt-in controlled project walk, outside the default tasks. The driver seeds the existing
+isolated Demo repository and enables the fake chat replay (`--project-demo`, incompatible with `--first-run` or
+`--no-ai`). The reviewer opens Demo, chooses Claude Haiku and sends the recording's exact sky question. This proves
+finding a prepared project conversation and following its recorded answer; it does not prove adding a project through
+the native folder picker, Auto routing, real-provider compatibility, file edits or checks. No real CLI runs inside the
+app; the reviewer still uses quota. The driver must be rebuilt when changing this setup; an old cached app is not new
+source evidence.
+Before asking the reviewer, the driver checks the document's actual language against `--lang`; a mismatch saves an
+image and fails instead of writing a report under the wrong language.
+
 The reviewer never sees the code. The default is Haiku through `claude -p --tools ""` with no MCP server, which starts
 with no tool at all (its `init` line lists none); `--agent codex` is gpt-6-luna with its shell, apps, browser and
 computer use switched off and a read-only sandbox. Either runs in an empty folder under the system temp folder, and the
