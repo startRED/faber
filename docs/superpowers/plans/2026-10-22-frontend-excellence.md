@@ -30,7 +30,7 @@ virtualizer, animation or setting does not become useful merely because it appea
 | Refined frontend workflow, actual slow completion and executed-artifact identity | Frozen paired examples and fresh instruction review; real delayed IndexedDB deletion reproduced an existing failure, then three focused checks and cleanup passed; normal landing subsequently passed 2,189 engine, 706 UI and 123 native scenarios | GitHub subsequently reported the change closed and merged; numbered candidate observed on the development base |
 | Durable admission guard before send/steer/queue dispatch | Thirteen engine scenarios plus aggregate passed; six final UI checks with clean audit; native refused-write/retry preserved exact words/PNG/PDF; two security reviews; 16 normal captures independently 40/40 before and after | Remote gate failed an inherited reading/search scenario on macOS; repair is in progress, not waived |
 | Native resource and interaction workload on 1,000 messages/500 collapsed tools | Actual operation/count assertions, fixture bytes and executable identities; same-base sequential before/after reading pair passed the unchanged resource budget | Remote style failure repaired and independently reviewed; normal requeue passed 2,190 engine, 706 UI and 124 native scenarios, but the subsequent macOS gate failed the inherited reading/search assertion (705 UI passed, one failed); corrected-base confirmation remains required |
-| Search focus and temporary marker after earlier messages load | Two actual regressions reproduced: result 100 became 60 after paging; focus disappeared after marker expiry. The narrow repair preserves logical focus, the original marker deadline and a newer composer focus; 706 UI checks and independent review passed | Corrected-base integration being confirmed separately from the earlier local proofs |
+| Search focus and temporary marker after earlier messages load | Two actual regressions reproduced: result 100 became 60 after paging; focus disappeared after marker expiry. The narrow repair preserves logical focus, the original marker deadline and a newer composer focus; 706 UI checks and independent review passed | Observed on the development base after corrected-base confirmation |
 | Frontend guidance for logical record identity during paging, reordering and filtering | Selected delivery and delivery-mode checks; fresh instruction review with three paper cases; the separate whole-tree confirmation below identifies its executed build | GitHub reported the instruction change closed and merged; numbered candidate observed on the development base and main |
 
 These selected changes strengthen specific blueprint criteria; none replaces the initial 243-row inventory with a
@@ -140,3 +140,11 @@ physical phones, all browser engines, hidden/occluded power cost, quiet repeated
 parity remain unverified. Other partial/unknown blueprint rows remain product backlog, not completed features.
 Voice, SSH, remote devices, scheduling and proprietary cloud capabilities are separate product work. No claim of
 all 243 techniques implemented, general design mastery or generalized performance improvement is made.
+
+The combined search correction subsequently passed the ordinary full local confirmation on its queued tree:
+2,240 engine checks, 713 UI checks and 124 native scenarios, with zero failures or skips. Its queued gate and
+integration job both completed successfully, and the source was observed on the development base and main.
+The two earlier stale-control passes remain invalid evidence for this composition. The visual-version scenario
+also passed with the unchanged 15 MB allowance (133.6 MB baseline, 147.6 MB after close at 10.9 seconds); this
+newer-tree result does not diagnose or repair the earlier 16.1 MB overage. Send admission and the resource fixture
+still require their separate final integration; the send route reported a real conflict with deferred queue editing.
