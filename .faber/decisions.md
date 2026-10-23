@@ -8,3 +8,5 @@
 - Manual Catalog replacements reuse the consent-bound retained-copy journal used by agent replacements. The detail confirms an exact snapshot; initial installs never consume physical or Undo copies, and an unreadable ledger refuses publication. [by AI]
 
 - The project agent settings tool accepts only web_search off/cached/live. It reuses the ordinary settings save, its own consent and audit, and existing full trust only for this bounded preference. The saved response is queued after durable persistence and before stricter settings stop replies; no delivery acknowledgement or stop exemption is introduced. [by AI]
+
+- The Windows desktop tool starts with foreground accessible text only, uses the existing project Full access gate, accepts no target or control input, and treats every returned field as untrusted data. Screenshots and input control remain separate unfinished work. [by AI]

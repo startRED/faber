@@ -53,6 +53,7 @@ pub struct ClaudeLaunch {
 /// The tools Faber's MCP server holds for a launch: the helper for a project's own agent, the browser where it is offered.
 fn mcp_tools(launch: &ClaudeLaunch) -> crate::helper::Tools {
     crate::helper::Tools {
+        desktop: false,
         helper: launch.helper == crate::helper::Helper::Offers,
         browse: launch.browse,
         conversation: launch.conversations,
@@ -621,6 +622,7 @@ pub fn parse_claude_message(msg: &Value) -> Vec<EngineEvent> {
                 .chain(items(&msg["message"]["content"]).filter(|c| c["type"] == "tool_use").map(|c| {
                     let name = match c["name"].as_str() {
                         Some(crate::helper::CLAUDE_NAME) => crate::helper::TOOL.to_string(),
+                        Some(crate::desktop::CLAUDE_NAME) => crate::desktop::TOOL.to_string(),
                         Some(crate::browser::CLAUDE_NAME) => crate::browser::TOOL.to_string(),
                         Some(crate::sibling::CLAUDE_NAME) => crate::sibling::TOOL.to_string(),
                         Some(crate::verify::CLAUDE_NAME) => crate::verify::TOOL.to_string(),
@@ -777,6 +779,10 @@ pub struct ClaudeOptions {
 }
 
 pub fn start_claude(opts: ClaudeOptions, on_event: EventSink) -> Session {
+    start_claude_with_desktop(opts, on_event, false)
+}
+
+pub(crate) fn start_claude_with_desktop(opts: ClaudeOptions, on_event: EventSink, desktop: bool) -> Session {
     let args = claude_args(&opts.launch);
     let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
     // The process starts right away, so a warmed-up session is already booting while the user types.
@@ -953,7 +959,8 @@ pub fn start_claude(opts: ClaudeOptions, on_event: EventSink) -> Session {
                             }
                             // R161: Faber's MCP server. Only a session that offers one of its tools has it; the CLI waits for each answer.
                             if msg["type"] == "control_request" && msg["request"]["subtype"] == "mcp_message" {
-                                let tools = mcp_tools(&opts.launch);
+                                let mut tools = mcp_tools(&opts.launch);
+                                tools.desktop = desktop && opts.launch.progress && opts.launch.area == Area::Project && opts.launch.permissions == Permissions::FullAccess;
                                 let offered = tools.any() && msg["request"]["server_name"] == "faber";
                                 let step = if offered { crate::helper::mcp(&msg["request"]["message"], tools) } else {
                                     crate::helper::Mcp::Answer(json!({"jsonrpc":"2.0","id":msg["request"]["message"]["id"],"error":{"code":-32601,"message":"No such server"}}))
@@ -965,9 +972,16 @@ pub fn start_claude(opts: ClaudeOptions, on_event: EventSink) -> Session {
                                         let _ = proc::write_line(&mut *stdin, &reply).await;
                                     }
                                     crate::helper::Mcp::Call { tool, id, rpc, input } => {
+                                        if helpers.contains_key(&id) {
+                                            let answer = crate::helper::mcp_result(&rpc, false, "An unfinished tool call already owns this id.", &[]);
+                                            let reply = json!({"type":"control_response","response":{"subtype":"success","request_id":msg["request_id"],"response":{"mcp_response":answer}}});
+                                            let _ = proc::write_line(&mut *stdin, &reply).await;
+                                            continue;
+                                        }
                                         // Both answers come back as a `HelperReply` for the call's id.
                                         helpers.insert(id.clone(), (s(&msg["request_id"]), rpc));
                                         on_event(match tool {
+                                            crate::desktop::NAME => EngineEvent::DesktopCall { id, input },
                                             crate::browser::NAME => EngineEvent::BrowseCall { id, input },
                                             crate::sibling::NAME => EngineEvent::ConversationCall { id, input },
                                             crate::verify::NAME => EngineEvent::VerifyCall { id, input },
@@ -1003,6 +1017,7 @@ pub fn start_claude(opts: ClaudeOptions, on_event: EventSink) -> Session {
                                     // Calling the helper changes nothing by itself: what the helper does is held to the same mode. The
                                     // browser is offered only in full access, which asks nothing, and the engine checks every address.
                                     if (tool == crate::helper::CLAUDE_NAME && opts.launch.helper == crate::helper::Helper::Offers)
+                                        || (tool == crate::desktop::CLAUDE_NAME && desktop && opts.launch.progress && opts.launch.area == Area::Project && opts.launch.permissions == Permissions::FullAccess)
                                         || (tool == crate::browser::CLAUDE_NAME && opts.launch.browse)
                                         || (tool == crate::sibling::CLAUDE_NAME && opts.launch.conversations)
                                         || ((tool == crate::verify::CLAUDE_NAME || tool == crate::map::CLAUDE_NAME) && opts.launch.verify)

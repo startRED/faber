@@ -596,6 +596,7 @@ export const ptBR: Messages = {
   "ask.self.webSearchLine": "De {from} para {to}",
   "ask.self.alwaysWebSearch": "Sempre permitir mudanças na busca na web",
   "tool.settingsWebSearch": "Mudando a busca na web",
+  "tool.desktopRead": "Lendo a janela em primeiro plano",
   "ask.self.alwaysRepair": "Sempre permitir reparos do catálogo nesta conversa",
   "ask.self.replaceEffect": "Isso substitui as alterações locais e o backup anterior. Os arquivos atuais ficam guardados como o novo backup. Esta conversa mantém as ferramentas que já usa.",
   "ask.self.replaceLine": "{from} → {version}",

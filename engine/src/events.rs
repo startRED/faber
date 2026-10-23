@@ -200,6 +200,10 @@ pub enum EngineEvent {
     },
     /// The agent called Faber's helper tool (R161, `crate::helper`): `id` is that tool call. The CLI waits for the answer,
     /// which the engine sends with `Session::helper_reply` once the helper is done.
+    DesktopCall {
+        id: String,
+        input: Value,
+    },
     HelperCall {
         id: String,
         input: Value,

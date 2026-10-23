@@ -1117,6 +1117,7 @@ dependencies = [
  "block2",
  "dirs",
  "faber-engine",
+ "faber-winproc",
  "junction",
  "notify-rust",
  "objc2",
@@ -1202,6 +1203,7 @@ dependencies = [
  "libc",
  "rustix",
  "tempfile",
+ "windows 0.62.2",
  "windows-sys 0.61.2",
 ]
 

@@ -43,6 +43,7 @@ notify-rust = "4"
 webkit2gtk = { version = "2", features = ["v2_40"] }
 
 [target.'cfg(windows)'.dependencies]
+faber-winproc = { path = "../winproc" }
 winsafe = { version = "0.0.29", features = ["gui"] }
 # The browser pane drives its page through WebView2's own DevTools call (pane/native.rs); the same versions Tauri uses.
 webview2-com = "0.39"

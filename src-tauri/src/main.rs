@@ -6,6 +6,8 @@
 #[cfg(all(feature = "test-hooks", not(debug_assertions)))]
 compile_error!("the `test-hooks` feature is for debug test builds only; it must not be enabled in a release build");
 
+#[cfg(windows)]
+mod desktop;
 mod feed;
 mod folder;
 mod look;
@@ -2021,6 +2023,7 @@ fn main() {
                 let pane = pane::Pane::new(app.handle().clone());
                 app.state::<Faber>().engine.set_browser(Arc::new(pane::PaneBrowser(pane.clone())));
                 app.manage(pane);
+                app.state::<Faber>().engine.set_desktop(Arc::new(desktop::NativeDesktop::default()));
             }
             app.state::<Faber>().engine.watch_accounts();
             app.state::<Faber>().engine.follow_open_prs();

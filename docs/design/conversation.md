@@ -187,3 +187,5 @@ error uses the existing quiet work-log line, and a later retry does not insert r
 
 Agent catalog changes share the existing self-change permission card; [Catalog](catalog.md#agent-requests) describes
 their separate grants, version disclosure, backups and preservation of current conversation tools.
+
+Native foreground-window text reads use the existing work-log row and status treatment. The localized action label has no supplied title, selector or target detail; native window content remains tool-result data. No new screen, control, focus movement or animation is added.

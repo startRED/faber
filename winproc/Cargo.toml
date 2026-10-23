@@ -8,8 +8,20 @@ repository.workspace = true
 
 # Not `[lints] workspace = true`: the workspace forbids unsafe code, and this crate exists to keep those calls in one place.
 
+[features]
+# Controlled synthetic provider proof only; never enabled by shipping adapters.
+test-hooks = ["windows/Win32_System_StationsAndDesktops", "windows/Win32_System_Threading", "windows/Win32_System_JobObjects"]
+
+[[example]]
+name = "native-desktop-probe"
+
 [target.'cfg(windows)'.dependencies]
+windows = { version = "0.62.2", features = ["Win32_Foundation", "Win32_System_Com", "Win32_UI_Accessibility", "Win32_UI_WindowsAndMessaging"] }
 windows-sys = { version = "0.61", features = ["Wdk_System_SystemInformation", "Win32_Foundation", "Wdk_Foundation", "Wdk_Storage_FileSystem", "Win32_Storage_FileSystem", "Win32_Security", "Win32_Security_Authorization", "Win32_System_Memory", "Win32_System_IO", "Win32_System_Diagnostics_ToolHelp", "Win32_System_JobObjects", "Win32_System_Threading", "Win32_UI_Shell"] }
+
+# Only the controlled provider example needs desktop creation/query and native controls; shipping builds omit these.
+[target.'cfg(windows)'.dev-dependencies]
+windows = { version = "0.62.2", features = ["Win32_System_StationsAndDesktops", "Win32_Graphics_Gdi", "Win32_System_LibraryLoader", "Win32_System_Threading", "Win32_System_JobObjects"] }
 
 [target.'cfg(unix)'.dependencies]
 rustix = { version = "1", features = ["fs", "process"] }

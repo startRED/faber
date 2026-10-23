@@ -73,6 +73,7 @@ function detailOf(input: unknown): string {
 }
 
 export function toolRow(tool: ToolUse): ToolRow {
+  if (tool.name === 'Desktop') return { label: t('tool.desktopRead'), detail: '' };
   if (tool.name === 'Settings') {
     const value = (tool.input && typeof tool.input === 'object' ? tool.input as Record<string, unknown> : {}).web_search;
     return { label: t('tool.settingsWebSearch'), detail: value === 'off' || value === 'cached' || value === 'live' ? t(`set.webSearch.${value}`) : '' };

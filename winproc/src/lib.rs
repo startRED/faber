@@ -438,3 +438,6 @@ mod processes {
 pub use processes::{ProcessInfo, processes};
 
 pub mod rewind;
+
+#[cfg(windows)]
+pub mod desktop;

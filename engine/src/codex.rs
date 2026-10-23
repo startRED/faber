@@ -522,6 +522,7 @@ fn parse_notification(msg: &Value, state: &mut CodexTurnState) -> Vec<EngineEven
             let name = match (kind, item["tool"].as_str()) {
                 ("dynamicToolCall", Some("run_command")) => "Bash",
                 ("dynamicToolCall", Some(crate::helper::NAME)) => crate::helper::TOOL,
+                ("dynamicToolCall", Some(crate::desktop::NAME)) => crate::desktop::TOOL,
                 ("dynamicToolCall", Some(crate::browser::NAME)) => crate::browser::TOOL,
                 ("dynamicToolCall", Some(crate::sibling::NAME)) => crate::sibling::TOOL,
                 ("dynamicToolCall", Some(crate::verify::NAME)) => crate::verify::TOOL,
@@ -753,7 +754,7 @@ pub struct CodexThread {
 }
 
 enum ServerCommand {
-    Open { key: u64, thread: Box<CodexThread>, sink: EventSink, tools: Option<crate::tools::Delivery> },
+    Open { key: u64, thread: Box<CodexThread>, sink: EventSink, tools: Option<crate::tools::Delivery>, desktop: bool },
     Session(u64, SessionCommand),
     Tools(crate::tools::Delivery),
     Retire,
@@ -801,6 +802,7 @@ fn skill_commands(result: &Value, cwd: &std::path::Path) -> Option<Vec<crate::mo
 
 /// A conversation's side of the shared process.
 struct Thread {
+    desktop: bool,
     early_completion: Vec<Value>,
     sink: EventSink,
     params: CodexThread,
@@ -1154,18 +1156,22 @@ impl CodexServer {
 
     /// Opens a conversation as a thread. The session behaves as if it had the process to itself.
     pub fn open(&self, thread: CodexThread, sink: EventSink) -> Session {
-        self.open_inner(thread, sink, None)
+        self.open_inner(thread, sink, None, false)
     }
 
     /// Uses the project's catalog choices for this launch, leaving already open conversations alone.
     pub fn open_with_tools(&self, thread: CodexThread, sink: EventSink, tools: crate::tools::Delivery) -> Session {
-        self.open_inner(thread, sink, Some(tools))
+        self.open_inner(thread, sink, Some(tools), false)
     }
 
-    fn open_inner(&self, thread: CodexThread, sink: EventSink, tools: Option<crate::tools::Delivery>) -> Session {
+    pub(crate) fn open_with_desktop(&self, thread: CodexThread, sink: EventSink, tools: crate::tools::Delivery, desktop: bool) -> Session {
+        self.open_inner(thread, sink, Some(tools), desktop)
+    }
+
+    fn open_inner(&self, thread: CodexThread, sink: EventSink, tools: Option<crate::tools::Delivery>, desktop: bool) -> Session {
         let key = self.next.fetch_add(1, Ordering::Relaxed);
         if let Err(SendError(ServerCommand::Open { sink, .. })) =
-            self.tx.send(ServerCommand::Open { key, thread: Box::new(thread), sink, tools })
+            self.tx.send(ServerCommand::Open { key, thread: Box::new(thread), sink, tools, desktop })
         {
             sink(EngineEvent::Error { message: "Codex stopped.".into(), fatal: true });
             sink(EngineEvent::WriterExit { confirmed: true });
@@ -1287,6 +1293,9 @@ async fn serve(
                 }
             } else {
                 let (method, mut params) = thread_params(area, &$t.params);
+                if $t.desktop && $t.params.progress && area == Area::Project && method == "thread/start" {
+                    params["dynamicTools"].as_array_mut().unwrap().push(crate::desktop::codex_tool());
+                }
                 let delivery = $t.tools.as_ref().unwrap_or(&tools);
                 // extraRoots is process-wide; discovery and bounded instructions belong only to this thread.
                 // Faber's own guide (R18): its line goes into a new thread only; a resumed one keeps what it was started with, and the
@@ -1617,6 +1626,24 @@ async fn serve(
                     (Some(method), Some(id)) => {
                         let top = params["threadId"].as_str().and_then(|t| by_id.get(t)).copied();
                         let thread = top.and_then(|k| threads.get_mut(&k));
+                        if method == "item/tool/call" && thread.as_ref().is_some_and(|t| t.helpers.contains_key(params["callId"].as_str().unwrap_or_default())) {
+                            let result = crate::helper::dynamic_result(false, "An unfinished tool call already owns this id.", &[]);
+                            let _ = proc::write_line(&mut *stdin, &json!({"id":id,"result":result})).await;
+                            continue;
+                        }
+                        if method == "item/tool/call" && params["tool"] == crate::desktop::NAME {
+                            match thread.filter(|t| t.desktop && t.params.progress && area == Area::Project && t.params.permissions == Permissions::FullAccess && t.turn.is_some() && params["turnId"].as_str() == t.turn.as_deref() && !t.blocked && !t.closing) {
+                                Some(t) => {
+                                    let call = s(&params["callId"]);
+                                    t.helpers.insert(call.clone(), id.clone());
+                                    (t.sink)(EngineEvent::DesktopCall { id: call, input: params["arguments"].clone() });
+                                }
+                                None => {
+                                    let _ = proc::write_line(&mut *stdin, &json!({"id":id,"result":{"success":false,"contentItems":[{"type":"inputText","text":"Desktop observation is unavailable here."}]}})).await;
+                                }
+                            }
+                            continue;
+                        }
                         if method == "item/tool/call" && params["tool"] == crate::helper::NAME {
                             // R161: the agent asked for a helper; the engine answers once the helper is done.
                             match thread.filter(|t| t.params.helper == crate::helper::Helper::Offers && !t.blocked && !t.closing) {
@@ -1906,9 +1933,9 @@ async fn serve(
                 }
             }
             cmd = rx.recv(), if !stopping => match cmd {
-                Some(ServerCommand::Open { key, thread, sink, tools }) => {
+                Some(ServerCommand::Open { key, thread, sink, tools, desktop }) => {
                     let state = CodexTurnState::new(thread.resume.is_some());
-                    let t = Thread { sink, params: *thread, tools, id: None, turn: None, queued: vec![], compact: false, state, approvals: HashMap::new(), helpers: HashMap::new(), watch: proc::TurnWatch::default(), interrupt_pending: false, blocked: false, closing: false, stop_children: false, early_completion: vec![], commands: HashMap::new(), unconfirmed_commands: HashMap::new(), owns_server: !no_process, server_writers: false, native_commands: Default::default(), stop_reported: false };
+                    let t = Thread { desktop, sink, params: *thread, tools, id: None, turn: None, queued: vec![], compact: false, state, approvals: HashMap::new(), helpers: HashMap::new(), watch: proc::TurnWatch::default(), interrupt_pending: false, blocked: false, closing: false, stop_children: false, early_completion: vec![], commands: HashMap::new(), unconfirmed_commands: HashMap::new(), owns_server: !no_process, server_writers: false, native_commands: Default::default(), stop_reported: false };
                     if ready {
                         open_thread!(key, &t);
                     } else {
@@ -2307,6 +2334,7 @@ mod rewind_tests {
 
     fn thread(sink: EventSink) -> Thread {
         Thread {
+            desktop: false,
             sink,
             params: CodexThread {
                 cwd: PathBuf::new(),
@@ -2585,7 +2613,8 @@ mod rewind_tests {
             let init = read(&mut output).await;
             write(&mut input, json!({"id":init["id"],"result":{}})).await;
             assert_eq!(read(&mut output).await["method"], "initialized");
-            tx.send(ServerCommand::Open { key: 1, thread: Box::new(thread(sink.clone()).params), sink, tools: None }).unwrap();
+            tx.send(ServerCommand::Open { key: 1, thread: Box::new(thread(sink.clone()).params), sink, tools: None, desktop: false })
+                .unwrap();
             let open = read(&mut output).await;
             write(&mut input, json!({"id":open["id"],"result":{"thread":{"id":"owner"}}})).await;
             while !matches!(events.recv().await.unwrap(), EngineEvent::Started { .. }) {}
@@ -2694,7 +2723,7 @@ mod rewind_tests {
             write(&mut input, json!({"id":init["id"],"result":{}})).await;
             assert_eq!(read(&mut output).await["method"], "initialized");
             for (key, id) in [(1, "owner"), (2, "peer")] {
-                tx.send(ServerCommand::Open { key, thread: Box::new(thread(sink.clone()).params), sink: sink.clone(), tools: None }).unwrap();
+                tx.send(ServerCommand::Open { key, thread: Box::new(thread(sink.clone()).params), sink: sink.clone(), tools: None, desktop: false }).unwrap();
                 let open = read(&mut output).await;
                 write(&mut input, json!({"id":open["id"],"result":{"thread":{"id":id}}})).await;
                 while !matches!(events.recv().await.unwrap(), EngineEvent::Started { .. }) {}
@@ -2803,7 +2832,7 @@ mod rewind_tests {
                 write(&mut input, json!({"id":init["id"],"result":{}})).await;
                 assert_eq!(read(&mut output).await["method"], "initialized");
                 for (key, id) in [(1, "owner"), (2, "peer")] {
-                    tx.send(ServerCommand::Open { key, thread: Box::new(thread(sink(key)).params), sink: sink(key), tools: None }).unwrap();
+                    tx.send(ServerCommand::Open { key, thread: Box::new(thread(sink(key)).params), sink: sink(key), tools: None, desktop: false }).unwrap();
                     let open = read(&mut output).await;
                     write(&mut input, json!({"id":open["id"],"result":{"thread":{"id":id}}})).await;
                     while !matches!(events.recv().await.unwrap(), (k, EngineEvent::Started { .. }) if k == key) {}
@@ -2823,7 +2852,7 @@ mod rewind_tests {
                 while !matches!(events.recv().await.unwrap(), (1, EngineEvent::Error { .. })) {}
                 let mut next = thread(sink(3)).params;
                 next.effort = Some("high".into());
-                tx.send(ServerCommand::Open { key: 3, thread: Box::new(next), sink: sink(3), tools: None }).unwrap();
+                tx.send(ServerCommand::Open { key: 3, thread: Box::new(next), sink: sink(3), tools: None, desktop: false }).unwrap();
                 let open = read(&mut output).await;
                 write(&mut input, json!({"id":open["id"],"result":{"thread":{"id":replacement}}})).await;
                 while !matches!(events.recv().await.unwrap(), (3, EngineEvent::Started { .. })) {}
@@ -2884,7 +2913,8 @@ mod rewind_tests {
             assert_eq!(init["method"], "initialize");
             write(&mut input, json!({"id":init["id"],"result":{}})).await;
             assert_eq!(read(&mut output).await["method"], "initialized");
-            tx.send(ServerCommand::Open { key: 1, thread: Box::new(thread(sink.clone()).params), sink, tools: None }).unwrap();
+            tx.send(ServerCommand::Open { key: 1, thread: Box::new(thread(sink.clone()).params), sink, tools: None, desktop: false })
+                .unwrap();
             let open = read(&mut output).await;
             write(&mut input, json!({"id":open["id"],"result":{"thread":{"id":"owner"}}})).await;
             while !matches!(events.recv().await.unwrap(), EngineEvent::Started { .. }) {}

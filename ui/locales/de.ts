@@ -436,6 +436,7 @@ export const de: Messages = {
   "ask.self.webSearchLine": "Von {from} zu {to}",
   "ask.self.alwaysWebSearch": "Änderungen der Websuche immer erlauben",
   "tool.settingsWebSearch": "Websuche ändern",
+  "tool.desktopRead": "Vordergrundfenster lesen",
   "ask.self.alwaysRepair": "Katalogreparaturen in dieser Unterhaltung immer erlauben",
   "ask.self.replaceEffect": "Lokale Änderungen und die vorige Sicherung werden ersetzt. Die aktuellen Dateien bleiben als neue Sicherung erhalten. Diese Unterhaltung behält ihre bisherigen Werkzeuge.",
   "ask.self.replaceLine": "{from} → {version}",

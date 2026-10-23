@@ -597,6 +597,7 @@ export const es: Messages = {
   "ask.self.webSearchLine": "De {from} a {to}",
   "ask.self.alwaysWebSearch": "Permitir siempre cambios en la búsqueda web",
   "tool.settingsWebSearch": "Cambiando la búsqueda web",
+  "tool.desktopRead": "Leyendo la ventana en primer plano",
   "ask.self.alwaysRepair": "Permitir siempre reparaciones del catálogo en esta conversación",
   "ask.self.replaceEffect": "Esto sustituye los cambios locales y la copia de seguridad anterior. Los archivos actuales se guardan como la nueva copia de seguridad. Esta conversación conserva las herramientas que ya usa.",
   "ask.self.replaceLine": "{from} → {version}",

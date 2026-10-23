@@ -597,6 +597,7 @@ export const en = {
   "ask.self.webSearchLine": "From {from} to {to}",
   "ask.self.alwaysWebSearch": "Always allow web search changes",
   "tool.settingsWebSearch": "Changing web search",
+  "tool.desktopRead": "Reading the foreground window",
   "ask.self.alwaysRepair": "Always allow catalog repairs in this conversation",
   "ask.self.replaceEffect": "This replaces local edits and any previous backup. The current files are kept as the new backup. This conversation keeps its existing tools.",
   "ask.self.replaceLine": "{from} → {version}",

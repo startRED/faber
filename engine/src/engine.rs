@@ -39,6 +39,7 @@ mod by_itself;
 mod changes;
 mod compact;
 mod copies;
+mod desktop;
 mod ended;
 pub use aside::Aside;
 pub use browse::TabStep;
@@ -421,6 +422,8 @@ struct Core {
     git: Option<copies::GitRunner>,
     /// Faber's own browser (R161 step 7), given by the shell where it has one; without it the tool is not offered.
     browser: Option<std::sync::Arc<dyn crate::browser::Browser>>,
+    desktop: Option<std::sync::Arc<dyn crate::desktop::Desktop>>,
+    desktop_pending: HashMap<String, desktop::Pending>,
     /// Runs a project's checks (`crate::verify`), given by the shell; without it the tool is not offered.
     verifier: Option<std::sync::Arc<crate::verify::Verifier>>,
     /// Where the catalog install of a project's agent downloads from instead of the real hosts (tests; a loopback address only).
@@ -664,6 +667,8 @@ impl Engine {
                 follows: HashMap::new(),
                 pr_reader,
                 browser: None,
+                desktop: None,
+                desktop_pending: HashMap::new(),
                 verifier: None,
                 setup_source: None,
                 node_missing: false,
@@ -1120,6 +1125,11 @@ impl Engine {
     pub fn set_browser(&self, browser: std::sync::Arc<dyn crate::browser::Browser>) {
         self.with(|c| c.browser = Some(browser));
     }
+
+    /// Supplies native text observation; absent adapters never expose a desktop tool.
+    pub fn set_desktop(&self, desktop: std::sync::Arc<dyn crate::desktop::Desktop>) {
+        self.with(|core| core.desktop = Some(desktop));
+    }
     /// Makes the project agent's catalog install download from this loopback address instead of the real hosts (tests).
     #[doc(hidden)]
     pub fn set_setup_source(&self, source: &str) {
@@ -1332,6 +1342,10 @@ impl Engine {
     pub fn shutdown(&self) {
         self.with(|c| {
             c.closing = true;
+            let pending: Vec<_> = c.desktop_pending.keys().cloned().collect();
+            for id in pending {
+                c.cancel_desktop(&id);
+            }
             let active: Vec<_> = c.live.keys().cloned().collect();
             for id in active {
                 c.note_turn(&id, None, true);
@@ -1838,6 +1852,12 @@ impl Core {
             settings.before_plan = (to == Permissions::Plan && was != Permissions::Plan).then_some(was);
         }
         self.store.save_settings(&settings).map_err(|_| "error.settings.saveFailed".to_string())?;
+        if permissions_picked {
+            let ids: Vec<_> = self.desktop_pending.keys().cloned().collect();
+            for id in ids {
+                self.cancel_desktop(&id);
+            }
+        }
         if patch.web_search.is_some() {
             self.web_revision = self.web_revision.wrapping_add(1);
         }
@@ -2011,6 +2031,7 @@ impl Core {
             self.installs.remove(id);
             self.bigger.remove(id);
         }
+        self.cancel_desktop(id);
         let compacting = self.convs.get(id).is_some_and(|c| c.compacting);
         let active = self.live.get(id).is_some_and(|l| l.turn.is_some() || compacting);
         if let Some(l) = self.live.get(id) {
@@ -2120,7 +2141,8 @@ impl Core {
                     }
                     return;
                 }
-                EngineEvent::HelperCall { id, .. }
+                EngineEvent::DesktopCall { id, .. }
+                | EngineEvent::HelperCall { id, .. }
                 | EngineEvent::BrowseCall { id, .. }
                 | EngineEvent::ConversationCall { id, .. }
                 | EngineEvent::VerifyCall { id, .. }
@@ -2375,6 +2397,7 @@ impl Core {
                 self.settle_facts(conv, &id);
                 self.watch_ended(conv, &id);
             }
+            EngineEvent::DesktopCall { id, input } => return self.desktop_call(conv, sid, id, input),
             EngineEvent::HelperCall { id, input } => return self.start_helper(conv, id, input),
             EngineEvent::BrowseCall { id, input } => return self.browse(conv, id, input),
             EngineEvent::ConversationCall { id, input } => return self.conversation_call(conv, id, input),
@@ -2720,6 +2743,7 @@ impl Core {
     }
 
     fn finish(&mut self, conv: &str, turn_id: Option<String>) {
+        self.cancel_desktop(conv);
         if let Some(sid) = self.live.get(conv).map(|l| l.sid)
             && self.background.end_turn(conv, sid)
         {
@@ -2751,6 +2775,7 @@ impl Core {
 
     /// The rest of a turn's end, with the keep-going reading `finish` already made when it held the turn.
     fn end_turn(&mut self, conv: &str, turn_id: Option<String>, read: Option<Option<String>>) {
+        self.cancel_desktop(conv);
         self.transfers.remove(conv);
         self.installs.remove(conv);
         self.settings_changes.remove(conv);
@@ -3057,6 +3082,9 @@ impl Core {
     /// The CLI took the oldest message handed to the running turn in (or the one named): it joins the conversation, and the
     /// answer goes on in a new reply under it, because that is what answers it.
     fn taken_in(&mut self, conv: &str, tag: Option<String>) {
+        if self.live.get(conv).is_some_and(|l| !l.steering.is_empty()) {
+            self.cancel_desktop(conv);
+        }
         let secs = self.secs();
         let Some(l) = self.live.get_mut(conv) else { return };
         let Some(at) = tag.and_then(|t| l.steering.iter().position(|s| *s == t)).or((!l.steering.is_empty()).then_some(0)) else { return };
@@ -3927,9 +3955,10 @@ impl Core {
         let conversations = siblings::offers(area);
         let verify = self.offers_verify(area, tool_mode);
         let progress = area == Area::Project;
+        let desktop = self.desktop.is_some() && progress && tool_mode == Permissions::FullAccess;
         self.rewind_session_started(conv, sid, cwd_used.clone());
         let session = match pick.vendor {
-            Vendor::Claude => start_claude(
+            Vendor::Claude => crate::claude::start_claude_with_desktop(
                 ClaudeOptions {
                     bin: cli.command.clone(),
                     cwd,
@@ -3957,8 +3986,9 @@ impl Core {
                     sandbox: self.opts.clis.get(&Vendor::Codex).cloned(),
                 },
                 sink,
+                desktop,
             ),
-            Vendor::Codex => self.codex_server(area, user_hooks, permissions, &cli).open_with_tools(
+            Vendor::Codex => self.codex_server(area, user_hooks, permissions, &cli).open_with_desktop(
                 CodexThread {
                     helper,
                     browse,
@@ -3979,6 +4009,7 @@ impl Core {
                 },
                 sink,
                 project_tools,
+                desktop,
             ),
         };
         self.live.insert(
