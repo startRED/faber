@@ -107,7 +107,9 @@ non-reproduction, not a diagnosed cause or product repair. A subsequent ordinary
 passed 2,236 engine, 712 UI and 123 native scenarios. Its visual-version scenario retained 6.8 MB after closing and
 8.6 MB after reopening and Escape, both after 10.9 seconds and below the unchanged 15 MB margin. This newer-tree
 confirmation is separate from the exact-source control; it does not diagnose the original overage. The normal queue
-accepted the candidate, while its remote gate and final integration remain unobserved.
+accepted the candidate. GitHub subsequently reported this instruction change closed and merged, and its numbered
+candidate was observed on both the development base and main. Its queued workflow gate passed; the subsequent
+post-integration warmed-cache gate is separate from the full native execution above.
 
 Required local commands passed for each final package, with receipts retaining the five pre-existing source warnings,
 the existing bundle warning and script result 101 passed/one branch-only skip. Claims were rechecked after other
