@@ -339,6 +339,7 @@ impl Core {
     /// Pending work belongs to the conversation and follows its next session. Only a compaction already running ends
     /// with this process: nothing would ever hear its end.
     pub(super) fn retire(&mut self, conv: &str) -> Option<Live> {
+        self.settings_changes.remove(conv);
         self.revoke_replacement(conv);
         self.release_codex_preparation(conv);
         let live = self.live.remove(conv)?;

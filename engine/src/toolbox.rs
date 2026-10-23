@@ -16,6 +16,9 @@ use std::sync::OnceLock;
 pub const QUOTA_TOOL: &str = "Quota";
 pub const CATALOG_TOOL: &str = "Catalog";
 pub const MEMORY_SEARCH_TOOL: &str = "MemorySearch";
+pub const SETTINGS_TOOL: &str = "Settings";
+pub const SETTINGS: &str = "settings";
+pub const SELF_WEB_SEARCH: &str = "faber.settings.web_search";
 pub const OFFER_BIGGER_TOOL: &str = "OfferBigger";
 /// The tools as Codex knows them, and as Faber's MCP server lists them to Claude Code.
 pub const QUOTA: &str = "quota";
@@ -62,13 +65,32 @@ pub const SELF_UPDATE: &str = "faber.tools.update";
 pub const SELF_REPAIR: &str = "faber.tools.repair";
 
 pub fn is_self_change(tool: &str) -> bool {
-    matches!(tool, SELF_INSTALL | SELF_SWITCH | SELF_REMOVE | SELF_UPDATE | SELF_REPAIR)
+    matches!(tool, SELF_INSTALL | SELF_SWITCH | SELF_REMOVE | SELF_UPDATE | SELF_REPAIR | SELF_WEB_SEARCH)
 }
 /// Every decision about a self-change, one line each, in the data folder.
 pub const SELF_CHANGES: &str = "self-changes.jsonl";
 /// About 1,000 lines of about 200 bytes. At the cap the oldest half goes and the newest lines stay, so a decision is never lost
 /// for being late.
 const SELF_CHANGES_MAX: u64 = 200_000;
+
+const SETTINGS_DESCRIPTION: &str = "Only when the person explicitly requests it, change Faber's web search preference to off, cached or live. This changes Faber itself and needs its own permission unless full trust is enabled. A stricter choice stops all replies in progress, including this one. Never change permissions or trust; never use this during unrelated work.";
+
+fn settings_schema() -> Value {
+    json!({ "type": "object", "properties": { "web_search": { "type": "string", "enum": ["off", "cached", "live"] } }, "required": ["web_search"], "additionalProperties": false })
+}
+
+pub fn log_web_search(
+    dir: &std::path::Path,
+    at: u64,
+    conv: &str,
+    from: crate::model::WebSearch,
+    to: crate::model::WebSearch,
+    how: &str,
+    result: &str,
+) -> bool {
+    let line = json!({ "at": at, "kind": "settings.web_search", "conv": conv, "from": from, "to": to, "how": how, "result": result });
+    append_capped_line(&dir.join(SELF_CHANGES), &line.to_string(), SELF_CHANGES_MAX)
+}
 
 fn quota_schema() -> Value {
     json!({ "type": "object", "properties": {}, "additionalProperties": false })
@@ -114,8 +136,9 @@ fn offer_bigger_schema() -> Value {
 }
 
 /// The tools as Codex `dynamicTools` entries.
-pub fn codex_tools() -> [Value; 4] {
+pub fn codex_tools() -> [Value; 5] {
     [
+        json!({ "type": "function", "name": SETTINGS, "description": SETTINGS_DESCRIPTION, "inputSchema": settings_schema() }),
         json!({ "type": "function", "name": QUOTA, "description": QUOTA_DESCRIPTION, "inputSchema": quota_schema() }),
         json!({ "type": "function", "name": CATALOG, "description": CATALOG_DESCRIPTION, "inputSchema": catalog_schema() }),
         json!({ "type": "function", "name": MEMORY_SEARCH, "description": MEMORY_SEARCH_DESCRIPTION, "inputSchema": memory_search_schema() }),
@@ -124,8 +147,9 @@ pub fn codex_tools() -> [Value; 4] {
 }
 
 /// The tools as Faber's MCP server lists them to Claude Code.
-pub fn mcp_tools() -> [Value; 4] {
+pub fn mcp_tools() -> [Value; 5] {
     [
+        json!({ "name": SETTINGS, "description": SETTINGS_DESCRIPTION, "inputSchema": settings_schema() }),
         json!({ "name": QUOTA, "description": QUOTA_DESCRIPTION, "inputSchema": quota_schema() }),
         json!({ "name": CATALOG, "description": CATALOG_DESCRIPTION, "inputSchema": catalog_schema() }),
         json!({ "name": MEMORY_SEARCH, "description": MEMORY_SEARCH_DESCRIPTION, "inputSchema": memory_search_schema() }),
@@ -136,6 +160,7 @@ pub fn mcp_tools() -> [Value; 4] {
 /// The name both drivers give a call of one of these tools, from the name Codex or the MCP server knows.
 pub fn tool_of(name: &str) -> Option<&'static str> {
     match name {
+        SETTINGS => Some(SETTINGS_TOOL),
         QUOTA => Some(QUOTA_TOOL),
         CATALOG => Some(CATALOG_TOOL),
         MEMORY_SEARCH => Some(MEMORY_SEARCH_TOOL),
@@ -147,6 +172,26 @@ pub fn tool_of(name: &str) -> Option<&'static str> {
 /// The same, from the name Claude Code gives the call.
 pub fn claude_tool(name: &str) -> Option<&'static str> {
     name.strip_prefix("mcp__faber__").and_then(tool_of)
+}
+
+#[cfg(test)]
+mod settings_contract_tests {
+    use super::*;
+
+    #[test]
+    fn settings_exposes_only_the_explicit_web_search_choice() {
+        let listed = codex_tools();
+        let tool = listed.iter().find(|tool| tool["name"] == "settings").expect("the settings tool must be offered");
+        let schema = &tool["inputSchema"];
+        assert_eq!(schema["additionalProperties"], false);
+        assert_eq!(schema["required"], json!(["web_search"]));
+        assert_eq!(schema["properties"].as_object().unwrap().len(), 1, "never expose an arbitrary settings patch");
+        assert_eq!(schema["properties"]["web_search"]["enum"], json!(["off", "cached", "live"]));
+        assert!(mcp_tools().iter().any(|tool| tool["name"] == "settings" && tool["inputSchema"] == *schema));
+        assert_eq!(tool_of("settings"), Some("Settings"));
+        assert_eq!(claude_tool("mcp__faber__settings"), Some("Settings"));
+        assert!(is_self_change("faber.settings.web_search"));
+    }
 }
 
 // ---- quota ----
