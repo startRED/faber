@@ -98,6 +98,17 @@ each version, the benchmark measures it, and the version ships only with the mai
 Not planned yet: community themes listed in the catalog, code signing and the Microsoft Store, and animations for the
 symbol.
 
+### Proposed work-method extension
+
+The [Faber Flow revision 3 proposal](../superpowers/specs/2026-10-22-faber-framework/README.md) researches company and
+community practices and extends the approved R435 method without replacing its records or changing the phase order.
+Its [capability backlog](../superpowers/specs/2026-10-22-faber-framework/features.md) and
+[implementation slices](../superpowers/specs/2026-10-22-faber-framework/roadmap.md) cover current-input identity,
+complete task packets, evidence-linked outcomes, adaptive support for light/frontier models, constrained composition,
+recovery, calibrated review, domain checks, readable progress and measured workflow improvement. Reusable work becoming
+scheduled routines remains in phase 7. These are proposed capabilities, not approved implementation or measured gains;
+existing R435 work retains precedence and each candidate needs normal adoption and program evidence.
+
 ### Non-goals
 
 - Vendors other than Claude Code and Codex: no Gemini, Copilot, Cursor, OpenCode or ACP drivers.

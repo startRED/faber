@@ -3,8 +3,9 @@
 Status: Proposal, not an adopted product decision. No runtime behavior is changed.
 Date: 2026-10-22. Working name only: Faber Flow.
 
-Revision 2: research-driven redesign. The core is now adaptive, evidence-backed work across domains and model
-capability levels; the visual roadmap is its readable view. This replaces revision 1's progress-first emphasis.
+Revision 3: company/community practice and Faber history extend the adaptive, evidence-backed work method.
+The new emphasis is constrained workflow composition, calibrated review, human attention, reliable effects and
+measured improvement of the workflow itself. The visual roadmap remains a readable native view, not another ledger.
 
 ## Read this first
 
@@ -29,6 +30,10 @@ This proposal covers Faber developing itself and the full intended product, incl
 | [GSD audit](research-gsd.md) | Fourteen complaint classes across Core/Pi and their historical lines |
 | [Research basis](research-methods.md) | Primary evidence and limits of amplification, routing and collaboration |
 | [Qualification gates](qualification.md) | Exactly what counts as a light/frontier/domain or competitor improvement |
+| [Practice research](research-practice.md) | Company/community sources and corrections to the supplied AI answer |
+| [Faber context audit](context-audit.md) | Owner intent, existing decisions, current capabilities and adoption boundaries |
+| [Composition](composition.md) | A small common loop with support adapted to the task and model |
+| [Feature backlog](features.md) | Twelve proposed capabilities, native homes, dependencies and acceptance |
 
 ## 1. Summary
 
@@ -48,6 +53,11 @@ Approved memory and trust rules remain authoritative; additions below are propos
 The framework selects between direct work, grounded steps, strong guidance for bounded light-model execution,
 independent alternatives and a strong direct/escalated route. It chooses a route from actual capability, evidence,
 risk, dependency structure and whole-task cost. It does not always start cheap, always start strong or always fan out.
+
+Revision 3 makes that selection concrete: six reusable mechanisms compose only as needed, within an unchanged
+trust boundary. Review guidance is tested for both missed faults and false alarms. Resumption reconciles ambiguous
+effects rather than replaying them. Workflow experiments use frozen baselines and held-out tasks; preference alone
+cannot silently rewrite policy. Full quality includes usable delivery and the person's correction burden.
 
 ## 2. Background
 

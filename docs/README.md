@@ -66,7 +66,7 @@ one is never touched again, and its boxes say nothing.
 
 | Page | Status |
 | :--- | :--- |
-| [superpowers/specs/2026-10-22-faber-framework/README.md](superpowers/specs/2026-10-22-faber-framework/README.md) | Proposal revision 2, nothing built: adaptive work across light/frontier models and domains, BMAD/Core/Pi complaint audit, evidence-backed progress, staged adoption and fair qualification; companion pages linked from its README |
+| [superpowers/specs/2026-10-22-faber-framework/README.md](superpowers/specs/2026-10-22-faber-framework/README.md) | Proposal revision 3, nothing built: company/community research, Faber context audit, adaptive composition, twelve capability candidates, BMAD/Core/Pi audit, evidence-backed progress and fair qualification; companion pages linked from its README |
 | superpowers/specs/2026-10-11-faber-redesign-design.md | Absorbed into product/ and design/ |
 | superpowers/specs/2026-10-11-auto-quota-pacing-design.md, plans/2026-10-11-auto-quota-pacing.md, auto-quota-pacing-report.md | Shipped |
 | superpowers/plans/2026-10-11-b2 … b9 (test runner, looks, running engine, layout, tray, first run, Settings, download) | Shipped |

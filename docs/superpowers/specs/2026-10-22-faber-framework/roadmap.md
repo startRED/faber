@@ -139,6 +139,23 @@ chooses adoption. Keep prior qualified paths when a candidate policy does not im
 
 ## Ranked priorities after preparation
 
+Revision 3 turns these priorities into [twelve capability candidates](features.md), with native homes, dependencies,
+observable acceptance and cost/removal conditions. They are proposal references, not another implementation queue.
+The [composition design](composition.md) and [practice research](research-practice.md) explain the new mechanisms.
+
+| Slice | Revision 3 candidates | Milestone evidence |
+| :--- | :--- | :--- |
+| F0 | FF01 current-input audit; FF10/11 baseline and attention measures | Current root/version recorded; comparison and data collection scope declared |
+| F1 | FF01–03 input identity, complete packets, outcome/evidence links | Stale/wrong-root passes refused; required context survives handoff |
+| F2 | FF04 model-sensitive support and qualified route choice | Light, mixed and frontier outcomes/costs attributed separately |
+| F3 | FF05–07 constrained composition, effect recovery, calibrated review | No unauthorized composition, duplicate ambiguous effect or reset repair loop |
+| F4 | FF08/09 artifact acceptance and understandable native route | Domain artifact actually inspected; now/next/blocker understood |
+| F5 | FF10/11 held-out improvement and intervention burden | Quality floors, cost completeness and downstream faults reported together |
+
+FF12, reusable procedures becoming explicitly scheduled routines, belongs to existing product phase 7. It is not
+an implicit addition to F3 or a reason to deploy a permanent workflow service. Other candidates fit phases 1a/3/4
+and the existing specialized phases as described in the backlog; none reorders the approved main phase table.
+
 | Rank | Capability | Impact / effort / uncertainty | Trade-off |
 | :--- | :--- | :--- | :--- |
 | 1 | Complete task packets plus evidence identity | High effect on light-model usefulness and trust; moderate schema effort | Must preserve original constraints |
