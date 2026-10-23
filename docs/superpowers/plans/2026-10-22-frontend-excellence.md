@@ -226,5 +226,19 @@ A separate temporary scalar investigation on that exact composed source passed t
 139.5 MiB baseline, 7.4/7.9 MiB retention after close/Escape. Its unchanged detached motion layer was already present
 before baseline; the corresponding isolate used-JS delta was 283,680 bytes, not whole-browser private working set.
 These readings belong only to that diagnostic launch, whose instrumentation can perturb allocation and timing. They
-do not establish a cause or repair of the failed ordinary run. Full-workload diagnostic collection remains in progress;
-no production memory repair, new queued acceptance or final send integration is established.
+do not establish a cause or repair of the failed ordinary run. The full instrumented native workload subsequently
+passed 126 scenarios, zero failed/not run/skipped, with 7.2/8.2 MiB retention. This is another non-reproduction.
+
+A bounded navigation experiment reduced joint history from 21 entries to one after twenty version switches, but did
+not improve post-close RAM. At a separately expanded 200-switch diagnostic workload, original/replacement navigation
+retained 12.9/13.2 MiB after close and 12.7/14.2 after Escape; sampled peaks were 235.3/237.2 MiB and active CPU was
+19,500/20,922 ms. Each variant ran once. The observed increases are retained; neither this comparison nor flat history
+establishes a memory cause or gain. The temporary navigation candidate was discarded, not shipped.
+
+A later read-only diagnostic queried the fixture browser's process types without command lines. That passing launch
+had rounded browser +5.1, GPU -4.1 and renderer +5.2 MiB after close. These roles and isolate observations cannot be
+assigned to the separate failed launch. All temporary probes and expanded workloads were archived and only their own
+source edits restored; the diagnostic tree was confirmed clean at its original source. An independent evidence review
+found no concrete production memory repair and recommended one bounded ordinary complete confirmation, retaining
+the unexplained failure and stopping on another failure. This does not approve the guard or replace its actual gate.
+That new ordinary confirmation remains in progress; no production memory repair or final send integration is established.
