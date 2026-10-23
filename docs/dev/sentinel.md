@@ -51,7 +51,9 @@ Checks and the critique know what Faber should look like; a newcomer only knows 
 720x480, pt-BR by default; `--size`, `--lang`, `--steps`, `--no-build`) and gives a fresh AI one step at a time: a
 screenshot and the controls a screen reader would name, numbered. Text is read from the image, never copied from the
 page body: that would also reveal text below the viewport. It answers with one action (click a
-number, type, a key, scroll, done or stuck) and what confused it. The tasks are the first run, a first chat, Projects
+number, type, a key, scroll, wait, done or stuck) and what confused it. Wait uses the same fixed 1.2-second pause as
+other actions and counts toward the step limit; it cannot request an unlimited delay. The chat task follows sending
+until a response appears, rather than treating a loading screen as completion. The tasks are the first run, a first chat, Projects
 and the language in Settings (`TASKS`), in one app, each starting where the last ended. The Catalog task comes after
 onboarding: find a debugging tool, read its purpose and automatic-use explanation, then return to the list. This task
 only browses; it does not test installation, removal or switches. `--task catalogo` runs this task alone, while an

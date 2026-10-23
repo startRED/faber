@@ -45,7 +45,7 @@ export const TASKS = [
       'Pelo que a tela explica, descubra para que ela serve e quando a IA a usa. Depois volte à lista. ' +
       'Só explore e leia: não instale, remova, ative, desative ou troque ferramentas, nem abra páginas externas.',
   },
-  { id: 'conversa', goal: 'Comece uma conversa nova e mande uma pergunta simples, por exemplo "o que você sabe fazer?".' },
+  { id: 'conversa', goal: 'Comece uma conversa nova e mande uma pergunta simples, por exemplo "o que você sabe fazer?". Acompanhe até aparecer uma resposta.' },
   { id: 'projetos', goal: 'Abra a área de Projetos e descubra para que ela serve.' },
   { id: 'configuracoes', goal: 'Encontre as Configurações do app e descubra onde se muda o idioma.' },
 ];
@@ -119,10 +119,10 @@ export function stepPrompt(task, history, seen, size, language = 'pt-BR') {
     '',
     'Escolha UMA próxima ação. Responda só com um JSON, sem nada antes ou depois:',
     '{"thought": "o que você pensa ao ver a tela, em uma frase", "confusion": "o que te confundiu aqui, ou null",',
-    ' "action": {"type": "click", "n": 3} | {"type": "type", "text": "..."} | {"type": "key", "key": "Enter"} |',
+    ' "action": {"type": "click", "n": 3} | {"type": "type", "text": "..."} | {"type": "key", "key": "Enter"} | {"type": "wait"} |',
     '           {"type": "scroll", "dy": 400} | {"type": "done", "summary": "como conseguiu"} |',
     '           {"type": "stuck", "where": "onde e por que travou"}}',
-    'Para escrever num campo, clique nele primeiro. Diga "done" só quando a tarefa estiver feita de verdade.',
+    'Para escrever num campo, clique nele primeiro. Use "wait" enquanto o app prepara ou responde. Diga "done" só quando a tarefa estiver feita de verdade.',
   ].join('\n');
 }
 
@@ -162,7 +162,7 @@ export function firstJson(text) {
   return null;
 }
 
-const TYPES = new Set(['click', 'type', 'key', 'scroll', 'done', 'stuck']);
+const TYPES = new Set(['click', 'type', 'key', 'scroll', 'wait', 'done', 'stuck']);
 
 /** The step an answer asks for, checked against the controls on screen; an answer that is not one ends the task. */
 export function parseStep(text, controls) {
@@ -186,6 +186,8 @@ export function describe(action) {
       return `apertou ${action.key}`;
     case 'scroll':
       return `rolou ${action.dy}`;
+    case 'wait':
+      return 'aguardou';
     case 'done':
       return `conseguiu: ${action.summary || ''}`;
     default:
@@ -352,6 +354,7 @@ async function act(app, action, seen, size) {
     const params = { type: 'mouseWheel', x: size.width / 2, y: size.height / 2, deltaX: 0, deltaY: Number(action.dy) || 400 };
     await app.op('call', 'Input.dispatchMouseEvent', { params });
   }
+  // Waiting consumes one ordinary step and only this existing pause, never an unbounded loop.
   await pause(1200);
 }
 

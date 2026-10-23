@@ -71,6 +71,12 @@ test('a step outside the allowed actions or a control that is not on screen ends
   assert.equal(parseStep('não sei', controls).action.type, 'stuck');
 });
 
+test('a newcomer can wait for a response without reporting the task complete', () => {
+  const step = parseStep('{"thought":"a resposta ainda está chegando","action":{"type":"wait"}}', controls);
+  assert.equal(step.action.type, 'wait');
+  assert.equal(describe(step.action), 'aguardou');
+});
+
 test('the step prompt holds the task, the screen as words and the numbered controls, never a selector', () => {
   const prompt = stepPrompt(TASKS[0], [], { text: 'Bem-vindo', controls }, { width: 720, height: 480 });
   assert.match(prompt, /Tarefa: Você acabou de instalar/);
