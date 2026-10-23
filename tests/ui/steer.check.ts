@@ -122,7 +122,8 @@ check('steer: a message already handed to the running answer cannot be removed',
     { id: 'sent', at: 2, text: 'Already in the turn', choice: { vendor: 'codex' }, sending: true },
   ];
   const dispose = render(() => createComponent(Thread, {
-    conversationId: 'conv-test', messages: [message], queued, busy: true, from: 0, options: [], onBranch: () => {},
+    // The app passes busy only for Faber's checks, so Send now shows while an answer streams (it steers).
+    conversationId: 'conv-test', messages: [message], queued, busy: false, from: 0, options: [], onBranch: () => {},
   }), root);
   const settle = () => new Promise((resolve) => setTimeout(resolve, 30));
   try {
@@ -130,8 +131,14 @@ check('steer: a message already handed to the running answer cannot be removed',
     const bubbles = [...root.querySelectorAll('.mine.queued')];
     equal(bubbles.length, 2, 'both queued messages are drawn');
     const remove = (bubble: Element) => bubble.querySelector('button[aria-label="' + t('queue.removeLabel') + '"]');
+    const sendNow = (bubble: Element) => bubble.querySelector('button[aria-label="' + t('queue.sendNowLabel') + '"]');
     ok(remove(bubbles[0]), 'a message waiting for the next turn can be removed');
+    ok(sendNow(bubbles[0]), 'and sent now');
+    equal(bubbles[0].querySelector('.queue-badge')?.textContent, t('queue.label'), 'it reads as queued');
     equal(remove(bubbles[1]), null, 'a message already in the running turn cannot');
+    equal(sendNow(bubbles[1]), null, 'nor offers a Send now that would do nothing');
+    equal(bubbles[1].querySelector('.queue-badge')?.textContent, t('queue.handed'), 'it says it was sent, not queued');
+    equal(bubbles[1].querySelector('.actions'), null, 'it keeps no empty row of actions');
   } finally {
     dispose();
     root.remove();

@@ -987,6 +987,7 @@ export const de: Messages = {
   'mine.versionBack': 'Vorherige Version',
   'mine.versionNext': 'Nächste Version',
   'queue.label': 'In der Warteschlange',
+  'queue.handed': 'Gesendet: die KI liest es beim nächsten Schritt',
   'queue.edit': 'Bearbeiten',
   'queue.editLabel': 'Nachricht in der Warteschlange bearbeiten',
   'queue.save': 'Speichern',

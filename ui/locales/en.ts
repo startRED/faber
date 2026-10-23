@@ -1146,6 +1146,7 @@ export const en = {
   'mine.versionBack': 'Previous version',
   'mine.versionNext': 'Next version',
   'queue.label': 'Queued',
+  'queue.handed': 'Sent: the AI reads it at its next step',
   'queue.edit': 'Edit',
   'queue.editLabel': 'Edit queued message',
   'queue.save': 'Save',

@@ -781,7 +781,7 @@ const empty = (m: Message) =>
   !m.text.trim() && !m.tools?.length && !m.thinking && !m.error && !m.checks && !m.follow && !m.halt && !m.permissions?.length && !m.parked?.length && !m.files?.length;
 
 // A message written while an answer was running. The person can take it back until it is sent; one already handed to the
-// running answer (`sending`) cannot be, and one that waits for the next turn can be sent by hand once nothing runs.
+// running answer (`sending`) cannot be and says so, with no buttons, and one that waits can be sent by hand.
 function Queued(props: { conversationId: string; q: QueuedTurn; busy: boolean; onRecovered?: (id: string, text: string) => void; onError?: (err: unknown) => void }) {
   const editKey = `queued-edit.${props.conversationId}.${props.q.id}`;
   const [editing, setEditing] = createSignal<string | undefined>(kept(editKey) || undefined);
@@ -838,7 +838,7 @@ function Queued(props: { conversationId: string; q: QueuedTurn; busy: boolean; o
     <div class="mine queued">
       <Strip images={props.q.images} files={props.q.attachments} />
       <div class="you queued" classList={{ editing: editing() !== undefined }}>
-        <span class="queue-badge">{t('queue.label')}</span>
+        <span class="queue-badge">{props.q.sending ? t('queue.handed') : t('queue.label')}</span>
         <Show
           when={editing() !== undefined}
           fallback={
@@ -846,23 +846,21 @@ function Queued(props: { conversationId: string; q: QueuedTurn; busy: boolean; o
               <Show when={props.q.text}>
                 <div class="queue-text">{props.q.text}</div>
               </Show>
-              <div class="actions">
-                <Show when={!props.q.sending}>
+              <Show when={!props.q.sending}>
+                <div class="actions">
                   <button type="button" ref={(el) => { editButton = el; }} aria-label={t('queue.editLabel')} onClick={() => {
                     write(props.q.text);
                   }}>{t('queue.edit')}</button>
-                </Show>
-                <Show when={!props.q.sending}>
                   <button type="button" onClick={() => api.removeQueued(props.conversationId, props.q.id).catch((err) => props.onError?.(err))} aria-label={t('queue.removeLabel')}>
                     {t('queue.remove')}
                   </button>
-                </Show>
-                <Show when={!props.busy}>
-                  <button type="button" onClick={() => api.sendQueued(props.conversationId, props.q.id).catch((err) => props.onError?.(err))} aria-label={t('queue.sendNowLabel')}>
-                    {t('queue.sendNow')}
-                  </button>
-                </Show>
-              </div>
+                  <Show when={!props.busy}>
+                    <button type="button" onClick={() => api.sendQueued(props.conversationId, props.q.id).catch((err) => props.onError?.(err))} aria-label={t('queue.sendNowLabel')}>
+                      {t('queue.sendNow')}
+                    </button>
+                  </Show>
+                </div>
+              </Show>
             </>
           }
         >

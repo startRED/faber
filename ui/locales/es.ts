@@ -1148,6 +1148,7 @@ export const es: Messages = {
   'mine.versionBack': 'Versión anterior',
   'mine.versionNext': 'Versión siguiente',
   'queue.label': 'En cola',
+  'queue.handed': 'Enviado: la IA lo lee en su próximo paso',
   'queue.edit': 'Editar',
   'queue.editLabel': 'Editar mensaje en cola',
   'queue.save': 'Guardar',

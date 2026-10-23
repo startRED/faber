@@ -1,0 +1,12 @@
+{
+  "notes": {
+    "fixed": {
+      "en": "A message the AI already received while working now reads \"Sent\", instead of \"Queued\" with a Send now button that did nothing.",
+      "pt-BR": "Uma mensagem que a IA já recebeu enquanto trabalha agora aparece como \"Enviada\", e não mais \"Na fila\" com um Enviar agora que não fazia nada.",
+      "es": "Un mensaje que la IA ya recibió mientras trabaja ahora dice \"Enviado\", y ya no \"En cola\" con un Enviar ahora que no hacía nada.",
+      "fr": "Un message que l’IA a déjà reçu pendant son travail indique maintenant « Envoyé », au lieu de « En attente » avec un Envoyer maintenant qui ne faisait rien.",
+      "de": "Eine Nachricht, die die KI schon während der Arbeit bekommen hat, zeigt jetzt „Gesendet“ statt „In der Warteschlange“ mit einem wirkungslosen Jetzt senden."
+    }
+  },
+  "decisions": []
+}

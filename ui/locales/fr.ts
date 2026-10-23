@@ -987,6 +987,7 @@ export const fr: Messages = {
   'mine.versionBack': 'Version précédente',
   'mine.versionNext': 'Version suivante',
   'queue.label': 'En attente',
+  'queue.handed': 'Envoyé : l’IA le lit à sa prochaine étape',
   'queue.edit': 'Modifier',
   'queue.editLabel': 'Modifier le message en attente',
   'queue.save': 'Enregistrer',

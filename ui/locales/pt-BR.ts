@@ -1145,6 +1145,7 @@ export const ptBR: Messages = {
   'mine.versionBack': 'Versão anterior',
   'mine.versionNext': 'Próxima versão',
   'queue.label': 'Na fila',
+  'queue.handed': 'Enviada: a IA lê no próximo passo',
   'queue.edit': 'Editar',
   'queue.editLabel': 'Editar mensagem da fila',
   'queue.save': 'Salvar',

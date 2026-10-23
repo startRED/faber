@@ -5,6 +5,8 @@
   Shift+Enter adds a line and Escape cancels from any control in the editor form; composition input never saves or
   cancels early. Nothing animates, including under
   reduced or no motion. The box and its actions wrap within the conversation column at 720 px.
+- A message already handed to the running turn swaps the badge for "Sent: the AI reads it at its next step" and drops
+  the actions row: the CLI holds it, so Edit, Remove and Send now would do nothing.
 - Save changes the text in place, keeping the message's id, position, images and files. A message handed to the CLI
   cannot be edited. A save refused because the message left the queue closes the editor and returns its words to the
   conversation's message box, after a blank line if it already holds a draft, with focus there and one calm status
