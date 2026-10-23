@@ -29,8 +29,10 @@ const plugin = (row: ToolRow) => !!row.pluginParts?.length;
 const needsNode = (row: ToolRow) => (row.server || row.requiresNode) && row.nodeAvailable === false;
 const glyph = (row: ToolRow): GlyphName => plugin(row) ? 'puzzle' : row.server ? 'globe' : glyphs[row.job] ?? 'wand';
 const tone = (row: ToolRow) => row.status || needsNode(row) ? 'warn' : !row.installed ? 'none' : row.enabled === false ? 'off' : 'on';
+const hasCopy = (row: ToolRow) => row.hasCopy ?? !!(row.installed || row.status);
+const removedCopy = (row: ToolRow) => typeof row.removedEnabled === 'boolean';
 type Batch = 'install' | 'on' | 'off' | 'remove';
-const fits = (row: ToolRow, action: Batch) => action === 'install' ? !needsNode(row) && (!row.installed || !!row.status)
+const fits = (row: ToolRow, action: Batch) => action === 'install' ? !needsNode(row) && !hasCopy(row) && !removedCopy(row)
   : action === 'remove' ? row.installed : row.installed && !row.status && (row.enabled === false) === (action === 'on');
 const partsSummary =(row: ToolRow) => (['skill', 'command', 'agent', 'server'] as const).flatMap((kind) => {
   const n = row.pluginParts?.filter((part) => part.kind === kind).length ?? 0;
@@ -68,6 +70,9 @@ export function Catalog(props: { projects: Project[]; projectId?: string; vendor
   createEffect(() => { held.query = query(); held.filter = filter(); held.page = page(); held.selected = selected(); });
   const [busy, setBusy] = createSignal(false);
   const [confirming, setConfirming] = createSignal(false);
+  const [replacement, setReplacement] = createSignal<Awaited<ReturnType<typeof api.toolsPrepareReplacement>>>();
+  let preparation = 0;
+  let cancelReplacement: HTMLButtonElement | undefined;
   const [removed, setRemoved] = createSignal<{ id: string; enabled: boolean }>();
   const [revision, setRevision] = createSignal(0);
   const [picked, setPicked] = createSignal<string[]>([]);
@@ -101,7 +106,7 @@ export function Catalog(props: { projects: Project[]; projectId?: string; vendor
     } finally { if (!gone) setLoading(false); }
   };
   // The screen's optimistic rows and the engine's replies differ in shape (absent or null status, the flag of a removed item): compare what the screen shows.
-  const same = (list: readonly ToolRow[]) => JSON.stringify(list.map((r) => [r.id, r.installed, r.installed ? r.enabled !== false : true, r.status ?? null, r.version ?? null, r.nodeAvailable ?? null]));
+  const same = (list: readonly ToolRow[]) => JSON.stringify(list.map((r) => [r.id, r.installed, r.installed ? r.enabled !== false : true, r.status ?? null, hasCopy(r), r.removedEnabled ?? null, r.version ?? null, r.nodeAvailable ?? null]));
   const rememberRemoved = (list: readonly ToolRow[]) => {
     const row = list.find((row) => !row.installed && typeof row.removedEnabled === 'boolean');
     if (row) setRemoved({ id: row.id, enabled: row.removedEnabled! });
@@ -137,7 +142,7 @@ export function Catalog(props: { projects: Project[]; projectId?: string; vendor
       setSelected(undefined);
       queueMicrotask(() => search?.focus());
     }
-    if (!event.defaultPrevented && event.key === 'Escape' && selected()) { event.preventDefault(); if (confirming()) setConfirming(false); else back(); }
+    if (!event.defaultPrevented && event.key === 'Escape' && selected()) { event.preventDefault(); if (replacement()) { setReplacement(undefined); ++preparation; queueMicrotask(() => detail?.focus()); } else if (confirming()) setConfirming(false); else back(); }
     // The search field keeps its own Escape, which clears what was typed.
     else if (!event.defaultPrevented && event.key === 'Escape' && event.target !== search && chosen().length && !busy()) { event.preventDefault(); if (confirmingBatch()) setConfirmingBatch(false); else setPicked([]); }
   };
@@ -216,7 +221,7 @@ export function Catalog(props: { projects: Project[]; projectId?: string; vendor
         if (gone) return;
         done.push(id);
         const at = rows.findIndex((r) => r.id === id);
-        if (at >= 0) setRows(at, { installed: action !== 'remove', enabled: action !== 'off', status: undefined });
+        if (at >= 0) setRows(at, { installed: action !== 'remove', hasCopy: action !== 'remove', removedEnabled: undefined, enabled: action === 'install' ? rows[at].enabled !== false : action !== 'off', status: undefined });
       } catch (err) { reason = failureText(err); }
     }
     if (gone) return;
@@ -230,6 +235,7 @@ export function Catalog(props: { projects: Project[]; projectId?: string; vendor
     if (refreshAfterAction) { refreshAfterAction = false; void refresh(); }
   };
   const open = (row: ToolRow, button: HTMLElement) => {
+    ++preparation; setReplacement(undefined); setRetry(undefined);
     returnCard = button;
     setSelected(row.id);
     setConfirming(false);
@@ -238,6 +244,7 @@ export function Catalog(props: { projects: Project[]; projectId?: string; vendor
   };
   const back = () => {
     const id = selected();
+    ++preparation; setReplacement(undefined); setRetry(undefined);
     setSelected(undefined); setConfirming(false); setError(undefined);
     queueMicrotask(() => { const card = [...document.querySelectorAll<HTMLElement>('[data-catalog-card]')].find((el) => el.dataset.catalogCard === id); (card ?? (returnCard?.isConnected ? returnCard : search))?.focus(); });
   };
@@ -255,7 +262,7 @@ export function Catalog(props: { projects: Project[]; projectId?: string; vendor
       if (gone) return true;
       // Update fields in place so a successful toggle keeps its native input and focus.
       const index = rows.findIndex((r) => r.id === id);
-      if (index >= 0) setRows(index, { installed: action !== 'remove', enabled: action === 'toggle' ? enabled : action === 'restore' ? restoring?.enabled !== false : true, status: undefined });
+      if (index >= 0) setRows(index, { installed: action !== 'remove', hasCopy: action !== 'remove', removedEnabled: action === 'remove' ? wasEnabled : undefined, enabled: action === 'toggle' ? enabled : action === 'restore' ? restoring?.enabled !== false : action === 'install' ? wasEnabled : true, status: undefined });
       if (action === 'remove') { setRemoved({ id, enabled: wasEnabled }); setConfirming(false); queueMicrotask(() => undo?.focus()); }
       else if (removed()?.id === id) setRemoved(undefined);
       if (action === 'restore') rememberRemoved(rows);
@@ -265,6 +272,37 @@ export function Catalog(props: { projects: Project[]; projectId?: string; vendor
     } catch (err) {
       if (!gone) { setError(failureText(err)); setRetry(() => () => void change(id, action, enabled)); }
       return false;
+    } finally { if (!gone) { setBusy(false); if (refreshAfterAction) { refreshAfterAction = false; void refresh(); } } }
+  };
+  const prepareReplacement = async (id: string) => {
+    if (busy()) return;
+    const request = ++preparation;
+    setBusy(true); setReplacement(undefined); setError(undefined); setRetry(undefined);
+    try {
+      const next = await api.toolsPrepareReplacement(id);
+      if (!gone && request === preparation && selected() === id) {
+        setReplacement(next);
+        queueMicrotask(() => cancelReplacement?.focus());
+      }
+    } catch (err) {
+      if (!gone && request === preparation && selected() === id) { setError(failureText(err)); setRetry(() => () => void prepareReplacement(id)); }
+    } finally { if (!gone) { setBusy(false); if (refreshAfterAction) { refreshAfterAction = false; void refresh(); } } }
+  };
+  const replace = async (id: string) => {
+    const prepared = replacement();
+    if (busy() || !prepared) return;
+    ++read;
+    setBusy(true); setReplacement(undefined); setError(undefined); setRetry(undefined);
+    try {
+      await api.toolsReplace(prepared.plan);
+      if (gone) return;
+      const index = rows.findIndex((row) => row.id === id);
+      if (index >= 0) setRows(index, { installed: true, hasCopy: true, enabled: prepared.enabled, status: undefined, version: prepared.to });
+      setRevision((v) => v + 1);
+      queueMicrotask(() => detail?.focus());
+    } catch (err) {
+      // A failed or stale plan is never submitted again: Retry prepares a new question.
+      if (!gone && selected() === id) { setError(failureText(err)); setRetry(() => () => void prepareReplacement(id)); }
     } finally { if (!gone) { setBusy(false); if (refreshAfterAction) { refreshAfterAction = false; void refresh(); } } }
   };
   const projectServers = (row: ToolRow, names: { serverName?: string; serverNames?: string[] }) => <>
@@ -301,6 +339,7 @@ export function Catalog(props: { projects: Project[]; projectId?: string; vendor
             <input type="checkbox" class="catalog-pick" aria-label={t('catalog.pick', { name: catalogName(row.id) })} checked={picked().includes(row.id)} onChange={(e) => pick(row.id, e.currentTarget.checked)} />
             <button class="iconbtn catalog-site" aria-label={t('catalog.openSite', { repo: row.repo })} title={t('catalog.openSite', { repo: row.repo })} onClick={() => site(row)}><Icon name="external" small /></button>
             <Show when={fits(row, 'install')}><button class="btn secondary catalog-quick" aria-label={t('catalog.installName', { name: catalogName(row.id) })} onClick={() => void change(row.id, 'install').then((done) => done && focusCard(row.id))}><Icon name="download" small />{t('catalog.install')}</button></Show>
+            <Show when={hasCopy(row) && !!row.status && !removedCopy(row)}><button class="btn secondary catalog-quick" disabled={busy()} onClick={(e) => open(row, e.currentTarget)}>{t('catalog.replace')}</button></Show>
             <Show when={row.installed && !row.status}><input type="checkbox" role="switch" class="sw2 catalog-quick" aria-label={t('catalog.switchName', { name: catalogName(row.id) })} checked={row.enabled !== false} onChange={async (e) => { const box = e.currentTarget; if (!(await change(row.id, 'toggle', box.checked))) box.checked = row.enabled !== false; }} /></Show>
           </div>}</For></div></section>}</For>
           <Show when={matching().length > PAGE}><nav class="catalog-pages" aria-label={t('catalog.pages')}><button class="btn" disabled={!page()} onClick={() => setPage(page() - 1)}>{t('catalog.previous')}</button><span aria-live="polite">{t('catalog.page', { n: page() + 1, total: Math.ceil(matching().length / PAGE) })}</span><button class="btn" disabled={(page() + 1) * PAGE >= matching().length} onClick={() => setPage(page() + 1)}>{t('catalog.next')}</button></nav></Show>
@@ -332,10 +371,18 @@ export function Catalog(props: { projects: Project[]; projectId?: string; vendor
             <section class="catalog-gain"><h2>{t('catalog.gain')}</h2><p class="catalog-description">{words(`tools.${row().id}`, row().id)}</p></section>
             <Show when={needsNode(row())}><p>{t(plugin(row()) ? 'catalog.pluginNodeHelp' : 'catalog.nodeHelp')}</p><button class="link" onClick={() => void api.openLink('https://nodejs.org/en/download').catch((e) => setError(failureText(e)))}>{t('catalog.getNode')}</button></Show>
             <div class="catalog-actions">
-              <Show when={row().installed} fallback={<button class="btn primary big" disabled={busy() || !!needsNode(row())} onClick={() => void change(row().id, 'install')}>{t(busy() ? 'catalog.working' : 'catalog.install')}</button>}>
-                <Show when={row().status}><button class="btn primary big" disabled={busy() || !!needsNode(row())} onClick={() => void change(row().id, 'install')}>{t(busy() ? 'catalog.working' : 'catalog.install')}</button></Show>
-                <Toggle id="catalog-enabled" label={t('catalog.enabled')} hint={t('catalog.nextConversation')} checked={!row().status && row().enabled !== false} disabled={!!row().status} onChange={(next) => change(row().id, 'toggle', next)} />
-                <Show when={confirming()} fallback={<button class="btn danger" disabled={busy()} onClick={() => setConfirming(true)}>{t('catalog.remove')}</button>}>
+              <Show when={!removedCopy(row())}>
+                <Show when={replacement()} fallback={<button class="btn primary big" disabled={busy() || !!needsNode(row())} onClick={() => hasCopy(row()) ? void prepareReplacement(row().id) : void change(row().id, 'install')}>{t(busy() ? 'catalog.working' : hasCopy(row()) ? 'catalog.replace' : 'catalog.install')}</button>}>
+                  {(prepared) => <div class="catalog-notice" data-catalog-replacement>
+                    <div><p>{t('catalog.confirmReplace')}</p><dl><dt>{t('catalog.replaceFrom')}</dt><dd class="catalog-version">{prepared().from}</dd><dt>{t('catalog.replaceTo')}</dt><dd class="catalog-version">{prepared().to}</dd></dl><p>{t('catalog.replaceKeeps')}</p></div>
+                    <button class="btn" ref={(el) => (cancelReplacement = el)} disabled={busy()} onClick={() => { ++preparation; setReplacement(undefined); queueMicrotask(() => detail?.focus()); }}>{t('catalog.cancel')}</button>
+                    <button class="btn primary" disabled={busy()} onClick={() => void replace(row().id)}>{t('catalog.confirmReplaceAction')}</button>
+                  </div>}
+                </Show>
+              </Show>
+              <Show when={row().installed}>
+                <Toggle id="catalog-enabled" label={t('catalog.enabled')} hint={t('catalog.nextConversation')} checked={!row().status && row().enabled !== false} disabled={busy() || !!replacement() || !!row().status} onChange={(next) => change(row().id, 'toggle', next)} />
+                <Show when={confirming()} fallback={<button class="btn danger" disabled={busy() || !!replacement()} onClick={() => setConfirming(true)}>{t('catalog.remove')}</button>}>
                   <div class="catalog-notice"><span>{t('catalog.confirmRemove', { name: catalogName(row().id) })}</span><button class="btn" disabled={busy()} onClick={() => setConfirming(false)}>{t('catalog.cancel')}</button><button class="btn danger" disabled={busy()} onClick={() => void change(row().id, 'remove')}>{t('catalog.remove')}</button></div>
                 </Show>
               </Show>

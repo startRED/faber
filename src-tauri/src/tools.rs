@@ -45,6 +45,7 @@ pub struct ToolRow {
     repo: String,
     home: String,
     installed: bool,
+    has_copy: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
     removed_enabled: Option<bool>,
     /// An engine key explaining why a present item needs reinstalling.
@@ -89,6 +90,7 @@ pub async fn tools_list(faber: State<'_, Faber>) -> Res<Vec<ToolRow>> {
                 repo: i.repo.clone(),
                 home: i.home(),
                 installed: installed.contains_key(&i.id),
+                has_copy: store.has_copy(&i.id).unwrap_or(true),
                 removed_enabled: store.agent_removed_enabled(&i.id),
                 status: statuses.get(&i.id).cloned(),
                 enabled: installed.contains_key(&i.id) && store.enabled(&i.id),
@@ -125,6 +127,40 @@ pub async fn tools_install(faber: State<'_, Faber>, id: String) -> Res<()> {
             eprintln!("tools: install of {id} failed: {detail}");
             "error.tools.install".to_string()
         }
+    })
+}
+
+#[derive(Serialize)]
+pub struct PreparedReplacement {
+    plan: faber_engine::tools::ReplacementPlan,
+    from: String,
+    to: String,
+    enabled: bool,
+}
+
+/// Captures the exact existing copy for the person's detail confirmation; it downloads nothing.
+#[tauri::command]
+pub async fn tools_prepare_replacement(faber: State<'_, Faber>, id: String) -> Res<PreparedReplacement> {
+    find(&id).ok_or("error.tools.unknown")?;
+    let data = faber.data_dir.clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        let plan = Store::new(&data).capture_replacement(&id).map_err(|_| "error.tools.install".to_string())?;
+        Ok(PreparedReplacement { from: plan.old_commit().into(), to: plan.item().commit.clone(), enabled: plan.enabled(), plan })
+    })
+    .await
+    .map_err(|_| "error.tools.install".to_string())?
+}
+
+/// Revalidates the confirmed snapshot before downloading and again under the publication lock.
+#[tauri::command]
+pub async fn tools_replace(faber: State<'_, Faber>, plan: faber_engine::tools::ReplacementPlan) -> Res<()> {
+    let _running = crate::update::SetupRunning::begin()?;
+    let data = faber.data_dir.clone();
+    let store = tokio::task::spawn_blocking(move || Store::new(&data)).await.map_err(|_| "error.tools.install".to_string())?;
+    let source = std::env::var("FABER_SETUP_SOURCE").ok().map(|s| s.trim_end_matches('/').to_string());
+    faber_engine::tools::replace_checked(&store, &plan, source.as_deref()).await.map_err(|why| match why {
+        InstallError::Node => "error.tools.node".to_string(),
+        InstallError::Held(_) | InstallError::Failed(_) => "error.tools.install".to_string(),
     })
 }
 

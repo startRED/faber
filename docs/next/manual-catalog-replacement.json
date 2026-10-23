@@ -1,0 +1,10 @@
+{
+  "notes": { "fixed": {
+    "en": "Catalog replacements ask for confirmation and preserve the previous files and on/off choice if installation fails.",
+    "pt-BR": "As trocas no catálogo pedem confirmação e preservam os arquivos anteriores e a escolha de ativação se a instalação falhar.",
+    "es": "Los reemplazos del catálogo piden confirmación y conservan los archivos anteriores y su estado de activación si falla la instalación.",
+    "fr": "Les remplacements du catalogue demandent confirmation et préservent les anciens fichiers et leur état d’activation si l’installation échoue.",
+    "de": "Der Katalog fragt vor dem Ersetzen nach und bewahrt bei einem Installationsfehler die bisherigen Dateien und den Ein-/Aus-Zustand."
+  } },
+  "decisions": ["| R-next | 2026-10-23 | Manual Catalog replacement confirms an exact current-copy snapshot in the existing detail and reuses the retained-copy journal. Revalidate before download and publication, preserve the on/off choice and conversation kits, and disclose replacement of the previous backup. Initial installation refuses occupied paths or pending Undo even without a ledger entry; malformed metadata refuses publication. | AI |"]
+}

@@ -609,6 +609,7 @@ export type AccountStatus = 'signedIn' | 'signedOut' | 'unknown';
 /** One skill of Faber's catalog (src-tauri/src/tools.rs). */
 export interface ToolRow {
   removedEnabled?: boolean | null;
+  hasCopy?: boolean;
   id: string;
   cliName?: string | null;
   job: string;
@@ -1035,6 +1036,8 @@ export const api = {
   toolsInventory: (projectId?: string) => invoke<ToolInventoryList[]>('tools_inventory', { projectId }),
   toolsList: () => invoke<ToolRow[]>('tools_list'),
   toolsInstall: (id: string) => invoke<void>('tools_install', { id }),
+  toolsPrepareReplacement: (id: string) => invoke<{ plan: unknown; from: string; to: string; enabled: boolean }>('tools_prepare_replacement', { id }),
+  toolsReplace: (plan: unknown) => invoke<void>('tools_replace', { plan }),
   toolsClearRemoved: () => invoke<void>('tools_clear_removed'),
   /** The catalog tools the conversation's agent has now, each with its job group; read once when the context panel opens. */
   toolsInUse: (id: string) => invoke<[string, string][]>('tools_in_use', { id }),
