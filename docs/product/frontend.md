@@ -15,6 +15,9 @@ Faber supplies two original instruction skills beside its own guide in the exist
 These are first-party instructions, not copies or bundled versions of catalog skills. Existing design, motion and
 framework skills remain useful; these supply the project-aware interaction and proof workflow between them. They
 create no new setting, catalog card, tool, model, timer, process or permission to act on external services.
+For a new composition or identity, frontend-craft explicitly complements an applicable installed art-direction
+workflow. A local behavior repair keeps the existing identity. The proof workflow checks the actual completion of
+a slow path; an independent instant-success mode cannot establish that the waiting path really finishes.
 
 - Claude Code in Projects discovers them as native skills of the existing private plugin, with only descriptions
   resident until needed. Both files are explicitly allowed for instruction loading, alongside the guide.
@@ -52,6 +55,8 @@ improvement in generated design quality. That needs paired task runs and indepen
 The first [exploratory pair](../research/2026-10-22-frontend-evaluation.md) tied at 17/20 in a blind review, with
 different strengths. It does not establish a causal gain: only one sample per condition was built, the exact model
 variant was not exposed, and consultation of the existing art-direction skill differed.
+The [refinement record](../research/2026-10-22-frontend-skill-refinement.md) keeps the follow-up controls and evidence
+separate. Drafted guidance is not proof of improved generated output.
 
 The [source study](../research/2026-10-22-frontend-sources.md) distinguishes standards from practitioner advice and
 proposed measurements. The [243-item audit](../research/2026-10-22-frontend-blueprint-audit.md) records static evidence

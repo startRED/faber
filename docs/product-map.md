@@ -510,6 +510,9 @@ same bounded index with two extra file references, not the full skill bodies. Gu
 these three skills or their three exact files, and all writes into the folder remain denied. The guide's former
 70–100-token/one-file description applies only to the guide portion; the combined index has the extra references.
 No skill-selection report or catalog count includes these first-party instructions.
+Their frontend workflow complements an applicable installed art-direction skill for new composition, retains the
+existing identity for local repairs, and checks the real completion of slow operations rather than an unrelated
+instant-success mode. These are instruction expectations, not a guarantee that a model followed them.
 
 Faber writes one first-party folder, <data>/guide-plugin, containing its help guide and two original frontend
 skills. The guide uses the screen language (Settings, else system, else English), with prose and the English/selected

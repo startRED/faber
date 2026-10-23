@@ -37,6 +37,9 @@ remained intact. For a changed asynchronous flow, include relevant cases from th
 
 Do not perform destructive or external operations just to test them. Use approved fixtures or a sandbox. A persistence
 check that never reloads proves only in-memory continuity; a retry check must also inspect the resulting record count.
+For a slow asynchronous path designed to finish, exercise its actual completion as well as waiting and cancellation.
+A separate instant-success mode does not prove that the slow operation finishes, releases controls or preserves the
+right result. A deliberately indefinite wait is checked against its own contract, including cancellation or recovery.
 
 ## Keyboard and accessibility
 

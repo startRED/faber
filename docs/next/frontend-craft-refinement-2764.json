@@ -1,0 +1,11 @@
+{
+  "notes": {
+    "fixed": {
+      "en": "Frontend guidance now combines the available design workflow with usable screens and checks slow actions through completion.",
+      "pt-BR": "As orientações pra criar telas e sites agora juntam design e uso, conferindo ações demoradas até terminarem.",
+      "es": "Las pautas para crear interfaces combinan diseño y uso, y comprueban las acciones lentas hasta que terminan.",
+      "fr": "Les conseils de création d’interfaces associent le design à l’usage et vérifient les actions lentes jusqu’à leur fin.",
+      "de": "Die Anleitung für Oberflächen verbindet Gestaltung und Bedienung und prüft langsame Aktionen bis zum Abschluss."
+    }
+  }
+}
