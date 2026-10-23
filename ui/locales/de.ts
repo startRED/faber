@@ -1472,7 +1472,7 @@ export const de: Messages = {
   'projects.home.title': 'Was packen wir an?',
   'projects.chat.lead': 'Bitte um alles in diesem Ordner. Der Assistent arbeitet direkt hier und fragt dich, wenn er etwas braucht.',
   'setup.title': 'Abonnements verbinden',
-  'setup.body': 'Claude läuft mit einem Claude-Abo wie Pro oder Max, Codex mit einem ChatGPT-Abo wie Plus oder Pro. Eines reicht: Wähle das, für das du schon zahlst.',
+  'setup.body': 'Claude: Pro oder Max. Codex: ChatGPT Plus oder Pro. Ein Abo reicht. Die Auswahl prüft nur Installation und Konto; Installation oder Anmeldung bestätigst du danach.',
   'setup.claude': 'Claude',
   'setup.chatgpt': 'Codex',
   'setup.none': 'Vorerst keines',

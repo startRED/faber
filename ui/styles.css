@@ -1118,6 +1118,7 @@ textarea.field { height: auto; max-width: none; padding: 8px 10px; resize: verti
 .stepper .cur { color: var(--ink); font-weight: 580; }
 .firstrun { display: flex; flex-direction: column; min-height: 0; overflow-y: auto; overflow-x: hidden; padding: 28px clamp(24px, 5vw, 64px) 0; }
 .fr-col { flex: none; width: min(100%, 720px); margin-top: clamp(0px, 6vh, 56px); }
+@media (max-height: 600px) { .fr-col { margin-top: 0; } }
 .fr-title { margin-top: 22px; font-size: min(var(--fs-h1), 9vw); overflow-wrap: anywhere; outline: none; }
 .fr-col .peek { margin-top: 4px; }
 .fr-col .fr-title { margin-top: 18px; }

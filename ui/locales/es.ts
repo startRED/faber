@@ -1472,7 +1472,7 @@ export const es: Messages = {
   'projects.home.title': '¿Qué resolvemos?',
   'projects.chat.lead': 'Pide lo que quieras en esta carpeta. El asistente trabaja aquí mismo y te pregunta cuando lo necesita.',
   'setup.title': 'Conecta tus suscripciones',
-  'setup.body': 'Claude funciona con un plan de Claude, como Pro o Max; Codex, con un plan de ChatGPT, como Plus o Pro. Con uno basta: elige el que ya pagas.',
+  'setup.body': 'Claude: Pro o Max. Codex: ChatGPT Plus o Pro. Basta un plan. Elegir solo comprueba la instalación y la cuenta; instalar o iniciar sesión es otra acción.',
   'setup.claude': 'Claude',
   'setup.chatgpt': 'Codex',
   'setup.none': 'Ninguna por ahora',

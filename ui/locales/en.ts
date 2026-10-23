@@ -1467,7 +1467,7 @@ export const en = {
   'projects.home.title': 'What should we tackle?',
   'projects.chat.lead': 'Ask for anything in this folder. The assistant works right here and asks you when it needs to.',
   'setup.title': 'Connect your subscriptions',
-  'setup.body': 'Claude works with a Claude plan, such as Pro or Max; Codex with a ChatGPT plan, such as Plus or Pro. One is enough: pick the one you already pay for.',
+  'setup.body': 'Claude: Pro or Max. Codex: ChatGPT Plus or Pro. One plan is enough. Choosing only checks installation and account; install or sign in separately.',
   'setup.claude': 'Claude',
   'setup.chatgpt': 'Codex',
   'setup.none': 'None for now',
