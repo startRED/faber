@@ -59,7 +59,9 @@ computer use switched off and a read-only sandbox. Either runs in an empty folde
 script refuses one inside the repository. Builds run at idle priority, the reviewer's processes have no window, and no
 CLI runs inside Faber, so its only cost is the reviewer's own calls (about 40 small Haiku turns).
 
-The findings go to `docs/research/first-user-<date>.md`, most serious first, each with what it tried, where it got stuck
-and the step's screenshot in `target/faber-test/first-user/<date>/` (local only). Nothing is fixed from it directly:
+Each run gets a unique `<date>-<suffix>` name, including repeat runs with the same configuration. The findings go to
+`docs/research/first-user-<date>-<suffix>.md`, most serious first, each with what it tried, where it got stuck and the
+step's screenshot in `target/faber-test/first-user/<date>-<suffix>/` (local only). `--out` overrides only the report;
+screenshots still get their own folder. Nothing is fixed from it directly:
 a person reads the list and turns what is real into tasks. `scripts/first-user.test.mjs` keeps the answer parsing, the
 folder check and the report.

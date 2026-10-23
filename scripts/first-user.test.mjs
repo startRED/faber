@@ -3,13 +3,35 @@
 
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { join } from 'node:path';
+import { basename, dirname, join } from 'node:path';
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import * as firstUser from './first-user.mjs';
 import { TASKS, describe, fallback, firstJson, insideRepo, parseStep, report, stepPrompt, summaryPrompt } from './first-user.mjs';
 
 const controls = [
   { role: 'button', name: 'Continuar', x: 10, y: 10, disabled: false },
   { role: 'input', name: 'Escreva aqui', x: 20, y: 20, disabled: true },
 ];
+
+test('same-day review runs keep separate screenshots and default reports, including identical configurations', () => {
+  assert.equal(typeof firstUser.runPaths, 'function');
+  const root = mkdtempSync(join(tmpdir(), 'faber-first-user-paths-'));
+  try {
+    const target = join(root, 'target');
+    const first = firstUser.runPaths(root, target, '2026-10-23');
+    writeFileSync(join(first.shots, 'primeira-abertura-1.png'), 'first run');
+    const second = firstUser.runPaths(root, target, '2026-10-23');
+    assert.notEqual(first.shots, second.shots);
+    assert.notEqual(first.out, second.out);
+    assert.equal(readFileSync(join(first.shots, 'primeira-abertura-1.png'), 'utf8'), 'first run');
+    assert.equal(dirname(first.shots), join(target, 'faber-test', 'first-user'));
+    assert.equal(first.out, join(root, 'docs', 'research', `first-user-${basename(first.shots)}.md`));
+    const explicit = firstUser.runPaths(root, target, '2026-10-23', 'custom-report.md');
+    assert.equal(explicit.out, join(root, 'custom-report.md'));
+    assert.notEqual(explicit.shots, second.shots);
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
 
 test('the reviewer folder must sit outside the repository', () => {
   const root = join('E:', 'repo');
