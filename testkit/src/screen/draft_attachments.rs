@@ -195,6 +195,13 @@ fn refused_send(ctx: &mut Ctx) -> Result {
     app.page.wait_enabled(&send)?;
     app.page.click(&send)?;
     app.page.wait_for("the recorded answer after retry", "document.querySelectorAll('article.ai .actions').length === 2")?;
+    // Settled shows the actions before the CLI's final result has been saved.
+    eventually("the retry's saved completion", Duration::from_secs(20), || {
+        std::fs::read(&file)
+            .ok()
+            .and_then(|bytes| serde_json::from_slice::<Value>(&bytes).ok())
+            .is_some_and(|saved| saved["messages"][3]["status"] == "done")
+    })?;
     let saved: Value = serde_json::from_slice(&std::fs::read(&file).map_err(|e| e.to_string())?).map_err(|e| e.to_string())?;
     let messages = saved["messages"].as_array().ok_or("missing saved messages")?;
     same(messages.len(), 4, "retry saves exactly one new user turn and reply")?;
