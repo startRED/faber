@@ -454,12 +454,17 @@ check('reading: return and restart keep the same old message after the history a
         const searchThread = root.querySelector<HTMLElement>('.thread')!;
         const resultOffset = () => root.querySelector<HTMLElement>('[data-message-index="100"]')!.getBoundingClientRect().top - searchThread.getBoundingClientRect().top;
         const searchedOffset = resultOffset();
+        const viewportBefore = { offset: searchedOffset, scroll: searchThread.scrollTop, height: searchThread.scrollHeight,
+          first: searchThread.querySelector<HTMLElement>('[data-message-index]')?.dataset.messageIndex };
         // Deliver the native scroll after focus: WebKit can defer it until the earlier-page load.
         searchThread.dispatchEvent(new Event('scroll'));
         equal((document.activeElement as HTMLElement)?.dataset.messageIndex, '100', 'loading the earlier page keeps focus on the requested message');
         ok(root.querySelector('[data-message-index="100"].search-focus'), 'an explicit search result wins over the saved reading anchor');
         ok(document.activeElement?.textContent?.includes('The explicitly requested search result.'), 'focus stays on the real search message after rows are reused');
-        ok(Math.abs(resultOffset() - searchedOffset) < 3, 'loading the earlier page preserves the search viewport');
+        ok(Math.abs(resultOffset() - searchedOffset) < 3, `loading the earlier page preserves the search viewport: ${JSON.stringify({
+          before: viewportBefore, after: { offset: resultOffset(), scroll: searchThread.scrollTop, height: searchThread.scrollHeight,
+            first: searchThread.querySelector<HTMLElement>('[data-message-index]')?.dataset.messageIndex,
+            focus: (document.activeElement as HTMLElement)?.dataset.messageIndex } })}`);
         const composer = root.querySelector<HTMLTextAreaElement>('.composer textarea')!;
         composer.value = 'A draft after searching';
         composer.dispatchEvent(new Event('input', { bubbles: true }));

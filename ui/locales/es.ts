@@ -2103,6 +2103,7 @@ export const es: Messages = {
   'notes.220.fixed': 'Las pautas de interfaz ahora incluyen mantener el foco y el resaltado en el elemento correcto cuando cambia una lista.',
   'notes.221.fixed': 'Faber ya no crece hasta varios gigabytes de memoria mientras llega una respuesta larga del agente. Una respuesta de 600 pasos ahora se queda por debajo de 200 MB; antes pasaba de 860 MB.',
   'notes.222.fixed': 'El resultado de búsqueda conserva el foco y el contorno cuando aparecen mensajes anteriores.',
+  'notes.223.fixed': 'El mensaje encontrado sigue en su sitio al cargar mensajes anteriores en Mac.',
   'update.checking': 'Buscando una actualización…',
   'update.downloading': 'Descargando actualización…',
   'update.downloadingPercent': 'Descargando actualización… {percent} %',

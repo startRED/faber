@@ -2103,6 +2103,7 @@ export const fr: Messages = {
   'notes.220.fixed': 'Les conseils de création d’interfaces incluent le maintien du focus et du surlignage sur le bon élément quand une liste change.',
   'notes.221.fixed': "Faber ne gonfle plus jusqu'à plusieurs gigaoctets de mémoire pendant qu'arrive une longue réponse de l'agent. Une réponse de 600 étapes reste maintenant sous 200 Mo, contre plus de 860 Mo avant.",
   'notes.222.fixed': 'Le résultat de recherche garde le focus et son contour quand des messages plus anciens apparaissent.',
+  'notes.223.fixed': 'Le message trouvé reste à sa place quand vous chargez les messages précédents sur Mac.',
   'update.checking': 'Recherche d’une mise à jour…',
   'update.downloading': 'Téléchargement de la mise à jour…',
   'update.downloadingPercent': 'Téléchargement de la mise à jour… {percent} %',

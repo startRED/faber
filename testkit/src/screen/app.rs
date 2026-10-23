@@ -1139,7 +1139,9 @@ fn visual_frames_collected(ctx: &mut Ctx, app: &mut Opened, baseline: f64, befor
     );
     ctx.notes.push(numbers.clone());
     ensure(retained == json!([]), || format!("{numbers}; retired frames must be collectible"))?;
-    ensure(closed <= baseline + 15.0, || format!("{numbers}; exceeds the 15 MB post-close margin after collection"))?;
+    ensure(closed <= baseline + 15.0, || {
+        format!("{numbers}; exceeds the 15 MB post-close margin after collection\n{}", ctx.notes.join("\n"))
+    })?;
     Ok(closed)
 }
 

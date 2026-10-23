@@ -1983,6 +1983,7 @@ export const en = {
   'notes.220.fixed': 'Frontend guidance now covers keeping the right item highlighted and focused when lists change.',
   'notes.221.fixed': 'Faber no longer swells to gigabytes of memory while a long agent reply streams. A 600-step reply now stays under 200 MB, where it passed 860 MB.',
   'notes.222.fixed': 'Search results keep their focus and outline when earlier messages appear.',
+  'notes.223.fixed': 'A searched message stays in place when you load earlier messages on a Mac.',
   'update.checking': 'Looking for an update…',
   'update.downloading': 'Downloading update…',
   'update.downloadingPercent': 'Downloading update… {percent}%',
