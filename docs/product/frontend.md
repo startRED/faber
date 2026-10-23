@@ -42,6 +42,12 @@ the allocation model, not a measured whole-app RAM/CPU result or proof that ever
 3. Retain proof of the affected task and visual result, independent review where required, actual measurements and
    anything unverified. Never present a visual score as proof of reliability or an automated scan as AA conformance.
 
+For forms collecting information about the form user, the skills cover supported, defined input purposes through
+matching programmatic metadata (such as HTML `autocomplete`). Labels and input types alone may not establish that
+purpose. This does not require metadata for every field or other people's records, and browser autofill is not the
+pass condition. A synthetic markup check can establish this narrow contract, not general WCAG conformance or a
+measured gain in generated design quality.
+
 Frontend quality is judged on task clarity, visual hierarchy, type, spacing, useful content, coherent identity,
 interaction states and accessibility. A particular font, gradient, animation library or fixed card layout is not a
 universal quality standard. No new dependency is required by these skills.

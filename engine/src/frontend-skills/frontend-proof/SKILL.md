@@ -47,6 +47,9 @@ right result. A deliberately indefinite wait is checked against its own contract
   Escape, arrows and focus return for custom widgets. Background shortcuts must not intercept text entry or IME.
 - Check accessible names, roles, labels, headings, errors and state announcements. Do not announce every streaming
   token. Use an automated scan when available, and record its scope; it cannot prove WCAG conformance.
+- For changed forms collecting information about the form user, inspect supported input-purpose metadata against
+  each applicable field's actual meaning, including missing or mismatched HTML `autocomplete` tokens. Visible labels
+  and input types alone are insufficient; whether the browser chooses to autofill is not the pass condition.
 - Inspect visible focus, including beneath sticky bars, overlays and a growing composer. Confirm modal background
   inertness only for actual modals. A panel opened by background work should not take the person's focus.
 - Inspect contrast in affected themes and native forced-colors mode. Test status comprehension without color.

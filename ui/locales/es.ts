@@ -2112,6 +2112,7 @@ export const es: Messages = {
   'notes.223.fixed': 'El mensaje encontrado sigue en su sitio al cargar mensajes anteriores en Mac.',
   'notes.224.fixed': 'Los reemplazos del catálogo piden confirmación y conservan los archivos anteriores y su estado de activación si falla la instalación.',
   'notes.225.fixed': 'Si un mensaje no se puede guardar, puedes volver a intentarlo sin iniciar la IA ni duplicar el mensaje.',
+  'notes.226.better': 'Al crear formularios, Faber comprueba que el navegador identifique los campos de tu nombre, correo y teléfono.',
   'update.checking': 'Buscando una actualización…',
   'update.downloading': 'Descargando actualización…',
   'update.downloadingPercent': 'Descargando actualización… {percent} %',

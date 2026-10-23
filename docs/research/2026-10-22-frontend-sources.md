@@ -76,3 +76,13 @@ distinguishes OS memory footprint from the JavaScript heap and recommends examin
 over time. A collectible frame element is one observation, not proof that the whole process tree returned to its
 prior footprint. Keep the existing app memory budget, record the failed scenario's own measurements and distinguish
 them from neighboring scenarios. A passing rerun alone does not diagnose an earlier overage or establish a repair.
+
+## Follow-up: identifying the form user's input purpose (2026-10-23)
+
+[WCAG 2.2 SC 1.3.5](https://www.w3.org/TR/WCAG22/#identify-input-purpose) is normative: defined input purposes for
+information about the user must be programmatically determinable where the technology supports this. The W3C
+[Understanding explanation](https://www.w3.org/WAI/WCAG22/Understanding/identify-input-purpose.html) is informative;
+it explains why a label or broad input type alone may be insufficient and how HTML `autocomplete` conveys purpose.
+It explicitly separates exposing the purpose from the browser choosing to autofill. This is not a blanket rule
+for every input or records about other people. Synthetic name/email/phone attribute checks establish only their
+markup contract; they do not establish AA conformance, autofill behavior or a repeated causal gain from the skills.

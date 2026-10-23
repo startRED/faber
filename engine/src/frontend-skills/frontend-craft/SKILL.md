@@ -73,6 +73,9 @@ and determinate progress only when progress is measured. Keep usable controls av
   table or code block its own horizontal scrolling when needed, without making the whole page overflow.
 - Use native semantic controls, real labels and deliberate heading order. Icons need accessible names when they are
   controls. Keyboard order follows the task; do not repair a broken order with positive tabindex values.
+- For fields collecting information about the form user, expose a supported specific input purpose, such as the
+  matching HTML `autocomplete` token (`name`, `email`, `tel`). A label or input type alone may not identify it.
+  Apply this to defined user-data purposes supported by the technology, not every field or other people's records.
 - By default, grid/flex visual reordering leaves keyboard order tied to DOM order. Keep the source order meaningful
   and check both after changing grid areas, order, or a responsive arrangement.
 - For custom tabs, menus, dialogs and splitters follow the relevant WAI-ARIA APG pattern, including keyboard behavior.
