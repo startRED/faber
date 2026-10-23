@@ -263,6 +263,12 @@ struct Live {
     turn: Option<String>,
     break_pending: bool,
     answer_started: bool,
+    /// The main thread said all it will say (`Settled`) and only helpers in the background may still run: a message written now
+    /// waits for no step and goes in at once.
+    settled: bool,
+    /// The agent's own tool calls of this CLI turn still running, on whichever reply they show (a steer starts a new one):
+    /// while any runs, its step has not ended. Helpers in the background are left out.
+    open_tools: Vec<String>,
     used: u64,
     /// The CLI this process was started with; a replaced CLI starts a new process on the next turn.
     cli: Cli,
@@ -2143,6 +2149,9 @@ impl Core {
             // Codex accepted the turn: if Faber dies now, the next launch resumes this session instead of starting one that never
             // heard of the turn.
             EngineEvent::TurnStarted => {
+                if let Some(l) = self.live.get_mut(conv) {
+                    l.settled = false;
+                }
                 if vendor == Vendor::Codex {
                     let planning = self.live.get(conv).is_some_and(|l| l.permissions == Permissions::Plan);
                     if let Some(c) = self.convs.get_mut(conv)
@@ -2202,8 +2211,23 @@ impl Core {
                 {
                     m.finished_at = Some(now());
                 }
+                if let Some(l) = self.live.get_mut(conv) {
+                    l.settled = true;
+                }
+                self.hand_over_at_step(conv);
+            }
+            EngineEvent::MainIdle => {
+                if let Some(l) = self.live.get_mut(conv) {
+                    l.settled = true;
+                }
+                self.hand_over_at_step(conv);
             }
             EngineEvent::Text(delta) => {
+                if !delta.is_empty()
+                    && let Some(l) = self.live.get_mut(conv)
+                {
+                    l.settled = false;
+                }
                 let pending = self.live.get(conv).is_some_and(|l| l.break_pending);
                 let Some(m) = self.turn(conv) else { return };
                 if pending && !delta.is_empty() {
@@ -2219,12 +2243,23 @@ impl Core {
                 }
             }
             EngineEvent::Thinking(delta) => {
+                if !delta.is_empty()
+                    && let Some(l) = self.live.get_mut(conv)
+                {
+                    l.settled = false;
+                }
                 if let Some(m) = self.turn(conv) {
                     m.thinking.get_or_insert_default().push_str(&delta);
                 }
             }
             EngineEvent::Tool { id, name, input, parent } => {
+                if parent.is_none()
+                    && let Some(l) = self.live.get_mut(conv)
+                {
+                    l.settled = false;
+                }
                 let final_answer = self.live.get(conv).is_some_and(|l| l.answer_started);
+                let mut step = false;
                 if let Some(m) = self.turn(conv) {
                     // A subagent works while the agent waits for it, so its tools never move where the answer begins.
                     if !final_answer && parent.is_none() {
@@ -2249,7 +2284,11 @@ impl Core {
                         ended: None,
                     };
                     tool.check = crate::nudge::is_check(&tool);
+                    step = tool.parent.is_none() && !crate::model::runs_in_background(&tool);
                     m.tools.get_or_insert_default().push(tool);
+                }
+                if let Some(l) = self.live.get_mut(conv).filter(|l| step && !l.open_tools.contains(&id)) {
+                    l.open_tools.push(id.clone());
                 }
                 self.watch_started(conv, &id);
             }
@@ -2264,13 +2303,21 @@ impl Core {
                 }
             }
             EngineEvent::ToolResult { id, ok, declined, text } => {
+                if let Some(l) = self.live.get_mut(conv) {
+                    l.open_tools.retain(|open| *open != id);
+                }
                 let current = self.live.get(conv).and_then(|l| l.turn.clone());
+                let mut background = false;
                 if let Some(m) = self.convs.get_mut(conv).and_then(|c| message_with_tool(&mut c.messages, current.as_deref(), &id)) {
                     let tool = m.tools.as_mut().unwrap().iter_mut().find(|t| t.id == id).unwrap();
                     // A helper sent to the background answers its call as soon as it starts; its end comes as `HelperDone`.
-                    if !declined && crate::model::runs_in_background(tool) {
-                        return;
-                    }
+                    background = !declined && crate::model::runs_in_background(tool);
+                }
+                if background {
+                    return self.hand_over_at_step(conv);
+                }
+                if let Some(m) = self.convs.get_mut(conv).and_then(|c| message_with_tool(&mut c.messages, current.as_deref(), &id)) {
+                    let tool = m.tools.as_mut().unwrap().iter_mut().find(|t| t.id == id).unwrap();
                     tool.ok = Some(ok);
                     tool.ended = Some(now());
                     tool.declined = declined;
@@ -2290,6 +2337,7 @@ impl Core {
                 self.settle_facts(conv, &id);
                 self.watch_ended(conv, &id);
                 self.pr_seen(conv, &id, &text);
+                self.hand_over_at_step(conv);
             }
             EngineEvent::HelperDone { id, ok, text } => {
                 // A helper that ran with its call is already settled by the call's own result, its full report included.
@@ -2861,9 +2909,10 @@ impl Core {
         self.refresh_running();
     }
 
-    /// A message written while a turn runs. The running CLI takes it into that turn (Codex `turn/steer`, Claude Code a line on
-    /// its input) and the message becomes part of the conversation when the CLI says it has; every other case waits here and
-    /// goes out as the next turn. Either way it is saved with the conversation first, so a crash or a refusal cannot lose it.
+    /// A message written while a turn runs. It waits here until the agent's step ends, then the running CLI takes it into that
+    /// turn (Codex `turn/steer`, Claude Code a line on its input) and it becomes part of the conversation when the CLI says it
+    /// has; with no step left it goes out as the next turn. Either way it is saved with the conversation first, so a crash or a
+    /// refusal cannot lose it.
     fn enqueue(&mut self, id: &str, req: SendRequest) -> Result<String, String> {
         let c = self.convs.get(id).ok_or("error.conversationGone")?;
         if c.queued.len() >= MAX_QUEUED {
@@ -2878,7 +2927,7 @@ impl Core {
         let names: Vec<String> =
             saved.iter().map(|p| p.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default()).collect();
         let at = now();
-        let mut item = QueuedTurn {
+        let item = QueuedTurn {
             id: new_id(),
             text: req.text,
             images: (!req.images.is_empty()).then_some(req.images),
@@ -2888,18 +2937,7 @@ impl Core {
             sending: false,
             wake: None,
         };
-        let c = self.convs.get(id).ok_or("error.conversationGone")?;
-        // Steering waits behind nothing: a message that is already queued would be passed by one sent straight in. A reply whose
-        // agent already finished takes nothing in: the message waits for the CLI to close the turn and goes out as the next one.
-        let finished = c.messages.last().is_some_and(|m| m.role == Role::Assistant && m.finished_at.is_some());
-        let steer = research::question(&item.text).is_none()
-            && !finished
-            && !c.stopped
-            && c.queued.iter().all(|q| q.sending)
-            && self.live.get(id).is_some_and(|l| l.turn.is_some() && [l.vendor.name(), "auto"].contains(&item.choice.vendor.as_str()));
-        if steer {
-            self.steer(id, &mut item);
-        }
+        // It waits here, the person's to edit or remove, until the agent's step ends (`hand_over_at_step`) or Send now.
         if let Some(c) = self.convs.get_mut(id) {
             if c.stopped {
                 c.send_after_stop.get_or_insert_with(|| item.id.clone());
@@ -2909,7 +2947,51 @@ impl Core {
         }
         self.save(id);
         self.emit_queue(id);
+        // With only helpers left at work, no step will end: it goes in now, as it did before (fixture `background-steer`).
+        if self.live.get(id).is_some_and(|l| l.settled) {
+            self.hand_over_at_step(id);
+        }
         Ok(id.to_string())
+    }
+
+    /// The agent's step ended (none of its own tools still runs): the waiting messages at the head of the queue go into its turn
+    /// now, so each stayed the person's to edit or remove until then (R439). Once handed over the CLI holds it, and nothing can
+    /// take it back. A live capture (Claude Code 2.1.307, Haiku) showed a line written right after a tool's result misses that
+    /// step: the CLI reads it at its next step, or as a turn of its own when the answer ends there.
+    fn hand_over_at_step(&mut self, conv: &str) {
+        let Some(vendor) = self.live.get(conv).filter(|l| l.turn.is_some() && l.open_tools.is_empty()).map(|l| l.vendor.name()) else {
+            return;
+        };
+        let mut handed = false;
+        while let Some(c) = self.convs.get_mut(conv) {
+            // A reply whose agent already finished takes nothing in: the message goes out as the next turn.
+            let finished = c.messages.last().is_some_and(|m| m.role == Role::Assistant && m.finished_at.is_some());
+            let Some(pos) = c.queued.iter().position(|q| !q.sending) else { break };
+            let next = &c.queued[pos];
+            // Steering waits behind nothing: one for the other AI, or one Faber wrote, keeps its place and those behind it.
+            if finished
+                || c.stopped
+                || next.wake.is_some()
+                || research::question(&next.text).is_some()
+                || ![vendor, "auto"].contains(&next.choice.vendor.as_str())
+            {
+                break;
+            }
+            let mut item = c.queued.remove(pos);
+            self.steer(conv, &mut item);
+            let sent = item.sending;
+            if let Some(c) = self.convs.get_mut(conv) {
+                c.queued.insert(pos, item);
+            }
+            handed = true;
+            if !sent {
+                break;
+            }
+        }
+        if handed {
+            self.save(conv);
+            self.emit_queue(conv);
+        }
     }
 
     /// Hands a message to the running turn; the CLI takes it in at its next step (`taken_in`) or refuses it (`steer_failed`).
@@ -2989,6 +3071,7 @@ impl Core {
             l.turn = Some(reply_id.clone());
             l.answer_started = false;
             l.break_pending = false;
+            l.settled = false;
         }
         self.listen(conv);
         // A plan limit now continues this reply, not the one the turn began in.
@@ -3520,6 +3603,8 @@ impl Core {
                 .and_then(|c| c.messages.last())
                 .is_some_and(|m| m.id == reply_id && m.activity_end.unwrap_or(0) < m.text.encode_utf16().count());
             l.break_pending = false;
+            l.settled = false;
+            l.open_tools.clear();
             l.by_hand = by_hand;
             l.approved = approved;
             l.break_pending |= self.convs.get(id).and_then(|c| c.messages.last()).is_some_and(|m| !m.text.is_empty());
@@ -3891,6 +3976,8 @@ impl Core {
                 turn: None,
                 break_pending: false,
                 answer_started: false,
+                settled: false,
+                open_tools: Vec::new(),
                 used: self.tick,
                 cli,
                 resumed,
@@ -4789,6 +4876,8 @@ mod tool_in_tests {
             turn: None,
             break_pending: false,
             answer_started: false,
+            settled: false,
+            open_tools: Vec::new(),
             used: 0,
             cli: Cli { command: "unused".into(), prefix: vec![] },
             resumed: false,
@@ -4872,6 +4961,8 @@ mod tool_in_tests {
                         turn: None,
                         break_pending: false,
                         answer_started: false,
+                        settled: false,
+                        open_tools: Vec::new(),
                         used: 0,
                         cli: Cli { command: "unused".into(), prefix: vec![] },
                         resumed: false,

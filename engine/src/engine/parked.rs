@@ -284,6 +284,8 @@ mod tests {
                     turn: Some("reply".into()),
                     break_pending: false,
                     answer_started: false,
+                    settled: false,
+                    open_tools: Vec::new(),
                     used: 0,
                     cli: Cli { command: "claude".into(), prefix: vec![] },
                     resumed: false,

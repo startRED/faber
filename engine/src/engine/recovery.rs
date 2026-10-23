@@ -594,6 +594,8 @@ mod tests {
                     turn: Some("reply".into()),
                     break_pending: false,
                     answer_started: false,
+                    settled: false,
+                    open_tools: Vec::new(),
                     used: 0,
                     cli: Cli { command: "codex".into(), prefix: vec![] },
                     resumed: true,

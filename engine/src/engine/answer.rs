@@ -486,6 +486,8 @@ pub(super) mod tests {
                 turn: turns.last().map(|t| t.0.to_string()),
                 break_pending: false,
                 answer_started: false,
+                settled: false,
+                open_tools: Vec::new(),
                 used: 0,
                 cli: Cli { command: "claude".into(), prefix: vec![] },
                 resumed: false,
@@ -1958,5 +1960,61 @@ pub(super) mod tests {
         engine.with(|c| c.handle(&id, 1, EngineEvent::Settled));
         engine.with(|c| c.handle(&id, 1, failed()));
         assert_eq!(engine.open(&id).unwrap().messages.pop().unwrap().finished_at, None);
+    }
+
+    fn written(id: &str) -> SendRequest {
+        SendRequest {
+            conversation_id: Some(id.into()),
+            area: Area::Chat,
+            project_id: None,
+            text: "next".into(),
+            images: vec![],
+            files: vec![],
+            choice: crate::router::Choice { vendor: "auto".into(), model: None, effort: None },
+        }
+    }
+
+    fn handed(engine: &Engine, id: &str) -> (usize, Vec<bool>) {
+        engine.with(|c| (c.live[id].steering.len(), c.convs[id].queued.iter().map(|q| q.sending).collect()))
+    }
+
+    fn bash(id: &str) -> EngineEvent {
+        EngineEvent::Tool { id: id.into(), name: "Bash".into(), input: json!({ "command": "sleep 6" }), parent: None }
+    }
+
+    fn result(id: &str) -> EngineEvent {
+        EngineEvent::ToolResult { id: id.into(), ok: true, declined: false, text: String::new() }
+    }
+
+    #[tokio::test]
+    async fn a_message_written_while_tools_run_waits_until_the_last_of_them_returns() {
+        let dir = tempfile::tempdir().unwrap();
+        let (engine, _) = engine(dir.path());
+        let id = seed(&engine, stub(vec![]).session, &[("t1", &[])]);
+        engine.with(|c| {
+            c.handle(&id, 1, bash("a"));
+            c.handle(&id, 1, bash("b"));
+        });
+        engine.with(|c| c.enqueue(&id, written(&id))).unwrap();
+        assert_eq!(handed(&engine, &id), (0, vec![false]), "it waits, the person's to edit or remove");
+        engine.with(|c| c.handle(&id, 1, result("a")));
+        assert_eq!(handed(&engine, &id), (0, vec![false]), "one tool still runs: the step has not ended");
+        // A steer that started a new reply leaves b on the old one; the step still waits for it.
+        engine.with(|c| c.live.get_mut(&id).unwrap().turn = Some("t2".into()));
+        engine.with(|c| c.handle(&id, 1, result("b")));
+        assert_eq!(handed(&engine, &id), (1, vec![true]), "the step ended: it goes into the turn");
+    }
+
+    #[tokio::test]
+    async fn only_an_idle_main_thread_takes_a_message_in_at_once() {
+        let dir = tempfile::tempdir().unwrap();
+        let (engine, _) = engine(dir.path());
+        let id = seed(&engine, stub(vec![]).session, &[("t1", &[])]);
+        engine.with(|c| c.handle(&id, 1, EngineEvent::MainIdle));
+        engine.with(|c| c.handle(&id, 1, EngineEvent::Thinking("more".into())));
+        engine.with(|c| c.enqueue(&id, written(&id))).unwrap();
+        assert_eq!(handed(&engine, &id), (0, vec![false]), "the agent thinks again: the message waits for its step");
+        engine.with(|c| c.handle(&id, 1, EngineEvent::MainIdle));
+        assert_eq!(handed(&engine, &id), (1, vec![true]), "with only helpers at work it goes in at once");
     }
 }

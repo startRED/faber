@@ -3142,6 +3142,17 @@ fn settled(c: &faber_engine::model::Conversation, messages: usize) -> bool {
     c.messages.len() == messages && c.messages.iter().all(|m| m.status != Some(Status::Streaming))
 }
 
+/// Says a message and hands it to the running turn at once (Send now), the moment a message went in before it waited for
+/// the agent's step to end (R439): the recordings these tests replay captured the line then.
+fn say_now(engine: &Engine, id: &str, vendor: &str, text: &str) -> Result<String, String> {
+    let said = say(engine, id, vendor, text)?;
+    let waiting = engine.open(id).unwrap().queued.into_iter().rev().find(|q| !q.sending && q.text == text);
+    if let Some(q) = waiting {
+        engine.send_queued(id, &q.id)?;
+    }
+    Ok(said)
+}
+
 fn say(engine: &Engine, id: &str, vendor: &str, text: &str) -> Result<String, String> {
     let model = if vendor == "claude" { "haiku" } else { "gpt-6-luna" };
     engine.send(SendRequest { conversation_id: Some(id.into()), ..ask(Area::Chat, text, choice(vendor, Some(model))) })
@@ -3153,8 +3164,8 @@ async fn two_quick_messages_while_claude_answers_go_into_its_turn_in_order_and_e
     let f = fake(claude_turns(&[("first", true), ("second", true), ("third", true)]));
     let (engine, _rx) = engine(dir.path(), Vendor::Claude, f.spawn.clone());
     let id = engine.send(ask(Area::Chat, "first", choice("claude", Some("haiku")))).unwrap();
-    say(&engine, &id, "claude", "second").unwrap();
-    say(&engine, &id, "claude", "third").unwrap();
+    say_now(&engine, &id, "claude", "second").unwrap();
+    say_now(&engine, &id, "claude", "third").unwrap();
     let waiting = engine.open(&id).unwrap();
     assert_eq!(waiting.queued.iter().map(|q| q.text.as_str()).collect::<Vec<_>>(), ["second", "third"]);
     assert!(waiting.queued.iter().all(|q| q.sending), "both go into the running turn, in order");
@@ -3178,7 +3189,7 @@ async fn a_stopped_or_failed_turn_keeps_the_queue_and_the_person_sends_it() {
     let id = engine.send(ask(Area::Chat, "first", choice("claude", Some("haiku")))).unwrap();
     // The CLI cannot take the message into the turn, so it waits in the queue.
     f.wire.refuse_words("second");
-    say(&engine, &id, "claude", "second").unwrap();
+    say_now(&engine, &id, "claude", "second").unwrap();
     let c = until(&engine, &id, |c| settled(c, 2)).await;
     assert_eq!(c.messages[1].status, Some(Status::Stopped));
     tokio::time::sleep(Duration::from_millis(100)).await;
@@ -3372,7 +3383,7 @@ async fn codex_takes_a_message_into_the_running_turn_and_the_answer_continues_be
     let id = engine.send(ask(Area::Chat, COUNT, choice("codex", Some("gpt-6-luna")))).unwrap();
     until(&engine, &id, |c| c.messages.last().is_some_and(|m| !m.text.is_empty())).await;
 
-    say(&engine, &id, "codex", STEER).unwrap();
+    say_now(&engine, &id, "codex", STEER).unwrap();
     // Until Codex says it took the message in, it is a pending bubble that cannot be taken back.
     let c = engine.open(&id).unwrap();
     assert_eq!(c.queued.len(), 1);
@@ -3402,7 +3413,7 @@ async fn claude_takes_a_message_into_the_running_turn_at_its_next_step_and_the_a
     let (engine, _rx) = engine(dir.path(), Vendor::Claude, f.spawn.clone());
     let id = engine.send(ask(Area::Chat, SLEEP, choice("claude", Some("haiku")))).unwrap();
     until(&engine, &id, |c| c.messages.len() == 2).await;
-    say(&engine, &id, "claude", PONG).unwrap();
+    say_now(&engine, &id, "claude", PONG).unwrap();
     assert!(engine.open(&id).unwrap().queued[0].sending, "the line goes to the running turn, not to the back of a queue");
 
     let c = until(&engine, &id, |c| settled(c, 4)).await;
@@ -3414,6 +3425,34 @@ async fn claude_takes_a_message_into_the_running_turn_at_its_next_step_and_the_a
     assert_eq!((c.messages[1].status, c.messages[3].status), (Some(Status::Done), Some(Status::Done)));
     assert_eq!(c.messages[3].vendor, Some(Vendor::Claude));
     assert!(c.queued.is_empty());
+    assert_eq!(f.wire.lines_with(PONG), 1, "the message went to the CLI once");
+}
+
+// Live capture (Claude Code 2.1.307, Haiku 5.5, the flags Faber uses; its task notices left out and the command's 3 s
+// shortened to a pause): a message written while a command runs waits in Faber's queue, so it can still be edited or
+// removed, and goes to the CLI when the command's result comes. Written then, it missed that step: the CLI answered "done"
+// and then the message as a turn of its own.
+#[tokio::test]
+async fn a_message_written_while_a_tool_runs_stays_editable_until_the_step_ends() {
+    let dir = tempfile::tempdir().unwrap();
+    let f = fake(fixture("claude", "steer-held"));
+    let (engine, _rx) = engine(dir.path(), Vendor::Claude, f.spawn.clone());
+    let id = engine.send(ask(Area::Chat, SLEEP, choice("claude", Some("haiku")))).unwrap();
+    until(&engine, &id, |c| c.messages[1].tools.as_ref().is_some_and(|t| !t.is_empty())).await;
+    say(&engine, &id, "claude", "Also say the word ping.").unwrap();
+    let waiting = engine.open(&id).unwrap().queued;
+    assert!(!waiting[0].sending, "it waits in the queue while the command runs");
+    engine.edit_queued(&id, &waiting[0].id, PONG).unwrap();
+    assert_eq!(f.wire.lines_with(PONG), 0, "nothing reached the CLI before the step ended");
+
+    let c = until(&engine, &id, |c| settled(c, 4)).await;
+    engine.shutdown();
+    assert_eq!(f.mismatches.lock().unwrap().clone(), Vec::<String>::new());
+    assert_eq!(texts(&c), [SLEEP, PONG]);
+    assert_eq!(c.messages[1].tools.as_ref().and_then(|t| t[0].ok), Some(true), "the command ran in the first reply");
+    assert_eq!(c.messages[3].text.trim(), "pong");
+    assert!(c.queued.is_empty());
+    assert_eq!(f.wire.lines_with("ping"), 0, "only the edited words reached the CLI");
     assert_eq!(f.wire.lines_with(PONG), 1, "the message went to the CLI once");
 }
 
@@ -3455,7 +3494,7 @@ async fn a_waiting_message_sent_now_goes_into_the_running_turn() {
     until(&engine, &id, |c| c.messages.len() == 2).await;
     // The CLI could not take the line, so it waits for the turn to end, until the person sends it now.
     f.wire.refuse_words(PONG);
-    say(&engine, &id, "claude", PONG).unwrap();
+    say_now(&engine, &id, "claude", PONG).unwrap();
     let c = until(&engine, &id, |c| c.queued.first().is_some_and(|q| !q.sending)).await;
     assert_eq!(c.messages[1].status, Some(Status::Streaming), "the turn still runs");
 
@@ -3482,7 +3521,7 @@ async fn a_message_handed_to_claude_before_a_stop_is_answered_below_the_stopped_
     let (engine, _rx) = engine(dir.path(), Vendor::Claude, f.spawn.clone());
     let id = engine.send(ask(Area::Chat, SLEEP, choice("claude", Some("haiku")))).unwrap();
     until(&engine, &id, |c| c.messages.len() == 2).await;
-    say(&engine, &id, "claude", PONG).unwrap();
+    say_now(&engine, &id, "claude", PONG).unwrap();
     until(&engine, &id, |c| c.messages[1].tools.as_ref().is_some_and(|t| !t.is_empty())).await;
     engine.interrupt(&id);
 
@@ -3505,7 +3544,7 @@ async fn a_steer_codex_refuses_is_sent_again_as_the_next_turn_exactly_once() {
         let (engine, _rx) = engine(dir.path(), Vendor::Codex, f.spawn.clone());
         let id = engine.send(ask(Area::Chat, COUNT, choice("codex", Some("gpt-6-luna")))).unwrap();
         until(&engine, &id, |c| c.messages.last().is_some_and(|m| !m.text.is_empty())).await;
-        say(&engine, &id, "codex", STEER).unwrap();
+        say_now(&engine, &id, "codex", STEER).unwrap();
 
         until(&engine, &id, |c| settled(c, 4)).await;
         tokio::time::sleep(Duration::from_millis(100)).await;
@@ -3527,7 +3566,7 @@ async fn the_result_of_a_tool_that_ran_across_a_steer_lands_on_the_tool_not_on_t
     let (engine, _rx) = engine(dir.path(), Vendor::Codex, f.spawn.clone());
     let id = engine.send(ask(Area::Chat, COUNT, choice("codex", Some("gpt-6-luna")))).unwrap();
     until(&engine, &id, |c| c.messages.last().is_some_and(|m| m.tools.as_ref().is_some_and(|t| !t.is_empty()))).await;
-    say(&engine, &id, "codex", STEER).unwrap();
+    say_now(&engine, &id, "codex", STEER).unwrap();
 
     let c = until(&engine, &id, |c| settled(c, 4)).await;
     engine.shutdown();
@@ -3806,7 +3845,7 @@ async fn a_plan_limit_after_a_steer_stops_the_steered_reply_and_leaves_the_first
     let (engine, _rx) = engine(dir.path(), Vendor::Codex, f.spawn.clone());
     let id = engine.send(ask(Area::Chat, COUNT, choice("codex", Some("gpt-6-luna")))).unwrap();
     until(&engine, &id, |c| c.messages.last().is_some_and(|m| !m.text.is_empty())).await;
-    say(&engine, &id, "codex", STEER).unwrap();
+    say_now(&engine, &id, "codex", STEER).unwrap();
 
     // The limit hits after Codex took the message in, so the answer that is cut off is the second one: recovery has to
     // follow the steer, or it fails the first reply and sends its text again.
@@ -3843,7 +3882,7 @@ async fn a_message_waiting_for_the_turn_to_end_runs_on_the_cli_reconnected_in_th
     let id = engine.send(ask(Area::Chat, "first", choice("claude", Some("haiku")))).unwrap();
     // The CLI cannot take the message into the turn, so it waits for the turn to end.
     wire.refuse_words("second");
-    say(&engine, &id, "claude", "second").unwrap();
+    say_now(&engine, &id, "claude", "second").unwrap();
     // The person reconnects the CLI in Settings while the first turn runs and a message waits behind it.
     engine.replace_clis(BTreeMap::from([(Vendor::Claude, Cli { command: "claude-new".into(), prefix: vec![] })]));
 

@@ -133,6 +133,9 @@ pub enum EngineEvent {
     /// unless a tool call is still open. The CLI's own `result` may come much later (whatever runs after the answer, such as
     /// the person's Stop hooks), so the screen reads the reply as done now while the engine still waits for `Done`.
     Settled,
+    /// Like `Settled`, while helpers the agent left in the background still run: the reply is not done, but the main thread
+    /// waits for no step, so a message written now goes in at once.
+    MainIdle,
     Tool {
         id: String,
         name: String,

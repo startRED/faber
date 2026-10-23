@@ -982,7 +982,7 @@ pub fn start_claude(opts: ClaudeOptions, on_event: EventSink) -> Session {
                             }
                             for mut event in parse_claude_message(&msg) {
                                 if matches!(event, EngineEvent::Settled) && background.owes() {
-                                    continue;
+                                    event = EngineEvent::MainIdle;
                                 }
                                 if matches!(event, EngineEvent::Done { .. }) {
                                     if !finished {
