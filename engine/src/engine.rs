@@ -420,7 +420,7 @@ struct Core {
     /// Tests: this computer is taken to have no Node, so a tool that needs it is refused before any card.
     node_missing: bool,
     /// The install card each conversation waits on: the call it answers and the process that made it (`engine/toolbox.rs`).
-    installs: HashMap<String, (String, u64)>,
+    installs: HashMap<String, toolbox::PendingChange>,
     /// The question card of `offer_bigger` each conversation waits on: the call it answers and the process that made it. Its answer
     /// goes back as the tool's result, never to the CLI as a control response (`engine/toolbox.rs`, `engine/answer.rs`).
     bigger: HashMap<String, (String, u64)>,
@@ -2314,7 +2314,7 @@ impl Core {
                     fields.remove("bigger");
                 }
                 // The install card is Faber's own: a CLI's request under its name is never shown, so no CLI can dress a card as ours.
-                if tool == crate::toolbox::SELF_INSTALL {
+                if tool == crate::toolbox::SELF_INSTALL || tool == crate::toolbox::SELF_SWITCH {
                     if let Some(l) = self.live.get(conv) {
                         drop(l.session.answer(&request_id, false));
                     }

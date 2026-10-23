@@ -129,7 +129,7 @@ a planned name does not mean that a callable tool exists.
 | `judge.creative` | Not built: two blind judges from different vendors, in fresh sessions, with recorded scores. |
 | `snapshot` / `undo` | Private file history and the message menu's Go back and Redo are built in both areas, with bounded coverage reported. No per-step agent API with these names exists. Remote effects cannot be undone. See [Rewind](../design/rewind.md). |
 | `catalog.search` / `catalog.install` | Built as `catalog`: offline search and installation of a tool Faber does not hold, through the approval gate below. |
-| `faber.tools` / `faber.settings` | Partial: `catalog` installs, and the person manages installed tools in Catalog. Agent-driven update, repair, removal, on/off and setting changes are not built. Task 995 curates content; it does not implement these agent actions. |
+| `faber.tools` / `faber.settings` | Partial: `catalog` installs and switches healthy installed tools on or off through their own consent. The person manages the other installed-tool actions in Catalog. Agent-driven update, repair, removal and setting changes are not built. Task 995 curates content; it does not implement these agent actions. |
 | `pc.*` | Partial: `browse` drives Faber's browser, with login, captcha and payment handed to the person. Native desktop control through accessibility and screenshot fallback is not built into Faber. An external installed server is not that first-party API. |
 | `memory.search` | Built as `memory_search`, over this project's conversations and `.faber` notes only. |
 | `quota.get` | Built as `quota`, from limits Faber already measured, without starting a request. |

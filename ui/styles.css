@@ -864,6 +864,7 @@ details.thinking div { white-space: pre-wrap; padding: 6px 0 0 12px; border-left
 .btn:active { transform: scale(0.98); }
 .btn.primary { background: var(--accent); color: var(--accent-ink); box-shadow: none; font-weight: 580; }
 .btn.primary:hover { background: color-mix(in srgb, var(--accent) 88%, white); }
+.ask .btn { height: auto; min-height: var(--h-md); padding-block: 6px; white-space: normal; }
 .ask .btn.primary { background: var(--amber); color: var(--amber-on); }
 .btn:disabled { opacity: 0.4; cursor: default; }
 .chips { display: flex; flex-wrap: wrap; gap: 6px; }

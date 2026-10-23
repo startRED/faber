@@ -2,6 +2,11 @@
 
 Faber's own test system: `cargo t`, screen tests, the build folder and what a run prints.
 
+The runner resolves the repository from its current folder or the nearest ancestor containing `Cargo.toml`,
+`testkit/Cargo.toml` and `engine/Cargo.toml`. Run it inside the intended checkout, even when reusing a warmed
+`CARGO_TARGET_DIR`; outside a Faber workspace it fails instead of using the checkout where it was compiled.
+The fake CLI stays beside the runner executable, and the configured target folder is preserved.
+
 ## Screen tests
 
 Faber's own test runner (`cargo t`, the `testkit/` crate) tests the screen in two ways, both against a hidden test build
