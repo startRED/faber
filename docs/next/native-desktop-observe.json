@@ -1,11 +1,11 @@
 {
   "notes": {
     "new": {
-      "en": "In Windows projects with Full access, the agent can read accessible text from the foreground window.",
-      "pt-BR": "Em projetos no Windows com Acesso total, a IA pode ler o texto acessível da janela em primeiro plano.",
-      "es": "En proyectos de Windows con Acceso total, la IA puede leer el texto accesible de la ventana en primer plano.",
-      "fr": "Dans les projets Windows avec Accès complet, l’IA peut lire le texte accessible de la fenêtre au premier plan.",
-      "de": "In Windows-Projekten mit Vollzugriff kann die KI den zugänglichen Text des Vordergrundfensters lesen."
+      "en": "In Windows projects with Full access, the agent can read accessible foreground-window text and marks incomplete reads as partial.",
+      "pt-BR": "Em projetos no Windows com Acesso total, a IA pode ler o texto acessível da janela em primeiro plano e informa quando a leitura é parcial.",
+      "es": "En proyectos de Windows con Acceso total, la IA puede leer el texto accesible de la ventana en primer plano e indica cuándo la lectura es parcial.",
+      "fr": "Dans les projets Windows avec Accès complet, l’IA peut lire le texte accessible de la fenêtre au premier plan et indique quand la lecture est partielle.",
+      "de": "In Windows-Projekten mit Vollzugriff kann die KI den zugänglichen Text des Vordergrundfensters lesen und kennzeichnet unvollständige Ergebnisse."
     }
   },
   "decisions": [

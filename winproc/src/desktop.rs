@@ -20,7 +20,7 @@ trait Provider {
 
 fn collect<P: Provider>(provider: &mut P, root: P::Node) -> (String, bool) {
     let mut out = String::new();
-    let partial = walk(provider, root, 0, &mut 0, &mut out).unwrap_or(true);
+    let partial = walk(provider, root, 0, &mut 0, &mut out).unwrap_or(true) || provider.expired();
     (out, partial)
 }
 
@@ -567,6 +567,41 @@ mod tests {
         p.fail = true;
         assert!(collect(&mut p, 0).1);
         assert_eq!(p.calls, 1);
+    }
+    #[test]
+    fn native_desktop_uia_last_text_call_crossing_deadline_marks_partial() {
+        struct Leaf {
+            expired: bool,
+            expire_in_text: bool,
+        }
+        impl Provider for Leaf {
+            type Node = ();
+            fn expired(&self) -> bool {
+                self.expired
+            }
+            fn protected(&mut self, _: &()) -> io::Result<bool> {
+                Ok(false)
+            }
+            fn offscreen(&mut self, _: &()) -> io::Result<bool> {
+                Ok(false)
+            }
+            fn first(&mut self, _: &()) -> io::Result<Option<()>> {
+                Ok(None)
+            }
+            fn next(&mut self, _: &()) -> io::Result<Option<()>> {
+                panic!("a root leaf has no sibling query")
+            }
+            fn text(&mut self, _: &()) -> io::Result<String> {
+                self.expired = self.expire_in_text;
+                Ok("visible text".into())
+            }
+        }
+        for expire_in_text in [false, true] {
+            let mut provider = Leaf { expired: false, expire_in_text };
+            let (text, partial) = collect(&mut provider, ());
+            assert_eq!(text, "visible text");
+            assert_eq!(partial, expire_in_text, "the final provider call must not hide an exhausted budget");
+        }
     }
     #[test]
     fn native_desktop_uia_utf8_output_never_splits_characters() {
