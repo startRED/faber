@@ -623,10 +623,11 @@ fn update_faber_file(
 }
 
 /// Appends whole list items without changing existing bytes; `next.md` admits at most twelve items and no duplicate line.
-pub(crate) fn append_notes(project: &Path, name: &str, lines: &[String]) -> Result<(), &'static str> {
+pub(crate) fn append_notes(project: &Path, name: &str, lines: &[String]) -> Result<Vec<String>, &'static str> {
     if !matches!(name, "taste.md" | "lessons.md" | "next.md") {
         return Err(REFUSED);
     }
+    let mut hashes = Vec::new();
     update_faber_file(project, name, |bytes| {
         let text = std::str::from_utf8(bytes).map_err(|_| READ)?;
         let mut count = item_count(text);
@@ -636,7 +637,7 @@ pub(crate) fn append_notes(project: &Path, name: &str, lines: &[String]) -> Resu
                 return Err(REFUSED);
             }
             let item = format!("- {line}");
-            if name == "next.md" && count >= 12 || next.lines().any(|l| l == item) {
+            if name == "next.md" && count >= 12 || list_items(&next).any(|(_, text)| text == line) {
                 continue;
             }
             if !next.is_empty() && !next.ends_with('\n') {
@@ -646,9 +647,16 @@ pub(crate) fn append_notes(project: &Path, name: &str, lines: &[String]) -> Resu
             next.push('\n');
             count += 1;
         }
+        for line in lines {
+            let matches = list_items(&next).filter(|(_, text)| *text == line).map(|(range, _)| digest(&next[range])).collect::<Vec<_>>();
+            if matches.is_empty() && name != "next.md" {
+                return Err(REFUSED);
+            }
+            hashes.extend(matches);
+        }
         Ok(next.into_bytes())
     })?;
-    Ok(())
+    Ok(hashes)
 }
 
 /// A done follow-up removes only its exact line, keeping every other byte as it was.
@@ -658,8 +666,11 @@ pub(crate) fn finish_next(project: &Path, line: &str) -> Result<(), &'static str
     }
     update_faber_file(project, "next.md", |bytes| {
         let text = std::str::from_utf8(bytes).map_err(|_| READ)?;
-        let item = format!("- {line}");
-        Ok(text.split_inclusive('\n').filter(|l| l.trim_end_matches(['\r', '\n']) != item).collect::<String>().into_bytes())
+        let mut next = text.to_string();
+        for (range, _) in list_items(text).filter(|(_, text)| *text == line).collect::<Vec<_>>().into_iter().rev() {
+            next.replace_range(range, "");
+        }
+        Ok(next.into_bytes())
     })?;
     Ok(())
 }
@@ -673,20 +684,42 @@ pub(crate) fn next_full(project: &Path) -> bool {
 }
 
 fn item_count(text: &str) -> usize {
-    let (mut depth, mut count) = (0, 0);
-    for event in Parser::new(text) {
+    list_items(text).count()
+}
+
+/// Only parsed top-level items count as notes; their markers and blank separators do not belong to their words.
+fn list_items(text: &str) -> impl Iterator<Item = (Range<usize>, &str)> {
+    let (mut depth, mut item) = (0, None);
+    let bom = usize::from(text.starts_with('\u{feff}')) * '\u{feff}'.len_utf8();
+    Parser::new(&text[bom..]).into_offset_iter().filter_map(move |(event, range)| {
         match event {
             Event::Start(tag) => {
                 if depth == 1 && matches!(tag, Tag::Item) {
-                    count += 1;
+                    item = Some(range.start + bom);
                 }
                 depth += 1;
             }
-            Event::End(_) => depth -= 1,
+            Event::End(tag) => {
+                depth -= 1;
+                if tag == TagEnd::Item && depth == 1 {
+                    let start = item.take()?;
+                    let raw = &text[start..range.end + bom];
+                    let mut end = start;
+                    let mut offset = start;
+                    for line in raw.split_inclusive('\n') {
+                        offset += line.len();
+                        if !line.trim().is_empty() {
+                            end = offset;
+                        }
+                    }
+                    let content = raw.trim().split_once(char::is_whitespace).map_or("", |(_, text)| text.trim());
+                    return Some((start..end, content));
+                }
+            }
             _ => {}
         }
-    }
-    count
+        None
+    })
 }
 
 fn codex_file(dir: &Directory, folder: &Path, protected: &[String]) -> Result<Option<&'static str>, &'static str> {
@@ -1043,6 +1076,41 @@ fn edit_with_private(project: &Path, edit: &Edit, protected: &[String]) -> Resul
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn finish_next_removes_only_matching_top_level_items_and_keeps_fenced_examples() {
+        let project = folder();
+        std::fs::create_dir(project.path().join(".faber")).unwrap();
+        let path = project.path().join(".faber/next.md");
+        let line = "Check reloads because state can be lost.";
+        let before = format!("\u{feff}# Next\r\n\r\n```md\r\n- {line}\r\n```\r\n\r\n> - {line}\r\n\r\n- Parent\r\n  - {line}\r\n\r\n");
+        let after = format!("\r\n- {line} Extra detail.\r\n\r\nTail without a newline");
+        for marker in ["- ", "* ", "+ ", "1. ", "2) "] {
+            std::fs::write(&path, format!("{before}{marker}{line}\r\n{after}")).unwrap();
+            finish_next(project.path(), line).unwrap();
+            assert_eq!(std::fs::read_to_string(&path).unwrap(), format!("{before}{after}"), "{marker}");
+        }
+    }
+
+    #[test]
+    fn note_appends_deduplicate_top_level_item_contents_across_markers() {
+        let project = folder();
+        std::fs::create_dir(project.path().join(".faber")).unwrap();
+        let line = "Check reloads because state can be lost.".to_string();
+        for name in ["taste.md", "lessons.md", "next.md"] {
+            let path = project.path().join(format!(".faber/{name}"));
+            for marker in ["- ", "* ", "+ ", "1. ", "2) "] {
+                let original = format!("\u{feff}# Notes\r\n\r\n{marker}{line}\r\n\r\nTail without a newline");
+                std::fs::write(&path, &original).unwrap();
+                append_notes(project.path(), name, &[line.clone(), line.clone()]).unwrap();
+                assert_eq!(std::fs::read_to_string(&path).unwrap(), original, "{name}: {marker}");
+            }
+            let example = format!("```md\r\n- {line}\r\n```\r\n\r\n");
+            std::fs::write(&path, &example).unwrap();
+            append_notes(project.path(), name, std::slice::from_ref(&line)).unwrap();
+            assert_eq!(std::fs::read_to_string(&path).unwrap(), format!("{example}- {line}\n"), "an example is not a live item");
+        }
+    }
 
     #[test]
     fn note_appends_preserve_bytes_and_retries_and_count_only_top_level_items() {

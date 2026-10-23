@@ -52,6 +52,8 @@ rest of the shell are in [layout.md](layout.md).
 - A closing box keeps its recap and optional question. Project boxes can also propose one preference and one lesson,
   each with a plain ghost Keep and no confirmation. Keep records the person's approval and appends that line to
   `.faber/taste.md` or `.faber/lessons.md`; its button becomes the quiet word "Kept", including after reopening.
+  Keep binds approval to the proposal shown at the click; changed words are refused, and a pending write never marks
+  a replacement proposal kept. Existing matching note items keep their bytes and record their actual saved identity.
   The buttons wait during a write; a failure stays beside the proposal and leaves Keep available. Proposals and
   follow-up buttons are plain text, wrap in a narrow column and add no motion, watcher or process.
 - One block per project, plus one "Chat" block. Each row shows the vendor's shape (a neutral dot while Auto is still

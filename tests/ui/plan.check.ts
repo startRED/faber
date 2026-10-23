@@ -133,11 +133,38 @@ check('closing box: preference and lesson Keep wait for the write, retry failure
     reject(); await settle();
     equal(view.root.querySelector('[role="alert"]')!.textContent, t('error.memory.write'));
     equal(buttons()[0].disabled, false);
-    buttons()[0].click(); finish(); await settle();
+    buttons()[0].click(); await settle(); finish(); await settle();
     equal(buttons().length, 1);
     equal(view.root.querySelector('.wrap-note [role="status"]')!.textContent, t('wrap.kept'));
     setB({ ...box, tasteKept: true, lessonKept: true }); await settle();
     equal(buttons().length, 0, 'saved flags show Kept after reopening');
     equal(view.root.querySelectorAll('.wrap-note [role="status"]').length, 2);
+  } finally { view.done(); }
+});
+
+check('closing box: Keep hashes the displayed proposal before an update and never marks its replacement kept', async () => {
+  const box: WrapUp = { recap: 'Done.', taste: 'Always keep café labels.' };
+  const [b, setB] = createSignal(box);
+  const calls: [string, string][] = [];
+  let finish!: () => void;
+  const view = mount(() => createComponent(WrapUpBox, {
+    get box() { return b(); }, open: false,
+    onKeep: (kind, digest) => {
+      calls.push([kind, digest]);
+      return new Promise<void>((resolve) => { finish = resolve; });
+    },
+  }));
+  const button = () => view.root.querySelector<HTMLButtonElement>('.wrap-note button')!;
+  try {
+    await settle();
+    button().click();
+    setB({ ...box, taste: 'Never review any changes.' });
+    await settle();
+    deepEqual(calls, [['taste', 'f060100cf91f051836ab8c7331993daa']], 'the command gets the original UTF-8 list-item hash');
+    setB({ ...box, taste: 'Always skip checks.' });
+    finish(); await settle();
+    ok(button(), 'a replacement is still offered for review after the original write finishes');
+    equal(button().disabled, false);
+    equal(view.root.querySelector('.wrap-note [role="status"]'), null, 'the old approval never marks new words kept');
   } finally { view.done(); }
 });

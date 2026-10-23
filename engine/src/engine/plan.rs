@@ -5,8 +5,8 @@ use crate::progress;
 
 impl Engine {
     /// Keeps the saved proposal, never words supplied by the screen or a repository author mark.
-    pub fn keep_project_note(&self, conv: &str, message: &str, kind: &str) -> Result<(), String> {
-        self.with(|c| c.keep_project_note(conv, message, kind))
+    pub fn keep_project_note(&self, conv: &str, message: &str, kind: &str, expected_digest: &str) -> Result<(), String> {
+        self.with(|c| c.keep_project_note(conv, message, kind, expected_digest))
     }
 
     /// A follow-up is a normal new project conversation with the closing box's saved request.
@@ -45,7 +45,7 @@ impl Engine {
 }
 
 impl Core {
-    fn keep_project_note(&mut self, conv: &str, message: &str, kind: &str) -> Result<(), String> {
+    fn keep_project_note(&mut self, conv: &str, message: &str, kind: &str, expected_digest: &str) -> Result<(), String> {
         let c = self.load(conv).filter(|c| c.area == Area::Project).ok_or("error.memory.refused")?;
         let project_id = c.project_id.clone().ok_or("error.projectGone")?;
         let w = c
@@ -60,15 +60,19 @@ impl Core {
             _ => return Err("error.memory.refused".into()),
         };
         let line = line.ok_or("error.memory.refused")?;
+        if crate::project::memory::digest(&format!("- {line}")) != expected_digest {
+            return Err("error.memory.changed".into());
+        }
         if kept {
             return Ok(());
         }
         let project = self.project_of(Some(&project_id)).ok_or("error.projectGone")?;
-        crate::project::memory::append_notes(Path::new(&project.path), name, std::slice::from_ref(&line)).map_err(str::to_string)?;
+        let hashes =
+            crate::project::memory::append_notes(Path::new(&project.path), name, std::slice::from_ref(&line)).map_err(str::to_string)?;
         let live = self.store.projects_checked().map_err(|e| e.key().to_string())?.into_iter().map(|p| p.id).collect::<Vec<_>>();
-        self.store
-            .keep_decision(&project_id, crate::project::memory::digest(&format!("- {line}")), &live)
-            .map_err(|e| e.key().to_string())?;
+        for hash in hashes {
+            self.store.keep_decision(&project_id, hash, &live).map_err(|e| e.key().to_string())?;
+        }
         let w = self
             .convs
             .get_mut(conv)

@@ -43,16 +43,23 @@ export function PlanList(props: { plan: Plan; now?: string }) {
 
 /** The closing box of a task: the recap, and one question whose buttons reply for the person, the recommendation first. A
  * question Faber answered for them while Keep going ran keeps no buttons: the reply's answers card says what it chose. */
-export function WrapUpBox(props: { box: WrapUp; open: boolean; onReply?: (text: string) => void; onKeep?: (kind: 'taste' | 'lesson') => Promise<void> }) {
+export function WrapUpBox(props: { box: WrapUp; open: boolean; onReply?: (text: string) => void; onKeep?: (kind: 'taste' | 'lesson', expectedDigest: string) => Promise<void> }) {
   const id = createUniqueId();
   const [busy, setBusy] = createSignal(false);
   const [kept, setKept] = createSignal<string[]>([]);
   const [error, setError] = createSignal(false);
   const keep = async (kind: 'taste' | 'lesson') => {
     if (busy() || !props.onKeep) return;
-    const key = `${kind}:${props.box[kind]}`;
+    const text = props.box[kind];
+    if (!text) return;
+    const key = `${kind}:${text}`;
     setBusy(true); setError(false);
-    try { await props.onKeep(kind); setKept([...kept(), key]); }
+    try {
+      const hash = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(`- ${text}`.trim()));
+      const expectedDigest = [...new Uint8Array(hash).slice(0, 16)].map((byte) => byte.toString(16).padStart(2, '0')).join('');
+      await props.onKeep(kind, expectedDigest);
+      setKept([...kept(), key]);
+    }
     catch { setError(true); }
     finally { setBusy(false); }
   };

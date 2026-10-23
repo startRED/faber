@@ -6,6 +6,13 @@
       "es": "Guarda preferencias y lecciones al terminar una tarea y elige un pendiente para empezar otra conversación en el proyecto.",
       "fr": "Gardez les préférences et les leçons en fin de tâche, puis choisissez une suite pour ouvrir une nouvelle conversation dans le projet.",
       "de": "Behalte Vorlieben und Erkenntnisse nach einer Aufgabe und starte mit einem offenen Punkt ein neues Gespräch im Projekt."
+    },
+    "fixed": {
+      "en": "Keeping a preference checks the words you approved and recognizes matching notes already saved with another list marker.",
+      "pt-BR": "Ao guardar uma preferência, o Faber confere a frase aprovada e reconhece notas iguais já salvas com outro marcador de lista.",
+      "es": "Al guardar una preferencia, Faber comprueba el texto aprobado y reconoce notas iguales guardadas con otro marcador de lista.",
+      "fr": "Faber vérifie les mots approuvés avant de garder une préférence et reconnaît les notes identiques avec une autre puce.",
+      "de": "Beim Behalten einer Vorliebe prüft Faber den bestätigten Text und erkennt gleiche Notizen mit anderen Listenzeichen."
     }
   },
   "decisions": []

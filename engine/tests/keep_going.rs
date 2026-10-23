@@ -14,6 +14,11 @@ use std::time::Duration;
 use support::{Pipe, next_pipe, pipes};
 use tokio::sync::mpsc::UnboundedReceiver;
 
+fn proposal_digest(line: &str) -> String {
+    use sha2::Digest;
+    sha2::Sha256::digest(format!("- {line}").trim().as_bytes())[..16].iter().map(|b| format!("{b:02x}")).collect()
+}
+
 fn engine(dir: &Path, spawn: faber_engine::proc::Spawner) -> (Engine, UnboundedReceiver<AppEvent>) {
     engine_with(dir, spawn, &[Vendor::Claude])
 }
@@ -942,10 +947,19 @@ async fn taste_lessons_next_proposals_wait_for_keep_and_survive_reopening() {
     assert!(!wrap.taste_kept && !wrap.lesson_kept);
     assert_eq!(std::fs::read(project.path().join(".faber/taste.md")).unwrap(), original);
     assert!(!project.path().join(".faber/lessons.md").exists(), "a proposal alone never writes a note");
-    assert!(engine.keep_project_note(&id, &reply.id, "rules").is_err(), "only taste and lessons can be kept here");
+    assert!(engine.keep_project_note(&id, &reply.id, "rules", "").is_err(), "only taste and lessons can be kept here");
     for kind in ["taste", "lesson"] {
-        engine.keep_project_note(&id, &reply.id, kind).unwrap();
-        engine.keep_project_note(&id, &reply.id, kind).unwrap();
+        let line = if kind == "taste" { wrap.taste.as_ref() } else { wrap.lesson.as_ref() }.unwrap();
+        assert!(
+            engine.keep_project_note(&id, &reply.id, kind, &proposal_digest("Words the person no longer sees.")).is_err(),
+            "a different displayed proposal cannot approve these words"
+        );
+        let current = engine.open(&id).unwrap();
+        let proposal = current.messages.last().unwrap().wrap_up.as_ref().unwrap();
+        assert!(!(if kind == "taste" { proposal.taste_kept } else { proposal.lesson_kept }), "a stale click records no approval");
+        engine.keep_project_note(&id, &reply.id, kind, &proposal_digest(line)).unwrap();
+        engine.keep_project_note(&id, &reply.id, kind, &proposal_digest(line)).unwrap();
+        assert!(engine.keep_project_note(&id, &reply.id, kind, "").is_err(), "even an already kept proposal needs the displayed digest");
     }
     let taste = std::fs::read_to_string(project.path().join(".faber/taste.md")).unwrap();
     assert!(taste.as_bytes().starts_with(original), "appending keeps all existing bytes");
@@ -971,6 +985,36 @@ async fn taste_lessons_next_proposals_wait_for_keep_and_survive_reopening() {
     reopened.shutdown();
 }
 
+#[tokio::test]
+async fn taste_lessons_next_keep_records_existing_item_markers_without_duplicates() {
+    for marker in ["* ", "+ ", "1. ", "2) ", "-   "] {
+        let (dir, project) = (tempfile::tempdir().unwrap(), support::work_folder());
+        std::fs::create_dir_all(project.path().join(".faber")).unwrap();
+        let line = "Always use plain labels.";
+        let original = format!("\u{feff}# Taste\r\n\r\n{marker}{line}\r\n");
+        std::fs::write(project.path().join(".faber/taste.md"), &original).unwrap();
+        std::fs::write(project.path().join(".faber/lessons.md"), &original).unwrap();
+        let (engine, _rx, mut pipe, id) = started(dir.path(), project.path()).await;
+        let (_, error) = calls(&mut pipe, "notes", "wrap_up", json!({ "recap": "Checked.", "taste": line, "lesson": line })).await;
+        assert!(!error);
+        answers(&mut pipe, "Done.", true).await;
+        let conversation = until(&engine, &id, idle).await;
+        for (kind, name) in [("taste", "taste.md"), ("lesson", "lessons.md")] {
+            engine.keep_project_note(&id, &conversation.messages.last().unwrap().id, kind, &proposal_digest(line)).unwrap();
+            assert_eq!(
+                std::fs::read_to_string(project.path().join(format!(".faber/{name}"))).unwrap(),
+                original,
+                "{marker}: no duplicate or rewritten bytes"
+            );
+            let memory = engine.project_memory(conversation.project_id.as_ref().unwrap()).unwrap();
+            let file = memory.files.iter().find(|file| file.path == format!(".faber/{name}")).unwrap();
+            assert_eq!(file.entries.len(), 1);
+            assert_eq!(file.entries[0].author, Some("person"), "{marker}: the record matches the existing item's bytes");
+        }
+        engine.shutdown();
+    }
+}
+
 #[cfg(any(windows, unix))]
 #[tokio::test]
 async fn taste_lessons_next_keep_refuses_a_link_without_recording_approval() {
@@ -985,7 +1029,7 @@ async fn taste_lessons_next_keep_refuses_a_link_without_recording_approval() {
     std::fs::hard_link(&target, project.path().join(".faber/taste.md")).unwrap();
     #[cfg(unix)]
     std::os::unix::fs::symlink(&target, project.path().join(".faber/taste.md")).unwrap();
-    assert!(engine.keep_project_note(&id, &c.messages.last().unwrap().id, "taste").is_err());
+    assert!(engine.keep_project_note(&id, &c.messages.last().unwrap().id, "taste", &proposal_digest("Always use plain labels.")).is_err());
     assert_eq!(std::fs::read_to_string(target).unwrap(), "Outside stays unchanged.\n");
     assert!(!engine.open(&id).unwrap().messages.last().unwrap().wrap_up.as_ref().unwrap().taste_kept);
     assert!(!dir.path().join("decisions-kept.json").exists());
@@ -1099,7 +1143,7 @@ async fn taste_lessons_next_chat_drops_all_project_proposals() {
     let c = until(&engine, &id, idle).await;
     let reply = c.messages.last().unwrap();
     assert!(reply.wrap_up.is_none(), "Chat does not offer the project's closing tool");
-    assert!(engine.keep_project_note(&id, &reply.id, "taste").is_err());
+    assert!(engine.keep_project_note(&id, &reply.id, "taste", "").is_err());
     assert!(engine.start_follow_up(&id, &reply.id, 0, choice).is_err());
     assert!(!dir.path().join("decisions-kept.json").exists());
     engine.shutdown();

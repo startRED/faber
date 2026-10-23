@@ -1391,9 +1391,15 @@ async fn edit_project_memory(faber: State<'_, Faber>, project_id: String, edit: 
 }
 
 #[tauri::command]
-async fn keep_project_note(faber: State<'_, Faber>, conversation_id: String, message_id: String, kind: String) -> Res<()> {
+async fn keep_project_note(
+    faber: State<'_, Faber>,
+    conversation_id: String,
+    message_id: String,
+    kind: String,
+    expected_digest: String,
+) -> Res<()> {
     let engine = faber.engine.clone();
-    tauri::async_runtime::spawn_blocking(move || engine.keep_project_note(&conversation_id, &message_id, &kind))
+    tauri::async_runtime::spawn_blocking(move || engine.keep_project_note(&conversation_id, &message_id, &kind, &expected_digest))
         .await
         .map_err(|_| "error.memory.write".to_string())?
 }
