@@ -1597,10 +1597,16 @@ html.away-win :is(.amb, .amb *) { animation-play-state: paused !important; }
 .answers { display: grid; gap: 6px; padding: 8px 10px; border-radius: var(--r-sm); background: var(--s1); }
 .answers .woke { margin: 0; }
 .answers ul { list-style: none; margin: 0; padding: 0; display: grid; gap: 4px; }
-.answers li { display: flex; align-items: baseline; gap: 8px; min-width: 0; font-size: var(--fs-sm); }
-.answers li .q { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--ink-2); }
-.answers li .a { flex: none; max-width: 40%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--ink); }
-.answers li .change { flex: none; padding: 2px 8px; font-size: var(--fs-sm); }
+.answers li { display: grid; gap: 8px; min-width: 0; font-size: var(--fs-sm); }
+.answers li.open { padding-bottom: 6px; }
+.answers .row { display: flex; align-items: baseline; gap: 8px; min-width: 0; }
+.answers .row .q { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--ink-2); }
+.answers .row .a { flex: none; max-width: 40%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--ink); }
+.answers .row .change { flex: none; padding: 2px 8px; font-size: var(--fs-sm); }
+.answers li.open .row .q { white-space: normal; overflow-wrap: anywhere; color: var(--ink); }
+.answer-choices { padding-left: 2px; }
+.answer-choices .chosen { color: var(--ink-3); }
+.answer-actions { display: flex; gap: 8px; }
 .more-narration { appearance: none; margin: 0; padding: 0; border: 0; background: none; font: inherit; cursor: default; color: var(--ink-3); font-size: var(--fs-sm); }
 .more-narration:hover { color: var(--ink-2); }
 .more-narration:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 4px; }

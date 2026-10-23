@@ -1,6 +1,5 @@
-import { createEffect, createSignal, For, Index, on, Show, type JSX } from 'solid-js';
+import { createEffect, createSignal, createUniqueId, For, Index, on, Show, type JSX } from 'solid-js';
 import type { Message, Plan } from './api.ts';
-import { openMenu } from './contextmenu.ts';
 import { Icon } from './Glyphs.tsx';
 import { elapsed } from './running.ts';
 import { fromEngine, t } from './i18n.ts';
@@ -58,13 +57,27 @@ export function answeredIn(replies: Message[]): Answered[] {
   ]);
 }
 
-/** "Faber answered 3 questions for you": one quiet card, a row per question with the answer chosen. "Change" sends another
- * choice as the person's message (with more than one, a menu picks it). */
+/** "Faber answered 3 questions for you": one quiet card, a row per question with the answer chosen. "Change" opens the whole
+ * question with every choice under its row, and only "Change answer" sends the one picked, as the person's message. */
 export function AnswersCard(props: { answers: Answered[]; onReply?: (text: string) => void }) {
-  const change = (e: MouseEvent, a: Answered) => {
-    const send = (answer: string) => props.onReply?.(t('answers.changeTo', { question: a.question, answer }));
-    if (a.others.length === 1) return send(a.others[0]!);
-    openMenu(e, a.others.map((other, i) => ({ id: `other-${i}`, label: other, run: () => send(other) })));
+  const uid = createUniqueId();
+  const [open, setOpen] = createSignal<number>();
+  const [picked, setPicked] = createSignal<string>();
+  const toggle = (i: number) => {
+    setPicked(undefined);
+    setOpen(open() === i ? undefined : i);
+  };
+  // Closing removes the focused control, so focus goes back to the row's Change.
+  const close = (e: Event) => {
+    const change = (e.currentTarget as Element).closest('li')?.querySelector<HTMLButtonElement>('.change');
+    setOpen(undefined);
+    change?.focus();
+  };
+  const send = (e: Event, a: Answered) => {
+    const answer = picked();
+    if (!answer || answer === a.answer) return;
+    close(e);
+    props.onReply?.(t('answers.changeTo', { question: a.question, answer }));
   };
   return (
     <section class="answers" aria-label={t('answers.title', { n: props.answers.length })}>
@@ -75,14 +88,49 @@ export function AnswersCard(props: { answers: Answered[]; onReply?: (text: strin
       <ul>
         {/* By place, not by object: the list is made again on every tick of a stream, and a row (and a focused Change) stays. */}
         <Index each={props.answers}>
-          {(a) => (
-            <li>
-              <span class="q" title={a().question}>{a().question}</span>
-              <span class="a">{a().answer}</span>
-              <Show when={props.onReply && a().others.length}>
-                <button type="button" class="btn ghost change" onClick={(e) => change(e, a())}>
-                  {t('answers.change')}
-                </button>
+          {(a, i) => (
+            <li
+              classList={{ open: open() === i }}
+              onKeyDown={(e) => {
+                if (e.key !== 'Escape' || open() !== i) return;
+                e.stopPropagation();
+                close(e);
+              }}
+            >
+              <div class="row">
+                <span class="q" title={a().question}>{a().question}</span>
+                <span class="a">{a().answer}</span>
+                <Show when={props.onReply && a().others.length}>
+                  <button type="button" class="btn ghost change" aria-expanded={open() === i} onClick={() => toggle(i)}>
+                    {t('answers.change')}
+                  </button>
+                </Show>
+              </div>
+              <Show when={open() === i}>
+                <fieldset class="piece-choices answer-choices">
+                  <legend class="sr">{a().question}</legend>
+                  <For each={[a().answer, ...a().others]}>
+                    {(choice) => (
+                      <label>
+                        <input type="radio" name={`${uid}-${i}`} checked={(picked() ?? a().answer) === choice} onChange={() => setPicked(choice)} />
+                        <span>
+                          {choice}
+                          <Show when={choice === a().answer}>
+                            <span class="chosen"> · {t('answers.chosen')}</span>
+                          </Show>
+                        </span>
+                      </label>
+                    )}
+                  </For>
+                </fieldset>
+                <div class="answer-actions">
+                  <button type="button" class="btn send" disabled={!picked() || picked() === a().answer} onClick={(e) => send(e, a())}>
+                    {t('answers.send')}
+                  </button>
+                  <button type="button" class="btn ghost" onClick={close}>
+                    {t('answers.cancel')}
+                  </button>
+                </div>
               </Show>
             </li>
           )}

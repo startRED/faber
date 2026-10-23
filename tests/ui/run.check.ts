@@ -56,9 +56,40 @@ check('run: one header with the time, the turns and the plan, the earlier turns 
       [...card[0]!.querySelectorAll('li')].map((li) => [li.querySelector('.q')!.textContent, li.querySelector('.a')!.textContent]),
       [['Which database for the cache?', 'SQLite'], ['Check it on a phone?', 'Yes']],
     );
-    // "Change" with one other choice sends it at once, as the person's message.
-    card[0]!.querySelectorAll<HTMLButtonElement>('.change')[1]!.click();
+    // "Change" sends nothing: it opens the question in full with every choice, Faber's own picked and marked.
+    const row = card[0]!.querySelectorAll('li')[1]!;
+    const change = row.querySelector<HTMLButtonElement>('.change')!;
+    change.click();
+    await settle();
+    deepEqual(sent, [], 'opening the choices sends nothing');
+    equal(change.getAttribute('aria-expanded'), 'true');
+    const choices = [...row.querySelectorAll<HTMLInputElement>('.answer-choices input')];
+    deepEqual(choices.map((c) => c.closest('label')!.textContent), [`Yes · ${t('answers.chosen')}`, 'Later']);
+    ok(choices[0]!.checked, "Faber's choice starts picked");
+    const confirm = row.querySelector<HTMLButtonElement>('.answer-actions .send')!;
+    ok(confirm.disabled, 'nothing to send until another choice is picked');
+    // Cancel closes it with nothing sent; Escape does the same.
+    row.querySelector<HTMLButtonElement>('.answer-actions .ghost')!.click();
+    await settle();
+    equal(row.querySelector('.answer-choices'), null);
+    equal(document.activeElement, change, 'Cancel gives the focus back to Change');
+    change.click();
+    await settle();
+    row.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+    await settle();
+    equal(row.querySelector('.answer-choices'), null, 'Escape closes the choices');
+    deepEqual(sent, []);
+    // Picking another choice and confirming sends it, as the person's message, and closes the choices.
+    change.click();
+    await settle();
+    const later = row.querySelectorAll<HTMLInputElement>('.answer-choices input')[1]!;
+    later.checked = true;
+    later.dispatchEvent(new Event('change', { bubbles: true }));
+    await settle();
+    row.querySelector<HTMLButtonElement>('.answer-actions .send')!.click();
+    await settle();
     deepEqual(sent, [t('answers.changeTo', { question: 'Check it on a phone?', answer: 'Later' })]);
+    equal(row.querySelector('.answer-choices'), null);
     // The closing box Faber answered offers no buttons of its own.
     equal(root.querySelector('.wrap-actions'), null);
   } finally {

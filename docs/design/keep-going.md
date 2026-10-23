@@ -22,8 +22,11 @@ own, the newest reply starts, right under the model's name, with one quiet line 
 as the stop line: "While you were away (3 h): 14 turns of work, 1 switch to the other AI, 2 questions answered for you."
 (a part that did not happen is left out). The questions Faber answered (the agent's own and its closing box's) are one
 quiet card under it on the soft fill: "Faber answered 2 questions for you" with the loop icon, then a row each,
-the question cut to one line in the second ink, the answer chosen in the full ink, and a ghost "Change" button that sends
-the other choice as the person's message (a menu picks it when there are several). Nothing moves.
+the question cut to one line in the second ink, the answer chosen in the full ink, and a ghost "Change" button. "Change"
+sends nothing by itself: it opens, under its row, the question in full (no longer cut) and every choice as a radio list,
+Faber's own picked and marked "Faber's choice" in the third ink, then "Change answer" (enabled once another choice is
+picked) and a ghost Cancel. Only "Change answer" sends the choice, as the person's message; Cancel and Escape close it.
+One row opens at a time. Nothing moves.
 One run, one block (R251): two or more turns in a row Faber sent by itself, with no message of the person between, sit
 under one header in the work log's disclosure: the loop icon, "Worked on its own · 2 h · 14 turns · plan 5 of 7" on one
 line with an ellipsis, its tooltip counting what Faber asked ("Faber asked it to keep going ×12"). Closed by default; open,
