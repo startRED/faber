@@ -110,6 +110,7 @@ impl Costs {
 pub const SOLO: &[(&str, &str)] = &[
     (performance::NAME, "processor, memory, scheduling and layout timing"),
     ("reading: a real restart preserves an old reading point within the memory budget", "processor, memory"),
+    (reading::PROJECT_NAME, "processor, memory"),
     ("chat groups: ten knowledge files survive reopening within the memory budget", "processor, memory"),
     ("draft attachments: committed bytes survive a real restart, removals stay gone, within the memory budget", "processor, memory"),
     ("draft attachments: refused disk save preserves words and bytes, retry sends once within the memory budget", "processor, memory"),

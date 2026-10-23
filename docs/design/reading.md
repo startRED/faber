@@ -18,7 +18,7 @@ How conversation text reads and keeps its place, in Chat and Projects.
 
 ## Verification
 
-The hidden screen scenario in `testkit/src/screen/reading.rs` uses 160 synthetic messages and no AI. It closes the
+The hidden Chat and Projects screen scenarios in `testkit/src/screen/reading.rs` each use 160 synthetic messages and no AI. Each closes the
 first app and requires its process tree, including WebView2, to exit before enlarging an earlier saved message and
 relaunching the same profile. It checks the real message id and viewport offset, native wheel scrolling, the latest
 message and forgotten tail position, the unchanged conversation file, and screenshots at 1280 and 720 px.
@@ -28,7 +28,7 @@ post-launch flow intervals; these are not isolated anchor overhead, broad latenc
 
 ### Measured fixture (Windows, 2026-10-23)
 
-The hidden 160-message scenario passed with motion set to none and no AI. The first app and WebView2 tree ended before
+The original Chat 160-message scenario passed with motion set to none and no AI. The first app and WebView2 tree ended before
 the same profile reopened in another native process; a larger earlier message preserved message 7 at its -24 px offset.
 The 1280 and 720 px captures, native wheel gesture, one-click jump to message 159 and removal of the stored position passed.
 
@@ -41,3 +41,22 @@ The 1280 and 720 px captures, native wheel gesture, one-click jump to message 15
 CPU covers navigation, scrolling and screenshots on this fixture; it excludes app launches and the closed-profile interval.
 It is a flow measurement on a busy local PC, not isolated feature overhead or a broad interaction latency result.
 The disabled-cache mutation failed only after the real relaunch; its exact source bytes were restored before the green run.
+
+### Projects restart follow-up (Windows, 2026-10-23)
+
+The Projects case seeds one synthetic project and opens its conversation through the real area, project and conversation
+controls. After closing the app and WebView2 tree, it checks the same project identity and message 7 at its -24 px offset
+in another native process using the same profile. Earlier content grows while closed; 1280 and 720 px captures, a native
+wheel gesture, one jump to message 159, forgotten tail metadata and the unchanged conversation file are checked too.
+
+A temporary Projects-only omission of the loaded reading cache failed after the second real launch at the viewport
+assertion. Restoring the exact original app source made both Chat and Projects pass, with zero failed/not run/skipped.
+
+| Follow-up fixture | Sampled tree peak | CPU / measured post-launch flow | Scenario duration |
+| :--- | :--- | :--- | :--- |
+| Chat | 168.0 MB | 1,281 / 1,455 ms | 8.2 s |
+| Projects | 176.5 MB | 1,250 / 1,484 ms | 8.0 s |
+
+These are single busy-PC flows including navigation, scrolling and screenshots, not isolated overhead, a performance
+comparison or a zero-cost claim. The project is a synthetic local folder with no AI; this does not cover remote projects,
+other operating systems, smooth motion or a screen reader. This verification-only extension changes no app code.

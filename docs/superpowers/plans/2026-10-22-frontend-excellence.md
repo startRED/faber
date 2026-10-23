@@ -40,7 +40,7 @@ whole-product pass. Each scope keeps the limitations below and its separate inte
 | Blueprint IDs | Evidence added | Boundary still open |
 | --- | --- | --- |
 | R05, C03 | Unsent words and attachment bytes survive the exercised failed-save/retry and process-restart paths | Power loss, storage exhaustion and an outgoing journal are not established |
-| S02, C15, C16 | Logical reading anchor, changed earlier heights, manual scroll and actual latest-message jump | Native Projects restart, smooth motion and every new-output cue are not established |
+| S02, C15, C16 | Logical reading anchor, changed earlier heights, manual scroll and actual latest-message jump; separate Windows native Projects restart follow-up below | Other platforms, smooth motion and every new-output cue are not established |
 | C10, X04 | Search result identity, marker expiry and newer composer focus during paging | Other focus-return paths and complete assistive-technology coverage are not established |
 | T01, T07 | A refused durable write does not dispatch the tested send/steer/queue operations | Lost acknowledgements and exactly-once external effects remain outside this guard |
 | M03, M10, P07 | Identified executable/fixture pair, input/frame proxies, process-tree RAM/CPU and unchanged memory gate | No field INP, general latency gain, quiet repeated trial or hidden-window power proof |
@@ -64,7 +64,7 @@ different references/author choices, one sample per condition and an unexposed e
 causal or general superiority claims. Later indefinite-wait, artifact-identity and list-focus wording was reviewed separately,
 not retroactively assigned those scores. Two extra routing examples were paper checks, not implemented applications.
 
-The current original instruction files total 17,308 UTF-8 bytes, including frontmatter. Native plugin discovery uses
+The original instruction files in the earlier evaluated package totalled 17,308 UTF-8 bytes, including frontmatter. Native plugin discovery uses
 their 151/152-byte descriptions; other delivery modes use the existing short index or fallback instructions. Full
 files are read on relevant use when available, rather than being injected into every task. No resident service, new dependency or application timer was
 added by the wording; marginal whole-app resource cost of wording was not measured.
@@ -203,7 +203,7 @@ not provide a stable client receipt, crash-safe outgoing journal or exactly-once
 reply. Never automatically replay an ambiguous external effect. Pre-admission attachment copies may remain after a
 refusal; no cleanup guarantee was added for those copies.
 
-Full AA conformance, native screen-reader coverage, native Projects reading restart, smooth-motion restoration,
+Full AA conformance, native screen-reader coverage, non-Windows native reading restart, smooth-motion restoration,
 physical phones, all browser engines, hidden/occluded power cost, quiet repeated latency/cost trials and competitor
 parity remain unverified. Other partial/unknown blueprint rows remain product backlog, not completed features.
 Voice, SSH, remote devices, scheduling and proprietary cloud capabilities are separate product work. No claim of
@@ -256,3 +256,19 @@ reported the change closed and merged, and the exact candidate was observed dire
 The 722 UI checks belong to the Windows confirmation. The separate earlier 713-check macOS runtime proof remains
 valid for its identified cleanup tree; skipped remote UI and platform lints do not establish a new macOS run of
 this final guard composition.
+
+## Follow-up: native Projects reading restart
+
+The original request was revisited against the recorded unverified contracts. A missing Windows Projects restart
+proof now extends the existing Chat scenario through the real area/project/conversation controls, with the same
+160-message fixture, changed earlier heights, message 7/-24 px offset, three-pixel tolerance, 1280/720 widths,
+native wheel and actual final-message jump. It requires the first app and WebView2 tree to exit before reopening
+the same profile in another process and checking the saved project identity. No AI runs or conversation edits occur.
+
+A temporary Projects-only cache omission failed after the real restart, at the saved-offset assertion. Exact original
+app bytes were restored before an identified run passed both Chat and Projects, zero failed/not run/skipped. Sampled
+tree peaks were 168.0/176.5 MB against the unchanged 400 MB limit; measured post-launch flow CPU was 1,281/1,455 ms
+for Chat and 1,250/1,484 ms for Projects, including navigation, scrolling and screenshots. One run per area on a busy
+PC does not establish isolated overhead, general speed or performance equivalence. The [reading page](../../design/reading.md)
+retains the scoped measurements. This is additional verification, not an application behavior change, another
+generated-design evaluation or proof of other platforms, smooth motion, remote projects or assistive technology.

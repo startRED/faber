@@ -7,10 +7,11 @@ use serde_json::{Value, json};
 use std::time::{Duration, Instant};
 
 const NAME: &str = "reading: a real restart preserves an old reading point within the memory budget";
+pub(super) const PROJECT_NAME: &str = "reading: a real Projects restart preserves an old reading point within the memory budget";
 const OFFSET: &str = "(() => { const e=document.querySelector('[data-message-index=\"7\"]'); const t=document.querySelector('.thread'); return e ? e.getBoundingClientRect().top-t.getBoundingClientRect().top : null; })()";
 
 pub fn scenarios() -> Vec<Scenario> {
-    vec![Scenario { name: NAME, run: restart }]
+    vec![Scenario { name: NAME, run: restart }, Scenario { name: PROJECT_NAME, run: restart_project }]
 }
 
 fn memory(ctx: &mut Ctx, id: usize, peak: &mut f64) -> Result {
@@ -25,6 +26,15 @@ fn at_point(page: &mut Page, offset: f64) -> Result {
 }
 
 fn restart(ctx: &mut Ctx) -> Result {
+    restart_area(ctx, false)
+}
+
+fn restart_project(ctx: &mut Ctx) -> Result {
+    restart_area(ctx, true)
+}
+
+fn restart_area(ctx: &mut Ctx, project: bool) -> Result {
+    let shot_prefix = if project { "project-reading" } else { "reading" };
     ctx.write_settings(&json!({ "language":"en", "setup":"done", "tutorialDone":true,
         "appearance": {"base":"sala", "motion":"none", "effects":{"ambient":false,"texture":false,"glow":false}} }))?;
     let mut conversation = json!({ "id":"reading-native", "title":"Synthetic reading fixture", "area":"chat",
@@ -32,6 +42,11 @@ fn restart(ctx: &mut Ctx) -> Result {
         "messages": (0..160).map(|i| json!({"id":format!("reading-{i}"), "role":if i%2==0 {"user"} else {"assistant"},
             "at":i, "status":"done", "text":format!("{} Synthetic message {i}. {}",
                 if i==7 {"Albatrossanchor"} else {"Reading"}, "A calm paragraph for this synthetic reading fixture. ".repeat(12))})).collect::<Vec<_>>() });
+    if project {
+        super::shell::seed_project(ctx, "Reading project")?;
+        conversation["area"] = json!("project");
+        conversation["projectId"] = json!("demo");
+    }
     let folder = ctx.sb.data.join("conversations");
     std::fs::create_dir_all(&folder).map_err(|e| e.to_string())?;
     let file = folder.join("reading-native.json");
@@ -42,7 +57,14 @@ fn restart(ctx: &mut Ctx) -> Result {
     let started = Instant::now();
     let mut peak = 0.0;
     memory(ctx, app.id, &mut peak)?;
-    app.page.click(&css(".crow .item").has_text("Synthetic reading fixture"))?;
+    if project {
+        let projects = app.page.named("button", "area.projects")?;
+        app.page.click(&projects)?;
+        app.page.click(&css(".prow .item").has_text("Reading project"))?;
+        app.page.click(&css(".proj-chats .item").has_text("Synthetic reading fixture"))?;
+    } else {
+        app.page.click(&css(".crow .item").has_text("Synthetic reading fixture"))?;
+    }
     app.page.wait_visible(&css("[data-message-index=\"159\"]"))?;
     app.page.fill(&css(".search input"), "Albatrossanchor")?;
     app.page.wait_visible(&css(".message-hit"))?;
@@ -57,7 +79,7 @@ fn restart(ctx: &mut Ctx) -> Result {
       return p?.id==='reading-7' && Math.abs(p.offset+24)<3;
     })()"#,
     )?;
-    ctx.shot(&mut app, "reading-before-restart-1280")?;
+    ctx.shot(&mut app, &format!("{shot_prefix}-before-restart-1280"))?;
     memory(ctx, app.id, &mut peak)?;
     let first_cpu = ctx.cpu_ms(app.id)? - start_cpu;
     let first_ms = started.elapsed().as_secs_f64() * 1000.0;
@@ -74,13 +96,19 @@ fn restart(ctx: &mut Ctx) -> Result {
     super::shell::set_size(&mut app.page, 1280, 800)?;
     let second_cpu = ctx.cpu_ms(app.id)?;
     let second = Instant::now();
+    if project {
+        app.page.wait_for(
+            "the same project conversation to reopen in Projects",
+            "(() => {const p=JSON.parse(localStorage.getItem('faber.place')||'{}');return p.area==='project'&&p.projectId==='demo'&&p.id==='reading-native';})()",
+        )?;
+    }
     at_point(&mut app.page, -24.0)?;
     app.page.wait_visible(&css(".toend"))?;
-    ctx.shot(&mut app, "reading-after-restart-1280")?;
+    ctx.shot(&mut app, &format!("{shot_prefix}-after-restart-1280"))?;
     memory(ctx, app.id, &mut peak)?;
     super::shell::set_size(&mut app.page, 720, 800)?;
     at_point(&mut app.page, -24.0)?;
-    ctx.shot(&mut app, "reading-after-restart-720")?;
+    ctx.shot(&mut app, &format!("{shot_prefix}-after-restart-720"))?;
     memory(ctx, app.id, &mut peak)?;
 
     let before = app.page.eval(OFFSET)?.as_f64().ok_or("the restored point is missing")?;
@@ -118,6 +146,7 @@ fn restart(ctx: &mut Ctx) -> Result {
     let disk: Value = serde_json::from_slice(&std::fs::read(&file).map_err(|e| e.to_string())?).map_err(|e| e.to_string())?;
     same(disk, conversation, "reading, relaunching and scrolling never write the seeded conversation")?;
     same(ctx.records()?.len(), 0, "the reading scenario never launches or sends to an AI")?;
-    ctx.notes.push(format!("reading fixture160 only, two real app processes {first_pid}/{}: sampled tree peak {peak:.1} MB <=400 MB; post-launch scripted flow {cpu:.0} ms CPU over {wall:.0} ms ({:.1}% of one core), including navigation, scrolling and screenshots; not isolated anchor overhead or a latency benchmark", app.pid, cpu/wall*100.0));
+    let area = if project { "Projects" } else { "Chat" };
+    ctx.notes.push(format!("{area} reading fixture160 only, two real app processes {first_pid}/{}: sampled tree peak {peak:.1} MB <=400 MB; post-launch scripted flow {cpu:.0} ms CPU over {wall:.0} ms ({:.1}% of one core), including navigation, scrolling and screenshots; not isolated anchor overhead or a latency benchmark", app.pid, cpu/wall*100.0));
     ctx.close(app.id)
 }
