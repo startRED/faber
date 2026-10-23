@@ -84,6 +84,14 @@ then passed at 1,085 ms; this does not diagnose the original slowdown. The compl
 task assertions but failed a separate NVIDIA cache cleanup audit. A fresh ordinary confirmation passed three checks
 and cleanup; the old cache was not removed, its failure was not waived and its cause remains unestablished.
 
+A subsequent normal instruction-package landing attempt passed 2,193 engine and 706 UI checks but failed one native
+visual-version lifecycle scenario (123 others passed). It measured 131.5 MB before opening and 147.6 MB after closing:
+16.1 MB retained after 15.4 seconds, above its unchanged 15 MB margin. No weak frame references remained, but that
+does not establish the cause of the process footprint. The candidate was not queued. Its failure and executable
+identities are retained. A focused rebuild of that same source passed the unchanged limit: 136.6 MB baseline,
+8.8 MB retained after version switching and closing, and 11.3 MB after reopening and Escape at 720 px. This is one
+non-reproduction, not a diagnosed cause or product repair. The full normal landing verification remains required.
+
 Required local commands passed for each final package, with receipts retaining the five pre-existing source warnings,
 the existing bundle warning and script result 101 passed/one branch-only skip. Claims were rechecked after other
 lanes narrowed disjoint reservations. A passing local scenario or a queued commit is not an observed remote gate.
