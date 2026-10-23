@@ -36,6 +36,7 @@ export function Running(props: {
   /** A done card's click opens its conversation, which clears it; its × only clears it. */
   onOpenDone?: (c: Summary) => void;
   onDismiss?: (c: Summary) => void;
+  onFollowUp?: (c: Summary, index: number) => Promise<void>;
   onClose: () => void;
   /** Opened by the user over the stage: it is a modal dialog. Docked, or opened by itself, it is not. */
   modal: boolean;
@@ -68,6 +69,15 @@ export function Running(props: {
 }) {
   // The times move while the column is open and stop with it.
   const [now, setNow] = createSignal(Date.now());
+  const [starting, setStarting] = createSignal(false);
+  const [followError, setFollowError] = createSignal<string>();
+  const followUp = async (c: Summary, index: number) => {
+    if (starting() || !props.onFollowUp) return;
+    setStarting(true); setFollowError(undefined);
+    try { await props.onFollowUp(c, index); }
+    catch { setFollowError(c.id); }
+    finally { setStarting(false); }
+  };
   everyWhileShown(15_000, () => setNow(Date.now()));
   // The engine sends the whole list anew at every change, so its items are new objects each time. A row keyed by its object
   // would be built again at every change and lose what it holds (an answered question card folding away): rows are kept by
@@ -230,6 +240,12 @@ export function Running(props: {
                                 {c.title || t('run.untitled')}
                               </button>
                               <Show when={ended(c).line}>{(line) => <p class="run-kg"><span class="last" title={line()}>{line()}</span></p>}</Show>
+                              <Show when={c.area === 'project' && props.onFollowUp}>
+                                <div class="run-next">
+                                  <For each={ended(c).next?.items.slice(0, 3)}>{(line, index) => <button type="button" class="btn ghost" disabled={starting()} onClick={() => void followUp(c, index())}>{line}</button>}</For>
+                                </div>
+                                <Show when={followError() === c.id}><p class="note err" role="alert">{t('run.followFailed')}</p></Show>
+                              </Show>
                             </li>
                           )}
                         </For>

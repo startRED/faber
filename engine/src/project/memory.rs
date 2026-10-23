@@ -14,10 +14,10 @@ const CHANGED: &str = "error.memory.changed";
 const REFUSED: &str = "error.memory.refused";
 /// Soft targets of the project's own notes (own work method, "Staying small and current"). Over one, Memory says so and
 /// the next close asks the agent to fold the file; Faber itself never cuts an item.
-pub const TARGETS: [(&str, usize); 2] = [(".faber/decisions.md", 8 * 1024), (".faber/taste.md", 1024)];
+pub const TARGETS: [(&str, usize); 3] = [(".faber/decisions.md", 8 * 1024), (".faber/taste.md", 1024), (".faber/lessons.md", 2 * 1024)];
 /// The note kinds read under `.faber/`: today's, `decisions-old` (overridden decisions, searched and never loaded), and the
 /// legacy `plans`, `recipes`, `learning` and `memory`, still read for folders that have them.
-const KINDS: [&str; 7] = ["decisions", "decisions-old", "taste", "plans", "recipes", "learning", "memory"];
+const KINDS: [&str; 10] = ["decisions", "decisions-old", "taste", "lessons", "next", "rules", "plans", "recipes", "learning", "memory"];
 /// The file extensions a backticked name with no folder needs to be judged a path (`.js` is left out: `Next.js` is a name).
 const EXTENSIONS: [&str; 30] = [
     "md", "rs", "ts", "tsx", "jsx", "mjs", "cjs", "json", "toml", "yaml", "yml", "py", "go", "java", "kt", "swift", "c", "h", "cpp", "cs",
@@ -31,6 +31,9 @@ pub struct MemoryFile {
     pub source: &'static str,
     pub revision: String,
     pub too_large: bool,
+    /// Built by Faber, so Memory offers reading only.
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub read_only: bool,
     /// Over its soft target (`TARGETS`).
     #[serde(skip_serializing_if = "std::ops::Not::not")]
     pub over: bool,
@@ -105,6 +108,20 @@ fn decisions(path: &str) -> bool {
         .position(|p| *p == ".faber")
         .and_then(|i| parts.get(i + 1))
         .is_some_and(|kind| matches!(kind.trim_end_matches(".md"), "decisions" | "decisions-old"))
+}
+
+/// Taste and lessons carry no author mark: only Faber's record makes them the person's.
+fn proposals(path: &str) -> bool {
+    let parts: Vec<_> = path.split('/').collect();
+    parts
+        .iter()
+        .position(|p| *p == ".faber")
+        .and_then(|i| parts.get(i + 1))
+        .is_some_and(|kind| matches!(kind.trim_end_matches(".md"), "taste" | "lessons"))
+}
+
+fn rules(path: &str) -> bool {
+    path.split('/').collect::<Vec<_>>().windows(2).any(|p| p == [".faber", "rules.md"])
 }
 
 /// The backticked project-relative file paths in a note. Only these are judged: a span with a space, a quote, `=`, `:`, a
@@ -563,7 +580,19 @@ pub(super) fn read_sources(
 /// same no-follow handles and atomic replacement as an edit: a link planted in place of either is refused, never followed.
 /// Returns whether it wrote.
 pub(super) fn write_faber_file(project: &Path, name: &str, bytes: &[u8]) -> Result<bool, &'static str> {
+    update_faber_file(project, name, |_| Ok(bytes.to_vec()))
+}
+
+/// Holds the same no-follow directory and revision from reading through replacement, including for appends.
+fn update_faber_file(
+    project: &Path,
+    name: &str,
+    change: impl FnOnce(&[u8]) -> Result<Vec<u8>, &'static str>,
+) -> Result<bool, &'static str> {
     let _write = WRITES.lock().map_err(|_| "error.memory.write")?;
+    if !matches!(name, "rules.md" | "taste.md" | "lessons.md" | "next.md") {
+        return Err(REFUSED);
+    }
     let protected = resolved_private(&private_roots());
     let (_, project_dir) = project_directory(project, &protected)?;
     let dir = match project_dir.under(Path::new(".faber")) {
@@ -579,11 +608,85 @@ pub(super) fn write_faber_file(project: &Path, name: &str, bytes: &[u8]) -> Resu
     let permissions = file.metadata().map_err(|_| READ)?.permissions();
     let mut current = Vec::new();
     file.take(MAX_BYTES as u64 + 1).read_to_end(&mut current).map_err(|_| READ)?;
+    if current.len() > MAX_BYTES {
+        return Err(REFUSED);
+    }
+    let bytes = change(&current)?;
+    if bytes.len() > MAX_BYTES {
+        return Err(REFUSED);
+    }
     if current == bytes {
         return Ok(false);
     }
-    dir.replace(name, bytes, permissions, &revision(&current)).map_err(|_| "error.memory.write")?;
+    dir.replace(name, &bytes, permissions, &revision(&current)).map_err(|_| "error.memory.write")?;
     Ok(true)
+}
+
+/// Appends whole list items without changing existing bytes; `next.md` admits at most twelve items and no duplicate line.
+pub(crate) fn append_notes(project: &Path, name: &str, lines: &[String]) -> Result<(), &'static str> {
+    if !matches!(name, "taste.md" | "lessons.md" | "next.md") {
+        return Err(REFUSED);
+    }
+    update_faber_file(project, name, |bytes| {
+        let text = std::str::from_utf8(bytes).map_err(|_| READ)?;
+        let mut count = item_count(text);
+        let mut next = text.to_string();
+        for line in lines {
+            if line.trim().is_empty() || line.contains(['\r', '\n', '\0']) || line.chars().count() > 200 {
+                return Err(REFUSED);
+            }
+            let item = format!("- {line}");
+            if name == "next.md" && count >= 12 || next.lines().any(|l| l == item) {
+                continue;
+            }
+            if !next.is_empty() && !next.ends_with('\n') {
+                next.push('\n');
+            }
+            next.push_str(&item);
+            next.push('\n');
+            count += 1;
+        }
+        Ok(next.into_bytes())
+    })?;
+    Ok(())
+}
+
+/// A done follow-up removes only its exact line, keeping every other byte as it was.
+pub(crate) fn finish_next(project: &Path, line: &str) -> Result<(), &'static str> {
+    if ProjectFiles::open(project).is_none_or(|files| files.file(".faber/next.md").is_err()) {
+        return Ok(());
+    }
+    update_faber_file(project, "next.md", |bytes| {
+        let text = std::str::from_utf8(bytes).map_err(|_| READ)?;
+        let item = format!("- {line}");
+        Ok(text.split_inclusive('\n').filter(|l| l.trim_end_matches(['\r', '\n']) != item).collect::<String>().into_bytes())
+    })?;
+    Ok(())
+}
+
+/// The full follow-up list is folded at close, through the existing fold request.
+pub(crate) fn next_full(project: &Path) -> bool {
+    let Some(files) = ProjectFiles::open(project) else { return false };
+    let Ok(file) = files.file(".faber/next.md") else { return false };
+    let mut text = String::new();
+    file.take(MAX_BYTES as u64 + 1).read_to_string(&mut text).is_ok() && (text.len() > MAX_BYTES || item_count(&text) >= 12)
+}
+
+fn item_count(text: &str) -> usize {
+    let (mut depth, mut count) = (0, 0);
+    for event in Parser::new(text) {
+        match event {
+            Event::Start(tag) => {
+                if depth == 1 && matches!(tag, Tag::Item) {
+                    count += 1;
+                }
+                depth += 1;
+            }
+            Event::End(_) => depth -= 1,
+            _ => {}
+        }
+    }
+    count
 }
 
 fn codex_file(dir: &Directory, folder: &Path, protected: &[String]) -> Result<Option<&'static str>, &'static str> {
@@ -614,19 +717,23 @@ fn revision(bytes: &[u8]) -> String {
 }
 
 /// What Faber stores when the person keeps an AI decision: a short hash of its words, so reworded words are not kept.
-fn digest(body: &str) -> String {
+pub(crate) fn digest(body: &str) -> String {
     revision(body.trim().as_bytes())[..32].into()
 }
 
 /// Marks the decisions the person kept or wrote (`kept` is what Faber stored outside the project). A `[by person]` mark
 /// with no record is an agent's claim, so it reads as an AI decision not yet reviewed, whatever the file says.
 pub fn mark_kept(list: &mut MemoryList, kept: &[String]) {
-    for entry in list.files.iter_mut().flat_map(|f| &mut f.entries) {
-        let recorded = entry.body.as_deref().is_some_and(|b| kept.contains(&digest(b)));
-        if entry.author == Some("person") && !recorded {
-            entry.author = Some("ai");
+    for file in &mut list.files {
+        for entry in &mut file.entries {
+            let recorded = entry.body.as_deref().is_some_and(|b| kept.contains(&digest(b)));
+            if proposals(&file.path) {
+                entry.author = Some(if recorded { "person" } else { "ai" });
+            } else if entry.author == Some("person") && !recorded {
+                entry.author = Some("ai");
+            }
+            entry.reviewed = entry.author == Some("ai") && recorded;
         }
-        entry.reviewed = entry.author == Some("ai") && recorded;
     }
 }
 
@@ -708,7 +815,8 @@ fn read_file(dir: &Directory, name: &str, path: String, source: &'static str) ->
         file.take(MAX_BYTES as u64 + 1).read_to_end(&mut bytes).map_err(|_| READ)?;
     } else {
         let over = TARGETS.iter().any(|(target, _)| *target == path);
-        return Ok(MemoryFile { path, source, revision: String::new(), too_large: true, over, entries: vec![] });
+        let read_only = rules(&path);
+        return Ok(MemoryFile { path, source, revision: String::new(), too_large: true, read_only, over, entries: vec![] });
     }
     let over = TARGETS.iter().any(|(target, cap)| *target == path && bytes.len() > *cap);
     let too_large = bytes.len() > MAX_BYTES;
@@ -720,7 +828,14 @@ fn read_file(dir: &Directory, name: &str, path: String, source: &'static str) ->
             }
         }
     }
-    Ok(MemoryFile { path, source, revision: revision(&bytes), too_large, over, entries })
+    if proposals(&path) {
+        for entry in &mut entries {
+            entry.body = Some(entry.text.clone());
+            entry.author = Some("ai");
+        }
+    }
+    let read_only = rules(&path);
+    Ok(MemoryFile { path, source, revision: revision(&bytes), too_large, read_only, over, entries })
 }
 
 pub fn list(project: &Path) -> Result<MemoryList, &'static str> {
@@ -860,6 +975,9 @@ static WRITES: std::sync::Mutex<()> = std::sync::Mutex::new(());
 fn edit_with_private(project: &Path, edit: &Edit, protected: &[String]) -> Result<Option<String>, &'static str> {
     let _write = WRITES.lock().map_err(|_| "error.memory.write")?;
     let source = source(&edit.path).ok_or(REFUSED)?;
+    if rules(&edit.path) {
+        return Err("error.memory.readOnly");
+    }
     let protected = resolved_private(protected);
     let (root, project_dir) = project_directory(project, &protected)?;
     if private(&root.join(&edit.path), &protected) {
@@ -889,6 +1007,9 @@ fn edit_with_private(project: &Path, edit: &Edit, protected: &[String]) -> Resul
     let mut replacement = String::new();
     if edit.keep {
         let text = &original[entry.start..entry.end];
+        if proposals(&edit.path) {
+            return Ok(Some(digest(text)));
+        }
         let kept = decisions(&edit.path).then(|| mark(text)).flatten().ok_or(REFUSED)?;
         return Ok(Some(digest(&text[..kept.open])));
     }
@@ -922,6 +1043,35 @@ fn edit_with_private(project: &Path, edit: &Edit, protected: &[String]) -> Resul
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn note_appends_preserve_bytes_and_retries_and_count_only_top_level_items() {
+        let project = folder();
+        std::fs::create_dir(project.path().join(".faber")).unwrap();
+        let path = project.path().join(".faber/taste.md");
+        let original = b"# Taste\r\n\r\n- Existing.\r\n";
+        std::fs::write(&path, original).unwrap();
+        let line = "Always use plain labels.".to_string();
+        for _ in 0..2 {
+            append_notes(project.path(), "taste.md", std::slice::from_ref(&line)).unwrap();
+        }
+        let mut expected = original.to_vec();
+        expected.extend_from_slice(b"- Always use plain labels.\n");
+        assert_eq!(std::fs::read(path).unwrap(), expected);
+        let path = project.path().join(".faber/next.md");
+        let mut original = "# Next\r\n\r\nA note.\r\n\r\n".to_string();
+        original.push_str(&(0..11).map(|i| format!("- Item {i}\r\n  - Its detail\r\n")).collect::<String>());
+        std::fs::write(&path, &original).unwrap();
+        append_notes(project.path(), "next.md", &[line.clone(), "No room".into()]).unwrap();
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), format!("{original}- {line}\n"));
+        assert!(next_full(project.path()));
+        finish_next(project.path(), &line).unwrap();
+        let bare = tempfile::tempdir().unwrap();
+        finish_next(bare.path(), "Anything").unwrap();
+        assert!(!bare.path().join(".faber").exists(), "finishing a follow-up creates no file");
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), original);
+        assert!(!next_full(project.path()));
+    }
 
     fn folder() -> tempfile::TempDir {
         tempfile::tempdir_in(std::env::temp_dir().canonicalize().unwrap()).unwrap()

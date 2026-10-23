@@ -1169,12 +1169,36 @@ impl Engine {
     }
     pub fn edit_project_memory(&self, id: &str, edit: &crate::project::memory::Edit) -> Result<(), String> {
         let project = self.project(id)?;
-        // Keeping writes nothing to the project: the person's review is stored here, out of an agent's reach (R16).
+        let removed = if edit.text.is_none() && !edit.keep {
+            let before = self.project_memory(id)?;
+            before
+                .files
+                .iter()
+                .find(|f| f.path == edit.path)
+                .and_then(|f| f.entries.iter().find(|e| e.start == edit.start && e.end == edit.end))
+                .map(|e| e.body.as_deref().unwrap_or(&e.text))
+                .map(crate::project::memory::digest)
+        } else {
+            None
+        };
+        let removed = removed.filter(|hash| self.with(|c| c.store.kept_decisions(id).contains(hash)));
+        // The person's review is stored here, out of an agent's reach (R16).
         if let Some(hash) = crate::project::memory::apply(Path::new(&project.path), edit).map_err(str::to_string)? {
             self.with(|c| {
                 let live: Vec<_> = c.store.projects_checked().unwrap_or_default().into_iter().map(|p| p.id).collect();
                 c.store.keep_decision(id, hash, &live).map_err(|e| e.key().to_string())
             })?;
+        }
+        if let Some(hash) = removed {
+            let after = crate::project::memory::list(Path::new(&project.path)).map_err(str::to_string)?;
+            let used = after
+                .files
+                .iter()
+                .flat_map(|f| &f.entries)
+                .any(|e| crate::project::memory::digest(e.body.as_deref().unwrap_or(&e.text)) == hash);
+            if !after.incomplete && !used {
+                self.with(|c| c.store.forget_decision(id, &hash).map_err(|e| e.key().to_string()))?;
+            }
         }
         Ok(())
     }
@@ -1658,8 +1682,17 @@ impl Core {
             }
         }
         kept.reverse();
+        let mut taste: Vec<_> = notes
+            .files
+            .iter()
+            .filter(|f| f.path == ".faber/taste.md")
+            .flat_map(|f| &f.entries)
+            .filter(|e| e.author == Some("person"))
+            .filter_map(|e| e.body.as_deref())
+            .collect();
+        taste.reverse();
         let files = crate::project::memory::ProjectFiles::open(path);
-        Some(crate::project::rules::card(&facts, &kept, unreviewed, |d| files.as_ref().is_some_and(|f| f.stale(d))))
+        Some(crate::project::rules::card(&facts, &kept, unreviewed, &taste, |d| files.as_ref().is_some_and(|f| f.stale(d))))
     }
 
     fn folder_of(&self, c: &Conversation) -> Result<PathBuf, String> {
@@ -3987,6 +4020,7 @@ impl Core {
             project_id,
             working_folder: None,
             project_start_pending: area == Area::Project,
+            next: None,
             copy: None,
             sessions: BTreeMap::new(),
             session_kits: BTreeMap::new(),

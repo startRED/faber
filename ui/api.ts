@@ -192,6 +192,11 @@ export interface WrapUp {
   ask?: string;
   actions?: string[];
   done?: boolean;
+  taste?: string;
+  lesson?: string;
+  next?: string[];
+  tasteKept?: boolean;
+  lessonKept?: boolean;
   /** The reply Faber gave for the person while Keep going ran and nobody answered. */
   answered?: string;
 }
@@ -280,6 +285,8 @@ export interface Conversation {
   projectId?: string;
   workingFolder?: string;
   projectStartPending?: boolean;
+  /** The exact follow-up this conversation finishes when it closes done. */
+  next?: string;
   /** A project conversation's own copy (a git worktree on its own branch), made at its first message. */
   copy?: WorkCopy;
   sessions: Partial<Record<Vendor, string>>;
@@ -337,6 +344,7 @@ export interface Ended {
   workMs: number;
   /** The last line the agent wrote. */
   line?: string;
+  next?: { messageId: string; items: string[] };
 }
 export interface WorkCopy {
   path: string;
@@ -859,6 +867,7 @@ export interface MemoryFile {
   tooLarge: boolean;
   /** Over its soft target: the agent folds it at its next close. */
   over?: boolean;
+  readOnly?: boolean;
   entries: MemoryEntry[];
 }
 export interface MemoryList {
@@ -893,6 +902,8 @@ export const api = {
   stopBackground: (id: string) => invoke<void>('stop_background', { id }),
   open: (id: string) => invoke<Conversation | null>('open', { id }),
   send: (req: SendRequest) => invoke<string>('send', { req }),
+  keepProjectNote: (conversationId: string, messageId: string, kind: 'taste' | 'lesson') => invoke<void>('keep_project_note', { conversationId, messageId, kind }),
+  startFollowUp: (conversationId: string, messageId: string, index: number, choice: Choice) => invoke<string>('start_follow_up', { conversationId, messageId, index, choice }),
   branch: (req: { conversationId: string; messageId: string; text: string; choice: Choice }) => invoke<string>('branch', { req }),
   cliSessions: (projectId: string) => invoke<CliSession[]>('cli_sessions', { projectId }),
   pickUp: (projectId: string, session: CliSession) => invoke<string>('pick_up', { projectId, session }),

@@ -37,7 +37,11 @@ impl Core {
             }
             let Some(kind) = end_kind(c) else { continue };
             let start = old.keep_progress.as_ref().map(|p| p.since).filter(|s| *s > 0).unwrap_or(old.since);
-            c.ended = Some(Ended { at, kind, work_ms: at.saturating_sub(start), line: keep_going::progress_line(&c.messages) });
+            let next = c.messages.last().filter(|_| c.area == Area::Project).and_then(|m| {
+                let items = &m.wrap_up.as_ref()?.next;
+                (!items.is_empty()).then(|| FollowUps { message_id: m.id.clone(), items: items.iter().take(3).cloned().collect() })
+            });
+            c.ended = Some(Ended { at, kind, work_ms: at.saturating_sub(start), line: keep_going::progress_line(&c.messages), next });
             changed.push(old.conversation_id.clone());
         }
         for item in items.iter().filter(|i| !i.settled) {
@@ -118,6 +122,7 @@ mod tests {
             actions: vec!["Yes".into()],
             done: false,
             answered: None,
+            ..Default::default()
         };
         boxed.wrap_up = Some(ask.clone());
         assert_eq!(end_kind(&conv(vec![person(), boxed.clone()])), Some(EndKind::NeedsYou));
@@ -132,7 +137,7 @@ mod tests {
     #[test]
     fn a_card_nobody_opens_goes_after_a_week_and_a_failure_after_a_day() {
         let day = 86_400_000;
-        let mark = |kind| Ended { at: 0, kind, work_ms: 0, line: None };
+        let mark = |kind| Ended { at: 0, kind, work_ms: 0, line: None, next: None };
         assert!(mark(EndKind::Done).current(6 * day) && !mark(EndKind::Done).current(7 * day));
         assert!(mark(EndKind::NeedsYou).current(6 * day));
         assert!(mark(EndKind::Failed).current(day - 1) && !mark(EndKind::Failed).current(day));

@@ -600,6 +600,15 @@ impl Store {
         self.write(&self.decisions_kept, &all)
     }
 
+    /// A deleted entry loses its review only after no identical live entry uses it.
+    pub fn forget_decision(&self, project: &str, hash: &str) -> Result<(), Fault> {
+        let mut all = read::<BTreeMap<String, Vec<String>>>(&self.decisions_kept).unwrap_or_default();
+        if let Some(kept) = all.get_mut(project) {
+            kept.retain(|h| h != hash);
+        }
+        self.write(&self.decisions_kept, &all)
+    }
+
     /// What Faber remembers about each vendor's quota, for Chat and Auto. A missing, damaged or unreadable file is an empty
     /// ledger: it only holds what was learned, and learning starts again.
     pub fn ledger(&self) -> Ledger {

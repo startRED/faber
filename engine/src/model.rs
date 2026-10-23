@@ -664,7 +664,7 @@ pub struct PlanCount {
 }
 
 /// The closing box an agent puts at the end of a reply when a task ends (`crate::progress::wrap_up`).
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct WrapUp {
     /// What is now true, then what is not done or not verified.
@@ -680,6 +680,17 @@ pub struct WrapUp {
     /// The reply Faber gave for the person while Keep going ran and nobody answered.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub answered: Option<String>,
+    /// Proposals stay in the box until the person keeps them.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub taste: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub lesson: Option<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub next: Vec<String>,
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub taste_kept: bool,
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub lesson_kept: bool,
 }
 
 /// A question the agent asked that Faber answered with the first choice while the person was away.
@@ -874,6 +885,9 @@ pub struct Conversation {
     /// No project turn has started yet: the common session entrance applies the project's current copy rule.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub project_start_pending: bool,
+    /// The exact follow-up this conversation took; a verified close removes it from the project's list.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub next: Option<String>,
     /// A project conversation's own copy, made at its first message (R201). None works in the project folder.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub copy: Option<crate::project::copy::WorkCopy>,
@@ -1099,6 +1113,16 @@ pub struct Ended {
     /// The last line the agent wrote, as the running row showed it.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub line: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub next: Option<FollowUps>,
+}
+
+/// The closing box that offered a done card's follow-ups, so a click reuses its saved words.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct FollowUps {
+    pub message_id: String,
+    pub items: Vec<String>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]

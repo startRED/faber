@@ -45,7 +45,15 @@ rest of the shell are in [layout.md](layout.md).
   missing, empty, binary and too-large files have plain words, and a failed read offers "Try again".
 - A run that ended while nobody looked keeps a calm card in its block (R242): no fill, a thin line around it, a check
   and "done" (amber when it needs the person), the time it worked and its last line. A click opens it, its × clears it;
-  nothing else moves. The sidebar row shows a 6 px accent dot until the conversation is seen.
+  nothing else moves. A project's card also offers up to three follow-ups proposed in its closing box, each as one
+  wrapped ghost button. Picking one starts a new conversation in the same project with those words; buttons wait
+  while it starts, and a failure says so on the card and leaves retry available. Finishing that conversation with
+  `done: true` removes the exact item from `.faber/next.md`. The sidebar row shows a 6 px accent dot until the conversation is seen.
+- A closing box keeps its recap and optional question. Project boxes can also propose one preference and one lesson,
+  each with a plain ghost Keep and no confirmation. Keep records the person's approval and appends that line to
+  `.faber/taste.md` or `.faber/lessons.md`; its button becomes the quiet word "Kept", including after reopening.
+  The buttons wait during a write; a failure stays beside the proposal and leaves Keep available. Proposals and
+  follow-up buttons are plain text, wrap in a narrow column and add no motion, watcher or process.
 - One block per project, plus one "Chat" block. Each row shows the vendor's shape (a neutral dot while Auto is still
   choosing the model), the conversation title, the state in words ("Working", "Needs you" or "Choosing the model") and
   the time since the turn started.

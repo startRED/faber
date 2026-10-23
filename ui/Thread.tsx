@@ -593,7 +593,7 @@ function Answer(props: Shared & { m: Accessor<Message>; messages?: Message[]; pr
           {fromEngine(m().halt, { ai: m().vendor ? vendorName(m().vendor!) : t('model.auto') })}
         </p>
       </Show>
-      <Show when={m().wrapUp}>{(box) => <WrapUpBox box={box()} open={!!props.last && !working() && !m().permissions?.some((p) => p.tool === 'ExitPlanMode')} onReply={props.onReply} />}</Show>
+      <Show when={m().wrapUp}>{(box) => <WrapUpBox box={box()} open={!!props.last && !working() && !m().permissions?.some((p) => p.tool === 'ExitPlanMode')} onReply={props.onReply} onKeep={(kind) => api.keepProjectNote(props.conversationId, m().id, kind)} />}</Show>
       <Show when={!working() || foot()}>
         {/* While the agent works the row holds only the foot line; `.actions` is the finished reply's row, which screen tests wait for.
             Its buttons, time and cost show on hover or focus (the hover bar); the foot line, which says the reply is done, stays. */}

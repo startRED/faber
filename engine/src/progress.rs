@@ -94,7 +94,15 @@ fn wrap_up_schema() -> Value {
                 "items": { "type": "string" },
                 "description": "With ask: one or two replies of 1 to 3 words, the recommendation first."
             },
-            "done": { "type": "boolean", "description": "The person's whole request is finished and verified." }
+            "done": { "type": "boolean", "description": "The person's whole request is finished and verified." },
+            "taste": { "type": "string", "description": "In a project, propose one rule only after the same kind of correction twice, or once with always or never." },
+            "lesson": { "type": "string", "description": "In a project, propose what went wrong and why only when it changes later work." },
+            "next": {
+                "type": "array",
+                "maxItems": 3,
+                "items": { "type": "string" },
+                "description": "In a project, propose up to three follow-ups found and not done, each one line with its why."
+            }
         },
         "required": ["recap"],
         "additionalProperties": false
@@ -150,6 +158,11 @@ fn line(text: &str, most: usize) -> String {
 
 fn text_of(v: &Value, most: usize) -> Option<String> {
     v.as_str().map(|t| line(t, most)).filter(|t| !t.is_empty())
+}
+
+/// A proposal's 200 characters include the ellipsis.
+fn proposal(v: &Value) -> Option<String> {
+    text_of(v, 200).map(|text| if text.chars().count() > 200 { line(&text, 199) } else { text })
 }
 
 /// The most an estimate may say, in US dollars: above it the number is a mistake, not a job.
@@ -240,7 +253,18 @@ pub fn wrap_up(input: &Value) -> Result<WrapUp, String> {
         None => vec![],
     };
     let ask = ask.filter(|_| !actions.is_empty());
-    Ok(WrapUp { recap, ask, actions, done: input["done"].as_bool() == Some(true), answered: None })
+    Ok(WrapUp {
+        recap,
+        ask,
+        actions,
+        done: input["done"].as_bool() == Some(true),
+        answered: None,
+        taste: proposal(&input["taste"]),
+        lesson: proposal(&input["lesson"]),
+        next: input["next"].as_array().into_iter().flatten().filter_map(proposal).take(3).collect(),
+        taste_kept: false,
+        lesson_kept: false,
+    })
 }
 
 /// The first sentence of a recap, for a running row, a done card and the tray: up to its first full stop, question or
@@ -258,6 +282,30 @@ pub fn first_sentence(recap: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn wrap_up_proposals_are_one_line_two_hundred_characters_and_three_follow_ups() {
+        let input = json!({
+            "recap": "Checked.", "taste": format!("  {}\n{}  ", "é".repeat(150), "界".repeat(100)),
+            "lesson": "  A\n\tsecond failure explained why.  ",
+            "next": [null, "  ", "  Check\nthe UI because it wraps. ", "Second", "Third", "Fourth"]
+        });
+        let w = wrap_up(&input).unwrap();
+        let taste = w.taste.unwrap();
+        assert_eq!(taste.chars().count(), 200);
+        assert!(taste.ends_with('…') && !taste.contains('\n'));
+        assert_eq!(w.lesson.as_deref(), Some("A second failure explained why."));
+        assert_eq!(w.next, ["Check the UI because it wraps.", "Second", "Third"]);
+        assert!(!w.taste_kept && !w.lesson_kept);
+        let exactly = "x".repeat(200);
+        assert_eq!(wrap_up(&json!({"recap":"Checked.","taste": exactly})).unwrap().taste.as_deref(), Some(exactly.as_str()));
+        let old = wrap_up(&json!({"recap":"Checked."})).unwrap();
+        assert!(old.taste.is_none() && old.lesson.is_none() && old.next.is_empty());
+        let schema = wrap_up_schema();
+        assert_eq!(schema["properties"]["next"]["maxItems"], 3);
+        assert!(schema["properties"]["taste"]["description"].as_str().unwrap().contains("twice"));
+        assert!(schema["properties"]["lesson"]["description"].as_str().unwrap().contains("changes later work"));
+    }
 
     fn states(p: &Plan) -> Vec<(&str, StepState)> {
         p.steps.iter().map(|s| (s.text.as_str(), s.state)).collect()

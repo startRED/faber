@@ -1333,6 +1333,14 @@ export function App(props: { initial: AppState; update?: UpdateStatus; inbox: { 
         openSummary(c);
       }}
       onDismiss={(c) => void api.seen(c.id).catch(() => {})}
+      onFollowUp={async (c, index) => {
+        const next = c.ended?.next;
+        if (!next || !c.projectId) return;
+        const id = await api.startFollowUp(c.id, next.messageId, index, { vendor: 'auto' });
+        if (!docked()) closeColumn();
+        closeSettings(); closeSide(false);
+        await go({ area: 'project', projectId: c.projectId, id });
+      }}
       onClose={closeColumn}
       details={sideDetails() ? { conversationId: sideDetails()!.id, messages: sideDetails()!.messages,
         background: state().background?.items ?? [], changes: { id: sideDetails()!.id, files: changeList()?.files ?? [], loading: changes.loading,

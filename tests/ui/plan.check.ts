@@ -108,3 +108,36 @@ check('plan: the calls that keep the plan, the now line and the box are never st
   const call = (name: string) => ({ id: name, name, input: {} });
   deepEqual(['Plan', 'Status', 'WrapUp', 'Bash', 'Agent'].map((n) => isProgressCall(call(n))), [true, true, true, false, false]);
 });
+
+check('closing box: preference and lesson Keep wait for the write, retry failures and remember kept proposals', async () => {
+  const box: WrapUp = { recap: 'Done.', taste: 'Always use plain buttons.', lesson: 'Check paths before saving because folders can move.' };
+  const [b, setB] = createSignal(box);
+  const calls: string[] = [];
+  let finish!: () => void;
+  let reject!: () => void;
+  const view = mount(() => createComponent(WrapUpBox, {
+    get box() { return b(); }, open: false,
+    onKeep: (kind) => {
+      calls.push(kind);
+      return new Promise<void>((resolve, fail) => { finish = resolve; reject = () => fail(new Error('write failed')); });
+    },
+  }));
+  const buttons = () => [...view.root.querySelectorAll<HTMLButtonElement>('.wrap-note button')];
+  try {
+    await settle();
+    equal(buttons().length, 2, 'older closing boxes still allow keeping a proposal');
+    ok(buttons().every((button) => button.classList.contains('ghost')));
+    buttons()[0].click(); await settle();
+    deepEqual(calls, ['taste'], 'Keep needs no confirmation');
+    ok(buttons().every((button) => button.disabled), 'a pending write cannot be submitted twice');
+    reject(); await settle();
+    equal(view.root.querySelector('[role="alert"]')!.textContent, t('error.memory.write'));
+    equal(buttons()[0].disabled, false);
+    buttons()[0].click(); finish(); await settle();
+    equal(buttons().length, 1);
+    equal(view.root.querySelector('.wrap-note [role="status"]')!.textContent, t('wrap.kept'));
+    setB({ ...box, tasteKept: true, lessonKept: true }); await settle();
+    equal(buttons().length, 0, 'saved flags show Kept after reopening');
+    equal(view.root.querySelectorAll('.wrap-note [role="status"]').length, 2);
+  } finally { view.done(); }
+});

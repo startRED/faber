@@ -372,9 +372,10 @@ mod tests {
             actions: vec!["Yes".into(), "Not now".into()],
             done: false,
             answered: None,
+            ..Default::default()
         });
         assert_eq!(of(&m), None, "one question at a time");
-        m.wrap_up = Some(WrapUp { recap: "Fixed.".into(), ask: None, actions: vec![], done: true, answered: None });
+        m.wrap_up = Some(WrapUp { recap: "Fixed.".into(), ask: None, actions: vec![], done: true, answered: None, ..Default::default() });
         assert_eq!(of(&m).map(|l| l.reason).as_deref(), Some("look.fixed"), "a box with no question leaves room for the offer");
     }
 
@@ -485,8 +486,14 @@ mod tests {
         });
         assert_eq!(with_places(&m, places.clone()), None, "never beside a step up");
         m.nudge = None;
-        m.wrap_up =
-            Some(WrapUp { recap: "Done.".into(), ask: Some("Ship it?".into()), actions: vec!["Yes".into()], done: false, answered: None });
+        m.wrap_up = Some(WrapUp {
+            recap: "Done.".into(),
+            ask: Some("Ship it?".into()),
+            actions: vec!["Yes".into()],
+            done: false,
+            answered: None,
+            ..Default::default()
+        });
         assert_eq!(with_places(&m, places.clone()), None, "one question at a time");
         m.wrap_up = None;
         m.status = Some(Status::Stopped);

@@ -98,7 +98,7 @@ function MemoryList(props: { projectId: string }) {
             <Show when={entry} fallback={<p class="hint">{t(file.tooLarge ? 'memory.tooLarge' : 'memory.noEntries')}</p>}>
               {(entry) => <Show when={editing() === key(file, entry())} fallback={<>
                 <p class="memory-text">{entry().body || entry().text}</p>
-                <div class="memory-actions">
+                <Show when={!file.readOnly}><div class="memory-actions">
                   <Show when={entry().author === 'ai' && !entry().reviewed}><button type="button" class="btn ghost" disabled={busy() || files.loading} onClick={() => void save(file, entry(), null, true)}>{t('memory.keep')}</button></Show>
                   <button type="button" class="btn ghost" data-edit disabled={busy() || files.loading} onClick={() => { setConfirm(undefined); setEditing(key(file, entry())); setDraft(entry().text); }}>{t('memory.edit')}</button>
                   <button type="button" class="btn ghost danger" disabled={busy() || files.loading}
@@ -111,7 +111,7 @@ function MemoryList(props: { projectId: string }) {
                     onFocusOut={() => { keyDown = needsRelease = false; if (confirm() === key(file, entry())) setConfirm(undefined); }}
                     onClick={() => remove(file, entry())}>{t(confirm() === key(file, entry()) ? 'memory.confirmDelete' : 'memory.delete')}</button>
                   <Show when={confirm() === key(file, entry())}><button type="button" class="btn ghost" disabled={busy() || files.loading} onClick={() => setConfirm(undefined)}>{t('memory.cancel')}</button></Show>
-                </div>
+                </div></Show>
               </>}>
                 <form onSubmit={(event) => { event.preventDefault(); if (!busy() && !files.loading) void save(file, entry(), draft()); }} onKeyDown={(event) => { if (event.key === 'Escape' && !event.isComposing && !busy()) { event.preventDefault(); event.stopPropagation(); setEditing(undefined); } }}>
                   <textarea class="field" aria-label={t('memory.editText')} value={draft()} disabled={busy() || files.loading} onInput={(event) => setDraft(event.currentTarget.value)} ref={(el) => queueMicrotask(() => el.focus())} />

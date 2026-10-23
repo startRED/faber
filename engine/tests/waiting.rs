@@ -565,6 +565,7 @@ fn seed(dir: &Path, long: bool) -> Conversation {
         commands: BTreeMap::new(),
         working_folder: None,
         project_start_pending: false,
+        next: None,
         copy: None,
         choice: None,
         id: "seeded".into(),

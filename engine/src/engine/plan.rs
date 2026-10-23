@@ -3,7 +3,88 @@
 use super::*;
 use crate::progress;
 
+impl Engine {
+    /// Keeps the saved proposal, never words supplied by the screen or a repository author mark.
+    pub fn keep_project_note(&self, conv: &str, message: &str, kind: &str) -> Result<(), String> {
+        self.with(|c| c.keep_project_note(conv, message, kind))
+    }
+
+    /// A follow-up is a normal new project conversation with the closing box's saved request.
+    pub fn start_follow_up(&self, conv: &str, message: &str, index: usize, choice: Choice) -> Result<String, String> {
+        self.with(|c| {
+            let before = c.load(conv).filter(|c| c.area == Area::Project).ok_or("error.memory.refused")?;
+            let project_id = before.project_id.clone().ok_or("error.projectGone")?;
+            let text = before
+                .messages
+                .iter()
+                .find(|m| m.id == message && m.role == Role::Assistant)
+                .and_then(|m| m.wrap_up.as_ref())
+                .and_then(|w| w.next.get(index).filter(|_| index < 3))
+                .cloned()
+                .ok_or("error.memory.refused")?;
+            let id = c.blank(Area::Project, Some(project_id.clone()));
+            c.convs.get_mut(&id).ok_or("error.conversationGone")?.next = Some(text.clone());
+            let sent = c.send(
+                SendRequest {
+                    conversation_id: Some(id.clone()),
+                    area: Area::Project,
+                    project_id: Some(project_id),
+                    text,
+                    images: vec![],
+                    files: vec![],
+                    choice,
+                },
+                None,
+            );
+            if sent.is_err() && c.convs.get(&id).is_some_and(|c| c.messages.is_empty()) {
+                c.convs.remove(&id);
+            }
+            sent
+        })
+    }
+}
+
 impl Core {
+    fn keep_project_note(&mut self, conv: &str, message: &str, kind: &str) -> Result<(), String> {
+        let c = self.load(conv).filter(|c| c.area == Area::Project).ok_or("error.memory.refused")?;
+        let project_id = c.project_id.clone().ok_or("error.projectGone")?;
+        let w = c
+            .messages
+            .iter()
+            .find(|m| m.id == message && m.role == Role::Assistant)
+            .and_then(|m| m.wrap_up.as_ref())
+            .ok_or("error.messageGone")?;
+        let (line, kept, name) = match kind {
+            "taste" => (w.taste.clone(), w.taste_kept, "taste.md"),
+            "lesson" => (w.lesson.clone(), w.lesson_kept, "lessons.md"),
+            _ => return Err("error.memory.refused".into()),
+        };
+        let line = line.ok_or("error.memory.refused")?;
+        if kept {
+            return Ok(());
+        }
+        let project = self.project_of(Some(&project_id)).ok_or("error.projectGone")?;
+        crate::project::memory::append_notes(Path::new(&project.path), name, std::slice::from_ref(&line)).map_err(str::to_string)?;
+        let live = self.store.projects_checked().map_err(|e| e.key().to_string())?.into_iter().map(|p| p.id).collect::<Vec<_>>();
+        self.store
+            .keep_decision(&project_id, crate::project::memory::digest(&format!("- {line}")), &live)
+            .map_err(|e| e.key().to_string())?;
+        let w = self
+            .convs
+            .get_mut(conv)
+            .and_then(|c| c.messages.iter_mut().find(|m| m.id == message))
+            .and_then(|m| m.wrap_up.as_mut())
+            .ok_or("error.messageGone")?;
+        if kind == "taste" {
+            w.taste_kept = true;
+        } else {
+            w.lesson_kept = true;
+        }
+        self.save(conv);
+        self.push(conv, Some(message), true);
+        Ok(())
+    }
+
     /// Adds what something cost, in US$, to the job's running total (rule 7): the conversation's, and its parent's when an
     /// agent started it. It is called where each cost is written (a turn, a helper, a quick side question), so the spend is
     /// read in one step and never counted again from the conversations. A cost not known adds nothing, so the warning can
@@ -59,15 +140,21 @@ impl Core {
     /// a close looks, through the folder's no-follow handle.
     fn fold_ask(&mut self, conv: &str) -> Option<String> {
         let c = self.convs.get(conv).filter(|c| c.area == Area::Project)?;
-        let files = crate::project::memory::ProjectFiles::open(&self.folder_of(c).ok()?)?;
-        let over: Vec<String> = crate::project::memory::TARGETS
+        let folder = self.folder_of(c).ok()?;
+        let project = self.project_of(c.project_id.as_deref())?;
+        let files = crate::project::memory::ProjectFiles::open(&folder)?;
+        let stored = crate::project::memory::ProjectFiles::open(Path::new(&project.path))?;
+        let mut over: Vec<String> = crate::project::memory::TARGETS
             .iter()
             .filter_map(|(path, cap)| {
-                let len = files.size(path)?;
+                let len = if *path == ".faber/decisions.md" { files.size(path) } else { stored.size(path) }?;
                 (len > *cap as u64 && self.folds_asked.insert(format!("{conv}\n{path}\n{len}")))
                     .then(|| format!("`{path}` is {:.1} KB, over its {} KB target", len as f64 / 1024.0, cap / 1024))
             })
             .collect();
+        if crate::project::memory::next_full(Path::new(&project.path)) {
+            over.push("`.faber/next.md` is full (12 items); fold it before adding follow-ups".into());
+        }
         if over.is_empty() {
             return None;
         }
@@ -75,7 +162,8 @@ impl Core {
             "Before you end your turn, fold these notes: {}. Merge duplicates and drop what a later line overrides; in \
              `.faber/decisions.md`, move a decision a later one overrides to the end of `.faber/decisions-old.md` (searched, \
              never loaded) instead of deleting it. Never drop a live item: when the target cannot be reached without losing \
-             one, leave the file over it. Then end your turn without calling wrap_up again.",
+             one, leave the file over it. For taste and lessons, propose edits to the person instead of writing those files. \
+             Then end your turn without calling wrap_up again.",
             over.join("; ")
         ))
     }
@@ -109,7 +197,30 @@ impl Core {
                 Ok("The person sees it.".into())
             }
             progress::WRAP_UP_TOOL => {
-                let box_ = progress::wrap_up(input)?;
+                let mut box_ = progress::wrap_up(input)?;
+                if self.turn(conv).is_none() {
+                    return Err("No reply is under way.".into());
+                }
+                let c = self.convs.get(conv).ok_or("error.conversationGone")?;
+                let mut unsaved = false;
+                if c.area == Area::Project {
+                    let path = self.project_of(c.project_id.as_deref()).map(|p| p.path.clone());
+                    if box_.done
+                        && let Some(line) = &c.next
+                    {
+                        unsaved |= path.as_ref().is_none_or(|p| crate::project::memory::finish_next(Path::new(p), line).is_err());
+                        box_.next.retain(|next| next != line);
+                    }
+                    if !box_.next.is_empty() {
+                        unsaved |= path
+                            .as_ref()
+                            .is_none_or(|p| crate::project::memory::append_notes(Path::new(p), "next.md", &box_.next).is_err());
+                    }
+                } else {
+                    box_.taste = None;
+                    box_.lesson = None;
+                    box_.next.clear();
+                }
                 let m = self.turn(conv).ok_or("No reply is under way.")?;
                 let done = box_.done;
                 m.wrap_up = Some(box_);
@@ -123,12 +234,60 @@ impl Core {
                     (self.emit)(AppEvent::Plan { conversation_id: conv.to_string(), plan });
                 }
                 self.push(conv, Some(&id), true);
+                // The box is shown either way; a list Faber could not write is the agent's to mention, not a failed close.
+                let unsaved = if unsaved { " The follow-up list in .faber/next.md could not be updated: say so in one line." } else { "" };
                 Ok(match self.fold_ask(conv) {
-                    Some(fold) => format!("The person sees the box. {fold}"),
-                    None => "The person sees the box. End your turn now, without repeating the recap.".into(),
+                    Some(fold) => format!("The person sees the box.{unsaved} {fold}"),
+                    None => format!("The person sees the box.{unsaved} End your turn now, without repeating the recap."),
                 })
             }
             _ => Err("Faber has no such tool.".into()),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::super::answer::tests::{engine, seed};
+    use super::*;
+
+    #[tokio::test]
+    async fn a_follow_up_that_cannot_start_leaves_no_empty_conversation() {
+        let dir = tempfile::tempdir().unwrap();
+        let (engine, _) = engine(dir.path());
+        let id = seed(&engine, Session::from_fn(|_| {}), &[("reply", &[])]);
+        let before = engine.with(|c| {
+            let conv = c.convs.get_mut(&id).unwrap();
+            conv.area = Area::Project;
+            conv.project_id = Some("project".into());
+            conv.messages.last_mut().unwrap().wrap_up = Some(WrapUp { next: vec!["Check saved state.".into()], ..Default::default() });
+            c.convs.len()
+        });
+        let choice = Choice { vendor: "auto".into(), model: None, effort: None };
+        assert!(engine.start_follow_up(&id, "reply", 0, choice).is_err(), "no AI is connected");
+        assert_eq!(engine.with(|c| c.convs.len()), before, "retrying cannot accumulate empty conversations");
+        engine.shutdown();
+    }
+
+    #[tokio::test]
+    async fn a_non_project_close_drops_all_proposals_even_if_the_tool_reaches_the_engine() {
+        let dir = tempfile::tempdir().unwrap();
+        let (engine, _) = engine(dir.path());
+        let id = seed(&engine, Session::from_fn(|_| {}), &[("reply", &[])]);
+        engine.with(|c| {
+            c.write_progress(
+                &id,
+                progress::WRAP_UP_TOOL,
+                &serde_json::json!({
+                    "recap": "Explained.", "taste": "Always use plain words.",
+                    "lesson": "Check reloads.", "next": ["Cover saved state."]
+                }),
+            )
+            .unwrap();
+            let wrap = c.convs[&id].messages.last().unwrap().wrap_up.as_ref().unwrap();
+            assert!(wrap.taste.is_none() && wrap.lesson.is_none() && wrap.next.is_empty());
+        });
+        assert!(!dir.path().join("decisions-kept.json").exists());
+        engine.shutdown();
     }
 }

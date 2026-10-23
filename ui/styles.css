@@ -1583,6 +1583,11 @@ html.away-win :is(.amb, .amb *) { animation-play-state: paused !important; }
 .plan .note { margin: 6px 0 0; overflow-wrap: anywhere; }
 .wrap-up { margin: 12px 0 4px; padding: 10px 12px; border-radius: var(--r-md); box-shadow: inset 0 0 0 1px var(--line-2); display: grid; gap: 8px; }
 .wrap-up .recap { margin: 0; }
+.wrap-note { display: flex; align-items: baseline; flex-wrap: wrap; gap: 4px 8px; min-width: 0; }
+.wrap-note p { flex: 1 1 240px; margin: 0; overflow-wrap: anywhere; }
+.wrap-note > span { color: var(--ink-3); font-size: var(--fs-sm); }
+.run-next { display: grid; justify-items: start; gap: 4px; }
+.run-next .btn { max-width: 100%; white-space: normal; overflow-wrap: anywhere; text-align: left; }
 .wrap-ask { display: grid; gap: 8px; }
 .wrap-ask .q { margin: 0; font-weight: 580; }
 .wrap-actions { display: flex; flex-wrap: wrap; gap: 8px; }

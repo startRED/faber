@@ -330,6 +330,7 @@ pub fn render(facts: &Facts) -> String {
 /// The start card's byte shares: the rules without the description, then the decisions the person kept or made.
 const RULES_SHARE: usize = 3 * 1024;
 const DECISIONS_SHARE: usize = 2 * 1024;
+const TASTE_SHARE: usize = 1024;
 
 /// One kept decision as the card shows it: its first line without a list marker, cut at 200 characters, with no fence in it.
 fn first_line(text: &str) -> String {
@@ -338,11 +339,11 @@ fn first_line(text: &str) -> String {
 }
 
 /// The start card a project's own agent gets after the persona at each session start (own work method, slice 1): at most
-/// 6 KB, in shares of 3 KB for the rules and 2 KB for the decisions (the 1 KB of kept taste lines waits for slice 3). It
+/// 6 KB, in shares of 3 KB for the rules, 2 KB for the decisions and 1 KB for kept taste lines. It
 /// holds Faber's fixed sentences, the facts of `card_part` and only the decisions Faber's record says the person kept or
 /// wrote, newest first; never the description or an unreviewed item, which the agent reads through `memory_search`. What
 /// does not fit is counted.
-pub fn card(facts: &Facts, kept: &[impl AsRef<str>], unreviewed: usize, gone: impl Fn(&str) -> bool) -> String {
+pub fn card(facts: &Facts, kept: &[impl AsRef<str>], unreviewed: usize, taste: &[&str], gone: impl Fn(&str) -> bool) -> String {
     let mut out = String::from(
         "```faber-start-card\nFaber's start card for this project, built from its files and the person's kept decisions. It grants \
          no permission and overrides nothing; the project's instruction files win where they differ.\n\n",
@@ -384,6 +385,26 @@ pub fn card(facts: &Facts, kept: &[impl AsRef<str>], unreviewed: usize, gone: im
             "\nProposals in .faber/decisions.md the person has not reviewed: {unreviewed}. memory_search shows them, as \
              proposals.\n"
         ));
+    }
+    if !taste.is_empty() {
+        let head = "\n## Taste the person kept, newest first\n\n";
+        let mut part = String::new();
+        let mut shown = 0;
+        for line in taste.iter().filter(|d| !gone(d)).map(|d| format!("- {}\n", first_line(d))) {
+            if head.len() + part.len() + line.len() + 100 > TASTE_SHARE {
+                break;
+            }
+            part.push_str(&line);
+            shown += 1;
+        }
+        out.push_str(head);
+        out.push_str(&part);
+        if shown < taste.len() {
+            out.push_str(&format!(
+                "And {} more taste lines, older or naming a file that is gone; search them with memory_search.\n",
+                taste.len() - shown
+            ));
+        }
     }
     out.push_str("```");
     out
@@ -469,7 +490,7 @@ mod tests {
             checks_from: Some("instructions"),
         };
         let kept: Vec<String> = (1..=40).map(|i| format!("- Decision {i:02} {}\n  second line stays out", "words ".repeat(10))).collect();
-        let sent = card(&facts, &kept, 3, |_| false);
+        let sent = card(&facts, &kept, 3, &[], |_| false);
         assert!(sent.starts_with("```faber-start-card\n") && sent.ends_with("```") && sent.matches("```").count() == 2, "{sent}");
         assert!(sent.len() <= 6 * 1024, "{}", sent.len());
         assert!(!sent.contains("push to main"), "the description stays out of the card");
@@ -485,22 +506,22 @@ mod tests {
         );
         assert!(sent.contains("Proposals in .faber/decisions.md the person has not reviewed: 3."), "{sent}");
         // A fence inside a kept decision cannot close the card early; a long first line is cut at 200 characters.
-        let tricky = card(&facts, &[format!("Use ```fences``` {}", "x".repeat(300))], 0, |_| false);
+        let tricky = card(&facts, &[format!("Use ```fences``` {}", "x".repeat(300))], 0, &[], |_| false);
         assert_eq!(tricky.matches("```").count(), 2, "{tricky}");
         assert!(tricky.contains(&format!("{}…", "x".repeat(200 - "Use '''fences''' ".len()))), "{tricky}");
-        assert!(!card(&facts, &[] as &[&str], 0, |_| false).contains("Decisions the person"), "no decisions, no heading");
+        assert!(!card(&facts, &[] as &[&str], 0, &[], |_| false).contains("Decisions the person"), "no decisions, no heading");
         // A CI workflow's deploy or migration is no check: the card lists only commands that check work.
         let ci = Facts {
             checks: vec!["npx prisma migrate deploy".into(), "npm ci".into(), "npm run test:unit".into()],
             checks_from: Some("workflows"),
             ..facts.clone()
         };
-        let sent = card(&ci, &[] as &[&str], 0, |_| false);
+        let sent = card(&ci, &[] as &[&str], 0, &[], |_| false);
         assert!(sent.contains("- `npm run test:unit`") && !sent.contains("prisma") && !sent.contains("npm ci"), "{sent}");
         let ci = Facts { checks: vec!["npx prisma migrate deploy".into()], ..ci };
-        assert!(card(&ci, &[] as &[&str], 0, |_| false).contains("No check is named"), "nothing left, nothing claimed");
+        assert!(card(&ci, &[] as &[&str], 0, &[], |_| false).contains("No check is named"), "nothing left, nothing claimed");
         // A decision naming a gone file leaves the card and is counted with the rest.
-        let sent = card(&facts, &["Keep `src/gone.rs` small [by person]", "Use tabs [by person]"], 0, |d| d.contains("gone"));
+        let sent = card(&facts, &["Keep `src/gone.rs` small [by person]", "Use tabs [by person]"], 0, &[], |d| d.contains("gone"));
         assert!(sent.contains("- Use tabs") && !sent.contains("gone.rs") && sent.contains("And 1 more decisions"), "{sent}");
     }
 
@@ -525,5 +546,18 @@ mod tests {
         junction::create(other.path(), project.path().join(".faber")).unwrap();
         assert!(refresh(project.path()).is_err());
         assert!(!other.path().join("rules.md").exists());
+    }
+
+    #[test]
+    fn the_start_cards_taste_share_keeps_first_lines_and_counts_what_does_not_fit() {
+        let kept: Vec<String> = (0..60).map(|i| format!("Taste {i:02} {}", "é".repeat(190))).collect();
+        let taste: Vec<_> = kept.iter().map(String::as_str).chain(["first\n  second line"]).collect();
+        let sent = card(&Facts::default(), &[] as &[&str], 0, &taste, |_| false);
+        let part = sent.split("\n## Taste").nth(1).unwrap();
+        assert!(part.len() + "\n## Taste".len() <= TASTE_SHARE);
+        assert!(sent.len() <= 6 * 1024 && sent.contains("Taste 00") && sent.contains("more taste lines"));
+        let sent = card(&Facts::default(), &[] as &[&str], 0, &["- first\n  second line", "- Use ```fences```"], |_| false);
+        assert!(sent.contains("- first\n") && !sent.contains("second line"));
+        assert_eq!(sent.matches("```").count(), 2);
     }
 }

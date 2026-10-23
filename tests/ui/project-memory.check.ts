@@ -24,6 +24,41 @@ const button = (root: HTMLElement, key: Parameters<typeof t>[0]) => {
   return found;
 };
 
+check('project memory: taste and lessons show recorded authors and Keep, while rules are read-only', async () => {
+  const before = { read: api.projectMemory, edit: api.editProjectMemory };
+  let kept = false;
+  api.projectMemory = async () => ({ incomplete: false, files: [
+    { path: '.faber/taste.md', source: 'faber', revision: 'taste', tooLarge: false, entries: [
+      { start: 0, end: 25, line: 1, text: '- Always use plain words.', body: 'Always use plain words.', author: kept ? 'person' : 'ai', reviewed: kept },
+    ] },
+    { path: '.faber/lessons.md', source: 'faber', revision: 'lesson', tooLarge: false, entries: [
+      { start: 0, end: 23, line: 1, text: '- Check before writing.', body: 'Check before writing.', author: 'person', reviewed: true },
+    ] },
+    { path: '.faber/rules.md', source: 'faber', revision: 'rules', tooLarge: false, readOnly: true, entries: [
+      { start: 0, end: 20, line: 1, text: '- Run project checks.', author: 'ai', reviewed: false },
+    ] },
+    { path: '.faber/next.md', source: 'faber', revision: 'next', tooLarge: false, entries: [
+      { start: 0, end: 16, line: 1, text: '- Check phones.' },
+    ] },
+  ] });
+  api.editProjectMemory = async (id, edit) => {
+    equal(id, 'memory-project'); equal(edit.path, '.faber/taste.md'); equal(edit.keep, true); kept = true;
+  };
+  const root = document.createElement('div'); root.dataset.motion = 'none'; document.body.append(root);
+  const dispose = render(() => createComponent(ProjectMemory, { projectId: 'memory-project' }), root);
+  try {
+    button(root, 'memory.title').click(); await settle();
+    const rows = () => [...root.querySelectorAll<HTMLElement>('.memory-entry')];
+    ok(rows()[0].textContent!.includes(t('memory.author.ai')));
+    ok(rows()[1].textContent!.includes(t('memory.author.person')));
+    equal(rows()[2].querySelector('button'), null, 'built rules never offer Keep, Edit or Delete');
+    equal(rows()[3].querySelectorAll('button').length, 2, 'follow-ups remain editable and deletable');
+    button(rows()[0], 'memory.keep').click(); await settle();
+    ok(rows()[0].textContent!.includes(t('memory.author.person')));
+    equal(rows()[0].querySelectorAll('button').length, 2);
+  } finally { dispose(); root.remove(); api.projectMemory = before.read; api.editProjectMemory = before.edit; }
+});
+
 check('project memory: the project page lists each source and line, edits and deletes only after confirmation, and rereads on refresh', async () => {
   const before = { read: api.projectMemory, edit: api.editProjectMemory };
   let reads = 0;

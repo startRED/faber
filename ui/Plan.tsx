@@ -1,4 +1,4 @@
-import { For, Show } from 'solid-js';
+import { createSignal, createUniqueId, For, Show } from 'solid-js';
 import type { Plan, PlanCount, WrapUp } from './api.ts';
 import { Icon } from './Glyphs.tsx';
 import { t } from './i18n.ts';
@@ -43,10 +43,31 @@ export function PlanList(props: { plan: Plan; now?: string }) {
 
 /** The closing box of a task: the recap, and one question whose buttons reply for the person, the recommendation first. A
  * question Faber answered for them while Keep going ran keeps no buttons: the reply's answers card says what it chose. */
-export function WrapUpBox(props: { box: WrapUp; open: boolean; onReply?: (text: string) => void }) {
+export function WrapUpBox(props: { box: WrapUp; open: boolean; onReply?: (text: string) => void; onKeep?: (kind: 'taste' | 'lesson') => Promise<void> }) {
+  const id = createUniqueId();
+  const [busy, setBusy] = createSignal(false);
+  const [kept, setKept] = createSignal<string[]>([]);
+  const [error, setError] = createSignal(false);
+  const keep = async (kind: 'taste' | 'lesson') => {
+    if (busy() || !props.onKeep) return;
+    const key = `${kind}:${props.box[kind]}`;
+    setBusy(true); setError(false);
+    try { await props.onKeep(kind); setKept([...kept(), key]); }
+    catch { setError(true); }
+    finally { setBusy(false); }
+  };
   return (
     <section class="wrap-up" aria-label={t('wrap.label')}>
       <p class="recap">{props.box.recap}</p>
+      <For each={['taste', 'lesson'] as const}>{(kind) => <Show when={props.box[kind]}>{(text) => (
+        <div class="wrap-note">
+          <p id={`${id}-${kind}`}>{t(kind === 'taste' ? 'wrap.taste' : 'wrap.lesson')} · {text()}</p>
+          <Show when={props.box[kind === 'taste' ? 'tasteKept' : 'lessonKept'] || kept().includes(`${kind}:${text()}`)} fallback={
+            <Show when={props.onKeep}><button type="button" class="btn ghost" aria-describedby={`${id}-${kind}`} disabled={busy()} onClick={() => void keep(kind)}>{t('memory.keep')}</button></Show>
+          }><span role="status">{t('wrap.kept')}</span></Show>
+        </div>
+      )}</Show>}</For>
+      <Show when={error()}><p class="note err" role="alert">{t('error.memory.write')}</p></Show>
       <Show when={props.box.ask}>
         {(ask) => (
           <div class="wrap-ask">

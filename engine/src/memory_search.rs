@@ -186,7 +186,7 @@ mod tests {
     }
 
     fn file(path: &str, source: &'static str, entries: Vec<Entry>) -> MemoryFile {
-        MemoryFile { path: path.into(), source, revision: String::new(), too_large: false, over: false, entries }
+        MemoryFile { path: path.into(), source, revision: String::new(), too_large: false, read_only: false, over: false, entries }
     }
 
     fn results(ready: bool, hits: Vec<Hit>) -> Result<Results, &'static str> {

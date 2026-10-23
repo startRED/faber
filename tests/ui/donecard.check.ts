@@ -1,7 +1,7 @@
 import { createComponent, createSignal } from 'solid-js';
 import { render } from 'solid-js/web';
 import type { Summary } from '../../ui/api.ts';
-import { t } from '../../ui/i18n.ts';
+import { lang, t, useLanguage } from '../../ui/i18n.ts';
 import { Running } from '../../ui/Running.tsx';
 import { check, deepEqual, equal, ok } from './check.ts';
 
@@ -16,6 +16,44 @@ const card = (id: string, kind: 'done' | 'needsYou' | 'failed', over: Partial<Su
   updatedAt: 0,
   ended: { at: 1, kind, workMs: 2 * 3_600_000 + 600_000, line: 'All the pages load again.' },
   ...over,
+});
+
+check('done card: project follow-ups are at most three plain buttons, wait during start and retry failures', async () => {
+  const next = { messageId: 'closed', items: ['Check the phone layout because it is still untested.', 'Document the new path because it moved.', 'Cover the empty case because it failed before.', 'Not shown'] };
+  const done = card('follow-ups', 'done');
+  done.ended!.next = next;
+  const chat = { ...done, id: 'chat', area: 'chat' as const, projectId: undefined };
+  const calls: [string, number][] = [];
+  let finish!: () => void;
+  let reject!: () => void;
+  const root = document.createElement('div'); root.dataset.motion = 'none'; root.style.cssText = 'position:fixed;left:0;top:0;width:720px';
+  document.body.append(root);
+  const before = lang();
+  const dispose = render(() => createComponent(Running, {
+    items: [], done: [done, chat], projects: [{ id: 'p1', name: 'Shop', path: '/shop' }],
+    onOpen: () => {}, onClose: () => {}, modal: false, ref: () => {},
+    onFollowUp: (c, index) => {
+      calls.push([c.id, index]);
+      return new Promise<void>((resolve, fail) => { finish = resolve; reject = () => fail(new Error('start failed')); });
+    },
+  }), root);
+  const buttons = () => [...root.querySelectorAll<HTMLButtonElement>('.run-next button')];
+  try {
+    useLanguage('de'); await settle();
+    equal(buttons().length, 3, 'Chat never offers a project follow-up');
+    deepEqual(buttons().map((button) => button.textContent), next.items.slice(0, 3));
+    ok(buttons().every((button) => button.classList.contains('ghost')));
+    buttons()[1].click(); await settle();
+    deepEqual(calls, [['follow-ups', 1]], 'the saved closing-box index reaches the project start path');
+    ok(buttons().every((button) => button.disabled));
+    reject(); await settle();
+    equal(root.querySelector('[role="alert"]')!.textContent, t('run.followFailed'));
+    buttons()[1].click(); finish(); await settle();
+    deepEqual(calls, [['follow-ups', 1], ['follow-ups', 1]]);
+    equal(root.querySelector('[role="alert"]'), null);
+    ok(buttons().every((button) => !button.disabled));
+    ok(buttons().every((button) => button.scrollWidth <= button.clientWidth + 1), 'follow-up text wraps in a narrow column');
+  } finally { useLanguage(before); dispose(); root.remove(); }
 });
 
 check('done card: a run that ended shows how it ended, opens with a click and goes with its ×', async () => {

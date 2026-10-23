@@ -1390,6 +1390,28 @@ async fn edit_project_memory(faber: State<'_, Faber>, project_id: String, edit: 
         .map_err(|_| "error.memory.write".to_string())?
 }
 
+#[tauri::command]
+async fn keep_project_note(faber: State<'_, Faber>, conversation_id: String, message_id: String, kind: String) -> Res<()> {
+    let engine = faber.engine.clone();
+    tauri::async_runtime::spawn_blocking(move || engine.keep_project_note(&conversation_id, &message_id, &kind))
+        .await
+        .map_err(|_| "error.memory.write".to_string())?
+}
+
+#[tauri::command]
+async fn start_follow_up(
+    faber: State<'_, Faber>,
+    conversation_id: String,
+    message_id: String,
+    index: usize,
+    choice: faber_engine::router::Choice,
+) -> Res<String> {
+    let engine = faber.engine.clone();
+    tauri::async_runtime::spawn_blocking(move || engine.start_follow_up(&conversation_id, &message_id, index, choice))
+        .await
+        .map_err(|_| "error.conversationGone".to_string())?
+}
+
 /// The owner confirms the commands Faber checks a project's work with (R137): the project's declared list, or the edited one.
 #[tauri::command]
 async fn project_proof_confirm(
@@ -1855,6 +1877,8 @@ fn main() {
                 project_proof,
                 project_memory,
                 edit_project_memory,
+                keep_project_note,
+                start_follow_up,
                 project_proof_confirm,
                 update_status,
                 screen_ready,

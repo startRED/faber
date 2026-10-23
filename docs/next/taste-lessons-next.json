@@ -1,0 +1,12 @@
+{
+  "notes": {
+    "new": {
+      "en": "Keep preferences and lessons when a task ends, then pick a follow-up to start a new conversation in the project.",
+      "pt-BR": "Guarde preferências e lições ao terminar uma tarefa e escolha uma pendência pra começar outra conversa no projeto.",
+      "es": "Guarda preferencias y lecciones al terminar una tarea y elige un pendiente para empezar otra conversación en el proyecto.",
+      "fr": "Gardez les préférences et les leçons en fin de tâche, puis choisissez une suite pour ouvrir une nouvelle conversation dans le projet.",
+      "de": "Behalte Vorlieben und Erkenntnisse nach einer Aufgabe und starte mit einem offenen Punkt ein neues Gespräch im Projekt."
+    }
+  },
+  "decisions": []
+}
