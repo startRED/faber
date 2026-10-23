@@ -1,0 +1,11 @@
+{
+  "notes": {
+    "fixed": {
+      "en": "A searched message stays in place when you load earlier messages on a Mac.",
+      "pt-BR": "A mensagem encontrada na busca fica no lugar ao carregar mensagens anteriores no Mac.",
+      "es": "El mensaje encontrado sigue en su sitio al cargar mensajes anteriores en Mac.",
+      "fr": "Le message trouvé reste à sa place quand vous chargez les messages précédents sur Mac.",
+      "de": "Die gefundene Nachricht bleibt an ihrem Platz, wenn du auf dem Mac frühere Nachrichten lädst."
+    }
+  }
+}
