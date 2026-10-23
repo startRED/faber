@@ -96,6 +96,10 @@ impl Drop for Apartment {
 fn native_error(error: windows::core::Error) -> io::Error {
     io::Error::other(error)
 }
+fn navigation_node<T>(result: windows::core::Result<T>) -> io::Result<Option<T>> {
+    // The generated binding represents a successful null navigation pointer as Error::empty().
+    result.map(Some).or_else(|error| if error.code() == windows::core::HRESULT(0) { Ok(None) } else { Err(error) }).map_err(native_error)
+}
 struct Native {
     walker: IUIAutomationTreeWalker,
     start: Instant,
@@ -120,23 +124,11 @@ impl Provider for Native {
     }
     fn first(&mut self, n: &Self::Node) -> io::Result<Option<Self::Node>> {
         self.deadline()?;
-        unsafe {
-            self.walker
-                .GetFirstChildElement(n)
-                .map(Some)
-                .or_else(|e| if e.code() == windows::core::HRESULT(0x80004003u32 as i32) { Ok(None) } else { Err(e) })
-                .map_err(native_error)
-        }
+        unsafe { navigation_node(self.walker.GetFirstChildElement(n)) }
     }
     fn next(&mut self, n: &Self::Node) -> io::Result<Option<Self::Node>> {
         self.deadline()?;
-        unsafe {
-            self.walker
-                .GetNextSiblingElement(n)
-                .map(Some)
-                .or_else(|e| if e.code() == windows::core::HRESULT(0x80004003u32 as i32) { Ok(None) } else { Err(e) })
-                .map_err(native_error)
-        }
+        unsafe { navigation_node(self.walker.GetNextSiblingElement(n)) }
     }
     fn text(&mut self, n: &Self::Node) -> io::Result<String> {
         self.deadline()?;
@@ -420,6 +412,18 @@ mod tests {
         );
     }
     use super::*;
+    #[test]
+    fn native_desktop_uia_navigation_accepts_only_successful_null_as_absent() {
+        use windows::core::{Error, HRESULT, Type};
+        let null = unsafe { <IUIAutomationElement as Type<IUIAutomationElement>>::from_abi(std::ptr::null_mut()) };
+        assert_eq!(null.as_ref().unwrap_err().code(), HRESULT(0));
+        assert!(navigation_node(null).unwrap().is_none());
+        assert_eq!(navigation_node(Ok(42)).unwrap(), Some(42));
+        for code in [0x80004003u32, 0x80004005, 0x80070005, 0x80040201] {
+            let error = navigation_node::<()>(Err(Error::from_hresult(HRESULT(code as i32)))).unwrap_err();
+            assert_eq!(error.get_ref().unwrap().downcast_ref::<Error>().unwrap().code(), HRESULT(code as i32));
+        }
+    }
     struct Fake {
         reads: Vec<usize>,
     }
