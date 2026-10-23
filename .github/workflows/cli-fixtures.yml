@@ -1,0 +1,23 @@
+name: cli-fixtures
+
+# Parser evidence only: no CLI downloads, accounts, publication or change to installed versions.
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: '43 6 * * *'
+
+permissions:
+  contents: read
+
+jobs:
+  recorded-shapes:
+    # Nightly runs wait for an explicit opt-in; a manual run is itself the opt-in.
+    if: github.event_name == 'workflow_dispatch' || vars.FABER_CLI_FIXTURE_CHECKS == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@stable
+      - run: cargo test -q -p faber-engine --test engine cli_versions:: -- --nocapture
