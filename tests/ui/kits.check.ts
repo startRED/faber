@@ -97,9 +97,20 @@ check('kits: damaged Catalog items explain reinstalling in every language and pr
     api.toolsClearRemoved = async () => {};
     for (const language of ['en', 'pt-BR', 'es', 'fr', 'de'] as const) {
       useLanguage(language);
-      api.toolsList = async () => [{ id: 'systematic-debugging', job: 'debugging', license: 'MIT', repo: '', home: '', installed: true, server: false, status: 'error.tools.reinstall' }];
+      let row: ToolRow = { id: 'systematic-debugging', job: 'debugging', license: 'MIT', repo: '', home: '', installed: true, enabled: true, server: false, status: 'error.tools.reinstall' };
+      api.toolsList = async () => [structuredClone(row)];
       let installs = 0;
+      let preparations = 0;
+      let replacements = 0;
       api.toolsInstall = async () => { installs++; };
+      api.toolsPrepareReplacement = async (id) => {
+        preparations++;
+        return { plan: { id, enabled: row.enabled }, from: 'old-copy', to: 'catalog-copy', enabled: row.enabled !== false };
+      };
+      api.toolsReplace = async (plan) => {
+        replacements++;
+        row = { ...row, installed: true, hasCopy: true, status: undefined, enabled: (plan as { enabled: boolean }).enabled };
+      };
       const root = document.createElement('div');
       document.body.append(root);
       const dispose = render(catalog, root);
@@ -114,10 +125,18 @@ check('kits: damaged Catalog items explain reinstalling in every language and pr
         equal(toggle.disabled, true, 'a damaged copy cannot be enabled');
         ok([...root.querySelectorAll('button')].some((button) => button.textContent === t('catalog.remove')), 'the physical copy remains removable');
         equal(installs, 0, 'nothing installs by itself');
-        [...root.querySelectorAll<HTMLButtonElement>('button')].find((button) => button.textContent === t('catalog.install'))!.click();
+        [...root.querySelectorAll<HTMLButtonElement>('button')].find((button) => button.textContent === t('catalog.replace'))!.click();
         await tick();
-        equal(installs, 1, 'only the explicit installation action repairs the item');
-        equal(root.querySelector<HTMLInputElement>('[role=switch]')!.checked, true);
+        ok(root.querySelector('[data-catalog-replacement]'), 'review shows the replacement details before consent');
+        equal(preparations, 1);
+        equal(replacements, 0, 'review alone does not replace the copy');
+        equal(installs, 0, 'repair does not use the install path');
+        [...root.querySelectorAll<HTMLButtonElement>('button')].find((button) => button.textContent === t('catalog.confirmReplaceAction'))!.click();
+        await tick();
+        equal(replacements, 1, 'one explicit confirmation replaces the damaged copy');
+        equal(installs, 0, 'repair never installs alongside the damaged copy');
+        equal(root.querySelector<HTMLInputElement>('[role=switch]')!.disabled, false);
+        equal(root.querySelector<HTMLInputElement>('[role=switch]')!.checked, true, 'repair restores the saved enabled choice');
         ok(!root.textContent?.includes(t('error.tools.reinstall')));
       } finally { dispose(); root.remove(); }
     }
