@@ -2233,6 +2233,17 @@ fn review3_dynamic_command_failures_keep_their_output_and_failed_status() {
     assert_eq!(events, vec![EngineEvent::ToolResult { id: "tool".into(), ok: false, declined: false, text: "sandbox refused".into() }]);
 }
 
+/// Codex's web search carries no status: each one used to read as a failure, so three searches of a research subagent
+/// showed "the same check failed three times".
+#[test]
+fn a_web_search_with_no_status_went_through() {
+    let events = parse_codex_notification(
+        &json!({"method":"item/completed","params":{"item":{"id":"ws","type":"webSearch","query":"claude code subagents"}}}),
+        &mut CodexTurnState::default(),
+    );
+    assert_eq!(events, vec![EngineEvent::ToolResult { id: "ws".into(), ok: true, declined: false, text: String::new() }]);
+}
+
 #[tokio::test]
 async fn review3_command_gate_declines_git_mutations_and_runs_builds_only_in_the_sandbox() {
     for area in [Area::Chat, Area::Project] {

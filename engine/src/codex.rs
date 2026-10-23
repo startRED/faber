@@ -556,7 +556,10 @@ fn parse_notification(msg: &Value, state: &mut CodexTurnState) -> Vec<EngineEven
             if NOT_TOOLS.contains(&kind) || kind == "collabAgentToolCall" || kind == "subAgentActivity" {
                 return vec![];
             }
-            let ok = item["status"] == "completed" && item["success"] != false && (item["exitCode"].is_null() || item["exitCode"] == 0);
+            // A step with no status at all (a web search, an image view) has no way to fail: it ended, so it went through.
+            let ok = (item["status"] == "completed" || item["status"].is_null())
+                && item["success"] != false
+                && (item["exitCode"].is_null() || item["exitCode"] == 0);
             let text = if kind == "dynamicToolCall" {
                 item["contentItems"]
                     .as_array()

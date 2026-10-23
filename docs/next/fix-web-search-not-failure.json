@@ -1,0 +1,11 @@
+{
+  "notes": {
+    "fixed": {
+      "en": "A subagent that searches the web no longer shows as stuck with \"the same check failed three times\": its searches count as done.",
+      "pt-BR": "Um subagente que pesquisa na web não aparece mais como travado com \"a mesma verificação falhou três vezes\": as buscas contam como feitas.",
+      "es": "Un subagente que busca en la web ya no aparece atascado con \"la misma comprobación falló tres veces\": sus búsquedas cuentan como hechas.",
+      "fr": "Un sous-agent qui cherche sur le web n'apparaît plus bloqué avec « la même vérification a échoué trois fois » : ses recherches comptent comme faites.",
+      "de": "Ein Subagent, der im Web sucht, erscheint nicht mehr als festgefahren mit „Dieselbe Prüfung ist dreimal fehlgeschlagen“: seine Suchen zählen als erledigt."
+    }
+  }
+}
