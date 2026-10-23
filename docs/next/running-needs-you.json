@@ -1,0 +1,10 @@
+{
+  "notes": { "fixed": {
+    "en": "What you type in an answer box under Needs you no longer disappears when another conversation changes. A stuck helper now says so and opens its conversation.",
+    "pt-BR": "O que você escreve numa caixa de resposta em Precisa de você não some mais quando outra conversa muda. Um ajudante travado agora avisa e abre a conversa dele.",
+    "es": "Lo que escribes en un cuadro de respuesta de Te necesita ya no desaparece cuando cambia otra conversación. Un ayudante atascado ahora lo dice y abre su conversación.",
+    "fr": "Ce que vous écrivez dans une zone de réponse sous « A besoin de vous » ne disparaît plus quand une autre conversation change. Un assistant bloqué le dit maintenant et ouvre sa conversation.",
+    "de": "Was du in ein Antwortfeld unter „Braucht dich“ schreibst, verschwindet nicht mehr, wenn sich ein anderes Gespräch ändert. Ein festhängender Helfer sagt es jetzt und öffnet sein Gespräch."
+  } },
+  "decisions": ["| R-next | 2026-10-23 | The running column keeps a row's elements while its conversation stays listed: the list is reconciled by conversation and turn, so a new list from the engine updates what changed and never rebuilds the answer card the person is writing in. A row marked Needs you only because a helper seems stuck shows the count, one line on what to do and a button that opens its conversation. No new process or timer; the reconcile is linear in the rows listed. Not measured: no change large enough to move memory or processor. | AI (Erick delegou) |"]
+}

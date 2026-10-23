@@ -200,6 +200,10 @@ projects. Faber has no worktree creation for projects, so an environment has no 
   each question in bold with its short header chip, its options as full-width rows to tap (amber ring when chosen,
   checkboxes when several are allowed), one line to write another answer, then Send answers (enabled once every
   question has an answer) and Skip. No motion beyond the card's arrival; option hovers do not animate under reduced motion.
+- A row that is amber only because a helper seems stuck has no card to answer, so it shows "A helper seems stuck", one
+  line saying where to look and act, and "Open conversation". Every amber row says what it wants and gives the way to do it.
+- A row stays the same element while its conversation is listed: a new list updates the words, never the box the user is
+  writing in, so typing, the picked option and the focus survive it.
 - Clicking a row opens that conversation, setting the area, the project and the conversation together.
 - The column is closed when the window opens. It opens by itself once for each question it has not yet shown, 1.5 s
   after the last keystroke in any text field, including questions already waiting at launch. If the user closes it

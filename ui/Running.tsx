@@ -1,4 +1,5 @@
-import { createSignal, For, Show } from 'solid-js';
+import { createComputed, createSignal, For, Show } from 'solid-js';
+import { createStore, reconcile } from 'solid-js/store';
 import type { Project, RunningItem } from './api.ts';
 import { AgentChat } from './AgentChat.tsx';
 import { Asks, Parkeds } from './Ask.tsx';
@@ -10,7 +11,7 @@ import { SitePane, type OpenSite } from './Site.tsx';
 import { vendorName } from './models.ts';
 import { animateList } from './motion.ts';
 import { untilReset } from './Sidebar.tsx';
-import { blocksOf, elapsed } from './running.ts';
+import { type Block, blocksOf, elapsed } from './running.ts';
 import type { AgentStep } from './worklog.ts';
 
 /** The running column: what runs now, one block per project and one for Chat, in the order the engine sent. A question
@@ -34,7 +35,15 @@ export function Running(props: {
   // The times move while the column is open and stop with it.
   const [now, setNow] = createSignal(Date.now());
   everyWhileShown(15_000, () => setNow(Date.now()));
-  const blocks = () => blocksOf(props.items);
+  // The engine sends the whole list again with every change of any conversation, as new objects. Drawn from those, each
+  // row (and the card the person is writing in) would be built again; reconciled by key, a row that is still there stays
+  // the same element and only what changed in it is updated.
+  const [view, setView] = createStore<{ blocks: Block[] }>({ blocks: [] });
+  createComputed(() => {
+    const next = blocksOf(props.items).map((block) => ({ ...block, items: block.items.map((item) => ({ ...item, key: `${item.conversationId}:${item.turnId}` })) }));
+    setView('blocks', reconcile(next, { key: 'key' }));
+  });
+  const blocks = () => view.blocks;
   const nameOf = (key: string) => (key === 'chat' ? t('area.chat') : (props.projects.find((p) => p.id === key)?.name ?? t('area.projects')));
   const words = (item: RunningItem) => (item.waitUntil ? t('run.waiting', { when: untilReset(item.waitUntil) }) : item.state === 'needsYou' ? t('run.needsYou') : item.vendor ? t('run.working') : t('run.routing'));
   const since = (item: RunningItem) => {
@@ -103,6 +112,17 @@ export function Running(props: {
                               </button>
                               <Show when={item.permissions.length > 0}>
                                 <Asks conversationId={item.conversationId} turnId={item.turnId} permissions={item.permissions} />
+                              </Show>
+                              <Show when={item.stuck?.length}>
+                                <div class="ask stuck" role="status">
+                                  <b>{t('run.stuck', { n: item.stuck?.length ?? 0 })}</b>
+                                  <span class="note">{t('run.stuckHint')}</span>
+                                  <div>
+                                    <button class="btn primary" onClick={() => props.onOpen(item)}>
+                                      {t('run.stuckOpen')}
+                                    </button>
+                                  </div>
+                                </div>
                               </Show>
                               <Show when={item.parked?.length || item.parkedMore}>
                                 <Parkeds parked={item.parked ?? []} more={item.parkedMore} />

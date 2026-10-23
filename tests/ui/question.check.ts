@@ -1,7 +1,8 @@
-import { createComponent } from 'solid-js';
+import { createComponent, createSignal } from 'solid-js';
 import { render } from 'solid-js/web';
-import { api } from '../../ui/api.ts';
+import { api, type RunningItem } from '../../ui/api.ts';
 import { askedQuestions, Asks } from '../../ui/Ask.tsx';
+import { Running } from '../../ui/Running.tsx';
 import { useLanguage } from '../../ui/i18n.ts';
 import { check, deepEqual, equal, ok } from './check.ts';
 
@@ -112,3 +113,62 @@ check('question card: a question whose text is a built-in name still renders and
   await settle();
   deepEqual(calls[0], ['question', 'c1', 't1', 'r1', { constructor: 'Yes', toString: 'No' }]);
 }, { questions: [{ question: 'constructor', options: [{ label: 'Yes' }] }, { question: 'toString', options: [{ label: 'No' }] }] }));
+
+// The running list arrives again with every change of any conversation, as new objects. What the person is writing in a
+// card of the column survives it: the same field, the same text, the same picked option.
+check('question card in the running column: a new list with the same question keeps the field and what is written in it', async () => {
+  const originals = { ...api };
+  useLanguage('en');
+  const waiting = (title: string): RunningItem => ({
+    conversationId: 'c1',
+    turnId: 't1',
+    title,
+    area: 'chat',
+    state: 'needsYou',
+    since: 0,
+    permissions: [{ requestId: 'r1', tool: 'AskUserQuestion', input: INPUT }],
+  });
+  const [items, setItems] = createSignal<RunningItem[]>([waiting('Plan')]);
+  const root = document.createElement('div');
+  document.body.append(root);
+  const dispose = render(() => createComponent(Running, { get items() { return items(); }, projects: [], onOpen: () => {}, onClose: () => {}, modal: false, ref: () => {} }), root);
+  try {
+    await settle();
+    click(options(root, 0)[1]);
+    const other = root.querySelector<HTMLInputElement>('fieldset.q:nth-of-type(2) .q-other')!;
+    other.focus();
+    other.value = 'Zig and more';
+    other.dispatchEvent(new InputEvent('input', { bubbles: true }));
+    await settle();
+    setItems([waiting('Plan, renamed')]);
+    await settle();
+    ok(root.querySelector('.ri .name')!.textContent!.includes('Plan, renamed'), 'the new list was drawn');
+    ok(root.contains(other), 'the field the person was writing in is still on screen');
+    equal(other.value, 'Zig and more');
+    equal(document.activeElement, other, 'and it still has the focus');
+    equal(options(root, 0)[1].getAttribute('aria-checked'), 'true', 'a tapped option stays tapped');
+  } finally {
+    dispose();
+    root.remove();
+    Object.assign(api, originals);
+  }
+});
+
+// A row marked "Needs you" for a stuck helper has no card to answer, so it says what is wrong and offers the way to act.
+check('running column: a stuck helper says so and opens its conversation', () => {
+  useLanguage('en');
+  const opened: string[] = [];
+  const row: RunningItem = { conversationId: 'c9', turnId: 't9', title: 'Refactor', area: 'chat', state: 'needsYou', since: 0, permissions: [], stuck: ['toolu_1'] };
+  const root = document.createElement('div');
+  document.body.append(root);
+  const dispose = render(() => createComponent(Running, { items: [row], projects: [], onOpen: (item) => opened.push(item.conversationId), onClose: () => {}, modal: false, ref: () => {} }), root);
+  try {
+    equal(root.querySelector('.ask.stuck b')!.textContent, 'A helper seems stuck');
+    ok(root.querySelector('.ask.stuck .note')!.textContent!.includes('guide the agent or stop it'));
+    root.querySelector<HTMLButtonElement>('.ask.stuck .btn')!.click();
+    deepEqual(opened, ['c9']);
+  } finally {
+    dispose();
+    root.remove();
+  }
+});
