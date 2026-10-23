@@ -9,6 +9,6 @@
     }
   },
   "decisions": [
-    "| R-next | 2026-10-23 | The Windows desktop tool starts with foreground accessible text only, uses the existing project Full access gate, accepts no target or control input, and treats every returned field as untrusted data. Screenshots and input control remain separate unfinished work. | AI |"
+    "| R-next | 2026-10-23 | The Windows desktop tool starts with foreground supported visible text ranges only, omits unverified Name and whole Value fallbacks with a partial result, uses the existing project Full access gate, accepts no target or control input, and treats every returned field as untrusted data. Screenshots and input control remain separate unfinished work. | AI |"
   ]
 }

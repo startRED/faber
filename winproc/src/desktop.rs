@@ -26,7 +26,7 @@ fn collect<P: Provider>(provider: &mut P, root: P::Node) -> (String, bool) {
 
 use std::time::{Duration, Instant};
 use windows::Win32::{
-    Foundation::HWND,
+    Foundation::{E_NOINTERFACE, HWND},
     System::Com::{CLSCTX_INPROC_SERVER, COINIT_MULTITHREADED, CoCreateInstance, CoInitializeEx, CoUninitialize},
     UI::{Accessibility::*, WindowsAndMessaging::*},
 };
@@ -100,9 +100,21 @@ fn navigation_node<T>(result: windows::core::Result<T>) -> io::Result<Option<T>>
     // The generated binding represents a successful null navigation pointer as Error::empty().
     result.map(Some).or_else(|error| if error.code() == windows::core::HRESULT(0) { Ok(None) } else { Err(error) }).map_err(native_error)
 }
+fn visible_pattern<T>(result: windows::core::Result<T>, incomplete: &mut bool) -> io::Result<Option<T>> {
+    // Unsupported patterns/interfaces and successful null pointers supply no visible text.
+    match result {
+        Ok(pattern) => Ok(Some(pattern)),
+        Err(error) if [0, UIA_E_NOTSUPPORTED as i32, E_NOINTERFACE.0].contains(&error.code().0) => {
+            *incomplete = true;
+            Ok(None)
+        }
+        Err(error) => Err(native_error(error)),
+    }
+}
 struct Native {
     walker: IUIAutomationTreeWalker,
     start: Instant,
+    incomplete: bool,
 }
 impl Native {
     fn deadline(&self) -> io::Result<()> {
@@ -137,29 +149,30 @@ impl Provider for Native {
         }
         // Only leaves reach here: container names/text may aggregate protected descendants.
         unsafe {
-            if let Ok(pattern) = n.GetCurrentPatternAs::<IUIAutomationTextPattern>(UIA_TextPatternId) {
-                self.deadline()?;
-                let ranges = pattern.GetVisibleRanges().map_err(native_error)?;
-                self.deadline()?;
-                let len = ranges.Length().map_err(native_error)?;
-                if len > 256 {
-                    return Err(io::Error::other("too many visible text ranges"));
-                }
-                let mut text = String::new();
-                for index in 0..len.min(256) {
-                    self.deadline()?;
-                    let range = ranges.GetElement(index).map_err(native_error)?;
-                    self.deadline()?;
-                    let value = range.GetText((MAX_TEXT + 1) as i32).map_err(native_error)?.to_string();
-                    if append_bounded(&mut text, &value, MAX_TEXT + 1) {
-                        break;
-                    }
-                }
-                return Ok(text);
-            }
-            // A visible edit may contain scrolled-out characters; raw values cannot prove visibility.
             self.deadline()?;
-            n.CurrentName().map(|v| v.to_string()).map_err(native_error)
+            let Some(pattern) =
+                visible_pattern(n.GetCurrentPatternAs::<IUIAutomationTextPattern>(UIA_TextPatternId), &mut self.incomplete)?
+            else {
+                return Ok(String::new());
+            };
+            self.deadline()?;
+            let ranges = pattern.GetVisibleRanges().map_err(native_error)?;
+            self.deadline()?;
+            let len = ranges.Length().map_err(native_error)?;
+            if len > 256 {
+                return Err(io::Error::other("too many visible text ranges"));
+            }
+            let mut text = String::new();
+            for index in 0..len.min(256) {
+                self.deadline()?;
+                let range = ranges.GetElement(index).map_err(native_error)?;
+                self.deadline()?;
+                let value = range.GetText((MAX_TEXT + 1) as i32).map_err(native_error)?.to_string();
+                if append_bounded(&mut text, &value, MAX_TEXT + 1) {
+                    break;
+                }
+            }
+            Ok(text)
         }
     }
 }
@@ -356,7 +369,7 @@ fn observe_window(hwnd: HWND, check: WindowCheck) -> io::Result<Observation> {
         automation.SetConnectionTimeout(200).map_err(native_error)?;
         automation.SetTransactionTimeout(200).map_err(native_error)?;
         let root = automation.ElementFromHandle(hwnd).map_err(native_error)?;
-        let mut provider = Native { walker: automation.RawViewWalker().map_err(native_error)?, start };
+        let mut provider = Native { walker: automation.RawViewWalker().map_err(native_error)?, start, incomplete: false };
         if !check.matches(hwnd) {
             return Err(io::Error::other(check.changed_error()));
         }
@@ -368,7 +381,7 @@ fn observe_window(hwnd: HWND, check: WindowCheck) -> io::Result<Observation> {
         if !check.matches(hwnd) {
             return Err(io::Error::other(check.changed_error()));
         }
-        Ok(Observation { title, text, truncated: truncated || title_partial || len == 256 })
+        Ok(Observation { title, text, truncated: truncated || provider.incomplete || title_partial || len == 256 })
     }
 }
 
@@ -411,7 +424,69 @@ mod tests {
             "a visible Edit can contain offscreen characters; whole values have no visibility proof"
         );
     }
+    #[test]
+    fn native_desktop_uia_reads_only_supported_visible_ranges() {
+        let source = include_str!("desktop.rs");
+        let production = source.split("#[cfg(test)]").next().unwrap();
+        assert!(!production.contains(".CurrentName("), "accessibility names do not prove text visibility");
+        assert!(production.contains(".GetVisibleRanges("));
+        assert!(!production.contains(".DocumentRange("));
+        assert!(production.contains("truncated || provider.incomplete"), "unsupported text must leave an incomplete result");
+    }
     use super::*;
+    #[test]
+    fn native_desktop_uia_unsupported_patterns_omit_but_real_errors_propagate() {
+        use windows::core::{Error, HRESULT};
+        let mut incomplete = false;
+        assert_eq!(visible_pattern(Ok(42), &mut incomplete).unwrap(), Some(42));
+        assert!(!incomplete);
+        for code in [0, UIA_E_NOTSUPPORTED as i32, E_NOINTERFACE.0] {
+            incomplete = false;
+            assert!(visible_pattern::<()>(Err(Error::from_hresult(HRESULT(code))), &mut incomplete).unwrap().is_none());
+            assert!(incomplete);
+        }
+        assert_eq!(visible_pattern(Ok(42), &mut incomplete).unwrap(), Some(42));
+        assert!(incomplete, "later supported text must not erase an earlier omission");
+        for code in [0x80004003u32, 0x80004005, 0x80070005, 0x80040201] {
+            incomplete = false;
+            let error = visible_pattern::<()>(Err(Error::from_hresult(HRESULT(code as i32))), &mut incomplete).unwrap_err();
+            assert_eq!(error.get_ref().unwrap().downcast_ref::<Error>().unwrap().code(), HRESULT(code as i32));
+            assert!(!incomplete);
+        }
+    }
+    #[test]
+    fn native_desktop_uia_omits_unsupported_leaf_and_continues_to_visible_text() {
+        struct Patterns {
+            incomplete: bool,
+        }
+        impl Provider for Patterns {
+            type Node = usize;
+            fn expired(&self) -> bool {
+                false
+            }
+            fn protected(&mut self, _: &usize) -> io::Result<bool> {
+                Ok(false)
+            }
+            fn offscreen(&mut self, _: &usize) -> io::Result<bool> {
+                Ok(false)
+            }
+            fn first(&mut self, n: &usize) -> io::Result<Option<usize>> {
+                Ok((*n == 0).then_some(1))
+            }
+            fn next(&mut self, n: &usize) -> io::Result<Option<usize>> {
+                Ok((*n == 1).then_some(2))
+            }
+            fn text(&mut self, n: &usize) -> io::Result<String> {
+                let pattern = if *n == 1 { Err(windows::core::Error::empty()) } else { Ok("visible range") };
+                Ok(visible_pattern(pattern, &mut self.incomplete)?.unwrap_or_default().to_string())
+            }
+        }
+        let mut provider = Patterns { incomplete: false };
+        let (text, stopped) = collect(&mut provider, 0);
+        assert_eq!(text, "visible range");
+        assert!(!stopped, "an unsupported leaf must not stop later supported text");
+        assert!(provider.incomplete);
+    }
     #[test]
     fn native_desktop_uia_navigation_accepts_only_successful_null_as_absent() {
         use windows::core::{Error, HRESULT, Type};

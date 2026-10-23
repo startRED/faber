@@ -10,3 +10,5 @@
 - The project agent settings tool accepts only web_search off/cached/live. It reuses the ordinary settings save, its own consent and audit, and existing full trust only for this bounded preference. The saved response is queued after durable persistence and before stricter settings stop replies; no delivery acknowledgement or stop exemption is introduced. [by AI]
 
 - The Windows desktop tool starts with foreground accessible text only, uses the existing project Full access gate, accepts no target or control input, and treats every returned field as untrusted data. Screenshots and input control remain separate unfinished work. [by AI]
+
+- Native window content accepts only supported UIA visible text ranges, never accessibility Name or whole Value fallbacks. Unsupported patterns are omitted without stopping later supported leaves and leave the result partial; real provider errors still fail closed. [by AI]
