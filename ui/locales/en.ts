@@ -1981,6 +1981,7 @@ export const en = {
   'notes.218.better': 'You can let the agent remove a catalog tool, with Undo in Catalog until Faber restarts.',
   'notes.219.better': 'You can ask the agent to update or repair a catalog tool, with separate permission and a retained copy of its current files.',
   'notes.220.fixed': 'Frontend guidance now covers keeping the right item highlighted and focused when lists change.',
+  'notes.221.fixed': 'Faber no longer swells to gigabytes of memory while a long agent reply streams. A 600-step reply now stays under 200 MB, where it passed 860 MB.',
   'update.checking': 'Looking for an update…',
   'update.downloading': 'Downloading update…',
   'update.downloadingPercent': 'Downloading update… {percent}%',

@@ -117,6 +117,7 @@ pub const SOLO: &[(&str, &str)] = &[
     ),
     ("after the six looks were applied in turn, Faber stays within its memory budget", "memory"),
     ("a conversation with a thousand messages opens quickly and stays within the budget", "time to open, memory"),
+    ("a long answer streaming hundreds of steps keeps the screen's memory flat", "memory"),
     ("conversation changes: thirty 3990-line files stay within the memory budget while switching and after closing", "processor, memory"),
     ("visual answers: one open frame stays within the memory budget while switching versions and after closing", "processor, memory"),
     ("visual answers: pane memory before opening, while open and after closing", "memory"),

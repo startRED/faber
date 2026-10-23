@@ -173,6 +173,15 @@ fn is_hold(line: &str) -> bool {
     serde_json::from_str::<Value>(line).is_ok_and(|v| v.get(HOLD).is_some())
 }
 
+/// A recorded line with this key is not sent either: the replay waits its number of milliseconds first, so a long answer
+/// streams at the pace of a real one instead of all at once.
+const PAUSE: &str = "faber_pause";
+
+/// How long a recorded line asks the replay to wait, when it is a pause marker.
+fn pause_of(line: &str) -> Option<u64> {
+    serde_json::from_str::<Value>(line).ok()?.get(PAUSE)?.as_u64()
+}
+
 fn hold(state: Option<&Path>) {
     let Some(file) = state.map(|s| s.join(RELEASE)) else { return };
     for _ in 0..1200 {
@@ -201,6 +210,9 @@ fn session(
             if is_hold(&out) {
                 stdout.flush()?;
                 hold(state);
+            } else if let Some(ms) = pause_of(&out) {
+                stdout.flush()?;
+                std::thread::sleep(std::time::Duration::from_millis(ms));
             } else {
                 writeln!(stdout, "{out}")?;
             }
@@ -300,6 +312,13 @@ mod tests {
         assert!(is_hold(r#"{"faber_hold":true}"#));
         assert!(!is_hold(r#"{"type":"assistant","text":"the faber_hold marker"}"#));
         assert!(err.is_empty(), "{err}");
+    }
+
+    #[test]
+    fn a_pause_marker_is_never_sent_and_only_its_number_counts() {
+        assert_eq!(pause_of(r#"{"faber_pause":30}"#), Some(30));
+        assert_eq!(pause_of(r#"{"type":"assistant","text":"the faber_pause marker"}"#), None);
+        assert_eq!(pause_of(r#"{"faber_pause":"soon"}"#), None);
     }
 
     #[test]

@@ -108,6 +108,7 @@ pub fn scenarios() -> Vec<Scenario> {
         },
         Scenario { name: "after the six looks were applied in turn, Faber stays within its memory budget", run: memory_after_every_look },
         Scenario { name: "a conversation with a thousand messages opens quickly and stays within the budget", run: thousand_messages },
+        Scenario { name: "a long answer streaming hundreds of steps keeps the screen's memory flat", run: long_streaming_answer },
         Scenario {
             name: "conversation changes: thirty 3990-line files stay within the memory budget while switching and after closing",
             run: changes_memory,
@@ -1862,6 +1863,85 @@ fn walks_versions(ctx: &mut Ctx) -> Result {
     page.wait_for("its question to show its versions", &format!("{count} === '2/2'"))?;
     same(page.count(&css(".you"))?, 1, "the branch holds the question")?;
     same(page.count(&css("article.ai"))?, 1, "and its answer, with nothing sent")
+}
+
+/// The recorded chat with `steps` tool calls before its answer, each read returning `output` bytes and followed by a short
+/// pause, so the reply streams like a long agent turn (a 2026-10-22 project reply ran 793 steps and 2 MB).
+fn long_recording(ctx: &Ctx, steps: usize, output: usize) -> std::result::Result<std::path::PathBuf, String> {
+    let chat = std::fs::read_to_string(ctx.paths.fixtures.join("claude/chat.jsonl")).map_err(|e| e.to_string())?;
+    let mut lines: Vec<String> = chat.lines().filter(|l| !l.trim().is_empty()).map(String::from).collect();
+    let session = "c5b9834c-dfc7-4086-beed-2212be93b722";
+    let body = "fn line() { /* read */ }\n".repeat(output / 25);
+    let pause = json!({ "dir": "out", "msg": { "faber_pause": 30 } }).to_string();
+    let mut work = Vec::new();
+    for i in 0..steps {
+        let id = format!("toolu_long{i:05}");
+        let call = json!({ "type": "tool_use", "id": id, "name": "Read", "input": { "file_path": format!("src/part_{i}.rs") } });
+        let usage = json!({ "input_tokens": 2, "output_tokens": 10, "cache_read_input_tokens": 1000, "cache_creation_input_tokens": 0 });
+        let message = json!({ "model": "claude-haiku-5-5", "id": format!("msg_long{i}"), "type": "message", "role": "assistant", "content": [call], "usage": usage });
+        work.push(
+            json!({ "dir": "out", "msg": { "type": "assistant", "message": message, "parent_tool_use_id": null, "session_id": session } })
+                .to_string(),
+        );
+        work.push(pause.clone());
+        let result = json!({ "type": "tool_result", "tool_use_id": id, "content": format!("{i}\n{body}") });
+        work.push(json!({ "dir": "out", "msg": { "type": "user", "message": { "role": "user", "content": [result] }, "parent_tool_use_id": null, "session_id": session } }).to_string());
+        work.push(pause.clone());
+    }
+    // After the person's message and the CLI's start, before the answer's own text.
+    let at = lines.iter().position(|l| l.contains(r#""subtype":"init""#)).ok_or("chat.jsonl has no init line")? + 1;
+    lines.splice(at..at, work);
+    let path = ctx.sb.tmp.join("long-answer.jsonl");
+    std::fs::write(&path, lines.join("\n")).map_err(|e| e.to_string())?;
+    Ok(path)
+}
+
+/// While a long reply streams, the screen hears only the steps that changed (`src-tauri/src/feed.rs`). Sent whole, each
+/// update of this 600-step reply was a script of up to 1.6 MB, and the app grew from 157 MB to 863 MB in 40 s; the 2026-10-22
+/// install reached 8 GB after hours of such replies. Memory is read as it streams, with no forced collection, since that
+/// hid the growth; then every step must be on screen, in order, each with its own file.
+fn long_streaming_answer(ctx: &mut Ctx) -> Result {
+    const STEPS: usize = 600;
+    /// What the app may grow by while the reply streams: the steps themselves take a few MB on screen.
+    const GROWTH_MB: f64 = 100.0;
+    start_settings(ctx, "en")?;
+    let recording = long_recording(ctx, STEPS, 2500)?;
+    let launch = Launch { recording: Some(recording), ..claude_chat(ctx) };
+    let mut app = ctx.launch(launch)?;
+    ask(&mut app.page, QUESTION)?;
+    // Read once the message is sent, before the reply streams: the screen is drawn and the CLI has started.
+    let (before, _) = ctx.memory_mb(app.id)?;
+    let started = Instant::now();
+    let mut samples = Vec::new();
+    let mut peak = before;
+    loop {
+        pause(3.0);
+        let (mb, _) = ctx.memory_mb(app.id)?;
+        peak = peak.max(mb);
+        samples.push(format!("{mb:.0}"));
+        if app.page.eval("!!document.querySelector('article.ai .actions')")?.as_bool() == Some(true) {
+            break;
+        }
+        ensure(started.elapsed() < Duration::from_secs(150), || format!("the reply did not end in 150 s; MB: {}", samples.join(" ")))?;
+    }
+    ctx.notes.push(format!(
+        "{STEPS} steps in {:.0} s: {before:.0} MB before, peak {peak:.0} MB (every 3 s: {})",
+        started.elapsed().as_secs_f64(),
+        samples.join(" ")
+    ));
+    let shown = app.page.eval(
+        "(() => { const chips = [...document.querySelectorAll('article.ai .activity .tools > span')]; return { n: chips.length, first: chips[0]?.textContent, last: chips.at(-1)?.textContent, summary: document.querySelector('article.ai .activity summary')?.textContent }; })()",
+    )?;
+    same(shown["n"].as_u64(), Some(STEPS as u64), "steps on screen")?;
+    ensure(shown["first"].as_str().is_some_and(|t| t.contains("src/part_0.rs")), || format!("the first step: {shown}"))?;
+    ensure(shown["last"].as_str().is_some_and(|t| t.contains(&format!("src/part_{}.rs", STEPS - 1))), || {
+        format!("the last step: {shown}")
+    })?;
+    ensure(shown["summary"].as_str().is_some_and(|t| t.contains(&format!("{STEPS} steps"))), || format!("the work log: {shown}"))?;
+    ensure(peak - before <= GROWTH_MB, || {
+        format!("the app grew {:.0} MB while the reply streamed (from {before:.0} to {peak:.0} MB)", peak - before)
+    })?;
+    ensure(peak <= BUDGET_MB, || format!("{peak:.0} MB is over the {BUDGET_MB} MB budget"))
 }
 
 #[cfg(test)]

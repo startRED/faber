@@ -442,9 +442,17 @@ check('reading: return and restart keep the same old message after the history a
     api.searchMessages = async () => ({ ready: true, hits: [{ ...hit('chat'), conversationId: conversation.id, messageIndex: 100 }] });
     type(root, 'another result');
     await until(() => root.querySelector('.message-hit'));
+    // The mark is watched for, not polled: it lasts 1.8 s, a hidden window on a slow runner can poll later than that, and
+    // the message can take focus a frame before the search marks it.
+    let marked = false;
+    const marks = new MutationObserver(() => {
+      marked ||= !!root.querySelector('[data-message-index="100"].search-focus');
+    });
+    marks.observe(root, { subtree: true, attributes: true, attributeFilter: ['class'] });
     root.querySelector<HTMLButtonElement>('.message-hit')!.click();
-    await until(() => root.querySelector('[data-message-index="100"]') === document.activeElement);
-    ok(root.querySelector('[data-message-index="100"].search-focus'), 'an explicit search result wins over the saved reading anchor');
+    await until(() => marked && root.querySelector('[data-message-index="100"]') === document.activeElement);
+    marks.disconnect();
+    ok(marked, 'an explicit search result wins over the saved reading anchor');
   } finally {
     dispose(); root.remove();
     api.open = before.open; api.setClock = before.clock; api.notesSeen = before.notes; api.searchMessages = before.search;

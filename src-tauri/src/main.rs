@@ -6,6 +6,7 @@
 #[cfg(all(feature = "test-hooks", not(debug_assertions)))]
 compile_error!("the `test-hooks` feature is for debug test builds only; it must not be enabled in a release build");
 
+mod feed;
 mod folder;
 mod look;
 #[cfg(windows)]
@@ -72,6 +73,8 @@ pub(crate) struct Faber {
     pub(crate) hidden: bool,
     pub(crate) awake: Arc<Mutex<CountedAwake>>,
     pub(crate) autostart: Mutex<Arc<dyn AutostartKeeper>>,
+    /// What the screen last heard of each streaming reply, so an update carries only the steps that changed (`feed.rs`).
+    pub(crate) feed: Arc<Mutex<feed::Feed>>,
 }
 
 type Res<T> = Result<T, String>;
@@ -205,6 +208,7 @@ fn main_window(app: &AppHandle) -> Option<tauri::Window> {
 
 #[tauri::command]
 async fn state(app: AppHandle, faber: State<'_, Faber>) -> Res<FullState> {
+    lock(&faber.feed).forget();
     let mut state = faber.engine.state();
     state.settings = shown_settings(std::mem::take(&mut state.settings), lock(&faber.autostart).as_ref());
     let look = look::stored(state.settings.appearance.as_ref());
@@ -213,6 +217,8 @@ async fn state(app: AppHandle, faber: State<'_, Faber>) -> Res<FullState> {
 
 #[tauri::command]
 async fn open(faber: State<'_, Faber>, id: String) -> Res<Option<Conversation>> {
+    // Whatever it heard of a streaming reply, the screen now takes this snapshot: the next update of each goes whole.
+    lock(&faber.feed).forget();
     Ok(faber.engine.open_for_screen(&id))
 }
 
@@ -1933,6 +1939,8 @@ fn main() {
             let awake = Arc::new(Mutex::new(CountedAwake::new(power, keep_awake)?));
             let awake_for_emit = awake.clone();
             let autostart_for_emit = autostart_keeper.clone();
+            let feed = Arc::new(Mutex::new(feed::Feed::default()));
+            let feed_for_emit = feed.clone();
             let emit = Arc::new(move |e: AppEvent| {
                 // The engine calls this with its lock held, and the tray waits for the main thread, which can be waiting
                 // for that lock. So the tray works on its own thread; it keeps the newest list, whatever the order.
@@ -1950,7 +1958,8 @@ fn main() {
                     let (app, title, why, vendor) = (handle.clone(), title.clone(), why.clone(), *vendor);
                     tauri::async_runtime::spawn_blocking(move || tray::on_halted(&app, &title, &why, vendor));
                 }
-                let _ = handle.emit("faber:event", event_for_screen(e, autostart_for_emit.as_ref()));
+                let event = lock(&feed_for_emit).shrink(event_for_screen(e, autostart_for_emit.as_ref()));
+                let _ = handle.emit("faber:event", event);
             });
             let opts = EngineOptions {
                 data_dir: data_dir.clone(),
@@ -2002,6 +2011,7 @@ fn main() {
                 hidden,
                 awake,
                 autostart: Mutex::new(autostart_keeper),
+                feed,
             });
             // R161 step 7: Faber's own browser, for a project's agent. Windows only for now: its page is driven through WebView2.
             #[cfg(windows)]

@@ -1,5 +1,5 @@
-import type { Conversation, Message } from '../../ui/api.ts';
-import { createOpening, upsert } from '../../ui/opening.ts';
+import type { Conversation, HeardMessage, Message, ToolUse } from '../../ui/api.ts';
+import { createOpening, upsert, whole } from '../../ui/opening.ts';
 import { check, deepEqual, equal, ok } from './check.ts';
 
 const message = (id: string, text: string, status: Message['status']): Message => ({ id, role: 'assistant', text, at: 1, status });
@@ -68,4 +68,27 @@ check('opening: upsert replaces a message by id and appends a new one', () => {
   const c = conversation('a', [message('r', 'one', 'streaming')]);
   deepEqual(upsert(c, message('r', 'two', 'done')).messages.map((m) => m.text), ['two']);
   deepEqual(upsert(c, message('s', 'next', 'done')).messages.map((m) => m.id), ['r', 's']);
+});
+
+const step = (id: string, output = ''): ToolUse => ({ id, name: 'Read', input: { file_path: id }, output });
+const heard = (tools: HeardMessage['tools'], toolsFrom?: number): HeardMessage => ({ ...message('r', 'x', 'streaming'), tools, toolsFrom });
+
+check('opening: an update of a streaming reply is made whole from the steps the screen holds, keeping their objects', () => {
+  const a = step('a', '1');
+  const b = step('b');
+  const held = { ...message('r', 'x', 'streaming'), tools: [a, b] };
+  const next = whole(held, heard([step('b', '2'), step('c')], 1));
+  deepEqual(next?.tools?.map((t) => [t.id, t.output]), [['a', '1'], ['b', '2'], ['c', '']]);
+  ok(next?.tools?.[0] === a, 'a step left out keeps the very object the screen holds, so its row stays');
+  ok(!next || !('toolsFrom' in next), 'the whole reply carries no toolsFrom');
+  const early = whole(held, heard([step('a', '1!'), { id: 'b', same: true }], 0));
+  ok(early?.tools?.[1] === b, 'a step named by its id alone is the one the screen holds');
+  equal(early?.tools?.[0]?.output, '1!');
+  equal(whole(held, heard([{ id: 'zz', same: true }], 0)), undefined, 'a step the screen does not hold');
+  equal(whole(held, heard([], 3)), undefined, 'more kept steps than the screen holds');
+  equal(whole(undefined, heard([], 1)), undefined, 'a reply the screen never heard');
+  const full = heard([a]);
+  ok(whole(undefined, full) === full, 'an update with every step is taken as it is');
+  const c = conversation('a', [held]);
+  ok(upsert(c, heard([{ id: 'zz', same: true }], 0)) === c, 'upsert leaves the conversation alone when it cannot be made whole');
 });

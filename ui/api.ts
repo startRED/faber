@@ -80,6 +80,14 @@ export interface ToolUse {
   /** When the engine saw the call end, in Unix milliseconds; absent while it runs and on older conversations. */
   ended?: number;
 }
+/** A step of a streaming reply that has not changed since the screen last heard it: only its id. */
+export interface SameTool {
+  id: string;
+  same: true;
+}
+/** A reply as an update brings it (`src-tauri/src/feed.rs`): while it streams, its first `toolsFrom` steps are as the screen
+ * holds them, and after them a step that did not change is a `SameTool`. `upsert` (`ui/opening.ts`) makes it whole again. */
+export type HeardMessage = Omit<Message, 'tools'> & { tools?: (ToolUse | SameTool)[]; toolsFrom?: number };
 export interface Permission {
   requestId: string;
   tool: string;
@@ -774,7 +782,7 @@ export type AppEvent =
   | { type: 'catalog' }
   | ({ type: 'background' } & BackgroundList)
   | { type: 'commands'; conversationId: string; vendor: Vendor }
-  | { type: 'message'; conversationId: string; message: Message }
+  | { type: 'message'; conversationId: string; message: HeardMessage }
   | { type: 'asides'; conversationId: string; asides: Aside[] }
   | { type: 'queue'; conversationId: string; queued: QueuedTurn[] }
   | ({ type: 'quota' } & QuotaReading)

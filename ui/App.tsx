@@ -49,7 +49,7 @@ import { animateDetails, animateList, keepForExit, watchMotion } from './motion.
 import { Palette } from './Palette.tsx';
 import { Shortcuts, shortcutsOpen } from './Shortcuts.tsx';
 import { Projects } from './Projects.tsx';
-import { createOpening, upsert } from './opening.ts';
+import { createOpening, upsert, whole } from './opening.ts';
 import { Running } from './Running.tsx';
 import { openedDetails, showDetails } from './Details.tsx';
 import { agentWide, openedAgent, showAgent, startMessage, toggleAgentWide } from './AgentChat.tsx';
@@ -272,6 +272,24 @@ export function App(props: { initial: AppState; update?: UpdateStatus; inbox: { 
   // conversation then, so nothing may be sent or warmed for either.
   const [loading, setLoading] = createSignal(false);
   const opening = createOpening();
+  // An update that leaves out steps this screen does not hold (`whole`): the reply is asked for again, once at a time. Asking
+  // also tells the shell to send the next updates whole, and one of those may come before the answer: an update applied
+  // meanwhile is newer than the answer, which is then dropped.
+  const refetching = new Set<string>();
+  let applied = 0;
+  const refetch = (conversationId: string, messageId: string) => {
+    if (refetching.has(conversationId)) return;
+    refetching.add(conversationId);
+    const since = applied;
+    void api
+      .open(conversationId)
+      .then((snapshot) => {
+        const m = snapshot?.messages.find((x) => x.id === messageId);
+        if (m && applied === since) setCurrent((c) => (c?.id === conversationId ? upsert(c, m) : c));
+      })
+      .catch(() => {})
+      .finally(() => refetching.delete(conversationId));
+  };
   const win = createWindowWidth();
   const width = createMemo(() => widthClass(win()));
   let thread: HTMLDivElement | undefined;
@@ -280,7 +298,7 @@ export function App(props: { initial: AppState; update?: UpdateStatus; inbox: { 
   let clearRestored: ((draft: Draft) => boolean) | undefined;
   const held = new Map<string, { draft: Draft; reply?: string; restored?: boolean }>();
   let sendTicket = 0;
-  const restoreRejected = (id: string, m: import("./api.ts").Message | undefined) => {
+  const restoreRejected = (id: string, m: Pick<import("./api.ts").Message, "id" | "status" | "error"> | undefined) => {
     const saved = held.get(id);
     if (!saved || !m || (saved.reply && saved.reply !== m.id)) return;
     if (m.status === "streaming") {
@@ -855,7 +873,12 @@ export function App(props: { initial: AppState; update?: UpdateStatus; inbox: { 
       if (e.type === 'message') restoreRejected(e.conversationId, e.message.role === 'assistant' ? e.message : undefined);
       if (e.type === 'quota') setQuotas((q) => withQuota(q, e));
       if (e.type === 'message' && opening.hear(e.conversationId, e.message) === 'apply') {
-        setCurrent((c) => (c?.id === e.conversationId ? upsert(c, e.message) : c));
+        const open = current();
+        const m = open?.id === e.conversationId ? whole(open.messages.find((x) => x.id === e.message.id), e.message) : undefined;
+        if (m) {
+          applied++;
+          setCurrent((c) => (c?.id === e.conversationId ? upsert(c, m) : c));
+        } else if (open?.id === e.conversationId) refetch(open.id, e.message.id);
       }
       if (e.type === 'asides') heardAsides(e.conversationId, e.asides);
       if (e.type === 'queue') {

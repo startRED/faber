@@ -30,7 +30,10 @@ Engine (Rust crate inside the app today; a separate process later, so work survi
   process or a large DOM alive needs a reason and a measurement. Measured on 2026-10-10 as Task Manager counts it
   (private working set): 89 MB idle, 114 MB with a thousand-message conversation open (only the last 40 messages are
   drawn, more on scrolling up), 4 MB closed to the tray (the screen is freed; the engine keeps running and the window
-  comes back where it was). For comparison, the Claude desktop app used 2.5 GB that day.
+  comes back where it was). For comparison, the Claude desktop app used 2.5 GB that day. A streaming reply reaches the
+  screen up to 30 times a second, so an update carries only the steps that changed since the last one
+  (`src-tauri/src/feed.rs`): sent whole, a long agent reply (thousands of steps, 11 MB) was parsed by the webview at each
+  update, and on 2026-10-22 the window grew to 8.3 GB after a few hours of such replies.
 - **CLIs that cost almost nothing while idle.** A Claude Code process takes about 120 MB just waiting (more in long
   sessions, and each session starts its own copies of the user's MCP servers), and it has no way to serve two
   conversations. So Faber starts it on the first keystroke, not when the window opens, and closes it after two idle

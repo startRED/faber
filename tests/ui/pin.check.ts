@@ -66,8 +66,10 @@ for (const area of ['chat', 'project'] as const) {
       before.focus({ preventScroll: true });
       equal(document.activeElement, before, `the conversation's ${from} control has focus before Shift+F10`);
       before.dispatchEvent(new KeyboardEvent('keydown', { bubbles: true, cancelable: true, key: 'F10', shiftKey: true }));
-      await settle();
-      const panel = document.querySelector<HTMLElement>('.cmenu:not(.leaving)');
+      // Waited for, not a fixed 30 ms: a busy macOS runner drew it later than that (queue of #286, 2026-10-23).
+      const open = () => document.querySelector<HTMLElement>('.cmenu:not(.leaving)');
+      for (let waited = 0; waited < 2000 && !open(); waited += 30) await settle();
+      const panel = open();
       ok(panel, 'Shift+F10 opens a menu on the focused conversation');
       const entries = [...panel.querySelectorAll<HTMLButtonElement>('[role=menuitem]')];
       deepEqual(entries.map((el) => el.textContent), [t('menu.rename'), t(`menu.${action}`), t('menu.export'), ...(area === 'chat' ? [t('menu.moveToGroup'), t('menu.moveToProject')] : []), t('menu.archive'), t('menu.delete')]);
