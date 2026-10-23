@@ -21,7 +21,7 @@ These observations need confirmation before changing product copy or layout; the
 
 Fresh independent read-only review inspected the screenshots and confirmed the bounded findings above. None of these walks
 tests installing, removing, on/off, plugin/server execution, a Chat response or a project conversation. The full
-two-reviewer, two-language, two-size matrix remains incomplete.
+two-reviewer, two-language, two-size matrix was incomplete at this initial stage; the subsequent Catalog-only round is below.
 
 ## A false source of confidence fixed
 
@@ -82,3 +82,45 @@ The reviewer selected Claude Haiku, typed the sky-blue question and sent it. Scr
 `E:/Temp/faber-target/catalog-update/faber-test/first-user/2026-10-23-Gb1UQs/conversa-5.png` shows the complete recorded
 answer, Ready and nothing running. This proves the bounded manual-model conversation path with the existing fake
 recording, not Auto routing, real-provider compatibility or a current rebuilt app binary. App sources were unchanged.
+
+## Subsequent Catalog-only matrix
+
+Each of the eight reviewer/language/window combinations has now been attempted with screenshot-only page prose.
+These are bounded walks of the existing hidden test build, not eight successful product acceptance results. The
+first Codex English wide-window attempt returned an empty reviewer answer at step 3; it is preserved separately and
+was retried once. This is a reviewer failure, not evidence of an app failure. All reports remain unedited.
+
+| Reviewer | Window | Language | Observed result |
+| :--- | :--- | :--- | :--- |
+| Codex | 720x480 | pt-BR | Returned to the list; reading the use explanation was not proved in the initial walk. |
+| Haiku | 720x480 | pt-BR | Purpose and use explanation appeared; then looped through the sidebar without returning and tried Alt+Left. |
+| Codex | 720x480 | English | Purpose and use explanation appeared; the reviewer failed to scroll fully back to the return control. |
+| Haiku | 720x480 | English | Purpose and use explanation appeared; sidebar navigation retained the detail and the reviewer did not return. |
+| Codex | 1280x800 | pt-BR | Purpose, conditional use explanation and return to list confirmed by independent image review. |
+| Haiku | 1280x800 | pt-BR | Purpose, conditional use explanation and return to list confirmed by independent image review. |
+| Codex | 1280x800 | English | Retry purpose, conditional use and return confirmed by image review; initial empty answer remains separate. |
+| Haiku | 1280x800 | English | Purpose and conditional use explanation legible, returned to the list in the initial walk. |
+
+The two English small-window reviewers incorrectly reported that the return control did not exist. Their earlier
+detail screenshot shows it at the top; after scrolling it is above the viewport. Both also received an image with
+the full conditional-use explanation, contradicting the Codex summary that it never appeared. Those raw summaries
+are findings to inspect, not facts to reproduce in product documentation.
+Fresh independent read-only review inspected all five additional completed walks and the directed diagnostic,
+confirming the bounded table outcomes. It also rejected the Portuguese small-window summary's implication that
+cut-off text was unavailable: the next image shows the full explanation after scrolling.
+
+A separate deterministic diagnostic, with no AI reviewer, opens the same detail at 720x480, scrolls to the bottom,
+checks that Back is not among reachable controls, scrolls fully to the top, checks Back has reappeared, clicks it and
+checks the card is back in the list. It passed and exited 0. This demonstrates that scrolling back works in this
+test build; the newcomer failures show a discovery problem, not an impossible return. The raw diagnostic reuses a
+generic report template: its introductory newcomer wording is inapplicable, as its explicit reviewer label states.
+
+Additional local evidence under `E:/Temp/faber-tools/`: `catalog-newcomer-720-en-screen-only`,
+`catalog-newcomer-codex-720-en`, `catalog-newcomer-haiku-1280-pt`, `catalog-newcomer-haiku-720-pt`,
+`catalog-newcomer-codex-1280-en` and `catalog-newcomer-codex-1280-en-retry` each have separate `.md` and `.log` files.
+`catalog-return-directed-report.md`, `catalog-return-directed.log`, `prepare-catalog-return-probe.mjs` and
+`catalog-return-probe-receipt.json` retain the directed recipe and pinned source/probe hashes. Its screenshots are
+`2026-10-23-cedSvs` under the existing first-user evidence root. No installation or external navigation was performed.
+
+Task 996 still needs its other screens and conversations, fixes and a repeat that clears confirmed blockers. This
+matrix does not prove tool installation, switching, execution, real providers, idle resources or stable qualification.
