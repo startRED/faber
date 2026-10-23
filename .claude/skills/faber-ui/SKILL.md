@@ -75,7 +75,8 @@ Code checks and motion checks do not see the whole screen. Look at a screenshot 
 - At most three strong text weights in view (a heading, a label, the body); the rest is regular or muted.
 - Decorative art (the black hole, the light, the dust) is never behind text a person reads: under it, only a faint veil.
 - Neighbouring columns share a baseline: their bottoms (or their first lines) line up.
-- A screen of one area never borrows another area's words, hints or rows (the Projects home says nothing of Chat).
+- Words, hints and rows follow the area's documented scope. The Projects home stays within its project; the Chat
+  home's pick-up list deliberately includes both areas (`docs/design/layout.md`, R175).
 
 The UX sentinel catches art under text, a name in three places and uneven columns (`docs/dev/sentinel.md`); the
 rest needs the visual critique (`.claude/skills/visual-critique/SKILL.md`).
