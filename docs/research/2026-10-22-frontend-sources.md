@@ -68,3 +68,11 @@ component swap is not a performance argument: object identity and streaming upda
 
 This is guidance for the cross-platform search/reading investigation, not proof of its cause or a mandate to
 replace every positional list. The regression reproduction and the eventual fix must supply their own evidence.
+
+## Follow-up: process memory and object lifetime (2026-10-23)
+
+Chrome's original [memory investigation guide](https://developer.chrome.com/docs/devtools/memory-problems)
+distinguishes OS memory footprint from the JavaScript heap and recommends examining retained objects and allocation
+over time. A collectible frame element is one observation, not proof that the whole process tree returned to its
+prior footprint. Keep the existing app memory budget, record the failed scenario's own measurements and distinguish
+them from neighboring scenarios. A passing rerun alone does not diagnose an earlier overage or establish a repair.
