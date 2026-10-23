@@ -657,7 +657,10 @@ export function Composer(props: Props) {
         <button type="button" class="iconbtn" onMouseDown={keepEditingFocus} aria-label={t('composer.attach')} title={t('composer.attach')} onClick={() => fileInput?.click()}>
           <Icon name="clip" />
         </button>
-        <input ref={(el) => (fileInput = el)} type="file" multiple hidden onChange={(e) => e.currentTarget.files && void add(e.currentTarget.files)} />
+        <input ref={(el) => (fileInput = el)} type="file" multiple hidden onChange={(e) => {
+          if (e.currentTarget.files) void add(e.currentTarget.files);
+          e.currentTarget.value = '';
+        }} />
         {/* The model: a chip with the rays of "let the AI choose" and a chevron, over the real select that does the work. */}
         <label class="chip choose" data-tour="auto">
           <Icon name="auto" small />

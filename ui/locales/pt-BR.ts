@@ -2056,6 +2056,8 @@ export const ptBR: Messages = {
   'notes.206.new': 'Cada projeto ganha um arquivo de regras que o Faber monta com os arquivos do próprio projeto: como conferir o trabalho, onde ele acontece e o que precisa do seu sim.',
   'notes.207.better': 'Uma decisão que a IA marca como sua só passa a valer como sua depois que você a mantém em Memória.',
   'notes.208.fixed': '“Trocar” numa pergunta que o Faber respondeu por você não envia mais na hora: mostra a pergunta inteira e todas as opções, e só envia a que você escolher.',
+  'notes.209.better': 'O Faber agora tem guias próprios pra criar e conferir as interfaces que ele faz.',
+  'notes.210.fixed': 'Dá pra anexar o mesmo arquivo de novo depois de removê-lo da mensagem.',
   'update.checking': 'Procurando atualização…',
   'update.downloading': 'Baixando atualização…',
   'update.downloadingPercent': 'Baixando atualização… {percent}%',

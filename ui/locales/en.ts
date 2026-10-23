@@ -1949,6 +1949,8 @@ export const en = {
   'notes.206.new': 'Each project gets a rules file Faber writes from its own files: what it checks with, where the work happens, and what needs your yes.',
   'notes.207.better': 'A decision an AI marks as yours now counts as yours only after you keep it in Memory.',
   'notes.208.fixed': '“Change” on a question Faber answered for you no longer sends at once: it shows the whole question and every choice, and sends only the one you pick.',
+  'notes.209.better': 'Faber now has its own guides for designing and checking the interfaces it builds.',
+  'notes.210.fixed': 'You can attach the same file again after removing it from a message.',
   'update.checking': 'Looking for an update…',
   'update.downloading': 'Downloading update…',
   'update.downloadingPercent': 'Downloading update… {percent}%',

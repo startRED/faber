@@ -993,7 +993,8 @@ mod tests {
                             let text = claude_input(&messages).await;
                             let note = note.unwrap();
                             assert!(text.starts_with(&note) && text.ends_with(task), "{which}: {text}");
-                            assert!(note.contains("German") && note.contains("SKILL.md") && note.len() < 400, "{which}: {note}");
+                            assert!(note.contains("German") && note.contains("SKILL.md") && note.len() < 1000, "{which}: {note}");
+                            assert!(!note.contains("# Frontend"), "{which}: skill bodies remain lazy");
                             assert!(!text.contains("Selbst weitermachen"), "{which}: the table stays in the file");
                             assert!(plugin_dirs(&args).is_empty(), "{which}: Chat has no Skill tool to load a plugin");
                             assert!(
@@ -1012,7 +1013,11 @@ mod tests {
                             assert_eq!(plugins.len(), 2, "{which}: the catalog's plugin and the guide's: {plugins:?}");
                             assert_eq!(guide_skill(&plugins), Some(crate::guide::skill_file(crate::guide::Language::De)), "{which}");
                             assert!(!text.contains("faber-guide"), "{which}: the kit's index never lists it");
-                            assert_eq!(allowed_tools(&args), ["Skill(faber-guide:guide)"], "{which}");
+                            assert_eq!(
+                                allowed_tools(&args),
+                                ["Skill(faber-guide:guide)", "Skill(faber-guide:frontend-craft)", "Skill(faber-guide:frontend-proof)"],
+                                "{which}"
+                            );
                         }
                         (Vendor::Codex, _) => {
                             let thread = until_message(&messages, "thread/start").await;
@@ -1106,6 +1111,15 @@ mod tests {
                     expected.iter().all(|rule| allowed.contains(rule)) && (!expected.is_empty() || allowed.is_empty()),
                     "{which}: {allowed:?}"
                 );
+                if permissions.guarded() {
+                    for name in ["frontend-craft", "frontend-proof"] {
+                        let rule = match area {
+                            Area::Chat => format!("Read({})", rule_path(&folder.join(format!("guide-plugin/skills/{name}/SKILL.md")))),
+                            Area::Project => format!("Skill(faber-guide:{name})"),
+                        };
+                        assert!(allowed.contains(&rule), "{which}: first-party skill needs no extra card: {allowed:?}");
+                    }
+                }
                 let folder_rule = rule_path(&folder.join("guide-plugin"));
                 let denied = denied_tools(&args);
                 for tool in ["Edit", "Write"] {
@@ -1356,10 +1370,14 @@ mod tests {
             let recorded = args.lock().unwrap();
             let argv = &recorded[0].1;
             assert!(argv.windows(2).any(|a| a == ["--input-format", "stream-json"]));
-            let guide = format!("Read({})", rule_path(&guide_file(&folder)));
+            let mut files = vec![format!("Read({})", rule_path(&guide_file(&folder)))];
+            files.extend(
+                ["frontend-craft", "frontend-proof"]
+                    .map(|name| format!("Read({})", rule_path(&folder.join(format!("guide-plugin/skills/{name}/SKILL.md"))))),
+            );
             assert!(
-                !argv.iter().any(|a| a == "--plugin-dir" || a == "--add-dir" || (a.starts_with("Read(") && *a != guide)),
-                "the only file Chat may read with no card is Faber's own guide"
+                !argv.iter().any(|a| a == "--plugin-dir" || a == "--add-dir" || (a.starts_with("Read(") && !files.contains(a))),
+                "only Faber's original instruction files are readable without a card"
             );
             drop(recorded);
             engine.shutdown();

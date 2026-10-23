@@ -2069,6 +2069,8 @@ export const fr: Messages = {
   'notes.206.new': 'Chaque projet a un fichier de règles que Faber écrit à partir de ses propres fichiers : comment vérifier le travail, où il se fait et ce qui demande votre accord.',
   'notes.207.better': "Une décision qu'une IA marque comme la vôtre ne compte comme telle qu'une fois gardée dans Mémoire.",
   'notes.208.fixed': '« Changer » sur une question à laquelle Faber a répondu pour vous n’envoie plus tout de suite : la question entière s’affiche avec tous les choix, et seul celui que vous prenez part.',
+  'notes.209.better': "Faber dispose maintenant de ses propres guides pour concevoir et vérifier les interfaces qu'il crée.",
+  'notes.210.fixed': "Vous pouvez joindre à nouveau le même fichier après l'avoir retiré du message.",
   'update.checking': 'Recherche d’une mise à jour…',
   'update.downloading': 'Téléchargement de la mise à jour…',
   'update.downloadingPercent': 'Téléchargement de la mise à jour… {percent} %',

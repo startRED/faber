@@ -1,6 +1,6 @@
 ---
 name: faber-ui
-description: Use when adding, changing or reviewing anything the user sees or feels in Faber's screen (ui/): motion, hover and press states, surfaces, icons, spacing, radius. Decides first whether something should move at all, then builds it from Faber's tokens, then checks it against a short list.
+description: Use when adding, changing or reviewing Faber's own screen (ui/). Applies the existing layout, interaction states, accessibility, motion and visual critique rules. For interfaces Faber generates in other projects, use frontend-craft and frontend-proof with that project's own design system instead.
 ---
 
 # Faber screen: motion and polish
@@ -8,6 +8,21 @@ description: Use when adding, changing or reviewing anything the user sees or fe
 The rules and numbers live in `docs/design/looks.md` ("One structure, many looks" and "Motion"); the tokens live in `ui/styles.css` and
 `src-tauri/src/themes.json`. This skill is the order to think in and the list to check. If it disagrees with the docs, the
 docs win.
+
+Before implementing an interaction, read Faber's original
+[frontend-craft](../../../engine/src/frontend-skills/frontend-craft/SKILL.md); before delivering it, use
+[frontend-proof](../../../engine/src/frontend-skills/frontend-proof/SKILL.md). Load the parts relevant to the change.
+Those skills complement this one; they do not replace Faber's tokens, taste cards or visual critique rubric.
+
+## Interaction before polish
+
+- Extend the product map's existing flow. Confirm the primary task, what signals completion and what must survive
+  failure or navigation. Local intent, saved, accepted and completed are different states.
+- Check the affected empty, loading, populated and recoverable-error states; preserve drafts and references.
+- Walk the keyboard path, focus entry/return and non-drag alternative. Announce important state changes, not tokens.
+- Inspect the supported narrow window, long translations, larger text, forced colors and reduced motion. Code blocks
+  may scroll locally; the composer and required actions must remain reachable.
+- Pair screenshots with an executed task. Attractive composition cannot establish persistence or honest completion.
 
 ## 1. Should it move at all?
 

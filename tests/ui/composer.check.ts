@@ -86,6 +86,46 @@ check('composer: typed text survives a reload and is forgotten once sent', async
 
 const PNG = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==';
 
+check('composer: removing a picked file allows picking the same file again', async () => {
+  const root = document.createElement('div');
+  root.dataset.motion = 'none';
+  document.body.append(root);
+  let sent: Draft | undefined;
+  const dispose = render(() => createComponent(Composer, {
+    vendors: ['codex'], options: [], choice: { vendor: 'auto' }, busy: false, placeholder: '',
+    onChoice: () => {}, onStop: () => {}, onWarm: () => {}, onPause: () => {}, onSend: (draft) => { sent = draft; },
+  }), root);
+  try {
+    const input = root.querySelector<HTMLInputElement>('input[type="file"]')!;
+    const file = new File(['%PDF-1.4'], 'same.pdf', { type: 'application/pdf' });
+    const pick = () => {
+      const transfer = new DataTransfer();
+      transfer.items.add(file);
+      input.files = transfer.files;
+      input.dispatchEvent(new Event('change', { bubbles: true }));
+      equal(input.value, '', 'reset the native selection so choosing the same file can fire change again');
+    };
+    const attached = () => root.querySelector<HTMLButtonElement>('.thumb-x');
+    const waitForFile = async () => {
+      for (let i = 0; i < 100 && !attached(); i++) await new Promise((resolve) => setTimeout(resolve, 20));
+      ok(attached(), 'the picked file is attached after its asynchronous read');
+    };
+    pick();
+    await waitForFile();
+    attached()!.click();
+    equal(attached(), null, 'removing the file clears its card');
+    pick();
+    await waitForFile();
+    root.querySelector('form')!.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
+    equal(sent?.files.length, 1, 'the reselected file is sent once');
+    equal(sent?.files[0]?.name, 'same.pdf');
+    equal(sent?.files[0]?.base64, 'JVBERi0xLjQ=', 'resetting selection preserves the file bytes');
+  } finally {
+    dispose();
+    root.remove();
+  }
+});
+
 check('composer: images show thumbnails and files small cards, each with its own x that removes only it', async () => {
   const settle = (ms = 30) => new Promise((resolve) => setTimeout(resolve, ms));
   const root = document.createElement('div');

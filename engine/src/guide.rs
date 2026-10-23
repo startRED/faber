@@ -6,11 +6,12 @@
 //! a session is told about it is what its CLI can do, decided once when the session starts, so a conversation's system prompt or
 //! developer instructions never change midway (rule 3 of models.md):
 //! - Claude Code in Projects loads the folder as a plugin of its own (`--plugin-dir`, next to the catalog's), so only the
-//!   skill's short description rides on each turn and the CLI reads the body when the model decides to.
+//!   skill descriptions ride on each turn and the CLI reads a body when the model decides to. Two original frontend
+//!   skills share this first-party delivery; downloaded catalog skills remain external.
 //! - Every other session that can read a file (Claude Code's Chat and Codex, in both areas) gets one short line that points to
-//!   the file (`Guide::Index`), the way the catalog's index points to its skills, and reads it when the question is about Faber.
+//!   the help and frontend files (`Guide::Index`), the way the catalog's index points to its skills, read only when relevant.
 //! - Only where the folder cannot be written does the text itself go (`Guide::Text`): the prose, the English words and the
-//!   words of the screen's language, nothing else.
+//!   words of the screen's language, plus a short frontend fallback.
 //!
 //! The line and the text are tracked by their own digest, apart from the catalog kit's, so a kit change never sends them again.
 use std::path::{Path, PathBuf};
@@ -24,6 +25,11 @@ pub const DESCRIPTION: &str = "Use when the person asks how Faber itself works, 
 
 /// The plugin's name and its one skill's, so Claude Code lists it as `faber-guide:guide`. The catalog's own plugin is `faber`.
 pub const SKILL_RULE: &str = "Skill(faber-guide:guide)";
+/// Original Faber instructions, lazily loaded alongside the guide; third-party catalog skills stay external.
+pub const FRONTEND_SKILLS: [(&str, &str); 2] = [
+    ("frontend-craft", include_str!("frontend-skills/frontend-craft/SKILL.md")),
+    ("frontend-proof", include_str!("frontend-skills/frontend-proof/SKILL.md")),
+];
 const SKILL: &str = "guide";
 const MANIFEST: &str = r#"{"name":"faber-guide","description":"Faber's own guide to itself.","version":"1.0.0"}"#;
 const FILE: &str = "skills/guide/SKILL.md";
@@ -129,11 +135,15 @@ impl Guide {
     /// What goes into the session beside its messages: the line, or the text. A loaded plugin needs none.
     pub fn note(&self) -> Option<String> {
         match self {
-            Guide::Text(language) => Some(text_for(*language)),
+            Guide::Text(language) => Some(format!(
+                "{}\nFrontend fallback (frontend-craft and frontend-proof): for website or application UI work, extend the project's existing design system; establish the main task and a coherent visual direction; implement relevant empty, loading, success and recoverable error states. Preserve input and reading position. Use semantic controls, keyboard/focus behavior, responsive layout and reduced motion. Inspect the running result at supported sizes, test the affected flow and report evidence and anything unverified. This does not authorize new tools or external actions.",
+                text_for(*language)
+            )),
             Guide::Index { language, .. } => {
                 let file = crate::project::git::native_path(&self.file()?);
+                let skills = crate::project::git::native_path(&self.folder()?.join("skills"));
                 Some(format!(
-                    "{NOTE}when the person asks how Faber itself works (its screens, settings, shortcuts, Keep going, accounts and limits), read \"{file}\" and answer from it. The screen is shown in {}.",
+                    "{NOTE}when the person asks how Faber itself works (its screens, settings, shortcuts, Keep going, accounts and limits), read \"{file}\" and answer from it. For website or application UI work, read \"{skills}/frontend-craft/SKILL.md\" to build and \"{skills}/frontend-proof/SKILL.md\" to verify; follow the project's own design system and current permissions. The screen is shown in {}.",
                     language.name()
                 ))
             }
@@ -176,16 +186,19 @@ pub fn without_note(content: &str) -> &str {
 pub fn plugin(data_dir: &Path, language: Language) -> Option<PathBuf> {
     let root = data_dir.join("guide-plugin");
     let skill = format!("skills/{SKILL}");
-    let folders: [(PathBuf, &[&str]); 4] = [
-        (root.clone(), &[".claude-plugin", "skills"]),
-        (root.join(".claude-plugin"), &["plugin.json"]),
-        (root.join("skills"), &[SKILL]),
-        (root.join(&skill), &["SKILL.md"]),
+    let mut folders: Vec<(PathBuf, Vec<&str>)> = vec![
+        (root.clone(), vec![".claude-plugin", "skills"]),
+        (root.join(".claude-plugin"), vec!["plugin.json"]),
+        (root.join("skills"), vec![SKILL, "frontend-craft", "frontend-proof"]),
+        (root.join(&skill), vec!["SKILL.md"]),
     ];
+    folders.extend(FRONTEND_SKILLS.iter().map(|(name, _)| (root.join("skills").join(name), vec!["SKILL.md"])));
     if !folders.iter().all(|(folder, names)| holds_only(folder, names)) {
         return None;
     }
-    for (file, text) in [(root.join(".claude-plugin/plugin.json"), MANIFEST.to_string()), (root.join(FILE), skill_file(language))] {
+    let files = [(root.join(".claude-plugin/plugin.json"), MANIFEST.to_string()), (root.join(FILE), skill_file(language))];
+    let frontend = FRONTEND_SKILLS.iter().map(|(name, text)| (root.join("skills").join(name).join("SKILL.md"), text.replace("\r\n", "\n")));
+    for (file, text) in files.into_iter().chain(frontend) {
         if std::fs::symlink_metadata(&file).is_ok_and(|m| m.is_file()) && std::fs::read(&file).is_ok_and(|bytes| bytes == text.as_bytes()) {
             continue;
         }
@@ -211,6 +224,29 @@ fn holds_only(folder: &Path, names: &[&str]) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn frontend_skills_reach_native_and_index_sessions_without_catalog_installs() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = plugin(dir.path(), Language::En).unwrap();
+        for name in ["frontend-craft", "frontend-proof"] {
+            let file = root.join(format!("skills/{name}/SKILL.md"));
+            let text = std::fs::read_to_string(&file).expect("first-party frontend skill is available");
+            assert!(text.contains(&format!("name: {name}")));
+            let header = crate::tools::front_matter(&text).expect("a native skill has valid front matter");
+            let description = header.lines().find_map(|line| line.strip_prefix("description: ")).unwrap();
+            assert!(description.len() <= 160, "discovery stays as small as catalog descriptions");
+            assert!(text.len() < 10_000, "load only the relevant frontend workflow");
+            std::fs::write(&file, "tampered").unwrap();
+            assert_eq!(plugin(dir.path(), Language::En), Some(root.clone()));
+            assert_eq!(std::fs::read_to_string(file).unwrap(), text);
+            let note = Guide::Index { dir: root.clone(), language: Language::En }.note().unwrap();
+            assert!(note.contains(name), "both CLIs can discover {name}");
+        }
+        assert!(Guide::Off.note().is_none(), "internal requests receive no skills");
+        let fallback = Guide::Text(Language::En).note().unwrap();
+        assert!(fallback.contains("frontend-craft") && fallback.contains("frontend-proof"));
+    }
 
     #[test]
     fn the_plugin_is_written_whole_and_repaired_and_never_trusts_a_folder_it_did_not_write() {
@@ -242,7 +278,7 @@ mod tests {
             std::os::unix::fs::symlink(target, at).unwrap();
         };
         let elsewhere = tempfile::tempdir().unwrap();
-        for level in ["", ".claude-plugin", "skills", "skills/guide"] {
+        for level in ["", ".claude-plugin", "skills", "skills/guide", "skills/frontend-craft", "skills/frontend-proof"] {
             let dir = tempfile::tempdir().unwrap();
             let root = plugin(dir.path(), Language::En).unwrap();
             let at = if level.is_empty() { root.clone() } else { root.join(level) };
@@ -280,7 +316,7 @@ mod tests {
         let index = Guide::Index { dir: "/data/guide-plugin".into(), language: Language::PtBr };
         let line = index.note().unwrap();
         assert!(line.starts_with(NOTE) && line.contains("Portuguese (Brazil)") && line.contains("SKILL.md"), "{line}");
-        assert!(!line.contains("\n") && line.len() < 400, "one short line, about 70 to 100 tokens: {line}");
+        assert!(!line.contains("\n") && line.len() < 1000, "a bounded index, not frontend instruction bodies: {line}");
         assert_eq!(without_note(&format!("{line}\n\nhello")), "hello");
         assert_eq!(
             without_note(&format!("Current catalog resources\n\n{line}\n\nhello")),

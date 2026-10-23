@@ -4,6 +4,11 @@ How Projects builds software: one voice with a team behind it, many workers, sel
 
 ## Building software: one voice, a team behind it
 
+For frontend work, the existing guide delivery provides Faber's original `frontend-craft` and `frontend-proof`
+skills ([contract](frontend.md)): project-aware composition and interaction states, followed by task, accessibility,
+layout and resource evidence. They complement installed design skills and never impose Faber's own desktop theme
+on another project. Delivery checks do not establish a measured gain in generated interface quality.
+
 Normal mode feels like Claude Code: the user talks only to Faber. Behind it, Claude and Codex sessions work in
 parallel, each on what it does best, and the result must read as if one careful team made it.
 

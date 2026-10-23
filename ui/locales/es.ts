@@ -2069,6 +2069,8 @@ export const es: Messages = {
   'notes.206.new': 'Cada proyecto tiene un archivo de reglas que Faber arma con los archivos del propio proyecto: cómo se revisa el trabajo, dónde se hace y qué necesita tu sí.',
   'notes.207.better': 'Una decisión que la IA marca como tuya solo cuenta como tuya cuando la conservas en Memoria.',
   'notes.208.fixed': '“Cambiar” en una pregunta que Faber respondió por ti ya no envía al instante: muestra la pregunta entera y todas las opciones, y solo envía la que elijas.',
+  'notes.209.better': 'Faber ya cuenta con guías propias para diseñar y revisar las interfaces que crea.',
+  'notes.210.fixed': 'Puedes volver a adjuntar el mismo archivo después de quitarlo del mensaje.',
   'update.checking': 'Buscando una actualización…',
   'update.downloading': 'Descargando actualización…',
   'update.downloadingPercent': 'Descargando actualización… {percent} %',

@@ -218,15 +218,21 @@ fn guide_plugin_loaded(launch: &ClaudeLaunch) -> bool {
     launch.area == Area::Project && offers_tools(launch.area, launch.permissions) && launch.flags.plugin_dir
 }
 
-/// The one rule that lets a guarded session use the guide with no card: its skill, or reading its file.
-fn guide_allowed(guide: &crate::guide::Guide, plugin_loaded: bool) -> Option<String> {
+/// Only Faber's original guide and frontend instructions are readable without a card.
+fn guide_allowed(guide: &crate::guide::Guide, plugin_loaded: bool) -> Vec<String> {
     match guide {
-        crate::guide::Guide::Plugin { .. } if plugin_loaded => Some(crate::guide::SKILL_RULE.into()),
+        crate::guide::Guide::Plugin { .. } if plugin_loaded => std::iter::once(crate::guide::SKILL_RULE.to_string())
+            .chain(crate::guide::FRONTEND_SKILLS.iter().map(|(name, _)| format!("Skill(faber-guide:{name})")))
+            .collect(),
         crate::guide::Guide::Index { .. } => {
-            let file = crate::project::git::native_path(&guide.file()?);
-            Some(format!("Read({})", crate::permissions::claude_rule_path(&file)))
+            let Some(file) = guide.file() else { return vec![] };
+            let Some(folder) = guide.folder() else { return vec![] };
+            std::iter::once(file)
+                .chain(crate::guide::FRONTEND_SKILLS.iter().map(|(name, _)| folder.join("skills").join(name).join("SKILL.md")))
+                .map(|file| format!("Read({})", crate::permissions::claude_rule_path(&crate::project::git::native_path(&file))))
+                .collect()
         }
-        _ => None,
+        _ => vec![],
     }
 }
 

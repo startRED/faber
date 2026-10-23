@@ -3,6 +3,10 @@
 The same message box serves Chat and Projects, at home and below a conversation. Its controls and model picker are
 listed in the Composer row of [product-map.md](../product-map.md); placement follows [layout.md](layout.md).
 
+The attachment picker copies its selected files and immediately clears the native input. Removing a file and choosing
+the same one again therefore follows the ordinary attachment path in both areas, with no new UI or persistence rule
+(`tests/ui/composer.check.ts`: `composer: removing a picked file allows picking the same file again`).
+
 ## Completion list and earlier messages
 
 - `@` in a conversation with a working folder lists matching files and folders over the box, on the context menu's

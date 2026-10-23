@@ -2069,6 +2069,8 @@ export const de: Messages = {
   'notes.206.new': 'Jedes Projekt bekommt eine Regeldatei, die Faber aus seinen eigenen Dateien schreibt: wie die Arbeit geprüft wird, wo sie passiert und was dein Ja braucht.',
   'notes.207.better': 'Eine Entscheidung, die eine KI als deine markiert, zählt erst als deine, wenn du sie im Gedächtnis behältst.',
   'notes.208.fixed': '„Ändern“ bei einer Frage, die Faber für dich beantwortet hat, sendet nicht mehr sofort: Es zeigt die ganze Frage mit allen Möglichkeiten und sendet nur die, die du wählst.',
+  'notes.209.better': 'Faber hat jetzt eigene Leitfäden zum Gestalten und Prüfen der Oberflächen, die es erstellt.',
+  'notes.210.fixed': 'Nach dem Entfernen aus einer Nachricht lässt sich dieselbe Datei erneut anhängen.',
   'update.checking': 'Suche nach einem Update…',
   'update.downloading': 'Update wird heruntergeladen…',
   'update.downloadingPercent': 'Update wird heruntergeladen… {percent} %',
