@@ -112,6 +112,17 @@ accepted the candidate. GitHub subsequently reported this instruction change clo
 candidate was observed on both the development base and main. Its queued workflow gate passed; the subsequent
 post-integration warmed-cache gate is separate from the full native execution above.
 
+The later search candidate passed its queued gate, including 712 macOS UI checks, but integration failed when a
+newer base changed the same search check. Conflict resolution preserves both the base's short-lived-marker observer
+and the repair's live-outline, composer and post-expiry assertions. Fresh source review rejected an initial timing
+combination, then accepted the observer-turn version. Two subsequent local commands reported one passing scenario
+each but selected an older nested control tree; they are invalid evidence for this composition. A normal rebuild
+and a library-only compilation did not replace the old runner. These attempts remain recorded separately; a current
+executable identity and actual selected-source confirmation are required before accepting a new runtime result.
+A subsequent identified runner executed one current-source UI scenario successfully in a detached proof workspace
+whose entire staged tree matched the saved resolution, independently checked. All seven local commands passed there;
+this focused confirmation does not diagnose stale artifact reuse or establish the final remote integration.
+
 Required local commands passed for each final package, with receipts retaining the five pre-existing source warnings,
 the existing bundle warning and script result 101 passed/one branch-only skip. Claims were rechecked after other
 lanes narrowed disjoint reservations. A passing local scenario or a queued commit is not an observed remote gate.
