@@ -123,7 +123,9 @@ most once an hour (the `target/.faber-sweep` stamp), and prints a line only when
 
 A folder is in use while Cargo holds one of its lock files (`.cargo-lock`, `.cargo-build-lock`, `.cargo-artifact-lock`)
 or, on Windows, while a program in one of its profiles runs (Windows refuses to open it for writing). In use, it is
-neither swept nor removed. The sweep holds the profile's locks while it deletes, so a build that starts meanwhile waits.
+neither swept nor removed. A lane whose sandbox may not write the main checkout builds in `%TEMP%\faber-target\<lane>`
+instead; that root is swept by the same rules and cap (R440), since on 2026-10-22 it held 83 GB in 22 folders made that
+day. The sweep holds the profile's locks while it deletes, so a build that starts meanwhile waits.
 sccache (user-wide, outside the repository) makes the rebuild of a swept dependency cheap.
 
 ### Build slots
@@ -133,7 +135,10 @@ slot, so the suites now run in CI on the queued commit and a lane runs `cargo t 
 only the runner, takes no slot and checks the claims and the red base (R183). Before building, a run takes one of three slots
 (`testkit/src/slots.rs`): a locked file `target/.faber-slots/slot-<n>` of the main checkout, held until the run ends,
 crash included. With all three taken it prints one waiting line and waits. `FABER_BUILD_SLOTS` sets another count for
-another PC (R129, E3).
+another PC (R129, E3). Idle priority gives the processor away but not the memory, so before its slot a run also waits
+while a full-screen app is in front (a game, a presentation; a borderless window is not seen) or while less memory is free
+than one run takes (8 GB), at most ten minutes for memory, with one `Waiting:` line per reason (R440). On 2026-10-22 three runs left 2.2 GB of 36 free
+under a game. CI never waits.
 
 ### What a run prints
 

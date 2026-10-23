@@ -29,10 +29,20 @@ pub const LINTS: [&[&str]; 2] = [
     &["clippy", "-p", "faber", "--features", "test-hooks", "--", "-D", "warnings"],
 ];
 
+/// The test programs of the `rust` suite: libraries, binaries and `tests/`. Plain `cargo test` also builds every example
+/// and runs rustdoc on each library, though no example is a test program and no doc comment holds a test: about a fifth
+/// of a rebuild after one changed engine file (cargo --timings, 2026-10-23). The lint suite still checks every example.
+const TEST_PROGRAMS: [&str; 3] = ["--lib", "--bins", "--tests"];
+
 /// The `cargo test` command line of the `rust` suite: every test program runs even after one fails, compiler messages
 /// come as JSON, and `-j` and `--test-threads` are the same number.
 pub fn cargo_test_args(jobs: usize, filter: Option<&str>) -> Vec<String> {
-    let mut args = ["test", "--workspace", "--no-fail-fast", "--message-format=json", "-j"].map(String::from).to_vec();
+    let mut args = ["test", "--workspace"]
+        .into_iter()
+        .chain(TEST_PROGRAMS)
+        .chain(["--no-fail-fast", "--message-format=json", "-j"])
+        .map(String::from)
+        .collect::<Vec<_>>();
     args.push(jobs.to_string());
     args.extend(filter.map(str::to_string));
     args.extend(["--".to_string(), "--test-threads".into(), jobs.to_string()]);
@@ -41,10 +51,9 @@ pub fn cargo_test_args(jobs: usize, filter: Option<&str>) -> Vec<String> {
 
 /// The same, for exactly these tests (`--failed`): libtest takes several names, and `--exact` makes each one a whole name.
 pub fn cargo_test_exact_args(jobs: usize, names: &[String]) -> Vec<String> {
-    let mut args = ["test", "--workspace", "--no-fail-fast", "--message-format=json", "-j"].map(String::from).to_vec();
-    args.push(jobs.to_string());
     // Cargo takes one test name before `--`; the test programs take any number after it.
-    args.extend(["--".to_string(), "--test-threads".into(), jobs.to_string(), "--exact".into()]);
+    let mut args = cargo_test_args(jobs, None);
+    args.push("--exact".into());
     args.extend(names.iter().cloned());
     args
 }
@@ -199,27 +208,37 @@ fn git(root: &Path, args: &[&str]) -> Option<String> {
 
 /// Keeps the main checkout's `target` under the cap (R106), at most once an hour. Prints a line only when it freed space.
 /// Returns that `target`, which every worktree shares.
-fn sweep_builds(paths: &Paths, porcelain: Option<&str>) -> Option<PathBuf> {
+fn sweep_builds(paths: &Paths, porcelain: Option<&str>, loose: &Path, now: std::time::SystemTime) -> Option<PathBuf> {
     let worktrees = sweep::worktrees(porcelain?);
     let (Some(main), Some(own)) = (worktrees.first(), paths.target.parent()) else { return None };
     let target = main.join("target");
-    let now = std::time::SystemTime::now();
+    sweep_root(loose, own, &worktrees, now);
     if !target.is_dir() {
         return None;
     }
-    if !sweep::due(&target, now) {
-        return Some(target);
+    sweep_root(&target, own, &worktrees, now);
+    Some(target)
+}
+
+/// Sweeps one build root when its hour is due, and says so only when it freed space or stays above the cap.
+fn sweep_root(target: &Path, own: &Path, worktrees: &[PathBuf], now: std::time::SystemTime) {
+    if !target.is_dir() || !sweep::due(target, now) {
+        return;
     }
-    let report = sweep::sweep(&target, own, &worktrees, now, sweep::CAP);
+    let report = sweep::sweep(target, own, worktrees, now, sweep::CAP);
     let gb = |bytes: u64| bytes as f64 / (1u64 << 30) as f64;
+    let at = target.display();
     if report.after < report.before {
         let removed = if report.removed.is_empty() { String::new() } else { format!(", removed {}", report.removed.join(", ")) };
-        println!("Build folder: {:.1} GB -> {:.1} GB{removed}", gb(report.before), gb(report.after));
+        println!("Build folder {at}: {:.1} GB -> {:.1} GB{removed}", gb(report.before), gb(report.after));
     }
     if report.after > sweep::CAP {
-        println!("Build folder: {:.1} GB is above the {:.0} GB cap, and nothing else is idle to remove", gb(report.after), gb(sweep::CAP));
+        println!(
+            "Build folder {at}: {:.1} GB is above the {:.0} GB cap, and nothing else is idle to remove",
+            gb(report.after),
+            gb(sweep::CAP)
+        );
     }
-    Some(target)
 }
 
 fn changed(root: &Path) -> Result<Vec<String>, String> {
@@ -278,7 +297,7 @@ fn run_suites(args: &[String], log_out: &mut Option<Log>) -> i32 {
         }
     };
     let worktrees = git(&paths.root, &["worktree", "list", "--porcelain"]);
-    let shared = sweep_builds(&paths, worktrees.as_deref());
+    let shared = sweep_builds(&paths, worktrees.as_deref(), &sweep::loose_root(), std::time::SystemTime::now());
     let changed = match changed(&paths.root) {
         Ok(list) => list,
         Err(e) => {
@@ -422,6 +441,35 @@ mod tests {
     use super::*;
 
     #[test]
+    fn the_loose_build_root_is_swept_like_the_main_target_and_a_live_lane_s_folder_stays() {
+        let temp = tempfile::tempdir().unwrap();
+        let (main, loose) = (temp.path().join("faber"), temp.path().join("loose"));
+        let lane = main.join(".claude/worktrees/lane");
+        for dir in [main.join("target/debug/.fingerprint"), loose.join("gone/debug/.fingerprint"), loose.join("lane/debug/.fingerprint")] {
+            std::fs::create_dir_all(&dir).unwrap();
+        }
+        for name in ["gone", "lane"] {
+            std::fs::write(loose.join(name).join("CACHEDIR.TAG"), "").unwrap();
+            std::fs::write(loose.join(name).join("debug/faber.pdb"), [0u8; 100]).unwrap();
+        }
+        let target = loose.join("lane/faber-test");
+        let paths = Paths {
+            root: lane.clone(),
+            app: target.clone(),
+            fake_cli: target.clone(),
+            fixtures: target.clone(),
+            shots: target.clone(),
+            target,
+        };
+        let porcelain = format!("worktree {}\nworktree {}\n", main.display(), lane.display());
+
+        let later = std::time::SystemTime::now() + std::time::Duration::from_secs(2 * 24 * 60 * 60);
+        assert_eq!(sweep_builds(&paths, Some(&porcelain), &loose, later), Some(main.join("target")));
+        assert!(!loose.join("gone").exists(), "a loose folder no worktree owns, idle for a day, goes");
+        assert!(loose.join("lane/debug/faber.pdb").exists(), "the folder of a live lane stays");
+    }
+
+    #[test]
     fn a_filter_that_matched_no_test_anywhere_is_a_mistake_but_no_filter_and_no_tests_is_not_this_check() {
         let one = [Outcome::pass(Suite::Ui, "i18n: keys", None)];
         assert!(nothing_matched(&[], Some("zzz")));
@@ -431,7 +479,7 @@ mod tests {
 
     #[test]
     fn cargo_test_runs_every_program_with_json_messages_and_the_same_number_for_jobs_and_test_threads() {
-        let start = ["test", "--workspace", "--no-fail-fast", "--message-format=json", "-j"];
+        let start = ["test", "--workspace", "--lib", "--bins", "--tests", "--no-fail-fast", "--message-format=json", "-j"];
         assert_eq!(cargo_test_args(3, None), [&start[..], &["3", "--", "--test-threads", "3"]].concat());
         assert_eq!(cargo_test_args(1, Some("fake")), [&start[..], &["1", "fake", "--", "--test-threads", "1"]].concat());
     }
@@ -444,6 +492,9 @@ mod tests {
             [
                 "test",
                 "--workspace",
+                "--lib",
+                "--bins",
+                "--tests",
                 "--no-fail-fast",
                 "--message-format=json",
                 "-j",

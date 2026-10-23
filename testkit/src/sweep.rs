@@ -35,6 +35,12 @@ pub struct Report {
     pub removed: Vec<String>,
 }
 
+/// Where a lane builds when its sandbox may not write the main checkout (`%TEMP%\faber-target\<lane>`, as Codex lanes
+/// do). Swept by the same rules: on 2026-10-22 it held 83 GB in 22 folders made that day, which no sweep reached.
+pub fn loose_root() -> PathBuf {
+    std::env::temp_dir().join("faber-target")
+}
+
 /// The worktree paths in `git worktree list --porcelain`, the main checkout first.
 pub fn worktrees(porcelain: &str) -> Vec<PathBuf> {
     porcelain.lines().filter_map(|l| l.strip_prefix("worktree ")).map(PathBuf::from).collect()
