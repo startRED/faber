@@ -6,6 +6,105 @@
 use serde::Serialize;
 use serde_json::Value;
 
+#[derive(Debug, Clone, PartialEq)]
+pub struct QuietSample {
+    pub key: String,
+    pub epoch: f64,
+    pub identity: String,
+    pub at: f64,
+    pub used: f64,
+    pub reset: f64,
+    pub lag: f64,
+    pub max_age: f64,
+    /// The latest own work's end plus the vendor's reporting lag.
+    pub safe_after: f64,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Quiet {
+    Ready,
+    Wait,
+    Unknown,
+    Aborted,
+}
+
+#[derive(Default)]
+pub struct QuietGate {
+    previous: std::collections::BTreeMap<String, QuietSample>,
+    seen: std::collections::BTreeMap<String, QuietSample>,
+    aborted: bool,
+    after_work: f64,
+}
+
+impl QuietGate {
+    pub fn after_work(&mut self, now: f64) {
+        self.previous.clear();
+        self.after_work = now;
+    }
+    pub fn observe(&mut self, samples: Option<&[QuietSample]>, now: f64, cancelled: bool) -> Quiet {
+        if cancelled {
+            self.aborted = true;
+        }
+        if self.aborted {
+            return Quiet::Aborted;
+        }
+        let Some(samples) = samples.filter(|samples| !samples.is_empty()) else {
+            self.previous.clear();
+            return Quiet::Unknown;
+        };
+        let mut ready = true;
+        for sample in samples {
+            let valid = [now, sample.at, sample.used, sample.reset, sample.lag, sample.max_age, sample.safe_after, sample.epoch]
+                .iter()
+                .all(|v| v.is_finite())
+                && (0.0..=1.5).contains(&sample.used)
+                && sample.reset > now
+                && sample.at <= now
+                && now - sample.at <= sample.max_age
+                && sample.lag > 0.0
+                && sample.at >= sample.safe_after.max(self.after_work + sample.lag);
+            if !valid {
+                self.previous.clear();
+                return Quiet::Unknown;
+            }
+            if self.seen.get(&sample.key).is_some_and(|seen| {
+                sample.at < seen.at
+                    || sample.epoch < seen.epoch
+                    || (sample.at == seen.at
+                        && (sample.used != seen.used
+                            || sample.reset != seen.reset
+                            || sample.epoch != seen.epoch
+                            || sample.identity != seen.identity))
+            }) {
+                self.previous.clear();
+                return Quiet::Unknown;
+            }
+            if !self.seen.contains_key(&sample.key) && self.seen.len() >= 128 {
+                return Quiet::Unknown;
+            }
+            self.seen.insert(sample.key.clone(), sample.clone());
+            let prior = self.previous.get(&sample.key);
+            let same = prior.is_some_and(|p| {
+                p.epoch == sample.epoch
+                    && p.identity == sample.identity
+                    && p.reset == sample.reset
+                    && p.used == sample.used
+                    && sample.at >= p.at
+                    && now - p.at <= sample.max_age
+                    && p.at >= sample.safe_after
+            });
+            if !same {
+                self.previous.insert(sample.key.clone(), sample.clone());
+                ready = false;
+            } else if prior.is_none_or(|p| sample.at - p.at < sample.lag) {
+                ready = false;
+            }
+        }
+        self.previous.retain(|key, _| samples.iter().any(|s| s.key == *key));
+        if ready { Quiet::Ready } else { Quiet::Wait }
+    }
+}
+
 // --- Requests -------------------------------------------------------------------------------------------------------
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
@@ -599,6 +698,95 @@ pub fn render_tables(rows: &[Row], spent: &Spend, cap: &Cap) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn quiet_gate_needs_two_fresh_unchanged_readings_and_abort_is_terminal() {
+        let mut gate = QuietGate::default();
+        let mut sample = QuietSample {
+            key: "claude/week".into(),
+            epoch: 0.0,
+            identity: "fixture".into(),
+            at: 1000.0,
+            used: 0.2,
+            reset: 10000.0,
+            lag: 600.0,
+            max_age: 1500.0,
+            safe_after: 0.0,
+        };
+        assert_eq!(gate.observe(None, 1000.0, false), Quiet::Unknown);
+        assert_eq!(gate.observe(Some(&[sample.clone()]), 1000.0, false), Quiet::Wait);
+        assert_eq!(gate.observe(Some(&[sample.clone()]), 1600.0, false), Quiet::Wait);
+        sample.at = 1600.0;
+        assert_eq!(gate.observe(Some(&[sample.clone()]), 1600.0, false), Quiet::Ready);
+        sample.used = 0.21;
+        sample.at = 1700.0;
+        assert_eq!(gate.observe(Some(&[sample.clone()]), 1700.0, false), Quiet::Wait);
+        sample.at = 2300.0;
+        assert_eq!(gate.observe(Some(&[sample.clone()]), 2300.0, false), Quiet::Ready);
+        gate.after_work(2300.0);
+        assert_eq!(
+            gate.observe(Some(&[sample.clone()]), 2300.0, false),
+            Quiet::Unknown,
+            "a completed stage cannot release the next with old evidence"
+        );
+        sample.safe_after = 2400.0;
+        assert_eq!(gate.observe(Some(&[sample.clone()]), 2300.0, false), Quiet::Unknown);
+        sample.safe_after = 0.0;
+        assert_eq!(gate.observe(Some(&[sample.clone()]), 5000.0, false), Quiet::Unknown);
+        assert_eq!(gate.observe(None, 5000.0, true), Quiet::Aborted);
+        assert_eq!(gate.observe(Some(&[sample]), 2300.0, false), Quiet::Aborted);
+    }
+
+    #[test]
+    fn quiet_reset_requires_a_new_pair_instead_of_elapsed_time() {
+        let mut gate = QuietGate::default();
+        let mut sample = QuietSample {
+            key: "codex/week".into(),
+            epoch: 0.0,
+            identity: "fixture".into(),
+            at: 1000.0,
+            used: 0.2,
+            reset: 4000.0,
+            lag: 300.0,
+            max_age: 1200.0,
+            safe_after: 0.0,
+        };
+        assert_eq!(gate.observe(Some(&[sample.clone()]), 1000.0, false), Quiet::Wait);
+        sample.at = 1300.0;
+        sample.reset = 5000.0;
+        assert_eq!(gate.observe(Some(&[sample.clone()]), 1300.0, false), Quiet::Wait);
+        assert_eq!(gate.observe(Some(&[sample.clone()]), 1600.0, false), Quiet::Wait);
+        sample.at = 1600.0;
+        assert_eq!(gate.observe(Some(&[sample.clone()]), 1600.0, false), Quiet::Ready);
+        sample.at = 1700.0;
+        sample.used = f64::NAN;
+        assert_eq!(gate.observe(Some(&[sample]), 1700.0, false), Quiet::Unknown);
+    }
+
+    #[test]
+    fn rolled_back_evidence_cannot_erase_observed_movement() {
+        let mut gate = QuietGate::default();
+        let mut sample = QuietSample {
+            key: "claude/week".into(),
+            epoch: 0.0,
+            identity: "fixture".into(),
+            at: 1000.0,
+            used: 0.2,
+            reset: 10000.0,
+            lag: 600.0,
+            max_age: 1500.0,
+            safe_after: 0.0,
+        };
+        assert_eq!(gate.observe(Some(&[sample.clone()]), 1000.0, false), Quiet::Wait);
+        sample.at = 1700.0;
+        sample.used = 0.3;
+        assert_eq!(gate.observe(Some(&[sample.clone()]), 1700.0, false), Quiet::Wait);
+        sample.at = 1000.0;
+        sample.used = 0.2;
+        assert_eq!(gate.observe(Some(&[sample.clone()]), 1700.0, false), Quiet::Unknown);
+        sample.at = 1600.0;
+        assert_eq!(gate.observe(Some(&[sample]), 1700.0, false), Quiet::Unknown);
+    }
 
     const REQUEST: &str = "---\nid: organize-folder\ntitle: Organize a messy folder\nkind: project\nfixture: organize\nproof: organize\n---\n\nPlease organize this.\nKeep every file.\n";
 

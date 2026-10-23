@@ -51,6 +51,7 @@ struct Options {
     cap: Cap,
     per_run_usd: f64,
     dry_run: bool,
+    account_data: Option<PathBuf>,
 }
 
 impl Options {
@@ -83,6 +84,7 @@ impl Options {
             cap: Cap { max_usd: number("--cap-usd", 8.0)?, max_fresh_tokens: number("--cap-tokens", 3_000_000.0)? as u64 },
             per_run_usd: number("--per-run-usd", 1.5)?,
             dry_run: args.iter().any(|a| a == "--dry-run"),
+            account_data: value("--account-data").map(PathBuf::from).or_else(|| std::env::var_os("FABER_DATA_DIR").map(PathBuf::from)),
         })
     }
 }
@@ -489,10 +491,7 @@ async fn run_faber(clis: &BTreeMap<Vendor, Cli>, request: &Request, work: &Work,
             let prefix = codex.prefix.clone();
             let spawn: proc::Spawner =
                 Arc::new(move |bin, args, cwd| real(bin, &prefix.iter().chain(args).cloned().collect::<Vec<_>>(), cwd));
-            let limits =
-                faber_engine::codex::read_codex_limits(&codex.command, &work.repo, cfg!(windows), spawn.clone(), Duration::from_secs(20))
-                    .await;
-            engine.note_account_events(Vendor::Codex, limits);
+            // check_plans already read this account's limits; do not ask for the same quota twice.
             let list =
                 faber_engine::codex::list_codex_models(&codex.command, &work.repo, cfg!(windows), spawn, Duration::from_secs(20)).await;
             let recommended = list.iter().find(|m| m.is_default).map(|m| m.id.clone());
@@ -831,6 +830,7 @@ fn write_results(run_dir: &Path, options: &Options, rows: &[Row], spent: &Spend)
         "runId": options.run_id,
         "plain": { "cli": options.plain.name(), "model": options.plain_model, "effort": options.plain_effort },
         "faberVendors": options.vendors.iter().map(|v| v.name()).collect::<Vec<_>>(),
+        "accountEvidence": { "dataDir": options.account_data, "source": "budget.json (read-only)", "recovery": "two unchanged no-model samples, vendor lag apart" },
         "judge": { "vendor": options.judge_vendor.name(), "model": options.judge_model, "effort": options.judge_effort, "weakerSameVendor": options.judge_weaker },
         "cap": { "usd": options.cap.max_usd, "freshTokens": options.cap.max_fresh_tokens, "perRunUsd": options.per_run_usd },
         "spent": spent,
@@ -853,6 +853,194 @@ fn write_results(run_dir: &Path, options: &Options, rows: &[Row], spent: &Spend)
         ),
     )?;
     Ok(())
+}
+
+/// Reads only the saved quota ledger; never opens the installed app's store or launches an account checker.
+fn quiet_samples(path: Option<&Path>, vendors: &[Vendor], now: f64) -> Option<Vec<pure::QuietSample>> {
+    let file = std::fs::File::open(path?.join("budget.json")).ok()?;
+    let mut bytes = Vec::new();
+    std::io::Read::read_to_end(&mut std::io::Read::take(file, 1_048_577), &mut bytes).ok()?;
+    if bytes.len() > 1_048_576 {
+        return None;
+    }
+    let ledger: faber_engine::ledger::Ledger = serde_json::from_slice(&bytes).ok()?;
+    samples_from_ledger(&ledger, vendors, now)
+}
+
+fn samples_from_ledger(ledger: &faber_engine::ledger::Ledger, vendors: &[Vendor], now: f64) -> Option<Vec<pure::QuietSample>> {
+    let active = faber_engine::project::budget::Budget::load(ledger).ok()?;
+    if vendors.iter().any(|vendor| active.unbounded.get(vendor).is_some_and(|n| *n > 0)) {
+        return None;
+    }
+    let mut samples = Vec::new();
+    for vendor in vendors {
+        let (v, lag) = match vendor {
+            Vendor::Claude => (&ledger.claude, faber_engine::ledger::LAG_CLAUDE),
+            Vendor::Codex => (&ledger.codex, faber_engine::ledger::LAG_CODEX),
+        };
+        if v.readings.is_empty() || !v.since.is_finite() || v.since < 0.0 || v.since > now {
+            return None;
+        }
+        let ends = v
+            .spans
+            .iter()
+            .map(|s| (s.start, s.end))
+            .chain(v.work.iter().map(|w| (w.start, w.finished)))
+            .chain(v.folded.iter().map(|f| (f.start, f.finished)));
+        let mut last_own: f64 = 0.0;
+        for (start, end) in ends {
+            if !start.is_finite() || !end.is_finite() || start < 0.0 || end < start {
+                return None;
+            }
+            last_own = last_own.max(end);
+        }
+        for (window, current) in &v.readings {
+            let sample = v.zero_turn_readings.get(window)?;
+            if sample.read_at < v.since
+                || current.used != sample.used
+                || current.resets_at != sample.resets_at
+                || !current.read_at.is_finite()
+                || current.read_at > now
+                || current.read_at < sample.read_at
+            {
+                return None;
+            }
+            samples.push(pure::QuietSample {
+                key: format!("{}/{window}", vendor.name()),
+                epoch: v.since,
+                identity: format!("{:?}/{:?}", v.plan, v.typed_plan),
+                at: sample.read_at,
+                used: sample.used,
+                reset: sample.resets_at,
+                lag,
+                max_age: faber_engine::cadence::EVERY + lag,
+                safe_after: last_own.max(v.since) + lag,
+            });
+        }
+    }
+    Some(samples)
+}
+
+#[cfg(test)]
+mod account_tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn cancellation_saves_completed_side_without_dispatching_pending_stage() {
+        let root = tempfile::tempdir().unwrap();
+        std::fs::write(root.path().join("cancel"), "").unwrap();
+        let options = Options::read().unwrap();
+        let mut completed = not_run(Side::Plain, "fixture".into());
+        completed.reply = "completed result".into();
+        completed.cost_usd = Some(0.2);
+        let row = Row {
+            request: "fixture".into(),
+            title: "fixture".into(),
+            kind: Kind::Chat,
+            a: Side::Plain,
+            verdict: None,
+            winner: None,
+            faber: None,
+            plain: Some(completed),
+            judge_cost_usd: None,
+            judge_attempted: false,
+            judge_usage: Usage::default(),
+            skipped: None,
+        };
+        let mut gate = pure::QuietGate::default();
+        let mut spent = Spend::default();
+        spent.add(&Usage::default(), Some(0.2));
+        assert!(wait_account(&options, root.path(), &[], &row, &spent, "Faber", &[Vendor::Claude], &mut gate).await.is_err());
+        let saved: serde_json::Value = serde_json::from_slice(&std::fs::read(root.path().join("results.json")).unwrap()).unwrap();
+        assert_eq!(saved["rows"][0]["plain"]["reply"], "completed result");
+        assert!(saved["rows"][0]["faber"].is_null());
+        assert!(saved["rows"][0]["skipped"].as_str().unwrap().contains("cancelled before Faber"));
+        assert_eq!(saved["spent"]["usd"], 0.2);
+    }
+
+    #[test]
+    fn saved_evidence_requires_no_model_readings_and_respects_pending_own_work() {
+        let mut ledger = faber_engine::ledger::Ledger::default();
+        assert!(samples_from_ledger(&ledger, &[Vendor::Claude], 1000.0).is_none());
+        ledger.claude.record("weekly", 0.2, 10000.0, 1000.0, 0);
+        assert!(samples_from_ledger(&ledger, &[Vendor::Claude], 1000.0).is_none());
+        ledger.claude.zero_turn_readings = ledger.claude.readings.clone();
+        let sample = samples_from_ledger(&ledger, &[Vendor::Claude], 1000.0).unwrap();
+        assert_eq!(sample[0].at, 1000.0);
+        let mut gate = pure::QuietGate::default();
+        assert_eq!(gate.observe(Some(&sample), 1000.0, false), pure::Quiet::Wait);
+        ledger.claude.work.push(faber_engine::ledger::Work {
+            start: 900.0,
+            finished: 950.0,
+            model: "fixture".into(),
+            cost: None,
+            incomplete: true,
+        });
+        let sample = samples_from_ledger(&ledger, &[Vendor::Claude], 1000.0).unwrap();
+        assert_eq!(gate.observe(Some(&sample), 1000.0, false), pure::Quiet::Unknown);
+        ledger.claude.readings.get_mut("weekly").unwrap().used = 0.21;
+        assert!(
+            samples_from_ledger(&ledger, &[Vendor::Claude], 1000.0).is_none(),
+            "ordinary movement cannot be hidden by an older zero-turn sample"
+        );
+        assert!(samples_from_ledger(&serde_json::from_str("{}").unwrap(), &[Vendor::Codex], 1000.0).is_none());
+    }
+
+    #[test]
+    fn active_or_corrupt_budget_and_old_plan_evidence_block_admission() {
+        let mut ledger = faber_engine::ledger::Ledger::default();
+        ledger.claude.record("weekly", 0.2, 10000.0, 1000.0, 0);
+        ledger.claude.zero_turn_readings = ledger.claude.readings.clone();
+        faber_engine::project::budget::start_unbounded(&mut ledger, Vendor::Claude, 1001.0).unwrap();
+        assert!(samples_from_ledger(&ledger, &[Vendor::Claude], 1001.0).is_none(), "an active own call has no finished span yet");
+        faber_engine::project::budget::finish_unbounded(&mut ledger, Vendor::Claude).unwrap();
+        ledger.claude.since = 1100.0;
+        assert!(samples_from_ledger(&ledger, &[Vendor::Claude], 1200.0).is_none(), "a previous plan's reading cannot establish quiet");
+        ledger.claude.since = 0.0;
+        ledger.extra.insert("missionBudget".into(), serde_json::json!({"schema":999}));
+        assert!(samples_from_ledger(&ledger, &[Vendor::Claude], 1200.0).is_none());
+    }
+}
+
+async fn wait_account(
+    options: &Options,
+    root: &Path,
+    rows: &[Row],
+    row: &Row,
+    spent: &Spend,
+    stage: &str,
+    vendors: &[Vendor],
+    gate: &mut pure::QuietGate,
+) -> Result<(), Failure> {
+    let mut saved = rows.to_vec();
+    let mut pending = row.clone();
+    pending.skipped = Some(format!("pending {stage}: waiting for saved account evidence"));
+    saved.push(pending);
+    write_results(root, options, &saved, spent)?;
+    let mut announced = false;
+    loop {
+        let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH)?.as_secs_f64();
+        let cancelled = root.join("cancel").try_exists().unwrap_or(true);
+        let samples = if cancelled { None } else { quiet_samples(options.account_data.as_deref(), vendors, now) };
+        match gate.observe(samples.as_deref(), now, cancelled) {
+            pure::Quiet::Ready => return Ok(()),
+            pure::Quiet::Aborted => {
+                saved.last_mut().expect("pending row").skipped = Some(format!("cancelled before {stage}; pending work was not dispatched"));
+                write_results(root, options, &saved, spent)?;
+                return Err(format!("cancelled before {stage}; completed work is saved, no pending call started").into());
+            }
+            state => {
+                if !announced {
+                    println!(
+                        "paused before {stage}: account evidence {state:?}; refreshing saved evidence only; create {}/cancel to cancel",
+                        root.display()
+                    );
+                    announced = true;
+                }
+            }
+        }
+        tokio::time::sleep(Duration::from_secs(30)).await;
+    }
 }
 
 #[tokio::main]
@@ -912,6 +1100,7 @@ async fn main() -> Result<(), Failure> {
     std::fs::create_dir_all(&judge_dir)?;
 
     let (mut rows, mut spent) = (Vec::new(), Spend::default());
+    let mut quiet_gate = pure::QuietGate::default();
     for (index, request) in requests.iter().enumerate() {
         let a = pure::a_side(&options.run_id, index);
         let mut row = Row {
@@ -935,16 +1124,21 @@ async fn main() -> Result<(), Failure> {
             continue;
         }
         println!("[{}/{}] {}", index + 1, requests.len(), request.id);
+        wait_account(&options, &root, &rows, &row, &spent, "plain", &[options.plain], &mut quiet_gate).await?;
         let work = prepare(request, &root, &node.command)?;
         let mut plain = run_plain(&options, &plain_cli, request, &work, options.cap.allowance(&spent, options.per_run_usd)).await;
         spent.add(&plain.usage, plain.cost_usd);
+        quiet_gate.after_work(chrono::Utc::now().timestamp() as f64);
         println!("  plain: ok {}, {:.0}s, US${:?}, {}", plain.ok, plain.secs, plain.cost_usd, plain.error.as_deref().unwrap_or(""));
+        row.plain = Some(plain.clone());
         let mut faber = if let Some(why) = options.cap.reached(&spent) {
             not_run(Side::Faber, why)
         } else {
+            wait_account(&options, &root, &rows, &row, &spent, "Faber", &options.vendors, &mut quiet_gate).await?;
             run_faber(&clis, request, &work, &root, options.cap.allowance(&spent, options.per_run_usd), false).await
         };
         spent.add(&faber.usage, faber.cost_usd);
+        quiet_gate.after_work(chrono::Utc::now().timestamp() as f64);
         println!("  faber: ok {}, {:.0}s, US${:?}, {}", faber.ok, faber.secs, faber.cost_usd, faber.error.as_deref().unwrap_or(""));
         prove(&node, request, &work, &mut plain, &root).await;
         prove(&node, request, &work, &mut faber, &root).await;
@@ -955,11 +1149,15 @@ async fn main() -> Result<(), Failure> {
         } else if let Some(why) = options.cap.reached(&spent) {
             row.skipped = Some(format!("not judged, the cap was reached: {why}"));
         } else {
+            row.plain = Some(plain.clone());
+            row.faber = Some(faber.clone());
+            wait_account(&options, &root, &rows, &row, &spent, "judge", &[options.judge_vendor], &mut quiet_gate).await?;
             let (first, second) = if a == Side::Faber { (&faber, &plain) } else { (&plain, &faber) };
             row.judge_attempted = true;
             let judged =
                 judge(&options, &judge_cli, request, first, second, &judge_dir, options.cap.allowance(&spent, options.per_run_usd)).await;
             spent.add(&judged.usage, judged.cost_usd);
+            quiet_gate.after_work(chrono::Utc::now().timestamp() as f64);
             row.judge_cost_usd = judged.cost_usd;
             row.judge_usage = judged.usage;
             row.winner = judged.verdict.as_ref().and_then(|v| pure::reveal(v.pick, a));
