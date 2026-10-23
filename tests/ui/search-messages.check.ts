@@ -4,7 +4,7 @@ import themes from '../../src-tauri/src/themes.json';
 import { App } from '../../ui/App.tsx';
 import { api, type AppEvent, type AppState, type Area, type Conversation, type Message, type MessageHit, type MessageSearch, type Summary } from '../../ui/api.ts';
 import { Sidebar } from '../../ui/Sidebar.tsx';
-import { readingWindow, savedReading } from '../../ui/reading.ts';
+import { readingPoint, readingWindow, savedReading } from '../../ui/reading.ts';
 import { t } from '../../ui/i18n.ts';
 import { check, equal, frames, ok } from './check.ts';
 
@@ -455,14 +455,38 @@ check('reading: return and restart keep the same old message after the history a
         const resultOffset = () => root.querySelector<HTMLElement>('[data-message-index="100"]')!.getBoundingClientRect().top - searchThread.getBoundingClientRect().top;
         const searchedOffset = resultOffset();
         const viewportBefore = { offset: searchedOffset, scroll: searchThread.scrollTop, height: searchThread.scrollHeight,
-          first: searchThread.querySelector<HTMLElement>('[data-message-index]')?.dataset.messageIndex };
+          first: searchThread.querySelector<HTMLElement>('[data-message-index]')?.dataset.messageIndex,
+          point: readingPoint(searchThread, conversation.messages) };
+        const trace: unknown[] = [];
+        const geometry = () => ({ offset: resultOffset(), scroll: searchThread.scrollTop,
+          height: searchThread.scrollHeight, client: searchThread.clientHeight });
+        const scrollTop = Object.getOwnPropertyDescriptor(Element.prototype, 'scrollTop')!;
+        const ownScrollTop = Object.getOwnPropertyDescriptor(searchThread, 'scrollTop');
+        const focus = HTMLElement.prototype.focus;
+        Object.defineProperty(searchThread, 'scrollTop', { configurable: true,
+          get() { return scrollTop.get!.call(this); },
+          set(value: number) {
+            const before = geometry();
+            scrollTop.set!.call(this, value);
+            trace.push({ kind: 'scroll', requested: value, before, after: geometry() });
+          } });
+        HTMLElement.prototype.focus = function (...args: Parameters<HTMLElement['focus']>) {
+          const before = geometry();
+          Reflect.apply(focus, this, args);
+          trace.push({ kind: 'focus', index: this.dataset.messageIndex, before, after: geometry() });
+        };
         // Deliver the native scroll after focus: WebKit can defer it until the earlier-page load.
-        searchThread.dispatchEvent(new Event('scroll'));
+        try { searchThread.dispatchEvent(new Event('scroll')); }
+        finally {
+          if (ownScrollTop) Object.defineProperty(searchThread, 'scrollTop', ownScrollTop);
+          else delete (searchThread as Partial<HTMLElement>).scrollTop;
+          HTMLElement.prototype.focus = focus;
+        }
         equal((document.activeElement as HTMLElement)?.dataset.messageIndex, '100', 'loading the earlier page keeps focus on the requested message');
         ok(root.querySelector('[data-message-index="100"].search-focus'), 'an explicit search result wins over the saved reading anchor');
         ok(document.activeElement?.textContent?.includes('The explicitly requested search result.'), 'focus stays on the real search message after rows are reused');
         ok(Math.abs(resultOffset() - searchedOffset) < 3, `loading the earlier page preserves the search viewport: ${JSON.stringify({
-          before: viewportBefore, after: { offset: resultOffset(), scroll: searchThread.scrollTop, height: searchThread.scrollHeight,
+          before: viewportBefore, trace, after: { offset: resultOffset(), scroll: searchThread.scrollTop, height: searchThread.scrollHeight,
             first: searchThread.querySelector<HTMLElement>('[data-message-index]')?.dataset.messageIndex,
             focus: (document.activeElement as HTMLElement)?.dataset.messageIndex } })}`);
         const composer = root.querySelector<HTMLTextAreaElement>('.composer textarea')!;
