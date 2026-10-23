@@ -14,6 +14,7 @@ pub mod menus;
 pub mod permissions;
 pub mod projects;
 pub mod projects_ui;
+pub mod reading;
 pub mod real_work;
 pub mod review;
 pub mod sentinel;
@@ -56,6 +57,7 @@ pub fn all() -> Vec<Scenario> {
         .chain(mcp_servers::scenarios())
         .chain(chat_groups::scenarios())
         .chain(draft_attachments::scenarios())
+        .chain(reading::scenarios())
         .chain(sentinel::scenarios());
     let all = all.chain(visual_network::scenarios());
     #[cfg(windows)]
@@ -104,6 +106,7 @@ impl Costs {
 /// When unsure, list it: a wrong entry costs a few seconds, a missing one costs a flaky run. A test fails when a name says
 /// "memory", "processor", "CPU", "MB", "budget", "frame", "focused", "quota" or "usage limits" and is not listed.
 pub const SOLO: &[(&str, &str)] = &[
+    ("reading: a real restart preserves an old reading point within the memory budget", "processor, memory"),
     ("chat groups: ten knowledge files survive reopening within the memory budget", "processor, memory"),
     ("draft attachments: committed bytes survive a real restart, removals stay gone, within the memory budget", "processor, memory"),
     ("with no CLI running, Faber stays within its memory budget", "memory"),

@@ -98,7 +98,7 @@ const AWAY = 240;
  * "Latest": a button over the end of the thread while the person has scrolled up, most of all while an answer is streaming below.
  * It sits in the thread's own box, so the motion list around it gives it its entrance and exit.
  */
-export function ToEnd(props: { thread: () => HTMLElement | undefined }) {
+export function ToEnd(props: { thread: () => HTMLElement | undefined; onGo?: () => void }) {
   const [away, setAway] = createSignal(false);
   onMount(() => {
     const el = props.thread();
@@ -124,6 +124,7 @@ export function ToEnd(props: { thread: () => HTMLElement | undefined }) {
   const go = () => {
     const el = props.thread();
     if (!el) return;
+    props.onGo?.();
     el.scrollTo({ top: el.scrollHeight, behavior: level(el) === 'full' ? 'smooth' : 'auto' });
     // An answer still streaming grows while the scroll runs: when it stops short, the rest is one jump. Only the scroll this press
     // started: a person who scrolls up a second later is never pulled back.

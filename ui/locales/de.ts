@@ -2075,6 +2075,8 @@ export const de: Messages = {
   'notes.209.better': 'Faber hat jetzt eigene Leitfäden zum Gestalten und Prüfen der Oberflächen, die es erstellt.',
   'notes.210.fixed': 'Nach dem Entfernen aus einer Nachricht lässt sich dieselbe Datei erneut anhängen.',
   'notes.211.fixed': 'Ungesendete Anhänge bleiben im Entwurf, wenn du zum Gespräch zurückkehrst oder Faber erneut öffnest.',
+  'notes.212.better': 'Beim Zurückkehren bleibt deine Lesestelle erhalten, auch nach einem Neustart von Faber oder wenn frühere Nachrichten ihre Größe ändern.',
+  'notes.213.fixed': 'Zum Ende führt zur neuesten Nachricht, auch wenn du gerade einen älteren Teil der Unterhaltung liest.',
   'update.checking': 'Suche nach einem Update…',
   'update.downloading': 'Update wird heruntergeladen…',
   'update.downloadingPercent': 'Update wird heruntergeladen… {percent} %',

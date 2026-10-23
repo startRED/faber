@@ -66,6 +66,7 @@ import { Catalog, showInCatalog } from './Catalog.tsx';
 import { Sidebar } from './Sidebar.tsx';
 import { keepRows, neighbour, seedQuotas, withQuota } from './sidebar.ts';
 import { ToEnd } from './Floating.tsx';
+import { readingPoint, readingWindow, restoreReading, savedReading, type Reading } from './reading.ts';
 import { Thread } from './Thread.tsx';
 import { tutorialDue } from './tour.ts';
 import { Tutorial } from './Tutorial.tsx';
@@ -315,15 +316,55 @@ export function App(props: { initial: AppState; update?: UpdateStatus; inbox: { 
     }
   }));
   let stick = true;
-  // Where each conversation was left while Faber runs: the first message drawn and the scroll inside that window. A
-  // conversation read to its end has none, so it opens at the end; a search reveal still wins.
-  const scrolls = new Map<string, { from: number; top: number }>();
+  const scrolls = savedReading(recall<unknown>('faber.reading', []));
+  let reading: Reading | undefined;
+  let restoringReading = false;
+  let readingDirty = false;
+  const saveReading = () => {
+    if (!readingDirty) return;
+    remember('faber.reading', [...scrolls]);
+    readingDirty = false;
+  };
+  const keepReading = () => {
+    const id = current()?.id;
+    if (!thread || !id || loading() || restoringReading || place().id !== id) return;
+    if (stick) {
+      reading = undefined;
+      if (scrolls.delete(id)) readingDirty = true;
+    } else {
+      const point = readingPoint(thread, current()?.messages ?? []);
+      if (!point) return;
+      reading = point;
+      scrolls.delete(id);
+      scrolls.set(id, point);
+      if (scrolls.size > 100) scrolls.delete(scrolls.keys().next().value!);
+      readingDirty = true;
+    }
+  };
+  const holdReading = () => {
+    if (!thread || !reading || stick || restoringReading || loading()) return;
+    restoreReading(thread, reading, current()?.messages ?? []);
+    lastScrollTop = thread.scrollTop;
+  };
+  onMount(() => {
+    const hidden = () => { if (document.hidden) saveReading(); };
+    window.addEventListener('pagehide', saveReading);
+    document.addEventListener('visibilitychange', hidden);
+    onCleanup(() => {
+      keepReading(); saveReading();
+      window.removeEventListener('pagehide', saveReading);
+      document.removeEventListener('visibilitychange', hidden);
+    });
+  });
   // The column view a conversation had open, by id, kept with the place so a restart reopens it.
   type Pane = 'changes' | 'details';
   const panes = recall<Record<string, Pane>>('faber.column', {});
   // One observer keeps the tail visible when the thread box or the column inside it changes size.
   let tail: ResizeObserver | undefined;
-  const tailWatch = () => (tail ??= new ResizeObserver(() => { if (thread && stick) thread.scrollTop = thread.scrollHeight; }));
+  const tailWatch = () => (tail ??= new ResizeObserver(() => {
+    if (thread && stick) thread.scrollTop = thread.scrollHeight;
+    else holdReading();
+  }));
   let lastScrollTop = 0;
   // Where focus was, until the tutorial took it. Weak, so a control that left the page (Settings closed with the focus in
   // it) is not kept alive, with everything it hangs from, until focus moves again.
@@ -676,6 +717,9 @@ export function App(props: { initial: AppState; update?: UpdateStatus; inbox: { 
   const planHeard: { plan?: { id: string; plan?: Plan } } = {};
   // The conversation the user is in: opening it asks the engine for a snapshot and the answer takes a while.
   const go = async (next: Place, messageIndex?: number) => {
+    keepReading(); saveReading();
+    reading = undefined;
+    restoringReading = false;
     setCatalogOpen(false);
     clearSearch();
     setUntil(undefined);
@@ -700,17 +744,26 @@ export function App(props: { initial: AppState; update?: UpdateStatus; inbox: { 
     if (done.stale) return;
     setLoading(false);
     const target = messageIndex !== undefined && messageIndex >= 0 && messageIndex < (done.conversation?.messages.length ?? 0) ? messageIndex : undefined;
-    const left = target === undefined && next.id ? scrolls.get(next.id) : undefined;
+    const saved = target === undefined && next.id ? scrolls.get(next.id) : undefined;
+    const left = saved && readingWindow(done.conversation?.messages ?? [], saved, PAGE);
     const pane = next.id ? panes[next.id] : undefined;
     stick = target === undefined && !left;
-    setUntil(target === undefined ? undefined : Math.min(done.conversation!.messages.length, target + PAGE));
-    setFrom(left ? Math.min(Math.max(left.from, (done.conversation?.messages.length ?? 0) - 3 * PAGE), Math.max(0, (done.conversation?.messages.length ?? 0) - 1)) : Math.min(target ?? Infinity, Math.max(0, (done.conversation?.messages.length ?? 0) - PAGE)));
+    restoringReading = !!left;
+    reading = left?.point;
+    setUntil(left ? left.until : target === undefined ? undefined : Math.min(done.conversation!.messages.length, target + PAGE));
+    setFrom(left ? left.from : Math.min(target ?? Infinity, Math.max(0, (done.conversation?.messages.length ?? 0) - PAGE)));
     fillPage();
     const heard = planHeard.plan as { id: string; plan?: Plan } | undefined;
     const plan = heard?.id === done.conversation?.id ? heard : undefined;
     setCurrent(done.conversation && plan ? { ...done.conversation, plan: plan.plan } : done.conversation);
-    setSearchIndex(target);
-    if (left) requestAnimationFrame(() => { if (thread && place().id === next.id) { thread.scrollTop = left.top; lastScrollTop = thread.scrollTop; } });
+    setSearchIndex(target ?? left?.reveal);
+    if (left) searchFrame = requestAnimationFrame(() => {
+      if (place().id !== next.id) return;
+      restoringReading = false;
+      holdReading();
+      keepReading();
+      setSearchIndex(undefined);
+    });
     if (pane && done.conversation?.area === 'project') {
       if (pane === 'changes') setChangesOpen(next.id);
       else showDetails(next.id);
@@ -954,16 +1007,13 @@ export function App(props: { initial: AppState; update?: UpdateStatus; inbox: { 
   );
 
   const onScroll = (el: HTMLDivElement) => {
+    if (restoringReading) return;
     const below = el.scrollHeight - el.scrollTop - el.clientHeight;
     const end = until();
     if (below < 40 && (end === undefined || end >= (current()?.messages.length ?? 0))) stick = true;
     else if (el.scrollTop < lastScrollTop - 1) stick = false;
     lastScrollTop = el.scrollTop;
-    const here = current()?.id;
-    if (here && place().id === here) {
-      if (stick) scrolls.delete(here);
-      else scrolls.set(here, { from: from(), top: el.scrollTop });
-    }
+    keepReading();
     if (below < 400 && end !== undefined) {
       const next = end + PAGE;
       setUntil(next < (current()?.messages.length ?? 0) ? next : undefined);
@@ -971,8 +1021,11 @@ export function App(props: { initial: AppState; update?: UpdateStatus; inbox: { 
     if (el.scrollTop < 400 && from() > 0) {
       // The earlier messages appear above; keep what the user is reading in place.
       const before = el.scrollHeight;
+      const point = reading;
       setFrom((f) => Math.max(0, f - PAGE));
-      el.scrollTop += el.scrollHeight - before;
+      if (point) restoreReading(el, point, current()?.messages ?? []);
+      else el.scrollTop += el.scrollHeight - before;
+      lastScrollTop = el.scrollTop;
     }
   };
 
@@ -1714,7 +1767,8 @@ ${copy().path}`}>
                         onMount(() => {
                           // Keep the tail visible as the composer grows, without pulling a reader back down.
                           tailWatch().observe(el);
-                          onCleanup(() => tailWatch().unobserve(el));
+                          el.addEventListener('scrollend', saveReading);
+                          onCleanup(() => { tailWatch().unobserve(el); el.removeEventListener('scrollend', saveReading); });
                         });
                       }} onScroll={(e) => onScroll(e.currentTarget)} inert={trapped() || (colShown() && wide())}>
                         <Show
@@ -1792,7 +1846,12 @@ ${copy().path}`}>
                         </Show>
                       </div>
                       <Show when={!newChat() && !needsProject()}>
-                        <ToEnd thread={() => thread} />
+                        <ToEnd thread={() => thread} onGo={() => {
+                          stick = true;
+                          keepReading(); saveReading();
+                          setFrom(Math.max(0, (current()?.messages.length ?? 0) - PAGE));
+                          setUntil(undefined);
+                        }} />
                       </Show>
                       <Show when={!newChat() && !needsProject() && state().vendors.length > 0}>
                         <div class="dock" inert={trapped()} onInput={() => setQueuedNotice(undefined)}>

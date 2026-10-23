@@ -2062,6 +2062,8 @@ export const ptBR: Messages = {
   'notes.209.better': 'O Faber agora tem guias próprios pra criar e conferir as interfaces que ele faz.',
   'notes.210.fixed': 'Dá pra anexar o mesmo arquivo de novo depois de removê-lo da mensagem.',
   'notes.211.fixed': 'Os anexos não enviados ficam no rascunho quando você volta à conversa ou abre o Faber de novo.',
+  'notes.212.better': 'A conversa volta onde você tava lendo, mesmo depois de reiniciar o Faber ou de mensagens anteriores mudarem de tamanho.',
+  'notes.213.fixed': 'Ir para o fim chega à última mensagem mesmo quando você tá lendo uma parte antiga da conversa.',
   'update.checking': 'Procurando atualização…',
   'update.downloading': 'Baixando atualização…',
   'update.downloadingPercent': 'Baixando atualização… {percent}%',

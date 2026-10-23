@@ -178,7 +178,8 @@ export function RunBlock(props: { messages: Message[]; run: Run; plan?: Plan; ea
     [t('run.block.title', { time: time(), turns: t('run.block.turns', { n: props.run.replies.length }) }), plan()].filter(Boolean).join(' · ');
   return (
     <details class="run-block disclosure" ref={(el) => (details = el)} onToggle={(e) => setOpen(e.currentTarget.open)}>
-      <summary title={reasons(props.messages, props.run) || undefined}>
+      <summary title={reasons(props.messages, props.run) || undefined}
+        data-reading-id={props.messages[props.run.replies[0]!]!.id} data-reading-index={props.run.replies[0]} data-reading-run="true">
         <Icon name="loop" small />
         <span class="run-title">{title()}</span>
       </summary>

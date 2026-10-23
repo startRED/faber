@@ -4,8 +4,9 @@ import themes from '../../src-tauri/src/themes.json';
 import { App } from '../../ui/App.tsx';
 import { api, type AppEvent, type AppState, type Area, type Conversation, type Message, type MessageHit, type MessageSearch, type Summary } from '../../ui/api.ts';
 import { Sidebar } from '../../ui/Sidebar.tsx';
+import { readingWindow, savedReading } from '../../ui/reading.ts';
 import { t } from '../../ui/i18n.ts';
-import { check, equal, ok } from './check.ts';
+import { check, equal, frames, ok } from './check.ts';
 
 // A fixed wait is only for an assertion that something did NOT happen (a stale reply, a repeated search): a slow machine
 // can only make it pass later, never fail. Everything that must happen waits for its state with `until`.
@@ -314,4 +315,165 @@ check('search-messages: clicking a hit opens its old message, unfolds its run an
     Element.prototype.scrollIntoView = original.scroll;
     if (stored === null) localStorage.removeItem('faber.place'); else localStorage.setItem('faber.place', stored);
   }
+});
+
+check('reading: return and restart keep the same old message after the history above changes height', async () => {
+  const before = { open: api.open, clock: api.setClock, notes: api.notesSeen, search: api.searchMessages };
+  const saved = new Map(['faber.place', 'faber.reading'].map((key) => [key, localStorage.getItem(key)]));
+  const effects = { ambient: false, texture: false, glow: false };
+  const conversation: Conversation = {
+    id: 'reading-anchor', title: 'Reading anchor', area: 'chat', sessions: {}, createdAt: 0, updatedAt: 0,
+    messages: Array.from({ length: 160 }, (_, i) => ({ id: `reading-${i}`, at: i, role: i % 2 ? 'assistant' : 'user', status: 'done',
+      text: 'A saved message with enough words to fill the column. '.repeat(12) })),
+  };
+  const other: Conversation = { ...conversation, id: 'reading-other', title: 'Other conversation', messages: [{ id: 'other', role: 'user', text: 'Other', at: 0 }] };
+  const initial: AppState = {
+    vendors: ['codex'], models: [], quotas: [], version: 'test', running: { revision: 0, items: [] }, projects: [],
+    conversations: [conversation, other].map((c) => ({ id: c.id, title: c.title, area: c.area, updatedAt: 0 })),
+    settings: { setup: 'done', tutorialDone: true, language: 'en', appearance: { base: 'sala' } },
+    look: { vars: themes.css.base, scheme: 'dark', motion: 'none', effects, checks: [], notices: [],
+      appearance: { base: 'sala', ground: 'sala', accent: '#f3f0e8', textFont: 'archivo', headingFont: 'narrow', textSize: 14, density: 1, corners: 1, motion: 'none', effects } },
+  };
+  api.open = async (id) => id === conversation.id ? structuredClone(conversation) : other;
+  api.setClock = async () => {}; api.notesSeen = async () => Number.MAX_SAFE_INTEGER;
+  api.searchMessages = async () => ({ ready: true, hits: [{ ...hit('chat'), conversationId: conversation.id, messageIndex: 4 }] });
+  localStorage.removeItem('faber.reading');
+  localStorage.setItem('faber.place', JSON.stringify({ area: 'chat' }));
+  const root = document.createElement('div');
+  root.style.cssText = 'position:fixed;inset:0'; root.dataset.motion = 'none';
+  document.body.append(root);
+  let dispose = () => {};
+  let receive: ((event: AppEvent) => void) | undefined;
+  const mount = () => { dispose = render(() => createComponent(App, { initial, inbox: { take: (listener) => { receive = listener; } } }), root); };
+  const target = () => root.querySelector<HTMLElement>('[data-message-index="7"]');
+  const offset = () => target()!.getBoundingClientRect().top - root.querySelector('.thread')!.getBoundingClientRect().top;
+  const open = (title: string) => {
+    type(root, '');
+    const row = [...root.querySelectorAll<HTMLButtonElement>('.crow .item')].find((button) => button.textContent?.trim() === title);
+    ok(row, `the sidebar contains ${title}`);
+    row.click();
+  };
+  try {
+    mount(); type(root, 'found');
+    await until(() => root.querySelector('.message-hit'));
+    root.querySelector<HTMLButtonElement>('.message-hit')!.click();
+    await until(() => target());
+    const thread = root.querySelector<HTMLElement>('.thread')!;
+    thread.scrollTop += offset() + 20;
+    thread.dispatchEvent(new Event('scroll'));
+    const left = offset();
+    ok(Math.abs(left + 20) < 3, 'the saved reading point is partly inside an old message');
+    open(other.title);
+    await until(() => root.querySelector('[data-message-index="0"]')?.textContent?.includes('Other'));
+    conversation.messages[5]!.text += '\n\n' + 'Extra lines above the reading point.\n\n'.repeat(12);
+    open(conversation.title);
+    await until(() => target());
+    await frames(3);
+    ok(target(), 'return mounts the old reading window, even beyond the last three pages');
+    ok(Math.abs(offset() - left) < 3, 'return keeps the same message offset after height above changed');
+    dispose(); root.replaceChildren(); mount();
+    await until(() => target());
+    await frames(3);
+    ok(target(), 'a fresh App restores the reading window from storage');
+    ok(Math.abs(offset() - left) < 3, 'a fresh App restores the same message offset');
+    receive?.({ type: 'message', conversationId: conversation.id, message: { ...conversation.messages[5]!, text: 'A streaming change above the reader.\n\n'.repeat(40), status: 'streaming' } });
+    await frames(3);
+    ok(Math.abs(offset() - left) < 3, 'streaming above preserves the reading point without following the tail');
+    const next = root.querySelector<HTMLElement>('[data-message-index="9"]')!;
+    const liveThread = root.querySelector<HTMLElement>('.thread')!;
+    liveThread.scrollTop += next.getBoundingClientRect().top - liveThread.getBoundingClientRect().top + 30;
+    liveThread.dispatchEvent(new Event('scroll'));
+    await frames(3);
+    ok(Math.abs(next.getBoundingClientRect().top - liveThread.getBoundingClientRect().top + 30) < 3, 'the reader can scroll freely to a new anchor');
+    open(other.title);
+    await until(() => root.querySelector('[data-message-index="0"]')?.textContent?.includes('Other'));
+    conversation.messages.splice(9, 1);
+    open(conversation.title);
+    await until(() => root.querySelector('[data-message-index="9"]'));
+    const survivor = root.querySelector<HTMLElement>('[data-message-index="9"]');
+    ok(survivor, 'a removed anchor falls back to its surviving neighbour instead of the tail');
+    await frames(3);
+    ok(Math.abs(survivor.getBoundingClientRect().top - root.querySelector('.thread')!.getBoundingClientRect().top + 30) < 3, 'the surviving neighbour keeps the reading offset');
+    open(other.title);
+    await until(() => root.querySelector('[data-message-index="0"]')?.textContent?.includes('Other'));
+    conversation.messages[4]!.wake = { why: 'wake.keepGoing' };
+    conversation.messages[6]!.wake = { why: 'wake.keepGoing' };
+    api.searchMessages = async () => ({ ready: true, hits: [{ ...hit('chat'), conversationId: conversation.id, messageIndex: 7 }] });
+    type(root, 'run');
+    await until(() => root.querySelector('.message-hit'));
+    root.querySelector<HTMLButtonElement>('.message-hit')!.click();
+    await until(() => root.querySelector('.run-block summary'));
+    const runTop = () => root.querySelector<HTMLElement>('.run-block summary')!.getBoundingClientRect().top - root.querySelector('.thread')!.getBoundingClientRect().top;
+    const runThread = root.querySelector<HTMLElement>('.thread')!;
+    runThread.scrollTop += runTop() + 10;
+    runThread.dispatchEvent(new Event('scroll'));
+    const runOffset = runTop();
+    ok(Math.abs(runOffset + 10) < 3, `loading an earlier page keeps the run header at -10: ${runOffset}`);
+    open(other.title);
+    const keptRun = savedReading(JSON.parse(localStorage.getItem('faber.reading') ?? 'null')).get(conversation.id);
+    equal(keptRun?.id, 'reading-5', `leaving the run saves its first reply id at ${runOffset}; saved ${JSON.stringify(keptRun)}`);
+    equal(keptRun?.run, true, 'leaving the run saves its header part');
+    ok(Math.abs(keptRun!.offset - runOffset) < 3, `the saved run offset ${keptRun?.offset} matches ${runOffset}`);
+    await until(() => root.querySelector('[data-message-index="0"]')?.textContent?.includes('Other'));
+    conversation.messages.splice(8, 0,
+      { id: 'run-next-question', role: 'user', text: 'Continue', at: 8, wake: { why: 'wake.keepGoing' } },
+      { id: 'run-next-answer', role: 'assistant', text: 'The run continued.', at: 9, status: 'done' });
+    open(conversation.title);
+    await until(() => root.querySelector('.run-block summary'));
+    await frames(3);
+    equal(root.querySelector<HTMLElement>('.run-block summary')!.dataset.readingId, 'reading-5', 'a run header uses its first real reply id even after another turn arrives');
+    ok(Math.abs(runTop() - runOffset) < 3, `a regrouped run keeps its reading offset: ${runTop()} expected ${runOffset}; stored ${JSON.stringify(keptRun)}`);
+    const details = root.querySelector<HTMLDetailsElement>('.run-block')!;
+    details.open = true;
+    details.dispatchEvent(new Event('toggle'));
+    await until(() => root.querySelector('.run-earlier [data-message-index="5"]'));
+    const earlier = () => root.querySelector<HTMLElement>('.run-earlier [data-message-index="5"]');
+    const earlierOffset = () => earlier()!.getBoundingClientRect().top - root.querySelector('.thread')!.getBoundingClientRect().top;
+    const expandedThread = root.querySelector<HTMLElement>('.thread')!;
+    expandedThread.scrollTop += earlierOffset() + 15;
+    expandedThread.dispatchEvent(new Event('scroll'));
+    open(other.title);
+    await until(() => root.querySelector('[data-message-index="0"]')?.textContent?.includes('Other'));
+    open(conversation.title);
+    await until(() => earlier());
+    await frames(3);
+    ok(earlier(), 'return unfolds the run containing an earlier reading point');
+    ok(Math.abs(earlierOffset() + 15) < 3, 'an earlier reply inside an unfolded run keeps its offset');
+    api.searchMessages = async () => ({ ready: true, hits: [{ ...hit('chat'), conversationId: conversation.id, messageIndex: 100 }] });
+    type(root, 'another result');
+    await until(() => root.querySelector('.message-hit'));
+    root.querySelector<HTMLButtonElement>('.message-hit')!.click();
+    await until(() => root.querySelector('[data-message-index="100"]') === document.activeElement);
+    ok(root.querySelector('[data-message-index="100"].search-focus'), 'an explicit search result wins over the saved reading anchor');
+  } finally {
+    dispose(); root.remove();
+    api.open = before.open; api.setClock = before.clock; api.notesSeen = before.notes; api.searchMessages = before.search;
+    for (const [key, value] of saved) if (value === null) localStorage.removeItem(key); else localStorage.setItem(key, value);
+  }
+});
+
+check('reading: saved positions reject malformed data and retain at most one hundred metadata-only entries', () => {
+  equal(savedReading(null).size, 0);
+  equal(savedReading({}).size, 0);
+  equal(savedReading([['bad', { id: 'm', index: -1, offset: 0 }], ['bad', { id: 'm', index: 1, offset: Infinity }], ['bad', { id: 1, index: 0, offset: 0 }]]).size, 0);
+  const points = savedReading(Array.from({ length: 150 }, (_, index) => [`c${index}`, { id: `m${index}`, index, offset: -20, text: 'Never retained' }]));
+  equal(points.size, 100);
+  equal(points.has('c49'), false);
+  equal(points.has('c50'), true);
+  equal(JSON.stringify([...points]).includes('Never retained'), false);
+});
+
+check('reading: the real message id wins over a moved index and a removed message uses its surviving neighbour', () => {
+  const messages: Message[] = Array.from({ length: 160 }, (_, index) => ({ id: `m${index}`, role: 'user', text: '', at: 0 }));
+  const point = { id: 'm7', index: 7, offset: -20 };
+  messages.unshift({ id: 'inserted', role: 'user', text: '', at: 0 });
+  const moved = readingWindow(messages, point, 40)!;
+  equal(moved.point.id, 'm7');
+  equal(moved.point.index, 8);
+  ok(moved.from <= 8 && moved.until! > 8, 'the message stays inside the restored window');
+  messages.splice(8, 1);
+  equal(readingWindow(messages, moved.point, 40)!.point.id, 'm8');
+  const branch = messages.map((message) => ({ ...message, id: `branch-${message.id}` }));
+  equal(readingWindow(branch, moved.point, 40)!.point.id, 'branch-m8', 'a replaced history stays at the surviving slot instead of the tail');
+  equal(readingWindow([], point, 40), undefined);
 });

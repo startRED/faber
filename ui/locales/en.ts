@@ -1955,6 +1955,8 @@ export const en = {
   'notes.209.better': 'Faber now has its own guides for designing and checking the interfaces it builds.',
   'notes.210.fixed': 'You can attach the same file again after removing it from a message.',
   'notes.211.fixed': 'Unsent attachments stay with your draft when you return to a conversation or reopen Faber.',
+  'notes.212.better': 'Conversations keep your reading position when you return, even after restarting Faber or earlier messages change size.',
+  'notes.213.fixed': 'Jump to latest reaches the newest message even when you are reading an older part of the conversation.',
   'update.checking': 'Looking for an update…',
   'update.downloading': 'Downloading update…',
   'update.downloadingPercent': 'Downloading update… {percent}%',

@@ -2075,6 +2075,8 @@ export const fr: Messages = {
   'notes.209.better': "Faber dispose maintenant de ses propres guides pour concevoir et vérifier les interfaces qu'il crée.",
   'notes.210.fixed': "Vous pouvez joindre à nouveau le même fichier après l'avoir retiré du message.",
   'notes.211.fixed': 'Les pièces jointes non envoyées restent dans le brouillon au retour dans la conversation ou à la réouverture de Faber.',
+  'notes.212.better': 'Vous retrouvez votre place dans une conversation, même après un redémarrage de Faber ou si les messages précédents changent de taille.',
+  'notes.213.fixed': 'Aller à la fin mène au dernier message, même si vous lisez un passage ancien de la conversation.',
   'update.checking': 'Recherche d’une mise à jour…',
   'update.downloading': 'Téléchargement de la mise à jour…',
   'update.downloadingPercent': 'Téléchargement de la mise à jour… {percent} %',

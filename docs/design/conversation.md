@@ -68,11 +68,7 @@ above an answer. The window widths, the sidebar and the running column are in [l
   growing out of its thumbnail and leaving the same way, arrows (and ← →) between the conversation's pictures, Esc and a
   click outside to close, a count at the bottom, Tab kept inside. Its DOM exists only while it is open. Pictures inside
   an answer are thumbnails too (at most 280 × 200 px).
-- The conversation reads in a column of 760 px (`--col-w`, shared by the thread and the message box) with a line height
-  of 1.68 (`--read-lh`) and 14 px between paragraphs, so a 720 px window still has about 640 px of text. A code block has
-  a bar with its language and a copy button for that block. Selecting words in an answer floats "Ask about this" over
-  them (menu motion), and it puts them in the message box as a quote. Scrolled up, a "Jump to latest" button floats at
-  the foot of the thread and scrolls down smoothly.
+- Reading width, text selection, scroll anchoring and the latest-message control are in [reading.md](reading.md).
 - There is no permission sentence over a conversation: the mode is a Settings matter.
 - A reply waiting on quota offers Stop on its quota card, including when it ended with a recoverable quota error.
   Stop cancels that recovery before the conversation can move into a project. Closing Faber preserves explicit recovery.
