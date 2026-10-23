@@ -11,6 +11,7 @@ pub mod first_run;
 pub mod homes;
 pub mod mcp_servers;
 pub mod menus;
+pub mod performance;
 pub mod permissions;
 pub mod projects;
 pub mod projects_ui;
@@ -45,6 +46,7 @@ pub fn all() -> Vec<Scenario> {
     let all = app::scenarios()
         .into_iter()
         .chain(permissions::scenarios())
+        .chain(performance::scenarios())
         .chain(approve_plan::scenarios())
         .chain(projects::scenarios())
         .chain(shell::scenarios())
@@ -106,6 +108,7 @@ impl Costs {
 /// When unsure, list it: a wrong entry costs a few seconds, a missing one costs a flaky run. A test fails when a name says
 /// "memory", "processor", "CPU", "MB", "budget", "frame", "focused", "quota" or "usage limits" and is not listed.
 pub const SOLO: &[(&str, &str)] = &[
+    (performance::NAME, "processor, memory, scheduling and layout timing"),
     ("reading: a real restart preserves an old reading point within the memory budget", "processor, memory"),
     ("chat groups: ten knowledge files survive reopening within the memory budget", "processor, memory"),
     ("draft attachments: committed bytes survive a real restart, removals stay gone, within the memory budget", "processor, memory"),

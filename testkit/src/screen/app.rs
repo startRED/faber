@@ -1569,7 +1569,7 @@ fn background_commands_memory(ctx: &mut Ctx) -> Result {
     })
 }
 
-fn thousand_messages(ctx: &mut Ctx) -> Result {
+pub(super) fn seed_thousand_messages(ctx: &Ctx, with_tools: bool) -> Result {
     start_settings(ctx, "en")?;
     let at: u64 = 1_790_000_000_000;
     let paragraph = "Rayleigh scattering sends **short blue wavelengths** in every direction, so the sky looks blue. ";
@@ -1582,7 +1582,11 @@ fn thousand_messages(ctx: &mut Ctx) -> Result {
                 json!({ "id": message_id, "role": "user", "text": format!("Question {}: why is the sky blue?", i / 2), "at": at + i })
             } else {
                 let text = [paragraph.repeat(6), "- one\n- two".to_string(), format!("{fence}js\nconsole.log({i});\n{fence}")].join("\n\n");
-                json!({ "id": message_id, "role": "assistant", "text": text, "at": at + i, "vendor": "claude", "model": "claude-haiku-5-5", "status": "done" })
+                let mut message = json!({ "id": message_id, "role": "assistant", "text": text, "at": at + i, "vendor": "claude", "model": "claude-haiku-5-5", "status": "done" });
+                if with_tools {
+                    message["tools"] = json!([{ "id": format!("tool-{i}"), "name": "Read", "input": { "file_path": "example.txt" }, "ok": true, "output": "Synthetic bounded output.\n".repeat(40) }]);
+                }
+                message
             }
         })
         .collect();
@@ -1590,8 +1594,24 @@ fn thousand_messages(ctx: &mut Ctx) -> Result {
     std::fs::create_dir_all(&folder).map_err(|e| e.to_string())?;
     let conversation =
         json!({ "id": id, "title": "Long one", "area": "chat", "sessions": {}, "createdAt": at, "updatedAt": at, "messages": messages });
+    if with_tools {
+        let parsed: faber_engine::model::Conversation =
+            serde_json::from_value(conversation.clone()).map_err(|e| format!("baseline fixture contract: {e}"))?;
+        let tools: Vec<_> = parsed.messages.iter().flat_map(|message| message.tools.iter().flatten()).collect();
+        ensure(
+            parsed.messages.len() == 1000
+                && tools.len() == 500
+                && tools.iter().all(|tool| tool.output.as_ref().is_some_and(|output| output.lines().count() == 40 && output.len() <= 2048)),
+            || "baseline fixture must contain 1000 messages and 500 bounded tool outputs".into(),
+        )?;
+    }
     std::fs::write(folder.join(format!("{id}.json")), conversation.to_string()).map_err(|e| e.to_string())?;
 
+    Ok(())
+}
+
+fn thousand_messages(ctx: &mut Ctx) -> Result {
+    seed_thousand_messages(ctx, false)?;
     let launch = claude_chat(ctx);
     let mut app = ctx.launch(launch)?;
     let page = &mut app.page;
