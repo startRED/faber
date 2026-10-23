@@ -176,7 +176,7 @@ thread_local! {
 }
 
 impl Store {
-    fn replacement_roots(&self) -> Result<(), String> {
+    pub(super) fn replacement_roots(&self) -> Result<(), String> {
         for path in [
             self.root.clone(),
             self.plugin(),
@@ -193,13 +193,48 @@ impl Store {
         }
         Ok(())
     }
-    fn replacement_ledger(&self) -> Result<BTreeMap<String, String>, String> {
-        let bytes = checked_bytes(&self.ledger())?.ok_or("The tool is not installed")?;
+    pub(super) fn initial_ledger(&self) -> Result<BTreeMap<String, String>, String> {
+        let Some(bytes) = checked_bytes(&self.ledger())? else { return Ok(BTreeMap::new()) };
         let ledger: BTreeMap<String, String> = serde_json::from_slice(&bytes).map_err(|_| "Could not read the catalog ledger")?;
         if ledger.iter().any(|(id, commit)| !valid_id(id) || commit.is_empty()) {
             return Err("Invalid catalog ledger".into());
         }
         Ok(ledger)
+    }
+    fn replacement_ledger(&self) -> Result<BTreeMap<String, String>, String> {
+        checked_bytes(&self.ledger())?.ok_or("The tool is not installed")?;
+        self.initial_ledger()
+    }
+    pub(super) fn physical_copy(&self, item: &Item) -> Result<bool, String> {
+        Ok(exists(&self.dir(item))? || exists(&self.disabled().join(&item.id))?)
+    }
+    pub(super) fn occupied_install(&self, item: &Item) -> Result<bool, String> {
+        Ok(self.physical_copy(item)? || exists(&self.removed().join(&item.id))?)
+    }
+    pub fn has_copy(&self, id: &str) -> Result<bool, String> {
+        let _store = lock();
+        self.replacement_roots()?;
+        let item = self.items.iter().find(|item| item.id == id).ok_or("Unknown tool")?;
+        self.physical_copy(item)
+    }
+    pub(super) fn direct_replacement(&self, item: &Item, zip: &Path, packages: &BTreeMap<String, PathBuf>) -> Result<bool, String> {
+        let _store = lock();
+        self.recover_replacements()?;
+        if !self.physical_copy(item)? {
+            return Ok(false);
+        }
+        let plan = self.replacement_snapshot(&item.id)?;
+        if plan.item != *item {
+            return Err("The replacement does not match the catalog".into());
+        }
+        let copy = if plan.disabled_location { self.disabled().join(&item.id) } else { self.dir(item) };
+        // Trusted direct callers can repeat an already complete installation without replacing its files or receipt.
+        if plan.old_commit == item.commit && self.verify_item(&copy, item) {
+            self.refresh_ready_after_install();
+            return Ok(true);
+        }
+        self.replace_sources_locked(&plan, zip, packages, || true)?;
+        Ok(true)
     }
     fn replacement_snapshot(&self, id: &str) -> Result<ReplacementPlan, String> {
         self.replacement_roots()?;
@@ -266,6 +301,16 @@ impl Store {
         authorized: impl FnOnce() -> bool,
     ) -> Result<(), String> {
         let _store = lock();
+        self.replace_sources_locked(plan, zip, packages, authorized)
+    }
+
+    fn replace_sources_locked(
+        &self,
+        plan: &ReplacementPlan,
+        zip: &Path,
+        packages: &BTreeMap<String, PathBuf>,
+        authorized: impl FnOnce() -> bool,
+    ) -> Result<(), String> {
         self.recover_replacements()?;
         self.check_replacement_locked(plan)?;
         let temporary = kits::TemporaryCopy::new(&self.root, ".staging-").map_err(|e| e.to_string())?;
@@ -321,7 +366,7 @@ impl Store {
                 Err(recovery) => Err(format!("{error}; catalog recovery needs attention: {recovery}")),
             };
         }
-        self.refresh_ready();
+        self.refresh_ready_after_install();
         Ok(())
     }
     /// Called under the store lock before any pruning or further mutation.
@@ -451,6 +496,58 @@ mod transaction_tests {
         std::fs::write(dir.join("SKILL.md"), b"old user modified instructions").unwrap();
         store.write_ledger(&BTreeMap::from([(item.id.clone(), "older-pin".into())])).unwrap();
         (tmp, store, item, archive)
+    }
+
+    #[test]
+    fn an_agent_install_never_overwrites_files_missing_from_the_ledger() {
+        let (_tmp, store, item, archive) = setup();
+        std::fs::remove_file(store.ledger()).unwrap();
+        let original = store.dir(&item).join("SKILL.md");
+        let before = std::fs::read(&original).unwrap();
+        assert!(store.install_sources_as(&item, &archive, &BTreeMap::new(), true).is_err(), "unrecorded files need explicit recovery");
+        assert_eq!(std::fs::read(original).unwrap(), before);
+    }
+
+    #[test]
+    fn manual_reinstall_failure_preserves_disabled_original_files() {
+        let (_tmp, store, item, archive) = setup();
+        store.set_enabled(&item.id, false).unwrap();
+        store.wait_prepared_for_test();
+        let original = store.disabled().join(&item.id).join("SKILL.md");
+        let old_bytes = std::fs::read(&original).unwrap();
+        let old_selection = std::fs::read(store.root.join("selection.json")).unwrap();
+        std::fs::remove_file(store.ledger()).unwrap();
+        std::fs::create_dir(store.ledger()).unwrap();
+        assert!(store.install_sources(&item, &archive, &BTreeMap::new()).is_err());
+        assert_eq!(std::fs::read(&original).ok(), Some(old_bytes), "a failed manual reinstall must retain the disabled original");
+        assert_eq!(std::fs::read(store.root.join("selection.json")).unwrap(), old_selection);
+        assert!(!store.dir(&item).exists(), "a failed reinstall must not enable its replacement");
+    }
+
+    #[test]
+    fn initial_install_preserves_missing_entries_and_the_off_switch() {
+        let (_tmp, store, item, archive) = setup();
+        store.set_enabled(&item.id, false).unwrap();
+        store.wait_prepared_for_test();
+        std::fs::remove_dir_all(store.disabled().join(&item.id)).unwrap();
+        let unrelated = "another-missing-tool".to_string();
+        store.write_ledger(&BTreeMap::from([(item.id.clone(), "older-pin".into()), (unrelated.clone(), "other-pin".into())])).unwrap();
+        let switches = std::fs::read(store.root.join("selection.json")).unwrap();
+        store.install_sources(&item, &archive, &BTreeMap::new()).unwrap();
+        assert_eq!(store.initial_ledger().unwrap().get(&unrelated).map(String::as_str), Some("other-pin"));
+        assert_eq!(std::fs::read(store.root.join("selection.json")).unwrap(), switches);
+        assert!(store.disabled().join(&item.id).join("SKILL.md").is_file());
+        assert!(!store.dir(&item).exists());
+    }
+
+    #[test]
+    fn initial_install_refuses_a_corrupt_ledger_without_publishing_files() {
+        let (_tmp, store, item, archive) = setup();
+        std::fs::remove_dir_all(store.dir(&item)).unwrap();
+        std::fs::write(store.ledger(), b"not a ledger").unwrap();
+        assert!(store.install_sources(&item, &archive, &BTreeMap::new()).is_err());
+        assert_eq!(std::fs::read(store.ledger()).unwrap(), b"not a ledger");
+        assert!(!store.dir(&item).exists());
     }
 
     #[test]
