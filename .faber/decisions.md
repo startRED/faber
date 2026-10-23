@@ -1,3 +1,4 @@
 - Deliver original frontend-craft and frontend-proof instructions lazily through the existing first-party guide path; retain external catalog skills and each project's own visual system. [by AI]
 - Extend the existing composer draft keys with native IndexedDB Blob attachments, preserving synchronous text writes and explicit storage-failure recovery; a draft save does not establish delivery to the engine. [by AI]
 - Keep at most 100 recent conversation reading anchors (message id, index fallback and viewport offset) in browser storage, enough for routine switching while bounding metadata; reuse message windows, run grouping and the existing resize observer without a timer or setting. [by AI]
+- After restoring a negative control, verify the executable or served bundle actually tested as well as the source bytes; restore with a fresh write or invalidate stale build inputs so preserved timestamps cannot make an old artifact stand in for the corrected version. [by AI]

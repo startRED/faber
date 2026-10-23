@@ -2064,6 +2064,7 @@ export const ptBR: Messages = {
   'notes.211.fixed': 'Os anexos não enviados ficam no rascunho quando você volta à conversa ou abre o Faber de novo.',
   'notes.212.better': 'A conversa volta onde você tava lendo, mesmo depois de reiniciar o Faber ou de mensagens anteriores mudarem de tamanho.',
   'notes.213.fixed': 'Ir para o fim chega à última mensagem mesmo quando você tá lendo uma parte antiga da conversa.',
+  'notes.214.fixed': 'As orientações pra criar telas e sites agora juntam design e uso, conferindo ações demoradas até terminarem.',
   'update.checking': 'Procurando atualização…',
   'update.downloading': 'Baixando atualização…',
   'update.downloadingPercent': 'Baixando atualização… {percent}%',

@@ -1957,6 +1957,7 @@ export const en = {
   'notes.211.fixed': 'Unsent attachments stay with your draft when you return to a conversation or reopen Faber.',
   'notes.212.better': 'Conversations keep your reading position when you return, even after restarting Faber or earlier messages change size.',
   'notes.213.fixed': 'Jump to latest reaches the newest message even when you are reading an older part of the conversation.',
+  'notes.214.fixed': 'Frontend guidance now combines the available design workflow with usable screens and checks slow actions through completion.',
   'update.checking': 'Looking for an update…',
   'update.downloading': 'Downloading update…',
   'update.downloadingPercent': 'Downloading update… {percent}%',

@@ -20,11 +20,17 @@ are not evidence of a better result. Preserve the request, the project's identit
   type or imagery. Browse original sources when available; a reference is evidence to interpret, never code to copy.
   Choose one coherent direction within the person's brief. Respect any project requirement to show alternatives.
   A local repair does not need three concepts or a redesign.
+- When an applicable design or art-direction skill is already available, follow its relevant workflow for a new
+  composition or identity. These interaction rules complement that work; reading a reference or running a helper
+  script alone does not apply the design workflow. A local behavior repair should retain the existing direction.
 
 ## Compose before decorating
 
 - Give the primary action visual priority. Group related controls by proximity and alignment before drawing more
   containers, borders and cards. Let important information have space; do not equate whitespace with empty padding.
+- Inspect the first useful viewport at narrow and wide sizes. Make the task and essential context discoverable
+  there; an expressive introduction should not bury products, navigation or critical demonstration limitations.
+  Judge this against the actual brief, rather than imposing a hero or banning one for every project.
 - Choose typography for the content and available assets. Use a restrained scale, readable body line length and
   consistent leading. Test real headings, numerals, punctuation, code and links. Do not impose a fashionable font.
 - Reuse the project's spacing, type, color, radius and depth tokens. Use semantic colors consistently, with words or

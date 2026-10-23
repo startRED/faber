@@ -2077,6 +2077,7 @@ export const de: Messages = {
   'notes.211.fixed': 'Ungesendete Anhänge bleiben im Entwurf, wenn du zum Gespräch zurückkehrst oder Faber erneut öffnest.',
   'notes.212.better': 'Beim Zurückkehren bleibt deine Lesestelle erhalten, auch nach einem Neustart von Faber oder wenn frühere Nachrichten ihre Größe ändern.',
   'notes.213.fixed': 'Zum Ende führt zur neuesten Nachricht, auch wenn du gerade einen älteren Teil der Unterhaltung liest.',
+  'notes.214.fixed': 'Die Anleitung für Oberflächen verbindet Gestaltung und Bedienung und prüft langsame Aktionen bis zum Abschluss.',
   'update.checking': 'Suche nach einem Update…',
   'update.downloading': 'Update wird heruntergeladen…',
   'update.downloadingPercent': 'Update wird heruntergeladen… {percent} %',

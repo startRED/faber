@@ -2077,6 +2077,7 @@ export const es: Messages = {
   'notes.211.fixed': 'Los archivos sin enviar siguen en el borrador al volver a la conversación o abrir Faber de nuevo.',
   'notes.212.better': 'Al volver a una conversación, sigues donde estabas leyendo, incluso tras reiniciar Faber o cambiar el tamaño de mensajes anteriores.',
   'notes.213.fixed': 'Ir al final llega al último mensaje aunque estés leyendo una parte antigua de la conversación.',
+  'notes.214.fixed': 'Las pautas para crear interfaces combinan diseño y uso, y comprueban las acciones lentas hasta que terminan.',
   'update.checking': 'Buscando una actualización…',
   'update.downloading': 'Descargando actualización…',
   'update.downloadingPercent': 'Descargando actualización… {percent} %',
