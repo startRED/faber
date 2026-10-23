@@ -272,3 +272,58 @@ for Chat and 1,250/1,484 ms for Projects, including navigation, scrolling and sc
 PC does not establish isolated overhead, general speed or performance equivalence. The [reading page](../../design/reading.md)
 retains the scoped measurements. This is additional verification, not an application behavior change, another
 generated-design evaluation or proof of other platforms, smooth motion, remote projects or assistive technology.
+
+## Follow-up: identifying the form user's input purpose
+
+The original craft/proof skills now make supported input-purpose metadata explicit for forms collecting information
+about the form user. A visible label or input type alone may not identify the specific purpose; whether a browser
+chooses to autofill is not the pass condition. The living frontend page and source study retain the normative W3C
+criterion and its informative explanation. This does not impose the rule on every input or claim full AA conformance.
+
+Two isolated authoring tasks received the same synthetic name/email/phone form request and old/new instruction
+snapshots. Both produced correct purpose metadata, so no observed quality gain follows from that pair. A damaged
+copy retained labels/types but omitted the name purpose and mismatched email; the narrow static markup check rejected
+both defects. An independent repair restored the two attributes, passed and matched the good artifact's hash.
+An initial repair write failed; its intermediate failure remains in that lane's evidence. A fresh read-only reviewer
+independently checked all four artifacts. Parsing controlled static fields is not browser rendering, keyboard,
+screen-reader or autofill behavior, an HTML conformance audit, a repeated causal comparison or general design mastery.
+
+The two lazy skill bodies total 17,986 UTF-8 bytes including frontmatter, 678 more than the earlier package. Names,
+descriptions and delivery remain unchanged; no resident service, timer, process, dependency or setting was added.
+Marginal whole-app/model cost and loading of this wording in the already-running installed guide remain unmeasured.
+
+The [ordinary instruction confirmation](https://github.com/startRED/faber/actions/runs/39952863103) accepted the
+identified local receipt: 2,259 engine, 722 Windows UI and 126 native scenarios passed, each zero failed/not run/skipped.
+Its gate and integration succeeded, and the exact candidate was observed directly on the development base and main.
+Remote heavy suites were skipped under that ordinary exact-tree receipt; platform lints are not another runtime run.
+This candidate did not contain the later Projects restart scenario. These results establish that execution, not
+marginal instruction cost, spontaneous model compliance or general generated-design improvement.
+
+## Continuation confirmation and remaining scope
+
+The first [ordinary Projects confirmation](https://github.com/startRED/faber/actions/runs/39952273854) passed 2,259
+Windows engine checks, 2,210 macOS engine checks, 722 UI checks on each platform and 127 Windows native scenarios
+across eight shards, each zero failed/not run/skipped. The new Projects case ran in shard 2: 9.8 seconds, sampled
+tree peak 138.9 MB against the unchanged 400 MB limit, and 625 ms CPU over its 1,646 ms post-launch scripted flow.
+These include navigation, scrolling and screenshots, not isolated overhead. Its exact candidate retained the reviewed
+reading source and app bytes. The gate passed, but the base had advanced with the separate instruction change;
+the normal landing recomposed the change rather than integrating that earlier candidate. The old run's final
+report was cancelled after recomposition; its completed suite results are not a final integration receipt.
+
+The [combined confirmation](https://github.com/startRED/faber/actions/runs/39954652590) includes both follow-ups.
+It separately passed 2,259 Windows engine checks, 2,210 macOS engine checks, 722 UI checks on each platform and
+127 Windows native scenarios across eight shards, each zero failed/not run/skipped. Its gate and integration
+succeeded, GitHub reported the change closed and merged, and the exact candidate was observed directly on the
+development base and main. This is the combined run's evidence, not a substitution of either earlier receipt.
+Its Projects restart case passed in 8.0 seconds with a sampled tree peak of 141.7 MB and 438 ms CPU over 1,519 ms
+of post-launch scripted flow; Chat passed in 8.6 seconds at 139.9 MB and 891/1,632 ms. These single-run measurements
+include navigation, scrolling and screenshots, not isolated overhead or a general speed gain. No manual requeue,
+check waiver, application behavior change or production memory repair was added by these follow-ups.
+
+The original request covered useful blueprint techniques, Faber's own frontend skills and primary-source design,
+UX and frontend research. The linked study, complete initial inventory, original build/proof instructions,
+controlled generated-page evaluations, selected reliability repairs and resource baseline record those outcomes.
+The blueprint remains 243 assessed criteria, not 243 unconditional feature orders or a whole-product pass.
+Outgoing lost-acknowledgement reconciliation and exactly-once external effects remain outside the delivered guard.
+The accessibility, platform, motion, resource, competitor and installed-guide limits above remain open; earlier
+visual-retention failures remain unexplained. Voice, remote access and scheduling remain separate product capabilities.
