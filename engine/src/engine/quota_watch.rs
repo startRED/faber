@@ -47,7 +47,16 @@ impl Core {
                         let mut c = core.lock().unwrap_or_else(|e| e.into_inner());
                         match read {
                             UsageRead::Windows(found) => {
-                                found.into_iter().for_each(|(window, used, resets_at)| c.note_quota(vendor, window, used, resets_at));
+                                let now = c.secs();
+                                let events = found
+                                    .into_iter()
+                                    .map(|(window, used, resets_at)| EngineEvent::Quota {
+                                        window: window.into(),
+                                        used,
+                                        resets_at: c.ledger.of(vendor).canonical_reset(window, resets_at, now),
+                                    })
+                                    .collect();
+                                c.zero_turn_checked(vendor, events);
                                 c.reading_done(vendor);
                             }
                             UsageRead::Spent => c.usage_command_spent = true,

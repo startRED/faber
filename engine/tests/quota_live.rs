@@ -477,13 +477,35 @@ async fn the_watcher_reads_claude_through_the_usage_command_and_asks_no_model() 
     let dir = tempfile::tempdir().unwrap();
     let probe = Probe::saying(usage_json(0));
     let calls = probe.calls.clone();
-    let (engine, _) = start(dir.path(), probe.spawner(None));
+    let scheduled = probe.spawner(None);
+    let status_background = probe.status_background.clone();
+    let (engine, _) = start(
+        dir.path(),
+        Arc::new(move |bin, args, cwd| {
+            if args.iter().any(|a| a == "status") {
+                status_background.lock().unwrap().push(faber_engine::proc::starting_in_background());
+                return Err(std::io::Error::other("the plan check cannot supply this test's no-model evidence"));
+            }
+            scheduled(bin, args, cwd)
+        }),
+    );
     engine.set_utc_offset(-10_800);
+    engine.note_account_events(
+        Vendor::Claude,
+        vec![EngineEvent::Quota { window: "five_hour".into(), used: 0.09, resets_at: 1_791_627_030.0 }],
+    );
     engine.watch_accounts();
     until("both windows read", || engine.ledger().claude.readings.len() == 2).await;
     let l = engine.ledger().claude;
-    assert_eq!((l.readings["five_hour"].used, l.readings["five_hour"].resets_at), (0.10, 1_791_627_000.0));
+    assert_eq!((l.readings["five_hour"].used, l.readings["five_hour"].resets_at), (0.10, 1_791_627_030.0));
     assert_eq!((l.readings["seven_day"].used, l.readings["seven_day"].resets_at), (0.36, 1_792_137_600.0));
+    for window in ["five_hour", "seven_day"] {
+        let evidence = l.zero_turn_readings.get(window).expect("a validated scheduled read records no-model evidence");
+        assert_eq!(evidence.used, l.readings[window].used);
+        assert_eq!(evidence.resets_at, l.readings[window].resets_at);
+        assert_eq!(evidence.read_at, WHEN as f64);
+        assert_eq!(Store::new(dir.path()).ledger().claude.zero_turn_readings[window].resets_at, evidence.resets_at);
+    }
     let calls = calls.lock().unwrap().clone();
     assert_eq!(calls.len(), 1);
     let args = &calls[0];
@@ -514,6 +536,7 @@ async fn a_usage_command_that_turns_out_to_ask_a_model_is_never_run_again() {
     engine.set_attention(true, true);
     tokio::time::sleep(Duration::from_millis(150)).await;
     assert_eq!(calls.lock().unwrap().len(), 1);
+    assert!(engine.ledger().claude.zero_turn_readings.is_empty(), "model work cannot create no-model evidence");
     engine.shutdown();
 }
 
@@ -654,6 +677,7 @@ async fn a_reading_that_fails_does_not_leave_the_vendor_unread() {
     until("the failing reading", || probe.calls.lock().unwrap().len() == 1).await;
     tokio::time::sleep(Duration::from_millis(100)).await;
     assert!(engine.ledger().claude.readings.is_empty());
+    assert!(engine.ledger().claude.zero_turn_readings.is_empty(), "a failed reading cannot create no-model evidence");
     *probe.text.lock().unwrap() = usage_json(0);
     time.store(WHEN + 400, Ordering::SeqCst);
     engine.set_attention(true, true);

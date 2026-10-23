@@ -37,6 +37,7 @@ Both vendors' counters are read by commands that answer locally, so a reading co
   and weekly percentages; the reset times are printed in the PC's own time, which the screen's offset converts. A reset time
   within two minutes of the one already held is the same window (the stream prints seconds, `/usage` the minute).
 - Codex: `account/rateLimits/read` on a short-lived `codex app-server` (handshake, the two reads, nothing else).
+- A successful scheduled reading also refreshes the ledger's confirmed no-model evidence. A failed reading or any result with model turns, tokens or cost never refreshes that evidence.
 - During Faber's own requests both CLIs already send their windows with the stream (Claude's rate-limit events, Codex's
   rate-limit updates); those go through the same recording.
 

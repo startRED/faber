@@ -217,6 +217,13 @@ impl VendorLedger {
             .map(|(_, n)| n)
     }
 
+    pub(crate) fn canonical_reset(&self, window: &str, resets_at: f64, now: f64) -> f64 {
+        self.readings
+            .get(window)
+            .filter(|held| resets_at > now && held.resets_at > now && (held.resets_at - resets_at).abs() <= SAME_RESET)
+            .map_or(resets_at.round(), |held| held.resets_at)
+    }
+
     /// A reading of a window. Readings that make no sense (not a number, below 0 or far above 1) are dropped.
     pub fn record(&mut self, window: &str, used: f64, resets_at: f64, now: f64, offset: i64) {
         self.own_spend.retain(|_, cost| cost.is_finite() && *cost >= 0.0);
@@ -226,8 +233,7 @@ impl VendorLedger {
         }
         // Whole seconds and hundredths are all a reading holds; the file stays small. A reset time within two minutes of the
         // one held is the same window's, in the form first seen, so the history keeps comparing like with like.
-        let held = self.readings.get(window).map(|r| r.resets_at).filter(|at| (at - resets_at).abs() <= SAME_RESET);
-        let (now, resets_at, used) = (now.round(), held.unwrap_or(resets_at.round()), (used * 1000.0).round() / 1000.0);
+        let (now, resets_at, used) = (now.round(), self.canonical_reset(window, resets_at, now), (used * 1000.0).round() / 1000.0);
         self.readings.insert(window.to_string(), Reading { used, resets_at, read_at: now });
         self.prune(now);
         let point = Point { at: now, used, resets_at };
@@ -521,5 +527,22 @@ impl VendorLedger {
         while self.unmetered.len() > 31 {
             self.unmetered.pop_first();
         }
+    }
+}
+
+#[cfg(test)]
+mod canonical_reset_tests {
+    use super::*;
+
+    #[test]
+    fn confirmed_reads_share_only_a_current_window_reset() {
+        let mut ledger = VendorLedger::default();
+        ledger.readings.insert("five_hour".into(), Reading { used: 0.1, resets_at: 1200.0, read_at: 900.0 });
+        for (incoming, now, expected) in
+            [(1080.0, 1000.0, 1200.0), (1079.0, 1000.0, 1079.0), (990.0, 1000.0, 990.0), (1200.0, 1200.0, 1200.0), (1250.0, 1200.0, 1250.0)]
+        {
+            assert_eq!(ledger.canonical_reset("five_hour", incoming, now), expected);
+        }
+        assert_eq!(ledger.canonical_reset("seven_day", 1500.4, 1000.0), 1500.0);
     }
 }
