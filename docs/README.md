@@ -46,6 +46,7 @@ one is never touched again, and its boxes say nothing.
 
 | Page | Status |
 | :--- | :--- |
+| [superpowers/specs/2026-10-22-faber-framework/README.md](superpowers/specs/2026-10-22-faber-framework/README.md) | Proposal, nothing built: Faber-native framework, file ownership, execution rules, visual progress, staged adoption and comparison with BMAD/GSD; companion pages linked from its README |
 | superpowers/specs/2026-10-11-faber-redesign-design.md | Absorbed into product/ and design/ |
 | superpowers/specs/2026-10-11-auto-quota-pacing-design.md, plans/2026-10-11-auto-quota-pacing.md, auto-quota-pacing-report.md | Shipped |
 | superpowers/plans/2026-10-11-b2 … b9 (test runner, looks, running engine, layout, tray, first run, Settings, download) | Shipped |
