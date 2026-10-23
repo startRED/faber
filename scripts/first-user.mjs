@@ -9,18 +9,26 @@
 //
 // Faber runs as the hidden, sandboxed test build that `testkit/examples/ux_audit.rs` drives (C006: the window lives on a
 // desktop no monitor shows), with no CLI connected, so no subscription is spent inside it; the reviewer's own calls are
-// its only cost. Builds run at idle priority. The findings go to `docs/research/first-user-<date>.md` and the screenshots
-// to `<target>/faber-test/first-user/<date>/`. Nothing is fixed: the list is for a person to read.
+// its only cost. Builds run at idle priority. Findings go to `docs/research/first-user-<date>-<suffix>.md`, screenshots
+// to `<target>/faber-test/first-user/<date>-<suffix>/`. Each run keeps its own evidence. Nothing is fixed by the review.
 import { spawn, spawnSync } from 'node:child_process';
 import { createInterface } from 'node:readline';
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir, setPriority, constants } from 'node:os';
-import { delimiter, dirname, join, relative, resolve, isAbsolute } from 'node:path';
+import { basename, delimiter, dirname, join, relative, resolve, isAbsolute } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const EXE = process.platform === 'win32' ? '.exe' : '';
 const TARGET = process.env.CARGO_TARGET_DIR ? resolve(ROOT, process.env.CARGO_TARGET_DIR) : join(ROOT, 'target');
+
+/** Every review keeps its own evidence, even when the same configuration runs twice in one day. */
+export function runPaths(root, target, date, output) {
+  const parent = join(target, 'faber-test', 'first-user');
+  mkdirSync(parent, { recursive: true });
+  const shots = mkdtempSync(join(parent, `${date}-`));
+  return { shots, out: resolve(root, output ?? `docs/research/first-user-${basename(shots)}.md`) };
+}
 
 /** What a newcomer is asked to do, in order, in the same app: each task starts where the last one ended. */
 export const TASKS = [
@@ -339,9 +347,7 @@ async function main(args) {
   const lang = option(args, '--lang', 'pt-BR');
   const maxSteps = Number(option(args, '--steps', '8'));
   const date = new Date().toISOString().slice(0, 10);
-  const shots = join(TARGET, 'faber-test/first-user', date);
-  const out = resolve(ROOT, option(args, '--out', `docs/research/first-user-${date}.md`));
-  mkdirSync(shots, { recursive: true });
+  const { shots, out } = runPaths(ROOT, TARGET, date, option(args, '--out'));
 
   const home = mkdtempSync(join(tmpdir(), 'faber-first-user-'));
   if (insideRepo(home)) throw new Error(`the reviewer's folder ${home} is inside the repository`);
