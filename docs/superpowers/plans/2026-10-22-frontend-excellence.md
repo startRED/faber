@@ -20,7 +20,8 @@ The [source study](../../research/2026-10-22-frontend-sources.md) records checke
 - [x] Extend the existing Faber UI skill beyond motion with the same interaction and proof workflow.
 - [x] Prove and repair same-file attachment reselection without changing attachment persistence.
 - [x] Complete local proofs, independent code/security review and skill scenario review; record remaining limits.
-- [ ] Queue the proven change through the normal workflow. Local checks do not establish a release.
+- [x] Queue the proven change through the normal workflow. Its local integration run passed 2,189 engine checks,
+  687 UI checks and 120 native scenarios; the remote integration result is separate from those local receipts.
 
 ## Remaining reliability work, in dependency order
 
@@ -30,6 +31,10 @@ contract and failing-before/passing-after proof, extending the existing send/dra
 1. **Durable draft attachments (C03/S06/F05).** Persist references/bytes with bounded storage and cleanup in the
    existing draft store; cover reload, restart, removed files, failed storage, branch/conversation changes and privacy.
    Do not write large base64 blobs into localStorage or pretend an OS path alone preserves pasted files.
+   Implemented locally: the complete UI suite passed 703 checks after the final metadata cleanup/race fix;
+   two native scenarios now pass, including three actual process launches, failed-save/retry and byte equality.
+   Required local proofs and independent visual recheck passed (lowest 39/40 before and after). Exact-tree queue
+   integration remains separate; no final integration result is claimed yet.
 2. **Durable outgoing intent and reconciliation (R01/R03/R04/R05/T01/T07).** Establish stable message identity and
    durable acknowledgement at the engine boundary before an optimistic UI. Cover repeated submit, cancel/late ACK,
    crash at each persistence boundary and restart; never replay ambiguous external effects blindly.
@@ -40,6 +45,8 @@ contract and failing-before/passing-after proof, extending the existing send/dra
    memory/CPU baselines, including hidden state and long tool logs. Add only the optimization the trace justifies.
 5. **Generated frontend evaluation (D13/M01/M14).** Run the source study's paired fixtures and independent visual
    review. Skills delivered successfully do not prove the generated interfaces improved.
+   The first [bakery pair](../../research/2026-10-22-frontend-evaluation.md) is complete: 17/20 each in a fresh blind
+   review, with different strengths. N=1 and differing design-skill consultation prevent a causal improvement claim.
 
 Other partial/unknown audit rows stay open until their own evidence exists. Existing pane/tab/side-chat work is
 extended rather than rebuilt. Voice, remote machines/devices, scheduling and comparator products are separate
@@ -65,4 +72,5 @@ capability work, not cosmetic improvements or claims of parity made by this slic
 
 Receipts remain in the working copy's target/frontend-guide-cargo.log, target/faber-test/run.log and
 target/faber-test/critique/. The UI suite's 687-result receipt was produced before screenshot runs reused run.log;
-the tool log retains its full result. Queue-wide and generated-design quality measurements remain unverified.
+the tool log retains its full result. The first package's local integration receipts cover the engine, UI and native
+suites. Generated-design quality measurements remain unverified.

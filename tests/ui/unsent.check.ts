@@ -4,7 +4,7 @@ import themes from '../../src-tauri/src/themes.json';
 import { Thread } from '../../ui/Thread.tsx';
 import type { Message } from '../../ui/api.ts';
 import { dirtyCount, keep, kept, release } from '../../ui/unsent.ts';
-import { check, equal, ok } from './check.ts';
+import { check, deepEqual, equal, ok } from './check.ts';
 
 const settle = () => new Promise((resolve) => setTimeout(resolve, 30));
 
@@ -187,5 +187,152 @@ check('thread: in a scrolled thread, cancelling an edit leaves every paragraph o
   } finally {
     dispose();
     host.remove();
+  }
+});
+
+check('unsent: attachment bytes are durable and deletion cannot be overtaken by an older write', async () => {
+  const { keepAttachments, keptAttachments, forgetDraft } = await import('../../ui/unsent.ts');
+  const key = 'check-attachment-store';
+  const value = { images: [{ name: 'one.png', mediaType: 'image/png', base64: 'AAECAw==' }], files: [{ name: 'binary.dat', base64: '/wCA' }], inlined: [{ name: 'note.txt', block: '\nnotes' }] };
+  try {
+    ok(await keepAttachments(key, value));
+    deepEqual(await keptAttachments(key), value, 'a read after the write gets the stored Blob bytes and metadata');
+    const write = keepAttachments(key, value);
+    const remove = forgetDraft(key);
+    await Promise.all([write, remove]);
+    equal(await keptAttachments(key), undefined, 'deletion follows all earlier writes');
+  } finally { await forgetDraft(key); }
+});
+
+check('unsent: attachment save failures stay protected after release and recover on retry', async () => {
+  const { keepAttachments, keptAttachments, forgetDraft } = await import('../../ui/unsent.ts');
+  const key = 'check-attachment-failure';
+  const value = { images: [], files: [{ name: 'binary.dat', base64: 'AAE=' }], inlined: [] };
+  const before = dirtyCount();
+  const open = IDBFactory.prototype.open;
+  try {
+    IDBFactory.prototype.open = () => { throw new Error('storage unavailable'); };
+    equal(await keepAttachments(key, value), false, 'failure is reported, never called saved');
+    equal(dirtyCount(), before + 1, 'memory-only attachments block an unattended restart');
+    release(key);
+    equal(dirtyCount(), before + 1, 'unmount cannot release the memory-only protection');
+    deepEqual(await keptAttachments(key), value, 'a remount can read the failed write in memory');
+    IDBFactory.prototype.open = open;
+    ok(await keepAttachments(key, value), 'a retry persists it');
+    equal(dirtyCount(), before, 'only the successful write releases its protection');
+    deepEqual(await keptAttachments(key), value, 'the bytes now read from durable storage');
+  } finally {
+    IDBFactory.prototype.open = open;
+    await forgetDraft(key);
+  }
+});
+
+check('unsent: a marker quota failure keeps attachment bytes and guard in memory until retry', async () => {
+  const { keepAttachments, keptAttachments, forgetDraft } = await import('../../ui/unsent.ts');
+  const key = 'check-attachment-marker-quota';
+  const value = { images: [], files: [{ name: 'binary.dat', base64: 'AAE=' }], inlined: [] };
+  const before = dirtyCount();
+  const write = Storage.prototype.setItem;
+  try {
+    Storage.prototype.setItem = function (key, value) {
+      if (key.startsWith('faber.unsent-attachments.')) throw new Error('quota');
+      return write.call(this, key, value);
+    };
+    equal(await keepAttachments(key, value), false);
+    release(key);
+    equal(dirtyCount(), before + 1);
+    deepEqual(await keptAttachments(key), value);
+    Storage.prototype.setItem = write;
+    ok(await keepAttachments(key, value));
+    equal(dirtyCount(), before);
+  } finally {
+    Storage.prototype.setItem = write;
+    await forgetDraft(key);
+  }
+});
+
+check('unsent: a failed attachment deletion keeps its tombstone protected until durable removal succeeds', async () => {
+  const { keepAttachments, keptAttachments, forgetDraft } = await import('../../ui/unsent.ts');
+  const key = 'check-attachment-delete-failure';
+  const before = dirtyCount();
+  const open = IDBFactory.prototype.open;
+  try {
+    ok(await keepAttachments(key, { images: [], files: [{ name: 'binary.dat', base64: 'AAE=' }], inlined: [] }));
+    IDBFactory.prototype.open = () => { throw new Error('storage unavailable'); };
+    equal(await forgetDraft(key), false);
+    release(key);
+    equal(dirtyCount(), before + 1, 'the stale durable attachment must not return during an unattended update');
+    equal(await keptAttachments(key), undefined, 'the current intent is empty even while the durable delete failed');
+    IDBFactory.prototype.open = open;
+    ok(await forgetDraft(key));
+    equal(dirtyCount(), before);
+    equal(await keptAttachments(key), undefined);
+  } finally {
+    IDBFactory.prototype.open = open;
+    await forgetDraft(key);
+  }
+});
+
+check('unsent: deleting a draft while a Blob read is pending never resurrects that attachment', async () => {
+  const { keepAttachments, keptAttachments, forgetDraft } = await import('../../ui/unsent.ts');
+  const key = 'check-stale-attachment-read';
+  const read = FileReader.prototype.readAsDataURL;
+  let resume = () => {};
+  let started!: () => void;
+  const reading = new Promise<void>((resolve) => { started = resolve; });
+  try {
+    ok(await keepAttachments(key, { images: [], files: [{ name: 'binary.dat', base64: 'AAE=' }], inlined: [] }));
+    FileReader.prototype.readAsDataURL = function (blob) {
+      resume = () => { resume = () => {}; read.call(this, blob); };
+      started();
+    };
+    const old = keptAttachments(key);
+    await reading;
+    ok(await forgetDraft(key));
+    resume();
+    equal(await old, undefined, 'an older completion returns the current deletion, never stale bytes');
+    equal(await keptAttachments(key), undefined);
+  } finally {
+    FileReader.prototype.readAsDataURL = read;
+    resume();
+    await forgetDraft(key);
+  }
+});
+
+check('unsent: pending attachment-only removal keeps newer text and a full discard retries failed text removal', async () => {
+  const { keepAttachments, keptAttachments, forgetDraft, retryDraftRemovals, pendingAttachmentRemovals } = await import('../../ui/unsent.ts');
+  const key = 'check-removal-scope';
+  const remove = Storage.prototype.removeItem;
+  const open = IDBFactory.prototype.open;
+  const before = dirtyCount();
+  try {
+    ok(await keepAttachments(key, { images: [], files: [{ name: 'private.dat', base64: 'AAE=' }], inlined: [] }));
+    keep(key, 'newer words typed after sending');
+    IDBFactory.prototype.open = () => { throw new Error('storage unavailable'); };
+    equal(await keepAttachments(key, { images: [], files: [], inlined: [] }), false);
+    equal(localStorage.getItem('faber.unsent-attachments.' + key), 'remove');
+    ok(pendingAttachmentRemovals().includes(key));
+    equal(await keptAttachments(key), undefined, 'a deletion intent never exposes the stale bytes');
+    IDBFactory.prototype.open = open;
+    ok(await retryDraftRemovals());
+    equal(kept(key), 'newer words typed after sending', 'retrying Send or Remove attachments never discards a later text draft');
+    Storage.prototype.removeItem = function (storedKey) {
+      if (storedKey === 'faber.unsent.' + key) throw new Error('text deletion denied');
+      remove.call(this, storedKey);
+    };
+    equal(await forgetDraft(key), false, 'full discard cannot claim success while old private text remains on disk');
+    equal(localStorage.getItem('faber.unsent-attachments.' + key), 'forget', 'full discard has a distinct durable scope');
+    equal(kept(key), '', 'the failed text deletion is hidden by its in-memory tombstone');
+    release(key);
+    ok(dirtyCount() > before, 'unmount must not release failed text or attachment deletion');
+    Storage.prototype.removeItem = remove;
+    ok(await retryDraftRemovals());
+    equal(localStorage.getItem('faber.unsent.' + key), null);
+    equal(localStorage.getItem('faber.unsent-attachments.' + key), null);
+    equal(dirtyCount(), before);
+  } finally {
+    Storage.prototype.removeItem = remove;
+    IDBFactory.prototype.open = open;
+    await forgetDraft(key);
   }
 });

@@ -68,6 +68,7 @@ img, svg, a { -webkit-user-drag: none; }
 
 .toast { position: fixed; top: 44px; right: 16px; z-index: 20; display: flex; align-items: center; gap: 10px; max-width: min(480px, calc(100vw - 32px)); padding: 8px 8px 8px 16px; border-radius: var(--r-md); background: var(--s3); color: var(--ink); box-shadow: inset 3px 0 0 var(--danger), var(--lift-shadow); animation: arrive var(--dur-arrive) var(--ease) both; }
 .toast button { flex: none; width: var(--h-sm); height: var(--h-sm); border-radius: var(--r-xs); color: var(--ink-2); }
+.toast .toast-retry { width: auto; padding-inline: 8px; }
 .toast button:hover { background: var(--s2); color: var(--ink); }
 
 /* Sidebar and the shell around the stage. An open running column sits beside the stage (.docked) whenever the stage keeps 440 px
@@ -1018,6 +1019,8 @@ textarea.field { height: auto; max-width: none; padding: 8px 10px; resize: verti
 .hint { margin: 0; font-size: var(--fs-xs); color: var(--ink-3); line-height: 1.45; }
 .hint button { color: var(--ink-2); text-decoration: underline; text-underline-offset: 2px; }
 .hint button:hover { color: var(--ink); }
+.composer > .hint { padding: 12px 18px 0; }
+.composer > .hint button { margin-inline-start: .35em; }
 .dots { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
 .dot { position: relative; flex: none; width: var(--h-sm); height: var(--h-sm); border-radius: var(--r-pill); background: var(--c); box-shadow: inset 0 0 0 1px var(--line-3); }
 .dot[aria-pressed='true']::after { content: ''; position: absolute; inset: -4px; border-radius: var(--r-pill); box-shadow: 0 0 0 1.5px var(--ink); }

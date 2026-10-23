@@ -2,7 +2,8 @@ import { createComponent } from 'solid-js';
 import { render } from 'solid-js/web';
 import { App } from '../../ui/App.tsx';
 import { api, type Aside, type AppEvent, type AppState, type Conversation, type Message } from '../../ui/api.ts';
-import { btw } from '../../ui/QuickQuestion.tsx';
+import { btw, QuickQuestion } from '../../ui/QuickQuestion.tsx';
+import { forgetDraft, kept } from '../../ui/unsent.ts';
 import { t } from '../../ui/i18n.ts';
 import { check, deepEqual, equal, ok } from './check.ts';
 
@@ -18,6 +19,40 @@ const look = {
   vars: {}, scheme: 'dark', motion: 'none', checks: [], notices: [], effects: { ambient: false, texture: false, glow: false },
   appearance: { base: 'sala', ground: 'sala', accent: '#ffffff', textFont: 'archivo', headingFont: 'narrow', textSize: 14, density: 1, corners: 1, motion: 'none', effects: { ambient: false, texture: false, glow: false } },
 };
+
+check('side chat: a late failed request cannot restore a draft after its conversation was deleted', async () => {
+  const settle = () => new Promise((resolve) => setTimeout(resolve, 30));
+  const host = document.createElement('div');
+  document.body.append(host);
+  const conversation: Conversation = { id: 'check-deleted-aside', title: 'Deleted conversation', area: 'chat', sessions: {}, createdAt: 1, updatedAt: 1,
+    messages: [{ id: 'answer', role: 'assistant', text: 'An answer', vendor: 'claude', status: 'done', at: 1 }],
+  };
+  const key = `aside.${conversation.id}`;
+  const before = { askAside: api.askAside, asides: api.asides };
+  let reject = (_error: Error) => {};
+  let asked = false;
+  api.asides = async () => [];
+  api.askAside = () => new Promise((_resolve, fail) => { asked = true; reject = fail; });
+  const dispose = render(() => createComponent(QuickQuestion, { conversation, options: [], onClose: () => {}, onTell: () => {} }), host);
+  try {
+    await settle();
+    const field = host.querySelector<HTMLTextAreaElement>('#aside-box')!;
+    field.value = 'Private side question';
+    field.dispatchEvent(new InputEvent('input', { bubbles: true }));
+    field.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true }));
+    await settle();
+    ok(asked);
+    ok(await forgetDraft(key));
+    dispose();
+    reject(new Error('request ended after deletion'));
+    await settle();
+    equal(kept(key), '', 'the old request cannot recreate explicitly deleted private words');
+  } finally {
+    dispose(); host.remove();
+    Object.assign(api, before);
+    await forgetDraft(key);
+  }
+});
 
 for (const entry of ['button', 'menu', 'send'] as const) {
   check(`recap: ${entry} answers on the side of an idle conversation and leaves its thread alone`, async () => {

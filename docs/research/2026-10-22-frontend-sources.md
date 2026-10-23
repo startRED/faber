@@ -8,6 +8,7 @@ of measured app behavior. Source access date: 2026-10-22. No third-party skill b
 | Source | Useful finding | Application and limit |
 | :--- | :--- | :--- |
 | [WCAG 2.2](https://www.w3.org/TR/WCAG22/) | Accessibility has testable criteria, not just visual taste. | Check keyboard, focus, names, contrast, reflow and status. A scan alone cannot certify conformance. |
+| [W3C IndexedDB 3 draft, transaction durability](https://www.w3.org/TR/IndexedDB-3/#transaction-durability-hint) | A transaction's default durability follows the browser; strict requests stronger persistence before completion, with an I/O and power tradeoff. | Draft attachments are not a reconstructible cache. Distinguish a committed app-restart proof from an OS-crash or power-loss guarantee; the durability option remains a browser hint. |
 | [WAI APG keyboard](https://www.w3.org/WAI/ARIA/apg/practices/keyboard-interface/) | Composite widgets need a predictable keyboard model. | Use native controls or the relevant complete pattern; a role attribute is insufficient. APG is informative guidance. |
 | [WCAG target size](https://www.w3.org/WAI/WCAG22/Understanding/target-size-minimum.html) | AA uses a 24 CSS px minimum with specified exceptions. | Treat as a floor. Important touch controls may need more space. Do not claim every icon must be 44 px under AA. |
 | [Microsoft Fluent layout](https://fluent2.microsoft.design/layout) | Proximity and spacing convey relationship and importance. | Group and align before adding cards/dividers. Its spacing ramp is an example, not a replacement for Faber's tokens. |
@@ -40,7 +41,8 @@ was read. The research intentionally favors original standards and author guidan
 
 ## Practical evaluation fixtures
 
-These are acceptance scenarios for future paired runs, not executed model evaluations. Keep model version,
+These are acceptance scenarios. The first [exploratory bakery pair](2026-10-22-frontend-evaluation.md) has now run;
+the other fixtures remain unexecuted. Keep model version,
 instruction set, task, assets, hardware and runtime build recorded. An independent reviewer sees anonymized results.
 
 | Scenario | What the reviewer must look for |
@@ -53,5 +55,5 @@ instruction set, task, assets, hardware and runtime build recorded. An independe
 | Backend-only change, or a video request | Does not load or impose the frontend workflow unnecessarily |
 
 Record task success and concrete visual findings separately. Program proofs cannot judge taste, and taste votes do
-not demonstrate durability, accessibility or resource use. Do not claim the new skills beat the baseline before
-these paired runs exist.
+not demonstrate durability, accessibility or resource use. The first pair tied on the independent visual rubric;
+its unequal skill consultation and single sample per condition do not establish a causal improvement.

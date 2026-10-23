@@ -49,6 +49,9 @@ The delivery checks live inside `engine/src/guide.rs` and `engine/src/engine/kit
 discovery, both vendors and areas, isolated requests, guarded modes, unchanged/resumed sessions and directory safety.
 The existing guide checks still cover its words and screen language. These checks establish delivery, not a measured
 improvement in generated design quality. That needs paired task runs and independent visual judgment.
+The first [exploratory pair](../research/2026-10-22-frontend-evaluation.md) tied at 17/20 in a blind review, with
+different strengths. It does not establish a causal gain: only one sample per condition was built, the exact model
+variant was not exposed, and consultation of the existing art-direction skill differed.
 
 The [source study](../research/2026-10-22-frontend-sources.md) distinguishes standards from practitioner advice and
 proposed measurements. The [243-item audit](../research/2026-10-22-frontend-blueprint-audit.md) records static evidence

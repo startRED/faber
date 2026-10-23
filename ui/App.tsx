@@ -28,7 +28,7 @@ import {
 import { inOrder, refreshed, saveAndApply, watchSystem, windowHidden } from './appearance.ts';
 import { useClock } from './clock.ts';
 import { Composer, type Draft } from './Composer.tsx';
-import { queuedDrafts, recoverQueuedDraft } from './unsent.ts';
+import { forgetDraft, queuedDrafts, recoverQueuedDraft, retryDraftRemovals } from './unsent.ts';
 import { ContextMeter } from './Context.tsx';
 import { heardParts } from './context.ts';
 import { Empty } from './Empty.tsx';
@@ -218,6 +218,7 @@ export function App(props: { initial: AppState; update?: UpdateStatus; inbox: { 
   const [error, setError] = createSignal<string>();
   // The text of the last refused or failed save of settings; the page stays as it was.
   const [saveError, setSaveError] = createSignal<string>();
+  const [retryingDraftRemoval, setRetryingDraftRemoval] = createSignal(false);
   const [settingsOpen, setSettingsOpen] = createSignal(false);
   const [catalogOpen, setCatalogOpen] = createSignal(false);
   createEffect(on(catalogOpen, (open) => remember('faber.place', { ...place(), catalog: open || undefined }), { defer: true }));
@@ -1106,6 +1107,17 @@ export function App(props: { initial: AppState; update?: UpdateStatus; inbox: { 
     closeSide(false);
     void fresh({ area: 'project', projectId: projects[0].id });
   };
+  const retryRemovedDrafts = async () => {
+    if (retryingDraftRemoval()) return;
+    setRetryingDraftRemoval(true);
+    try {
+      if (!await retryDraftRemovals()) setSaveError(t('composer.draftRemoveFailed'));
+      else if (saveError() === t('composer.draftRemoveFailed')) setSaveError(undefined);
+    } catch { setSaveError(t('composer.draftRemoveFailed')); }
+    finally { setRetryingDraftRemoval(false); }
+  };
+  onMount(() => void retryRemovedDrafts());
+
   /** Deletes a conversation; `'unsaved'` when its copy holds work found nowhere else and the person must say so first. */
   const remove = async (id: string, discard = false): Promise<'unsaved' | undefined> => {
     try {
@@ -1117,6 +1129,8 @@ export function App(props: { initial: AppState; update?: UpdateStatus; inbox: { 
     }
     try { localStorage.removeItem(`faber.choice.${id}`); } catch { /* Storage can be unavailable. */ }
     if (opening.id === id) void fresh(place());
+    const forgotten = await Promise.all([id, `aside.${id}`].map((key) => forgetDraft(key).catch(() => false)));
+    if (forgotten.some((ok) => !ok)) setSaveError(t('composer.draftRemoveFailed'));
   };
 
   const options = createMemo(() => (lang(), modelOptions(state().vendors, state().models)));
@@ -1390,6 +1404,9 @@ export function App(props: { initial: AppState; update?: UpdateStatus; inbox: { 
       <Show when={saveError()}>
         <div class="toast" role="alert">
           <span>{saveError()}</span>
+          <Show when={saveError() === t('composer.draftRemoveFailed')}>
+            <button type="button" class="toast-retry" disabled={retryingDraftRemoval()} onClick={() => void retryRemovedDrafts()}>{t('changes.retry')}</button>
+          </Show>
           <button type="button" aria-label={t('toast.dismiss')} onClick={() => setSaveError(undefined)}>
             <Icon name="close" small />
           </button>

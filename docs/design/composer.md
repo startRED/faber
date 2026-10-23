@@ -7,6 +7,30 @@ The attachment picker copies its selected files and immediately clears the nativ
 the same one again therefore follows the ordinary attachment path in both areas, with no new UI or persistence rule
 (`tests/ui/composer.check.ts`: `composer: removing a picked file allows picking the same file again`).
 
+## Unsent attachments
+
+The same draft key keeps text and attachments. Text retains its synchronous small browser-storage write; image and
+file bytes use IndexedDB Blobs, with names and inline-text removal metadata. Typing does not rewrite attachment bytes.
+Only a draft with a saved marker or a pending write opens that store. No resident service or polling is added.
+
+Restoring bytes can be slower than restoring text. The person may type while they load; sending waits until the saved
+attachments are known, and hydration preserves the newer words. A load failure leaves the record intact and offers
+the existing Remove attachments action for explicit discard. A save failure retains the in-memory draft, keeps the
+update-restart protection through navigation, and offers Try again beside the field. These warnings use the existing
+quiet hint line, are associated with the textarea and announced as status; no modal, setting or motion is added.
+When the person edited away an inline file's text, recovery deletes its obsolete removal metadata as well. That
+cleanup preserves unrelated file reads still in flight; an explicit send, discard or conversation deletion cancels them.
+
+A successful save means the storage transaction completed; writes request the browser's strict durability hint.
+This is not a power-loss guarantee. A pending or failed write is not promised to survive a crash, and this draft store
+does not close the later send/engine-acknowledgement gap. The outgoing-intent work remains separate. Component restoration
+and storage-failure checks live in `tests/ui/composer.check.ts` and `tests/ui/unsent.check.ts`; the native restart scenario
+lives in `testkit/src/screen/draft_attachments.rs`.
+
+Removal has a durable intent too: removing attachments preserves newer typed words, while a confirmed conversation
+deletion clears its main and side drafts. An engine refusal leaves both intact. An interrupted removal is retried on
+the next opening; a failure uses the existing save-error toast and its Try again action. No retry loop or new screen.
+
 ## Completion list and earlier messages
 
 - `@` in a conversation with a working folder lists matching files and folders over the box, on the context menu's

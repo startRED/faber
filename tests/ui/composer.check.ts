@@ -223,3 +223,303 @@ check('composer: a rejected message comes back with its pictures, files and text
     root.remove();
   }
 });
+
+check('composer: unsent attachments survive remount with names bytes and removable inline text', async () => {
+  const key = 'check-durable-attachments';
+  const settle = () => new Promise((resolve) => setTimeout(resolve, 20));
+  let sent: Draft | undefined;
+  const open = () => {
+    const root = document.createElement('div');
+    root.dataset.motion = 'none';
+    document.body.append(root);
+    const dispose = render(() => createComponent(Composer, {
+      draftKey: key, vendors: ['codex'], options: [], choice: { vendor: 'auto' }, busy: false, placeholder: 'Ask',
+      onChoice: () => {}, onStop: () => {}, onWarm: () => {}, onPause: () => {}, onSend: (draft) => { sent = draft; },
+    }), root);
+    return { root, close: () => { dispose(); root.remove(); } };
+  };
+  const waitFor = async (root: HTMLElement, n: number) => {
+    for (const start = Date.now(); root.querySelectorAll('.thumb').length !== n && Date.now() - start < 3000;) await settle();
+    equal(root.querySelectorAll('.thumb').length, n, 'all attachments are restored');
+  };
+  let current = open();
+  try {
+    const transfer = new DataTransfer();
+    transfer.items.add(new File([Uint8Array.from(atob(PNG), (c) => c.charCodeAt(0))], 'durable.png', { type: 'image/png' }));
+    transfer.items.add(new File(['%PDF-1.4'], 'durable.pdf', { type: 'application/pdf' }));
+    transfer.items.add(new File(['durable note'], 'durable.txt', { type: 'text/plain' }));
+    current.root.querySelector('form')!.dispatchEvent(new DragEvent('drop', { dataTransfer: transfer, bubbles: true, cancelable: true }));
+    await waitFor(current.root, 3);
+    current.close();
+    current = open();
+    await waitFor(current.root, 3);
+    equal([...current.root.querySelectorAll('.thumb')].map((el) => el.querySelector('img')?.alt ?? el.querySelector('b')!.textContent).join(), 'durable.png,durable.pdf,durable.txt');
+    current.root.querySelector<HTMLButtonElement>(`.thumb-x[aria-label="${t('composer.removeOne', { name: 'durable.txt' })}"]`)!.click();
+    ok(!current.root.querySelector('textarea')!.value.includes('durable note'), 'restored text file retains its removal block');
+    current.root.querySelector('form')!.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
+    equal(sent?.images[0]?.base64, PNG, 'image bytes are intact');
+    equal(sent?.files[0]?.base64, 'JVBERi0xLjQ=', 'binary bytes are intact');
+    current.close();
+    current = open();
+    await settle();
+    equal(current.root.querySelectorAll('.thumb').length, 0, 'sending never restores old attachments');
+  } finally {
+    current.close();
+    localStorage.removeItem('faber.unsent.' + key);
+  }
+});
+
+check('composer: a text only draft still sends when IndexedDB is unavailable', async () => {
+  const root = document.createElement('div');
+  document.body.append(root);
+  const open = IDBFactory.prototype.open;
+  let sent = '';
+  let fill!: (text: string) => void;
+  let dispose = () => {};
+  try {
+    IDBFactory.prototype.open = () => { throw new Error('storage unavailable'); };
+    dispose = render(() => createComponent(Composer, {
+      draftKey: 'check-no-attachment-storage', vendors: ['codex'], options: [], choice: { vendor: 'auto' }, busy: false, placeholder: 'Ask',
+      onChoice: () => {}, onStop: () => {}, onWarm: () => {}, onPause: () => {},
+      onSend: (draft) => { sent = draft.text; }, onReady: (ready) => { fill = ready; },
+    }), root);
+    fill('text is independent of binary storage');
+    root.querySelector('form')!.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
+    equal(sent, 'text is independent of binary storage');
+  } finally {
+    IDBFactory.prototype.open = open;
+    dispose(); root.remove();
+    localStorage.removeItem('faber.unsent.check-no-attachment-storage');
+  }
+});
+
+check('composer: slow attachment restoration preserves new typing and typing never rewrites bytes', async () => {
+  const { keep, keepAttachments, forgetDraft } = await import('../../ui/unsent.ts');
+  const key = 'check-slow-attachment-load';
+  let restore!: (draft: Draft) => boolean;
+  const root = document.createElement('div');
+  document.body.append(root);
+  const read = FileReader.prototype.readAsDataURL;
+  const open = IDBFactory.prototype.open;
+  const reads: (() => void)[] = [];
+  let opens = 0;
+  let dispose = () => {};
+  const settle = () => new Promise((resolve) => setTimeout(resolve, 20));
+  try {
+    keep(key, '');
+    ok(await keepAttachments(key, { images: [{ name: 'slow.png', mediaType: 'image/png', base64: PNG }], files: [], inlined: [] }));
+    FileReader.prototype.readAsDataURL = function (blob) { reads.push(() => read.call(this, blob)); };
+    IDBFactory.prototype.open = function (...args: Parameters<IDBFactory['open']>) { opens++; return open.apply(this, args); };
+    dispose = render(() => createComponent(Composer, {
+      draftKey: key, vendors: ['codex'], options: [], choice: { vendor: 'auto' }, busy: false, placeholder: 'Ask',
+      onChoice: () => {}, onStop: () => {}, onWarm: () => {}, onPause: () => {}, onSend: () => {}, onRestore: (put) => { restore = put; },
+    }), root);
+    for (const start = Date.now(); !reads.length && Date.now() - start < 3000;) await settle();
+    ok(reads.length, 'the stored image read is held in flight');
+    equal(restore({ text: '', images: [{ mediaType: 'image/png', base64: PNG }], files: [] }), false, 'an image-only saved draft is not empty while its bytes load');
+    const field = root.querySelector('textarea')!;
+    field.value = 'new words typed during recovery';
+    field.dispatchEvent(new Event('input', { bubbles: true }));
+    reads.splice(0).forEach((resume) => resume());
+    for (const start = Date.now(); !root.querySelector('.thumb') && Date.now() - start < 3000;) await settle();
+    equal(root.querySelector('img')?.alt, 'slow.png');
+    equal(field.value, 'new words typed during recovery');
+    const before = opens;
+    for (let i = 0; i < 10; i++) {
+      field.value += 'x';
+      field.dispatchEvent(new Event('input', { bubbles: true }));
+    }
+    await settle();
+    equal(opens, before, 'typing stores text only, with no IndexedDB reads or writes');
+  } finally {
+    FileReader.prototype.readAsDataURL = read;
+    IDBFactory.prototype.open = open;
+    reads.splice(0).forEach((resume) => resume());
+    dispose(); root.remove();
+    await forgetDraft(key);
+  }
+});
+
+check('composer: a failed attachment load preserves its saved record and offers explicit discard', async () => {
+  const { keep, keepAttachments, keptAttachments, forgetDraft } = await import('../../ui/unsent.ts');
+  const key = 'check-failed-attachment-load';
+  const root = document.createElement('div');
+  document.body.append(root);
+  const open = IDBFactory.prototype.open;
+  let dispose = () => {};
+  let sent = false;
+  try {
+    keep(key, 'keep my words');
+    ok(await keepAttachments(key, { images: [], files: [{ name: 'stored.dat', base64: 'AAE=' }], inlined: [] }));
+    IDBFactory.prototype.open = () => { throw new Error('storage unavailable'); };
+    dispose = render(() => createComponent(Composer, {
+      draftKey: key, vendors: ['codex'], options: [], choice: { vendor: 'auto' }, busy: false, placeholder: 'Ask',
+      onChoice: () => {}, onStop: () => {}, onWarm: () => {}, onPause: () => {}, onSend: () => { sent = true; },
+    }), root);
+    await new Promise((resolve) => setTimeout(resolve, 30));
+    ok(root.textContent?.includes(t('composer.draftLoadFailed')), 'the failed read is announced beside the field');
+    root.querySelector('form')!.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
+    equal(sent, false, 'sending cannot silently discard unread attachments');
+    IDBFactory.prototype.open = open;
+    equal((await keptAttachments(key))?.files[0]?.name, 'stored.dat', 'a failed load never writes an empty replacement');
+    root.querySelector<HTMLButtonElement>('.hint button')!.click();
+    equal(root.querySelector('textarea')!.value, 'keep my words');
+    ok(await forgetDraft(key));
+    equal(await keptAttachments(key), undefined, 'only the explicit discard removes the saved attachments');
+  } finally {
+    IDBFactory.prototype.open = open;
+    dispose(); root.remove();
+    await forgetDraft(key);
+  }
+});
+
+check('composer: late file reads after remount preserve both additions and update the current box', async () => {
+  const { forgetDraft, keptAttachments } = await import('../../ui/unsent.ts');
+  const key = 'check-late-two-attachments';
+  const read = FileReader.prototype.readAsDataURL;
+  const reads: (() => void)[] = [];
+  const settle = () => new Promise((resolve) => setTimeout(resolve, 20));
+  const open = () => {
+    const root = document.createElement('div');
+    root.dataset.motion = 'none'; document.body.append(root);
+    const dispose = render(() => createComponent(Composer, {
+      draftKey: key, vendors: ['codex'], options: [], choice: { vendor: 'auto' }, busy: false, placeholder: 'Ask',
+      onChoice: () => {}, onStop: () => {}, onWarm: () => {}, onPause: () => {}, onSend: () => {},
+    }), root);
+    return { root, close: () => { dispose(); root.remove(); } };
+  };
+  let current = open();
+  try {
+    FileReader.prototype.readAsDataURL = function (blob) {
+      const result = (blob as File).name === 'late.png' ? 'data:image/png;base64,' + PNG : 'data:application/pdf;base64,JVBERi0xLjQ=';
+      reads.push(() => {
+        Object.defineProperty(this, 'result', { value: result, configurable: true });
+        this.onload?.call(this, new ProgressEvent('load') as ProgressEvent<FileReader>);
+      });
+    };
+    for (const file of [new File(['image'], 'late.png', { type: 'image/png' }), new File(['pdf'], 'late.pdf', { type: 'application/pdf' })]) {
+      const transfer = new DataTransfer(); transfer.items.add(file);
+      current.root.querySelector('form')!.dispatchEvent(new DragEvent('drop', { dataTransfer: transfer, bubbles: true, cancelable: true }));
+    }
+    for (const start = Date.now(); reads.length !== 2 && Date.now() - start < 3000;) await settle();
+    equal(reads.length, 2, 'both selected files are still reading');
+    current.close();
+    current = open();
+    const field = current.root.querySelector('textarea')!;
+    field.value = 'words typed after returning';
+    field.dispatchEvent(new Event('input', { bubbles: true }));
+    FileReader.prototype.readAsDataURL = read;
+    reads.splice(0).forEach((resume) => resume());
+    for (const start = Date.now(); current.root.querySelectorAll('.thumb').length !== 2 && Date.now() - start < 3000;) await settle();
+    const stored = await keptAttachments(key);
+    equal((stored?.images.length ?? 0) + (stored?.files.length ?? 0), 2, 'two late read-modify-writes cannot overwrite one another');
+    equal(current.root.querySelectorAll('.thumb').length, 2, 'the current composer sees attachments saved by its old instance');
+    equal(field.value, 'words typed after returning');
+    field.value += ' plus another word';
+    field.dispatchEvent(new Event('input', { bubbles: true }));
+    await settle();
+    equal(current.root.querySelectorAll('.thumb').length, 2, 'later typing cannot erase an invisible attachment');
+  } finally {
+    FileReader.prototype.readAsDataURL = read;
+    reads.splice(0).forEach((resume) => resume());
+    current.close(); await forgetDraft(key);
+  }
+});
+
+check('composer: sending after remount cancels a file still being read by the old box', async () => {
+  const { forgetDraft, keptAttachments } = await import('../../ui/unsent.ts');
+  const key = 'check-send-before-old-file';
+  const read = FileReader.prototype.readAsDataURL;
+  let resume: (() => void) | undefined;
+  let sent = '';
+  const open = () => {
+    const root = document.createElement('div'); document.body.append(root);
+    const dispose = render(() => createComponent(Composer, {
+      draftKey: key, vendors: ['codex'], options: [], choice: { vendor: 'auto' }, busy: false, placeholder: 'Ask',
+      onChoice: () => {}, onStop: () => {}, onWarm: () => {}, onPause: () => {}, onSend: (draft) => { sent = draft.text; },
+    }), root);
+    return { root, close: () => { dispose(); root.remove(); } };
+  };
+  let current = open();
+  try {
+    FileReader.prototype.readAsDataURL = function () {
+      resume = () => {
+        Object.defineProperty(this, 'result', { value: 'data:application/pdf;base64,JVBERi0xLjQ=', configurable: true });
+        this.onload?.call(this, new ProgressEvent('load') as ProgressEvent<FileReader>);
+      };
+    };
+    const transfer = new DataTransfer(); transfer.items.add(new File(['pdf'], 'late.pdf', { type: 'application/pdf' }));
+    current.root.querySelector('form')!.dispatchEvent(new DragEvent('drop', { dataTransfer: transfer, bubbles: true, cancelable: true }));
+    for (const start = Date.now(); !resume && Date.now() - start < 3000;) await new Promise((resolve) => setTimeout(resolve, 20));
+    ok(resume, 'the file read is pending');
+    current.close(); current = open();
+    const field = current.root.querySelector('textarea')!;
+    field.value = 'send these words'; field.dispatchEvent(new Event('input', { bubbles: true }));
+    current.root.querySelector('form')!.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
+    equal(sent, 'send these words');
+    FileReader.prototype.readAsDataURL = read;
+    resume(); resume = undefined;
+    await new Promise((resolve) => setTimeout(resolve, 30));
+    equal(await keptAttachments(key), undefined, 'the previous box cannot restore a file after the new one sent');
+    equal(current.root.querySelectorAll('.thumb').length, 0);
+    equal(field.value, '');
+  } finally {
+    FileReader.prototype.readAsDataURL = read;
+    resume?.(); current.close(); await forgetDraft(key);
+  }
+});
+
+check('composer: cleaning edited inline metadata on reopen preserves a newly selected file still being read', async () => {
+  const { keep, keepAttachments, keptAttachments, forgetDraft } = await import('../../ui/unsent.ts');
+  const key = 'check-inline-cleanup-pending-file';
+  const read = FileReader.prototype.readAsDataURL;
+  const settle = () => new Promise((resolve) => setTimeout(resolve, 20));
+  let resume: (() => void) | undefined;
+  const open = () => {
+    const root = document.createElement('div'); root.dataset.motion = 'none'; document.body.append(root);
+    const dispose = render(() => createComponent(Composer, {
+      draftKey: key, vendors: ['codex'], options: [], choice: { vendor: 'auto' }, busy: false, placeholder: 'Ask',
+      onChoice: () => {}, onStop: () => {}, onWarm: () => {}, onPause: () => {}, onSend: () => {},
+    }), root);
+    return { root, close: () => { dispose(); root.remove(); } };
+  };
+  let current: ReturnType<typeof open> | undefined;
+  try {
+    const block = '\n\nprivate contents of the old text file';
+    keep(key, 'Original words' + block);
+    ok(await keepAttachments(key, { images: [], files: [], inlined: [{ name: 'old.txt', block }] }));
+    current = open();
+    for (const start = Date.now(); !current.root.querySelector('.thumb') && Date.now() - start < 3000;) await settle();
+    equal(current.root.querySelector('.thumb b')?.textContent, 'old.txt', 'the original inline file has loaded');
+    FileReader.prototype.readAsDataURL = function () {
+      resume = () => {
+        Object.defineProperty(this, 'result', { value: 'data:application/pdf;base64,JVBERi0xLjQ=', configurable: true });
+        this.onload?.call(this, new ProgressEvent('load') as ProgressEvent<FileReader>);
+      };
+    };
+    const transfer = new DataTransfer(); transfer.items.add(new File(['%PDF-1.4'], 'new.pdf', { type: 'application/pdf' }));
+    current.root.querySelector('form')!.dispatchEvent(new DragEvent('drop', { dataTransfer: transfer, bubbles: true, cancelable: true }));
+    for (const start = Date.now(); !resume && Date.now() - start < 3000;) await settle();
+    ok(resume, 'the newly selected binary file is still being read');
+    const field = current.root.querySelector('textarea')!;
+    field.value = 'Edited words without the old private file';
+    field.dispatchEvent(new Event('input', { bubbles: true }));
+    current.close(); current = open();
+    // Reopening prunes the obsolete metadata and commits its deletion while the new file's reader is held.
+    for (const start = Date.now(); localStorage.getItem('faber.unsent-attachments.' + key) !== null && Date.now() - start < 3000;) await settle();
+    equal(localStorage.getItem('faber.unsent-attachments.' + key), null, 'the obsolete metadata was durably removed');
+    equal(current.root.querySelectorAll('.thumb').length, 0);
+    FileReader.prototype.readAsDataURL = read;
+    resume(); resume = undefined;
+    for (const start = Date.now(); !current.root.querySelector('.thumb') && Date.now() - start < 3000;) await settle();
+    equal(current.root.querySelector('.thumb b')?.textContent, 'new.pdf', 'cleanup must not cancel the separate file selected before navigation');
+    const saved = await keptAttachments(key);
+    equal(saved?.files[0]?.name, 'new.pdf');
+    equal(saved?.files[0]?.base64, 'JVBERi0xLjQ=', 'the new binary bytes are retained');
+    equal(saved?.inlined.length, 0, 'the obsolete private metadata stays removed');
+    equal(current.root.querySelector('textarea')!.value, 'Edited words without the old private file');
+  } finally {
+    FileReader.prototype.readAsDataURL = read;
+    resume?.(); current?.close(); await forgetDraft(key);
+  }
+});

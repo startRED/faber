@@ -1,5 +1,5 @@
 import { readAs } from './attachments.ts';
-import { createEffect, createMemo, createSignal, For, on, onCleanup, onMount, Show } from 'solid-js';
+import { batch, createEffect, createMemo, createSignal, createUniqueId, For, on, onCleanup, onMount, Show } from 'solid-js';
 import { DEFAULT_EFFORT, type Choice, type Command, type Effort, type Mention, PERMISSION_MODES, type PermissionMode, type Vendor } from './api.ts';
 import { Ghost } from './Ghost.tsx';
 import { Icon } from './Glyphs.tsx';
@@ -8,7 +8,7 @@ import { type Option, vendorName } from './models.ts';
 import { caretOnFirstLine, resizeComposer } from './composer-size.ts';
 import { animateList, keepForExit } from './motion.ts';
 import { Thumb } from './Thumbs.tsx';
-import { keep, kept, release, useDraft } from './unsent.ts';
+import { appendAttachments, attachmentDiscardVersion, attachmentSaveFailed, hasKeptAttachments, keep, keepAttachments, kept, keptAttachments, release, retainAttachments, setDirty, useDraft, watchAttachments, type DraftAttachments } from './unsent.ts';
 import { pressed } from './keys.ts';
 
 export interface Draft {
@@ -156,6 +156,83 @@ export function PermissionChip(props: { mode: PermissionMode; onMode: (mode: Per
 export function Composer(props: Props) {
   const [draft, setDraft] = createSignal<Draft>({ ...EMPTY, text: props.draftKey ? kept(props.draftKey) : '' });
   const [inlined, setInlined] = createSignal<Inlined[]>([]);
+  const [attachmentsReady, setAttachmentsReady] = createSignal(true);
+  const [attachmentLoadFailed, setAttachmentLoadFailed] = createSignal(false);
+  const draftNoticeId = createUniqueId();
+  const attachmentError = () => attachmentLoadFailed() || !!(props.draftKey && attachmentSaveFailed(props.draftKey));
+  let alive = true;
+  const attachmentSource = {};
+  let activeKey = props.draftKey;
+  let attachmentTurn = 0;
+  let additions = 0;
+  let hydration: Promise<boolean> = Promise.resolve(true);
+  let savedImages = draft().images;
+  let savedFiles = draft().files;
+  let savedInline = inlined();
+  const attachmentSnapshot = (d: Draft, inline: Inlined[]): DraftAttachments => ({
+    images: d.images.map((image) => ({ ...image, name: called.get(image) })), files: d.files, inlined: inline,
+  });
+  const applyAttachments = (saved: DraftAttachments, text?: string) => {
+    const images = saved.images.map(({ name, mediaType, base64 }) => {
+      const image = { mediaType, base64 };
+      if (name) called.set(image, name);
+      return image;
+    });
+    const words = text ?? (historyMode() ? beforeHistory.text : draft().text);
+    const inline = saved.inlined.filter((item) => words.includes(item.block));
+    savedImages = images; savedFiles = saved.files; savedInline = inline;
+    batch(() => {
+      if (text !== undefined && historyMode()) leaveHistory(false);
+      setDraft((current) => ({ ...current, text: text ?? current.text, images, files: saved.files }));
+      setInlined(inline);
+      setAttachmentsReady(true);
+      setAttachmentLoadFailed(false);
+    });
+  };
+  createEffect(on(() => props.draftKey, (key, previous) => {
+    const turn = ++attachmentTurn;
+    activeKey = key;
+    setAttachmentsReady(false);
+    if (previous !== undefined) {
+      additions++;
+      setDraft({ ...EMPTY, text: key ? kept(key) : '' });
+      setInlined([]);
+    }
+    savedImages = draft().images; savedFiles = draft().files; savedInline = inlined();
+    setAttachmentLoadFailed(false);
+    if (key) onCleanup(watchAttachments(key, (value, change) => {
+      if (change.source === attachmentSource || !alive) return;
+      attachmentTurn++;
+      applyAttachments(value, change.text);
+      hydration = Promise.resolve(true);
+    }));
+    const needed = !!key && hasKeptAttachments(key);
+    setAttachmentsReady(!needed);
+    hydration = needed ? keptAttachments(key!).then((saved) => {
+      if (!alive || turn !== attachmentTurn) return true;
+      if (saved) {
+        applyAttachments(saved);
+        if (saved.inlined.length !== inlined().length) {
+          void keepAttachments(key!, attachmentSnapshot(draft(), inlined()), { source: attachmentSource, preserveReads: true });
+        }
+      }
+      savedImages = draft().images; savedFiles = draft().files; savedInline = inlined();
+      setAttachmentsReady(true);
+      return true;
+    }).catch(() => {
+      if (alive && turn === attachmentTurn) setAttachmentLoadFailed(true);
+      return false;
+    }) : Promise.resolve(true);
+  }));
+  // Array identity changes only on attachment edits: typing never serializes bytes or writes IndexedDB.
+  createEffect(() => {
+    const d = draft(); const inline = inlined();
+    if (!attachmentsReady() || !activeKey) return;
+    if (d.images === savedImages && d.files === savedFiles && inline === savedInline) return;
+    savedImages = d.images; savedFiles = d.files; savedInline = inline;
+    void keepAttachments(activeKey, attachmentSnapshot(d, inline), { source: attachmentSource });
+  });
+  onCleanup(() => { alive = false; field = undefined; fileInput = undefined; });
   const [focused, setFocused] = createSignal(false);
   const [historyMode, setHistoryMode] = createSignal<'browse' | 'search'>();
   const [historyError, setHistoryError] = createSignal(false);
@@ -209,7 +286,7 @@ export function Composer(props: Props) {
   });
   const selected = () => Math.max(0, props.options.findIndex((o) => o.choice.vendor === props.choice.vendor && o.choice.model === props.choice.model));
   const hasContent = () => draft().text.trim() !== '' || draft().images.length > 0 || draft().files.length > 0;
-  const canSend = () => !props.locked && !recalling() && historyMode() !== 'search' && hasContent() && props.vendors.length > 0;
+  const canSend = () => attachmentsReady() && !props.locked && !recalling() && historyMode() !== 'search' && hasContent() && props.vendors.length > 0;
   useDraft(hasContent);
   createEffect(() => props.draftKey && keep(props.draftKey, historyMode() ? beforeHistory.text : draft().text));
   onCleanup(() => props.draftKey && release(props.draftKey));
@@ -418,11 +495,11 @@ export function Composer(props: Props) {
     cancelHistoryRead();
     closeMentions();
     clearTimeout(pause);
+    additions++;
     const sending = draft();
     sentWith.set(sending, inlined());
     props.onSend(sending);
-    setDraft(EMPTY);
-    setInlined([]);
+    batch(() => { setDraft(EMPTY); setInlined([]); });
     warmed = false;
   };
   props.onReady?.((text) => {
@@ -432,32 +509,49 @@ export function Composer(props: Props) {
     field?.setSelectionRange(text.length, text.length);
   });
   props.onRestore?.((saved) => {
-    if (hasContent() || props.locked) return false;
-    editDraft(() => saved); setInlined(sentWith.get(saved) ?? []); warmed = false;
+    if (!attachmentsReady() || hasContent() || props.locked) return false;
+    batch(() => { editDraft(() => saved); setInlined(sentWith.get(saved) ?? []); }); warmed = false;
     field?.focus(); return true;
   });
   props.onClearRestored?.((saved) => {
     if (draft() !== saved) return false;
-    editDraft(() => EMPTY); setInlined([]); warmed = false; return true;
+    batch(() => { editDraft(() => EMPTY); setInlined([]); }); warmed = false; return true;
   });
   const add = async (list: Iterable<File>) => {
     const files = [...list];
     if (!files.length) return;
     // Escape or a late recall must not undo this edit while FileReader is still at work.
     if (historyMode()) leaveHistory(historyMode() === 'search');
-    const result = await attach(files, EMPTY);
-    let added = result.inlined;
-    editDraft((d) => {
-      const gap = d.text ? '\n\n' : '';
-      // The first small text file starts the added words, so the gap before them belongs to it: taking it away takes the gap too.
-      added = result.inlined.map((item, i) => (i === 0 ? { ...item, block: gap + item.block } : item));
-      return {
-        text: result.draft.text ? `${d.text}${gap}${result.draft.text}` : d.text,
-        images: [...d.images, ...result.draft.images],
-        files: [...d.files, ...result.draft.files],
-      };
-    });
-    setInlined((all) => [...all, ...added]);
+    const key = activeKey;
+    const generation = additions;
+    const discarded = key ? attachmentDiscardVersion(key) : 0;
+    const reading = {};
+    const releaseRead = key ? retainAttachments(key) : () => {};
+    setDirty(reading, true);
+    try {
+      if (!await hydration) return;
+      const result = await attach(files, EMPTY);
+      if (generation !== additions || (key && attachmentDiscardVersion(key) !== discarded)) return;
+      if (!alive || key !== activeKey) {
+        if (!key) return;
+        await appendAttachments(key, { ...attachmentSnapshot(result.draft, result.inlined), text: result.draft.text }, discarded);
+        return;
+      }
+      let added = result.inlined;
+      batch(() => {
+        editDraft((d) => {
+          const gap = d.text ? '\n\n' : '';
+          // The first small text file starts the added words, so the gap before them belongs to it: taking it away takes the gap too.
+          added = result.inlined.map((item, i) => (i === 0 ? { ...item, block: gap + item.block } : item));
+          return {
+            text: result.draft.text ? `${d.text}${gap}${result.draft.text}` : d.text,
+            images: [...d.images, ...result.draft.images],
+            files: [...d.files, ...result.draft.files],
+          };
+        });
+        setInlined((all) => [...all, ...added]);
+      });
+    } finally { releaseRead(); setDirty(reading, false); }
   };
   // The attachments, each its own. A memo per kind, so typing (which makes a new draft) never builds the thumbnails again.
   const images = createMemo(() => draft().images);
@@ -466,14 +560,15 @@ export function Composer(props: Props) {
   const shown = keepForExit(() => count() > 0);
   const dropImage = (image: Draft['images'][number]) => editDraft((d) => ({ ...d, images: d.images.filter((i) => i !== image) }));
   const dropFile = (file: Draft['files'][number]) => editDraft((d) => ({ ...d, files: d.files.filter((f) => f !== file) }));
-  const dropText = (item: Inlined) => {
+  const dropText = (item: Inlined) => batch(() => {
     setInlined((all) => all.filter((i) => i !== item));
     editDraft((d) => ({ ...d, text: d.text.replace(item.block, '') }));
-  };
-  const dropAll = () => {
+  });
+  const dropAll = () => batch(() => {
+    additions++;
     editDraft((d) => ({ ...d, images: [], files: [], text: inlined().reduce((text, i) => text.replace(i.block, ''), d.text) }));
     setInlined([]);
-  };
+  });
 
   // Stop with helpers at work says what it ends and offers to let them work; it closes by itself once they are done.
   const [stopping, setStopping] = createSignal(false);
@@ -486,6 +581,7 @@ export function Composer(props: Props) {
     <form
       class="composer"
       data-tour="composer"
+      aria-busy={!attachmentsReady() && !attachmentLoadFailed()}
       onSubmit={(e) => {
         e.preventDefault();
         send();
@@ -496,6 +592,21 @@ export function Composer(props: Props) {
         if (e.dataTransfer) void add(e.dataTransfer.files);
       }}
     >
+      <Show when={attachmentError()}>
+        <p class="hint" id={draftNoticeId} role="status">{t(attachmentLoadFailed() ? 'composer.draftLoadFailed' : 'composer.draftSaveFailed')}
+          <Show when={attachmentLoadFailed()}>
+            <button type="button" class="more" onClick={() => {
+              additions++;
+              setAttachmentLoadFailed(false);
+              setAttachmentsReady(true);
+              if (activeKey) void keepAttachments(activeKey, { images: [], files: [], inlined: [] }, { source: attachmentSource });
+            }}>{t('composer.removeAttachments')}</button>
+          </Show>
+          <Show when={!attachmentLoadFailed()}>
+            <button type="button" class="more" onClick={() => activeKey && void keepAttachments(activeKey, attachmentSnapshot(draft(), inlined()), { source: attachmentSource })}>{t('changes.retry')}</button>
+          </Show>
+        </p>
+      </Show>
       {/* The row opens and closes with its height, so the box never jumps when the first file lands or the last one goes. */}
       <Show when={shown()}>
         <div class="fold attachments" classList={{ open: count() > 0 }} inert={count() === 0}>
@@ -515,6 +626,7 @@ export function Composer(props: Props) {
       </Show>
       <textarea
         aria-label={t('composer.message')}
+        aria-describedby={attachmentError() ? draftNoticeId : undefined}
         rows={1}
         placeholder={historyMode() === 'search' ? t('composer.history') : props.placeholder}
         value={draft().text}

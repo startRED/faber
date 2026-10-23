@@ -6,6 +6,7 @@ pub mod approve_plan;
 pub mod chat_groups;
 #[cfg(windows)]
 pub mod containment;
+pub mod draft_attachments;
 pub mod first_run;
 pub mod homes;
 pub mod mcp_servers;
@@ -54,6 +55,7 @@ pub fn all() -> Vec<Scenario> {
         .chain(menus::scenarios())
         .chain(mcp_servers::scenarios())
         .chain(chat_groups::scenarios())
+        .chain(draft_attachments::scenarios())
         .chain(sentinel::scenarios());
     let all = all.chain(visual_network::scenarios());
     #[cfg(windows)]
@@ -103,6 +105,7 @@ impl Costs {
 /// "memory", "processor", "CPU", "MB", "budget", "frame", "focused", "quota" or "usage limits" and is not listed.
 pub const SOLO: &[(&str, &str)] = &[
     ("chat groups: ten knowledge files survive reopening within the memory budget", "processor, memory"),
+    ("draft attachments: committed bytes survive a real restart, removals stay gone, within the memory budget", "processor, memory"),
     ("with no CLI running, Faber stays within its memory budget", "memory"),
     ("with reduced motion on, the dust stays off and Faber stays within its memory budget", "memory"),
     (
