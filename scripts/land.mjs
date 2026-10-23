@@ -31,6 +31,14 @@ import { dirname, join, resolve } from 'node:path';
 
 const BASE = 'phase-1-base';
 
+/** Keep an empty-output proof failure diagnosable without copying its potentially large output. */
+export function localProofFailure(suite, error) {
+  const reason = Number.isInteger(error.status) ? `exit ${error.status}`
+    : error.signal ? `signal ${error.signal}`
+      : error.code ? `start error ${error.code}` : 'no exit status';
+  return `Local ${suite} proof failed (${reason}). Nothing was queued.`;
+}
+
 /**
  * The commit message of a landed pull request: its title and number, its body without the template's comments, and the
  * head it was squashed from. The land job moves the branch from that head only, so a later push stops the landing.
@@ -331,7 +339,8 @@ function check(commit, suites) {
       console.log(`Checking ${suite} on this PC before queueing (cargo t --suite ${suite})...`);
       try {
         execFileSync('cargo', ['t', '--suite', suite], { cwd: dir, env, stdio: 'inherit', windowsHide: true });
-      } catch {
+      } catch (error) {
+        console.error(localProofFailure(suite, error));
         return false;
       }
     }
