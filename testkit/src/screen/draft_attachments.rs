@@ -21,6 +21,10 @@ pub fn scenarios() -> Vec<Scenario> {
             run: restart,
         },
         Scenario { name: "draft attachments: edited inline file metadata is removed when the draft reopens", run: edited_inline },
+        Scenario {
+            name: "draft attachments: refused disk save preserves words and bytes, retry sends once within the memory budget",
+            run: refused_send,
+        },
     ]
 }
 
@@ -89,6 +93,132 @@ fn sent(ctx: &Ctx) -> Option<Value> {
         let value: Value = serde_json::from_slice(&std::fs::read(entry.path()).ok()?).ok()?;
         value["messages"].as_array()?.iter().any(|message| message["role"] == "user" && message["text"] == WORDS).then_some(value)
     })
+}
+
+fn refused_send(ctx: &mut Ctx) -> Result {
+    start_settings(ctx, "en")?;
+    let id = "5f1c0000-0000-4000-8000-0000000000ad";
+    let cwd = ctx.sb.data.join("chat").join(id);
+    let at = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_err(|e| e.to_string())?.as_millis() as u64;
+    let conversation = json!({
+        "id": id, "title": "Blocked send fixture", "area": "chat", "sessions": {"claude": "synthetic-admission-session"},
+        "createdAt": at, "updatedAt": at, "queued": [],
+        "messages": [
+            {"id": "previous-question", "role": "user", "text": "Previous synthetic question", "at": at},
+            {"id": "previous-answer", "role": "assistant", "text": "Previous synthetic answer", "at": at,
+             "vendor": "claude", "model": "claude-haiku-5-5", "status": "done"}
+        ]
+    });
+    let folder = ctx.sb.data.join("conversations");
+    std::fs::create_dir_all(&folder).map_err(|e| e.to_string())?;
+    let file = folder.join(format!("{id}.json"));
+    std::fs::write(&file, conversation.to_string()).map_err(|e| e.to_string())?;
+    let mut launch = claude_chat(ctx);
+    let source = std::fs::read_to_string(launch.recording.as_ref().ok_or("missing chat recording")?).map_err(|e| e.to_string())?;
+    let mut lines =
+        source.lines().map(serde_json::from_str::<Value>).collect::<std::result::Result<Vec<_>, _>>().map_err(|e| e.to_string())?;
+    // The refused attempt copies the PDF before admission; its retry keeps that orphan and chooses the next safe name.
+    let retry_pdf = PDF.replace(".pdf", "-1.pdf");
+    let prompt = format!("{WORDS}\n\nAttached files (in your working folder):\n- attachments/{retry_pdf}");
+    lines[0]["msg"]["message"]["content"] = json!([
+        {"type": "image", "source": {"type": "base64", "media_type": "image/png", "data": PNG}},
+        {"type": "text", "text": prompt}
+    ]);
+    let recording = ctx.sb.data.join("admission-chat.jsonl");
+    std::fs::write(&recording, lines.iter().map(Value::to_string).collect::<Vec<_>>().join("\n")).map_err(|e| e.to_string())?;
+    let setup = ctx.sb.data.join("admission.setup.json");
+    std::fs::write(&setup, json!({"vendor": "claude", "version": "2.1.296", "chat": "admission-chat.jsonl"}).to_string())
+        .map_err(|e| e.to_string())?;
+    std::fs::write(ctx.sb.state.join("claude.signed-in"), "synthetic fixture").map_err(|e| e.to_string())?;
+    launch.recording = Some(setup);
+    let mut app = ctx.launch(launch)?;
+    app.page.click(&css(".list .item").has_text("Blocked send fixture"))?;
+    app.page.wait_count(&css("article.ai"), 1)?;
+    let model = app.page.labelled("composer.model")?;
+    app.page.select_option(&model, "Claude Haiku")?;
+    let cpu_before = ctx.cpu_ms(app.id)?;
+    let started = Instant::now();
+    app.page.fill(&css(".composer textarea"), WORDS)?;
+    app.page.eval(&format!(r#"(() => {{
+        const transfer = new DataTransfer();
+        transfer.items.add(new File([Uint8Array.from(atob({png}), c => c.charCodeAt(0))], {image}, {{type: 'image/png'}}));
+        transfer.items.add(new File([{bytes}], {pdf}, {{type: 'application/pdf'}}));
+        document.querySelector('.composer').dispatchEvent(new DragEvent('drop', {{dataTransfer: transfer, bubbles: true, cancelable: true}}));
+        return true;
+    }})()"#, png=json!(PNG), image=json!(IMAGE), bytes=json!(PDF_BYTES), pdf=json!(PDF)))?;
+    app.page.wait_count(&css(".composer .attach-row .thumb"), 2)?;
+    let read = READ.replace("'new-chat-'", &json!(id).to_string());
+    app.page.wait_for(
+        "the fixture PNG and PDF bytes to commit",
+        &format!(
+            "(async () => {{ const d = await ({read}); return d.images?.[0]?.base64 === {} && d.files?.[0]?.base64 === {}; }})()",
+            json!(PNG),
+            json!(base64::engine::general_purpose::STANDARD.encode(PDF_BYTES))
+        ),
+    )?;
+    let draft = app.page.eval(&read)?;
+    eventually("the existing draft warmup", Duration::from_secs(10), || {
+        ctx.records().is_ok_and(|r| r.iter().any(|r| r.args.iter().any(|a| a == "--resume")))
+    })?;
+    let warm_commands = ctx.records()?;
+    let before = std::fs::read(&file).map_err(|e| e.to_string())?;
+    let (before_mb, webview) = ctx.memory_mb(app.id)?;
+    ensure(webview, || "the admission cost must include the WebView tree".into())?;
+    let blocked = folder.join(format!("{id}.json.tmp"));
+    std::fs::create_dir(&blocked).map_err(|e| e.to_string())?;
+    let send = app.page.named("button", "composer.send")?.exact();
+    app.page.wait_enabled(&send)?;
+    app.page.click(&send)?;
+    app.page.wait_visible(&css(".toast[role=alert]"))?;
+    app.page.wait_for("the refused send to restore its words and both attachments", &format!(
+        "document.querySelector('.composer textarea')?.value === {} && document.querySelectorAll('.composer .attach-row .thumb').length === 2", json!(WORDS)))?;
+    app.page.wait_for(
+        "the restored attachment bytes to commit",
+        &format!("(async () => {{ const actual = await ({read}); const expected = {draft}; return Object.entries(expected).every(([key, items]) => Array.isArray(actual[key]) && actual[key].length === items.length && items.every((item, index) => Object.entries(item).every(([field, value]) => actual[key][index][field] === value))); }})()"),
+    )?;
+    same(app.page.eval(&read)?, draft, "the refused send retains the exact committed draft names and bytes")?;
+    same(std::fs::read(&file).map_err(|e| e.to_string())?, before, "the refused turn changes no saved history")?;
+    same(app.page.count(&css("article.ai"))?, 1, "the refusal adds no answer")?;
+    same(app.page.count(&css(".mine"))?, 1, "the refusal adds no user turn")?;
+    same(app.page.count(&css(".toast[role=alert]"))?, 1, "the failed event and rejected command share one warning")?;
+    ctx.notes.push(format!(
+        "recorded CLI launches before refusal {}, after restoration {}; warmup is not human input evidence",
+        warm_commands.len(),
+        ctx.records()?.len()
+    ));
+    let refused_mb = ctx.memory_mb(app.id)?.0;
+    ctx.shot(&mut app, "send-admission-refused-draft")?;
+    // This fixture owns this exact empty directory; remove no cache, copied attachment or other sandbox path.
+    ensure(std::fs::read_dir(&blocked).map_err(|e| e.to_string())?.next().is_none(), || "the admission blocker must remain empty".into())?;
+    std::fs::remove_dir(&blocked).map_err(|e| e.to_string())?;
+    app.page.click(&css(".toast button"))?;
+    app.page.wait_enabled(&send)?;
+    app.page.click(&send)?;
+    app.page.wait_for("the recorded answer after retry", "document.querySelectorAll('article.ai .actions').length === 2")?;
+    let saved: Value = serde_json::from_slice(&std::fs::read(&file).map_err(|e| e.to_string())?).map_err(|e| e.to_string())?;
+    let messages = saved["messages"].as_array().ok_or("missing saved messages")?;
+    same(messages.len(), 4, "retry saves exactly one new user turn and reply")?;
+    same(messages[2]["text"].clone(), json!(WORDS), "retry sends the original words")?;
+    same(messages[2]["images"].clone(), json!([{"mediaType": "image/png", "base64": PNG}]), "retry sends the exact PNG bytes")?;
+    same(messages[2]["attachments"].clone(), json!([retry_pdf]), "retry names the retained PDF copy once")?;
+    same(
+        std::fs::read(cwd.join("attachments").join(&retry_pdf)).map_err(|e| e.to_string())?,
+        PDF_BYTES.as_bytes().to_vec(),
+        "retry sends the exact PDF bytes",
+    )?;
+    same(messages[3]["status"].clone(), json!("done"), "the exact recording completed once")?;
+    app.page.wait_for(
+        "the accepted draft bytes and text to clear",
+        &format!("(async () => (await ({read})).empty === true && document.querySelector('.composer textarea')?.value === '')()"),
+    )?;
+    let accepted_mb = ctx.memory_mb(app.id)?.0;
+    let cpu = ctx.cpu_ms(app.id)? - cpu_before;
+    ctx.notes.push(format!("admission PNG/PDF full warmup/refusal/retry flow: {cpu:.0} ms CPU over {:.0} ms; app tree before {before_mb:.1}, refused {refused_mb:.1}, accepted {accepted_mb:.1} MB (not idle overhead)", started.elapsed().as_secs_f64()*1000.0));
+    ensure(before_mb.max(refused_mb).max(accepted_mb) <= 400.0, || "the measured admission flow exceeded 400 MB".into())?;
+    ctx.shot(&mut app, "send-admission-retry-once")?;
+    ctx.close(app.id)?;
+    let output = ctx.output(app.id);
+    ensure(!output.contains("sent user") && !output.contains("recorded user"), || format!("the exact one-input replay differed: {output}"))
 }
 
 fn restart(ctx: &mut Ctx) -> Result {

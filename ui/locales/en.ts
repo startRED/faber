@@ -1991,6 +1991,7 @@ export const en = {
   'notes.222.fixed': 'Search results keep their focus and outline when earlier messages appear.',
   'notes.223.fixed': 'A searched message stays in place when you load earlier messages on a Mac.',
   'notes.224.fixed': 'Catalog replacements ask for confirmation and preserve the previous files and on/off choice if installation fails.',
+  'notes.225.fixed': 'Messages that cannot be saved stay available to retry, without starting the AI or adding duplicates.',
   'update.checking': 'Looking for an update…',
   'update.downloading': 'Downloading update…',
   'update.downloadingPercent': 'Downloading update… {percent}%',

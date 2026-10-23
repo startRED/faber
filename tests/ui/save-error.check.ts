@@ -1,7 +1,7 @@
 import { createComponent } from 'solid-js';
 import { render } from 'solid-js/web';
 import { App } from '../../ui/App.tsx';
-import { api, type AppEvent, type AppState } from '../../ui/api.ts';
+import { api, type AppEvent, type AppState, type Conversation } from '../../ui/api.ts';
 import { t } from '../../ui/i18n.ts';
 import { forgetDraft, keep, keepAttachments, kept } from '../../ui/unsent.ts';
 import { check, equal, ok } from './check.ts';
@@ -151,5 +151,112 @@ check('save error: refusing conversation deletion keeps its drafts, while a conf
     Object.assign(api, before);
     if (place === null) localStorage.removeItem('faber.place'); else localStorage.setItem('faber.place', place);
     for (const key of keys) await forgetDraft(key);
+  }
+});
+
+for (const eventFirst of [true, false]) {
+  check(`save error: a refused send and its save event share one notice (${eventFirst ? 'event first' : 'command first'})`, async () => {
+    const settle = () => new Promise((resolve) => setTimeout(resolve, 30));
+    const host = document.createElement('div');
+    document.body.append(host);
+    const before = { state: api.state, warm: api.warm, routeDraft: api.routeDraft, setClock: api.setClock,
+      setShellTexts: api.setShellTexts, send: api.send };
+    const initial = { conversations: [], projects: [], vendors: ['claude'],
+      settings: { setup: 'done', tutorialDone: true, language: 'en', appearance: { base: 'sala' } },
+      running: { revision: 0, items: [] }, quotas: [], usage: [], models: [], version: 'test', look,
+    } as AppState;
+    api.state = async () => initial;
+    api.warm = async () => {}; api.routeDraft = async () => {};
+    api.setClock = async () => {}; api.setShellTexts = async () => {};
+    let hear!: (event: AppEvent) => void;
+    let key = 'error.chat.saveFailed';
+    api.send = async () => {
+      if (eventFirst && key !== 'error.noSubscription') hear({ type: 'saveFailed', key });
+      throw eventFirst ? key : { key };
+    };
+    const dispose = render(() => createComponent(App, { initial,
+      inbox: { take: (listener?: (event: AppEvent) => void) => { if (listener) hear = listener; } },
+    }), host);
+    let earlier = '';
+    try {
+      await settle();
+      earlier = host.querySelector<HTMLTextAreaElement>('.composer textarea')!.value;
+      for (const error of ['error.chat.saveFailed', 'error.chat.saveFull', 'error.noSubscription']) {
+        key = error;
+        const field = host.querySelector<HTMLTextAreaElement>('.composer textarea')!;
+        field.value = 'keep this message';
+        field.dispatchEvent(new Event('input', { bubbles: true }));
+        field.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
+        await settle();
+        if (!eventFirst && error !== 'error.noSubscription') {
+          hear({ type: 'saveFailed', key });
+          await settle();
+        }
+        equal(field.value, 'keep this message', 'the rejected send restores the draft');
+        if (error === 'error.noSubscription') {
+          equal(host.querySelector('.toast'), null, 'an unrelated failure does not become a save warning');
+          ok(host.querySelector('.note.err[role="alert"]'), 'an unrelated failure remains visible');
+          hear({ type: 'saveFailed', key: 'error.chat.saveFailed' });
+          await settle();
+          ok(host.querySelector('.note.err[role="alert"]'), 'a save warning leaves the unrelated failure visible');
+          equal(host.querySelectorAll('.toast[role="alert"]').length, 1, 'the save warning still appears once');
+        } else {
+          equal(host.querySelectorAll('.toast[role="alert"]').length, 1, 'event and command reuse one save notice');
+          equal(host.querySelector('.toast span')?.textContent, t(error as 'error.chat.saveFailed'), 'the returned fault keeps its own words');
+          equal(host.querySelector('.note.err[role="alert"]'), null, 'there is no duplicate warning under the composer');
+          host.querySelector<HTMLButtonElement>('.toast button')!.click();
+          await settle();
+        }
+      }
+    } finally {
+      const field = host.querySelector<HTMLTextAreaElement>('.composer textarea');
+      if (field) { field.value = earlier; field.dispatchEvent(new Event('input', { bubbles: true })); }
+      dispose(); host.remove(); Object.assign(api, before);
+    }
+  });
+}
+
+check('save error: accepted research stays sent when its later Settings write fails', async () => {
+  const settle = () => new Promise((resolve) => setTimeout(resolve, 40));
+  const host = document.createElement('div'); document.body.append(host);
+  const before = { state: api.state, warm: api.warm, routeDraft: api.routeDraft, setClock: api.setClock,
+    setShellTexts: api.setShellTexts, send: api.send, open: api.open, commands: api.commands };
+  const oldDraft = kept('new-chat-');
+  const oldPlace = localStorage.getItem('faber.place');
+  const oldChoice = localStorage.getItem('faber.choice.accepted-research');
+  const initial = { conversations: [], projects: [], vendors: ['claude'],
+    settings: { setup: 'done', tutorialDone: true, language: 'en', appearance: { base: 'sala' } },
+    running: { revision: 0, items: [] }, quotas: [], usage: [], models: [], version: 'test', look,
+  } as AppState;
+  const conversation = { id: 'accepted-research', title: 'Research', area: 'chat', createdAt: 1, updatedAt: 1, sessions: {}, queued: [],
+    choice: { vendor: 'claude' }, messages: [
+      { id: 'accepted-question', role: 'user', text: '/research compare the choices', at: 1 },
+      { id: 'settings-failed', role: 'assistant', text: '', at: 1, status: 'error', error: 'error.settings.saveFailed' },
+    ],
+  } as Conversation;
+  api.state = async () => initial;
+  api.warm = async () => {}; api.routeDraft = async () => {};
+  api.setClock = async () => {}; api.setShellTexts = async () => {};
+  api.open = async () => conversation; api.commands = async () => [];
+  let sends = 0;
+  api.send = async () => { sends++; return conversation.id; };
+  const dispose = render(() => createComponent(App, { initial, inbox: { take: () => {} } }), host);
+  try {
+    await settle();
+    const field = host.querySelector<HTMLTextAreaElement>('.composer textarea')!;
+    field.value = '/research compare the choices';
+    field.dispatchEvent(new Event('input', { bubbles: true }));
+    field.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
+    await settle(); await settle();
+    equal(sends, 1, 'the accepted intent is not automatically sent a second time');
+    equal(host.querySelector<HTMLTextAreaElement>('.composer textarea')!.value, '', 'a later settings failure does not restore an accepted draft');
+    ok(host.textContent?.includes(t('error.settings.saveFailed')), 'the saved reply explains the later Settings failure');
+    equal(host.querySelectorAll('article.ai').length, 1, 'one accepted intent has one failed reply');
+  } finally {
+    dispose(); host.remove(); Object.assign(api, before);
+    keep('new-chat-', oldDraft);
+    for (const [key, value] of [['faber.place', oldPlace], ['faber.choice.accepted-research', oldChoice]] as const) {
+      if (value === null) localStorage.removeItem(key); else localStorage.setItem(key, value);
+    }
   }
 });

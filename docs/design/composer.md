@@ -31,6 +31,22 @@ Removal has a durable intent too: removing attachments preserves newer typed wor
 deletion clears its main and side drafts. An engine refusal leaves both intact. An interrupted removal is retried on
 the next opening; a failure uses the existing save-error toast and its Try again action. No retry loop or new screen.
 
+Sending first saves the message or queued intent. If that write fails, the existing save-error notice appears and the
+message returns through the same rejected-send draft restoration in Chat and Projects. Retrying adds it once; no AI
+turn or steering begins before admission (`engine/src/engine/send_admission.rs`). Queued edits remain in memory when
+writing fails; Send now, automatic draining and handover at the end of an agent step must save their current words
+before sending them. A failed step handover keeps the edited queue intact and retries storage at the next handover. Files copied before
+admission may remain in the attachment folder after a refusal; the guard does not delete files.
+Refusal also preserves an archived conversation's date and follow-up choice, and its draft route. Research changes the
+shared permission mode only after its intent is saved. If that later Settings write fails, the message stays sent with
+an ordinary failed reply; Keep going ends with its existing failure reason, leaving human queued messages untouched
+and scheduling no continuation. The composer stays empty for this accepted message (`tests/ui/save-error.check.ts`).
+
+The native refused-send scenario in `testkit/src/screen/draft_attachments.rs` blocks only its conversation's atomic
+write with a fixture-owned empty temporary directory. It checks saved history, draft PNG/PDF bytes and native retry
+once after ordinary warmup, then reports the complete flow's app-tree memory and CPU separately from idle overhead.
+It removes only that empty blocker; copied attachments and GPU cache cleanup remain outside this proof.
+
 ## Completion list and earlier messages
 
 - `@` in a conversation with a working folder lists matching files and folders over the box, on the context menu's

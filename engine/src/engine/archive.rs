@@ -4,6 +4,31 @@
 //! over, and what Faber queued by itself goes. Writing to it brings it back by itself (`Core::send`).
 use super::*;
 
+pub(super) struct Reopened {
+    at: u64,
+    updated: u64,
+    kept: Option<bool>,
+}
+
+pub(super) fn reopen(c: &mut Conversation) -> Option<Reopened> {
+    let at = c.archived_at.take()?;
+    let updated = std::mem::replace(&mut c.updated_at, now());
+    let kept = c.messages.iter_mut().rev().find_map(|m| m.follow.as_mut()).map(|f| std::mem::replace(&mut f.kept, true));
+    Some(Reopened { at, updated, kept })
+}
+
+pub(super) fn restore(c: &mut Conversation, reopened: Option<Reopened>) {
+    if let Some(before) = reopened {
+        c.archived_at = Some(before.at);
+        c.updated_at = before.updated;
+        if let Some(kept) = before.kept
+            && let Some(follow) = c.messages.iter_mut().rev().find_map(|m| m.follow.as_mut())
+        {
+            follow.kept = kept;
+        }
+    }
+}
+
 impl Engine {
     pub fn pin(&self, id: &str, on: bool) -> Result<(), String> {
         self.with(|core| {
@@ -29,16 +54,13 @@ impl Core {
         if on == c.archived_at.is_some() {
             return Ok(());
         }
-        c.archived_at = on.then(now);
         if !on {
             // Brought back, it is as new as a message: Faber does not put it away again for the week it was quiet, nor for
             // the pull request that ended (`auto_archive`).
-            c.updated_at = now();
-            if let Some(f) = c.messages.iter_mut().rev().find_map(|m| m.follow.as_mut()) {
-                f.kept = true;
-            }
+            let _ = reopen(c);
         }
         if on {
+            c.archived_at = Some(now());
             c.pinned_at = None;
             // What Faber queued by itself (a report, a question, Keep going) never wakes an archived conversation.
             c.queued.retain(|q| q.sending || q.wake.is_none());

@@ -112,6 +112,7 @@ pub const SOLO: &[(&str, &str)] = &[
     ("reading: a real restart preserves an old reading point within the memory budget", "processor, memory"),
     ("chat groups: ten knowledge files survive reopening within the memory budget", "processor, memory"),
     ("draft attachments: committed bytes survive a real restart, removals stay gone, within the memory budget", "processor, memory"),
+    ("draft attachments: refused disk save preserves words and bytes, retry sends once within the memory budget", "processor, memory"),
     ("with no CLI running, Faber stays within its memory budget", "memory"),
     ("with reduced motion on, the dust stays off and Faber stays within its memory budget", "memory"),
     (

@@ -2098,6 +2098,7 @@ export const ptBR: Messages = {
   'notes.222.fixed': 'O resultado da busca mantém o foco e o contorno quando mensagens anteriores aparecem.',
   'notes.223.fixed': 'A mensagem encontrada na busca fica no lugar ao carregar mensagens anteriores no Mac.',
   'notes.224.fixed': 'As trocas no catálogo pedem confirmação e preservam os arquivos anteriores e a escolha de ativação se a instalação falhar.',
+  'notes.225.fixed': 'Se a mensagem não puder ser salva, dá pra tentar de novo sem iniciar a IA nem duplicar a mensagem.',
   'update.checking': 'Procurando atualização…',
   'update.downloading': 'Baixando atualização…',
   'update.downloadingPercent': 'Baixando atualização… {percent}%',

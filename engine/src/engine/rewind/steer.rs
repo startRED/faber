@@ -14,6 +14,10 @@ fn unavailable(message: &str, turn: &str, at: u64) -> PointInfo {
 }
 
 impl Core {
+    pub(in crate::engine) fn rewind_steer(&self, queued: &str) -> Option<PointInfo> {
+        self.rewind.steers.get(queued).cloned()
+    }
+
     pub(in crate::engine) fn take_rewind_steer(&mut self, queued: &str) -> Option<PointInfo> {
         self.rewind.steers.remove(queued)
     }

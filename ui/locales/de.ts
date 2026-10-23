@@ -2111,6 +2111,7 @@ export const de: Messages = {
   'notes.222.fixed': 'Suchtreffer behalten den Fokus und ihre Umrandung, wenn ältere Nachrichten erscheinen.',
   'notes.223.fixed': 'Die gefundene Nachricht bleibt an ihrem Platz, wenn du auf dem Mac frühere Nachrichten lädst.',
   'notes.224.fixed': 'Der Katalog fragt vor dem Ersetzen nach und bewahrt bei einem Installationsfehler die bisherigen Dateien und den Ein-/Aus-Zustand.',
+  'notes.225.fixed': 'Lässt sich eine Nachricht nicht speichern, können Sie es erneut versuchen, ohne die KI zu starten oder die Nachricht zu verdoppeln.',
   'update.checking': 'Suche nach einem Update…',
   'update.downloading': 'Update wird heruntergeladen…',
   'update.downloadingPercent': 'Update wird heruntergeladen… {percent} %',

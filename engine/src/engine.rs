@@ -1678,15 +1678,23 @@ impl Core {
     /// it whole and `shutdown` tries once more) and is never silent: the screen's save-error toast says it when the first
     /// conversation starts failing, and again only after every failed one has been saved.
     fn save(&self, id: &str) {
+        let _ = self.try_save(id);
+    }
+
+    fn try_save(&self, id: &str) -> Result<(), String> {
         // A conversation that keeps failing does not make every save wait for a busy file again.
         let patient = !self.save_failed.lock().unwrap_or_else(|e| e.into_inner()).contains(id);
-        self.save_with(id, patient);
+        self.save_result(id, patient)
     }
 
     fn save_with(&self, id: &str, patient: bool) {
+        let _ = self.save_result(id, patient);
+    }
+
+    fn save_result(&self, id: &str, patient: bool) -> Result<(), String> {
         // Nothing is written for a conversation that is not loaded, so that is neither a failure nor a success.
         if !self.convs.contains_key(id) {
-            return;
+            return Ok(());
         }
         let result = self.save_checked(id, patient);
         let first = {
@@ -1701,15 +1709,19 @@ impl Core {
                 Err(_) => failed.insert(id.to_string()) && failed.len() == 1,
             }
         };
-        if let (true, Err(fault)) = (first, result) {
+        if let Err(fault) = result {
             use crate::store::Fault;
             let key = match fault {
                 Fault::DiskFull => "error.chat.saveFull",
                 Fault::Write => "error.chat.saveFailed",
                 other => other.key(),
             };
-            (self.emit)(AppEvent::SaveFailed { key: key.to_string() });
+            if first {
+                (self.emit)(AppEvent::SaveFailed { key: key.to_string() });
+            }
+            return Err(key.to_string());
         }
+        Ok(())
     }
 
     fn save_checked(&self, id: &str, patient: bool) -> Result<(), crate::store::Fault> {
@@ -2944,15 +2956,26 @@ impl Core {
             sending: false,
             wake: None,
         };
-        // It waits here, the person's to edit or remove, until the agent's step ends (`hand_over_at_step`) or Send now.
-        if let Some(c) = self.convs.get_mut(id) {
-            if c.stopped {
-                c.send_after_stop.get_or_insert_with(|| item.id.clone());
-            }
-            c.queued.push(item);
-            c.updated_at = at;
+        let c = self.convs.get(id).ok_or("error.conversationGone")?;
+        let previous = (c.updated_at, c.send_after_stop.clone());
+        let c = self.convs.get_mut(id).expect("queued conversation exists");
+        let reopened = archive::reopen(c);
+        if c.stopped {
+            c.send_after_stop.get_or_insert_with(|| item.id.clone());
         }
-        self.save(id);
+        c.queued.push(item);
+        c.updated_at = at;
+        if let Err(error) = self.try_save(id) {
+            let c = self.convs.get_mut(id).expect("queued conversation exists");
+            c.queued.pop();
+            (c.updated_at, c.send_after_stop) = previous;
+            archive::restore(c, reopened);
+            return Err(error);
+        }
+        self.draft_routes.remove(id);
+        if reopened.is_some() {
+            self.list_changed();
+        }
         self.emit_queue(id);
         // With only helpers left at work, no step will end: it goes in now, as it did before (fixture `background-steer`).
         if self.live.get(id).is_some_and(|l| l.settled) {
@@ -2984,7 +3007,10 @@ impl Core {
             {
                 break;
             }
-            let mut item = c.queued.remove(pos);
+            if self.try_save(conv).is_err() {
+                return;
+            }
+            let mut item = self.convs.get_mut(conv).expect("queued conversation exists").queued.remove(pos);
             self.steer(conv, &mut item);
             let sent = item.sending;
             if let Some(c) = self.convs.get_mut(conv) {
@@ -3189,6 +3215,7 @@ impl Core {
             if c.queued[pos].sending {
                 return Ok(());
             }
+            let previous = c.send_after_stop.clone();
             let mut item = c.queued.remove(pos);
             let at = c.queued.iter().rposition(|q| q.sending).map_or(0, |p| p + 1);
             // A stopped turn accepts no steering, even when its final result has not arrived yet.
@@ -3197,13 +3224,24 @@ impl Core {
                 c.send_after_stop = Some(item.id.clone());
             }
             // One for the other AI cannot go into this turn: it goes first among those that wait.
-            if !stopped && research::question(&item.text).is_none() && [vendor, "auto"].contains(&item.choice.vendor.as_str()) {
-                self.steer(id, &mut item);
-            }
+            let steer = !stopped && research::question(&item.text).is_none() && [vendor, "auto"].contains(&item.choice.vendor.as_str());
+            item.sending = steer;
             if let Some(c) = self.convs.get_mut(id) {
                 c.queued.insert(at, item);
             }
-            self.save(id);
+            if let Err(error) = self.try_save(id) {
+                let c = self.convs.get_mut(id).expect("queued conversation exists");
+                let mut item = c.queued.remove(at);
+                item.sending = false;
+                c.queued.insert(pos, item);
+                c.send_after_stop = previous;
+                return Err(error);
+            }
+            if steer {
+                let mut item = self.convs.get_mut(id).expect("queued conversation exists").queued.remove(at);
+                self.steer(id, &mut item);
+                self.convs.get_mut(id).expect("queued conversation exists").queued.insert(at, item);
+            }
             self.emit_queue(id);
             return Ok(());
         }
@@ -3259,8 +3297,9 @@ impl Core {
         // A turn Faber sends by itself (`by_itself.rs`) is never one the person picked: an AI billed per use is not spent on.
         let by_hand = !auto && item.wake.as_ref().is_none_or(|w| w.why == "wake.approvedPlan");
         let route = if auto { self.next_route(id) } else { None };
-        let point = self.take_rewind_steer(&item.id);
+        let point = self.rewind_steer(&item.id);
         let c = self.convs.get_mut(id).expect("checked above");
+        let previous = (c.messages.len(), c.choice.clone(), c.updated_at, c.stopped, c.keep_going.as_ref().and_then(|kg| kg.wait_until));
         // A turn that starts ends any wait of keep going: its end decides again, and no timer or reading sends a second one.
         if let Some(kg) = c.keep_going.as_mut() {
             kg.wait_until = None;
@@ -3306,11 +3345,22 @@ impl Core {
         c.messages.push(question);
         c.messages.push(reply);
         c.updated_at = at;
+        if let Err(error) = self.try_save(id) {
+            let c = self.convs.get_mut(id).expect("queued conversation exists");
+            c.messages.truncate(previous.0);
+            (c.choice, c.updated_at, c.stopped) = (previous.1, previous.2, previous.3);
+            if let Some(kg) = c.keep_going.as_mut() {
+                kg.wait_until = previous.4;
+            }
+            self.requeue(id, item);
+            return Err(error);
+        }
+        let _ = self.take_rewind_steer(&item.id);
         self.clear_older_plan_cards(id, &reply_id);
-        self.save(id);
         self.list_changed();
         self.emit_message(id, &question_id);
         if let Err(error) = self.prepare_research(&item.text) {
+            self.halt(id, &reply_id, "reason.keepGoing.failed");
             self.fail_reply(id, &reply_id, error.clone());
             return Err(error);
         }
@@ -4107,12 +4157,6 @@ impl Core {
         if let Some(id) = &existing {
             self.look_used(id, &req.text);
         }
-        // Writing to an archived conversation brings it back.
-        if let Some(id) = &existing
-            && self.convs.get(id).is_some_and(|c| c.archived_at.is_some())
-        {
-            self.set_archived(id, false)?;
-        }
         if let Some(id) = &existing
             && (self.live.get(id).is_some_and(|l| l.turn.is_some())
                 || self
@@ -4120,12 +4164,9 @@ impl Core {
                     .get(id)
                     .is_some_and(|c| verifying::checking(c) || c.messages.last().is_some_and(|m| m.status == Some(Status::Streaming))))
         {
-            // Pressing Send empties the box, queued or not: the next draft is routed afresh (`route_draft`).
-            self.draft_routes.remove(id);
             return self.enqueue(id, req);
         }
-        // Decide research mode under the lock that takes the draft; start() plans its copy from the actual conversation id.
-        self.prepare_research(&req.text)?;
+        let first = existing.is_none();
         let draft = self.draft.clone().filter(|d| self.convs.get(d).is_some_and(|c| c.area == req.area && c.project_id == req.project_id));
         let id = match existing {
             Some(id) => id,
@@ -4155,9 +4196,10 @@ impl Core {
         };
         let at = now();
         let auto = req.choice.vendor == "auto";
-        self.draft_routes.remove(&id);
         let route = if auto { self.next_route(&id) } else { None };
         let c = self.convs.get_mut(&id).ok_or("error.conversationGone")?;
+        let previous = (c.messages.len(), c.title.clone(), c.choice.clone(), c.updated_at, c.stopped, c.copy.clone());
+        let reopened = archive::reopen(c);
         c.choice = Some(Choice { effort: (!auto).then(|| req.choice.effort.unwrap_or_default()), ..req.choice.clone() });
         let routing = route.is_some();
         let pick = match &route {
@@ -4215,11 +4257,27 @@ impl Core {
         if let Some(plan) = self.copy_plan(&id) {
             self.name_copy(&id, &plan);
         }
+        if let Err(error) = self.try_save(&id) {
+            let c = self.convs.get_mut(&id).expect("new turn's conversation exists");
+            c.messages.truncate(previous.0);
+            (c.title, c.choice, c.updated_at, c.stopped, c.copy) = (previous.1, previous.2, previous.3, previous.4, previous.5);
+            archive::restore(c, reopened);
+            if first {
+                self.draft = Some(id);
+            }
+            return Err(error);
+        }
+        self.draft_routes.remove(&id);
         self.clear_older_plan_cards(&id, &reply_id);
-        self.save(&id);
         self.list_changed();
         // An open conversation only grows through these events, so the question goes out as well as the answer.
         self.emit_message(&id, &question_id);
+        if let Err(error) = self.prepare_research(&req.text) {
+            // The intent is already durable: its reply fails, rather than asking the composer to resend it.
+            self.halt(&id, &reply_id, "reason.keepGoing.failed");
+            self.fail_reply(&id, &reply_id, error);
+            return Ok(id);
+        }
         self.transfers.insert(
             id.clone(),
             recovery::Transfer {
@@ -5121,3 +5179,6 @@ mod tool_in_tests {
         assert_eq!(twice[0].tools.as_ref().unwrap()[0].ok, Some(false), "the current reply is looked at first");
     }
 }
+
+#[cfg(test)]
+mod send_admission;

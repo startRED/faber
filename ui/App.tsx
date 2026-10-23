@@ -422,7 +422,11 @@ export function App(props: { initial: AppState; update?: UpdateStatus; inbox: { 
     await go({ area: 'chat', id: conversation.id });
     document.querySelector<HTMLTextAreaElement>('.composer textarea')?.focus();
   };
-  const fail = (err: unknown) => setError(failureText(err));
+  const fail = (err: unknown) => {
+    const key = errorText(err);
+    if (key === 'error.chat.saveFailed' || key === 'error.chat.saveFull') setSaveError(failureText(err));
+    else setError(failureText(err));
+  };
   // The sidebar's quota line still names the old usage section: accounts and their limits are one section now.
   const openSettings = (at?: Section | 'usage') => {
     setSettingsAt(at === 'usage' ? 'accounts' : at);
