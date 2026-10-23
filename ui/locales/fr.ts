@@ -2114,6 +2114,8 @@ export const fr: Messages = {
   'notes.225.fixed': "Si un message ne peut pas être enregistré, vous pouvez réessayer sans lancer l'IA ni créer de doublon.",
   'notes.226.better': 'Quand il crée des formulaires, Faber vérifie que le navigateur reconnaît les champs de votre nom, adresse e-mail et téléphone.',
   'notes.227.fixed': 'Vous pouvez revenir à la liste du Catalogue sans remonter au début des détails d’un outil.',
+  'notes.228.fixed': 'Vous pouvez retirer les images et fichiers joints avec un bouton plus grand.',
+  'notes.229.better': 'Dans une petite fenêtre, le menu reste ouvert quand vous passez de Chat à Projets pour choisir où continuer.',
   'update.checking': 'Recherche d’une mise à jour…',
   'update.downloading': 'Téléchargement de la mise à jour…',
   'update.downloadingPercent': 'Téléchargement de la mise à jour… {percent} %',

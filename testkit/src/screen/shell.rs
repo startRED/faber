@@ -827,16 +827,25 @@ fn keys_until_the_question(page: &mut Page, chords: &[&str]) -> Result<std::time
 
 fn waits_for_every_key(ctx: &mut Ctx) -> Result {
     start_settings(ctx, "en")?;
-    let launch = two_writes(ctx)?;
+    let mut launch = two_writes(ctx)?;
+    let mut recording =
+        std::fs::read_to_string(launch.recording.as_ref().ok_or("the tool recording is missing")?).map_err(|e| e.to_string())?;
+    let permission =
+        recording.find("{\"dir\":\"out\",\"msg\":{\"type\":\"control_request\"").ok_or("the tool recording has no permission request")?;
+    recording.insert_str(permission, "{\"dir\":\"out\",\"msg\":{\"faber_hold\":true}}\n");
+    let held = ctx.sb.sandbox.join("typing-question.jsonl");
+    std::fs::write(&held, recording).map_err(|e| e.to_string())?;
+    launch.recording = Some(held);
     let mut app = ctx.launch(launch)?;
     let page = &mut app.page;
     let model = page.labelled("composer.model")?;
     page.select_option(&model, "Claude Haiku")?;
-    delay_open(page, 800)?;
     ask(page, TWO_WRITES)?;
     // The title can arrive before the snapshot replaces the welcome composer with the conversation's composer.
     page.wait_visible(&css(".dock .composer textarea"))?;
     page.wait_enabled(&model)?;
+    ensure(!page.is_visible(&css("article .ask"))?, || "the question arrived before typing setup was ready".to_string())?;
+    ensure(!page.is_visible(&css(".runcol"))?, || "the column opened before typing setup was ready".to_string())?;
     let composer = page.labelled("composer.message")?;
     // As in `ask`, establish native input focus on the replacement field before typing through DevTools.
     page.click(&composer)?;
@@ -847,9 +856,15 @@ fn waits_for_every_key(ctx: &mut Ctx) -> Result {
     )?;
     page.press("ArrowLeft")?;
     page.press("ArrowLeft")?;
+    let typed_at = std::time::Instant::now();
     let initial = page.eval_on(&composer, "return { text: el.value, at: el.selectionStart, end: el.selectionEnd };")?;
     same(initial["text"].as_str(), Some("hello"), "the draft before the snapshot arrives")?;
     same((initial["at"].as_u64(), initial["end"].as_u64()), (Some(3), Some(3)), "the initial caret")?;
+    ensure(typed_at.elapsed() < Duration::from_millis(1400), || {
+        "typing setup exceeded the quiet window before releasing the question".to_string()
+    })?;
+    // Hold the question, rather than the open request, until the replacement composer is ready and has received real keys.
+    std::fs::write(ctx.sb.state.join("release"), "").map_err(|e| e.to_string())?;
     // Only arrow keys from here on: they move the caret and change no text, so no `input` event comes. The question
     // arrives meanwhile, and the column must keep out of the way for as long as the keys come.
     let last = keys_until_the_question(page, &["ArrowLeft", "ArrowRight"])?;

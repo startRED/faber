@@ -129,7 +129,8 @@ check('composer: removing a picked file allows picking the same file again', asy
 check('composer: images show thumbnails and files small cards, each with its own x that removes only it', async () => {
   const settle = (ms = 30) => new Promise((resolve) => setTimeout(resolve, ms));
   const root = document.createElement('div');
-  root.style.cssText = 'position:fixed;left:0;top:0;width:700px';
+  // Pointer-hit checks must reach this isolated fixture, not the running app's title bar underneath it.
+  root.style.cssText = 'position:fixed;left:0;top:0;width:700px;z-index:1000';
   for (const [key, value] of Object.entries(themes.css.base)) root.style.setProperty(`--${key}`, value);
   root.dataset.motion = 'none';
   document.body.append(root);
@@ -158,6 +159,38 @@ check('composer: images show thumbnails and files small cards, each with its own
     ok(field.value.includes('hello notes'), 'a small text file goes inside the message');
     const x = (name: string) => root.querySelector<HTMLButtonElement>(`.thumb-x[aria-label="${t('composer.removeOne', { name })}"]`)!;
     equal(root.querySelectorAll('.thumb-x').length, 4, 'each one has its own x');
+    for (const enlargedCorners of [false, true]) {
+      if (enlargedCorners) {
+        root.style.setProperty('--r-xs', '12px');
+        root.style.setProperty('--r-md', '19px');
+      }
+      for (const button of root.querySelectorAll<HTMLButtonElement>('.thumb-x')) {
+        const box = button.getBoundingClientRect();
+        ok(box.width >= 24 && box.height >= 24, 'each attachment remove target is at least 24 by 24 CSS pixels');
+        for (const dx of [-11.9, 11.9]) for (const dy of [-11.9, 11.9]) {
+          const hit = document.elementFromPoint(box.x + box.width / 2 + dx, box.y + box.height / 2 + dy);
+          ok(hit === button || (hit !== null && button.contains(hit)), `the remove target contains a full 24-pixel square, including its rounded corners (${button.getAttribute('aria-label')}, enlarged=${enlargedCorners}, box=${box.x},${box.y},${box.width},${box.height}, corner=${dx},${dy}, hit=${hit?.tagName}.${hit?.getAttribute('class')}, radius=${getComputedStyle(button).borderRadius})`);
+        }
+      }
+    }
+    root.dataset.motion = 'full';
+    let pressRules = 0;
+    for (const base of ['sala', 'oficina']) {
+      root.dataset.base = base;
+      // Synthetic events cannot hold :active; inspect the shipped selectors as if each button were pressed.
+      const inspect = (rules: CSSRuleList) => { for (const rule of rules) {
+        if (rule instanceof CSSStyleRule && rule.selectorText.includes(':active') && rule.style.transform) {
+          pressRules++;
+          for (const button of root.querySelectorAll('.thumb-x')) {
+            if (button.matches(rule.selectorText.replaceAll(':active', ''))) equal(rule.style.transform, 'none', `a pressed removal target stays still in ${base}`);
+          }
+        }
+        if ('cssRules' in rule) inspect((rule as CSSGroupingRule).cssRules);
+      } };
+      for (const sheet of document.styleSheets) { let rules: CSSRuleList; try { rules = sheet.cssRules; } catch { continue; } inspect(rules); }
+    }
+    ok(pressRules > 0, 'the shipped press transforms were inspected');
+    root.dataset.motion = 'none';
     equal(getComputedStyle(x('two.png')).opacity, '0', 'shown only for the pointer or the keyboard');
     equal(getComputedStyle(x('two.png')).visibility, 'visible', 'so the keyboard still reaches it');
     // A hidden test window never has the focus or a pointer, so the rule that shows it is read.

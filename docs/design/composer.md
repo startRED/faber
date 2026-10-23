@@ -7,6 +7,13 @@ The attachment picker copies its selected files and immediately clears the nativ
 the same one again therefore follows the ordinary attachment path in both areas, with no new UI or persistence rule
 (`tests/ui/composer.check.ts`: `composer: removing a picked file allows picking the same file again`).
 
+Each image/file removal button uses the existing small-control size (`--h-sm`) and small-corner radius (`--r-xs`,
+capped at 6 px even with increased corner roundness), without scaling its hit area.
+A centered 24 CSS px square remains clickable, including near its rounded corners;
+file text reserves room for the control. Hover/focus disclosure and no-hover visibility stay on the existing path.
+The four-attachment composer check verifies the bounds and pointer hits with normal and increased corner roundness,
+as well as removing only the chosen file.
+
 ## Unsent attachments
 
 The same draft key keeps text and attachments. Text retains its synchronous small browser-storage write; image and

@@ -2101,6 +2101,8 @@ export const ptBR: Messages = {
   'notes.225.fixed': 'Se a mensagem não puder ser salva, dá pra tentar de novo sem iniciar a IA nem duplicar a mensagem.',
   'notes.226.better': 'Ao criar formulários, o Faber confere se o navegador reconhece os campos do seu nome, email e telefone.',
   'notes.227.fixed': 'Você pode voltar à lista do Catálogo sem rolar até o início dos detalhes de uma ferramenta.',
+  'notes.228.fixed': 'Fica mais fácil remover imagens e arquivos anexados com o botão maior.',
+  'notes.229.better': 'Em janelas pequenas, trocar entre Chat e Projetos mantém o menu aberto pra você escolher onde continuar.',
   'update.checking': 'Procurando atualização…',
   'update.downloading': 'Baixando atualização…',
   'update.downloadingPercent': 'Baixando atualização… {percent}%',

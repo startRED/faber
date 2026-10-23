@@ -2114,6 +2114,8 @@ export const es: Messages = {
   'notes.225.fixed': 'Si un mensaje no se puede guardar, puedes volver a intentarlo sin iniciar la IA ni duplicar el mensaje.',
   'notes.226.better': 'Al crear formularios, Faber comprueba que el navegador identifique los campos de tu nombre, correo y teléfono.',
   'notes.227.fixed': 'Puedes volver a la lista del Catálogo sin subir hasta el inicio de los detalles de una herramienta.',
+  'notes.228.fixed': 'Puedes quitar imágenes y archivos adjuntos con un botón más grande.',
+  'notes.229.better': 'En ventanas pequeñas, el menú sigue abierto al cambiar entre Chat y Proyectos para que puedas elegir dónde continuar.',
   'update.checking': 'Buscando una actualización…',
   'update.downloading': 'Descargando actualización…',
   'update.downloadingPercent': 'Descargando actualización… {percent} %',

@@ -805,16 +805,16 @@ details.thinking div { white-space: pre-wrap; padding: 6px 0 0 12px; border-left
 .thumb-open:active { transform: none; }
 .thumb-open:focus-visible { outline-offset: -2px; }
 .thumb.file { width: auto; min-width: 132px; max-width: 220px; height: calc(var(--thumb) * 0.72); display: flex; align-items: center; padding: 0 12px 0 10px; }
-.thumb.file:has(.thumb-x) { padding-right: 32px; }
+.thumb.file:has(.thumb-x) { padding-right: calc(var(--h-sm) + 8px); }
 .thumb-card { display: flex; align-items: center; gap: 10px; min-width: 0; }
 .thumb-card .fi { flex: none; display: grid; place-items: center; width: 28px; height: 28px; border-radius: var(--r-xs); background: var(--accent-soft); color: var(--accent-text); }
 .thumb-text { display: grid; min-width: 0; line-height: 1.25; }
 .thumb-text b { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: var(--fs-sm); font-weight: 500; }
 .thumb-text small { color: var(--ink-3); font-size: var(--fs-xs); letter-spacing: 0.04em; }
-.thumb .thumb-x { position: absolute; top: 4px; right: 4px; width: 22px; height: 22px; display: grid; place-items: center; border-radius: var(--r-pill); background: color-mix(in srgb, var(--bg) 80%, transparent); color: var(--ink); box-shadow: inset 0 0 0 1px var(--line-3); opacity: 0; transform: scale(0.85); transition: opacity var(--dur-fast) var(--ease), transform var(--dur-fast) var(--ease), background-color var(--dur-fast) var(--ease), color var(--dur-fast) var(--ease); }
-.thumb:is(:hover, :focus-within) .thumb-x { opacity: 1; transform: none; }
+.thumb .thumb-x { position: absolute; top: 4px; right: 4px; width: var(--h-sm); height: var(--h-sm); display: grid; place-items: center; border-radius: min(var(--r-xs), 6px); background: color-mix(in srgb, var(--bg) 80%, transparent); color: var(--ink); box-shadow: inset 0 0 0 1px var(--line-3); opacity: 0; transition: opacity var(--dur-fast) var(--ease), background-color var(--dur-fast) var(--ease), color var(--dur-fast) var(--ease); }
+.thumb:is(:hover, :focus-within) .thumb-x { opacity: 1; }
 .thumb .thumb-x:hover { background: var(--danger); color: var(--bg); }
-@media (hover: none) { .thumb .thumb-x { opacity: 1; transform: none; } }
+@media (hover: none) { .thumb .thumb-x { opacity: 1; } }
 .thumb-more { display: grid; place-items: center; color: var(--ink-2); font-size: var(--fs-ui); font-weight: 580; cursor: default; transition: background-color var(--dur-fast) var(--ease), color var(--dur-fast) var(--ease); }
 .thumb-more:hover { background: var(--s3); color: var(--ink); }
 .composer .attach-row { padding: 12px 14px 4px; }
@@ -1297,8 +1297,8 @@ html[data-ambient='on'] .ambient.bare .amb-drift { display: block; }
 /* Short feedback shares the theme's curve; exits finish sooner. Native selects keep their keyboard behavior. */
 :is(button, select, .plus, .x) { transition: background-color var(--dur-fast) var(--ease), color var(--dur-fast) var(--ease), box-shadow var(--dur-fast) var(--ease), opacity var(--dur-fast) var(--ease), transform var(--dur-fast) var(--ease); }
 /* A press gives way on buttons, never on rows a person runs down (R246): a list that shrinks under each click flickers. */
-button:active:not(:disabled, .item, .rrow, .message-hit, .catalog-card) { transform: translateY(1px) scale(.98); }
-[data-base='oficina'] button:active:not(:disabled, .item, .rrow, .message-hit, .catalog-card) { transform: scale(.98); }
+button:active:not(:disabled, .item, .rrow, .message-hit, .catalog-card, .thumb-x) { transform: translateY(1px) scale(.98); }
+[data-base='oficina'] button:active:not(:disabled, .item, .rrow, .message-hit, .catalog-card, .thumb-x) { transform: scale(.98); }
 :is(.ask, .toast, .ri.need, .coach, .agent-stuck, .dv-card, .notes, .notes-group h2, .notes-group li, .ask .note.err, .ask-more) { animation-duration: var(--dur-ui); }
 .tour-ring { transition-duration: var(--dur-ui); }
 [data-motion-list] > :is(.ask, .toast, .ri.need, .coach) { animation: none; }
