@@ -59,6 +59,8 @@ pub struct Launch {
     pub cdp_port: Option<u16>,
     /// `FABER_CHECKS_OUT`: the `ui` suite's report file.
     pub checks_out: Option<PathBuf>,
+    /// A substring of check names, applied before any check body runs.
+    pub checks_filter: Option<String>,
 }
 
 pub struct Sandbox {
@@ -256,6 +258,9 @@ pub fn child_env(parent: &[(String, String)], sb: &Sandbox, launch: &Launch, fak
     }
     if let Some(out) = &launch.checks_out {
         set("FABER_CHECKS_OUT", path(out));
+        if let Some(filter) = &launch.checks_filter {
+            set("FABER_CHECKS_FILTER", filter.clone());
+        }
     }
     let slot = |slot: CliSlot| match slot {
         CliSlot::Off => Some(String::new()),
@@ -321,6 +326,21 @@ mod tests {
 
     fn pairs(list: &[(&str, &str)]) -> Vec<(String, String)> {
         list.iter().map(|(k, v)| (k.to_string(), v.to_string())).collect()
+    }
+
+    #[test]
+    fn a_checks_filter_reaches_only_an_explicit_checks_launch_unchanged() {
+        let sb = Sandbox::new().unwrap();
+        let parent = pairs(&[("FABER_CHECKS_FILTER", "inherited")]);
+        let fake = Path::new("fake-cli.exe");
+        let filter = "check: quotes \" & + 日本語";
+        let launch = Launch { checks_filter: Some(filter.into()), ..Launch::default() };
+        assert!(!child_env(&parent, &sb, &Launch::default(), fake).contains_key("FABER_CHECKS_FILTER"));
+        assert!(!child_env(&parent, &sb, &launch, fake).contains_key("FABER_CHECKS_FILTER"));
+        let launch = Launch { checks_out: Some(sb.sandbox.join("checks.json")), ..launch };
+        assert_eq!(child_env(&parent, &sb, &launch, fake).get("FABER_CHECKS_FILTER").map(String::as_str), Some(filter));
+        let launch = Launch { checks_filter: None, ..launch };
+        assert!(!child_env(&parent, &sb, &launch, fake).contains_key("FABER_CHECKS_FILTER"));
     }
 
     #[test]
