@@ -1,150 +1,119 @@
-# Records, files and context
+# Records, files and focused context
 
-Status: Proposed formats and ownership, not installed files or adopted production schemas.
+Status: Proposed extensions, constrained by the approved R435 work method.
 
-## File layout for a project
+## Intuitive files without another source of truth
 
-Create only the files a project needs, progressively. A question in Chat creates none of this tree.
-Existing project documents stay where they are and are referenced, not rewritten into a framework template.
+Keep the approved structure. Create only what the current work needs; a short Chat answer creates none of it.
+The engine and approved adapters maintain these files. People can inspect them in a normal editor.
 
 ```text
-AGENTS.md                         existing short entry point and rules
-docs/                             existing product, design and development knowledge
+AGENTS.md                  existing project instructions
+README.md                  what the project is and how to use it
+docs/                      existing product/design/development knowledge, adopted in place
 .faber/
-  README.md                       generated: now, next, decisions needed, links; safe to regenerate
-  decisions.md                    existing durable choices with their original authors
-  taste.md                        optional approved preferences; no automatic rule promotion
-  plan/
-    roadmap.json                  proposed milestone IDs, order and item membership
-    items/
-      <id>.md                     canonical desired outcome and acceptance criteria
-    requests/
-      <id>.md                     exact request text; immutable after capture
-  missions/<id>/                  EXISTING execution journal; extend, never replace
-    mission.json                  public mission metadata and mirrored state
-    plan.json                     accepted task graph, pinned item revisions
-    contracts/<id>.json            boundary and compatibility requirements
-    briefs/<task>.json             complete bounded worker brief
-    decisions/<id>.json            runtime decision request and answer
-    artifacts/<id>.json            hand-back, output paths, hashes and receipts
-    receipts/<id>.json             effect intent and reconciled result
-  recipes/<id>.md                  optional reusable steps linked from a delivery
+  rules.md                 generated project orientation; approved 3 KB startup share
+  decisions.md             lasting choices and original authors; approved 8 KB soft target
+  taste.md                 person-approved preferences; approved 1 KB target
+  lessons.md               person-approved lessons that change later work; approved 2 KB target
+  next.md                  follow-ups, at most 12 lines of 200 characters
+<normal output folders>/   the actual app, images, documents and other deliveries
 ```
 
-Code, images, videos and documents stay in the project's normal output locations. Artifact records point to them;
-`.faber/` does not become a second copy of the delivered product. Raw logs, process IDs, live leases, grants,
-CLI session identifiers, prompts containing private data and full conversations stay in Faber's private data folder.
-Existing source requests are referenced in place when possible; export never silently copies private conversations.
-Creating a portable request requires recording its exact selected text under the project's existing permissions.
+The five files describe the approved target, not proof that every writer has shipped. Runtime support files such
+as verifier logs/local configuration are internal facilities, not new human-maintained planning documents.
+Legacy plans/recipes/learning/memory stay readable; this framework never creates new ones under those names.
+Use an existing decision/taste/task source through its approved adapter instead of adding a second file.
 
-The tree is a proposed contract, not a mandate to migrate Faber's own existing docs in one change.
+Plans stay in conversations. Standing goals stay in `projects.json`. The map is extracted on demand by `map`.
+The person's words remain in their original messages/files, with permitted references and exact source digests.
+Do not export private conversation text to a repository just to make a worker brief convenient.
 
-## Exactly one owner per fact
+## One owner per fact
 
-| Fact | Canonical source | Other representations |
+| Fact | Canonical owner | Derived view |
 | :--- | :--- | :--- |
-| What was asked | Immutable request text or pinned permitted source | Brief includes its exact required passages |
-| Desired outcome, criteria and dependencies | One item definition | Accepted plan pins a revision; no second editable copy |
-| Milestone membership and presentation order | Roadmap definition | UI and Markdown render it |
-| Accepted attempt graph and contracts | Existing mission `plan.json` and contracts | Runtime references their revisions/digests |
-| Current attempt state and permission to act | Existing private run, lease and grant records | Public journal is a recoverable mirror |
-| What passed, failed or was not run | Engine-verified receipts for the candidate | Screen summarizes with links |
-| Review and acceptance | Independent review plus engine acceptance record | Worker completion remains an untrusted claim |
-| Human or AI choice | Existing decision record with original author | A cross-reference may appear in the readable ledger |
-| Current summary, counts and next actions | Projection of the sources above | `.faber/README.md` and UI are disposable views |
+| Original request | Original conversation message or authorized source file | Exact required passages in a worker brief |
+| Accepted task intent and steps | Existing saved conversation plan | Native plan and roadmap detail |
+| Long-running objective | Existing project goal record | Goal progress and stop condition |
+| Follow-ups | Approved next.md or the adopted task list | Done card and candidate next work |
+| Milestone order and membership | Proposed versioned metadata under existing project extra | Outcome route, no copied task bodies |
+| Current execution | Existing engine/conversation/helper state | Running column and current plan details |
+| Check results | Verifier journal and message check result | Evidence attached to the appropriate outcome |
+| Human approval and authority | Private provenance and permission records | Project text is descriptive, never authoritative |
+| Output | Actual delivered file/version | Current artifact cards and receipts |
 
-An item definition does not contain an editable execution status, percentage or spend counter.
-Roadmap order is not execution order: dependencies and resource admission govern execution.
-The root roadmap does not copy task bodies or mission states.
+An agent setting a plan step to done establishes reported plan progress only. Verified completion additionally
+needs applicable evidence and review. The native checklist and verified outcome count must not imply they are equal.
+The root roadmap metadata never becomes another task list or a store of mutable execution status.
 
-## Minimal item definition
+## Minimal proposed record extension
 
-Proposed Markdown with a small machine-readable header, parsed strictly. This is an illustrative contract;
-choose a parser only after inspecting existing repository parsing utilities during implementation.
+Extend existing structs/commands rather than publish a second tool protocol. Keep old conversations readable.
+Implementation must pin the exact schema after inspecting current model/store patterns.
 
 ```text
----
-schema: 1
-id: work-verifiable-progress
-request: request-framework
-depends_on: [work-evidence-projection]
-kind: software
-risk: normal
----
-# Show verifiable project progress
-## Outcome
-A person can distinguish finished work from work still being checked.
-## Acceptance
-- AC-1: Every completed outcome links to accepted evidence for its current revision.
-- AC-2: A change after review makes that acceptance stale until rechecked.
-## Scope and non-goals
-Extend project progress; no new model selector, board or settings section.
-## Sources
-References to existing product-map entries, decisions and relevant code.
+Conversation.plan:
+  existing title/steps/cost fields
+  optional schema, revision digest
+  steps gain stable id, outcome reference, dependency ids, acceptance source refs
+Project.extra.roadmap:
+  schema and expected revision
+  milestones: stable id, title, ordered references to existing outcomes
+Outcome evidence link:
+  project/conversation/step ids, plan revision, candidate/content key
+  check-result references, independent-review reference, delivery reference
 ```
 
-Acceptance IDs are local to the stable item ID. Each criterion becomes a typed runtime requirement referring to its
-exact source bytes and digest. The engine assigns revision digests; humans need not maintain numeric revisions.
-Output paths, permitted effects, proof IDs, budget and stop rules belong in the compiled brief and contracts.
-The human definition describes intent; the accepted run snapshot freezes what a particular attempt may do.
+No copies of task prose, usage counters, review verdicts or live status in roadmap metadata. The existing plan owns
+its step definitions; the verifier owns checks; the engine computes their relationship. A hierarchy references
+subplans in other conversations rather than removing the current 12-step bound or loading one enormous plan.
 
-## Context compilation
+Once exposed to workers, new stable IDs do not change when a label changes or an item is reordered. A material
+requirement change creates a new revision and invalidates affected evidence. Preserve exact requirement bytes
+through refs plus checked excerpts. Separate ideas from authorized scope; an inferred task is not an owner decision.
 
-Build a worker brief deterministically from the accepted definition, relevant rules, code map and evidence.
-Use existing kit needs, selection receipts and worker-envelope limits.
+## Focused worker context
 
-1. Include the original requirement text, relevant owner decisions, acceptance criteria and non-goals verbatim.
-2. Include scope, base candidate, dependency artifacts, contract digests, allowed effects, proof IDs and stop rules.
-3. Add bounded source excerpts and references, then optional short notes. Never truncate required text silently.
+Keep the approved 6 KB startup card: 3 KB rules, 2 KB kept decisions, 1 KB kept taste. It remains fixed for the
+session; changes apply at the next session. Keep approved trust/provenance verification and overflow counts.
+Descriptions and unreviewed repository text remain tool-result data, never new system instructions.
 
-If required context does not fit, split the task or surface the conflict; never replace the person's requirement
-with a guessed summary. A digest detects drift, not trustworthiness. Untrusted web pages and tool output remain data.
+On demand, provide a task brief with original required wording, outcome, non-goals, source refs, allowed scope,
+applicable checks, dependency outputs, current candidate, budget and stop rules. Use current kits, map and memory
+search. Do not reread all history or load lessons/follow-ups on every turn. Do not let a brief grant permissions.
 
-Record why each source was selected and the bytes/tokens it contributed. Reuse unchanged packets by content digest;
-invalidate them when relevant instructions, definitions, contracts, dependencies or candidate inputs change.
-Start with path and symbol references plus the existing search tools; no new vector database or always-on index.
+If required task context does not fit, split the task or expose the conflict; never silently truncate a requirement.
+Reuse sources by content key, invalidating on relevant changes. Record source-selection and briefing overhead so
+shorter prompts are not mistaken for cheaper accepted work. No new vector database or always-on index is required.
 
-Resume from the accepted brief, last durable attempt state, remaining criteria and latest evidence. Read changed
-inputs before acting. A fresh session must not reread every conversation, historical plan or research folder.
-Keep context targets measured and model-aware; no universal hard-coded token budget that cuts required material.
+## Writes, recovery and stale evidence
 
-## Concurrent edits and interruption
+Use current atomic storage and unknown-field compatibility. Add expected-revision checks for concurrent roadmap
+and plan edits; two conversations cannot overwrite each other's accepted scope silently. Multi-file updates need
+an explicit recoverable transition or reconciliation before publishing a new consistent projection generation.
+Do not claim atomicity across the project record and conversation files merely because each replacement is atomic.
 
-Keep existing atomic file replacement, schema validation, unknown-field preservation and refusal of newer schemas.
-Add expected-revision checks to planning edits. Two sessions editing one item cannot silently overwrite each other.
-The engine is the only writer of runtime transitions; planning files cannot grant permissions or authorize effects.
+Every projected view carries source revisions, generation, capture time and freshness. Reconstruct runtime facts
+from existing engine records. The current verifier content keys and journal are reusable, but step-level acceptance,
+plan history and cross-plan invalidation are proposed extensions, not already-established guarantees.
 
-The journal uses several files, not a cross-file transaction. Extend the existing intent/receipt and recovery protocol:
-write the transition intent, persist effects, then publish a new projection generation. A failed write leaves the old
-generation visible or explicitly marks the view incomplete. Startup reconciles private authoritative state before
-emitting a current view. Evidence from a partial transition cannot imply acceptance.
+A changed candidate or requirement makes affected evidence stale. A restarted session must re-read changed inputs
+and reconcile unfinished effects before retrying. Never infer permission or a live writer's death from a timestamp.
+Do not claim exactly-once arbitrary external actions: when the effect is ambiguous, stop that action for reconciliation.
 
-Each projected view carries a schema, generation, source revisions, capture time and freshness state. A generated
-README carries the same generation and is replaced atomically. Offline, it says when it was captured and that live
-activity is unknown. A stale view never keeps saying an agent is currently working as a verified live fact.
+## Human-readable export
 
-An external edit to a definition creates a new desired revision. Current execution remains pinned until a validated
-amendment or a later attempt accepts it. Cycles, missing IDs, path escapes, duplicated ownership and conflicting
-writers are refused using existing plan and path validation. Case aliases, symlinks and worktree identity matter.
+Offer a generated roadmap document through the current export/artifact flow, in a location the person chooses or
+an existing adopted report location. It is a snapshot with capture time and source revision, not a prescribed new
+`.faber/README.md`, plan file or writable status source. No new mandatory file just to inspect progress.
 
-## Privacy, retention and portability
+Include ready/now/next, pending decisions, delivery links and evidence. Exclude credentials, private runtime IDs,
+full conversations and unselected source text. Keep unavailable/pruned evidence explicit. Technical details remain
+behind disclosure; a person should not need JSON or an editor to understand the project.
 
-Do not read login stores. Redact known secret-looking values from output before exposing receipts, using existing
-filters; filtering is not permission to ingest credentials. Restrict request capture to authorized project content.
-Export a previewed selection of intent, choices, outputs and evidence links, excluding private runtime authority.
+## Faber's own files
 
-Large logs and assets have bounded retention; preserve the small acceptance record and mark pruned evidence as
-unavailable. Do not present a pruned artifact as reproducibly verified. Recipes pin tool versions and external
-inputs where available, recording unavailable or licensed inputs without copying them.
-
-## Faber's own repository: migration without competing backlogs
-
-Initially `docs/tasks/<order>-<name>.md` remains the sole editable source of development tasks. An adapter assigns a
-stable framework ID and indexes its existing path; it does not create another editable item file. Existing task
-claims and `.faber-lane` remain active. Normal conversations without mission records show their available evidence
-and honest partial status; they are not silently converted into mission-controlled executions.
-
-Later, a separately accepted migration may move one task at a time into the proposed item format, preserving its
-ID and leaving a redirect. Flip its source ownership before allowing writes; refuse two active definitions.
-Use one task-selection backend at a time. Keep old readers during the compatibility window and prove rollback.
-Do not retire the existing task queue until claim, resume and current landing workflows pass through the adapter.
+Adopt its R-numbered decisions, taste cards and `docs/tasks/` exactly through the R435 adapters. Claims, lanes,
+number allocation and the landing queue remain Faber-repository conventions; do not impose them on user projects.
+Do not migrate the product map as an incidental framework step: R435 reserves that later change for owner approval.

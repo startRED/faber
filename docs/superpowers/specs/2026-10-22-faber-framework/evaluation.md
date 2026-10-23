@@ -54,8 +54,8 @@ Keep accepted scope constant within a comparison. Canceling hard work cannot imp
 | Combined work breaks integration | Individual success cannot accept the combination |
 | Dependency or acceptance definition changes | Affected descendants invalidated or replanned |
 | Crash between intent and external effect receipt | Reconcile; do not replay an ambiguous effect |
-| Crash between private state and public mirror | Recover authority first; no false current projection |
-| Old worker remains alive after apparent timeout | No lease transfer based on time alone |
+| Crash between project and conversation updates | Reconcile revisions; no false current projection |
+| Old worker remains alive after apparent timeout | No competing writer admitted based on time alone |
 | Two writers claim overlapping case/symlink paths | Refuse unsafe concurrent admission |
 | Two editors save the same planning revision | One succeeds; the other receives a conflict |
 | Newer schema or corrupt journal | Refuse unsafe interpretation; retain original data |
@@ -93,8 +93,8 @@ The proposed route must not become an agent map or competing running list.
 ## Adoption and rollback
 
 Start read-only. Permit opt-in planning writes only after schema, revision-conflict and legacy-adapter proof.
-Permit multiple-task execution only after lease/recovery and integration scenarios pass. Keep existing one-task
-records readable and current task-queue ownership intact throughout migration.
+Permit cross-plan coordination only after write-ownership/recovery and integration scenarios pass. Keep existing conversation
+records readable and current task-queue ownership intact throughout any record extension.
 
 Production changes follow AGENTS.md: relevant local proofs, independent review, product-map/design/locale updates,
 what's-new entries, current landing procedure and required remote confirmation. The approved built-in verifier is

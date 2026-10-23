@@ -1,168 +1,144 @@
-# Visual progress and implementation roadmap
+# Visual roadmap and implementation order
 
-Status: Proposed experience and implementation slices. Illustrations are not live project status.
+Status: Proposed experience. All examples below are illustrative, not live progress or implemented screens.
 
-## The screen's question
+## The one question
 
 What can I use now, what is Faber doing, and what is keeping the rest from being ready?
 
-Make that answer readable in one glance. Start with a sentence, an outcome route, current work and the next ready
-outcomes. Open details only when requested. Extend Projects and its current project context; do not replace the
-conversation, add another application area or resurrect the removed mission board.
+Answer inside current Projects and its native saved plan. Start with a sentence and a compact vertical outcome
+route. Open detail in the current viewing/running surface when requested. Do not add a fixed dashboard, workflow
+board, agent network, new application area or competing running list.
 
-## Proposed view
+## A concrete sketch
 
-This sketch uses illustrative states to explain behavior, not measured completion of Faber or this proposal:
+The following is example content, not the status of Faber or this proposal:
 
 ```text
-Faber / Your project / Progress
+Faber / Your project
+The export works. Faber is checking a large file.
 
-The export works. Faber is checking how it handles a large file.
-2 of 5 required outcomes accepted · scope revision 3
+2 of 5 required outcomes verified · scope revision 3
 
 ✓ Understand the input
-✓ Make the export work             Open the result
-● Handle a large file               Checking · evidence in details
+✓ Make the export work             Open result
+● Handle a large file               Checking
 ○ Add the preview                   Next, after the file check
-○ Prepare the final delivery        Later
+○ Prepare final delivery            Later
 
-Now
-Checking a large file. The preview can start after this passes.
+Needs your decision                shown only when a real decision exists
+Which preview style should stay?   Open comparison
 
-Needs your decision                 only present if a real decision exists
-Which preview style should stay?    Open the comparison
-
-Details                             original request, files, evidence, cost, history
+Details: request · files · evidence · choices · cost · history
 ```
 
-Use a vertical sequence of outcomes, not a board with workflow columns or an agent network. Order can show
-dependencies without suggesting all work is serial. A person can expand a milestone into its outcomes and open
-one outcome's current explanation, deliverables, proof, decisions and history.
+Show outcomes people recognize, not a live org chart of agents. Expand one milestone into its existing subplans,
+keeping the current 12-step plan limit. A long project does not require a huge list mounted in the conversation.
+Live conversations and helpers remain in the running column. Model/effort remains in the composer; persistent
+settings remain in Settings. Priority and scope changes are work actions that record a new plan revision.
 
-The existing running column owns live conversations, helpers and attention. Progress references those entries,
-not a second list of agents. Model selection stays in the composer; persistent controls stay in Settings.
-Priority or scope changes are work actions, recorded as plan revisions, subject to existing permissions.
+The native plan already counts reported steps. The proposed verified-outcome count must be labeled separately
+until those steps have trustworthy evidence links. Never relabel an agent-written checkbox as engine verification.
+Use the current status/closing-box and artifact grammar; do not create a second completion receipt.
 
 ## Honest progress
 
-- Count accepted required outcomes for the selected scope revision. Show the count and denominator together.
-- Do not treat a fraction of differently sized tasks as percentage of effort or time remaining.
-- An outcome awaiting required review is checking, not done. Published availability is a separate delivery fact.
-- Deferred, canceled and optional work stay visible in details and are excluded with a reason, never hidden as done.
-- If scope changes, show what changed and its new revision. Splitting tasks cannot create apparent achievement.
-- A dependency or criteria change marks affected acceptance stale; retain the old acceptance in history.
-- If execution facts are missing, say unknown. A worker's self-reported progress is not verified progress.
-- Show a range for time only once calibrated with comparable runs. Otherwise use the next dependency and no ETA.
-- Mark cost completeness and capture time; never equate API-priced token estimates with a subscription charge.
+- Count verified required outcomes for the selected accepted scope; show numerator and denominator together.
+- Do not treat uneven task counts as percent of time/effort remaining.
+- Checking/review is not done. Published availability is a separate delivery fact.
+- Ideas, optional, deferred and canceled work remain explainable; never mark them complete to improve a metric.
+- A scope revision says what changed. Splitting tasks cannot manufacture progress.
+- Relevant input changes invalidate current acceptance while retaining historical evidence.
+- Missing execution data says unknown. A worker's claim is reported, not verified.
+- Give time ranges only after comparable recorded runs calibrate them; otherwise show dependencies without an ETA.
+- Show incomplete cost honestly, without equating API-priced token use with a subscription bill.
 
-For a large milestone, an optional bar may show accepted outcomes within the current frozen scope, labeled as such.
-Do not show a global percentage for the entire evolving Faber vision. Detailed task counts belong behind disclosure.
+Do not show a global completion percentage for the evolving complete Faber vision. A milestone's optional bar
+represents accepted outcomes in its selected scope, with that meaning written next to it.
 
-## Interaction and accessibility
+## Accessible and light
 
-Use Faber's existing theme tokens, typography, disclosure patterns and focus behavior. Preserve the reserved colors:
-amber means needs the person; vendor colors identify the vendor. Every state also has text and a shape.
-Use real buttons and links with keyboard focus, descriptive names and a stable reading order.
+Use existing Faber theme tokens, controls, keyboard focus and disclosure behavior. Amber means needs the person;
+vendor colors retain their current meanings. Every state has text and a shape as well as color.
+At 720 px, keep the route vertical and the conversation reachable. Long translations wrap without losing meaning.
+Exported summaries read on a phone; that does not introduce a phone executor.
 
-At 720 px, keep the route vertical and the conversation reachable. A standalone exported summary must also read
-well on a phone; that does not promise a phone execution app. Long translations wrap rather than truncate meaning.
-No animation is required for progress. With reduced motion, hidden window or a game in front, stop visual activity
-and avoid background layout work. Render only opened sections and page long lists.
+Render only opened detail and page long histories. No animation is required. Reduced motion, hidden window and
+a game in front preserve existing zero-repaint behavior. Reuse current attention rules instead of toasting every
+completed item. All eventual product text belongs in the five locales, authored by hand.
 
-Required empty and failure states: no plan, no AI connected, planning not accepted, no work running, all done,
-permission needed, missing dependency, quota unavailable, corrupted record, stale summary and unavailable artifact.
-Each says what is known and what changes the condition. Do not show an empty gray dashboard or fake activity.
+Cover no plan, no AI, no active work, all done, missing evidence, stale output, unavailable quota, permission needed,
+canceled work, corrupt records and missing artifacts. Show what is known and the condition that changes the state.
+An optional export is a dated snapshot through the existing file flow, never another source of plan status.
 
-No completion toast for every task. Reuse existing attention rules. A stopped autonomous run retains its existing
-notification behavior. All product text is authored in the five locale files as part of implementation.
+## Six implementation slices
 
-## Portable human view
-
-Generate `.faber/README.md` from the same view used on screen. It includes the objective, accepted scope revision,
-capture time and freshness, accepted outcomes, now/next, decisions, current delivery links and evidence references.
-It is useful outside Faber but never a source of execution authority. It must state when it is merely a snapshot.
-Keep the README small and link to details. A manually edited generated summary is not imported as a status update.
-
-## Roadmap for building Faber Flow
-
-All six slices below are proposed and unstarted by this task. Their order does not replace the main product roadmap.
-Schedule them within the existing self-development, Full Chat and Projects phases at the relevant boundaries.
+All are proposed. Preserve the order of the four approved R435 slices and do not fork or replace their work.
+Read-only discovery can proceed now; contracts, trust, adapters and review-gate extensions depend on their relevant
+approved slices being completed. This roadmap does not reorder Faber's main product phases.
 
 ```text
-F0 Establish truth
-  -> F1 Show current evidence
-    -> F2 Make plans portable and briefs small
-      -> F3 Coordinate several bounded tasks
-        -> F4 Prove full-product use
-          -> F5 Compare and qualify adoption
+F0 Current truth
+  -> F1 One readable view
+    -> F2 Durable outcome links
+      -> F3 Reliable coordination
+        -> F4 Full-product acceptance
+          -> F5 Comparative qualification
 ```
 
-### F0 — Establish truth and compatibility
+### F0 — Establish the current truth
 
-Inventory the current project, conversation, mission and development-queue interfaces. Resolve the specific living
-document contradictions affecting this feature. Pin current schemas, owner decisions and recovery contracts.
-Create representative recorded fixtures, including incomplete conversation-only work and legacy one-task missions.
+Pin current engine/model/store schemas, product decisions and the approved work-method revision. Resolve only the
+documentation discrepancies this feature relies on. Map the native plan, goal, check, memory and artifact records.
+Build fixtures for current conversations, legacy plans and incomplete evidence.
+Exit: a reviewer can identify one owner per fact; no mission revival or competing queue.
 
-Exit: a reviewer can identify the owner of each fact and the relevant existing check; no undocumented migration.
-No new UI or autonomous behavior. Dependency: none; scoped to this feature's foundations.
+### F1 — Make today's work understandable
 
-### F1 — Show current work from existing evidence
+Improve the current native plan/detail using facts already available. Distinguish reported steps from verified
+results; show current artifacts and missing links honestly. Reuse the existing running and closing surfaces.
+Exit: a non-programmer identifies now/next/blocker; no fabricated historical verification; keyboard, width,
+long-language, reduced-motion and idle-resource checks pass. No new scheduler is required for this slice.
 
-Build a read-only projection over existing records and expose a minimal project progress detail through Projects.
-Show what can actually be known for conversation-only work. Generate the portable summary from that same projection.
-Use a proposed definition only where the old data cannot represent outcomes; never fabricate historical completion.
+### F2 — Add stable outcomes and a persistent route
 
-Exit: UI and summary agree on a pinned generation; a planted false worker success cannot mark an outcome done;
-stale, absent and corrupt data remain distinct. Pass relevant layout, memory and zero-idle-work checks.
-This is the first useful slice; no multiple-writer scheduler is needed to understand today's work.
+Extend saved plans with stable step/outcome IDs, acceptance source refs and revision history. Add versioned milestone
+membership under the existing project record, referencing those plans. Bind applicable verifier results/review
+receipts to outcomes. Keep original requirements intact and use approved adopted task sources.
+Exit: fresh sessions resume with complete required context; concurrent edits cannot silently overwrite scope;
+changed inputs invalidate affected acceptance. No `.faber/plan`, roadmap task database or copied backlog.
 
-### F2 — Make plans durable and worker briefs small
+### F3 — Coordinate safely across conversations
 
-Add roadmap/item definitions, original-request references, stable acceptance IDs and controlled planning edits.
-Compile focused briefs through the existing kit system. Add the adapter for Faber's current task queue.
+Use existing helpers, started conversations, separate copies, budgets and repair behavior. Add validated dependency
+readiness, integration checks and candidate invalidation across plans. Strengthen write-scope ownership where needed
+in the current architecture. Measure admission headroom and reserve independent-review capacity.
+Exit: cancellation, crashes, quota loss, overlapping writers and changed dependencies cannot produce false accepted
+outcomes or blind replay of ambiguous external effects. Do not claim process guarantees borrowed from removed code.
 
-Exit: a fresh session resumes without reading the full history; required words survive byte for byte; conflicting
-edits are refused; legacy source ownership is unambiguous. Measure brief size and resumed-task correctness.
+### F4 — Establish complete-product acceptance
 
-### F3 — Coordinate multiple tasks with bounded repair
+Apply the same outcome links to representative research, visual assets, rendered documents, media and automation.
+Add only checks supported by actual installed tools. Exercise a long-running project across session compaction and
+vendor switching. Optional user-requested reproducibility files are deliverables, not new memory-library writers.
+Exit: supported work has concrete evidence and an explicit human-judgment boundary; unsupported checks stay not run.
 
-Extend the current one-task coordinator explicitly. Add ready-task selection, resource admission, dependency
-invalidation, bounded repair, independent review capacity and final integration proofs. Keep existing grants,
-process leases and effect reconciliation. Integrate the approved verifier as its own slices become available;
-do not assume its unfinished stages are a prerequisite for every read-only improvement.
+### F5 — Compare, simplify and qualify
 
-Exit: crash/restart, cancellation, changing inputs, quota exhaustion and overlapping paths cannot accept stale
-output, duplicate a reserved effect or run an unauthorized writer. Show measured peak resources including workers.
+Compare with current Faber, plain CLIs and pinned BMAD/GSD versions using [evaluation.md](evaluation.md).
+Remove stages that spend more without improving accepted results. Keep legacy reading and a read-only fallback.
+Exit: independent scorecard reports quality, total tokens, corrections, recovery and usability, with losses included.
+The owner chooses adoption; no performance claim is made merely because a design looks comprehensive.
 
-### F4 — Prove the complete-product contract
-
-Use the same records for representative research, visual assets, rendered documents, video and automation tasks.
-Add domain-specific acceptance only where installed tools can actually produce and verify the outputs.
-Exercise a long-running project across compacted contexts and vendor changes.
-
-Exit: every supported kind has a concrete check recipe, clear human-judgment boundary and linked artifact;
-unsupported checks remain explicitly not run. No new runtime, driver or bundled catalog content.
-
-### F5 — Compare, simplify and qualify adoption
-
-Run the controlled comparison in [evaluation.md](evaluation.md), including contemporary BMAD and GSD versions.
-Remove stages that add cost without improving accepted outcomes. Keep a read-only/legacy fallback while adoption
-is evaluated. Let the owner decide product direction and any default workflow change from measured results.
-
-Exit: publish a truthful internal scorecard with quality, total token cost, corrections, recovery and usability.
-If targets fail, show the regression and keep the proven previous path. Do not rename a failed comparison a win.
-
-## Why these five priorities come first
-
-F0 is mandatory preparation. Rank the next five capabilities without invented numerical scores:
+## Ranked priorities after preparation
 
 | Rank | Capability | Impact / effort / uncertainty | Trade-off |
 | :--- | :--- | :--- | :--- |
-| 1 | Evidence-backed read-only progress | High trust; moderate effort; bounded integration risk | Less automation initially |
-| 2 | Durable intent and focused briefs | High continuity/economy; moderate effort; schema risk | Requires strict ownership and migration |
-| 3 | Multiple tasks and bounded repair | High throughput; high effort and concurrency risk | Delayed until truth and recovery hold |
-| 4 | Cross-domain deliverable checks | Broad product fit; variable effort and verifier availability | Only admit supported kinds |
-| 5 | Comparative qualification and simplification | Establishes whether adoption is justified; recurring evaluation cost | Avoids unsupported superiority claims |
+| 1 | Clear current native progress | High clarity; moderate effort; bounded integration risk | Does not automate more work yet |
+| 2 | Outcome IDs, source refs and evidence links | High continuity/trust; moderate effort; schema risk | Needs compatibility and R435 integration |
+| 3 | Cross-plan dependencies and integration checks | High coordination value; high effort and concurrency risk | Wait until records are reliable |
+| 4 | Domain-specific acceptance | Full-product fit; variable effort/tool availability | Admit only what can be verified |
+| 5 | Comparative evaluation and simplification | Establishes value; recurring benchmark cost | Avoids unsupported superiority claims |
 
-Defer a visual workflow editor, custom role marketplace, separate dashboard application, cloud synchronization,
-vector memory store and elaborate estimation system. None is required to make progress truthful or work resumable.
+Defer a workflow editor, role marketplace, cloud sync, separate dashboard service, vector memory and elaborate
+estimation engine. None is necessary to show honest progress or resume useful work.

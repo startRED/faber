@@ -1,143 +1,113 @@
-# Faber Flow: a framework designed for Faber
+# Faber Flow: a framework designed for the current Faber
 
-Status: Proposal. Nothing in this folder implements or changes the product.
-Date: 2026-10-22. Working name: Faber Flow; naming remains a product choice.
+Status: Proposal, not an adopted product decision. No runtime behavior is changed.
+Date: 2026-10-22. Working name only: Faber Flow.
 
 ## Read this first
 
-Faber Flow connects intent, planning, execution, evidence and delivery through Faber's existing engine.
-People see a readable route to their result. Agents receive the smallest complete brief for their current task.
-The engine owns execution facts; the writer cannot turn a claim into a successful check.
+Extend Faber's approved own work method (R435), its project conversations, durable plans, standing goals,
+verifier, memory and closing receipts. Make the route from the person's request to a usable result visible.
+Do not introduce a second methodology, resurrect the retired mission engine (R215), or create a competing backlog.
 
-This proposal covers both building Faber itself and the complete intended Faber product, including non-code work.
-It does not claim that future capabilities already exist. The repository snapshot, rather than an installed build,
-was inspected. The user's request is preserved in [request.md](request.md).
+The initial working copy was older than the shared product. The baseline was refreshed against the shared
+`phase-1-base` on 2026-10-22 before this revision. The original request is in [request.md](request.md).
+This proposal covers Faber developing itself and the full intended product, including non-code work.
 
 | Read | To answer |
 | :--- | :--- |
-| [Baseline](baseline.md) | What exists, what is planned, and what BMAD and GSD contribute |
-| [Records](records.md) | Where files live, what owns each fact, and how state survives interruption |
-| [Execution](execution.md) | How work is selected, delegated, checked, resumed and delivered |
-| [Roadmap and experience](roadmap.md) | What the person sees and the order in which to build it |
+| [Baseline](baseline.md) | What exists now, what is approved, and what BMAD/GSD contribute |
+| [Records](records.md) | Where information belongs and what agents read |
+| [Execution](execution.md) | How to size, coordinate, verify and resume work |
+| [Roadmap](roadmap.md) | What people see and the ordered implementation slices |
 | [Evaluation](evaluation.md) | How to prove quality, economy, recovery and usability |
 
 ## 1. Summary
 
-Use one small framework inside Faber, not another orchestration application or a bundled methodology.
-Extend the mission journal, worker envelopes, independent review, Auto routing and existing progress surfaces.
-Make current work understandable without reading a conversation or opening technical files.
-
-The central relationship is:
+A person should understand what is ready, what is happening and what comes next without reconstructing a chat.
+An agent should receive just the complete relevant context, with the person's requirements intact.
+The engine should establish what was checked; the writer's claim alone must never establish completion.
 
 ```text
-Original request -> accepted outcomes -> planned work -> attempts -> evidence -> accepted delivery
-                          |                 |              |                        |
-                      decisions        dependencies     live activity         files and recipe
+Original request -> accepted outcomes -> conversation plans -> work -> checks/review -> usable delivery
+                          |                     |                |                         |
+                   standing goal         dependencies       live activity             files/receipt
 ```
 
-The roadmap is a projection of these relationships, never an agent-written second status ledger.
-An accepted delivery and a published version are separate facts.
+The roadmap is a view of those records. It is not another editable status ledger.
+Approved memory and trust rules remain authoritative; additions below are proposals needing normal product adoption.
 
 ## 2. Background
 
-Faber already has durable mission records, contracts, scoped workers, receipt-backed acceptance and process leases.
-Its current coordinator deliberately accepts one task and one writing attempt. Projects currently opens conversations;
-the old mission board is absent. The development task queue, conversation plans and mission records do not yet form
-one durable, user-readable project plan. Some living documents contradict the current code; see the baseline.
+The current Faber works through project conversations and separate copies. The plan, status and closing tools,
+Keep going, standing goals, project memory, on-demand map and verifier already provide much of the spine.
+The old mission journals/coordinator were removed. R435 approves a small method: size by risk, a contract in the
+plan, engine-recorded checks, independent risky-work review and selective lasting memory.
 
-The opportunity is to connect those pieces with a reliable planning model and an understandable view, rather than
-to add more roles, prompts or dashboards. Planning itself is a valid deliverable and need not start implementation.
+The missing extension is a coherent project-level route across conversations, outcomes and delivery evidence.
+Some shared documents lag code, including the implementation status of the approved method's first slice.
+Use the code and current owner decisions for integration, never a historical specification as runtime authority.
 
 ## 3. Objective
 
-Quality comes first, with economy close behind and speed after both, following Faber's product principles.
-Use the existing product targets as the desired destination, not measurements of this proposal:
+Follow Faber's priorities: quality, closely followed by economy, then speed. Keep its existing product targets:
 
-- Win or tie nine out of ten Projects requests against the plain CLI, with independent assessment and executable proof.
-- Reach at most 70% of the plain CLI's token cost per accepted task without reducing quality.
-- Cut corrections requested after completion by half. Never report an unrun check as passed.
+- Projects wins or ties nine of ten requests against the plain CLI, judged independently with concrete proof.
+- Total token cost per accepted task is at most 70% of the plain CLI, without reducing quality.
+- Corrections requested after completion fall by half; no unrun check is reported as passed.
 
-Framework-specific acceptance also requires honest progress, exact-version evidence, safe recovery and quick
-orientation for someone who does not program. Thresholds and comparison design are in the evaluation document.
+These are targets, not results of this proposal. Add recovery integrity, truthful progress and rapid human
+orientation as framework acceptance conditions. [Evaluation](evaluation.md) defines a fair comparison.
 
-## 4. People and their jobs
+## 4. People and jobs
 
-| Person | Job | Constraint |
+| Person | Job | What should improve |
 | :--- | :--- | :--- |
-| Someone delegating a result | Understand what is ready, happening, next, or needs a decision | No commands or project-management vocabulary required |
-| A frequent user with several projects | Change priorities, inspect outputs and resume work | Stable identities and no duplicate progress lists |
-| Faber's maintainer | Build Faber through Faber and verify the exact result | Existing product rules, checks, review and landing authority remain in force |
-
-Agents are consumers of the same project records, not another audience with a separate project truth.
+| Someone delegating a result | Understand ready, now, next and decisions | No need to learn commands or project management |
+| Frequent user | Resume and redirect several projects | One route, stable identities and linked output |
+| Faber maintainer | Let Faber build itself with reliable evidence | Existing development files and queue are adopted |
 
 ## 5. Value propositions
 
 | Segment | Why | Before | How | After | Alternatives |
 | :--- | :--- | :--- | :--- | :--- | :--- |
-| Delegator | Wants a finished result without supervising every step | Reconstructs progress from chat | Outcome-based route, current facts, linked outputs | Can understand and redirect the work | Direct AI conversation or a generic framework |
-| Frequent user | Needs continuity across sessions and projects | Repeats context and tracks several lists | Durable records, bounded briefs, explicit dependencies | Resumes without reconstructing history | Manual notes, GSD or BMAD artifacts |
-| Maintainer | Needs fast development without accepting unchecked changes | Connects queues, documents and proofs manually | Adapters into the same evidence model | Can see exactly what was checked and accepted | Existing scripts used separately |
-
-The differentiator to test is continuity from the person's words to the delivered result inside Faber, combined
-with native resource accounting and engine-enforced evidence. A methodology alone does not prove better results.
+| Delegator | Wants a usable result | Reads scattered chat updates | Outcome route and current receipt | Can understand and redirect | Direct AI conversation |
+| Frequent user | Needs continuity | Repeats context and maintains lists | Saved plans/goals plus focused context | Resumes with fewer corrections | Manual notes, BMAD or GSD artifacts |
+| Maintainer | Needs safe efficient work | Joins queues, documents and checks manually | Adopt existing sources; project-level projection | Sees what was actually checked | Current separate tools |
 
 ## 6. Proposed solution
 
-### A. A common spine with task-specific checks
+1. **Adopt the approved method.** Keep R435's five memory files, trust boundaries, risk-sized loop and adapters.
+2. **Connect outcomes.** Add stable outcome/dependency references to existing saved plans and standing goals.
+3. **Derive progress.** Read runtime evidence, plan revisions and delivery state into one shared projection.
+4. **Keep context small.** Use the approved bounded start card and on-demand map/memory; complete task briefs are tool
+   results tied to source revisions, not an ever-growing system prompt.
+5. **Keep one conversation experience.** Extend Projects, its native plan and current running/closing surfaces.
+6. **Verify by domain.** Software, research, images, documents and media share the outcome model but have distinct
+   checks. Technical validity and the person's creative judgment are separate.
 
-Keep request, outcome, task, attempt, decision, evidence and delivery as a small shared vocabulary.
-Software, research, image, video, documents and automation differ in artifacts and acceptance checks, not in
-project-management machinery. Short Chat answers do not create a project tree. Durable multi-step work does.
+A small fix stays small. A long project gains durable dependencies and evidence. A planning request can end with
+a reviewed plan; it does not authorize implementing that plan. Finishing work does not authorize publishing it.
 
-### B. Planning sized to risk
+## 7. Alternatives
 
-A small reversible change needs a short outcome and relevant checks, not a full specification ritual.
-Multi-area work adds dependencies and contracts. Security, data migration, money and external effects add the
-appropriate isolation, review and authorization. Risk can escalate the path; an agent cannot lower required checks.
-
-### C. One place for each fact
-
-Existing mission records remain the execution spine. Human-readable task definitions describe desired work;
-accepted plans pin them to an attempt. The screen and a portable Markdown summary read the same projection.
-Private sessions, grants and live process state remain in Faber's private data, outside the repository.
-
-### D. A route people can understand
-
-Extend Projects with an optional progress detail, accessed from the project context, showing outcomes in order.
-Lead with now, next, finished and the one decision that matters. The existing running column continues to show
-live conversations and helpers. Avoid a new agent map, a wall of cards or another settings surface.
-
-### E. Independent completion
-
-Workers submit candidates. Engine-verified checks and an independent review determine whether a candidate is
-accepted. Creative taste and product direction belong to the person. Publishing and spending require authority;
-finishing a task is not permission to publish it.
-
-## 7. Alternatives considered
-
-| Approach | Advantage | Why it is not the proposed default |
+| Approach | Advantage | Trade-off |
 | :--- | :--- | :--- |
-| Prompt files only | Cheap and portable | Cannot enforce runtime state, process ownership or truthful completion |
-| Large role-based pipeline for every request | Thorough specialization | Coordination and context overhead for simple work |
-| File-first planning connected to Faber's engine | Human-readable intent plus enforceable execution | Requires careful adapters and schema evolution; recommended |
-| Separate workflow service and database | Independent scaling | Duplicates Faber's engine, adds idle cost and synchronization failures |
+| Prompt/file methodology alone | Portable and simple | Cannot enforce runtime authority or truthful completion |
+| Another full orchestration layer | Many specialized stages | Duplicates Faber's existing roles, routing and state |
+| Extend R435 and native records | Best fit with current Faber; recommended | Requires small, versioned additions and careful evidence invalidation |
+| Separate workflow server/database | Independent scaling | Adds idle cost and competing ownership |
 
-BMAD and GSD already address some of these concerns. The proposed advantage is specific integration with Faber;
-comparative superiority remains unproven until the evaluation passes.
+BMAD already offers intent-sized planning and reviewed implementation. GSD emphasizes durable phases and fresh
+context. Borrow those methods as references, not code. Faber's specific opportunity is a native link between those
+ideas, subscription pacing, current evidence and human-readable output. Superiority still requires measurement.
 
 ## 8. Scope and adoption
 
-Build in the six outcome slices in [roadmap.md](roadmap.md). First prove a read-only projection of current work,
-then controlled planning and context packets, then multiple tasks, then full-domain adaptation and comparison.
-Do not reorder Faber's overall product phases or adopt the proposed files as production formats in this planning task.
+The six slices in [roadmap.md](roadmap.md) extend the current product, without reordering Faber's main phases.
+No new always-running service, vendor driver, bundled tool, cloud account or permanent department hierarchy.
+Existing project documents stay where they are; the engine's approved adapters adopt them.
 
-No new always-running process, cloud account, vendor driver, framework dependency or permanent team hierarchy is
-proposed. Use the current Rust engine, SolidJS surfaces and open files. Optional tools still come from the catalog.
-
-Assumptions: the framework should serve Faber itself and user projects; current product constraints remain binding;
-the requested visual roadmap is an outcome route, compatible with the existing rejection of agent maps and boards.
-These are design assumptions, not owner-approved rules. This proposal does not adopt a new product decision.
-
-The main unresolved taste choice is the final location and presentation of progress inside Projects. The proposal
-gives a concrete option to review; no existing screen is changed. Implementation estimates need the first slice's
-measured results; no calendar dates or unmeasured performance claims are promised.
+Assumptions: the requested framework serves Faber and user projects; a visual roadmap means an outcome route,
+compatible with the rejection of agent maps and boards; existing owner decisions remain binding.
+The final progress placement and any new persistent roadmap fields are proposed product choices, not adopted here.
+Do not change R435's file model or create new plan/recipe files as an incidental part of implementation.

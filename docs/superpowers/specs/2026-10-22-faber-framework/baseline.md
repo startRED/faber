@@ -1,87 +1,75 @@
-# Baseline and comparison
+# Current baseline and comparison
 
-Status: Proposal research, based on the checked-out repository on 2026-10-22. No installed-app validation.
+Status: Proposal research, refreshed against the shared product on 2026-10-22. No installed-app validation.
 
-## Evidence hierarchy
+## Freshness matters
 
-The person's decisions constrain design. Source code establishes what this checkout implements; a documented
-vision establishes intended scope. Neither establishes that an installed build has passed an end-to-end check.
-When documents disagree, record the conflict instead of silently choosing whichever supports the proposal.
+The original conversation copy contained the pre-R215 mission engine and an older roadmap. The shared product had
+already removed that engine and approved R435. This revised proposal uses the current shared sources below.
+Historical mission contracts are not a reusable current runtime. Do not read, repair or migrate abandoned mission
+folders merely to introduce this framework.
 
-## Existing mechanisms to extend
+Owner decisions constrain design. Source establishes implementation in the inspected revision; proof results
+establish tested behavior. Neither a document marked approved nor a source file alone establishes full delivery.
 
-| Mechanism | Evidence in this checkout | Implication |
+## Existing spine
+
+| Capability | Current source to inspect | Framework use |
 | :--- | :--- | :--- |
-| Project conversations | `ui/Projects.tsx`, `ui/App.tsx`; product-map Words and Projects surfaces | Preserve conversation-first work |
-| Mission coordinator | `engine/src/project/coordinator.rs`, `src-tauri/src/main.rs` (`mission_start`, `drive_mission`) | Extend an executor rather than invent another |
-| One task, one writer attempt | `coordinator.rs` (`accept_plan`, module contract) | Multiple tasks and repair are new work |
-| Graph, scopes, contracts | `engine/src/project.rs`; design/projects Records | Reuse dependency and overlap validation |
-| Durable journal | `engine/src/project/store.rs`, `run.rs` | Private run authority repairs the public mirror |
-| Exclusive process-aware leases | `engine/src/project/lease.rs` | Elapsed time alone must not transfer a live worker's rights |
-| Exact-result acceptance | `engine/src/project/queue.rs` | A changed candidate needs fresh applicable checks and review |
-| Briefs and worker envelopes | `engine/src/project/wire.rs`, `kit.rs`; design/projects Worker wire and Kits | Extend typed contracts and bounded source selection |
-| Check and cost records | `engine/src/project/report.rs`, `wire.rs` | Keep unknown cost and checks not run explicit |
-| Development task queue | `docs/tasks/README.md`, `scripts/tasks.mjs` | Adapter required; do not maintain a competing backlog |
-| Local area claims | `.faber-lane`, `testkit/src/lanes.rs` | Preserve overlap prevention during self-development |
-| Model/quota routing | `engine/src/route.rs`, `budget.rs`; product/models | Extend Auto rather than add a framework model selector |
-| Helpers, activity and browser | product-map Subagent step, Work log and Page in Faber's browser | Reuse visible activity and intervention |
+| Project conversations and separate copies | `docs/design/projects.md`, `engine/src/project/copy.rs` | Keep the current execution unit |
+| Saved plans, short status and closing box | `engine/src/engine/plan.rs`, `engine/src/model.rs` | Extend their records rather than create mission state |
+| Standing goals | `projects.json`; product map Standing goals | Link long-running outcomes and stop conditions |
+| Keep going and started conversations | `docs/design/keep-going.md`, `docs/dev/self-development.md` | Continue and delegate through current mechanisms |
+| Verifier and engine checks | `verify` tool; self-development and verifier docs | Bind evidence to the applicable candidate |
+| Auto, quotas and spend | product/models; `engine/src/engine/plan.rs` | Reuse routing, usage and over-estimate economy behavior |
+| On-demand code map | `map` tool; product-map Project map | Do not generate another prose inventory |
+| Memory and approved provenance | `engine/src/project/memory.rs`, `engine/src/project/rules.rs` | Distinguish person-kept items from editable project text |
+| Native progress and visual answers | design/running, conversation and visual-answers | Add outcome detail inside current surfaces |
+| Development queue and areas | `docs/tasks/`, `.faber-lane`, dev/workflow | Adopt their own format; no user-project claim bureaucracy |
 
-The task queue has no pending task documents in this checkout, and `.faber/` was absent during the inventory.
-That does not imply that mission or project-memory code is absent.
+The original copy's empty task folder did not represent the current shared queue. Never infer the whole project's
+current plan solely from one isolated conversation copy.
 
-## Planned capabilities, not established as complete
+## Approved method to preserve
 
-- Multiple-task missions, bounded repair and a durable project-wide outcome roadmap.
-- General automatic map extraction, contract enforcement and shared evidence-backed completion for all work.
-- Full deliverable library, learned taste and project memory with reusable recipes across domains.
-- The built-in verifier beyond its recorded initial measurements: docs/README still says V0 measured, V1 next.
-- Shared MCP infrastructure and measured cross-domain benchmarks described by the product vision.
+The shared `docs/superpowers/specs/2026-10-22-own-work-method.md`, pinned by R435, defines the current direction:
 
-## Documentation conflicts discovered
+- Small / normal / risky work; the contract belongs in the plan, and boundary-crossing raises risk before execution.
+- Engine-written receipts tied to file hashes; fresh independent risky-work review; security requires two reviews.
+- `.faber/rules.md`, `decisions.md`, `taste.md`, `lessons.md` and `next.md`, with bounded startup context.
+- Repository text grants no authority. Approved provenance and adopted-source pointers live in the private data folder.
+- Plans stay in conversations, standing goals in `projects.json`, code facts in `map`.
+- Adopt a project's existing decision/taste/task sources instead of writing a second copy.
+- Legacy plans/recipes/learning/memory remain readable, but new writers do not create them.
 
-| Conflict | Current evidence | Planning treatment |
+The shared index/spec still describe all method slices as unbuilt, while current code/map show slice-one integration.
+Treat that as a documentation discrepancy, not proof that every slice has shipped. Verify each integration at its start.
+Some product/building prose still refers to missions; current design/projects explicitly records their R215 removal.
+
+## Complete-product coverage
+
+| Area | Framework responsibility | Boundary |
 | :--- | :--- | :--- |
-| `product/areas.md` says projects have no direct conversation | product-map and `ui/Projects.tsx` show conversations | Preserve the implemented conversation entry |
-| `product/following.md` mentions the old mission board | product-map and design/projects say it was removed | Do not describe a board as an existing surface |
-| design/projects has an old statement that the coordinator is absent | main.rs starts and drives the coordinator | Use the actual coordinator, retain its one-task limit |
-| Product map's unbuilt list includes features named elsewhere as present | Guide and individual surface entries disagree | Verify each integration against code during its slice |
+| Chat | Answers, sources and optional durable handoff | No mandatory plan for a question |
+| Projects | Outcomes across saved conversations, work and delivery | One existing plan/task system |
+| Models and subscriptions | Quality floor, quotas, measured total cost | No credentials or unapproved paid fallback |
+| Catalog and kits | Tools selected by real need and provenance | No bundled third-party framework |
+| Following work | Outcome route, artifact links, current attention | No competing running list or agent map |
+| Self-development | Current queue, verifier, review and landing adapters | No resurrected mission machinery |
+| Images, research, documents and media | Domain-specific verification and reproducibility | Human taste and missing checks remain explicit |
+| PC automation and future phone | Receipts, interruption and authorized effects | Phone is a remote; sending/paying/publishing need authority |
+| Privacy, settings and updates | Current trust, rollback and idle budgets | No new settings area or cloud dependency |
 
-These are findings, not changes made by this proposal. Resolve the relevant conflict before implementing an affected
-slice; do not expand this planning task into unrelated product or documentation repairs.
+## BMAD and GSD
 
-## Full-product coverage
+Primary sources inspected on 2026-10-22. Pin actual versions when benchmarking. No code or prompts were copied.
+The former GSD repository points to [GSD Core](https://github.com/open-gsd/gsd-core) as its current development home.
 
-| Faber area | Framework responsibility | Boundary |
+| Source | Documented contribution | Faber response |
 | :--- | :--- | :--- |
-| Chat | Lightweight answers, sources, optional durable handoff | No mandatory roadmap for a question |
-| Projects | Outcomes, dependencies, attempts, deliverables, decisions | Same conversation and permission model |
-| Auto and accounts | Existing routing, quotas, actual usage and admission | No credentials or new paid-provider path |
-| Catalog and tools | Select by task needs, record versions and provenance | Download from source; never bundle third-party tools |
-| Following the work | Project route, activity, source-linked output | No second running list or agent map |
-| Verification and self-development | Exact-candidate proof, independent review, existing queue adapters | Respect current landing rules and product phases |
-| Images, design and documents | Dimensions, rendering, accessibility where relevant, person's taste | Aesthetic judgment stays distinct from technical validity |
-| Video, 3D, mods and reverse engineering | Domain recipes, reproducibility, suitable checks, provenance | Original code; authorized scope and tools |
-| Automation and future phone remote | Durable state and interruption | Phone controls work; it does not become another executor |
-| Settings, privacy and updates | Existing settings and rollback contracts | No new settings page; local history, telemetry off |
+| [BMAD planning](https://docs.bmad-method.org/plan/choose-a-planning-path/) | Clarify intent and size planning to the work | Preserve the approved risk-sized loop |
+| [BMAD build](https://docs.bmad-method.org/build/build-a-change/) | Investigate, implement, review and repair | Tie the process to Faber's actual checks and closing records |
+| [GSD Core](https://github.com/open-gsd/gsd-core) | Durable phases and fresh-context workers | Preserve continuity while avoiding unnecessary session/brief overhead |
 
-## BMAD and GSD: what to borrow
-
-Sources inspected on 2026-10-22. These are moving projects; pin versions for any benchmark.
-The former GSD repository redirects development to [GSD Core](https://github.com/open-gsd/gsd-core).
-No code, prompts or third-party assets from either project are included here.
-
-| Source | Documented strength | Faber-specific design response |
-| :--- | :--- | :--- |
-| [BMAD planning paths](https://docs.bmad-method.org/plan/choose-a-planning-path/) | Intent and planning sized to the work | Keep risk-sized preparation; reuse Faber's product map and decisions |
-| [BMAD build](https://docs.bmad-method.org/build/build-a-change/) | Investigate, build, independently review and repair; small changes can take a light path | Do not pretend review or lightweight execution are novel; bind them to Faber's verified candidate |
-| [GSD Core](https://github.com/open-gsd/gsd-core) | Durable phases and fresh-context research, planning and execution | Preserve resumability; choose fresh sessions when useful rather than for every tiny step |
-
-The intended difference is a single native product linking runtime authority, human-readable plans, live evidence,
-subscription pacing and visible deliverables. This comparison does not establish that competing tools cannot
-integrate similar ideas, or that Faber already performs better.
-
-## Why not adopt one unchanged?
-
-Faber already owns process lifetimes, model choice, permission cards, worker reporting and quota accounting.
-Layering another orchestration system on top would require reconciling two owners of those facts.
-Use the useful methods as design references; implement the smallest Faber-native layer and measure its value.
+The intended advantage is native integration: subscription pacing, runtime facts, visible output and continuity in
+one app. This does not establish that competitors lack equivalent guarantees or that Faber already performs better.
