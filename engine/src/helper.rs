@@ -148,6 +148,7 @@ fn called(name: &Value, tools: Tools) -> Option<&'static str> {
         crate::toolbox::CATALOG if tools.progress => Some(crate::toolbox::CATALOG),
         crate::toolbox::MEMORY_SEARCH if tools.progress => Some(crate::toolbox::MEMORY_SEARCH),
         crate::toolbox::OFFER_BIGGER if tools.progress => Some(crate::toolbox::OFFER_BIGGER),
+        crate::toolbox::JUDGE_CREATIVE if tools.progress => Some(crate::toolbox::JUDGE_CREATIVE),
         _ => None,
     }
 }
@@ -331,11 +332,11 @@ mod tests {
     }
 
     #[test]
-    fn the_quota_the_catalog_the_memory_search_and_the_bigger_offer_come_with_the_project_agents_own_tools_and_with_no_other_session() {
+    fn the_project_toolbox_comes_with_progress_and_with_no_other_session() {
         let call =
             |name: &str, tools| mcp(&json!({"method":"tools/call","params":{"name":name,"arguments":{}},"jsonrpc":"2.0","id":9}), tools);
         let offered = Tools { progress: true, ..Tools::default() };
-        for name in ["quota", "catalog", "memory_search", "offer_bigger"] {
+        for name in ["quota", "catalog", "memory_search", "offer_bigger", "judge_creative"] {
             assert!(matches!(call(name, offered), Mcp::Call { tool, .. } if tool == name), "{name} is offered with the progress tools");
             assert!(
                 matches!(call(name, Tools { verify: true, map: true, ..Tools::default() }), Mcp::Answer(_)),
@@ -344,7 +345,7 @@ mod tests {
         }
         let Mcp::Answer(list) = mcp(&json!({"method":"tools/list","jsonrpc":"2.0","id":1}), offered) else { panic!() };
         let names: Vec<_> = list["result"]["tools"].as_array().unwrap().iter().map(|t| t["name"].as_str().unwrap()).collect();
-        assert_eq!(names, ["plan", "status", "wrap_up", "quota", "catalog", "memory_search", "offer_bigger"]);
+        assert_eq!(names, ["plan", "status", "wrap_up", "quota", "catalog", "memory_search", "offer_bigger", "judge_creative"]);
     }
 
     #[test]

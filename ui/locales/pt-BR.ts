@@ -972,6 +972,7 @@ export const ptBR: Messages = {
   'tool.verifyFull': 'Rodando todas as verificações',
   'tool.map': 'Lendo o mapa do projeto',
   'tool.quota': 'Conferindo os limites das IAs',
+  'tool.judgeCreative': 'Comparando rascunhos',
   'tool.catalog': 'Buscando no catálogo',
   "tool.catalogInstall": "Instalando do catálogo",
   'tool.memorySearch': 'Buscando na memória do projeto',

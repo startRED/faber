@@ -974,6 +974,7 @@ export const es: Messages = {
   'tool.verifyFull': 'Ejecutando todas las comprobaciones',
   'tool.map': 'Leyendo el mapa del proyecto',
   'tool.quota': 'Comprobando los límites de las IA',
+  'tool.judgeCreative': 'Comparando borradores',
   'tool.catalog': 'Buscando en el catálogo',
   "tool.catalogInstall": "Instalando desde el catálogo",
   'tool.memorySearch': 'Buscando en la memoria del proyecto',

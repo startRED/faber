@@ -43,6 +43,7 @@ mod ended;
 pub use aside::Aside;
 pub use browse::TabStep;
 pub use copies::GitRunner;
+mod creative;
 pub mod facts;
 mod goals;
 #[path = "groups.rs"]
@@ -515,6 +516,7 @@ struct Core {
     copying: HashMap<String, copies::Held>,
     /// Helpers at work (R161), by the agent's tool call that started each.
     helpers: HashMap<String, helpers::Run>,
+    judges: HashMap<u64, creative::Panel>,
     /// The quick questions on the side (R250), by conversation, and the ones still asking, by question.
     asides: HashMap<String, Vec<aside::Aside>>,
     asking: HashMap<String, aside::Asking>,
@@ -648,6 +650,7 @@ impl Engine {
                 transfers: HashMap::new(),
                 copying: HashMap::new(),
                 helpers: HashMap::new(),
+                judges: HashMap::new(),
                 asides: HashMap::new(),
                 asking: HashMap::new(),
                 watched: HashMap::new(),
@@ -2336,10 +2339,13 @@ impl Core {
                 }
                 if let Some(m) = self.convs.get_mut(conv).and_then(|c| message_with_tool(&mut c.messages, current.as_deref(), &id)) {
                     let tool = m.tools.as_mut().unwrap().iter_mut().find(|t| t.id == id).unwrap();
-                    tool.ok = Some(ok);
-                    tool.ended = Some(now());
-                    tool.declined = declined;
-                    tool.output = Some(text.chars().take(4000).collect());
+                    // A creative comparison's bounded result was recorded by Faber itself before replying to the CLI.
+                    if tool.name != crate::toolbox::JUDGE_CREATIVE_TOOL || tool.output.is_none() {
+                        tool.ok = Some(ok);
+                        tool.ended = Some(now());
+                        tool.declined = declined;
+                        tool.output = Some(text.chars().take(4000).collect());
+                    }
                     let committed = ok
                         && !declined
                         && crate::nudge::command(tool).is_some_and(|c| crate::follow::committed(c, tool.output.as_deref().unwrap_or("")));

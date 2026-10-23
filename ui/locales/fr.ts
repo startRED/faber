@@ -813,6 +813,7 @@ export const fr: Messages = {
   'tool.verifyFull': 'Lance toutes les vérifications',
   'tool.map': 'Lit la carte du projet',
   'tool.quota': 'Vérifie les limites des IA',
+  'tool.judgeCreative': 'Compare les propositions',
   'tool.catalog': 'Cherche dans le catalogue',
   "tool.catalogInstall": "Installe depuis le catalogue",
   'tool.memorySearch': 'Cherche dans la mémoire du projet',

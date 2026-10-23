@@ -322,6 +322,22 @@ impl Core {
         instructions: &str,
         purpose: Purpose,
     ) -> Option<Spare> {
+        self.open_aux_owned(vendor, model, effort, instructions, purpose, None)
+    }
+
+    pub(super) fn open_judge(&mut self, profile: Profile, instructions: &str, owner: super::creative::Owner) -> Option<Spare> {
+        self.open_aux_owned(profile.vendor, profile.model, profile.effort, instructions, Purpose::UserTurn { by_hand: false }, Some(owner))
+    }
+
+    fn open_aux_owned(
+        &mut self,
+        vendor: Vendor,
+        model: &'static str,
+        effort: &str,
+        instructions: &str,
+        purpose: Purpose,
+        owner: Option<super::creative::Owner>,
+    ) -> Option<Spare> {
         self.allows(vendor, family_of(model), purpose, false).ok()?;
         let cli = self.opts.clis.get(&vendor)?.clone();
         let (tx, answer) = oneshot::channel();
@@ -333,14 +349,32 @@ impl Core {
         let stop = Stop::default();
         let closer = stop.clone();
         let sink: EventSink = Arc::new(move |e| match e {
-            EngineEvent::Text(t) => text.lock().unwrap_or_else(|e| e.into_inner()).push_str(&t),
+            EngineEvent::Text(t) => {
+                let mut text = text.lock().unwrap_or_else(|e| e.into_inner());
+                if owner.is_some() && text.len().saturating_add(t.len()) > 4096 {
+                    text.clear();
+                    if let Some(tx) = tx.lock().unwrap_or_else(|e| e.into_inner()).take() {
+                        let _ = tx.send(None);
+                    }
+                    stop_router(Some(closer.clone()));
+                } else if tx.lock().unwrap_or_else(|e| e.into_inner()).is_some() {
+                    text.push_str(&t);
+                }
+            }
             e @ (EngineEvent::Done { .. } | EngineEvent::Error { .. }) => {
-                if let (Some(start), Some(core)) = (ran.lock().unwrap_or_else(|e| e.into_inner()).take(), me.upgrade()) {
+                // Never hold `asked` while taking Core: cancellation locks them in the other order.
+                let started = ran.lock().unwrap_or_else(|e| e.into_inner()).take();
+                if let (Some(start), Some(core)) = (started, me.upgrade()) {
                     let (cost, incomplete) = usage::fresh_price(&e, model);
-                    core.lock().unwrap_or_else(|e| e.into_inner()).note_span(vendor, start, model, cost, incomplete);
+                    let mut core = core.lock().unwrap_or_else(|e| e.into_inner());
+                    core.note_span(vendor, start, model, cost, incomplete);
+                    if let Some(owner) = &owner {
+                        core.judge_cost(owner, cost, incomplete);
+                    }
                 }
                 let ok = matches!(e, EngineEvent::Done { ok: true, .. });
-                if let Some(tx) = tx.lock().unwrap_or_else(|e| e.into_inner()).take() {
+                let sender = tx.lock().unwrap_or_else(|e| e.into_inner()).take();
+                if let Some(tx) = sender {
                     let _ = tx.send(ok.then(|| std::mem::take(&mut *text.lock().unwrap_or_else(|e| e.into_inner()))));
                 }
             }
