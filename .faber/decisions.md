@@ -8,3 +8,5 @@
 - Agent catalog removal extends the existing reversible removal receipt and Catalog Undo. Its own permission kind never inherits install or switch grants; an agent receipt survives opening Catalog but expires at engine restart. [by AI]
 - Catalog updates and repairs retain one previous copy outside launch roots. A later explicitly consented replacement may replace an unchanged prior backup, and its permission card says so; corrupt or changed backups are preserved and block replacement. [by AI]
 - Manual Catalog replacements reuse the consent-bound retained-copy journal used by agent replacements. The detail confirms an exact snapshot; initial installs never consume physical or Undo copies, and an unreadable ledger refuses publication. [by AI]
+
+- The project agent settings tool accepts only web_search off/cached/live. It reuses the ordinary settings save, its own consent and audit, and existing full trust only for this bounded preference. The saved response is queued after durable persistence and before stricter settings stop replies; no delivery acknowledgement or stop exemption is introduced. [by AI]
