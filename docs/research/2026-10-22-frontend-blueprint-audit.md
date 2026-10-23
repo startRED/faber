@@ -12,6 +12,8 @@ speculative/product-scale work. Decisions are recommendations, not implementatio
 50/100 ms, INP, AA conformance, zero loss and current RAM/CPU remain unmeasured here.
 
 [Part 2: T01–F16](2026-10-22-frontend-blueprint-audit-part-2.md).
+The findings and row statuses below preserve the initial inspection. Subsequent implementation, executed checks and
+integration state are recorded in the [implementation record](../superpowers/plans/2026-10-22-frontend-excellence.md).
 
 ## Findings
 

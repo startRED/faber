@@ -29,7 +29,20 @@ virtualizer, animation or setting does not become useful merely because it appea
 | Durable reading anchor and offset, bounded to 100 entries; true final-message jump | Five focused UI checks; real app/WebView2 exit, changed earlier content, same-profile restart, wheel input and one jump to message 159; 16 normal captures independently 40/40 before and after | Numbered change observed integrated; the compared functional UI/scenario sources match |
 | Refined frontend workflow, actual slow completion and executed-artifact identity | Frozen paired examples and fresh instruction review; real delayed IndexedDB deletion reproduced an existing failure, then three focused checks and cleanup passed; normal landing subsequently passed 2,189 engine, 706 UI and 123 native scenarios | GitHub subsequently reported the change closed and merged; numbered candidate observed on the development base |
 | Durable admission guard before send/steer/queue dispatch | Thirteen engine scenarios plus aggregate passed; six final UI checks with clean audit; native refused-write/retry preserved exact words/PNG/PDF; two security reviews; 16 normal captures independently 40/40 before and after | Remote gate failed an inherited reading/search scenario on macOS; repair is in progress, not waived |
-| Native resource and interaction workload on 1,000 messages/500 collapsed tools | Actual operation/count assertions, fixture bytes and executable identities; same-base sequential before/after reading pair passed the unchanged resource budget | Remote style check rejected a modulo expression; equivalent native integer method, fresh review and all local proofs passed; normal requeue passed 2,190 engine, 706 UI and 124 native scenarios, remote gate not yet observed |
+| Native resource and interaction workload on 1,000 messages/500 collapsed tools | Actual operation/count assertions, fixture bytes and executable identities; same-base sequential before/after reading pair passed the unchanged resource budget | Remote style failure repaired and independently reviewed; normal requeue passed 2,190 engine, 706 UI and 124 native scenarios, but the subsequent macOS gate failed the inherited reading/search assertion (705 UI passed, one failed); corrected-base confirmation remains required |
+| Search focus and temporary marker after earlier messages load | Two actual regressions reproduced: result 100 became 60 after paging; focus disappeared after marker expiry. The narrow repair preserves logical focus, the original marker deadline and a newer composer focus; 706 UI checks and independent review passed | Corrected-base integration being confirmed separately from the earlier local proofs |
+
+These selected changes strengthen specific blueprint criteria; none replaces the initial 243-row inventory with a
+whole-product pass. Each scope keeps the limitations below and its separate integration state above.
+
+| Blueprint IDs | Evidence added | Boundary still open |
+| --- | --- | --- |
+| R05, C03 | Unsent words and attachment bytes survive the exercised failed-save/retry and process-restart paths | Power loss, storage exhaustion and an outgoing journal are not established |
+| S02, C15, C16 | Logical reading anchor, changed earlier heights, manual scroll and actual latest-message jump | Native Projects restart, smooth motion and every new-output cue are not established |
+| C10, X04 | Search result identity, marker expiry and newer composer focus during paging | Other focus-return paths and complete assistive-technology coverage are not established |
+| T01, T07 | A refused durable write does not dispatch the tested send/steer/queue operations | Lost acknowledgements and exactly-once external effects remain outside this guard |
+| M03, M10, P07 | Identified executable/fixture pair, input/frame proxies, process-tree RAM/CPU and unchanged memory gate | No field INP, general latency gain, quiet repeated trial or hidden-window power proof |
+| D13, M08 | Affected normal captures and independent visual reviews alongside executed tasks | Photos do not prove persistence, all themes, native screen readers or universal AA conformance |
 
 The skills reuse the first-party guide/session-kit delivery for both vendors and areas, including guarded modes,
 fallback, resumed sessions and Windows junction rejection. Existing external catalog art direction remains separate.
@@ -90,7 +103,11 @@ visual-version lifecycle scenario (123 others passed). It measured 131.5 MB befo
 does not establish the cause of the process footprint. The candidate was not queued. Its failure and executable
 identities are retained. A focused rebuild of that same source passed the unchanged limit: 136.6 MB baseline,
 8.8 MB retained after version switching and closing, and 11.3 MB after reopening and Escape at 720 px. This is one
-non-reproduction, not a diagnosed cause or product repair. The full normal landing verification remains required.
+non-reproduction, not a diagnosed cause or product repair. A subsequent ordinary landing on a newer composed tree
+passed 2,236 engine, 712 UI and 123 native scenarios. Its visual-version scenario retained 6.8 MB after closing and
+8.6 MB after reopening and Escape, both after 10.9 seconds and below the unchanged 15 MB margin. This newer-tree
+confirmation is separate from the exact-source control; it does not diagnose the original overage. The normal queue
+accepted the candidate, while its remote gate and final integration remain unobserved.
 
 Required local commands passed for each final package, with receipts retaining the five pre-existing source warnings,
 the existing bundle warning and script result 101 passed/one branch-only skip. Claims were rechecked after other
