@@ -2102,6 +2102,7 @@ export const es: Messages = {
   'notes.219.better': 'Puedes pedir al agente que actualice o repare una herramienta del catálogo, con un permiso propio y una copia de los archivos actuales guardada.',
   'notes.220.fixed': 'Las pautas de interfaz ahora incluyen mantener el foco y el resaltado en el elemento correcto cuando cambia una lista.',
   'notes.221.fixed': 'Faber ya no crece hasta varios gigabytes de memoria mientras llega una respuesta larga del agente. Una respuesta de 600 pasos ahora se queda por debajo de 200 MB; antes pasaba de 860 MB.',
+  'notes.222.fixed': 'El resultado de búsqueda conserva el foco y el contorno cuando aparecen mensajes anteriores.',
   'update.checking': 'Buscando una actualización…',
   'update.downloading': 'Descargando actualización…',
   'update.downloadingPercent': 'Descargando actualización… {percent} %',

@@ -2089,6 +2089,7 @@ export const ptBR: Messages = {
   'notes.219.better': 'Você pode pedir ao agente pra atualizar ou reparar uma ferramenta do catálogo, com permissão própria e uma cópia dos arquivos atuais guardada.',
   'notes.220.fixed': 'As orientações pra criar telas agora incluem manter o destaque e o foco no item certo quando uma lista muda.',
   'notes.221.fixed': 'O Faber não incha mais até gigabytes de memória enquanto uma resposta longa do agente chega. Uma resposta de 600 passos agora fica abaixo de 200 MB; antes passava de 860 MB.',
+  'notes.222.fixed': 'O resultado da busca mantém o foco e o contorno quando mensagens anteriores aparecem.',
   'update.checking': 'Procurando atualização…',
   'update.downloading': 'Baixando atualização…',
   'update.downloadingPercent': 'Baixando atualização… {percent}%',

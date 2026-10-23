@@ -439,20 +439,51 @@ check('reading: return and restart keep the same old message after the history a
     await frames(3);
     ok(earlier(), 'return unfolds the run containing an earlier reading point');
     ok(Math.abs(earlierOffset() + 15) < 3, 'an earlier reply inside an unfolded run keeps its offset');
+    conversation.messages[100]!.text = 'The explicitly requested search result.';
     api.searchMessages = async () => ({ ready: true, hits: [{ ...hit('chat'), conversationId: conversation.id, messageIndex: 100 }] });
     type(root, 'another result');
     await until(() => root.querySelector('.message-hit'));
-    // The mark is watched for, not polled: it lasts 1.8 s, a hidden window on a slow runner can poll later than that, and
-    // the message can take focus a frame before the search marks it.
+    // Exercise the live outline in its observer turn; a hidden runner can resume polling after its 1.8 s lifetime.
     let marked = false;
+    let markError: unknown;
     const marks = new MutationObserver(() => {
-      marked ||= !!root.querySelector('[data-message-index="100"].search-focus');
+      if (marked || !root.querySelector('[data-message-index="100"].search-focus')) return;
+      marked = true;
+      marks.disconnect();
+      try {
+        const searchThread = root.querySelector<HTMLElement>('.thread')!;
+        const resultOffset = () => root.querySelector<HTMLElement>('[data-message-index="100"]')!.getBoundingClientRect().top - searchThread.getBoundingClientRect().top;
+        const searchedOffset = resultOffset();
+        // Deliver the native scroll after focus: WebKit can defer it until the earlier-page load.
+        searchThread.dispatchEvent(new Event('scroll'));
+        equal((document.activeElement as HTMLElement)?.dataset.messageIndex, '100', 'loading the earlier page keeps focus on the requested message');
+        ok(root.querySelector('[data-message-index="100"].search-focus'), 'an explicit search result wins over the saved reading anchor');
+        ok(document.activeElement?.textContent?.includes('The explicitly requested search result.'), 'focus stays on the real search message after rows are reused');
+        ok(Math.abs(resultOffset() - searchedOffset) < 3, 'loading the earlier page preserves the search viewport');
+        const composer = root.querySelector<HTMLTextAreaElement>('.composer textarea')!;
+        composer.value = 'A draft after searching';
+        composer.dispatchEvent(new Event('input', { bubbles: true }));
+        composer.focus();
+        searchThread.scrollTop = 0;
+        searchThread.dispatchEvent(new Event('scroll'));
+        equal(document.activeElement, composer, 'loading another earlier page never takes focus back from the composer');
+        equal(composer.value, 'A draft after searching', 'pagination preserves the new draft');
+        ok(root.querySelector('[data-message-index="100"].search-focus'), 'pagination keeps the outline on its message after focus moves elsewhere');
+      } catch (error) { markError = error; }
     });
     marks.observe(root, { subtree: true, attributes: true, attributeFilter: ['class'] });
     root.querySelector<HTMLButtonElement>('.message-hit')!.click();
-    await until(() => marked && root.querySelector('[data-message-index="100"]') === document.activeElement);
+    await until(() => marked);
     marks.disconnect();
-    ok(marked, 'an explicit search result wins over the saved reading anchor');
+    if (markError) throw markError;
+    await until(() => !root.querySelector('.search-focus'), 2200);
+    equal(root.querySelector('.search-focus'), null, 'a transferred outline still expires at its original deadline');
+    root.querySelector<HTMLElement>('[data-message-index="100"]')!.focus({ preventScroll: true });
+    const searchThread = root.querySelector<HTMLElement>('.thread')!;
+    searchThread.scrollTop = 0;
+    searchThread.dispatchEvent(new Event('scroll'));
+    equal((document.activeElement as HTMLElement)?.dataset.messageIndex, '100', 'pagination preserves message focus after the outline expires');
+    equal(root.querySelector('.search-focus'), null, 'later pagination never revives an expired outline');
   } finally {
     dispose(); root.remove();
     api.open = before.open; api.setClock = before.clock; api.notesSeen = before.notes; api.searchMessages = before.search;

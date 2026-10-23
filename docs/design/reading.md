@@ -8,7 +8,8 @@ How conversation text reads and keeps its place, in Chat and Projects.
   them (menu motion), and it puts them in the message box as a quote. Scrolled up, a "Jump to latest" button floats at
   the foot of the thread and scrolls down smoothly.
 - Returning to a conversation, including after a restart, keeps the same message at the same reading offset even when
-  earlier text or pictures changed height. Search still opens its result. Reading above the tail never follows new words;
+  earlier text or pictures changed height. Search still opens its result, keeping its focus and brief outline if scrolling
+  loads an earlier page. Reading above the tail never follows new words;
   scrolling by hand immediately changes the reading point. A removed message falls back to its surviving neighbour.
   This correction is instant at every motion level and uses the existing message window, not a second scrolling view.
 - "Jump to latest" first selects the conversation's newest message window, then scrolls to its end; it never stops at

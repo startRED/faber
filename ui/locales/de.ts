@@ -2102,6 +2102,7 @@ export const de: Messages = {
   'notes.219.better': 'Du kannst den Agenten bitten, ein Katalogwerkzeug zu aktualisieren oder zu reparieren, mit eigener Erlaubnis und einer aufbewahrten Kopie der aktuellen Dateien.',
   'notes.220.fixed': 'Die Anleitung für Oberflächen behandelt jetzt, wie Fokus und Hervorhebung beim richtigen Eintrag bleiben, wenn sich eine Liste ändert.',
   'notes.221.fixed': 'Faber wächst nicht mehr auf mehrere Gigabyte Speicher an, während eine lange Antwort des Agenten eintrifft. Eine Antwort mit 600 Schritten bleibt jetzt unter 200 MB, vorher waren es über 860 MB.',
+  'notes.222.fixed': 'Suchtreffer behalten den Fokus und ihre Umrandung, wenn ältere Nachrichten erscheinen.',
   'update.checking': 'Suche nach einem Update…',
   'update.downloading': 'Update wird heruntergeladen…',
   'update.downloadingPercent': 'Update wird heruntergeladen… {percent} %',

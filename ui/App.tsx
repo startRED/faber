@@ -1045,9 +1045,19 @@ export function App(props: { initial: AppState; update?: UpdateStatus; inbox: { 
       // The earlier messages appear above; keep what the user is reading in place.
       const before = el.scrollHeight;
       const point = reading;
+      // Prepending reuses message rows by position; keep the search marker on its message.
+      const marked = searchMark?.classList.contains('search-focus');
+      const focused = searchMark === document.activeElement;
+      const searchAt = marked || focused ? searchMark?.dataset.messageIndex : undefined;
       setFrom((f) => Math.max(0, f - PAGE));
       if (point) restoreReading(el, point, current()?.messages ?? []);
       else el.scrollTop += el.scrollHeight - before;
+      if (searchAt !== undefined) {
+        searchMark?.classList.remove('search-focus');
+        searchMark = el.querySelector<HTMLElement>(`[data-message-index="${searchAt}"]`) ?? undefined;
+        if (marked) searchMark?.classList.add('search-focus');
+        if (focused) searchMark?.focus({ preventScroll: true });
+      }
       lastScrollTop = el.scrollTop;
     }
   };
