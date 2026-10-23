@@ -240,9 +240,12 @@ export function AgentChat(props: {
         <p class="side-meta">{agentMeta(props.step, props.streaming)}</p>
         <Show when={state() === 'stuck' && props.step.call.sign}>
           {(sign) => (
-            <p class="agent-why" role="status">
-              {t(`agent.stuck.${sign() as 'repeat' | 'failing' | 'silent'}`)}
-            </p>
+            <>
+              <p class="agent-why" role="status">
+                {t(`agent.stuck.${sign() as 'repeat' | 'failing' | 'silent'}`)}
+              </p>
+              <p class="note agent-hint">{t('agent.stuck.hint')}</p>
+            </>
           )}
         </Show>
         <Show when={props.step.brief}>

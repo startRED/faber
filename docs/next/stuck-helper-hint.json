@@ -1,0 +1,10 @@
+{
+  "notes": { "better": {
+    "en": "When a helper seems stuck, Faber now says it is still working, and that you can tell the agent to try another way or press Stop.",
+    "pt-BR": "Quando um ajudante parece travado, o Faber agora diz que ele continua trabalhando e que você pode pedir ao agente outro caminho ou apertar Parar.",
+    "es": "Cuando un ayudante parece atascado, Faber ahora dice que sigue trabajando y que puedes pedir al agente otro camino o pulsar Detener.",
+    "fr": "Quand un assistant semble bloqué, Faber indique maintenant qu’il continue de travailler et que vous pouvez demander à l’agent d’essayer autrement ou appuyer sur Arrêter.",
+    "de": "Wenn ein Helfer festzuhängen scheint, sagt Faber jetzt, dass er weiterarbeitet und dass du dem Agenten einen anderen Weg vorschlagen oder Stoppen drücken kannst."
+  } },
+  "decisions": ["| R-next | 2026-10-23 | A subagent that seems stuck shows one more line, in the thread and in the running column: it is still working (a stuck sign never stops it), and the person can tell the agent to try another way or press Stop. The sign and its thresholds are unchanged. No new process or timer. Not measured: one line of text. | AI (Erick delegou) |"]
+}

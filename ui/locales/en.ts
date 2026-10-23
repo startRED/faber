@@ -163,6 +163,7 @@ export const en = {
   'agent.stuck.repeat': 'It keeps starting the same step.',
   'agent.stuck.failing': 'The same check failed three times with nothing changed.',
   'agent.stuck.silent': 'It has done nothing for a long while.',
+  'agent.stuck.hint': 'It is still working. If it stays like this, tell the agent to try another way, or press Stop.',
   'agent.look': 'Look',
   'agent.tell': 'Tell it…',
   'agent.back': "Back to what's running",

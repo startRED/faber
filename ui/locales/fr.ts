@@ -164,6 +164,7 @@ export const fr: Messages = {
   'agent.stuck.repeat': 'Il relance sans cesse la même étape.',
   'agent.stuck.failing': 'La même vérification a échoué trois fois sans que rien ne change.',
   'agent.stuck.silent': 'Il ne fait plus rien depuis longtemps.',
+  'agent.stuck.hint': 'Il continue de travailler. Si cela dure, dites à l’agent d’essayer autrement, ou appuyez sur Arrêter.',
   'agent.look': 'Voir',
   'agent.tell': 'Lui dire…',
   'agent.back': 'Revenir à ce qui tourne',

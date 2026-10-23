@@ -86,6 +86,7 @@ function AgentRow(props: { step: Accessor<AgentStep>; streaming: boolean; conver
         {(sign) => (
           <div class="agent-stuck" role="status">
             <span class="agent-why">{t(`agent.stuck.${sign() as 'repeat' | 'failing' | 'silent'}`)}</span>
+            <span class="note agent-hint">{t('agent.stuck.hint')}</span>
             <button type="button" class="btn" onClick={open}>{t('agent.look')}</button>
             <button type="button" class="btn" onClick={() => tellAbout(step().title || t('agent.untitled'))}>{t('agent.tell')}</button>
           </div>

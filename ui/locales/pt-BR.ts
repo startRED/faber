@@ -162,6 +162,7 @@ export const ptBR: Messages = {
   'agent.stuck.repeat': 'Ele repete a mesma etapa sem parar.',
   'agent.stuck.failing': 'A mesma verificação falhou três vezes sem nada mudar.',
   'agent.stuck.silent': 'Ele não faz nada há muito tempo.',
+  'agent.stuck.hint': 'Ele continua trabalhando. Se ficar assim, diga ao agente para tentar outro caminho ou aperte Parar.',
   'agent.look': 'Ver',
   'agent.tell': 'Dizer algo…',
   'agent.back': 'Voltar ao que está rodando',
