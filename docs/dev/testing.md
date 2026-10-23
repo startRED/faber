@@ -46,6 +46,11 @@ audit's 15 s, so the cleanup ends that tree through the app's job and waits unti
 private memory) with one `NtQuerySystemInformation` call (`faber_winproc::processes`, the one crate allowed unsafe code),
 which takes a few milliseconds; the WMI query it replaced took 150-200 ms, and a scenario takes 9 to 49 of these lists.
 The tree is still followed by parent and start time, so a pid the system reused is never mistaken for one of the app's.
+After a visual-frame collection or post-close memory assertion fails, the runner records owned process memory,
+aggregate page heap and process roles from that fixture's own loopback browser. Browser queries have separate
+three-second deadlines; their errors and capture delay remain evidence, never a substitute for the original failure.
+These observations follow the captured assertion values and cannot establish the exact deadline state or the cause
+of an earlier failure. Process enumeration may also delay reporting; no memory limit or collection step changes.
 A page wait (`Cdp::settle`) runs inside the page: one DevTools call of up to two seconds reads the condition again at
 every change of the document (at most every 16 ms, and every 50 ms without a change), instead of one call every 100 ms
 from the runner. A condition the page cannot wrap, statements rather than one expression, is asked every 100 ms as before. The checks and the hooks that report them exist only in the test build
