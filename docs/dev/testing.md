@@ -15,6 +15,7 @@ of the app. `FABER_HIDDEN=1` keeps the window offscreen with its own browser pro
 - **Checks** (`tests/ui/*.check.ts`) test the screen's own logic. The test build opens `index.html?checks`, runs them when
   the page loads, writes the result to the file named by `FABER_CHECKS_OUT` and exits. No DevTools port is involved, so
   they run on Windows, macOS and Linux (Linux under `xvfb-run -a`).
+  With `--filter`, only check bodies whose names contain that text run; startup and module registration remain shared.
 - **Scenarios** (`testkit/src/screen/`, written in Rust) drive the real app like a person: they read the page, click and
   type, and save screenshots (named checkpoints, and every failure) to `target/faber-test/shots/`. On Windows the UI
   runs in WebView2, which exposes Chromium's DevTools port (`FABER_CDP_PORT`); the macOS and Linux webviews have no such
