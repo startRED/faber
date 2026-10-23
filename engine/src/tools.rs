@@ -296,7 +296,10 @@ impl Store {
                 (true, reply::ALREADY)
             });
         }
-        self.has_removed_copy(&item.id).then_some((false, reply::REMOVED))
+        if self.has_removed_copy(&item.id) {
+            return Some((false, reply::REMOVED));
+        }
+        self.physical_copy(item).unwrap_or(true).then_some((false, reply::REINSTALL))
     }
 
     /// Whether the person removed this tool and Catalog still offers Undo for it (`removed/<id>`).
@@ -533,11 +536,16 @@ impl Store {
 
     /// Installs the source and each pinned package as one checked item, under the ordinary ledger and lock.
     pub fn install_sources(&self, item: &Item, zip: &Path, packages: &BTreeMap<String, PathBuf>) -> Result<(), String> {
+        if !valid_id(&item.id) {
+            return Err(format!("Invalid skill id: {}", item.id));
+        }
+        if self.direct_replacement(item, zip, packages)? {
+            return Ok(());
+        }
         self.install_sources_as(item, zip, packages, false)
     }
 
-    /// `agent` is the project agent's install: it touches only an id Faber holds nothing of, checked again here under the lock
-    /// (the error is then one of the `toolbox` refusals), since an install replaces a copy and discards an Undo copy and a switch.
+    /// Initial installation never consumes an existing copy or Undo, checked again under the store lock.
     fn install_sources_as(&self, item: &Item, zip: &Path, packages: &BTreeMap<String, PathBuf>, agent: bool) -> Result<(), String> {
         if !valid_id(&item.id) {
             return Err(format!("Invalid skill id: {}", item.id));
@@ -547,6 +555,12 @@ impl Store {
         if agent && let Some((_, why)) = self.held(item) {
             return Err(why.into());
         }
+        self.recover_replacements()?;
+        if self.occupied_install(item)? {
+            return Err("The stored copy needs confirmation in Catalog".into());
+        }
+        let mut ledger = self.initial_ledger()?;
+        let selection = self.read_selection().ok_or("Could not read catalog switches")?;
         if [
             self.root.clone(),
             self.plugin(),
@@ -562,7 +576,7 @@ impl Store {
         {
             return Err("The tool store contains a linked or invalid directory".into());
         }
-        let dest = self.dir(item);
+        let dest = if selection.disabled.contains(&item.id) { self.disabled().join(&item.id) } else { self.dir(item) };
         std::fs::create_dir_all(dest.parent().unwrap_or(&self.root)).map_err(|e| e.to_string())?;
         let temporary = kits::TemporaryCopy::new(&self.root, ".staging-").map_err(|e| e.to_string())?;
         let staging = &temporary.path;
@@ -585,19 +599,8 @@ impl Store {
                 standalone_skill(&skill).map_err(|why| format!("{} {why}", item.id))?;
                 self.write_manifest().map_err(|e| e.to_string())?;
             }
-            self.discard(&self.removed().join(&item.id)).map_err(|e| e.to_string())?;
-            self.discard(&self.disabled().join(&item.id)).map_err(|e| e.to_string())?;
-            // Reinstalling identical verified bytes need not rename files a background snapshot is reading.
-            if !std::fs::symlink_metadata(&dest).is_ok_and(|metadata| metadata.is_dir()) || !self.verify_item(&dest, item) {
-                self.discard(&dest).map_err(|e| format!("Could not replace the catalog item: {e}"))?;
-                retry_busy(|| std::fs::rename(staging, &dest)).map_err(|e| format!("Could not publish catalog files: {e}"))?;
-            }
-            let mut ledger = self.installed();
+            retry_busy(|| std::fs::rename(staging, &dest)).map_err(|e| format!("Could not publish catalog files: {e}"))?;
             ledger.insert(item.id.clone(), item.commit.clone());
-            let mut selection = self.read_selection().ok_or("Could not read catalog switches")?;
-            if selection.disabled.remove(&item.id) {
-                self.save_selection(&selection)?;
-            }
             // A ledger that cannot be written takes the files back out: the install failed, so nothing of it is loaded.
             self.write_ledger(&ledger).map_err(|e| {
                 let _ = self.discard(&dest);
@@ -1401,6 +1404,21 @@ pub async fn install_checked(store: &Store, item: &Item, source: Option<&str>) -
         return Err(InstallError::Node);
     }
     install(store, item, source).await.map_err(InstallError::Failed)
+}
+
+/// The person's explicit Catalog confirmation, checked before any download and again before publication.
+pub async fn replace_checked(store: &Store, plan: &ReplacementPlan, source: Option<&str>) -> Result<(), InstallError> {
+    let (checked_store, checked_plan) = (store.clone(), plan.clone());
+    tokio::task::spawn_blocking(move || checked_store.check_replacement(&checked_plan))
+        .await
+        .map_err(|e| InstallError::Failed(e.to_string()))?
+        .map_err(InstallError::Failed)?;
+    let downloaded = download_replacement(store, plan, source).await?;
+    let (store, plan) = (store.clone(), plan.clone());
+    tokio::task::spawn_blocking(move || downloaded.replace(&store, &plan, || true))
+        .await
+        .map_err(|e| InstallError::Failed(e.to_string()))?
+        .map_err(InstallError::Failed)
 }
 
 /// The tools (by place in their store) the project agent is installing now: a second install of one is refused, not queued behind the first.

@@ -38,7 +38,7 @@ const sources: ToolInventoryList[] = [{ vendor: 'claude', rows: [
   { name: 'personal-skill', kind: 'skill', source: 'user', location: 'C:/person/.claude/skills/personal-skill' },
   { name: 'team-plugin', kind: 'plugin', source: 'project', location: 'C:/person/.claude/plugins/installed_plugins.json' },
 ], issues: [{ source: 'user', kind: 'plugin', reason: 'unsupported' }] }];
-type Options = { keepView?: boolean; rows?: ToolRow[]; inventory?: ToolInventoryList[]; vendors?: Vendor[]; failList?: boolean; failInventory?: boolean; failInstall?: boolean; failToggle?: boolean; failRemove?: boolean; failRestore?: boolean };
+type Options = { keepView?: boolean; rows?: ToolRow[]; inventory?: ToolInventoryList[]; vendors?: Vendor[]; failList?: boolean; failInventory?: boolean; failInstall?: boolean; failToggle?: boolean; failRemove?: boolean; failRestore?: boolean; failReplace?: boolean };
 const cards = (root: Element) => [...root.querySelectorAll<HTMLButtonElement>('[data-catalog-card]')];
 function button(root: Element, key: Key) {
   const found = [...root.querySelectorAll<HTMLButtonElement>('button')].find((el) => el.textContent?.trim() === t(key));
@@ -56,12 +56,14 @@ async function panel(options: Options = {}) {
   const before = { ...api }, language = lang(), store = structuredClone(options.rows ?? sample());
   const removed = new Map<string, ToolRow>();
   let listener: ((event: AppEvent) => void) | undefined;
-  const calls = { list: 0, inventory: 0, install: [] as string[], remove: [] as string[], enabled: [] as boolean[], links: [] as string[] };
+  const calls = { list: 0, inventory: 0, install: [] as string[], remove: [] as string[], enabled: [] as boolean[], links: [] as string[], prepare: [] as string[], replace: [] as unknown[] };
   api.toolsClearRemoved = async () => {};
   api.on = async (receive) => { listener = receive; return () => {}; };
   api.toolsList = async () => { calls.list++; if (options.failList) throw 'error.tools.install'; return structuredClone(store); };
   api.toolsInventory = async () => { calls.inventory++; if (options.failInventory) throw 'error.tools.install'; return structuredClone(options.inventory ?? []); };
-  api.toolsInstall = async (id) => { calls.install.push(id); if (options.failInstall) throw 'error.tools.install'; Object.assign(store.find((r) => r.id === id)!, { installed: true, enabled: true, status: undefined }); };
+  api.toolsInstall = async (id) => { calls.install.push(id); if (options.failInstall) throw 'error.tools.install'; Object.assign(store.find((r) => r.id === id)!, { installed: true, hasCopy: true, enabled: store.find((r) => r.id === id)!.enabled !== false, status: undefined }); };
+  api.toolsPrepareReplacement = async (id) => { calls.prepare.push(id); return { plan: { id, revision: calls.prepare.length }, from: 'old-pin', to: 'new-pin', enabled: store.find((r) => r.id === id)!.enabled !== false }; };
+  api.toolsReplace = async (plan) => { calls.replace.push(plan); if (options.failReplace) throw 'error.tools.install'; const id = (plan as { id: string }).id; Object.assign(store.find((r) => r.id === id)!, { installed: true, hasCopy: true, status: undefined }); };
   api.toolsRemove = async (id) => { calls.remove.push(id); if (options.failRemove) throw 'error.tools.remove'; const row = store.find((r) => r.id === id)!; removed.set(id, structuredClone(row)); row.installed = false; };
   api.toolsRestore = async (id) => { Object.assign(store.find((r) => r.id === id)!, removed.get(id)); if (options.failRestore) throw 'error.tools.restore'; };
   api.toolsSetEnabled = async (id, enabled) => { calls.enabled.push(enabled); if (options.failToggle) throw 'error.tools.toggle'; store.find((r) => r.id === id)!.enabled = enabled; };
@@ -78,6 +80,109 @@ async function panel(options: Options = {}) {
   await tick();
   return { root, calls, store, publish: () => listener?.({ type: 'catalog' }), close: () => { dispose(); root.remove(); Object.assign(api, before); useLanguage(language); } };
 }
+
+// Native visual audits reuse this fixture; this module is absent from production builds.
+Object.assign(window, { __faberCatalogReplacementPreview: async () => {
+  const rows = sample(); rows[1].status = 'error.tools.reinstall';
+  const view = await panel({ rows });
+  view.root.style.cssText = 'position:fixed;inset:0;display:flex;flex-direction:column;background:var(--bg);z-index:10000';
+  await tap(cards(view.root).find((card) => card.dataset.catalogCard === 'ponytail')!);
+  await tap(button(view.root, 'catalog.replace'));
+  return true;
+} });
+
+check('catalog manual replacement: a quick repair opens details before any installation', async () => {
+  const rows = sample();
+  rows[1].status = 'error.tools.reinstall';
+  const view = await panel({ rows });
+  try {
+    const tile = view.root.querySelector('[data-catalog-card="ponytail"]')?.parentElement;
+    const action = tile?.querySelector<HTMLButtonElement>('.catalog-quick');
+    ok(action, 'a damaged held item offers its repair action');
+    await tap(action!);
+    deepEqual(view.calls.install, [], 'the existing copy cannot be replaced before reviewing and confirming its details');
+    ok(view.root.querySelector('.catalog-detail'), 'repair opens the existing item details');
+  } finally { view.close(); }
+});
+
+check('catalog manual replacement: confirmation, cancellation and failed-plan retry preserve the off choice', async () => {
+  const rows = sample(); rows[1].status = 'error.tools.reinstall';
+  const options: Options = { rows, failReplace: true }, view = await panel(options);
+  try {
+    await tap(cards(view.root).find((card) => card.dataset.catalogCard === 'ponytail')!);
+    await tap(button(view.root, 'catalog.replace'));
+    ok(view.root.querySelector('[data-catalog-replacement]'));
+    ok(view.root.textContent?.includes('old-pin') && view.root.textContent?.includes('new-pin'));
+    deepEqual(view.calls.install, []); deepEqual(view.calls.replace, []);
+    await tap(button(view.root, 'catalog.cancel'));
+    equal(view.root.querySelector('[data-catalog-replacement]'), null);
+    await tap(button(view.root, 'catalog.replace'));
+    await tap(button(view.root, 'catalog.confirmReplaceAction'));
+    equal(view.calls.replace.length, 1); ok(view.root.querySelector('[role=alert]'));
+    equal(view.store[1].enabled, false);
+    options.failReplace = false;
+    await tap(button(view.root, 'catalog.retry'));
+    equal(view.calls.prepare.length, 3, 'Retry prepares a fresh confirmation, never reuses a failed plan');
+    equal(view.calls.replace.length, 1);
+    await tap(button(view.root, 'catalog.confirmReplaceAction'));
+    equal(view.calls.replace.length, 2); equal(view.store[1].enabled, false);
+    equal(view.root.querySelector<HTMLInputElement>('[role=switch]')?.checked, false);
+    deepEqual(view.calls.install, []);
+  } finally { view.close(); }
+});
+
+check('catalog manual replacement: batch installation excludes existing and removed copies', async () => {
+  const rows = sample(); rows[1].status = 'error.tools.reinstall'; rows[2].removedEnabled = false;
+  const view = await panel({ rows });
+  try {
+    await tap(view.root.querySelector<HTMLButtonElement>('[data-catalog-pick-shown]')!);
+    await tap(view.root.querySelector<HTMLButtonElement>('[data-batch=install]')!);
+    deepEqual(view.calls.install, ['systematic-debugging']);
+    deepEqual(view.calls.prepare, []); deepEqual(view.calls.replace, []);
+    equal(view.store[2].removedEnabled, false);
+  } finally { view.close(); }
+});
+
+check('catalog manual replacement: an explicitly missing copy installs afresh and keeps its off choice', async () => {
+  const rows = sample(); rows[1].hasCopy = false; rows[1].installed = false; rows[1].status = 'error.tools.reinstall';
+  const view = await panel({ rows });
+  try {
+    await tap(cards(view.root).find((card) => card.dataset.catalogCard === 'ponytail')!);
+    await tap(button(view.root, 'catalog.install'));
+    deepEqual(view.calls.install, ['ponytail']); deepEqual(view.calls.prepare, []);
+    equal(view.root.querySelector<HTMLInputElement>('[role=switch]')?.checked, false);
+  } finally { view.close(); }
+});
+
+check('catalog manual replacement: Escape cancels the question and returns focus to its heading', async () => {
+  const rows = sample(); rows[1].status = 'error.tools.reinstall';
+  const view = await panel({ rows });
+  try {
+    await tap(cards(view.root).find((card) => card.dataset.catalogCard === 'ponytail')!);
+    await tap(button(view.root, 'catalog.replace'));
+    equal(document.activeElement, button(view.root, 'catalog.cancel'));
+    keyboard('Escape'); await tick();
+    equal(view.root.querySelector('[data-catalog-replacement]'), null);
+    equal(document.activeElement, view.root.querySelector('.catalog-detail h1'));
+    deepEqual(view.calls.replace, []);
+  } finally { view.close(); }
+});
+
+check('catalog manual replacement: leaving details discards a late preparation', async () => {
+  const rows = sample(); rows[1].status = 'error.tools.reinstall';
+  const view = await panel({ rows });
+  try {
+    let finish!: (value: Awaited<ReturnType<typeof api.toolsPrepareReplacement>>) => void;
+    api.toolsPrepareReplacement = () => new Promise((resolve) => { finish = resolve; });
+    await tap(cards(view.root).find((card) => card.dataset.catalogCard === 'ponytail')!);
+    await tap(button(view.root, 'catalog.replace')); await tap(button(view.root, 'catalog.back'));
+    finish({ plan: { id: 'ponytail' }, from: 'old', to: 'new', enabled: false }); await tick();
+    equal(view.root.querySelector('[data-catalog-replacement]'), null);
+    await tap(cards(view.root).find((card) => card.dataset.catalogCard === 'ponytail')!);
+    equal(view.root.querySelector('[data-catalog-replacement]'), null);
+    deepEqual(view.calls.replace, []);
+  } finally { view.close(); }
+});
 
 check('catalog: reinstall status follows catalog-owned inventory and reported servers without changing external rows', async () => {
   const rows = sample();

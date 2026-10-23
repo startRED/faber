@@ -1875,6 +1875,8 @@ fn main() {
                 tools::mcp_servers,
                 tools::set_mcp_server,
                 tools::tools_install,
+                tools::tools_prepare_replacement,
+                tools::tools_replace,
                 tools::tools_remove,
                 tools::tools_set_enabled,
                 tools::tools_restore,

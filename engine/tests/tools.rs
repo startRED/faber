@@ -403,6 +403,9 @@ fn tampered_disabled_or_removed_files_never_become_available_again() {
     assert!(store.installed().is_empty() && store.delivery().plugin.is_none());
     assert!(store.restore("../careful").is_err());
 
+    assert!(store.install_from(&item(), &archive).is_err(), "installation never silently consumes a pending Undo copy");
+    assert_eq!(std::fs::read(data.path().join("tools/removed/careful/files/SKILL.md")).unwrap(), b"changed");
+    store.clear_removed().unwrap();
     store.install_from(&item(), &archive).unwrap();
     store.remove("careful").unwrap();
     let mut newer = item();
