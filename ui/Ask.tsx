@@ -24,16 +24,18 @@ function describe(tool: string, input: unknown): { title: string; note?: string;
 /** Faber's own self-change card (the agent installing from the catalog): the engine sends ids and facts, and every word here is the
  * screen's own, from the Catalog's names and purposes, so the agent cannot write any of them. Any other tool is not one. */
 const SELF = 'faber'; // not written as one quoted word: the map's check reads that as a browser storage key
-function selfInstall(tool: string, input: unknown): { title: string; what: string; line: string; code: string } | undefined {
-  if (tool !== `${SELF}.tools.install`) return undefined;
+function selfInstall(tool: string, input: unknown): { title: string; what: string; effect: string; line: string; code: string } | undefined {
+  const switching = tool === `${SELF}.tools.switch`;
+  if (tool !== `${SELF}.tools.install` && !switching) return undefined;
   const i = (input && typeof input === 'object' ? input : {}) as Record<string, unknown>;
   const text = (v: unknown) => (typeof v === 'string' ? v : '');
   const id = text(i.id);
   const kind = ['skill', 'plugin', 'server'].includes(text(i.kind)) ? text(i.kind) : 'skill';
   const purpose = `tools.${id}`;
   return {
-    title: t('ask.self.install', { name: catalogName(id) }),
+    title: t(switching ? (i.enabled === true ? 'ask.self.enable' : 'ask.self.disable') : 'ask.self.install', { name: catalogName(id) }),
     what: purpose in en ? t(purpose as Key) : '',
+    effect: switching ? t('ask.self.newConversations') : '',
     line: t('ask.self.line', { kind: t(`catalog.kind.${kind}` as Key), version: text(i.version), repo: text(i.repo), licence: text(i.license) }),
     // A tool server, or a plugin that brings one, runs code on this computer: said once, calmly.
     code: i.code === true ? t('ask.self.code') : '',
@@ -455,6 +457,9 @@ function Card(props: { conversationId: string; turnId: string; permission: Permi
               <Show when={self().what}>
                 <span class="note">{self().what}</span>
               </Show>
+              <Show when={self().effect}>
+                <span class="note" data-testid="self-effect">{self().effect}</span>
+              </Show>
               <span class="note" data-testid="self-line">{self().line}</span>
               <Show when={self().code}>
                 <span class="note" data-testid="self-code">{self().code}</span>
@@ -467,7 +472,7 @@ function Card(props: { conversationId: string; turnId: string; permission: Permi
             {own() ? t('ask.self.once') : t('ask.allow')}
           </button>
           <button class="btn" disabled={sending()} onClick={() => void answer(true, true)}>
-            {own() ? t('ask.self.always') : t('ask.always')}
+            {own() ? t(props.permission.tool === `${SELF}.tools.switch` ? 'ask.self.alwaysSwitch' : 'ask.self.always') : t('ask.always')}
           </button>
           <button class="btn" disabled={sending()} onClick={() => void answer(false)}>
             {t('ask.deny')}
