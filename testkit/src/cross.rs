@@ -1,6 +1,6 @@
 //! The macOS Clippy proof on a Windows PC. CI checks macOS only after a push, so code behind `cfg(unix)` or
 //! `cfg(target_os = "macos")` that breaks there used to cost a whole CI round and a fix commit. Clippy needs no linker,
-//! but `aws-lc-sys` compiles C, so zig stands in as the target's C compiler and archiver: Cargo calls this runner as
+//! but `ring` compiles C, so zig stands in as the target's C compiler and archiver: Cargo calls this runner as
 //! `CC` and `AR`, and [`zig_mode`] hands the call to zig. A PC without zig skips the proof; CI still runs it on a Mac.
 
 use std::ffi::OsString;

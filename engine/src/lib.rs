@@ -50,6 +50,7 @@ pub mod sibling;
 pub mod signals;
 pub mod store;
 pub mod stuck;
+pub mod tls;
 pub mod tool_inventory;
 pub mod toolbox;
 pub mod tools;

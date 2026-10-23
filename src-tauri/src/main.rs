@@ -1725,6 +1725,8 @@ fn main() {
     if let Some(dir) = crash_record_dir(is_test) {
         faber_engine::crash::install_hook(dir, env!("CARGO_PKG_VERSION"), env!("FABER_COMMIT"));
     }
+    // Before any HTTPS client, the updater's included: reqwest is built without a crypto provider of its own.
+    faber_engine::tls::install();
     let mut builder = tauri::Builder::default();
     // A second launch brings the open window forward. Runs with their own data folder (tests) stay separate.
     if std::env::var_os("FABER_DATA_DIR").is_none() {

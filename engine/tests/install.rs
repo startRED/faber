@@ -485,11 +485,19 @@ fn F01_url_parser_bypass() {
 #[allow(non_snake_case)]
 async fn F02_tls_transport() {
     // Nothing listens on this loopback port, so the request fails to connect; a client built without TLS says why instead.
+    faber_engine::tls::install();
     let port = std::net::TcpListener::bind("127.0.0.1:0").unwrap().local_addr().unwrap().port();
     let res = reqwest::Client::builder().no_proxy().build().unwrap().get(format!("https://127.0.0.1:{port}")).send().await;
     let error = res.expect_err("Nothing answers on that port");
     let debug = format!("{error:?}");
     assert!(!debug.contains("scheme is not http"), "Official HTTPS downloads are impossible: {debug}");
+}
+
+#[test]
+fn tls_builds_without_aws_lc() {
+    // The updater compiles ring anyway; aws-lc-sys would add minutes of C to every cold build (src/tls.rs).
+    let lock = std::fs::read_to_string(concat!(env!("CARGO_MANIFEST_DIR"), "/../Cargo.lock")).unwrap();
+    assert!(!lock.contains("name = \"aws-lc-sys\""), "A dependency turned on aws-lc-rs again; use the ring provider");
 }
 
 #[tokio::test]

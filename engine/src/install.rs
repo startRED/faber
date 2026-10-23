@@ -716,6 +716,7 @@ pub const IDLE_TIMEOUT: Duration = Duration::from_secs(60);
 /// `idle` fails the request; a loopback origin never goes through a proxy.
 async fn get(url: &str, loopback: Option<&str>, idle: Duration) -> io::Result<reqwest::Response> {
     allowed_url(url, &[], loopback).map_err(io::Error::other)?;
+    crate::tls::install();
     let origin = loopback.map(String::from);
     let custom_policy = reqwest::redirect::Policy::custom(move |attempt| {
         if attempt.previous().len() >= 10 {
