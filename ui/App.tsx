@@ -1183,7 +1183,6 @@ export function App(props: { initial: AppState; update?: UpdateStatus; inbox: { 
 
   const switchArea = (next: Place['area']) => {
     closeSettings();
-    closeSide(false);
     void fresh({ area: next, projectId: projectId() });
   };
   const addProject = async () => {

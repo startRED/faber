@@ -5,7 +5,7 @@ import { api, type AppState, type Conversation } from '../../ui/api.ts';
 import { agentWide, showAgent } from '../../ui/AgentChat.tsx';
 import { showSite } from '../../ui/Site.tsx';
 import { App } from '../../ui/App.tsx';
-import { t, useLanguage } from '../../ui/i18n.ts';
+import { LANGUAGES, t, useLanguage, type Lang } from '../../ui/i18n.ts';
 import { ASIDE_USUAL, autoRun, dockable, fit, KINDS, limitsOf, paneUsual, RUN, savedWidths, SIDE, STAGE_MIN } from '../../ui/layout.ts';
 import { check, deepEqual, equal, ok } from './check.ts';
 
@@ -70,16 +70,16 @@ const talk: Conversation = {
 
 /** The whole shell, mounted in a box that fills the window. `motion` is the level the page runs at; `stored` is the layout
  * that an earlier run of the window left in storage. */
-async function shell(vendors: AppState['vendors'], motion: 'full' | 'none', run: (root: HTMLElement) => Promise<void> | void, stored?: unknown, convo: Conversation = talk) {
+async function shell(vendors: AppState['vendors'], motion: 'full' | 'none', run: (root: HTMLElement) => Promise<void> | void, stored?: unknown, convo: Conversation = talk, projects: AppState['projects'] = [], language: Lang = 'en') {
   const originalOpen = api.open;
   const originalClock = api.setClock;
   const place = localStorage.getItem('faber.place');
   const layout = localStorage.getItem('faber.layout');
   const effects = { ambient: false, texture: false, glow: false };
   const initial: AppState = {
-    vendors, models: [], quotas: [], projects: [], version: '0.0.0', running: { revision: 0, items: [] },
+    vendors, models: [], quotas: [], projects, version: '0.0.0', running: { revision: 0, items: [] },
     conversations: [{ id: convo.id, title: convo.title, area: convo.area, updatedAt: 1 }],
-    settings: { setup: 'done', tutorialDone: true, language: 'en', appearance: { base: 'sala' } },
+    settings: { setup: 'done', tutorialDone: true, language, appearance: { base: 'sala' } },
     look: {
       vars: themes.css.base, scheme: 'dark', motion, effects, checks: [], notices: [],
       appearance: { base: 'sala', ground: 'sala', accent: '#f3f0e8', textFont: 'archivo', headingFont: 'narrow', textSize: 14, density: 1, corners: 1, motion, effects },
@@ -96,12 +96,17 @@ async function shell(vendors: AppState['vendors'], motion: 'full' | 'none', run:
   for (const [key, value] of Object.entries(themes.css.base)) root.style.setProperty(`--${key}`, value);
   document.body.append(root);
   const dispose = render(() => createComponent(App, { initial, inbox: { take: () => {} } }), root);
+  const background = document.getElementById('root');
+  const backgroundInert = background?.inert ?? false;
   try {
+    // The test app owns keyboard focus; the booted app must not trap it in its first-run dialog.
+    if (background) background.inert = true;
     await settle(60);
     await run(root);
   } finally {
     dispose();
     root.remove();
+    if (background) background.inert = backgroundInert;
     api.open = originalOpen;
     api.setClock = originalClock;
     for (const [key, value] of [['faber.place', place], ['faber.layout', layout]] as const) {
@@ -308,6 +313,63 @@ check('shell: over the stage, an opened subagent as a full thread is no dialog: 
       showAgent(undefined);
     }, undefined, withAgent),
   );
+});
+
+check('shell: changing work area keeps narrow navigation open until a row, Escape or Catalog is chosen', async () => {
+  for (const { code } of LANGUAGES) {
+    await atWidth(720, () => shell(['claude'], 'none', async (root) => {
+      const side = root.querySelector<HTMLElement>('.side')!;
+      const menu = () => root.querySelector<HTMLButtonElement>('.topbar .menu')!;
+      const areas = () => side.querySelectorAll<HTMLButtonElement>('.areas .area');
+      const open = async () => { menu().click(); await settle(30); };
+      await open();
+      areas()[1].focus(); areas()[1].click();
+      await settle(60);
+      ok(side.classList.contains('shown'), `${code}: Projects keeps its list visible`);
+      equal(side.getAttribute('aria-modal'), 'true');
+      ok(root.querySelector<HTMLElement>('.main')!.inert, 'the work remains behind the modal sidebar');
+      equal(areas()[1].getAttribute('aria-pressed'), 'true');
+      ok(side.contains(document.activeElement), 'changing area keeps focus in the sidebar');
+      const project = side.querySelector<HTMLButtonElement>('.projects .item')!;
+      ok(project && project.textContent?.includes('Demo'), 'the saved project is directly reachable');
+      ok(!root.querySelector('.fr-stage'), 'the fixture has no connection dialog');
+      const stops = [...side.querySelectorAll<HTMLElement>('button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])')]
+        .filter((el) => !el.matches(':disabled') && el.getClientRects().length > 0 && !el.closest('[inert]'));
+      const describe = (el: Element | null | undefined) => el ? `${el.tagName}.${el.className} "${el.getAttribute('aria-label') ?? el.textContent?.trim().slice(0, 55)}" visibility=${getComputedStyle(el).visibility} inert=${!!el.closest('[inert]')}` : 'none';
+      stops.at(-1)!.focus();
+      equal(document.activeElement, stops.at(-1), `the last stop accepts focus before Tab: actual ${describe(document.activeElement)}; last ${describe(stops.at(-1))}`);
+      key('Tab');
+      equal(document.activeElement, stops[0], `Tab wraps inside the overlay: actual ${describe(document.activeElement)}; first ${describe(stops[0])}; last ${describe(stops.at(-1))}`);
+      key('Tab', { shiftKey: true });
+      equal(document.activeElement, stops.at(-1), 'Shift+Tab wraps back');
+      key('Escape'); await settle(30);
+      ok(!side.classList.contains('shown'), 'Escape closes navigation');
+      equal(document.activeElement, menu(), 'Escape returns focus to its menu button');
+      await open();
+      side.querySelector<HTMLButtonElement>('.projects .item')!.click(); await settle(60);
+      ok(!side.classList.contains('shown'), 'choosing Demo closes navigation');
+      equal(JSON.parse(localStorage.getItem('faber.place')!).projectId, 'demo');
+      await open();
+      areas()[0].focus(); areas()[0].click(); await settle(60);
+      ok(side.classList.contains('shown'), 'Chat also keeps its list open');
+      // The existing conversation button has its accessible title even when its group layout changes.
+      const chat = [...side.querySelectorAll<HTMLButtonElement>('button')].find((button) => button.textContent?.includes(talk.title));
+      ok(chat, 'the saved chat is directly reachable');
+      chat.click(); await settle(60);
+      ok(!side.classList.contains('shown'), 'choosing a chat closes navigation');
+      await open();
+      side.querySelector<HTMLButtonElement>('[data-catalog-tab]')!.click(); await settle(60);
+      ok(!side.classList.contains('shown'), 'Catalog still closes navigation');
+    }, undefined, talk, [{ id: 'demo', name: 'Demo', path: '/demo' }], code));
+  }
+  await atWidth(1440, () => shell(['claude'], 'none', async (root) => {
+    const side = root.querySelector<HTMLElement>('.side')!;
+    const area = side.querySelector<HTMLButtonElement>('[data-tour="projects"]')!;
+    area.focus(); area.click(); await settle(60);
+    equal(side.getAttribute('aria-modal'), null, 'wide navigation stays beside the work');
+    ok(!side.inert && !root.querySelector<HTMLElement>('.main')!.inert);
+    equal(document.activeElement, area, 'wide area switching keeps the focused control');
+  }));
 });
 
 check('shell: Ctrl+B steps the sidebar and the column aside and brings them back, and a button says how', async () => {
