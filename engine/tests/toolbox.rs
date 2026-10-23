@@ -343,7 +343,7 @@ async fn claude_code_reads_the_limits_and_searches_the_catalog_in_any_permission
 
         let tools = names(&claude_list(&mut pipe, "list").await);
         assert!(
-            ["quota", "catalog", "memory_search", "offer_bigger"].iter().all(|t| tools.contains(&t.to_string())),
+            ["quota", "catalog", "memory_search", "offer_bigger", "judge_creative"].iter().all(|t| tools.contains(&t.to_string())),
             "{mode:?}: {tools:?}"
         );
 
@@ -427,7 +427,10 @@ async fn codex_reads_the_limits_and_searches_the_catalog_through_its_dynamic_too
     let start = codex_boot(&mut pipe).await;
     let tools: Vec<String> =
         start["params"]["dynamicTools"].as_array().unwrap().iter().map(|t| t["name"].as_str().unwrap().into()).collect();
-    assert!(["quota", "catalog", "memory_search", "offer_bigger"].iter().all(|t| tools.contains(&t.to_string())), "{tools:?}");
+    assert!(
+        ["quota", "catalog", "memory_search", "offer_bigger", "judge_creative"].iter().all(|t| tools.contains(&t.to_string())),
+        "{tools:?}"
+    );
 
     pipe.say(json!({"method":"item/started","params":{"threadId":"main","turnId":"turn-main","item":{"id":"c1","type":"dynamicToolCall",
         "tool":"catalog","arguments":{"query":"bug"}}}}))
@@ -456,7 +459,10 @@ async fn codex_in_chat_gets_neither_tool() {
         .as_array()
         .map(|t| t.iter().map(|t| t["name"].as_str().unwrap().into()).collect())
         .unwrap_or_default();
-    assert!(!["quota", "catalog", "memory_search", "offer_bigger"].iter().any(|t| tools.contains(&t.to_string())), "{tools:?}");
+    assert!(
+        !["quota", "catalog", "memory_search", "offer_bigger", "judge_creative"].iter().any(|t| tools.contains(&t.to_string())),
+        "{tools:?}"
+    );
     let (refused, failed) = codex_call(&mut pipe, 902, "quota", json!({})).await;
     assert!(failed && refused.contains("not available"), "{refused}");
     let (refused, failed) = codex_call(&mut pipe, 903, "memory_search", json!({ "query": "plan" })).await;
