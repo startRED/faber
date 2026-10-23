@@ -14,6 +14,20 @@ const controls = [
   { role: 'input', name: 'Escreva aqui', x: 20, y: 20, disabled: true },
 ];
 
+test('a focused newcomer review rejects missing selections before starting the app', () => {
+  assert.throws(() => firstUser.selectTasks(['--task']), /missing task/);
+  assert.throws(() => firstUser.selectTasks(['--task', '--agent', 'codex']), /missing task/);
+});
+
+test('a focused newcomer review selects Catalog and rejects unknown tasks instead of reporting an empty success', () => {
+  assert.equal(typeof firstUser.selectTasks, 'function');
+  assert.deepEqual(firstUser.selectTasks(), TASKS);
+  const selected = firstUser.selectTasks(['--task', 'catalogo']);
+  assert.equal(selected.length, 1);
+  assert.equal(selected[0].id, 'catalogo');
+  assert.throws(() => firstUser.selectTasks(['--task', 'does-not-exist']), /unknown task/);
+});
+
 test('same-day review runs keep separate screenshots and default reports, including identical configurations', () => {
   assert.equal(typeof firstUser.runPaths, 'function');
   const root = mkdtempSync(join(tmpdir(), 'faber-first-user-paths-'));
@@ -64,6 +78,15 @@ test('the step prompt holds the task, the screen as words and the numbered contr
   assert.match(prompt, /\[1\] button: Continuar/);
   assert.match(prompt, /\[2\] input: Escreva aqui \(desativado\)/);
   assert.doesNotMatch(prompt, /querySelector|\.tsx|class=/);
+  const english = stepPrompt(TASKS[0], [], { text: 'Welcome', controls }, { width: 1280, height: 800 }, 'en');
+  assert.match(english, /idioma da interface é en/);
+  assert.doesNotMatch(english, /app está em português/);
+});
+
+test('the reviewer must read the screenshot, not body text copied from below the viewport', () => {
+  const prompt = stepPrompt(TASKS[0], [], { text: 'OFFSCREEN_SENTINEL_NOT_VISIBLE', controls }, { width: 720, height: 480 });
+  assert.doesNotMatch(prompt, /OFFSCREEN_SENTINEL_NOT_VISIBLE/);
+  assert.match(prompt, /Leia o texto diretamente na imagem/);
 });
 
 test('the report lists findings first, then each task with its steps and screenshots', () => {
@@ -84,6 +107,14 @@ test('the report lists findings first, then each task with its steps and screens
   assert.match(text, /### primeira-abertura: travou/);
   assert.match(text, /clicou em \[1\] "Continuar"/);
   assert.equal(describe({ type: 'key', key: 'Enter' }), 'apertou Enter');
+});
+
+test('a reviewer saying done is reported as its claim, not verified completion', () => {
+  const text = report({ date: '2026-10-23', agent: 'fixture', size: { width: 720, height: 480 }, lang: 'pt-BR',
+    findings: [], results: [{ task: TASKS[0], steps: [], outcome: 'done' }], shots: 'fixture' });
+  assert.match(text, /conclusão declarada pela IA/);
+  assert.match(text, /precisa conferir as imagens/);
+  assert.doesNotMatch(text, /### primeira-abertura: conseguiu/);
 });
 
 test('without a usable summary the report still lists every confusion and every stuck task', () => {

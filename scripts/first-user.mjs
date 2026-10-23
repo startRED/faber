@@ -1,11 +1,12 @@
 // The first-user review: a fresh AI that has never seen Faber uses it like a newcomer and says, in plain pt-BR, what
-// confused it. It sees only the screen: a screenshot, the visible text and the list of controls a screen reader would
+// confused it. It sees only the screen: a screenshot and the list of controls a screen reader would
 // name. It never sees the code: the AI runs with no tools at all (Claude) or with its shell and apps switched off
 // (Codex), in an empty folder outside the repository.
 //
 //   node scripts/first-user.mjs                    (Haiku, 720x480, pt-BR, first run with no AI connected)
 //   node scripts/first-user.mjs --agent codex      (Codex gpt-6-luna instead)
 //   node scripts/first-user.mjs --size 1280x800 --steps 10 --no-build
+//   node scripts/first-user.mjs --task catalogo  (browse and read only; no installation task)
 //
 // Faber runs as the hidden, sandboxed test build that `testkit/examples/ux_audit.rs` drives (C006: the window lives on a
 // desktop no monitor shows), with no CLI connected, so no subscription is spent inside it; the reviewer's own calls are
@@ -38,12 +39,29 @@ export const TASKS = [
       'Você acabou de instalar o Faber e o abriu pela primeira vez. Você ainda não conectou nenhuma IA. ' +
       'Passe pela primeira abertura até chegar à tela principal do app.',
   },
+  {
+    id: 'catalogo',
+    goal: 'Encontre o Catálogo, procure uma ferramenta que ajude a corrigir erros de software e abra seus detalhes. ' +
+      'Pelo que a tela explica, descubra para que ela serve e quando a IA a usa. Depois volte à lista. ' +
+      'Só explore e leia: não instale, remova, ative, desative ou troque ferramentas, nem abra páginas externas.',
+  },
   { id: 'conversa', goal: 'Comece uma conversa nova e mande uma pergunta simples, por exemplo "o que você sabe fazer?".' },
   { id: 'projetos', goal: 'Abra a área de Projetos e descubra para que ela serve.' },
   { id: 'configuracoes', goal: 'Encontre as Configurações do app e descubra onde se muda o idioma.' },
 ];
 
-/** Runs in the page: the visible text, and every control a person can see and reach, numbered, with its centre. */
+/** A focused walk uses the same tasks and refuses a typo before launching the app or spending a model call. */
+export function selectTasks(args = []) {
+  const at = args.indexOf('--task');
+  if (at < 0) return TASKS;
+  const id = args[at + 1];
+  if (!id || id.startsWith('--')) throw new Error('missing task after --task');
+  const selected = TASKS.filter((task) => task.id === id);
+  if (!selected.length) throw new Error(`unknown task: ${id}`);
+  return selected;
+}
+
+/** Runs in the page: controls a person can see and reach, numbered, with their centre; text comes from the screenshot. */
 export const OBSERVE = `(() => {
   const vw = innerWidth, vh = innerHeight;
   const sel = 'button, a[href], input, textarea, select, summary, [role=button], [role=link], [role=tab], ' +
@@ -69,7 +87,7 @@ export const OBSERVE = `(() => {
     controls.push({ role, name: named(el), x, y, disabled: !!el.disabled || el.getAttribute('aria-disabled') === 'true' });
     if (controls.length >= 80) break;
   }
-  return { text: (document.body.innerText || '').replace(/\\n{3,}/g, '\\n\\n').slice(0, 4000), controls };
+  return { controls };
 })()`;
 
 /** Is `path` the repository or inside it? The reviewer's folder must not be. */
@@ -79,7 +97,7 @@ export function insideRepo(path, root = ROOT) {
 }
 
 /** The prompt for one step: who the reviewer is, the task, what it did so far, and the screen as words. */
-export function stepPrompt(task, history, seen, size) {
+export function stepPrompt(task, history, seen, size, language = 'pt-BR') {
   const controls = seen.controls
     .map((c, i) => `[${i + 1}] ${c.role}: ${c.name || '(sem nome)'}${c.disabled ? ' (desativado)' : ''}`)
     .join('\n');
@@ -88,16 +106,13 @@ export function stepPrompt(task, history, seen, size) {
     : '(nada ainda)';
   return [
     'Você é uma pessoa que nunca usou o Faber, um app de computador para conversar com IAs. Você não é programador.',
-    'Você só vê a tela: a imagem anexada, o texto visível e a lista de controles abaixo. Não tente abrir arquivos nem código.',
-    `A janela tem ${size.width}x${size.height} pixels e o app está em português.`,
+    'Você só vê a imagem da tela e a lista de controles abaixo. Leia o texto diretamente na imagem. Não tente abrir arquivos nem código.',
+    `A janela tem ${size.width}x${size.height} pixels e o idioma da interface é ${language}.`,
     '',
     `Tarefa: ${task.goal}`,
     '',
     'O que você já fez nesta tarefa:',
     done,
-    '',
-    'Texto visível na tela:',
-    seen.text || '(nenhum)',
     '',
     'Controles que dá para usar (número, tipo, nome):',
     controls || '(nenhum)',
@@ -189,11 +204,11 @@ export function fallback(results) {
 
 /** The report, in plain pt-BR. */
 export function report({ date, agent, size, lang, findings, results, shots }) {
-  const outcome = { done: 'conseguiu', stuck: 'travou', steps: 'não terminou no limite de passos' };
+  const outcome = { done: 'conclusão declarada pela IA; precisa conferir as imagens', stuck: 'travou', steps: 'não terminou no limite de passos' };
   const lines = [
     `# Primeiro usuário, ${date}`,
     '',
-    `Uma IA que nunca viu o Faber (${agent}) usou o app como um novato, vendo só a tela: a imagem, o texto visível e os`,
+    `Uma IA que nunca viu o Faber (${agent}) usou o app como um novato, lendo o texto na imagem da tela e vendo os`,
     `nomes dos controles, nunca o código. Janela de ${size.width}x${size.height}, idioma ${lang}, primeira abertura sem nenhuma IA`,
     'conectada. Gerado por `node scripts/first-user.mjs`; nada aqui foi corrigido, é uma lista para ler.',
     '',
@@ -341,6 +356,7 @@ async function act(app, action, seen, size) {
 }
 
 async function main(args) {
+  const tasks = selectTasks(args);
   const agent = option(args, '--agent', 'claude');
   const [width, height] = option(args, '--size', '720x480').split('x').map(Number);
   const size = { width, height };
@@ -368,14 +384,14 @@ async function main(args) {
   try {
     await app.op('call', 'Emulation.setDeviceMetricsOverride', { params: { width, height, deviceScaleFactor: 1, mobile: false } });
     await pause(1500);
-    for (const task of TASKS) {
+    for (const task of tasks) {
       const steps = [];
       let outcome = 'steps';
       for (let n = 1; n <= maxSteps; n++) {
         const shot = join(shots, `${task.id}-${n}.png`);
         await app.op('shot', shot);
         const seen = await app.op('eval', OBSERVE);
-        const step = parseStep(await ask(stepPrompt(task, steps, seen, size), shot), seen.controls);
+        const step = parseStep(await ask(stepPrompt(task, steps, seen, size, lang), shot), seen.controls);
         if (step.action.type === 'click') step.action.name = seen.controls[step.action.n - 1].name;
         steps.push({ ...step, shot: relative(ROOT, shot).replaceAll('\\', '/') });
         console.log(`${task.id} ${n}: ${describe(step.action)}`);
