@@ -2100,6 +2100,7 @@ export const es: Messages = {
   'notes.217.better': 'Puedes permitir que el agente active o desactive herramientas instaladas del catálogo para las conversaciones nuevas.',
   'notes.218.better': 'Puedes permitir que el agente quite una herramienta, con Deshacer en el Catálogo hasta reiniciar Faber.',
   'notes.219.better': 'Puedes pedir al agente que actualice o repare una herramienta del catálogo, con un permiso propio y una copia de los archivos actuales guardada.',
+  'notes.220.fixed': 'Las pautas de interfaz ahora incluyen mantener el foco y el resaltado en el elemento correcto cuando cambia una lista.',
   'update.checking': 'Buscando una actualización…',
   'update.downloading': 'Descargando actualización…',
   'update.downloadingPercent': 'Descargando actualización… {percent} %',

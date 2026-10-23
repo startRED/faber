@@ -1980,6 +1980,7 @@ export const en = {
   'notes.217.better': 'You can let the agent turn installed catalog tools on or off for new conversations, with your permission.',
   'notes.218.better': 'You can let the agent remove a catalog tool, with Undo in Catalog until Faber restarts.',
   'notes.219.better': 'You can ask the agent to update or repair a catalog tool, with separate permission and a retained copy of its current files.',
+  'notes.220.fixed': 'Frontend guidance now covers keeping the right item highlighted and focused when lists change.',
   'update.checking': 'Looking for an update…',
   'update.downloading': 'Downloading update…',
   'update.downloadingPercent': 'Downloading update… {percent}%',

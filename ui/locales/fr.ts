@@ -2100,6 +2100,7 @@ export const fr: Messages = {
   'notes.217.better': 'Vous pouvez autoriser l’agent à activer ou désactiver les outils installés du catalogue pour les nouvelles conversations.',
   'notes.218.better': 'Vous pouvez autoriser l’agent à retirer un outil, puis l’annuler dans le Catalogue avant de redémarrer Faber.',
   'notes.219.better': 'Vous pouvez demander à l’agent de mettre à jour ou réparer un outil du catalogue, avec une autorisation distincte et une copie des fichiers actuels conservée.',
+  'notes.220.fixed': 'Les conseils de création d’interfaces incluent le maintien du focus et du surlignage sur le bon élément quand une liste change.',
   'update.checking': 'Recherche d’une mise à jour…',
   'update.downloading': 'Téléchargement de la mise à jour…',
   'update.downloadingPercent': 'Téléchargement de la mise à jour… {percent} %',

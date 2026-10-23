@@ -514,6 +514,8 @@ No skill-selection report or catalog count includes these first-party instructio
 Their frontend workflow complements an applicable installed art-direction skill for new composition, retains the
 existing identity for local repairs, and checks the real completion of slow operations rather than an unrelated
 instant-success mode. These are instruction expectations, not a guarantee that a model followed them.
+List updates also require checking logical focus and temporary markers when rows are reused, without overriding a
+newer focus choice. This instruction follow-up was not measured by the frozen generated-page comparison.
 
 Faber writes one first-party folder, <data>/guide-plugin, containing its help guide and two original frontend
 skills. The guide uses the screen language (Settings, else system, else English), with prose and the English/selected

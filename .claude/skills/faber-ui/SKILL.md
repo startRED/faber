@@ -20,6 +20,8 @@ Those skills complement this one; they do not replace Faber's tokens, taste card
   failure or navigation. Local intent, saved, accepted and completed are different states.
 - Check the affected empty, loading, populated and recoverable-error states; preserve drafts and references.
 - Walk the keyboard path, focus entry/return and non-drag alternative. Announce important state changes, not tokens.
+- After paging or regrouping messages, verify the focused logical message and temporary marker, including after
+  the marker expires. Reused row positions must not move focus onto different content or steal a newer focus choice.
 - Inspect the supported narrow window, long translations, larger text, forced colors and reduced motion. Code blocks
   may scroll locally; the composer and required actions must remain reachable.
 - Pair screenshots with an executed task. Attractive composition cannot establish persistence or honest completion.

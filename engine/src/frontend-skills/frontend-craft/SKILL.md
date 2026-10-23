@@ -57,6 +57,9 @@ and determinate progress only when progress is measured. Keep usable controls av
   reload; never label an in-memory cache as durable. Disabling Submit is feedback, not server-side idempotency.
 - Keep reading position and selection stable while content arrives. Follow new output only while the person is
   already following it; otherwise offer a quiet way back. Revisit focus after navigation, removal and closing overlays.
+- When lists page, reorder or filter, check that focus, selection and temporary markers still belong to the intended
+  record. Positionally reused DOM can show different content. Preserve any newer focus choice; do not change the
+  whole rendering strategy without checking update and rendering cost.
 - Put recoverable field errors beside their field and connect them programmatically. Distinguish invalid input from
   a service outage. Say what can be done next; never clear valid input to show an error.
 - Use a modal only for a task that must suspend the background; trap and restore focus only then. Prefer existing

@@ -57,3 +57,14 @@ instruction set, task, assets, hardware and runtime build recorded. An independe
 Record task success and concrete visual findings separately. Program proofs cannot judge taste, and taste votes do
 not demonstrate durability, accessibility or resource use. The first pair tied on the independent visual rubric;
 its unequal skill consultation and single sample per condition do not establish a causal improvement.
+
+## Follow-up: identity during pagination (2026-10-23)
+
+The official Solid [Index reference](https://docs.solidjs.com/reference/components/index-component) describes reuse
+by position; its [For reference](https://docs.solidjs.com/reference/components/for) describes mapping by value
+identity. A positionally reused element can represent different content after prepending or windowing. Review
+focus, selection and temporary markers by logical record identity when the visible window changes. A blanket
+component swap is not a performance argument: object identity and streaming updates also need inspection.
+
+This is guidance for the cross-platform search/reading investigation, not proof of its cause or a mandate to
+replace every positional list. The regression reproduction and the eventual fix must supply their own evidence.
