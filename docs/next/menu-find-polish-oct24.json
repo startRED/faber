@@ -1,0 +1,11 @@
+{
+  "notes": {
+    "fixed": {
+      "en": "Search and commands closes without leaving a second fading copy over your conversation.",
+      "pt-BR": "O menu Busca e comandos fecha sem deixar uma cópia por cima da conversa.",
+      "es": "El menú Búsqueda y comandos se cierra sin dejar una copia sobre la conversación.",
+      "fr": "Le menu Recherche et commandes se ferme sans laisser de copie au-dessus de la conversation.",
+      "de": "Das Menü Suche und Befehle schließt, ohne eine verblassende Kopie über dem Gespräch zu hinterlassen."
+    }
+  }
+}
