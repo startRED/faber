@@ -44,7 +44,7 @@ connection, before queueing. The connector could open the review request, but do
 
 ## Follow-up walks and classification
 
-The matrix is still incomplete: nine of its sixteen requested default or project walks completed: Haiku and Codex, default and project at pt-BR/720x480, plus Codex default and project at en/720x480 and pt-BR/1280x800, and Codex default at en/1280x800. The focused Codex Chat smoke above is additional evidence,
+The matrix is still incomplete: ten of its sixteen requested default or project walks completed: Haiku and Codex, default and project at pt-BR/720x480, plus Codex default and project at en/720x480 and pt-BR/1280x800, and Codex default and project at en/1280x800. The focused Codex Chat smoke above is additional evidence,
 not a completed default configuration.
 
 | Walk | Program evidence | What it establishes and what remains |
@@ -195,4 +195,25 @@ and isolates temporary directories; it does not itself enforce the 8 GB free-mem
 call path; the seventh used the same setup. These walks therefore do not prove those resource guards were applied.
 Any earlier coordination note describing them as normally resource-guarded is corrected by this investigation.
 Their retained UI observations, source identities and natural receipts remain evidence of those narrower facts.
-No further native walk starts until the guard path is resolved; the remaining matrix and second pass are unfinished.
+Native walks stopped at that point until the resource-guard path was resolved as described below; the remaining
+matrix and second pass are unfinished.
+## English wide project walk and guarded restart
+
+The tenth first-pass configuration, Codex en/1280x800 with seeded Demo, ended naturally with exit 0. The raw report
+is preserved verbatim in `first-user-2026-10-24-codex-en-1280x800-project.md`. External
+`codex-en-1280x800-project/run-01` retains nine PNGs and one execution-identity file, not ten images: the collector's
+`screenshotCount: 10` counts all copied files. A fresh independent reviewer checked images 5 through 9 and verified
+the sizes/digests of all fifteen manifest artifacts plus the external full log. The remaining four images were not
+independently inspected. Image 5 shows a visible empty message field with its cursor; the two redundant clicks before
+typing do not establish a hidden field or a focus defect. Images 7 through 9 establish the exact question, send, then
+the complete Rayleigh reply with Done and Nothing running. This is controlled replay, not a real-provider result.
+
+A reviewed external adapter wrapped this run in the existing shared resource gate and held its slot through the
+child's lifetime; the normal storage lease wrapped the adapter. Its guard hash matched the reviewed guard manifest and compiled identities.
+`RESOURCE_GATE_ACQUIRED` preceded the walk, its single capture directory was retained without overwriting another
+run, a lease receipt was captured, and no watcher error was recorded. App, driver, fake CLI and adapter file hashes
+stayed equal at the recorded before/after boundaries; A/C sources also stayed unchanged and clean. These file
+observations do not attest to loaded process bytes. The gate checks full-screen use and free RAM at startup, with
+the existing wait policy; it does not continuously suspend for low RAM after admission. The adapter is an external
+operational remedy, not a claim that direct `first-user.mjs` calls enforce that gate. The native-picker screenshot
+limitation above remains unchanged. Six first-pass configurations and the second pass are still unfinished.
