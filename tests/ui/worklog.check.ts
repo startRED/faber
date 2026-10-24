@@ -2,9 +2,11 @@ import { createComponent, createSignal } from 'solid-js';
 import { render } from 'solid-js/web';
 import { Thread } from '../../ui/Thread.tsx';
 import type { Message, ToolUse } from '../../ui/api.ts';
+import { applyLook } from '../../ui/appearance.ts';
 import { t, useLanguage } from '../../ui/i18n.ts';
 import { changeOf, groupLabel, groupSteps, sourcesOf, stepLine, toolLine, toolRow } from '../../ui/worklog.ts';
 import { check, deepEqual, equal, ok } from './check.ts';
+import { sala } from './appearance.check.ts';
 
 check('worklog: every Claude Code tool reads as what it does, in words', () => {
   equal(toolRow({ id: '1', name: 'Read', input: { file_path: 'C:\\p\\a.txt' } }).label, t('tool.read'));
@@ -26,6 +28,7 @@ check('worklog: every Claude Code tool reads as what it does, in words', () => {
   deepEqual(toolRow({ id: '11', name: 'Map', input: {} }), { label: t('tool.map'), detail: '' });
   deepEqual(toolRow({ id: '12', name: 'Map', input: { kind: 'setting', query: 'theme' } }), { label: t('tool.map'), detail: 'setting theme' });
   // The limits and the catalog search read as what they do; the search shows its words, in every language of the screen.
+  deepEqual(toolRow({ id: 'creative', name: 'CreativeJudge', input: { first: 'Private draft', second: 'Other draft' } }), { label: t('tool.creativeJudge'), detail: '' });
   deepEqual(toolRow({ id: '13', name: 'Quota', input: {} }), { label: t('tool.quota'), detail: '' });
   deepEqual(toolRow({ id: '14', name: 'Catalog', input: { query: 'fix a bug' } }), { label: t('tool.catalog'), detail: 'fix a bug' });
   deepEqual(toolRow({ id: '15', name: 'Catalog', input: {} }), { label: t('tool.catalog'), detail: '' });
@@ -38,6 +41,8 @@ check('worklog: every Claude Code tool reads as what it does, in words', () => {
   deepEqual(toolRow({ id: '16', name: 'Catalog', input: { install: 'ponytail' } }), { label: t('tool.catalogInstall'), detail: 'ponytail' });
   for (const lang of ['pt-BR', 'es', 'fr', 'de'] as const) {
     useLanguage(lang);
+    ok(t('tool.creativeJudge') !== 'Comparing drafts independently', `${lang} names independent draft comparisons in its own words`);
+    deepEqual(toolRow({ id: 'creative', name: 'CreativeJudge', input: { first: 'Private draft' } }), { label: t('tool.creativeJudge'), detail: '' });
     ok(t('tool.quota') !== 'Checking the AI limits' && t('tool.catalog') !== 'Searching the catalog', `${lang} has its own words`);
     ok(t('tool.catalogInstall') !== 'Installing from the catalog', `${lang} names the install in its own words`);
     ok(t('tool.memorySearch') !== "Searching the project's memory", `${lang} names the memory search in its own words`);
@@ -267,7 +272,7 @@ check('worklog: a group of steps is a chip like its neighbours, closed and open,
     for (const [lang, tools, keys] of cases) {
       useLanguage(lang);
       const root = document.createElement('div');
-      root.dataset.motion = 'none';
+      applyLook(sala({ motion: 'none' }), root);
       root.style.width = '720px';
       document.body.append(root);
       const message: Message = { id: 'look', role: 'assistant', at: 0, status: 'done', text: 'Done.', tools: [...tools] };

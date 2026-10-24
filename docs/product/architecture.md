@@ -39,8 +39,12 @@ Engine (Rust crate inside the app today; a separate process later, so work survi
   conversations. So Faber starts it on the first keystroke, not when the window opens, and closes it after two idle
   minutes; the next turn resumes the same session. Codex's app-server can serve many conversations as threads, so one
   shared process per area holds them all (about 50 MB for three). Next: one shared copy of each MCP server for all
-  sessions of a project, and a RAM budget across all CLIs once the lead agent runs workers in parallel (workers queue
-  instead of going over it).
+  sessions of a project. On Windows, automatic helpers and unattended conversation turns also queue while measured
+  owned CLI private working sets reach half physical RAM or less than 2 GiB is available for the person. One new
+  automatic start is admitted per fresh sample; the nonempty queue samples every two seconds, off the engine lock.
+  Shared processes count once, including their root and owned children, and Stop cancels queued starts. Active work
+  is never killed. This is admission headroom, not a hard cap on later process growth or native CLI subagent starts.
+  Unix still uses the existing worker-count limits; native identity-safe memory sampling there remains unfinished.
 - **Languages.** English, Portuguese (Brazil), Spanish, French and German from the start, following the system
   language unless the user picks one in Settings. Every text is written by hand, never machine-translated; a new
   language needs a native speaker to review it.

@@ -171,6 +171,73 @@ async fn claude_code_in_chat_is_not_offered_the_limits_or_the_catalog() {
     app.shutdown();
 }
 
+#[tokio::test]
+async fn creative_claude_tool_runs_two_distinct_isolated_judges_and_saves_their_scores() {
+    let (dir, folder) = (support::canonical_tempdir().unwrap(), support::work_folder());
+    let (spawn, made) = pipes();
+    let launches = Arc::new(std::sync::Mutex::new(Vec::new()));
+    let recorded = launches.clone();
+    let app = engine(
+        dir.path(),
+        Vendor::Claude,
+        Arc::new(move |bin, args, cwd| {
+            recorded.lock().unwrap().push(args.to_vec());
+            spawn(bin, args, cwd)
+        }),
+    );
+    let project = app.add_project(&folder.path().to_string_lossy()).unwrap().id;
+    let id = app.send(request(Vendor::Claude, Area::Project, Some(project))).unwrap();
+    let mut main = next_pipe(&made).await;
+    wire(&main, |m| m["type"] == "user").await;
+    main.say(json!({"type":"system","subtype":"init","session_id":"writer","model":"claude-sonnet-5-5"})).await;
+    let input = json!({"request":"Synthetic headline","rubric":"Clarity","first":"First draft","second":"Second draft"});
+    main.say(json!({"type":"control_request","request_id":"creative","request":{"subtype":"mcp_message","server_name":"faber","message":{"jsonrpc":"2.0","id":7,"method":"tools/call","params":{"name":"judge_creative","arguments":input}}}})).await;
+    let mut first = next_pipe(&made).await;
+    let mut second = next_pipe(&made).await;
+    let mut prompts = Vec::new();
+    for (index, pipe) in [&mut first, &mut second].into_iter().enumerate() {
+        let sent = wire(pipe, |m| m["type"] == "user").await;
+        let content = &sent["message"]["content"];
+        let text = content.as_str().or_else(|| content[0]["text"].as_str()).unwrap();
+        prompts.push(serde_json::from_str::<Value>(text).unwrap());
+        let listed = claude_list(pipe, &format!("judge-list-{index}")).await;
+        assert!(names(&listed).is_empty(), "isolated judges receive no Faber tools: {listed}");
+        let score = if index == 0 { r#"{"a":8,"b":2,"reason":"A is clearer."}"# } else { r#"{"a":2,"b":8,"reason":"B is clearer."}"# };
+        pipe.say(json!({"type":"stream_event","parent_tool_use_id":null,"event":{"type":"content_block_delta","delta":{"type":"text_delta","text":score}}})).await;
+        pipe.say(json!({"type":"result","subtype":"success","is_error":false,"total_cost_usd":0.05,"usage":{}})).await;
+    }
+    assert_eq!(prompts[0]["A"], prompts[1]["B"]);
+    assert_eq!(prompts[0].as_object().unwrap().len(), 4);
+    let answer = wire(&main, |m| m["response"]["request_id"] == "creative").await;
+    let (text, failed) = said(&answer["response"]["response"]["mcp_response"]["result"]);
+    assert!(!failed, "{text}");
+    let result: Value = serde_json::from_str(&text).unwrap();
+    assert_eq!(result["same_vendor"], true);
+    assert_eq!(result["judges"][0]["first"], 8);
+    assert_eq!(result["judges"][1]["first"], 8);
+    let receipt: Value = serde_json::from_slice(
+        &std::fs::read(dir.path().join("data/creative-reviews").join(format!("{}.json", result["receipt"].as_str().unwrap()))).unwrap(),
+    )
+    .unwrap();
+    assert_eq!(receipt["judges"][1]["score"]["reason"], "B is clearer.");
+    assert_eq!(app.open(&id).unwrap().spent_usd, 0.1);
+    let launches = launches.lock().unwrap();
+    assert_eq!(launches.len(), 3);
+    let models: Vec<_> = launches[1..]
+        .iter()
+        .map(|args| {
+            support::assert_no_user_customizations(args);
+            assert!(!args.iter().any(|a| a == "--resume"));
+            assert_eq!(args[args.iter().position(|a| a == "--tools").unwrap() + 1], "");
+            assert!(args.iter().any(|a| a == "--no-session-persistence"));
+            args[args.iter().position(|a| a == "--model").unwrap() + 1].clone()
+        })
+        .collect();
+    assert_ne!(models[0], models[1]);
+    drop(launches);
+    app.shutdown();
+}
+
 // ---- Codex: dynamic tools registered with the thread ----
 
 async fn codex_boot(pipe: &mut Pipe) -> Value {
@@ -189,6 +256,71 @@ async fn codex_call(pipe: &mut Pipe, id: u64, tool: &str, arguments: Value) -> (
         .await;
     let result = wire(pipe, |m| m["id"] == id && m.get("result").is_some()).await["result"].clone();
     (result["contentItems"][0]["text"].as_str().unwrap_or_default().to_string(), result["success"] != true)
+}
+
+#[tokio::test]
+async fn creative_codex_tool_uses_two_fresh_isolated_threads_without_dynamic_tools() {
+    let (dir, folder) = (support::canonical_tempdir().unwrap(), support::work_folder());
+    let (spawn, made) = pipes();
+    let launches = Arc::new(std::sync::Mutex::new(Vec::new()));
+    let recorded = launches.clone();
+    let app = engine(
+        dir.path(),
+        Vendor::Codex,
+        Arc::new(move |bin, args, cwd| {
+            recorded.lock().unwrap().push(args.to_vec());
+            spawn(bin, args, cwd)
+        }),
+    );
+    app.set_codex_models(vec!["gpt-6.1-sol".into(), "gpt-6-luna".into()], Some("gpt-6.1-sol".into()));
+    let project = app.add_project(&folder.path().to_string_lossy()).unwrap().id;
+    app.send(request(Vendor::Codex, Area::Project, Some(project))).unwrap();
+    let mut main = next_pipe(&made).await;
+    let start = codex_boot(&mut main).await;
+    assert!(start["params"]["dynamicTools"].as_array().unwrap().iter().any(|t| t["name"] == "judge_creative"));
+    main.say(json!({"id":980,"method":"item/tool/call","params":{"threadId":"main","turnId":"turn-main","callId":"creative","tool":"judge_creative","arguments":{"request":"Synthetic headline","rubric":"Clarity","first":"First draft","second":"Second draft"}}})).await;
+    let mut judges = next_pipe(&made).await;
+    let init = wire(&judges, |m| m["method"] == "initialize").await;
+    judges.say(json!({"id":init["id"],"result":{}})).await;
+    let mut configs = Vec::new();
+    for _ in 0..2 {
+        let config = wire(&judges, |m| m["method"] == "config/read" && !configs.contains(&m["id"])).await;
+        judges.say(json!({"id":config["id"],"result":{"config":{"mcp_servers":{}}}})).await;
+        configs.push(config["id"].clone());
+    }
+    let mut starts = Vec::new();
+    let mut prompts = Vec::new();
+    for index in 0..2 {
+        let start = wire(&judges, |m| m["method"] == "thread/start" && !starts.iter().any(|s: &Value| s["id"] == m["id"])).await;
+        assert!(start["params"]["dynamicTools"].as_array().is_none_or(|tools| tools.is_empty()));
+        assert_eq!(start["params"]["ephemeral"], true);
+        assert_eq!(start["params"]["config"]["features.shell_tool"], false);
+        assert_eq!(start["params"]["approvalPolicy"], "never");
+        let thread = format!("judge-{index}");
+        judges.say(json!({"id":start["id"],"result":{"thread":{"id":thread}}})).await;
+        starts.push(start);
+        let turn = wire(&judges, |m| m["method"] == "turn/start" && m["params"]["threadId"] == thread).await;
+        let input = &turn["params"]["input"];
+        let text = input.as_array().unwrap().iter().find_map(|item| item["text"].as_str()).unwrap();
+        prompts.push(serde_json::from_str::<Value>(text).unwrap());
+        let turn_id = format!("turn-{index}");
+        judges.say(json!({"id":turn["id"],"result":{"turn":{"id":turn_id}}})).await;
+        let score = if index == 0 { r#"{"a":8,"b":2,"reason":"A is clearer."}"# } else { r#"{"a":2,"b":8,"reason":"B is clearer."}"# };
+        judges
+            .say(json!({"method":"item/agentMessage/delta","params":{"threadId":thread,"turnId":turn_id,"itemId":"score","delta":score}}))
+            .await;
+        judges.say(json!({"method":"turn/completed","params":{"threadId":thread,"turn":{"id":turn_id,"status":"completed"}}})).await;
+    }
+    assert_eq!(prompts[0]["A"], prompts[1]["B"]);
+    assert_ne!(starts[0]["params"]["model"], starts[1]["params"]["model"]);
+    let response = wire(&main, |m| m["id"] == 980 && m.get("result").is_some()).await;
+    assert_eq!(response["result"]["success"], true, "{response}");
+    let result: Value = serde_json::from_str(response["result"]["contentItems"][0]["text"].as_str().unwrap()).unwrap();
+    assert_eq!(result["judges"][1]["first"], 8);
+    assert!(dir.path().join("data/creative-reviews").join(format!("{}.json", result["receipt"].as_str().unwrap())).is_file());
+    let expected = faber_engine::codex::codex_args(Area::Chat, false, false, faber_engine::model::Permissions::Isolated);
+    assert_eq!(launches.lock().unwrap()[1], expected);
+    app.shutdown();
 }
 
 #[tokio::test]

@@ -784,6 +784,7 @@ pub fn start_claude(opts: ClaudeOptions, on_event: EventSink) -> Session {
     // the person's own refusal (or the engine's), which is no request to keep.
     let parking = args.windows(2).any(|a| a == ["--permission-prompts", "none"]);
     let started = (opts.spawn)(&opts.bin, &args, &opts.cwd);
+    let tree = started.as_ref().ok().and_then(|p| p.contained.as_ref()).and_then(proc::Containment::owned_tree);
     tokio::spawn(async move {
         let mut p = match started {
             Ok(p) => p,
@@ -1197,7 +1198,7 @@ pub fn start_claude(opts: ClaudeOptions, on_event: EventSink) -> Session {
             }
         }
     });
-    Session::new(tx)
+    Session::new(tx).with_tree(tree)
 }
 
 /// The words of a user line's content, plain or in blocks: what an echo is matched by.
@@ -1290,6 +1291,7 @@ mod allow_tests {
             ClaudeOptions { bin: "scripted".into(), cwd: PathBuf::new(), launch, spawn, sandbox: None },
             Arc::new(move |event| drop(sent.send(event))),
         );
+        assert!(session.owned_tree().is_some(), "worker memory retains the actual container before the driver takes it");
         let exchange = async {
             session.send(UserTurn::text("command"));
             input.next_line().await.unwrap().unwrap();

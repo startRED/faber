@@ -75,6 +75,20 @@ mod tests {
     }
 
     #[test]
+    fn creative_tool_is_offered_only_to_own_project_agents() {
+        use crate::helper::{Mcp, Tools, mcp};
+        for offered in [false, true] {
+            let tools = Tools { progress: offered, ..Default::default() };
+            let Mcp::Answer(list) = mcp(&json!({"method":"tools/list","id":1}), tools) else { panic!() };
+            let found = list["result"]["tools"].as_array().unwrap().iter().any(|tool| tool["name"] == "judge_creative");
+            assert_eq!(found, offered, "only a project's own agent receives creative judging");
+            let call = mcp(&json!({"method":"tools/call","id":2,"params":{"name":"judge_creative","arguments":{}}}), tools);
+            assert_eq!(matches!(call, Mcp::Call { tool: "judge_creative", .. }), offered);
+        }
+        assert_eq!(crate::toolbox::tool_of("judge_creative"), Some("CreativeJudge"));
+    }
+
+    #[test]
     fn creative_accepts_only_a_complete_bounded_comparison() {
         assert!(Request::parse(&input()).is_some());
         for key in ["request", "rubric", "first", "second"] {

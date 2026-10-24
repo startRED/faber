@@ -190,6 +190,7 @@ impl Core {
                 sink,
             ),
         };
+        self.worker_memory.registry.register(session.owned_tree());
         session.send(UserTurn::text(text));
         let asked = self.secs();
         let shown = model.clone().unwrap_or_else(|| vendor.name().to_string());

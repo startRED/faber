@@ -1,9 +1,6 @@
-//! Four tools of a project's agent (the "Toolbox" of docs/product/areas.md): `quota`, what Faber already knows of each connected
-//! AI's limits, `catalog`, a search of the tool catalog, and `memory_search` (`crate::memory_search`), a search of the project's
-//! own past conversations and notes, and `offer_bigger`, one question card per conversation that offers the larger version of a small
-//! request (`engine/src/engine/toolbox.rs`). Searching starts no request, process or download, and no tool shows a token, an account id
-//! or an e-mail: they answer from what Faber keeps in memory and ships. Both CLIs call them like the other tools of Faber's server. `catalog` also installs, by id (`install`): that changes Faber itself, so it waits for the
-//! person's card (guardrail 3, `engine/src/engine/toolbox.rs`); the words of the card and of the log live here.
+//! Project-agent tools shared by both official CLI adapters. Quota, catalog and memory search read local facts;
+//! offer_bigger asks one scope question. Creative comparisons start two isolated, bounded model requests and save receipts.
+//! Catalog changes keep the existing consent gate. No tool exposes account identifiers or sign-in data.
 
 use crate::engine::VendorUsage;
 use crate::model::Vendor;
@@ -17,6 +14,9 @@ pub const QUOTA_TOOL: &str = "Quota";
 pub const CATALOG_TOOL: &str = "Catalog";
 pub const MEMORY_SEARCH_TOOL: &str = "MemorySearch";
 pub const OFFER_BIGGER_TOOL: &str = "OfferBigger";
+pub const CREATIVE_TOOL: &str = "CreativeJudge";
+pub const CREATIVE: &str = "judge_creative";
+const CREATIVE_DESCRIPTION: &str = "Use when choosing between two text drafts whose quality needs judgment beyond program checks. Compare them against the request and rubric using two isolated judges. Each sees A/B in a different order and cannot see the other answer. Uses connected subscriptions within their limits; may use two fresh sessions of the same vendor when only one is available. Saves full scores and reasons, returns a receipt and scores. This judges text, not rendered visuals. Draft text can reveal its own author; Faber adds no author metadata. This does not replace required independent code review or program checks.";
 /// The tools as Codex knows them, and as Faber's MCP server lists them to Claude Code.
 pub const QUOTA: &str = "quota";
 pub const CATALOG: &str = "catalog";
@@ -113,9 +113,19 @@ fn offer_bigger_schema() -> Value {
     })
 }
 
+fn creative_schema() -> Value {
+    json!({"type":"object","properties":{
+        "request":{"type":"string","minLength":1,"maxLength":8192},
+        "rubric":{"type":"string","minLength":1,"maxLength":4096},
+        "first":{"type":"string","minLength":1,"maxLength":65536},
+        "second":{"type":"string","minLength":1,"maxLength":65536}
+    },"required":["request","rubric","first","second"],"additionalProperties":false})
+}
+
 /// The tools as Codex `dynamicTools` entries.
-pub fn codex_tools() -> [Value; 4] {
+pub fn codex_tools() -> [Value; 5] {
     [
+        json!({"type":"function","name":CREATIVE,"description":CREATIVE_DESCRIPTION,"inputSchema":creative_schema()}),
         json!({ "type": "function", "name": QUOTA, "description": QUOTA_DESCRIPTION, "inputSchema": quota_schema() }),
         json!({ "type": "function", "name": CATALOG, "description": CATALOG_DESCRIPTION, "inputSchema": catalog_schema() }),
         json!({ "type": "function", "name": MEMORY_SEARCH, "description": MEMORY_SEARCH_DESCRIPTION, "inputSchema": memory_search_schema() }),
@@ -124,8 +134,9 @@ pub fn codex_tools() -> [Value; 4] {
 }
 
 /// The tools as Faber's MCP server lists them to Claude Code.
-pub fn mcp_tools() -> [Value; 4] {
+pub fn mcp_tools() -> [Value; 5] {
     [
+        json!({"name":CREATIVE,"description":CREATIVE_DESCRIPTION,"inputSchema":creative_schema()}),
         json!({ "name": QUOTA, "description": QUOTA_DESCRIPTION, "inputSchema": quota_schema() }),
         json!({ "name": CATALOG, "description": CATALOG_DESCRIPTION, "inputSchema": catalog_schema() }),
         json!({ "name": MEMORY_SEARCH, "description": MEMORY_SEARCH_DESCRIPTION, "inputSchema": memory_search_schema() }),
@@ -136,6 +147,7 @@ pub fn mcp_tools() -> [Value; 4] {
 /// The name both drivers give a call of one of these tools, from the name Codex or the MCP server knows.
 pub fn tool_of(name: &str) -> Option<&'static str> {
     match name {
+        CREATIVE => Some(CREATIVE_TOOL),
         QUOTA => Some(QUOTA_TOOL),
         CATALOG => Some(CATALOG_TOOL),
         MEMORY_SEARCH => Some(MEMORY_SEARCH_TOOL),

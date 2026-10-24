@@ -75,6 +75,9 @@ impl Drop for Running {
 impl Core {
     pub(super) fn toolbox_call(&mut self, conv: &str, call: String, tool: &'static str, input: serde_json::Value) {
         let Some(sid) = self.live.get(conv).map(|l| l.sid) else { return };
+        if tool == toolbox::CREATIVE_TOOL {
+            return self.creative_call(conv, sid, call, &input);
+        }
         if tool == toolbox::QUOTA_TOOL {
             let text = toolbox::quota(&self.usage(), self.secs());
             return self.answer_toolbox(conv, sid, &call, true, text);

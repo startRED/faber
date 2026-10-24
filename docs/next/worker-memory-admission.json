@@ -1,0 +1,14 @@
+{
+  "notes": {
+    "better": {
+      "en": "On Windows, new automatic AI tasks wait when memory is tight, and Stop cancels them before they start.",
+      "pt-BR": "No Windows, novas tarefas automáticas das IAs aguardam quando falta memória, e Parar cancela as que ainda não começaram.",
+      "es": "En Windows, las nuevas tareas automáticas de IA esperan si falta memoria y Detener cancela las que aún no han empezado.",
+      "fr": "Sous Windows, les nouvelles tâches automatiques des IA attendent si la mémoire manque, et Arrêter annule celles qui n’ont pas démarré.",
+      "de": "Unter Windows warten neue automatische KI-Aufgaben bei knappem Arbeitsspeicher; Stoppen bricht sie vor dem Start ab."
+    }
+  },
+  "decisions": [
+    "| R-next | 2026-10-24 | Windows automatic helpers and unattended turns use FIFO memory admission in addition to existing count and quota limits: exact owned process identities, root included, private working set deduplicated across shared servers, below half physical RAM and at least 2 GiB available, one admission per fresh sample, sampled off the engine lock every two seconds only while queued. Stop cancels pending work; active work is never killed. This does not cap later growth or native CLI child starts. Unix memory admission remains unfinished. | AI |"
+  ]
+}

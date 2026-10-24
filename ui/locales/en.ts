@@ -975,6 +975,7 @@ export const en = {
   'tool.quota': 'Checking the AI limits',
   'tool.catalog': 'Searching the catalog',
   "tool.catalogInstall": "Installing from the catalog",
+  'tool.creativeJudge': 'Comparing drafts independently',
   'tool.memorySearch': "Searching the project's memory",
   'tool.agent': 'Subagent',
   'tool.plan': 'Updating the plan',

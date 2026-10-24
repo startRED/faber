@@ -815,6 +815,7 @@ export const fr: Messages = {
   'tool.quota': 'Vérifie les limites des IA',
   'tool.catalog': 'Cherche dans le catalogue',
   "tool.catalogInstall": "Installe depuis le catalogue",
+  'tool.creativeJudge': 'Compare les propositions avec deux avis indépendants',
   'tool.memorySearch': 'Cherche dans la mémoire du projet',
   'tool.agent': 'Sous-agent',
   'tool.plan': 'Mise à jour du plan',

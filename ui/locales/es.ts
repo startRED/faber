@@ -976,6 +976,7 @@ export const es: Messages = {
   'tool.quota': 'Comprobando los límites de las IA',
   'tool.catalog': 'Buscando en el catálogo',
   "tool.catalogInstall": "Instalando desde el catálogo",
+  'tool.creativeJudge': 'Comparando borradores con evaluaciones independientes',
   'tool.memorySearch': 'Buscando en la memoria del proyecto',
   'tool.agent': 'Subagente',
   'tool.plan': 'Actualizando el plan',
