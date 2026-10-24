@@ -65,7 +65,7 @@ const offsetOf = (el: HTMLElement) => el.matches('.side') ? 'translateX(calc(-1 
 function play(el: HTMLElement, frames: Keyframe[], exit = false, delay = 0): Animation | undefined {
   const motion = level(el);
   if (motion !== 'full') return;
-  const duration = Math.min(250, Math.max(150, millis(el, exit ? '--dur-exit' : '--dur-ui', exit ? 180 : 220)));
+  const duration = Math.min(250, exit ? millis(el, '--dur-exit', 180) : Math.max(150, millis(el, '--dur-ui', 220)));
   if (el.matches('.ask, .coach, .setup-card')) frames = frames.map((frame, i) => ({ ...frame, filter: (exit ? i === 0 : i !== 0) ? 'blur(0px)' : 'blur(var(--motion-blur))' }));
   // Large moving stages raster slowly with blurred shadows and rounded clipping; restore them at rest.
   if (el.matches('.runcol')) frames = frames.map((frame) => ({ ...frame, boxShadow: 'none', borderRadius: '0px' }));
