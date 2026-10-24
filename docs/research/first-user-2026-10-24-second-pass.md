@@ -58,10 +58,36 @@ retained per step, so whether the close action appeared in that list remains une
 Raw report: [Codex default](first-user-2026-10-24-second-pass-codex-pt-BR-720x480-default.md), copied verbatim.
 External evidence: `E:/Documentos/ProjetosIA/faber-evidence/newcomer-matrix-20261024-c590/second-pass/codex-pt-BR-720x480-default/run-01/`.
 
+## Directed narrow-navigation confirmation
+
+A separate deterministic run exercised the existing corrected source C at `af853a33`, without a model reviewer or
+another build. Evidence is retained at
+`E:/Documentos/ProjetosIA/faber-evidence/narrow-project-navigation-20261024/run-01/`.
+Five Portuguese 720x480 images show Chat navigation, the switch to Projects with navigation still open, closing by
+the X, reopening and closing by Escape. The Projects page remains available after both closures; both restore focus
+to the menu. The final image visibly shows the menu's keyboard focus. Playback was normal; no timing claim is made.
+
+Each of the initial and five observed states retains both the original source-C OBSERVE response and a separate
+filtered browser accessibility list with geometry. All three open states expose the enabled close button to OBSERVE
+at (260,64). Accessibility geometry identifies its 32x32 target at (244,48), separately from the scrim with the same
+name. The screenshot, OBSERVE response and accessibility list are sequential observations, not an atomic snapshot;
+the accessibility geometry alone does not establish freedom from clipping or occlusion.
+
+Fresh independent reviewer `/root/narrow_navigation_review` (`gpt-6.1-sol`) inspected every image and checked all
+twelve control files against the main receipt (`3246a4`, `8cb2a0`, `d8c06c`); no blocker was found. Source and executable
+identities match before/after, with clean B/C sources; the normal resource reservation was acquired, and the driver
+exited naturally with code 0 and CLEAN (`0a6106`). The original replay fixture remained unchanged; no message was sent.
+
+This confirms the directed path in the current build. It does not establish spontaneous discovery by the model or
+reconstruct the control list from the old failed-discovery walk. That finding and task 996 remain open. The reviewer
+script now preserves future per-step lists, as recorded in
+[control evidence](first-user-2026-10-24-control-evidence.md). No normal-speed performance, resource budget, complete
+motion inventory, integrated gate or stable release is established by this capture.
+
 ## Remaining work and cost
 
-Classify the narrow discovery concern against the images and existing navigation decisions, confirm an appropriate
-correction without inventing a missing page, and finish the affected second-pass flows. Integrated gates are still
+Assess the remaining spontaneous-discovery concern with retained per-step controls before proposing another product
+correction, and finish the affected second-pass flows. The directed path does not establish a missing page. Integrated gates are still
 required. The latest harness and memory-test corrections have not been integrated; the landing command failed again
 at the GitHub API connection before queueing or native verification (session 48323, receipt 23da21).
 

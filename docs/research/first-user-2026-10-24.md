@@ -50,6 +50,8 @@ subjective hesitation. The [follow-up evidence](first-user-2026-10-24-follow-up.
 reviewer-context limitation. The [isolated second pass](first-user-2026-10-24-second-pass.md) confirms the focused
 reviewer invocation but retains narrow-navigation discovery difficulty. The focused Codex Chat smoke above is
 additional evidence, not another completed matrix configuration.
+The second-pass record now also includes a separate directed Portuguese narrow-navigation confirmation with retained
+OBSERVE lists: X and Escape expose Projects and restore menu focus. It does not relabel the model's discovery result.
 
 | Walk | Program evidence | What it establishes and what remains |
 | :--- | :--- | :--- |
