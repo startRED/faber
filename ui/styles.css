@@ -11,6 +11,7 @@
   --h-sm: 28px; --h-md: 32px; --h-lg: 40px;
   /* One timing family. The theme sets --dur-fast, --dur-ui, --dur-move, --dur-arrive and --ease; these complete it. */
   --dur-exit: 80ms; --ease-in: cubic-bezier(.4, 0, 1, 1); --ease-spring: cubic-bezier(.2, .9, .25, 1.02);
+  --dur-feedback-max: 150ms; --dur-entry-max: 240ms; --dur-stagger-max: 60ms;
   /* Scenes that loop or play once (the home's effects, the blinking caret, Curioso waking): not interface timing. */
   --dur-wake: 1100ms; --dur-blink: 1s; --dur-pulse: 3.2s; --dur-weave: 9s; --dur-weave-slow: 12s; --dur-drift: 32s;
   --motion-slide: 24px; --motion-rise: var(--arrive-y, 6px); --motion-scale: .97;
@@ -776,8 +777,8 @@ details.thinking div { white-space: pre-wrap; padding: 6px 0 0 12px; border-left
 /* The bar under a message (Thread.tsx): copy, read aloud, retry, open in terminal, the time and how long it took. It is there for
    the message under the pointer or the keyboard, never for the last one alone (the owner, 2026-10-17), and it keeps its place, so
    nothing moves when it shows. Reduced and no motion are covered by the rules above that switch every transition off. */
-.bar, .ai .actions > :not(.foot) { opacity: 0; transform: translateY(-4px); transition: opacity var(--dur-exit) var(--ease-in), transform var(--dur-exit) var(--ease-in); }
-:is(.ai, .mine):is(:hover, :focus-within) :is(.bar, .actions > :not(.foot)) { opacity: 1; transform: none; transition-duration: var(--dur-ui); transition-timing-function: var(--ease); }
+.bar, .ai .actions > :not(.foot) { opacity: 0; transition: opacity min(var(--dur-fast), var(--dur-feedback-max)) var(--ease-in); }
+:is(.ai, .mine):is(:hover, :focus-within) :is(.bar, .actions > :not(.foot)) { opacity: 1; transition-timing-function: var(--ease); }
 @media (hover: none) { .bar, .ai .actions > :not(.foot) { opacity: 1; transform: none; } }
 .mine-bar { display: flex; align-items: center; justify-content: flex-end; gap: 2px; height: var(--h-sm); margin-bottom: -8px; }
 .mine-bar .iconbtn { width: var(--h-sm); height: var(--h-sm); }
@@ -797,7 +798,7 @@ details.thinking div { white-space: pre-wrap; padding: 6px 0 0 12px; border-left
 .composer .thumb { --thumb: 56px; }
 .file .thumb { --thumb: 88px; }
 .thumb-slot { flex: none; }
-.thumb-slot.late { animation: arrive var(--dur-arrive) var(--ease) both; animation-delay: calc(var(--i) * var(--motion-stagger)); }
+.thumb-slot.late { animation: arrive min(var(--dur-arrive), var(--dur-entry-max)) var(--ease) both; animation-delay: min(calc(var(--i) * var(--motion-stagger)), var(--dur-stagger-max)); }
 .thumb-open { position: relative; display: block; width: 100%; height: 100%; border-radius: inherit; cursor: zoom-in; }
 .thumb-open img { display: block; width: 100%; height: 100%; object-fit: cover; }
 .thumb-open::after { content: ''; position: absolute; inset: 0; border-radius: inherit; box-shadow: inset 0 0 0 1px transparent; transition: box-shadow var(--dur-fast) var(--ease); pointer-events: none; }
@@ -1230,7 +1231,7 @@ textarea.field { height: auto; max-width: none; padding: 8px 10px; resize: verti
 .notes-group ul { margin: 0; padding: 0; list-style: none; }
 .notes-group li { padding: 12px 0; border-top: 1px solid var(--line); color: var(--ink); font-size: var(--fs-read); line-height: 1.5; text-wrap: pretty; }
 .notes-act { display: flex; margin-top: 36px; }
-:is(.notes-group h2, .notes-group li) { animation: arrive var(--dur-arrive) var(--ease) both; animation-delay: calc(min(3 + var(--i, 0), 4) * var(--motion-stagger)); }
+:is(.notes-group h2, .notes-group li) { animation: arrive var(--dur-arrive) var(--ease) both; animation-delay: min(calc(min(3 + var(--i, 0), 4) * var(--motion-stagger)), var(--dur-stagger-max)); }
 
 /* The effects of the new conversation (ui/Ambient.tsx). The tokens --amb-beam, --amb-loom and --amb-flow are `none`
    for a look that does not have the effect, and for every look when the ambient switch is off. */
@@ -1499,7 +1500,7 @@ html.away-win :is(.amb, .amb *) { animation-play-state: paused !important; }
 .q-field:focus-visible { outline-offset: -2px; }
 .q-foot { display: flex; flex-wrap: wrap; align-items: center; justify-content: flex-end; gap: 8px; }
 .q-sum { margin-right: auto; color: var(--ink-3); font-size: var(--fs-xs); font-variant-numeric: tabular-nums; }
-.ask .note.err, .ask-more { animation: arrive var(--dur-arrive) var(--ease) both; }
+.ask .note.err, .ask-more { animation: arrive var(--dur-ui) var(--ease) both; }
 
 /* The Ctrl+K palette (ui/Palette.tsx) and the Ctrl+F find bar (ui/Find.tsx). Both exist only while open. They enter and leave with
    the normal arrival and exit; reduced and no motion are covered by the rules above that switch every animation off. */
