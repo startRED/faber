@@ -46,8 +46,9 @@ connection, before queueing. The connector could open the review request, but do
 
 All sixteen bounded default/project configurations completed their first-pass runs across Haiku/Codex, pt-BR/English
 and 720x480/1280x800. This does not approve every reported goal: some tasks reached their step limit or retained
-subjective hesitation. The [follow-up evidence](first-user-2026-10-24-follow-up.md) records the later walks, the
-reviewer-context limitation and the pending isolated confirmation pass. The focused Codex Chat smoke above is
+subjective hesitation. The [follow-up evidence](first-user-2026-10-24-follow-up.md) records the later walks and the
+reviewer-context limitation. The [isolated second pass](first-user-2026-10-24-second-pass.md) confirms the focused
+reviewer invocation but retains narrow-navigation discovery difficulty. The focused Codex Chat smoke above is
 additional evidence, not another completed matrix configuration.
 
 | Walk | Program evidence | What it establishes and what remains |

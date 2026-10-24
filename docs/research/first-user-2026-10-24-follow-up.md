@@ -3,7 +3,9 @@
 Status: in progress. The main [round record](first-user-2026-10-24.md) retains the original evidence and limits.
 All sixteen bounded first-pass configurations have program evidence and independent artifact/image review. Some
 tasks reached their step limit or retained subjective hesitation; this is not approval of every goal. The isolated
-confirmation pass and integrated gates remain unfinished. Completion of a walk is separate from approval of every reported goal.
+confirmation and narrow default walks are recorded in the [second-pass evidence](first-user-2026-10-24-second-pass.md).
+Narrow navigation discovery and integrated gates remain unfinished. Completion of a walk is separate from approval
+of every reported goal.
 
 ## Shared execution boundary
 
@@ -80,7 +82,7 @@ Raw reports for these five configurations are preserved verbatim beside this fil
 review report; counts above exclude the manifest itself. The first-pass observations remain bounded by the shared
 execution limits and are not reclassified as isolated confirmation results.
 
-## Reviewer customization correction: confirmation pending
+## Reviewer customization correction: focused confirmation
 
 The Claude reviewer already requested empty tools, strict MCP configuration, --disable-slash-commands and no session
 persistence, and used an empty folder, but it did not exclude all personal customizations. The installed CLI help documents --safe-mode as disabling
@@ -90,5 +92,7 @@ and model choice; managed policy may still apply. --bare would disable subscript
 The minimal correction adds --safe-mode while preserving the other restrictions. A unit check exercises the actual
 reviewer constructor with fake program/request functions and no process: it first failed with 18 passing/1 failing,
 then all 19 passed after the flag. It checks the request arguments, not the absence of every possible instruction
-in a live system prompt. Developer documentation records this boundary; a native confirmation run is still required.
+in a live system prompt. The actual focused Haiku invocation subsequently worked; the second-pass evidence records
+its independent image/artifact review and the remaining limits. It does not identify authentication or billing,
+or prove absence of every external instruction. The separate narrow default walk retains a discovery concern.
 This changes no shipped allocation, timer, process or UI. Reviewer startup cost was not measured.
