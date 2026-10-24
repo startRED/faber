@@ -98,6 +98,90 @@ fn fixture(dir: &Path, files: &[(&str, &str)], package_metadata: &str) -> (Defin
 }
 
 #[test]
+fn a_skill_only_plugin_needs_no_node_and_keeps_its_lifecycle_and_vendor_delivery() {
+    let temporary = tempfile::tempdir().unwrap();
+    let source = temporary.path().join("source");
+    let files = [
+        (".claude-plugin/plugin.json", "{\"name\":\"fixture\",\"author\":{\"name\":\"Fixture author\"},\"license\":\"MIT\"}"),
+        ("LICENSE", "Synthetic fixture license notice."),
+        ("skills/careful/SKILL.md", SKILL),
+        ("skills/careful/LICENSE.txt", "Synthetic fixture license notice."),
+    ];
+    for (name, body) in files {
+        let path = source.join(name);
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        std::fs::write(path, body).unwrap();
+    }
+    let definition = Definition {
+        item: Item {
+            id: "fixture".into(),
+            cli_name: None,
+            job: "debugging".into(),
+            tier: Default::default(),
+            license: "MIT".into(),
+            repo: "owner/repo".into(),
+            commit: "0123456789012345678901234567890123456789".into(),
+            path: "bundle".into(),
+            digest: digest(&source).unwrap(),
+            chat_safe: false,
+            server: None,
+        },
+        parts: vec![Part {
+            id: "careful".into(),
+            kind: PartKind::Skill,
+            cli_name: None,
+            path: "skills/careful".into(),
+            digest: part_digest(&source.join("skills/careful")).unwrap(),
+            server: None,
+        }],
+    };
+    let archive = zip(temporary.path(), &files);
+    let data = temporary.path().join("data");
+    let store = Store::with_plugins(&data, vec![], vec![definition.clone()]);
+    store.install_sources(&definition.item, &archive, &BTreeMap::new()).unwrap();
+    // Trusted source callers repeat a healthy installation without adding a second copy.
+    store.install_sources(&definition.item, &archive, &BTreeMap::new()).unwrap();
+    assert_eq!(store.installed().len(), 1);
+    assert_eq!(
+        store.installed_resources(),
+        BTreeMap::from([("fixture".into(), definition.item.commit.clone()), ("fixture--careful".into(), definition.item.commit.clone())])
+    );
+    assert!(store.verify_plugin_sources());
+    for vendor in [Vendor::Claude, Vendor::Codex] {
+        let (kit, report) = store.kit_for(vendor, "debug the failing behavior", None, Area::Project, Permissions::FullAccess, &[]);
+        assert_eq!(report.ids.iter().filter(|id| *id == "fixture--careful").count(), 1, "{report:?}");
+        assert_eq!(std::fs::read_to_string(kit.skills.as_ref().unwrap().join("fixture--careful/SKILL.md")).unwrap(), SKILL);
+        assert!(kit.servers.is_empty());
+        let (checked, damaged, io_failed) = kit.verified_for_launch(vendor);
+        assert!(damaged.is_empty() && !io_failed);
+        assert_eq!(std::fs::read_to_string(checked.skills.unwrap().join("fixture--careful/SKILL.md")).unwrap(), SKILL);
+    }
+    let wait = || drop(store.kit_for(Vendor::Claude, "debug", None, Area::Project, Permissions::FullAccess, &[]));
+    for enabled in [false, true] {
+        wait();
+        store.set_enabled("fixture", enabled).unwrap();
+        assert_eq!(store.enabled("fixture"), enabled);
+        assert_eq!(store.resource_selection().unwrap().disabled.contains("fixture--careful"), !enabled);
+        wait();
+        store.remove("fixture").unwrap();
+        assert!(store.installed_resources().is_empty());
+        store.restore("fixture").unwrap();
+        assert_eq!(store.enabled("fixture"), enabled);
+        assert!(store.verify_plugin_sources());
+    }
+    wait();
+    store.remove("fixture").unwrap();
+    store.clear_removed().unwrap();
+    store.install_sources(&definition.item, &archive, &BTreeMap::new()).unwrap();
+    assert_eq!(
+        store.installed_resources(),
+        BTreeMap::from([("fixture".into(), definition.item.commit.clone()), ("fixture--careful".into(), definition.item.commit.clone())])
+    );
+    assert!(store.verify_plugin_sources());
+    wait();
+}
+
+#[test]
 fn a_plugin_installs_switches_removes_and_undoes_as_one_checked_item() {
     let temporary = tempfile::tempdir().unwrap();
     let data = temporary.path().join("data");
