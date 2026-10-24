@@ -1,6 +1,9 @@
 import assert from 'node:assert/strict';
-import { watch } from 'node:fs';
+import childProcess from 'node:child_process';
+import { EventEmitter } from 'node:events';
+import { existsSync, readFileSync } from 'node:fs';
 import { mkdtemp, mkdir, writeFile, readFile, readdir, rm, symlink, utimes, realpath } from 'node:fs/promises';
+import { syncBuiltinESMExports } from 'node:module';
 import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
@@ -170,18 +173,33 @@ test('maintenance claims its compiler temp before spawn and cleans it after a mi
   const root = await fixture(t);
   const tools = path.join(root, 'target', '.faber-tools');
   await mkdir(tools, { recursive: true });
-  const events = [];
-  const watcher = watch(tools, (_, name) => events.push(String(name)));
-  const previousPath = process.env.PATH;
+  let observed;
+  // Observe the durable receipt at spawn, rather than relying on a platform's watcher notifications.
+  const compiler = t.mock.method(childProcess, 'spawn', (command, args, options) => {
+    observed = {
+      command, env: options.env,
+      owner: JSON.parse(readFileSync(path.join(tools, '.faber-lease', 'owner.json'), 'utf8')),
+      tempExists: existsSync(options.env.TEMP),
+    };
+    const child = new EventEmitter();
+    queueMicrotask(() => child.emit('error', Object.assign(new Error('simulated missing rustc'), { code: 'ENOENT' })));
+    return child;
+  });
+  syncBuiltinESMExports();
   try {
-    process.env.PATH = '';
     await assert.rejects(launcher.maintainStorage(root, path.join(root, 'target')), /rustc/);
-    assert.ok(events.includes('.faber-lease'), 'compiler temp must have a persisted owner lease');
+    assert.ok(observed, 'compiler temp must have a persisted owner lease at spawn');
+    assert.equal(observed.command, 'rustc');
+    assert.equal(observed.owner.pid, process.pid);
+    assert.equal(observed.owner.childPid, null);
+    assert.equal(observed.env.CARGO_TARGET_DIR, tools);
+    assert.equal(observed.env.TEMP, path.join(tools, '.faber-tmp', observed.owner.tempName));
+    assert.equal(observed.tempExists, true);
     assert.deepEqual(await readdir(path.join(tools, '.faber-tmp')), []);
     assert.ok(!(await readdir(tools)).includes('.faber-lease'));
   } finally {
-    process.env.PATH = previousPath;
-    watcher.close();
+    compiler.mock.restore();
+    syncBuiltinESMExports();
   }
 });
 
