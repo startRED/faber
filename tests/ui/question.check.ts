@@ -4,7 +4,10 @@ import { api, type Permission, type RunningItem } from '../../ui/api.ts';
 import { askedQuestions, Asks } from '../../ui/Ask.tsx';
 import { useLanguage } from '../../ui/i18n.ts';
 import { Running } from '../../ui/Running.tsx';
-import { check, deepEqual, equal, ok } from './check.ts';
+import { appliedLook, applyLook, motion } from '../../ui/appearance.ts';
+import { millis } from '../../ui/motion.ts';
+import { keepRoot } from './appearance.check.ts';
+import { check, deepEqual, equal, finished, ok } from './check.ts';
 
 // The assistant's own questions: a card in its message, one step per question, a tile per answer, answered by tapping
 // (docs/product-map.md, "Question card").
@@ -226,6 +229,37 @@ check('question card: an answered card folds away before it leaves, and the othe
   equal(root.querySelector('.ask.question'), null, 'then it is gone');
 }));
 
+check('question card: a finished entrance leaves the answered card free to fade out', () => withCard(async (root, _calls, waiting) => {
+  const card = root.querySelector<HTMLElement>('.ask.question')!;
+  const arrival = card.getAnimations().find((animation) =>
+    (animation as CSSAnimation).animationName === 'arrive' ||
+    animation instanceof CSSTransition && animation.transitionProperty === 'opacity');
+  ok(arrival, 'the full-motion card has its real entrance');
+  await finished([arrival!]);
+  equal(arrival!.playState, 'finished', 'the actual entrance finishes before answering');
+  equal(Number(getComputedStyle(card).opacity), 1, 'the entrance has settled visibly');
+  waiting([]);
+  ok(card.isConnected && card.classList.contains('gone'), 'the same card stays while leaving');
+  ok(card.querySelector('.q-inner')?.hasAttribute('inert'), 'the answered card takes no input');
+  const exit = card.getAnimations().find((animation) => animation instanceof CSSTransition && animation.transitionProperty === 'opacity');
+  const style = getComputedStyle(card);
+  const diagnostic = { opacity: style.opacity, animation: style.animationName, fill: style.animationFillMode,
+    transition: style.transitionProperty, duration: style.transitionDuration, motion: document.documentElement.dataset.motion,
+    reduced: matchMedia('(prefers-reduced-motion: reduce)').matches,
+    animations: card.getAnimations().map((animation) => ({ kind: animation.constructor.name, state: animation.playState,
+      property: animation instanceof CSSTransition ? animation.transitionProperty : undefined })) };
+  ok(exit, `the completed entrance must allow the real opacity exit transition: ${JSON.stringify(diagnostic)}`);
+  const duration = Number(exit!.effect!.getComputedTiming().duration);
+  ok(duration > 0, 'the opacity exit has a positive duration');
+  exit!.pause();
+  exit!.currentTime = duration / 2;
+  const opacity = Number(getComputedStyle(card).opacity);
+  ok(opacity > 0 && opacity < 1, `the connected exit passes through partial opacity, got ${opacity}`);
+  exit!.finish();
+  await settle(180);
+  equal(root.querySelector('.ask.question'), null, 'the answered card is eventually removed');
+}));
+
 check('question card: a question whose text is a built-in name still renders and can be answered', () => withCard(async (root, calls) => {
   equal(root.querySelectorAll('.q').length, 2);
   click(options(root, 0)[0]);
@@ -273,3 +307,225 @@ check('question card: in the running column an answered card folds away once, st
     root.remove();
   }
 });
+
+check('question card: answering from Running during partial thread arrival starts a real opacity exit', async () => {
+  useLanguage('en');
+  const threadRoot = document.createElement('div');
+  const runningRoot = document.createElement('div');
+  const permission: Permission = { requestId: 'r1', tool: 'AskUserQuestion', input: {
+    questions: [{ question: 'Which stack?', options: [{ label: 'Rust' }] },
+  ] } };
+  const [permissions, setPermissions] = createSignal<Permission[]>([permission]);
+  const originals = { answerQuestion: api.answerQuestion };
+  const calls: unknown[][] = [];
+  let disposeThread: (() => void) | undefined;
+  let disposeRunning: (() => void) | undefined;
+  const nextFrameBefore = (deadline: number) => new Promise<boolean>((resolve) => {
+    const remaining = deadline - performance.now();
+    if (remaining <= 0) return resolve(false);
+    let done = false;
+    let frame = 0;
+    const timer = setTimeout(() => finish(false), remaining);
+    const finish = (advanced: boolean) => {
+      if (done) return;
+      done = true;
+      clearTimeout(timer);
+      if (frame) cancelAnimationFrame(frame);
+      resolve(advanced);
+    };
+    try {
+      frame = requestAnimationFrame(() => finish(true));
+    } catch {
+      finish(false);
+    }
+  });
+  try {
+    document.body.append(threadRoot, runningRoot);
+    api.answerQuestion = async (...args) => {
+      calls.push(args);
+      // The shared pending state changes only when the real Running control calls the answer API.
+      setPermissions([]);
+    };
+    let constructionFailed = false;
+    let constructionError: unknown;
+    // Catch inside the owned callback so render returns its disposer even when construction fails.
+    disposeThread = render(() => {
+      try {
+        return createComponent(Asks, {
+          conversationId: 'c1', turnId: 't1', get permissions() { return permissions(); },
+        });
+      } catch (error) {
+        constructionFailed = true;
+        constructionError = error;
+      }
+    }, threadRoot);
+    if (constructionFailed) throw constructionError;
+    const item = (): RunningItem => ({
+      conversationId: 'c1', turnId: 't1', title: 'Pick a stack', area: 'chat', vendor: 'claude',
+      state: 'working', since: Date.now(), permissions: permissions(),
+    });
+    // Running reads the same signal directly; no detached effect or mirrored state is needed.
+    disposeRunning = render(() => {
+      try {
+        return createComponent(Running, {
+          get items() { return [item()]; }, projects: [], onOpen: () => {}, onClose: () => {}, modal: false, ref: () => {},
+        });
+      } catch (error) {
+        constructionFailed = true;
+        constructionError = error;
+      }
+    }, runningRoot);
+    if (constructionFailed) throw constructionError;
+
+    const threadCard = threadRoot.querySelector<HTMLElement>('.ask.question')!;
+    const runningCard = runningRoot.querySelector<HTMLElement>('.ask.question')!;
+    ok(threadCard && runningCard, 'both real Asks surfaces show the same pending question');
+    const arrival = threadCard.getAnimations().find((a) =>
+      (a as CSSAnimation).animationName === 'arrive' ||
+      a instanceof CSSTransition && a.transitionProperty === 'opacity')!;
+    ok(arrival, 'the Thread copy has its real entrance animation');
+
+    // The independent timer bounds this wait even if the hidden document stops delivering animation frames.
+    // A missed natural overlap is a hard precondition failure, never a passing exit result.
+    const deadline = performance.now() + 1200;
+    let before: { duration: number } | undefined;
+    while (performance.now() < deadline && await nextFrameBefore(deadline)) {
+      const duration = Number(arrival.effect?.getComputedTiming().duration);
+      const opacity = Number(getComputedStyle(threadCard).opacity);
+      if (arrival.playState === 'running' && Number(arrival.currentTime) > 0 &&
+          Number(arrival.currentTime) < duration && opacity > 0 && opacity < 1) {
+        before = { duration };
+        break;
+      }
+    }
+    ok(before, 'PRECONDITION FAILED: no natural partial-opacity Thread entrance frame within 1200 ms');
+
+    const option = runningCard.querySelector<HTMLElement>('.q-opt')!;
+    option.click();
+    const send = [...runningCard.querySelectorAll<HTMLButtonElement>('.q-foot .btn')]
+      .find((button) => button.textContent?.trim() === 'Send answers')!;
+    ok(send && !send.disabled, 'the actual Running copy has an enabled Send answers control');
+    deepEqual(permissions().map((p) => p.requestId), ['r1']);
+    const preClickOpacity = Number(getComputedStyle(threadCard).opacity);
+    const preClickTime = Number(arrival.currentTime);
+    ok(arrival.playState === 'running' && preClickTime < before!.duration &&
+      preClickOpacity > 0 && preClickOpacity < 1,
+      'PRECONDITION FAILED: Thread opacity is no longer partial immediately before the real click');
+
+    // The stub clears the shared signal synchronously during this real click. Inspect immediately so the
+    // short transition cannot be hidden by a settle delay.
+    const answeredAt = performance.now();
+    send.click();
+    deepEqual(calls, [['c1', 't1', 'r1', { 'Which stack?': 'Rust' }]]);
+    ok(threadCard.isConnected && threadCard.classList.contains('gone'), 'the same Thread card enters its gone state');
+    ok(threadCard.querySelector('.q-inner')?.hasAttribute('inert'), 'the retained Thread card is inert');
+    const exit = threadCard.getAnimations().find((a) => a instanceof CSSTransition && a.transitionProperty === 'opacity');
+    const snapshots: unknown[] = [];
+    const snapshot = () => ({
+        at: performance.now(), connected: threadCard.isConnected,
+        opacity: getComputedStyle(threadCard).opacity, transform: getComputedStyle(threadCard).transform,
+        animation: getComputedStyle(threadCard).animation, transition: getComputedStyle(threadCard).transition,
+        animations: threadCard.getAnimations().map((a) => ({
+          kind: a.constructor.name, name: (a as CSSAnimation).animationName,
+          property: (a as CSSTransition).transitionProperty, state: a.playState, time: a.currentTime,
+          timing: a.effect?.getComputedTiming(), keyframes: (a.effect as KeyframeEffect | null)?.getKeyframes(),
+        })),
+      });
+    if (!exit) {
+      snapshots.push(snapshot());
+      const diagnosticDeadline = performance.now() + 100;
+      for (let frame = 0; frame < 3 && await nextFrameBefore(diagnosticDeadline); frame++) snapshots.push(snapshot());
+    }
+    ok(exit, `a real opacity CSSTransition starts on the connected Thread card; diagnostic ${JSON.stringify({
+      preClickOpacity, preClickTime, arrivalDuration: before!.duration, snapshots,
+    })}`);
+    const exitDuration = Number(exit!.effect?.getComputedTiming().duration);
+    ok(exitDuration > 0, `the actual opacity exit has positive duration, got ${exitDuration}`);
+
+    const initialOpacity = Number(getComputedStyle(threadCard).opacity);
+    ok(Math.abs(initialOpacity - preClickOpacity) < 0.02, 'exit starts at the current opacity without a flash');
+    const endpoints = (exit!.effect as KeyframeEffect).getKeyframes();
+    ok(Math.abs(Number(endpoints[0].opacity) - preClickOpacity) < 0.02, 'the real exit starts at the interrupted entrance');
+    equal(Number(endpoints.at(-1)!.opacity), 0, 'the real exit targets zero opacity');
+    ok(!threadCard.getAnimations().some((a) => a instanceof CSSAnimation && a.animationName === 'arrive'),
+      'no arrival keyframes compete with the exit');
+    const configuredExit = millis(document.documentElement, '--dur-exit', 180);
+    const fold = threadCard.getAnimations().find((a) => a instanceof CSSTransition && a.transitionProperty === 'grid-template-rows');
+    ok(fold, 'the card has its real layout fold');
+    equal(Number(fold!.effect?.getComputedTiming().duration), configuredExit, 'the layout fold retains the full exit time');
+    const removalAtDeadline = settle(Math.max(0, answeredAt + configuredExit + 100 - performance.now())).then(() => ({
+      card: threadRoot.querySelector('.ask.question'), elapsed: performance.now() - answeredAt,
+    }));
+    let finishedNaturally = false;
+    let cancelled = false;
+    void Promise.all([exit!.finished, fold!.finished]).then(() => { finishedNaturally = true; }, () => { cancelled = true; });
+    // A reversed opacity transition may finish between frames; require its endpoints and natural completion instead.
+    const exitDeadline = answeredAt + configuredExit + 250;
+    const exitFrames: unknown[] = [];
+    const recordExit = (currentExit: Animation | undefined, opacity: number) => {
+      exitFrames.push({
+        elapsed: performance.now() - answeredAt, connected: threadCard.isConnected,
+        gone: threadCard.classList.contains('gone'), opacity,
+        time: currentExit?.currentTime, state: currentExit?.playState,
+      });
+    };
+    recordExit(exit, Number(getComputedStyle(threadCard).opacity));
+    let previousOpacity = initialOpacity;
+    while (!finishedNaturally && !cancelled && performance.now() < exitDeadline && await nextFrameBefore(exitDeadline)) {
+      const currentExit = threadCard.getAnimations().find((a) => a instanceof CSSTransition && a.transitionProperty === 'opacity');
+      const opacity = Number(getComputedStyle(threadCard).opacity);
+      recordExit(currentExit, opacity);
+      ok(opacity >= 0 && opacity <= previousOpacity + 0.02, `the natural exit never rebounds; ${JSON.stringify(exitFrames)}`);
+      previousOpacity = opacity;
+    }
+    ok(finishedNaturally && !cancelled, `the real opacity exit and layout fold finish naturally; diagnostic ${JSON.stringify({
+      preClickOpacity, preClickTime, exitDuration, configuredExit, exitFrames,
+      elapsed: performance.now() - answeredAt, connected: threadCard.isConnected,
+    })}`);
+    equal(Number(getComputedStyle(threadCard).opacity), 0, 'the naturally finished exit is invisible');
+    const removal = await removalAtDeadline;
+    equal(removal.card, null, `Thread removes its answered card by the configured fold deadline; diagnostic ${JSON.stringify({
+      exitDuration, configuredExit, elapsed: removal.elapsed,
+    })}`);
+  } finally {
+    try {
+      disposeRunning?.();
+    } finally {
+      try {
+        disposeThread?.();
+      } finally {
+        try {
+          api.answerQuestion = originals.answerQuestion;
+        } finally {
+          runningRoot.remove();
+          threadRoot.remove();
+        }
+      }
+    }
+  }
+});
+
+for (const level of ['reduced', 'none'] as const) {
+  check(`question card: ${level} motion removes an answered card without the full-motion delay`, async () => {
+    const saved = appliedLook();
+    ok(saved, 'the app has applied its real look before this check');
+    const restore = keepRoot();
+    try {
+      await applyLook({ ...saved, motion: level });
+      equal(motion(), level, 'the reactive motion preference is in force');
+      equal(document.documentElement.dataset.motion, level, 'the stylesheet uses the same preference');
+      await withCard(async (root, _calls, waiting) => {
+        ok(root.querySelector('.ask.question'), 'the pending question is present');
+        waiting([]);
+        await settle();
+        equal(root.querySelector('.ask.question'), null, 'the answered card is removed without a full-motion exit delay');
+      });
+    } finally {
+      try {
+        await applyLook(saved);
+      } finally {
+        restore();
+      }
+    }
+  });
+}
