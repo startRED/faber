@@ -25,3 +25,11 @@ userAgent, then send initialized and close stdin. Require a clean parent exit. B
 1 MiB and elapsed time to 30 seconds. Reject malformed JSON, mismatched responses and protocol errors without
 recording raw output. Only a passing Codex startup removes protocol-startup from missing evidence; authenticated
 turns, cancellation and process-tree cleanup remain unproven. Unit checks never start subprocesses.
+
+Claude startup extension: use print mode with stream-json input/output, empty tools, system prompt and setting
+sources, strict empty MCP configuration and no session persistence in the same isolated environment. Send only
+a control_request initialize with request_id faber-init-1; never send a user message. Require a correlated
+control_response success containing an object response, then close stdin and require a clean parent exit.
+Apply the same output/time bounds and failure receipts. A passing startup removes only protocol-startup evidence
+for that provider; it never qualifies authenticated operation or process-tree cleanup. Official SDK protocol:
+https://github.com/anthropics/claude-agent-sdk-python/blob/main/src/claude_agent_sdk/_internal/query.py

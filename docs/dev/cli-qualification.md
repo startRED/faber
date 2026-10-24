@@ -12,14 +12,19 @@ It also sends initialize to the real Codex app server, requires the matching suc
 and closes stdin, requiring a clean parent exit. Combined startup output is capped at 1 MiB; the 30-second deadline
 ends the probe even if inherited pipes remain open. Neither parent exit nor killing it proves process-tree cleanup.
 No model turn, login, account request, personal settings or production signing is used.
+Claude starts in print mode with stream-json, empty tools, system prompt and setting sources, strict empty MCP
+configuration and no session persistence. Only an initialize control request is sent, with no user message.
+It requires a correlated successful control response containing an object, closes stdin and requires clean parent
+exit under the same combined output/deadline bounds. Startup may still attempt network access; the probe inherits
+no credentials and never calls an authentication operation.
 
 The JSON receipt records the binary SHA-256, exact candidate version, platform, architecture, time and each check's
 pass/failure category. Raw output, configuration, generated schemas and binaries are never uploaded. Reports remain
 for 14 days. A command failure or missing interface fails the job and preserves its report when it can be written.
 A failed download has no binary receipt and fails the artifact step too, rather than suggesting a checked candidate.
 
-Every receipt says `qualified: false`, even when all contract checks pass. A passing Codex startup removes only its
-protocol-startup gap. Claude startup, authenticated turns, cancellation and process-tree cleanup still lack evidence.
+Every receipt says `qualified: false`, even when all contract checks pass. A passing provider startup removes only its
+protocol-startup gap. Authenticated turns, cancellation and process-tree cleanup still lack evidence.
 These checks detect interface drift; they cannot
 establish complete compatibility, authorize an installation, update a manifest, sign metadata or promote a release.
 Real-binary authenticated qualification and the owner's production signing/publication setup remain unfinished.
@@ -29,6 +34,7 @@ the scheduled check. Local test fixtures validate missing options/methods, versi
 and the unqualified status; they are never presented as real-binary compatibility evidence.
 
 Sources: [Claude CLI reference](https://code.claude.com/docs/en/cli-reference),
+[Claude official SDK control protocol](https://github.com/anthropics/claude-agent-sdk-python/blob/main/src/claude_agent_sdk/_internal/query.py),
 [Codex version-specific schema generation](https://developers.openai.com/codex/app-server), and the official npm
 metadata for [Claude Code](https://registry.npmjs.org/@anthropic-ai/claude-code/latest) and
 [Codex](https://registry.npmjs.org/@openai/codex/latest). Candidate versions are resolved afresh for each run.

@@ -62,15 +62,47 @@ test('startup accepts only the matching successful initialize response', async (
   }
 });
 
-test('only a passing Codex startup removes its missing evidence', () => {
+test('only a passing provider startup removes its missing evidence', () => {
   for (const provider of ['codex', 'claude']) {
     for (const passed of [true, false]) {
       const value = report({ provider, checks: [{ name: 'protocol-startup', passed }] });
-      assert.equal(value.missingEvidence.includes('protocol-startup'), !(provider === 'codex' && passed));
+      assert.equal(value.missingEvidence.includes('protocol-startup'), !passed);
       assert.equal(value.qualified, false);
       assert.ok(value.missingEvidence.includes('process-tree-cleanup'));
     }
   }
+});
+
+test('Claude startup validates its correlated success envelope and closes without a user message', async (t) => {
+  const { checkInitialize, startup } = await import('./cli-qualification.mjs');
+  const success = { type: 'control_response', response: { subtype: 'success', request_id: 'faber-init-1', response: {} } };
+  assert.equal(checkInitialize(JSON.stringify(success), 'claude'), true);
+  for (const response of [null, [], { subtype: 'error', request_id: 'faber-init-1', response: {} },
+    { subtype: 'success', request_id: 'other', response: {} },
+    { subtype: 'success', request_id: 'faber-init-1', response: [] }]) {
+    assert.equal(checkInitialize(JSON.stringify({ type: 'control_response', response }), 'claude'), false);
+  }
+  const child = new EventEmitter();
+  for (const name of ['stdin', 'stdout', 'stderr']) child[name] = new PassThrough();
+  child.kill = t.mock.fn();
+  const sent = [];
+  child.stdin.on('data', chunk => sent.push(chunk.toString()));
+  const start = t.mock.fn(() => child);
+  const pending = startup('unused', 'isolated', start, 'claude');
+  child.stdout.write(JSON.stringify(success) + '\n');
+  assert.equal(child.stdin.writableEnded, true);
+  child.emit('close', 0);
+  assert.deepEqual(await pending, { name: 'protocol-startup', passed: true });
+  assert.deepEqual(sent.map(line => JSON.parse(line)), [
+    { type: 'control_request', request_id: 'faber-init-1', request: { subtype: 'initialize' } },
+  ]);
+  const [, args, options] = start.mock.calls[0].arguments;
+  assert.deepEqual(args, ['-p', '--input-format', 'stream-json', '--output-format', 'stream-json', '--verbose',
+    '--system-prompt', '', '--tools', '', '--setting-sources', '', '--strict-mcp-config', '--mcp-config',
+    '{"mcpServers":{}}', '--no-session-persistence']);
+  assert.equal(options.env.CLAUDE_CONFIG_DIR, 'isolated');
+  assert.equal(options.shell, false);
+  assert.equal(options.windowsHide, true);
 });
 
 test('startup deadline completes even when inherited pipes never close', async (t) => {

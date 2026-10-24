@@ -41,20 +41,30 @@ export function isolatedEnv(folder, source = process.env) {
 
 export function report(identity) {
   return { ...identity, scope: 'unauthenticated-contract-only', qualified: false,
-    missingEvidence: [...(identity.provider === 'codex' && identity.checks?.some((check) => check.name === 'protocol-startup' && check.passed === true)
+    missingEvidence: [...(['codex', 'claude'].includes(identity.provider) && identity.checks?.some((check) => check.name === 'protocol-startup' && check.passed === true)
       ? [] : ['protocol-startup']), 'authenticated-turn', 'cancellation', 'process-tree-cleanup'] };
 }
 
-export function checkInitialize(line) {
+export function checkInitialize(line, provider = 'codex') {
   try {
     const message = JSON.parse(line);
+    if (provider === 'claude') {
+      const response = message?.response;
+      return message?.type === 'control_response' && response?.request_id === 'faber-init-1'
+        && response.subtype === 'success' && response.response !== null && typeof response.response === 'object'
+        && !Array.isArray(response.response) && !Object.hasOwn(response, 'error');
+    }
     return message?.id === 1 && !Object.hasOwn(message, 'error') && typeof message.result?.userAgent === 'string';
   } catch { return false; }
 }
 
-export function startup(binary, folder, startProcess = spawn) {
+export function startup(binary, folder, startProcess = spawn, provider = 'codex') {
   return new Promise((resolveStartup) => {
-    const child = startProcess(binary, ['app-server'], { cwd: folder, env: isolatedEnv(folder),
+    const args = provider === 'claude'
+      ? ['-p', '--input-format', 'stream-json', '--output-format', 'stream-json', '--verbose', '--system-prompt', '',
+        '--tools', '', '--setting-sources', '', '--strict-mcp-config', '--mcp-config', '{"mcpServers":{}}', '--no-session-persistence']
+      : ['app-server'];
+    const child = startProcess(binary, args, { cwd: folder, env: isolatedEnv(folder),
       shell: false, windowsHide: true, stdio: ['pipe', 'pipe', 'pipe'] });
     let bytes = 0;
     let pending = '';
@@ -93,10 +103,10 @@ export function startup(binary, folder, startProcess = spawn) {
         let message;
         try { message = JSON.parse(line); } catch { fail('malformed-json'); return; }
         if (!message || typeof message !== 'object' || Array.isArray(message)) { fail('protocol-mismatch'); return; }
-        if (Object.hasOwn(message, 'id')) {
-          if (initialized || !checkInitialize(line)) { fail('protocol-mismatch'); return; }
+        if (Object.hasOwn(message, 'id') || message.type === 'control_response' || message.type === 'control_request') {
+          if (initialized || !checkInitialize(line, provider)) { fail('protocol-mismatch'); return; }
           initialized = true;
-          child.stdin.end(`${JSON.stringify({ method: 'initialized' })}\n`);
+          child.stdin.end(provider === 'claude' ? undefined : `${JSON.stringify({ method: 'initialized' })}\n`);
         }
       }
     });
@@ -106,9 +116,12 @@ export function startup(binary, folder, startProcess = spawn) {
       const reason = failure ?? (code !== 0 ? 'command-failed' : !initialized || pending.trim() ? 'protocol-mismatch' : undefined);
       finish(reason);
     });
-    child.stdin.write(`${JSON.stringify({ id: 1, method: 'initialize', params: {
+    const request = provider === 'claude'
+      ? { type: 'control_request', request_id: 'faber-init-1', request: { subtype: 'initialize' } }
+      : { id: 1, method: 'initialize', params: {
       clientInfo: { name: 'faber_contract_probe', version: '0.1.0' }, capabilities: { experimentalApi: false },
-    } })}\n`);
+      } };
+    child.stdin.write(`${JSON.stringify(request)}\n`);
   });
 }
 
@@ -138,8 +151,8 @@ export async function probe(provider, binary, version, destination) {
         if (statSync(path).size > 8 * 1024 * 1024) return false;
         return checkSchema(JSON.parse(readFileSync(path, 'utf8'))).length === 0;
       });
-      checks.push(await startup(binary, folder));
     }
+    checks.push(await startup(binary, folder, spawn, provider));
   } catch {
     checks.push({ name: 'probe', passed: false, reason: 'probe-failed' });
   }
