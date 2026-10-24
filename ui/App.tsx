@@ -1611,6 +1611,7 @@ export function App(props: { initial: AppState; update?: UpdateStatus; inbox: { 
               aria-hidden={(narrow() && !sideOverlay()) || ((focus() || folded()) && !narrow()) ? 'true' : undefined}
             >
               <Sidebar
+                onClose={narrow() ? closeSide : undefined}
                 conversations={state().conversations}
                 groups={state().groups}
                 onGroup={(groupId) => { closeSide(false); void go({ area: 'chat', groupId }); }}
