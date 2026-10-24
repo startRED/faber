@@ -137,6 +137,7 @@ pub const SOLO: &[(&str, &str)] = &[
     ("pointer respects delayed finite layout motion before clicking", "motion timing"),
     ("sentinel: panels move through frames, and reduced motion moves nothing", "frame clock"),
     ("sentinel: a permission card arrives through frames", "frame clock"),
+    ("sentinel: the native select picker opens and dismisses through real frames", "frame clock and native picker focus"),
     ("the quota of each vendor shows in the footer, and comes back after the screen reloads", "quota reading at idle priority"),
     ("the quota in the sidebar opens Settings on the usage limits, and a reload shows the same figures", "quota reading at idle priority"),
     ("every section of Settings says its part: the accounts, the usage limits and what stays on this PC", "quota reading at idle priority"),

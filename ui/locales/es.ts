@@ -2117,6 +2117,7 @@ export const es: Messages = {
   'notes.228.fixed': 'Puedes quitar imágenes y archivos adjuntos con un botón más grande.',
   'notes.229.better': 'En ventanas pequeñas, el menú sigue abierto al cambiar entre Chat y Proyectos para que puedas elegir dónde continuar.',
   'notes.230.fixed': 'Al pedir medir el rendimiento del navegador, se elige la herramienta instalada aunque no menciones su nombre.',
+  'notes.231.fixed': 'Esc cierra la lista de opciones abierta sin sacarte de Configuración.',
   'update.checking': 'Buscando una actualización…',
   'update.downloading': 'Descargando actualización…',
   'update.downloadingPercent': 'Descargando actualización… {percent} %',

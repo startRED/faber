@@ -981,6 +981,7 @@ export function App(props: { initial: AppState; update?: UpdateStatus; inbox: { 
         if (to) openSummary(to);
       }
       if (e.key === 'Escape') {
+        if (CSS.supports('selector(select:open)') && document.querySelector('select:open')) return;
         if (sideOverlay() && inShell) return closeSide();
         // A column the user opened over the stage is modal; one that opened itself answers Esc only while focus is in it.
         if (inShell && colShown() && (trapped() || column?.contains(document.activeElement))) return closeColumn();

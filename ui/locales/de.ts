@@ -2117,6 +2117,7 @@ export const de: Messages = {
   'notes.228.fixed': 'Mit der größeren Schaltfläche kannst du angehängte Bilder und Dateien leichter entfernen.',
   'notes.229.better': 'In kleinen Fenstern bleibt das Menü beim Wechsel zwischen Chat und Projekten offen, damit du auswählen kannst, wo du weiterarbeitest.',
   'notes.230.fixed': 'Bei Leistungsfragen zum Browser wird das installierte Browserwerkzeug ausgewählt, auch wenn du seinen Namen nicht nennst.',
+  'notes.231.fixed': 'Esc schließt eine offene Auswahlliste, ohne die Einstellungen zu verlassen.',
   'update.checking': 'Suche nach einem Update…',
   'update.downloading': 'Update wird heruntergeladen…',
   'update.downloadingPercent': 'Update wird heruntergeladen… {percent} %',
