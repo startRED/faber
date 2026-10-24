@@ -25,6 +25,7 @@ pub mod helper;
 pub mod install;
 pub mod learn;
 pub mod ledger;
+pub mod live_manifest;
 pub mod look;
 pub mod look_log;
 pub mod map;

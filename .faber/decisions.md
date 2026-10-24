@@ -10,3 +10,4 @@
 - Manual Catalog replacements reuse the consent-bound retained-copy journal used by agent replacements. The detail confirms an exact snapshot; initial installs never consume physical or Undo copies, and an unreadable ledger refuses publication. [by AI]
 - Frozen proof artifacts are copied with verified hashes and their source/run receipts outside disposable build roots; preserve only required runtime files, never pin a whole cache or treat a rebuild as the original executable. [by AI]
 - The task 998 offline publication boundary uses built-in Ed25519 verification with pinned public keys, a 1 MiB envelope limit and exact authenticated UTF-8 bytes; signature verification alone never authorizes installation. [by AI]
+- Task 998 document, compiled-support and revision validation will have one native engine implementation reused by the publication check; the JavaScript signature primitive will not grow a duplicate catalog policy validator. [by AI]

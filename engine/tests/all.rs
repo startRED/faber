@@ -74,6 +74,8 @@ mod learn;
 mod learning;
 #[path = "ledger.rs"]
 mod ledger;
+#[path = "live_manifest.rs"]
+mod live_manifest;
 #[path = "locales.rs"]
 mod locales;
 #[path = "look.rs"]

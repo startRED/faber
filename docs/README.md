@@ -69,7 +69,8 @@ one is never touched again, and its boxes say nothing.
 | Page | Status |
 | :--- | :--- |
 | [superpowers/specs/2026-10-22-faber-framework/README.md](superpowers/specs/2026-10-22-faber-framework/README.md) | Proposal revision 3, nothing built: company/community research, Faber context audit, adaptive composition, twelve capability candidates, BMAD/Core/Pi audit, evidence-backed progress and fair qualification; companion pages linked from its README |
-| [superpowers/specs/2026-10-24-cli-tools-live-manifest.md](superpowers/specs/2026-10-24-cli-tools-live-manifest.md) | In progress locally: offline signature boundary checked and independently reviewed; publication, schema, compatibility and executable delivery remain unbuilt |
+| [superpowers/specs/2026-10-24-cli-tools-live-manifest.md](superpowers/specs/2026-10-24-cli-tools-live-manifest.md) | Offline signature foundation checked; native document validation tracked by the next contract; live publication, compatibility delivery and executable installation remain unbuilt |
+| [superpowers/specs/2026-10-24-live-manifest-policy.md](superpowers/specs/2026-10-24-live-manifest-policy.md) | Native offline validator: 19 focused checks and all seven required local proofs passed, two independent static security reviews; no durable recovery or installation authority built |
 | superpowers/specs/2026-10-11-faber-redesign-design.md | Absorbed into product/ and design/ |
 | superpowers/specs/2026-10-11-auto-quota-pacing-design.md, plans/2026-10-11-auto-quota-pacing.md, auto-quota-pacing-report.md | Shipped |
 | superpowers/plans/2026-10-11-b2 … b9 (test runner, looks, running engine, layout, tray, first run, Settings, download) | Shipped |
