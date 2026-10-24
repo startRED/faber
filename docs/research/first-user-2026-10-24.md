@@ -28,6 +28,16 @@ developer walk adds one sequential hidden-app launch, never two overlapping apps
 
 ## Native evidence
 
-The focused Chat walk is being run first with the Codex newcomer reviewer, pt-BR, 720x480, on the hidden isolated
-desktop. Its result and screenshots are not yet evidence of success. The complete matrix and human inspection of the
-resulting screenshots remain unfinished.
+The focused Chat walk passed with the Codex newcomer reviewer, pt-BR, 720x480, on the hidden isolated desktop. It
+selected Claude Haiku, entered the exact question, sent it, and saw the recorded answer in five steps with no reported
+confusion. The sandbox and cleanup passed. The final screenshot was independently inspected in the main session and
+shows the full expected answer, idle status and an available composer. The detailed report is
+`first-user-2026-10-24-wePfFO.md` beside this file; this is one controlled replay, not real-provider compatibility.
+
+The five screenshots and the report were copied outside the disposable build caches to
+`E:/Documentos/ProjetosIA/faber-evidence/newcomer-chat-20261024-c590/`, with `sha256.json` recording each file's digest.
+
+The broader matrix began, but its first walk ended after three onboarding actions with exit 1 and no completed report.
+That attempt does not prove onboarding. The complete matrix and confirmation of its remaining screenshots are unfinished.
+The harness correction is saved and sent for integration; the required landing command failed at the GitHub API
+connection, before queueing. The connector could open the review request, but does not replace that landing command.
