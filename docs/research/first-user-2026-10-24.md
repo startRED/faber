@@ -41,3 +41,42 @@ The broader matrix began, but its first walk ended after three onboarding action
 That attempt does not prove onboarding. The complete matrix and confirmation of its remaining screenshots are unfinished.
 The harness correction is saved and sent for integration; the required landing command failed at the GitHub API
 connection, before queueing. The connector could open the review request, but does not replace that landing command.
+
+## Follow-up walks and classification
+
+The matrix is still incomplete: two of its sixteen requested default or project walks completed, both Haiku in
+pt-BR at 720x480. The focused Codex Chat smoke above is additional evidence, not a completed default configuration.
+
+| Walk | Program evidence | What it establishes and what remains |
+| :--- | :--- | :--- |
+| Codex, focused first run, pt-BR, 720x480 | Exit 0; `first-user-2026-10-24-tPs6KS.md`; five images retained | Image 3 shows the main disconnected screen. The reviewer nevertheless declared itself stuck looking for another continuation step. The goal was reached visually; its confusion remains recorded, not relabeled as a flawless UX pass. |
+| Haiku, default walk, pt-BR, 720x480 | Exit 0; `first-user-2026-10-24-claude-pt-BR-720x480-default.md`; report and images copied with hashes | First run, Catalog, Chat and Settings were declared complete; the core Chat answer was visible. Projects was declared stuck with the narrow navigation drawer still open. The complete findings remain in the generated report. |
+| Haiku, focused project, same language/size, retry | Exit 0; `first-user-2026-10-24-claude-pt-BR-720x480-project.md`; nine images, source/copy report hashes equal | Final image shows a reply and Done in Demo, with the start of the reply above the viewport. This proves a completed recorded turn, not that the complete answer was inspected or real-provider compatibility. |
+
+The first project attempt was interrupted without a report when its coordinating runner received SIGINT. Three partial
+images and an explicit interrupted status were preserved. It is not a success. The abandoned cache reservation was
+later moved into evidence only after independent read-only recovery review, path/link checks, exact owner matching,
+absence of known children, and a process snapshot showing no build writers. No temporary data or other processes were
+deleted or ended. The normal reservation mechanism then admitted the next focused check. The interrupted audit is
+not retroactively called clean.
+
+Evidence is outside disposable caches at
+`E:/Documentos/ProjetosIA/faber-evidence/newcomer-matrix-20261024-c590/`. The successful project retry has its own
+`retry-after-interruption` folder, preserving the earlier partial images. Its executable digest remained unchanged;
+it was the hidden UI build from the independently developed motion corrections, not an assertion that this worktree's
+unbuilt UI was exercised.
+
+A separate read-only native diagnostic reproduced Projects at 720x480. With the drawer open, the main stage is inert
+and blurred, as documented. Closing the scrim exposes Open a project, its explanation and Add project folder. Both
+images and `projects-diagnostics.json` are retained in the same evidence folder; that diagnostic's sandbox audit and
+cleanup passed. The reported empty main page is therefore not confirmed. The empty sidebar caption exists at opacity
+1, but sits low in the scroll area; the add button intentionally appears on pointer or keyboard focus. Discovery in
+the small drawer remains a usability finding to compare with remaining reviewers, not a fabricated missing page.
+
+Source inspection also confirms that the first-run appearance step contains three cards, stacked and scrollable in
+the small window. Seeing only one without scrolling does not establish missing choices. That discovery complaint,
+Catalog detail scroll position, model-selection wording and language-field ambiguity remain recorded for confirmation
+in the outstanding walks. No speculative product change was made from those statements alone.
+
+Remaining work: both reviewers at both languages and sizes, retained screenshot verification, confirmed findings fixed
+with regression checks, and a second pass without blocking findings. Task 996 remains open; no stable-release claim.
