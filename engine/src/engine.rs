@@ -39,6 +39,7 @@ mod by_itself;
 mod changes;
 mod compact;
 mod copies;
+mod creative_judges;
 mod ended;
 pub use aside::Aside;
 pub use browse::TabStep;
@@ -455,6 +456,7 @@ struct Core {
     /// Streaming text goes to the screen at most ~30 times a second; the message waiting per conversation.
     pending: HashMap<String, String>,
     next_sid: u64,
+    creative_runs: std::collections::HashSet<String>,
     tick: u64,
     /// The shared Codex processes, one per area, hooks choice and permissions. Faber's internal questions (routing) use an
     /// Isolated process of their own, so nothing the person's setting allows ever reaches them.
@@ -614,6 +616,7 @@ impl Engine {
                 draft: None,
                 pending: HashMap::new(),
                 next_sid: 0,
+                creative_runs: Default::default(),
                 tick: 0,
                 codex: HashMap::new(),
                 codex_prepared: HashMap::new(),
