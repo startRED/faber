@@ -44,8 +44,7 @@ connection, before queueing. The connector could open the review request, but do
 
 ## Follow-up walks and classification
 
-The matrix is still incomplete: four of its sixteen requested default or project walks completed: Haiku and Codex,
-default and project, all pt-BR at 720x480. The focused Codex Chat smoke above is additional evidence,
+The matrix is still incomplete: six of its sixteen requested default or project walks completed: Haiku and Codex, default and project at pt-BR/720x480, plus Codex default and project at en/720x480. The focused Codex Chat smoke above is additional evidence,
 not a completed default configuration.
 
 | Walk | Program evidence | What it establishes and what remains |
@@ -93,3 +92,49 @@ driver, fake CLI and UI source identities. Its final image was inspected separat
 
 Remaining work: both reviewers at both languages and sizes, retained screenshot verification, confirmed findings fixed
 with regression checks, and a second pass without blocking findings. Task 996 remains open; no stable-release claim.
+
+## English narrow default walk and executable provenance
+
+The Codex en/720x480 default walk ended naturally with exit 0, using the corrected sidebar app at `af853a33`.
+Its report is preserved verbatim in `first-user-2026-10-24-codex-en-720x480-default.md`. External evidence under
+`codex-en-720x480-default/run-01` retains 33 images and 39 verified artifact digests. A fresh reviewer checked eleven
+key images and all digests. This is the fifth completed first-pass configuration, not a second-pass result.
+
+- First run: `primeira-abertura-4.png` shows the disconnected main screen, reaching the stated goal. Later difficulty
+  finding how to continue remains a discovery complaint, not proof the goal was unreachable.
+- Catalog: `catalogo-7.png` shows the entire When the agent uses it explanation. `catalogo-9.png` shows Back to the list;
+  the walk had already returned previously. Both claims of missing information are contradicted. The final task was
+  incomplete through the reviewer's interpretation; that does not prove a product defect.
+- Chat: `conversa-5.png` shows the complete recorded answer, Done and Nothing running.
+- Projects: `projetos-3.png` includes the new visible close control. `projetos-5.png` explains working inside an added
+  folder, satisfying the purpose-discovery goal. After add-folder clicks, `projetos-8.png` shows no native selector;
+  the hidden environment cannot establish how a normal picker behaves, and adding a folder exceeds that task's goal.
+- Settings: `configuracoes-4.png` shows Language. The final Portuguese image shows System, so the specific language
+  selection claimed by the reviewer is not confirmed.
+
+The app remained `4b54472d85da2f6ca68a2d844c0b3a8519b2e90469844e0cac5c009a83483cf0`; the fake CLI and A/C source
+snapshots also stayed unchanged. The driver changed from `660f6e3fbc0f737c33fe4a113da13da4c4bbdc5b737cf67025ade39c1d8b15c2`
+to `efdfc87e399e64670b38c587326550590895780e7a91259bcaa82e0883bc494e`. Source inspection confirms the harness builds
+that driver before launch even with `--no-build`, which skips only the app build. No driver hash was captured at the
+exact spawn boundary in this walk; the endpoints do not prove an unchanged running driver.
+
+The harness now streams executable hashes into `execution-identities.json` before/after the driver build, immediately
+before each driver start, after readiness and after exit. Missing pre-build files are explicit null values; other
+read errors stop the review. The new identity test first failed because the helper did not exist, then all eighteen
+first-user checks passed. No desktop-app code or behavior changes. This developer-only evidence work reads files
+sequentially in small stream chunks rather than retaining whole executables. Its native smoke is recorded below.
+## English narrow project walk and identity smoke
+
+The sixth first-pass configuration, Codex en/720x480 with the seeded Demo conversation, ended naturally with exit 0.
+The raw report is `first-user-2026-10-24-codex-en-720x480-project.md`; external `codex-en-720x480-project/run-01` retains
+its report, log, twelve screenshots, executable identities, provenance and lease receipt. Nineteen artifact digests
+were verified. The reviewer first mistook the account footer for conversation navigation, returned from Accounts,
+then chose Demo and completed the recorded turn. Its final image shows the complete Rayleigh answer and idle state;
+this is replay evidence, not a real-provider connection or a confusion-free walk.
+
+The new identity file has all five expected stages in order: before-driver-build, after-driver-build,
+batch-0-before-driver-start, batch-0-ready, batch-0-after-driver-exit. App and fake CLI each have one digest throughout;
+the driver has one digest across after-build, before-start, ready and exit. A's uncommitted source hashes/status and
+C's clean source hashes/status stayed unchanged during the run. This confirms the new logging in native use without
+claiming that an endpoint file hash alone attests to a running process. The complete first-pass matrix, a second pass
+and integrated gates remain unfinished.

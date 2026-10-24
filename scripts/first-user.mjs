@@ -15,8 +15,9 @@
 // its only cost. Builds run at idle priority. Findings go to `docs/research/first-user-<date>-<suffix>.md`, screenshots
 // to `<target>/faber-test/first-user/<date>-<suffix>/`. Each run keeps its own evidence. Nothing is fixed by the review.
 import { spawn, spawnSync } from 'node:child_process';
+import { createHash } from 'node:crypto';
 import { createInterface } from 'node:readline';
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { createReadStream, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir, setPriority, constants } from 'node:os';
 import { basename, delimiter, dirname, join, relative, resolve, isAbsolute } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -24,6 +25,22 @@ import { fileURLToPath } from 'node:url';
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const EXE = process.platform === 'win32' ? '.exe' : '';
 const TARGET = process.env.CARGO_TARGET_DIR ? resolve(ROOT, process.env.CARGO_TARGET_DIR) : join(ROOT, 'target');
+
+/** Missing artifacts are expected before a build; other read failures must not become missing evidence. */
+export async function artifactIdentity(paths) {
+  const files = {};
+  for (const [name, path] of Object.entries(paths)) {
+    const hash = createHash('sha256');
+    try {
+      for await (const chunk of createReadStream(path)) hash.update(chunk);
+      files[name] = { path, sha256: hash.digest('hex') };
+    } catch (error) {
+      if (error.code !== 'ENOENT') throw error;
+      files[name] = { path, sha256: null };
+    }
+  }
+  return files;
+}
 
 /** Every review keeps its own evidence, even when the same configuration runs twice in one day. */
 export function runPaths(root, target, date, output) {
@@ -448,14 +465,29 @@ async function main(args) {
   } catch {
     // Not allowed here: build at the normal priority.
   }
+  const artifacts = {
+    driver: join(TARGET, `debug/examples/ux_audit${EXE}`),
+    app: join(TARGET, `faber-test/debug/faber${EXE}`),
+    fakeCli: join(TARGET, `debug/fake-cli${EXE}`),
+  };
+  const identities = [];
+  const recordIdentity = async (stage) => {
+    identities.push({ stage, at: new Date().toISOString(), files: await artifactIdentity(artifacts) });
+    writeFileSync(join(shots, 'execution-identities.json'), JSON.stringify(identities, null, 2));
+  };
+  await recordIdentity('before-driver-build');
+  // --no-build reuses the app; the driver is still built from this worktree before it starts.
   const built = spawnSync('cargo', ['build', '--quiet', '-p', 'faber-testkit', '--example', 'ux_audit'], { cwd: ROOT, stdio: 'inherit', windowsHide: true });
+  await recordIdentity('after-driver-build');
   if (built.status !== 0) throw new Error('the build of testkit/examples/ux_audit.rs failed');
   const results = [];
   for (const [batchIndex, batch] of reviewBatches(tasks).entries()) {
     const flags = driverFlags(batch, lang, batchIndex === 0 && !args.includes('--no-build'));
-    const app = driver(join(TARGET, `debug/examples/ux_audit${EXE}`), flags);
+    await recordIdentity(`batch-${batchIndex}-before-driver-start`);
+    const app = driver(artifacts.driver, flags);
     try {
       await app.ready();
+      await recordIdentity(`batch-${batchIndex}-ready`);
       await app.op('call', 'Emulation.setDeviceMetricsOverride', { params: { width, height, deviceScaleFactor: 1, mobile: false } });
       await pause(1500);
       const actualLang = await app.op('eval', 'document.documentElement.lang');
@@ -484,6 +516,7 @@ async function main(args) {
       }
     } finally {
       await app.quit();
+      await recordIdentity(`batch-${batchIndex}-after-driver-exit`);
     }
   }
   const summary = firstJson(await ask(summaryPrompt(results)))?.findings;

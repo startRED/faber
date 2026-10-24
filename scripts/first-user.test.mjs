@@ -15,6 +15,28 @@ const controls = [
   { role: 'input', name: 'Escreva aqui', x: 20, y: 20, disabled: true },
 ];
 
+test('artifact identities distinguish a missing app, a rebuilt driver and the previously recorded bytes', async () => {
+  const folder = mkdtempSync(join(tmpdir(), 'faber-first-user-identity-'));
+  try {
+    const paths = { driver: join(folder, 'driver'), app: join(folder, 'app') };
+    writeFileSync(paths.driver, 'a');
+    const before = await firstUser.artifactIdentity(paths);
+    assert.equal(before.driver.sha256, 'ca978112ca1bbdcafac231b39a23dc4da786eff8147c4e72b9807785afee48bb');
+    assert.equal(before.app.sha256, null);
+    writeFileSync(paths.driver, 'b');
+    writeFileSync(paths.app, 'a');
+    const after = await firstUser.artifactIdentity(paths);
+    assert.equal(after.driver.sha256, '3e23e8160039594a33894f6564e1b1348bbd7a0088d42c4acb73eeaed59c009d');
+    assert.equal(after.app.sha256, before.driver.sha256);
+    assert.notEqual(after.driver.sha256, before.driver.sha256);
+    assert.equal(before.app.sha256, null);
+    assert.equal(after.driver.path, paths.driver);
+    await assert.rejects(firstUser.artifactIdentity({ driver: folder }));
+  } finally {
+    rmSync(folder, { recursive: true, force: true });
+  }
+});
+
 test('native choices require an observed enabled selector and an exact enabled option', () => {
   const lists = [{ role: 'list', name: 'Modelo', disabled: false, options: [
     { label: 'Claude Haiku', value: 'haiku', disabled: false },
