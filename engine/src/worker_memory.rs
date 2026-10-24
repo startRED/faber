@@ -1,15 +1,15 @@
 //! Read-only memory samples for the CLI trees Faber owns.
 use crate::proc::OwnedTree;
-#[cfg(any(windows, target_os = "macos", test))]
+#[cfg(any(windows, target_os = "macos", target_os = "linux", test))]
 use crate::proc::ProcessIdentity;
-#[cfg(any(windows, target_os = "macos", test))]
+#[cfg(any(windows, target_os = "macos", target_os = "linux", test))]
 use std::collections::{HashMap, HashSet};
 use std::io;
 use std::sync::{Arc, Mutex};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Snapshot {
-    /// Windows private working set or macOS resident bytes (shared pages may count per process).
+    /// Windows private working set or macOS/Linux resident bytes (shared pages may count per process).
     pub used: u64,
     pub total: u64,
     pub available: u64,
@@ -45,7 +45,7 @@ impl Registry {
                 Ok((processes, system.total_memory(), system.available_memory()))
             })
         }
-        #[cfg(target_os = "macos")]
+        #[cfg(any(target_os = "macos", target_os = "linux"))]
         {
             self.snapshot_with(|members| {
                 let unique: HashSet<_> = members.iter().copied().collect();
@@ -58,13 +58,13 @@ impl Registry {
                 Ok((processes, system.total_memory(), system.available_memory()))
             })
         }
-        #[cfg(not(any(windows, target_os = "macos")))]
+        #[cfg(not(any(windows, target_os = "macos", target_os = "linux")))]
         {
             Err(io::Error::new(io::ErrorKind::Unsupported, "worker memory sampling needs exact native process identities"))
         }
     }
 
-    #[cfg(any(windows, target_os = "macos", test))]
+    #[cfg(any(windows, target_os = "macos", target_os = "linux", test))]
     fn snapshot_with(&self, read: impl FnOnce(&[ProcessIdentity]) -> io::Result<Reading>) -> io::Result<Snapshot> {
         let trees = {
             let mut trees = self.trees.lock().unwrap_or_else(|error| error.into_inner());
@@ -88,10 +88,10 @@ impl Registry {
     }
 }
 
-#[cfg(any(windows, target_os = "macos", test))]
+#[cfg(any(windows, target_os = "macos", target_os = "linux", test))]
 type Reading = (Vec<(ProcessIdentity, u64)>, u64, u64);
 
-#[cfg(any(windows, target_os = "macos", test))]
+#[cfg(any(windows, target_os = "macos", target_os = "linux", test))]
 fn sample_members(members: &[ProcessIdentity], processes: &[(ProcessIdentity, u64)], total: u64, available: u64) -> io::Result<Snapshot> {
     if total == 0 || available > total {
         return Err(io::Error::other("system memory reading is unavailable"));

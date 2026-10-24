@@ -8,7 +8,7 @@ pub struct ProcessIdentity {
     pub created: u64,
 }
 
-#[cfg(any(target_os = "macos", test))]
+#[cfg(any(target_os = "macos", target_os = "linux", test))]
 fn sample_resident_bytes(
     expected: ProcessIdentity,
     mut process_identity: impl FnMut() -> io::Result<Option<ProcessIdentity>>,
@@ -24,6 +24,17 @@ fn sample_resident_bytes(
         return Err(io::Error::other("process identity changed during memory sample"));
     }
     Ok(bytes)
+}
+
+#[cfg(any(target_os = "linux", test))]
+fn parse_resident_bytes(statm: &str, page_size: u64) -> io::Result<u64> {
+    let pages = statm
+        .split_whitespace()
+        .nth(1)
+        .ok_or_else(|| io::Error::other("incomplete process memory information"))?
+        .parse::<u64>()
+        .map_err(io::Error::other)?;
+    pages.checked_mul(page_size).ok_or_else(|| io::Error::other("process memory size overflow"))
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -184,6 +195,17 @@ mod platform {
 
     fn read_member(pid: u32) -> io::Result<(ProcessMember, u32)> {
         parse_stat(&std::fs::read_to_string(format!("/proc/{pid}/stat"))?, pid)
+    }
+
+    pub fn resident_bytes(identity: ProcessIdentity) -> io::Result<u64> {
+        sample_resident_bytes(
+            identity,
+            || read_member(identity.pid).map(|(member, _)| Some(member.identity)),
+            || {
+                let statm = std::fs::read_to_string(format!("/proc/{}/statm", identity.pid))?;
+                parse_resident_bytes(&statm, rustix::param::page_size() as u64)
+            },
+        )
     }
 
     pub fn group_process_identity(pgid: u32, pid: u32) -> io::Result<ProcessIdentity> {
@@ -412,7 +434,7 @@ mod platform {
     }
 }
 
-#[cfg(target_os = "macos")]
+#[cfg(any(target_os = "macos", target_os = "linux"))]
 pub use platform::resident_bytes;
 #[cfg(unix)]
 pub use platform::{group_members, group_process_identity};
@@ -422,6 +444,21 @@ pub use platform::{job_members, job_process_identity};
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn worker_memory_linux_statm_uses_resident_pages_and_native_page_size() {
+        assert_eq!(parse_resident_bytes("1000 7 3 1 0 2 0\n", 4096).unwrap(), 28_672);
+        assert_eq!(parse_resident_bytes("1000 7 3 1 0 2 0\n", 16384).unwrap(), 114_688);
+        assert_eq!(parse_resident_bytes("0 0", 4096).unwrap(), 0);
+    }
+
+    #[test]
+    fn worker_memory_linux_statm_rejects_missing_invalid_and_overflowing_counts() {
+        for statm in ["", "1000", "1000 nope", "1000 -1", "1000 18446744073709551616"] {
+            assert!(parse_resident_bytes(statm, 4096).is_err(), "{statm:?}");
+        }
+        assert!(parse_resident_bytes("0 18446744073709551615", 4096).is_err());
+    }
 
     #[test]
     fn worker_memory_sample_preserves_bytes_for_stable_identity() {

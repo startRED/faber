@@ -1,0 +1,14 @@
+{
+  "notes": {
+    "better": {
+      "en": "On Linux, new automatic AI tasks also wait when memory is tight; work already running continues.",
+      "pt-BR": "No Linux, novas tarefas automáticas das IAs também aguardam quando falta memória; o trabalho em andamento continua.",
+      "es": "En Linux, las nuevas tareas automáticas de IA también esperan si falta memoria; el trabajo en curso continúa.",
+      "fr": "Sous Linux, les nouvelles tâches automatiques des IA attendent aussi si la mémoire manque ; le travail en cours continue.",
+      "de": "Auch unter Linux warten neue automatische KI-Aufgaben bei knappem Arbeitsspeicher; laufende Arbeit geht weiter."
+    }
+  },
+  "decisions": [
+    "| R-next | 2026-10-24 | Linux extends automatic-worker memory admission with approximate resident pages from /proc/<pid>/statm times the native page size, checked multiplication and exact owned-process start-time identity checks before and after each query. Shared pages may count per process. Existing thresholds, cancellation, count and quota guards remain; native Unix runtime and real parallel resource cost remain unverified. | AI |"
+  ]
+}

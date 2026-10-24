@@ -34,8 +34,7 @@ impl State {
 
 impl Core {
     pub(super) fn worker_ready(&mut self, key: &str) -> bool {
-        // shortcut: Linux keeps count limits until its exact native memory sampler is supported.
-        if !self.opts.windows && !cfg!(target_os = "macos") {
+        if !self.opts.windows && !cfg!(any(target_os = "macos", target_os = "linux")) {
             return true;
         }
         if self.worker_memory.permitted.as_deref() == Some(key) {
@@ -148,6 +147,22 @@ mod tests {
     use super::super::answer::tests::{engine, seed};
     use super::*;
     use std::sync::atomic::{AtomicBool, Ordering};
+
+    #[cfg(any(target_os = "macos", target_os = "linux"))]
+    #[tokio::test]
+    async fn worker_memory_unix_requires_matching_single_use_permit() {
+        let dir = tempfile::tempdir().unwrap();
+        let (app, _) = engine(dir.path());
+        app.with(|core| {
+            core.opts.windows = false;
+            assert!(!core.worker_ready("first"));
+            core.worker_memory.permitted = Some("first".into());
+            assert!(!core.worker_ready("other"));
+            assert!(core.worker_ready("first"));
+            assert!(!core.worker_ready("first"));
+        });
+        app.shutdown();
+    }
 
     async fn observed(mut receive: tokio::sync::mpsc::UnboundedReceiver<String>, expected: &[&str]) {
         for expected in expected {
