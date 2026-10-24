@@ -1,0 +1,11 @@
+{
+  "notes": {
+    "fixed": {
+      "en": "Your chosen language no longer appears to change while you switch Settings sections.",
+      "pt-BR": "O idioma escolhido não parece mais mudar quando você troca de seção nas configurações.",
+      "es": "El idioma elegido ya no parece cambiar al pasar de una sección de ajustes a otra.",
+      "fr": "La langue choisie ne semble plus changer quand vous passez d’une rubrique des paramètres à une autre.",
+      "de": "Die gewählte Sprache scheint beim Wechsel zwischen den Einstellungsbereichen nicht mehr zu wechseln."
+    }
+  }
+}

@@ -14,7 +14,7 @@ import { fr } from '../../ui/locales/fr.ts';
 import { ptBR } from '../../ui/locales/pt-BR.ts';
 import { useLanguage } from '../../ui/i18n.ts';
 import { accountLine, seedQuotas, usageRows } from '../../ui/sidebar.ts';
-import { Settings } from '../../ui/Settings.tsx';
+import { forgetSection, Settings } from '../../ui/Settings.tsx';
 import { check, deepEqual, equal, frames, ok } from './check.ts';
 
 check('R107: Settings names Chat and Projects and discloses the shared default', () => {
@@ -671,6 +671,59 @@ check('settings: the chat working folder is one row, and only where its control 
   } finally { withFolder.stop(); without.stop(); }
 });
 
+check('settings: an exit copy preserves the language selected on the live native select', async () => {
+  forgetSection();
+  const preference = Object.getOwnPropertyDescriptor(MediaQueryList.prototype, 'matches')!;
+  Object.defineProperty(MediaQueryList.prototype, 'matches', { ...preference, get(this: MediaQueryList) {
+    return this.media === '(prefers-reduced-motion: reduce)' ? false : preference.get!.call(this);
+  } });
+  const was = document.documentElement.dataset.motion;
+  document.documentElement.dataset.motion = 'full';
+  useLanguage('pt-BR');
+  let saves = 0;
+  const view = mount(() => createComponent(Settings, {
+    look: look(), saved: { language: 'pt-BR' }, vendors: [], quotas: {}, now: 0,
+    onClose: () => {}, onOpenSetup: () => {}, onSave: async () => { saves++; return true; },
+  }));
+  const selected = (list: HTMLSelectElement) => ({
+    value: list.value, index: list.selectedIndex, label: list.selectedOptions[0]?.label,
+    options: [...list.options].map((option) => ({ value: option.value, selected: option.selected, defaultSelected: option.defaultSelected })),
+  });
+  try {
+    view.host.querySelector<HTMLElement>('.settings')!.style.cssText = 'position:fixed;left:0;top:0;width:720px;height:444px';
+    const live = view.host.querySelector<HTMLSelectElement>('select[aria-label="Idioma"]')!;
+    ok(live, 'the reproduction uses Settings\' real native language select');
+    await leave();
+    const before = selected(live);
+    equal(before.value, 'pt-BR');
+    ok(before.index > 0, 'a nondefault native option is selected before the section leaves');
+    equal(before.label, 'Português (Brasil)');
+    // Keep native cloning separate in failure evidence: the regression is the real animateList exit copy below.
+    const nativeClone = selected(live.cloneNode(true) as HTMLSelectElement);
+    const privacy = [...view.host.querySelectorAll<HTMLButtonElement>('.s-nav .item')]
+      .find((button) => button.querySelector('span')?.textContent === ptBR['set.privacy'])!;
+    privacy.click();
+    await tick();
+    equal(view.host.querySelectorAll('.facts').length, 1, 'Privacy is the new live section');
+    equal(view.host.querySelectorAll('.st-group').length, 0, 'General is only an exit copy');
+    equal(saves, 0, 'switching sections saved no setting');
+    const copy = [...document.querySelectorAll<HTMLElement>('.motion-exit')]
+      .flatMap((host) => [...(host.shadowRoot?.querySelectorAll<HTMLSelectElement>('select[aria-label="Idioma"]') ?? [])])[0];
+    ok(copy, 'the departing General section has a real native select in its shadow exit copy');
+    const observed = selected(copy);
+    const evidence = JSON.stringify({ before, nativeClone, detachedLive: selected(live), exitCopy: observed });
+    equal(observed.value, before.value, 'the exit copy must keep the live language: ' + evidence);
+    equal(observed.index, before.index, 'the exit copy keeps the actual selected index');
+    equal(observed.label, before.label, 'the visible departing label matches the live control');
+  } finally {
+    view.stop();
+    await leave();
+    Object.defineProperty(MediaQueryList.prototype, 'matches', preference);
+    if (was === undefined) delete document.documentElement.dataset.motion;
+    else document.documentElement.dataset.motion = was;
+    useLanguage('en');
+  }
+});
 check('settings: switching sections is a short cross-fade (the old one leaves as a copy, the new one arrives), instant when reduced, and the new section opens at its top', async () => {
   const preference = Object.getOwnPropertyDescriptor(MediaQueryList.prototype, 'matches')!;
   Object.defineProperty(MediaQueryList.prototype, 'matches', { ...preference, get(this: MediaQueryList) {

@@ -1,0 +1,11 @@
+{
+  "notes": {
+    "fixed": {
+      "en": "Message buttons no longer slide on hover, and expanding many attachments no longer leaves the last ones waiting to appear.",
+      "pt-BR": "Os botões das mensagens aparecem sem deslizar, e abrir muitos anexos não deixa os últimos demorando pra aparecer.",
+      "es": "Los botones de los mensajes aparecen sin desplazarse, y al desplegar muchos archivos los últimos ya no tardan en aparecer.",
+      "fr": "Les boutons des messages apparaissent sans glisser, et déplier de nombreuses pièces jointes ne retarde plus l’apparition des dernières.",
+      "de": "Die Schaltflächen an Nachrichten gleiten nicht mehr beim Einblenden; auch die letzten Anhänge erscheinen beim Aufklappen ohne lange Verzögerung."
+    }
+  }
+}

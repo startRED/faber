@@ -13,7 +13,9 @@ Faber's own test runner (`cargo t`, the `testkit/` crate) tests the screen in tw
 of the app. `FABER_HIDDEN=1` keeps the window offscreen with its own browser profile, so it never takes the user's screen.
 
 - **Checks** (`tests/ui/*.check.ts`) test the screen's own logic. The test build opens `index.html?checks`, runs them when
-  the page loads, writes the result to the file named by `FABER_CHECKS_OUT` and exits. No DevTools port is involved, so
+  the app's first mount has finished, writes the result to the file named by `FABER_CHECKS_OUT` and exits. Mounting the
+  app concurrently with a check could replace that check's focus with the first-run heading or composer focus.
+  No DevTools port is involved, so
   they run on Windows, macOS and Linux (Linux under `xvfb-run -a`).
   With `--filter`, only check bodies whose names contain that text run; startup and module registration remain shared.
 - **Scenarios** (`testkit/src/screen/`, written in Rust) drive the real app like a person: they read the page, click and

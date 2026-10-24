@@ -72,7 +72,7 @@ check('notes: the screen shows the version and the entries by kind, and focus st
     ok(screen.textContent?.includes('9.9.9'), 'the version');
     deepEqual([...screen.querySelectorAll('h2')].map((h) => h.textContent), [t('notes.kind.new'), t('notes.kind.better'), t('notes.kind.fixed')]);
     equal(screen.querySelectorAll('li').length, LIST.length);
-    equal(document.activeElement, host.querySelector('button'), 'Continue has the focus');
+    equal(document.activeElement, host.querySelector('button'), `Continue has the focus (active: ${document.activeElement?.outerHTML.slice(0, 350)})`);
     equal(host.querySelector('button')!.textContent, t('notes.continue'));
   }));
 
@@ -83,6 +83,24 @@ check('notes: Continue closes it once', () => {
     equal(closed, 1);
   });
 });
+
+check('notes: scrolling update entries never puts their viewport under the window controls', () =>
+  shown('reduced', () => {}, async (host) => {
+    const frame = document.createElement('div');
+    frame.className = 'app';
+    frame.style.cssText = 'position:fixed;inset:0';
+    const titlebar = document.createElement('header');
+    titlebar.className = 'top';
+    frame.append(titlebar, document.createElement('main'));
+    document.body.append(frame);
+    try {
+      const screen = host.querySelector<HTMLElement>('.notes')!;
+      screen.scrollTop = screen.scrollHeight;
+      ok(screen.getBoundingClientRect().top >= titlebar.getBoundingClientRect().bottom,
+        'the scrollable notes start below the actual title-bar height, so content cannot pass behind its controls');
+      ok(screen.clientHeight > 0 && screen.scrollHeight >= screen.clientHeight, 'entries remain scrollable');
+    } finally { frame.remove(); }
+  }));
 
 check('notes: Esc closes it too, and the shell does not see the key', () => {
   let closed = 0;
