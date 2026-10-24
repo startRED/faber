@@ -44,7 +44,7 @@ connection, before queueing. The connector could open the review request, but do
 
 ## Follow-up walks and classification
 
-The matrix is still incomplete: ten of its sixteen requested default or project walks completed: Haiku and Codex, default and project at pt-BR/720x480, plus Codex default and project at en/720x480 and pt-BR/1280x800, and Codex default and project at en/1280x800. The focused Codex Chat smoke above is additional evidence,
+The matrix is still incomplete: eleven of its sixteen requested default or project walks completed: Haiku and Codex, default and project at pt-BR/720x480, plus Codex default and project at en/720x480 and pt-BR/1280x800, Codex default and project at en/1280x800, and Haiku project at pt-BR/1280x800. The focused Codex Chat smoke above is additional evidence,
 not a completed default configuration.
 
 | Walk | Program evidence | What it establishes and what remains |
@@ -216,4 +216,4 @@ stayed equal at the recorded before/after boundaries; A/C sources also stayed un
 observations do not attest to loaded process bytes. The gate checks full-screen use and free RAM at startup, with
 the existing wait policy; it does not continuously suspend for low RAM after admission. The adapter is an external
 operational remedy, not a claim that direct `first-user.mjs` calls enforce that gate. The native-picker screenshot
-limitation above remains unchanged. Six first-pass configurations and the second pass are still unfinished.
+limitation above remains unchanged. The remaining first-pass configurations and second pass are recorded in the [follow-up evidence](first-user-2026-10-24-follow-up.md).
