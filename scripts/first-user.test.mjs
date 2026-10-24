@@ -65,7 +65,7 @@ test('a seeded project conversation is opt-in and never launches without its fak
   assert.match(tasks[0].goal, /In one sentence: why is the sky blue\?/);
   assert.equal(firstUser.selectTasks().some((task) => task.id === 'conversa-projeto'), false);
   assert.deepEqual(firstUser.driverFlags(tasks, 'pt-BR', false), ['--project-demo', '--lang', 'pt-BR']);
-  assert.deepEqual(firstUser.driverFlags(TASKS, 'en', true), ['--first-run', '--no-ai', '--lang', 'en', '--build']);
+  assert.throws(() => firstUser.driverFlags(TASKS, 'en', true), /separate batches/);
   assert.throws(() => firstUser.driverFlags([...TASKS, ...tasks], 'en', false), /one focused task/);
 });
 
@@ -74,6 +74,22 @@ test('the project report identifies the seeded replay rather than claiming first
   const text = report({ date: '2026-10-23', agent: 'fixture', size: { width: 720, height: 480 }, lang: 'en',
     findings: [], results: [{ task, steps: [], outcome: 'done' }], shots: 'fixture' });
   assert.match(text, /projeto Demo já preparado/);
+  assert.match(text, /resposta gravada/);
+  assert.doesNotMatch(text, /primeira abertura sem nenhuma IA/);
+});
+
+test('a Chat review uses the recorded AI after the disconnected first-run walk', () => {
+  const chat = firstUser.selectTasks(['--task', 'conversa']);
+  assert.deepEqual(firstUser.driverFlags(chat, 'en', false), ['--lang', 'en']);
+  assert.match(chat[0].goal, /In one sentence: why is the sky blue\?/);
+  assert.match(chat[0].goal, /Haiku/);
+  const batches = firstUser.reviewBatches(TASKS);
+  assert.deepEqual(batches.flat(), TASKS);
+  assert.equal(batches.length, 2);
+  assert.deepEqual(firstUser.driverFlags(batches[0], 'pt-BR', true), ['--first-run', '--no-ai', '--lang', 'pt-BR', '--build']);
+  assert.deepEqual(firstUser.driverFlags(batches[1], 'pt-BR', false), ['--lang', 'pt-BR']);
+  const text = report({ date: '2026-10-24', agent: 'fixture', size: { width: 720, height: 480 }, lang: 'en',
+    findings: [], results: [{ task: chat[0], steps: [], outcome: 'done' }], shots: 'fixture' });
   assert.match(text, /resposta gravada/);
   assert.doesNotMatch(text, /primeira abertura sem nenhuma IA/);
 });
