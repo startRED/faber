@@ -7,6 +7,7 @@
 //   node scripts/first-user.mjs --agent codex      (Codex gpt-6-luna instead)
 //   node scripts/first-user.mjs --size 1280x800 --steps 10 --no-build
 //   node scripts/first-user.mjs --task catalogo  (browse and read only; no installation task)
+//   node scripts/first-user.mjs --task conversa  (Chat with the existing recorded response, without first run)
 //   node scripts/first-user.mjs --task conversa-projeto  (seeded Demo project, fake recorded response)
 //
 // Faber runs as the hidden, sandboxed test build that `testkit/examples/ux_audit.rs` drives (C006: the window lives on a
@@ -14,8 +15,9 @@
 // its only cost. Builds run at idle priority. Findings go to `docs/research/first-user-<date>-<suffix>.md`, screenshots
 // to `<target>/faber-test/first-user/<date>-<suffix>/`. Each run keeps its own evidence. Nothing is fixed by the review.
 import { spawn, spawnSync } from 'node:child_process';
+import { createHash } from 'node:crypto';
 import { createInterface } from 'node:readline';
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { createReadStream, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir, setPriority, constants } from 'node:os';
 import { basename, delimiter, dirname, join, relative, resolve, isAbsolute } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -23,6 +25,22 @@ import { fileURLToPath } from 'node:url';
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const EXE = process.platform === 'win32' ? '.exe' : '';
 const TARGET = process.env.CARGO_TARGET_DIR ? resolve(ROOT, process.env.CARGO_TARGET_DIR) : join(ROOT, 'target');
+
+/** Missing artifacts are expected before a build; other read failures must not become missing evidence. */
+export async function artifactIdentity(paths) {
+  const files = {};
+  for (const [name, path] of Object.entries(paths)) {
+    const hash = createHash('sha256');
+    try {
+      for await (const chunk of createReadStream(path)) hash.update(chunk);
+      files[name] = { path, sha256: hash.digest('hex') };
+    } catch (error) {
+      if (error.code !== 'ENOENT') throw error;
+      files[name] = { path, sha256: null };
+    }
+  }
+  return files;
+}
 
 /** Every review keeps its own evidence, even when the same configuration runs twice in one day. */
 export function runPaths(root, target, date, output) {
@@ -32,7 +50,7 @@ export function runPaths(root, target, date, output) {
   return { shots, out: resolve(root, output ?? `docs/research/first-user-${basename(shots)}.md`) };
 }
 
-/** What a newcomer is asked to do, in order, in the same app: each task starts where the last one ended. */
+/** The disconnected first-run walk comes before a fresh app with a recorded Chat response. */
 export const TASKS = [
   {
     id: 'primeira-abertura',
@@ -46,7 +64,9 @@ export const TASKS = [
       'Pelo que a tela explica, descubra para que ela serve e quando a IA a usa. Depois volte à lista. ' +
       'Só explore e leia: não instale, remova, ative, desative ou troque ferramentas, nem abra páginas externas.',
   },
-  { id: 'conversa', goal: 'Comece uma conversa nova e mande uma pergunta simples, por exemplo "o que você sabe fazer?". Acompanhe até aparecer uma resposta.' },
+  { id: 'conversa', goal: 'Comece uma conversa nova no Chat, escolha Claude Haiku no seletor de modelo e envie exatamente ' +
+    '"In one sentence: why is the sky blue?". Acompanhe até aparecer uma resposta. É uma resposta gravada; ' +
+    'nenhuma assinatura real está conectada dentro do app.' },
   { id: 'projetos', goal: 'Abra a área de Projetos e descubra para que ela serve.' },
   { id: 'configuracoes', goal: 'Encontre as Configurações do app e descubra onde se muda o idioma.' },
 ];
@@ -72,7 +92,15 @@ export function selectTasks(args = []) {
 export function driverFlags(tasks, lang, build) {
   const project = tasks.some((task) => task.id === PROJECT_TASK.id);
   if (project && tasks.length !== 1) throw new Error('the seeded project needs one focused task');
-  return [...(project ? ['--project-demo'] : ['--first-run', '--no-ai']), '--lang', lang, ...(build ? ['--build'] : [])];
+  const chat = tasks.some((task) => task.id === 'conversa');
+  if (chat && tasks.some((task) => task.id === 'primeira-abertura')) throw new Error('first run and Chat need separate batches');
+  return [...(project ? ['--project-demo'] : chat ? [] : ['--first-run', '--no-ai']), '--lang', lang, ...(build ? ['--build'] : [])];
+}
+
+/** Restart only at Chat: disconnected onboarding and a working recorded AI cannot share one launch. */
+export function reviewBatches(tasks) {
+  const chat = tasks.findIndex((task) => task.id === 'conversa');
+  return chat > 0 ? [tasks.slice(0, chat), tasks.slice(chat)] : [tasks];
 }
 
 /** Runs in the page: controls a person can see and reach, numbered, with their centre; text comes from the screenshot. */
@@ -239,6 +267,9 @@ export function report({ date, agent, size, lang, findings, results, shots }) {
   const outcome = { done: 'conclusão declarada pela IA; precisa conferir as imagens', stuck: 'travou', steps: 'não terminou no limite de passos' };
   const context = results.some((r) => r.task.id === PROJECT_TASK.id)
     ? 'projeto Demo já preparado, com resposta gravada e sem uma IA real dentro do app'
+    : results.some((r) => r.task.id === 'conversa')
+    ? 'Chat com resposta gravada e sem uma IA real dentro do app' +
+      (results.some((r) => r.task.id === 'primeira-abertura') ? ', após a primeira abertura em outro app isolado sem IA' : '')
     : 'primeira abertura sem nenhuma IA conectada';
   const lines = [
     `# Primeiro usuário, ${date}`,
@@ -434,41 +465,59 @@ async function main(args) {
   } catch {
     // Not allowed here: build at the normal priority.
   }
+  const artifacts = {
+    driver: join(TARGET, `debug/examples/ux_audit${EXE}`),
+    app: join(TARGET, `faber-test/debug/faber${EXE}`),
+    fakeCli: join(TARGET, `debug/fake-cli${EXE}`),
+  };
+  const identities = [];
+  const recordIdentity = async (stage) => {
+    identities.push({ stage, at: new Date().toISOString(), files: await artifactIdentity(artifacts) });
+    writeFileSync(join(shots, 'execution-identities.json'), JSON.stringify(identities, null, 2));
+  };
+  await recordIdentity('before-driver-build');
+  // --no-build reuses the app; the driver is still built from this worktree before it starts.
   const built = spawnSync('cargo', ['build', '--quiet', '-p', 'faber-testkit', '--example', 'ux_audit'], { cwd: ROOT, stdio: 'inherit', windowsHide: true });
+  await recordIdentity('after-driver-build');
   if (built.status !== 0) throw new Error('the build of testkit/examples/ux_audit.rs failed');
-  const flags = driverFlags(tasks, lang, !args.includes('--no-build'));
-  const app = driver(join(TARGET, `debug/examples/ux_audit${EXE}`), flags);
-  await app.ready();
   const results = [];
-  try {
-    await app.op('call', 'Emulation.setDeviceMetricsOverride', { params: { width, height, deviceScaleFactor: 1, mobile: false } });
-    await pause(1500);
-    const actualLang = await app.op('eval', 'document.documentElement.lang');
-    if (actualLang !== lang) {
-      await app.op('shot', join(shots, 'language-mismatch.png'));
-      throw new Error(`the app language is ${actualLang}, expected ${lang}; refusing a mislabeled review`);
-    }
-    for (const task of tasks) {
-      const steps = [];
-      let outcome = 'steps';
-      for (let n = 1; n <= maxSteps; n++) {
-        const shot = join(shots, `${task.id}-${n}.png`);
-        await app.op('shot', shot);
-        const seen = await app.op('eval', OBSERVE);
-        const step = parseStep(await ask(stepPrompt(task, steps, seen, size, lang), shot), seen.controls);
-        if (step.action.type === 'click') step.action.name = seen.controls[step.action.n - 1].name;
-        steps.push({ ...step, shot: relative(ROOT, shot).replaceAll('\\', '/') });
-        console.log(`${task.id} ${n}: ${describe(step.action)}`);
-        if (step.action.type === 'done' || step.action.type === 'stuck') {
-          outcome = step.action.type;
-          break;
-        }
-        await act(app, step.action, seen, size);
+  for (const [batchIndex, batch] of reviewBatches(tasks).entries()) {
+    const flags = driverFlags(batch, lang, batchIndex === 0 && !args.includes('--no-build'));
+    await recordIdentity(`batch-${batchIndex}-before-driver-start`);
+    const app = driver(artifacts.driver, flags);
+    try {
+      await app.ready();
+      await recordIdentity(`batch-${batchIndex}-ready`);
+      await app.op('call', 'Emulation.setDeviceMetricsOverride', { params: { width, height, deviceScaleFactor: 1, mobile: false } });
+      await pause(1500);
+      const actualLang = await app.op('eval', 'document.documentElement.lang');
+      if (actualLang !== lang) {
+        await app.op('shot', join(shots, 'language-mismatch.png'));
+        throw new Error(`the app language is ${actualLang}, expected ${lang}; refusing a mislabeled review`);
       }
-      results.push({ task, steps, outcome });
+      for (const task of batch) {
+        const steps = [];
+        let outcome = 'steps';
+        for (let n = 1; n <= maxSteps; n++) {
+          const shot = join(shots, `${task.id}-${n}.png`);
+          await app.op('shot', shot);
+          const seen = await app.op('eval', OBSERVE);
+          const step = parseStep(await ask(stepPrompt(task, steps, seen, size, lang), shot), seen.controls);
+          if (step.action.type === 'click') step.action.name = seen.controls[step.action.n - 1].name;
+          steps.push({ ...step, shot: relative(ROOT, shot).replaceAll('\\', '/') });
+          console.log(`${task.id} ${n}: ${describe(step.action)}`);
+          if (step.action.type === 'done' || step.action.type === 'stuck') {
+            outcome = step.action.type;
+            break;
+          }
+          await act(app, step.action, seen, size);
+        }
+        results.push({ task, steps, outcome });
+      }
+    } finally {
+      await app.quit();
+      await recordIdentity(`batch-${batchIndex}-after-driver-exit`);
     }
-  } finally {
-    await app.quit();
   }
   const summary = firstJson(await ask(summaryPrompt(results)))?.findings;
   const findings = Array.isArray(summary) ? summary : fallback(results);

@@ -15,6 +15,28 @@ const controls = [
   { role: 'input', name: 'Escreva aqui', x: 20, y: 20, disabled: true },
 ];
 
+test('artifact identities distinguish a missing app, a rebuilt driver and the previously recorded bytes', async () => {
+  const folder = mkdtempSync(join(tmpdir(), 'faber-first-user-identity-'));
+  try {
+    const paths = { driver: join(folder, 'driver'), app: join(folder, 'app') };
+    writeFileSync(paths.driver, 'a');
+    const before = await firstUser.artifactIdentity(paths);
+    assert.equal(before.driver.sha256, 'ca978112ca1bbdcafac231b39a23dc4da786eff8147c4e72b9807785afee48bb');
+    assert.equal(before.app.sha256, null);
+    writeFileSync(paths.driver, 'b');
+    writeFileSync(paths.app, 'a');
+    const after = await firstUser.artifactIdentity(paths);
+    assert.equal(after.driver.sha256, '3e23e8160039594a33894f6564e1b1348bbd7a0088d42c4acb73eeaed59c009d');
+    assert.equal(after.app.sha256, before.driver.sha256);
+    assert.notEqual(after.driver.sha256, before.driver.sha256);
+    assert.equal(before.app.sha256, null);
+    assert.equal(after.driver.path, paths.driver);
+    await assert.rejects(firstUser.artifactIdentity({ driver: folder }));
+  } finally {
+    rmSync(folder, { recursive: true, force: true });
+  }
+});
+
 test('native choices require an observed enabled selector and an exact enabled option', () => {
   const lists = [{ role: 'list', name: 'Modelo', disabled: false, options: [
     { label: 'Claude Haiku', value: 'haiku', disabled: false },
@@ -65,7 +87,7 @@ test('a seeded project conversation is opt-in and never launches without its fak
   assert.match(tasks[0].goal, /In one sentence: why is the sky blue\?/);
   assert.equal(firstUser.selectTasks().some((task) => task.id === 'conversa-projeto'), false);
   assert.deepEqual(firstUser.driverFlags(tasks, 'pt-BR', false), ['--project-demo', '--lang', 'pt-BR']);
-  assert.deepEqual(firstUser.driverFlags(TASKS, 'en', true), ['--first-run', '--no-ai', '--lang', 'en', '--build']);
+  assert.throws(() => firstUser.driverFlags(TASKS, 'en', true), /separate batches/);
   assert.throws(() => firstUser.driverFlags([...TASKS, ...tasks], 'en', false), /one focused task/);
 });
 
@@ -74,6 +96,22 @@ test('the project report identifies the seeded replay rather than claiming first
   const text = report({ date: '2026-10-23', agent: 'fixture', size: { width: 720, height: 480 }, lang: 'en',
     findings: [], results: [{ task, steps: [], outcome: 'done' }], shots: 'fixture' });
   assert.match(text, /projeto Demo já preparado/);
+  assert.match(text, /resposta gravada/);
+  assert.doesNotMatch(text, /primeira abertura sem nenhuma IA/);
+});
+
+test('a Chat review uses the recorded AI after the disconnected first-run walk', () => {
+  const chat = firstUser.selectTasks(['--task', 'conversa']);
+  assert.deepEqual(firstUser.driverFlags(chat, 'en', false), ['--lang', 'en']);
+  assert.match(chat[0].goal, /In one sentence: why is the sky blue\?/);
+  assert.match(chat[0].goal, /Haiku/);
+  const batches = firstUser.reviewBatches(TASKS);
+  assert.deepEqual(batches.flat(), TASKS);
+  assert.equal(batches.length, 2);
+  assert.deepEqual(firstUser.driverFlags(batches[0], 'pt-BR', true), ['--first-run', '--no-ai', '--lang', 'pt-BR', '--build']);
+  assert.deepEqual(firstUser.driverFlags(batches[1], 'pt-BR', false), ['--lang', 'pt-BR']);
+  const text = report({ date: '2026-10-24', agent: 'fixture', size: { width: 720, height: 480 }, lang: 'en',
+    findings: [], results: [{ task: chat[0], steps: [], outcome: 'done' }], shots: 'fixture' });
   assert.match(text, /resposta gravada/);
   assert.doesNotMatch(text, /primeira abertura sem nenhuma IA/);
 });
