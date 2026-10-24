@@ -153,6 +153,44 @@ check('question card: Skip declines the question without sending answers', () =>
   deepEqual(calls, [['answer', 'c1', 't1', 'r1', false]]);
 }));
 
+check('question card: failed delivery preserves answers for one unchanged retry', () => withCard(async (root, calls) => {
+  const pending: { resolve: () => void; reject: (reason: unknown) => void }[] = [];
+  api.answerQuestion = (...args) => {
+    calls.push(['question', ...args]);
+    return new Promise<void>((resolve, reject) => pending.push({ resolve, reject }));
+  };
+  click(options(root, 0)[1]);
+  click(tabs(root)[1]);
+  click(panel(root, 1).querySelector('.q-more'));
+  const field = panel(root, 1).querySelector<HTMLInputElement>('input')!;
+  write(field, 'Backups');
+  await settle();
+  const send = button(root, 'Send answers');
+  const inner = root.querySelector<HTMLElement>('.q-inner')!;
+  click(send);
+  await settle();
+  const expected = ['question', 'c1', 't1', 'r1', { 'Which stack?': 'Go', 'Which extras?': 'Backups' }];
+  deepEqual(calls, [expected]);
+  ok(inner.inert, 'the card waits for delivery before accepting more input');
+  equal(inner.getAttribute('aria-busy'), 'true');
+  pending[0].reject('error.permission.undelivered');
+  await settle();
+  ok(root.querySelector('.note.err[role="alert"]')?.textContent?.includes('Try again.'), 'failed delivery has an actionable error');
+  equal(options(root, 0)[1].getAttribute('aria-checked'), 'true');
+  equal(field.value, 'Backups', 'the written answer survives delivery failure');
+  ok(!inner.inert && !send.disabled, 'failed delivery releases the card for retry');
+  equal(inner.getAttribute('aria-busy'), 'false');
+  click(send);
+  await settle();
+  deepEqual(calls, [expected, expected], 'the retry sends the same answers exactly once');
+  equal(root.querySelector('.note.err'), null, 'retry clears the previous error');
+  ok(inner.inert, 'retry also waits for delivery');
+  pending[1].resolve();
+  await settle();
+  equal(root.querySelector('.note.err'), null);
+  ok(!inner.inert && !send.disabled, 'completion releases the card');
+}));
+
 check('question card: tapping a tile of a single choice clears what was written, so only one answer goes back', () => withCard(async (root, calls) => {
   click(panel(root, 0).querySelector('.q-more'));
   write(panel(root, 0).querySelector<HTMLInputElement>('input')!, 'Zig');
