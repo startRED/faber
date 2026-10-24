@@ -33,7 +33,7 @@ sha2 = "0.11"
 tempfile = "3"
 tokio = { version = "1", features = ["io-util", "macros", "process", "rt-multi-thread", "sync", "time"] }
 tungstenite = { version = "0.30", default-features = false, features = ["handshake"] }
-zip = { version = "8", default-features = false, features = ["deflate"] }
+zip = { version = "9", default-features = false, features = ["deflate"] }
 
 [target.'cfg(not(windows))'.dependencies]
 sysinfo = { version = "0.39.6", default-features = false, features = ["system"] }
