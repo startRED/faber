@@ -236,3 +236,26 @@ test('without a usable summary the report still lists every confusion and every 
     { task: 'primeira-abertura', tried: 'travou: sem saída', stuck: 'sem saída', shot: 'a-3.png' },
   ]);
 });
+
+test('the Haiku reviewer excludes personal customizations without disabling subscription auth or tool restrictions', async () => {
+  const source = readFileSync(new URL('./first-user.mjs', import.meta.url), 'utf8');
+  const start = source.indexOf('function reviewer(kind, home) {');
+  const end = source.indexOf('/** The hidden test build', start);
+  assert.ok(start >= 0 && end > start, 'exercise the actual reviewer constructor');
+  const invocations = [];
+  const ask = runInNewContext(source.slice(start, end) + '\nreviewer("claude", "/outside-review");', {
+    program: () => 'claude.exe', firstJson,
+    run: async (exe, args, options) => {
+      invocations.push({ exe, args: Array.from(args), cwd: options.cwd });
+      return '{"type":"result","result":"ok"}\n';
+    },
+  });
+  assert.equal(await ask('Read only the provided screen.'), 'ok');
+  assert.equal(invocations.length, 1);
+  const { args, cwd } = invocations[0];
+  assert.ok(args.includes('--safe-mode'), 'personal memory, plugins and hooks must not reach the newcomer reviewer');
+  assert.ok(!args.includes('--bare'), 'bare mode would disable subscription OAuth');
+  assert.equal(args[args.indexOf('--tools') + 1], '');
+  for (const flag of ['--strict-mcp-config', '--disable-slash-commands', '--no-session-persistence']) assert.ok(args.includes(flag));
+  assert.equal(cwd, '/outside-review');
+});

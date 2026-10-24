@@ -74,8 +74,9 @@ source evidence.
 Before asking the reviewer, the driver checks the document's actual language against `--lang`; a mismatch saves an
 image and fails instead of writing a report under the wrong language.
 
-The reviewer never sees the code. The default is Haiku through `claude -p --tools ""` with no MCP server, which starts
-with no tool at all (its `init` line lists none); `--agent codex` is gpt-6-luna with its shell, apps, browser and
+The reviewer never sees the code. The default is Haiku through `claude -p --safe-mode --tools ""` with no MCP server, which starts
+with no tool at all (its `init` line lists none); safe mode excludes personal CLAUDE.md, hooks and installed customizations
+while retaining ordinary subscription authentication (managed policy may still apply), without a silent fallback; `--agent codex` is gpt-6-luna with its shell, apps, browser and
 computer use switched off and a read-only sandbox. Either runs in an empty folder under the system temp folder, and the
 script refuses one inside the repository. Builds run at idle priority, the reviewer's processes have no window, and no
 CLI runs inside Faber, so its only cost is the reviewer's own calls (about 40 small Haiku turns).

@@ -337,7 +337,8 @@ function run(exe, args, { cwd, input, timeout = 300_000 }) {
 function reviewer(kind, home) {
   if (kind === 'claude') {
     const exe = program('claude');
-    const args = ['-p', '--model', 'haiku', '--tools', '', '--strict-mcp-config', '--disable-slash-commands',
+    // Safe mode excludes personal customizations while retaining normal subscription authentication.
+    const args = ['-p', '--safe-mode', '--model', 'haiku', '--tools', '', '--strict-mcp-config', '--disable-slash-commands',
       '--no-session-persistence', '--input-format', 'stream-json', '--output-format', 'stream-json', '--verbose'];
     return async (prompt, image) => {
       const content = [{ type: 'text', text: prompt }];

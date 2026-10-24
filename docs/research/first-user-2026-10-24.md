@@ -38,14 +38,17 @@ The five screenshots and the report were copied outside the disposable build cac
 `E:/Documentos/ProjetosIA/faber-evidence/newcomer-chat-20261024-c590/`, with `sha256.json` recording each file's digest.
 
 The broader matrix began, but its first walk ended after three onboarding actions with exit 1 and no completed report.
-That attempt does not prove onboarding. The complete matrix and confirmation of its remaining screenshots are unfinished.
+That attempt does not prove onboarding. The later first-pass configurations and screenshot classifications are retained below; confirmation remains unfinished.
 The harness correction is saved and sent for integration; the required landing command failed at the GitHub API
 connection, before queueing. The connector could open the review request, but does not replace that landing command.
 
 ## Follow-up walks and classification
 
-The matrix is still incomplete: eleven of its sixteen requested default or project walks completed: Haiku and Codex, default and project at pt-BR/720x480, plus Codex default and project at en/720x480 and pt-BR/1280x800, Codex default and project at en/1280x800, and Haiku project at pt-BR/1280x800. The focused Codex Chat smoke above is additional evidence,
-not a completed default configuration.
+All sixteen bounded default/project configurations completed their first-pass runs across Haiku/Codex, pt-BR/English
+and 720x480/1280x800. This does not approve every reported goal: some tasks reached their step limit or retained
+subjective hesitation. The [follow-up evidence](first-user-2026-10-24-follow-up.md) records the later walks, the
+reviewer-context limitation and the pending isolated confirmation pass. The focused Codex Chat smoke above is
+additional evidence, not another completed matrix configuration.
 
 | Walk | Program evidence | What it establishes and what remains |
 | :--- | :--- | :--- |
@@ -90,8 +93,8 @@ product decision rather than silently treating the drawer as a missing Projects 
 The Codex project walk has its own `codex-pt-BR-720x480-project/run-01` evidence folder with the same unchanged app,
 driver, fake CLI and UI source identities. Its final image was inspected separately from the reviewer's success claim.
 
-Remaining work: both reviewers at both languages and sizes, retained screenshot verification, confirmed findings fixed
-with regression checks, and a second pass without blocking findings. Task 996 remains open; no stable-release claim.
+Remaining work: confirmation of subjective findings, regression checks for confirmed fixes and an isolated second
+pass without blocking findings. Task 996 remains open; no stable-release claim.
 
 ## English narrow default walk and executable provenance
 
@@ -216,4 +219,4 @@ stayed equal at the recorded before/after boundaries; A/C sources also stayed un
 observations do not attest to loaded process bytes. The gate checks full-screen use and free RAM at startup, with
 the existing wait policy; it does not continuously suspend for low RAM after admission. The adapter is an external
 operational remedy, not a claim that direct `first-user.mjs` calls enforce that gate. The native-picker screenshot
-limitation above remains unchanged. The remaining first-pass configurations and second pass are recorded in the [follow-up evidence](first-user-2026-10-24-follow-up.md).
+limitation above remains unchanged. The completed first-pass follow-up and pending second pass are recorded in the [follow-up evidence](first-user-2026-10-24-follow-up.md).
