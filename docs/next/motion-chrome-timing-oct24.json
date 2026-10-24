@@ -1,0 +1,11 @@
+{
+  "notes": {
+    "fixed": {
+      "en": "Question errors and update notes appear with the same short motion as the rest of the screen.",
+      "pt-BR": "Os avisos de erro nas perguntas e os itens das novidades aparecem com o mesmo movimento curto do restante da tela.",
+      "es": "Los avisos de error en las preguntas y las novedades aparecen con el mismo movimiento breve que el resto de la pantalla.",
+      "fr": "Les erreurs dans les questions et les nouveautés apparaissent avec la même animation courte que le reste de l’écran.",
+      "de": "Fehlermeldungen bei Fragen und die Neuigkeiten erscheinen mit derselben kurzen Bewegung wie die übrigen Elemente."
+    }
+  }
+}

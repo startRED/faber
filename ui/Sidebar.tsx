@@ -101,6 +101,7 @@ interface Props {
   now: number;
   /** A new conversation in the area and project the user is in. */
   onNew: () => void;
+  onClose?: () => void;
   onArea: (area: Area) => void;
   /** The user picked a project: its row is selected and no conversation is open. */
   onProject: (id: string) => void;
@@ -392,11 +393,18 @@ export function Sidebar(props: Props) {
 
   return (
     <>
-      <button class="newchat" onClick={() => props.onNew()}>
-        <Icon name="plus" />
-        <span>{t('side.new')}</span>
-        <kbd>{keysOf('new')}</kbd>
-      </button>
+      <div class="side-start">
+        <button class="newchat" onClick={() => props.onNew()}>
+          <Icon name="plus" />
+          <span>{t('side.new')}</span>
+          <kbd>{keysOf('new')}</kbd>
+        </button>
+        <Show when={props.onClose}>
+          <button class="iconbtn side-close" aria-label={t('side.hide')} title={t('side.hide')} onClick={() => props.onClose?.()}>
+            <Icon name="close" />
+          </button>
+        </Show>
+      </div>
       <div class="areas" role="group" aria-label={t('area.label')}>
         <button class="area" title={keysOf('chat')} aria-pressed={!props.catalogOpen && props.place.area === 'chat'} onClick={() => props.onArea('chat')}>
           <Icon name="chat" />
