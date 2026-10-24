@@ -84,7 +84,9 @@ CLI runs inside Faber, so its only cost is the reviewer's own calls (about 40 sm
 Each run gets a unique `<date>-<suffix>` name, including repeat runs with the same configuration. The findings go to
 `docs/research/first-user-<date>-<suffix>.md`, most serious first, each with what it tried, where it got stuck and the
 step's screenshot in `target/faber-test/first-user/<date>-<suffix>/` (local only). `--out` overrides only the report;
-screenshots still get their own folder. That folder also keeps `execution-identities.json`, with streamed SHA-256
+screenshots still get their own folder. Each step saves a matching `<task>-<step>.controls.json` before asking the
+reviewer, retaining the actual numbered controls and options it received even if the reviewer fails. The image and
+control list are captured sequentially, not atomically. That folder also keeps `execution-identities.json`, with streamed SHA-256
 identities of the driver, app and fake CLI before/after the driver build and around each app batch. A missing binary
 before a build is recorded as null; other read errors stop the review. `--no-build` skips only the app build: the
 driver is still built before launch. Compare the launch-boundary snapshots rather than assuming a pre-build driver

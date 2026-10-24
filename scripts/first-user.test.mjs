@@ -15,6 +15,24 @@ const controls = [
   { role: 'input', name: 'Escreva aqui', x: 20, y: 20, disabled: true },
 ];
 
+test('each captured step keeps the actual controls before the reviewer can fail', async () => {
+  assert.equal(typeof firstUser.captureObservation, 'function');
+  const folder = mkdtempSync(join(tmpdir(), 'faber-first-user-observation-'));
+  try {
+    const shot = join(folder, 'projetos-1.png');
+    const seen = { controls: [{ role: 'button', name: 'Fechar a barra lateral', x: 260, y: 64, disabled: false }] };
+    const calls = [];
+    const app = { op: async (op, value) => { calls.push([op, value]); return op === 'eval' ? seen : true; } };
+    const observed = await firstUser.captureObservation(app, shot);
+    assert.equal(observed, seen);
+    assert.deepEqual(calls, [['shot', shot], ['eval', firstUser.OBSERVE]]);
+    const evidence = join(folder, 'projetos-1.controls.json');
+    assert.deepEqual(JSON.parse(readFileSync(evidence, 'utf8')), seen);
+    await assert.rejects(firstUser.captureObservation(app, shot), { code: 'EEXIST' });
+    assert.deepEqual(JSON.parse(readFileSync(evidence, 'utf8')), seen);
+  } finally { rmSync(folder, { recursive: true, force: true }); }
+});
+
 test('artifact identities distinguish a missing app, a rebuilt driver and the previously recorded bytes', async () => {
   const folder = mkdtempSync(join(tmpdir(), 'faber-first-user-identity-'));
   try {

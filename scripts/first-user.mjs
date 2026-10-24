@@ -137,6 +137,13 @@ export const OBSERVE = `(() => {
   return { controls };
 })()`;
 
+export async function captureObservation(app, shot) {
+  await app.op('shot', shot);
+  const seen = await app.op('eval', OBSERVE);
+  writeFileSync(join(dirname(shot), `${basename(shot, '.png')}.controls.json`), JSON.stringify(seen, null, 2), { flag: 'wx' });
+  return seen;
+}
+
 /** Is `path` the repository or inside it? The reviewer's folder must not be. */
 export function insideRepo(path, root = ROOT) {
   const rel = relative(resolve(root), resolve(path));
@@ -501,8 +508,7 @@ async function main(args) {
         let outcome = 'steps';
         for (let n = 1; n <= maxSteps; n++) {
           const shot = join(shots, `${task.id}-${n}.png`);
-          await app.op('shot', shot);
-          const seen = await app.op('eval', OBSERVE);
+          const seen = await captureObservation(app, shot);
           const step = parseStep(await ask(stepPrompt(task, steps, seen, size, lang), shot), seen.controls);
           if (step.action.type === 'click') step.action.name = seen.controls[step.action.n - 1].name;
           steps.push({ ...step, shot: relative(ROOT, shot).replaceAll('\\', '/') });
