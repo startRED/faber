@@ -6096,3 +6096,264 @@ async fn a_project_turn_rebuilds_the_rules_file_from_the_project_over_a_planted_
     assert!(rules.contains("- `npm run test`") && !rules.contains("Push to main"), "{rules}");
     engine.shutdown();
 }
+
+#[tokio::test]
+async fn project_memory_approval_records_both_item_identity_and_content() {
+    use faber_engine::project::memory::Edit;
+    let (data, root) = (memory_folder(), support::work_folder());
+    std::fs::create_dir_all(root.path().join(".faber")).unwrap();
+    let path = root.path().join(".faber/decisions.md");
+    let original = "- Use SQLite.\n  Keep the database local. [by AI]\n";
+    std::fs::write(&path, original).unwrap();
+    let spawn: Spawner = Arc::new(|_, _, _| panic!("memory must never launch a CLI"));
+    let (engine, _rx) = engine(data.path(), Vendor::Claude, spawn);
+    let project = engine.add_project(root.path().to_str().unwrap()).unwrap();
+    let read = || engine.project_memory(&project.id).unwrap().files.into_iter().find(|file| file.path == ".faber/decisions.md").unwrap();
+    let keep = |file: &faber_engine::project::memory::MemoryFile| Edit {
+        path: file.path.clone(),
+        revision: file.revision.clone(),
+        start: file.entries[0].start,
+        end: file.entries[0].end,
+        text: None,
+        keep: true,
+    };
+    engine.edit_project_memory(&project.id, &keep(&read())).unwrap();
+    assert!(read().entries[0].reviewed, "the fixture must be approved before inspecting its record");
+    let ledger_path = data.path().join("decisions-kept.json");
+    let load = || serde_json::from_slice::<serde_json::Value>(&std::fs::read(&ledger_path).unwrap()).unwrap();
+    let ledger = load();
+    let record = &ledger[&project.id][0];
+    assert!(record.is_object(), "item identity and content must be recorded separately: {record}");
+    let item_id = record["itemId"].as_str().filter(|s| !s.is_empty()).expect("item identity").to_string();
+    let content_hash = record["contentHash"].as_str().filter(|s| !s.is_empty()).expect("content hash").to_string();
+    std::fs::write(&path, original.replace("Keep the database local.", "Upload the database elsewhere.")).unwrap();
+    assert!(!read().entries[0].reviewed, "an unchanged first line cannot approve changed continuation text");
+    engine.edit_project_memory(&project.id, &keep(&read())).unwrap();
+    let mut ledger = load();
+    let updated = ledger[&project.id]
+        .as_array_mut()
+        .unwrap()
+        .iter_mut()
+        .find(|record| record["itemId"] == item_id && record["contentHash"] != content_hash)
+        .expect("explicitly keeping the new content retains the first-line identity and records its new hash");
+    updated["itemId"] = serde_json::Value::String("forged-item-identity".into());
+    std::fs::write(&ledger_path, serde_json::to_vec(&ledger).unwrap()).unwrap();
+    assert!(!read().entries[0].reviewed, "matching content with a wrong item identity is unreviewed");
+    engine.shutdown();
+}
+
+#[tokio::test]
+async fn project_memory_legacy_approvals_keep_only_their_exact_words() {
+    use faber_engine::project::memory::Edit;
+    use sha2::{Digest, Sha256};
+    let (data, root) = (memory_folder(), support::work_folder());
+    std::fs::create_dir_all(root.path().join(".faber")).unwrap();
+    let body = "- Use SQLite.\n  Keep the database local.";
+    let path = root.path().join(".faber/decisions.md");
+    std::fs::write(&path, format!("{body} [by AI]\n")).unwrap();
+    let spawn: Spawner = Arc::new(|_, _, _| panic!("memory must never launch a CLI"));
+    let (engine, _rx) = engine(data.path(), Vendor::Claude, spawn);
+    let project = engine.add_project(root.path().to_str().unwrap()).unwrap();
+    let read = || engine.project_memory(&project.id).unwrap().files.into_iter().find(|file| file.path == ".faber/decisions.md").unwrap();
+    let ledger_path = data.path().join("decisions-kept.json");
+    let hash = faber_engine::hex(&Sha256::digest(body.as_bytes()))[..32].to_string();
+    let ledger = serde_json::json!({ &project.id: [hash] });
+    std::fs::write(&ledger_path, serde_json::to_vec(&ledger).unwrap()).unwrap();
+    assert!(read().entries[0].reviewed, "the same protected legacy content remains approved");
+    let migrated: serde_json::Value = serde_json::from_slice(&std::fs::read(&ledger_path).unwrap()).unwrap();
+    assert!(migrated[&project.id][0].is_object(), "verified legacy words acquire a protected item identity before use");
+    std::fs::write(&path, format!("{} [by AI]\n", body.replace("Keep the database local.", "Upload the database elsewhere."))).unwrap();
+    assert!(!read().entries[0].reviewed, "a legacy digest cannot approve a changed continuation");
+    std::fs::write(&path, format!("{body} [by AI]\n")).unwrap();
+    let file = read();
+    engine
+        .edit_project_memory(
+            &project.id,
+            &Edit {
+                path: file.path,
+                revision: file.revision,
+                start: file.entries[0].start,
+                end: file.entries[0].end,
+                text: None,
+                keep: true,
+            },
+        )
+        .unwrap();
+    let ledger: serde_json::Value = serde_json::from_slice(&std::fs::read(&ledger_path).unwrap()).unwrap();
+    let records = ledger[&project.id].as_array().unwrap();
+    assert_eq!(records.len(), 1, "keeping the same words replaces their legacy record");
+    assert_eq!(records[0]["itemId"], faber_engine::hex(&Sha256::digest(b"- Use SQLite.")));
+    assert_eq!(records[0]["contentHash"], hash);
+    assert!(read().entries[0].reviewed);
+    std::fs::write(&ledger_path, serde_json::to_vec(&serde_json::json!({ &project.id: [{"itemId": 7, "contentHash": hash}] })).unwrap())
+        .unwrap();
+    assert!(!read().entries[0].reviewed, "malformed protected records never confer authority");
+    engine.shutdown();
+}
+
+#[tokio::test]
+async fn project_memory_deleting_the_last_identical_copy_revokes_its_approval() {
+    use faber_engine::project::memory::Edit;
+    let (data, root) = (memory_folder(), support::work_folder());
+    std::fs::create_dir_all(root.path().join(".faber")).unwrap();
+    let body = "- Keep project data local.";
+    let path = root.path().join(".faber/decisions.md");
+    std::fs::write(&path, format!("{body} [by AI]\n")).unwrap();
+    std::fs::write(root.path().join("CLAUDE.md"), format!("{body}\n")).unwrap();
+    let spawn: Spawner = Arc::new(|_, _, _| panic!("memory must never launch a CLI"));
+    let (engine, _rx) = engine(data.path(), Vendor::Claude, spawn);
+    let project = engine.add_project(root.path().to_str().unwrap()).unwrap();
+    let read = |path: &str| engine.project_memory(&project.id).unwrap().files.into_iter().find(|file| file.path == path).unwrap();
+    let edit = |file: faber_engine::project::memory::MemoryFile, keep| Edit {
+        path: file.path,
+        revision: file.revision,
+        start: file.entries[0].start,
+        end: file.entries[0].end,
+        text: None,
+        keep,
+    };
+    engine.edit_project_memory(&project.id, &edit(read(".faber/decisions.md"), true)).unwrap();
+    assert!(read(".faber/decisions.md").entries[0].reviewed);
+    engine.edit_project_memory(&project.id, &edit(read(".faber/decisions.md"), false)).unwrap();
+    let ledger_path = data.path().join("decisions-kept.json");
+    let load = || serde_json::from_slice::<serde_json::Value>(&std::fs::read(&ledger_path).unwrap()).unwrap();
+    assert_eq!(load()[&project.id].as_array().unwrap().len(), 1, "an identical unmarked instruction keeps the record alive");
+    engine.edit_project_memory(&project.id, &edit(read("CLAUDE.md"), false)).unwrap();
+    assert!(load()[&project.id].as_array().is_none_or(Vec::is_empty), "deleting the last unmarked copy revokes the record");
+    std::fs::write(&path, format!("{body} [by AI]\n")).unwrap();
+    assert!(!read(".faber/decisions.md").entries[0].reviewed, "replanted words cannot regain a deleted approval");
+    engine.shutdown();
+}
+
+#[tokio::test]
+async fn project_memory_deletion_preserves_approval_when_an_instruction_file_is_unreadable_by_size() {
+    use faber_engine::project::memory::Edit;
+    let (data, root) = (memory_folder(), support::work_folder());
+    std::fs::create_dir_all(root.path().join(".faber")).unwrap();
+    let body = "- Keep project data local.";
+    let path = root.path().join(".faber/decisions.md");
+    std::fs::write(&path, format!("{body} [by AI]\n")).unwrap();
+    let paragraph =
+        "# Project instructions\nKeep existing compatibility checks, preserve accessibility, and explain any change before publishing.\n\n";
+    let oversized = format!("{body}\n\n{}", paragraph.repeat(faber_engine::project::memory::MAX_BYTES / paragraph.len() + 1));
+    assert!(oversized.len() > faber_engine::project::memory::MAX_BYTES);
+    std::fs::write(root.path().join("CLAUDE.md"), oversized).unwrap();
+    let spawn: Spawner = Arc::new(|_, _, _| panic!("memory must never launch a CLI"));
+    let (engine, _rx) = engine(data.path(), Vendor::Claude, spawn);
+    let project = engine.add_project(root.path().to_str().unwrap()).unwrap();
+    let read = || engine.project_memory(&project.id).unwrap();
+    let file = read().files.into_iter().find(|file| file.path == ".faber/decisions.md").unwrap();
+    let request = |file: &faber_engine::project::memory::MemoryFile, keep| Edit {
+        path: file.path.clone(),
+        revision: file.revision.clone(),
+        start: file.entries[0].start,
+        end: file.entries[0].end,
+        text: None,
+        keep,
+    };
+    engine.edit_project_memory(&project.id, &request(&file, true)).unwrap();
+    let ledger_path = data.path().join("decisions-kept.json");
+    let before = std::fs::read(&ledger_path).unwrap();
+    assert!(
+        read().files.iter().find(|file| file.path == ".faber/decisions.md").unwrap().entries[0].reviewed,
+        "fixture must have a protected approval"
+    );
+    let listed = read();
+    assert!(listed.files.iter().any(|file| file.path == "CLAUDE.md" && file.too_large));
+    assert!(!listed.incomplete, "fixture must finish its bounded scan");
+    let file = listed.files.into_iter().find(|file| file.path == ".faber/decisions.md").unwrap();
+    engine.edit_project_memory(&project.id, &request(&file, false)).unwrap();
+    assert!(
+        read().files.iter().find(|file| file.path == ".faber/decisions.md").unwrap().entries.is_empty(),
+        "deletion must remove the visible copy"
+    );
+    assert_eq!(std::fs::read(&ledger_path).unwrap(), before, "a file above the supported bound cannot prove its identical entry is gone");
+    engine.shutdown();
+}
+
+#[tokio::test]
+async fn project_memory_deletion_preserves_text_when_revocation_cannot_be_saved() {
+    memory_revocation_failure(false);
+}
+
+#[tokio::test]
+async fn project_memory_deletion_preserves_legacy_text_when_migration_cannot_be_saved() {
+    memory_revocation_failure(true);
+}
+
+fn memory_revocation_failure(legacy: bool) {
+    use faber_engine::project::memory::Edit;
+    {
+        let (data, root) = (memory_folder(), support::work_folder());
+        std::fs::create_dir_all(root.path().join(".faber")).unwrap();
+        let body = "- Keep project data local.";
+        let note = root.path().join(".faber/decisions.md");
+        let original = format!("{body} [by AI]\n");
+        std::fs::write(&note, &original).unwrap();
+        let spawn: Spawner = Arc::new(|_, _, _| panic!("memory never launches a CLI"));
+        let (engine, _rx) = engine(data.path(), Vendor::Claude, spawn);
+        let project = engine.add_project(root.path().to_str().unwrap()).unwrap();
+        let read =
+            || engine.project_memory(&project.id).unwrap().files.into_iter().find(|file| file.path == ".faber/decisions.md").unwrap();
+        let file = read();
+        let mut edit = Edit {
+            path: file.path,
+            revision: file.revision,
+            start: file.entries[0].start,
+            end: file.entries[0].end,
+            text: None,
+            keep: true,
+        };
+        engine.edit_project_memory(&project.id, &edit).unwrap();
+        let ledger = data.path().join("decisions-kept.json");
+        if legacy {
+            let saved: serde_json::Value = serde_json::from_slice(&std::fs::read(&ledger).unwrap()).unwrap();
+            let hash = saved[&project.id][0]["contentHash"].clone();
+            std::fs::write(&ledger, serde_json::to_vec(&serde_json::json!({&project.id: [hash]})).unwrap()).unwrap();
+        }
+        let before = std::fs::read(&ledger).unwrap();
+        std::fs::create_dir(data.path().join("decisions-kept.json.tmp")).unwrap();
+        edit.keep = false;
+        assert!(
+            engine.edit_project_memory(&project.id, &edit).is_err(),
+            "failed protected persistence must refuse deletion, legacy={legacy}"
+        );
+        assert_eq!(std::fs::read_to_string(&note).unwrap(), original, "failed revocation must leave the project text, legacy={legacy}");
+        assert_eq!(std::fs::read(&ledger).unwrap(), before);
+        engine.shutdown();
+    }
+}
+
+#[tokio::test]
+async fn project_memory_deleting_a_legacy_unmarked_last_copy_revokes_its_approval() {
+    use faber_engine::project::memory::Edit;
+    use sha2::{Digest, Sha256};
+    let (data, root) = (memory_folder(), support::work_folder());
+    let body = "- Keep project data local.";
+    std::fs::write(root.path().join("CLAUDE.md"), format!("{body}\n")).unwrap();
+    let spawn: Spawner = Arc::new(|_, _, _| panic!("memory never launches a CLI"));
+    let (engine, _rx) = engine(data.path(), Vendor::Claude, spawn);
+    let project = engine.add_project(root.path().to_str().unwrap()).unwrap();
+    let ledger = data.path().join("decisions-kept.json");
+    let hash = faber_engine::hex(&Sha256::digest(body.as_bytes()))[..32].to_string();
+    std::fs::write(&ledger, serde_json::to_vec(&serde_json::json!({&project.id: [hash]})).unwrap()).unwrap();
+    let file = engine.project_memory(&project.id).unwrap().files.into_iter().find(|file| file.path == "CLAUDE.md").unwrap();
+    engine
+        .edit_project_memory(
+            &project.id,
+            &Edit {
+                path: file.path,
+                revision: file.revision,
+                start: file.entries[0].start,
+                end: file.entries[0].end,
+                text: None,
+                keep: false,
+            },
+        )
+        .unwrap();
+    std::fs::create_dir_all(root.path().join(".faber")).unwrap();
+    std::fs::write(root.path().join(".faber/decisions.md"), format!("{body} [by AI]\n")).unwrap();
+    let note = engine.project_memory(&project.id).unwrap().files.into_iter().find(|file| file.path == ".faber/decisions.md").unwrap();
+    assert!(!note.entries[0].reviewed, "a deleted legacy unmarked copy cannot resurrect an approval");
+    engine.shutdown();
+}

@@ -21,7 +21,8 @@ impl Core {
         let read = self.opts.runtime.spawn_blocking(move || {
             let found = search.query_project(&query, &project, &asking, memory_search::ASKED);
             let list = crate::project::memory::list_faber(Path::new(&folder)).map(|mut list| {
-                crate::project::memory::mark_kept(&mut list, &kept());
+                let records = kept(&list);
+                crate::project::memory::mark_kept(&mut list, &records);
                 list
             });
             memory_search::answer(&query, &found, &list, now())

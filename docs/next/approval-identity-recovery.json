@@ -1,0 +1,12 @@
+{
+  "notes": {
+    "fixed": {
+      "en": "After the last copy of a kept project note is deleted, adding it back asks for approval again.",
+      "pt-BR": "Depois de apagar a última cópia de uma anotação aprovada do projeto, adicioná-la de novo exige outra aprovação.",
+      "es": "Después de borrar la última copia de una nota aprobada del proyecto, volver a añadirla requiere otra aprobación.",
+      "fr": "Après la suppression de la dernière copie d’une note de projet approuvée, la rajouter demande une nouvelle approbation.",
+      "de": "Wird die letzte Kopie einer bestätigten Projektnotiz gelöscht, muss sie beim erneuten Hinzufügen wieder bestätigt werden."
+    }
+  },
+  "decisions": []
+}

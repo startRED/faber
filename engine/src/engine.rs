@@ -412,6 +412,7 @@ struct Core {
     background_pending: bool,
     opts: EngineOptions,
     store: Store,
+    memory_edits: Arc<Mutex<()>>,
     emit: Emit,
     me: Weak<Mutex<Core>>,
     /// Conversations in use, the source of truth while the app runs; every change is written through to disk.
@@ -603,6 +604,7 @@ impl Engine {
                 background_pending: false,
                 opts,
                 store,
+                memory_edits: Arc::new(Mutex::new(())),
                 emit,
                 me: me.clone(),
                 convs: HashMap::new(),
@@ -1165,13 +1167,41 @@ impl Engine {
     pub fn project_memory(&self, id: &str) -> Result<crate::project::memory::MemoryList, String> {
         let project = self.project(id)?;
         let mut list = crate::project::memory::list(Path::new(&project.path)).map_err(str::to_string)?;
-        crate::project::memory::mark_kept(&mut list, &self.with(|c| c.store.kept_decisions(id)));
+        let records = self.with(|c| c.store.kept_decisions(id, &list));
+        crate::project::memory::mark_kept(&mut list, &records);
         Ok(list)
     }
     pub fn edit_project_memory(&self, id: &str, edit: &crate::project::memory::Edit) -> Result<(), String> {
+        let edits = self.with(|c| c.memory_edits.clone());
+        let _edit = edits.lock().map_err(|_| "error.memory.write".to_string())?;
         let project = self.project(id)?;
-        // Keeping writes nothing to the project: the person's review is stored here, out of an agent's reach (R16).
-        if let Some(hash) = crate::project::memory::apply(Path::new(&project.path), edit).map_err(str::to_string)? {
+        let revoke = if edit.text.is_none() && !edit.keep {
+            let before = crate::project::memory::list(Path::new(&project.path)).map_err(str::to_string)?;
+            let file = before.files.iter().find(|file| file.path == edit.path).ok_or("error.memory.changed")?;
+            if file.revision != edit.revision {
+                return Err("error.memory.changed".into());
+            }
+            let entry =
+                file.entries.iter().find(|entry| entry.start == edit.start && entry.end == edit.end).ok_or("error.memory.refused")?;
+            let hash = crate::project::memory::Approval::of(entry.body.as_deref().unwrap_or(&entry.text));
+            let used = before.files.iter().any(|file| {
+                file.entries.iter().any(|entry| {
+                    (file.path != edit.path || entry.start != edit.start || entry.end != edit.end)
+                        && crate::project::memory::Approval::of(entry.body.as_deref().unwrap_or(&entry.text)) == hash
+                })
+            });
+            (!before.incomplete && !before.files.iter().any(|file| file.too_large) && !used).then_some(hash)
+        } else {
+            None
+        };
+        let forget = self.with(|c| c.store.decision_revoker(id));
+        // The person's review is stored here, out of an agent's reach (R16).
+        // Revoke before replacement, after validation, without taking Core while the file writer is locked.
+        let kept = crate::project::memory::apply_before_delete(Path::new(&project.path), edit, move || {
+            revoke.as_ref().map_or(Ok(()), |hash| forget(hash).map_err(|error| error.key()))
+        })
+        .map_err(str::to_string)?;
+        if let Some(hash) = kept {
             self.with(|c| {
                 let live: Vec<_> = c.store.projects_checked().unwrap_or_default().into_iter().map(|p| p.id).collect();
                 c.store.keep_decision(id, hash, &live).map_err(|e| e.key().to_string())
@@ -4839,6 +4869,56 @@ mod tool_in_tests {
     use serde_json::json;
 
     #[tokio::test]
+    async fn memory_edits_refuse_a_failed_transaction_gate_before_changing_files_or_approvals() {
+        let data = tempfile::tempdir().unwrap();
+        let folder = tempfile::tempdir().unwrap();
+        std::fs::create_dir(folder.path().join(".faber")).unwrap();
+        let note = folder.path().join(".faber/decisions.md");
+        let original = "- Keep project data local. [by AI]\n";
+        std::fs::write(&note, original).unwrap();
+        let engine = Engine::new(
+            EngineOptions {
+                data_dir: data.path().into(),
+                clis: BTreeMap::new(),
+                spawn: Arc::new(|_, _, _| panic!("memory never starts a CLI")),
+                windows: cfg!(windows),
+                claude_env_billed: false,
+                max_warm: 0,
+                idle: Duration::from_secs(60),
+                runtime: tokio::runtime::Handle::current(),
+                ask: None,
+            },
+            Arc::new(|_| {}),
+        );
+        let project = engine.add_project(&folder.path().to_string_lossy()).unwrap();
+        let file = engine.project_memory(&project.id).unwrap().files.into_iter().find(|file| file.path == ".faber/decisions.md").unwrap();
+        let gate = engine.with(|core| core.memory_edits.clone());
+        assert!(
+            std::thread::spawn(move || {
+                let _guard = gate.lock().unwrap();
+                panic!("simulate an interrupted memory transaction");
+            })
+            .join()
+            .is_err()
+        );
+        for keep in [true, false] {
+            let edit = crate::project::memory::Edit {
+                path: file.path.clone(),
+                revision: file.revision.clone(),
+                start: file.entries[0].start,
+                end: file.entries[0].end,
+                text: None,
+                keep,
+            };
+            assert_eq!(engine.edit_project_memory(&project.id, &edit), Err("error.memory.write".into()));
+        }
+        assert_eq!(std::fs::read_to_string(note).unwrap(), original);
+        assert!(!data.path().join("decisions-kept.json").exists());
+        assert!(engine.projects_checked().is_ok(), "a failed memory gate never poisons the engine lock");
+        engine.shutdown();
+    }
+
+    #[tokio::test]
     async fn streamed_reply_events_and_open_keep_captured_bytes_out_of_the_screen_store() {
         let data = tempfile::tempdir().unwrap();
         let seen = Arc::new(Mutex::new(0usize));
@@ -4900,6 +4980,66 @@ mod tool_in_tests {
         assert!(!json.contains("SNAPSHOT-BYTES") && !json.contains("visualFiles"));
         assert_eq!(moved.messages[0].visual_file_count, Some(3));
         assert_eq!(engine.open(&id).unwrap().messages[0].visual_files.len(), 3, "move response does not discard stored versions");
+        engine.shutdown();
+    }
+
+    #[tokio::test]
+    async fn memory_revocation_finishes_before_project_replacement_and_never_restores_after_conflict() {
+        use crate::store::{Disk, RealDisk};
+        struct ConcurrentEditor {
+            note: PathBuf,
+        }
+        impl Disk for ConcurrentEditor {
+            fn write(&self, path: &Path, bytes: &[u8]) -> std::io::Result<()> {
+                RealDisk.write(path, bytes)
+            }
+            fn rename(&self, from: &Path, to: &Path) -> std::io::Result<()> {
+                RealDisk.rename(from, to)?;
+                if to.file_name().is_some_and(|name| name == "decisions-kept.json") {
+                    std::fs::write(&self.note, "- Changed by another editor. [by AI]\n")?;
+                }
+                Ok(())
+            }
+        }
+        let data = tempfile::tempdir().unwrap();
+        let folder = tempfile::tempdir().unwrap();
+        std::fs::create_dir(folder.path().join(".faber")).unwrap();
+        let note = folder.path().join(".faber/decisions.md");
+        let original = "- Keep project data local. [by AI]\n";
+        std::fs::write(&note, original).unwrap();
+        let engine = Engine::new(
+            EngineOptions {
+                data_dir: data.path().into(),
+                clis: BTreeMap::new(),
+                spawn: Arc::new(|_, _, _| panic!("memory never starts a CLI")),
+                windows: cfg!(windows),
+                claude_env_billed: false,
+                max_warm: 0,
+                idle: Duration::from_secs(60),
+                runtime: tokio::runtime::Handle::current(),
+                ask: None,
+            },
+            Arc::new(|_| {}),
+        );
+        let project = engine.add_project(&folder.path().to_string_lossy()).unwrap();
+        let read =
+            || engine.project_memory(&project.id).unwrap().files.into_iter().find(|file| file.path == ".faber/decisions.md").unwrap();
+        let file = read();
+        let mut edit = crate::project::memory::Edit {
+            path: file.path,
+            revision: file.revision,
+            start: file.entries[0].start,
+            end: file.entries[0].end,
+            text: None,
+            keep: true,
+        };
+        engine.edit_project_memory(&project.id, &edit).unwrap();
+        engine.with(|core| core.store = Store::with_disk(data.path(), Arc::new(ConcurrentEditor { note: note.clone() })));
+        edit.keep = false;
+        assert_eq!(engine.edit_project_memory(&project.id, &edit), Err("error.memory.changed".into()));
+        assert_eq!(std::fs::read_to_string(&note).unwrap(), "- Changed by another editor. [by AI]\n");
+        std::fs::write(&note, original).unwrap();
+        assert!(!read().entries[0].reviewed, "a failed project replacement cannot restore revoked authority");
         engine.shutdown();
     }
 

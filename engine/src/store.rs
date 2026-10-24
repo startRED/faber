@@ -7,6 +7,7 @@
 
 use crate::ledger::Ledger;
 use crate::model::{BranchOf, Conversation, Project, Settings, Summary};
+use crate::project::memory::Approval;
 use crate::recents::Recents;
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
@@ -142,6 +143,7 @@ pub struct Store {
     /// The grants epoch started when the settings could not be read. It lives here, in memory, and is the epoch in force
     /// until a save writes it: a read that works again later never brings the epoch on disk back.
     recovery_epoch: std::sync::Mutex<Option<String>>,
+    approvals_lock: Arc<std::sync::Mutex<()>>,
 }
 
 /// The conversation replacement commits the move; until then group membership must roll back after a crash.
@@ -182,6 +184,7 @@ impl Store {
             budget_owner: None,
             owner_required: false,
             recovery_epoch: std::sync::Mutex::new(None),
+            approvals_lock: Arc::new(std::sync::Mutex::new(())),
             cache_health: data_dir.join("cache-health.jsonl"),
         }
     }
@@ -579,25 +582,86 @@ impl Store {
     /// The AI decisions the person kept in a project's decision list (R16), as hashes of their words. They live here and
     /// not in the project, so no agent can write a review. A missing or damaged file keeps nothing: decisions read "not
     /// reviewed" again.
-    pub fn kept_decisions(&self, project: &str) -> Vec<String> {
-        self.kept_decisions_reader(project)()
+    pub fn kept_decisions(&self, project: &str, list: &crate::project::memory::MemoryList) -> Vec<Approval> {
+        self.kept_decisions_reader(project)(list)
     }
 
     /// `kept_decisions` for a worker: the file is read when the closure is called, away from the engine lock.
-    pub fn kept_decisions_reader(&self, project: &str) -> impl FnOnce() -> Vec<String> + Send + 'static {
-        let (path, project) = (self.decisions_kept.clone(), project.to_string());
-        move || read::<BTreeMap<String, Vec<String>>>(&path).unwrap_or_default().remove(&project).unwrap_or_default()
+    pub fn kept_decisions_reader(
+        &self,
+        project: &str,
+    ) -> impl FnOnce(&crate::project::memory::MemoryList) -> Vec<Approval> + Send + 'static {
+        let (path, project, disk, lock) =
+            (self.decisions_kept.clone(), project.to_string(), self.disk.clone(), self.approvals_lock.clone());
+        move |list| {
+            let Ok(_guard) = lock.lock() else { return Vec::new() };
+            let Some(mut all) = read::<BTreeMap<String, Vec<Approval>>>(&path) else { return Vec::new() };
+            let previous = all.get(&project).cloned().unwrap_or_default();
+            let wanted = previous
+                .iter()
+                .filter_map(|record| match record {
+                    Approval::Legacy(hash) => Some(hash.as_str()),
+                    _ => None,
+                })
+                .collect::<std::collections::BTreeSet<_>>();
+            let mut changed = false;
+            if !wanted.is_empty() {
+                let mut verified = BTreeMap::new();
+                for body in list.files.iter().flat_map(|file| &file.entries).filter_map(|entry| entry.body.as_deref()) {
+                    let current = Approval::of(body);
+                    if let Approval::Item { content_hash, .. } = &current
+                        && wanted.contains(content_hash.as_str())
+                    {
+                        verified.insert(content_hash.clone(), current);
+                    }
+                }
+                for record in all.entry(project.clone()).or_default() {
+                    if let Approval::Legacy(hash) = record
+                        && let Some(current) = verified.get(hash)
+                    {
+                        *record = current.clone();
+                        changed = true;
+                    }
+                }
+            }
+            if changed {
+                let bytes = serde_json::to_vec_pretty(&all).expect("plain data always serializes");
+                if replace(&*disk, &path, &bytes).is_err() {
+                    return previous.into_iter().filter(|record| matches!(record, Approval::Item { .. })).collect();
+                }
+            }
+            all.remove(&project).unwrap_or_default().into_iter().filter(|record| matches!(record, Approval::Item { .. })).collect()
+        }
     }
 
     /// Adds one kept decision. The newest 500 per project stay, and projects that are gone (not in `live`) are dropped.
-    pub fn keep_decision(&self, project: &str, hash: String, live: &[String]) -> Result<(), Fault> {
-        let mut all = read::<BTreeMap<String, Vec<String>>>(&self.decisions_kept).unwrap_or_default();
+    pub fn keep_decision(&self, project: &str, hash: Approval, live: &[String]) -> Result<(), Fault> {
+        let _guard = self.approvals_lock.lock().map_err(|_| Fault::Write)?;
+        let mut all = read::<BTreeMap<String, Vec<Approval>>>(&self.decisions_kept).unwrap_or_default();
         all.retain(|id, _| live.contains(id));
         let kept = all.entry(project.into()).or_default();
-        kept.retain(|h| *h != hash);
+        kept.retain(|h| !h.matches(&hash));
         kept.push(hash);
         kept.drain(..kept.len().saturating_sub(500));
         self.write(&self.decisions_kept, &all)
+    }
+
+    /// Revokes a last copy before deleting it, without holding the engine lock during the file replacement.
+    pub fn decision_revoker(&self, project: &str) -> impl FnOnce(&Approval) -> Result<(), Fault> + Send + 'static + use<> {
+        let (path, project, disk, lock) =
+            (self.decisions_kept.clone(), project.to_string(), self.disk.clone(), self.approvals_lock.clone());
+        move |hash| {
+            let _guard = lock.lock().map_err(|_| Fault::Write)?;
+            let mut all = read_checked::<BTreeMap<String, Vec<Approval>>>(&path)?.unwrap_or_default();
+            let Some(kept) = all.get_mut(&project) else { return Ok(()) };
+            let previous = kept.len();
+            kept.retain(|record| !record.matches(hash));
+            if kept.len() == previous {
+                return Ok(());
+            }
+            let bytes = serde_json::to_vec_pretty(&all).expect("plain data always serializes");
+            replace(&*disk, &path, &bytes)
+        }
     }
 
     /// What Faber remembers about each vendor's quota, for Chat and Auto. A missing, damaged or unreadable file is an empty
@@ -667,6 +731,43 @@ impl Store {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn approval_migration_needs_a_successful_protected_write_and_preserves_unseen_records() {
+        struct FullDisk;
+        impl Disk for FullDisk {
+            fn write(&self, _: &Path, _: &[u8]) -> io::Result<()> {
+                Err(io::ErrorKind::StorageFull.into())
+            }
+            fn rename(&self, _: &Path, _: &Path) -> io::Result<()> {
+                panic!("a failed write must never rename")
+            }
+        }
+        let data = tempfile::tempdir().unwrap();
+        let project = tempfile::tempdir().unwrap();
+        fs::create_dir(project.path().join(".faber")).unwrap();
+        fs::write(project.path().join(".faber/decisions.md"), "- Use SQLite. [by AI]\n").unwrap();
+        let list = crate::project::memory::list(project.path()).unwrap();
+        let current = Approval::of("- Use SQLite.");
+        let old = Approval::of("- Previously confirmed.");
+        let Approval::Item { content_hash, .. } = &current else { unreachable!() };
+        let ledger = serde_json::json!({"project": [content_hash, old, "unseen-legacy"], "other": ["other-legacy"]});
+        let path = data.path().join("decisions-kept.json");
+        let bytes = serde_json::to_vec(&ledger).unwrap();
+        fs::write(&path, &bytes).unwrap();
+        let failing = Store::with_disk(data.path(), Arc::new(FullDisk));
+        assert_eq!(failing.kept_decisions("project", &list), [old.clone()], "failed migration cannot authorize the legacy item");
+        assert_eq!(fs::read(&path).unwrap(), bytes, "the previous protected record survives failure");
+        let store = Store::new(data.path());
+        assert_eq!(store.kept_decisions("project", &list), [current.clone(), old]);
+        let saved: serde_json::Value = serde_json::from_slice(&fs::read(&path).unwrap()).unwrap();
+        assert_eq!(saved["project"][0], serde_json::to_value(current).unwrap());
+        assert_eq!(saved["project"][2], "unseen-legacy");
+        assert_eq!(saved["other"], ledger["other"], "a bounded read never drops another project's records");
+        let once = fs::read(&path).unwrap();
+        store.kept_decisions("project", &list);
+        assert_eq!(fs::read(&path).unwrap(), once, "an unchanged read does not rewrite the ledger");
+    }
 
     #[test]
     fn a_failed_rename_returns_the_error_and_removes_the_temp_file() {

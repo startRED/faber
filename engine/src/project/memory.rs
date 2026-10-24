@@ -501,11 +501,41 @@ fn digest(body: &str) -> String {
     revision(body.trim().as_bytes())[..32].into()
 }
 
+/// Protected records; legacy hashes retain only their existing exact-content authority.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(untagged)]
+pub enum Approval {
+    Item {
+        #[serde(rename = "itemId")]
+        item_id: String,
+        #[serde(rename = "contentHash")]
+        content_hash: String,
+    },
+    Legacy(String),
+}
+
+impl Approval {
+    pub(crate) fn of(body: &str) -> Self {
+        let first = body.trim().lines().next().unwrap_or_default().split_whitespace().collect::<Vec<_>>().join(" ");
+        Self::Item { item_id: revision(first.as_bytes()), content_hash: digest(body) }
+    }
+
+    pub(crate) fn matches(&self, current: &Self) -> bool {
+        match (self, current) {
+            (Self::Legacy(hash), Self::Item { content_hash, .. }) => hash == content_hash,
+            _ => self == current,
+        }
+    }
+}
+
 /// Marks the decisions the person kept or wrote (`kept` is what Faber stored outside the project). A `[by person]` mark
 /// with no record is an agent's claim, so it reads as an AI decision not yet reviewed, whatever the file says.
-pub fn mark_kept(list: &mut MemoryList, kept: &[String]) {
+pub fn mark_kept(list: &mut MemoryList, kept: &[Approval]) {
     for entry in list.files.iter_mut().flat_map(|f| &mut f.entries) {
-        let recorded = entry.body.as_deref().is_some_and(|b| kept.contains(&digest(b)));
+        let recorded = entry.body.as_deref().is_some_and(|b| {
+            let current = Approval::of(b);
+            kept.iter().any(|record| record.matches(&current))
+        });
         if entry.author == Some("person") && !recorded {
             entry.author = Some("ai");
         }
@@ -722,14 +752,31 @@ pub fn edit(project: &Path, edit: &Edit) -> Result<(), &'static str> {
 }
 
 /// Like `edit`, and for `keep` returns the hash of the kept words instead of writing anything.
-pub fn apply(project: &Path, edit: &Edit) -> Result<Option<String>, &'static str> {
+pub fn apply(project: &Path, edit: &Edit) -> Result<Option<Approval>, &'static str> {
     edit_with_private(project, edit, &private_roots())
 }
 
 /// One writer at a time for the notes and `rules.md`.
 static WRITES: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
-fn edit_with_private(project: &Path, edit: &Edit, protected: &[String]) -> Result<Option<String>, &'static str> {
+fn edit_with_private(project: &Path, edit: &Edit, protected: &[String]) -> Result<Option<Approval>, &'static str> {
+    edit_before_delete(project, edit, protected, || Ok(()))
+}
+
+pub(crate) fn apply_before_delete(
+    project: &Path,
+    edit: &Edit,
+    before_delete: impl FnOnce() -> Result<(), &'static str>,
+) -> Result<Option<Approval>, &'static str> {
+    edit_before_delete(project, edit, &private_roots(), before_delete)
+}
+
+fn edit_before_delete(
+    project: &Path,
+    edit: &Edit,
+    protected: &[String],
+    before_delete: impl FnOnce() -> Result<(), &'static str>,
+) -> Result<Option<Approval>, &'static str> {
     let _write = WRITES.lock().map_err(|_| "error.memory.write")?;
     let source = source(&edit.path).ok_or(REFUSED)?;
     let protected = resolved_private(protected);
@@ -762,7 +809,7 @@ fn edit_with_private(project: &Path, edit: &Edit, protected: &[String]) -> Resul
     if edit.keep {
         let text = &original[entry.start..entry.end];
         let kept = decisions(&edit.path).then(|| mark(text)).flatten().ok_or(REFUSED)?;
-        return Ok(Some(digest(&text[..kept.open])));
+        return Ok(Some(Approval::of(&text[..kept.open])));
     }
     if let Some(text) = &edit.text {
         if text.trim().is_empty() || text.contains('\0') || text.len() > MAX_BYTES {
@@ -784,11 +831,14 @@ fn edit_with_private(project: &Path, edit: &Edit, protected: &[String]) -> Resul
         return Err(REFUSED);
     }
     drop(file);
+    if edit.text.is_none() {
+        before_delete()?;
+    }
     dir.replace(name, &next, permissions, expected)
         .map_err(|error| if error.kind() == std::io::ErrorKind::AlreadyExists { CHANGED } else { "error.memory.write" })?;
     // Words the person wrote themselves in Memory and marked theirs are recorded as theirs, like a Keep.
     let written = edit.text.as_deref().filter(|_| decisions(&edit.path)).map(str::trim_end);
-    Ok(written.and_then(|text| mark(text).filter(|m| m.author == "person").map(|m| digest(&text[..m.open]))))
+    Ok(written.and_then(|text| mark(text).filter(|m| m.author == "person").map(|m| Approval::of(&text[..m.open]))))
 }
 
 #[cfg(test)]
@@ -1064,7 +1114,7 @@ mod tests {
 
     const DECISIONS: &str = "- Use SQLite for the cache. [by AI]\n- Keep the old export, it is\n  what customers use. [By Person]\n- Ship on Fridays\n- Drop the beta flag [by AI, reviewed]\n- Mixed [by robot]\n- Use [by AI] marks mid-line\n- Odd [by person, reviewed]\n";
 
-    fn listed(project: &Path, path: &str, kept: &[String]) -> MemoryFile {
+    fn listed(project: &Path, path: &str, kept: &[Approval]) -> MemoryFile {
         let mut list = list(project).unwrap();
         mark_kept(&mut list, kept);
         list.files.into_iter().find(|f| f.path == path).unwrap()
@@ -1079,7 +1129,7 @@ mod tests {
         (project, file)
     }
 
-    fn keep(project: &Path, file: &MemoryFile, i: usize) -> Result<Option<String>, &'static str> {
+    fn keep(project: &Path, file: &MemoryFile, i: usize) -> Result<Option<Approval>, &'static str> {
         apply(
             project,
             &Edit {
