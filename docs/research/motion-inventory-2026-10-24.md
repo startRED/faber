@@ -20,12 +20,13 @@ Rules: `docs/design/looks.md`, `.claude/skills/faber-ui/SKILL.md` and `docs/dev/
 | Sidebar and project folds | `App.tsx`, `.fold`, shared resize; shell/motion/review-motion checks | Focus mode, narrow overlay, scrim, folding and resize cancellation. |
 | Catalog | `Catalog.tsx`, selection fade, empty pulse; `catalog.check.ts` | Browse, details, filter and pagination under full/reduced/none. |
 | First run, setup and tutorial | `FirstRun.tsx`, `Setup.tsx`, coach/ring; setup/styles/tutorial/motion checks, sentinel tutorial | Step/back/skip/retry, ring travel and final exit. |
-| Message actions and thumbnails | Shared Thread and thumbnail CSS; `viewer.check.ts` | Focused runtime timing is checked below; slow visual feedback and expanded attachments remain to inspect. |
+| Message actions and thumbnails | Shared Thread and thumbnail CSS; `viewer.check.ts` | Four focused 720x480/full/0.25x states independently inspected; real photos, varied ratios, interruption and remaining motion modes still need observation. |
 | Viewer, quote popup and reply states | Viewer CSS, swap icons, animateDetails; viewer/motion/review-motion checks | Opening origin, image swap, cleanup and interrupted disclosures. |
 | Home effects and theme changes | Welcome, Ghost, Ambient, Hole, native View Transition; idle/hole/quiet checks | Distinguish expressive home scenes from chrome; focus loss, hidden stop, theme swap and reduced/none. |
 | What's new | `WhatsNew.tsx`, `.notes-group`; `notes.check.ts` and new all-theme motion check | Entry stagger, closing and reduced/none in every factory theme. |
 
-These check names identify existing coverage, not a claim that this investigation executed all of them.
+These check names identify existing coverage, not a claim that this investigation executed all of them. The focused
+attachment and message-bar capture is recorded in `motion-frequent-input-2026-10-24.md`; it does not approve this inventory.
 
 ## Verified findings and unfinished corrections
 
@@ -56,5 +57,6 @@ walk remain unfinished. Details are in `motion-chrome-timing-2026-10-24.md`; evi
 running-column open/close at 1440x900, 1000x700 and 720x480, the narrow sidebar, Settings and reduced motion.
 Composition covers 1920x1080 and 1280x800.
 
-This is not a complete inventory walkthrough. Menus, Catalog details, thumbnail expansion, message actions, native
-picker behavior and recoverable-error animation still need explicit observation and independent scores.
+This is not a complete inventory walkthrough. Menus, Catalog details, native picker behavior and recoverable-error
+animation still need explicit observation and independent scores. Thumbnail expansion and message actions now have
+one independently inspected four-state slow capture; their broader cases and individual scores remain unfinished.

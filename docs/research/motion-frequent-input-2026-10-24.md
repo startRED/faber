@@ -45,3 +45,31 @@ eight rubric lines, with no deductions. Cards checked: C005 and C011. Evidence n
 The composition images do not expose hovered message actions or expanded attachments. Static images cannot prove
 animation timing or reduced-motion behavior; those claims rely on the native checks above. A slowed visual walk of
 all moving surfaces and their individual scores is still unfinished under task 997.
+
+## Focused slow capture: attachments and the message bar
+
+The first successful focused capture is retained in the evidence root above under
+`attachments-720-full-fixture04/run-04/`: four PNGs, before/after provenance and a detailed receipt. Three earlier
+attempts failed and remain retained: missing Git before launch, an incomplete clock sample, then a timeout awaiting
+attachment disclosure and a completed response. Independent diagnosis identified an incompatible replay input;
+that failed capture did not establish whether submission occurred. None produced successful screenshots or counts
+as visual approval.
+
+The successful run used the existing pinned app, driver and fake CLI, without compilation. A detached runtime
+worktree at `af853a33` changed only the replay's first input to seven exact 1x1 PNG blocks and the original question,
+following the existing attachment-check pattern. This is synthetic content, not a live provider response.
+Before/after source and executable identities matched; the runtime fixture was intentionally modified and recorded.
+
+At 720x480, full motion and 0.25x playback, the four images show hidden message actions, revealed hover actions,
+attachment expansion in progress and all seven attachments expanded. Submission waited for Send to become enabled,
+clicked the composer and pressed Enter; the field cleared. The normal resource gate was acquired. The clock passed
+on sample two of the bounded three-sample policy (184 frames, median gap about 5.3 ms); 235 expansion observations
+include intermediate opacity and all three newly revealed attachments reaching opacity 1. Exit was natural with
+code 0 and the CLEAN marker. Parent tool receipts: launch `476e8d`, identity/self-check/dry-run `84d26c`.
+
+Fresh read-only reviewer `/root/fixture04_review` (`gpt-6.1-sol`) inspected all four images and receipts. It found no
+evident visual defect in this scope: the hover bar did not move content and the expanded thumbnails stayed aligned
+without visible overlap. Its preparation and result reports are retained verbatim beside the capture folder.
+This is a focused observation, not a replacement for the scored composition critique or the full task-997 walk.
+The 1x1 images do not cover real-photo quality, decoding load or varied aspect ratios. Slowed playback does not
+measure normal-speed smoothness, memory or processor cost. Integration remains unverified.
