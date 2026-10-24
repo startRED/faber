@@ -321,7 +321,7 @@ pub(super) fn labels(request: &str, cwd: Option<&Path>) -> (BTreeSet<String>, BT
         ),
         (
             "performance",
-            "performance optimize optimization fps memory cpu gpu desempenho otimizar otimize memoria optimizar optimiza rendimiento optimiser optimise memoire optimieren optimiere leistung speicher",
+            "performance performances optimize optimization fps memory cpu gpu desempenho otimizar otimize memoria optimizar optimiza rendimiento optimiser optimise memoire optimieren optimiere leistung speicher",
         ),
         (
             "database",
@@ -349,6 +349,9 @@ pub(super) fn labels(request: &str, cwd: Option<&Path>) -> (BTreeSet<String>, BT
         }
     }
     let has = |words: &str| words.split_whitespace().any(|word| tokens.contains(word));
+    if jobs.contains("performance") && has("browser browsers navegador navegadores navigateur navigateurs") {
+        jobs.insert("measure".into());
+    }
     let phrase = |terms: &str| terms.split('|').any(|term| contains_term(&text, term));
     for (job, terms) in [
         (
@@ -779,6 +782,23 @@ mod tests {
                     "Crea un sitio para mi panadería",
                     "Crée un site pour ma boulangerie",
                     "Erstelle eine Website für meine Bäckerei",
+                ],
+            ),
+            (
+                "chrome-devtools",
+                [
+                    "Measure browser rendering performance",
+                    "Meça o desempenho da página no navegador",
+                    "Mide el rendimiento de la página en el navegador",
+                    "Mesure les performances de la page dans le navigateur",
+                    "Miss die Leistung meiner Webseite im Browser",
+                ],
+                [
+                    "Measure backend performance",
+                    "Meça o desempenho do servidor",
+                    "Mide el rendimiento del servidor",
+                    "Mesure les performances de mon serveur",
+                    "Miss die Leistung meines Servers",
                 ],
             ),
         ];

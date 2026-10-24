@@ -539,6 +539,8 @@ The folder stays denied to Edit and Write and is healed at launch; full-access s
 as they can the catalog. It has no catalog card, switch or report entry and never reaches Isolated requests.
 
 Code chooses instructions and servers from installed, switched-on, verified ready resources at session boundaries.
+Browser performance requests in all five languages also match the measurement job without naming Lighthouse;
+generic server performance and simple website creation do not opt into that browser tool.
 Task intent and stack fingerprints match every shipped job group in English, Portuguese, Spanish, French and German; casual consumer questions,
 document-page summaries, house plants, arithmetic and README typos do not activate software skills. No picker model,
 spare router or process is added. A kit stays fixed during its turn; a helper chooses for its own brief, while native

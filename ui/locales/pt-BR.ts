@@ -2103,6 +2103,7 @@ export const ptBR: Messages = {
   'notes.227.fixed': 'Você pode voltar à lista do Catálogo sem rolar até o início dos detalhes de uma ferramenta.',
   'notes.228.fixed': 'Fica mais fácil remover imagens e arquivos anexados com o botão maior.',
   'notes.229.better': 'Em janelas pequenas, trocar entre Chat e Projetos mantém o menu aberto pra você escolher onde continuar.',
+  'notes.230.fixed': 'Pedidos para medir o desempenho no navegador passam a selecionar a ferramenta instalada, mesmo sem citar seu nome.',
   'update.checking': 'Procurando atualização…',
   'update.downloading': 'Baixando atualização…',
   'update.downloadingPercent': 'Baixando atualização… {percent}%',
