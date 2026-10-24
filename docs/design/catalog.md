@@ -4,6 +4,9 @@ Faber's original frontend-craft and frontend-proof instruction skills are part o
 delivery, not catalog entries or a new tool installation path. They add no cards, switches or screen layout; third-party
 design skills keep their existing source, installation and selection rules ([contract](../product/frontend.md)).
 
+An installed browser tool can match a browser performance request without its name being mentioned. This adds no
+screen control and preserves the existing project, permission and on/off boundaries.
+
 A browsing and management tab beside Chat and Projects (R344). It extends the pinned skill/server store, moving its
 controls out of Settings > Projects. It is not a work area: no conversation, composer, project instructions or AI picker.
 

@@ -6,7 +6,8 @@ How the Settings screen looks and behaves. The first run and the tutorial are in
 
 - Settings replaces the shell, as before, with a list of five sections on the left: General, Projects, Appearance,
   Accounts and limits and Privacy, and "Faber <version>" once at the bottom of the list. Ctrl comma opens it on General,
-  the quota of a vendor in the sidebar opens it on Accounts and limits, and Esc or Back closes it. Switching sections is
+  the quota of a vendor in the sidebar opens it on Accounts and limits, and Esc or Back closes it. With a native options
+  list open, the first Esc dismisses only that list and keeps Settings and its focused select in place. Switching sections is
   a short cross-fade (the owner, 2026-10-17, reversing R169): the old section leaves as an inert copy while the new one
   arrives. The departing copy preserves each native select's current choice, including the language label;
   copying that state does not save or change the live preference. The new section opens scrolled to its top, and with reduced or no motion it is instant. All sections share one content width (`--st-w`: 720 px, growing with the window to 820 px, centred right of the list; the Appearance section keeps its own two columns), and the section title is not drawn again above the cards (the list names it; screen readers still get the heading).

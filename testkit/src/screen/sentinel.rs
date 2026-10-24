@@ -3,7 +3,7 @@
 //! probe (`probe.js`) measures; the rules are in `crate::sentinel`, where each has its planted-defect twin as a unit
 //! test. Here every detector also meets a planted defect in the live page (never in the repository), and must find it.
 
-use super::{Result, Scenario, ask, claude_chat, ensure, pause, start_settings, system_motion};
+use super::{Result, Scenario, ask, claude_chat, ensure, pause, same, start_settings, system_motion};
 use crate::app::Ctx;
 use crate::page::{Page, css};
 use crate::sandbox::{CliSlot, Launch};
@@ -15,6 +15,8 @@ const PROBE: &str = include_str!("../probe.js");
 pub fn scenarios() -> Vec<Scenario> {
     vec![
         Scenario { name: "sentinel: panels move through frames, and reduced motion moves nothing", run: motion },
+        Scenario { name: "sentinel: catalog card controls fade on hover and keyboard focus", run: catalog_controls },
+        Scenario { name: "sentinel: the native select picker opens and dismisses through real frames", run: native_picker },
         Scenario { name: "sentinel: a permission card arrives through frames", run: permission },
         Scenario { name: "sentinel: the composer grows and shrinks, and the end of the thread stays clear", run: composer },
         Scenario { name: "sentinel: no text is garbled in five languages, and titles survive the engine's files", run: text },
@@ -163,6 +165,178 @@ fn judge_motion(ctx: &mut Ctx, found: &mut Vec<Finding>, screen: &str, surface: 
             Ok(())
         }
     }
+}
+
+fn catalog_controls(ctx: &mut Ctx) -> Result {
+    start_settings(ctx, "pt-BR")?;
+    let mut app = ctx.launch(claude_chat(ctx))?;
+    let page = &mut app.page;
+    let folder = ctx.paths.target.join("ux/catalog-controls");
+    std::fs::create_dir_all(&folder).map_err(|e| e.to_string())?;
+    let mut found = Vec::new();
+    for mode in ["full", "reduced", "none"] {
+        let config = Config {
+            width: 1280,
+            height: 800,
+            look: "sala",
+            language: "pt-BR",
+            size: 15,
+            motion: if mode == "none" { "none" } else { "full" },
+        };
+        apply(page, &config)?;
+        inject(page)?;
+        if mode == "full" {
+            system_motion(page, false)?;
+            clock_and_slow(page)?;
+        }
+        system_motion(page, mode == "reduced")?;
+        page.click(&css("[data-catalog-tab]"))?;
+        page.wait_for("Catalog cards", "!!document.querySelector('[data-catalog-card]')")?;
+        page.wait_for("Catalog to finish arriving", "document.getAnimations().every(a => a.effect.getTiming().iterations === Infinity || (!a.pending && a.playState !== 'running'))")?;
+        ensure(page.eval("matchMedia('(hover: hover)').matches")? == json!(true), || {
+            "infrastructure: this pointer cannot qualify Catalog hover motion".to_string()
+        })?;
+        page.eval("(() => { const tile = document.querySelector('.catalog-tile'); tile.dataset.motionCatalog = 'true'; for (const name of ['catalog-pick', 'catalog-site']) tile.querySelector('.' + name).dataset.surface = name; return true; })()")?;
+        let card = css("[data-motion-catalog] [data-catalog-card]");
+        page.wait_visible(&card)?;
+        let away = css("[data-catalog-tab]");
+        page.hover(&away)?;
+        page.eval_on(&css("[data-catalog-pick-shown]"), "el.focus(); return {};")?;
+        for step in ["hover-in", "hover-out", "focus-in", "focus-out"] {
+            let shown = step.ends_with("in");
+            let w = watch(ctx, &format!("catalog {mode} {step}"), page, &["catalog-pick", "catalog-site"], |p| {
+                match step {
+                    "hover-in" => p.hover(&card)?,
+                    "hover-out" => p.hover(&away)?,
+                    "focus-in" => p.press("Tab")?,
+                    _ => p.press("Shift+Tab")?,
+                }
+                if mode != "full" {
+                    same(p.eval("[...document.querySelectorAll('[data-motion-catalog] :is(.catalog-pick,.catalog-site)')].map(e => Number(getComputedStyle(e).opacity))")?, json!([if shown { 1 } else { 0 }, if shown { 1 } else { 0 }]), "reduced/none controls change opacity immediately")?;
+                }
+                Ok(())
+            })?;
+            for (i, surface) in ["catalog-pick", "catalog-site"].iter().enumerate() {
+                if mode == "full" {
+                    judge_motion(ctx, &mut found, "catalog", surface, step, mode, &w.samples[i])?;
+                }
+                same(
+                    page.eval(&format!("Number(getComputedStyle(document.querySelector('[data-motion-catalog] .{surface}')).opacity)"))?,
+                    json!(if shown { 1 } else { 0 }),
+                    "settled Catalog action visibility",
+                )?;
+            }
+            if mode != "full" {
+                ensure(w.anims.iter().all(|a| !a.target.contains("catalog")), || format!("{mode} Catalog controls must not animate"))?;
+            }
+            if step == "focus-in" {
+                same(
+                    page.eval("document.activeElement === document.querySelector('[data-motion-catalog] [data-catalog-card]')")?,
+                    json!(true),
+                    "Tab enters the first real Catalog card",
+                )?;
+            }
+            page.screenshot(&folder.join(format!("{mode}-{step}.png")))?;
+        }
+    }
+    gate(ctx, "catalog-controls", &found)
+}
+
+fn native_picker(ctx: &mut Ctx) -> Result {
+    start_settings(ctx, "pt-BR")?;
+    let mut app = ctx.launch(claude_chat(ctx))?;
+    let page = &mut app.page;
+    let folder = ctx.paths.target.join("ux/picker");
+    std::fs::create_dir_all(&folder).map_err(|e| e.to_string())?;
+    let capability = page.eval("({ supported: CSS.supports('appearance', 'base-select'), userAgent: navigator.userAgent })")?;
+    std::fs::write(folder.join("capability.json"), capability.to_string()).map_err(|e| e.to_string())?;
+    ensure(capability["supported"] == json!(true), || {
+        format!("infrastructure: this WebView cannot qualify the customizable picker: {capability}")
+    })?;
+    let mut detached = Vec::new();
+    for (width, height) in [(720, 480), (1280, 800), (1920, 1080)] {
+        for mode in ["full", "reduced", "none"] {
+            let config =
+                Config { width, height, look: "sala", language: "pt-BR", size: 15, motion: if mode == "none" { "none" } else { "full" } };
+            apply(page, &config)?;
+            inject(page)?;
+            if mode == "full" {
+                system_motion(page, false)?;
+                page.cdp.call("Animation.setPlaybackRate", json!({ "playbackRate": 1.0 }))?;
+                clock_and_slow(page)?;
+            }
+            system_motion(page, mode == "reduced")?;
+            pause(0.3);
+            page.press("Control+,")?;
+            let select = page.labelled("set.language")?;
+            page.wait_visible(&select)?;
+            page.wait_for("Settings to finish arriving", "document.getAnimations().every(a => a.effect.getTiming().iterations === Infinity || (!a.pending && a.playState !== 'running'))")?;
+            page.eval_on(&select, "el.dataset.pickerProbe = 'true'; return {};")?;
+            let before = page.eval("document.querySelector('[data-picker-probe]').value")?;
+            // The picker is a pseudo-element, so the DOM-surface probe cannot observe it.
+            page.eval(r#"(() => {
+          const el = document.querySelector('[data-picker-probe]');
+          const state = () => { const s = getComputedStyle(el, '::picker(select)'); return {
+            at: performance.now(), open: el.matches(':open'), display: s.display,
+            opacity: s.opacity === '' ? null : Number(s.opacity), transform: s.transform, connected: el.isConnected,
+            animations: document.getAnimations().filter(a => a.effect?.getTiming().iterations !== Infinity).map(a => ({ state:a.playState, pseudo:a.effect?.pseudoElement,
+              duration:a.effect?.getTiming().duration, progress:a.effect?.getComputedTiming().progress })) }; };
+          window.__pickerProbe = { state, rows: [], running: false,
+            start() { this.rows = [state()]; this.running = true; const frame = () => {
+              if (!this.running) return; this.rows.push(state()); requestAnimationFrame(frame); }; requestAnimationFrame(frame); },
+            finish() { return new Promise(resolve => setTimeout(() => { this.running = false; this.rows.push(state()); resolve(this.rows); }, 1600)); } };
+          return true;
+        })()"#)?;
+            for step in ["opens", "closes"] {
+                page.eval("window.__pickerProbe.start(); true")?;
+                if step == "opens" {
+                    page.click(&select)?;
+                    page.wait_for("the real native picker to open", "document.querySelector('[data-picker-probe]').matches(':open')")?;
+                } else {
+                    page.press("Escape")?;
+                }
+                let immediate = page.eval("window.__pickerProbe.state()")?;
+                let rows = page.eval("window.__pickerProbe.finish()")?;
+                let evidence = json!({ "mode": mode, "step": step, "immediate": immediate, "rows": rows });
+                std::fs::write(folder.join(format!("{width}-{mode}-{step}.json")), evidence.to_string()).map_err(|e| e.to_string())?;
+                page.screenshot(&folder.join(format!("{width}-{mode}-{step}.png")))?;
+                let samples = rows.as_array().ok_or("picker probe must return frame samples")?;
+                ensure(samples.len() >= 3, || format!("infrastructure: no picker frame clock: {evidence}"))?;
+                let last = samples.last().ok_or("picker samples missing")?;
+                if last["connected"] != json!(true) {
+                    detached.push(format!("{width} {mode}: Escape removed Settings instead of only dismissing its picker"));
+                    break;
+                }
+                same(last["open"].clone(), json!(step == "opens"), "native picker open state after settling")?;
+                same(last["display"] == json!("none"), step == "closes", "native picker display after settling")?;
+                if mode == "full" {
+                    ensure(
+                        samples.iter().any(|r| r["display"] != json!("none") && r["opacity"].as_f64().is_some_and(|o| o > 0.0 && o < 1.0)),
+                        || format!("the full-motion picker must have a real intermediate opacity: {evidence}"),
+                    )?;
+                } else {
+                    same(immediate["display"] == json!("none"), step == "closes", "reduced/none picker changes display immediately")?;
+                    ensure(samples.iter().all(|r| r["animations"].as_array().is_some_and(Vec::is_empty)), || {
+                        format!("{mode} picker must have no animations: {evidence}")
+                    })?;
+                }
+            }
+            if page.eval("!!document.querySelector('[data-picker-probe]')")? != json!(true) {
+                continue;
+            }
+            same(page.eval("document.querySelector('[data-picker-probe]').value")?, before, "Escape preserves the selected language")?;
+            same(
+                page.eval("document.activeElement === document.querySelector('[data-picker-probe]')")?,
+                json!(true),
+                "picker returns focus to its select",
+            )?;
+            page.press("Escape")?;
+            page.wait_gone(&css(".settings"))?;
+            ctx.notes.push(format!("native picker {mode}: real open/close frames and focus recorded"));
+        }
+    }
+    ensure(detached.is_empty(), || detached.join("; "))?;
+    Ok(())
 }
 
 fn motion(ctx: &mut Ctx) -> Result {

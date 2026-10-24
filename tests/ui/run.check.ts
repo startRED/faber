@@ -86,6 +86,7 @@ check('run: one header with the time, the turns and the plan, the earlier turns 
     later.checked = true;
     later.dispatchEvent(new Event('change', { bubbles: true }));
     await settle();
+    deepEqual(sent, [], 'choosing another option only changes the pending choice');
     row.querySelector<HTMLButtonElement>('.answer-actions .send')!.click();
     await settle();
     deepEqual(sent, [t('answers.changeTo', { question: 'Check it on a phone?', answer: 'Later' })]);

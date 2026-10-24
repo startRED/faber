@@ -1996,6 +1996,8 @@ export const en = {
   'notes.227.fixed': "You can return to the Catalog list without scrolling back to the top of a tool's details.",
   'notes.228.fixed': 'You can remove attached images and files with a larger button.',
   'notes.229.better': 'In small windows, switching between Chat and Projects keeps the menu open so you can choose where to continue.',
+  'notes.230.fixed': 'Browser performance requests now pick the installed browser tool without needing to name it.',
+  'notes.231.fixed': 'Esc closes an open options list without taking you out of Settings.',
   'update.checking': 'Looking for an update…',
   'update.downloading': 'Downloading update…',
   'update.downloadingPercent': 'Downloading update… {percent}%',
