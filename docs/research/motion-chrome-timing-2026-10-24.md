@@ -34,7 +34,9 @@ driver's sandbox audit and cleanup passed.
 Visual critique: before 39/40, after 39/40, by independent read-only `/root/review_motion_frequent`. At 720x480 the
 eight rubric scores were 5,5,5,5,5,5,5,4; at 1280x800 they were all 5. One fit point was lost in both small captures:
 the "Melhor" heading overlaps the Faber title-bar mark. It is present before and after, so this is not a timing-change
-regression. Its navigation/layout cause still needs reproduction. No question-error image was captured or scored.
+regression. The later [window-frame correction](notes-window-frame-2026-10-24.md) records reproduction of the viewport
+starting behind the titlebar, its correction and independent 40/40 after critique. Integration remains unfinished;
+that note also records the missing capture-time executable digest. No question-error image was captured or scored.
 The complete inventory and remaining observations are in `motion-inventory-2026-10-24.md`.
 
 Negative/positive logs, native receipts, screenshot pairs, capture source and corrected source/executable identities
