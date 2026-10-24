@@ -263,7 +263,10 @@ impl Core {
         self.sibling_allowed(&ai)?;
         let busy = self.live.get(id).is_some_and(|l| l.turn.is_some()) || state_of(false, target) == State::Working;
         let wake = Wake::of("wake.asked");
-        self.send_by_itself(id, sibling::ask_prompt(&from, conv, message), wake).map_err(|_| "it could not take the message now")?;
+        self.send_by_itself(id, sibling::ask_prompt(&from, conv, message), wake).map_err(|why| match why.as_str() {
+            "error.queueFull" => "the target conversation's message queue is full",
+            _ => "it could not take the message now",
+        })?;
         Ok(sibling::asked(&title, id, busy))
     }
 }

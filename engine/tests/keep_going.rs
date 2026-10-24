@@ -1345,6 +1345,36 @@ async fn keep_going_turned_on_after_a_closing_question_still_waits_before_answer
 }
 
 #[tokio::test]
+async fn a_sibling_ask_reports_a_full_target_queue_without_losing_accepted_questions() {
+    let (dir, project) = (tempfile::tempdir().unwrap(), support::work_folder());
+    let (engine, mut agent, id, made) = started_made(dir.path(), project.path(), &[Vendor::Claude]).await;
+    let (said, error) = calls(&mut agent, "start", "conversation", json!({ "title": "Questions", "brief": "Check the docs." })).await;
+    assert!(!error, "{said}");
+    let mut sibling = next_pipe(&made).await;
+    until_turns(&sibling, 1).await;
+    sibling.say(json!({ "type": "system", "subtype": "init", "session_id": "questions", "model": "claude-haiku-5-5" })).await;
+    for n in 0..10 {
+        let (said, error) = calls(
+            &mut sibling,
+            &format!("ask{n}"),
+            "conversation",
+            json!({ "action": "ask", "id": id, "message": format!("Question {n}") }),
+        )
+        .await;
+        assert!(!error, "{said}");
+    }
+    let before = engine.open(&id).unwrap().queued;
+    assert_eq!(before.len(), 10);
+    let (said, error) =
+        calls(&mut sibling, "overflow", "conversation", json!({ "action": "ask", "id": id, "message": "Rejected question" })).await;
+    assert!(error, "a full queue must refuse the message");
+    let after = engine.open(&id).unwrap().queued;
+    assert_eq!(after.iter().map(|q| (&q.id, &q.text)).collect::<Vec<_>>(), before.iter().map(|q| (&q.id, &q.text)).collect::<Vec<_>>());
+    assert!(said.contains("message queue is full"), "{said}");
+    engine.shutdown();
+}
+
+#[tokio::test]
 async fn failed_turns_drain_sibling_questions_in_order_without_retrying_or_sending_human_messages() {
     let (dir, project) = (tempfile::tempdir().unwrap(), support::work_folder());
     let (engine, mut agent, id, made) = started_made(dir.path(), project.path(), &[Vendor::Claude]).await;

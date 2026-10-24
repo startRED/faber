@@ -1,0 +1,11 @@
+{
+  "notes": {
+    "fixed": {
+      "en": "Your agent now learns when another conversation’s message queue is full instead of receiving an unexplained refusal.",
+      "pt-BR": "Quando a fila de outra conversa está cheia, a IA recebe esse motivo em vez de uma recusa sem explicação.",
+      "es": "Si la cola de otra conversación está llena, la IA recibe ese motivo en lugar de una negativa sin explicación.",
+      "fr": "Quand la file d’une autre conversation est pleine, l’IA reçoit ce motif plutôt qu’un refus sans explication.",
+      "de": "Ist die Warteschlange eines anderen Gesprächs voll, erfährt die KI den Grund statt einer unerklärten Ablehnung."
+    }
+  }
+}
