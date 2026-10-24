@@ -1,15 +1,15 @@
 //! Read-only memory samples for the CLI trees Faber owns.
 use crate::proc::OwnedTree;
-#[cfg(any(windows, test))]
+#[cfg(any(windows, target_os = "macos", test))]
 use crate::proc::ProcessIdentity;
-#[cfg(any(windows, test))]
+#[cfg(any(windows, target_os = "macos", test))]
 use std::collections::{HashMap, HashSet};
 use std::io;
 use std::sync::{Arc, Mutex};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Snapshot {
-    /// Private resident working set, not committed bytes or a prediction of future growth.
+    /// Windows private working set or macOS resident bytes (shared pages may count per process).
     pub used: u64,
     pub total: u64,
     pub available: u64,
@@ -35,7 +35,7 @@ impl Registry {
     pub fn snapshot(&self) -> io::Result<Snapshot> {
         #[cfg(windows)]
         {
-            self.snapshot_with(|| {
+            self.snapshot_with(|_| {
                 let processes = faber_winproc::processes()?
                     .into_iter()
                     .map(|process| (ProcessIdentity { pid: process.pid, created: process.created }, process.private_bytes))
@@ -45,14 +45,27 @@ impl Registry {
                 Ok((processes, system.total_memory(), system.available_memory()))
             })
         }
-        #[cfg(not(windows))]
+        #[cfg(target_os = "macos")]
+        {
+            self.snapshot_with(|members| {
+                let unique: HashSet<_> = members.iter().copied().collect();
+                let processes = unique
+                    .into_iter()
+                    .map(|identity| faber_winproc::process_tree::resident_bytes(identity).map(|bytes| (identity, bytes)))
+                    .collect::<io::Result<Vec<_>>>()?;
+                let mut system = sysinfo::System::new();
+                system.refresh_memory();
+                Ok((processes, system.total_memory(), system.available_memory()))
+            })
+        }
+        #[cfg(not(any(windows, target_os = "macos")))]
         {
             Err(io::Error::new(io::ErrorKind::Unsupported, "worker memory sampling needs exact native process identities"))
         }
     }
 
-    #[cfg(any(windows, test))]
-    fn snapshot_with(&self, read: impl FnOnce() -> io::Result<Reading>) -> io::Result<Snapshot> {
+    #[cfg(any(windows, target_os = "macos", test))]
+    fn snapshot_with(&self, read: impl FnOnce(&[ProcessIdentity]) -> io::Result<Reading>) -> io::Result<Snapshot> {
         let trees = {
             let mut trees = self.trees.lock().unwrap_or_else(|error| error.into_inner());
             trees.retain(|tree| !tree.is_retired());
@@ -70,15 +83,15 @@ impl Registry {
             }
         }
         self.trees.lock().unwrap_or_else(|error| error.into_inner()).retain(|tree| !tree.is_retired());
-        let (processes, total, available) = read()?;
+        let (processes, total, available) = read(&members)?;
         sample_members(&members, &processes, total, available)
     }
 }
 
-#[cfg(any(windows, test))]
+#[cfg(any(windows, target_os = "macos", test))]
 type Reading = (Vec<(ProcessIdentity, u64)>, u64, u64);
 
-#[cfg(any(windows, test))]
+#[cfg(any(windows, target_os = "macos", test))]
 fn sample_members(members: &[ProcessIdentity], processes: &[(ProcessIdentity, u64)], total: u64, available: u64) -> io::Result<Snapshot> {
     if total == 0 || available > total {
         return Err(io::Error::other("system memory reading is unavailable"));
@@ -144,10 +157,10 @@ mod tests {
         let session = crate::events::Session::from_fn(|_| {}).with_tree(Some(tree));
         assert!(session.owned_tree().is_some());
         drop(session);
-        assert_eq!(registry.clone().snapshot_with(|| Ok((vec![(root, 99)], 1000, 500))).unwrap().used, 99);
+        assert_eq!(registry.clone().snapshot_with(|_| Ok((vec![(root, 99)], 1000, 500))).unwrap().used, 99);
         assert_eq!(stops.load(Ordering::Relaxed), 0, "sampling never stops an owned process");
         drop(container);
-        let reading = registry.clone().snapshot_with(|| Ok((vec![(root, 99)], 1000, 500))).unwrap();
+        let reading = registry.clone().snapshot_with(|_| Ok((vec![(root, 99)], 1000, 500))).unwrap();
         assert_eq!(reading.used, 99, "root stays counted without a conversation");
         assert_eq!(stops.load(Ordering::Relaxed), 1, "retaining samples never prevents the driver's drop cleanup");
     }
@@ -162,18 +175,43 @@ mod tests {
         let tree = container.owned_tree().unwrap();
         let registry = Registry::default();
         registry.register(Some(tree.clone()));
-        assert!(registry.snapshot_with(|| Err(io::Error::other("process sample failed"))).is_err());
+        assert!(registry.snapshot_with(|_| Err(io::Error::other("process sample failed"))).is_err());
         assert_eq!(registry.trees.lock().unwrap().len(), 1);
         members.lock().unwrap().clear();
-        assert_eq!(registry.snapshot_with(|| Ok((vec![], 1000, 500))).unwrap().used, 0);
+        assert_eq!(registry.snapshot_with(|_| Ok((vec![], 1000, 500))).unwrap().used, 0);
         assert!(registry.trees.lock().unwrap().is_empty(), "an independent empty-container query confirms retirement");
         tree.retire().await.unwrap();
-        registry.snapshot_with(|| Ok((vec![], 1000, 500))).unwrap();
+        registry.snapshot_with(|_| Ok((vec![], 1000, 500))).unwrap();
         assert!(registry.trees.lock().unwrap().is_empty());
 
         let failing = Containment::scripted_descendants(root, || Err(io::Error::other("container sample failed")), || {});
         registry.register(failing.owned_tree());
-        assert!(registry.snapshot_with(|| Ok((vec![], 1000, 500))).is_err());
+        assert!(registry.snapshot_with(|_| Ok((vec![], 1000, 500))).is_err());
+    }
+
+    #[test]
+    fn worker_memory_queries_only_exact_owned_members_and_propagates_memory_failure() {
+        use crate::proc::Containment;
+        let root = identity(42, 10);
+        let child = identity(43, 11);
+        let container = Containment::scripted_descendants(root, move || Ok(vec![root, child]), || {});
+        let registry = Registry::default();
+        registry.register(container.owned_tree());
+        let sample = registry
+            .snapshot_with(|members| {
+                assert_eq!(members, &[root, child]);
+                Ok((members.iter().map(|member| (*member, 123)).collect(), 1000, 500))
+            })
+            .unwrap();
+        assert_eq!(sample.used, 246);
+        assert!(
+            registry
+                .snapshot_with(|members| {
+                    assert_eq!(members, &[root, child]);
+                    Err(io::Error::other("identity changed around the resident-memory query"))
+                })
+                .is_err()
+        );
     }
 
     #[test]
@@ -197,7 +235,7 @@ mod tests {
         drop(container);
         assert_eq!(stops.load(Ordering::Relaxed), 1);
         members.lock().unwrap().clear();
-        assert_eq!(registry.snapshot_with(|| Ok((vec![], 1000, 500))).unwrap().used, 0);
+        assert_eq!(registry.snapshot_with(|_| Ok((vec![], 1000, 500))).unwrap().used, 0);
         assert!(registry.trees.lock().unwrap().is_empty(), "a confirmed empty owned container no longer needs a retained handle");
         assert_eq!(stops.load(Ordering::Relaxed), 1, "empty confirmation never terminates a process");
     }

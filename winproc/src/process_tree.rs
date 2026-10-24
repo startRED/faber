@@ -8,6 +8,24 @@ pub struct ProcessIdentity {
     pub created: u64,
 }
 
+#[cfg(any(target_os = "macos", test))]
+fn sample_resident_bytes(
+    expected: ProcessIdentity,
+    mut process_identity: impl FnMut() -> io::Result<Option<ProcessIdentity>>,
+    mut resident_bytes: impl FnMut() -> io::Result<u64>,
+) -> io::Result<u64> {
+    let current = process_identity()?.ok_or_else(|| io::Error::other("process exited during memory sample"))?;
+    if current != expected {
+        return Err(io::Error::other("process identity changed before memory sample"));
+    }
+    let bytes = resident_bytes()?;
+    let current = process_identity()?.ok_or_else(|| io::Error::other("process exited during memory sample"))?;
+    if current != expected {
+        return Err(io::Error::other("process identity changed during memory sample"));
+    }
+    Ok(bytes)
+}
+
 #[derive(Debug, Clone, Copy)]
 pub struct ProcessMember {
     pub identity: ProcessIdentity,
@@ -305,6 +323,28 @@ mod platform {
         }))
     }
 
+    pub fn resident_bytes(identity: ProcessIdentity) -> io::Result<u64> {
+        let pid = i32::try_from(identity.pid).map_err(io::Error::other)?;
+        sample_resident_bytes(
+            identity,
+            || Ok(process_entry(pid)?.map(|entry| entry.member.identity)),
+            || {
+                let mut info = std::mem::MaybeUninit::<libc::proc_taskinfo>::zeroed();
+                let bytes = std::mem::size_of::<libc::proc_taskinfo>() as i32;
+                let used = unsafe { libc::proc_pidinfo(pid, libc::PROC_PIDTASKINFO, 0, info.as_mut_ptr().cast(), bytes) };
+                if used != bytes {
+                    let error = io::Error::last_os_error();
+                    return Err(if error.raw_os_error() == Some(0) {
+                        io::Error::other("incomplete process memory information")
+                    } else {
+                        error
+                    });
+                }
+                Ok(unsafe { info.assume_init() }.pti_resident_size)
+            },
+        )
+    }
+
     pub(super) fn process_table(
         root: ProcessIdentity,
         observed: &std::collections::HashSet<ProcessIdentity>,
@@ -372,6 +412,8 @@ mod platform {
     }
 }
 
+#[cfg(target_os = "macos")]
+pub use platform::resident_bytes;
 #[cfg(unix)]
 pub use platform::{group_members, group_process_identity};
 #[cfg(windows)]
@@ -380,6 +422,68 @@ pub use platform::{job_members, job_process_identity};
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn worker_memory_sample_preserves_bytes_for_stable_identity() {
+        let expected = ProcessIdentity { pid: 42, created: 123 };
+        let mut identities = [Some(expected), Some(expected)].into_iter();
+        let mut memory_calls = 0;
+        assert_eq!(
+            sample_resident_bytes(
+                expected,
+                || Ok(identities.next().unwrap()),
+                || {
+                    memory_calls += 1;
+                    Ok(987_654)
+                },
+            )
+            .unwrap(),
+            987_654
+        );
+        assert_eq!(memory_calls, 1);
+    }
+
+    #[test]
+    fn worker_memory_sample_rejects_reused_pid_before_reading_memory() {
+        let expected = ProcessIdentity { pid: 42, created: 123 };
+        let reused = ProcessIdentity { pid: 42, created: 124 };
+        let mut identities = [Some(reused)].into_iter();
+        assert!(sample_resident_bytes(expected, || Ok(identities.next().unwrap()), || Ok(10)).is_err());
+    }
+
+    #[test]
+    fn worker_memory_sample_rejects_missing_process_before_and_after_read() {
+        let expected = ProcessIdentity { pid: 42, created: 123 };
+        assert!(sample_resident_bytes(expected, || Ok(None), || Ok(10)).is_err());
+
+        let mut identities = [Some(expected), None].into_iter();
+        assert!(sample_resident_bytes(expected, || Ok(identities.next().unwrap()), || Ok(10)).is_err());
+    }
+
+    #[test]
+    fn worker_memory_sample_rejects_pid_reuse_after_read_and_propagates_read_errors() {
+        let expected = ProcessIdentity { pid: 42, created: 123 };
+        let reused = ProcessIdentity { pid: 42, created: 124 };
+        let mut identities = [Some(expected), Some(reused)].into_iter();
+        assert!(sample_resident_bytes(expected, || Ok(identities.next().unwrap()), || Ok(10)).is_err());
+
+        let mut identities = [Some(expected)].into_iter();
+        assert!(sample_resident_bytes(expected, || Ok(identities.next().unwrap()), || Err(io::Error::other("read failed"))).is_err());
+
+        assert!(sample_resident_bytes(expected, || Err(io::Error::other("identity read failed")), || Ok(10)).is_err());
+        let mut identity_reads = 0;
+        assert!(
+            sample_resident_bytes(
+                expected,
+                || {
+                    identity_reads += 1;
+                    if identity_reads == 1 { Ok(Some(expected)) } else { Err(io::Error::other("identity read failed")) }
+                },
+                || Ok(10),
+            )
+            .is_err()
+        );
+    }
 
     fn process(pid: u32, parent: u32, created: u64, group: u32) -> ProcessEntry {
         ProcessEntry { member: ProcessMember { identity: ProcessIdentity { pid, created }, parent }, group, running: true }

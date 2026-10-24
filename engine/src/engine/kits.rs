@@ -1541,6 +1541,7 @@ mod tests {
                     conversation(core, Area::Project, Some(&project.id), &folder, "Design a landing page");
                     if helper {
                         core.launch("kit", &pick(Vendor::Codex)).unwrap();
+                        core.worker_memory.permit_for_test("helper:child");
                         core.start_helper("kit", "child".into(), json!({"title":"Design", "brief":"Design a landing page"}));
                         assert!(core.helpers.contains_key("child"));
                     } else {
@@ -2986,6 +2987,7 @@ mod tests {
                 core.launch("kit", &pick(caller)).unwrap();
                 let expected = vec!["debug"];
                 assert_eq!(core.live["kit"].tool_kit.ids, expected);
+                core.worker_memory.permit_for_test("helper:child");
                 core.start_helper("kit", "child".into(), json!({"title":"Design the page", "brief":"Design a landing page"}));
                 assert!(core.helpers.contains_key("child"), "the helper must launch, not merely compute a prospective selection");
                 assert_eq!(core.live["kit"].tool_kit.ids, expected);
@@ -3178,6 +3180,7 @@ mod tests {
             core.opts.clis.insert(Vendor::Codex, child_cli);
             core.synchronous_kit_checks = true;
             for call in ["first-child", "second-child"] {
+                core.worker_memory.permit_for_test(&format!("helper:{call}"));
                 core.start_helper("kit", call.into(), json!({"title":"Design", "brief":"Design a landing page"}));
             }
             assert_eq!(core.helpers.len(), 2, "a rejected pending helper consumes neither of the two slots");

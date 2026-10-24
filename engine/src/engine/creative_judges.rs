@@ -16,12 +16,131 @@ fn select_profiles(candidates: &[crate::route::Profile], economy: bool) -> Optio
     Some([first, second])
 }
 
+type Meter = (Vendor, &'static str, Arc<Mutex<Option<f64>>>);
+
 /// Owns every started session even if the task is cancelled or unwinds.
 struct Judges {
     sessions: Vec<Session>,
-    meters: Vec<(Vendor, &'static str, Arc<Mutex<Option<f64>>>)>,
+    meters: Vec<Meter>,
     me: std::sync::Weak<Mutex<Core>>,
     conv: String,
+}
+
+impl Drop for Judges {
+    fn drop(&mut self) {
+        for session in &self.sessions {
+            session.close();
+        }
+        if let Some(core) = self.me.upgrade() {
+            let mut core = core.lock().unwrap_or_else(|e| e.into_inner());
+            for (vendor, model, asked) in &self.meters {
+                if let Some(start) = asked.lock().unwrap_or_else(|e| e.into_inner()).take() {
+                    core.note_span(*vendor, start, model, None, true);
+                }
+            }
+            core.creative_runs.remove(&self.conv);
+        }
+    }
+}
+
+impl Core {
+    pub(super) fn creative_call(&mut self, conv: &str, sid: u64, call: String, input: &serde_json::Value) {
+        let refuse = |c: &Self, message: &str| c.answer_toolbox(conv, sid, &call, false, message.into());
+        if self.closing
+            || self.installing
+            || self.convs.get(conv).is_none_or(|c| c.area != Area::Project || c.stopped)
+            || self.live.get(conv).is_none_or(|l| l.sid != sid || l.permissions == Permissions::Isolated)
+        {
+            return refuse(self, "Creative judging requires an active project agent.");
+        }
+        let Some(request) = Request::parse(input) else {
+            return refuse(self, "Supply only bounded nonempty request, rubric, first and second text fields.");
+        };
+        if self.creative_runs.contains(conv) || self.creative_runs.len() >= 2 {
+            return refuse(self, "Another creative comparison is already running; continue other work before retrying.");
+        }
+        if self.goal_out_of_money(conv) || self.rewind_blocked(conv) {
+            return refuse(self, "Creative judging cannot start while the project budget or restore blocks work.");
+        }
+        let available: Vec<_> = self.opts.clis.keys().copied().collect();
+        let candidates: Vec<_> = crate::route::candidates(&available, &self.codex_models)
+            .into_iter()
+            .filter(|p| self.allows(p.vendor, family_of(p.model), PURPOSE, false).is_ok())
+            .collect();
+        let Some(profiles) = select_profiles(&candidates, self.economy(conv)) else {
+            return refuse(self, "Two distinct connected models must be allowed within subscription limits before a comparison starts.");
+        };
+        let same_vendor = profiles[0].vendor == profiles[1].vendor;
+        // All admission checks finish before either judge receives the drafts.
+        let mut spares = Vec::new();
+        for p in &profiles {
+            let Some(spare) = self.open_aux(p.vendor, (p.model, p.effort), INSTRUCTIONS, PURPOSE, Some((4096, conv.into()))) else {
+                for spare in spares {
+                    let spare: super::auto::Spare = spare;
+                    spare.session.close();
+                }
+                return refuse(self, "A judge could not start; no comparison was dispatched.");
+            };
+            spares.push(spare);
+        }
+        self.run_creative(conv, sid, call, request, spares, same_vendor);
+    }
+
+    fn run_creative(&mut self, conv: &str, sid: u64, call: String, request: Request, spares: Vec<super::auto::Spare>, same_vendor: bool) {
+        self.creative_runs.insert(conv.into());
+        let turn = self.live.get(conv).and_then(|l| l.turn.clone());
+        let guard = Judges {
+            sessions: spares.iter().map(|s| s.session.clone()).collect(),
+            meters: spares.iter().map(|s| (s.vendor, s.model_name, s.asked.clone())).collect(),
+            me: self.me.clone(),
+            conv: conv.into(),
+        };
+        for (index, spare) in spares.iter().enumerate() {
+            let _ = self.begin_unbounded(spare.vendor);
+            *spare.asked.lock().unwrap_or_else(|e| e.into_inner()) = Some(self.secs());
+            spare.session.send(UserTurn::text(request.prompt(index == 1)));
+        }
+        let (me, conv) = (self.me.clone(), conv.to_string());
+        self.opts.runtime.spawn(async move {
+            let _guard = guard;
+            let deadline = tokio::time::Instant::now() + Duration::from_secs(120);
+            let mut results = Vec::new();
+            for (index, spare) in spares.into_iter().enumerate() {
+                let mut answer = spare.answer;
+                let raw = loop {
+                    tokio::select! {
+                        result = &mut answer => break result.ok().flatten(),
+                        _ = tokio::time::sleep_until(deadline) => break None,
+                        _ = tokio::time::sleep(Duration::from_millis(100)) => {
+                            let active = me.upgrade().is_some_and(|c| {
+                                let c = c.lock().unwrap_or_else(|e| e.into_inner());
+                                !c.closing && !c.installing && c.live.get(&conv).is_some_and(|l| l.sid == sid && l.turn == turn)
+                                    && c.convs.get(&conv).is_some_and(|c| !c.stopped)
+                            });
+                            if !active { return; }
+                        }
+                    }
+                };
+                spare.session.close();
+                let score = raw.as_deref().and_then(Score::parse).map(|s| s.reveal(index == 1));
+                results.push(serde_json::json!({"vendor":spare.vendor,"model":spare.model_name,"a_is":if index==0 {"first"} else {"second"},"score":score,"error":if score.is_none() {Some("Judge failed, timed out, exceeded the response limit or returned invalid scores.")} else {None}}));
+            }
+            let Some(core) = me.upgrade() else { return };
+            let core = core.lock().unwrap_or_else(|e| e.into_inner());
+            if core.closing || core.installing || core.live.get(&conv).is_none_or(|l| l.sid != sid || l.turn != turn)
+                || core.convs.get(&conv).is_none_or(|c| c.stopped) { return; }
+            let complete = results.iter().all(|r| !r["score"].is_null());
+            let receipt = serde_json::json!({"at":now(),"conversation":conv,"call":call,"request":request.request,"rubric":request.rubric,"first":request.first,"second":request.second,"same_vendor":same_vendor,"judges":results});
+            match core.store.save_creative_review(&receipt) {
+                Ok(id) => {
+                    // Full reasons stay in the durable receipt; the work log has a bounded result.
+                    let summaries: Vec<_> = results.iter().map(|r| serde_json::json!({"vendor":r["vendor"],"model":r["model"],"first":r["score"]["first"],"second":r["score"]["second"],"a_is":r["a_is"],"reason_preview":r["score"]["reason"].as_str().unwrap_or_default().chars().take(200).collect::<String>(),"error":r["error"]})).collect();
+                    core.answer_toolbox(&conv, sid, &call, complete, serde_json::json!({"receipt":id,"same_vendor":same_vendor,"complete":complete,"judges":summaries}).to_string());
+                }
+                Err(_) => core.answer_toolbox(&conv, sid, &call, false, "The creative comparison could not be recorded; do not treat it as verified.".into()),
+            }
+        });
+    }
 }
 
 #[cfg(test)]
@@ -188,122 +307,5 @@ mod tests {
         assert!(commands.lock().unwrap().iter().filter(|s| *s == "closed").count() >= 2);
         drop(held);
         engine.shutdown();
-    }
-}
-
-impl Drop for Judges {
-    fn drop(&mut self) {
-        for session in &self.sessions {
-            session.close();
-        }
-        if let Some(core) = self.me.upgrade() {
-            let mut core = core.lock().unwrap_or_else(|e| e.into_inner());
-            for (vendor, model, asked) in &self.meters {
-                if let Some(start) = asked.lock().unwrap_or_else(|e| e.into_inner()).take() {
-                    core.note_span(*vendor, start, model, None, true);
-                }
-            }
-            core.creative_runs.remove(&self.conv);
-        }
-    }
-}
-
-impl Core {
-    pub(super) fn creative_call(&mut self, conv: &str, sid: u64, call: String, input: &serde_json::Value) {
-        let refuse = |c: &Self, message: &str| c.answer_toolbox(conv, sid, &call, false, message.into());
-        if self.closing
-            || self.installing
-            || self.convs.get(conv).is_none_or(|c| c.area != Area::Project || c.stopped)
-            || self.live.get(conv).is_none_or(|l| l.sid != sid || l.permissions == Permissions::Isolated)
-        {
-            return refuse(self, "Creative judging requires an active project agent.");
-        }
-        let Some(request) = Request::parse(input) else {
-            return refuse(self, "Supply only bounded nonempty request, rubric, first and second text fields.");
-        };
-        if self.creative_runs.contains(conv) || self.creative_runs.len() >= 2 {
-            return refuse(self, "Another creative comparison is already running; continue other work before retrying.");
-        }
-        if self.goal_out_of_money(conv) || self.rewind_blocked(conv) {
-            return refuse(self, "Creative judging cannot start while the project budget or restore blocks work.");
-        }
-        let available: Vec<_> = self.opts.clis.keys().copied().collect();
-        let candidates: Vec<_> = crate::route::candidates(&available, &self.codex_models)
-            .into_iter()
-            .filter(|p| self.allows(p.vendor, family_of(p.model), PURPOSE, false).is_ok())
-            .collect();
-        let Some(profiles) = select_profiles(&candidates, self.economy(conv)) else {
-            return refuse(self, "Two distinct connected models must be allowed within subscription limits before a comparison starts.");
-        };
-        let same_vendor = profiles[0].vendor == profiles[1].vendor;
-        // All admission checks finish before either judge receives the drafts.
-        let mut spares = Vec::new();
-        for p in &profiles {
-            let Some(spare) = self.open_aux(p.vendor, (p.model, p.effort), INSTRUCTIONS, PURPOSE, Some((4096, conv.into()))) else {
-                for spare in spares {
-                    let spare: super::auto::Spare = spare;
-                    spare.session.close();
-                }
-                return refuse(self, "A judge could not start; no comparison was dispatched.");
-            };
-            spares.push(spare);
-        }
-        self.run_creative(conv, sid, call, request, spares, same_vendor);
-    }
-
-    fn run_creative(&mut self, conv: &str, sid: u64, call: String, request: Request, spares: Vec<super::auto::Spare>, same_vendor: bool) {
-        self.creative_runs.insert(conv.into());
-        let turn = self.live.get(conv).and_then(|l| l.turn.clone());
-        let guard = Judges {
-            sessions: spares.iter().map(|s| s.session.clone()).collect(),
-            meters: spares.iter().map(|s| (s.vendor, s.model_name, s.asked.clone())).collect(),
-            me: self.me.clone(),
-            conv: conv.into(),
-        };
-        for (index, spare) in spares.iter().enumerate() {
-            let _ = self.begin_unbounded(spare.vendor);
-            *spare.asked.lock().unwrap_or_else(|e| e.into_inner()) = Some(self.secs());
-            spare.session.send(UserTurn::text(request.prompt(index == 1)));
-        }
-        let (me, conv) = (self.me.clone(), conv.to_string());
-        self.opts.runtime.spawn(async move {
-            let _guard = guard;
-            let deadline = tokio::time::Instant::now() + Duration::from_secs(120);
-            let mut results = Vec::new();
-            for (index, spare) in spares.into_iter().enumerate() {
-                let mut answer = spare.answer;
-                let raw = loop {
-                    tokio::select! {
-                        result = &mut answer => break result.ok().flatten(),
-                        _ = tokio::time::sleep_until(deadline) => break None,
-                        _ = tokio::time::sleep(Duration::from_millis(100)) => {
-                            let active = me.upgrade().is_some_and(|c| {
-                                let c = c.lock().unwrap_or_else(|e| e.into_inner());
-                                !c.closing && !c.installing && c.live.get(&conv).is_some_and(|l| l.sid == sid && l.turn == turn)
-                                    && c.convs.get(&conv).is_some_and(|c| !c.stopped)
-                            });
-                            if !active { return; }
-                        }
-                    }
-                };
-                spare.session.close();
-                let score = raw.as_deref().and_then(Score::parse).map(|s| s.reveal(index == 1));
-                results.push(serde_json::json!({"vendor":spare.vendor,"model":spare.model_name,"a_is":if index==0 {"first"} else {"second"},"score":score,"error":if score.is_none() {Some("Judge failed, timed out, exceeded the response limit or returned invalid scores.")} else {None}}));
-            }
-            let Some(core) = me.upgrade() else { return };
-            let core = core.lock().unwrap_or_else(|e| e.into_inner());
-            if core.closing || core.installing || core.live.get(&conv).is_none_or(|l| l.sid != sid || l.turn != turn)
-                || core.convs.get(&conv).is_none_or(|c| c.stopped) { return; }
-            let complete = results.iter().all(|r| !r["score"].is_null());
-            let receipt = serde_json::json!({"at":now(),"conversation":conv,"call":call,"request":request.request,"rubric":request.rubric,"first":request.first,"second":request.second,"same_vendor":same_vendor,"judges":results});
-            match core.store.save_creative_review(&receipt) {
-                Ok(id) => {
-                    // Full reasons stay in the durable receipt; the work log has a bounded result.
-                    let summaries: Vec<_> = results.iter().map(|r| serde_json::json!({"vendor":r["vendor"],"model":r["model"],"first":r["score"]["first"],"second":r["score"]["second"],"a_is":r["a_is"],"reason_preview":r["score"]["reason"].as_str().unwrap_or_default().chars().take(200).collect::<String>(),"error":r["error"]})).collect();
-                    core.answer_toolbox(&conv, sid, &call, complete, serde_json::json!({"receipt":id,"same_vendor":same_vendor,"complete":complete,"judges":summaries}).to_string());
-                }
-                Err(_) => core.answer_toolbox(&conv, sid, &call, false, "The creative comparison could not be recorded; do not treat it as verified.".into()),
-            }
-        });
     }
 }

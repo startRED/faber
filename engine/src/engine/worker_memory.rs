@@ -24,10 +24,18 @@ pub(super) struct State {
     probe: Option<Arc<dyn Fn() -> std::io::Result<Snapshot> + Send + Sync>>,
 }
 
+#[cfg(test)]
+impl State {
+    /// Kit-delivery fakes grant memory admission without reading the host's processes.
+    pub(super) fn permit_for_test(&mut self, key: &str) {
+        self.permitted = Some(key.into());
+    }
+}
+
 impl Core {
     pub(super) fn worker_ready(&mut self, key: &str) -> bool {
-        // shortcut: Unix keeps the existing worker-count limits until exact native memory samples are supported.
-        if !self.opts.windows {
+        // shortcut: Linux keeps count limits until its exact native memory sampler is supported.
+        if !self.opts.windows && !cfg!(target_os = "macos") {
             return true;
         }
         if self.worker_memory.permitted.as_deref() == Some(key) {
@@ -107,9 +115,9 @@ impl Core {
     fn unattended_reply(&self, id: &str, reply: &str) -> bool {
         let Some(conv) = self.convs.get(id) else { return false };
         let Some(end) = conv.messages.iter().position(|message| message.id == reply) else { return false };
-        let questions = conv.messages[..end].iter().filter(|message| message.role == Role::User);
+        let mut questions = conv.messages[..end].iter().filter(|message| message.role == Role::User);
         let count = questions.clone().count();
-        let last = questions.last();
+        let last = questions.next_back();
         last.is_some_and(|message| message.wake.as_ref().is_some_and(|wake| wake.why != "wake.approvedPlan"))
             || (conv.started_by.is_some() && count == 1)
     }

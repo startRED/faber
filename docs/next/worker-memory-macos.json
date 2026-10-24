@@ -1,0 +1,14 @@
+{
+  "notes": {
+    "better": {
+      "en": "On Mac, new automatic AI tasks also wait when memory is tight, and Stop cancels them before they start.",
+      "pt-BR": "No Mac, novas tarefas automáticas das IAs também aguardam quando falta memória, e Parar cancela as que ainda não começaram.",
+      "es": "En Mac, las nuevas tareas automáticas de IA también esperan si falta memoria y Detener cancela las que aún no han empezado.",
+      "fr": "Sur Mac, les nouvelles tâches automatiques des IA attendent aussi si la mémoire manque, et Arrêter annule celles qui n’ont pas démarré.",
+      "de": "Auch auf dem Mac warten neue automatische KI-Aufgaben bei knappem Arbeitsspeicher; Stoppen bricht sie vor dem Start ab."
+    }
+  },
+  "decisions": [
+    "| R-next | 2026-10-24 | macOS extends the existing automatic-worker memory admission with libproc resident bytes and exact owned-process identity checks before and after each memory query. Resident pages shared between processes may count for each, conservatively delaying new work. Existing thresholds, cancellation, count and quota guards remain; Linux memory admission and real parallel cost measurement remain unfinished. | AI |"
+  ]
+}
