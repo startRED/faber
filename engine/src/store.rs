@@ -127,6 +127,7 @@ pub struct Store {
     conversations: PathBuf,
     /// The side chat of each conversation (R250), a file of its own beside it, so the conversation and its search never read it.
     side_chats: PathBuf,
+    creative_reviews: PathBuf,
     search: crate::search::Search,
     projects: PathBuf,
     chat_groups: PathBuf,
@@ -171,6 +172,7 @@ impl Store {
             search: crate::search::Search::new(conversations.clone()),
             conversations,
             side_chats: data_dir.join("side-chats"),
+            creative_reviews: data_dir.join("creative-reviews"),
             projects: data_dir.join("projects.json"),
             chat_groups: data_dir.join("chat-groups.json"),
             settings: data_dir.join("settings.json"),
@@ -216,6 +218,14 @@ impl Store {
 
     fn file(&self, id: &str) -> PathBuf {
         self.conversations.join(format!("{id}.json"))
+    }
+
+    /// The id is generated here; caller text can never select a filesystem path.
+    pub(crate) fn save_creative_review(&self, value: &serde_json::Value) -> Result<String, Fault> {
+        let id = uuid::Uuid::new_v4().to_string();
+        fs::create_dir_all(&self.creative_reviews).map_err(|e| Fault::of_write(&e))?;
+        self.write(&self.creative_reviews.join(format!("{id}.json")), value)?;
+        Ok(id)
     }
 
     pub fn list(&self) -> Vec<Summary> {
@@ -667,6 +677,21 @@ impl Store {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn creative_receipts_use_generated_paths_and_report_failed_writes() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = Store::new(dir.path());
+        let value = serde_json::json!({"first":"../outside", "reason":"Full reason"});
+        let one = store.save_creative_review(&value).unwrap();
+        let two = store.save_creative_review(&value).unwrap();
+        assert_ne!(one, two);
+        assert!(uuid::Uuid::parse_str(&one).is_ok());
+        assert_eq!(read::<serde_json::Value>(&dir.path().join("creative-reviews").join(format!("{one}.json"))), Some(value));
+        let blocked = tempfile::tempdir().unwrap();
+        fs::write(blocked.path().join("creative-reviews"), "a file, not a folder").unwrap();
+        assert_eq!(Store::new(blocked.path()).save_creative_review(&serde_json::json!({})), Err(Fault::Write));
+    }
 
     #[test]
     fn a_failed_rename_returns_the_error_and_removes_the_temp_file() {

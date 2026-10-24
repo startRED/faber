@@ -974,6 +974,7 @@ export const ptBR: Messages = {
   'tool.quota': 'Conferindo os limites das IAs',
   'tool.catalog': 'Buscando no catálogo',
   "tool.catalogInstall": "Instalando do catálogo",
+  'tool.creativeJudge': 'Comparando rascunhos com avaliações independentes',
   'tool.memorySearch': 'Buscando na memória do projeto',
   'tool.agent': 'Subagente',
   'tool.plan': 'Atualizando o plano',

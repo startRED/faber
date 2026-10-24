@@ -815,6 +815,7 @@ export const de: Messages = {
   'tool.quota': 'Prüft die KI-Limits',
   'tool.catalog': 'Durchsucht den Katalog',
   "tool.catalogInstall": "Installiert aus dem Katalog",
+  'tool.creativeJudge': 'Vergleicht Entwürfe mit unabhängigen Bewertungen',
   'tool.memorySearch': 'Durchsucht das Gedächtnis des Projekts',
   'tool.agent': 'Subagent',
   'tool.plan': 'Aktualisiert den Plan',

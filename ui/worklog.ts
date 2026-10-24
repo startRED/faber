@@ -79,6 +79,7 @@ export function toolRow(tool: ToolUse): ToolRow {
   // The project map (R146) reads as reading it, with what was looked up.
   if (tool.name === 'Map') return { label: t('tool.map'), detail: [input?.kind, input?.query].filter((v) => typeof v === 'string' && v).join(' ') };
   // Faber's two read-only lookups: the limits of the AIs (nothing after) and a catalog search (with its words).
+  if (tool.name === 'CreativeJudge') return { label: t('tool.creativeJudge'), detail: '' };
   if (tool.name === 'Quota') return { label: t('tool.quota'), detail: '' };
   // A search of the project's own past conversations and notes reads as that, with its words.
   if (tool.name === 'MemorySearch') return { label: t('tool.memorySearch'), detail: typeof input?.query === 'string' ? input.query : '' };
