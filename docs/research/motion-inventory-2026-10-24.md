@@ -14,7 +14,7 @@ Rules: `docs/design/looks.md`, `.claude/skills/faber-ui/SKILL.md` and `docs/dev/
 | Context and permission menus | `.cmenu`, `.st-menu`, keepForExit; `contextmenu.check.ts`, `settings.check.ts` | One message menu and one Settings permission list observed at 720x480/full/0.25x, including Escape focus return. Same-message rapid reversal is now observed; edge placement, option activation and remaining motion modes still need observation. |
 | Native selects | Customizable picker with native fallback in `styles.css`; Settings checks | Supported-picker entrance/exit and fallback behavior. |
 | Palette and Find | `.pal`, `.find`; palette interaction and `find.check.ts` checks | Both separate entrance and exit paths. |
-| Permission/question cards, toast and errors | `Ask.tsx`, `.ask`, `.toast`, `.quota-card`; `question.check.ts`, sentinel permission | Retrying actual error states, including the later error shorthand found below. |
+| Permission/question cards, toast and errors | `Ask.tsx`, `.ask`, `.toast`, `.quota-card`; `question.check.ts`, sentinel permission | One normal lifecycle is observed below; visual error/retry paths and the complete visible exit remain unobserved. |
 | Composer and attachments | `Composer.tsx`, reveal, attachment list, Ghost; composer/idle/review-motion checks, sentinel composer | Wrapping, send, interrupted growth and thumbnail expansion. |
 | Running column and reading stage | `App.tsx`, motion.ts; interactions/shell checks, sentinel panels | Docked/overlay width, open/close, cancellation. Exit-duration work belongs to another conversation. |
 | Sidebar and project folds | `App.tsx`, `.fold`, shared resize; shell/motion/review-motion checks | Focus mode, narrow overlay, scrim, folding and resize cancellation. |
@@ -162,3 +162,25 @@ Evidence is retained at `E:/Documentos/ProjetosIA/faber-evidence/context-menu-re
 The normal shared resource slot was held through child exit. The run exited naturally with code 0 and `CLEAN`; before/after source and artifact identities match. Five PNGs, receipts and provenance are in the evidence folder. Launcher exit receipt: `3d141e`. The independent actual-result review at `independent-result-review.txt` (SHA-256 `9c52f058ad7c2ead3fd2187c19754e2e7c7a61beb5ca0a759c0aff124069ed0b`) passed only this captured interaction. It scored the settled open, reversal and closed-focus images 40/40 each on the local eight-line rubric; this is not a before/after comparison or broad visual approval.
 
 The event pair is synthetic in one JavaScript task, so it does not measure physical input timing. CSS playback at 0.25x does not slow the JavaScript removal timer. The immediate reversal snapshot does not retain the old node's action labels, so old-label continuity during that exact interval is not directly proven. Only 14 final-exit frames sampled the leaving state, down to opacity 0.912486; a complete slowed fade was not observed. Edge placement, action activation, reduced/none, normal-speed performance, resource cost, integration and full task-997 approval remain unverified. The earlier rejected preparation and stale-pin red receipt remain preparation history, not a product failure.
+
+## Focused normal question-card lifecycle
+
+Evidence is retained at `E:/Documentos/ProjetosIA/faber-evidence/question-card-motion-20261024/run-01/`.
+One hidden native run used the existing full-access fake recording through an isolated fixture-only checkout,
+at 720x480, pt-BR, Oficina, full motion and 0.25x CSS playback. It selected SQLite by the visible option and sent
+through the real card. The clock passed on its first sample (188 frames, median gap about 5.2 ms); this is a capture
+clock result, not application FPS. The normal lease/resource guard, natural exit 0, CLEAN marker and identical
+before/after source/executable snapshots were recorded. No live provider or evaluator was called.
+
+The independent reviewer inspected all five images and the receipts. The selected and completed states scored
+40/40; the open state scored 39/40 because the assistant identity/status line is partly clipped at the top of the
+conversation viewport. Its baseline/regression status is unknown; the question, choices and footer fit. Completion
+has no card, running Stop control or error/stopped note, and an empty composer. The recording finishes successfully
+without assistant text; it does not demonstrate generated answer content or transmission of SQLite in the reply.
+
+The exit image contains no visible card: its opacity was already zero although the node remained mounted and
+leaving. Recorded height decreased from 179.25 to 175.328125 before removal, demonstrating only the beginning of
+collapse. Forty-seven observer records include duplicates, 46 connected records and one removal; they are not 47
+transitions. The JavaScript removal timer is not slowed by CSS playback. A complete visible exit fade/fold, normal-speed
+feel, resource cost, other sizes/languages/motion modes, integration and task-997 completion remain unverified.
+Result review SHA-256: `a3f74d5af1e39b65abec6fc83d1d21d5386131ce65575f075f1fc1402de7354a`.
