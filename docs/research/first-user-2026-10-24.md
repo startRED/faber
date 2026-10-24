@@ -44,14 +44,17 @@ connection, before queueing. The connector could open the review request, but do
 
 ## Follow-up walks and classification
 
-The matrix is still incomplete: two of its sixteen requested default or project walks completed, both Haiku in
-pt-BR at 720x480. The focused Codex Chat smoke above is additional evidence, not a completed default configuration.
+The matrix is still incomplete: four of its sixteen requested default or project walks completed: Haiku and Codex,
+default and project, all pt-BR at 720x480. The focused Codex Chat smoke above is additional evidence,
+not a completed default configuration.
 
 | Walk | Program evidence | What it establishes and what remains |
 | :--- | :--- | :--- |
 | Codex, focused first run, pt-BR, 720x480 | Exit 0; `first-user-2026-10-24-tPs6KS.md`; five images retained | Image 3 shows the main disconnected screen. The reviewer nevertheless declared itself stuck looking for another continuation step. The goal was reached visually; its confusion remains recorded, not relabeled as a flawless UX pass. |
 | Haiku, default walk, pt-BR, 720x480 | Exit 0; `first-user-2026-10-24-claude-pt-BR-720x480-default.md`; report and images copied with hashes | First run, Catalog, Chat and Settings were declared complete; the core Chat answer was visible. Projects was declared stuck with the narrow navigation drawer still open. The complete findings remain in the generated report. |
 | Haiku, focused project, same language/size, retry | Exit 0; `first-user-2026-10-24-claude-pt-BR-720x480-project.md`; nine images, source/copy report hashes equal | Final image shows a reply and Done in Demo, with the start of the reply above the viewport. This proves a completed recorded turn, not that the complete answer was inspected or real-provider compatibility. |
+| Codex, default walk, pt-BR, 720x480 | Exit 0; `first-user-2026-10-24-codex-pt-BR-720x480-default.md`; 24 images and report retained; 29 artifact digests verified | Chat's complete recorded answer and idle state were independently inspected. Catalog and Settings were declared complete. First run reached the disconnected main screen, but the reviewer asked how to continue without AI and declared itself stuck. Projects again stopped with the narrow drawer open; that does not establish a missing page. |
+| Codex, focused project, pt-BR, 720x480 | Exit 0; `first-user-2026-10-24-codex-pt-BR-720x480-project.md`; nine images, 14 retained artifact digests verified | Demo was found and the recorded turn completed. The final image shows the reply's end and idle status, with its beginning above the viewport; full-answer inspection is not established. The drawer initially confused the reviewer, which continued by choosing Demo. |
 
 The first project attempt was interrupted without a report when its coordinating runner received SIGINT. Three partial
 images and an explicit interrupted status were preserved. It is not a success. The abandoned cache reservation was
@@ -77,6 +80,16 @@ Source inspection also confirms that the first-run appearance step contains thre
 the small window. Seeing only one without scrolling does not establish missing choices. That discovery complaint,
 Catalog detail scroll position, model-selection wording and language-field ambiguity remain recorded for confirmation
 in the outstanding walks. No speculative product change was made from those statements alone.
+
+The Codex default walk retains all evidence under `codex-pt-BR-720x480-default/run-01` in the external matrix folder.
+Before/after digests separately identify the actual app (`build-3/faber-test/debug/faber.exe`), the UX driver and
+the fake CLI; all stayed unchanged. The driver digest alone does not identify the app. The UI source was the
+independently developed motion/notes worktree at `1618816e`, not this harness worktree. The controlled replay and
+disconnected first-run apps both ended naturally. Repeated drawer confusion now has evidence from both reviewers;
+the documented behavior keeps navigation open when switching areas, so changing that behavior needs a separate
+product decision rather than silently treating the drawer as a missing Projects screen.
+The Codex project walk has its own `codex-pt-BR-720x480-project/run-01` evidence folder with the same unchanged app,
+driver, fake CLI and UI source identities. Its final image was inspected separately from the reviewer's success claim.
 
 Remaining work: both reviewers at both languages and sizes, retained screenshot verification, confirmed findings fixed
 with regression checks, and a second pass without blocking findings. Task 996 remains open; no stable-release claim.
