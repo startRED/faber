@@ -99,4 +99,4 @@ unpublished work or permission to admit the candidate. Admission, installation a
 The original external report is retained verbatim with SHA-256
 `709f196ed5c52c66b143b5ed528d41243351a13bf0c564ad716cece028ef6027`. This repository copy contextualizes the original status and adds this coordination
 note. A separate synthetic skill-only lifecycle test is being prepared; its initial inventory assertion was incorrect
-and its revised execution remains pending. It is not a successful validation of the real source described here.
+and its revised execution subsequently passed the one selected check plus the runner aggregate (see [the synthetic proof](plugin-skill-proof-2026-10-24.md)). It is not a successful validation of the real source described here.
