@@ -290,9 +290,9 @@ pub fn claude_args(launch: &ClaudeLaunch) -> Vec<String> {
     let mut args: Vec<String> = [
         "-p",
         "--input-format",
-        "stream-json",
+        Vendor::Claude.protocol(),
         "--output-format",
-        "stream-json",
+        Vendor::Claude.protocol(),
         "--verbose",
         "--include-partial-messages",
         "--exclude-dynamic-system-prompt-sections",

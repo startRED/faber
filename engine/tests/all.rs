@@ -46,6 +46,8 @@ mod claude_sessions;
 mod codex_session;
 #[path = "compact.rs"]
 mod compact;
+#[path = "compiled_protocols.rs"]
+mod compiled_protocols;
 #[path = "conversation_copy.rs"]
 mod conversation_copy;
 #[path = "engine.rs"]

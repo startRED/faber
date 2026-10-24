@@ -26,7 +26,7 @@ there when it helps, and mention the files you create.";
 /// and require MXC on Windows. Full access ("Do not ask", R121) starts the CLI as the person would: their MCP servers, plugins
 /// and hooks stay on, and no sandbox is configured.
 pub fn codex_args(area: Area, windows: bool, user_hooks: bool, permissions: Permissions) -> Vec<String> {
-    let mut args = vec!["app-server".to_string()];
+    let mut args = vec![Vendor::Codex.protocol().to_string()];
     let mut push = |a: &[&str]| args.extend(a.iter().map(|s| s.to_string()));
     let isolated = permissions == Permissions::Isolated;
     if isolated || (permissions.guarded() && !user_hooks) {

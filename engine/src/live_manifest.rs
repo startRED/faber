@@ -284,7 +284,7 @@ pub fn validate_document(payload: &[u8], now: &str, app_version: &str, previous:
     for driver in &document.drivers {
         if !id(&driver.id)
             || !drivers.insert(&driver.id)
-            || !matches!((driver.provider.as_str(), driver.variant.as_str()), ("claude", "stream-json") | ("codex", "app-server"))
+            || !crate::model::Vendor::ALL.iter().any(|vendor| vendor.name() == driver.provider && vendor.protocol() == driver.variant)
         {
             return Err(Invalid::Support);
         }

@@ -15,6 +15,14 @@ pub enum Vendor {
 impl Vendor {
     pub const ALL: [Vendor; 2] = [Vendor::Claude, Vendor::Codex];
 
+    /// The compiled wire protocol used by both launch arguments and manifest descriptors.
+    pub fn protocol(self) -> &'static str {
+        match self {
+            Vendor::Claude => "stream-json",
+            Vendor::Codex => "app-server",
+        }
+    }
+
     pub fn name(self) -> &'static str {
         match self {
             Vendor::Claude => "claude",
