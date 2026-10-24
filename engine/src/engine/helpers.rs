@@ -45,7 +45,7 @@ struct Ended {
 
 impl Core {
     pub(super) fn helpers_in(&self, conv: &str) -> bool {
-        self.helpers.values().any(|h| h.conv == conv)
+        self.helpers.values().any(|h| h.conv == conv) || self.waiting_helpers(conv, "") > 0
     }
     /// Whether a project conversation on `vendor` offers the helper tool: the other vendor's CLI is connected.
     pub(super) fn offers_helper(&self, area: Area, vendor: Vendor) -> Helper {
@@ -55,6 +55,18 @@ impl Core {
     /// The agent called the helper tool. A helper that cannot start answers the call at once with why, so the agent goes on alone.
     pub(super) fn start_helper(&mut self, conv: &str, call: String, input: serde_json::Value) {
         if let Err(why) = self.launch_helper(conv, &call, &input) {
+            if why == super::worker_memory::PENDING {
+                let Some(sid) = self.live.get(conv).map(|live| live.sid) else { return };
+                let owner = conv.to_string();
+                self.defer_worker(format!("helper:{call}"), owner.clone(), move |core| {
+                    if core.live.get(&owner).is_some_and(|live| live.sid == sid)
+                        && core.convs.get(&owner).is_some_and(|conversation| !conversation.stopped && conversation.archived_at.is_none())
+                    {
+                        core.start_helper(&owner, call, input);
+                    }
+                });
+                return;
+            }
             if why == super::mcp_servers::CHECK_PENDING {
                 let Some(sid) = self.live.get(conv).map(|live| live.sid) else { return };
                 let (owner, key) = (conv.to_string(), format!("helper:{call}"));
@@ -100,8 +112,11 @@ impl Core {
             + self
                 .kit_checks
                 .iter()
-                .filter(|(name, check)| name.starts_with("helper:") && name.as_str() != check_name && check.owner == conv)
+                .filter(|(name, check)| {
+                    name.starts_with("helper:") && name.as_str() != check_name && check.owner == conv && !self.worker_waiting(name)
+                })
                 .count()
+            + self.waiting_helpers(conv, &check_name)
             >= helper::MAX_PER_CONVERSATION
         {
             return Err("two helpers are already working; wait for one to finish");
@@ -131,6 +146,9 @@ impl Core {
         let flags = if vendor == Vendor::Claude { self.claude_flags_for(&cli) } else { Default::default() };
         if vendor == Vendor::Claude && !flags.plugin_dir {
             tools.plugin = None;
+        }
+        if !self.worker_ready(&check_name) {
+            return Err(super::worker_memory::PENDING);
         }
         self.begin_unbounded(vendor).map_err(|_| "the other AI cannot start right now")?;
         let user_hooks = self.store.settings().user_hooks == Some(true) && permissions.guarded();
@@ -199,6 +217,7 @@ impl Core {
                 tools,
             ),
         };
+        self.worker_memory.registry.register(session.owned_tree());
         self.rewind_helper_session(call, hsid, session.clone());
         session.send(UserTurn::text(super::kits::with_resources(prompt, resources)));
         let started = self.secs();
@@ -442,6 +461,7 @@ impl Core {
 
     /// The agent's turn stopped or ended: its helpers stop with it. An interrupted helper still reports what it had.
     pub(super) fn stop_helpers(&mut self, conv: &str, close: bool) {
+        self.cancel_workers(conv);
         self.kit_checks.retain(|name, check| !name.starts_with("helper:") || check.owner != conv);
         // The checks it was waiting for stop too (`verifying.rs`).
         self.stop_verify(conv);

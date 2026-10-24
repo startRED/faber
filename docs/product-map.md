@@ -482,6 +482,8 @@ changes, and native desktop control (the [toolbox inventory](product/areas.md#to
 Safe, Balanced and Free git modes on screen (R83, separate from CLI permissions and Keep going); the remaining visual
 answers; and the full benchmark (its light version of 5 requests runs from `docs/dev/benchmark.md`).
 
+Windows worker memory admission extends Helpers and agent-started conversation turns. Registered CLI containers contribute their private working set once per exact OS process identity, root included; shared Codex threads do not multiply their server. Automatic helpers and unattended turns wait in FIFO order while aggregate usage reaches half physical RAM, available RAM falls below 2 GiB, or a reading is unknown. One fresh sample admits one start; sampling runs off the engine lock every two seconds only while work waits. Stop removes waiting work; callbacks recheck the conversation/reply or helper session generation, and existing quota, catalog, copy, rewind and install checks remain. Manual Auto messages keep their original path. Admission does not kill active work or cap subsequent growth/native CLI subagents. Unix remains count-limited until its native sampler is implemented. Covered by unit tests in `engine/src/worker_memory.rs`, `engine/src/engine/worker_memory.rs`, its policy module, and the shared-server fake in `engine/src/codex.rs`; real parallel resource cost remains unverified.
+
 ## Portable catalog plugins
 
 A plugin groups only parts the existing store can check: skills, slash-command prompts, subagent definitions and

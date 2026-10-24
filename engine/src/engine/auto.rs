@@ -469,6 +469,7 @@ impl Core {
                 sink,
             ),
         };
+        self.worker_memory.registry.register(session.owned_tree());
         *stop.lock().unwrap_or_else(|e| e.into_inner()) = Some(session.clone());
         self.next_sid += 1;
         Some(Spare { session, answer, id: self.next_sid, vendor, asked, model_name })

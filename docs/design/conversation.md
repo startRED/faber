@@ -6,6 +6,9 @@ above an answer. The window widths, the sidebar and the running column are in [l
 
 ## Answers
 
+- On Windows, automatic helpers and unattended turns may wait for memory headroom while the existing working state
+  and Stop remain available. Stop cancels their pending start; capacity returning resumes it. This adds no setting,
+  permission card or error banner. The engine's admission does not stop active work; Unix retains count limits.
 - Native visual pieces, HTML/SVG cards and their web-access rules are in [visual-answers.md](visual-answers.md).
 - The header is the vendor's mark, the model's name and its effort in the quiet header ink ("· high effort"; the owner,
   2026-10-17), nothing else (Auto shows its reason beside the name only while it is still choosing). Auto's reason is its

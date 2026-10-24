@@ -442,6 +442,7 @@ struct Core {
     /// What each conversation's folder held when its reply began, for Faber's checks (`verifying::Before`).
     before: HashMap<String, verifying::Before>,
     live: HashMap<String, Live>,
+    worker_memory: worker_memory::State,
     /// Set while an install of Faber closes the engine's admission (`Engine::install_admission`): nothing new starts.
     installing: bool,
     /// Compactions the agents asked for, done once their turn ends (`compact.rs`).
@@ -596,6 +597,7 @@ impl Engine {
             Mutex::new(Core {
                 catalog_store: Some(catalog_store),
                 kit_checks: HashMap::new(),
+                worker_memory: Default::default(),
                 kit_check_gate: Arc::new(tokio::sync::Semaphore::new(1)),
                 #[cfg(test)]
                 synchronous_kit_checks: false,
@@ -1979,6 +1981,7 @@ impl Core {
     /// way, but nobody pressed Stop, so the conversation is not marked stopped, its waiting messages stay, and Keep going sees a
     /// turn that failed.
     fn interrupt(&mut self, id: &str, by_person: bool) {
+        self.cancel_workers(id);
         self.revoke_replacement(id);
         self.kit_checks.retain(|_, check| check.owner != id);
         self.release_codex_preparation(id);
@@ -3507,6 +3510,7 @@ impl Core {
         } else {
             server.tools(opts.tools);
         }
+        self.worker_memory.registry.register(server.owned_tree());
         server
     }
 
@@ -3540,6 +3544,9 @@ impl Core {
         self.note_away(id, reply_id);
         let approved = self.transfers.get(id).is_some_and(|t| t.reply == reply_id && t.approved == Some(pick.vendor));
         self.gate_turn_approved(pick, by_hand, approved)?;
+        if self.defer_unattended(id, reply_id, pick, &text, &images, by_hand) {
+            return Ok(());
+        }
         if let Some(m) = self.convs.get_mut(id).and_then(|c| c.messages.iter_mut().find(|m| m.id == reply_id)) {
             m.vendor = Some(pick.vendor);
             m.model = pick.model.clone();
@@ -4017,6 +4024,7 @@ impl Core {
                 project_tools,
             ),
         };
+        self.worker_memory.registry.register(session.owned_tree());
         self.live.insert(
             conv.to_string(),
             Live {
@@ -5189,3 +5197,4 @@ mod tool_in_tests {
 
 #[cfg(test)]
 mod send_admission;
+mod worker_memory;
