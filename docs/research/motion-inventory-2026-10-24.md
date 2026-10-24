@@ -10,8 +10,8 @@ Rules: `docs/design/looks.md`, `.claude/skills/faber-ui/SKILL.md` and `docs/dev/
 
 | Surface | Existing implementation and checks | Remaining visual observation |
 | :--- | :--- | :--- |
-| Settings and other panels | `Settings.tsx`, `motion.ts` animateList; `motion.check.ts`, sentinel panels | Open/close, section cross-fade, interruption and reduced/none. |
-| Context and permission menus | `.cmenu`, `.st-menu`, keepForExit; `contextmenu.check.ts`, `settings.check.ts` | One message-menu entrance, exit and Escape focus return observed at 720x480/full/0.25x; permission menus, edges, rapid reversal and remaining motion modes still need observation. |
+| Settings and other panels | `Settings.tsx`, `motion.ts` animateList; `motion.check.ts`, sentinel panels | General/Privacy cross-fade observed at 720x480/full/0.25x, with an incorrect language label in an exit copy still open; panel open/close, interruption and reduced/none remain. |
+| Context and permission menus | `.cmenu`, `.st-menu`, keepForExit; `contextmenu.check.ts`, `settings.check.ts` | One message menu and one Settings permission list observed at 720x480/full/0.25x, including Escape focus return; edges, option activation, rapid reversal and remaining motion modes still need observation. |
 | Native selects | Customizable picker with native fallback in `styles.css`; Settings checks | Supported-picker entrance/exit and fallback behavior. |
 | Palette and Find | `.pal`, `.find`; palette interaction and `find.check.ts` checks | Both separate entrance and exit paths. |
 | Permission/question cards, toast and errors | `Ask.tsx`, `.ask`, `.toast`, `.quota-card`; `question.check.ts`, sentinel permission | Retrying actual error states, including the later error shorthand found below. |
@@ -57,7 +57,7 @@ critique. The question-error state was not photographed. Integration and the com
 running-column open/close at 1440x900, 1000x700 and 720x480, the narrow sidebar, Settings and reduced motion.
 Composition covers 1920x1080 and 1280x800.
 
-This is not a complete inventory walkthrough. Remaining menus, Catalog details, native picker behavior and recoverable-error
+This is not a complete inventory walkthrough. Remaining menu cases, Catalog details, native picker behavior and recoverable-error
 animation still need explicit observation and independent scores. Thumbnail expansion and message actions now have
 one independently inspected four-state slow capture; their broader cases and individual scores remain unfinished.
 
@@ -86,6 +86,71 @@ C011. The preparation and result reports are retained verbatim beside the captur
 The JavaScript removal timer is unchanged by slowed CSS playback: this capture observed removal about 80.7 ms after
 the leaving state, with the last sampled opacity about 0.907. It does not prove a complete slowed fade to opacity 0
 or diagnose a normal-speed exit defect. Images and DOM observations are sequential, not atomic or exact animation
-percentages. Permission menus, edge placement, rapid reversal, reduced/none, normal-speed performance, runtime
+percentages. That message-menu run did not cover permission menus, edge placement, rapid reversal, reduced/none, normal-speed performance, runtime
 memory/processor cost, integration and full task-997 approval remain unverified by this focused run. Item navigation,
 action activation and destructive-action confirmation were not exercised; external desktop focus was not measured.
+
+## Focused Settings permission-list observation
+
+Evidence is retained at `E:/Documentos/ProjetosIA/faber-evidence/settings-permission-motion-20261024/`.
+One hidden native run opened the existing permission selector and closed it with Escape at 720x480, pt-BR,
+Oficina, full motion and 0.25x CSS playback. It selected no permission and made no provider request. The isolated
+sandbox alone received the appearance prerequisite; the personal app and its settings were not changed.
+Clean runner source `a7d93dfe`, clean runtime source `af853a33` and the original cache-3 app, driver, fake CLI,
+fixture and probe were pinned. The reviewed capture hash was checked before the normal resource gate and shared
+lease. Parent launch receipt: `ac1d6d`; natural exit 0 and CLEAN were recorded, with identical provenance before/after.
+
+The four original images show entrance, settled open, exit and closed focus. All five options and their descriptions
+fit inside the window and Settings scroll pane. The list measured x340, y81.828125, width320, height303.796875;
+the deliberate pane scroll is not a clipped menu. Exactly one option stayed selected: `set-permissions-pick-opt-4`.
+The button label remained `Acesso total`, and the persisted permission remained `dontAsk` before and after. Escape
+kept Settings open, removed the list and returned visible focus to the exact same connected combobox.
+
+The clock passed on sample one with 179 frames. The passive collector retained 241 observations, including 122
+intermediate entrance frames and 15 leaving frames plus one leaving event. All 16 leaving samples kept the same
+selected option, remained connected and were inert and pointer-disabled. Removal was observed about 84.8 ms after
+the leaving event. The exit image still shows the list; the later closed-focus image has no visible ghost.
+
+Fresh read-only reviewer `/root/observation_evidence_review` inspected all four images, records and provenance.
+The open and closed-focus endpoints each scored 40/40 on the existing eight-line composition rubric, with no
+deductions; the two transitional images were inspected without final-state scores. This is one unchanged app,
+not a before/after correction. The verbatim preparation/result reviews and image manifest are beside the capture.
+Result review SHA-256: `e5ba8b1bbb262329fb1c55485b6680d683b099129b87d6b7acb0898ba0d38d4a`.
+
+Slowed CSS does not stretch the JavaScript removal timer. Sequential images and records are not atomic and do not
+prove an exact animation percentage, complete slowed fade, normal-speed smoothness or resource cost. This run does
+not evaluate permission policy, activate an option, cover other sizes/themes/languages/reduced/none, establish
+screen-reader behavior, approve integration or complete task 997. No product correction follows from this observation.
+
+## Focused Settings section transition: visual finding remains open
+
+Evidence is retained at `E:/Documentos/ProjetosIA/faber-evidence/settings-section-motion-20261024/`.
+One hidden native run navigated General to Privacy and back, at 720x480, pt-BR, Oficina, full motion and 0.25x
+CSS playback, without activating an internal control or provider. It used the same clean runner/runtime sources
+and original cache-3 artifacts as the permission-list observation. The reviewed capture hash was checked before
+the normal shared lease/resource gate. Parent launch receipt: `5c7e88`; natural exit 0, CLEAN and identical captured
+provenance before/after were recorded. The permission value stayed `dontAsk`; this is not a language-save check.
+
+Fresh read-only reviewer `/root/observation_evidence_review` inspected all five original PNGs and the frame records.
+The initial General and both settled destination states each scored 40/40 on the existing eight-line composition
+rubric, with no visible ghost at rest. Both destination buttons retained exact native focus, selection and heading;
+their original references stayed connected, scrollTop was zero, and exit hosts and live animations were gone.
+The deliberate nonzero-scroll reset and interruption cases were not exercised.
+
+The transient Privacy-entry image exposes a concrete visual defect: the departing General copy shows
+`Igual ao sistema` for Language, while initial and returned General show `Português (Brasil)`. The automatic
+assertions passed but did not retain that selector's value or selectedIndex. The evidence establishes an unfaithful
+visual copy, not a persisted-language change or its cause. This finding remains open; the endpoint scores do not
+approve the whole transition. The two transient images were inspected without final-state scores.
+
+The two collectors retained 183/221 frames, with 125/144 intermediate entrance frames and 102/103 frames containing
+an old-section clone. Every recorded clone was inert, aria-hidden and pointer-disabled. Hosts disappeared about
+642.9/643.7 ms after each collector started; live animations reached rest about 1070.9/1193.4 ms. These sampled
+times include the native click and CSS slowdown, and are not normal interaction latency. Recorded opacity changes
+confirm a cross-fade. All sampled computed transforms had zero displacement; variable-based keyframes alone do
+not establish vertical movement. No memory, processor or normal-speed performance conclusion follows.
+
+The verbatim result review and five-image manifest are beside the capture. Result review SHA-256:
+`09ed9f1000c9c8bdaa6f5c9929467328ea2cd14b5b9926058cbabc86baded645`.
+Other sections, sizes, themes, languages, reduced/none, rapid reversal, resource cost, integration and complete
+task-997 approval remain unverified by this focused run. No correction has been verified for the visual finding.
