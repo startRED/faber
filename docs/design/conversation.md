@@ -183,3 +183,5 @@ error uses the existing quiet work-log line, and a later retry does not insert r
 
 Agent catalog changes share the existing self-change permission card; [Catalog](catalog.md#agent-requests) describes
 their separate grants, version disclosure, backups and preservation of current conversation tools.
+
+- Creative comparisons reuse the work log row, labelled as independent draft comparisons in every language. Draft bodies never appear in the row detail; the bounded result names scores, model identities, shown order, short reason previews and a durable receipt. Failure remains a failed tool result. There is no new panel, control or motion.
