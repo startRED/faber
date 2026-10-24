@@ -124,6 +124,9 @@ controls; these rules extend the large-page and drawing viewer, never add anothe
   memory/processor checks passed in the lead's run above; this sandbox cannot run screen suites. The existing
   visual_answers_pane_memory scenario now also opens the real pinned Mermaid CDN library with Live, confirms an SVG
   and hidden code/fallback through a scoped DevTools session, measures opening CPU and idle CPU before/open/closed,
-  and applies the same memory cap and 15 MiB post-close margin after collection. Only FABER_LIVE_CDN=1 enables this
+  and applies the same memory cap and 15 MiB post-close margin after collection. The separate visual_answers_memory
+  scenario allows 25 MiB over the cold baseline for the first close after twenty switches (browser cache warm-up), then
+  5 MiB over that warmed reading for the 720 px reopen, twenty more switches and Escape; the 400 MB cap and frame/process checks stay.
+  Only FABER_LIVE_CDN=1 enables this
   real-CDN step; otherwise it prints that Mermaid Live was not measured. Offline HTML always runs. The opted-in
   check requires internet and fails if drawing falls back to code. Task 310 is complete and parity M1 is implemented.

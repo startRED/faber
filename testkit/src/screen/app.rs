@@ -1105,7 +1105,14 @@ fn changes_memory(ctx: &mut Ctx) -> Result {
 }
 
 // Weak references prove DOM disposal; process identities and working sets show Chromium's delayed teardown separately.
-fn visual_frames_collected(ctx: &mut Ctx, app: &mut Opened, baseline: f64, before: &[crate::proctree::ProcRow], what: &str) -> Result<f64> {
+fn visual_frames_collected(
+    ctx: &mut Ctx,
+    app: &mut Opened,
+    baseline: f64,
+    margin_mb: f64,
+    before: &[crate::proctree::ProcRow],
+    what: &str,
+) -> Result<f64> {
     let started = Instant::now();
     let mut closed;
     let mut retained;
@@ -1123,7 +1130,7 @@ fn visual_frames_collected(ctx: &mut Ctx, app: &mut Opened, baseline: f64, befor
             "window.__visualFrames.flatMap((ref,i)=>{const frame=ref.deref();return frame?[{i,connected:frame.isConnected,srcdocBytes:frame.srcdoc.length,urlBytes:frame.src.length}]:[]})",
         )?;
         ctx.notes.push(format!("{label}: extra WebView2 pids {extra:?}; remaining frame references: {retained}"));
-        if (started.elapsed() >= Duration::from_secs(2) && closed <= baseline + 15.0 && retained == json!([]) && extra.is_empty())
+        if (started.elapsed() >= Duration::from_secs(2) && closed <= baseline + margin_mb && retained == json!([]) && extra.is_empty())
             || started.elapsed() >= Duration::from_secs(15)
         {
             break;
@@ -1133,14 +1140,14 @@ fn visual_frames_collected(ctx: &mut Ctx, app: &mut Opened, baseline: f64, befor
     let dom = app.page.cdp.call("Memory.getDOMCounters", json!({}))?;
     ctx.notes.push(format!("{what}: renderer DOM counters {dom}"));
     let numbers = format!(
-        "{what}: {closed:.1} MB, before opening {baseline:.1} MB, retained difference {:.1} MB after {:.1}s; remaining frame references: {retained}",
+        "{what}: {closed:.1} MB, baseline {baseline:.1} MB, retained difference {:.1} MB after {:.1}s; remaining frame references: {retained}",
         closed - baseline,
         started.elapsed().as_secs_f64()
     );
     ctx.notes.push(numbers.clone());
     ensure(retained == json!([]), || format!("{numbers}; retired frames must be collectible"))?;
-    ensure(closed <= baseline + 15.0, || {
-        format!("{numbers}; exceeds the 15 MB post-close margin after collection\n{}", ctx.notes.join("\n"))
+    ensure(closed <= baseline + margin_mb, || {
+        format!("{numbers}; exceeds the {margin_mb} MB post-close margin after collection\n{}", ctx.notes.join("\n"))
     })?;
     Ok(closed)
 }
@@ -1242,7 +1249,7 @@ fn visual_answers_pane_memory(ctx: &mut Ctx) -> Result {
     app.page.click(&close)?;
     app.page.wait_gone(&css(".visual-pane"))?;
     same(app.page.count(&css("iframe"))?, 0, "closing the visual pane removes its frame")?;
-    visual_frames_collected(ctx, &mut app, baseline, &before_processes, "visual answer after closing")?;
+    visual_frames_collected(ctx, &mut app, baseline, 15.0, &before_processes, "visual answer after closing")?;
 
     if std::env::var("FABER_LIVE_CDN").as_deref() != Ok("1") {
         ctx.notes.push("Mermaid Live not measured; set FABER_LIVE_CDN=1 for the lead's real-CDN renderer and cost check".into());
@@ -1281,7 +1288,7 @@ fn visual_answers_pane_memory(ctx: &mut Ctx) -> Result {
     app.page.click(&close)?;
     app.page.wait_gone(&css(".visual-pane"))?;
     same(app.page.count(&css("iframe"))?, 0, "closing the Mermaid pane removes its real renderer frame")?;
-    let mermaid_closed = visual_frames_collected(ctx, &mut app, mermaid_baseline, &before_processes, "Mermaid Live after closing")?;
+    let mermaid_closed = visual_frames_collected(ctx, &mut app, mermaid_baseline, 15.0, &before_processes, "Mermaid Live after closing")?;
     let closed_before = ctx.cpu_ms(app.id)?;
     let closed_started = Instant::now();
     pause(2.0);
@@ -1378,7 +1385,8 @@ fn visual_answers_memory(ctx: &mut Ctx) -> Result {
         switch_cpu / switch_ms * 100.0
     );
     ctx.notes.push(numbers.clone());
-    let closed = visual_frames_collected(ctx, &mut app, baseline, &before_processes, "visual versions after closing")?;
+    // One-time browser cache warm-up: CI +5..+7 MB, Erick's PC +14.9 MB; allow 25 MB over the cold baseline.
+    let closed = visual_frames_collected(ctx, &mut app, baseline, 25.0, &before_processes, "visual versions after closing")?;
     // Real browser input must cross the opaque frame, including the modal pane at the minimum window width.
     super::shell::set_size(&mut app.page, 720, 600)?;
     app.page.click(&css(".visual-card .visual-open").last())?;
@@ -1405,6 +1413,18 @@ fn visual_answers_memory(ctx: &mut Ctx) -> Result {
         json!(true),
         "the keyboard version switch reuses the reopened frame",
     )?;
+    // Repeat the twenty-switch workload on the warmed browser so the 5 MB margin below also bounds retention per switch.
+    for _ in 0..10 {
+        for (control, version) in [(".visual-next", 2), (".visual-prev", 1)] {
+            loads += 1;
+            app.page.click(&css(control))?;
+            app.page.wait_for(
+                "the warmed visual version to load in the same frame",
+                &format!("window.__visualLoads==={loads} && document.body.dataset.visualReadyVersion==='{version}'"),
+            )?;
+        }
+    }
+    same(app.page.count(&css("iframe"))?, 1, "the warmed switches keep only one frame mounted")?;
     app.page.press_on(&css(".visual-next"), "Tab")?;
     // The page's counter precedes its input in DOM order, even though the input covers it in this pointer fixture.
     app.page.wait_for("Tab to enter the new version at its first control", "document.body.dataset.visualFocused==='1:BUTTON'")?;
@@ -1422,7 +1442,8 @@ fn visual_answers_memory(ctx: &mut Ctx) -> Result {
     app.page.press("Escape")?;
     app.page.wait_gone(&css(".visual-pane"))?;
     same(app.page.count(&css("iframe"))?, 0, "Escape from the page input removes the frame at 720 px")?;
-    visual_frames_collected(ctx, &mut app, baseline, &before_processes, "visual answer after Escape at 720 px")?;
+    // Reopening plus twenty more switches must stay within 5 MB of the warmed reading (observed +0.5 and +1.7 MB for one cycle).
+    visual_frames_collected(ctx, &mut app, closed, 5.0, &before_processes, "visual answer after Escape at 720 px")?;
     ensure(peak <= BUDGET_MB && closed <= BUDGET_MB, || format!("{numbers}; over the {BUDGET_MB} MB budget"))
 }
 
