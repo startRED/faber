@@ -2,6 +2,10 @@
 
 How Projects builds software: one voice with a team behind it, many workers, self-development and coherence.
 
+Phase 4's [nightly CLI candidate checks](../dev/cli-qualification.md) detect launch-option and request-schema drift
+without sign-in. Their metadata receipts always remain unqualified; authenticated turns, cancellation and cleanup
+evidence are still needed before a candidate can authorize installation.
+
 ## Building software: one voice, a team behind it
 
 For frontend work, the existing guide delivery provides Faber's original `frontend-craft` and `frontend-proof`
