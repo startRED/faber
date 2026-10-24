@@ -17,6 +17,9 @@ so the layout changes with its width:
 
 In the narrow sidebar overlay, switching between Chat and Projects keeps navigation open so the chosen area's rows remain reachable. Choosing a project or conversation, opening Catalog, Escape or the scrim closes it. Tab stays inside the modal overlay; Escape returns focus to the topbar menu button. Wide navigation stays beside the stage.
 
+The What's New page starts below the 36 px titlebar. Its scrolling viewport never extends behind the brand or window
+controls, including when focus scrolls to Continue in a short window (`tests/ui/notes.check.ts`, `notes: scrolling`).
+
 Text size up to 18 px must not push the page past the window width at any of these widths: content wraps or scrolls
 inside its own area.
 

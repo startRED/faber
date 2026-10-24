@@ -13,7 +13,6 @@ import { store } from './running.ts';
 // Only a test build (`vite build --mode test`) carries the screen's checks; a production build drops this line.
 if (import.meta.env.MODE === 'test') {
   await import('../tests/ui/crash.ts');
-  await import('../tests/ui/index.ts');
 }
 
 // Events are listened for first, and only then is the snapshot asked for. The running list carries a revision and the
@@ -59,6 +58,9 @@ render(
 );
 // The static first frame (ui/index.html) has done its job: the real screen is in the page now.
 document.getElementById('first')?.remove();
+
+// Checks may move focus: start them only after the app's first mount has placed its own focus.
+if (import.meta.env.MODE === 'test') await import('../tests/ui/index.ts');
 
 // A screen loaded again had no time to let Faber's browser go: box 0 does so now and makes the shell forget every box, so the
 // numbers of this screen start again from 1 whatever the clock does (R161 step 7).

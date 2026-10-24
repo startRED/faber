@@ -22,10 +22,10 @@ above an answer. The window widths, the sidebar and the running column are in [l
   Every inherited project attachment is copied before the new conversation appears, even one from an earlier message;
   a failed copy refuses the edit rather than publishing broken references. Deleting the original leaves these copies intact.
 - That line is a hover bar (R264; the owner, 2026-10-17). It is in the layout the whole time, so nothing moves when it
-  shows, but it is transparent until the pointer is on the message or the keyboard is inside it, and it fades in and
-  slides down 4 px with `--dur-ui` and `--ease` (out with `--dur-exit` and `--ease-in`). The last answer is no
-  exception. A screen with no hover (`@media (hover: none)`) shows it always; reduced and no motion show it without
-  the slide. The person's own message has the same bar under its bubble, right-aligned: the time, copy, edit. An icon
+  shows, but it is transparent until the pointer is on the message or the keyboard is inside it. It only fades,
+  using `--dur-fast` capped by `--dur-feedback-max` at 150 ms, with no translation (see [looks.md](looks.md)).
+  The last answer is no exception. A screen with no hover (`@media (hover: none)`) shows it always; reduced and no
+  motion disable the transition. The person's own message has the same bar under its bubble, right-aligned: the time, copy, edit. An icon
   that answers a press (copy turns into a check for 1.6 s, read aloud into a stop square while it speaks) cross-fades
   with a small scale. Read aloud uses the browser's own voice for the screen language and skips code blocks.
 - The same line carries the reply's state (the owner, 2026-10-18: "you should have said you finished"), after the buttons, in the
