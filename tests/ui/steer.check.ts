@@ -8,6 +8,44 @@ import { api, type AppEvent, type AppState, type Conversation, type Message, typ
 import { failureText, t } from '../../ui/i18n.ts';
 import { check, deepEqual, equal, ok } from './check.ts';
 
+check('steer: agent messages show origin and keep recovery controls only for held work', async () => {
+  for (const why of ['wake.asked', 'wake.childDone'] as const) {
+    const root = document.createElement('div');
+    document.body.append(root);
+    const [message, setMessage] = createSignal<Message>({ id: 'answer', at: 0, role: 'assistant', text: 'Synthetic work', status: 'streaming', vendor: 'codex' });
+    const queued: QueuedTurn[] = [{ id: 'agent', at: 1, text: 'Synthetic internal instructions for another AI', choice: { vendor: 'codex' }, wake: { why } }];
+    const before = { remove: api.removeQueued, send: api.sendQueued };
+    const actions: string[] = [];
+    api.removeQueued = async (conversation, id) => { actions.push(`remove:${conversation}:${id}`); };
+    api.sendQueued = async (conversation, id) => { actions.push(`send:${conversation}:${id}`); };
+    const dispose = render(() => createComponent(Thread, {
+      conversationId: 'agent-message', get messages() { return [message()]; }, queued, busy: false, from: 0, options: [], onBranch: () => {},
+    }), root);
+    try {
+      await new Promise((resolve) => setTimeout(resolve, 30));
+      equal(root.querySelector('.mine.queued'), null, 'a message never impersonates the person');
+      ok(root.textContent!.includes(t(why)), 'its agent origin is visible');
+      ok(!root.textContent!.includes(queued[0].text), 'internal instructions do not fill the conversation');
+      equal(root.querySelector('button'), null, 'no Edit, Remove or Send now is needed');
+      setMessage({ ...message(), status: 'stopped' });
+      await new Promise((resolve) => setTimeout(resolve, 30));
+      const line = root.querySelector('.woke')!;
+      ok(line.querySelector(`button[aria-label="${t('queue.removeLabel')}"]`), 'stopped work can be discarded');
+      ok(line.querySelector(`button[aria-label="${t('queue.sendNowLabel')}"]`), 'the person can explicitly resume stopped work');
+      equal(line.querySelector(`button[aria-label="${t('queue.editLabel')}"]`), null, 'the agent prompt is never edited as the person');
+      line.querySelector<HTMLButtonElement>(`button[aria-label="${t('queue.removeLabel')}"]`)!.click();
+      line.querySelector<HTMLButtonElement>(`button[aria-label="${t('queue.sendNowLabel')}"]`)!.click();
+      await new Promise((resolve) => setTimeout(resolve, 30));
+      deepEqual(actions, ['remove:agent-message:agent', 'send:agent-message:agent'], 'held work uses the existing recovery commands');
+    } finally {
+      api.removeQueued = before.remove;
+      api.sendQueued = before.send;
+      dispose();
+      root.remove();
+    }
+  }
+});
+
 check('steer: composer stays usable while busy and sends mid-turn draft', async () => {
   const root = document.createElement('div');
   root.style.cssText = 'position:fixed;left:0;top:0;width:500px';

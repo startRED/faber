@@ -1,0 +1,14 @@
+{
+  "notes": {
+    "fixed": {
+      "en": "Messages from other agents reach your AI automatically and no longer appear as messages you need to send.",
+      "pt-BR": "Recados de outras IAs chegam automaticamente à sua IA e deixam de aparecer como mensagens que você precisa enviar.",
+      "es": "Los mensajes de otros agentes llegan solos a tu IA y ya no aparecen como mensajes que tengas que enviar.",
+      "fr": "Les messages des autres agents arrivent automatiquement à votre IA, sans vous demander de les envoyer.",
+      "de": "Nachrichten anderer Agenten kommen automatisch bei deiner KI an, ohne dass du sie selbst senden musst."
+    }
+  },
+  "decisions": [
+    "| R-next | 2026-10-24 | Agent-to-agent questions and completion reports retain their wake origin, appear as a quiet pending origin line without human editing or routine manual send, retain Remove and Send now when held, and enter the running turn automatically when no tool is open or at the next step boundary. Stop, queue order, durable admission and unattended subscription/quota limits still hold; other automatic continuations retain their own-turn behavior. | Erick |"
+  ]
+}
