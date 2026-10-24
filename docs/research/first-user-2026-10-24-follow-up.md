@@ -96,3 +96,25 @@ in a live system prompt. The actual focused Haiku invocation subsequently worked
 its independent image/artifact review and the remaining limits. It does not identify authentication or billing,
 or prove absence of every external instruction. The separate narrow default walk retains a discovery concern.
 This changes no shipped allocation, timer, process or UI. Reviewer startup cost was not measured.
+
+## Focused spontaneous Projects discovery: attempt 03
+
+The bounded walk ended naturally with exit 0 and CLEAN after three fresh `gpt-6-luna` calls, within its eight-call
+limit. The exact task was “Abra a área de Projetos e descubra para que ela serve.” The reviewer opened the navigation,
+selected Projects, then stopped as stuck while the open drawer blurred the work area. Projects was selected and one
+`.projects-root` mounted; that DOM count is not a saved-project count, which remained zero.
+
+The third prompt's exact control list included enabled [5] “Fechar a barra lateral”, the visible X at (260,64), and
+enabled [12] “Fechar a barra lateral”, the backdrop. The reviewer attempted neither control nor Escape. This confirms
+the X was present in that step's input; it does not prove purpose discovery after closing the drawer, that typical
+users fail at a measured rate, or a broken close control. It is repeated bounded usability evidence, not a reproduced
+functional defect or a justified specific repair. Attempts 01 and 02 failed during preparation with zero evaluator
+calls, so they are not additional discovery failures.
+
+Primer setup chose Haiku through programmatic DOM selection, not a physical/native picker. The exact historical
+selected-model state is unverified; the reconstructed sky chat is not proof of that historical state. Before/after
+source and all seven artifact identities match, but this does not attest loaded executable bytes or establish full
+996/997 completion, integration, stability, or resource measurements. Parent process receipts support preservation
+of the user's running Faber process; they do not verify all app data. The fresh independent review and immutable
+evidence are at `E:/Documentos/ProjetosIA/faber-evidence/newcomer-projects-focused-20261024/attempt-03/`;
+the run manifest SHA-256 is `391a66be77b9b32a630792f15ace0b2d4392f43413feed19e74873ae68b9b75b`.

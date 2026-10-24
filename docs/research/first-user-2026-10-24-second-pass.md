@@ -55,6 +55,11 @@ inferred solely from a model's report. Independent review confirms that the Proj
 not met in this execution, while first run had already reached its stated goal. The actual control list was not
 retained per step, so whether the close action appeared in that list remains unestablished.
 
+A later focused spontaneous attempt retained each step's exact control list and confirmed that the enabled X was
+visible to the reviewer after selecting Projects. It again stopped as stuck without trying the X, backdrop or Escape.
+This confirms the control was present in that later input, but does not retroactively reconstruct the earlier run or
+show whether the purpose is discoverable after closing the drawer. See the [attempt 03 evidence](first-user-2026-10-24-follow-up.md#focused-spontaneous-projects-discovery-attempt-03).
+
 Raw report: [Codex default](first-user-2026-10-24-second-pass-codex-pt-BR-720x480-default.md), copied verbatim.
 External evidence: `E:/Documentos/ProjetosIA/faber-evidence/newcomer-matrix-20261024-c590/second-pass/codex-pt-BR-720x480-default/run-01/`.
 
