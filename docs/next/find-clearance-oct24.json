@@ -1,0 +1,11 @@
+{
+  "notes": {
+    "fixed": {
+      "en": "Find keeps the current match clear of its bar and closes without changing size.",
+      "pt-BR": "A busca deixa o resultado visível e fecha sem mudar de tamanho.",
+      "es": "La búsqueda mantiene visible el resultado actual y se cierra sin cambiar de tamaño.",
+      "fr": "La recherche garde le résultat visible et se ferme sans changer de taille.",
+      "de": "Die Suche hält den aktuellen Treffer sichtbar und schließt, ohne ihre Größe zu ändern."
+    }
+  }
+}
