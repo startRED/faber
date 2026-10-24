@@ -48,10 +48,17 @@ pub(super) type Stop = Arc<Mutex<Option<Session>>>;
 pub(super) struct Spare {
     pub(super) session: Session,
     pub(super) answer: oneshot::Receiver<Option<String>>,
-    id: u64,
+    pub(super) id: u64,
     pub(super) vendor: Vendor,
     pub(super) asked: Arc<Mutex<Option<f64>>>,
     pub(super) model_name: &'static str,
+}
+
+struct AuxEvents {
+    sink: EventSink,
+    answer: oneshot::Receiver<Option<String>>,
+    asked: Arc<Mutex<Option<f64>>>,
+    stop: Stop,
 }
 
 /// A draft's route still holds for the sent text when the text only grew a little past it.
@@ -311,37 +318,68 @@ impl Core {
                 && self.allows(*vendor, family_of(model), Purpose::Router, false).is_ok()
         });
         let (vendor, model, effort) = router?;
-        self.open_aux(vendor, model, effort, INSTRUCTIONS, Purpose::Router)
+        self.open_aux(vendor, (model, effort), INSTRUCTIONS, Purpose::Router, None)
     }
 
-    pub(super) fn open_aux(
-        &mut self,
-        vendor: Vendor,
-        model: &'static str,
-        effort: &str,
-        instructions: &str,
-        purpose: Purpose,
-    ) -> Option<Spare> {
-        self.allows(vendor, family_of(model), purpose, false).ok()?;
-        let cli = self.opts.clis.get(&vendor)?.clone();
+    fn aux_events(&self, vendor: Vendor, model: &'static str, purpose: Purpose, bounded: Option<(usize, String)>) -> AuxEvents {
         let (tx, answer) = oneshot::channel();
-        let text = Arc::new(Mutex::new(String::new()));
+        let text = Arc::new(Mutex::new(Some(String::new())));
         let tx = Arc::new(Mutex::new(Some(tx)));
         let me = self.me.clone();
         let asked = Arc::new(Mutex::new(None));
         let ran = asked.clone();
         let stop = Stop::default();
         let closer = stop.clone();
+        let done = std::sync::atomic::AtomicBool::new(false);
         let sink: EventSink = Arc::new(move |e| match e {
-            EngineEvent::Text(t) => text.lock().unwrap_or_else(|e| e.into_inner()).push_str(&t),
+            EngineEvent::Text(t) => {
+                let mut output = text.lock().unwrap_or_else(|e| e.into_inner());
+                let mut overflow = false;
+                if let Some(value) = output.as_mut() {
+                    if bounded.as_ref().is_some_and(|(limit, _)| value.len().saturating_add(t.len()) > *limit) {
+                        *output = None;
+                        overflow = true;
+                    } else {
+                        value.push_str(&t);
+                    }
+                }
+                drop(output);
+                if overflow {
+                    if let Some(tx) = tx.lock().unwrap_or_else(|e| e.into_inner()).take() {
+                        let _ = tx.send(None);
+                    }
+                    stop_router(Some(closer.clone()));
+                }
+            }
             e @ (EngineEvent::Done { .. } | EngineEvent::Error { .. }) => {
-                if let (Some(start), Some(core)) = (ran.lock().unwrap_or_else(|e| e.into_inner()).take(), me.upgrade()) {
+                let final_cost = matches!(e, EngineEvent::Done { .. });
+                if final_cost && done.swap(true, std::sync::atomic::Ordering::SeqCst) {
+                    return;
+                }
+                let start = ran.lock().unwrap_or_else(|e| e.into_inner()).take();
+                if let Some(core) = me.upgrade() {
                     let (cost, incomplete) = usage::fresh_price(&e, model);
-                    core.lock().unwrap_or_else(|e| e.into_inner()).note_span(vendor, start, model, cost, incomplete);
+                    let mut core = core.lock().unwrap_or_else(|e| e.into_inner());
+                    if let Some(start) = start {
+                        core.note_span(vendor, start, model, cost, incomplete);
+                    } else if final_cost && bounded.is_some() && cost.is_some() {
+                        // Cancellation already settled the in-flight count. A late price must not settle another request.
+                        let (now, offset) = (core.secs(), core.utc_offset);
+                        core.ledger.of_mut(vendor).spend(cost, incomplete, now, offset);
+                        core.save_ledger(true);
+                        core.emit_usage();
+                    }
+                    if let Some((_, conv)) = &bounded
+                        && cost.is_some()
+                    {
+                        core.load(conv);
+                        core.add_spend(conv, cost);
+                        core.save(conv);
+                    }
                 }
                 let ok = matches!(e, EngineEvent::Done { ok: true, .. });
                 if let Some(tx) = tx.lock().unwrap_or_else(|e| e.into_inner()).take() {
-                    let _ = tx.send(ok.then(|| std::mem::take(&mut *text.lock().unwrap_or_else(|e| e.into_inner()))));
+                    let _ = tx.send(if ok { text.lock().unwrap_or_else(|e| e.into_inner()).take() } else { None });
                 }
             }
             // The router's process sees account-wide news too (Codex hands it to one thread): the ledger must not miss it.
@@ -350,12 +388,32 @@ impl Core {
                     let mut c = core.lock().unwrap_or_else(|e| e.into_inner());
                     c.note_account_event(vendor, e);
                     if c.allows(vendor, family_of(model), purpose, false).is_err() {
+                        if bounded.is_some()
+                            && let Some(tx) = tx.lock().unwrap_or_else(|e| e.into_inner()).take()
+                        {
+                            let _ = tx.send(None);
+                        }
                         stop_router(Some(closer.clone()));
                     }
                 }
             }
             _ => {}
         });
+        AuxEvents { sink, answer, asked, stop }
+    }
+
+    pub(super) fn open_aux(
+        &mut self,
+        vendor: Vendor,
+        profile: (&'static str, &str),
+        instructions: &str,
+        purpose: Purpose,
+        bounded: Option<(usize, String)>,
+    ) -> Option<Spare> {
+        let (model, effort) = profile;
+        self.allows(vendor, family_of(model), purpose, false).ok()?;
+        let cli = self.opts.clis.get(&vendor)?.clone();
+        let AuxEvents { sink, answer, asked, stop } = self.aux_events(vendor, model, purpose, bounded);
         let model_name = model;
         let (cwd, instructions) = (self.opts.data_dir.clone(), Some(instructions.to_string()));
         let (model, effort) = (Some(model.to_string()), Some(effort.to_string()));
@@ -411,6 +469,7 @@ impl Core {
                 sink,
             ),
         };
+        self.worker_memory.registry.register(session.owned_tree());
         *stop.lock().unwrap_or_else(|e| e.into_inner()) = Some(session.clone());
         self.next_sid += 1;
         Some(Spare { session, answer, id: self.next_sid, vendor, asked, model_name })
@@ -527,6 +586,107 @@ pub(super) fn stop_router(stop: Option<Stop>) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[tokio::test]
+    async fn creative_aux_events_bound_output_and_settle_cost_once() {
+        let dir = tempfile::tempdir().unwrap();
+        let (engine, _) = super::super::answer::tests::engine(dir.path());
+        let id = super::super::answer::tests::seed(&engine, Session::from_fn(|_| {}), &[("turn", &[])]);
+        let AuxEvents { sink, answer, asked, stop } = engine.with(|c| {
+            c.begin_unbounded(Vendor::Claude).unwrap();
+            c.aux_events(Vendor::Claude, "claude-sonnet-5-5", Purpose::UserTurn { by_hand: false }, Some((4, id.clone())))
+        });
+        *asked.lock().unwrap() = Some(engine.with(|c| c.secs()));
+        let closed = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let got = closed.clone();
+        *stop.lock().unwrap() = Some(Session::from_fn(move |command| {
+            if matches!(command, crate::events::SessionCommand::Close) {
+                got.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            }
+        }));
+        sink(EngineEvent::Text("éé".into())); // Exactly four UTF-8 bytes.
+        sink(EngineEvent::Text("x".into()));
+        sink(EngineEvent::Text("ignored after overflow".into()));
+        assert_eq!(answer.await.unwrap(), None);
+        assert_eq!(closed.load(std::sync::atomic::Ordering::SeqCst), 1);
+        let done = EngineEvent::Done {
+            ok: true,
+            reason: "done".into(),
+            cost_total_usd: Some(0.25),
+            input_tokens: 0,
+            output_tokens: 0,
+            cache_read_tokens: 0,
+            cache_write_tokens: 0,
+            cache_write_1h_tokens: 0,
+            incomplete: false,
+        };
+        sink(done.clone());
+        sink(done);
+        engine.with(|c| {
+            assert_eq!(c.convs[&id].spent_usd, 0.25);
+            assert_eq!(crate::project::budget::Budget::load(&c.ledger).unwrap().unbounded[&Vendor::Claude], 0);
+        });
+        engine.shutdown();
+    }
+
+    #[tokio::test]
+    async fn creative_aux_quota_revocation_closes_and_refuses_the_answer() {
+        let dir = tempfile::tempdir().unwrap();
+        let (engine, _) = super::super::answer::tests::engine(dir.path());
+        let AuxEvents { sink, answer, stop, .. } = engine.with(|c| {
+            c.aux_events(Vendor::Claude, "claude-sonnet-5-5", Purpose::UserTurn { by_hand: false }, Some((4096, "synthetic".into())))
+        });
+        let closed = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let got = closed.clone();
+        *stop.lock().unwrap() = Some(Session::from_fn(move |command| {
+            if matches!(command, crate::events::SessionCommand::Close) {
+                got.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            }
+        }));
+        sink(EngineEvent::Signals(crate::signals::Signals { billing: Some(crate::budget::Billing::UsageBilled), ..Default::default() }));
+        assert_eq!(answer.await.unwrap(), None);
+        assert_eq!(closed.load(std::sync::atomic::Ordering::SeqCst), 1);
+        engine.shutdown();
+    }
+
+    #[tokio::test]
+    async fn creative_late_cost_after_cancel_is_counted_once_without_settling_another_request() {
+        let dir = tempfile::tempdir().unwrap();
+        let (engine, _) = super::super::answer::tests::engine(dir.path());
+        let id = super::super::answer::tests::seed(&engine, Session::from_fn(|_| {}), &[("turn", &[])]);
+        let AuxEvents { sink, asked, .. } = engine.with(|c| {
+            c.begin_unbounded(Vendor::Claude).unwrap();
+            c.aux_events(Vendor::Claude, "claude-sonnet-5-5", Purpose::UserTurn { by_hand: false }, Some((4096, id.clone())))
+        });
+        *asked.lock().unwrap() = Some(engine.with(|c| c.secs()));
+        engine.with(|c| {
+            let start = asked.lock().unwrap().take().unwrap();
+            c.note_span(Vendor::Claude, start, "claude-sonnet-5-5", None, true);
+            c.begin_unbounded(Vendor::Claude).unwrap(); // A different request is still active.
+            c.save(&id);
+            c.convs.remove(&id); // The stopped conversation can leave the in-memory cache before its final price arrives.
+        });
+        sink(EngineEvent::Error { message: "closed".into(), fatal: true });
+        let done = EngineEvent::Done {
+            ok: false,
+            reason: "cancelled".into(),
+            cost_total_usd: Some(0.25),
+            input_tokens: 0,
+            output_tokens: 0,
+            cache_read_tokens: 0,
+            cache_write_tokens: 0,
+            cache_write_1h_tokens: 0,
+            incomplete: false,
+        };
+        sink(done.clone());
+        sink(done);
+        engine.with(|c| {
+            assert_eq!(c.convs[&id].spent_usd, 0.25);
+            assert_eq!(crate::project::budget::Budget::load(&c.ledger).unwrap().unbounded[&Vendor::Claude], 1);
+            assert_eq!(c.ledger.of(Vendor::Claude).own_spend.values().sum::<f64>(), 0.25);
+        });
+        engine.shutdown();
+    }
 
     #[tokio::test]
     async fn rewind_a_guessed_project_route_never_starts_before_its_message() {

@@ -15,7 +15,12 @@ impl Engine {
     pub fn install_admission(&self) -> Result<InstallGuard, String> {
         self.with(|c| {
             // An install the agent was allowed to make is work too, though Stop left nothing in the list.
-            if c.installing || c.agent_installs > 0 || !c.running_items().is_empty() || c.convs.values().any(|v| !v.queued.is_empty()) {
+            if c.installing
+                || c.agent_installs > 0
+                || c.workers_waiting()
+                || !c.running_items().is_empty()
+                || c.convs.values().any(|v| !v.queued.is_empty())
+            {
                 return Err("error.update.activeOperations".into());
             }
             c.installing = true;

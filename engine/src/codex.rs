@@ -1134,6 +1134,7 @@ pub struct CodexServer {
     tx: UnboundedSender<ServerCommand>,
     next: Arc<AtomicU64>,
     alive: Arc<AtomicBool>,
+    tree: Option<proc::OwnedTree>,
 }
 
 impl CodexServer {
@@ -1142,9 +1143,14 @@ impl CodexServer {
         let (tx, rx) = unbounded_channel();
         let args = codex_args(opts.area, opts.windows, opts.user_hooks, opts.permissions);
         let started = (opts.spawn)(&opts.cli.command, &args, &opts.cwd);
+        let tree = started.as_ref().ok().and_then(|p| p.contained.as_ref()).and_then(proc::Containment::owned_tree);
         let alive = Arc::new(AtomicBool::new(true));
         tokio::spawn(serve(started, opts, rx, alive.clone()));
-        CodexServer { tx, next: Arc::new(AtomicU64::new(1)), alive }
+        CodexServer { tx, next: Arc::new(AtomicU64::new(1)), alive, tree }
+    }
+
+    pub fn owned_tree(&self) -> Option<proc::OwnedTree> {
+        self.tree.clone()
     }
 
     /// False once the process has stopped; the engine then starts a new one.
@@ -1172,7 +1178,7 @@ impl CodexServer {
         }
         // Straight into the server's queue, so commands from all conversations keep the order they were given in.
         let server = self.tx.clone();
-        Session::from_fn(move |cmd| drop(server.send(ServerCommand::Session(key, cmd))))
+        Session::from_fn(move |cmd| drop(server.send(ServerCommand::Session(key, cmd)))).with_tree(self.tree.clone())
     }
 
     /// The catalog's tools as the store sees them now (`crate::tools`): a store that could not be made clean takes them away
@@ -2347,6 +2353,36 @@ mod rewind_tests {
             stop_reported: false,
             tools: None,
         }
+    }
+
+    #[tokio::test]
+    async fn worker_memory_codex_threads_share_the_actual_spawned_container() {
+        let root = proc::ProcessIdentity { pid: 42, created: 10 };
+        let container = proc::Containment::scripted_descendants(root, move || Ok(vec![root]), || {});
+        let expected = container.owned_tree().unwrap();
+        let process = std::sync::Mutex::new(Some(proc::Proc {
+            stdin: Box::new(tokio::io::sink()),
+            stdout: Box::new(tokio::io::empty()),
+            stderr: None,
+            child: None,
+            contained: Some(container),
+        }));
+        let server = CodexServer::start(CodexServerOptions {
+            permissions: Permissions::Ask,
+            cli: crate::cli::Cli { command: "scripted".into(), prefix: vec![] },
+            cwd: PathBuf::new(),
+            area: Area::Project,
+            user_hooks: false,
+            windows: false,
+            spawn: Arc::new(move |_, _, _| Ok(process.lock().unwrap().take().unwrap())),
+            tools: Default::default(),
+        });
+        let sink: EventSink = Arc::new(|_| {});
+        let one = server.open(thread(sink.clone()).params, sink.clone());
+        let two = server.open(thread(sink.clone()).params, sink);
+        assert!(expected.same_tree(&server.owned_tree().unwrap()));
+        assert!(expected.same_tree(&one.owned_tree().unwrap()));
+        assert!(expected.same_tree(&two.owned_tree().unwrap()));
     }
 
     #[tokio::test]
