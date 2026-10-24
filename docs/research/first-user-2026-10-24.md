@@ -44,7 +44,7 @@ connection, before queueing. The connector could open the review request, but do
 
 ## Follow-up walks and classification
 
-The matrix is still incomplete: seven of its sixteen requested default or project walks completed: Haiku and Codex, default and project at pt-BR/720x480, plus Codex default and project at en/720x480 and Codex default at pt-BR/1280x800. The focused Codex Chat smoke above is additional evidence,
+The matrix is still incomplete: nine of its sixteen requested default or project walks completed: Haiku and Codex, default and project at pt-BR/720x480, plus Codex default and project at en/720x480 and pt-BR/1280x800, and Codex default at en/1280x800. The focused Codex Chat smoke above is additional evidence,
 not a completed default configuration.
 
 | Walk | Program evidence | What it establishes and what remains |
@@ -157,3 +157,42 @@ boundaries; A and C source identities also stayed unchanged. These are file obse
 not loaded-process attestation. This is a completed first-pass walk, not approval of every goal or a second pass.
 A fresh read-only reviewer independently verified all 28 digests and eight key images, confirming the classifications
 above and no newly established blocking defect. The remaining thirteen images were not independently inspected.
+
+## Portuguese wide project walk
+
+The eighth first-pass configuration, Codex pt-BR/1280x800 with seeded Demo, ended naturally with exit 0.
+External `codex-pt-BR-1280x800-project/run-01` retains eight images and fifteen verified artifact digests. A fresh
+read-only reviewer independently verified all fifteen digests, the five ordered identity stages, unchanged clean
+A/C sources and the natural receipt. It inspected `conversa-projeto-3.png` and `conversa-projeto-8.png`: Demo is open,
+and the final image shows the exact question, Claude Haiku, the complete Rayleigh reply, Done and Nothing running.
+The reviewer reported no confusion. This proves the controlled seeded conversation, not project creation, file edits
+or a real-provider connection. The remaining six images were not independently inspected.
+
+## Native-folder observation boundary
+
+A separate read-only source investigation checked the UI worktree at `af853a33`. `add_project` in
+`src-tauri/src/main.rs:930` opens a native folder dialog parented to the main window. The UX driver's shot operation
+in `testkit/examples/ux_audit.rs:57` delegates to the page screenshot, which uses CDP `Page.captureScreenshot`
+(`testkit/src/cdp.rs:468`). These screenshots capture the webview, not the whole desktop or external native dialog.
+Their lack of a folder picker therefore cannot prove that no picker opened. The native result and ordinary use
+remain unverified. No product correction is justified by that absence alone. The external investigation note has
+SHA-256 `e47d232c81c2583ceee649647217656eb0d454a6c2f931484a754fa2fb631b85`.
+## English wide default walk and resource-guard correction
+
+The ninth first-pass configuration, Codex en/1280x800 default, ended naturally with exit 0. External
+`codex-en-1280x800-default/run-01` retains 21 images and 28 verified artifact digests. A fresh read-only reviewer
+verified every digest, the eight ordered identity stages, unchanged clean A/C sources and the natural receipt,
+and inspected seven key images. First run reaches the disconnected main screen; Catalog shows its full automatic-use
+explanation and returns to the uninstalled list. The Chat reply is complete with Done and Nothing running; Settings
+shows General / Language / English. Projects states Add a folder and Faber works inside it, so purpose discovery
+succeeded even though the reviewer continued to the native picker and declared itself stuck. The page-only capture
+cannot establish the result of that external dialog. This is controlled replay, not a real-provider result.
+
+Investigation after this walk found an important limit in the execution setup. `runChild` reserves build storage
+and isolates temporary directories; it does not itself enforce the 8 GB free-memory/full-screen-app gate.
+`first-user.mjs` directly builds the driver, and `ux_audit` creates its sandbox without taking the runner's build slot.
+`Ctx::guard_desktop` enforces hidden windows, a separate property. The eighth and ninth collector confirmed this
+call path; the seventh used the same setup. These walks therefore do not prove those resource guards were applied.
+Any earlier coordination note describing them as normally resource-guarded is corrected by this investigation.
+Their retained UI observations, source identities and natural receipts remain evidence of those narrower facts.
+No further native walk starts until the guard path is resolved; the remaining matrix and second pass are unfinished.
