@@ -44,7 +44,7 @@ connection, before queueing. The connector could open the review request, but do
 
 ## Follow-up walks and classification
 
-The matrix is still incomplete: six of its sixteen requested default or project walks completed: Haiku and Codex, default and project at pt-BR/720x480, plus Codex default and project at en/720x480. The focused Codex Chat smoke above is additional evidence,
+The matrix is still incomplete: seven of its sixteen requested default or project walks completed: Haiku and Codex, default and project at pt-BR/720x480, plus Codex default and project at en/720x480 and Codex default at pt-BR/1280x800. The focused Codex Chat smoke above is additional evidence,
 not a completed default configuration.
 
 | Walk | Program evidence | What it establishes and what remains |
@@ -138,3 +138,22 @@ the driver has one digest across after-build, before-start, ready and exit. A's 
 C's clean source hashes/status stayed unchanged during the run. This confirms the new logging in native use without
 claiming that an endpoint file hash alone attests to a running process. The complete first-pass matrix, a second pass
 and integrated gates remain unfinished.
+## Portuguese wide default walk
+
+The seventh first-pass configuration, Codex pt-BR/1280x800, ended naturally with exit 0. The raw report is
+`first-user-2026-10-24-codex-pt-BR-1280x800-default.md`. External `codex-pt-BR-1280x800-default/run-01` retains
+21 screenshots and 28 verified artifact digests, including the report, log, receipt, provenance and identity file.
+First run reaches the disconnected main screen. Catalog details include When the agent uses it and Back to the list;
+the recorded Chat answer is fully visible, and Settings identifies Portuguese (Brazil).
+
+Projects explains that Faber works inside an added folder, satisfying the stated purpose-discovery goal. The reviewer
+continued beyond that goal, clicked Add project folder repeatedly and declared itself stuck when no picker appeared
+in the hidden harness. Normal native-picker behavior remains unverified; this is not evidence of a missing Projects
+page or an established picker defect.
+
+All eight identity stages are present: two around the driver build and before-start, ready and after-exit for each
+of the two isolated app batches. App, fake CLI and post-build driver hashes stayed equal across their recorded
+boundaries; A and C source identities also stayed unchanged. These are file observations at recorded boundaries,
+not loaded-process attestation. This is a completed first-pass walk, not approval of every goal or a second pass.
+A fresh read-only reviewer independently verified all 28 digests and eight key images, confirming the classifications
+above and no newly established blocking defect. The remaining thirteen images were not independently inspected.
