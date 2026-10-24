@@ -1231,7 +1231,7 @@ textarea.field { height: auto; max-width: none; padding: 8px 10px; resize: verti
 .notes-group ul { margin: 0; padding: 0; list-style: none; }
 .notes-group li { padding: 12px 0; border-top: 1px solid var(--line); color: var(--ink); font-size: var(--fs-read); line-height: 1.5; text-wrap: pretty; }
 .notes-act { display: flex; margin-top: 36px; }
-:is(.notes-group h2, .notes-group li) { animation: arrive var(--dur-arrive) var(--ease) both; animation-delay: calc(min(3 + var(--i, 0), 4) * var(--motion-stagger)); }
+:is(.notes-group h2, .notes-group li) { animation: arrive var(--dur-arrive) var(--ease) both; animation-delay: min(calc(min(3 + var(--i, 0), 4) * var(--motion-stagger)), var(--dur-stagger-max)); }
 
 /* The effects of the new conversation (ui/Ambient.tsx). The tokens --amb-beam, --amb-loom and --amb-flow are `none`
    for a look that does not have the effect, and for every look when the ambient switch is off. */
@@ -1500,7 +1500,7 @@ html.away-win :is(.amb, .amb *) { animation-play-state: paused !important; }
 .q-field:focus-visible { outline-offset: -2px; }
 .q-foot { display: flex; flex-wrap: wrap; align-items: center; justify-content: flex-end; gap: 8px; }
 .q-sum { margin-right: auto; color: var(--ink-3); font-size: var(--fs-xs); font-variant-numeric: tabular-nums; }
-.ask .note.err, .ask-more { animation: arrive var(--dur-arrive) var(--ease) both; }
+.ask .note.err, .ask-more { animation: arrive var(--dur-ui) var(--ease) both; }
 
 /* The Ctrl+K palette (ui/Palette.tsx) and the Ctrl+F find bar (ui/Find.tsx). Both exist only while open. They enter and leave with
    the normal arrival and exit; reduced and no motion are covered by the rules above that switch every animation off. */
