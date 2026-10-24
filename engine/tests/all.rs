@@ -76,6 +76,8 @@ mod learning;
 mod ledger;
 #[path = "live_manifest.rs"]
 mod live_manifest;
+#[path = "live_manifest_cache.rs"]
+mod live_manifest_cache;
 #[path = "live_manifest_signature.rs"]
 mod live_manifest_signature;
 #[path = "locales.rs"]
