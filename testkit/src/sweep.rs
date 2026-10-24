@@ -1,14 +1,14 @@
-//! The build folder budget (R106). Every worktree builds into a folder of the main checkout's `target`, and Cargo never
-//! deletes anything there, so the runner sweeps it at start, at most once an hour:
+//! The build folder budget (R106). Local commands reuse a leased cache pool in the main checkout's `target`. Maintenance
+//! also accounts for legacy worktree-local targets and sweeps at command boundaries, at most once an hour:
 //!
-//! 1. A worktree's folder whose worktree is gone, idle for a day, is removed whole.
+//! 1. A worktree's cache whose worktree is gone, idle for a day, has its build output removed.
 //! 2. In every build profile (`debug`, `release`, nested ones), an artifact in `deps/` or an `incremental/` folder that
 //!    a newer build of the same crate replaced more than a day ago is removed. A crate's newest build always stays.
-//! 3. If `target` is still above the cap, whole worktree folders go, the least recently used first. A folder built in
+//! 3. If build output is still above the cap, idle caches are cleared, the least recently used first. A folder built in
 //!    the last six hours belongs to a lane still at work and stays: a cold rebuild costs it ten minutes or more.
 //!
 //! A folder is never touched while Cargo holds its lock or one of its programs runs, and the main checkout's own
-//! folders (`debug`, `release`, `faber-test`) are only ever swept, never removed whole.
+//! folders (`debug`, `release`, `faber-test`) are only ever swept, never cleared. Lock files and ownership records stay.
 
 use std::collections::HashMap;
 use std::fs::{self, File, OpenOptions};
@@ -109,10 +109,7 @@ fn lock(profile: &Path) -> Option<Vec<File>> {
     let mut held = Vec::new();
     for name in LOCKS {
         let path = profile.join(name);
-        if !path.exists() {
-            continue;
-        }
-        let file = OpenOptions::new().read(true).write(true).open(path).ok()?;
+        let file = OpenOptions::new().create(true).truncate(false).read(true).write(true).open(path).ok()?;
         file.try_lock().ok()?;
         held.push(file);
     }
@@ -133,11 +130,98 @@ fn running(profile: &Path) -> bool {
 }
 
 fn busy(dir: &Path) -> bool {
-    profiles(dir).iter().any(|p| running(p) || lock(p).is_none())
+    leased(dir) || descendant_lease(dir) || profiles(dir).iter().any(|p| running(p) || lock(p).is_none())
+}
+
+fn leased(dir: &Path) -> bool {
+    dir.ancestors().any(|p| p.join(".faber-lease").try_exists().unwrap_or(true))
+}
+
+fn descendant_lease(dir: &Path) -> bool {
+    let Ok(mut entries) = fs::read_dir(dir) else { return true };
+    entries.any(|entry| {
+        let Ok(entry) = entry else { return true };
+        if entry.file_name() == ".faber-lease" {
+            return false;
+        }
+        let Ok(kind) = entry.file_type() else { return true };
+        kind.is_dir() && (entry.path().join(".faber-lease").try_exists().unwrap_or(true) || descendant_lease(&entry.path()))
+    })
+}
+
+struct Lease(PathBuf);
+
+impl Lease {
+    fn take(dir: &Path) -> Option<Self> {
+        if leased(dir) {
+            return None;
+        }
+        let path = dir.join(".faber-lease");
+        fs::create_dir(&path).ok()?;
+        // Both sides publish before checking overlaps: a racing parent and child cannot both enter.
+        if dir.parent().is_some_and(leased) || descendant_lease(dir) {
+            let _ = fs::remove_dir(&path);
+            return None;
+        }
+        let pid = std::process::id();
+        let created = SystemTime::now().duration_since(SystemTime::UNIX_EPOCH).ok()?.as_millis();
+        let receipt = format!("{{\"pid\":{pid},\"childPid\":{pid},\"createdAt\":{created},\"tempName\":\"run-maintenance-{pid}\"}}");
+        if fs::write(path.join("owner.json"), receipt).is_err() {
+            let _ = fs::remove_dir(&path);
+            return None;
+        }
+        Some(Self(path))
+    }
+}
+
+impl Drop for Lease {
+    fn drop(&mut self) {
+        let _ = fs::remove_file(self.0.join("owner.json"));
+        let _ = fs::remove_dir(&self.0);
+    }
+}
+
+/// Keep Cargo's lock files in place while deleting: replacing an open lock would let another build enter.
+fn remove_cache(dir: &Path) -> u64 {
+    let Some(_lease) = Lease::take(dir) else { return 0 };
+    let profiles = profiles(dir);
+    let mut held = Vec::new();
+    for profile in &profiles {
+        if running(profile) {
+            return 0;
+        }
+        let Some(locks) = lock(profile) else { return 0 };
+        held.extend(locks);
+    }
+    fn clear(dir: &Path) -> u64 {
+        let Ok(entries) = fs::read_dir(dir) else { return 0 };
+        entries
+            .flatten()
+            .map(|entry| {
+                if LOCKS.iter().any(|name| entry.file_name() == *name)
+                    || entry.file_name() == "CACHEDIR.TAG"
+                    || entry.file_name().to_string_lossy().starts_with(".faber-")
+                {
+                    return 0;
+                }
+                match entry.file_type() {
+                    Ok(kind) if kind.is_dir() => {
+                        let bytes = clear(&entry.path());
+                        let _ = fs::remove_dir(entry.path());
+                        bytes
+                    }
+                    Ok(kind) if kind.is_file() => remove(&entry.path()),
+                    _ => 0,
+                }
+            })
+            .sum()
+    }
+    clear(dir)
 }
 
 fn last_used(dir: &Path) -> SystemTime {
-    profiles(dir).iter().flat_map(|p| [mtime(p), mtime(&p.join("deps"))]).chain([mtime(dir)]).max().unwrap_or(SystemTime::UNIX_EPOCH)
+    // Acquiring a maintenance lease changes the cache root's mtime, but is not a build.
+    profiles(dir).iter().flat_map(|p| [mtime(p), mtime(&p.join("deps"))]).max().unwrap_or_else(|| mtime(dir))
 }
 
 pub fn size(dir: &Path) -> u64 {
@@ -171,6 +255,11 @@ pub fn replaced(entries: &[(PathBuf, String, SystemTime)], cutoff: SystemTime) -
 /// Removes the replaced builds older than `cutoff` in one profile: artifacts in `deps/` keyed by crate and extension,
 /// `incremental/` folders keyed by crate. A crate's newest build always stays. Returns bytes freed.
 pub fn sweep_profile(profile: &Path, cutoff: SystemTime) -> u64 {
+    let cache = profile.ancestors().find(|dir| dir.join("CACHEDIR.TAG").is_file()).or_else(|| profile.parent());
+    let Some(_lease) = cache.and_then(Lease::take) else { return 0 };
+    if running(profile) {
+        return 0;
+    }
     let Some(_locks) = lock(profile) else { return 0 };
     let listed = |dir: &str, key: fn(&str) -> Option<String>| -> Vec<(PathBuf, String, SystemTime)> {
         let Ok(entries) = fs::read_dir(profile.join(dir)) else { return Vec::new() };
@@ -192,15 +281,18 @@ pub fn sweep(target: &Path, own: &Path, worktrees: &[PathBuf], now: SystemTime, 
     let worktree_folders = |report: &Report| -> Vec<(String, PathBuf)> {
         subdirs(target)
             .into_iter()
-            .filter(|d| d.join("CACHEDIR.TAG").is_file() && d.as_path() != own)
+            .filter(|d| d.join("CACHEDIR.TAG").is_file() && d.as_path() != own && !own.starts_with(d))
             .filter_map(|d| Some((d.file_name()?.to_str()?.to_string(), d)))
             .filter(|(name, _)| !MAIN_FOLDERS.contains(&name.as_str()) && !report.removed.contains(name))
             .collect()
     };
     for (name, dir) in worktree_folders(&report) {
         if !owned(&name, worktrees) && last_used(&dir) + DAY < now && !busy(&dir) {
-            report.after -= remove(&dir).min(report.after);
-            report.removed.push(name);
+            let freed = remove_cache(&dir);
+            report.after -= freed.min(report.after);
+            if freed > 0 {
+                report.removed.push(name);
+            }
         }
     }
     for profile in profiles(target) {
@@ -215,8 +307,11 @@ pub fn sweep(target: &Path, own: &Path, worktrees: &[PathBuf], now: SystemTime, 
             })
             .collect();
         for name in over_budget(candidates, report.after, cap) {
-            report.after -= remove(&target.join(&name)).min(report.after);
-            report.removed.push(name);
+            let freed = remove_cache(&target.join(&name));
+            report.after -= freed.min(report.after);
+            if freed > 0 {
+                report.removed.push(name);
+            }
         }
     }
     report
@@ -231,11 +326,67 @@ pub fn due(target: &Path, now: SystemTime) -> bool {
     File::create(stamp).is_ok()
 }
 
+/// Sweeps Cargo output belonging to all registered checkouts under one budget.
+pub fn sweep_worktrees(target: &Path, own: &Path, worktrees: &[PathBuf], now: SystemTime, cap: u64) -> Report {
+    let mut report = sweep(target, own, worktrees, now, u64::MAX);
+    let mut local = Vec::new();
+    for worktree in worktrees.iter().skip(1) {
+        let dir = worktree.join("target");
+        if dir == target || !fs::symlink_metadata(&dir).is_ok_and(|m| m.is_dir() && !m.is_symlink()) || !dir.join("CACHEDIR.TAG").is_file()
+        {
+            continue;
+        }
+        let before = size(&dir);
+        report.before += before;
+        report.after += before;
+        for profile in profiles(&dir) {
+            report.after -= sweep_profile(&profile, now - STALE).min(report.after);
+        }
+        local.push(dir);
+    }
+    let mut candidates: Vec<_> = local
+        .into_iter()
+        .map(|dir| {
+            let used = last_used(&dir);
+            let busy = dir == own || own.starts_with(&dir) || used + ACTIVE > now || busy(&dir);
+            (dir.to_string_lossy().into_owned(), size(&dir), used, busy)
+        })
+        .collect();
+    candidates.extend(
+        subdirs(target)
+            .into_iter()
+            .filter(|dir| {
+                dir.join("CACHEDIR.TAG").is_file()
+                    && dir != own
+                    && !own.starts_with(dir)
+                    && dir.file_name().is_some_and(|name| !MAIN_FOLDERS.iter().any(|kept| name == *kept))
+            })
+            .map(|dir| {
+                let used = last_used(&dir);
+                let busy = used + ACTIVE > now || busy(&dir);
+                (dir.to_string_lossy().into_owned(), size(&dir), used, busy)
+            }),
+    );
+    for name in over_budget(candidates, report.after, cap) {
+        let freed = remove_cache(Path::new(&name));
+        report.after -= freed.min(report.after);
+        if freed > 0 {
+            report.removed.push(name);
+        }
+    }
+    report
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
 
     const GB: u64 = 1 << 30;
+
+    fn fixture() -> tempfile::TempDir {
+        // The command's TEMP is inside a live cache lease; simulated caches must be outside that lease.
+        tempfile::tempdir_in(std::env::current_dir().unwrap()).unwrap()
+    }
 
     fn write(path: &Path, bytes: usize, age: Duration) {
         fs::create_dir_all(path.parent().unwrap()).unwrap();
@@ -277,7 +428,7 @@ mod tests {
 
     #[test]
     fn a_profile_sweep_removes_replaced_old_artifacts_and_old_incremental_folders_only() {
-        let temp = tempfile::tempdir().unwrap();
+        let temp = fixture();
         let profile = temp.path().join("debug");
         fs::create_dir_all(profile.join(".fingerprint")).unwrap();
         let deps = profile.join("deps");
@@ -309,7 +460,7 @@ mod tests {
 
     #[test]
     fn a_profile_whose_lock_cargo_holds_is_left_alone() {
-        let temp = tempfile::tempdir().unwrap();
+        let temp = fixture();
         let profile = temp.path().join("debug");
         write(&profile.join(".cargo-lock"), 0, Duration::ZERO);
         write(&profile.join("deps/liba-0000000000000001.rlib"), 10, STALE * 2);
@@ -323,7 +474,7 @@ mod tests {
 
     #[test]
     fn the_sweep_removes_gone_worktrees_then_keeps_the_main_folders_and_this_run_s_own_under_any_cap() {
-        let temp = tempfile::tempdir().unwrap();
+        let temp = fixture();
         let target = temp.path().join("target");
         let folder = |name: &str, bytes| {
             write(&target.join(name).join("CACHEDIR.TAG"), 0, Duration::ZERO);
@@ -355,10 +506,103 @@ mod tests {
 
     #[test]
     fn the_sweep_runs_at_most_once_an_hour() {
-        let temp = tempfile::tempdir().unwrap();
+        let temp = fixture();
         let now = SystemTime::now();
         assert!(due(temp.path(), now));
         assert!(!due(temp.path(), now));
         assert!(due(temp.path(), now + EVERY * 2));
+    }
+
+    #[test]
+    fn a_leased_cache_is_never_swept_even_between_cargo_commands() {
+        let temp = fixture();
+        let cache = temp.path().join("build-1");
+        let profile = cache.join("debug");
+        write(&cache.join(".faber-lease/owner.json"), 0, Duration::ZERO);
+        write(&profile.join("deps/liba-0000000000000001.rlib"), 10, DAY * 2);
+        write(&profile.join("deps/liba-0000000000000002.rlib"), 10, Duration::ZERO);
+        assert_eq!(sweep_profile(&profile, SystemTime::now()), 0);
+        assert!(profile.join("deps/liba-0000000000000001.rlib").exists());
+    }
+
+    #[test]
+    fn nested_cache_leases_exclude_parent_cleanup_and_parent_leases_exclude_children() {
+        let temp = fixture();
+        let parent = temp.path().join("cache");
+        let nested = parent.join("nested");
+        write(&nested.join("debug/keep"), 100, Duration::ZERO);
+        let child_lease = Lease::take(&nested).unwrap();
+        assert!(Lease::take(&parent).is_none(), "a parent must not reserve an active descendant");
+        assert_eq!(remove_cache(&parent), 0);
+        assert!(nested.join("debug/keep").exists());
+        drop(child_lease);
+        let parent_lease = Lease::take(&parent).unwrap();
+        assert!(Lease::take(&nested).is_none(), "a descendant must not enter an active parent");
+        drop(parent_lease);
+        assert!(Lease::take(&nested).is_some());
+    }
+
+    #[test]
+    fn an_explicit_cache_nested_in_an_old_slot_protects_its_parent() {
+        let temp = fixture();
+        let target = temp.path().join("target");
+        let parent = target.join("old-slot");
+        let own = parent.join("nested");
+        write(&parent.join("CACHEDIR.TAG"), 0, Duration::ZERO);
+        write(&parent.join("debug/.fingerprint/x"), 0, Duration::ZERO);
+        write(&own.join("keep"), 100, Duration::ZERO);
+        sweep(&target, &own, &[], SystemTime::now() + DAY * 2, 0);
+        assert!(own.join("keep").exists());
+    }
+
+    #[test]
+    fn reusable_build_slots_are_evicted_when_idle_and_over_budget() {
+        let temp = fixture();
+        let target = temp.path().join("target");
+        let cache = target.join("build-1");
+        write(&cache.join("CACHEDIR.TAG"), 0, Duration::ZERO);
+        write(&cache.join("debug/.fingerprint/x"), 0, Duration::ZERO);
+        write(&cache.join("debug/deps/liba-0000000000000001.rlib"), 100, Duration::ZERO);
+        let worktrees = [temp.path().to_path_buf(), temp.path().join("build-1")];
+        let report = sweep_worktrees(&target, &target, &worktrees, SystemTime::now() + DAY * 2, 50);
+        assert_eq!((report.before, report.after), (100, 0));
+        assert!(!cache.join(".faber-lease").exists());
+    }
+
+    #[test]
+    fn local_worktree_targets_count_toward_the_shared_budget() {
+        let temp = fixture();
+        let main = temp.path().join("main");
+        let lane = temp.path().join("lane");
+        let target = lane.join("target");
+        write(&target.join("CACHEDIR.TAG"), 0, Duration::ZERO);
+        write(&target.join("debug/.fingerprint/x"), 0, Duration::ZERO);
+        write(&target.join("debug/deps/liba-0000000000000001.rlib"), 100, Duration::ZERO);
+        write(&main.join("target/debug/.fingerprint/x"), 0, Duration::ZERO);
+        write(&main.join("target/debug/keep"), 20, Duration::ZERO);
+        let report = sweep_worktrees(&main.join("target"), &main.join("target"), &[main.clone(), lane], SystemTime::now() + DAY * 2, 50);
+        assert_eq!((report.before, report.after), (120, 20));
+        assert!(!target.join("debug/deps/liba-0000000000000001.rlib").exists());
+        assert!(main.join("target/debug/keep").exists());
+    }
+
+    #[test]
+    fn local_worktree_targets_with_a_live_build_or_without_a_cache_tag_stay() {
+        let temp = fixture();
+        let main = temp.path().join("main");
+        let lane = temp.path().join("lane");
+        let target = lane.join("target");
+        write(&target.join("debug/.fingerprint/x"), 0, Duration::ZERO);
+        write(&target.join("debug/keep"), 100, Duration::ZERO);
+        let worktrees = [main.clone(), lane];
+        let later = SystemTime::now() + DAY * 2;
+        sweep_worktrees(&main.join("target"), &main.join("target"), &worktrees, later, 0);
+        assert!(target.join("debug/keep").exists(), "an arbitrary folder is not a Cargo cache");
+        write(&target.join("CACHEDIR.TAG"), 0, Duration::ZERO);
+        write(&target.join("debug/.cargo-lock"), 0, Duration::ZERO);
+        let cargo = File::options().read(true).write(true).open(target.join("debug/.cargo-lock")).unwrap();
+        cargo.lock().unwrap();
+        sweep_worktrees(&main.join("target"), &main.join("target"), &worktrees, later, 0);
+        assert!(target.join("debug/keep").exists(), "Cargo owns this cache");
     }
 }

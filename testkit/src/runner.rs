@@ -213,7 +213,7 @@ fn sweep_builds(paths: &Paths, porcelain: Option<&str>, loose: &Path, now: std::
     let (Some(main), Some(own)) = (worktrees.first(), paths.target.parent()) else { return None };
     let target = main.join("target");
     sweep_root(loose, own, &worktrees, now);
-    if !target.is_dir() {
+    if !std::fs::symlink_metadata(&target).is_ok_and(|meta| meta.is_dir() && !meta.is_symlink()) {
         return None;
     }
     sweep_root(&target, own, &worktrees, now);
@@ -222,10 +222,14 @@ fn sweep_builds(paths: &Paths, porcelain: Option<&str>, loose: &Path, now: std::
 
 /// Sweeps one build root when its hour is due, and says so only when it freed space or stays above the cap.
 fn sweep_root(target: &Path, own: &Path, worktrees: &[PathBuf], now: std::time::SystemTime) {
-    if !target.is_dir() || !sweep::due(target, now) {
+    if !std::fs::symlink_metadata(target).is_ok_and(|meta| meta.is_dir() && !meta.is_symlink()) || !sweep::due(target, now) {
         return;
     }
-    let report = sweep::sweep(target, own, worktrees, now, sweep::CAP);
+    let report = if worktrees.first().is_some_and(|main| target == main.join("target").as_path()) {
+        sweep::sweep_worktrees(target, own, worktrees, now, sweep::CAP)
+    } else {
+        sweep::sweep(target, own, worktrees, now, sweep::CAP)
+    };
     let gb = |bytes: u64| bytes as f64 / (1u64 << 30) as f64;
     let at = target.display();
     if report.after < report.before {
@@ -442,7 +446,7 @@ mod tests {
 
     #[test]
     fn the_loose_build_root_is_swept_like_the_main_target_and_a_live_lane_s_folder_stays() {
-        let temp = tempfile::tempdir().unwrap();
+        let temp = tempfile::tempdir_in(std::env::current_dir().unwrap()).unwrap();
         let (main, loose) = (temp.path().join("faber"), temp.path().join("loose"));
         let lane = main.join(".claude/worktrees/lane");
         for dir in [main.join("target/debug/.fingerprint"), loose.join("gone/debug/.fingerprint"), loose.join("lane/debug/.fingerprint")] {
@@ -465,7 +469,7 @@ mod tests {
 
         let later = std::time::SystemTime::now() + std::time::Duration::from_secs(2 * 24 * 60 * 60);
         assert_eq!(sweep_builds(&paths, Some(&porcelain), &loose, later), Some(main.join("target")));
-        assert!(!loose.join("gone").exists(), "a loose folder no worktree owns, idle for a day, goes");
+        assert!(!loose.join("gone/debug/faber.pdb").exists(), "old loose output goes; its lock files stay");
         assert!(loose.join("lane/debug/faber.pdb").exists(), "the folder of a live lane stays");
     }
 

@@ -130,7 +130,7 @@ npm run docs
 npm run build
 cargo fmt --all --check
 npm run test:scripts
-cargo t --claims
+node scripts/cargo.mjs t --claims
 ```
 
 `cargo t --claims` checks the lane's claims and shows a red `phase-1-base`; it builds only the runner. The heavy proofs run
@@ -145,6 +145,10 @@ and a summary (every line in `target/faber-test/run.log`). A command that may ta
 build) runs in the background while you keep working; wait for its notice or the Monitor tool, never a `sleep` or
 `until` loop, and never poll CI (the app watches it). `npm run dev` opens the app from source with live reload. Unit
 tests never spawn processes, touch real git or call a real CLI.
+
+Local compiling commands go through `node scripts/cargo.mjs <cargo arguments>`: it reuses three caches across worktrees
+and cleans owned temporary files. `npm run dev` and `npm run dist` already use it; direct Cargo bypasses the storage
+policy. See [testing](docs/dev/testing.md#build-folder-budget).
 
 On the maintainer's PC, Rust lives outside the default folders; export these before any `cargo` or `npm run dev`:
 
