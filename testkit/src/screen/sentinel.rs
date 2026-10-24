@@ -15,6 +15,7 @@ const PROBE: &str = include_str!("../probe.js");
 pub fn scenarios() -> Vec<Scenario> {
     vec![
         Scenario { name: "sentinel: panels move through frames, and reduced motion moves nothing", run: motion },
+        Scenario { name: "sentinel: catalog card controls fade on hover and keyboard focus", run: catalog_controls },
         Scenario { name: "sentinel: the native select picker opens and dismisses through real frames", run: native_picker },
         Scenario { name: "sentinel: a permission card arrives through frames", run: permission },
         Scenario { name: "sentinel: the composer grows and shrinks, and the end of the thread stays clear", run: composer },
@@ -164,6 +165,81 @@ fn judge_motion(ctx: &mut Ctx, found: &mut Vec<Finding>, screen: &str, surface: 
             Ok(())
         }
     }
+}
+
+fn catalog_controls(ctx: &mut Ctx) -> Result {
+    start_settings(ctx, "pt-BR")?;
+    let mut app = ctx.launch(claude_chat(ctx))?;
+    let page = &mut app.page;
+    let folder = ctx.paths.target.join("ux/catalog-controls");
+    std::fs::create_dir_all(&folder).map_err(|e| e.to_string())?;
+    let mut found = Vec::new();
+    for mode in ["full", "reduced", "none"] {
+        let config = Config {
+            width: 1280,
+            height: 800,
+            look: "sala",
+            language: "pt-BR",
+            size: 15,
+            motion: if mode == "none" { "none" } else { "full" },
+        };
+        apply(page, &config)?;
+        inject(page)?;
+        if mode == "full" {
+            system_motion(page, false)?;
+            clock_and_slow(page)?;
+        }
+        system_motion(page, mode == "reduced")?;
+        page.click(&css("[data-catalog-tab]"))?;
+        page.wait_for("Catalog cards", "!!document.querySelector('[data-catalog-card]')")?;
+        page.wait_for("Catalog to finish arriving", "document.getAnimations().every(a => a.effect.getTiming().iterations === Infinity || (!a.pending && a.playState !== 'running'))")?;
+        ensure(page.eval("matchMedia('(hover: hover)').matches")? == json!(true), || {
+            "infrastructure: this pointer cannot qualify Catalog hover motion".to_string()
+        })?;
+        page.eval("(() => { const tile = document.querySelector('.catalog-tile'); tile.dataset.motionCatalog = 'true'; for (const name of ['catalog-pick', 'catalog-site']) tile.querySelector('.' + name).dataset.surface = name; return true; })()")?;
+        let card = css("[data-motion-catalog] [data-catalog-card]");
+        page.wait_visible(&card)?;
+        let away = css("[data-catalog-tab]");
+        page.hover(&away)?;
+        page.eval_on(&css("[data-catalog-pick-shown]"), "el.focus(); return {};")?;
+        for step in ["hover-in", "hover-out", "focus-in", "focus-out"] {
+            let shown = step.ends_with("in");
+            let w = watch(ctx, &format!("catalog {mode} {step}"), page, &["catalog-pick", "catalog-site"], |p| {
+                match step {
+                    "hover-in" => p.hover(&card)?,
+                    "hover-out" => p.hover(&away)?,
+                    "focus-in" => p.press("Tab")?,
+                    _ => p.press("Shift+Tab")?,
+                }
+                if mode != "full" {
+                    same(p.eval("[...document.querySelectorAll('[data-motion-catalog] :is(.catalog-pick,.catalog-site)')].map(e => Number(getComputedStyle(e).opacity))")?, json!([if shown { 1 } else { 0 }, if shown { 1 } else { 0 }]), "reduced/none controls change opacity immediately")?;
+                }
+                Ok(())
+            })?;
+            for (i, surface) in ["catalog-pick", "catalog-site"].iter().enumerate() {
+                if mode == "full" {
+                    judge_motion(ctx, &mut found, "catalog", surface, step, mode, &w.samples[i])?;
+                }
+                same(
+                    page.eval(&format!("Number(getComputedStyle(document.querySelector('[data-motion-catalog] .{surface}')).opacity)"))?,
+                    json!(if shown { 1 } else { 0 }),
+                    "settled Catalog action visibility",
+                )?;
+            }
+            if mode != "full" {
+                ensure(w.anims.iter().all(|a| !a.target.contains("catalog")), || format!("{mode} Catalog controls must not animate"))?;
+            }
+            if step == "focus-in" {
+                same(
+                    page.eval("document.activeElement === document.querySelector('[data-motion-catalog] [data-catalog-card]')")?,
+                    json!(true),
+                    "Tab enters the first real Catalog card",
+                )?;
+            }
+            page.screenshot(&folder.join(format!("{mode}-{step}.png")))?;
+        }
+    }
+    gate(ctx, "catalog-controls", &found)
 }
 
 fn native_picker(ctx: &mut Ctx) -> Result {
