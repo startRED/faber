@@ -1,0 +1,11 @@
+{
+  "notes": {
+    "fixed": {
+      "en": "Update notes stay below the window bar while you scroll, so text no longer runs behind the window controls.",
+      "pt-BR": "As novidades ficam abaixo da barra da janela ao rolar, sem passar por trás dos botões da janela.",
+      "es": "Al desplazarte por las novedades, el texto queda debajo de la barra de la ventana y no pasa tras sus botones.",
+      "fr": "Quand vous faites défiler les nouveautés, le texte reste sous la barre de la fenêtre, sans passer derrière ses boutons.",
+      "de": "Beim Scrollen bleiben die Neuigkeiten unter der Fensterleiste, sodass kein Text mehr hinter den Fensterknöpfen verschwindet."
+    }
+  }
+}

@@ -19,7 +19,7 @@ has already moved to another control, even if they then leave that control. Movi
 for the destination row in the later project snapshot; its area can change before that snapshot arrives. Pin and Unpin
 remain usable from the keyboard in both areas.
 
-- At the top: "New conversation" (Ctrl N), then Chat, Projects (with a count) and Catalog. Catalog keeps New conversation, navigation and footer in place, with no conversation search/list. New conversation returns to the last work area. Switching back opens the chosen work area. In a narrow window, switching Chat/Projects keeps the already-open sidebar overlay visible; choosing a project or conversation closes it, as do Escape, the scrim and Catalog.
+- At the top: "New conversation" (Ctrl N), then Chat, Projects (with a count) and Catalog. Catalog keeps New conversation, navigation and footer in place, with no conversation search/list. New conversation returns to the last work area. Switching back opens the chosen work area. In a narrow window, switching Chat/Projects keeps the already-open sidebar overlay visible; choosing a project or conversation closes it, as do Escape, the scrim and Catalog. A visible close icon beside New conversation also closes the narrow overlay and returns keyboard focus to its menu button; it uses the existing sidebar-close label and is absent from docked navigation.
 - The sidebar lists only the open area's items (R168): Chat lists the chats and no Projects block, not even an empty
   one; Projects lists the projects with their conversations and the add-folder control, and no chats. Rows keep their DOM
   when the list refreshes, so a refresh moves nothing the person is pointing at.

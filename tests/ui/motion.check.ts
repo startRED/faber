@@ -241,6 +241,33 @@ check('motion: a hover never moves a row and no card arrives in more than 300ms'
   }
 });
 
+for (const [name, markup, selector] of [
+  ['recoverable question errors', '<div class="ask"><p class="note err">Try again</p></div>', '.ask .note.err'],
+  ['update entries including their stagger', '<div class="notes"><section class="notes-group"><h2 style="--i:0">Changes</h2><ul><li style="--i:20">Updated</li></ul></section></div>', '.notes-group h2, .notes-group li'],
+]) {
+  check(`motion: ${name} finish within 300ms in every factory theme`, () => {
+    for (const [theme, overrides] of Object.entries(themes.css.themes)) {
+      for (const motion of ['full', 'reduced', 'none']) {
+        const root = document.createElement('div');
+        root.dataset.base = theme;
+        root.dataset.motion = motion;
+        for (const [key, value] of Object.entries({ ...themes.css.base, ...overrides })) root.style.setProperty(`--${key}`, value);
+        root.innerHTML = markup;
+        document.body.append(root);
+        try {
+          for (const el of root.querySelectorAll(selector)) {
+            const style = getComputedStyle(el);
+            if (motion === 'full') {
+              const total = (parseFloat(style.animationDuration) + parseFloat(style.animationDelay)) * 1000;
+              ok(total > 0 && total <= 300, `${theme} ${selector} takes ${total}ms including stagger`);
+            } else equal(style.animationName, 'none', `${theme} ${motion} disables ${selector}`);
+          }
+        } finally { root.remove(); }
+      }
+    }
+  });
+}
+
 check('motion: a disclosure chevron turns with a transform that eases, and nothing else about it changes', () => {
   const root = document.createElement('div');
   root.style.cssText = 'position:fixed;left:10px;top:10px;width:240px';
