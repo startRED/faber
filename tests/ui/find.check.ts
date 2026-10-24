@@ -162,6 +162,55 @@ check('find: the browser find shows nowhere in the window, with or without the b
   equal(press({ key: 'a', ctrlKey: true }), true, 'other shortcuts are left alone');
 });
 
+check('find: search keeps the first highlighted match clear of its bar at the top', async () => {
+  const { host, thread } = stage();
+  host.className = 'main';
+  host.style.cssText = 'position:fixed;left:0;top:36px;width:720px;height:444px';
+  thread.style.cssText = 'position:absolute;inset:52px 0 108px;overflow-y:auto;--thread-tail:0px';
+  thread.querySelector('.you')!.textContent = 'Sky at the start';
+  const dispose = render(() => createComponent(Find, { enabled: true, root: () => thread }), host);
+  try {
+    ctrlF();
+    await settle();
+    type('sky');
+    await until(() => marks('find-now') === 1);
+    const current = [...CSS.highlights.get('find-now')!][0]! as Range;
+    equal(current.toString(), 'Sky', 'the first logical match is current');
+    equal(thread.scrollTop, 0, 'the first match has no earlier scroll position available');
+    const overlay = bar()!.getBoundingClientRect();
+    const rects = [...current.getClientRects()];
+    ok(rects.some((r) => r.width > 0 && r.height > 0), 'the current match has a rendered text box');
+    ok(rects.every((r) => r.bottom <= overlay.top || r.top >= overlay.bottom
+      || r.right <= overlay.left || r.left >= overlay.right), 'the current match must not sit under its own search bar');
+  } finally {
+    dispose();
+    host.remove();
+  }
+});
+
+check('find: search keeps its count and width while leaving but releases highlights immediately', async () => {
+  const { host, thread } = stage('full');
+  const dispose = render(() => createComponent(Find, { enabled: true, root: () => thread }), host);
+  try {
+    ctrlF();
+    await settle();
+    type('cafe');
+    await until(() => marks('find-now') === 1);
+    await settle(300);
+    const before = { count: count(), width: bar()!.getBoundingClientRect().width };
+    press({ key: 'Escape' });
+    ok(bar()?.classList.contains('leaving'), 'the search bar is still present during its own exit');
+    equal(CSS.highlights.has('find'), false, 'text ranges are released as soon as the search closes');
+    equal(CSS.highlights.has('find-now'), false);
+    equal(count(), before.count, 'the exiting bar keeps the count the person just saw');
+    equal(bar()!.getBoundingClientRect().width, before.width, 'clearing results must not widen the exiting bar');
+    await until(() => !bar());
+  } finally {
+    dispose();
+    host.remove();
+  }
+});
+
 check('find: the bar slides down from above and fades, leaves with a shorter exit, and stays still in reduced motion', async () => {
   const { host, thread } = stage('full');
   const dispose = render(() => createComponent(Find, { enabled: true, root: () => thread }), host);

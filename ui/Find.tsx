@@ -23,10 +23,15 @@ export function Find(props: { enabled: boolean; root: () => HTMLElement | undefi
   const [query, setQuery] = createSignal('');
   const [found, setFound] = createSignal(none);
   const [at, setAt] = createSignal(0);
+  const [exitCount, setExitCount] = createSignal('');
   let input: HTMLInputElement | undefined;
   let opener: HTMLElement | undefined;
 
   const total = () => found().ranges.length;
+  const count = () => {
+    if (!open()) return exitCount();
+    return !query().trim() ? '' : total() ? t('find.count', { current: at() + 1, total: found().capped ? `${LIMIT}+` : total() }) : t('find.none');
+  };
   // Looks for the word again. A new word starts at its first match and goes there; the same word again (the thread changed)
   // stays on the match the person was at.
   const look = (restart: boolean) => {
@@ -46,6 +51,7 @@ export function Find(props: { enabled: boolean; root: () => HTMLElement | undefi
   };
   createEffect(() => paint(found().ranges, found().ranges[at()]));
   const hide = (back: boolean) => {
+    if (open()) setExitCount(count());
     setOpen(false);
     // The matches hold on to the text they point into.
     setFound(none);
@@ -96,8 +102,6 @@ export function Find(props: { enabled: boolean; root: () => HTMLElement | undefi
       unpaint();
     });
   });
-
-  const count = () => (!query().trim() ? '' : total() ? t('find.count', { current: at() + 1, total: found().capped ? `${LIMIT}+` : total() }) : t('find.none'));
 
   return (
     <Show when={shown()}>
