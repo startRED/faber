@@ -47,7 +47,7 @@ with `.claude/skills/visual-critique/SKILL.md`; the score never drops and a touc
 ## First-user review
 
 Checks and the critique know what Faber should look like; a newcomer only knows what the screen says (R244).
-`node scripts/first-user.mjs` starts the hidden test build through `testkit/examples/ux_audit.rs` (first run, no CLI,
+`node scripts/first-user.mjs` starts the hidden test build through `testkit/examples/ux_audit.rs` (first run, no real CLI,
 720x480, pt-BR by default; `--size`, `--lang`, `--steps`, `--no-build`) and gives a fresh AI one step at a time: a
 screenshot and the controls a screen reader would name, numbered. Text is read from the image, never copied from the
 page body: that would also reveal text below the viewport. It answers with one action (click a
@@ -56,7 +56,10 @@ exposes its accessible option labels; selection requires an exact, unique enable
 the same connected, reachable element and enabled option before dispatching input and change events. Wait uses the same fixed 1.2-second pause as
 other actions and counts toward the step limit; it cannot request an unlimited delay. The chat task follows sending
 until a response appears, rather than treating a loading screen as completion. The tasks are the first run, a first chat, Projects
-and the language in Settings (`TASKS`), in one app, each starting where the last ended. The Catalog task comes after
+and the language in Settings (`TASKS`). First run and Catalog use an app with no AI. At Chat, that app closes and a fresh
+isolated app starts with the existing fake Claude replay; the remaining tasks continue there. The Chat task chooses
+Haiku and sends the recording's exact sky question. `--task conversa` runs only this connected replay, without first run.
+The report names the replay and distinguishes it from disconnected onboarding. The Catalog task comes after
 onboarding: find a debugging tool, read its purpose and automatic-use explanation, then return to the list. This task
 only browses; it does not test installation, removal or switches. `--task catalogo` runs this task alone, while an
 unknown task name fails before launching the app. Other task ids are in `TASKS`.
@@ -71,8 +74,9 @@ source evidence.
 Before asking the reviewer, the driver checks the document's actual language against `--lang`; a mismatch saves an
 image and fails instead of writing a report under the wrong language.
 
-The reviewer never sees the code. The default is Haiku through `claude -p --tools ""` with no MCP server, which starts
-with no tool at all (its `init` line lists none); `--agent codex` is gpt-6-luna with its shell, apps, browser and
+The reviewer never sees the code. The default is Haiku through `claude -p --safe-mode --tools ""` with no MCP server, which starts
+with no tool at all (its `init` line lists none); safe mode excludes personal CLAUDE.md, hooks and installed customizations
+while retaining ordinary subscription authentication (managed policy may still apply), without a silent fallback; `--agent codex` is gpt-6-luna with its shell, apps, browser and
 computer use switched off and a read-only sandbox. Either runs in an empty folder under the system temp folder, and the
 script refuses one inside the repository. Builds run at idle priority, the reviewer's processes have no window, and no
 CLI runs inside Faber, so its only cost is the reviewer's own calls (about 40 small Haiku turns).
@@ -80,7 +84,13 @@ CLI runs inside Faber, so its only cost is the reviewer's own calls (about 40 sm
 Each run gets a unique `<date>-<suffix>` name, including repeat runs with the same configuration. The findings go to
 `docs/research/first-user-<date>-<suffix>.md`, most serious first, each with what it tried, where it got stuck and the
 step's screenshot in `target/faber-test/first-user/<date>-<suffix>/` (local only). `--out` overrides only the report;
-screenshots still get their own folder. Nothing is fixed from it directly:
+screenshots still get their own folder. Each step saves a matching `<task>-<step>.controls.json` before asking the
+reviewer, retaining the actual numbered controls and options it received even if the reviewer fails. The image and
+control list are captured sequentially, not atomically. That folder also keeps `execution-identities.json`, with streamed SHA-256
+identities of the driver, app and fake CLI before/after the driver build and around each app batch. A missing binary
+before a build is recorded as null; other read errors stop the review. `--no-build` skips only the app build: the
+driver is still built before launch. Compare the launch-boundary snapshots rather than assuming a pre-build driver
+was the one that ran. Nothing is fixed from the review directly:
 a person reads the list and turns what is real into tasks. A reviewer's `done` is labeled as its own claim, requiring
 image inspection; it is not verified completion. `scripts/first-user.test.mjs` keeps the answer parsing, the
 folder check and the report.

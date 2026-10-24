@@ -15,6 +15,46 @@ const controls = [
   { role: 'input', name: 'Escreva aqui', x: 20, y: 20, disabled: true },
 ];
 
+test('each captured step keeps the actual controls before the reviewer can fail', async () => {
+  assert.equal(typeof firstUser.captureObservation, 'function');
+  const folder = mkdtempSync(join(tmpdir(), 'faber-first-user-observation-'));
+  try {
+    const shot = join(folder, 'projetos-1.png');
+    const seen = { controls: [{ role: 'button', name: 'Fechar a barra lateral', x: 260, y: 64, disabled: false }] };
+    const calls = [];
+    const app = { op: async (op, value) => { calls.push([op, value]); return op === 'eval' ? seen : true; } };
+    const observed = await firstUser.captureObservation(app, shot);
+    assert.equal(observed, seen);
+    assert.deepEqual(calls, [['shot', shot], ['eval', firstUser.OBSERVE]]);
+    const evidence = join(folder, 'projetos-1.controls.json');
+    assert.deepEqual(JSON.parse(readFileSync(evidence, 'utf8')), seen);
+    await assert.rejects(firstUser.captureObservation(app, shot), { code: 'EEXIST' });
+    assert.deepEqual(JSON.parse(readFileSync(evidence, 'utf8')), seen);
+  } finally { rmSync(folder, { recursive: true, force: true }); }
+});
+
+test('artifact identities distinguish a missing app, a rebuilt driver and the previously recorded bytes', async () => {
+  const folder = mkdtempSync(join(tmpdir(), 'faber-first-user-identity-'));
+  try {
+    const paths = { driver: join(folder, 'driver'), app: join(folder, 'app') };
+    writeFileSync(paths.driver, 'a');
+    const before = await firstUser.artifactIdentity(paths);
+    assert.equal(before.driver.sha256, 'ca978112ca1bbdcafac231b39a23dc4da786eff8147c4e72b9807785afee48bb');
+    assert.equal(before.app.sha256, null);
+    writeFileSync(paths.driver, 'b');
+    writeFileSync(paths.app, 'a');
+    const after = await firstUser.artifactIdentity(paths);
+    assert.equal(after.driver.sha256, '3e23e8160039594a33894f6564e1b1348bbd7a0088d42c4acb73eeaed59c009d');
+    assert.equal(after.app.sha256, before.driver.sha256);
+    assert.notEqual(after.driver.sha256, before.driver.sha256);
+    assert.equal(before.app.sha256, null);
+    assert.equal(after.driver.path, paths.driver);
+    await assert.rejects(firstUser.artifactIdentity({ driver: folder }));
+  } finally {
+    rmSync(folder, { recursive: true, force: true });
+  }
+});
+
 test('native choices require an observed enabled selector and an exact enabled option', () => {
   const lists = [{ role: 'list', name: 'Modelo', disabled: false, options: [
     { label: 'Claude Haiku', value: 'haiku', disabled: false },
@@ -65,7 +105,7 @@ test('a seeded project conversation is opt-in and never launches without its fak
   assert.match(tasks[0].goal, /In one sentence: why is the sky blue\?/);
   assert.equal(firstUser.selectTasks().some((task) => task.id === 'conversa-projeto'), false);
   assert.deepEqual(firstUser.driverFlags(tasks, 'pt-BR', false), ['--project-demo', '--lang', 'pt-BR']);
-  assert.deepEqual(firstUser.driverFlags(TASKS, 'en', true), ['--first-run', '--no-ai', '--lang', 'en', '--build']);
+  assert.throws(() => firstUser.driverFlags(TASKS, 'en', true), /separate batches/);
   assert.throws(() => firstUser.driverFlags([...TASKS, ...tasks], 'en', false), /one focused task/);
 });
 
@@ -74,6 +114,22 @@ test('the project report identifies the seeded replay rather than claiming first
   const text = report({ date: '2026-10-23', agent: 'fixture', size: { width: 720, height: 480 }, lang: 'en',
     findings: [], results: [{ task, steps: [], outcome: 'done' }], shots: 'fixture' });
   assert.match(text, /projeto Demo já preparado/);
+  assert.match(text, /resposta gravada/);
+  assert.doesNotMatch(text, /primeira abertura sem nenhuma IA/);
+});
+
+test('a Chat review uses the recorded AI after the disconnected first-run walk', () => {
+  const chat = firstUser.selectTasks(['--task', 'conversa']);
+  assert.deepEqual(firstUser.driverFlags(chat, 'en', false), ['--lang', 'en']);
+  assert.match(chat[0].goal, /In one sentence: why is the sky blue\?/);
+  assert.match(chat[0].goal, /Haiku/);
+  const batches = firstUser.reviewBatches(TASKS);
+  assert.deepEqual(batches.flat(), TASKS);
+  assert.equal(batches.length, 2);
+  assert.deepEqual(firstUser.driverFlags(batches[0], 'pt-BR', true), ['--first-run', '--no-ai', '--lang', 'pt-BR', '--build']);
+  assert.deepEqual(firstUser.driverFlags(batches[1], 'pt-BR', false), ['--lang', 'pt-BR']);
+  const text = report({ date: '2026-10-24', agent: 'fixture', size: { width: 720, height: 480 }, lang: 'en',
+    findings: [], results: [{ task: chat[0], steps: [], outcome: 'done' }], shots: 'fixture' });
   assert.match(text, /resposta gravada/);
   assert.doesNotMatch(text, /primeira abertura sem nenhuma IA/);
 });
@@ -197,4 +253,27 @@ test('without a usable summary the report still lists every confusion and every 
     { task: 'primeira-abertura', tried: 'clicou em [2]', stuck: 'nome estranho', shot: 'a-2.png' },
     { task: 'primeira-abertura', tried: 'travou: sem saída', stuck: 'sem saída', shot: 'a-3.png' },
   ]);
+});
+
+test('the Haiku reviewer excludes personal customizations without disabling subscription auth or tool restrictions', async () => {
+  const source = readFileSync(new URL('./first-user.mjs', import.meta.url), 'utf8');
+  const start = source.indexOf('function reviewer(kind, home) {');
+  const end = source.indexOf('/** The hidden test build', start);
+  assert.ok(start >= 0 && end > start, 'exercise the actual reviewer constructor');
+  const invocations = [];
+  const ask = runInNewContext(source.slice(start, end) + '\nreviewer("claude", "/outside-review");', {
+    program: () => 'claude.exe', firstJson,
+    run: async (exe, args, options) => {
+      invocations.push({ exe, args: Array.from(args), cwd: options.cwd });
+      return '{"type":"result","result":"ok"}\n';
+    },
+  });
+  assert.equal(await ask('Read only the provided screen.'), 'ok');
+  assert.equal(invocations.length, 1);
+  const { args, cwd } = invocations[0];
+  assert.ok(args.includes('--safe-mode'), 'personal memory, plugins and hooks must not reach the newcomer reviewer');
+  assert.ok(!args.includes('--bare'), 'bare mode would disable subscription OAuth');
+  assert.equal(args[args.indexOf('--tools') + 1], '');
+  for (const flag of ['--strict-mcp-config', '--disable-slash-commands', '--no-session-persistence']) assert.ok(args.includes(flag));
+  assert.equal(cwd, '/outside-review');
 });
