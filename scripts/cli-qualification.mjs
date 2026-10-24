@@ -1,5 +1,5 @@
 // Candidate contract probes only. These receipts never authorize installation or a live manifest entry.
-import { spawnSync } from 'node:child_process';
+import { spawn, spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { mkdtempSync, readFileSync, statSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -41,10 +41,78 @@ export function isolatedEnv(folder, source = process.env) {
 
 export function report(identity) {
   return { ...identity, scope: 'unauthenticated-contract-only', qualified: false,
-    missingEvidence: ['protocol-startup', 'authenticated-turn', 'cancellation', 'process-tree-cleanup'] };
+    missingEvidence: [...(identity.provider === 'codex' && identity.checks?.some((check) => check.name === 'protocol-startup' && check.passed === true)
+      ? [] : ['protocol-startup']), 'authenticated-turn', 'cancellation', 'process-tree-cleanup'] };
 }
 
-export function probe(provider, binary, version, destination) {
+export function checkInitialize(line) {
+  try {
+    const message = JSON.parse(line);
+    return message?.id === 1 && !Object.hasOwn(message, 'error') && typeof message.result?.userAgent === 'string';
+  } catch { return false; }
+}
+
+export function startup(binary, folder, startProcess = spawn) {
+  return new Promise((resolveStartup) => {
+    const child = startProcess(binary, ['app-server'], { cwd: folder, env: isolatedEnv(folder),
+      shell: false, windowsHide: true, stdio: ['pipe', 'pipe', 'pipe'] });
+    let bytes = 0;
+    let pending = '';
+    let initialized = false;
+    let failure;
+    let settled = false;
+    const finish = (reason) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      child.stdin.destroy();
+      child.stdout.destroy();
+      child.stderr.destroy();
+      resolveStartup({ name: 'protocol-startup', passed: !reason, ...(reason ? { reason } : {}) });
+    };
+    const fail = (reason) => {
+      failure ??= reason;
+      child.kill('SIGKILL');
+      finish(failure);
+    };
+    const timer = setTimeout(() => fail('timeout'), 30_000);
+    const count = (chunk) => {
+      bytes += chunk.length;
+      if (bytes > 1024 * 1024) fail('output-limit');
+    };
+    child.stderr.on('data', count);
+    child.stdout.on('data', (chunk) => {
+      count(chunk);
+      if (failure) return;
+      pending += chunk.toString('utf8');
+      let newline;
+      while ((newline = pending.indexOf('\n')) !== -1) {
+        const line = pending.slice(0, newline).trim();
+        pending = pending.slice(newline + 1);
+        if (!line) continue;
+        let message;
+        try { message = JSON.parse(line); } catch { fail('malformed-json'); return; }
+        if (!message || typeof message !== 'object' || Array.isArray(message)) { fail('protocol-mismatch'); return; }
+        if (Object.hasOwn(message, 'id')) {
+          if (initialized || !checkInitialize(line)) { fail('protocol-mismatch'); return; }
+          initialized = true;
+          child.stdin.end(`${JSON.stringify({ method: 'initialized' })}\n`);
+        }
+      }
+    });
+    child.stdin.on('error', () => fail('stdin-failed'));
+    child.on('error', () => fail('spawn-failed'));
+    child.on('close', (code) => {
+      const reason = failure ?? (code !== 0 ? 'command-failed' : !initialized || pending.trim() ? 'protocol-mismatch' : undefined);
+      finish(reason);
+    });
+    child.stdin.write(`${JSON.stringify({ id: 1, method: 'initialize', params: {
+      clientInfo: { name: 'faber_contract_probe', version: '0.1.0' }, capabilities: { experimentalApi: false },
+    } })}\n`);
+  });
+}
+
+export async function probe(provider, binary, version, destination) {
   if (!Object.hasOwn(OPTIONS, provider) || !VERSION.test(version) || !isAbsolute(binary) || !isAbsolute(destination)) {
     throw new Error('Expected provider, absolute native binary, exact package version and absolute report path');
   }
@@ -70,6 +138,7 @@ export function probe(provider, binary, version, destination) {
         if (statSync(path).size > 8 * 1024 * 1024) return false;
         return checkSchema(JSON.parse(readFileSync(path, 'utf8'))).length === 0;
       });
+      checks.push(await startup(binary, folder));
     }
   } catch {
     checks.push({ name: 'probe', passed: false, reason: 'probe-failed' });
@@ -82,7 +151,7 @@ export function probe(provider, binary, version, destination) {
 if (process.argv[1] && import.meta.url === pathToFileURL(resolve(process.argv[1])).href) {
   const [provider, binary, version, destination, ...extra] = process.argv.slice(2);
   if (extra.length) throw new Error('Unexpected arguments');
-  const result = probe(provider, binary, version, destination);
+  const result = await probe(provider, binary, version, destination);
   process.stdout.write(`${provider}: ${result.checks.filter((check) => check.passed).length}/${result.checks.length} contract checks passed; full qualification missing\n`);
   if (result.checks.some((check) => !check.passed)) process.exitCode = 1;
 }

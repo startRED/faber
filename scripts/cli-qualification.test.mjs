@@ -1,6 +1,8 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { existsSync } from 'node:fs';
+import { EventEmitter } from 'node:events';
+import { PassThrough } from 'node:stream';
 assert.ok(existsSync(new URL('./cli-qualification.mjs', import.meta.url)), 'nightly candidate contract checker is not implemented');
 const { checkHelp, checkSchema, checkVersion, isolatedEnv, report } = await import('./cli-qualification.mjs');
 
@@ -47,4 +49,58 @@ test('passing candidate contracts still cannot qualify a version for installatio
   assert.equal(value.qualified, false);
   assert.equal(value.scope, 'unauthenticated-contract-only');
   assert.ok(value.missingEvidence.includes('authenticated-turn'));
+});
+
+test('startup accepts only the matching successful initialize response', async () => {
+  const { checkInitialize } = await import('./cli-qualification.mjs');
+  assert.equal(typeof checkInitialize, 'function', 'initialize response validation is missing');
+  assert.equal(checkInitialize('{"id":1,"result":{"userAgent":"probe"}}'), true);
+  for (const line of ['{', 'null', '{"id":2,"result":{"userAgent":"probe"}}',
+    '{"id":1,"error":{"code":-1}}', '{"id":1,"result":{}}',
+    '{"id":1,"result":{"userAgent":"probe"},"error":{}}']) {
+    assert.equal(checkInitialize(line), false);
+  }
+});
+
+test('only a passing Codex startup removes its missing evidence', () => {
+  for (const provider of ['codex', 'claude']) {
+    for (const passed of [true, false]) {
+      const value = report({ provider, checks: [{ name: 'protocol-startup', passed }] });
+      assert.equal(value.missingEvidence.includes('protocol-startup'), !(provider === 'codex' && passed));
+      assert.equal(value.qualified, false);
+      assert.ok(value.missingEvidence.includes('process-tree-cleanup'));
+    }
+  }
+});
+
+test('startup deadline completes even when inherited pipes never close', async (t) => {
+  t.mock.timers.enable({ apis: ['setTimeout'] });
+  const { startup } = await import('./cli-qualification.mjs');
+  const child = new EventEmitter();
+  for (const name of ['stdin', 'stdout', 'stderr']) child[name] = new PassThrough();
+  child.kill = t.mock.fn();
+  let result;
+  const pending = startup('unused', 'unused', () => child).then((value) => { result = value; });
+  t.mock.timers.tick(30_000);
+  await Promise.resolve();
+  assert.deepEqual(result, { name: 'protocol-startup', passed: false, reason: 'timeout' });
+  assert.equal(child.kill.mock.calls.length, 1);
+  for (const name of ['stdin', 'stdout', 'stderr']) assert.equal(child[name].destroyed, true);
+  await pending;
+});
+
+test('startup caps combined output and rejects malformed or uncorrelated replies', async (t) => {
+  const { startup } = await import('./cli-qualification.mjs');
+  for (const [chunks, reason] of [
+    [[['stderr', Buffer.alloc(600_000)], ['stdout', Buffer.alloc(600_000)]], 'output-limit'],
+    [[['stdout', '{broken}\n']], 'malformed-json'],
+    [[['stdout', '{"id":2,"result":{"userAgent":"probe"}}\n']], 'protocol-mismatch'],
+  ]) {
+    const child = new EventEmitter();
+    for (const name of ['stdin', 'stdout', 'stderr']) child[name] = new PassThrough();
+    child.kill = t.mock.fn();
+    const pending = startup('unused', 'unused', () => child);
+    for (const [stream, chunk] of chunks) child[stream].write(chunk);
+    assert.deepEqual(await pending, { name: 'protocol-startup', passed: false, reason });
+  }
 });

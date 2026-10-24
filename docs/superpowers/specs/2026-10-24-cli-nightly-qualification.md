@@ -19,3 +19,9 @@ A failed probe exits nonzero while preserving its report; a passing probe never 
 Acceptance: missing launch options or request methods fail; method names in descriptions cannot pass; malformed
 versions and failed commands fail; environment filtering drops credentials; reports never claim full qualification.
 The workflow runs on Windows x64, Linux x64 and macOS arm64 and keeps reports only for a bounded retention period.
+
+Startup extension: send Codex initialize with request id 1, require a matching non-error response with a string
+userAgent, then send initialized and close stdin. Require a clean parent exit. Bound combined stdout/stderr to
+1 MiB and elapsed time to 30 seconds. Reject malformed JSON, mismatched responses and protocol errors without
+recording raw output. Only a passing Codex startup removes protocol-startup from missing evidence; authenticated
+turns, cancellation and process-tree cleanup remain unproven. Unit checks never start subprocesses.

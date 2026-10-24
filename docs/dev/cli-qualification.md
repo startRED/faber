@@ -8,6 +8,9 @@ installed outside the checkout with lifecycle scripts disabled; no downloaded to
 allowlisted environment whose account/configuration folders are empty. Commands have a 30-second timeout and a
 1 MiB output limit. It checks exact version identity and Faber's required launch options. Codex additionally generates
 its version-specific JSON schema locally; required request methods must be actual schema branches, not prose.
+It also sends initialize to the real Codex app server, requires the matching successful response, sends initialized
+and closes stdin, requiring a clean parent exit. Combined startup output is capped at 1 MiB; the 30-second deadline
+ends the probe even if inherited pipes remain open. Neither parent exit nor killing it proves process-tree cleanup.
 No model turn, login, account request, personal settings or production signing is used.
 
 The JSON receipt records the binary SHA-256, exact candidate version, platform, architecture, time and each check's
@@ -15,8 +18,9 @@ pass/failure category. Raw output, configuration, generated schemas and binaries
 for 14 days. A command failure or missing interface fails the job and preserves its report when it can be written.
 A failed download has no binary receipt and fails the artifact step too, rather than suggesting a checked candidate.
 
-Every receipt says `qualified: false`, even when all contract checks pass. Protocol startup, an authenticated turn,
-cancellation and process-tree cleanup are still missing evidence. These checks detect interface drift; they cannot
+Every receipt says `qualified: false`, even when all contract checks pass. A passing Codex startup removes only its
+protocol-startup gap. Claude startup, authenticated turns, cancellation and process-tree cleanup still lack evidence.
+These checks detect interface drift; they cannot
 establish complete compatibility, authorize an installation, update a manifest, sign metadata or promote a release.
 Real-binary authenticated qualification and the owner's production signing/publication setup remain unfinished.
 
