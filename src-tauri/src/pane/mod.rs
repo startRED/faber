@@ -1147,15 +1147,27 @@ impl Pane {
     /// Test builds only: observe the child through safe native getters and fixed private DevTools requests.
     #[cfg(feature = "test-hooks")]
     pub async fn test_probe(&self, capture: bool) -> Result<Value, String> {
-        let (webview, shown, owner) = {
+        let (webview, shown, owner, era, made) = {
             let s = crate::lock(&self.state);
-            (s.webview.clone(), s.shown, s.owner.clone())
+            (s.webview.clone(), s.shown, s.owner.clone(), s.era, s.made)
         };
         let Some(webview) = webview else { return Ok(json!({ "shown": false })) };
         // These query the actual native child, not the rectangle the screen last requested.
-        let position = webview.position().map_err(|e| e.to_string())?;
-        let size = webview.size().map_err(|e| e.to_string())?;
-        let scale = webview.window().scale_factor().map_err(|e| e.to_string())?;
+        let position = webview.position().map_err(|e| {
+            let now = crate::lock(&self.state);
+            format!("{e}; test_site_probe position: era {era}->{}, made {made}->{}, owner {owner:?}->{:?}", now.era, now.made, now.owner)
+        })?;
+        let size = webview.size().map_err(|e| {
+            let now = crate::lock(&self.state);
+            format!("{e}; test_site_probe size: era {era}->{}, made {made}->{}, owner {owner:?}->{:?}", now.era, now.made, now.owner)
+        })?;
+        let scale = webview.window().scale_factor().map_err(|e| {
+            let now = crate::lock(&self.state);
+            format!(
+                "{e}; test_site_probe scale_factor: era {era}->{}, made {made}->{}, owner {owner:?}->{:?}",
+                now.era, now.made, now.owner
+            )
+        })?;
         let page = self.call("Runtime.evaluate", json!({
             "expression": "({url:location.href,title:document.title,text:(document.body?.innerText||'').slice(0,2000),width:innerWidth,height:innerHeight})",
             "returnByValue": true
@@ -1164,12 +1176,28 @@ impl Pane {
         let private = tokio::time::timeout(CALL, native::test_private(&webview))
             .await
             .map_err(|_| "the test private-mode query timed out")?
-            .map_err(|_| "the test browser closed")??;
+            .map_err(|_| "the test browser closed")?
+            .map_err(|e| {
+                let now = crate::lock(&self.state);
+                format!("{e}; test_site_probe private: era {era}->{}, made {made}->{}, owner {owner:?}->{:?}", now.era, now.made, now.owner)
+            })?;
         let mut answer = json!({
-            "shown": shown, "owner": owner, "url": webview.url().map_err(|e| e.to_string())?.as_str(),
+            "shown": shown, "owner": owner, "url": webview.url().map_err(|e| {
+                let now = crate::lock(&self.state);
+                format!(
+                    "{e}; test_site_probe url: era {era}->{}, made {made}->{}, owner {owner:?}->{:?}",
+                    now.era, now.made, now.owner
+                )
+            })?.as_str(),
             "x": position.x, "y": position.y, "width": size.width, "height": size.height,
             "scale": scale, "page": page["result"]["value"], "history": history, "private": private,
-            "hostMinimized": webview.window().is_minimized().map_err(|e| e.to_string())?
+            "hostMinimized": webview.window().is_minimized().map_err(|e| {
+                let now = crate::lock(&self.state);
+                format!(
+                    "{e}; test_site_probe is_minimized: era {era}->{}, made {made}->{}, owner {owner:?}->{:?}",
+                    now.era, now.made, now.owner
+                )
+            })?
         });
         if capture {
             let shot = self.call("Page.captureScreenshot", json!({"format":"png", "captureBeyondViewport":false})).await?;
