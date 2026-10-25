@@ -22,8 +22,10 @@ const OWN: ToolUse = { id: 'b1', name: 'Bash', input: { command: 'cargo check' }
 
 check('subagent history: long sessions read one page and keep older pages steady while new work arrives', () => retainedHistory());
 check('subagent history diagnostic: native reset readbacks', () => retainedHistory(true));
+check('subagent history diagnostic: pointer pins before the native reset', () => retainedHistory(false, 'pointer'));
+check('subagent history diagnostic: prevented wheel pins before the native reset', () => retainedHistory(false, 'prevented-wheel'));
 
-async function retainedHistory(readbacks = false) {
+async function retainedHistory(readbacks = false, pin: 'wheel' | 'pointer' | 'prevented-wheel' = 'wheel') {
   const port = api;
   const before = port.childTranscript;
   const reads: number[] = [];
@@ -81,7 +83,10 @@ async function retainedHistory(readbacks = false) {
     equal(reads.at(-1), 13, 'only the newly appended immutable page is read');
     equal([...root.querySelectorAll('.side-said')].find((node) => node.textContent?.includes('Retained page 6.')), stable, 'new work keeps the existing text nodes in place');
     const heard = reads.length;
-    root.querySelector('.side-said')!.dispatchEvent(new WheelEvent('wheel', { deltaY: -60, bubbles: true }));
+    const pinEvent = pin === 'pointer' ? new PointerEvent('pointerdown', { bubbles: true })
+      : new WheelEvent('wheel', { deltaY: -60, bubbles: true, cancelable: pin === 'prevented-wheel' });
+    if (pin === 'prevented-wheel') pinEvent.preventDefault();
+    root.querySelector('.side-said')!.dispatchEvent(pinEvent);
     setPages(15);
     await settle();
     equal(reads.length, heard, 'scrolling up pins the current window instead of evicting text being read');
@@ -190,6 +195,7 @@ async function retainedHistory(readbacks = false) {
         scrollPositions,
         scrollEvents,
         droppedScrollEvents,
+        pin: { mode: pin, prevented: pinEvent.defaultPrevented, trusted: pinEvent.isTrusted },
         nativeCopies,
         browser: { userAgent: navigator.userAgent, anchoring: CSS.supports('overflow-anchor', 'none') },
         synthetic: { reads: [...reads], sections: root.querySelector('.agent-pages .side-meta')?.textContent ?? null, pageCount: pages() },
