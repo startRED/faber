@@ -2152,6 +2152,7 @@ export const ptBR: Messages = {
   'notes.261.fixed': 'Os controles do projeto preservam rascunhos e foco ao salvar, e o painel lateral fecha sem dar um salto durante o movimento.',
   'notes.262.fixed': 'O botão de voltar ao fim do histórico do subagente fica no lugar ao clicar com movimento reduzido.',
   'notes.263.new': 'Em Projetos, você pode pedir pra mudar a busca na web e conferir a escolha atual e a nova antes de permitir.',
+  'notes.264.fixed': 'A busca deixa o resultado visível e fecha sem mudar de tamanho.',
   'update.checking': 'Procurando atualização…',
   'update.downloading': 'Baixando atualização…',
   'update.downloadingPercent': 'Baixando atualização… {percent}%',

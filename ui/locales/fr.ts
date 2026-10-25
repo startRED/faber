@@ -2165,6 +2165,7 @@ export const fr: Messages = {
   'notes.261.fixed': 'Les réglages du projet conservent le brouillon et le focus à l’enregistrement, et le panneau latéral se ferme sans saut pendant son déplacement.',
   'notes.262.fixed': 'Le bouton pour revenir à la fin de l’historique du sous-agent reste en place au clic lorsque les mouvements sont réduits.',
   'notes.263.new': 'Dans Projets, vous pouvez demander une modification de la recherche web et comparer les choix avant de donner votre accord.',
+  'notes.264.fixed': 'La recherche garde le résultat visible et se ferme sans changer de taille.',
   'update.checking': 'Recherche d’une mise à jour…',
   'update.downloading': 'Téléchargement de la mise à jour…',
   'update.downloadingPercent': 'Téléchargement de la mise à jour… {percent} %',

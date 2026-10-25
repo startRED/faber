@@ -2165,6 +2165,7 @@ export const es: Messages = {
   'notes.261.fixed': 'Los controles del proyecto conservan el borrador y el foco al guardar, y el panel lateral se cierra sin saltos durante el movimiento.',
   'notes.262.fixed': 'El botón para ir al final del historial del subagente se mantiene en su sitio al pulsarlo con movimiento reducido.',
   'notes.263.new': 'En Proyectos, puedes pedir cambiar la búsqueda web y revisar la opción actual y la propuesta antes de permitirlo.',
+  'notes.264.fixed': 'La búsqueda mantiene visible el resultado actual y se cierra sin cambiar de tamaño.',
   'update.checking': 'Buscando una actualización…',
   'update.downloading': 'Descargando actualización…',
   'update.downloadingPercent': 'Descargando actualización… {percent} %',

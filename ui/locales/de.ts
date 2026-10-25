@@ -2165,6 +2165,7 @@ export const de: Messages = {
   'notes.261.fixed': 'Beim Speichern bleiben Entwurf und Tastaturfokus in den Projekteinstellungen erhalten, und bewegte Seitenleisten schließen ohne Sprung.',
   'notes.262.fixed': 'Bei reduzierter Bewegung bleibt die Schaltfläche zum Ende des Unteragentenverlaufs beim Drücken an ihrem Platz.',
   'notes.263.new': 'In Projekten kannst du eine Änderung der Websuche anfragen und vor deiner Zustimmung die bisherige und die vorgeschlagene Wahl vergleichen.',
+  'notes.264.fixed': 'Die Suche hält den aktuellen Treffer sichtbar und schließt, ohne ihre Größe zu ändern.',
   'update.checking': 'Suche nach einem Update…',
   'update.downloading': 'Update wird heruntergeladen…',
   'update.downloadingPercent': 'Update wird heruntergeladen… {percent} %',

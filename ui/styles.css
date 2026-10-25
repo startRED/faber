@@ -1550,6 +1550,7 @@ html.away-win :is(.amb, .amb *) { animation-play-state: paused !important; }
 @keyframes find-out { to { opacity: 0; transform: translateY(calc(-1 * var(--motion-slide) / 2)); } }
 .find { max-width: calc(100% - 48px); }
 .main:has(.work.under) .find { right: calc(min(352px, 100%) + 24px); max-width: calc(100% - min(352px, 100%) - 48px); }
+.main:has(> .find) .thread { padding-top: calc(22px * var(--dens) + var(--h-lg)); }
 .find .field.search { flex: 1 1 200px; width: auto; min-width: 0; }
 .find .iconbtn { flex: none; }
 .find-count { flex: none; min-width: 48px; padding: 0 6px; color: var(--ink-3); font-size: var(--fs-xs); text-align: center; white-space: nowrap; }
