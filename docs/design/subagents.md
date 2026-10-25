@@ -1,5 +1,38 @@
 # Subagent steps
 
+## Current activity
+
+A running helper row shows its latest unfinished tool under its task name, using the existing translated tool label
+and a bounded one-line detail. Between tools, the last observed step stays with its explicit result, so the row
+does not collapse and grow again. This is observed activity, not a progress estimate. Waiting and stuck helpers retain
+the observed action so the person can see what needs attention; a known result precedes a clipped detail. Stopped,
+declined and completed helpers do not keep an activity line. The existing row still opens the full helper view; no new
+reader, timer or stored value is added. `tests/ui/agents.check.ts` covers arrival and removal of this line.
+
+Nested tasks have independent rows and the same reader route (R450), with a small inset and a parent-name tooltip.
+Each task owns its tools; its parent keeps the delegation as a button that opens the child. The child's reader names
+its parent above the metadata, and Back returns to that parent before the running list. A child inherits background
+status from its ancestors, so ending the main reply does not falsely stop it. Older calls retain their existing
+16,000-character preview limit; new calls use the paged history below. The nested routing, direct-step ordering and background-state
+regressions live in `tests/ui/agents.check.ts`.
+
+## Retained visible history
+
+New calls retain visible text, steps and full tool results in atomic pages outside the conversation JSON. The engine never
+copies private reasoning or a vendor's own history. Helper text is buffered until a content boundary or 8 KiB;
+process-writer and cursor metadata never split streamed words into separate pages.
+The reader loads a bounded window of up to eight immutable pages at a time and offers Earlier,
+Later and Latest in the same pane or full-thread view. Selecting an older page, scrolling up or selecting text holds the window steady while new output arrives;
+Latest resumes following the newest saved page. The same floating Latest action remains reachable while reading up; late font loading and pane resizing keep the tail visible only while following it. Tool results wrap without horizontal overflow; the helper's final report
+uses the existing frame removal and Markdown. A background task's steps are resolved across the conversation's turns.
+The retained transcript itself does not animate: a transform on the long text would make the floating action belong to
+that text rather than the viewport. The column and its metadata keep their existing motion. The paused-arrival check in
+`tests/ui/agents.check.ts` holds an arrival and requires the same Latest action to remain inside the reader and work.
+Read failures remain inside the reader with a translated retry action. A failed save leaves a persistent incomplete-history
+notice; older discarded text cannot be recovered. Empty and legacy calls keep the existing preview behavior. The new pages
+follow a branch's retained calls and are removed with the owning conversation; rewind retains them for Redo. The existing
+conversation export still exports answers, not the work log. No complete vendor session or user-research claim is made.
+
 How a reply shows the subagents and helpers its agent hands work to: the rows, the running column, the stuck signs, and the pages
 the agent opens in Faber's browser, which open in the same place.
 The work log they sit under is in [conversation.md](conversation.md).
@@ -18,8 +51,8 @@ ran in runs with what it wrote between its steps (R416) between the runs, drawn 
 second ink and the column's full width, outside the chips so no chip rule (border, padding, nowrap) reaches a fenced block's
 spans; the paragraphs lose the outer margins, so the gap above and below is the column's own 12 px. Its last words give way
 to its report only when the report starts with them, since a cut, failed or stopped report may not say them. The words are
-read when the view opens and again when they grow, never carried by the reply's updates. When the engine stops keeping words
-(16,000 characters per subagent, cut after a whole message or at a paragraph or sentence), one quiet line in the third ink
+read when the view opens and again when they grow, never carried by the reply's updates. For legacy previews without paged history,
+the old 16,000-character limit cuts after a whole message or at a paragraph or sentence. A cut preview has one quiet line in the third ink
 right after the last words kept says "It wrote more than fits here. What it wrote after this point is not kept." Then,
 once it ended, "What it did" (R161 step 4): a quiet block in the work log's surface with the files it changed
 in the data face, its checks and how many failed (a failed count gets the error note's 2 px edge), and the changed files
@@ -69,9 +102,15 @@ helper tool existed keeps its Codex thread without it, since Codex takes dynamic
 ### Pages in Faber's browser
 
 The page's head has an expand button, the subagent's own: the page fills the work area over the conversation, the composer
-below, and the same button (then "Back to the side column") returns it. Its bar names the screen size the page is drawn at,
-"Panel" or the size in figures, a quiet ghost button opening the right-click menu's list of sizes; a desktop size is drawn
-whole and shrunk to fit the box, so 1920×1080 in a 560 px column shows the full page small.
+below, and the same button (then "Back to the side column") returns it. Its More menu names the screen size the page is drawn at
+and opens the existing list of sizes; a desktop size is drawn whole and shrunk to fit the box, so 1920×1080 in a 560 px column
+shows the full page small.
+
+An active emulated screen size stays visible above the live page as “Preview: PC · 1920 × 1080”, with “Fit to panel” beside it. The normal panel size needs no notice; recorded pictures keep their own size labels. Reset uses the same size command as the menu, ignores repeated activation while pending, keeps the confirmed size and shows a translated error if it fails, and returns keyboard focus to the address after success.
+
+Back and Forward refresh after each completed load, including when the address already shows the requested page; an older history reply cannot replace a newer one. An unsupported address and a native failure to open a valid page have distinct translated errors beside the address. The field retains its text for retry; only an unsupported address is marked invalid.
+
+The native child explicitly reuses the host's WebView2 environment while keeping its InPrivate controller and the per-conversation clearing rules. Creating a second environment with different browser options in the same data folder is refused by WebView2, including in hidden test runs.
 
 A page a project's agent opened in Faber's browser (R161 step 7) is a card among the reply's files, in the file card's
 surface: the picture the browser took of the page's top (a 16:10 crop at most 480 px wide, the page loaded at 1280 by 800
@@ -90,8 +129,8 @@ and under it a box that fills the rest of the column, in the third surface with 
 itself is drawn by a second webview of the same window. The box is measured and the page placed again when it changes
 size, when the window does and once the column has slid in; when the box goes, the page moves out of the window, where
 it keeps drawing, and it closes after five minutes nobody used it. Opening a subagent closes the page and the other way
-round. Known limit: the page is a native view over the screen, so a menu or toast that would cover the column passes
-under it. While it is on screen the page is the person's: they click and type in it, and the agent's call waits for them
+round. A menu, dialog or toast covering its box temporarily parks the native page; it returns when the layer goes.
+While it is on screen the page is the person's: they click and type in it, and the agent's call waits for them
 to go back. A page clicked through several times is one card, its latest. Under the box, once the agent did more than one thing in the
 browser during the reply, the log of its steps fills at most a third of the column, oldest first, one quiet row each in the
 third ink (a number in the data face, then the step's words; what the agent typed never shows, only the field), the step

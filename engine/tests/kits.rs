@@ -58,8 +58,17 @@ async fn replay(
     tools: Delivery,
     cwd: &Path,
     internal: bool,
+    task: &str,
 ) -> (Vec<String>, Vec<Value>) {
-    let fake = fake(fixture(vendor.name(), "kits"));
+    let mut entries = fixture(vendor.name(), "kits");
+    for entry in entries.iter_mut().filter(|entry| entry.input) {
+        if entry.msg["method"] == "turn/start" {
+            entry.msg["params"]["input"][0]["text"] = task.into();
+        } else if entry.msg["type"] == "user" {
+            entry.msg["message"]["content"] = task.into();
+        }
+    }
+    let fake = fake(entries);
     let (tx, mut events) = tokio::sync::mpsc::unbounded_channel();
     let sink = Arc::new(move |event| drop(tx.send(event)));
     let server;
@@ -133,7 +142,7 @@ async fn replay(
             session
         }
     };
-    session.send(UserTurn::text(TASK));
+    session.send(UserTurn::text(task));
     tokio::time::timeout(Duration::from_secs(3), async {
         loop {
             match events.recv().await.expect("fake session ended before completing") {
@@ -174,7 +183,7 @@ async fn kits_reach_both_cli_sessions_in_chat_and_projects_with_isolated_modes_s
                 let tools_root = tools.tools_root();
                 // Core verifies once before invoking the pure driver argument builder.
                 let tools = tools.verified_for_launch(vendor).0;
-                let (args, messages) = replay(vendor, area, permissions, tools, dir.path(), false).await;
+                let (args, messages) = replay(vendor, area, permissions, tools, dir.path(), false, TASK).await;
                 if vendor == Vendor::Claude {
                     let loaded = args.windows(2).find(|args| args[0] == "--plugin-dir").map(|args| args[1].clone());
                     assert_eq!(loaded, plugin.filter(|_| area == Area::Project).map(|path| path.to_string_lossy().into_owned()));
@@ -253,7 +262,7 @@ async fn the_launch_boundary_rechecks_skill_names_and_bodies_without_dropping_he
                 assert!(checked_index.contains("faber:design;"), "a healthy item survives: {checked_index}");
                 assert_eq!(checked_index.contains("faber:debug;"), mutation != "changed-body");
                 assert!(!checked_index.contains("planted") && !checked_index.contains("CHANGED_INSTRUCTIONS"));
-                let (args, _) = replay(Vendor::Claude, area, permissions, checked, dir.path(), false).await;
+                let (args, _) = replay(Vendor::Claude, area, permissions, checked, dir.path(), false, TASK).await;
                 assert!(!args.iter().any(|arg| arg == "--plugin-dir" || arg == "--add-dir"), "{area:?} {permissions:?}: {args:?}");
                 let index = &args.windows(2).find(|arg| arg[0] == "--append-system-prompt").unwrap()[1];
                 assert!(!index.contains("faber:") && !index.contains("CHANGED_INSTRUCTIONS"));
@@ -273,7 +282,7 @@ async fn internal_claude_requests_never_load_catalog_descriptions_or_extra_read_
     let store = skills(dir.path());
     let (kit, _) = store.kit_for(Vendor::Claude, TASK, None, Area::Chat, Permissions::Ask, &[]);
     assert!(kit.skill_descriptions().is_some());
-    let (args, _) = replay(Vendor::Claude, Area::Chat, Permissions::Ask, kit, dir.path(), true).await;
+    let (args, _) = replay(Vendor::Claude, Area::Chat, Permissions::Ask, kit, dir.path(), true, TASK).await;
     assert!(!args.iter().any(|arg| arg == "--add-dir" || arg == "--plugin-dir" || arg.contains("faber:debug;")));
     assert_eq!(args.windows(2).find(|args| args[0] == "--tools").unwrap()[1], "");
 }
@@ -310,9 +319,73 @@ fn install_server(store: &Store, item: &Item, root: &Path) {
     let mut header = tar::Header::new_gnu();
     header.set_size(body.len() as u64);
     header.set_mode(0o644);
-    tar.append_data(&mut header, "package/run.js", &body[..]).unwrap();
+    tar.append_data(&mut header, format!("package/{}", item.server.as_ref().unwrap().entry), &body[..]).unwrap();
     tar.into_inner().unwrap().finish().unwrap();
     store.install_from(item, &archive).unwrap();
+}
+
+#[tokio::test]
+async fn the_kept_server_installs_and_reaches_both_native_sessions_until_switched_off_or_removed() {
+    let task = "Benchmark browser performance with devtools";
+    for vendor in [Vendor::Claude, Vendor::Codex] {
+        let dir = tempfile::tempdir().unwrap();
+        let source = dir.path().join("source");
+        let mut item = faber_engine::tools::find("chrome-devtools").unwrap().clone();
+        let server = item.server.as_ref().unwrap().clone();
+        let script = source.join(&server.entry);
+        std::fs::create_dir_all(script.parent().unwrap()).unwrap();
+        std::fs::write(&script, b"fixture server").unwrap();
+        // Keep the shipped metadata; only package bytes and their pin belong to this inert fixture.
+        item.digest = digest(&source).unwrap();
+        let node = dir.path().join("fixture-node");
+        let store = Store::with_catalog(&dir.path().join("data"), vec![item.clone()]).with_node(node.clone());
+        install_server(&store, &item, dir.path());
+        assert_eq!(store.installed().get(&item.id), Some(&item.commit));
+        for state in ["installed", "off", "on", "removed"] {
+            match state {
+                "off" => store.set_enabled(&item.id, false).unwrap(),
+                "on" => store.set_enabled(&item.id, true).unwrap(),
+                "removed" => store.remove(&item.id).unwrap(),
+                _ => {}
+            }
+            let enabled = matches!(state, "installed" | "on");
+            let (kit, report) = store.kit_for(vendor, task, Some(dir.path()), Area::Project, Permissions::FullAccess, &[]);
+            assert_eq!(report.ids.iter().any(|id| id == &item.id), enabled, "{vendor:?} {state}: {report:?}");
+            assert_eq!(kit.servers.len(), usize::from(enabled));
+            let expected = kit.servers.first().cloned();
+            if let Some(launch) = &expected {
+                assert_eq!(launch.name, "faber-chrome-devtools");
+                assert_eq!(launch.command, node);
+                assert!(Path::new(&launch.args[0]).ends_with(&server.entry));
+                assert_eq!(std::fs::read(&launch.args[0]).unwrap(), b"fixture server");
+                assert_eq!(&launch.args[1..], server.args);
+                assert_eq!(launch.env, server.env);
+            }
+            let (checked, damaged, io_failed) = kit.verified_for_launch(vendor);
+            assert!(damaged.is_empty() && !io_failed);
+            assert_eq!(checked.servers.len(), usize::from(enabled));
+            let (args, messages) = replay(vendor, Area::Project, Permissions::FullAccess, checked, dir.path(), false, task).await;
+            let config = match vendor {
+                Vendor::Claude => args.windows(2).find(|pair| pair[0] == "--mcp-config")
+                    .map(|pair| serde_json::from_str::<Value>(&pair[1]).unwrap()["mcpServers"]["faber-chrome-devtools"].clone())
+                    .unwrap_or(Value::Null),
+                Vendor::Codex => messages.iter().find(|message| message["method"] == "thread/start").unwrap()
+                    ["params"]["config"]["mcp_servers.faber-chrome-devtools"].clone(),
+            };
+            if let Some(launch) = expected {
+                let mut expected = serde_json::json!({"command": launch.command, "args": launch.args, "env": launch.env});
+                if vendor == Vendor::Codex {
+                    expected["enabled"] = true.into();
+                } else {
+                    expected["type"] = "stdio".into();
+                }
+                assert_eq!(config, expected, "{vendor:?} {state}");
+            } else {
+                assert!(config.is_null(), "{vendor:?} {state}: {config}");
+            }
+        }
+        assert!(store.installed().is_empty());
+    }
 }
 
 #[test]

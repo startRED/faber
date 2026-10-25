@@ -136,6 +136,8 @@ mod stuck;
 mod toolbox;
 #[path = "tools.rs"]
 mod tools;
+#[path = "transcript.rs"]
+mod transcript;
 #[path = "turn_usage.rs"]
 mod turn_usage;
 #[path = "usage_view.rs"]

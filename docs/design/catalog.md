@@ -32,6 +32,10 @@ When removal empties the last Installed page, the list returns to its last remai
 
 Each card shows a drawing for its job (`ui/Glyphs.tsx`; plugins a puzzle piece, servers a globe) tinted with the accent while the item is on, and a dot before its state words. Beside the card, outside its button so the card stays one control: a select box (top right), the source page in the system browser, and Install or the on/off switch (bottom right), which save through the same store calls as the detail. The select box and the source link stay hidden at rest and show on hover, on keyboard focus, on every card once anything is selected, and always where there is no hover. A selection survives filters, search and pages; Select all shown adds or removes the visible cards. While anything is selected a bar floats at the bottom of the list with the count and only the actions that fit the selection (Install, Turn on, Turn off, Remove, each with its count), run one item after another with "Working on 2 of 5". Removing several asks first and says they can be installed again: Undo keeps only one single removal. Items that fail stay selected and the notice offers Try again. Escape leaves the question, then clears the selection.
 
+The card switch uses the shared small-control hit area without native margins. Its centre follows the ordinary
+quick-action centre using the two height tokens, rather than a fixed offset that shifts when the hit area changes.
+`tests/ui/grammar.check.ts` checks the alignment.
+
 Cards use the look's surface, ink, line and radius tokens. Hover changes surface and border only; press changes the same
 properties, with no travel, scaling or blur. Reduced/no motion removes the transition. At 720 px cards become one column,
 filters wrap, and long names, pins and paths wrap. The ordinary narrow sidebar remains a modal dialog with its existing

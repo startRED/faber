@@ -1093,7 +1093,7 @@ fn changes_memory(ctx: &mut Ctx) -> Result {
     let switch_ms = started.elapsed().as_secs_f64() * 1000.0;
     let close = app.page.named("button", "run.close")?;
     app.page.click(&close)?;
-    app.page.wait_gone(&css(".changes-view"))?;
+    app.page.wait_count(&css(".changes-view"), 0)?;
     same(app.page.count(&css(".patch-line"))?, 0, "closing Changes releases every patch line")?;
     let (closed, _) = ctx.memory_mb(app.id)?;
     let numbers = format!(
@@ -1247,7 +1247,7 @@ fn visual_answers_pane_memory(ctx: &mut Ctx) -> Result {
     super::setup::measure(ctx, &app, "visual answer while open")?;
     let close = app.page.named("button", "run.close")?;
     app.page.click(&close)?;
-    app.page.wait_gone(&css(".visual-pane"))?;
+    app.page.wait_count(&css(".visual-pane"), 0)?;
     same(app.page.count(&css("iframe"))?, 0, "closing the visual pane removes its frame")?;
     visual_frames_collected(ctx, &mut app, baseline, 15.0, &before_processes, "visual answer after closing")?;
 
@@ -1286,7 +1286,7 @@ fn visual_answers_pane_memory(ctx: &mut Ctx) -> Result {
     let open_cpu = (ctx.cpu_ms(app.id)? - open_before) / open_started.elapsed().as_secs_f64() / 10.0;
     ctx.shot(&mut app, "visual-pane-memory-mermaid-live")?;
     app.page.click(&close)?;
-    app.page.wait_gone(&css(".visual-pane"))?;
+    app.page.wait_count(&css(".visual-pane"), 0)?;
     same(app.page.count(&css("iframe"))?, 0, "closing the Mermaid pane removes its real renderer frame")?;
     let mermaid_closed = visual_frames_collected(ctx, &mut app, mermaid_baseline, 15.0, &before_processes, "Mermaid Live after closing")?;
     let closed_before = ctx.cpu_ms(app.id)?;
@@ -1378,7 +1378,7 @@ fn visual_answers_memory(ctx: &mut Ctx) -> Result {
     let switch_cpu = ctx.cpu_ms(app.id)? - cpu_before;
     let close = app.page.named("button", "run.close")?;
     app.page.click(&close)?;
-    app.page.wait_gone(&css(".visual-pane"))?;
+    app.page.wait_count(&css(".visual-pane"), 0)?;
     same(app.page.count(&css("iframe"))?, 0, "closing the visual answer removes its frame")?;
     let numbers = format!(
         "visual answers: before {baseline:.1} MB, open {opened:.1} MB, sampled peak {peak:.1} MB; processor of one core idle {idle_cpu:.1}%, open {open_cpu:.1}%; twenty version switches {switch_cpu:.0} ms CPU ({:.1}% of one core over {switch_ms:.0} ms)",
@@ -1389,6 +1389,12 @@ fn visual_answers_memory(ctx: &mut Ctx) -> Result {
     let closed = visual_frames_collected(ctx, &mut app, baseline, 25.0, &before_processes, "visual versions after closing")?;
     // Real browser input must cross the opaque frame, including the modal pane at the minimum window width.
     super::shell::set_size(&mut app.page, 720, 600)?;
+    app.page.cdp.call("HeapProfiler.collectGarbage", json!({}))?;
+    let resized = super::setup::measure(ctx, &app, "visual versions closed after resize to 720 px")?;
+    ctx.notes.push(format!(
+        "visual resize-only delta before reopening: {:.1} MB; compare retention against this same-width closed state",
+        resized - closed
+    ));
     app.page.click(&css(".visual-card .visual-open").last())?;
     app.page.wait_visible(&css(".visual-frame"))?;
     app.page.eval("window.__visualFrames.push(new WeakRef(document.querySelector('.visual-frame')));void 0")?;
@@ -1440,10 +1446,11 @@ fn visual_answers_memory(ctx: &mut Ctx) -> Result {
         "document.body.dataset.visualMenuBlocked==='yes'",
     )?;
     app.page.press("Escape")?;
-    app.page.wait_gone(&css(".visual-pane"))?;
+    app.page.wait_count(&css(".visual-pane"), 0)?;
     same(app.page.count(&css("iframe"))?, 0, "Escape from the page input removes the frame at 720 px")?;
-    // Reopening plus twenty more switches must stay within 5 MB of the warmed reading (observed +0.5 and +1.7 MB for one cycle).
-    visual_frames_collected(ctx, &mut app, closed, 5.0, &before_processes, "visual answer after Escape at 720 px")?;
+    // Resizing alone changes browser working sets; compare the same closed layout, with the strict margin unchanged.
+    let closed720 = visual_frames_collected(ctx, &mut app, resized, 5.0, &before_processes, "visual answer after Escape at 720 px")?;
+    peak = peak.max(resized).max(closed720);
     ensure(peak <= BUDGET_MB && closed <= BUDGET_MB, || format!("{numbers}; over the {BUDGET_MB} MB budget"))
 }
 

@@ -5,7 +5,45 @@ import { Composer } from '../../ui/Composer.tsx';
 import { Thread } from '../../ui/Thread.tsx';
 import { api, type Message } from '../../ui/api.ts';
 import { t } from '../../ui/i18n.ts';
+import { renderMarkdown } from '../../ui/markdown.tsx';
 import { check, deepEqual, equal, ok } from './check.ts';
+
+check('thread: streaming preserves the open paragraph, selection, code scroll and safe link updates', () => {
+  const root = document.createElement('div'); root.className = 'md'; document.body.append(root);
+  try {
+    renderMarkdown(root, 'A readable answer');
+    const paragraph = root.firstChild!;
+    const words = paragraph.firstChild!;
+    const selection = window.getSelection()!;
+    const range = document.createRange(); range.setStart(words, 2); range.setEnd(words, 10);
+    selection.removeAllRanges(); selection.addRange(range);
+    renderMarkdown(root, 'A readable answer grows naturally.');
+    equal(root.firstChild, paragraph, 'the live paragraph does not disappear between deltas');
+    equal(paragraph.firstChild, words, 'appending words preserves their text node');
+    equal(selection.toString(), 'readable', 'new words do not clear the selected words');
+    renderMarkdown(root, 'A readable answer grows naturally.\n\n```text\n' + 'wide '.repeat(100));
+    const box = root.querySelector<HTMLElement>('.codeblock')!;
+    const pre = box.querySelector('pre')!; pre.style.width = '120px'; pre.style.overflow = 'auto';
+    pre.scrollLeft = 80;
+    const copy = box.querySelector('button')!; copy.focus();
+    renderMarkdown(root, 'A readable answer grows naturally.\n\n```text\n' + 'wide '.repeat(101));
+    equal(root.querySelector('.codeblock'), box, 'the streaming code block is retained');
+    equal(pre.scrollLeft, 80, 'the reader keeps their horizontal position');
+    equal(document.activeElement, copy, 'streaming does not discard keyboard focus');
+    renderMarkdown(root, 'Read [docs][d]\n\n[d]: https://example.com/one');
+    const link = root.querySelector('a')!;
+    renderMarkdown(root, 'Read [docs][d]\n\n[d]: https://example.com/two');
+    equal(root.querySelector('a'), link);
+    equal(link.getAttribute('href'), 'https://example.com/two');
+    renderMarkdown(root, 'Read [docs][d]\n\n[d]: javascript:alert(1)');
+    equal(root.querySelector('a')?.getAttribute('href'), null, 'removed unsafe attributes never survive reconciliation');
+    renderMarkdown(root, '<span class="cb-copy">First answer</span>');
+    renderMarkdown(root, '<span class="cb-copy">Corrected answer</span>');
+    equal(root.textContent?.trim(), 'Corrected answer', 'answer HTML cannot impersonate a generated copy button');
+    renderMarkdown(root, 'Short.');
+    equal(root.textContent?.trim(), 'Short.', 'shorter replies release obsolete blocks');
+  } finally { window.getSelection()?.removeAllRanges(); root.remove(); }
+});
 
 check('thread: ten tool steps and narration fold into one activity row above the final answer', async () => {
   const root = document.createElement('div');

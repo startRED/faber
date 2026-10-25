@@ -3,8 +3,11 @@ import { render } from 'solid-js/web';
 import { App } from '../../ui/App.tsx';
 import { api, type AppState, type Conversation, type Message, type SiteTabs, type ToolUse } from '../../ui/api.ts';
 import { store } from '../../ui/running.ts';
+import { appliedLook, applyLook } from '../../ui/appearance.ts';
+import { leaveColumn, level } from '../../ui/motion.ts';
+import { showFile } from '../../ui/fileref.ts';
 import recorded from '../fixtures/conversation-changes.json';
-import { useLanguage } from '../../ui/i18n.ts';
+import { t, useLanguage } from '../../ui/i18n.ts';
 import { Running } from '../../ui/Running.tsx';
 import { quietTabs } from './site-tabs.check.ts';
 import { addressOf, appsOf, awaySites, cornersOf, covered, looksOf, openedSite, showSite, siteOf, sitesOf, stepsOf, type OpenSite } from '../../ui/Site.tsx';
@@ -108,6 +111,9 @@ check('page in the browser: the column places Faber’s browser over its box, an
   api.sitePark = async (id) => ((boxParked = id), void parked++);
   let moveTo: (url: string) => void = () => {};
   api.onSite = async (listener) => ((moveTo = listener), () => {});
+  const backdrop = document.createElement('div');
+  backdrop.style.cssText = 'position:fixed;inset:0;z-index:0';
+  document.body.append(backdrop);
   const root = document.createElement('div');
   root.style.cssText = 'position: fixed; left: 0; top: 0; width: 360px; height: 600px; display: flex;';
   document.body.append(root);
@@ -140,6 +146,59 @@ check('page in the browser: the column places Faber’s browser over its box, an
     const r = box.getBoundingClientRect();
     deepEqual(placed.at(-1), [r.left, r.top, r.width, r.height], 'over the box, in the page’s pixels');
     ok(r.height > 300, 'the box fills the column');
+    const column = root.querySelector<HTMLElement>('.runcol')!;
+    const beforeMotion = placed.length;
+    column.style.transition = 'transform 240ms linear';
+    column.getBoundingClientRect();
+    column.style.transform = 'translateX(100px)';
+    const reduced = matchMedia('(prefers-reduced-motion: reduce)').matches;
+    // An instant synthetic transform emits no transition event; native host resizes notify placement directly.
+    if (reduced) window.dispatchEvent(new Event('resize'));
+    await new Promise((done) => setTimeout(done, 100));
+    if (reduced) equal(placed.at(-1)![0], r.left + 100, 'reduced motion places the page at its final position immediately');
+    else ok(placed.slice(beforeMotion).some(([x]) => x! > r.left + 2 && x! < r.left + 98), 'the native page follows intermediate positions, rather than jumping at the end');
+    column.style.transition = 'none';
+    column.style.transform = '';
+    window.dispatchEvent(new Event('resize'));
+    await frames();
+    const beforeExit = placed.length;
+    // An overlay can be painted over a sibling stage that receives the hit when the pane becomes inert.
+    root.style.pointerEvents = 'none';
+    column.style.pointerEvents = 'auto';
+    column.dataset.motion = 'full';
+    column.dataset.exiting = 'true';
+    column.inert = true;
+    column.setAttribute('aria-hidden', 'true');
+    ok(!covered(box), 'a pane declining input remains visually present during its exit');
+    ok(column.inert && column.getAttribute('aria-hidden') === 'true', 'hit testing preserves the closing pane’s input and accessibility state');
+    root.style.pointerEvents = 'auto';
+    column.style.clipPath = 'inset(0 28px 0 0)';
+    ok(!covered(box), 'the painted ancestor at a clipping edge does not cover the departing page');
+    column.style.clipPath = '';
+    root.style.pointerEvents = 'none';
+    const overExit = document.createElement('div');
+    overExit.style.cssText = 'position:fixed;inset:0;z-index:90';
+    document.body.append(overExit);
+    ok(covered(box), 'an ordinary covering element still hides an inert departing page');
+    overExit.remove();
+    const exit = leaveColumn(column);
+    try {
+      await frames();
+      await new Promise((done) => setTimeout(done, 60));
+      await frames();
+      if (reduced) equal(exit, undefined, 'reduced motion starts no exit animation');
+      else ok(placed.slice(beforeExit).some(([x]) => x! > r.left + 2 && x! < r.left + r.width), 'native bounds also follow the column’s Web Animations exit');
+    } finally {
+      exit?.cancel();
+      delete column.dataset.motion;
+      delete column.dataset.exiting;
+      column.inert = false;
+      column.removeAttribute('aria-hidden');
+      root.style.pointerEvents = '';
+      column.style.pointerEvents = '';
+      window.dispatchEvent(new Event('resize'));
+      await frames();
+    }
     const corners = cornersOf(box);
     ok(corners, 'the page takes the corners of its box');
     equal(corners!.radius, Number.parseFloat(getComputedStyle(box).borderTopLeftRadius), 'as round as the box');
@@ -187,6 +246,16 @@ check('page in the browser: the column places Faber’s browser over its box, an
     window.dispatchEvent(new Event('resize')); // places the browser now: the check never depends on a frame
     await frames();
     ok(boxPlaced > first, 'and the next box has a larger one');
+    let release!: (placed: boolean) => void;
+    let pendingPlaces = 0;
+    api.sitePlace = () => (pendingPlaces++, new Promise<boolean>((done) => (release = done)));
+    window.dispatchEvent(new Event('resize'));
+    for (let i = 0; i < 20; i++) window.dispatchEvent(new Event('resize'));
+    equal(pendingPlaces, 1, 'slow native placement keeps only one request in flight');
+    setSite(undefined);
+    release(true);
+    await frames();
+    equal(pendingPlaces, 1, 'closing drops the pending position rather than placing a removed page again');
   } finally {
     setSite(undefined);
     api.siteSize = siteSize;
@@ -195,6 +264,7 @@ check('page in the browser: the column places Faber’s browser over its box, an
     api.onSite = onSite;
     dispose();
     root.remove();
+    backdrop.remove();
   }
 });
 
@@ -226,6 +296,7 @@ check('page in the browser: each step reads as what the agent did, and what it t
 
 check('page in the browser: a step of the log shows its picture in the page’s place, and the live page comes back', async () => {
   useLanguage('en');
+  const tabs = quietTabs();
   const [sitePlace, sitePark, sitePicture, onSite] = [api.sitePlace, api.sitePark, api.sitePicture, api.onSite];
   // The shell's own rule (`Boxes` in src-tauri/src/pane/mod.rs): a box it let go never places the page again.
   let places = 0;
@@ -308,6 +379,7 @@ check('page in the browser: a step of the log shows its picture in the page’s 
     api.onSite = onSite;
     dispose();
     root.remove();
+    tabs();
   }
 });
 
@@ -673,6 +745,7 @@ check('screen sizes: a check reads as one step, its sizes from Faber’s own lin
 
 check('screen sizes: the page view shows each size’s picture with its name, and says where the page runs past the edge', async () => {
   useLanguage('en');
+  const tabs = quietTabs();
   const [sitePlace, sitePark, sitePicture, onSite] = [api.sitePlace, api.sitePark, api.sitePicture, api.onSite];
   api.sitePlace = async () => true;
   api.sitePark = async () => {};
@@ -711,6 +784,7 @@ check('screen sizes: the page view shows each size’s picture with its name, an
     api.onSite = onSite;
     dispose();
     root.remove();
+    tabs();
   }
 });
 
@@ -806,6 +880,7 @@ check('page in the browser: with no page yet the pane shows only its address fie
     await frames();
     deepEqual(opened, [], 'what is no web page never reaches the browser');
     ok(root.querySelector('[role="alert"]'), 'and the pane says so');
+    equal(root.querySelector('[role="alert"]')!.textContent, t('site.refused'), 'an unsupported address explains the restriction');
     type('example.com');
     await frames();
     deepEqual(opened, [['c1', 'https://example.com/']], 'the page opens for this conversation, in its tab in front');
@@ -823,12 +898,76 @@ check('page in the browser: with no page yet the pane shows only its address fie
     type('example.org');
     await frames();
     ok(root.querySelector('[role="alert"]'), 'a page the browser refused is said');
+    equal(root.querySelector('[role="alert"]')!.textContent, 'The page couldn’t open. Try again.', 'a valid address that failed to open is not reported as a forbidden address');
+    equal(field.value, 'example.org', 'an opening failure preserves the typed address');
+    equal(field.getAttribute('aria-invalid'), null, 'a native opening failure does not mark a valid address invalid');
+    refuse = false;
+    type('example.org');
+    await frames();
+    equal(root.querySelector('[role="alert"]'), null, 'a successful retry clears the failure');
   } finally {
     showSite(undefined);
     Object.assign(api, { siteGo, sitePlace, sitePark, onSite, siteStep, openLink, siteHistory });
     tabs();
     dispose();
     root.remove();
+  }
+});
+
+check('browser navigation: a completed load refreshes history even when its URL already matches', async () => {
+  useLanguage('en');
+  const saved = { siteHistory: api.siteHistory, onSiteLoading: api.onSiteLoading, sitePlace: api.sitePlace, sitePark: api.sitePark, onSite: api.onSite };
+  const restoreTabs = quietTabs();
+  let committed: [boolean, boolean] = [false, false];
+  let deferNext = false;
+  let finishEarlier: ((value: [boolean, boolean]) => void) | undefined;
+  let loaded: ((loading: boolean) => void) | undefined;
+  api.siteHistory = async () => {
+    if (deferNext) {
+      deferNext = false;
+      return new Promise<[boolean, boolean]>((resolve) => finishEarlier = resolve);
+    }
+    return committed;
+  };
+  api.onSiteLoading = async (callback) => (loaded = callback, () => {});
+  api.sitePlace = async () => true;
+  api.sitePark = async () => {};
+  api.onSite = async () => () => {};
+  const root = document.createElement('div');
+  root.style.cssText = 'position:fixed;left:0;top:0;width:480px;height:600px;display:flex';
+  document.body.append(root);
+  const dispose = render(() => createComponent(Running, {
+    site: { conversationId: 'history-commit', url: 'https://example.org/two', title: 'Synthetic navigation' },
+    items: [], projects: [], modal: false, onOpen: () => {}, onClose: () => {}, ref: () => {},
+  }), root);
+  try {
+    await frames(2);
+    const back = root.querySelector<HTMLButtonElement>('.site-back')!;
+    const forward = root.querySelector<HTMLButtonElement>('.site-forward')!;
+    ok(back.disabled && forward.disabled, 'the first history read precedes the native navigation commit');
+    committed = [true, false];
+    loaded!(false);
+    await frames(2);
+    ok(!back.disabled && forward.disabled, 'Back becomes available after the native page commits');
+    committed = [false, true];
+    loaded!(false);
+    await frames(2);
+    ok(back.disabled && !forward.disabled, 'a later completed navigation refreshes both directions');
+    deferNext = true;
+    loaded!(false);
+    await frames(2);
+    committed = [false, false];
+    loaded!(false);
+    await frames(2);
+    ok(back.disabled && forward.disabled, 'the newest navigation has no history');
+    finishEarlier!([true, true]);
+    await frames(2);
+    ok(back.disabled && forward.disabled, 'an older delayed history answer cannot restore obsolete controls');
+  } finally {
+    dispose();
+    root.remove();
+    Object.assign(api, saved);
+    restoreTabs();
   }
 });
 
@@ -900,8 +1039,13 @@ check('page in the browser: the person picks the screen size the page is drawn a
   const tabs = quietTabs();
   const sizes = [{ name: '1920x1080', screen: 'pc' as const, width: 1920, height: 1080 }, { name: '390x844', screen: 'phone' as const, width: 390, height: 844 }];
   let now: string | null = null;
+  let refuseFit = false;
   const picks: (string | null)[] = [];
   api.siteSize = async (pick, size) => {
+    if (pick && size === null && refuseFit) {
+      picks.push(null);
+      throw new Error('error.cancelled');
+    }
     if (pick) (picks.push(size ?? null), (now = size ?? null));
     return { now, sizes };
   };
@@ -933,6 +1077,7 @@ check('page in the browser: the person picks the screen size the page is drawn a
   try {
     await frames(2);
     const more = root.querySelector<HTMLButtonElement>('.site-more')!;
+    equal(root.querySelector('.site-preview'), null, 'normal browsing has no preview notice');
     const sizeItem = () => (more.click(), menu()?.items.find((item) => item.id === 'size'));
     equal(sizeItem()?.label, 'Screen size: The panel’s own size', 'the bar’s menu has the screen size, none chosen: the panel’s own');
     sizeItem()!.run();
@@ -944,6 +1089,23 @@ check('page in the browser: the person picks the screen size the page is drawn a
     deepEqual(picks, ['1920x1080'], 'the pick goes to the pane, which the agent’s next calls use too');
     equal(sizeItem()?.label, 'Screen size: PC · 1920 × 1080');
     closeMenu();
+    ok(root.querySelector('.site-preview')?.textContent?.includes('PC · 1920 × 1080'), 'an active preview is visible without opening a menu');
+    const fit = root.querySelector<HTMLButtonElement>('.site-fit')!;
+    ok(fit, 'the person can return to the panel size in one action');
+    refuseFit = true;
+    fit.click();
+    ok(fit.disabled, 'the reset cannot run again while its command is pending');
+    ok(root.querySelector('.site-preview'), 'the current size stays visible while reset is pending');
+    await frames(2);
+    ok(root.querySelector('.site-preview'), 'a failed reset keeps the confirmed preview');
+    equal(root.querySelector('[role="alert"]')?.textContent, t('reason.other'), 'a failed reset explains the failure in the screen’s language');
+    refuseFit = false;
+    fit.click(); fit.click();
+    await frames(2);
+    deepEqual(picks, ['1920x1080', null, null], 'repeated activation resets the preview once through the existing command');
+    equal(root.querySelector('[role="alert"]'), null, 'a successful retry clears the error');
+    equal(root.querySelector('.site-preview'), null, 'the notice disappears only when the panel size is confirmed');
+    equal(document.activeElement, root.querySelector('.site-address'), 'focus returns to the address when the reset button leaves');
     const widen = root.querySelector<HTMLButtonElement>('.site-wide')!;
     equal(widen.getAttribute('aria-label'), 'Show the page over the conversation');
     widen.click();
@@ -963,9 +1125,10 @@ check('page in the browser: the pane opens again on the page it last showed, aft
   // The topbar's browser button is there only where Faber's browser is (Windows).
   if (!navigator.userAgent.includes('Windows')) return;
   useLanguage('en');
-  const before = { open: api.open, state: api.state, warm: api.warm, routeDraft: api.routeDraft, setClock: api.setClock, setShellTexts: api.setShellTexts, siteOpen: api.siteOpen, siteTabs: api.siteTabs, siteSize: api.siteSize };
+  const previousLook = appliedLook();
+  const before = { open: api.open, state: api.state, warm: api.warm, routeDraft: api.routeDraft, setClock: api.setClock, setShellTexts: api.setShellTexts, siteOpen: api.siteOpen, siteTabs: api.siteTabs, siteSize: api.siteSize, notesSeen: api.notesSeen };
   const storage = localStorage.getItem('faber.place');
-  const settle = () => new Promise((resolve) => setTimeout(resolve, 30));
+  const settle = (ms = 30) => new Promise((resolve) => setTimeout(resolve, ms));
   const c = structuredClone(recorded.conversation) as Conversation;
   // The agent opened the guide; the person went on to a page of their own, which the engine kept as the front tab.
   c.messages.push({ id: 'agent-page', role: 'assistant', at: 3, status: 'done', text: 'Read it.', tools: [BROWSE] });
@@ -983,12 +1146,16 @@ check('page in the browser: the pane opens again on the page it last showed, aft
   api.warm = async () => {}; api.routeDraft = async () => {};
   api.setClock = async () => {}; api.setShellTexts = async () => {};
   api.siteSize = async () => ({ now: null, sizes: [] });
+  api.notesSeen = async () => Number.MAX_SAFE_INTEGER;
   api.siteOpen = async (_, url) => (opened.push(url), true);
   api.siteTabs = async (id) => (id === c.id ? kept : null);
   localStorage.setItem('faber.place', JSON.stringify({ area: 'project', projectId: 'p1', id: c.id }));
   store.offer({ revision: store.list().revision + 1, items: [] });
   try {
-    for (const run of ['first', 'after a restart', 'with no tab kept']) {
+    for (const run of ['first', 'after a restart', 'with no tab kept', 'with full motion']) {
+      const requestedFull = run === 'with full motion';
+      const full = requestedFull && !matchMedia('(prefers-reduced-motion: reduce)').matches;
+      await applyLook({ ...initial.look, motion: requestedFull ? 'full' : 'none' });
       // A conversation from before tabs were kept, or whose pages were never web pages: the agent's last page, as before.
       if (run === 'with no tab kept') kept = null;
       const want = kept ? 'https://example.org/mine?q=1' : 'https://docs.example.org/guide';
@@ -1004,15 +1171,131 @@ check('page in the browser: the pane opens again on the page it last showed, aft
           await settle();
           equal(opened.at(-1), want, `${run}, ${time}: the kept front tab loads, not the agent’s last page`);
           equal(host.querySelector<HTMLInputElement>('.site-address')?.value, want);
+          if (full) await frames();
+          const pane = host.querySelector<HTMLElement>('.runcol')!;
+          if (full) ok(!host.querySelector('.shell')?.classList.contains('glide'), 'opening a pane never reuses a previous view-width glide');
+          const page = host.querySelector('.site-view');
+          const x = pane.getBoundingClientRect().left;
+          const exitLevel = level(pane);
+          button.click();
+          if (full) {
+            equal(host.querySelector('.site-view'), page, 'the real page remains mounted during its exit');
+            ok(pane.inert, 'a departing pane no longer accepts input');
+            await settle(70);
+            await frames();
+            ok(pane.getBoundingClientRect().left > x + 2, `the real pane slides out through an intermediate position: ${JSON.stringify({
+              before: x, after: pane.getBoundingClientRect().left, motion: document.documentElement.dataset.motion, exitLevel,
+              classes: document.documentElement.className, animations: pane.getAnimations().map((a) => ({ state: a.playState, time: a.currentTime })),
+            })}`);
+            equal(getComputedStyle(pane).opacity, '1', 'closing does not fade the browser');
+            if (time === 'opened') {
+              button.click();
+              equal(host.querySelector('.site-view'), page, 'reopening cancels the exit without replacing the page');
+              ok(!pane.inert, 'a reopened pane accepts input again');
+              await settle(350);
+              equal(host.querySelector('.site-view'), page, 'the cancelled exit cannot close the reopened page later');
+              button.click();
+            } else {
+              pane.getAnimations().forEach((animation) => animation.pause());
+              button.focus();
+              equal(document.activeElement, button, `a newer focus choice is possible (${document.activeElement?.outerHTML.slice(0, 160)})`);
+            }
+            await settle(250);
+            await frames();
+          } else await settle();
+          equal(host.querySelector('.site-address'), null, 'closing releases the page even when its animation timeline is held');
+          if (full && time !== 'opened') equal(document.activeElement, button, 'finishing the exit preserves a newer focus choice');
+        }
+        if (full) {
           button.click();
           await settle();
-          equal(host.querySelector('.site-address'), null, 'the second press closes the pane');
+          button.click();
+          showFile('example.txt');
+          await settle(350);
+          equal(host.querySelector('.runcol #running-title')?.textContent, 'example.txt', 'opening another view cancels the old page’s exit');
+          ok(!host.querySelector<HTMLElement>('.runcol')?.inert, 'the replacement view accepts input');
         }
       } finally { dispose(); host.remove(); showSite(undefined); }
     }
   } finally {
+    if (previousLook) await applyLook(previousLook);
     Object.assign(api, before);
     store.offer({ revision: store.list().revision + 1, items: [] });
     if (storage === null) localStorage.removeItem('faber.place'); else localStorage.setItem('faber.place', storage);
+  }
+});
+
+check('page in the browser: a delayed navigation or tab action cannot replace a newer choice', async () => {
+  const quiet = quietTabs();
+  const saved = { siteTab: api.siteTab, siteGo: api.siteGo, sitePlace: api.sitePlace, sitePark: api.sitePark, onSite: api.onSite };
+  let release!: (value: Awaited<ReturnType<typeof api.siteTab>>) => void;
+  api.siteTab = () => new Promise((done) => { release = done; });
+  api.siteGo = async () => true;
+  api.sitePlace = async () => true;
+  api.sitePark = async () => {};
+  let moved!: (url: string) => void;
+  api.onSite = async (listener) => { moved = listener; return () => {}; };
+  const root = document.createElement('div');
+  root.style.cssText = 'position:fixed;inset:0;display:flex';
+  document.body.append(root);
+  showSite({ conversationId: 'tab-race', url: 'https://example.org/one', title: 'One' });
+  const dispose = render(() => createComponent(Running, {
+    items: [], projects: [], modal: false, onOpen: () => {}, onClose: () => {}, ref: () => {},
+    get site() { return openedSite(); },
+  }), root);
+  try {
+    await frames();
+    root.querySelector<HTMLButtonElement>('.site-new')!.click();
+    const field = root.querySelector<HTMLInputElement>('.site-address')!;
+    field.value = 'https://example.org/two';
+    field.dispatchEvent(new InputEvent('input', { bubbles: true }));
+    release({ tabs: { tabs: [{ id: 'new', url: '' }], front: 'new', closed: [] }, tab: 'new' });
+    await frames();
+    equal(field.value, 'https://example.org/two', 'the older tab reply does not clear an address still being typed');
+    field.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true }));
+    await frames();
+    equal(field.value, 'https://example.org/two', 'Enter opens that address');
+    equal(root.querySelector('.site-empty'), null, 'the newer page does not turn into a blank tab');
+    let opened!: (value: boolean) => void;
+    api.siteGo = () => new Promise((done) => { opened = done; });
+    field.value = 'https://example.org/three';
+    field.dispatchEvent(new InputEvent('input', { bubbles: true }));
+    field.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true }));
+    api.siteTab = async () => ({ tabs: { tabs: [{ id: 'later', url: '' }], front: 'later' }, tab: 'later' });
+    root.querySelector<HTMLButtonElement>('.site-new')!.click();
+    await frames();
+    equal(field.value, '', 'the newer blank tab opens');
+    opened(true);
+    await frames();
+    equal(field.value, '', 'the older address response does not replace that tab');
+    ok(root.querySelector('.site-empty'), 'the newer blank tab stays selected');
+    field.value = 'https://example.org/four';
+    field.dispatchEvent(new InputEvent('input', { bubbles: true }));
+    field.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true }));
+    root.querySelector<HTMLButtonElement>('.site-head > .iconbtn:last-child')!.click();
+    opened(true);
+    await frames();
+    equal(openedSite()!.url, '', 'closing takes precedence even while the real pane is retained for its exit');
+    field.value = 'https://example.org/five';
+    field.dispatchEvent(new InputEvent('input', { bubbles: true }));
+    field.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true }));
+    const column = root.querySelector<HTMLElement>('.runcol')!;
+    column.dataset.exiting = 'true';
+    column.dispatchEvent(new Event('faber-motion', { bubbles: true }));
+    delete column.dataset.exiting;
+    opened(true);
+    await frames();
+    equal(openedSite()!.url, '', 'an outside close that is canceled still invalidates earlier navigation');
+    showSite({ conversationId: 'tab-race', url: 'https://example.org/current', title: 'Current' });
+    await frames();
+    field.focus();
+    equal(document.activeElement, field);
+    field.value = 'https://example.org/draft';
+    field.dispatchEvent(new InputEvent('input', { bubbles: true }));
+    moved('https://example.org/redirect');
+    await frames();
+    equal(field.value, 'https://example.org/draft', 'native page navigation does not erase the address being edited');
+  } finally {
+    dispose(); root.remove(); showSite(undefined); Object.assign(api, saved); quiet();
   }
 });

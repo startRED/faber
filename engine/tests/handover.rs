@@ -34,6 +34,7 @@ fn a_partial_answer_keeps_tool_effects_and_explicitly_continues_instead_of_repea
         words: vec![],
         words_cut: false,
         words_chars: None,
+        transcript: None,
         check: false,
         started: None,
         ended: None,

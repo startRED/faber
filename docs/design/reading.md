@@ -16,6 +16,14 @@ How conversation text reads and keeps its place, in Chat and Projects.
 - "Jump to latest" first selects the conversation's newest message window, then scrolls to its end; it never stops at
   an intermediate loaded page. Reaching that tail removes the old reading position from storage.
 
+## Streaming text
+
+A growing Markdown block updates compatible text and elements in place after sanitisation. Appending words preserves
+the existing text node and selection; code blocks keep keyboard focus and horizontal scroll. Changed reference links
+update their attributes, including removing unsafe or obsolete attributes. A change of block type can still replace
+that block. No second message tree, timer or unbounded cache is retained. The focused streaming check in
+`tests/ui/thread.check.ts` covers those guarantees, not every source of viewport movement.
+
 ## Verification
 
 The hidden Chat and Projects screen scenarios in `testkit/src/screen/reading.rs` each use 160 synthetic messages and no AI. Each closes the

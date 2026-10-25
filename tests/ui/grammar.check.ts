@@ -94,6 +94,31 @@ function onPage<T>(html: string, look: (root: HTMLElement) => T): T {
   }
 }
 
+check('grammar: compact help and switch controls keep a full small-control hit area', () => {
+  onPage('<button class="st-q" aria-label="Help">?</button><input type="checkbox" class="sw2" aria-label="Enable">', (root) => {
+    for (const control of root.children) {
+      const box = control.getBoundingClientRect();
+      ok(box.width >= 28 && box.height >= 28, 'compact controls are at least the small-control token in both directions');
+    }
+    const toggle = root.querySelector<HTMLInputElement>('input')!;
+    toggle.focus(); equal(document.activeElement, toggle);
+    toggle.click(); equal(toggle.checked, true, 'the whole checkbox remains native and interactive');
+    toggle.disabled = true; toggle.click(); equal(toggle.checked, true);
+    if (matchMedia('(forced-colors: active)').matches) {
+      equal(getComputedStyle(toggle).appearance, 'auto', 'system contrast keeps a native visible checkbox');
+      equal(getComputedStyle(toggle, '::after').display, 'none', 'the custom thumb does not cover the native state');
+    }
+  });
+});
+
+check('grammar: the catalog switch stays centred on the quick action after its hit area grows', () => {
+  onPage('<div class="catalog-tile" style="position:relative;width:320px;height:160px"><button class="btn catalog-quick">Install</button><input type="checkbox" class="sw2 catalog-quick" aria-label="Enable"></div>', (root) => {
+    const button = root.querySelector('button')!.getBoundingClientRect();
+    const toggle = root.querySelector('input')!.getBoundingClientRect();
+    equal(toggle.top + toggle.height / 2, button.top + button.height / 2, 'quick actions share a centre at every hit-area size');
+  });
+});
+
 check('grammar: the controls drawn on the page are 28, 32 or 40 px high, and the ones side by side line up', () => {
   const sizes: [string, number][] = [
     ['<button class="btn">Go</button>', 32], ['<button class="btn big">Go</button>', 40], ['<button class="btn primary">Go</button>', 32],

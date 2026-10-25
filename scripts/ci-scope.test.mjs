@@ -66,3 +66,14 @@ test('main warms every Rust cache the checks read, under the same names, and onl
   assert.equal(ci.match(/uses: Swatinem\/rust-cache@v2/g).length, 3, 'check, app and warm');
   assert.equal(ci.match(/save-if: \$\{\{ github\.ref == 'refs\/heads\/main' \}\}/g).length, 2, 'check and app save only on main');
 });
+
+test('Windows COM updates stay on the minor line required by WebView2', () => {
+  const config = readFileSync(new URL('../.github/dependabot.yml', import.meta.url), 'utf8').replaceAll('\r\n', '\n');
+  const cargo = config.split('  - package-ecosystem: cargo\n')[1]?.split('\n  - package-ecosystem:')[0];
+  assert.ok(cargo, 'Cargo dependency updates must remain configured');
+  assert.match(cargo, /dependency-name: windows-core\s+versions: \['>=0\.63'\]/,
+    'Keep 0.62 patch updates; a later minor must wait for WebView2 to use matching COM types');
+  const manifest = readFileSync(new URL('../src-tauri/Cargo.toml', import.meta.url), 'utf8');
+  assert.match(manifest, /windows-core = "0\.62"/);
+  assert.match(manifest, /webview2-com = "0\.39"/);
+});

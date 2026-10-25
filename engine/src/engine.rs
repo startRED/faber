@@ -931,6 +931,26 @@ impl Engine {
             found.map(|call| call.words.clone()).unwrap_or_default()
         })
     }
+    /// A single bounded page, only from a call belonging to this conversation.
+    pub fn child_transcript(&self, id: &str, call_id: &str, page: u64) -> Result<Vec<crate::transcript::TranscriptEntry>, String> {
+        self.with(|core| {
+            let status = core
+                .load(id)
+                .and_then(|conversation| {
+                    conversation.messages.iter().flat_map(|m| m.tools.iter().flatten()).find(|tool| tool.id == call_id)
+                })
+                .and_then(|tool| tool.transcript.as_ref())
+                .ok_or("error.messageGone")?;
+            if page >= status.pages {
+                return Err("error.messageGone".into());
+            }
+            core.store
+                .transcripts
+                .read_page(id, call_id, page)
+                .map_err(|fault| fault.key().to_string())?
+                .ok_or_else(|| "error.store.corrupt".into())
+        })
+    }
     pub fn open_for_screen(&self, id: &str) -> Option<Conversation> {
         self.open(id).map(Conversation::for_screen)
     }
@@ -1375,6 +1395,49 @@ impl Engine {
 }
 
 impl Core {
+    /// Store visible protocol events, never private reasoning. Only the small preview remains in the conversation.
+    fn keep_child_event(&mut self, conv: &str, call: &str, kind: crate::transcript::TranscriptKind, tool: Option<&str>, text: &str) {
+        let Some((at, mut status)) = self.convs.get(conv).and_then(|conversation| {
+            conversation.messages.iter().rev().find_map(|message| {
+                let tools = message.tools.as_ref()?;
+                let status = tools.iter().find(|entry| entry.id == call)?.transcript.clone()?;
+                Some((tools.iter().filter(|entry| entry.parent.as_deref() == Some(call)).count(), status))
+            })
+        }) else {
+            return;
+        };
+        for piece in crate::transcript::split_text(text).chain(text.is_empty().then_some("")) {
+            let entry = crate::transcript::TranscriptEntry { at, kind, tool: tool.map(str::to_string), text: piece.to_string() };
+            match self.store.transcripts.append_page(conv, call, status.pages, &[entry]) {
+                Ok(()) => status.pages += 1,
+                Err(_) => {
+                    status.failed = true;
+                    break;
+                }
+            }
+        }
+        if let Some(call) = self.tool_of(conv, call) {
+            call.transcript = Some(status);
+        }
+        self.save(conv);
+        let message = self
+            .convs
+            .get(conv)
+            .and_then(|c| c.messages.iter().rev().find(|m| m.tools.iter().flatten().any(|t| t.id == call)))
+            .map(|m| m.id.clone());
+        self.push(conv, message.as_deref(), false);
+    }
+
+    fn child_owner(&self, conv: &str, id: &str) -> Option<String> {
+        self.convs
+            .get(conv)?
+            .messages
+            .iter()
+            .rev()
+            .flat_map(|message| message.tools.iter().flatten())
+            .find(|tool| tool.id == id)
+            .and_then(|tool| tool.transcript.as_ref().map(|_| tool.id.clone()).or_else(|| tool.parent.clone()))
+    }
     /// The time in Unix seconds.
     fn secs(&self) -> f64 {
         self.clock.as_ref().map_or_else(unix_secs, |clock| clock())
@@ -2316,10 +2379,14 @@ impl Core {
                         words: vec![],
                         words_cut: false,
                         words_chars: None,
+                        transcript: None,
                         check: false,
                         started: Some(now()),
                         ended: None,
                     };
+                    if matches!(tool.name.as_str(), "Agent" | "Task" | "Helper") {
+                        tool.transcript = Some(crate::model::Transcript { pages: 0, failed: false });
+                    }
                     tool.check = crate::nudge::is_check(&tool);
                     step = tool.parent.is_none() && !crate::model::runs_in_background(&tool);
                     m.tools.get_or_insert_default().push(tool);
@@ -2328,10 +2395,19 @@ impl Core {
                     l.open_tools.push(id.clone());
                 }
                 self.watch_started(conv, &id);
+                if let Some(parent) = self
+                    .convs
+                    .get(conv)
+                    .and_then(|c| c.messages.iter().rev().flat_map(|m| m.tools.iter().flatten()).find(|t| t.id == id))
+                    .and_then(|t| t.parent.clone())
+                {
+                    self.keep_child_event(conv, &parent, crate::transcript::TranscriptKind::Tool, Some(&id), "");
+                }
             }
             // A subagent's own words go where its steps go (this turn's message, and nothing once the turn is done), onto its call,
             // after the steps it has run so far. A call from an earlier turn keeps none: its later steps are not shown with it either.
             EngineEvent::ChildWords { parent, text } => {
+                self.keep_child_event(conv, &parent, crate::transcript::TranscriptKind::Text, None, &text);
                 if let Some(tools) = self.turn(conv).and_then(|m| m.tools.as_mut()) {
                     let at = tools.iter().filter(|t| t.parent.as_deref() == Some(parent.as_str())).count();
                     if let Some(call) = tools.iter_mut().find(|t| t.id == parent) {
@@ -2340,6 +2416,9 @@ impl Core {
                 }
             }
             EngineEvent::ToolResult { id, ok, declined, text } => {
+                if let Some(owner) = self.child_owner(conv, &id) {
+                    self.keep_child_event(conv, &owner, crate::transcript::TranscriptKind::Result, Some(&id), &text);
+                }
                 if let Some(l) = self.live.get_mut(conv) {
                     l.open_tools.retain(|open| *open != id);
                 }
@@ -2377,6 +2456,7 @@ impl Core {
                 self.hand_over_at_step(conv);
             }
             EngineEvent::HelperDone { id, ok, text } => {
+                self.keep_child_event(conv, &id, crate::transcript::TranscriptKind::Result, Some(&id), &text);
                 // A helper that ran with its call is already settled by the call's own result, its full report included.
                 if let Some(tool) = self.tool_of(conv, &id).filter(|t| t.ok.is_none()) {
                     tool.ok = Some(ok);
@@ -4353,10 +4433,21 @@ impl Core {
         let group = if source.area == Area::Chat { self.group_for(&source.id)? } else { None };
         let at = source.messages.iter().position(|m| m.id == req.message_id).ok_or("error.messageGone")?;
         let (id, copy) = copy.map_or_else(|| (new_id(), None), |(id, copy)| (id, Some(copy)));
+        let retained = &source.messages[..if here { at + 1 } else { at }];
+        let calls: Vec<_> = retained
+            .iter()
+            .flat_map(|message| message.tools.iter().flatten())
+            .filter_map(|tool| tool.transcript.as_ref().map(|status| (tool.id.clone(), status.pages)))
+            .collect();
+        if let Err(fault) = self.store.transcripts.copy_calls(&source.id, &id, &calls) {
+            let _ = self.store.transcripts.remove_conversation(&id);
+            return Err(fault.key().into());
+        }
         if source.area == Area::Project
             && let Err(error) = self.copy_project_attachments(&source, &id, &source.messages[..at])
         {
             let _ = std::fs::remove_dir_all(self.opts.data_dir.join("attachments").join(&id));
+            let _ = self.store.transcripts.remove_conversation(&id);
             return Err(error);
         }
         let id = self.blank_as(id, source.area, source.project_id.clone());
@@ -4652,6 +4743,7 @@ impl Core {
             // Clearing leftovers is best-effort: the conversation is already gone and nothing reads these folders again.
             let _ = std::fs::remove_dir_all(self.scratch_of(id));
             let _ = std::fs::remove_dir_all(self.opts.data_dir.join("attachments").join(id));
+            let _ = self.store.transcripts.remove_conversation(id);
         }
         self.list_changed();
         Ok(())

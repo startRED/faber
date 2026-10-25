@@ -1,6 +1,7 @@
 import { createComponent } from 'solid-js';
 import { render } from 'solid-js/web';
 import { App } from '../../ui/App.tsx';
+import { applyLook } from '../../ui/appearance.ts';
 import { api, type Aside, type AppEvent, type AppState, type Conversation, type Message } from '../../ui/api.ts';
 import { btw, QuickQuestion } from '../../ui/QuickQuestion.tsx';
 import { forgetDraft, kept } from '../../ui/unsent.ts';
@@ -85,6 +86,7 @@ for (const entry of ['button', 'menu', 'send'] as const) {
     api.askAside = async (id, question) => { equal(id, c.id); asked.push(question); return `a-${entry}`; };
     localStorage.setItem('faber.place', JSON.stringify({ area: c.area, projectId: c.projectId, id: c.id }));
     let hear!: (event: AppEvent) => void;
+    applyLook(initial.look, host);
     const dispose = render(() => createComponent(App, { initial, inbox: { take: (listener?: (event: AppEvent) => void) => { if (listener) hear = listener; } } }), host);
     try {
       await settle();
@@ -154,6 +156,7 @@ check('quick question: asked while the agent works, it leaves the turn, its queu
   api.askAside = async (id, question, model) => { asked.push([id, question, model]); return 'a1'; };
   localStorage.setItem('faber.place', JSON.stringify({ area: 'chat', id: c.id }));
   let hear!: (event: AppEvent) => void;
+  applyLook(initial.look, host);
   const dispose = render(() => createComponent(App, { initial, inbox: { take: (listener?: (event: AppEvent) => void) => { if (listener) hear = listener; } } }), host);
   try {
     await settle();
@@ -215,6 +218,7 @@ check('quick question: before the agent has answered, the tab says when it can b
   api.asides = async () => [];
   api.askAside = async () => { asked++; return 'a1'; };
   localStorage.setItem('faber.place', JSON.stringify({ area: 'chat', id: c.id }));
+  applyLook(initial.look, host);
   const dispose = render(() => createComponent(App, { initial, inbox: { take: () => {} } }), host);
   try {
     await settle();
@@ -279,6 +283,7 @@ check('side chat: the kept thread comes back when it opens again, and a follow-u
   localStorage.setItem('faber.place', JSON.stringify({ area: 'chat', id: c.id }));
   localStorage.removeItem('faber.unsent.aside.side-kept');
   let hear!: (event: AppEvent) => void;
+  applyLook(initial.look, host);
   const dispose = render(() => createComponent(App, { initial, inbox: { take: (listener?: (event: AppEvent) => void) => { if (listener) hear = listener; } } }), host);
   const toggle = () => window.dispatchEvent(new KeyboardEvent('keydown', { key: ';', ctrlKey: true, bubbles: true, cancelable: true }));
   try {

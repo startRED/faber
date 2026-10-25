@@ -164,7 +164,7 @@ struct State {
     new_history: bool,
     /// A write of where the page is runs (`keep_soon`), and another was asked meanwhile.
     keeping: bool,
-    keep_again: bool,
+    keep_again: Option<u64>,
     /// Which of the screen's boxes has the pane.
     boxes: Boxes,
     /// Counts the times the person took the pane, so a call that ran meanwhile knows, even if they already went back.
@@ -449,6 +449,19 @@ impl Pane {
                     }
                 }
             });
+        // Reuse the host's environment: WebView2 rejects differing options in a shared browser process.
+        let (ready, waiting) = tokio::sync::oneshot::channel();
+        self.app
+            .get_webview("main")
+            .ok_or("Faber's screen is closed")?
+            .with_webview(move |host| {
+                let _ = ready.send(builder.with_environment(host.environment()));
+            })
+            .map_err(|e| e.to_string())?;
+        let builder = tokio::time::timeout(CALL, waiting)
+            .await
+            .map_err(|_| "Faber's browser environment did not answer")?
+            .map_err(|_| "Faber's screen closed before the browser opened")?;
         let webview = window.add_child(builder, PARKED, SIZE).map_err(|e| e.to_string())?;
         // The browser's keys pressed on the page are the screen's: the page is a native view, so they never reach it there.
         if front {
@@ -508,19 +521,23 @@ impl Pane {
                 return;
             }
             if std::mem::replace(&mut s.keeping, true) {
-                s.keep_again = true;
+                s.keep_again = Some(made);
                 return;
             }
         }
         let pane = self.clone();
         tauri::async_runtime::spawn(async move {
+            let mut made = made;
             loop {
                 pane.keep_now(made).await;
                 tokio::time::sleep(KEEP_EVERY).await;
                 let mut s = crate::lock(&pane.state);
-                if !std::mem::take(&mut s.keep_again) {
-                    s.keeping = false;
-                    break;
+                match s.keep_again.take() {
+                    Some(next) => made = next,
+                    None => {
+                        s.keeping = false;
+                        break;
+                    }
                 }
             }
         });
@@ -530,6 +547,7 @@ impl Pane {
     /// and written only while the same pane still keeps for the same conversation. Only web pages are kept, off the window's
     /// thread.
     async fn keep_now(&self, made: u64) {
+        let _turn = self.opening.lock().await;
         let held = {
             let s = crate::lock(&self.state);
             // A page Faber loads has not started: the history still shows the page before, which is another tab's.
@@ -550,10 +568,14 @@ impl Pane {
                 return;
             }
         }
-        let (app, url) = (self.app.clone(), url.to_string());
+        self.keep_page(conversation, tab, url.to_string(), Some(title.unwrap_or_default())).await;
+    }
+
+    async fn keep_page(&self, conversation: String, tab: Option<String>, url: String, title: Option<String>) {
+        let app = self.app.clone();
         let changed = tauri::async_runtime::spawn_blocking(move || {
             let faber = app.try_state::<crate::Faber>()?;
-            faber.engine.browser_seen(&conversation, tab.as_deref(), &url, Some(title.as_deref().unwrap_or(""))).then_some(conversation)
+            faber.engine.browser_seen(&conversation, tab.as_deref(), &url, title.as_deref()).then_some(conversation)
         })
         .await;
         // The strip shows the new title or address.
@@ -882,14 +904,23 @@ impl Pane {
         self.fresh_for(conversation).await;
         // A pane already there takes the conversation's sign-ins before the page asks for anything.
         self.bring_in(conversation).await;
-        let shown = self.load(url, conversation, tab.as_deref()).await.is_ok();
+        let loaded = self.load(url, conversation, tab.as_deref()).await;
+        #[cfg(feature = "test-hooks")]
+        if let Err(error) = &loaded {
+            eprintln!("test browser load failed: {error}");
+        }
+        let shown = loaded.is_ok();
         if shown {
-            let mut s = crate::lock(&self.state);
-            if s.owner.as_deref() != Some(conversation) {
-                s.visited.clear();
+            {
+                let mut s = crate::lock(&self.state);
+                if s.owner.as_deref() != Some(conversation) {
+                    s.visited.clear();
+                }
+                s.owner = Some(conversation.to_string());
+                s.reported = None;
             }
-            s.owner = Some(conversation.to_string());
-            s.reported = None;
+            // Remember an accepted address before another tab or a quick reopen can replace the live page.
+            self.keep_page(conversation.to_string(), tab, url.to_string(), None).await;
         }
         shown
     }
@@ -1111,6 +1142,40 @@ impl Pane {
             }
             _ => false,
         }
+    }
+
+    /// Test builds only: observe the child through safe native getters and fixed private DevTools requests.
+    #[cfg(feature = "test-hooks")]
+    pub async fn test_probe(&self, capture: bool) -> Result<Value, String> {
+        let (webview, shown, owner) = {
+            let s = crate::lock(&self.state);
+            (s.webview.clone(), s.shown, s.owner.clone())
+        };
+        let Some(webview) = webview else { return Ok(json!({ "shown": false })) };
+        // These query the actual native child, not the rectangle the screen last requested.
+        let position = webview.position().map_err(|e| e.to_string())?;
+        let size = webview.size().map_err(|e| e.to_string())?;
+        let scale = webview.window().scale_factor().map_err(|e| e.to_string())?;
+        let page = self.call("Runtime.evaluate", json!({
+            "expression": "({url:location.href,title:document.title,text:(document.body?.innerText||'').slice(0,2000),width:innerWidth,height:innerHeight})",
+            "returnByValue": true
+        })).await?;
+        let history = self.call("Page.getNavigationHistory", json!({})).await?;
+        let private = tokio::time::timeout(CALL, native::test_private(&webview))
+            .await
+            .map_err(|_| "the test private-mode query timed out")?
+            .map_err(|_| "the test browser closed")??;
+        let mut answer = json!({
+            "shown": shown, "owner": owner, "url": webview.url().map_err(|e| e.to_string())?.as_str(),
+            "x": position.x, "y": position.y, "width": size.width, "height": size.height,
+            "scale": scale, "page": page["result"]["value"], "history": history, "private": private,
+            "hostMinimized": webview.window().is_minimized().map_err(|e| e.to_string())?
+        });
+        if capture {
+            let shot = self.call("Page.captureScreenshot", json!({"format":"png", "captureBeyondViewport":false})).await?;
+            answer["picture"] = shot["data"].clone();
+        }
+        Ok(answer)
     }
 
     /// One DevTools call, with a deadline: a page that holds it longer closes with the pane, which opens fresh next time.

@@ -24,6 +24,7 @@ const parsed = new Map<string, string>();
 const LIMIT = 64;
 
 const copiedAt = new WeakMap<Element, ReturnType<typeof setTimeout>>();
+const codeButtons = new WeakSet<Element>();
 
 // The copy button of a code block: only that block's words, and the icon turns into a check for a moment (one timer, set by the click).
 function copyCode(button: Element) {
@@ -102,6 +103,7 @@ function dress(root: DocumentFragment) {
     const button = document.createElement('button');
     button.type = 'button';
     button.className = 'iconbtn cb-copy';
+    codeButtons.add(button);
     button.title = t('code.copy');
     button.setAttribute('aria-label', t('code.copy'));
     button.innerHTML = `<span class="swap">${iconMarkup('copy')}${iconMarkup('check')}</span>`;
@@ -125,10 +127,29 @@ function blocksOf(text: string, references?: Links): { blocks: { raw: string; to
   return { blocks: tokens.map((token) => ({ raw: token.raw, token })), links: lexed.links };
 }
 
+// Reconcile only sanitised Markdown. Keeping compatible nodes avoids losing selection, focus and code scroll on a delta.
+function updateNodes(parent: Node, fresh: ChildNode[], start = 0): void {
+  for (const [offset, next] of fresh.entries()) {
+    const old = parent.childNodes[start + offset];
+    if (!old) { parent.appendChild(next); continue; }
+    if (old.nodeType !== next.nodeType || old.nodeName !== next.nodeName) { parent.replaceChild(next, old); continue; }
+    if (old instanceof Text && next instanceof Text) {
+      if (next.data.startsWith(old.data)) old.appendData(next.data.slice(old.length));
+      else if (old.data !== next.data) old.replaceData(0, old.length, next.data);
+    } else if (old instanceof Element && next instanceof Element) {
+      for (const attribute of [...old.attributes]) if (!next.hasAttribute(attribute.name)) old.removeAttribute(attribute.name);
+      for (const attribute of [...next.attributes]) if (old.getAttribute(attribute.name) !== attribute.value) old.setAttribute(attribute.name, attribute.value);
+      // The copy button owns its temporary success icon; new text must not reset it.
+      if (!codeButtons.has(old) || !codeButtons.has(next)) updateNodes(old, [...next.childNodes]);
+    } else if (old.nodeValue !== next.nodeValue) old.nodeValue = next.nodeValue;
+  }
+  while (parent.childNodes.length > start + fresh.length) parent.lastChild!.remove();
+}
+
 /**
  * Draws `text` into `root` block by block. A block whose source did not change keeps its nodes, so while an answer streams
- * only the open block at the end is parsed, sanitised and built again, and the reader's selection and a code block's scroll
- * stay where they are.
+ * only the changing suffix is parsed and sanitised. Compatible nodes in that suffix are updated in place so selection,
+ * keyboard focus and a code block's scroll stay where they are.
  */
 export const referenceLinks = (text: string): Links => marked.lexer(text, OPTIONS).links;
 
@@ -139,17 +160,25 @@ export function renderMarkdown(root: HTMLElement, text: string, references?: Lin
   const before = shown.get(root) ?? { raws: [], nodes: [], links: linked };
   let same = 0;
   while (before.links === linked && same < blocks.length && same < before.raws.length && before.raws[same] === blocks[same]!.raw) same++;
-  for (const stale of before.nodes.slice(same)) for (const node of stale) node.remove();
   const raws = before.raws.slice(0, same);
   const nodes = before.nodes.slice(0, same);
+  const fresh: ChildNode[] = [];
+  const sizes: number[] = [];
   for (const block of blocks.slice(same)) {
     const template = document.createElement('template');
     const tokens = block.token ? [block.token] : lex(block.raw, references);
     template.innerHTML = tidy(marked.parser(Object.assign(tokens, { links }), OPTIONS));
     raws.push(block.raw);
     dress(template.content);
-    nodes.push([...template.content.childNodes]);
-    root.append(template.content);
+    sizes.push(template.content.childNodes.length);
+    fresh.push(...template.content.childNodes);
+  }
+  let offset = nodes.reduce((count, block) => count + block.length, 0);
+  updateNodes(root, fresh, offset);
+  const drawn = [...root.childNodes];
+  for (const size of sizes) {
+    nodes.push(drawn.slice(offset, offset + size));
+    offset += size;
   }
   shown.set(root, { raws, nodes, links: linked });
 }

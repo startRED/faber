@@ -1,6 +1,7 @@
 import { createComponent, createSignal } from 'solid-js';
 import { render } from 'solid-js/web';
 import { App } from '../../ui/App.tsx';
+import { applyLook } from '../../ui/appearance.ts';
 import { api, type AppEvent, type AppState, type Conversation, type FileChange } from '../../ui/api.ts';
 import { Changes } from '../../ui/Changes.tsx';
 import { store } from '../../ui/running.ts';
@@ -42,6 +43,7 @@ check('review change: both requests use the conversation send path while idle or
       const host = document.createElement('div');
       document.body.append(host);
       let hear!: (event: AppEvent) => void;
+      applyLook(initial.look, host);
       const dispose = render(() => createComponent(App, { initial, inbox: { take: (listener?: (event: AppEvent) => void) => { if (listener) hear = listener; } } }), host);
       try {
         await settle();
@@ -114,6 +116,7 @@ check('review change: switching conversations hides both review buttons before t
   store.offer({ revision: store.list().revision + 1, items: [] });
   const host = document.createElement('div');
   document.body.append(host);
+  applyLook(initial.look, host);
   const dispose = render(() => createComponent(App, { initial, inbox: { take: () => {} } }), host);
   try {
     await settle();
@@ -296,6 +299,7 @@ check('conversation changes: at 720 px, the auto-opened column becomes modal, pa
   const revision = store.list().revision;
   store.offer({ revision: revision + 1, items: initial.running.items });
   let hear!: (event: AppEvent) => void;
+  applyLook(initial.look, host);
   const dispose = render(() => createComponent(App, { initial, inbox: { take: (listener?: (event: AppEvent) => void) => { if (listener) hear = listener; } } }), host);
   const disclosures = () => [...host.querySelectorAll<HTMLDetailsElement>('.change-file')];
   try {

@@ -52,6 +52,13 @@ export interface ChildWords {
   at: number;
   text: string;
 }
+/** A bounded page of the visible helper thread, loaded only while its reader is open. */
+export interface TranscriptEntry {
+  at: number;
+  kind: 'text' | 'tool' | 'result';
+  tool?: string;
+  text: string;
+}
 
 export interface ToolUse {
   id: string;
@@ -75,6 +82,7 @@ export interface ToolUse {
   wordsChars?: number;
   /** On a subagent's call: more of its words were left out than the engine keeps, so its view says later ones are not kept. */
   wordsCut?: boolean;
+  transcript?: { pages: number; failed: boolean };
   /** When the engine saw the call start, in Unix milliseconds; absent on older conversations. */
   started?: number;
   /** When the engine saw the call end, in Unix milliseconds; absent while it runs and on older conversations. */
@@ -949,6 +957,7 @@ export const api = {
   editQueued: (id: string, turnId: string, text: string) => invoke<void>('edit_queued', { id, turnId, text }),
   sendQueued: (id: string, turnId: string) => invoke<void>('send_queued', { id, turnId }),
   childWords: (id: string, callId: string) => invoke<ChildWords[]>('child_words', { id, callId }),
+  childTranscript: (id: string, callId: string, page: number) => invoke<TranscriptEntry[]>('child_transcript', { id, callId, page }),
   tellHelper: (id: string, callId: string, text: string) => invoke<void>('tell_helper', { id, callId, text }),
   /** `@` in the composer: the working folder's entries that match `query`, at most 50; a new chat has none. */
   mentions: (id: string | undefined, projectId: string | undefined, query: string) => invoke<Mention[]>('mentions', { id, projectId, query }),

@@ -1140,7 +1140,10 @@ fn extract_skill(zip: &Path, path: &str, dest: &Path) -> Result<(), String> {
     for i in 0..archive.len() {
         let mut entry = archive.by_index(i).map_err(|e| e.to_string())?;
         let Some(name) = entry.enclosed_name() else {
-            return Err(format!("Unsafe path in the archive: {}", entry.name()));
+            return Err(format!(
+                "Unsafe path in the archive: {}",
+                entry.name().map_err(|e| format!("Failed to read ZIP entry name: {e}"))?
+            ));
         };
         // Every entry of a GitHub archive sits under one `<repo>-<commit>/` folder.
         let mut parts = name.components();
@@ -1150,13 +1153,19 @@ fn extract_skill(zip: &Path, path: &str, dest: &Path) -> Result<(), String> {
             continue;
         }
         if entry.is_symlink() {
-            return Err(format!("A link in the skill: {}", entry.name()));
+            return Err(format!("A link in the skill: {}", entry.name().map_err(|e| format!("Failed to read ZIP entry name: {e}"))?));
         }
         if !rel.components().all(|c| matches!(c, std::path::Component::Normal(n) if n.to_str().is_some_and(portable_name))) {
-            return Err(format!("A name no system can hold the same way: {}", entry.name()));
+            return Err(format!(
+                "A name no system can hold the same way: {}",
+                entry.name().map_err(|e| format!("Failed to read ZIP entry name: {e}"))?
+            ));
         }
         if !seen.insert(rel.to_string_lossy().to_lowercase()) {
-            return Err(format!("Two files differ only by case: {}", entry.name()));
+            return Err(format!(
+                "Two files differ only by case: {}",
+                entry.name().map_err(|e| format!("Failed to read ZIP entry name: {e}"))?
+            ));
         }
         files += 1;
         bytes += entry.size();
@@ -1170,7 +1179,10 @@ fn extract_skill(zip: &Path, path: &str, dest: &Path) -> Result<(), String> {
         let mut body = Vec::new();
         (&mut entry).take(SKILL_LIMIT + 1).read_to_end(&mut body).map_err(|e| e.to_string())?;
         if body.len() as u64 != entry.size() {
-            return Err(format!("{} is not the size the archive says", entry.name()));
+            return Err(format!(
+                "{} is not the size the archive says",
+                entry.name().map_err(|e| format!("Failed to read ZIP entry name: {e}"))?
+            ));
         }
         std::fs::File::create(&out).and_then(|mut f| f.write_all(&body)).map_err(|e| e.to_string())?;
     }

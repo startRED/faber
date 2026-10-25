@@ -1,11 +1,16 @@
 //! The `screen` suite: scenarios that drive a hidden test build of Faber through the DevTools port. Windows only, because
 //! only WebView2 has the port. Each scenario gets its own sandbox, and is audited when it ends.
 
+pub mod agent_history;
 pub mod app;
 pub mod approve_plan;
+#[cfg(windows)]
+pub mod browser_pane;
 pub mod chat_groups;
 #[cfg(windows)]
 pub mod containment;
+#[cfg(windows)]
+pub mod control_walk;
 pub mod draft_attachments;
 pub mod first_run;
 pub mod homes;
@@ -45,6 +50,7 @@ pub struct Scenario {
 pub fn all() -> Vec<Scenario> {
     let all = app::scenarios()
         .into_iter()
+        .chain(agent_history::scenarios())
         .chain(permissions::scenarios())
         .chain(performance::scenarios())
         .chain(approve_plan::scenarios())
@@ -63,7 +69,11 @@ pub fn all() -> Vec<Scenario> {
         .chain(sentinel::scenarios());
     let all = all.chain(visual_network::scenarios());
     #[cfg(windows)]
+    let all = all.chain(browser_pane::scenarios());
+    #[cfg(windows)]
     let all = all.chain(containment::scenarios());
+    #[cfg(windows)]
+    let all = all.chain(control_walk::scenarios());
     #[cfg(windows)]
     let all = all.chain(project_drivers::scenarios());
     all.collect()
@@ -109,6 +119,13 @@ impl Costs {
 /// "memory", "processor", "CPU", "MB", "budget", "frame", "focused", "quota" or "usage limits" and is not listed.
 pub const SOLO: &[(&str, &str)] = &[
     (performance::NAME, "processor, memory, scheduling and layout timing"),
+    (agent_history::NAME, "subagent-history screen scenario samples process-tree memory and CPU"),
+    #[cfg(windows)]
+    (browser_pane::NAME, "native browser placement, physical window size, process-tree memory and CPU"),
+    #[cfg(windows)]
+    (browser_pane::PREVIEW, "physical hidden-window resizing for native browser photographs"),
+    #[cfg(windows)]
+    (control_walk::WINDOW, "native window maximize, restore and close state"),
     ("reading: a real restart preserves an old reading point within the memory budget", "processor, memory"),
     (reading::PROJECT_NAME, "processor, memory"),
     ("chat groups: ten knowledge files survive reopening within the memory budget", "processor, memory"),

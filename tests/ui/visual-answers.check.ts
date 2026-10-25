@@ -2,6 +2,7 @@ import { createComponent, createSignal, Show } from 'solid-js';
 import { render } from 'solid-js/web';
 import { api, type AppState, type Conversation, type Message, type VisualAnswer } from '../../ui/api.ts';
 import { App } from '../../ui/App.tsx';
+import { applyLook } from '../../ui/appearance.ts';
 import { Thread } from '../../ui/Thread.tsx';
 import { openedVisual, showVisual, VisualFiles, VisualPane, VisualReply, visualDocument, VISUAL_CSP, VISUAL_LIVE_CSP } from '../../ui/VisualAnswer.tsx';
 import { MERMAID_INTEGRITY, MERMAID_URL, mermaidDocument } from '../../ui/visual-mermaid.ts';
@@ -800,6 +801,7 @@ check('visual answers: Chat and Projects at 720 px reuse the resizable running p
       api.onSite = async () => () => {};
       localStorage.setItem('faber.place', JSON.stringify({ area, projectId: c.projectId, id: c.id }));
       localStorage.removeItem('faber.layout');
+      applyLook(initial.look, host);
       const dispose = render(() => createComponent(App, { initial, inbox: { take: () => {} } }), host);
       try {
         await until(() => host.querySelectorAll('.visual-card').length === 2);

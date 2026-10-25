@@ -122,9 +122,8 @@ fn literal_html(text: &str, paths: &Paths) -> String {
             let mut out = self.0.borrow_mut();
             match token {
                 Token::CharacterTokens(text) => out.push_str(&self.1.redact(&text)),
-                Token::TagToken(tag) if tag.kind == TagKind::StartTag && tag.name.as_ref() == "img" => {
-                    let source =
-                        tag.attrs.iter().find(|attr| attr.name.local.as_ref() == "src").map(|attr| attr.value.as_ref()).unwrap_or("");
+                Token::TagToken(tag) if tag.kind == TagKind::StartTag && &*tag.name == "img" => {
+                    let source = tag.attrs.iter().find(|attr| &*attr.name.local == "src").map(|attr| attr.value.as_ref()).unwrap_or("");
                     let source = source.replace(['\t', '\n', '\r'], "");
                     out.push_str(&picture_name(source.trim(), 1, self.1));
                 }

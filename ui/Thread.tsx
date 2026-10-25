@@ -25,7 +25,7 @@ import { html, openLinks, pressImage } from './markdown.tsx';
 import { PieceReply } from './VisualPiece.tsx';
 import { VisualFiles } from './VisualAnswer.tsx';
 import type { VisualAnswer } from './api.ts';
-import { agentMeta, ChangedLines, openedAgent, SourceList, showAgent, startMessage, tellAbout, ToolChip } from './AgentChat.tsx';
+import { agentActivity, agentMeta, ChangedLines, openedAgent, SourceList, showAgent, startMessage, tellAbout, ToolChip } from './AgentChat.tsx';
 import { untilReset } from './Sidebar.tsx';
 import { appsOf, AwayPage, awaySites, SiteCard, sitesOf, stepsOf } from './Site.tsx';
 import { Quote } from './Floating.tsx';
@@ -174,8 +174,8 @@ function AgentRow(props: { step: Accessor<AgentStep>; streaming: boolean; conver
     return agent?.conversationId === props.conversationId && agent.callId === step().call.id;
   };
   return (
-    <div class="agent-item" role="listitem">
-      <button type="button" class="agent" data-state={state()} aria-controls="running" aria-current={shown() ? 'true' : undefined} onClick={open}>
+    <div class="agent-item" role="listitem" data-parent={step().parent?.id}>
+      <button type="button" class="agent" data-state={state()} title={step().parent ? `${step().parent!.title} › ${step().title}` : undefined} aria-controls="running" aria-current={shown() ? 'true' : undefined} onClick={open}>
         <span class="agent-mark" aria-hidden="true">
           <Show when={live()} fallback={<Show when={state() === 'done' || state() === 'failed'}><Icon name={state() === 'done' ? 'check' : 'close'} small /></Show>}>
             <span class="live" />
@@ -183,6 +183,7 @@ function AgentRow(props: { step: Accessor<AgentStep>; streaming: boolean; conver
         </span>
         <b>{step().title || t('agent.untitled')}</b>
         <span class="agent-meta">{agentMeta(step(), props.streaming)}</span>
+        <Show when={agentActivity(step(), props.streaming)}>{(current) => <span class="agent-now" title={current()}>{current()}</span>}</Show>
       </button>
       <Show when={state() === 'stuck' && step().call.sign}>
         {(sign) => (

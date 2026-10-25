@@ -1,11 +1,13 @@
 import { createComponent, createSignal } from 'solid-js';
 import { render } from 'solid-js/web';
-import { api, type ChildWords, type Message, type ToolUse } from '../../ui/api.ts';
+import { api, type AppState, type Conversation, type ChildWords, type Message, type ToolUse } from '../../ui/api.ts';
+import { App } from '../../ui/App.tsx';
+import themes from '../../src-tauri/src/themes.json';
 import { t, useLanguage } from '../../ui/i18n.ts';
 import { AgentChat, openedAgent, showAgent } from '../../ui/AgentChat.tsx';
 import { Running } from '../../ui/Running.tsx';
 import { Thread } from '../../ui/Thread.tsx';
-import { agentReport, agentSteps } from '../../ui/worklog.ts';
+import { agentReport, agentState, agentSteps, sameTools } from '../../ui/worklog.ts';
 import { check, deepEqual, equal, ok } from './check.ts';
 
 // The subagents the agent starts show as steps in its reply (R161; docs/product-map.md, "Subagent step").
@@ -17,6 +19,194 @@ const FRAMED =
 const AGENT: ToolUse = { id: 'a1', name: 'Agent', input: { description: 'Find file defining load_config', subagent_type: 'Explore', prompt: 'Search the folder.' } };
 const GREP: ToolUse = { id: 'g1', name: 'Grep', input: { pattern: 'load_config' }, parent: 'a1' };
 const OWN: ToolUse = { id: 'b1', name: 'Bash', input: { command: 'cargo check' }, ok: true };
+
+check('subagent history: long sessions read one page and keep older pages steady while new work arrives', async () => {
+  const port = api;
+  const before = port.childTranscript;
+  const reads: number[] = [];
+  port.childTranscript = async (_id, _call, page) => {
+    reads.push(page);
+    return [{ kind: 'text', text: `Retained page ${page}. ` + 'History stays readable. '.repeat(500), at: 0 },
+      ...(page === 12 ? [{ kind: 'text' as const, text: agentReport(FRAMED), at: 0 }, { kind: 'result' as const, tool: 'a1', text: FRAMED, at: 0 }] : [])];
+  };
+  showAgent({ conversationId: 'c1', messageId: 'm1', callId: 'a1' });
+  const root = document.createElement('aside');
+  root.className = 'runcol';
+  root.style.cssText = 'position:fixed;left:0;top:0;width:360px;height:640px';
+  document.body.append(root);
+  const [pages, setPages] = createSignal(12);
+  const dispose = render(() => createComponent(AgentChat, {
+    get step() { return agentSteps([{ ...AGENT, output: pages() === 0 ? FRAMED : undefined, transcript: { pages: pages(), failed: pages() === 0 } }])[0]!; },
+    streaming: true, onBack: () => {}, onClose: () => {},
+  }), root);
+  const settle = () => new Promise((done) => setTimeout(done, 40));
+  try {
+    await settle();
+    deepEqual(reads, [4, 5, 6, 7, 8, 9, 10, 11], 'opening a long session loads only one bounded window');
+    ok(root.textContent!.includes('Retained page 11.'));
+    const body = root.querySelector<HTMLElement>('.side-body')!;
+    ok(body.scrollTop > 0 && body.scrollHeight - body.scrollTop - body.clientHeight < 2, 'the live reader opens at its latest visible output');
+    root.querySelector<HTMLElement>('.side-said')!.style.paddingBlockEnd = '160px';
+    await settle();
+    ok(body.scrollHeight - body.scrollTop - body.clientHeight < 2, 'a late content resize keeps the live tail visible');
+    root.querySelector<HTMLButtonElement>('[data-history="older"]')!.click();
+    await settle();
+    deepEqual(reads, [4, 5, 6, 7, 8, 9, 10, 11, 0, 1, 2, 3]);
+    setPages(13);
+    await settle();
+    deepEqual(reads, [4, 5, 6, 7, 8, 9, 10, 11, 0, 1, 2, 3], 'new output never replaces the older page being read');
+    ok(root.textContent!.includes('Retained page 1.'));
+    equal(root.querySelector('.agent-pages .side-meta')?.textContent, 'Sections 1–4 of 13', 'the label describes the exact window while work grows');
+    root.querySelector<HTMLButtonElement>('[data-history="latest"]')!.click();
+    await settle();
+    deepEqual(reads, [4, 5, 6, 7, 8, 9, 10, 11, 0, 1, 2, 3, 5, 6, 7, 8, 9, 10, 11, 12]);
+    equal(root.querySelectorAll('.side-said').length, 8, 'old pages leave the DOM');
+    ok(root.textContent!.includes('Retained page 12.'));
+    ok(root.querySelector('.agent-report'), 'the final report keeps the usual Markdown reader');
+    ok(!root.textContent!.includes('[Subagent hand-back]'), 'internal delivery framing never becomes user-facing text');
+    const stable = [...root.querySelectorAll('.side-said')].find((node) => node.textContent?.includes('Retained page 6.'));
+    setPages(14);
+    await settle();
+    equal(reads.at(-1), 13, 'only the newly appended immutable page is read');
+    equal([...root.querySelectorAll('.side-said')].find((node) => node.textContent?.includes('Retained page 6.')), stable, 'new work keeps the existing text nodes in place');
+    const heard = reads.length;
+    // Exercise page pinning without a native wheel scroll racing the explicit reset below.
+    const wheel = new WheelEvent('wheel', { deltaY: -60, bubbles: true, cancelable: true });
+    wheel.preventDefault();
+    root.querySelector('.side-said')!.dispatchEvent(wheel);
+    setPages(15);
+    await settle();
+    equal(reads.length, heard, 'scrolling up pins the current window instead of evicting text being read');
+    body.scrollTop = 0; body.dispatchEvent(new Event('scroll'));
+    root.querySelector<HTMLElement>('.side-said')!.style.paddingBlockEnd = '320px';
+    await settle();
+    ok(body.scrollTop < 2, 'a late resize never pulls a pinned reader back to the end');
+    const latest = root.querySelector<HTMLButtonElement>('.toend')!;
+    ok(latest, 'the usual Latest action remains available while reading up');
+    const bounds = latest.getBoundingClientRect(), view = body.getBoundingClientRect();
+    ok(bounds.top >= view.top && bounds.bottom <= view.bottom, 'Latest stays visible instead of sitting below the long history');
+    latest.click();
+    await settle();
+    equal(reads.at(-1), 14, 'Latest loads the newest retained output');
+    ok(body.scrollHeight - body.scrollTop - body.clientHeight < 2, 'Latest returns to the end after its read completes');
+    port.childTranscript = async () => { throw new Error('error.store.read'); };
+    root.querySelector<HTMLButtonElement>('[data-history="older"]')!.click();
+    await settle();
+    ok(root.querySelector('[role="alert"]'), 'a read error is shown inside the reader');
+    ok(!root.querySelector('[role="alert"]')!.textContent!.includes('error.store.read'), 'the read error uses the selected language');
+    ok(root.querySelector('[data-history="retry"]'), 'the person can retry without reopening the conversation');
+    let retries = 0;
+    port.childTranscript = async () => { retries++; return [{ kind: 'text', text: 'Recovered history.', at: 0 }]; };
+    const retry = root.querySelector<HTMLButtonElement>('[data-history="retry"]')!;
+    retry.click(); retry.click();
+    await settle();
+    equal(retries, 7, 'repeated activation reads the selected window once');
+    ok(root.textContent?.includes('Recovered history.'));
+    equal(root.querySelector('[role="alert"]'), null, 'successful retry clears the read error');
+    setPages(0);
+    await settle();
+    ok(root.querySelector('.agent-report'), 'a failed first save keeps the available preview readable');
+    ok(root.querySelector('[role="alert"]'), 'a failed first save explains that its history is incomplete');
+  } finally {
+    dispose(); root.remove(); port.childTranscript = before; showAgent(undefined);
+  }
+});
+
+check('subagent history: a paused arrival keeps Latest inside the reader viewport', async () => {
+  const before = api.childTranscript;
+  api.childTranscript = async (_id, _call, page) => [{ kind: 'text', text: `Synthetic page ${page}. ` + 'Retained history. '.repeat(500), at: 0 }];
+  const root = document.createElement('aside');
+  root.className = 'runcol';
+  root.dataset.motion = 'full';
+  root.style.cssText = 'position:fixed;left:0;top:0;width:360px;height:640px';
+  root.addEventListener('faber-motion', (event) => {
+    const target = event.target;
+    if (target instanceof HTMLElement && target.tagName === 'SECTION' && target.querySelector('.agent-pages')) {
+      // A hidden webview may hold an arrival indefinitely; the reader must stay usable during it.
+      for (const animation of target.getAnimations()) animation.pause();
+    }
+  });
+  document.body.append(root);
+  showAgent({ conversationId: 'synthetic-paused-reader', messageId: 'm1', callId: 'a1' });
+  const dispose = render(() => createComponent(AgentChat, {
+    step: agentSteps([{ ...AGENT, transcript: { pages: 12, failed: false } }])[0]!,
+    streaming: true, onBack: () => {}, onClose: () => {},
+  }), root);
+  const settle = () => new Promise((done) => setTimeout(done, 40));
+  try {
+    await settle();
+    const body = root.querySelector<HTMLElement>('.side-body')!;
+    const wheel = new WheelEvent('wheel', { deltaY: -60, bubbles: true, cancelable: true });
+    wheel.preventDefault();
+    root.querySelector('.side-said')!.dispatchEvent(wheel);
+    body.scrollTop = 0; body.dispatchEvent(new Event('scroll'));
+    await settle();
+    const latest = root.querySelector<HTMLButtonElement>('.toend');
+    ok(latest, 'Latest is available while reading retained history');
+    const bounds = latest.getBoundingClientRect(), view = body.getBoundingClientRect();
+    ok(bounds.top >= view.top && bounds.bottom <= view.bottom, 'a paused arrival never puts Latest below the retained history');
+    latest.click();
+    await settle();
+    ok(body.scrollHeight - body.scrollTop - body.clientHeight < 2, 'Latest still returns to the live tail');
+  } finally {
+    dispose(); root.remove(); api.childTranscript = before; showAgent(undefined);
+  }
+});
+
+check('subagent history: new pages and save failures reach an already open reader', () => {
+  const call = { ...AGENT, transcript: { pages: 1, failed: false } };
+  equal(sameTools([call], [{ ...call, transcript: { pages: 2, failed: false } }]), false);
+  equal(sameTools([call], [{ ...call, transcript: { pages: 1, failed: true } }]), false);
+});
+
+check('subagent history: a reused call id never reuses another conversation page', async () => {
+  const before = api.childTranscript;
+  api.childTranscript = async (id) => [{ kind: 'text', at: 0, text: `History owned by ${id}.` }];
+  const root = document.createElement('aside'); document.body.append(root);
+  showAgent({ conversationId: 'first-owner', messageId: 'm1', callId: 'a1' });
+  const dispose = render(() => createComponent(AgentChat, { step: agentSteps([{ ...AGENT, transcript: { pages: 1, failed: false } }])[0]!, streaming: true, onBack: () => {}, onClose: () => {} }), root);
+  try {
+    await new Promise((done) => setTimeout(done, 30));
+    ok(root.textContent?.includes('History owned by first-owner.'));
+    showAgent({ conversationId: 'second-owner', messageId: 'm1', callId: 'a1' });
+    ok(!root.textContent?.includes('History owned by first-owner.'), 'a pending read never flashes the previous conversation');
+    await new Promise((done) => setTimeout(done, 30));
+    ok(root.textContent?.includes('History owned by second-owner.'), 'page reuse is scoped to the owning conversation');
+    ok(!root.textContent?.includes('History owned by first-owner.'));
+  } finally { dispose(); root.remove(); api.childTranscript = before; showAgent(undefined); }
+});
+
+check('subagent history: the real reader includes a background task step from a later turn', async () => {
+  const conversation: Conversation = { id: 'history-turns', title: 'Synthetic helper history', area: 'chat', sessions: {}, createdAt: 0, updatedAt: 1,
+    messages: [
+      { id: 'm1', role: 'assistant', text: 'First answer.', at: 0, status: 'done', vendor: 'claude', tools: [{ ...AGENT, transcript: { pages: 1, failed: false } }] },
+      { id: 'm2', role: 'assistant', text: 'Second answer.', at: 1, status: 'done', vendor: 'claude', tools: [{ ...GREP, id: 'later', input: { pattern: 'retained-neighbour' } }] },
+    ] };
+  const effects = { ambient: false, texture: false, glow: false };
+  const initial: AppState = { vendors: ['claude'], models: [], quotas: [], projects: [], version: '0.0.0', running: { revision: 0, items: [] },
+    conversations: [{ id: conversation.id, title: conversation.title, area: 'chat', updatedAt: 1 }],
+    settings: { setup: 'done', tutorialDone: true, language: 'en', appearance: { base: 'sala' } },
+    look: { vars: themes.css.base, scheme: 'dark', motion: 'none', effects, checks: [], notices: [],
+      appearance: { base: 'sala', ground: 'sala', accent: '#f3f0e8', textFont: 'archivo', headingFont: 'narrow', textSize: 14, density: 1, corners: 1, motion: 'none', effects } } };
+  const before = { open: api.open, setClock: api.setClock, childTranscript: api.childTranscript, notesSeen: api.notesSeen };
+  const place = localStorage.getItem('faber.place');
+  api.open = async () => conversation; api.setClock = async () => {}; api.notesSeen = async () => Number.MAX_SAFE_INTEGER;
+  api.childTranscript = async () => [{ kind: 'tool', tool: 'later', text: '', at: 0 }];
+  localStorage.setItem('faber.place', JSON.stringify({ area: 'chat', id: conversation.id }));
+  const root = document.createElement('div');
+  root.style.cssText = 'position:fixed;inset:0';
+  document.body.append(root);
+  const dispose = render(() => createComponent(App, { initial, inbox: { take: () => {} } }), root);
+  try {
+    await new Promise((done) => setTimeout(done, 50));
+    showAgent({ conversationId: conversation.id, messageId: 'm1', callId: 'a1' });
+    await new Promise((done) => setTimeout(done, 50));
+    ok(root.querySelector('.side-body')?.textContent?.includes('retained-neighbour'), 'a later-turn step is visible inside its original helper session');
+  } finally {
+    showAgent(undefined); dispose(); root.remove(); Object.assign(api, before);
+    if (place === null) localStorage.removeItem('faber.place'); else localStorage.setItem('faber.place', place);
+  }
+});
 
 check('subagent step: the report loses the hand-back frame and its indent, and an unframed report stays as it is', () => {
   equal(agentReport(FRAMED), 'The definition is in one file:\n\n- `config.rs`, line 1');
@@ -31,9 +221,48 @@ check('subagent step: each agent call collects the tools its subagent ran, and t
     ['Review the diff for mistakes.', '', []],
   ]);
   deepEqual(agentSteps(undefined), []);
-  // A helper that starts its own helper: the inner one's work counts for the step the agent started.
-  const nested = agentSteps([AGENT, { id: 'a3', name: 'Agent', input: {}, parent: 'a1' }, { id: 'r1', name: 'Read', input: {}, parent: 'a3' }]);
-  deepEqual(nested.map((s) => s.tools.map((t) => t.id)), [['a3', 'r1']]);
+  // Each nested agent owns its work; its parent retains the handoff without claiming the child's steps.
+  const child: ToolUse = { id: 'a3', name: 'Agent', input: { description: 'Inspect parser' }, parent: 'a1' };
+  const nested = agentSteps([AGENT, child, { id: 'r1', name: 'Read', input: {}, parent: 'a3' }]);
+  deepEqual(nested.map((s) => [s.title, s.tools.map((t) => t.id)]), [['Find file defining load_config', ['a3']], ['Inspect parser', ['r1']]]);
+  equal(nested[1]!.parent?.id, 'a1', 'the nested view can return to the parent task');
+  const background = agentSteps([{ ...AGENT, input: { run_in_background: true } }, child]);
+  equal(agentState(background[1]!, false), 'background', 'a child of a background task remains at work after the parent reply ends');
+  const cycle = agentSteps([{ ...AGENT, parent: 'a3' }, child]);
+  equal(cycle.length, 2, 'malformed ancestry is bounded and does not hide either task');
+});
+
+check('subagent in the column: a nested handoff opens its own session and returns to its parent', () => {
+  useLanguage('en');
+  const childTitle = 'Inspect parser ' + 'deeply/nested/long-name/'.repeat(12);
+  const child: ToolUse = { id: 'nested', name: 'Agent', parent: 'a1', input: { description: childTitle, prompt: 'Read parser.rs.' } };
+  const steps = agentSteps([AGENT, child, { id: 'read', name: 'Read', parent: 'nested', input: { file_path: 'parser.rs' } }]);
+  const root = document.createElement('aside');
+  root.className = 'runcol';
+  root.style.cssText = 'position:fixed;left:0;top:0;width:300px;height:640px';
+  document.body.append(root);
+  let backs = 0;
+  showAgent({ conversationId: 'nested-test', messageId: 'reply', callId: 'a1' });
+  const dispose = render(() => createComponent(AgentChat, {
+    get step() { return steps.find((s) => s.call.id === openedAgent()?.callId)!; },
+    streaming: true, onBack: () => { backs++; }, onClose: () => {},
+  }), root);
+  try {
+    const handoff = root.querySelector<HTMLButtonElement>('.agent-handoff');
+    ok(handoff, 'a delegated task is an actual button');
+    equal(getComputedStyle(handoff!).whiteSpace, 'normal', 'a long task title wraps');
+    ok(handoff!.scrollWidth <= handoff!.clientWidth + 1, 'the delegated task button has no hidden sideways text');
+    ok(handoff!.getBoundingClientRect().right <= root.getBoundingClientRect().right, 'the button stays inside the column');
+    handoff!.click();
+    equal(openedAgent()?.callId, 'nested');
+    equal(root.querySelector('h2')!.textContent, childTitle);
+    ok(root.querySelector('.side-brief')!.textContent!.includes('Read parser.rs.'));
+    root.querySelector<HTMLButtonElement>('.back')!.click();
+    equal(openedAgent()?.callId, 'a1', 'back returns to the task that delegated this one');
+    equal(backs, 0, 'the running list is not opened instead of the parent');
+    root.querySelector<HTMLButtonElement>('.back')!.click();
+    equal(backs, 1, 'a root task still returns to the running list');
+  } finally { dispose(); root.remove(); showAgent(undefined); }
 });
 
 check('subagent step: a running helper is its own row in the reply, apart from the agent’s own steps, and opens in the running column', async () => {
@@ -52,8 +281,30 @@ check('subagent step: a running helper is its own row in the reply, apart from t
     ok(row().querySelector('.live'), 'a running helper shows the live mark');
     equal(row().querySelector('b')!.textContent, 'Find file defining load_config');
     equal(row().querySelector('.agent-meta')!.textContent, 'Explore · working · 1 step');
+    ok(row().querySelector('.agent-now')?.textContent?.includes('load_config'), 'the main thread shows the helper current task');
+    const workingHeight = row().getBoundingClientRect().height;
+    setMessage({ ...message(), tools: [OWN, AGENT, { ...GREP, ok: true }] });
+    equal(row().getBoundingClientRect().height, workingHeight, 'the row keeps its height between observed tool steps');
+    ok(row().querySelector('.agent-now')?.textContent?.includes(t('agent.done')), 'the latest completed step is labelled honestly');
+    root.style.width = '420px';
+    setMessage({ ...message(), tools: [OWN, AGENT, { ...GREP, id: 'g2', input: { pattern: 'load_config ' + 'long-path/'.repeat(30) }, ok: true }] });
+    const caption = row().querySelector<HTMLElement>('.agent-now')!;
+    const status = document.createRange();
+    const at = caption.textContent!.lastIndexOf(t('agent.done'));
+    status.setStart(caption.firstChild!, at); status.setEnd(caption.firstChild!, at + t('agent.done').length);
+    ok(status.getBoundingClientRect().right <= caption.getBoundingClientRect().right, 'a long detail cannot hide the completed state beyond the ellipsis');
+    root.style.width = '';
+    setMessage({ ...message(), tools: [OWN, AGENT, GREP] });
     equal(root.querySelector('.activity summary')!.textContent, 'Working · 1 step · 1 command', 'the helper and its tools are not counted twice');
     equal(root.querySelectorAll('.activity .tools > span').length, 1, 'only the agent’s own tool is in its activity');
+    setMessage({ ...message(), tools: [OWN, AGENT, GREP, { id: 'nested', name: 'Agent', input: { description: 'Inspect parser' }, parent: 'a1' }, { id: 'read', name: 'Read', input: { file_path: 'parser.rs' }, parent: 'nested' }] });
+    equal(root.querySelectorAll('.agents .agent').length, 2, 'a nested task has its own clickable row');
+    const childRow = root.querySelectorAll<HTMLButtonElement>('.agents .agent')[1]!;
+    ok(childRow.querySelector('.agent-now')!.textContent!.includes('parser.rs'));
+    childRow.click();
+    equal(openedAgent()?.callId, 'nested', 'the main thread opens the child, not its parent');
+    showAgent(undefined);
+    setMessage({ ...message(), tools: [OWN, AGENT, GREP] });
     equal(row().getAttribute('aria-current'), null);
     row().click();
     deepEqual(openedAgent(), { conversationId: 'sub', messageId: 'sub', callId: 'a1' }, 'a click opens the subagent in the column');
@@ -63,6 +314,7 @@ check('subagent step: a running helper is its own row in the reply, apart from t
     setMessage({ ...message(), tools: [OWN, { ...AGENT, ok: true, output: FRAMED }, { ...GREP, ok: true }] });
     equal(row(), before);
     equal(row().dataset.state, 'done');
+    equal(row().querySelector('.agent-now'), null, 'completed work never keeps a stale current task');
     equal(row().getAttribute('aria-current'), 'true');
     showAgent(undefined);
     equal(row().getAttribute('aria-current'), null);
@@ -128,10 +380,13 @@ check('subagent step: waiting for you, and a stuck subagent is amber with Look a
     const row = () => root.querySelector<HTMLButtonElement>('.agents .agent')!;
     equal(row().dataset.state, 'waiting');
     equal(row().querySelector('.agent-meta')!.textContent, 'Explore · waiting for you · 1 step');
+    ok(row().querySelector('.agent-now')?.textContent?.includes('load_config'), 'a waiting helper names the observed action that needs attention');
     equal(root.querySelector('.agent-stuck'), null, 'waiting for the person is never stuck');
-    setMessage({ ...message(), tools: [{ ...AGENT, sign: 'failing' }, GREP] });
+    setMessage({ ...message(), tools: [{ ...AGENT, sign: 'failing' }, { ...GREP, ok: false }] });
     equal(row().dataset.state, 'stuck');
     equal(row().querySelector('.agent-meta')!.textContent, 'Explore · seems stuck · 1 step');
+    ok(row().querySelector('.agent-now')?.textContent?.startsWith(t('agent.failed')), 'the stuck row keeps the failed action and its result visible');
+    ok(row().querySelector('.agent-now')?.textContent?.includes('load_config'));
     const line = root.querySelector('.agent-stuck')!;
     equal(line.querySelector('.agent-why')!.textContent, 'The same check failed three times with nothing changed.');
     const [look, tell] = [...line.querySelectorAll('button')];

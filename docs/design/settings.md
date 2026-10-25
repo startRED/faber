@@ -17,6 +17,9 @@ How the Settings screen looks and behaves. The first run and the tutorial are in
   round "?" next to the name (`aria-expanded`, `aria-controls`, one accessible name, `set.learnMore`); there is no
   "Learn more" link. A fold (`Fold`) is a row whose title is a button; what is inside it is not in the page while it is
   closed. Switches are native checkboxes with `role="switch"`; segmented controls and selects sit in the control slot; the
+  help button and checkbox hit areas use the small-control height token (28 px at standard density); the switch track
+  remains 18 px high. The same checkbox in Catalog keeps its centre aligned with the quick action button using
+  the two control-height tokens, without native margins. Forced colours uses the native checkbox so its checked state remains visible. The
   mode menu is a select-only combobox whose open list shows each choice with its own line. Text fields share one class,
   `.field`. Under 960 px the control slot moves under the name.
 - General has, in groups: *You* (language, name); *How the AI works* (Permissions as a menu of the five modes, Web search,

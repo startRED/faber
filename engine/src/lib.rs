@@ -54,6 +54,7 @@ pub mod tls;
 pub mod tool_inventory;
 pub mod toolbox;
 pub mod tools;
+pub mod transcript;
 pub mod usage;
 pub mod verify;
 pub mod visual;

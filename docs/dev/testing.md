@@ -7,20 +7,24 @@ The runner resolves the repository from its current folder or the nearest ancest
 `CARGO_TARGET_DIR`; outside a Faber workspace it fails instead of using the checkout where it was compiled.
 The fake CLI stays beside the runner executable, and the configured target folder is preserved.
 
+`Launch::claude_recording` and `codex_recording` can select independent fake replays for a main agent and its helper.
+They add `--faber-recording <path>` to that fake binary's structured argument prefix; the fake removes it before
+handling status, setup or session arguments. Unset overrides keep the shared `Launch::recording` fallback.
+These options change only the test harness: the sandbox, hidden desktop and real CLI isolation stay the same.
+
 ## Screen tests
 
 Faber's own test runner (`cargo t`, the `testkit/` crate) tests the screen in two ways, both against a hidden test build
 of the app. `FABER_HIDDEN=1` keeps the window offscreen with its own browser profile, so it never takes the user's screen.
 
 - **Checks** (`tests/ui/*.check.ts`) test the screen's own logic. The test build opens `index.html?checks`, runs them when
-  the app's first mount has finished, writes the result to the file named by `FABER_CHECKS_OUT` and exits. Mounting the
-  app concurrently with a check could replace that check's focus with the first-run heading or composer focus.
-  No DevTools port is involved, so
+  the page loads, writes the result to the file named by `FABER_CHECKS_OUT` and exits. No DevTools port is involved, so
   they run on Windows, macOS and Linux (Linux under `xvfb-run -a`).
   With `--filter`, only check bodies whose names contain that text run; startup and module registration remain shared.
-- **Scenarios** (`testkit/src/screen/`, written in Rust) wait for the rendered app and its text/sentinel helpers within
-  the existing startup or reload deadline, then drive it like a person: they read the page, click, type, and save screenshots (named
-  checkpoints, and every failure) to `target/faber-test/shots/`. On Windows the UI
+  Checks start after the shared look and context menu bootstrap; the normal App is not mounted beside their own App
+  fixtures, so startup cannot change their language or focus. Test builds without `?checks` still open the normal app.
+- **Scenarios** (`testkit/src/screen/`, written in Rust) wait for the rendered app and its text/sentinel helpers within the existing startup or reload deadline, then drive it like a person: they read the page, click and
+  type, and save screenshots (named checkpoints, and every failure) to `target/faber-test/shots/`. On Windows the UI
   runs in WebView2, which exposes Chromium's DevTools port (`FABER_CDP_PORT`); the macOS and Linux webviews have no such
   port, so those systems skip this suite and run every other check.
 
@@ -40,6 +44,10 @@ them is a window of the desktop in use.
 page's whole event loop partway through a run on CI. So the macOS test build (`test-hooks`, hidden) sits at the screen's
 corner under every other window, ignores the mouse, never takes focus, and sets WebKit's inactive scheduling policy to
 `Disabled` (`background_throttling`, macOS 14+). Windows keeps the offscreen place and its own desktop.
+
+The four audited ancestor folders use compact names because WebView2 adds nested database paths below the private build
+temporary folder. Longer ancestor names reproduced an IndexedDB backing-store open failure in a long Windows cache path;
+shortening their names fixed that fixture without dropping any audit level or moving data outside the sandbox.
 
 Every launch is sandboxed: a temporary home, an empty `PATH`, no provider variables, a dead proxy and no real CLI (a fake
 CLI replays the recordings in `tests/fixtures/`). Each scenario is audited afterwards for leaked processes, writes outside

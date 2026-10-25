@@ -124,6 +124,7 @@ fn read<T: DeserializeOwned>(path: &Path) -> Option<T> {
 }
 
 pub struct Store {
+    pub(crate) transcripts: crate::transcript::TranscriptStore,
     conversations: PathBuf,
     /// The side chat of each conversation (R250), a file of its own beside it, so the conversation and its search never read it.
     side_chats: PathBuf,
@@ -168,6 +169,7 @@ impl Store {
         let conversations = data_dir.join("conversations");
         let _ = fs::create_dir_all(&conversations);
         Store {
+            transcripts: crate::transcript::TranscriptStore::with_disk(data_dir.join("child-transcripts"), disk.clone()),
             search: crate::search::Search::new(conversations.clone()),
             conversations,
             side_chats: data_dir.join("side-chats"),

@@ -86,6 +86,10 @@ fn button_in_view(page: &mut Page) -> Result {
         size(page, width, height)?;
         let seen = page.eval("(() => { const r = document.querySelector('.first-foot .btn.primary').getBoundingClientRect(); return r.top >= 0 && r.bottom <= innerHeight && r.left >= 0 && r.right <= innerWidth; })()")?;
         same(seen, json!(true), &format!("the primary button inside a {width}x{height} window"))?;
+        if page.count(&css("[data-screen='first.accounts']"))? > 0 {
+            let choices = page.eval("(() => { const foot = document.querySelector('.first-foot').getBoundingClientRect(); const picks = [...document.querySelectorAll('.picks .pick')]; return picks.length === 3 && picks.every((pick) => { const r = pick.getBoundingClientRect(); return r.top >= 0 && r.bottom <= foot.top && r.left >= 0 && r.right <= innerWidth; }); })()")?;
+            same(choices, json!(true), &format!("all AI choices visible above the footer in a {width}x{height} window"))?;
+        }
     }
     size(page, 1440, 900)
 }

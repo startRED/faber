@@ -21,6 +21,8 @@ pub(super) struct Run {
     started: f64,
     /// The helper's latest block of text: its final words are the report.
     report: String,
+    /// Bytes already persisted from this block; flush on a step or at 8 KiB, rather than syncing every streamed token.
+    kept: usize,
     new_block: bool,
     /// Tools the helper was not allowed to use without the person's approval.
     refused: Vec<String>,
@@ -211,6 +213,7 @@ impl Core {
             session,
             started,
             report: String::new(),
+            kept: 0,
             new_block: false,
             refused: vec![],
             waiting: vec![],
@@ -305,19 +308,44 @@ impl Core {
             self.emit_background();
             self.refresh_running();
         }
+        if !self.helpers.get(call).is_some_and(|h| h.hsid == hsid) {
+            return;
+        }
+        // Writer/cursor metadata accompanies streamed tokens; only content boundaries flush the buffer.
+        if matches!(
+            &event,
+            EngineEvent::Tool { .. }
+                | EngineEvent::ChildWords { .. }
+                | EngineEvent::ToolResult { .. }
+                | EngineEvent::Break { .. }
+                | EngineEvent::Permission { .. }
+                | EngineEvent::Injected { .. }
+                | EngineEvent::SteerFailed { .. }
+                | EngineEvent::Settled
+                | EngineEvent::MainIdle
+                | EngineEvent::Done { .. }
+                | EngineEvent::Error { .. }
+        ) {
+            self.flush_helper_words(call);
+        }
         let Some(h) = self.helpers.get_mut(call).filter(|h| h.hsid == hsid) else { return };
         let (conv, sid, vendor) = (h.conv.clone(), h.sid, h.vendor);
         match event {
-            EngineEvent::Tool { id, name, input, .. } => {
-                self.handle(&conv, sid, EngineEvent::Tool { id, name, input, parent: Some(call.to_string()) })
+            EngineEvent::Tool { id, name, input, parent } => {
+                self.handle(&conv, sid, EngineEvent::Tool { id, name, input, parent: parent.or_else(|| Some(call.to_string())) })
             }
+            EngineEvent::ChildWords { .. } => self.handle(&conv, sid, event),
             EngineEvent::ToolResult { .. } => self.handle(&conv, sid, event),
             EngineEvent::Break { .. } => h.new_block = true,
             EngineEvent::Text(delta) => {
                 if std::mem::take(&mut h.new_block) && !delta.is_empty() {
                     h.report.clear();
+                    h.kept = 0;
                 }
                 h.report.push_str(&delta);
+                if h.report.len().saturating_sub(h.kept) >= crate::transcript::MAX_TEXT_CHUNK_BYTES {
+                    self.flush_helper_words(call);
+                }
             }
             EngineEvent::Permission { request_id, tool, .. } => {
                 drop(h.session.answer(&request_id, false));
@@ -373,7 +401,18 @@ impl Core {
         }
     }
 
+    fn flush_helper_words(&mut self, call: &str) {
+        let Some(h) = self.helpers.get_mut(call) else { return };
+        if h.kept == h.report.len() {
+            return;
+        }
+        let (conv, text) = (h.conv.clone(), h.report[h.kept..].to_string());
+        h.kept = h.report.len();
+        self.keep_child_event(&conv, call, crate::transcript::TranscriptKind::Text, None, &text);
+    }
+
     fn end_helper(&mut self, call: &str, ok: bool, error: Option<&str>, cost: Option<f64>, incomplete: bool) {
+        self.flush_helper_words(call);
         let Some(h) = self.helpers.remove(call) else { return };
         if self.background.end_turn(&h.conv, h.hsid) {
             self.emit_background();

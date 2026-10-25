@@ -13,3 +13,8 @@
 - The task 998 offline publication boundary uses built-in Ed25519 verification with pinned public keys, a 1 MiB envelope limit and exact authenticated UTF-8 bytes; signature verification alone never authorizes installation. [by AI]
 
 - Engine construction returns a startup error before Store, catalog or background work when its data directory cannot be opened. Windows keeps its no-follow directory chain open through engine teardown; this entry check does not replace handle-relative I/O, a write sandbox or Chat-workspace relocation. [by AI]
+- Nested agent tasks must open independently, show what each task is doing, and let the person return to the task that delegated the work. [by person]
+
+- Side panes must close by sliding their real content away without a fade or a teleport; reduced motion closes them immediately. [by person]
+- Visible helper history is stored outside conversation JSON in bounded atomic pages and loaded in bounded windows only by the existing helper reader, preserving older-page selection during new work. [by AI]
+- Keep direct windows-core updates on 0.62 patch releases while WebView2 0.39 requires its COM types; lift the Dependabot version exclusion only with a coordinated WebView2/Tauri type migration. [by AI]

@@ -19,6 +19,10 @@ updates:
       interval: weekly
     commit-message:
       prefix: chore(deps)
+    # WebView2 0.39/Tauri exchange COM types from windows-core 0.62; update that line together.
+    ignore:
+      - dependency-name: windows-core
+        versions: ['>=0.63']
     groups:
       cargo:
         patterns: ['*']
