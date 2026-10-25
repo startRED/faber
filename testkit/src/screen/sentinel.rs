@@ -281,10 +281,30 @@ fn native_picker(ctx: &mut Ctx) -> Result {
             opacity: s.opacity === '' ? null : Number(s.opacity), transform: s.transform, connected: el.isConnected,
             animations: document.getAnimations().filter(a => a.effect?.getTiming().iterations !== Infinity).map(a => ({ state:a.playState, pseudo:a.effect?.pseudoElement,
               duration:a.effect?.getTiming().duration, progress:a.effect?.getComputedTiming().progress })) }; };
+          const eventTypes = ['transitionrun', 'transitionstart', 'transitionend', 'transitioncancel'];
+          const events = [];
+          let eventsOverflow = false;
+          const recordTransition = e => {
+            if (events.length >= 24) { eventsOverflow = true; return; }
+            events.push({ type: e.type, at: performance.now(), propertyName: e.propertyName,
+              pseudoElement: e.pseudoElement, elapsedTime: e.elapsedTime });
+          };
           window.__pickerProbe = { state, rows: [], running: false,
-            start() { this.rows = [state()]; this.running = true; const frame = () => {
+            start() { this.rows = [state()]; events.length = 0; eventsOverflow = false;
+              for (const type of eventTypes) el.addEventListener(type, recordTransition);
+              this.running = true; const frame = () => {
               if (!this.running) return; this.rows.push(state()); requestAnimationFrame(frame); }; requestAnimationFrame(frame); },
-            finish() { return new Promise(resolve => setTimeout(() => { this.running = false; this.rows.push(state()); resolve(this.rows); }, 1600)); } };
+            finish() { return new Promise(resolve => setTimeout(() => { this.running = false; this.rows.push(state());
+              for (const type of eventTypes) el.removeEventListener(type, recordTransition); resolve(this.rows); }, 1600)); },
+            takeEvents() { return { items: events.slice(), overflow: eventsOverflow }; },
+            diagnostics() { const s = getComputedStyle(el, '::picker(select)'); const root = getComputedStyle(document.documentElement);
+              return { motion: document.documentElement.dataset.motion || null,
+                prefersReducedMotion: matchMedia('(prefers-reduced-motion: reduce)').matches,
+                viewport: { width: innerWidth, height: innerHeight },
+                picker: { display: s.display, opacity: s.opacity, transform: s.transform,
+                  transitionProperty: s.transitionProperty, transitionDuration: s.transitionDuration,
+                  transitionDelay: s.transitionDelay, transitionTimingFunction: s.transitionTimingFunction },
+                variables: { durUi: root.getPropertyValue('--dur-ui').trim(), durExit: root.getPropertyValue('--dur-exit').trim() } }; } };
           return true;
         })()"#)?;
             for step in ["opens", "closes"] {
@@ -297,10 +317,21 @@ fn native_picker(ctx: &mut Ctx) -> Result {
                 }
                 let immediate = page.eval("window.__pickerProbe.state()")?;
                 let rows = page.eval("window.__pickerProbe.finish()")?;
-                let evidence = json!({ "mode": mode, "step": step, "immediate": immediate, "rows": rows });
+                let transitions = page.eval("window.__pickerProbe.takeEvents()")?;
+                let samples = rows.as_array().ok_or("picker probe must return frame samples")?;
+                let has_intermediate_opacity =
+                    samples.iter().any(|r| r["display"] != json!("none") && r["opacity"].as_f64().is_some_and(|o| o > 0.0 && o < 1.0));
+                let no_animations = samples.iter().all(|r| r["animations"].as_array().is_some_and(Vec::is_empty));
+                let failure_diagnostics =
+                    if samples.len() >= 3 && ((mode == "full" && !has_intermediate_opacity) || (mode != "full" && !no_animations)) {
+                        page.eval("window.__pickerProbe.diagnostics()")?
+                    } else {
+                        Value::Null
+                    };
+                let evidence = json!({ "mode": mode, "step": step, "immediate": immediate, "rows": rows,
+                    "transitionEvents": transitions, "failureDiagnostics": failure_diagnostics });
                 std::fs::write(folder.join(format!("{width}-{mode}-{step}.json")), evidence.to_string()).map_err(|e| e.to_string())?;
                 page.screenshot(&folder.join(format!("{width}-{mode}-{step}.png")))?;
-                let samples = rows.as_array().ok_or("picker probe must return frame samples")?;
                 ensure(samples.len() >= 3, || format!("infrastructure: no picker frame clock: {evidence}"))?;
                 let last = samples.last().ok_or("picker samples missing")?;
                 if last["connected"] != json!(true) {
@@ -310,15 +341,12 @@ fn native_picker(ctx: &mut Ctx) -> Result {
                 same(last["open"].clone(), json!(step == "opens"), "native picker open state after settling")?;
                 same(last["display"] == json!("none"), step == "closes", "native picker display after settling")?;
                 if mode == "full" {
-                    ensure(
-                        samples.iter().any(|r| r["display"] != json!("none") && r["opacity"].as_f64().is_some_and(|o| o > 0.0 && o < 1.0)),
-                        || format!("the full-motion picker must have a real intermediate opacity: {evidence}"),
-                    )?;
+                    ensure(has_intermediate_opacity, || {
+                        format!("the full-motion picker must have a real intermediate opacity: {evidence}")
+                    })?;
                 } else {
                     same(immediate["display"] == json!("none"), step == "closes", "reduced/none picker changes display immediately")?;
-                    ensure(samples.iter().all(|r| r["animations"].as_array().is_some_and(Vec::is_empty)), || {
-                        format!("{mode} picker must have no animations: {evidence}")
-                    })?;
+                    ensure(no_animations, || format!("{mode} picker must have no animations: {evidence}"))?;
                 }
             }
             if page.eval("!!document.querySelector('[data-picker-probe]')")? != json!(true) {

@@ -73,6 +73,10 @@ function detailOf(input: unknown): string {
 }
 
 export function toolRow(tool: ToolUse): ToolRow {
+  if (tool.name === 'Settings') {
+    const value = (tool.input && typeof tool.input === 'object' ? tool.input as Record<string, unknown> : {}).web_search;
+    return { label: t('tool.settingsWebSearch'), detail: value === 'off' || value === 'cached' || value === 'live' ? t(`set.webSearch.${value}`) : '' };
+  }
   const input = tool.input as { description?: unknown; title?: unknown; id?: unknown; level?: unknown; kind?: unknown; query?: unknown; install?: unknown; set_enabled?: unknown; remove?: unknown } | undefined;
   // Faber's checks (R190) read as what they run, with nothing after: the folder is the conversation's own.
   if (tool.name === 'Verify') return { label: t(input?.level === 'full' ? 'tool.verifyFull' : 'tool.verify'), detail: '' };

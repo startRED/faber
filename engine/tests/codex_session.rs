@@ -3066,3 +3066,54 @@ async fn mcp_servers_codex_lists_only_on_request_and_keeps_project_launch_choice
     off.close();
     server.retire();
 }
+
+#[tokio::test]
+async fn settings_search_result_before_close_drains_owner_without_stopping_shared_peer() {
+    tokio::time::timeout(Duration::from_secs(5), async {
+        let (spawn, mut input, mut output) = support::controlled();
+        let server = CodexServer::start(CodexServerOptions {
+            permissions: Permissions::Ask, cli: faber_engine::cli::Cli {command:"fake".into(), prefix:vec![]},
+            cwd:".".into(), area:Area::Project, user_hooks:false, windows:false, spawn, tools:Default::default()
+        });
+        let (tx, mut events) = tokio::sync::mpsc::unbounded_channel();
+        let owner_tx = tx.clone();
+        let owner = server.open(CodexThread {progress:true, ..mode_thread(Permissions::Ask, Default::default())}, Arc::new(move |e| drop(owner_tx.send(("owner",e)))));
+        let initialize = support::expect_method(&mut input,"initialize").await;
+        support::emit(&mut output,json!({"id":initialize["id"],"result":{}})).await;
+        support::expect_method(&mut input,"initialized").await;
+        let open = support::expect_method(&mut input,"thread/start").await;
+        support::emit(&mut output,json!({"id":open["id"],"result":{"thread":{"id":"owner"}}})).await;
+        let peer = server.open(mode_thread(Permissions::Ask, Default::default()),Arc::new(move |e| drop(tx.send(("peer",e)))));
+        let open = support::expect_method(&mut input,"thread/start").await;
+        support::emit(&mut output,json!({"id":open["id"],"result":{"thread":{"id":"peer"}}})).await;
+        for (session, id) in [(&owner,"owner"),(&peer,"peer")] {
+            session.send(UserTurn::text(id));
+            let start = support::expect_method(&mut input,"turn/start").await;
+            support::emit(&mut output,json!({"id":start["id"],"result":{"turn":{"id":format!("{id}-turn")}}})).await;
+        }
+        support::emit(&mut output,json!({"id":990,"method":"item/tool/call","params":{"threadId":"owner","turnId":"owner-turn","callId":"web","tool":"settings","arguments":{"web_search":"off"}}})).await;
+        loop { if matches!(events.recv().await.unwrap(),("owner",EngineEvent::ToolboxCall {id,..}) if id=="web") { break; } }
+        owner.helper_reply("web",true,"Saved on disk.".into());
+        owner.interrupt();
+        owner.close();
+        let reply = support::read_message(&mut input).await;
+        assert_eq!(reply["id"],990);
+        assert_eq!(reply["result"]["success"],true);
+        let interrupt = support::expect_method(&mut input,"turn/interrupt").await;
+        assert_eq!(interrupt["params"]["threadId"],"owner");
+        support::emit(&mut output,json!({"id":interrupt["id"],"result":{}})).await;
+        support::emit(&mut output,json!({"method":"turn/completed","params":{"threadId":"owner","turn":{"id":"owner-turn","status":"interrupted"}}})).await;
+        loop {
+            match events.recv().await.unwrap() {
+                ("owner",EngineEvent::WriterExit {confirmed:true}) => break,
+                ("peer",EngineEvent::WriterExit {..}) => panic!("owner close stopped peer"),
+                _ => (),
+            }
+        }
+        assert!(server.is_alive());
+        support::emit(&mut output,json!({"method":"item/agentMessage/delta","params":{"threadId":"peer","turnId":"peer-turn","itemId":"text","delta":"Still usable"}})).await;
+        loop { if matches!(events.recv().await.unwrap(),("peer",EngineEvent::Text(text)) if text=="Still usable") { break; } }
+        support::emit(&mut output,json!({"method":"turn/completed","params":{"threadId":"peer","turn":{"id":"peer-turn","status":"completed"}}})).await;
+        peer.close(); server.retire();
+    }).await.expect("owner must drain with a live peer");
+}

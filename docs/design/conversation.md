@@ -70,6 +70,10 @@ above an answer. The window widths, the sidebar and the running column are in [l
   an answer are thumbnails too (at most 280 × 200 px).
 - Reading width, text selection, scroll anchoring and the latest-message control are in [reading.md](reading.md).
 - There is no permission sentence over a conversation: the mode is a Settings matter.
+- The project's own web-search change uses the existing self-change card, with localized current and proposed
+  choices, Allow once, its own Always allow choice and Deny. The card explains that stricter choices stop replies
+  in progress, including the requesting reply. Engine facts alone supply the choices; unknown input never becomes
+  consent text. Its work-log row reads "Changing web search" with the localized destination, without raw JSON.
 - A reply waiting on quota offers Stop on its quota card, including when it ended with a recoverable quota error.
   Stop cancels that recovery before the conversation can move into a project. Closing Faber preserves explicit recovery.
   After a move, Wait keeps the earlier messages and attachment locations for the fresh project session. Switching to

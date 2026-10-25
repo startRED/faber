@@ -64,6 +64,7 @@ mod quota_watch;
 mod recovery;
 mod research;
 mod rewind;
+mod settings_change;
 mod siblings;
 mod silence;
 mod stuck_watch;
@@ -428,6 +429,10 @@ struct Core {
     node_missing: bool,
     /// The install card each conversation waits on: the call it answers and the process that made it (`engine/toolbox.rs`).
     installs: HashMap<String, toolbox::PendingChange>,
+    settings_changes: HashMap<String, settings_change::PendingSetting>,
+    web_revision: u64,
+    #[cfg(test)]
+    settings_audit_barrier: Option<(tokio::sync::oneshot::Sender<()>, tokio::sync::oneshot::Receiver<()>)>,
     replacements: HashMap<String, toolbox_replace::PendingReplacement>,
     replacement_runs: HashMap<String, Arc<std::sync::atomic::AtomicBool>>,
     /// The question card of `offer_bigger` each conversation waits on: the call it answers and the process that made it. Its answer
@@ -663,6 +668,10 @@ impl Engine {
                 setup_source: None,
                 node_missing: false,
                 installs: HashMap::new(),
+                settings_changes: HashMap::new(),
+                web_revision: 0,
+                #[cfg(test)]
+                settings_audit_barrier: None,
                 replacements: HashMap::new(),
                 replacement_runs: HashMap::new(),
                 bigger: HashMap::new(),
@@ -1861,6 +1870,10 @@ impl Core {
 
     /// Keeps the merged settings, or fails with `error.settings.saveFailed` before anything live changes.
     fn save_settings(&mut self, patch: Settings) -> Result<Settings, String> {
+        self.save_settings_with_receipt(patch, None)
+    }
+
+    fn save_settings_with_receipt(&mut self, patch: Settings, receipt: Option<settings_change::SavedReceipt>) -> Result<Settings, String> {
         let before = self.store.settings();
         let before_tuning = before.tuning();
         let mut settings = Settings {
@@ -1900,6 +1913,12 @@ impl Core {
             settings.before_plan = (to == Permissions::Plan && was != Permissions::Plan).then_some(was);
         }
         self.store.save_settings(&settings).map_err(|_| "error.settings.saveFailed".to_string())?;
+        if patch.web_search.is_some() {
+            self.web_revision = self.web_revision.wrapping_add(1);
+        }
+        if let Some(receipt) = receipt {
+            self.settle_saved_setting(receipt);
+        }
         // A turn keeps the mode it started with until it ends, so moving to a stricter mode stops the turns under way (a turn
         // that began under a stricter mode keeps it; moving to a looser one does not touch it).
         let stricter = to.strictness() > was.strictness() || settings.tuning().web.strictness() > before_tuning.web.strictness();
@@ -2039,6 +2058,7 @@ impl Core {
     /// way, but nobody pressed Stop, so the conversation is not marked stopped, its waiting messages stay, and Keep going sees a
     /// turn that failed.
     fn interrupt(&mut self, id: &str, by_person: bool) {
+        self.settings_changes.remove(id);
         self.revoke_replacement(id);
         self.kit_checks.retain(|_, check| check.owner != id);
         self.release_codex_preparation(id);
@@ -2825,6 +2845,7 @@ impl Core {
     fn end_turn(&mut self, conv: &str, turn_id: Option<String>, read: Option<Option<String>>) {
         self.transfers.remove(conv);
         self.installs.remove(conv);
+        self.settings_changes.remove(conv);
         self.revoke_replacement(conv);
         self.bigger.remove(conv);
         if let Some(l) = self.live.get_mut(conv) {
