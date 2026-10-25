@@ -645,14 +645,23 @@ details.thinking div { white-space: pre-wrap; padding: 6px 0 0 12px; border-left
 .agent-mark { display: grid; flex: none; place-items: center; width: 14px; height: 14px; color: var(--accent-text); }
 .agent:is([data-state='failed'], [data-state='stopped'], [data-state='declined']) .agent-mark { color: var(--ink-3); }
 .agent-meta { flex: none; color: var(--ink-3); white-space: nowrap; }
+.agent:has(.agent-now) { display: grid; grid-template-columns: 14px minmax(0, 1fr) auto 6px; row-gap: 4px; }
+.agent:has(.agent-now)::after { grid-column: 4; grid-row: 1 / 3; }
+.agent-now { grid-column: 2 / 4; grid-row: 2; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--ink-3); font-size: var(--fs-xs); }
+.btn.agent-handoff { min-width: 0; max-width: 100%; min-height: var(--h-sm); height: auto; white-space: normal; overflow-wrap: anywhere; text-align: start; }
+.agent-parent { overflow-wrap: anywhere; }
 /* A helper that works in the background is a ring, a live one a dot: never the square of a stop button. */
 .agent-mark .live { width: 6px; height: 6px; border-radius: 50%; }
 .agent-mark .live::after { inset: -3px; border-radius: 50%; }
 .agent[data-state='background'] .agent-mark .live { background: transparent; box-shadow: inset 0 0 0 1.5px var(--accent); }
 .agent-report { color: var(--ink-2); }
+.agent-pages { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-block-end: 12px; }
+.runcol .toend { position: absolute; inset-inline-start: 50%; bottom: 0; transform: translateX(-50%); max-width: calc(100% - 24px); }
+.agent-output { white-space: pre-wrap; overflow-wrap: anywhere; color: var(--ink-2); font: var(--fs-sm) var(--font-mono); }
 /* Waiting for the person's answer and seeming stuck are the conversation's amber (R161 step 6): the dot, and for a stuck one
    the row's edge and one line under it with what the engine saw and two ways in. */
 .agent-item { display: grid; grid-template-columns: minmax(0, 1fr); }
+.agent-item[data-parent] { margin-inline-start: 12px; padding-inline-start: 8px; border-inline-start: 1px solid var(--line-2); }
 .agent:is([data-state='waiting'], [data-state='stuck']) .agent-mark .live { background: var(--amber); }
 .agent:is([data-state='waiting'], [data-state='stuck']) .agent-mark .live::after { border-color: var(--amber); }
 .agent[data-state='stuck'] { box-shadow: inset 0 0 0 1px var(--amber-line); }
@@ -724,6 +733,8 @@ details.thinking div { white-space: pre-wrap; padding: 6px 0 0 12px; border-left
 .site-tab-close:hover { background: var(--s3); color: var(--ink); }
 .site-head .iconbtn + .iconbtn { margin-left: 0; }
 .site-bar { display: flex; align-items: center; gap: 2px; padding: 0 12px 8px; container-type: inline-size; }
+.site-preview { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; padding: 0 12px 8px; color: var(--ink-2); font-size: var(--fs-xs); }
+.site-preview .site-fit { font-size: inherit; }
 .site-bar .iconbtn:disabled { opacity: 0.4; pointer-events: none; }
 /* A narrow pane drops Forward first: Back and the field matter more. */
 @container (max-width: 300px) { .site-bar .site-forward { display: none; } }
@@ -962,7 +973,7 @@ select.pill option { background: var(--s2); color: var(--ink); }
 .st-name { display: flex; align-items: center; gap: 8px; font-size: var(--fs-sm); font-weight: 500; color: var(--ink); }
 .st-hint { font-size: var(--fs-xs); color: var(--ink-3); line-height: 1.4; }
 .st-ctl { display: flex; align-items: center; justify-content: flex-end; flex-wrap: wrap; gap: 8px; min-width: 0; max-width: 100%; }
-.st-q { flex: none; display: inline-grid; place-items: center; width: 1.5em; height: 1.5em; border-radius: 50%; box-shadow: inset 0 0 0 1px var(--line-3); color: var(--ink-3); font-size: var(--fs-xs); line-height: 1; transition: background var(--dur-fast), color var(--dur-fast); }
+.st-q { flex: none; display: inline-grid; place-items: center; width: var(--h-sm); height: var(--h-sm); border-radius: 50%; box-shadow: inset 0 0 0 1px var(--line-3); color: var(--ink-3); font-size: var(--fs-xs); line-height: 1; transition: background var(--dur-fast), color var(--dur-fast); }
 .st-q:hover, .st-q[aria-expanded='true'] { background: var(--s3); color: var(--ink); }
 .st-more { grid-column: 1 / -1; display: grid; gap: 6px; max-width: 62ch; padding-top: 6px; }
 .st-pad { padding: 14px 16px; }
@@ -1035,11 +1046,16 @@ textarea.field { height: auto; max-width: none; padding: 8px 10px; resize: verti
 .dot.custom.on { box-shadow: inset 0 0 0 1px var(--line-3), 0 0 0 3px var(--bg), 0 0 0 4.5px var(--ink); }
 .seg-ctl .sq { width: 14px; height: 14px; border-radius: 3px; box-shadow: inset 0 0 0 1px var(--line-3); }
 .range { width: 100%; accent-color: var(--accent); }
-.sw2 { appearance: none; position: relative; flex: none; width: 32px; height: 18px; border-radius: 9px; background: var(--s3); box-shadow: inset 0 0 0 1px var(--control-line); cursor: default; transition: background var(--dur-fast); }
-.sw2::after { content: ''; position: absolute; left: 3px; top: 3px; width: 12px; height: 12px; border-radius: 50%; background: var(--ink-2); transition: transform var(--dur-ui) var(--ease), background var(--dur-fast); }
-.sw2:checked { background: var(--accent); box-shadow: none; }
+.sw2 { appearance: none; margin: 0; position: relative; flex: none; width: 32px; height: var(--h-sm); background: transparent; cursor: default; }
+.sw2::before { content: ''; position: absolute; inset: calc(50% - 9px) 0; border-radius: var(--r-pill); background: var(--s3); box-shadow: inset 0 0 0 1px var(--control-line); transition: background var(--dur-fast); }
+.sw2::after { content: ''; position: absolute; left: 3px; top: calc(50% - 6px); width: 12px; height: 12px; border-radius: 50%; background: var(--ink-2); transition: transform var(--dur-ui) var(--ease), background var(--dur-fast); }
+.sw2:checked::before { background: var(--accent); box-shadow: none; }
 .sw2:checked::after { transform: translateX(14px); background: var(--accent-ink); }
 .sw2:disabled { cursor: default; opacity: 0.5; }
+@media (forced-colors: active) {
+  .sw2 { appearance: auto; }
+  .sw2::before, .sw2::after { display: none; }
+}
 /* Locked colours: a read-only row, each with its shape and its words. */
 .locked { display: flex; flex-wrap: wrap; gap: 8px; }
 .lt { display: inline-flex; align-items: center; gap: 7px; height: var(--h-sm); padding: 0 10px; border-radius: var(--r-xs); font-size: var(--fs-sm); font-weight: 500; }
@@ -1750,7 +1766,7 @@ html.away-win :is(.amb, .amb *) { animation-play-state: paused !important; }
 .catalog-tile:is(:hover, :focus-within) :is(.catalog-pick, .catalog-site), [data-picking] .catalog-pick { opacity: 1; }
 @media (hover: none) { .catalog-tile :is(.catalog-pick, .catalog-site) { opacity: 1; } }
 .catalog-quick { position: absolute; inset-inline-end: 20px; bottom: 14px; }
-.sw2.catalog-quick { bottom: 21px; }
+.sw2.catalog-quick { bottom: calc(14px + (var(--h-md) - var(--h-sm)) / 2); }
 .catalog-batch { position: sticky; bottom: 16px; z-index: 2; display: flex; flex-wrap: wrap; align-items: center; gap: 10px 18px; width: fit-content; max-width: 100%; margin: 28px auto 0; padding: 8px 8px 8px 18px; border-radius: var(--r-lg); background: var(--s2); box-shadow: var(--lift-shadow); }
 .catalog-batch-error { flex-basis: 100%; display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; padding-left: 10px; color: var(--ink); box-shadow: inset 2px 0 0 var(--danger); }
 .catalog-batch-count { font-weight: 580; font-variant-numeric: tabular-nums; }

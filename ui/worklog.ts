@@ -196,10 +196,12 @@ export function stepLine(groups: StepGroup[], tool: ToolUse): string {
 /** A call of the plan, the now line or the closing box (task 017): drawn as themselves, never as a step. */
 export const isProgressCall = (tool: ToolUse): boolean => tool.name === 'Plan' || tool.name === 'Status' || tool.name === 'WrapUp';
 
-export const isAgentCall = (tool: ToolUse): boolean => !tool.parent && (SUBAGENT.has(tool.name) || tool.name === 'Helper');
+export const isAgentCall = (tool: ToolUse): boolean => SUBAGENT.has(tool.name) || tool.name === 'Helper';
 
 export interface AgentStep {
   call: ToolUse;
+  /** The task that handed it work, when that task is in this reply. */
+  parent?: { id: string; title: string };
   /** The few words the agent gave the piece of work, else the start of its brief. */
   title: string;
   /** The kind of subagent (`Explore`, `Plan`, a person's own agent), when the agent named one; for a helper, the AI that ran it. */
@@ -255,6 +257,13 @@ export function agentState(step: AgentStep, streaming: boolean): AgentState {
   return ok ? 'done' : 'failed';
 }
 
+function agentBackground(tool: ToolUse, byId: Map<string, ToolUse>): boolean {
+  for (let at: ToolUse | undefined = tool, hops = 0; at && hops <= byId.size; at = at.parent ? byId.get(at.parent) : undefined, hops++) {
+    if ((at.input as { run_in_background?: unknown } | undefined)?.run_in_background === true) return true;
+  }
+  return false;
+}
+
 /** How many subagents and helpers are still at work, nested ones each counted: what a Stop would end with the turn. A reply
  * that ended (a message taken into the turn ends the one before it) still holds the background ones it sent and theirs;
  * the last Stop or error ended everything before it. */
@@ -268,43 +277,55 @@ export function helpersAtWork(messages: Message[] = []): number {
   const open = calls.filter((c) => c.tool.ok === undefined);
   if (!open.length) return 0;
   const byId = new Map(calls.map((c) => [c.tool.id, c.tool]));
-  const background = (tool: ToolUse) => {
-    for (let at: ToolUse | undefined = tool, hops = 0; at && hops <= byId.size; at = at.parent ? byId.get(at.parent) : undefined, hops++) {
-      if ((at.input as { run_in_background?: unknown } | undefined)?.run_in_background === true) return true;
-    }
-    return false;
-  };
-  return open.filter((c) => c.streaming || background(c.tool)).length;
+  return open.filter((c) => c.streaming || agentBackground(c.tool, byId)).length;
 }
 
 /** Whether two lists hold the same tools in the same state, so a message that only grew in text leaves the rows of its tools
  * alone while it streams. A tool is the same while its id, name, outcome, sign and output length are. */
 export function sameTools(a: ToolUse[], b: ToolUse[]): boolean {
-  return a.length === b.length && a.every((tool, i) => tool.id === b[i]!.id && tool.name === b[i]!.name && tool.ok === b[i]!.ok && tool.sign === b[i]!.sign && (tool.output?.length ?? 0) === (b[i]!.output?.length ?? 0));
+  return a.length === b.length && a.every((tool, i) => tool.id === b[i]!.id && tool.name === b[i]!.name && tool.ok === b[i]!.ok && tool.sign === b[i]!.sign && tool.wordsChars === b[i]!.wordsChars && tool.transcript?.pages === b[i]!.transcript?.pages && tool.transcript?.failed === b[i]!.transcript?.failed && (tool.output?.length ?? 0) === (b[i]!.output?.length ?? 0));
 }
 
-/** Each subagent the agent started, with the tools it ran under it. A subagent's own helper folds into it: its tools count
- * for the agent call the whole chain started from. */
+/** Each subagent, including nested ones, with its own tools. The parent keeps the handoff, the child keeps its work. */
 export function agentSteps(tools: ToolUse[] = [], helperKind = ''): AgentStep[] {
   const text = (v: unknown) => (typeof v === 'string' ? v : '');
-  const parents = new Map(tools.map((tool) => [tool.id, tool.parent]));
-  const root = (tool: ToolUse) => {
-    let id = tool.parent;
-    for (let hops = 0; id && parents.get(id) && hops < tools.length; hops++) id = parents.get(id);
-    return id;
+  const byId = new Map(tools.map((tool) => [tool.id, tool]));
+  const parentOf = (tool: ToolUse) => {
+    let at = tool.parent ? byId.get(tool.parent) : undefined;
+    for (let hops = 0; at && hops < tools.length; hops++) {
+      if (at.id === tool.id) return undefined;
+      if (isAgentCall(at)) return at;
+      at = at.parent ? byId.get(at.parent) : undefined;
+    }
+    return undefined;
   };
+  const titleOf = (call: ToolUse) => {
+    const input = (call.input ?? {}) as Record<string, unknown>;
+    const helper = call.name === 'Helper';
+    return text(helper ? input.title : input.description).trim() || middle(text(helper ? input.brief : input.prompt), 80);
+  };
+  const own = new Map<string, ToolUse[]>();
+  for (const tool of tools) {
+    const parent = parentOf(tool);
+    if (!parent) continue;
+    const group = own.get(parent.id) ?? [];
+    group.push(tool);
+    own.set(parent.id, group);
+  }
   return tools.filter(isAgentCall).map((call) => {
     const input = (call.input ?? {}) as Record<string, unknown>;
     const helper = call.name === 'Helper';
+    const parent = parentOf(call);
     return {
       call,
-      title: text(helper ? input.title : input.description).trim() || middle(text(helper ? input.brief : input.prompt), 80),
+      parent: parent ? { id: parent.id, title: titleOf(parent) } : undefined,
+      title: titleOf(call),
       kind: helper ? helperKind : text(input.subagent_type),
       helper,
       brief: text(helper ? input.brief : input.prompt).trim(),
-      tools: tools.filter((tool) => tool.parent && root(tool) === call.id),
+      tools: own.get(call.id) ?? [],
       report: agentReport(call.output),
-      background: input.run_in_background === true,
+      background: agentBackground(call, byId),
     };
   });
 }

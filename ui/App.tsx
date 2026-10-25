@@ -45,7 +45,7 @@ import { createWindowWidth, dockable, fit, isWide, type Kind, limitsOf, paneUsua
 import { Lockup } from './Mark.tsx';
 import { isFirstInstall, newestId, NOTES, type Note, whatsNew } from './notes.ts';
 import { modelOptions, vendorName } from './models.ts';
-import { animateDetails, animateList, keepForExit, watchMotion } from './motion.ts';
+import { animateDetails, animateList, keepForExit, leaveColumn, watchMotion } from './motion.ts';
 import { Palette } from './Palette.tsx';
 import { Shortcuts, shortcutsOpen } from './Shortcuts.tsx';
 import { Projects } from './Projects.tsx';
@@ -541,7 +541,12 @@ export function App(props: { initial: AppState; update?: UpdateStatus; inbox: { 
   const [glide, setGlide] = createSignal(false);
   let glideTimer: ReturnType<typeof setTimeout> | undefined;
   createEffect(on([paneKind, colShown], ([kind, shown], previous) => {
-    if (!previous || !previous[1] || !shown || previous[0] === kind) return;
+    if (!previous || !previous[1] || !shown) {
+      clearTimeout(glideTimer);
+      setGlide(false);
+      return;
+    }
+    if (previous[0] === kind) return;
     setGlide(true);
     clearTimeout(glideTimer);
     glideTimer = setTimeout(() => setGlide(false), 450);
@@ -564,12 +569,28 @@ export function App(props: { initial: AppState; update?: UpdateStatus; inbox: { 
   let retry: ReturnType<typeof setTimeout> | undefined;
   // An input method is composing text: the column waits for it to end.
   let composing = false;
+  let columnExit: Animation | undefined;
+  let columnExitTimer: ReturnType<typeof setTimeout> | undefined;
+  const cancelColumnExit = () => {
+    clearTimeout(columnExitTimer);
+    const exit = columnExit;
+    columnExit = undefined;
+    exit?.cancel();
+    if (column) {
+      delete column.dataset.exiting;
+      column.inert = false;
+      column.removeAttribute('aria-hidden');
+    }
+  };
+  onCleanup(cancelColumnExit);
   const openColumn = (user: boolean) => {
+    const reopening = !!columnExit;
+    cancelColumnExit();
     if (user) setCatalogOpen(false);
     // Something that opens the column shows it: focus mode steps aside.
     const hidden = focus();
     setFocus(false);
-    if (columnOpen()) {
+    if (columnOpen() && !reopening) {
       if (hidden) autoOpen.seen(waitingKeys(items()));
       return;
     }
@@ -581,7 +602,7 @@ export function App(props: { initial: AppState; update?: UpdateStatus; inbox: { 
     setColumnOpen(true);
     if (user && !docked()) queueMicrotask(() => column?.querySelector<HTMLElement>('button')?.focus());
   };
-  const closeColumn = () => {
+  const finishColumnClose = () => {
     showAgent(undefined);
     showSite(undefined);
     showVisual(undefined);
@@ -596,9 +617,35 @@ export function App(props: { initial: AppState; update?: UpdateStatus; inbox: { 
     clearTimeout(retry);
     setColumnOpen(false);
     setByUser(false);
-    runButton?.focus();
   };
-  const toggleColumn = () => (colShown() ? closeColumn() : openColumn(true));
+  const closeColumn = () => {
+    if (columnExit) return;
+    const el = column;
+    if (!columnOpen() || !el) return finishColumnClose();
+    el.dataset.exiting = 'true';
+    autoOpen.seen(waitingKeys(items()));
+    clearTimeout(retry);
+    // Release the modal trap before returning focus; retain the actual pane until it has left.
+    setByUser(false);
+    runButton?.focus();
+    const exit = leaveColumn(el);
+    if (!exit) return finishColumnClose();
+    columnExit = exit;
+    el.inert = true;
+    el.setAttribute('aria-hidden', 'true');
+    const finish = () => {
+      if (columnExit !== exit) return;
+      columnExit = undefined;
+      clearTimeout(columnExitTimer);
+      exit.cancel();
+      el.dataset.exited = 'true';
+      finishColumnClose();
+    };
+    void exit.finished.then(finish, finish);
+    // A hidden window may hold its animation timeline; it must still release its native page.
+    columnExitTimer = setTimeout(finish, Number(exit.effect?.getTiming().duration ?? 250) + 80);
+  };
+  const toggleColumn = () => (colShown() && !columnExit ? closeColumn() : openColumn(true));
   const toggleFocus = () => {
     if (focus()) return setFocus(false);
     // Focus inside what is about to leave the screen goes to the box that stays (asked before they go: removing the column drops focus).
@@ -616,7 +663,7 @@ export function App(props: { initial: AppState; update?: UpdateStatus; inbox: { 
     if (!open || conversation?.id !== open.conversationId) return undefined;
     const m = conversation.messages.find((message) => message.id === open.messageId);
     const helperKind = m?.vendor ? vendorName(m.vendor === 'claude' ? 'codex' : 'claude') : '';
-    const step = agentSteps(m?.tools, helperKind).find((s) => s.call.id === open.callId);
+    const step = agentSteps(conversation.messages.flatMap((message) => message.tools ?? []), helperKind).find((s) => s.call.id === open.callId);
     // A helper works only in a project whose agent can reach the other AI (both connected), as the engine offers it.
     const helpable = conversation.area === 'project' && state().vendors.length > 1;
     return step && { step, streaming: m?.status === 'streaming', helpable };
@@ -672,6 +719,7 @@ export function App(props: { initial: AppState; update?: UpdateStatus; inbox: { 
     if (!open) return;
     // One of another conversation is never shown (`sideAgent`); it goes when the conversation on screen changes.
     if (current()?.id !== open.conversationId) return;
+    cancelColumnExit();
     if (!columnOpen() || focus()) return openColumn(true);
     // A column that opened by itself becomes the person's: over the stage it is now a modal dialog, like one they opened.
     if (!byUser()) {
@@ -1372,8 +1420,20 @@ export function App(props: { initial: AppState; update?: UpdateStatus; inbox: { 
   // The topbar's pane buttons (R303): each puts its view in the right column, apart from the running list, and the one
   // already there closes the column when pressed again.
   const hasChanges = () => !!(changeList()?.files.length || changeList()?.incomplete);
-  const toggleAside = () => (sideAside() && colShown() ? closeColumn() : showAside({ conversationId: current()?.id }));
+  const toggleAside = () => {
+    if (columnExit) {
+      const same = !!sideAside();
+      openColumn(true);
+      if (same) return;
+    }
+    return sideAside() && colShown() ? closeColumn() : showAside({ conversationId: current()?.id });
+  };
   const toggleChanges = () => {
+    if (columnExit) {
+      const same = !!sideChanges();
+      openColumn(true);
+      if (same) return;
+    }
     if (sideChanges() && colShown()) return closeColumn();
     showAgent(undefined);
     showSite(undefined);
@@ -1389,6 +1449,11 @@ export function App(props: { initial: AppState; update?: UpdateStatus; inbox: { 
   // Faber's browser is a pane of the window on Windows, and its pages belong to a project conversation (R161 step 7).
   const canBrowse = () => isWindows && current()?.area === 'project' && current()?.id === place().id;
   const toggleSite = async () => {
+    if (columnExit) {
+      const same = !!sideSite();
+      openColumn(true);
+      if (same) return;
+    }
     if (sideSite() && colShown()) return closeColumn();
     const c = current();
     if (!c) return;

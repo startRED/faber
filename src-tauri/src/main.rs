@@ -678,6 +678,16 @@ async fn child_words(faber: State<'_, Faber>, id: String, call_id: String) -> Re
 }
 
 #[tauri::command]
+async fn child_transcript(
+    faber: State<'_, Faber>,
+    id: String,
+    call_id: String,
+    page: u64,
+) -> Res<Vec<faber_engine::transcript::TranscriptEntry>> {
+    faber.engine.child_transcript(&id, &call_id, page)
+}
+
+#[tauri::command]
 async fn tell_helper(faber: State<'_, Faber>, id: String, call_id: String, text: String) -> Res<()> {
     faber.engine.tell_helper(&id, &call_id, &text)
 }
@@ -1120,9 +1130,23 @@ async fn site_step(app: AppHandle, id: String, step: String) -> bool {
     false
 }
 
+// Refuse one open only in the hidden test build to exercise retry feedback.
+#[cfg(all(windows, feature = "test-hooks"))]
+static TEST_REFUSE_SITE_OPEN: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+#[cfg(all(windows, feature = "test-hooks"))]
+#[tauri::command]
+fn test_site_refuse_once() {
+    TEST_REFUSE_SITE_OPEN.store(true, std::sync::atomic::Ordering::Release);
+}
+
 /// The person loads an address they typed in the tab in front of the browser pane.
 #[tauri::command]
 async fn site_go(app: AppHandle, id: String, url: String) -> bool {
+    #[cfg(all(windows, feature = "test-hooks"))]
+    if TEST_REFUSE_SITE_OPEN.swap(false, std::sync::atomic::Ordering::AcqRel) {
+        return false;
+    }
     #[cfg(windows)]
     if let Some(pane) = app.try_state::<Arc<pane::Pane>>().map(|p| p.inner().clone()) {
         return pane.go(&id, &url).await;
@@ -1415,8 +1439,28 @@ async fn project_proof_confirm(
     Ok(checks::view(&after))
 }
 
-/// Test builds only: the screen's checks (tests/ui/) send their result here. It goes to the file named by
-/// `FABER_CHECKS_OUT`, written whole before it appears, and then the app ends.
+/// Debug test builds only: observed native child geometry and a bounded view of its fixture page.
+#[cfg(all(windows, feature = "test-hooks"))]
+#[tauri::command]
+async fn test_site_probe(app: AppHandle, capture: bool) -> Res<serde_json::Value> {
+    let pane = app.try_state::<Arc<pane::Pane>>().ok_or("the test browser is unavailable")?.inner().clone();
+    pane.test_probe(capture).await
+}
+
+/// Resizes the real hidden host, rather than emulating the main page's viewport.
+#[cfg(all(windows, feature = "test-hooks"))]
+#[tauri::command]
+async fn test_host_size(app: AppHandle, width: u32, height: u32) -> Res<()> {
+    if !(720..=1920).contains(&width) || !(600..=1080).contains(&height) {
+        return Err("test host size is outside 720–1920 by 600–1080".into());
+    }
+    app.get_window("main")
+        .ok_or("the test window is unavailable")?
+        .set_size(tauri::LogicalSize::new(width, height))
+        .map_err(|e| e.to_string())
+}
+
+/// Test builds only: the screen's checks send their result to `FABER_CHECKS_OUT`, written whole before the app ends.
 #[cfg(feature = "test-hooks")]
 #[tauri::command]
 async fn report_checks(app: AppHandle, json: String) -> Res<()> {
@@ -1814,6 +1858,7 @@ fn main() {
                 send_queued,
                 tell_helper,
                 child_words,
+                child_transcript,
                 mentions,
                 commands,
                 compact_now,
@@ -1892,6 +1937,12 @@ fn main() {
                 tools::tools_in_use,
                 #[cfg(feature = "test-hooks")]
                 report_checks,
+                #[cfg(all(windows, feature = "test-hooks"))]
+                test_site_probe,
+                #[cfg(all(windows, feature = "test-hooks"))]
+                test_host_size,
+                #[cfg(all(windows, feature = "test-hooks"))]
+                test_site_refuse_once,
                 #[cfg(feature = "test-hooks")]
                 checks_progress
             ];

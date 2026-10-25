@@ -1,12 +1,13 @@
-import { createMemo, createResource, createSignal, For, onCleanup, Show } from 'solid-js';
-import { api, errorText, type ChildWords, type ToolUse } from './api.ts';
+import { createEffect, createMemo, createResource, createSignal, For, onCleanup, onMount, Show } from 'solid-js';
+import { api, errorText, type ChildWords, type ToolUse, type TranscriptEntry } from './api.ts';
 import { Icon } from './Glyphs.tsx';
+import { ToEnd } from './Floating.tsx';
 import { fromEngine, t } from './i18n.ts';
 import { Markdown, openLinks } from './markdown.tsx';
 import { animateList } from './motion.ts';
 import { elapsed } from './running.ts';
 import { keep, kept, release, useDraft } from './unsent.ts';
-import { agentKind, agentState, changeOf, middle, toolRow, type AgentStep, type Change, type Sources } from './worklog.ts';
+import { agentKind, agentReport, agentState, changeOf, isAgentCall, middle, toolRow, type AgentStep, type Change, type Sources } from './worklog.ts';
 
 // A subagent opened in the running column (R161 step 3): its brief word for word, the steps it ran and its report, drawn
 // with the conversation's own parts. The column is the one place on the right, so this replaces its list until "back".
@@ -50,7 +51,12 @@ export function Breakable(props: { text: string }) {
  * person opened stays open, with its focus, instead of being made again. */
 function StepChip(props: { id: string; tools: () => ToolUse[] }) {
   const tool = createMemo<ToolUse>((last) => props.tools().find((t) => t.id === props.id) ?? last, props.tools().find((t) => t.id === props.id)!);
-  return <ToolChip tool={tool()} full />;
+  return <Show when={isAgentCall(tool())} fallback={<ToolChip tool={tool()} full />}>
+    <button type="button" class="btn agent-handoff" onClick={() => {
+      const open = openedAgent();
+      if (open) showAgent({ ...open, callId: props.id });
+    }}><Icon name="right" small />{toolRow(tool()).detail || t('agent.untitled')}</button>
+  </Show>;
 }
 
 /** One tool a turn or a subagent ran: its kind and what it ran on, struck through when it failed. In the subagent's view
@@ -143,6 +149,16 @@ export function agentMeta(step: AgentStep, streaming: boolean): string {
   const { started, ended, declined } = step.call;
   const took = started !== undefined && ended !== undefined && ended - started >= 1000 && !declined ? elapsed(started, ended) : undefined;
   return [agentKind(step.kind), t(`agent.${agentState(step, streaming)}`), t('activity.steps', { n: step.tools.length }), took && t(took.key, { n: took.n })].filter(Boolean).join(' · ');
+}
+
+/** Keep the last observed step between tools, marked with its result; never invent work or retain it after the helper ends. */
+export function agentActivity(step: AgentStep, streaming: boolean): string {
+  if (!['running', 'background', 'waiting', 'stuck'].includes(agentState(step, streaming))) return '';
+  const current = step.tools.findLast((tool) => tool.ok === undefined && !tool.declined) ?? step.tools.at(-1);
+  if (!current) return '';
+  const row = toolRow(current);
+  const result = current.declined ? 'declined' : current.ok === undefined ? '' : current.ok ? 'done' : 'failed';
+  return [result && t(`agent.${result}`), row.label, middle(row.detail)].filter(Boolean).join(' · ');
 }
 
 /** What an ended subagent did, counted by the engine from its steps (R161 step 4): never the main agent's word for it. */
@@ -258,6 +274,96 @@ function HelperBox(props: { callId: string }) {
 /** The open subagent, as the running column's content: a head with the way back, then the subagent's own thread. `helpable`:
  * a helper from the other AI can take on a piece of work here (a project with both AIs connected). `onTell` gets the words
  * that start the conversation's box. */
+function Transcript(props: { step: AgentStep }) {
+  const WINDOW = 8;
+  let section: HTMLElement | undefined;
+  // An explicit page stays put while work arrives. Undefined follows only the newest immutable page.
+  const [selected, select] = createSignal<number>();
+  const count = () => props.step.call.transcript?.pages ?? 0;
+  const page = () => Math.min(selected() ?? Math.max(0, count() - 1), Math.max(0, count() - 1));
+  const start = () => Math.max(0, page() - WINDOW + 1);
+  type Read = { owner: string; pages: { index: number; entries: TranscriptEntry[] }[]; entries: TranscriptEntry[]; error: string };
+  const [loaded, { refetch }] = createResource(
+    () => {
+      const open = opened();
+      return open && count() ? JSON.stringify([open.conversationId, props.step.call.id, start(), page()]) : undefined;
+    },
+    async (key, { value }): Promise<Read> => {
+      const [id, call, from, to] = JSON.parse(key) as [string, string, number, number];
+      const owner = JSON.stringify([id, call]);
+      const held = value?.owner === owner ? value.pages : [];
+      try {
+        const pages = await Promise.all(Array.from({ length: to - from + 1 }, async (_, offset) => {
+          const index = from + offset;
+          return held.find((part) => part.index === index) ?? { index, entries: await api.childTranscript(id, call, index) };
+        }));
+        return { owner, pages, entries: pages.flatMap((part) => part.entries), error: '' };
+      } catch (error) {
+        return { owner, pages: [], entries: [], error: errorText(error) };
+      }
+    },
+  );
+  const read = () => {
+    const value = loaded();
+    return value?.owner === JSON.stringify([opened()?.conversationId, props.step.call.id]) ? value : undefined;
+  };
+  const entries = createMemo(() => {
+    const entries = read()?.entries ?? [];
+    return entries.filter((entry, index) => {
+      const next = entries[index + 1];
+      return !(entry.kind === 'text' && entry.text.trim() && next?.kind === 'result' && next.tool === props.step.call.id && agentReport(next.text).startsWith(entry.text.trim()));
+    });
+  });
+  createEffect(() => {
+    if (selected() !== undefined || loaded.loading || !read()) return;
+    queueMicrotask(() => {
+      if (selected() !== undefined || !section?.isConnected) return;
+      const body = section.closest<HTMLElement>('.side-body');
+      if (body) body.scrollTop = body.scrollHeight;
+    });
+  });
+  onMount(() => {
+    const body = section?.closest<HTMLElement>('.side-body');
+    if (!section || !body) return;
+    // Font loading and a resized pane can change the tail after the text's render has finished.
+    const sizes = new ResizeObserver(() => {
+      if (selected() === undefined && !loaded.loading && read()) body.scrollTop = body.scrollHeight;
+    });
+    sizes.observe(section);
+    sizes.observe(body);
+    onCleanup(() => sizes.disconnect());
+  });
+  return <section ref={section} aria-label={t('agent.history')}
+    onWheel={(event) => { if (event.deltaY < 0) select(page()); }}
+    onPointerDown={(event) => { if (!(event.target as Element).closest('button')) select(page()); }}
+    onKeyDown={(event) => { if (['ArrowUp', 'PageUp', 'Home'].includes(event.key)) select(page()); }}>
+    <Show when={count() > WINDOW}>
+      <nav class="agent-pages" aria-label={t('agent.history')}>
+        <button type="button" class="btn" data-history="older" disabled={start() === 0 || loaded.loading} onClick={() => select(start() - 1)}>{t('agent.history.older')}</button>
+        <span class="side-meta">{t('agent.history.page', { first: start() + 1, last: page() + 1, total: count() })}</span>
+        <button type="button" class="btn" data-history="newer" disabled={page() >= count() - 1 || loaded.loading} onClick={() => select(Math.min(count() - 1, page() + WINDOW))}>{t('agent.history.newer')}</button>
+        <Show when={selected() !== undefined}><button type="button" class="btn" data-history="latest" onClick={() => select(undefined)}>{t('agent.history.latest')}</button></Show>
+      </nav>
+    </Show>
+    <Show when={read()?.error}>
+      <p class="bad" role="alert">{fromEngine(read()?.error ?? '')}</p>
+      <button type="button" class="btn" data-history="retry" onClick={() => void refetch()}>{t('agent.history.retry')}</button>
+    </Show>
+    <div aria-busy={loaded.loading}>
+      <For each={entries()}>{(entry) => entry.kind === 'tool' ? (
+        <Show when={props.step.tools.some((tool) => tool.id === entry.tool)}><div class="tools"><StepChip id={entry.tool!} tools={() => props.step.tools} /></div></Show>
+      ) : entry.kind === 'result' ? (
+        <Show when={entry.tool === props.step.call.id} fallback={<pre class="agent-output">{entry.text}</pre>}>
+          <div class="md agent-report" onClick={openLinks}><Markdown text={agentReport(entry.text)} /></div>
+        </Show>
+      ) : (
+        <div class="md side-said" onClick={openLinks}><Markdown text={entry.text} /></div>
+      )}</For>
+    </div>
+    <ToEnd thread={() => section?.closest<HTMLElement>('.side-body') ?? undefined} onGo={() => select(undefined)} />
+  </section>;
+}
+
 export function AgentChat(props: {
   step: AgentStep;
   streaming: boolean;
@@ -279,7 +385,7 @@ export function AgentChat(props: {
       const open = opened();
       const size = props.step.call.wordsChars;
       // A string, so an update that adds no words (the call object is new on every update) does not read them again.
-      return open && size ? JSON.stringify([open.conversationId, props.step.call.id, size]) : undefined;
+      return open && size && !props.step.call.transcript?.pages ? JSON.stringify([open.conversationId, props.step.call.id, size]) : undefined;
     },
     (key) => {
       const [id, call] = JSON.parse(key) as [string, string, number];
@@ -325,7 +431,11 @@ export function AgentChat(props: {
   return (
     <>
       <div class="rc-head side-head">
-        <button class="iconbtn back" aria-label={t('agent.back')} title={t('agent.back')} onClick={() => props.onBack()}>
+        <button class="iconbtn back" aria-label={props.step.parent?.title || t('agent.back')} title={props.step.parent?.title || t('agent.back')} onClick={() => {
+          const open = openedAgent();
+          if (props.step.parent && open) showAgent({ ...open, callId: props.step.parent.id });
+          else props.onBack();
+        }}>
           <Icon name="left" />
         </button>
         <h2 id="running-title" class="display" title={title()}>
@@ -341,6 +451,7 @@ export function AgentChat(props: {
         </button>
       </div>
       <div class="rc-body side-body" data-state={state()} ref={animateList}>
+        <Show when={props.step.parent}>{(parent) => <p class="side-meta agent-parent">{parent().title || t('agent.untitled')} › {title()}</p>}</Show>
         <p class="side-meta">{agentMeta(props.step, props.streaming)}</p>
         <Show when={state() === 'stuck' && props.step.call.sign}>
           {(sign) => (
@@ -356,7 +467,8 @@ export function AgentChat(props: {
             </div>
           </section>
         </Show>
-        <For each={keys()}>
+        <Show when={props.step.call.transcript?.failed}><p class="bad" role="alert">{t('agent.history.incomplete')}</p></Show>
+        <Show when={props.step.call.transcript?.pages && props.step.call.id} keyed fallback={<For each={keys()}>
           {(key) => {
             const part = () => parts().find((p) => p.key === key);
             const ids = createMemo(() => part()?.ids ?? [], [], { equals: sameIds });
@@ -372,12 +484,12 @@ export function AgentChat(props: {
               </div>
             );
           }}
-        </For>
+        </For>}>{(_callId) => <Transcript step={props.step} />}</Show>
         <Show when={props.step.call.told?.length}>
           <Told told={props.step.call.told!} />
         </Show>
         <Show when={props.step.call.facts}>{(facts) => <Facts facts={facts()} />}</Show>
-        <Show when={props.step.report}>
+        <Show when={!props.step.call.transcript?.pages && props.step.report}>
           <div class="md agent-report" onClick={openLinks}>
             <Markdown text={props.step.report} />
           </div>

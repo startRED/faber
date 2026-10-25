@@ -105,7 +105,7 @@ check('calm: the answer header is the mark, the model and its effort; a wait for
   }
 });
 
-check('calm: while an answer streams, only the block that changed is built again, and a change to the tools builds no text at all', async () => {
+check('calm: while an answer streams, its blocks keep their nodes, and a change to the tools builds no text at all', async () => {
   const [message, setMessage] = createSignal<Message>(answer({ status: 'streaming', text: 'First paragraph.\n\nSecond paragraph' }));
   const view = thread([]);
   view.close();
@@ -117,7 +117,8 @@ check('calm: while an answer streams, only the block that changed is built again
     equal(paragraphs().length, 2);
     setMessage({ ...message(), text: 'First paragraph.\n\nSecond paragraph grows' });
     equal(paragraphs()[0], first, 'the finished block keeps its node (a selection in it survives)');
-    ok(paragraphs()[1] !== second && paragraphs()[1]!.textContent === 'Second paragraph grows', 'the open block is drawn again');
+    equal(paragraphs()[1], second, 'the open block keeps its node while it grows');
+    equal(second!.textContent, 'Second paragraph grows');
     const open = paragraphs()[1];
     setMessage({ ...message(), tools: [{ id: 't1', name: 'Bash', input: { command: 'ls' }, ok: true }] });
     equal(paragraphs()[0], first);

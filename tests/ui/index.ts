@@ -5,7 +5,7 @@
 //   and translated name and never write a sentence of their own.
 // - `window.__faberMojibake(text)` is the UX sentinel's T1: why a text is garbled, or nothing (tests/ux/mojibake.ts).
 // - When the shell opened the page as `index.html?checks` (it does that when it was started with `FABER_CHECKS_OUT`),
-//   the checks run at load and their result goes to the shell's `report_checks` command, which writes it to that file and
+//   main starts the checks after its shared bootstrap, without mounting App; their result goes to `report_checks`, which writes that file and
 //   ends the app. No DevTools port is involved.
 
 import { LANGUAGES, t } from '../../ui/i18n.ts';
@@ -135,6 +135,12 @@ window.__faberChecks = runAll;
 window.__faberText = textFor;
 window.__faberMojibake = mojibake;
 
-if (new URLSearchParams(location.search).has('checks')) {
-  ignoreSystemMotion().then(() => runAll(progress, window.__faberChecksFilter)).then(report, (error: unknown) => crash(String(error)));
+/** Called by main after the look and global context-menu host are ready; imports alone never start checks. */
+export async function runChecksOnBoot(): Promise<void> {
+  try {
+    await ignoreSystemMotion();
+    report(await runAll(progress, window.__faberChecksFilter));
+  } catch (error: unknown) {
+    crash(String(error));
+  }
 }

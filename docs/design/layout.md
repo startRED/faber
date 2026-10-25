@@ -117,7 +117,23 @@ title in one line, close on the tab in front and on hover or focus), the one in 
 expand and close. Under it one bar: Back, Forward and Reload (dimmed at 40% when they cannot act; under 300 px Forward
 goes first), the address field as a filled pill (site in normal ink, the rest quiet until focus, a 2 px line along its
 bottom while the page loads) and More. The page shows in a rounded box under the bar, with nothing repeating the site:
-the address names it.
+the address names it. A newer submitted address or tab choice supersedes older pending action replies; the earlier
+reply cannot reset the visible address, page or opening error after another choice or once the pane starts closing.
+A native page navigation preserves an address while the person edits it; a completed tab choice explicitly resets the draft.
+An accepted navigation keeps its address before returning, so a quick tab switch or reopen cannot restore a blank page.
+Background title and redirect updates keep the latest pane generation across conversation changes; their history reads
+and writes serialize with navigation, while the existing two-second coalescing interval remains bounded to one worker.
+Closing keeps the real column, its content and its layout slot until it slides fully to the right, without a fade.
+Hiding or showing the column clears the view-width glide and its deadline, so a quick reopen cannot move its layout
+base in the opposite direction while its real content exits.
+It declines input and releases modal focus immediately. Reopening restores input, modal state and focus as a new opening does, even before the exit finishes. Reopening or opening another view cancels the exit; completing
+the exit never takes a newer focus choice. Reduced or no motion closes immediately. A bounded fallback releases the
+pane even if a hidden window holds its animation timeline; an already departed column gets no second exit copy.
+During CSS or Web Animations motion of its ancestors, the native page follows the box each frame for the existing bounded motion window.
+Only one placement may be in flight; further positions collapse to the latest measurement. Closing drops a deferred
+placement and parks the box. Layers covering the page still take it out of the window. A departing inert column is
+hit-tested as painted content synchronously, with its input block restored before returning; the stage behind it
+does not hide its native page during an overlay exit either.
 The pane is a native rectangle, so the shell draws the box's corners over the page in the card's colour, smooth, and gives
 the page the screen's thin scrollbars (`src-tauri/src/pane/round.js`, in a world of its own the page's scripts never see,
 `site_round`). With no page yet the box stays, calm, with a globe and what it is for in its middle. Where Firefox keeps a profile, the

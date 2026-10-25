@@ -160,7 +160,8 @@ fn close_column(page: &mut Page, width: u32) -> Result {
         let close = page.named("button", "run.close")?;
         page.click(&close)?;
     }
-    page.wait_gone(&css(".runcol"))
+    // A retained exit is inert before its content is released; the next layout starts after removal.
+    page.wait_count(&css(".runcol"), 0)
 }
 
 fn run_button(page: &mut Page) -> Result {

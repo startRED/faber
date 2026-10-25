@@ -93,6 +93,7 @@ one is never touched again, and its boxes say nothing.
 | research/2026-10-22/benchmark-light.md | First run of the light benchmark: Faber against plain Claude Code on 5 requests; Codex rows wait for its quota |
 | research/settings-exit-snapshot-2026-10-24.md | Locally reproduced and corrected native-select exit snapshot; focused RED/GREEN and paired visual evidence, with integration and resource limits retained |
 | [research/motion-verdicts-2026-10-25.md](research/motion-verdicts-2026-10-25.md) | Unfinished motion walkthrough: eight bounded surface verdicts, preserved visual scores and remaining native observations |
+| [research/2026-10-24-frontend-interaction.md](research/2026-10-24-frontend-interaction.md) | UX/UI/IxD references, clean behavioral comparison, partial implementation receipts and remaining gaps; no human user study |
 | research/ | Measurements, probes and reviews of the day in their name; model names and prices in them go stale fast. The UX, notification and screen-flake reviews of 2026-10-12 live here; their conclusions are in design/ and product/ |
 | superpowers/plans/2026-10-22-frontend-excellence.md | Completed selected changes: original frontend skills, reliability repairs and scoped proofs; initial 243-item audit and unverified criteria retained |
 

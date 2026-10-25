@@ -10,6 +10,8 @@ import { createInbox } from './inbox.ts';
 import { createHold, onQuiet, watchGames } from './quiet.ts';
 import { store } from './running.ts';
 
+const checksOnBoot = import.meta.env.MODE === 'test' && new URLSearchParams(location.search).has('checks');
+
 // Only a test build (`vite build --mode test`) carries the screen's checks; a production build drops this line.
 if (import.meta.env.MODE === 'test') {
   await import('../tests/ui/crash.ts');
@@ -50,7 +52,7 @@ installContextMenu();
 render(
   () => (
     <>
-      <App initial={state} update={update} inbox={inbox} />
+      {!checksOnBoot && <App initial={state} update={update} inbox={inbox} />}
       <ContextMenuHost />
     </>
   ),
@@ -76,3 +78,9 @@ const painted = () => {
 };
 requestAnimationFrame(() => requestAnimationFrame(painted));
 setTimeout(painted, 150);
+
+// Checks own their App fixtures: start after the shared bootstrap, without a second App changing their language or state.
+if (import.meta.env.MODE === 'test' && checksOnBoot) {
+  const { runChecksOnBoot } = await import('../tests/ui/index.ts');
+  await runChecksOnBoot();
+}

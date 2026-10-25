@@ -252,7 +252,7 @@ document.addEventListener('DOMContentLoaded', async () => {{
     same(server.requests().len(), 4, "cached is offline, independent of the CLI's search cache")?;
     let close = app.page.named("button", "run.close")?;
     app.page.click(&close)?;
-    app.page.wait_gone(&css(".visual-pane"))?;
+    app.page.wait_count(&css(".visual-pane"), 0)?;
     same(app.page.count(&css("iframe"))?, 0, "closing removes the network-enabled frame too")?;
     save_web(&mut app.page, "live")?;
     app.page.click(&css(".visual-card .visual-open").last())?;

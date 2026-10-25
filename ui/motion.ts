@@ -73,8 +73,16 @@ function play(el: HTMLElement, frames: Keyframe[], exit = false, delay = 0): Ani
     duration, delay: Math.min(48, delay), fill: 'backwards', easing: curve(el, exit ? '--ease-in' : '--ease-spring', exit ? 'ease-in' : 'ease-out'),
   });
   active.add(animation);
+  el.dispatchEvent(new Event('faber-motion', { bubbles: true }));
   void animation.finished.then(() => active.delete(animation), () => active.delete(animation));
   return animation;
+}
+
+/** The real column leaves before its native page and reading state are released. */
+export function leaveColumn(el: HTMLElement): Animation | undefined {
+  const transform = getComputedStyle(el).transform;
+  for (const animation of el.getAnimations()) animation.cancel();
+  return play(el, [{ transform, opacity: 1 }, { transform: 'translateX(calc(100% + 24px))', opacity: 1 }], true);
 }
 
 /**
@@ -171,6 +179,7 @@ export function animateList(root: HTMLElement, subtree = false): void {
       const offsets = new Map<HTMLElement, DOMMatrix>();
       const widths = new Map<HTMLElement, number>();
       for (const el of items) {
+        if (el.dataset.exiting === 'true') continue;
         if (!animations.has(el)) continue;
         if (el.matches('.main')) widths.set(el, el.getBoundingClientRect().width);
         const transform = getComputedStyle(el).transform;
@@ -184,7 +193,7 @@ export function animateList(root: HTMLElement, subtree = false): void {
       for (const [el, savedRect] of before) {
         const closingSide = sidebarClosing && el === side;
         const rect = closingSide ? el.getBoundingClientRect() : savedRect;
-        if (el.matches('.main, .shell, .leaving') || (!closingSide && (next.has(el) || el.isConnected)) || level(root) !== 'full' || exits >= 12 || rect.bottom <= 0 || rect.top >= innerHeight || rect.right <= 0 || rect.left >= innerWidth || !rect.width || !rect.height) continue;
+        if (el.dataset.exited === 'true' || el.matches('.main, .shell, .leaving') || (!closingSide && (next.has(el) || el.isConnected)) || level(root) !== 'full' || exits >= 12 || rect.bottom <= 0 || rect.top >= innerHeight || rect.right <= 0 || rect.left >= innerWidth || !rect.width || !rect.height) continue;
         const ghost = el.cloneNode(true) as HTMLElement;
         // Native cloning keeps option defaults, not the select's current choice.
         const selects = el.querySelectorAll('select');
@@ -214,6 +223,7 @@ export function animateList(root: HTMLElement, subtree = false): void {
       }
       let arrivals = 0;
       for (const el of items) {
+        if (el.dataset.exiting === 'true') continue;
         const previous = before.get(el);
         const rect = next.get(el)!;
         if (el === side) continue;

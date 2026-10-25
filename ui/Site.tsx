@@ -1,10 +1,10 @@
 import { type Accessor, createEffect, createResource, createSignal, For, Index, on, onCleanup, onMount, Show } from 'solid-js';
-import { api, type Message, type SiteTab, type SiteTabs, type SiteTabStep, type ToolUse } from './api.ts';
+import { api, errorText, type Message, type SiteTab, type SiteTabs, type SiteTabStep, type ToolUse } from './api.ts';
 import { appliedLook } from './appearance.ts';
 import { Cookies, cookieProfiles } from './Cookies.tsx';
 import { type MenuItem, openMenu } from './contextmenu.ts';
 import { Icon } from './Glyphs.tsx';
-import { t } from './i18n.ts';
+import { fromEngine, t } from './i18n.ts';
 import { type SiteKey, siteKeyOf } from './keys.ts';
 
 /** A page the agent opened in Faber's browser (R161 step 7), which the person opened from the reply. */
@@ -377,6 +377,14 @@ const LAYERS = 'dialog[open], :popover-open, [role="dialog"], [role="alertdialog
  * A layer counts by its bounds, however small, once anything of it is painted (one kept in the page fully faded or hidden
  * does not); nine points catch anything else drawn over the box. */
 export function covered(box: HTMLElement): boolean {
+  const leaving = box.closest<HTMLElement>('.runcol[data-exiting="true"]');
+  if (!leaving?.inert) return paintedCover(box, !!leaving);
+  // Inert excludes painted content from hit testing; restore it before any input can run.
+  leaving.inert = false;
+  try { return paintedCover(box, true); } finally { leaving.inert = true; }
+}
+
+function paintedCover(box: HTMLElement, departing: boolean): boolean {
   const r = box.getBoundingClientRect();
   if (r.width < 1 || r.height < 1) return false;
   for (const layer of document.querySelectorAll<HTMLElement>(LAYERS)) {
@@ -396,7 +404,7 @@ export function covered(box: HTMLElement): boolean {
   const ys = [r.top + 4, r.top + r.height / 2, r.bottom - 4];
   return xs.some((x) => ys.some((y) => {
     const top = document.elementFromPoint(x, y);
-    return top !== null && !box.contains(top);
+    return top !== null && !box.contains(top) && !(departing && top.contains(box));
   }));
 }
 
@@ -418,13 +426,29 @@ export function SitePane(props: { site: OpenSite; onClose: () => void; wide?: bo
   createEffect(on(liveKey, () => setLiveNow(lives.get(liveKey()) ?? props.site.url), { defer: true }));
   const stop = api.onSite(setLive);
   onCleanup(() => void stop.then((unlisten) => unlisten()).catch(() => {}));
+  let disposed = false;
+  let placing = false;
+  let placeAgain = false;
   const place = () => {
     // While a step of the log shows, its picture holds the box and the page stays out of the window; with no page yet there
     // is nothing to place.
-    if (away() || blank()) return;
+    if (disposed || away() || blank()) return;
+    if (placing) return void (placeAgain = true);
     const r = box?.getBoundingClientRect();
     if (!r) return;
-    if (r.width >= 1 && r.height >= 1) void api.sitePlace(id, r.left, r.top, r.width, r.height).then((placed) => placed && round(box!));
+    if (r.width >= 1 && r.height >= 1) {
+      const placingId = id;
+      placing = true;
+      void api.sitePlace(placingId, r.left, r.top, r.width, r.height).then((placed) => {
+        if (placed && !disposed && !away() && id === placingId) round(box!);
+      }).finally(() => {
+        placing = false;
+        if (placeAgain) {
+          placeAgain = false;
+          place();
+        }
+      });
+    }
   };
   onMount(() => {
     const seen = new ResizeObserver(place);
@@ -449,21 +473,25 @@ export function SitePane(props: { site: OpenSite; onClose: () => void; wide?: bo
     let movingUntil = 0;
     const follow = () => {
       lookAgain();
+      place();
       moving = performance.now() < movingUntil ? requestAnimationFrame(follow) : 0;
     };
     const started = (event: Event) => {
-      // Only a layer's own motion: a row's hover never sets the pane looking.
-      if (!(event.target instanceof Element) || !event.target.closest(LAYERS)) return;
+      // A layer or the box's own ancestors: a row's hover never sets the pane looking.
+      if (!(event.target instanceof Element) || (!event.target.closest(LAYERS) && !event.target.contains(box!))) return;
+      if (event.type === 'faber-motion' && event.target instanceof HTMLElement && event.target.dataset.exiting === 'true' && event.target.contains(box!)) navigation++;
       movingUntil = performance.now() + MOVING;
       moving ||= requestAnimationFrame(follow);
     };
-    const starts = ['transitionrun', 'animationstart'] as const;
+    const starts = ['transitionrun', 'animationstart', 'faber-motion'] as const;
     const moved = ['toggle', 'transitionend', 'transitioncancel', 'animationend', 'animationcancel'] as const;
     for (const event of starts) document.addEventListener(event, started, true);
     for (const event of moved) document.addEventListener(event, soon, true);
     // One already open counts before the first placing.
     if (!blank() && !picked()) setCovered(covered(box!));
     onCleanup(() => {
+      disposed = true;
+      placeAgain = false;
       watch.disconnect();
       for (const event of starts) document.removeEventListener(event, started, true);
       for (const event of moved) document.removeEventListener(event, soon, true);
@@ -530,11 +558,20 @@ export function SitePane(props: { site: OpenSite; onClose: () => void; wide?: bo
   const title = () => (blank() ? t('site.browser') : moved() ? hostOf(live()) : props.site.title || hostOf(props.site.url));
   // The address field shows where the page is until the person types; Enter loads what they typed, Esc puts it back.
   const [typed, setTyped] = createSignal<string>();
-  const [refused, setRefused] = createSignal(false);
-  createEffect(on(live, () => setTyped(undefined), { defer: true }));
+  const [focused, setFocused] = createSignal(false);
+  const [refused, setRefused] = createSignal<'site.refused' | 'site.openFailed'>();
+  let navigation = 0;
+  onCleanup(() => navigation++);
+  const close = () => { navigation++; props.onClose(); };
+  createEffect(on(live, () => document.activeElement !== address && setTyped(undefined), { defer: true }));
   const go = async (to: string | undefined) => {
-    setRefused(false);
-    if (!to || !(await api.siteGo(props.site.conversationId, to).catch(() => false))) return setRefused(true);
+    const request = ++navigation;
+    const owner = props.site.conversationId;
+    setRefused(undefined);
+    if (!to) return setRefused('site.refused');
+    const opened = await api.siteGo(owner, to).catch(() => false);
+    if (request !== navigation || owner !== props.site.conversationId || box?.closest<HTMLElement>('.runcol')?.dataset.exiting === 'true') return;
+    if (!opened) return setRefused('site.openFailed');
     setTyped(undefined);
     address?.blur();
     // The new page is the live one, even on the same site: a step's picture that stood in for the page goes.
@@ -551,7 +588,22 @@ export function SitePane(props: { site: OpenSite; onClose: () => void; wide?: bo
     const size = sizes()?.sizes.find((s) => s.name === name);
     return size ? t('site.size', { screen: t(`site.screen.${size.screen}`), width: String(size.width), height: String(size.height) }) : t('site.size.own');
   };
-  const pickSize = async (name: string | null) => setSizes((await api.siteSize(true, name).catch(() => undefined)) ?? sizes());
+  const [sizing, setSizing] = createSignal(false);
+  const [sizeError, setSizeError] = createSignal<string>();
+  const pickSize = async (name: string | null) => {
+    if (sizing()) return false;
+    setSizing(true);
+    try {
+      setSizes(await api.siteSize(true, name));
+      setSizeError(undefined);
+      return true;
+    } catch (error) {
+      setSizeError(errorText(error));
+      return false;
+    } finally {
+      setSizing(false);
+    }
+  };
   const sizeMenu = (e: MouseEvent, from: HTMLElement) =>
     openMenu(e, [null, ...(sizes()?.sizes.map((s) => s.name) ?? [])].map((name) => ({
       id: name ?? 'own',
@@ -560,7 +612,6 @@ export function SitePane(props: { site: OpenSite; onClose: () => void; wide?: bo
     })), from);
   const [signingIn, setSigningIn] = createSignal(false);
   let address: HTMLInputElement | undefined;
-  const [focused, setFocused] = createSignal(false);
   const addressKeys = (e: KeyboardEvent) => {
     if (e.key === 'Enter') {
       e.preventDefault();
@@ -570,7 +621,7 @@ export function SitePane(props: { site: OpenSite; onClose: () => void; wide?: bo
       e.stopPropagation();
       if (typed() !== undefined) {
         setTyped(undefined);
-        setRefused(false);
+        setRefused(undefined);
         requestAnimationFrame(() => address?.select());
       } else address?.blur();
     }
@@ -597,8 +648,17 @@ export function SitePane(props: { site: OpenSite; onClose: () => void; wide?: bo
   const [busy, setBusy] = createSignal<ReadonlySet<string>>(new Set());
   const [loading, setLoading] = createSignal(false);
   const [history, setHistory] = createSignal<[boolean, boolean]>([false, false]);
-  const readHistory = () => (blank() ? setHistory([false, false]) : void api.siteHistory(conversation()).then(setHistory, () => {}));
-  createEffect(on([live, blank], readHistory));
+  let historyRead = 0;
+  onCleanup(() => historyRead++);
+  const readHistory = () => {
+    const request = ++historyRead;
+    const owner = conversation();
+    if (blank()) return setHistory([false, false]);
+    void api.siteHistory(owner).then((next) => {
+      if (request === historyRead && owner === conversation()) setHistory(next);
+    }, () => {});
+  };
+  createEffect(on([conversation, live, blank], readHistory));
   createEffect(on(blank, (none) => none && setLoading(false)));
   const listening = [
     api.onSiteTabs((id) => id === conversation() && readTabs()),
@@ -611,7 +671,10 @@ export function SitePane(props: { site: OpenSite; onClose: () => void; wide?: bo
         return next;
       });
     }),
-    api.onSiteLoading(setLoading),
+    api.onSiteLoading((loading) => {
+      setLoading(loading);
+      if (!loading) readHistory();
+    }),
     api.onSiteKey((key) => siteKey(key as SiteKey)),
   ].map((listening) => listening.catch(() => () => {}));
   onCleanup(() => listening.forEach((stopping) => void stopping.then((unlisten) => unlisten()).catch(() => {})));
@@ -621,11 +684,16 @@ export function SitePane(props: { site: OpenSite; onClose: () => void; wide?: bo
   let agentSteps = props.site.steps;
   createEffect(() => props.site.steps && (agentSteps = props.site.steps));
   const step = async (kind: SiteTabStep, tab?: string) => {
-    if (tab === '') return kind === 'close' ? props.onClose() : undefined;
-    const answer = await api.siteTab(conversation(), kind, tab).catch(() => null);
+    if (tab === '') return kind === 'close' ? close() : undefined;
+    const request = ++navigation;
+    const owner = conversation();
+    const answer = await api.siteTab(owner, kind, tab).catch(() => null);
+    if (request !== navigation || owner !== conversation() || box?.closest<HTMLElement>('.runcol')?.dataset.exiting === 'true') return;
     if (!answer || answer.tabs === null) return;
+    setTyped(undefined);
+    setRefused(undefined);
     setTabs(answer.tabs);
-    if (!answer.tabs.tabs.length) return props.onClose();
+    if (!answer.tabs.tabs.length) return close();
     const now = answer.tabs.tabs.find((t) => t.id === answer.tabs.front);
     if (!now) return;
     // The agent's steps are the log of its own tab only.
@@ -778,7 +846,7 @@ export function SitePane(props: { site: OpenSite; onClose: () => void; wide?: bo
               <Icon name={props.wide ? 'shrink' : 'expand'} />
             </button>
           </Show>
-          <button class="iconbtn" aria-label={t('run.close')} title={t('run.close')} onClick={() => props.onClose()}>
+          <button class="iconbtn" aria-label={t('run.close')} title={t('run.close')} onClick={close}>
             <Icon name="close" />
           </button>
         </div>
@@ -807,10 +875,11 @@ export function SitePane(props: { site: OpenSite; onClose: () => void; wide?: bo
               spellcheck={false}
               autocomplete="off"
               aria-label={t('site.address')}
-              aria-invalid={refused() || undefined}
+              aria-invalid={refused() === 'site.refused' || undefined}
+              aria-describedby={refused() ? 'site-address-error' : undefined}
               placeholder={t('site.addressHint')}
               value={typed() ?? (blank() ? '' : live())}
-              onInput={(e) => (setTyped(e.currentTarget.value), setRefused(false))}
+              onInput={(e) => (navigation++, setTyped(e.currentTarget.value), setRefused(undefined))}
               onFocus={(e) => (setFocused(true), e.currentTarget.select())}
               onBlur={() => setFocused(false)}
               onKeyDown={addressKeys}
@@ -830,11 +899,20 @@ export function SitePane(props: { site: OpenSite; onClose: () => void; wide?: bo
           </button>
         </div>
       </div>
+      <Show when={!blank() && !picked() && sizes()?.now}>
+        <div class="site-preview">
+          <span>{t('site.preview', { size: sizeWords(sizes()?.now) })}</span>
+          <button class="btn site-fit" disabled={sizing()} onClick={() => void pickSize(null).then((fitted) => fitted && address?.focus())}>{t('site.size.fit')}</button>
+        </div>
+      </Show>
       <Show when={signingIn()}>
         <Cookies conversationId={props.site.conversationId} onClose={() => setSigningIn(false)} />
       </Show>
+      <Show when={sizeError()}>
+        {(error) => <p class="side-meta bad" role="alert">{fromEngine(error())}</p>}
+      </Show>
       <Show when={refused()}>
-        <p class="side-meta bad" role="alert">{t('site.refused')}</p>
+        {(error) => <p class="side-meta bad" id="site-address-error" role="alert">{t(error())}</p>}
       </Show>
       <div class="rc-body side-body site-body">
         {/* The sizes of a check are a list a screen reader walks, never one image. */}

@@ -22,6 +22,31 @@ fn answer<T>(slot: &Slot<T>, result: Result<T, String>) {
     }
 }
 
+/// Test builds only: read the actual profile's private-mode flag on its owning thread.
+#[cfg(all(windows, feature = "test-hooks"))]
+pub fn test_private(webview: &tauri::Webview) -> oneshot::Receiver<Result<bool, String>> {
+    use webview2_com::Microsoft::Web::WebView2::Win32::ICoreWebView2_13;
+    use windows_core::Interface;
+    let (tx, rx) = oneshot::channel();
+    let tx: Slot<bool> = Arc::new(Mutex::new(Some(tx)));
+    let failed = tx.clone();
+    let queued = webview.with_webview(move |platform| {
+        // SAFETY: read-only getters on live COM objects, on the UI thread Tauri gives us; no object leaves it.
+        let private = (|| unsafe {
+            let core = platform.controller().CoreWebView2()?.cast::<ICoreWebView2_13>()?;
+            let profile = core.Profile()?;
+            let mut private = windows_core::BOOL(0);
+            profile.IsInPrivateModeEnabled(&mut private)?;
+            Ok::<_, windows_core::Error>(private.as_bool())
+        })();
+        answer(&tx, private.map_err(|e| e.message()));
+    });
+    if let Err(error) = queued {
+        answer(&failed, Err(error.to_string()));
+    }
+    rx
+}
+
 /// Sends `method` with its JSON `params` to the pane's page and answers with the result's JSON, or why it failed.
 #[cfg(windows)]
 pub fn devtools(webview: &tauri::Webview, method: &str, params: String) -> oneshot::Receiver<Result<String, String>> {

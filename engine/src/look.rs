@@ -256,6 +256,7 @@ mod tests {
             words: vec![],
             words_cut: false,
             words_chars: None,
+            transcript: None,
             check: false,
             started: None,
             ended: None,

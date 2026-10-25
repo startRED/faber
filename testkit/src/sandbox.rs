@@ -54,6 +54,9 @@ pub struct Launch {
     pub codex: CliSlot,
     /// `FABER_FAKE_RECORDING`, for the fake CLIs.
     pub recording: Option<PathBuf>,
+    /// Per-vendor fake replay overrides; passed as structured arguments, never inherited from the person.
+    pub claude_recording: Option<PathBuf>,
+    pub codex_recording: Option<PathBuf>,
     /// `FABER_SETUP_SOURCE`: a loopback server; a dead address when `None`.
     pub setup_source: Option<String>,
     pub cdp_port: Option<u16>,
@@ -86,10 +89,11 @@ pub struct Sandbox {
 impl Sandbox {
     pub fn new() -> io::Result<Sandbox> {
         let root = plain(tempfile::Builder::new().prefix("faber-test-").tempdir()?.keep().canonicalize()?);
-        let observed = root.join("observed");
-        let enclosing = observed.join("enclosing");
-        let boundary = enclosing.join("boundary");
-        let scenario = boundary.join("scenario");
+        // Keep all four audited ancestors short enough for WebView2's nested database paths.
+        let observed = root.join("o");
+        let enclosing = observed.join("e");
+        let boundary = enclosing.join("b");
+        let scenario = boundary.join("s");
         let sandbox = scenario.join("sandbox");
         let profile = sandbox.join("profile");
         let sb = Sandbox {
@@ -262,12 +266,18 @@ pub fn child_env(parent: &[(String, String)], sb: &Sandbox, launch: &Launch, fak
             set("FABER_CHECKS_FILTER", filter.clone());
         }
     }
-    let slot = |slot: CliSlot| match slot {
+    let slot = |slot: CliSlot, recording: Option<&PathBuf>| match slot {
         CliSlot::Off => Some(String::new()),
-        CliSlot::Fake => Some(json!({ "command": path(fake_cli), "prefix": [] }).to_string()),
+        CliSlot::Fake => {
+            let prefix = recording.map_or_else(Vec::new, |recording| vec!["--faber-recording".to_string(), path(recording)]);
+            Some(json!({ "command": path(fake_cli), "prefix": prefix }).to_string())
+        }
         CliSlot::Absent => None,
     };
-    for (name, value) in [("FABER_CLI_CLAUDE", slot(launch.claude)), ("FABER_CLI_CODEX", slot(launch.codex))] {
+    for (name, value) in [
+        ("FABER_CLI_CLAUDE", slot(launch.claude, launch.claude_recording.as_ref())),
+        ("FABER_CLI_CODEX", slot(launch.codex, launch.codex_recording.as_ref())),
+    ] {
         if let Some(value) = value {
             set(name, value);
         }
@@ -341,6 +351,32 @@ mod tests {
         assert_eq!(child_env(&parent, &sb, &launch, fake).get("FABER_CHECKS_FILTER").map(String::as_str), Some(filter));
         let launch = Launch { checks_filter: None, ..launch };
         assert!(!child_env(&parent, &sb, &launch, fake).contains_key("FABER_CHECKS_FILTER"));
+    }
+
+    #[test]
+    fn vendor_recordings_are_structured_fake_arguments_and_do_not_reach_other_slots() {
+        let sb = Sandbox::new().unwrap();
+        let launch = Launch {
+            claude: CliSlot::Fake,
+            codex: CliSlot::Fake,
+            recording: Some(PathBuf::from("fallback.jsonl")),
+            claude_recording: Some(sb.sandbox.join("main recording.jsonl")),
+            codex_recording: Some(sb.sandbox.join("helper recording.setup.json")),
+            ..Launch::default()
+        };
+        let parent = pairs(&[("FABER_CLI_CLAUDE", "stale"), ("FABER_FAKE_RECORDING", "stale")]);
+        let env = child_env(&parent, &sb, &launch, Path::new("fake-cli.exe"));
+        for (vendor, path) in [("CLAUDE", launch.claude_recording.as_ref().unwrap()), ("CODEX", launch.codex_recording.as_ref().unwrap())] {
+            let cli: serde_json::Value = serde_json::from_str(&env[&format!("FABER_CLI_{vendor}")]).unwrap();
+            assert_eq!(cli["command"], "fake-cli.exe");
+            assert_eq!(cli["prefix"], json!(["--faber-recording", path.to_string_lossy()]));
+        }
+        assert_eq!(env["FABER_FAKE_RECORDING"], "fallback.jsonl");
+        let off = child_env(&parent, &sb, &Launch { codex: CliSlot::Off, ..launch.clone() }, Path::new("fake-cli.exe"));
+        assert_eq!(off["FABER_CLI_CODEX"], "");
+        let default = child_env(&parent, &sb, &Launch { claude_recording: None, ..launch }, Path::new("fake-cli.exe"));
+        let cli: serde_json::Value = serde_json::from_str(&default["FABER_CLI_CLAUDE"]).unwrap();
+        assert_eq!(cli["prefix"], json!([]));
     }
 
     #[test]

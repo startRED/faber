@@ -3740,6 +3740,7 @@ async fn r161_the_words_of_parallel_and_nested_subagents_each_stay_on_their_own_
 async fn r161_a_subagent_that_writes_more_than_is_kept_says_so_and_its_words_are_read_when_its_view_opens() {
     let a = "toolu_A";
     let long = "One sentence here. ".repeat(450).trim().to_string();
+    let output = "Full result with 資料 and 🙂. ".repeat(1800);
     let mut entries = claude_agents_start("go", &[a], false);
     entries.extend([
         child_said(a, &long),
@@ -3747,10 +3748,12 @@ async fn r161_a_subagent_that_writes_more_than_is_kept_says_so_and_its_words_are
         child_said(a, &long),
         child_step(a, "a2", "Grep"),
         child_said(a, "Too late."),
+        Entry { input: false, msg: json!({ "type": "user", "parent_tool_use_id": a, "message": { "role": "user", "content": [{ "type": "tool_result", "tool_use_id": "a2", "content": output }] } }) },
     ]);
     entries.extend(claude_agents_end(&[a]));
     let dir = tempfile::tempdir().unwrap();
-    let (engine, mut rx) = engine(dir.path(), Vendor::Claude, fake(entries).spawn);
+    let replay = fake(entries);
+    let (engine, mut rx) = engine(dir.path(), Vendor::Claude, replay.spawn.clone());
     let id = engine.send(ask(Area::Chat, "go", choice("claude", Some("haiku")))).unwrap();
     let c = until(&engine, &id, |c| settled(c, 2)).await;
     assert_eq!(words_of(&c, 1, a), [(0, long.as_str())], "the second entry did not fit, so nothing after the first is kept");
@@ -3771,7 +3774,26 @@ async fn r161_a_subagent_that_writes_more_than_is_kept_says_so_and_its_words_are
         }
     }
     assert!(told, "an update told the screen how much there is");
+    let pages = call.transcript.as_ref().expect("new calls keep a paged transcript").pages;
+    let retained: String = (0..pages).flat_map(|page| engine.child_transcript(&id, a, page).unwrap()).map(|entry| entry.text).collect();
+    assert!(retained.contains("Too late."), "opening the helper must retain the words after the preview limit");
+    assert_eq!(retained.matches(&long).count(), 2, "the preview limit never cuts the retained transcript");
+    assert!(retained.contains(&output), "tool results survive beyond the 4,000-character preview");
+    assert!(engine.child_transcript(&id, "nothing", 0).is_err());
+    assert!(engine.child_transcript("nothing", a, 0).is_err());
+    assert!(engine.child_transcript(&id, a, pages).is_err());
     engine.shutdown();
+    let (reopened, _) = self::engine(dir.path(), Vendor::Claude, replay.spawn);
+    let retained_again: String =
+        (0..pages).flat_map(|page| reopened.child_transcript(&id, a, page).unwrap()).map(|entry| entry.text).collect();
+    assert_eq!(retained_again, retained, "pages survive closing the engine");
+    let branch = reopened.branch_here(&id, &c.messages[1].id).unwrap();
+    reopened.remove(&id);
+    assert!(!dir.path().join("child-transcripts").join(&id).exists(), "the deleted conversation leaves no transcript folder");
+    let branched: String =
+        (0..pages).flat_map(|page| reopened.child_transcript(&branch, a, page).unwrap()).map(|entry| entry.text).collect();
+    assert_eq!(branched, retained, "the retained branch owns its transcript after its parent is deleted");
+    reopened.shutdown();
 }
 
 /// R161 step 3: a subagent's words follow its steps. Once the turn is done neither is kept, and a call from an earlier turn keeps
@@ -5142,6 +5164,11 @@ async fn r161_the_person_writes_to_a_codex_helper_at_work_and_it_takes_the_messa
     assert_eq!(helper, Vec::<String>::new(), "the message is steered into the helper's turn, in the helper's own words");
     told_was_taken(&tool, &report);
     assert!(report.starts_with("`config.toml` tem `timeout = 30`"), "its final words are the report: {report}");
+    assert!(
+        tool.transcript.as_ref().unwrap().pages <= 8,
+        "metadata between streamed words must not make one history page per token: {:?}",
+        tool.transcript
+    );
 }
 
 /// R161 step 5: Claude Code reads a line written during a tool step at its next step, with one result for both, and echoes

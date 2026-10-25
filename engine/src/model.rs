@@ -112,6 +112,12 @@ pub struct Recovery {
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct Transcript {
+    pub pages: u64,
+    pub failed: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct ToolUse {
     pub id: String,
     pub name: String,
@@ -159,6 +165,9 @@ pub struct ToolUse {
     /// so the side chat loads them while it is open and again when this changes.
     #[serde(default, skip_serializing_if = "Option::is_none", rename = "wordsChars")]
     pub words_chars: Option<usize>,
+    /// Visible child-session pages, kept outside the conversation and read one at a time.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub transcript: Option<Transcript>,
 }
 
 impl ToolUse {
