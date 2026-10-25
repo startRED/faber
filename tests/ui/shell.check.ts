@@ -315,6 +315,33 @@ check('shell: over the stage, an opened subagent as a full thread is no dialog: 
   );
 });
 
+check('shell: narrow navigation has a visible close button that returns focus to its menu', async () => {
+  for (const { code } of LANGUAGES) {
+    await atWidth(720, () => shell(['claude'], 'none', async (root) => {
+      const menu = root.querySelector<HTMLButtonElement>('.topbar .menu')!;
+      menu.click(); await settle();
+      const side = root.querySelector<HTMLElement>('.side')!;
+      side.querySelectorAll<HTMLButtonElement>('.areas .area')[1].click(); await settle();
+      ok(side.classList.contains('shown'), 'Projects keeps navigation open');
+      const close = side.querySelector<HTMLButtonElement>('.side-close');
+      ok(close, `${code}: the empty project drawer has an explicit close control`);
+      equal(close.getAttribute('aria-label'), t('side.hide'));
+      ok(close.getBoundingClientRect().width > 0 && getComputedStyle(close).opacity === '1', 'closing does not require hover');
+      ok(close.tabIndex >= 0, 'close belongs to the normal Tab order');
+      const bounds = close.getBoundingClientRect();
+      const primary = side.querySelector('.newchat')!.getBoundingClientRect();
+      ok(bounds.left >= primary.right && bounds.right <= innerWidth && bounds.top >= 0 && bounds.bottom <= innerHeight, 'close fits beside New conversation in the window');
+      close.focus(); equal(document.activeElement, close, 'the keyboard can reach close');
+      close.click(); await settle();
+      ok(!side.classList.contains('shown') && !root.querySelector<HTMLElement>('.main')!.inert, 'closing exposes the work area');
+      equal(document.activeElement, menu, 'focus returns to the menu');
+    }, undefined, talk, [], code));
+  }
+  await atWidth(1280, () => shell(['claude'], 'none', (root) => {
+    equal(root.querySelector('.side-close'), null, 'docked navigation needs no overlay close button');
+  }));
+});
+
 check('shell: changing work area keeps narrow navigation open until a row, Escape or Catalog is chosen', async () => {
   for (const { code } of LANGUAGES) {
     await atWidth(720, () => shell(['claude'], 'none', async (root) => {

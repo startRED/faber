@@ -47,7 +47,8 @@ query replaces the waiter and cancels the running scan between files. No index f
   underneath wait. The box is the shared search field (`.field.search`), taller (`--h-lg`), with no ring of its own; rows use
   `--h-md`, the chosen one on `--s3`, and the project or area of a conversation sits quiet at the right. Empty, it lists
   "Recent" (five conversations) then "Actions"; typing gives one list ranked across everything, eight rows at most.
-  Moving the choice by arrow changes its colour only (`--dur-fast`), no travel. It exists in the page only while open.
+  Moving the choice by arrow changes its colour only (`--dur-fast`), no travel. It stays for its own exit, then leaves
+  the page without a second list-exit copy over the conversation.
 - **Ctrl+F** in an open conversation slides a bar down from the top right of the thread (12 px and a fade, `--dur-ui`; it
   leaves with `--dur-exit`) with the shared search field, "3 of 12", previous, next and close. Matches are painted with the
   CSS Custom Highlight API: all in the accent at 42 %, the current one in the full accent, so no message is rewritten and

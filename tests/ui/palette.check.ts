@@ -5,6 +5,7 @@ import type { Project, Summary } from '../../ui/api.ts';
 import { Palette } from '../../ui/Palette.tsx';
 import { rank } from '../../ui/palette.ts';
 import { t } from '../../ui/i18n.ts';
+import { animateList, level } from '../../ui/motion.ts';
 import { check, deepEqual, equal, ok } from './check.ts';
 
 const settle = (ms = 30) => new Promise((resolve) => setTimeout(resolve, ms));
@@ -27,10 +28,11 @@ function stage(motion = 'none') {
   return root;
 }
 
-function mount(root: HTMLElement, calls: string[], enabled: () => boolean = () => true) {
+function mount(root: HTMLElement, calls: string[], enabled: () => boolean = () => true, appMotion = false) {
   return render(
-    () =>
-      createComponent(Palette, {
+    () => {
+      if (appMotion) animateList(root);
+      return createComponent(Palette, {
         get enabled() { return enabled(); },
         conversations, projects,
         onOpen: (c) => calls.push(`open ${c.id}`),
@@ -41,7 +43,8 @@ function mount(root: HTMLElement, calls: string[], enabled: () => boolean = () =
         onSettings: (section) => calls.push(`settings ${section ?? ''}`),
         onRunning: () => calls.push('running'),
         onAddProject: () => calls.push('add'),
-      }),
+      });
+    },
     root,
   );
 }
@@ -197,6 +200,47 @@ check('palette: it does not open while the first run, the tutorial or an update 
     await settle(300);
     equal(document.querySelector('.pal-scrim'), null, 'it closes when something takes over');
   } finally {
+    dispose();
+    root.remove();
+  }
+});
+
+check('palette: closing after its own exit leaves no second copy in the app motion layer', async () => {
+  const root = stage('full');
+  const dispose = mount(root, [], () => true, true);
+  let copied = false;
+  const roots = new WeakSet<ShadowRoot>();
+  const watch = new MutationObserver(() => record());
+  const record = () => {
+    for (const host of document.querySelectorAll('.motion-exit')) {
+      const shadow = host.shadowRoot;
+      if (!shadow) continue;
+      copied ||= !!shadow.querySelector('[data-check-palette="own-exit"]');
+      if (!roots.has(shadow)) {
+        roots.add(shadow);
+        watch.observe(shadow, { childList: true, subtree: true });
+      }
+    }
+  };
+  try {
+    await settle(300);
+    equal(level(root), 'full', 'the app motion list must exercise full motion');
+    ctrlK();
+    await settle(320);
+    const live = root.querySelector<HTMLElement>('.pal-scrim')!;
+    ok(live, 'the real palette opened inside the app motion list');
+    live.dataset.checkPalette = 'own-exit';
+    watch.observe(document.body, { childList: true, subtree: true });
+    record();
+    press({ key: 'Escape' });
+    ok(live.classList.contains('leaving') && live.isConnected, 'the palette plays its own exit before removal');
+    for (let i = 0; live.isConnected && i < 100; i++) await settle(10);
+    equal(live.isConnected, false, 'the palette finished its own exit');
+    await new Promise<void>((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve())));
+    record();
+    equal(copied, false, 'a completed palette exit must not restart as a generic exit copy');
+  } finally {
+    watch.disconnect();
     dispose();
     root.remove();
   }
