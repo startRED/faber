@@ -116,7 +116,7 @@ fn answers_a_card(ctx: &mut Ctx) -> Result {
     same(page.eval(PICKED)?.as_str(), Some(full_access.as_str()), "older settings default to Don't ask")?;
     pick_mode(page, 1)?;
     page.wait_for("the permissions choice to be saved", &format!("({PICKED}) === {}", serde_json::json!(ask_mode)))?;
-    page.cdp.call("Page.reload", serde_json::json!({}))?;
+    page.reload()?;
     page.wait_visible(&settings)?;
     page.click(&settings)?;
     page.wait_visible(&pick)?;
