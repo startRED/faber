@@ -367,6 +367,67 @@ fn native_picker(ctx: &mut Ctx) -> Result {
     Ok(())
 }
 
+fn short_menus(ctx: &mut Ctx, page: &mut Page, mode: &str, found: &mut Vec<Finding>) -> Result {
+    for (selector, surface) in [(".cmenu", "context-menu"), (".st-menu", "permission-menu")] {
+        if selector == ".st-menu" {
+            page.press("Control+,")?;
+            page.wait_visible(&css("#set-permissions-pick"))?;
+            page.wait_for(
+                "Settings to finish arriving",
+                "document.getAnimations().every(a => a.effect.getTiming().iterations === Infinity || (!a.pending && a.playState !== 'running'))",
+            )?;
+        } else {
+            page.click(&css(".composer textarea"))?;
+        }
+        for step in ["opens", "closes"] {
+            // Slow playback does not slow keepForExit's wall timer; judge removal at the real rate.
+            page.cdp
+                .call("Animation.setPlaybackRate", json!({ "playbackRate": if mode == "full" && step == "opens" { 0.25 } else { 1.0 } }))?;
+            let w = watch(ctx, &format!("{mode} {surface} {step}"), page, &[surface], |p| {
+                if step == "closes" {
+                    p.press("Escape")?;
+                    if mode != "full" {
+                        same(
+                            p.eval(&format!("document.querySelector({}) === null", json!(selector)))?,
+                            json!(true),
+                            "reduced/none menu leaves immediately after Escape",
+                        )?;
+                    }
+                    return Ok(());
+                }
+                if selector == ".cmenu" {
+                    p.right_click(&css(".composer textarea"))?;
+                } else {
+                    p.click(&css("#set-permissions-pick"))?;
+                }
+                p.eval(&format!("document.querySelector({}).dataset.surface = {}; true", json!(selector), json!(surface))).map(drop)
+            })?;
+            if mode == "full" {
+                let screen = if selector == ".cmenu" { "chat.new" } else { "settings" };
+                judge_motion(ctx, found, screen, surface, step, mode, &w.samples[0])?;
+            } else {
+                let animated = w.anims.iter().filter(|a| a.target.contains(selector)).count();
+                same(animated, 0, &format!("{mode} {surface} {step} animations"))?;
+            }
+            if step == "closes" {
+                page.wait_gone(&css(selector))?;
+                let focus = if selector == ".cmenu" { ".composer textarea" } else { "#set-permissions-pick" };
+                same(
+                    page.eval(&format!("document.activeElement === document.querySelector({})", json!(focus)))?,
+                    json!(true),
+                    "menu returns focus",
+                )?;
+            }
+        }
+        if selector == ".st-menu" {
+            page.press("Escape")?;
+            page.wait_gone(&css(".settings"))?;
+        }
+    }
+    page.cdp.call("Animation.setPlaybackRate", json!({ "playbackRate": 0.25 }))?;
+    Ok(())
+}
+
 fn motion(ctx: &mut Ctx) -> Result {
     // No look chosen yet: the first run shows its look step, and the tutorial that follows has a card to watch.
     ctx.write_settings(&json!({ "language": "en", "setup": "done" }))?;
@@ -445,11 +506,13 @@ fn motion(ctx: &mut Ctx) -> Result {
     let page = &mut app.page;
     let w = watch(ctx, "settings closes", page, &["settings"], |p| p.press("Escape"))?;
     judge_motion(ctx, &mut found, "settings", "settings", "closes", &config, &w.samples[0])?;
+    short_menus(ctx, page, "full", &mut found)?;
 
     // M6: with less motion asked for, nothing may travel. Reduced (the system's preference): only quick fades.
     let page = &mut app.page;
     system_motion(page, true)?;
     pause(0.3);
+    short_menus(ctx, page, "reduced", &mut found)?;
     let reduced = Config { width: 1440, height: 900, look: "sala", language: "en", size: 15, motion: "reduced" }.label();
     for step in ["opens", "closes"] {
         let w = watch(ctx, &format!("reduced {step}"), page, &["running"], |p| click(p, ".run-btn"))?;
@@ -485,6 +548,7 @@ fn motion(ctx: &mut Ctx) -> Result {
     inject(page)?;
     page.cdp.call("Animation.setPlaybackRate", json!({ "playbackRate": 0.25 }))?;
     pause(0.4);
+    short_menus(ctx, page, "none", &mut found)?;
     for step in ["opens", "closes"] {
         let w = watch(ctx, &format!("none {step}"), page, &["running"], |p| click(p, ".run-btn"))?;
         for problem in sentinel::reduced_problems("none", &w.anims) {
