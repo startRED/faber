@@ -2153,6 +2153,8 @@ export const fr: Messages = {
   'notes.254.fixed': 'Changer rapidement de thème ne provoque plus d’erreur de page lors de l’annulation de l’animation.',
   'notes.255.fixed': 'Aller à la fin reste visible à l’ouverture d’un long historique d’assistant.',
   'notes.256.better': 'L’écran de connexion explique ce que fait le choix d’une IA et garde les options visibles dans les fenêtres peu hautes.',
+  'notes.257.fixed': 'Quand Projets est vide, la barre latérale explique l’usage des dossiers et laisse le bouton d’ajout visible.',
+  'notes.258.fixed': 'Dans une fenêtre étroite, la barre latérale finit de glisser quand vous la fermez, au lieu de disparaître brusquement.',
   'update.checking': 'Recherche d’une mise à jour…',
   'update.downloading': 'Téléchargement de la mise à jour…',
   'update.downloadingPercent': 'Téléchargement de la mise à jour… {percent} %',

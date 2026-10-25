@@ -2140,6 +2140,8 @@ export const ptBR: Messages = {
   'notes.254.fixed': 'Trocar de tema rapidamente não causa mais um erro de página ao cancelar a animação.',
   'notes.255.fixed': 'Ir para o fim continua visível ao abrir um histórico longo de um ajudante.',
   'notes.256.better': 'A tela de conexão explica o que acontece ao escolher uma IA e mantém as opções visíveis em janelas baixas.',
+  'notes.257.fixed': 'Projetos vazio deixa de esconder o próximo passo: a barra lateral explica o uso das pastas e mostra o botão pra adicionar.',
+  'notes.258.fixed': 'Ao fechar a barra lateral numa janela estreita, ela termina de deslizar em vez de sumir de repente.',
   'update.checking': 'Procurando atualização…',
   'update.downloading': 'Baixando atualização…',
   'update.downloadingPercent': 'Baixando atualização… {percent}%',

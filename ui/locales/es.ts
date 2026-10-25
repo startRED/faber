@@ -2153,6 +2153,8 @@ export const es: Messages = {
   'notes.254.fixed': 'Cambiar de tema rápidamente ya no provoca un error de página al cancelar la animación.',
   'notes.255.fixed': 'Ir al final sigue visible al abrir un historial largo de un ayudante.',
   'notes.256.better': 'La pantalla de conexión explica qué ocurre al elegir una IA y mantiene las opciones visibles en ventanas bajas.',
+  'notes.257.fixed': 'Cuando Proyectos está vacío, la barra lateral explica para qué sirven las carpetas y muestra el botón para añadirlas.',
+  'notes.258.fixed': 'Al cerrar la barra lateral en una ventana estrecha, termina de deslizarse en vez de desaparecer de golpe.',
   'update.checking': 'Buscando una actualización…',
   'update.downloading': 'Descargando actualización…',
   'update.downloadingPercent': 'Descargando actualización… {percent} %',

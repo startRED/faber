@@ -436,6 +436,7 @@ export function Sidebar(props: Props) {
             when={props.projects.length > 0}
             fallback={
               <div class="side-empty">
+                <p>{t('empty.openProjectBody')}</p>
                 <Peek />
                 <span>{t('side.noProjects')}</span>
               </div>

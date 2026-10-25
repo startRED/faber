@@ -2033,6 +2033,8 @@ export const en = {
   'notes.254.fixed': 'Switching themes quickly no longer reports a cancelled animation as a page error.',
   'notes.255.fixed': 'Jump to latest stays visible when you open a helper’s long history.',
   'notes.256.better': 'The connection screen explains what choosing an AI does and keeps its choices visible in short windows.',
+  'notes.257.fixed': 'An empty Projects list explains how Faber uses folders and keeps Add project folder visible.',
+  'notes.258.fixed': 'The sidebar finishes sliding away when you close it in a narrow window, instead of disappearing abruptly.',
   'update.checking': 'Looking for an update…',
   'update.downloading': 'Downloading update…',
   'update.downloadingPercent': 'Downloading update… {percent}%',

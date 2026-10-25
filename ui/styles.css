@@ -118,6 +118,8 @@ html.sizing :is(.shell, .shell > .main, .shell .work > .runcol) { transition: no
    never visibility: a hidden button leaves the tab order, so the keyboard could not reach it to reveal it. */
 .group-h .plus { position: absolute; right: 0; top: -7px; opacity: 0; }
 .projects:hover .group-h .plus, .chat-groups:hover .group-h .plus, .group-h:focus-within .plus, .group-h .plus:focus-visible { opacity: 1; }
+.projects:has(.side-empty) .group-h { min-height: var(--h-sm); padding-bottom: 0; }
+.projects:has(.side-empty) .group-h .plus { top: 0; opacity: 1; }
 .plus:hover { background: var(--s3); color: var(--ink); }
 .list { display: grid; grid-template-columns: minmax(0, 1fr); gap: 16px; align-content: start; }
 .list > section, .proj, .crow { min-width: 0; }
@@ -489,7 +491,7 @@ svg.i.sm { width: 14px; height: 14px; }
 @media (max-width: 899px) {
   .shell { grid-template-columns: minmax(0, 1fr); }
   .main { margin-left: var(--stage-inset); }
-  .side { position: absolute; left: 0; top: 0; bottom: 0; z-index: 30; width: 288px; background: var(--frame); box-shadow: 18px 0 40px -20px rgba(0, 0, 0, 0.7); visibility: hidden; opacity: 0; transform: translateX(-100%); transition: transform var(--dur-exit) var(--ease-in), opacity var(--dur-exit) var(--ease-in); }
+  .side { position: absolute; left: 0; top: 0; bottom: 0; z-index: 30; width: 288px; background: var(--frame); box-shadow: 18px 0 40px -20px rgba(0, 0, 0, 0.7); visibility: hidden; opacity: 0; transform: translateX(-100%); transition: transform var(--dur-exit) var(--ease-in), opacity var(--dur-exit) var(--ease-in), visibility 0s linear var(--dur-exit); }
   .side.shown { visibility: visible; opacity: 1; transform: translateX(0); transition: transform var(--dur-ui) var(--ease), opacity var(--dur-ui) var(--ease), visibility 0s; }
   .scrim { display: block; position: absolute; inset: 0; z-index: 25; background: rgba(0, 0, 0, 0.5); cursor: default; }
 }

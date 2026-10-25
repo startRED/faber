@@ -2153,6 +2153,8 @@ export const de: Messages = {
   'notes.254.fixed': 'Schnelle Themewechsel melden eine abgebrochene Animation nicht mehr als Seitenfehler.',
   'notes.255.fixed': 'Zum Ende bleibt beim Öffnen eines langen Helferverlaufs sichtbar.',
   'notes.256.better': 'Der Verbindungsbildschirm erklärt die KI-Auswahl und hält die Optionen auch in niedrigen Fenstern sichtbar.',
+  'notes.257.fixed': 'Bei einer leeren Projektliste erklärt die Seitenleiste den Zweck der Ordner und zeigt die Schaltfläche zum Hinzufügen direkt an.',
+  'notes.258.fixed': 'In schmalen Fenstern gleitet die Seitenleiste beim Schließen vollständig hinaus, statt plötzlich zu verschwinden.',
   'update.checking': 'Suche nach einem Update…',
   'update.downloading': 'Update wird heruntergeladen…',
   'update.downloadingPercent': 'Update wird heruntergeladen… {percent} %',
