@@ -38,10 +38,12 @@ impl Runner for Fake {
     }
 }
 
-fn engine(dir: &Path, spawn: faber_engine::proc::Spawner) -> Engine {
+fn engine(dir: &crate::support::DataFolder, spawn: faber_engine::proc::Spawner) -> Engine {
     let (tx, _rx) = tokio::sync::mpsc::unbounded_channel();
     let opts = EngineOptions {
-        data_dir: dir.join("data"),
+        data_dir: dir.path().into(),
+        #[cfg(windows)]
+        chat_dir: dir.chat_path().into(),
         clis: BTreeMap::from([(Vendor::Claude, Cli { command: "claude".into(), prefix: vec![] })]),
         spawn,
         windows: false,
@@ -79,12 +81,12 @@ fn LIST(id: u64) -> serde_json::Value {
 
 #[tokio::test]
 async fn the_agent_runs_the_project_s_own_checks_and_reads_what_failed() {
-    let dir = support::canonical_tempdir().unwrap();
+    let dir = support::DataFolder::new();
     let folder = dir.path().join("project");
     std::fs::create_dir_all(&folder).unwrap();
     std::fs::write(folder.join("AGENTS.md"), AGENTS).unwrap();
     let (spawn, made) = pipes();
-    let engine = engine(dir.path(), spawn);
+    let engine = engine(&dir, spawn);
     let runner = Arc::new(Fake::default());
     engine.set_verifier(Arc::new(Verifier::new(runner.clone())));
     let project = engine.add_project(&folder.to_string_lossy()).unwrap();
@@ -128,9 +130,9 @@ async fn the_agent_runs_the_project_s_own_checks_and_reads_what_failed() {
 
 #[tokio::test]
 async fn the_checks_are_offered_only_where_the_agent_already_runs_commands_without_asking() {
-    let dir = support::canonical_tempdir().unwrap();
+    let dir = support::DataFolder::new();
     let (spawn, made) = pipes();
-    let engine = engine(dir.path(), spawn);
+    let engine = engine(&dir, spawn);
     engine.set_verifier(Arc::new(Verifier::new(Arc::new(Fake::default()))));
     engine.save_settings(Settings { permissions: Some(Permissions::Ask), ..Settings::default() }).unwrap();
     let project = engine.add_project(&dir.path().to_string_lossy()).unwrap();
@@ -233,14 +235,14 @@ fn ask(conversation_id: Option<String>, project_id: Option<String>, text: &str) 
 
 /// A project conversation in full access on a hand-driven Claude process, Faber's checks run by `runner`, on a known
 /// subscription (Faber sends a turn by itself only on one).
-async fn decided<R: Runner + 'static>(dir: &Path, runner: Arc<R>) -> (Engine, support::Pipe, String) {
+async fn decided<R: Runner + 'static>(dir: &support::DataFolder, runner: Arc<R>) -> (Engine, support::Pipe, String) {
     let (engine, pipe, id, _, _) = decided_in(dir, runner).await;
     (engine, pipe, id)
 }
 
 /// The same, with what starts the next process and the project's id, for a second conversation of the project.
-async fn decided_in<R: Runner + 'static>(dir: &Path, runner: Arc<R>) -> (Engine, support::Pipe, String, Made, String) {
-    let folder = dir.join("project");
+async fn decided_in<R: Runner + 'static>(dir: &support::DataFolder, runner: Arc<R>) -> (Engine, support::Pipe, String, Made, String) {
+    let folder = dir.path().join("project");
     std::fs::create_dir_all(&folder).unwrap();
     std::fs::write(folder.join("AGENTS.md"), AGENTS).unwrap();
     let (spawn, made) = pipes();
@@ -328,9 +330,9 @@ fn state(m: &Message) -> Option<ChecksState> {
 
 #[tokio::test]
 async fn a_reply_that_changed_files_is_done_once_the_checks_pass_and_a_failure_asks_the_agent_to_fix_it() {
-    let dir = support::canonical_tempdir().unwrap();
+    let dir = support::DataFolder::new();
     let runner = Flaky::new(1);
-    let (engine, mut pipe, id) = decided(dir.path(), runner.clone()).await;
+    let (engine, mut pipe, id) = decided(&dir, runner.clone()).await;
     replies(&mut pipe, 1, true).await;
     // The checks failed: the reply says which, and Faber sends one turn by itself, drawn as its quiet line.
     until_turns(&pipe, 2).await;
@@ -354,9 +356,9 @@ async fn a_reply_that_changed_files_is_done_once_the_checks_pass_and_a_failure_a
 
 #[tokio::test]
 async fn checks_that_still_fail_after_two_fixes_need_the_person_and_a_reply_that_changed_nothing_is_not_checked() {
-    let dir = support::canonical_tempdir().unwrap();
+    let dir = support::DataFolder::new();
     let runner = Flaky::new(usize::MAX);
-    let (engine, mut pipe, id) = decided(dir.path(), runner.clone()).await;
+    let (engine, mut pipe, id) = decided(&dir, runner.clone()).await;
     engine.keep_going(&id, true).unwrap();
     for n in 1..=3 {
         replies(&mut pipe, n, true).await;
@@ -427,12 +429,12 @@ impl Executor for Git {
 
 #[tokio::test]
 async fn a_reply_that_changes_files_only_by_a_command_gets_its_checks_and_one_that_changes_nothing_does_not() {
-    let dir = support::canonical_tempdir().unwrap();
+    let dir = support::DataFolder::new();
     let folder = dir.path().join("project");
     std::fs::create_dir_all(&folder).unwrap();
     std::fs::write(folder.join("AGENTS.md"), AGENTS).unwrap();
     let (spawn, made) = pipes();
-    let engine = engine(dir.path(), spawn);
+    let engine = engine(&dir, spawn);
     let git = Git {
         top: folder.to_string_lossy().into_owned(),
         untracked: Arc::default(),
@@ -460,7 +462,7 @@ async fn a_reply_that_changes_files_only_by_a_command_gets_its_checks_and_one_th
     {
         let captures = git.rewind_listed.lock().unwrap();
         assert_eq!(captures.len(), 2, "rewind separately listed saved and ignored files");
-        let history = dir.path().join("data/rewind").canonicalize().unwrap();
+        let history = dir.path().join("rewind").canonicalize().unwrap();
         assert!(
             captures.iter().all(|call| call
                 .args
@@ -499,9 +501,9 @@ async fn a_reply_that_changes_files_only_by_a_command_gets_its_checks_and_one_th
 
 #[tokio::test]
 async fn another_conversation_of_the_same_folder_never_stops_these_checks() {
-    let dir = support::canonical_tempdir().unwrap();
+    let dir = support::DataFolder::new();
     let runner = Gated::new(false);
-    let (engine, mut pipe, id, made, project) = decided_in(dir.path(), runner.clone()).await;
+    let (engine, mut pipe, id, made, project) = decided_in(&dir, runner.clone()).await;
     replies(&mut pipe, 1, true).await;
     until(&engine, &id, |m| m.get(1).and_then(state) == Some(ChecksState::Running)).await;
     // The person leaves a message while the checks run; it goes out once they pass.
@@ -523,9 +525,9 @@ async fn another_conversation_of_the_same_folder_never_stops_these_checks() {
 
 #[tokio::test]
 async fn while_the_checks_run_the_conversation_is_at_work_and_stop_ends_them_with_no_fix() {
-    let dir = support::canonical_tempdir().unwrap();
+    let dir = support::DataFolder::new();
     let runner = Gated::new(true);
-    let (engine, mut pipe, id) = decided(dir.path(), runner.clone()).await;
+    let (engine, mut pipe, id) = decided(&dir, runner.clone()).await;
     replies(&mut pipe, 1, true).await;
     until(&engine, &id, |m| m.get(1).and_then(state) == Some(ChecksState::Running)).await;
     let running = engine.state().running;
@@ -571,9 +573,9 @@ async fn while_the_checks_run_the_conversation_is_at_work_and_stop_ends_them_wit
 
 #[tokio::test]
 async fn keep_going_turned_on_while_the_checks_run_goes_on_once_they_pass() {
-    let dir = support::canonical_tempdir().unwrap();
+    let dir = support::DataFolder::new();
     let runner = Gated::new(false);
-    let (engine, mut pipe, id) = decided(dir.path(), runner.clone()).await;
+    let (engine, mut pipe, id) = decided(&dir, runner.clone()).await;
     replies(&mut pipe, 1, true).await;
     until(&engine, &id, |m| m.get(1).and_then(state) == Some(ChecksState::Running)).await;
     engine.keep_going(&id, true).unwrap();
@@ -591,9 +593,9 @@ async fn keep_going_turned_on_while_the_checks_run_goes_on_once_they_pass() {
 async fn no_fix_is_asked_after_a_question_to_the_person() {
     {
         let (asks, week) = (true, 0.1);
-        let dir = support::canonical_tempdir().unwrap();
+        let dir = support::DataFolder::new();
         let runner = Flaky::new(usize::MAX);
-        let (engine, mut pipe, id) = decided(dir.path(), runner.clone()).await;
+        let (engine, mut pipe, id) = decided(&dir, runner.clone()).await;
         replies_with(&mut pipe, 1, true, asks, week).await;
         let messages = until(&engine, &id, |m| m.get(1).and_then(state).is_some_and(|s| s != ChecksState::Running)).await;
         assert_eq!(state(&messages[1]), Some(ChecksState::NeedsYou), "asks {asks}, week {week}");
@@ -625,7 +627,7 @@ mod processes {
         if faber_engine::cli::find_cli("node").is_none() {
             return;
         }
-        let dir = tempfile::tempdir().unwrap();
+        let dir = support::DataFolder::new();
         // The check starts a child that holds hold.txt open for a minute, and ends at once.
         let script = "require('child_process').spawn('ping',['-n','60','127.0.0.1'],{windowsHide:true,stdio:['ignore',require('fs').openSync('hold.txt','w'),'ignore']}).unref()";
         let v = Verifier::real(None, None);
@@ -642,7 +644,7 @@ mod processes {
         if faber_engine::cli::find_cli("node").is_none() {
             return;
         }
-        let dir = tempfile::tempdir().unwrap();
+        let dir = support::DataFolder::new();
         let spec = faber_engine::verify::Spec {
             program: "node".into(),
             args: vec!["-e".into(), "Buffer.alloc(200*1024*1024, 1)".into()],
@@ -675,7 +677,7 @@ mod processes {
         if faber_engine::cli::find_cli("node").is_none() {
             return;
         }
-        let dir = tempfile::tempdir().unwrap();
+        let dir = support::DataFolder::new();
         let spec = faber_engine::verify::Spec {
             program: "node".into(),
             args: vec!["-e".into(), "Buffer.alloc(600*1024*1024, 1)".into()],
@@ -697,7 +699,7 @@ mod processes {
         if faber_engine::cli::find_cli("node").is_none() {
             return;
         }
-        let dir = tempfile::tempdir().unwrap();
+        let dir = support::DataFolder::new();
         let script = "require('fs').openSync('hold.txt','w');setTimeout(()=>{},60000)";
         let v = Arc::new(Verifier::with_deadline(Arc::new(faber_engine::verify::Real), Duration::from_secs(3)));
         let out = v.verify(request(dir.path(), node(dir.path(), script), Level::Full)).await;

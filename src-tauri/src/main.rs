@@ -1970,6 +1970,13 @@ fn main() {
             });
             let opts = EngineOptions {
                 data_dir: data_dir.clone(),
+                #[cfg(windows)]
+                chat_dir: {
+                    let mut name =
+                        data_dir.file_name().ok_or_else(|| std::io::Error::from(std::io::ErrorKind::InvalidInput))?.to_os_string();
+                    name.push("-chat-work");
+                    data_dir.with_file_name(name)
+                },
                 clis: clis.clone(),
                 spawn: real_spawner(),
                 windows: cfg!(windows),

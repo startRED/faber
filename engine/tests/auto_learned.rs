@@ -15,7 +15,7 @@ use faber_engine::signals::Signals;
 use faber_engine::store::Store;
 use faber_engine::{AppEvent, BranchRequest, Engine, EngineOptions, SendRequest};
 use std::collections::BTreeMap;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 use support::{fake, fixture};
@@ -28,10 +28,12 @@ fn now() -> u64 {
     std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_secs()
 }
 
-fn engine(dir: &Path, spawn: faber_engine::proc::Spawner, ask: Ask) -> (Engine, UnboundedReceiver<AppEvent>) {
+fn engine(dir: &crate::support::DataFolder, spawn: faber_engine::proc::Spawner, ask: Ask) -> (Engine, UnboundedReceiver<AppEvent>) {
     let (tx, rx) = tokio::sync::mpsc::unbounded_channel();
     let opts = EngineOptions {
-        data_dir: dir.into(),
+        data_dir: dir.path().into(),
+        #[cfg(windows)]
+        chat_dir: dir.chat_path().into(),
         clis: BTreeMap::from([(Vendor::Claude, Cli { command: "claude".into(), prefix: vec![] })]),
         spawn,
         windows: false,
@@ -127,7 +129,11 @@ fn lift(dir: &Path, kind: &str) {
 }
 
 /// Starts an engine, lets `setup` act, sends one Auto message with this verdict and returns what answered it.
-async fn first_message(dir: &Path, verdict: (&'static str, &'static str), setup: impl FnOnce(&Engine)) -> ((String, String), Message) {
+async fn first_message(
+    dir: &crate::support::DataFolder,
+    verdict: (&'static str, &'static str),
+    setup: impl FnOnce(&Engine),
+) -> ((String, String), Message) {
     let f = fake(fixture("claude", "chat"));
     let (engine, mut rx) = engine(dir, f.spawn.clone(), verdicts(vec![verdict]));
     setup(&engine);
@@ -147,9 +153,9 @@ fn stored(dir: &Path) -> serde_json::Value {
 
 #[tokio::test]
 async fn the_third_retry_of_a_kind_starts_the_next_conversation_one_rung_up_and_the_answer_says_why() {
-    let dir = tempfile::tempdir().unwrap();
+    let dir = crate::support::DataFolder::new();
     let f = fake(fixture("claude", "chat"));
-    let (engine, mut rx) = engine(dir.path(), f.spawn.clone(), verdicts(vec![("code", "medium")]));
+    let (engine, mut rx) = engine(&dir, f.spawn.clone(), verdicts(vec![("code", "medium")]));
     let id = engine.send(auto(SKY)).unwrap();
     let first = finished(&mut rx).await;
     assert_eq!(first.reason.as_deref(), Some("reason.route.code.medium"));
@@ -174,9 +180,9 @@ async fn the_third_retry_of_a_kind_starts_the_next_conversation_one_rung_up_and_
 
 #[tokio::test]
 async fn an_edited_request_teaches_nothing() {
-    let dir = tempfile::tempdir().unwrap();
+    let dir = crate::support::DataFolder::new();
     let f = fake(fixture("claude", "chat"));
-    let (engine, mut rx) = engine(dir.path(), f.spawn.clone(), verdicts(vec![("code", "medium")]));
+    let (engine, mut rx) = engine(&dir, f.spawn.clone(), verdicts(vec![("code", "medium")]));
     let id = engine.send(auto(SKY)).unwrap();
     finished(&mut rx).await;
     let question = engine.open(&id).unwrap().messages[0].id.clone();
@@ -196,11 +202,11 @@ async fn an_edited_request_teaches_nothing() {
 
 #[tokio::test]
 async fn a_message_sent_after_an_answer_keeps_it_and_eight_in_a_row_bring_a_lifted_kind_back_down() {
-    let dir = tempfile::tempdir().unwrap();
+    let dir = crate::support::DataFolder::new();
     let marks = ["kept"; 7].join("\",\"");
     std::fs::write(file(dir.path()), format!(r#"{{"kinds":{{"code":{{"marks":["{marks}"],"lifted":true,"at":{}}}}}}}"#, now())).unwrap();
     let f = fake(fixture("claude", "chat"));
-    let (engine, mut rx) = engine(dir.path(), f.spawn.clone(), verdicts(vec![("code", "medium")]));
+    let (engine, mut rx) = engine(&dir, f.spawn.clone(), verdicts(vec![("code", "medium")]));
     // Lifted: this first message starts one rung up, and is the answer that is kept below.
     let id = engine.send(auto(SKY)).unwrap();
     let first = finished(&mut rx).await;
@@ -214,19 +220,19 @@ async fn a_message_sent_after_an_answer_keeps_it_and_eight_in_a_row_bring_a_lift
 
 #[tokio::test]
 async fn a_lifted_kind_starts_one_rung_up_and_forgetting_it_goes_back_to_the_table() {
-    let (a, b, c) = (tempfile::tempdir().unwrap(), tempfile::tempdir().unwrap(), tempfile::tempdir().unwrap());
-    let (usual, usual_reply) = first_message(a.path(), ("code", "medium"), |_| {}).await;
+    let (a, b, c) = (crate::support::DataFolder::new(), crate::support::DataFolder::new(), crate::support::DataFolder::new());
+    let (usual, usual_reply) = first_message(&a, ("code", "medium"), |_| {}).await;
     lift(b.path(), "code");
-    let (raised, raised_reply) = first_message(b.path(), ("code", "medium"), |_| {}).await;
+    let (raised, raised_reply) = first_message(&b, ("code", "medium"), |_| {}).await;
     assert!(rank(&raised) > rank(&usual));
     assert!(learned_pace(&raised_reply) && !learned_pace(&usual_reply));
     // Another kind of task is untouched.
-    let (writing, _) = first_message(b.path(), ("writing", "medium"), |_| {}).await;
-    let (writing_usual, _) = first_message(a.path(), ("writing", "medium"), |_| {}).await;
+    let (writing, _) = first_message(&b, ("writing", "medium"), |_| {}).await;
+    let (writing_usual, _) = first_message(&a, ("writing", "medium"), |_| {}).await;
     assert_eq!(writing, writing_usual);
     // Forgotten: the file is empty and the next conversation starts as the table says.
     lift(c.path(), "code");
-    let (forgotten, reply) = first_message(c.path(), ("code", "medium"), |e| e.forget_auto_learned().unwrap()).await;
+    let (forgotten, reply) = first_message(&c, ("code", "medium"), |e| e.forget_auto_learned().unwrap()).await;
     assert_eq!(forgotten, usual);
     assert!(!learned_pace(&reply));
     assert!(stored(c.path())["kinds"].as_object().unwrap().is_empty());
@@ -235,7 +241,7 @@ async fn a_lifted_kind_starts_one_rung_up_and_forgetting_it_goes_back_to_the_tab
 
 #[tokio::test]
 async fn a_vendor_near_its_limit_gets_no_learned_step_up() {
-    let (a, b) = (tempfile::tempdir().unwrap(), tempfile::tempdir().unwrap());
+    let (a, b) = (crate::support::DataFolder::new(), crate::support::DataFolder::new());
     let near = |e: &Engine| {
         // No paid fallback: with it possible, a window past 90% is refused outright (the gate), which is not what is tested.
         e.note_account_events(Vendor::Claude, vec![EngineEvent::Signals(Signals { paid_fallback: Some(false), ..Default::default() })]);
@@ -244,18 +250,18 @@ async fn a_vendor_near_its_limit_gets_no_learned_step_up() {
             vec![EngineEvent::Quota { window: "five_hour".into(), used: 0.95, resets_at: now() as f64 + 18_000.0 }],
         )
     };
-    let (usual, _) = first_message(a.path(), ("code", "medium"), near).await;
+    let (usual, _) = first_message(&a, ("code", "medium"), near).await;
     lift(b.path(), "code");
-    let (same, reply) = first_message(b.path(), ("code", "medium"), near).await;
+    let (same, reply) = first_message(&b, ("code", "medium"), near).await;
     assert_eq!(same, usual, "a window past 90% buys no step up, learned or paced");
     assert!(!learned_pace(&reply));
 }
 
 #[tokio::test]
 async fn what_was_learned_never_changes_a_conversation_under_way() {
-    let (a, b) = (tempfile::tempdir().unwrap(), tempfile::tempdir().unwrap());
+    let (a, b) = (crate::support::DataFolder::new(), crate::support::DataFolder::new());
     // A greeting first, then code: the one place Auto moves a conversation up (rule 3, once).
-    let second = |dir: PathBuf| async move {
+    let second = |dir: crate::support::DataFolder| async move {
         let f = fake(fixture("claude", "chat"));
         let (engine, mut rx) = engine(&dir, f.spawn.clone(), verdicts(vec![("chat", "easy"), ("code", "medium")]));
         let id = engine.send(auto(SKY)).unwrap();
@@ -265,16 +271,16 @@ async fn what_was_learned_never_changes_a_conversation_under_way() {
         engine.shutdown();
         (started(&f.args, 1), reply)
     };
-    let (usual, usual_reply) = second(a.path().into()).await;
+    let (usual, usual_reply) = second(a).await;
     lift(b.path(), "code");
-    let (with_learning, reply) = second(b.path().into()).await;
+    let (with_learning, reply) = second(b).await;
     assert_eq!(with_learning, usual);
     assert!(!learned_pace(&reply) && !learned_pace(&usual_reply));
 }
 
 #[tokio::test]
 async fn the_file_round_trips_and_a_damaged_one_means_nothing_learned() {
-    let dir = tempfile::tempdir().unwrap();
+    let dir = crate::support::DataFolder::new();
     let store = Store::new(dir.path());
     assert!(store.auto_learned().is_empty(), "no file, nothing learned");
     let mut learned = Learned::default();
@@ -298,11 +304,11 @@ async fn the_file_round_trips_and_a_damaged_one_means_nothing_learned() {
 
 #[tokio::test]
 async fn a_damaged_file_at_start_changes_no_pick_and_learning_writes_a_good_one_over_it() {
-    let (a, b) = (tempfile::tempdir().unwrap(), tempfile::tempdir().unwrap());
-    let (usual, _) = first_message(a.path(), ("code", "medium"), |_| {}).await;
+    let (a, b) = (crate::support::DataFolder::new(), crate::support::DataFolder::new());
+    let (usual, _) = first_message(&a, ("code", "medium"), |_| {}).await;
     std::fs::write(file(b.path()), "{ this is not json").unwrap();
     let f = fake(fixture("claude", "chat"));
-    let (engine, mut rx) = engine(b.path(), f.spawn.clone(), verdicts(vec![("code", "medium")]));
+    let (engine, mut rx) = engine(&b, f.spawn.clone(), verdicts(vec![("code", "medium")]));
     let id = engine.send(auto(SKY)).unwrap();
     finished(&mut rx).await;
     assert_eq!(started(&f.args, 0), usual);
@@ -402,10 +408,10 @@ fn a_pick_that_already_carries_a_quota_note_is_not_lifted_so_a_shown_change_alwa
 
 #[tokio::test]
 async fn a_forget_that_cannot_reach_the_disk_says_so() {
-    let dir = tempfile::tempdir().unwrap();
+    let dir = crate::support::DataFolder::new();
     lift(dir.path(), "code");
     let f = fake(fixture("claude", "chat"));
-    let (engine, _rx) = engine(dir.path(), f.spawn.clone(), verdicts(vec![("code", "medium")]));
+    let (engine, _rx) = engine(&dir, f.spawn.clone(), verdicts(vec![("code", "medium")]));
     // A folder where the temporary file goes: the write fails like a locked or read-only disk.
     std::fs::create_dir(dir.path().join("auto-learned.json.tmp")).unwrap();
     assert_eq!(engine.forget_auto_learned(), Err("error.autoLearned.forget".to_string()));

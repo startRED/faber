@@ -160,6 +160,9 @@ pub type Ask = Arc<dyn Fn(String) -> Pin<Box<dyn Future<Output = Option<String>>
 
 pub struct EngineOptions {
     pub data_dir: PathBuf,
+    /// A fixed external private-work root; its parent exists and owns it across engine restarts.
+    #[cfg(windows)]
+    pub chat_dir: PathBuf,
     pub clis: BTreeMap<Vendor, Cli>,
     pub spawn: Spawner,
     pub windows: bool,
@@ -533,6 +536,9 @@ struct Core {
     follows: HashMap<String, pr_watch::Watch>,
     pr_reader: PrReader,
     rewind: rewind::State,
+    chat_dir: PathBuf,
+    #[cfg(windows)]
+    _chat_directory: faber_winproc::MemoryDirectory,
     _data_directory: crate::workspace::DataDirectory,
 }
 
@@ -549,6 +555,13 @@ pub struct Engine {
 impl Engine {
     pub fn new(opts: EngineOptions, emit: Emit) -> std::io::Result<Engine> {
         let data_directory = crate::workspace::DataDirectory::open(&opts.data_dir)?;
+        #[cfg(windows)]
+        let chat_directory = crate::workspace::relocation::open(&opts.data_dir, &opts.chat_dir)?;
+        #[cfg(windows)]
+        let chat_dir = crate::permissions::checked_folder(&chat_directory.0)
+            .ok_or_else(|| std::io::Error::from(std::io::ErrorKind::PermissionDenied))?;
+        #[cfg(not(windows))]
+        let chat_dir = opts.data_dir.join("chat");
         // Snapshot verification and cleanup run outside Core; an unready catalog never delays a session.
         let catalog_store = crate::tools::Store::new(&opts.data_dir);
         catalog_store.set_runtime(opts.runtime.clone());
@@ -569,9 +582,9 @@ impl Engine {
         });
         let search = store.search();
         // A crash can leave an unsaved draft behind. Visible records keep their scratch; orphan UUID folders do not.
-        let scratch = opts.data_dir.join("chat");
+        let scratch = &chat_dir;
         if scratch.symlink_metadata().is_ok_and(|m| !m.file_type().is_symlink()) {
-            for entry in std::fs::read_dir(&scratch).into_iter().flatten().flatten() {
+            for entry in std::fs::read_dir(scratch).into_iter().flatten().flatten() {
                 let id = entry.file_name().to_string_lossy().into_owned();
                 if Uuid::parse_str(&id).is_ok() && !opts.data_dir.join("conversations").join(format!("{id}.json")).exists() {
                     let _ = std::fs::remove_dir_all(entry.path());
@@ -604,6 +617,7 @@ impl Engine {
                 background: Default::default(),
                 background_pending: false,
                 opts,
+                chat_dir,
                 store,
                 emit,
                 me: me.clone(),
@@ -674,6 +688,8 @@ impl Engine {
                 git: None,
                 rewind,
                 _data_directory: data_directory,
+                #[cfg(windows)]
+                _chat_directory: chat_directory.1,
             })
         });
         let _ = search.start();
@@ -1599,7 +1615,7 @@ impl Core {
     }
 
     fn scratch_of(&self, id: &str) -> PathBuf {
-        self.opts.data_dir.join("chat").join(id)
+        self.chat_dir.join(id)
     }
 
     fn workspace_of(&self, id: &str) -> PathBuf {
@@ -4844,11 +4860,15 @@ mod tool_in_tests {
     #[tokio::test]
     async fn streamed_reply_events_and_open_keep_captured_bytes_out_of_the_screen_store() {
         let data = tempfile::tempdir().unwrap();
+        #[cfg(windows)]
+        let work = tempfile::tempdir().unwrap();
         let seen = Arc::new(Mutex::new(0usize));
         let emitted = seen.clone();
         let engine = Engine::new(
             EngineOptions {
                 data_dir: data.path().into(),
+                #[cfg(windows)]
+                chat_dir: work.path().join("private"),
                 clis: BTreeMap::new(),
                 spawn: Arc::new(|_, _, _| panic!("snapshot projection never starts a CLI")),
                 windows: false,
@@ -4912,9 +4932,13 @@ mod tool_in_tests {
     #[tokio::test]
     async fn the_capabilities_a_cli_announced_stay_with_its_own_process() {
         let data = tempfile::tempdir().unwrap();
+        #[cfg(windows)]
+        let work = tempfile::tempdir().unwrap();
         let engine = Engine::new(
             EngineOptions {
                 data_dir: data.path().to_path_buf(),
+                #[cfg(windows)]
+                chat_dir: work.path().join("private"),
                 clis: Default::default(),
                 spawn: Arc::new(|_, _, _| panic!("the test must never spawn a process")),
                 windows: cfg!(windows),
@@ -4992,9 +5016,13 @@ mod tool_in_tests {
     #[tokio::test]
     async fn rewind_stop_reaches_idle_sessions_without_stopping_other_conversations() {
         let data = tempfile::tempdir().unwrap();
+        #[cfg(windows)]
+        let work = tempfile::tempdir().unwrap();
         let engine = Engine::new(
             EngineOptions {
                 data_dir: data.path().to_path_buf(),
+                #[cfg(windows)]
+                chat_dir: work.path().join("private"),
                 clis: Default::default(),
                 spawn: Arc::new(|_, _, _| panic!("the stop test must never spawn a process")),
                 windows: cfg!(windows),
@@ -5123,9 +5151,13 @@ mod tool_in_tests {
     #[tokio::test]
     async fn slash_commands_use_the_conversation_list_or_the_last_vendor_lists_without_starting_a_process() {
         let dir = tempfile::tempdir().unwrap();
+        #[cfg(windows)]
+        let work = tempfile::tempdir().unwrap();
         let engine = Engine::new(
             EngineOptions {
                 data_dir: dir.path().into(),
+                #[cfg(windows)]
+                chat_dir: work.path().join("private"),
                 clis: BTreeMap::new(),
                 spawn: Arc::new(|_, _, _| panic!("listing commands starts no process")),
                 windows: false,

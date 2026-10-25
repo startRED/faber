@@ -1024,11 +1024,13 @@ mod tests {
 
     #[tokio::test]
     async fn move_chat_to_project_refuses_unconfirmed_writers_without_blocking_another_chat() {
-        let data = tempfile::tempdir().unwrap();
+        let data = crate::workspace::TestRoot::new();
         let folder = tempfile::tempdir().unwrap();
         let engine = Engine::new(
             EngineOptions {
                 data_dir: data.path().into(),
+                #[cfg(windows)]
+                chat_dir: data.work().into(),
                 clis: Default::default(),
                 spawn: Arc::new(|_, _, _| panic!("moving must not launch a process")),
                 windows: cfg!(windows),
@@ -1067,12 +1069,14 @@ mod tests {
 
     #[tokio::test]
     async fn move_chat_to_project_waits_for_rewind_admission_to_reopen() {
-        let data = tempfile::tempdir().unwrap();
+        let data = crate::workspace::TestRoot::new();
         let folder = tempfile::tempdir().unwrap();
         let destination = tempfile::tempdir().unwrap();
         let engine = Engine::new(
             EngineOptions {
                 data_dir: data.path().into(),
+                #[cfg(windows)]
+                chat_dir: data.work().into(),
                 clis: Default::default(),
                 spawn: Arc::new(|_, _, _| panic!("moving must not launch a process")),
                 windows: cfg!(windows),
@@ -1120,11 +1124,13 @@ mod tests {
 
     #[tokio::test]
     async fn rewind_deletion_checks_unreadable_recovery_before_any_side_effect() {
-        let data = tempfile::tempdir().unwrap();
+        let data = crate::workspace::TestRoot::new();
         let folder = tempfile::tempdir().unwrap();
         let engine = Engine::new(
             EngineOptions {
                 data_dir: data.path().into(),
+                #[cfg(windows)]
+                chat_dir: data.work().into(),
                 clis: Default::default(),
                 spawn: Arc::new(|_, _, _| panic!("deletion must not launch a process")),
                 windows: cfg!(windows),
@@ -1170,11 +1176,13 @@ mod tests {
             }
         }
         for (discard, admitted) in [(false, false), (true, false), (false, true), (true, true)] {
-            let data = tempfile::tempdir().unwrap();
+            let data = crate::workspace::TestRoot::new();
             let folder = tempfile::tempdir().unwrap();
             let engine = Engine::new(
                 EngineOptions {
                     data_dir: data.path().into(),
+                    #[cfg(windows)]
+                    chat_dir: data.work().into(),
                     clis: Default::default(),
                     spawn: Arc::new(|_, _, _| panic!("a deleted or stopped capture must not launch a process")),
                     windows: cfg!(windows),
@@ -1283,12 +1291,14 @@ mod tests {
 
     #[tokio::test]
     async fn rewind_deleted_conversations_block_their_folder_until_all_writers_confirm_exit() {
-        let data = tempfile::tempdir().unwrap();
+        let data = crate::workspace::TestRoot::new();
         let shared = tempfile::tempdir().unwrap();
         let other = tempfile::tempdir().unwrap();
         let engine = Engine::new(
             EngineOptions {
                 data_dir: data.path().into(),
+                #[cfg(windows)]
+                chat_dir: data.work().into(),
                 clis: Default::default(),
                 spawn: Arc::new(|_, _, _| panic!("deleting a conversation must not start a process")),
                 windows: cfg!(windows),
@@ -1417,12 +1427,14 @@ mod tests {
 
     #[tokio::test]
     async fn rewind_removing_an_idle_loaded_project_does_not_invent_an_unknown_writer() {
-        let data = tempfile::tempdir().unwrap();
+        let data = crate::workspace::TestRoot::new();
         let removed_folder = tempfile::tempdir().unwrap();
         let other_folder = tempfile::tempdir().unwrap();
         let engine = Engine::new(
             EngineOptions {
                 data_dir: data.path().into(),
+                #[cfg(windows)]
+                chat_dir: data.work().into(),
                 clis: Default::default(),
                 spawn: Arc::new(|_, _, _| panic!("project removal must not start a process")),
                 windows: cfg!(windows),

@@ -530,10 +530,12 @@ mod tests {
 
     #[tokio::test]
     async fn rewind_a_guessed_project_route_never_starts_before_its_message() {
-        let data = tempfile::tempdir().unwrap();
+        let data = crate::workspace::TestRoot::new();
         let engine = Engine::new(
             EngineOptions {
                 data_dir: data.path().into(),
+                #[cfg(windows)]
+                chat_dir: data.work().into(),
                 clis: BTreeMap::from([(Vendor::Claude, Cli { command: "fake".into(), prefix: vec![] })]),
                 spawn: Arc::new(|_, _, _| panic!("project startup must wait for capture")),
                 windows: false,
@@ -579,8 +581,8 @@ mod tests {
     // Rule 3: the live process keeps what it was asked for, the account default included; the name the CLI reports never counts.
     #[tokio::test]
     async fn auto_keeps_the_model_the_live_process_was_asked_for_even_when_that_is_the_default() {
-        let dir = tempfile::tempdir().unwrap();
-        let (engine, _) = super::super::answer::tests::engine(dir.path());
+        let dir = crate::workspace::TestRoot::new();
+        let (engine, _) = super::super::answer::tests::engine(&dir);
         let id = super::super::answer::tests::seed(&engine, Session::from_fn(|_| {}), &[("t1", &[])]);
         engine.with(|c| {
             let m = c.convs.get_mut(&id).unwrap().messages.last_mut().unwrap();
@@ -622,8 +624,8 @@ mod tests {
 
     #[tokio::test]
     async fn only_a_retry_of_a_finished_auto_answer_says_the_pick_was_not_good_enough() {
-        let dir = tempfile::tempdir().unwrap();
-        let (engine, _) = super::super::answer::tests::engine(dir.path());
+        let dir = crate::workspace::TestRoot::new();
+        let (engine, _) = super::super::answer::tests::engine(&dir);
         engine.with(|c| {
             let auto = choice("auto", None);
             let done = answer("reason.route.code.medium", Status::Done);
@@ -656,8 +658,8 @@ mod tests {
 
     #[tokio::test]
     async fn taking_the_offered_step_up_counts_twice() {
-        let dir = tempfile::tempdir().unwrap();
-        let (engine, _) = super::super::answer::tests::engine(dir.path());
+        let dir = crate::workspace::TestRoot::new();
+        let (engine, _) = super::super::answer::tests::engine(&dir);
         engine.with(|c| {
             let mut done = answer("reason.route.code.medium", Status::Done);
             done.nudge = Some(crate::nudge::Nudge {
@@ -677,8 +679,8 @@ mod tests {
 
     #[tokio::test]
     async fn a_message_after_a_finished_auto_answer_keeps_it() {
-        let dir = tempfile::tempdir().unwrap();
-        let (engine, _) = super::super::answer::tests::engine(dir.path());
+        let dir = crate::workspace::TestRoot::new();
+        let (engine, _) = super::super::answer::tests::engine(&dir);
         let id = super::super::answer::tests::seed(&engine, Session::from_fn(|_| {}), &[("t1", &[])]);
         engine.with(|c| {
             let req = SendRequest {
@@ -714,8 +716,8 @@ mod tests {
 
     #[tokio::test]
     async fn only_the_first_question_of_a_conversation_asked_again_teaches() {
-        let dir = tempfile::tempdir().unwrap();
-        let (engine, _) = super::super::answer::tests::engine(dir.path());
+        let dir = crate::workspace::TestRoot::new();
+        let (engine, _) = super::super::answer::tests::engine(&dir);
         let id = super::super::answer::tests::seed(&engine, Session::from_fn(|_| {}), &[("t1", &[])]);
         engine.with(|c| {
             let conversation = c.convs.get_mut(&id).unwrap();
@@ -761,8 +763,8 @@ mod tests {
     // conversation.
     #[tokio::test]
     async fn the_draft_count_starts_again_when_a_message_is_sent_queued_or_not_and_goes_with_the_conversation() {
-        let dir = tempfile::tempdir().unwrap();
-        let (engine, _) = super::super::answer::tests::engine(dir.path());
+        let dir = crate::workspace::TestRoot::new();
+        let (engine, _) = super::super::answer::tests::engine(&dir);
         let id = super::super::answer::tests::seed(&engine, Session::from_fn(|_| {}), &[("t1", &[])]);
         engine.with(|c| {
             c.opts.clis.insert(Vendor::Claude, crate::cli::Cli { command: "fake".into(), prefix: vec![] });

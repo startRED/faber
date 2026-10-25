@@ -15,7 +15,6 @@ use faber_engine::proc::Spawner;
 use faber_engine::router::Choice;
 use faber_engine::signals::Signals;
 use faber_engine::{AppEvent, Engine, EngineOptions, SendRequest};
-use std::path::Path;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
@@ -86,17 +85,19 @@ fn verdicts(list: Vec<(&'static str, &'static str)>) -> Ask {
     })
 }
 
-fn rig(dir: &Path, vendors: &[Vendor], ask: Ask) -> Rig {
+fn rig(dir: &crate::support::DataFolder, vendors: &[Vendor], ask: Ask) -> Rig {
     rig_env(dir, vendors, ask, false)
 }
 
-fn rig_env(dir: &Path, vendors: &[Vendor], ask: Ask, claude_env_billed: bool) -> Rig {
+fn rig_env(dir: &crate::support::DataFolder, vendors: &[Vendor], ask: Ask, claude_env_billed: bool) -> Rig {
     let (claude, codex) = (fake(fixture("claude", "chat")), fake(fixture("codex", "chat")));
     let (c, x) = (claude.spawn.clone(), codex.spawn.clone());
     let spawn: Spawner = Arc::new(move |bin, args, cwd| if bin == "claude" { c(bin, args, cwd) } else { x(bin, args, cwd) });
     let (tx, rx) = tokio::sync::mpsc::unbounded_channel();
     let opts = EngineOptions {
-        data_dir: dir.into(),
+        data_dir: dir.path().into(),
+        #[cfg(windows)]
+        chat_dir: dir.chat_path().into(),
         clis: vendors.iter().map(|v| (*v, Cli { command: v.name().into(), prefix: vec![] })).collect(),
         spawn,
         windows: false,
@@ -122,8 +123,8 @@ fn rig_env(dir: &Path, vendors: &[Vendor], ask: Ask, claude_env_billed: bool) ->
 
 #[tokio::test]
 async fn auto_after_a_manual_turn_does_not_bypass_unknown_billing() {
-    let dir = tempfile::tempdir().unwrap();
-    let mut r = rig(dir.path(), &[Vendor::Claude], verdicts(vec![("chat", "easy")]));
+    let dir = support::DataFolder::new();
+    let mut r = rig(&dir, &[Vendor::Claude], verdicts(vec![("chat", "easy")]));
     r.engine
         .note_account_events(Vendor::Claude, vec![EngineEvent::Signals(Signals { billing: Some(Billing::Unknown), ..Signals::default() })]);
     let chosen = SendRequest { choice: Choice { vendor: "claude".into(), model: Some("haiku".into()), effort: None }, ..auto(SKY) };
@@ -138,7 +139,7 @@ async fn auto_after_a_manual_turn_does_not_bypass_unknown_billing() {
     r.engine.shutdown();
 }
 
-fn both(dir: &Path, ask: Ask) -> Rig {
+fn both(dir: &crate::support::DataFolder, ask: Ask) -> Rig {
     rig(dir, &[Vendor::Claude, Vendor::Codex], ask)
 }
 
@@ -195,8 +196,8 @@ fn flag(args: &[String], name: &str) -> Option<String> {
 
 #[tokio::test]
 async fn a_claude_with_quota_to_spare_buys_one_step_up_on_a_task_that_matters_and_the_answer_says_why() {
-    let dir = tempfile::tempdir().unwrap();
-    let r = both(dir.path(), verdicts(vec![("code", "medium")]));
+    let dir = support::DataFolder::new();
+    let r = both(&dir, verdicts(vec![("code", "medium")]));
     spare_claude(&r.engine);
     let id = r.engine.send(auto(CODE)).unwrap();
     let (reply, went) = r.went(&id, 0).await;
@@ -211,16 +212,16 @@ async fn a_claude_with_quota_to_spare_buys_one_step_up_on_a_task_that_matters_an
 
 #[tokio::test]
 async fn nothing_changes_for_an_easy_chat_or_when_there_is_no_reading() {
-    let dir = tempfile::tempdir().unwrap();
-    let r = both(dir.path(), verdicts(vec![("chat", "easy")]));
+    let dir = support::DataFolder::new();
+    let r = both(&dir, verdicts(vec![("chat", "easy")]));
     spare_claude(&r.engine);
     let id = r.engine.send(auto(SKY)).unwrap();
     let (reply, went) = r.went(&id, 0).await;
     assert_eq!((went, reply.pace), (Went::Codex("gpt-6-luna"), None), "easy chat stays on the fast model");
     r.engine.shutdown();
 
-    let dir = tempfile::tempdir().unwrap();
-    let r = both(dir.path(), verdicts(vec![("code", "medium")]));
+    let dir = support::DataFolder::new();
+    let r = both(&dir, verdicts(vec![("code", "medium")]));
     let id = r.engine.send(auto(CODE)).unwrap();
     let (reply, went) = r.went(&id, 0).await;
     assert_eq!((went, reply.pace), (Went::Codex("gpt-6.1-sol"), None), "no reading, no news: today's pick");
@@ -255,8 +256,8 @@ async fn a_reading_that_may_be_wrong_gives_no_discount() {
         }),
     ];
     for (name, spoil) in cases {
-        let dir = tempfile::tempdir().unwrap();
-        let r = both(dir.path(), verdicts(vec![("code", "medium")]));
+        let dir = support::DataFolder::new();
+        let r = both(&dir, verdicts(vec![("code", "medium")]));
         spoil(&r.engine, &r.time);
         let id = r.engine.send(auto(CODE)).unwrap();
         let (reply, went) = r.went(&id, 0).await;
@@ -267,8 +268,8 @@ async fn a_reading_that_may_be_wrong_gives_no_discount() {
 
 #[tokio::test]
 async fn a_clock_set_backwards_does_not_make_an_old_reading_look_new() {
-    let dir = tempfile::tempdir().unwrap();
-    let r = both(dir.path(), verdicts(vec![("code", "medium")]));
+    let dir = support::DataFolder::new();
+    let r = both(&dir, verdicts(vec![("code", "medium")]));
     spare_claude(&r.engine);
     // The PC's clock is now an hour before the moment the readings were taken.
     r.time.store(WHEN - HOUR, Ordering::SeqCst);
@@ -281,8 +282,8 @@ async fn a_clock_set_backwards_does_not_make_an_old_reading_look_new() {
 
 #[tokio::test]
 async fn a_vendor_running_low_is_left_for_the_other_and_the_answer_says_so() {
-    let dir = tempfile::tempdir().unwrap();
-    let r = both(dir.path(), verdicts(vec![("code", "medium")]));
+    let dir = support::DataFolder::new();
+    let r = both(&dir, verdicts(vec![("code", "medium")]));
     low_codex(&r.engine);
     let id = r.engine.send(auto(CODE)).unwrap();
     let (reply, went) = r.went(&id, 0).await;
@@ -293,8 +294,8 @@ async fn a_vendor_running_low_is_left_for_the_other_and_the_answer_says_so() {
 
 #[tokio::test]
 async fn a_vendor_ahead_of_its_line_but_far_from_its_limit_is_left_without_an_alarm() {
-    let dir = tempfile::tempdir().unwrap();
-    let r = both(dir.path(), verdicts(vec![("code", "medium")]));
+    let dir = support::DataFolder::new();
+    let r = both(&dir, verdicts(vec![("code", "medium")]));
     // 30% used with the week barely begun: far ahead of the daily line, nowhere near the limit.
     r.engine.note_account_events(Vendor::Codex, vec![plan("pro"), quota("seven_day", 0.30, 6 * DAY + DAY / 2)]);
     let id = r.engine.send(auto(CODE)).unwrap();
@@ -306,14 +307,14 @@ async fn a_vendor_ahead_of_its_line_but_far_from_its_limit_is_left_without_an_al
 
 #[tokio::test]
 async fn a_vendor_that_runs_out_between_the_question_and_the_dispatch_is_not_used() {
-    let dir = tempfile::tempdir().unwrap();
+    let dir = support::DataFolder::new();
     let slow: Ask = Arc::new(|_| {
         Box::pin(async {
             tokio::time::sleep(Duration::from_millis(250)).await;
             Some(r#"{"kind":"code","difficulty":"medium","confidence":0.95}"#.to_string())
         })
     });
-    let r = both(dir.path(), slow);
+    let r = both(&dir, slow);
     spare_claude(&r.engine);
     let id = r.engine.send(auto(CODE)).unwrap();
     tokio::time::sleep(Duration::from_millis(60)).await;
@@ -327,8 +328,8 @@ async fn a_vendor_that_runs_out_between_the_question_and_the_dispatch_is_not_use
 
 #[tokio::test]
 async fn a_family_that_is_out_leaves_the_rest_of_the_vendor_alone() {
-    let dir = tempfile::tempdir().unwrap();
-    let r = both(dir.path(), verdicts(vec![("code", "hard")]));
+    let dir = support::DataFolder::new();
+    let r = both(&dir, verdicts(vec![("code", "hard")]));
     spare_claude(&r.engine);
     r.engine.note_account_events(Vendor::Claude, vec![quota("seven_day_opus", 1.0, 2 * DAY)]);
     let id = r.engine.send(auto("Redesign the locking in the scheduler")).unwrap();
@@ -340,8 +341,8 @@ async fn a_family_that_is_out_leaves_the_rest_of_the_vendor_alone() {
 
 #[tokio::test]
 async fn a_login_billed_by_use_is_never_picked_by_auto_but_the_user_can_pick_it() {
-    let dir = tempfile::tempdir().unwrap();
-    let mut r = both(dir.path(), verdicts(vec![("code", "hard")]));
+    let dir = support::DataFolder::new();
+    let mut r = both(&dir, verdicts(vec![("code", "hard")]));
     spare_claude(&r.engine);
     r.engine.note_account_events(Vendor::Claude, vec![billed_by_use()]);
     let id = r.engine.send(auto("Redesign the locking in the scheduler")).unwrap();
@@ -358,8 +359,8 @@ async fn a_login_billed_by_use_is_never_picked_by_auto_but_the_user_can_pick_it(
 
 #[tokio::test]
 async fn with_only_a_login_billed_by_use_auto_ends_with_an_error_and_starts_nothing() {
-    let dir = tempfile::tempdir().unwrap();
-    let mut r = rig(dir.path(), &[Vendor::Claude], verdicts(vec![("chat", "easy")]));
+    let dir = support::DataFolder::new();
+    let mut r = rig(&dir, &[Vendor::Claude], verdicts(vec![("chat", "easy")]));
     r.engine.note_account_events(Vendor::Claude, vec![billed_by_use()]);
     r.engine.send(auto(SKY)).unwrap();
     let reply = finished(&mut r.rx).await;
@@ -370,8 +371,8 @@ async fn with_only_a_login_billed_by_use_auto_ends_with_an_error_and_starts_noth
 
 #[tokio::test]
 async fn an_easy_start_still_moves_up_after_a_turn_that_carried_a_quota_reason() {
-    let dir = tempfile::tempdir().unwrap();
-    let mut r = both(dir.path(), verdicts(vec![("chat", "easy"), ("code", "hard")]));
+    let dir = support::DataFolder::new();
+    let mut r = both(&dir, verdicts(vec![("chat", "easy"), ("code", "hard")]));
     low_codex(&r.engine);
     let id = r.engine.send(auto(SKY)).unwrap();
     let first = finished(&mut r.rx).await;
@@ -387,8 +388,8 @@ async fn an_easy_start_still_moves_up_after_a_turn_that_carried_a_quota_reason()
 
 #[tokio::test]
 async fn a_conversation_file_from_before_pace_existed_opens() {
-    let dir = tempfile::tempdir().unwrap();
-    let r = both(dir.path(), verdicts(vec![("code", "medium")]));
+    let dir = support::DataFolder::new();
+    let r = both(&dir, verdicts(vec![("code", "medium")]));
     spare_claude(&r.engine);
     let id = r.engine.send(auto(CODE)).unwrap();
     r.went(&id, 0).await;
@@ -397,15 +398,15 @@ async fn a_conversation_file_from_before_pace_existed_opens() {
     let mut saved: serde_json::Value = serde_json::from_str(&std::fs::read_to_string(&file).unwrap()).unwrap();
     saved["messages"][1].as_object_mut().unwrap().remove("pace");
     std::fs::write(&file, saved.to_string()).unwrap();
-    let again = both(dir.path(), verdicts(vec![("code", "medium")]));
+    let again = both(&dir, verdicts(vec![("code", "medium")]));
     assert_eq!(again.engine.open(&id).unwrap().messages[1].pace, None);
     again.engine.shutdown();
 }
 
 #[tokio::test]
 async fn an_environment_override_cannot_be_overruled_by_a_subscription_signal() {
-    let dir = tempfile::tempdir().unwrap();
-    let r = rig_env(dir.path(), &[Vendor::Claude], verdicts(vec![("chat", "easy")]), true);
+    let dir = support::DataFolder::new();
+    let r = rig_env(&dir, &[Vendor::Claude], verdicts(vec![("chat", "easy")]), true);
     let id = r.engine.send(auto(SKY)).unwrap();
     for _ in 0..100 {
         if r.engine.open(&id).unwrap().messages.last().unwrap().status == Some(Status::Error) {
@@ -422,8 +423,8 @@ async fn an_environment_override_cannot_be_overruled_by_a_subscription_signal() 
 async fn a_week_spent_faster_than_one_seventh_a_day_is_priced_up_on_either_vendor() {
     // One day of seven gone and a fifth of the week used (the daily line is 14.3%): the vendor is left for the other.
     for (spent, other) in [(Vendor::Claude, Vendor::Codex), (Vendor::Codex, Vendor::Claude)] {
-        let dir = tempfile::tempdir().unwrap();
-        let r = both(dir.path(), verdicts(vec![("code", "medium")]));
+        let dir = support::DataFolder::new();
+        let r = both(&dir, verdicts(vec![("code", "medium")]));
         r.engine.note_account_events(spent, vec![plan("max"), quota("seven_day", 0.2, 6 * DAY)]);
         r.engine.note_account_events(other, vec![plan("pro"), quota("seven_day", 0.1, 6 * DAY)]);
         let id = r.engine.send(auto(CODE)).unwrap();

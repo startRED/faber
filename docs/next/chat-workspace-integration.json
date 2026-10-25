@@ -1,0 +1,11 @@
+{
+  "notes": {
+    "fixed": {
+      "en": "On Windows, private chat files move outside Faber's data folder and stay available after reopening.",
+      "pt-BR": "No Windows, os arquivos privados dos chats ficam fora dos dados do Faber e continuam disponíveis ao reabrir.",
+      "es": "En Windows, los archivos privados de los chats se guardan fuera de los datos de Faber y siguen disponibles al volver a abrirlo.",
+      "fr": "Sous Windows, les fichiers privés des conversations sont conservés hors des données de Faber et restent disponibles à la réouverture.",
+      "de": "Unter Windows liegen private Chatdateien außerhalb der Faber-Daten und bleiben beim erneuten Öffnen verfügbar."
+    }
+  }
+}

@@ -29,10 +29,12 @@ mod tests {
     use super::*;
     #[tokio::test]
     async fn install_reserves_chat_admission_and_releases_on_unwind() {
-        let data = tempfile::tempdir().unwrap();
+        let data = crate::workspace::TestRoot::new();
         let e = Engine::new(
             EngineOptions {
                 data_dir: data.path().into(),
+                #[cfg(windows)]
+                chat_dir: data.work().into(),
                 clis: Default::default(),
                 spawn: Arc::new(|_, _, _| panic!("install admission must not spawn")),
                 windows: false,

@@ -10,7 +10,6 @@ use faber_engine::proc::{Proc, Spawner};
 use faber_engine::{AppEvent, Engine, EngineOptions};
 use serde_json::json;
 use std::collections::BTreeMap;
-use std::path::Path;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
@@ -51,10 +50,12 @@ fn status(stdout: Option<&'static str>) -> (Spawner, Calls) {
     (spawn, calls)
 }
 
-fn start(dir: &Path, spawn: Spawner, ask: Option<Ask>) -> (Engine, UnboundedReceiver<AppEvent>, Time) {
+fn start(dir: &crate::support::DataFolder, spawn: Spawner, ask: Option<Ask>) -> (Engine, UnboundedReceiver<AppEvent>, Time) {
     let (tx, rx) = tokio::sync::mpsc::unbounded_channel();
     let opts = EngineOptions {
-        data_dir: dir.into(),
+        data_dir: dir.path().into(),
+        #[cfg(windows)]
+        chat_dir: dir.chat_path().into(),
         clis: BTreeMap::from([(Vendor::Claude, Cli { command: "claude".into(), prefix: vec![] })]),
         spawn,
         windows: false,
@@ -75,9 +76,9 @@ const FIVE: Duration = Duration::from_millis(500);
 
 #[tokio::test]
 async fn the_plan_comes_from_the_status_command_and_nothing_else_of_it_is_kept() {
-    let dir = tempfile::tempdir().unwrap();
+    let dir = support::DataFolder::new();
     let (spawn, calls) = status(Some(r#"{"loggedIn":true,"email":"someone@example.com","orgName":"Acme","subscriptionType":"max"}"#));
-    let (engine, mut events, _) = start(dir.path(), spawn, None);
+    let (engine, mut events, _) = start(&dir, spawn, None);
     engine.check_plans(FIVE).await;
     let claude = engine.ledger().claude;
     assert_eq!((claude.plan.as_deref(), claude.billing), (Some("max"), Billing::Subscription));
@@ -100,9 +101,9 @@ async fn the_plan_comes_from_the_status_command_and_nothing_else_of_it_is_kept()
 
 #[tokio::test]
 async fn a_login_billed_per_use_is_known_as_such_and_needs_no_plan() {
-    let dir = tempfile::tempdir().unwrap();
+    let dir = support::DataFolder::new();
     let (spawn, _) = status(Some(r#"{"loggedIn":true,"authMethod":"api_key"}"#));
-    let (engine, _, _) = start(dir.path(), spawn, None);
+    let (engine, _, _) = start(&dir, spawn, None);
     engine.check_plans(FIVE).await;
     let claude = engine.ledger().claude;
     assert_eq!((claude.billing, claude.plan.as_deref()), (Billing::UsageBilled, None));
@@ -111,9 +112,9 @@ async fn a_login_billed_per_use_is_known_as_such_and_needs_no_plan() {
 
 #[tokio::test]
 async fn without_a_plan_in_the_answer_the_user_is_asked_and_the_answer_never_authorizes_billing() {
-    let dir = tempfile::tempdir().unwrap();
+    let dir = support::DataFolder::new();
     let (spawn, _) = status(Some(r#"{"loggedIn":true,"authMethod":"claude.ai"}"#));
-    let (engine, _, _) = start(dir.path(), spawn, None);
+    let (engine, _, _) = start(&dir, spawn, None);
     engine.check_plans(FIVE).await;
     assert!(engine.ledger().claude.ask_for_plan());
     engine.answer_plan(Vendor::Claude, "  Max 20x! ");
@@ -128,16 +129,16 @@ async fn without_a_plan_in_the_answer_the_user_is_asked_and_the_answer_never_aut
 
 #[tokio::test]
 async fn one_failed_check_asks_nothing_three_in_a_row_ask_and_a_failure_never_refreshes_the_plan() {
-    let dir = tempfile::tempdir().unwrap();
+    let dir = support::DataFolder::new();
     let (good, _) = status(Some(r#"{"loggedIn":true,"subscriptionType":"pro"}"#));
-    let (engine, _, time) = start(dir.path(), good, None);
+    let (engine, _, time) = start(&dir, good, None);
     engine.check_plans(FIVE).await;
     assert!(engine.ledger().claude.plan_ok(WHEN as f64));
     engine.shutdown();
 
     // The same data folder, a CLI that no longer answers.
     let (hung, _) = status(None);
-    let (engine, _, time2) = start(dir.path(), hung, None);
+    let (engine, _, time2) = start(&dir, hung, None);
     time2.store(WHEN + 31 * 60, Ordering::SeqCst);
     drop(time);
     engine.check_plans(Duration::from_millis(30)).await;
@@ -149,9 +150,9 @@ async fn one_failed_check_asks_nothing_three_in_a_row_ask_and_a_failure_never_re
     assert!(!engine.ledger().claude.ask_for_plan());
     assert_eq!(engine.ledger().claude.plan.as_deref(), Some("pro"));
 
-    let fresh = tempfile::tempdir().unwrap();
+    let fresh = support::DataFolder::new();
     let (hung, _) = status(None);
-    let (engine, _, _) = start(fresh.path(), hung, None);
+    let (engine, _, _) = start(&fresh, hung, None);
     for _ in 0..2 {
         engine.check_plans(Duration::from_millis(30)).await;
     }
@@ -162,16 +163,16 @@ async fn one_failed_check_asks_nothing_three_in_a_row_ask_and_a_failure_never_re
 
 #[tokio::test]
 async fn a_changed_plan_name_starts_the_learning_again() {
-    let dir = tempfile::tempdir().unwrap();
+    let dir = support::DataFolder::new();
     let (spawn, _) = status(Some(r#"{"loggedIn":true,"subscriptionType":"pro"}"#));
-    let (engine, _, _) = start(dir.path(), spawn, None);
+    let (engine, _, _) = start(&dir, spawn, None);
     engine.check_plans(FIVE).await;
     assert!(!engine.ledger().claude.relearning(WHEN as f64));
     engine.shutdown();
 
     // The plan is remembered across runs, so the next run notices that it is a different one.
     let (spawn, _) = status(Some(r#"{"loggedIn":true,"subscriptionType":"max"}"#));
-    let (engine, _, _) = start(dir.path(), spawn, None);
+    let (engine, _, _) = start(&dir, spawn, None);
     engine.check_plans(FIVE).await;
     let claude = engine.ledger().claude;
     assert_eq!(claude.plan.as_deref(), Some("max"));
@@ -180,9 +181,9 @@ async fn a_changed_plan_name_starts_the_learning_again() {
 
 #[tokio::test]
 async fn watching_the_accounts_checks_at_once() {
-    let dir = tempfile::tempdir().unwrap();
+    let dir = support::DataFolder::new();
     let (spawn, calls) = status(Some(r#"{"loggedIn":true,"subscriptionType":"max"}"#));
-    let (engine, _, _) = start(dir.path(), spawn, None);
+    let (engine, _, _) = start(&dir, spawn, None);
     engine.set_utc_offset(0);
     engine.watch_accounts();
     for _ in 0..50 {
@@ -202,7 +203,7 @@ async fn watching_the_accounts_checks_at_once() {
 
 #[tokio::test]
 async fn startup_account_readings_wait_for_the_local_offset_and_do_not_spend() {
-    let dir = tempfile::tempdir().unwrap();
+    let dir = support::DataFolder::new();
     let mut ledger = faber_engine::ledger::Ledger::default();
     ledger.codex.record("five_hour", 0.10, (WHEN + 7000) as f64, (WHEN - 60) as f64, -10800);
     faber_engine::store::Store::new(dir.path()).save_ledger(&ledger).unwrap();
@@ -218,7 +219,7 @@ async fn startup_account_readings_wait_for_the_local_offset_and_do_not_spend() {
             msg: json!({"id":2,"result":{"rateLimits":{"primary":{"usedPercent":13,"windowDurationMins":300,"resetsAt":WHEN + 7000}}}}),
         },
     ]);
-    let (engine, _, _) = start(dir.path(), f.spawn.clone(), None);
+    let (engine, _, _) = start(&dir, f.spawn.clone(), None);
     engine.replace_clis(BTreeMap::from([(Vendor::Codex, Cli { command: "codex".into(), prefix: vec![] })]));
     engine.watch_accounts();
     tokio::time::sleep(Duration::from_millis(80)).await;
@@ -246,7 +247,7 @@ async fn startup_account_readings_wait_for_the_local_offset_and_do_not_spend() {
 
 #[tokio::test]
 async fn signing_out_clears_a_previously_confirmed_subscription() {
-    let dir = tempfile::tempdir().unwrap();
+    let dir = support::DataFolder::new();
     let (connected, _) = status(Some(r#"{"loggedIn":true,"subscriptionType":"max"}"#));
     let (disconnected, _) = status(Some(r#"{"loggedIn":false}"#));
     let calls = Arc::new(AtomicU64::new(0));
@@ -256,7 +257,7 @@ async fn signing_out_clears_a_previously_confirmed_subscription() {
                 if calls.fetch_add(1, Ordering::SeqCst) == 0 { connected(bin, args, cwd) } else { disconnected(bin, args, cwd) }
             },
         );
-    let (engine, _, _) = start(dir.path(), spawn, None);
+    let (engine, _, _) = start(&dir, spawn, None);
     engine.check_plans(FIVE).await;
     assert_eq!(engine.ledger().claude.billing, Billing::Subscription);
     engine.check_plans(FIVE).await;

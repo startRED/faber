@@ -44,7 +44,7 @@ async fn until(ready: impl Fn() -> bool) {
 
 #[tokio::test]
 async fn retired_shared_server_closes_after_replacing_a_session_before_settings_change() {
-    let data = tempfile::tempdir().unwrap();
+    let data = crate::workspace::TestRoot::new();
     let root = proc::ProcessIdentity { pid: 100, created: 1 };
     let members = Arc::new(Mutex::new(vec![root]));
     let stopped = Arc::new(AtomicBool::new(false));
@@ -72,6 +72,8 @@ async fn retired_shared_server_closes_after_replacing_a_session_before_settings_
     let app = Engine::new(
         EngineOptions {
             data_dir: data.path().into(),
+            #[cfg(windows)]
+            chat_dir: data.work().into(),
             clis: BTreeMap::from([(Vendor::Codex, Cli { command: "unused".into(), prefix: vec![] })]),
             spawn: Arc::new(move |_, _, _| Ok(process.lock().unwrap().take().expect("both sessions must share one server"))),
             windows: false,

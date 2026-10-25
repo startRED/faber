@@ -23,11 +23,13 @@ async fn paid_notices_stop_an_unapproved_subscription_turn_and_clear_permissions
     .into_iter()
     .enumerate()
     {
-        let dir = tempfile::tempdir().unwrap();
+        let dir = support::DataFolder::new();
         let fake = support::fake(support::claude_two_turns("guard"));
         let engine = Engine::new(
             EngineOptions {
                 data_dir: dir.path().into(),
+                #[cfg(windows)]
+                chat_dir: dir.chat_path().into(),
                 clis: BTreeMap::from([(Vendor::Claude, Cli { command: "claude".into(), prefix: vec![] })]),
                 spawn: fake.spawn,
                 windows: false,

@@ -52,6 +52,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let engine = Engine::new(
         EngineOptions {
             data_dir: world.join("state"),
+            #[cfg(windows)]
+            chat_dir: world.join("chat-work"),
             clis,
             spawn: proc::real_spawner(),
             windows: cfg!(windows),

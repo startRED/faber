@@ -399,10 +399,10 @@ mod tests {
 
     #[tokio::test]
     async fn tools_in_use_are_the_saved_kit_of_the_ai_at_work_with_each_job_group() {
-        let dir = tempfile::tempdir().unwrap();
+        let dir = crate::workspace::TestRoot::new();
         let folder = dir.path().canonicalize().unwrap();
         let (spawn, _, _) = fake();
-        let engine = engine(&folder, spawn);
+        let engine = engine(&dir, spawn);
         assert!(engine.tools_in_use("kit").is_empty(), "an unknown conversation has none");
         engine.with(|core| {
             conversation(core, Area::Chat, None, &folder, "Debug this failure");
@@ -428,10 +428,10 @@ mod tests {
 
     #[tokio::test]
     async fn catalog_hint_is_once_for_the_app_and_survives_settings_changes_and_reopening() {
-        let dir = tempfile::tempdir().unwrap();
+        let dir = crate::workspace::TestRoot::new();
         let folder = dir.path().canonicalize().unwrap();
         let (spawn, args, _) = fake();
-        let engine = engine(&folder, spawn);
+        let engine = engine(&dir, spawn);
         let missing = || crate::tools::kits::Report { suggested: Some("systematic-debugging".into()), ..Default::default() };
         engine.with(|core| {
             conversation(core, Area::Chat, None, &folder, "Debug this failure");
@@ -566,10 +566,14 @@ mod tests {
         store.wait_prepared_for_test();
     }
 
-    fn engine(dir: &Path, spawn: Spawner) -> Engine {
+    fn engine(root: &crate::workspace::TestRoot, spawn: Spawner) -> Engine {
+        let dir = root.path().canonicalize().unwrap();
+        let dir = dir.as_path();
         let engine = Engine::new(
             EngineOptions {
                 data_dir: dir.into(),
+                #[cfg(windows)]
+                chat_dir: dir.parent().unwrap().join("work"),
                 clis: [Vendor::Claude, Vendor::Codex]
                     .into_iter()
                     .map(|vendor| (vendor, Cli { command: vendor.name().into(), prefix: vec![] }))
@@ -635,10 +639,10 @@ mod tests {
 
     #[tokio::test]
     async fn production_launch_check_leaves_other_chats_responsive_and_composer_warm_cannot_replace_send() {
-        let dir = tempfile::tempdir().unwrap();
+        let dir = crate::workspace::TestRoot::new();
         let folder = dir.path().canonicalize().unwrap();
         let (spawn, args, messages) = fake();
-        let engine = engine(&folder, spawn);
+        let engine = engine(&dir, spawn);
         let (started, entered) = std::sync::mpsc::channel();
         let (finished, ended) = std::sync::mpsc::channel();
         let gate = Arc::new(std::sync::Barrier::new(2));
@@ -684,10 +688,10 @@ mod tests {
     #[tokio::test]
     async fn production_launch_check_cancels_stopped_turns_and_rejects_tampering_before_spawn() {
         for change in ["stop", "tamper", "switch"] {
-            let dir = tempfile::tempdir().unwrap();
+            let dir = crate::workspace::TestRoot::new();
             let folder = dir.path().canonicalize().unwrap();
             let (spawn, args, messages) = fake();
-            let engine = engine(&folder, spawn);
+            let engine = engine(&dir, spawn);
             let (started, entered) = std::sync::mpsc::channel();
             let (finished, ended) = std::sync::mpsc::channel();
             let gate = Arc::new(std::sync::Barrier::new(2));
@@ -757,10 +761,10 @@ mod tests {
 
     #[tokio::test]
     async fn production_launch_checks_bound_hashing_to_one_worker() {
-        let dir = tempfile::tempdir().unwrap();
+        let dir = crate::workspace::TestRoot::new();
         let folder = dir.path().canonicalize().unwrap();
         let (spawn, _, messages) = fake();
-        let engine = engine(&folder, spawn);
+        let engine = engine(&dir, spawn);
         let (first, entered_first) = std::sync::mpsc::channel();
         let (finished_first, ended_first) = std::sync::mpsc::channel();
         let gate_first = Arc::new(std::sync::Barrier::new(2));
@@ -802,10 +806,10 @@ mod tests {
     async fn core_keeps_a_session_kit_until_retirement_and_rechecks_switches_for_the_next_one() {
         for vendor in [Vendor::Claude, Vendor::Codex] {
             for area in [Area::Chat, Area::Project] {
-                let dir = tempfile::tempdir().unwrap();
+                let dir = crate::workspace::TestRoot::new();
                 let folder = dir.path().canonicalize().unwrap();
                 let (spawn, args, _) = fake();
-                let engine = engine(&folder, spawn);
+                let engine = engine(&dir, spawn);
                 let project = engine.add_project(&folder.to_string_lossy()).unwrap();
                 engine.with(|core| {
                     conversation(core, area, Some(&project.id), &folder, "Debug this failure");
@@ -843,10 +847,10 @@ mod tests {
     #[tokio::test]
     async fn moving_chat_to_a_project_discards_its_native_kit_and_picks_for_the_project_turn() {
         for vendor in [Vendor::Claude, Vendor::Codex] {
-            let dir = tempfile::tempdir().unwrap();
+            let dir = crate::workspace::TestRoot::new();
             let folder = dir.path().canonicalize().unwrap();
             let (spawn, args, messages) = fake();
-            let engine = engine(&folder, spawn);
+            let engine = engine(&dir, spawn);
             let project = engine.add_project(&folder.to_string_lossy()).unwrap();
             engine.with(|core| {
                 conversation(core, Area::Chat, None, &folder, "Debug this failure");
@@ -970,10 +974,10 @@ mod tests {
         for vendor in [Vendor::Claude, Vendor::Codex] {
             for area in [Area::Chat, Area::Project] {
                 for task in ["How do I switch the theme?", "Debug this failing test"] {
-                    let dir = tempfile::tempdir().unwrap();
+                    let dir = crate::workspace::TestRoot::new();
                     let folder = dir.path().canonicalize().unwrap();
                     let (spawn, args, messages) = fake();
-                    let engine = engine(&folder, spawn);
+                    let engine = engine(&dir, spawn);
                     let project = engine.add_project(&folder.to_string_lossy()).unwrap();
                     let note = engine.with(|core| {
                         set_screen(core, "de", Permissions::Ask);
@@ -1047,11 +1051,11 @@ mod tests {
     /// an older Claude Code with no plugin folder reads the file like Chat does.
     #[tokio::test]
     async fn faber_guide_falls_back_to_text_without_its_folder_and_to_a_line_in_an_older_claude_code() {
-        let dir = tempfile::tempdir().unwrap();
+        let dir = crate::workspace::TestRoot::new();
         let folder = dir.path().canonicalize().unwrap();
         std::fs::write(folder.join("guide-plugin"), "not a folder of Faber's").unwrap();
         let (spawn, args, messages) = fake();
-        let first = engine(&folder, spawn);
+        let first = engine(&dir, spawn);
         first.with(|core| {
             set_screen(core, "de", Permissions::Ask);
             conversation(core, Area::Chat, None, &folder, "Debug this failing test");
@@ -1064,10 +1068,10 @@ mod tests {
         assert!(allowed_tools(&args).iter().all(|rule| !rule.starts_with("Read(")), "no file, no rule: {:?}", allowed_tools(&args));
         first.shutdown();
 
-        let dir = tempfile::tempdir().unwrap();
+        let dir = crate::workspace::TestRoot::new();
         let folder = dir.path().canonicalize().unwrap();
         let (spawn, args, messages) = fake();
-        let engine = engine(&folder, spawn);
+        let engine = engine(&dir, spawn);
         let project = engine.add_project(&folder.to_string_lossy()).unwrap();
         engine.with(|core| {
             set_screen(core, "fr", Permissions::Ask);
@@ -1089,10 +1093,10 @@ mod tests {
     async fn faber_guide_is_allowed_without_a_card_in_guarded_modes_only_and_its_folder_is_closed_to_writes() {
         for permissions in [Permissions::Ask, Permissions::Plan, Permissions::FullAccess] {
             for area in [Area::Chat, Area::Project] {
-                let dir = tempfile::tempdir().unwrap();
+                let dir = crate::workspace::TestRoot::new();
                 let folder = dir.path().canonicalize().unwrap();
                 let (spawn, args, messages) = fake();
-                let engine = engine(&folder, spawn);
+                let engine = engine(&dir, spawn);
                 let project = engine.add_project(&folder.to_string_lossy()).unwrap();
                 engine.with(|core| {
                     set_screen(core, "en", permissions);
@@ -1138,10 +1142,10 @@ mod tests {
         for (guide_saved, kit_current, language) in
             [(Some(true), true, "en"), (Some(true), false, "en"), (Some(false), true, "en"), (None, true, "en"), (Some(true), true, "de")]
         {
-            let dir = tempfile::tempdir().unwrap();
+            let dir = crate::workspace::TestRoot::new();
             let folder = dir.path().canonicalize().unwrap();
             let (spawn, _, messages) = fake();
-            let engine = engine(&folder, spawn);
+            let engine = engine(&dir, spawn);
             let note = engine.with(|core| {
                 set_screen(core, "en", Permissions::Ask);
                 conversation(core, Area::Chat, None, &folder, "Debug this failure");
@@ -1182,10 +1186,10 @@ mod tests {
     #[tokio::test]
     async fn a_resumed_codex_thread_is_told_of_the_guide_in_its_first_input_only_when_it_was_not_told() {
         for told in [false, true] {
-            let dir = tempfile::tempdir().unwrap();
+            let dir = crate::workspace::TestRoot::new();
             let folder = dir.path().canonicalize().unwrap();
             let (spawn, _, messages) = fake();
-            let engine = engine(&folder, spawn);
+            let engine = engine(&dir, spawn);
             let note = engine.with(|core| {
                 set_screen(core, "es", Permissions::Ask);
                 conversation(core, Area::Chat, None, &folder, "Debug this failing test");
@@ -1216,10 +1220,10 @@ mod tests {
     /// until it does. Codex keeps its thread's instructions through a compaction.
     #[tokio::test]
     async fn the_guide_line_waits_for_an_ordinary_message_and_returns_after_a_compaction() {
-        let dir = tempfile::tempdir().unwrap();
+        let dir = crate::workspace::TestRoot::new();
         let folder = dir.path().canonicalize().unwrap();
         let (spawn, _, messages) = fake();
-        let first = engine(&folder, spawn);
+        let first = engine(&dir, spawn);
         let note = first.with(|core| {
             set_screen(core, "en", Permissions::Ask);
             conversation(core, Area::Chat, None, &folder, "/compact");
@@ -1248,10 +1252,10 @@ mod tests {
         });
         first.shutdown();
 
-        let dir = tempfile::tempdir().unwrap();
+        let dir = crate::workspace::TestRoot::new();
         let folder = dir.path().canonicalize().unwrap();
         let (spawn, _, messages) = fake();
-        let engine = engine(&folder, spawn);
+        let engine = engine(&dir, spawn);
         engine.with(|core| {
             set_screen(core, "en", Permissions::Ask);
             conversation(core, Area::Chat, None, &folder, "Debug this failing test");
@@ -1271,10 +1275,10 @@ mod tests {
     /// line goes again, as for Claude Code; a thread that has it in its instructions keeps it (the test above).
     #[tokio::test]
     async fn a_resumed_codex_thread_told_by_its_input_is_told_again_after_a_compaction() {
-        let dir = tempfile::tempdir().unwrap();
+        let dir = crate::workspace::TestRoot::new();
         let folder = dir.path().canonicalize().unwrap();
         let (spawn, _, messages) = fake();
-        let engine = engine(&folder, spawn);
+        let engine = engine(&dir, spawn);
         let note = engine.with(|core| {
             set_screen(core, "en", Permissions::Ask);
             conversation(core, Area::Chat, None, &folder, "Debug this failing test");
@@ -1299,10 +1303,9 @@ mod tests {
     /// decides when Faber has none (or one it has no words for).
     #[tokio::test]
     async fn the_guide_names_the_language_of_fabers_own_setting_before_the_systems() {
-        let dir = tempfile::tempdir().unwrap();
-        let folder = dir.path().canonicalize().unwrap();
+        let dir = crate::workspace::TestRoot::new();
         let (spawn, _, _) = fake();
-        let engine = engine(&folder, spawn);
+        let engine = engine(&dir, spawn);
         engine.with(|core| {
             use crate::guide::Language;
             for (code, language) in
@@ -1327,10 +1330,10 @@ mod tests {
     /// and never in a request of Faber's own (`Isolated`).
     #[tokio::test]
     async fn faber_guide_is_no_catalog_item_and_never_reaches_an_internal_request() {
-        let dir = tempfile::tempdir().unwrap();
+        let dir = crate::workspace::TestRoot::new();
         let folder = dir.path().canonicalize().unwrap();
         let (spawn, _, _) = fake();
-        let engine = engine(&folder, spawn);
+        let engine = engine(&dir, spawn);
         let project = engine.add_project(&folder.to_string_lossy()).unwrap();
         engine.with(|core| {
             conversation(core, Area::Project, Some(&project.id), &folder, "Debug this failing test");
@@ -1351,10 +1354,10 @@ mod tests {
     #[tokio::test]
     async fn claude_chat_receives_bounded_instructions_in_restricted_input_without_external_reads() {
         for permissions in [Permissions::Ask, Permissions::FullAccess] {
-            let dir = tempfile::tempdir().unwrap();
+            let dir = crate::workspace::TestRoot::new();
             let folder = dir.path().canonicalize().unwrap();
             let (spawn, args, messages) = fake();
-            let engine = engine(&folder, spawn);
+            let engine = engine(&dir, spawn);
             engine.with(|core| {
                 core.store.save_settings(&Settings { permissions: Some(permissions), ..Default::default() }).unwrap();
                 conversation(core, Area::Chat, None, &folder, "Debug this failing test");
@@ -1387,10 +1390,10 @@ mod tests {
 
     #[tokio::test]
     async fn resumed_claude_projects_receive_current_index_with_native_history_intact() {
-        let dir = tempfile::tempdir().unwrap();
+        let dir = crate::workspace::TestRoot::new();
         let folder = dir.path().canonicalize().unwrap();
         let (spawn, args, messages) = fake();
-        let engine = engine(&folder, spawn);
+        let engine = engine(&dir, spawn);
         let project = engine.add_project(&folder.to_string_lossy()).unwrap();
         engine.with(|core| {
             conversation(core, Area::Project, Some(&project.id), &folder, "Design a landing page");
@@ -1421,10 +1424,10 @@ mod tests {
     async fn claude_native_resume_sends_resources_only_when_the_saved_kit_changes() {
         for area in [Area::Chat, Area::Project] {
             for change in ["unchanged", "ids", "snapshot", "missing-digest"] {
-                let dir = tempfile::tempdir().unwrap();
+                let dir = crate::workspace::TestRoot::new();
                 let folder = dir.path().canonicalize().unwrap();
                 let (spawn, args, messages) = fake();
-                let engine = engine(&folder, spawn);
+                let engine = engine(&dir, spawn);
                 let project = engine.add_project(&folder.to_string_lossy()).unwrap();
                 let task = if change == "ids" { "Design a landing page" } else { "Debug this failure" };
                 engine.with(|core| {
@@ -1471,10 +1474,10 @@ mod tests {
     #[tokio::test(start_paused = true)]
     async fn claude_warmed_native_resume_sends_only_changed_resources() {
         for change in ["unchanged", "ids", "snapshot"] {
-            let dir = tempfile::tempdir().unwrap();
+            let dir = crate::workspace::TestRoot::new();
             let folder = dir.path().canonicalize().unwrap();
             let (spawn, args, messages) = fake();
-            let engine = engine(&folder, spawn);
+            let engine = engine(&dir, spawn);
             let task = if change == "ids" { "Design a landing page" } else { "Debug the next failure too" };
             engine.with(|core| {
                 conversation(core, Area::Chat, None, &folder, "Debug the failure");
@@ -1532,10 +1535,10 @@ mod tests {
     async fn claude_projects_and_helpers_choose_discovery_from_actual_plugin_support() {
         for helper in [false, true] {
             for plugin_dir in [false, true] {
-                let dir = tempfile::tempdir().unwrap();
+                let dir = crate::workspace::TestRoot::new();
                 let folder = dir.path().canonicalize().unwrap();
                 let (spawn, args, messages) = fake();
-                let engine = engine(&folder, spawn);
+                let engine = engine(&dir, spawn);
                 let project = engine.add_project(&folder.to_string_lossy()).unwrap();
                 engine.with(|core| {
                     core.claude_flags.plugin_dir = plugin_dir;
@@ -1570,10 +1573,10 @@ mod tests {
     async fn codex_projects_discover_oversize_enabled_skills_while_chat_uses_the_next_fitting_item() {
         for area in [Area::Chat, Area::Project] {
             for resumed in [false, true] {
-                let dir = tempfile::tempdir().unwrap();
+                let dir = crate::workspace::TestRoot::new();
                 let folder = dir.path().canonicalize().unwrap();
                 let (spawn, _, messages) = fake();
-                let engine = engine(&folder, spawn);
+                let engine = engine(&dir, spawn);
                 let project = engine.add_project(&folder.to_string_lossy()).unwrap();
                 engine.with(|core| {
                     let version = "X".repeat(crate::tools::kits::CONTEXT_BUDGET + 100);
@@ -1629,10 +1632,10 @@ mod tests {
 
     #[tokio::test]
     async fn codex_skill_boundary_resumes_native_history_and_delivers_full_selected_instructions() {
-        let dir = tempfile::tempdir().unwrap();
+        let dir = crate::workspace::TestRoot::new();
         let folder = dir.path().canonicalize().unwrap();
         let (spawn, args, messages) = fake();
-        let engine = engine(&folder, spawn);
+        let engine = engine(&dir, spawn);
         engine.with(|core| {
             conversation(core, Area::Chat, None, &folder, "Debug this failure");
             let c = core.convs.get_mut("kit").unwrap();
@@ -1658,11 +1661,11 @@ mod tests {
 
     #[tokio::test]
     async fn loaded_codex_project_refreshes_resources_after_switching_back_with_the_same_kit() {
-        let dir = tempfile::tempdir().unwrap();
+        let dir = crate::workspace::TestRoot::new();
         let folder = dir.path().canonicalize().unwrap();
         let effective: Messages = Arc::default();
         let (spawn, args, messages) = fake_backend(true, Some(effective.clone()));
-        let engine = engine(&folder, spawn);
+        let engine = engine(&dir, spawn);
         let project = engine.add_project(&folder.to_string_lossy()).unwrap();
         let old_resources = engine.with(|core| {
             let store = core.catalog_store();
@@ -1772,11 +1775,11 @@ mod tests {
 
     #[tokio::test]
     async fn loaded_codex_thread_clears_removed_resources_once_and_keeps_native_history() {
-        let dir = tempfile::tempdir().unwrap();
+        let dir = crate::workspace::TestRoot::new();
         let folder = dir.path().canonicalize().unwrap();
         let effective: Messages = Arc::default();
         let (spawn, args, messages) = fake_backend(true, Some(effective.clone()));
-        let engine = engine(&folder, spawn);
+        let engine = engine(&dir, spawn);
         engine.with(|core| {
             conversation(core, Area::Chat, None, &folder, "Debug this failure");
             core.rewind.captured_for_test("reply");
@@ -1872,10 +1875,10 @@ mod tests {
     async fn codex_native_resume_sends_resources_only_when_the_saved_kit_changes() {
         for area in [Area::Chat, Area::Project] {
             for change in ["unchanged", "contents", "ids", "native-id", "missing-record", "missing-digest"] {
-                let dir = tempfile::tempdir().unwrap();
+                let dir = crate::workspace::TestRoot::new();
                 let folder = dir.path().canonicalize().unwrap();
                 let (spawn, _, messages) = fake();
-                let engine = engine(&folder, spawn);
+                let engine = engine(&dir, spawn);
                 let project = engine.add_project(&folder.to_string_lossy()).unwrap();
                 let task = if change == "ids" { "Design a landing page" } else { "Debug this failure" };
                 engine.with(|core| {
@@ -1952,10 +1955,10 @@ mod tests {
     #[tokio::test]
     async fn identical_codex_kits_resume_native_history_and_compact_never_opens_an_empty_thread() {
         for compact in [false, true] {
-            let dir = tempfile::tempdir().unwrap();
+            let dir = crate::workspace::TestRoot::new();
             let folder = dir.path().canonicalize().unwrap();
             let (spawn, args, messages) = fake();
-            let engine = engine(&folder, spawn);
+            let engine = engine(&dir, spawn);
             engine.with(|core| {
                 conversation(core, Area::Chat, None, &folder, "Debug this failure");
                 let c = core.convs.get_mut("kit").unwrap();
@@ -1991,10 +1994,10 @@ mod tests {
 
     #[tokio::test(start_paused = true)]
     async fn code_pick_never_calls_a_model_or_delays_dispatch() {
-        let dir = tempfile::tempdir().unwrap();
+        let dir = crate::workspace::TestRoot::new();
         let folder = dir.path().canonicalize().unwrap();
         let (spawn, args, messages) = fake();
-        let engine = engine(&folder, spawn);
+        let engine = engine(&dir, spawn);
         let clock = tokio::time::Instant::now();
         engine.with(|core| {
             core.codex_models.clear();
@@ -2017,10 +2020,10 @@ mod tests {
 
     #[tokio::test]
     async fn cold_snapshot_preparation_never_holds_the_engine_lock_or_delays_a_turn() {
-        let dir = tempfile::tempdir().unwrap();
+        let dir = crate::workspace::TestRoot::new();
         let folder = dir.path().canonicalize().unwrap();
         let (spawn, _, messages) = fake();
-        let engine = engine(&folder, spawn);
+        let engine = engine(&dir, spawn);
         let catalog = engine.with(|core| {
             core.store.save_settings(&Settings { permissions: Some(Permissions::Plan), ..Default::default() }).unwrap();
             // The worker below holds the store lock; the session's own preparation must stay detached.
@@ -2072,10 +2075,10 @@ mod tests {
     #[tokio::test]
     #[ignore = "manual release-build fake-CLI first-word measurement"]
     async fn release_first_word_with_a_blank_warmed_claude_catalog_session() {
-        let dir = tempfile::tempdir().unwrap();
+        let dir = crate::workspace::TestRoot::new();
         let folder = dir.path().canonicalize().unwrap();
         let (spawn, args, _) = fake_reply(true);
-        let engine = engine(&folder, spawn);
+        let engine = engine(&dir, spawn);
         let store = if let Some(root) = std::env::var_os("FABER_KIT_BENCH_ROOT") {
             ToolStore::new(Path::new(&root))
         } else {
@@ -2142,10 +2145,10 @@ mod tests {
     #[ignore = "manual release-build fake-CLI first-word measurement"]
     async fn release_first_word_with_ready_and_unready_catalog_kits() {
         for ready in [false, true] {
-            let dir = tempfile::tempdir().unwrap();
+            let dir = crate::workspace::TestRoot::new();
             let folder = dir.path().canonicalize().unwrap();
             let (spawn, _, _) = fake_reply(true);
-            let engine = engine(&folder, spawn);
+            let engine = engine(&dir, spawn);
             let store = if let Some(root) = std::env::var_os("FABER_KIT_BENCH_ROOT") {
                 ToolStore::new(Path::new(&root))
             } else {
@@ -2188,10 +2191,10 @@ mod tests {
     #[tokio::test]
     async fn terminal_and_pre_update_threads_without_a_kit_record_resume_an_empty_pick() {
         for old_history in [false, true] {
-            let dir = tempfile::tempdir().unwrap();
+            let dir = crate::workspace::TestRoot::new();
             let folder = dir.path().canonicalize().unwrap();
             let (spawn, _, messages) = fake();
-            let engine = engine(&folder, spawn);
+            let engine = engine(&dir, spawn);
             engine.with(|core| {
                 conversation(core, Area::Chat, None, &folder, "Go on");
                 core.catalog_store().set_enabled("debug", false).unwrap();
@@ -2220,11 +2223,11 @@ mod tests {
 
     #[tokio::test]
     async fn picked_up_node_terminal_with_ponytail_resumes_and_receives_full_skill_instructions() {
-        let dir = tempfile::tempdir().unwrap();
+        let dir = crate::workspace::TestRoot::new();
         let folder = dir.path().canonicalize().unwrap();
         std::fs::write(folder.join("package.json"), "{}").unwrap();
         let (spawn, _, messages) = fake();
-        let engine = engine(&folder, spawn);
+        let engine = engine(&dir, spawn);
         let project = engine.add_project(&folder.to_string_lossy()).unwrap();
         engine.with(|core| {
             core.catalog_store = Some(catalog_items(&folder, "", &[("ponytail", "lean")]));
@@ -2263,10 +2266,10 @@ mod tests {
     #[tokio::test]
     async fn unrelated_catalog_switch_and_new_skill_pick_preserve_the_native_thread() {
         for (change_task, remove) in [(false, false), (false, true), (true, false)] {
-            let dir = tempfile::tempdir().unwrap();
+            let dir = crate::workspace::TestRoot::new();
             let folder = dir.path().canonicalize().unwrap();
             let (spawn, _, messages) = fake();
-            let engine = engine(&folder, spawn);
+            let engine = engine(&dir, spawn);
             engine.with(|core| {
                 conversation(core, Area::Chat, None, &folder, "Debug this failure");
                 let (delivery, report) = core.choose_session_tools("kit", Vendor::Codex, Permissions::FullAccess, &folder);
@@ -2305,10 +2308,10 @@ mod tests {
     #[tokio::test]
     async fn restarting_with_an_unready_or_unmatched_server_kit_preserves_native_context_and_its_record() {
         for cold in [false, true] {
-            let dir = tempfile::tempdir().unwrap();
+            let dir = crate::workspace::TestRoot::new();
             let folder = dir.path().canonicalize().unwrap();
             let (spawn, _, messages) = fake_reply(true);
-            let engine = engine(&folder, spawn);
+            let engine = engine(&dir, spawn);
             let project = engine.add_project(&folder.to_string_lossy()).unwrap();
             let identity = engine.with(|core| {
                 core.catalog_store = Some(server_catalog(&folder, "before"));
@@ -2366,10 +2369,10 @@ mod tests {
 
     #[tokio::test]
     async fn a_resumed_continuation_refreshes_server_paths_after_a_skill_snapshot_changes() {
-        let dir = tempfile::tempdir().unwrap();
+        let dir = crate::workspace::TestRoot::new();
         let folder = dir.path().canonicalize().unwrap();
         let (spawn, _, messages) = fake();
-        let engine = engine(&folder, spawn);
+        let engine = engine(&dir, spawn);
         let project = engine.add_project(&folder.to_string_lossy()).unwrap();
         let (old_script, identity, store) = engine.with(|core| {
             core.catalog_store = Some(server_catalog(&folder, "before"));
@@ -2409,10 +2412,10 @@ mod tests {
     #[tokio::test]
     async fn explicitly_revoked_servers_never_resume_while_the_replacement_snapshot_is_pending() {
         for action in ["disable", "remove", "project", "catalog"] {
-            let dir = tempfile::tempdir().unwrap();
+            let dir = crate::workspace::TestRoot::new();
             let folder = dir.path().canonicalize().unwrap();
             let (spawn, _, messages) = fake();
-            let engine = engine(&folder, spawn);
+            let engine = engine(&dir, spawn);
             let project = engine.add_project(&folder.to_string_lossy()).unwrap();
             engine.with(|core| {
                 core.catalog_store = Some(server_catalog(&folder, "before"));
@@ -2458,10 +2461,10 @@ mod tests {
 
     #[tokio::test]
     async fn only_a_changed_selected_server_replaces_the_native_thread() {
-        let dir = tempfile::tempdir().unwrap();
+        let dir = crate::workspace::TestRoot::new();
         let folder = dir.path().canonicalize().unwrap();
         let (spawn, _, messages) = fake_reply(true);
-        let engine = engine(&folder, spawn);
+        let engine = engine(&dir, spawn);
         let project = engine.add_project(&folder.to_string_lossy()).unwrap();
         engine.with(|core| {
             core.catalog_store = Some(server_catalog(&folder, "before"));
@@ -2507,10 +2510,10 @@ mod tests {
     #[tokio::test]
     async fn saved_empty_native_kit_overrides_old_reports_and_never_applies_to_another_thread() {
         for unknown_native_id in [false, true] {
-            let dir = tempfile::tempdir().unwrap();
+            let dir = crate::workspace::TestRoot::new();
             let folder = dir.path().canonicalize().unwrap();
             let (spawn, _, messages) = fake();
-            let engine = engine(&folder, spawn);
+            let engine = engine(&dir, spawn);
             engine.with(|core| {
                 conversation(core, Area::Chat, None, &folder, "Debug this failure");
                 core.catalog_store().set_enabled("debug", false).unwrap();
@@ -2552,10 +2555,10 @@ mod tests {
     #[tokio::test]
     async fn codex_native_context_survives_trusted_skill_updates() {
         for changed in [false, true] {
-            let dir = tempfile::tempdir().unwrap();
+            let dir = crate::workspace::TestRoot::new();
             let folder = dir.path().canonicalize().unwrap();
             let (spawn, _, messages) = fake();
-            let engine = engine(&folder, spawn);
+            let engine = engine(&dir, spawn);
             let old_identity = engine.with(|core| {
                 conversation(core, Area::Chat, None, &folder, "Debug this failure");
                 let (delivery, report) = core.choose_session_tools("kit", Vendor::Codex, Permissions::FullAccess, &folder);
@@ -2613,10 +2616,10 @@ mod tests {
 
     #[tokio::test]
     async fn compacted_native_kit_does_not_reuse_old_contents_after_a_trusted_update() {
-        let dir = tempfile::tempdir().unwrap();
+        let dir = crate::workspace::TestRoot::new();
         let folder = dir.path().canonicalize().unwrap();
         let (spawn, _, messages) = fake();
-        let engine = engine(&folder, spawn);
+        let engine = engine(&dir, spawn);
         engine.with(|core| {
             conversation(core, Area::Chat, None, &folder, "Debug this failure");
             let (delivery, report) = core.choose_session_tools("kit", Vendor::Codex, Permissions::FullAccess, &folder);
@@ -2661,10 +2664,10 @@ mod tests {
     async fn claude_blank_or_previous_task_warmup_reuses_the_process_and_reports_the_sent_task() {
         for earlier in [None, Some("Design a landing page")] {
             for task in ["Debug this failing test", "Meu app trava ao abrir"] {
-                let dir = tempfile::tempdir().unwrap();
+                let dir = crate::workspace::TestRoot::new();
                 let folder = dir.path().canonicalize().unwrap();
                 let (spawn, args, messages) = fake();
-                let engine = engine(&folder, spawn);
+                let engine = engine(&dir, spawn);
                 let sid = engine.with(|core| {
                     conversation(core, Area::Chat, None, &folder, earlier.unwrap_or_default());
                     let c = core.convs.get_mut("kit").unwrap();
@@ -2698,10 +2701,10 @@ mod tests {
 
     #[tokio::test]
     async fn a_known_corrupt_server_revokes_native_configuration_even_while_preparation_is_unavailable() {
-        let dir = tempfile::tempdir().unwrap();
+        let dir = crate::workspace::TestRoot::new();
         let folder = dir.path().canonicalize().unwrap();
         let (spawn, _, _) = fake();
-        let engine = engine(&folder, spawn);
+        let engine = engine(&dir, spawn);
         let project = engine.add_project(&folder.to_string_lossy()).unwrap();
         let store = server_catalog(&folder, "one");
         engine.with(|core| {
@@ -2729,10 +2732,10 @@ mod tests {
     #[tokio::test]
     async fn a_changed_retained_server_cannot_reenter_a_resumed_native_thread() {
         for damage in ["source", "snapshot", "unreadable"] {
-            let dir = tempfile::tempdir().unwrap();
+            let dir = crate::workspace::TestRoot::new();
             let folder = dir.path().canonicalize().unwrap();
             let (spawn, _, _) = fake();
-            let engine = engine(&folder, spawn);
+            let engine = engine(&dir, spawn);
             let project = engine.add_project(&folder.to_string_lossy()).unwrap();
             engine.with(|core| {
                 core.catalog_store = Some(server_catalog(&folder, "one"));
@@ -2763,10 +2766,10 @@ mod tests {
 
     #[tokio::test]
     async fn claude_warmup_still_restarts_for_an_actual_server_configuration_change() {
-        let dir = tempfile::tempdir().unwrap();
+        let dir = crate::workspace::TestRoot::new();
         let folder = dir.path().canonicalize().unwrap();
         let (spawn, args, _) = fake();
-        let engine = engine(&folder, spawn);
+        let engine = engine(&dir, spawn);
         engine.with(|core| {
             core.catalog_store = Some(server_catalog_scope(&folder, "one", true));
             conversation(core, Area::Chat, None, &folder, "");
@@ -2793,10 +2796,10 @@ mod tests {
     async fn installed_catalog_items_do_not_disable_warm_process_preparation() {
         for vendor in [Vendor::Claude, Vendor::Codex] {
             for (off, guarded) in [(false, false), (true, false), (false, true)] {
-                let dir = tempfile::tempdir().unwrap();
+                let dir = crate::workspace::TestRoot::new();
                 let folder = dir.path().canonicalize().unwrap();
                 let (spawn, args, messages) = fake();
-                let engine = engine(&folder, spawn);
+                let engine = engine(&dir, spawn);
                 engine.with(|core| {
                     conversation(core, Area::Chat, None, &folder, "Debug this failure");
                     core.convs.get_mut("kit").unwrap().working_folder = None;
@@ -2839,10 +2842,10 @@ mod tests {
     async fn kit_reports_appear_only_at_nonempty_session_boundaries() {
         for vendor in [Vendor::Claude, Vendor::Codex] {
             for empty in [false, true] {
-                let dir = tempfile::tempdir().unwrap();
+                let dir = crate::workspace::TestRoot::new();
                 let folder = dir.path().canonicalize().unwrap();
                 let (spawn, _, _) = fake();
-                let engine = engine(&folder, spawn);
+                let engine = engine(&dir, spawn);
                 engine.with(|core| {
                     if empty {
                         core.catalog_store().set_enabled("debug", false).unwrap();
@@ -2865,10 +2868,10 @@ mod tests {
     #[tokio::test]
     async fn idle_reopen_does_not_repeat_an_unchanged_conversations_kit_report() {
         for vendor in [Vendor::Claude, Vendor::Codex] {
-            let dir = tempfile::tempdir().unwrap();
+            let dir = crate::workspace::TestRoot::new();
             let folder = dir.path().canonicalize().unwrap();
             let (spawn, _, _) = fake();
-            let engine = engine(&folder, spawn);
+            let engine = engine(&dir, spawn);
             engine.with(|core| {
                 conversation(core, Area::Chat, None, &folder, "Debug this failure");
                 core.rewind.captured_for_test("reply");
@@ -2887,10 +2890,10 @@ mod tests {
     #[tokio::test]
     async fn abandoned_codex_preparation_closes_on_switch_or_cleanup_without_stopping_a_peer() {
         for (switch, peer) in [(true, false), (false, false), (true, true), (false, true)] {
-            let dir = tempfile::tempdir().unwrap();
+            let dir = crate::workspace::TestRoot::new();
             let folder = dir.path().canonicalize().unwrap();
             let (spawn, _, messages) = fake();
-            let engine = engine(&folder, spawn);
+            let engine = engine(&dir, spawn);
             let server = engine.with(|core| {
                 conversation(core, Area::Chat, None, &folder, "Debug this failure");
                 core.convs.get_mut("kit").unwrap().working_folder = None;
@@ -2929,10 +2932,10 @@ mod tests {
 
     #[tokio::test(start_paused = true)]
     async fn unused_codex_preparation_expires_without_a_native_thread() {
-        let dir = tempfile::tempdir().unwrap();
+        let dir = crate::workspace::TestRoot::new();
         let folder = dir.path().canonicalize().unwrap();
         let (spawn, _, messages) = fake();
-        let engine = engine(&folder, spawn);
+        let engine = engine(&dir, spawn);
         let server = engine.with(|core| {
             conversation(core, Area::Chat, None, &folder, "Go on");
             core.convs.get_mut("kit").unwrap().working_folder = None;
@@ -2956,10 +2959,10 @@ mod tests {
     #[tokio::test]
     async fn a_debugging_preparation_serves_a_new_design_task_without_preparing_that_task() {
         for request in ["Create a website", "Crie um site"] {
-            let dir = tempfile::tempdir().unwrap();
+            let dir = crate::workspace::TestRoot::new();
             let folder = dir.path().canonicalize().unwrap();
             let (spawn, _, messages) = fake();
-            let engine = engine(&folder, spawn);
+            let engine = engine(&dir, spawn);
             engine.with(|core| {
                 conversation(core, Area::Chat, None, &folder, request);
                 core.rewind.captured_for_test("reply");
@@ -2977,10 +2980,10 @@ mod tests {
     #[tokio::test]
     async fn core_helpers_deliver_their_own_tasks_kit_to_the_other_vendor() {
         for caller in [Vendor::Claude, Vendor::Codex] {
-            let dir = tempfile::tempdir().unwrap();
+            let dir = crate::workspace::TestRoot::new();
             let folder = dir.path().canonicalize().unwrap();
             let (spawn, args, messages) = fake();
-            let engine = engine(&folder, spawn);
+            let engine = engine(&dir, spawn);
             let project = engine.add_project(&folder.to_string_lossy()).unwrap();
             engine.with(|core| {
                 conversation(core, Area::Project, Some(&project.id), &folder, "Debug this failure");
@@ -3025,10 +3028,10 @@ mod tests {
     #[tokio::test]
     async fn production_pending_compaction_queues_send_and_stop_clears_its_busy_state() {
         for stop in [false, true] {
-            let dir = tempfile::tempdir().unwrap();
+            let dir = crate::workspace::TestRoot::new();
             let folder = dir.path().canonicalize().unwrap();
             let (spawn, args, messages) = fake();
-            let engine = engine(&folder, spawn);
+            let engine = engine(&dir, spawn);
             let (started, entered) = std::sync::mpsc::channel();
             let (finished, ended) = std::sync::mpsc::channel();
             let gate = Arc::new(std::sync::Barrier::new(2));
@@ -3108,10 +3111,10 @@ mod tests {
 
     #[tokio::test]
     async fn production_stopping_a_pending_warmed_codex_send_releases_its_unused_process() {
-        let dir = tempfile::tempdir().unwrap();
+        let dir = crate::workspace::TestRoot::new();
         let folder = dir.path().canonicalize().unwrap();
         let (spawn, args, messages) = fake();
-        let engine = engine(&folder, spawn);
+        let engine = engine(&dir, spawn);
         let (started, entered) = std::sync::mpsc::channel();
         let (finished, ended) = std::sync::mpsc::channel();
         let gate = Arc::new(std::sync::Barrier::new(2));
@@ -3147,10 +3150,10 @@ mod tests {
 
     #[tokio::test]
     async fn production_helper_rejection_after_verification_releases_its_pending_slot_and_lease() {
-        let dir = tempfile::tempdir().unwrap();
+        let dir = crate::workspace::TestRoot::new();
         let folder = dir.path().canonicalize().unwrap();
         let (spawn, args, _) = fake();
-        let engine = engine(&folder, spawn);
+        let engine = engine(&dir, spawn);
         let project = engine.add_project(&folder.to_string_lossy()).unwrap();
         let (started, entered) = std::sync::mpsc::channel();
         let (finished, ended) = std::sync::mpsc::channel();
@@ -3189,10 +3192,10 @@ mod tests {
     #[tokio::test]
     async fn production_discarding_a_pending_warm_conversation_releases_its_snapshot_lease() {
         for draft in [true, false] {
-            let dir = tempfile::tempdir().unwrap();
+            let dir = crate::workspace::TestRoot::new();
             let folder = dir.path().canonicalize().unwrap();
             let (spawn, args, _) = fake();
-            let engine = engine(&folder, spawn);
+            let engine = engine(&dir, spawn);
             let (started, entered) = std::sync::mpsc::channel();
             let (finished, ended) = std::sync::mpsc::channel();
             let gate = Arc::new(std::sync::Barrier::new(2));
@@ -3227,10 +3230,10 @@ mod tests {
 
     #[tokio::test]
     async fn production_failed_compact_check_sends_the_queued_turn_through_a_new_check() {
-        let dir = tempfile::tempdir().unwrap();
+        let dir = crate::workspace::TestRoot::new();
         let folder = dir.path().canonicalize().unwrap();
         let (spawn, args, messages) = fake();
-        let engine = engine(&folder, spawn);
+        let engine = engine(&dir, spawn);
         let (started, entered) = std::sync::mpsc::channel();
         let (finished, ended) = std::sync::mpsc::channel();
         let gate = Arc::new(std::sync::Barrier::new(2));
@@ -3281,10 +3284,10 @@ mod tests {
     #[tokio::test]
     async fn production_quota_exhausted_during_launch_check_recovers_the_original_reply() {
         for already_recovering in [false, true] {
-            let dir = tempfile::tempdir().unwrap();
+            let dir = crate::workspace::TestRoot::new();
             let folder = dir.path().canonicalize().unwrap();
             let (spawn, args, _) = fake();
-            let engine = engine(&folder, spawn);
+            let engine = engine(&dir, spawn);
             let (started, entered) = std::sync::mpsc::channel();
             let (finished, ended) = std::sync::mpsc::channel();
             let gate = Arc::new(std::sync::Barrier::new(2));

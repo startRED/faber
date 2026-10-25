@@ -6,6 +6,11 @@ above an answer. The window widths, the sidebar and the running column are in [l
 
 ## Answers
 
+On Windows, default Chat work lives outside Faber's data folder. Startup recovers existing work by its recorded
+directory identity before loading conversations; an ambiguous destination refuses startup without replacing either
+folder. Reopening keeps the same files, and removing a chat removes its private work. A folder the person picked
+remains theirs and is never removed with the conversation. Unix still uses the existing private Chat layout.
+
 - Native visual pieces, HTML/SVG cards and their web-access rules are in [visual-answers.md](visual-answers.md).
 - The header is the vendor's mark, the model's name and its effort in the quiet header ink ("· high effort"; the owner,
   2026-10-17), nothing else (Auto shows its reason beside the name only while it is still choosing). Auto's reason is its

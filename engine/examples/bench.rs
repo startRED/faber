@@ -462,6 +462,8 @@ async fn run_faber(clis: &BTreeMap<Vendor, Cli>, request: &Request, work: &Work,
     let engine = match Engine::new(
         EngineOptions {
             data_dir: state,
+            #[cfg(windows)]
+            chat_dir: root.join(&request.id).join("faber").join("chat-work"),
             clis: clis.clone(),
             spawn: logging_spawner(root.join(&request.id).join("faber").join("spawns.log")),
             windows: cfg!(windows),

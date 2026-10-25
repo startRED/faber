@@ -8,15 +8,16 @@ use faber_engine::verify::{Runner, Spec, Started, Verifier};
 use faber_engine::{Engine, EngineOptions, SendRequest};
 use serde_json::{Value, json};
 use std::collections::BTreeMap;
-use std::path::Path;
 use std::sync::Arc;
 use std::sync::atomic::Ordering::SeqCst;
 use std::time::Duration;
 
-fn engine(dir: &Path, vendor: Vendor, spawn: Spawner) -> Engine {
+fn engine(dir: &crate::support::DataFolder, vendor: Vendor, spawn: Spawner) -> Engine {
     let app = Engine::new(
         EngineOptions {
-            data_dir: dir.join("data"),
+            data_dir: dir.path().into(),
+            #[cfg(windows)]
+            chat_dir: dir.chat_path().into(),
             clis: BTreeMap::from([(vendor, Cli { command: vendor.name().into(), prefix: vec![] })]),
             spawn,
             windows: false,
@@ -152,11 +153,11 @@ impl Runner for Gated {
 }
 
 async fn checks_preserve_compaction(vendor: Vendor, permissions: bool, stop: bool, fail_first: bool) {
-    let dir = support::canonical_tempdir().unwrap();
+    let dir = support::DataFolder::new();
     let folder = support::work_folder();
     std::fs::write(folder.path().join("AGENTS.md"), "# Rules\n\n## Proof commands\n\n```bash\npython check.py\n```\n").unwrap();
     let (spawn, made) = pipes();
-    let app = engine(dir.path(), vendor, spawn);
+    let app = engine(&dir, vendor, spawn);
     let gate = Arc::new(tokio::sync::Semaphore::new(0));
     app.set_verifier(Arc::new(Verifier::new(Arc::new(Gated { gate: gate.clone(), fail_next: fail_first.into() }))));
     let project = app.add_project(&folder.path().to_string_lossy()).unwrap().id;
@@ -359,10 +360,10 @@ enum ReplyEnd {
 }
 
 async fn retired_codex_closes(area: Area, permissions: bool, end: ReplyEnd) {
-    let dir = support::canonical_tempdir().unwrap();
+    let dir = support::DataFolder::new();
     let folder = support::work_folder();
     let (spawn, made) = pipes();
-    let app = engine(dir.path(), Vendor::Codex, spawn);
+    let app = engine(&dir, Vendor::Codex, spawn);
     app.save_settings(Settings { permissions: Some(Permissions::Ask), ..Settings::default() }).unwrap();
     let project = (area == Area::Project).then(|| app.add_project(&folder.path().to_string_lossy()).unwrap().id);
     let req = |id| request(Vendor::Codex, area, project.clone(), id);
@@ -455,10 +456,10 @@ enum RestEnd {
 
 async fn ends_rest(end: RestEnd) {
     for permissions in [false, true] {
-        let dir = support::canonical_tempdir().unwrap();
+        let dir = support::DataFolder::new();
         let folder = support::work_folder();
         let (spawn, made) = pipes();
-        let app = engine(dir.path(), Vendor::Codex, spawn);
+        let app = engine(&dir, Vendor::Codex, spawn);
         app.save_settings(Settings { permissions: Some(Permissions::Ask), ..Settings::default() }).unwrap();
         app.set_keep_going_pace(0.01);
         let project = app.add_project(&folder.path().to_string_lossy()).unwrap().id;
@@ -499,10 +500,10 @@ async fn ends_rest(end: RestEnd) {
 #[tokio::test]
 async fn retired_codex_closes_when_quota_stops_its_last_turn_in_chat_and_projects() {
     for area in [Area::Chat, Area::Project] {
-        let dir = support::canonical_tempdir().unwrap();
+        let dir = support::DataFolder::new();
         let folder = support::work_folder();
         let (spawn, made) = pipes();
-        let app = engine(dir.path(), Vendor::Codex, spawn);
+        let app = engine(&dir, Vendor::Codex, spawn);
         let project = (area == Area::Project).then(|| app.add_project(&folder.path().to_string_lossy()).unwrap().id);
         let id = app.send(request(Vendor::Codex, area, project, None)).unwrap();
         let mut old = next_pipe(&made).await;
@@ -529,11 +530,11 @@ async fn retired_codex_closes_when_quota_stops_its_last_turn_in_chat_and_project
 async fn a_keep_going_halt_at_turn_end_still_checks_edits_before_retiring() {
     for vendor in Vendor::ALL {
         for failed in [false, true] {
-            let dir = support::canonical_tempdir().unwrap();
+            let dir = support::DataFolder::new();
             let folder = support::work_folder();
             std::fs::write(folder.path().join("AGENTS.md"), "# Rules\n\n## Proof commands\n\n```bash\npython check.py\n```\n").unwrap();
             let (spawn, made) = pipes();
-            let app = engine(dir.path(), vendor, spawn);
+            let app = engine(&dir, vendor, spawn);
             let gate = Arc::new(tokio::sync::Semaphore::new(0));
             app.set_verifier(Arc::new(Verifier::new(Arc::new(Gated { gate: gate.clone(), fail_next: failed.into() }))));
             let project = app.add_project(&folder.path().to_string_lossy()).unwrap().id;
@@ -570,9 +571,9 @@ async fn settings_relaunch_routes_a_delayed_background_start_to_its_retired_owne
     use faber_engine::background::State;
 
     for permissions in [false, true] {
-        let dir = support::canonical_tempdir().unwrap();
+        let dir = support::DataFolder::new();
         let (spawn, made) = pipes();
-        let app = engine(dir.path(), Vendor::Claude, spawn);
+        let app = engine(&dir, Vendor::Claude, spawn);
         app.save_settings(Settings { permissions: Some(Permissions::Ask), ..Settings::default() }).unwrap();
         let id = app.send(request(Vendor::Claude, Area::Chat, None, None)).unwrap();
         let mut old = next_pipe(&made).await;
@@ -628,9 +629,9 @@ async fn settings_relaunch_routes_a_delayed_background_start_to_its_retired_owne
 async fn settings_relaunch_keeps_background_commands_running_until_they_end() {
     for vendor in Vendor::ALL {
         for permissions in [false, true] {
-            let dir = support::canonical_tempdir().unwrap();
+            let dir = support::DataFolder::new();
             let (spawn, made) = pipes();
-            let app = engine(dir.path(), vendor, spawn);
+            let app = engine(&dir, vendor, spawn);
             app.save_settings(Settings { permissions: Some(Permissions::Ask), ..Settings::default() }).unwrap();
             let id = app.send(request(vendor, Area::Chat, None, None)).unwrap();
             let mut old = next_pipe(&made).await;

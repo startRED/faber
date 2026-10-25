@@ -143,3 +143,30 @@ pub fn inside_folder(dir: &Path, path: &str) -> Option<PathBuf> {
     }
     (depth > 0 && crate::permissions::allows(dir, "Read", &serde_json::json!({ "file_path": path }))).then_some(full)
 }
+
+/// Test fixture: one owning temp parent with sibling `data/` and `work/` folders that outlive every engine opened on them.
+#[cfg(test)]
+pub(crate) struct TestRoot {
+    _owner: tempfile::TempDir,
+    data: PathBuf,
+    work: PathBuf,
+}
+
+#[cfg(test)]
+impl TestRoot {
+    pub(crate) fn new() -> Self {
+        let owner = tempfile::tempdir().unwrap();
+        let (data, work) = (owner.path().join("data"), owner.path().join("work"));
+        std::fs::create_dir(&data).unwrap();
+        Self { _owner: owner, data, work }
+    }
+    /// The data folder.
+    pub(crate) fn path(&self) -> &Path {
+        &self.data
+    }
+    /// The external work folder; absent until an engine creates it.
+    #[allow(dead_code)]
+    pub(crate) fn work(&self) -> &Path {
+        &self.work
+    }
+}

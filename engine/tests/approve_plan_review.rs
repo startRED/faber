@@ -13,10 +13,12 @@ use std::path::Path;
 use std::sync::Arc;
 use std::time::Duration;
 
-fn engine(dir: &Path, vendor: Vendor, spawn: Spawner) -> Engine {
+fn engine(dir: &crate::support::DataFolder, vendor: Vendor, spawn: Spawner) -> Engine {
     Engine::new(
         EngineOptions {
-            data_dir: dir.into(),
+            data_dir: dir.path().into(),
+            #[cfg(windows)]
+            chat_dir: dir.chat_path().into(),
             clis: BTreeMap::from([(vendor, Cli { command: vendor.name().into(), prefix: vec![] })]),
             spawn,
             windows: false,
@@ -95,7 +97,7 @@ impl faber_engine::verify::Runner for Capabilities {
 }
 
 async fn full_access_relaunch(area: Area) {
-    let dir = tempfile::tempdir().unwrap();
+    let dir = crate::support::DataFolder::new();
     let mut planning = fixture("claude", "approve-plan");
     let mut next = fixture("claude", "approve-plan-run");
     if area == Area::Project {
@@ -127,7 +129,7 @@ async fn full_access_relaunch(area: Area) {
                 if calls.fetch_add(1, std::sync::atomic::Ordering::SeqCst) == 0 { a(bin, args, cwd) } else { b(bin, args, cwd) }
             },
         );
-    let engine = engine(dir.path(), Vendor::Claude, spawn);
+    let engine = engine(&dir, Vendor::Claude, spawn);
     let folder = crate::support::work_folder();
     let project_id = if area == Area::Project {
         engine.set_browser(Arc::new(Capabilities));
@@ -199,7 +201,7 @@ async fn r160_review_full_access_approval_relaunches_projects_with_the_full_tool
 async fn r160_review_both_clis_start_the_same_quiet_approved_turn_in_every_non_plan_mode() {
     for vendor in Vendor::ALL {
         for mode in [Permissions::Ask, Permissions::AcceptEdits, Permissions::Auto, Permissions::FullAccess] {
-            let dir = tempfile::tempdir().unwrap();
+            let dir = crate::support::DataFolder::new();
             let first = fake(fixture(vendor.name(), "approve-plan"));
             let resumed = fake(fixture(vendor.name(), "approve-plan-run"));
             let (a, b) = (first.spawn.clone(), resumed.spawn.clone());
@@ -210,7 +212,7 @@ async fn r160_review_both_clis_start_the_same_quiet_approved_turn_in_every_non_p
                         if calls.fetch_add(1, std::sync::atomic::Ordering::SeqCst) == 0 { a(bin, args, cwd) } else { b(bin, args, cwd) }
                     },
                 );
-            let engine = engine(dir.path(), vendor, spawn);
+            let engine = engine(&dir, vendor, spawn);
             engine
                 .save_settings(Settings {
                     permissions: Some(if vendor == Vendor::Claude && mode == Permissions::Ask {
@@ -265,9 +267,9 @@ async fn r160_review_both_clis_start_the_same_quiet_approved_turn_in_every_non_p
 #[tokio::test]
 async fn r160_review_a_later_permission_choice_revokes_an_old_plan_approval_even_after_restart() {
     for change_back in [false, true] {
-        let dir = tempfile::tempdir().unwrap();
+        let dir = crate::support::DataFolder::new();
         let f = fake(fixture("codex", "approve-plan"));
-        let original = engine(dir.path(), Vendor::Codex, f.spawn.clone());
+        let original = engine(&dir, Vendor::Codex, f.spawn.clone());
         let before = plan(&original).await;
         let reply = before.messages.last().unwrap();
         let card = &reply.permissions.as_ref().unwrap()[0];
@@ -277,7 +279,7 @@ async fn r160_review_a_later_permission_choice_revokes_an_old_plan_approval_even
             original.save_settings(Settings { permissions: Some(Permissions::FullAccess), ..Settings::default() }).unwrap();
         }
         original.shutdown();
-        let reopened = engine(dir.path(), Vendor::Codex, fake(vec![]).spawn);
+        let reopened = engine(&dir, Vendor::Codex, fake(vec![]).spawn);
         let current = reopened.state().settings.permissions;
         for _ in 0..2 {
             assert_eq!(
@@ -300,12 +302,12 @@ async fn r160_review_a_later_permission_choice_revokes_an_old_plan_approval_even
 
 #[tokio::test]
 async fn r160_review_claude_approval_queues_immediately_and_stop_removes_the_approved_work() {
-    let dir = tempfile::tempdir().unwrap();
+    let dir = crate::support::DataFolder::new();
     let mut entries = fixture("claude", "approve-plan");
     let result = entries.iter().position(|e| e.msg["type"] == "result").unwrap();
     entries.insert(result, crate::support::Entry { input: false, msg: json!({"faber_hold":1000}) });
     let f = fake(entries);
-    let engine = engine(dir.path(), Vendor::Claude, f.spawn.clone());
+    let engine = engine(&dir, Vendor::Claude, f.spawn.clone());
     engine.save_settings(Settings { permissions: Some(Permissions::Plan), ..Settings::default() }).unwrap();
     let id = engine.send(request(None, "claude", "Plan this change.")).unwrap();
     let before = until(&engine, &id, |c| c.messages.last().is_some_and(|m| m.permissions.as_ref().is_some_and(|p| !p.is_empty()))).await;
@@ -341,8 +343,8 @@ async fn r160_review_claude_approval_queues_immediately_and_stop_removes_the_app
 #[tokio::test]
 async fn r160_review_ask_before_plan_is_the_approval_default_even_for_the_first_conversation() {
     for vendor in Vendor::ALL {
-        let dir = tempfile::tempdir().unwrap();
-        let engine = engine(dir.path(), vendor, fake(fixture(vendor.name(), "approve-plan")).spawn);
+        let dir = crate::support::DataFolder::new();
+        let engine = engine(&dir, vendor, fake(fixture(vendor.name(), "approve-plan")).spawn);
         engine.save_settings(Settings { permissions: Some(Permissions::Ask), ..Settings::default() }).unwrap();
         engine.save_settings(Settings { permissions: Some(Permissions::Plan), ..Settings::default() }).unwrap();
         let id = engine.send(request(None, vendor.name(), "Plan this change.")).unwrap();
@@ -354,8 +356,8 @@ async fn r160_review_ask_before_plan_is_the_approval_default_even_for_the_first_
 
 #[tokio::test]
 async fn r160_review_legacy_conversation_modes_are_ignored_and_siblings_share_settings() {
-    let dir = tempfile::tempdir().unwrap();
-    let first = engine(dir.path(), Vendor::Codex, fake(fixture("codex", "approve-plan")).spawn);
+    let dir = crate::support::DataFolder::new();
+    let first = engine(&dir, Vendor::Codex, fake(fixture("codex", "approve-plan")).spawn);
     let seed = plan(&first).await;
     first.shutdown();
     let ids = ["11111111-1111-4111-8111-111111111111", "22222222-2222-4222-8222-222222222222"];
@@ -368,7 +370,7 @@ async fn r160_review_legacy_conversation_modes_are_ignored_and_siblings_share_se
         save(dir.path(), &saved);
     }
     let f = fake(vec![]);
-    let reopened = engine(dir.path(), Vendor::Claude, f.spawn.clone());
+    let reopened = engine(&dir, Vendor::Claude, f.spawn.clone());
     reopened.save_settings(Settings { permissions: Some(Permissions::Ask), ..Settings::default() }).unwrap();
     for id in ids {
         let saved = serde_json::to_value(reopened.open(id).unwrap()).unwrap();
@@ -393,9 +395,9 @@ async fn r160_review_legacy_conversation_modes_are_ignored_and_siblings_share_se
 
 #[tokio::test]
 async fn r160_review_a_warmed_new_chat_follows_the_default_until_its_first_send() {
-    let dir = tempfile::tempdir().unwrap();
+    let dir = crate::support::DataFolder::new();
     let f = fake(fixture("claude", "chat"));
-    let engine = engine(dir.path(), Vendor::Claude, f.spawn.clone());
+    let engine = engine(&dir, Vendor::Claude, f.spawn.clone());
     engine.save_settings(Settings { permissions: Some(Permissions::Plan), ..Settings::default() }).unwrap();
     engine.warm(WarmRequest { conversation_id: None, area: Area::Chat, project_id: None, choice: choice("claude") });
     engine.save_settings(Settings { permissions: Some(Permissions::Ask), ..Settings::default() }).unwrap();
@@ -413,8 +415,8 @@ async fn r160_review_a_warmed_new_chat_follows_the_default_until_its_first_send(
 
 #[tokio::test]
 async fn r160_review_a_failed_codex_approval_keeps_the_original_mode_and_card() {
-    let dir = tempfile::tempdir().unwrap();
-    let engine = engine(dir.path(), Vendor::Codex, fake(fixture("codex", "approve-plan")).spawn);
+    let dir = crate::support::DataFolder::new();
+    let engine = engine(&dir, Vendor::Codex, fake(fixture("codex", "approve-plan")).spawn);
     let before = plan(&engine).await;
     let reply = before.messages.last().unwrap();
     let card = &reply.permissions.as_ref().unwrap()[0];
@@ -431,9 +433,9 @@ async fn r160_review_a_failed_codex_approval_keeps_the_original_mode_and_card() 
 
 #[tokio::test]
 async fn r160_review_a_failed_settings_write_keeps_the_shared_mode_and_never_starts_work() {
-    let dir = tempfile::tempdir().unwrap();
+    let dir = crate::support::DataFolder::new();
     let f = fake(fixture("codex", "approve-plan"));
-    let engine = engine(dir.path(), Vendor::Codex, f.spawn.clone());
+    let engine = engine(&dir, Vendor::Codex, f.spawn.clone());
     let before = plan(&engine).await;
     let reply = before.messages.last().unwrap();
     let request_id = &reply.permissions.as_ref().unwrap()[0].request_id;
@@ -459,9 +461,9 @@ async fn r160_review_a_failed_settings_write_keeps_the_shared_mode_and_never_sta
 
 #[tokio::test]
 async fn r160_review_codex_approval_checks_quota_before_changing_the_mode_messages_or_card() {
-    let dir = tempfile::tempdir().unwrap();
+    let dir = crate::support::DataFolder::new();
     let f = fake(fixture("codex", "approve-plan"));
-    let engine = engine(dir.path(), Vendor::Codex, f.spawn.clone());
+    let engine = engine(&dir, Vendor::Codex, f.spawn.clone());
     let before = plan(&engine).await;
     let reply = before.messages.last().unwrap();
     let request_id = &reply.permissions.as_ref().unwrap()[0].request_id;
@@ -484,8 +486,8 @@ async fn r160_review_codex_approval_checks_quota_before_changing_the_mode_messag
 
 #[tokio::test]
 async fn r160_review_a_new_person_message_clears_the_older_codex_plan_card_after_restart() {
-    let dir = tempfile::tempdir().unwrap();
-    let first = engine(dir.path(), Vendor::Codex, fake(fixture("codex", "approve-plan")).spawn);
+    let dir = crate::support::DataFolder::new();
+    let first = engine(&dir, Vendor::Codex, fake(fixture("codex", "approve-plan")).spawn);
     let before = plan(&first).await;
     let old_reply = before.messages.last().unwrap().id.clone();
     first.shutdown();
@@ -493,22 +495,22 @@ async fn r160_review_a_new_person_message_clears_the_older_codex_plan_card_after
     recording.iter_mut().find(|e| e.input && e.msg["method"] == "turn/start").unwrap().msg["params"]["input"][0]["text"] =
         "Revise the second step.".into();
     let f = fake(recording);
-    let reopened = engine(dir.path(), Vendor::Codex, f.spawn.clone());
+    let reopened = engine(&dir, Vendor::Codex, f.spawn.clone());
     reopened.send(request(Some(&before.id), "codex", "Revise the second step.")).unwrap();
     let done = until(&reopened, &before.id, |c| c.messages.len() == 4 && c.messages.last().unwrap().status == Some(Status::Done)).await;
     assert!(done.messages.iter().find(|m| m.id == old_reply).unwrap().permissions.as_ref().is_none_or(Vec::is_empty));
     assert!(f.mismatches.lock().unwrap().is_empty(), "{:?}", f.mismatches.lock().unwrap());
     reopened.shutdown();
-    let again = engine(dir.path(), Vendor::Codex, fake(vec![]).spawn);
+    let again = engine(&dir, Vendor::Codex, fake(vec![]).spawn);
     assert!(again.open(&before.id).unwrap().messages.iter().all(|m| m.permissions.as_ref().is_none_or(Vec::is_empty)));
     again.shutdown();
 }
 
 #[tokio::test]
 async fn r160_review_a_new_person_message_clears_the_codex_plan_card_even_when_quota_stops_dispatch() {
-    let dir = tempfile::tempdir().unwrap();
+    let dir = crate::support::DataFolder::new();
     let f = fake(fixture("codex", "approve-plan"));
-    let engine = engine(dir.path(), Vendor::Codex, f.spawn.clone());
+    let engine = engine(&dir, Vendor::Codex, f.spawn.clone());
     let before = plan(&engine).await;
     let old_reply = before.messages.last().unwrap().id.clone();
     engine.set_time_source(Arc::new(|| 1_800_000_000.0));
@@ -525,15 +527,15 @@ async fn r160_review_a_new_person_message_clears_the_codex_plan_card_even_when_q
         "accepting a new message retires the old approval even when dispatch fails before starting the CLI"
     );
     engine.shutdown();
-    let reopened = self::engine(dir.path(), Vendor::Codex, fake(vec![]).spawn);
+    let reopened = self::engine(&dir, Vendor::Codex, fake(vec![]).spawn);
     assert!(reopened.open(&before.id).unwrap().messages.iter().all(|m| m.permissions.as_ref().is_none_or(Vec::is_empty)));
     reopened.shutdown();
 }
 
 #[tokio::test]
 async fn r160_review_codex_keep_planning_drains_the_message_held_behind_the_card() {
-    let dir = tempfile::tempdir().unwrap();
-    let first = engine(dir.path(), Vendor::Codex, fake(fixture("codex", "approve-plan")).spawn);
+    let dir = crate::support::DataFolder::new();
+    let first = engine(&dir, Vendor::Codex, fake(fixture("codex", "approve-plan")).spawn);
     let before = plan(&first).await;
     first.shutdown();
     let mut saved = serde_json::to_value(&before).unwrap();
@@ -544,7 +546,7 @@ async fn r160_review_codex_keep_planning_drains_the_message_held_behind_the_card
     recording.iter_mut().find(|e| e.input && e.msg["method"] == "turn/start").unwrap().msg["params"]["input"][0]["text"] =
         "Explain the second step.".into();
     let f = fake(recording);
-    let reopened = engine(dir.path(), Vendor::Codex, f.spawn.clone());
+    let reopened = engine(&dir, Vendor::Codex, f.spawn.clone());
     let reply = before.messages.last().unwrap();
     let request_id = &reply.permissions.as_ref().unwrap()[0].request_id;
     reopened.approve_plan(&before.id, &reply.id, request_id, None).await.unwrap();
@@ -561,8 +563,8 @@ async fn r160_review_codex_keep_planning_drains_the_message_held_behind_the_card
 #[tokio::test]
 async fn r160_approval_drains_the_idle_queue_in_order_before_its_approved_work() {
     for earlier_outcome in ["done", "failed", "unavailable"] {
-        let dir = tempfile::tempdir().unwrap();
-        let first = engine(dir.path(), Vendor::Codex, fake(fixture("codex", "approve-plan")).spawn);
+        let dir = crate::support::DataFolder::new();
+        let first = engine(&dir, Vendor::Codex, fake(fixture("codex", "approve-plan")).spawn);
         let before = plan(&first).await;
         first.shutdown();
         let mut saved = serde_json::to_value(&before).unwrap();
@@ -580,7 +582,7 @@ async fn r160_approval_drains_the_idle_queue_in_order_before_its_approved_work()
         let (a, b) = (earlier.spawn.clone(), approved.spawn.clone());
         let spawn: Spawner =
             Arc::new(move |bin, args, cwd| if bin == std::ffi::OsStr::new("claude") { a(bin, args, cwd) } else { b(bin, args, cwd) });
-        let reopened = engine(dir.path(), Vendor::Codex, spawn);
+        let reopened = engine(&dir, Vendor::Codex, spawn);
         reopened.replace_clis(
             Vendor::ALL
                 .into_iter()
@@ -670,7 +672,7 @@ impl faber_engine::verify::Runner for ProjectToolProbe {
 /// Real drivers replay Plan and its resumed work. Tool definitions must survive with the thread while calls follow its mode.
 #[tokio::test]
 async fn r160_codex_project_started_in_plan_keeps_tools_for_approved_full_access_and_gates_plan_calls() {
-    let dir = tempfile::tempdir().unwrap();
+    let dir = crate::support::DataFolder::new();
     let mut planning = fixture("codex", "approve-plan");
     let mut work = fixture("codex", "approve-plan-run");
     for (recording, turn, base) in [(&mut planning, "plan-turn", 100), (&mut work, "work-turn", 200)] {
@@ -693,7 +695,7 @@ async fn r160_codex_project_started_in_plan_keeps_tools_for_approved_full_access
     let (a, b) = (first.spawn.clone(), resumed.spawn.clone());
     let calls = std::sync::atomic::AtomicUsize::new(0);
     let engine = engine(
-        dir.path(),
+        &dir,
         Vendor::Codex,
         Arc::new(
             move |bin, args, cwd| {

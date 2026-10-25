@@ -3,11 +3,13 @@ use faber_engine::store::Store;
 use faber_engine::{Engine, EngineOptions};
 use serde_json::{Value, json};
 
-fn engine(directory: &std::path::Path) -> (tokio::runtime::Runtime, Engine) {
+fn engine(directory: &crate::support::DataFolder) -> (tokio::runtime::Runtime, Engine) {
     let runtime = tokio::runtime::Builder::new_current_thread().enable_all().build().unwrap();
     let engine = Engine::new(
         EngineOptions {
-            data_dir: directory.into(),
+            data_dir: directory.path().into(),
+            #[cfg(windows)]
+            chat_dir: directory.chat_path().into(),
             clis: Default::default(),
             spawn: std::sync::Arc::new(|_, _, _| panic!("prompt history must never start a CLI")),
             windows: false,
@@ -52,7 +54,7 @@ fn wait_for_sidebar(engine: &Engine) {
 #[test]
 fn prompt_history_orders_own_messages_before_newer_messages_from_the_same_area_and_project() {
     for area in [Area::Chat, Area::Project] {
-        let dir = tempfile::tempdir().unwrap();
+        let dir = crate::support::DataFolder::new();
         let store = Store::new(dir.path());
         let project = (area == Area::Project).then_some("project-one");
         save(&store, "open", area, project, json!([prompt("own older", 1), prompt("own newest", 2)]));
@@ -68,7 +70,7 @@ fn prompt_history_orders_own_messages_before_newer_messages_from_the_same_area_a
         if area == Area::Project {
             save(&store, "wrong-project", area, Some("project-two"), json!([prompt("wrong project", 100)]));
         }
-        let (_runtime, engine) = engine(dir.path());
+        let (_runtime, engine) = engine(&dir);
         wait_for_sidebar(&engine);
         let read = |id| engine.prompt_history(id, area, project).unwrap();
         assert_eq!(read(Some("open")), ["own newest", "own older", "other newest", "other older", "other middle"]);
@@ -78,11 +80,11 @@ fn prompt_history_orders_own_messages_before_newer_messages_from_the_same_area_a
 
 #[test]
 fn prompt_history_uses_last_activity_and_streams_past_replies_and_attachments() {
-    let dir = tempfile::tempdir().unwrap();
+    let dir = crate::support::DataFolder::new();
     let store = Store::new(dir.path());
     save_at(&store, "active", Area::Chat, None, 100, json!([prompt("older prompt in recently active conversation", 1)]));
     save_at(&store, "older", Area::Chat, None, 90, json!([prompt("newer prompt in older conversation", 50)]));
-    let (_runtime, engine) = engine(dir.path());
+    let (_runtime, engine) = engine(&dir);
     wait_for_sidebar(&engine);
     // Initialize the existing metadata before changing fields that only the prompt reader needs to skip.
     assert_eq!(
@@ -104,7 +106,7 @@ fn prompt_history_uses_last_activity_and_streams_past_replies_and_attachments() 
 #[test]
 fn prompt_history_bounds_file_and_payload_work_and_discards_cancelled_requests() {
     use std::sync::atomic::AtomicBool;
-    let dir = tempfile::tempdir().unwrap();
+    let dir = crate::support::DataFolder::new();
     let store = Store::new(dir.path());
     save_at(&store, "oversized", Area::Chat, None, 100, json!([prompt("must not read this oversized file", 1)]));
     let path = dir.path().join("conversations/oversized.json");
@@ -118,7 +120,7 @@ fn prompt_history_bounds_file_and_payload_work_and_discards_cancelled_requests()
         }
     }
     save_at(&store, "valid", Area::Chat, None, 10, json!([prompt("kept", 1)]));
-    let (_runtime, reader) = engine(dir.path());
+    let (_runtime, reader) = engine(&dir);
     let history = reader.prompt_history(None, Area::Chat, None).unwrap();
     assert_eq!(history, ["kept"]);
     assert!(reader.prompt_history_cancellable(None, Area::Chat, None, &AtomicBool::new(true)).unwrap().is_empty());
@@ -131,7 +133,7 @@ fn prompt_history_bounds_file_and_payload_work_and_discards_cancelled_requests()
         200,
         json!([prompt(&"a".repeat(1024 * 1024), 1), prompt(&"b".repeat(1024 * 1024), 2), prompt(&"c".repeat(1024 * 1024), 3),]),
     );
-    let (_runtime, reader) = engine(dir.path());
+    let (_runtime, reader) = engine(&dir);
     let history = reader.prompt_history(None, Area::Chat, None).unwrap();
     assert_eq!(history.iter().map(String::len).sum::<usize>(), 2 * 1024 * 1024);
     assert!(history[0].starts_with('c'));
@@ -140,13 +142,13 @@ fn prompt_history_bounds_file_and_payload_work_and_discards_cancelled_requests()
 
 #[test]
 fn prompt_history_deduplicates_before_the_cap_and_keeps_the_highest_ranked_copy() {
-    let dir = tempfile::tempdir().unwrap();
+    let dir = crate::support::DataFolder::new();
     let store = Store::new(dir.path());
     save(&store, "open", Area::Chat, None, json!([prompt("repeated", 1), prompt("repeated", 2)]));
     let mut messages: Vec<_> = (0..250).map(|i| prompt(&format!("other {i}"), i + 10)).collect();
     messages.extend((0..250).map(|i| prompt("repeated", i + 1000)));
     save(&store, "other", Area::Chat, None, json!(messages));
-    let (_runtime, engine) = engine(dir.path());
+    let (_runtime, engine) = engine(&dir);
     let history = engine.prompt_history(Some("open"), Area::Chat, None).unwrap();
     assert_eq!(history.len(), 200);
     assert_eq!(history[0], "repeated");
@@ -157,7 +159,7 @@ fn prompt_history_deduplicates_before_the_cap_and_keeps_the_highest_ranked_copy(
 
 #[test]
 fn prompt_history_excludes_fabers_messages_answers_side_questions_and_empty_text() {
-    let dir = tempfile::tempdir().unwrap();
+    let dir = crate::support::DataFolder::new();
     let store = Store::new(dir.path());
     let mut wake = prompt("keep going", 2);
     wake["wake"] = json!({"why": "wake.keepGoing"});
@@ -170,7 +172,7 @@ fn prompt_history_excludes_fabers_messages_answers_side_questions_and_empty_text
     saved["asides"] = json!([{"question": "side question", "answer": "side answer"}]);
     std::fs::write(path, serde_json::to_vec(&saved).unwrap()).unwrap();
     std::fs::write(dir.path().join("conversations/broken.json"), "{").unwrap();
-    let (_runtime, engine) = engine(dir.path());
+    let (_runtime, engine) = engine(&dir);
     assert_eq!(engine.prompt_history(Some("open"), Area::Chat, None).unwrap(), ["  keep these spaces\n"]);
     store.remove("open");
     assert!(engine.prompt_history(Some("open"), Area::Chat, None).unwrap().is_empty(), "no cache outlives a read");
@@ -200,7 +202,7 @@ fn measure_prompt_history_cost(cold: bool) {
         (process.memory(), process.accumulated_cpu_time())
     }
 
-    let dir = tempfile::tempdir().unwrap();
+    let dir = crate::support::DataFolder::new();
     std::fs::create_dir(dir.path().join("conversations")).unwrap();
     let mut bytes = 0;
     for i in 0..500 {
@@ -230,7 +232,7 @@ fn measure_prompt_history_cost(cold: bool) {
     }
     // Only the warm case initializes the sidebar before measurement; both cases read identical valid files.
     let warm = (!cold).then(|| {
-        let pair = engine(dir.path());
+        let pair = engine(&dir);
         wait_for_sidebar(&pair.1);
         assert_eq!(pair.1.prompt_history(None, Area::Chat, None).unwrap().len(), 200);
         assert!(pair.1.search_messages("", Area::Chat).unwrap().ready);
@@ -251,7 +253,7 @@ fn measure_prompt_history_cost(cold: bool) {
         peak.max(usage(&mut system, pid).0)
     });
     let started = Instant::now();
-    let (_runtime, engine) = warm.unwrap_or_else(|| engine(dir.path()));
+    let (_runtime, engine) = warm.unwrap_or_else(|| engine(&dir));
     assert_eq!(engine.search_messages("", Area::Chat).unwrap().ready, !cold, "cold first Up must begin before the sidebar is ready");
     let first_up = Instant::now();
     let history = engine.prompt_history(Some("saved-0"), Area::Chat, None).unwrap();

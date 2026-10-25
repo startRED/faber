@@ -13,10 +13,12 @@ use std::time::Duration;
 use support::Entry;
 use tokio::sync::mpsc::UnboundedReceiver;
 
-fn engine(dir: &Path, entries: Vec<Entry>) -> (Engine, UnboundedReceiver<AppEvent>) {
+fn engine(dir: &crate::support::DataFolder, entries: Vec<Entry>) -> (Engine, UnboundedReceiver<AppEvent>) {
     let (tx, rx) = tokio::sync::mpsc::unbounded_channel();
     let opts = EngineOptions {
-        data_dir: dir.into(),
+        data_dir: dir.path().into(),
+        #[cfg(windows)]
+        chat_dir: dir.chat_path().into(),
         clis: BTreeMap::from([(Vendor::Claude, Cli { command: "claude".into(), prefix: vec![] })]),
         spawn: support::fake(entries).spawn,
         windows: false,
@@ -72,12 +74,12 @@ fn logged(dir: &Path) -> Vec<Value> {
 
 #[tokio::test]
 async fn a_low_share_warm_turn_is_logged_and_a_cold_or_healthy_one_is_not() {
-    let dir = tempfile::tempdir().unwrap();
+    let dir = crate::support::DataFolder::new();
     // 300 of 4400 read (cold, never logged), 300 of 4400 (warm, logged), 9000 of 13100 is 69% (warm, logged), then 30000 of
     // 34100 is 88% (warm, healthy).
     let entries =
         vec![user("one"), init(), result(300), user("two"), result(300), user("three"), result(9000), user("four"), result(30_000)];
-    let (engine, mut rx) = engine(dir.path(), entries);
+    let (engine, mut rx) = engine(&dir, entries);
     let id = turn(&engine, &mut rx, None, "one").await;
     assert!(logged(dir.path()).is_empty(), "the first turn of a fresh process has an empty cache");
     for text in ["two", "three", "four"] {
@@ -103,13 +105,13 @@ async fn a_low_share_warm_turn_is_logged_and_a_cold_or_healthy_one_is_not() {
 
 #[tokio::test]
 async fn the_first_turn_after_a_resume_is_logged_as_resumed_when_its_share_is_low() {
-    let dir = tempfile::tempdir().unwrap();
-    let (first, mut rx) = engine(dir.path(), vec![user("one"), init(), result(300)]);
+    let dir = crate::support::DataFolder::new();
+    let (first, mut rx) = engine(&dir, vec![user("one"), init(), result(300)]);
     let id = turn(&first, &mut rx, None, "one").await;
     first.shutdown();
     assert!(logged(dir.path()).is_empty());
     // A new process continues the saved session: its cache may have expired while nobody was typing.
-    let (second, mut rx) = engine(dir.path(), vec![user("two"), init(), result(300), user("three"), result(30_000)]);
+    let (second, mut rx) = engine(&dir, vec![user("two"), init(), result(300), user("three"), result(30_000)]);
     turn(&second, &mut rx, Some(id), "two").await;
     let lines = logged(dir.path());
     assert_eq!(lines.len(), 1, "{lines:?}");
@@ -120,7 +122,7 @@ async fn the_first_turn_after_a_resume_is_logged_as_resumed_when_its_share_is_lo
 }
 
 /// Two turns on one process, the second warm and low (the case that is logged).
-async fn low_warm_turn(dir: &Path) {
+async fn low_warm_turn(dir: &crate::support::DataFolder) {
     let (engine, mut rx) = engine(dir, vec![user("one"), init(), result(300), user("two"), result(300)]);
     let id = turn(&engine, &mut rx, None, "one").await;
     turn(&engine, &mut rx, Some(id), "two").await;
@@ -129,22 +131,22 @@ async fn low_warm_turn(dir: &Path) {
 
 #[tokio::test]
 async fn a_log_that_cannot_be_written_never_breaks_the_turn() {
-    let dir = tempfile::tempdir().unwrap();
+    let dir = crate::support::DataFolder::new();
     // A folder sits where the file would go, so every append fails.
     std::fs::create_dir(dir.path().join("cache-health.jsonl")).unwrap();
-    low_warm_turn(dir.path()).await;
+    low_warm_turn(&dir).await;
     assert!(dir.path().join("cache-health.jsonl").is_dir());
 }
 
 #[tokio::test]
 async fn a_log_at_its_size_cap_is_not_appended_to() {
-    let dir = tempfile::tempdir().unwrap();
+    let dir = crate::support::DataFolder::new();
     let file = dir.path().join("cache-health.jsonl");
     std::fs::write(&file, vec![b'x'; 1_000_000]).unwrap();
-    low_warm_turn(dir.path()).await;
+    low_warm_turn(&dir).await;
     assert_eq!(std::fs::metadata(&file).unwrap().len(), 1_000_000, "a capped file stays as it was");
     // Just under the cap, one more line still fits (and the cap is checked before the write, so it may pass it once).
     std::fs::write(&file, vec![b'x'; 999_999]).unwrap();
-    low_warm_turn(dir.path()).await;
+    low_warm_turn(&dir).await;
     assert!(std::fs::metadata(&file).unwrap().len() > 1_000_000);
 }

@@ -140,7 +140,7 @@ struct Rig {
     in_front: Arc<AtomicBool>,
     skew: Arc<AtomicI64>,
     project: String,
-    _folders: (tempfile::TempDir, tempfile::TempDir),
+    _folders: (support::DataFolder, tempfile::TempDir),
     /// The installed Faber's data folder, whose crash file a crash goal reads.
     installed: tempfile::TempDir,
 }
@@ -237,7 +237,7 @@ async fn rig_with(billed: bool, both: bool) -> Rig {
 
 /// `crash`: the project is Faber's own repository and its one goal watches the installed crash file, not a check.
 async fn build(billed: bool, both: bool, crash: bool) -> Rig {
-    let data = support::work_folder();
+    let data = support::DataFolder::new();
     let folder = support::work_folder();
     std::fs::write(folder.path().join("AGENTS.md"), format!("## Proof commands\n\n```\n{CHECK}\n```\n")).unwrap();
     let (spawn, made) = support::pipes();
@@ -245,6 +245,8 @@ async fn build(billed: bool, both: bool, crash: bool) -> Rig {
     let seen = events.clone();
     let opts = EngineOptions {
         data_dir: data.path().into(),
+        #[cfg(windows)]
+        chat_dir: data.chat_path().into(),
         clis: BTreeMap::from(Vendor::ALL.map(|v| (v, Cli { command: v.name().into(), prefix: vec![] })))
             .into_iter()
             .filter(|(v, _)| both || *v == Vendor::Claude)

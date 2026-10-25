@@ -9,7 +9,6 @@ use faber_engine::store::Store;
 use faber_engine::{BranchRequest, Engine, EngineOptions};
 use serde_json::{Value, json};
 use std::collections::BTreeMap;
-use std::path::Path;
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -37,14 +36,16 @@ fn conversation(message: Message, area: Area) -> Conversation {
     conversation
 }
 
-fn engine(dir: &Path) -> Engine {
+fn engine(dir: &crate::support::DataFolder) -> Engine {
     engine_with_clis(dir, BTreeMap::new())
 }
 
-fn engine_with_clis(dir: &Path, clis: BTreeMap<Vendor, Cli>) -> Engine {
+fn engine_with_clis(dir: &crate::support::DataFolder, clis: BTreeMap<Vendor, Cli>) -> Engine {
     Engine::new(
         EngineOptions {
-            data_dir: dir.into(),
+            data_dir: dir.path().into(),
+            #[cfg(windows)]
+            chat_dir: dir.chat_path().into(),
             clis,
             spawn: support::fake(vec![]).spawn,
             windows: false,
@@ -62,7 +63,7 @@ fn engine_with_clis(dir: &Path, clis: BTreeMap<Vendor, Cli>) -> Engine {
 #[tokio::test]
 async fn branches_edits_and_retries_keep_only_retained_piece_choices_after_reopening() {
     for vendor in Vendor::ALL {
-        let dir = support::tempdir();
+        let dir = support::DataFolder::new();
         let mut initial = conversation(fixture(vendor), Area::Chat);
         initial.working_folder = None;
         initial.messages.insert(0, Message::new("first".into(), Role::User, "First question".into(), 1));
@@ -73,7 +74,7 @@ async fn branches_edits_and_retries_keep_only_retained_piece_choices_after_reope
         save_value(&mut initial, "answer", 4, json!([true, false])).unwrap();
         save_value(&mut initial, "later-answer", 4, json!([false, true])).unwrap();
         Store::new(dir.path()).save_checked(&initial).unwrap();
-        let app = engine_with_clis(dir.path(), BTreeMap::from([(vendor, Cli { command: vendor.name().into(), prefix: vec![] })]));
+        let app = engine_with_clis(&dir, BTreeMap::from([(vendor, Cli { command: vendor.name().into(), prefix: vec![] })]));
         let here = app.branch_here("pieces", "answer").unwrap();
         let full = app.branch_here("pieces", "later-answer").unwrap();
         let mut branches = vec![here];
@@ -100,7 +101,7 @@ async fn branches_edits_and_retries_keep_only_retained_piece_choices_after_reope
         };
         verify(&app);
         app.shutdown();
-        let reopened = engine(dir.path());
+        let reopened = engine(&dir);
         verify(&reopened);
         reopened.shutdown();
     }
@@ -109,7 +110,7 @@ async fn branches_edits_and_retries_keep_only_retained_piece_choices_after_reope
 #[tokio::test]
 async fn rewind_then_edit_an_earlier_piece_and_redo_recovers_the_saved_choices_after_reopening() {
     for vendor in Vendor::ALL {
-        let dir = support::tempdir();
+        let dir = support::DataFolder::new();
         let mut initial = conversation(fixture(vendor), Area::Chat);
         initial.id = "3611dcb7-6387-47c6-8b25-1b6f20903171".into();
         initial.working_folder = None;
@@ -120,7 +121,7 @@ async fn rewind_then_edit_an_earlier_piece_and_redo_recovers_the_saved_choices_a
         save_value(&mut initial, "answer", 4, json!([true, false])).unwrap();
         save_value(&mut initial, "later-answer", 4, json!([false, true])).unwrap();
         Store::new(dir.path()).save_checked(&initial).unwrap();
-        let app = engine(dir.path());
+        let app = engine(&dir);
         let restored = app
             .rewind_restore(RestoreRequest {
                 conversation_id: initial.id.clone(),
@@ -133,7 +134,7 @@ async fn rewind_then_edit_an_earlier_piece_and_redo_recovers_the_saved_choices_a
         assert_eq!(app.open(&initial.id).unwrap().piece_values.len(), 1, "the shortened conversation keeps only its visible choices");
         app.save_piece_value(&initial.id, "answer", 4, json!([false, true])).unwrap();
         app.shutdown();
-        let reopened = engine(dir.path());
+        let reopened = engine(&dir);
         assert_eq!(reopened.visual_pieces(&initial.id, "answer")[4].value, json!([false, true]));
         assert_eq!(reopened.rewind_redos(&initial.id).unwrap()[0].id, restored.id);
         let redone =
@@ -145,7 +146,7 @@ async fn rewind_then_edit_an_earlier_piece_and_redo_recovers_the_saved_choices_a
             "Redo restores the entire pre-rewind choice snapshot"
         );
         reopened.shutdown();
-        let again = engine(dir.path());
+        let again = engine(&dir);
         assert_eq!(again.open(&initial.id).unwrap().piece_values, initial.piece_values);
         assert_eq!(again.visual_pieces(&initial.id, "later-answer")[4].value, json!([false, true]));
         again.shutdown();
@@ -295,10 +296,10 @@ fn arithmetic_has_precedence_decimals_unary_signs_and_explicit_resource_limits()
 async fn both_cli_piece_choices_survive_engine_reopening_in_both_areas() {
     for vendor in Vendor::ALL {
         for area in [Area::Chat, Area::Project] {
-            let dir = support::tempdir();
+            let dir = support::DataFolder::new();
             let initial = conversation(fixture(vendor), area);
             Store::new(dir.path()).save_checked(&initial).unwrap();
-            let first = engine(dir.path());
+            let first = engine(&dir);
             let before = first.visual_pieces("pieces", "answer");
             assert_eq!(before.len(), 10);
             let choices = [(3, json!(7)), (4, json!([true, false])), (5, json!(1)), (6, json!(1)), (7, json!(1))];
@@ -322,7 +323,7 @@ async fn both_cli_piece_choices_survive_engine_reopening_in_both_areas() {
             let expected = first.visual_pieces("pieces", "answer");
             assert_eq!(first.open("pieces").unwrap().messages, initial.messages, "a form choice never submits or changes source");
             first.shutdown();
-            let reopened = engine(dir.path());
+            let reopened = engine(&dir);
             assert_eq!(reopened.visual_pieces("pieces", "answer"), expected, "{vendor:?} {area:?}");
             for (block, value) in choices {
                 assert_eq!(expected[block].value, value);
@@ -335,12 +336,12 @@ async fn both_cli_piece_choices_survive_engine_reopening_in_both_areas() {
 #[tokio::test]
 async fn moving_chat_to_a_project_keeps_both_clis_piece_choices_and_allows_saving_after_reopening() {
     for vendor in Vendor::ALL {
-        let dir = support::tempdir();
+        let dir = support::DataFolder::new();
         let folder = support::work_folder();
         let mut initial = conversation(fixture(vendor), Area::Chat);
         initial.working_folder = None;
         Store::new(dir.path()).save_checked(&initial).unwrap();
-        let app = engine(dir.path());
+        let app = engine(&dir);
         let project = app.add_project(&folder.path().to_string_lossy()).unwrap();
         for (block, value) in [(3, json!(7)), (4, json!([true, false])), (5, json!(1)), (6, json!(1)), (7, json!(1))] {
             app.save_piece_value("pieces", "answer", block, value).unwrap();
@@ -356,7 +357,7 @@ async fn moving_chat_to_a_project_keeps_both_clis_piece_choices_and_allows_savin
         assert_eq!(app.visual_pieces("pieces", "answer"), expected);
         app.shutdown();
 
-        let reopened = engine(dir.path());
+        let reopened = engine(&dir);
         let record = reopened.open("pieces").unwrap();
         assert_eq!(record.area, Area::Project);
         assert_eq!(record.project_id, moved.project_id);
@@ -369,7 +370,7 @@ async fn moving_chat_to_a_project_keeps_both_clis_piece_choices_and_allows_savin
         assert_eq!(edited.messages, before.messages);
         reopened.shutdown();
 
-        let again = engine(dir.path());
+        let again = engine(&dir);
         let record = again.open("pieces").unwrap();
         assert_eq!(record.area, Area::Project);
         assert_eq!(record.project_id, moved.project_id);
@@ -381,10 +382,10 @@ async fn moving_chat_to_a_project_keeps_both_clis_piece_choices_and_allows_savin
 
 #[tokio::test]
 async fn a_failed_piece_save_reports_the_disk_failure_and_rolls_back_the_live_value() {
-    let dir = support::tempdir();
+    let dir = support::DataFolder::new();
     let initial = conversation(fixture(Vendor::Claude), Area::Chat);
     Store::new(dir.path()).save_checked(&initial).unwrap();
-    let app = engine(dir.path());
+    let app = engine(&dir);
     let before = app.visual_pieces("pieces", "answer");
     let path = dir.path().join("conversations/pieces.json");
     let backup = dir.path().join("conversations/prior.json");
@@ -395,7 +396,7 @@ async fn a_failed_piece_save_reports_the_disk_failure_and_rolls_back_the_live_va
     std::fs::remove_dir(&path).unwrap();
     std::fs::rename(&backup, &path).unwrap();
     app.shutdown();
-    let reopened = engine(dir.path());
+    let reopened = engine(&dir);
     assert_eq!(reopened.visual_pieces("pieces", "answer"), before);
     reopened.shutdown();
 }

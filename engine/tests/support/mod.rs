@@ -20,13 +20,14 @@ pub fn canonical_tempdir() -> io::Result<tempfile::TempDir> {
 }
 
 /// A project folder Faber works in, also unattended: one under the build's own `target`, or the system's temporary one
-/// where the build sits in a folder Faber refuses (a worktree under `.claude` or a copy under AppData), so a run on the PC
-/// agrees with CI wherever the checkout lives.
+/// where the build sits in a folder Faber refuses (a worktree under `.claude` or a copy under AppData). An owned child of
+/// home is the final candidate when the build's temporary directory also lives under AppData.
 pub fn work_folder() -> tempfile::TempDir {
     let build = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../target/test-workspaces");
     std::fs::create_dir_all(&build).unwrap();
     [build, std::env::temp_dir()]
         .into_iter()
+        .chain(std::env::var_os(if cfg!(windows) { "USERPROFILE" } else { "HOME" }).map(std::path::PathBuf::from))
         // Resolve parent components and temporary aliases in the same plain form the engine uses.
         .filter_map(|root| faber_engine::permissions::checked_folder(&root))
         .map(|root| tempfile::tempdir_in(root).unwrap())
@@ -403,6 +404,49 @@ pub async fn drive(
 }
 pub fn tempdir() -> tempfile::TempDir {
     tempfile::Builder::new().tempdir_in(std::env::temp_dir().canonicalize().unwrap()).unwrap()
+}
+
+/// Owns a data root and its stable external chat root for the full test lifetime.
+pub struct DataFolder {
+    _owner: tempfile::TempDir,
+    data: std::path::PathBuf,
+    chat: std::path::PathBuf,
+}
+
+impl DataFolder {
+    pub fn new() -> Self {
+        let owner = tempdir();
+        let parent = faber_engine::permissions::checked_folder(owner.path()).expect("a checked fixture parent");
+        let data = parent.join("data");
+        let chat = parent.join("work");
+        std::fs::create_dir(&data).unwrap();
+        Self { _owner: owner, data, chat }
+    }
+
+    pub fn path(&self) -> &std::path::Path {
+        &self.data
+    }
+
+    pub fn chat_path(&self) -> &std::path::Path {
+        &self.chat
+    }
+
+    /// Existing-work fixtures use the real recovery protocol before seeding an external root.
+    pub fn initialize_chat(&self) {
+        #[cfg(windows)]
+        drop(faber_engine::workspace::relocation::open(&self.data, &self.chat).unwrap());
+    }
+
+    pub fn scratch_path(&self) -> std::path::PathBuf {
+        #[cfg(windows)]
+        {
+            self.chat.clone()
+        }
+        #[cfg(not(windows))]
+        {
+            self.data.join("chat")
+        }
+    }
 }
 
 /// A fake CLI process the test drives by hand: it writes the CLI's output lines itself, whenever it likes, and reads
