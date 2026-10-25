@@ -98,20 +98,22 @@ A scenario that fails only in parallel is added to the list, or its race is fixe
 
 ### Build folder budget
 
-Each worktree builds into `target/<name>` of the main checkout (`faber-wt-projhome` into `target/projhome`), and Cargo
-never deletes old artifacts. The runner (`testkit/src/sweep.rs`, R106) sweeps that `target` before choosing the suites, at
-most once an hour (the `target/.faber-sweep` stamp), and prints a line only when it freed space:
+A lane builds into a folder of the main checkout's `target` (`target/<name>`, through `CARGO_TARGET_DIR`) or into its own
+worktree's `target`, and Cargo never deletes old artifacts. The runner (`testkit/src/sweep.rs`, R106, R-next) sweeps them
+all before choosing the suites, at most once an hour (the `target/.faber-sweep` stamp), and prints a line only when it
+freed space:
 
-1. A `target/<name>` folder with a `CACHEDIR.TAG` whose worktree is gone (no `git worktree list` entry named `<name>` or
-   `*-<name>`) and that nothing used for a day is removed whole.
+1. A build folder with a `CACHEDIR.TAG` (in `target/`, or the `target` of any worktree `git worktree list` names) that
+   nothing used for two hours is removed whole, its worktree alive or gone. On 2026-10-25 such folders held 107 GB, 34 of
+   them on C: in the copies under `%APPDATA%\Faber`; sccache makes the rebuild cheap.
 2. In every build profile (a folder with `.fingerprint`, nested ones included), a file in `deps/` that a newer build of
-   the same crate and kind replaced more than a day ago is removed, and so is an `incremental/` folder a newer one of the
-   same crate replaced. A crate's newest build stays however old it is. Measured on 2026-10-14, `debug/incremental` held
-   52 folders for `faber_engine` alone, all but one dead.
-3. If `target` is still above 60 GB, whole worktree folders are removed, the least recently used first, until it fits.
-   A folder used in the last six hours belongs to a lane still at work and stays (a cold rebuild costs it ten minutes).
-   The main checkout's own folders (`debug`, `release`, `faber-test`) and this run's own folder are never removed whole;
-   if they alone exceed the cap, the runner says so.
+   the same crate and kind replaced more than two hours ago is removed, and so is an `incremental/` folder a newer one of
+   the same crate replaced. A crate's newest build stays however old it is. Measured on 2026-10-14, `debug/incremental`
+   held 52 folders for `faber_engine` alone, all but one dead.
+3. If they are still above 12 GB together, whole folders are removed, the least recently used first, until they fit, so
+   all of Faber's builds with `debug` stay under 15 GB. A folder used in the last half hour belongs to a lane still at
+   work and stays. The main checkout's own folders (`debug`, `release`, `faber-test`) and this run's own folder are never
+   removed whole; if they alone exceed the cap, the runner says so.
 
 A folder is in use while Cargo holds one of its lock files (`.cargo-lock`, `.cargo-build-lock`, `.cargo-artifact-lock`)
 or, on Windows, while a program in one of its profiles runs (Windows refuses to open it for writing). In use, it is
@@ -180,6 +182,6 @@ The program is `faber-test`, run as `cargo t`.
    parallel lanes, skipping unchanged builds and a shared running app for the screen scenarios.
 7. **The build folder has a budget** (R106). Every worktree builds into a folder of the main checkout's `target`, and
    Cargo never deletes anything there, so it grew to 123 GB and once filled the disk. `cargo t` sweeps it at start, at
-   most once an hour: folders of removed worktrees and builds replaced more than a day ago go, and above 60 GB
-   the least recently used worktree folders go too. A folder in use is never touched
+   most once an hour: build folders idle for two hours and builds replaced more than two hours ago go, and above 12 GB
+   the least recently used folders go too (R-next). A folder in use is never touched
    ([design](#build-folder-budget)).

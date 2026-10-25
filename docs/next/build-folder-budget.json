@@ -1,0 +1,3 @@
+{
+  "decisions": ["| R-next | 2026-10-25 | The build folder budget (R106) covers every worktree's own `target` as well as the main checkout's: a build folder nothing used for two hours is removed whole, its worktree alive or gone, replaced builds leave a profile after two hours, and above 12 GB together the least recently used folders go (a folder used in the last half hour stays), so all of Faber's builds on the owner's PC stay under 15 GB, on E:. Measured 2026-10-25: 107 GB of idle build folders, 34 GB of them on C:. Cost: one walk of the build folders at most once an hour inside `cargo t`; a lane back after two hours rebuilds from sccache. | Erick |"]
+}

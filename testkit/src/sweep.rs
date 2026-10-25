@@ -1,11 +1,13 @@
-//! The build folder budget (R106). Every worktree builds into a folder of the main checkout's `target`, and Cargo never
-//! deletes anything there, so the runner sweeps it at start, at most once an hour:
+//! The build folder budget (R106, R-next). Lanes build into folders of the main checkout's `target` or into their own
+//! worktree's `target`, and Cargo never deletes anything there, so the runner sweeps them all at start, at most once an
+//! hour:
 //!
-//! 1. A worktree's folder whose worktree is gone, idle for a day, is removed whole.
+//! 1. A build folder nothing used for two hours is removed whole, whether its worktree is alive or gone: sccache makes
+//!    the rebuild cheap, and an idle folder holds 3 to 30 GB.
 //! 2. In every build profile (`debug`, `release`, nested ones), an artifact in `deps/` or an `incremental/` folder that
-//!    a newer build of the same crate replaced more than a day ago is removed. A crate's newest build always stays.
-//! 3. If `target` is still above the cap, whole worktree folders go, the least recently used first. A folder built in
-//!    the last six hours belongs to a lane still at work and stays: a cold rebuild costs it ten minutes or more.
+//!    a newer build of the same crate replaced more than two hours ago is removed. A crate's newest build always stays.
+//! 3. If all of them together are still above the cap, whole folders go, the least recently used first. A folder used
+//!    in the last half hour belongs to a lane still at work and stays.
 //!
 //! A folder is never touched while Cargo holds its lock or one of its programs runs, and the main checkout's own
 //! folders (`debug`, `release`, `faber-test`) are only ever swept, never removed whole.
@@ -15,14 +17,13 @@ use std::fs::{self, File, OpenOptions};
 use std::path::{Path, PathBuf};
 use std::time::{Duration, SystemTime};
 
-/// Above this, whole worktree folders are removed. Each worktree needs about 5 to 15 GB once swept.
-pub const CAP: u64 = 60 << 30;
-const DAY: Duration = Duration::from_secs(24 * 60 * 60);
-/// How long a replaced build stays, so a build that just moved on can still go back cheaply.
-const STALE: Duration = DAY;
+/// Above this, whole build folders are removed, so all of Faber's builds on one PC stay under 15 GB with `debug`.
+pub const CAP: u64 = 12 << 30;
+/// A build folder nothing used for this long is removed whole, and a replaced build this old leaves its profile.
+const IDLE: Duration = Duration::from_secs(2 * 60 * 60);
 const EVERY: Duration = Duration::from_secs(60 * 60);
 /// Over the cap, a folder used more recently than this is a lane still at work, never evicted.
-const ACTIVE: Duration = Duration::from_secs(6 * 60 * 60);
+const ACTIVE: Duration = Duration::from_secs(30 * 60);
 const STAMP: &str = ".faber-sweep";
 /// The main checkout's own build folders that carry a `CACHEDIR.TAG` of their own.
 const MAIN_FOLDERS: [&str; 1] = ["faber-test"];
@@ -38,12 +39,6 @@ pub struct Report {
 /// The worktree paths in `git worktree list --porcelain`, the main checkout first.
 pub fn worktrees(porcelain: &str) -> Vec<PathBuf> {
     porcelain.lines().filter_map(|l| l.strip_prefix("worktree ")).map(PathBuf::from).collect()
-}
-
-/// Whether the folder `target/<name>` belongs to a live worktree: one named `<name>` or `<anything>-<name>`.
-pub fn owned(name: &str, worktrees: &[PathBuf]) -> bool {
-    let suffix = format!("-{name}");
-    worktrees.iter().filter_map(|w| w.file_name()?.to_str()).any(|w| w == name || w.ends_with(&suffix))
 }
 
 /// `libserde-0123456789abcdef.rlib` → (`libserde`, `rlib`). Files without Cargo's 16-digit hash give `None`.
@@ -179,29 +174,40 @@ pub fn sweep_profile(profile: &Path, cutoff: SystemTime) -> u64 {
     replaced(&deps, cutoff).iter().chain(&replaced(&incremental, cutoff)).map(|p| remove(p)).sum()
 }
 
-/// Sweeps the shared `target` of the main checkout. `own` is this run's build folder, never removed whole.
+/// The folders a sweep may remove whole, each (name, path): the tagged folders in the main checkout's `target` and the
+/// `target` of every other worktree. This run's own folder and the main folders are never among them.
+fn build_folders(target: &Path, own: &Path, worktrees: &[PathBuf]) -> Vec<(String, PathBuf)> {
+    let shared = subdirs(target)
+        .into_iter()
+        .filter_map(|d| Some((d.file_name()?.to_str()?.to_string(), d)))
+        .filter(|(name, _)| !MAIN_FOLDERS.contains(&name.as_str()));
+    let lanes = worktrees.iter().skip(1).filter_map(|w| Some((format!("{}/target", w.file_name()?.to_str()?), w.join("target"))));
+    shared.chain(lanes).filter(|(_, d)| d.join("CACHEDIR.TAG").is_file() && d.as_path() != own).collect()
+}
+
+/// Sweeps the main checkout's `target` and every worktree's own `target`. `own` is this run's build folder, never
+/// removed whole.
 pub fn sweep(target: &Path, own: &Path, worktrees: &[PathBuf], now: SystemTime, cap: u64) -> Report {
-    let before = size(target);
+    let folders = build_folders(target, own, worktrees);
+    let outside = |d: &Path| !d.starts_with(target);
+    let before = size(target) + folders.iter().filter(|(_, d)| outside(d)).map(|(_, d)| size(d)).sum::<u64>();
     let mut report = Report { before, after: before, removed: Vec::new() };
-    let worktree_folders = |report: &Report| -> Vec<(String, PathBuf)> {
-        subdirs(target)
-            .into_iter()
-            .filter(|d| d.join("CACHEDIR.TAG").is_file() && d.as_path() != own)
-            .filter_map(|d| Some((d.file_name()?.to_str()?.to_string(), d)))
-            .filter(|(name, _)| !MAIN_FOLDERS.contains(&name.as_str()) && !report.removed.contains(name))
-            .collect()
-    };
-    for (name, dir) in worktree_folders(&report) {
-        if !owned(&name, worktrees) && last_used(&dir) + DAY < now && !busy(&dir) {
+    let mut kept = Vec::new();
+    for (name, dir) in folders {
+        if last_used(&dir) + IDLE < now && !busy(&dir) {
             report.after -= remove(&dir).min(report.after);
             report.removed.push(name);
+        } else {
+            kept.push((name, dir));
         }
     }
-    for profile in profiles(target) {
-        report.after -= sweep_profile(&profile, now - STALE).min(report.after);
+    let roots = [target.to_path_buf()].into_iter().chain(kept.iter().filter(|(_, d)| outside(d)).map(|(_, d)| d.clone()));
+    for profile in roots.flat_map(|d| profiles(&d)) {
+        report.after -= sweep_profile(&profile, now - IDLE).min(report.after);
     }
     if report.after > cap {
-        let candidates = worktree_folders(&report)
+        let paths: HashMap<String, PathBuf> = kept.iter().cloned().collect();
+        let candidates = kept
             .into_iter()
             .map(|(name, dir)| {
                 let used = last_used(&dir);
@@ -209,7 +215,7 @@ pub fn sweep(target: &Path, own: &Path, worktrees: &[PathBuf], now: SystemTime, 
             })
             .collect();
         for name in over_budget(candidates, report.after, cap) {
-            report.after -= remove(&target.join(&name)).min(report.after);
+            report.after -= remove(&paths[&name]).min(report.after);
             report.removed.push(name);
         }
     }
@@ -230,6 +236,7 @@ mod tests {
     use super::*;
 
     const GB: u64 = 1 << 30;
+    const DAY: Duration = Duration::from_secs(24 * 60 * 60);
 
     fn write(path: &Path, bytes: usize, age: Duration) {
         fs::create_dir_all(path.parent().unwrap()).unwrap();
@@ -238,14 +245,10 @@ mod tests {
     }
 
     #[test]
-    fn porcelain_lists_every_worktree_and_a_folder_belongs_to_one_by_its_last_name_part() {
+    fn porcelain_lists_every_worktree_the_main_checkout_first() {
         let list =
             worktrees("worktree E:/p/faber\nHEAD eb53a93\nbranch refs/heads/main\n\nworktree E:/p/faber-wt-projhome\nHEAD 1\ndetached\n");
         assert_eq!(list, [PathBuf::from("E:/p/faber"), PathBuf::from("E:/p/faber-wt-projhome")]);
-        assert!(owned("projhome", &list));
-        assert!(owned("faber", &list));
-        assert!(!owned("rightclick", &list), "its worktree was removed");
-        assert!(!owned("home", &list), "only a whole name after a dash counts");
     }
 
     #[test]
@@ -275,14 +278,14 @@ mod tests {
         let profile = temp.path().join("debug");
         fs::create_dir_all(profile.join(".fingerprint")).unwrap();
         let deps = profile.join("deps");
-        write(&deps.join("libold-0000000000000001.rlib"), 10, STALE * 2);
+        write(&deps.join("libold-0000000000000001.rlib"), 10, IDLE * 2);
         write(&deps.join("libold-0000000000000002.rlib"), 10, Duration::ZERO);
-        write(&deps.join("liblone-0000000000000003.rlib"), 10, STALE * 2);
+        write(&deps.join("liblone-0000000000000003.rlib"), 10, IDLE * 2);
         write(&deps.join("libfresh-0000000000000004.rlib"), 10, EVERY);
         write(&deps.join("libfresh-0000000000000005.rlib"), 10, Duration::ZERO);
         write(&profile.join("incremental/faber-abc/s-1/work.bin"), 10, Duration::ZERO);
 
-        assert_eq!(sweep_profile(&profile, SystemTime::now() - STALE), 10);
+        assert_eq!(sweep_profile(&profile, SystemTime::now() - IDLE), 10);
         assert!(!deps.join("libold-0000000000000001.rlib").exists(), "replaced and older than the cutoff");
         assert!(deps.join("libold-0000000000000002.rlib").exists());
         assert!(deps.join("liblone-0000000000000003.rlib").exists(), "nothing replaced it");
@@ -306,7 +309,7 @@ mod tests {
         let temp = tempfile::tempdir().unwrap();
         let profile = temp.path().join("debug");
         write(&profile.join(".cargo-lock"), 0, Duration::ZERO);
-        write(&profile.join("deps/liba-0000000000000001.rlib"), 10, STALE * 2);
+        write(&profile.join("deps/liba-0000000000000001.rlib"), 10, IDLE * 2);
         write(&profile.join("deps/liba-0000000000000002.rlib"), 10, Duration::ZERO);
         let cargo = File::options().read(true).write(true).open(profile.join(".cargo-lock")).unwrap();
         cargo.lock().unwrap();
@@ -316,35 +319,43 @@ mod tests {
     }
 
     #[test]
-    fn the_sweep_removes_gone_worktrees_then_keeps_the_main_folders_and_this_run_s_own_under_any_cap() {
+    fn idle_build_folders_go_in_target_and_in_every_worktree_but_the_main_folders_and_this_run_s_own_stay() {
         let temp = tempfile::tempdir().unwrap();
-        let target = temp.path().join("target");
-        let folder = |name: &str, bytes| {
-            write(&target.join(name).join("CACHEDIR.TAG"), 0, Duration::ZERO);
-            write(&target.join(name).join("debug/.fingerprint/x"), 0, Duration::ZERO);
-            write(&target.join(name).join("debug/faber.pdb"), bytes, Duration::ZERO);
+        let target = temp.path().join("faber/target");
+        let lane = temp.path().join("faber-wt-live");
+        let folder = |dir: &Path| {
+            write(&dir.join("CACHEDIR.TAG"), 0, Duration::ZERO);
+            write(&dir.join("debug/.fingerprint/x"), 0, Duration::ZERO);
+            write(&dir.join("debug/faber.pdb"), 100, Duration::ZERO);
         };
-        folder("gone", 100);
-        folder("live", 100);
-        folder("mine", 100);
-        folder("faber-test", 100);
-        write(&target.join("debug/.fingerprint/x"), 0, Duration::ZERO);
-        write(&target.join("debug/faber.exe"), 100, Duration::ZERO);
-        let worktrees = [temp.path().join("faber"), temp.path().join("faber-wt-live"), temp.path().join("faber-wt-mine")];
+        let build = || {
+            for dir in [target.join("gone"), target.join("mine"), target.join("faber-test"), lane.join("target")] {
+                folder(&dir);
+            }
+            write(&target.join("debug/.fingerprint/x"), 0, Duration::ZERO);
+            write(&target.join("debug/faber.exe"), 100, Duration::ZERO);
+        };
+        let worktrees = [temp.path().join("faber"), lane.clone()];
+        let mine = target.join("mine");
+        let now = SystemTime::now();
+        let hour = Duration::from_secs(60 * 60);
+        let removed = |at, cap| {
+            let mut names = sweep(&target, &mine, &worktrees, at, cap).removed;
+            names.sort();
+            names
+        };
 
-        let today = sweep(&target, &target.join("mine"), &worktrees, SystemTime::now(), u64::MAX);
-        assert!(today.removed.is_empty(), "a folder whose worktree is gone keeps a day of grace");
-        let active = sweep(&target, &target.join("mine"), &worktrees, SystemTime::now(), 0);
-        assert!(active.removed.is_empty(), "over the cap, a folder built in the last hours belongs to a lane at work");
+        build();
+        assert!(removed(now, u64::MAX).is_empty(), "a folder used in the last two hours stays");
+        assert!(removed(now, 0).is_empty(), "over the cap, a folder used in the last half hour belongs to a lane at work");
+        assert_eq!(removed(now + hour, 0), ["faber-wt-live/target", "gone"], "over the cap, a folder idle for an hour goes");
 
-        let later = SystemTime::now() + DAY * 2;
-        let report = sweep(&target, &target.join("mine"), &worktrees, later, u64::MAX);
-        assert_eq!(report.removed, ["gone"]);
-        assert_eq!((report.before, report.after), (500, 400));
-
-        let report = sweep(&target, &target.join("mine"), &worktrees, later, 0);
-        assert_eq!(report.removed, ["live"], "over the cap, only other worktrees' folders go");
-        assert!(target.join("debug/faber.exe").exists() && target.join("faber-test").exists() && target.join("mine").exists());
+        build();
+        let report = sweep(&target, &mine, &worktrees, now + hour * 3, u64::MAX);
+        assert_eq!(report.removed.len(), 2, "idle for two hours, a folder goes under any cap, its worktree alive or gone");
+        assert_eq!((report.before, report.after), (500, 300));
+        assert!(target.join("debug/faber.exe").exists() && target.join("faber-test").exists() && mine.exists());
+        assert!(lane.exists() && !lane.join("target").exists(), "only the worktree's build folder goes");
     }
 
     #[test]
