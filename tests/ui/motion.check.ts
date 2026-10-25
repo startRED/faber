@@ -371,7 +371,9 @@ check('motion: closing a column freezes its visible box through interrupted widt
     root.style.left = '20px';
     root.style.transform = 'translateX(140px)';
     equal(column.getBoundingClientRect().x, initial.x, 'parent reflow cannot move the departing column backwards');
-    exit.currentTime = 90;
+    const duration = Number(exit.effect?.getTiming().duration);
+    ok(duration > 0, 'the exit has a measurable duration');
+    exit.currentTime = duration / 2;
     ok(column.getBoundingClientRect().x > initial.x, 'the opaque column travels out to the right');
     equal(getComputedStyle(column).opacity, '1');
     // WebKit rejects the cancellation promise in another microtask; await that settlement, not one guessed turn.
