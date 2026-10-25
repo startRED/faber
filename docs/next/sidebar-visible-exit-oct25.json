@@ -1,0 +1,11 @@
+{
+  "notes": {
+    "fixed": {
+      "en": "The sidebar finishes sliding away when you close it in a narrow window, instead of disappearing abruptly.",
+      "pt-BR": "Ao fechar a barra lateral numa janela estreita, ela termina de deslizar em vez de sumir de repente.",
+      "es": "Al cerrar la barra lateral en una ventana estrecha, termina de deslizarse en vez de desaparecer de golpe.",
+      "fr": "Dans une fenêtre étroite, la barre latérale finit de glisser quand vous la fermez, au lieu de disparaître brusquement.",
+      "de": "In schmalen Fenstern gleitet die Seitenleiste beim Schließen vollständig hinaus, statt plötzlich zu verschwinden."
+    }
+  }
+}

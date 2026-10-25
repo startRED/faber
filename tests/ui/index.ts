@@ -50,6 +50,7 @@ import './interactions.check.ts';
 import './models.check.ts';
 import './mojibake.check.ts';
 import './motion.check.ts';
+import './sidebar-exit.check.ts';
 import './appear.check.ts';
 import './nudge.check.ts';
 import './look.check.ts';

@@ -15,7 +15,7 @@ so the layout changes with its width:
 | 900 px to where the column no longer docks | 288 px, beside the stage | When open, an overlay on the stage | Up to 760 px |
 | 720 to 899 px | Hidden. A button in the topbar opens it as an overlay | When open, an overlay on the stage | Up to 760 px |
 
-In the narrow sidebar overlay, switching between Chat and Projects keeps navigation open so the chosen area's rows remain reachable. Choosing a project or conversation, opening Catalog, Escape or the scrim closes it. Tab stays inside the modal overlay; Escape returns focus to the topbar menu button. Wide navigation stays beside the stage.
+In the narrow sidebar overlay, switching between Chat and Projects keeps navigation open so the chosen area's rows remain reachable. Choosing a project or conversation, opening Catalog, Escape or the scrim closes it. Tab stays inside the modal overlay; Escape returns focus to the topbar menu button. Wide navigation stays beside the stage. The narrow sidebar remains painted through its full-motion exit, then becomes hidden; reduced and no motion hide it immediately. Closing makes it inert immediately, even while the exit is visible.
 
 The What's New page starts below the 36 px titlebar. Its scrolling viewport never extends behind the brand or window
 controls, including when focus scrolls to Continue in a short window (`tests/ui/notes.check.ts`, `notes: scrolling`).
