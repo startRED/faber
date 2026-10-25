@@ -39,6 +39,10 @@ fn name(name: &str) -> io::Result<Vec<u16>> {
 }
 
 fn child(parent: &File, name_text: &str, directory: bool, create: bool, replacing: bool) -> io::Result<File> {
+    child_access(parent, name_text, directory, create, replacing, 0)
+}
+
+fn child_access(parent: &File, name_text: &str, directory: bool, create: bool, replacing: bool, access: u32) -> io::Result<File> {
     let mut wide = name(name_text)?;
     let mut unicode = UNICODE_STRING { Length: (wide.len() * 2) as u16, MaximumLength: (wide.len() * 2) as u16, Buffer: wide.as_mut_ptr() };
     let attributes = OBJECT_ATTRIBUTES {
@@ -50,7 +54,7 @@ fn child(parent: &File, name_text: &str, directory: bool, create: bool, replacin
     };
     let mut handle = std::ptr::null_mut();
     let mut ios = IO_STATUS_BLOCK::default();
-    let access = 0x8000_0000 | if create { 0x4001_0000 } else { 0 };
+    let access = access | 0x8000_0000 | if create { 0x4001_0000 } else { 0 };
     let options =
         FILE_OPEN_REPARSE_POINT | FILE_SYNCHRONOUS_IO_NONALERT | if directory { FILE_DIRECTORY_FILE } else { FILE_NON_DIRECTORY_FILE };
     // SAFETY: the counted UTF-16 name and attributes live through this synchronous call. RootDirectory is an owned
@@ -168,6 +172,30 @@ impl MemoryDirectory {
 
     pub fn identity(&self) -> io::Result<String> {
         Self::file_identity(self.directory())
+    }
+
+    /// Move exactly the recorded directory between pinned parents, without replacing a destination.
+    pub fn relocate_directory(&self, source: &str, destination: &Self, target: &str, expected_identity: &str) -> io::Result<()> {
+        let wide = name(target)?;
+        // DELETE is limited to this source handle; ordinary memory readers retain their existing sharing rules.
+        let source = child_access(self.directory(), source, true, false, false, 0x0001_0000)?;
+        if Self::file_identity(&source)? != expected_identity {
+            return Err(denied());
+        }
+        let offset = std::mem::offset_of!(FILE_RENAME_INFORMATION, FileName);
+        let bytes = offset + (wide.len() + 1) * 2;
+        let mut buffer = vec![0usize; bytes.div_ceil(std::mem::size_of::<usize>())];
+        let info = buffer.as_mut_ptr().cast::<FILE_RENAME_INFORMATION>();
+        let mut ios = IO_STATUS_BLOCK::default();
+        // SAFETY: the aligned buffer holds the complete counted name. The exact source and both no-follow parent
+        // chains remain owned. A single relative leaf and ReplaceIfExists=false cannot redirect or replace the target.
+        status(unsafe {
+            (*info).Anonymous.ReplaceIfExists = false;
+            (*info).RootDirectory = destination.directory().as_raw_handle();
+            (*info).FileNameLength = (wide.len() * 2) as u32;
+            std::ptr::copy_nonoverlapping(wide.as_ptr(), (*info).FileName.as_mut_ptr(), wide.len());
+            NtSetInformationFile(source.as_raw_handle(), &mut ios, info.cast(), bytes as u32, FileRenameInformation)
+        })
     }
 
     pub fn file_identity(file: &File) -> io::Result<String> {
@@ -296,6 +324,68 @@ impl MemoryDirectory {
 mod tests {
     use super::*;
     use std::io::Write;
+    #[test]
+    fn chat_directory_move_refuses_linked_sources_destinations_and_parents() {
+        let owned = tempfile::tempdir().unwrap();
+        let root = owned.path().canonicalize().unwrap();
+        for directory in ["before", "after", "outside", "before/chat"] {
+            std::fs::create_dir(root.join(directory)).unwrap();
+        }
+        std::fs::write(root.join("before/chat/work.txt"), b"private work").unwrap();
+        std::fs::write(root.join("outside/untouched.txt"), b"outside work").unwrap();
+        std::os::windows::fs::symlink_dir(root.join("outside"), root.join("before/linked")).unwrap();
+        std::os::windows::fs::symlink_dir(root.join("outside"), root.join("after/linked")).unwrap();
+        std::os::windows::fs::symlink_dir(root.join("before"), root.join("linked-parent")).unwrap();
+        let before = MemoryDirectory::open(&root, Path::new("before")).unwrap();
+        let after = MemoryDirectory::open(&root, Path::new("after")).unwrap();
+        let outside = MemoryDirectory::open(&root, Path::new("outside")).unwrap().identity().unwrap();
+        let identity = before.under(Path::new("chat")).unwrap().identity().unwrap();
+        assert!(before.relocate_directory("linked", &after, "escaped", &outside).is_err());
+        assert!(before.relocate_directory("chat", &after, "linked", &identity).is_err());
+        assert!(MemoryDirectory::open(&root, Path::new("linked-parent")).is_err());
+        assert!(MemoryDirectory::open(&root.join("linked-parent"), Path::new("chat")).is_err());
+        assert_eq!(std::fs::read(root.join("before/chat/work.txt")).unwrap(), b"private work");
+        assert_eq!(std::fs::read(root.join("outside/untouched.txt")).unwrap(), b"outside work");
+        assert!(!root.join("after/escaped").exists());
+        assert!(root.join("before/linked").symlink_metadata().unwrap().file_type().is_symlink());
+        assert!(root.join("after/linked").symlink_metadata().unwrap().file_type().is_symlink());
+    }
+
+    #[test]
+    fn chat_directory_move_preserves_identity_and_refuses_replacement() {
+        let owned = tempfile::tempdir().unwrap();
+        let root = owned.path().canonicalize().unwrap();
+        std::fs::create_dir(root.join("before")).unwrap();
+        std::fs::create_dir(root.join("after")).unwrap();
+        std::fs::create_dir(root.join("before/chat")).unwrap();
+        std::fs::write(root.join("before/chat/work.txt"), b"private work").unwrap();
+        let before = MemoryDirectory::open(&root, Path::new("before")).unwrap();
+        let after = MemoryDirectory::open(&root, Path::new("after")).unwrap();
+        let held = before.under(Path::new("chat")).unwrap();
+        let identity = held.identity().unwrap();
+        assert!(before.relocate_directory("chat", &after, "chat", &identity).is_err(), "existing readers still pin their directory");
+        drop(held);
+        assert!(before.relocate_directory("chat", &after, "chat", "another identity").is_err());
+        assert!(root.join("before/chat/work.txt").exists());
+        std::fs::create_dir(root.join("after/chat")).unwrap();
+        std::fs::write(root.join("after/chat/other.txt"), b"other work").unwrap();
+        assert!(before.relocate_directory("chat", &after, "chat", &identity).is_err());
+        assert_eq!(std::fs::read(root.join("after/chat/other.txt")).unwrap(), b"other work");
+        before.relocate_directory("chat", &after, "moved", &identity).unwrap();
+        assert!(!root.join("before/chat").exists());
+        assert_eq!(after.under(Path::new("moved")).unwrap().identity().unwrap(), identity);
+        assert_eq!(std::fs::read(root.join("after/moved/work.txt")).unwrap(), b"private work");
+        assert!(before.relocate_directory("../after/moved", &after, "escape", &identity).is_err());
+        assert!(after.relocate_directory("moved", &before, "../escape", &identity).is_err());
+        assert!(std::fs::rename(root.join("after"), root.join("replaced")).is_err());
+        std::fs::write(root.join("before/plain-file"), b"not a directory").unwrap();
+        let file = before.file("plain-file", false).unwrap();
+        let file_identity = MemoryDirectory::file_identity(&file).unwrap();
+        drop(file);
+        assert!(before.relocate_directory("plain-file", &after, "plain-file", &file_identity).is_err());
+        assert_eq!(std::fs::read(root.join("before/plain-file")).unwrap(), b"not a directory");
+    }
+
     #[test]
     fn project_memory_directory_replaces_a_child_without_allowing_parent_replacement() {
         let path = std::env::temp_dir().join(format!("faber-memory-{}", std::process::id()));
