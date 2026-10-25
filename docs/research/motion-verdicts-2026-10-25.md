@@ -1,8 +1,9 @@
 # Motion verdicts: bounded observations and remaining work
 
-Status: bounded verdicts recorded for all eight task-997 surfaces. One demonstrated narrow-sidebar visibility rule
-break is corrected and locally checked in PR 372; its integration is not certified here. This note does not approve
-task 996 or the whole current application. No other implementation or timing change follows from an unobserved motion.
+Status: task 997 acceptance reconciled. All eight bounded surface verdicts and critique scores were incorporated
+through PR 373; the demonstrated narrow-sidebar visibility correction and its check entered through PR 382 on
+2026-10-25. PR 372 is its original source, not another required incorporation. This note does not approve the whole
+current application. No other implementation or timing change follows from an unobserved motion.
 
 The rules remain [looks](../design/looks.md#motion), the `faber-ui` checklist and the eight-line `visual-critique`
 rubric. A still composition score is not a verdict on continuous movement. Approximate samples are bracketed by
@@ -90,5 +91,9 @@ observations. These bounds are not new acceptance conditions added to task 997. 
 from opacity/compositing; current source inspection has not established a cause. Fix only a demonstrated rule break,
 not an inconclusive screenshot. The sidebar visibility delay is the demonstrated rule fix; its duration is unchanged.
 
-The eight bounded surface verdicts and critique scores are recorded above. Required integration gates remain outside
-this local evidence, and task 996, general resource budgets and continuous normal-speed movement are not approved.
+The eight bounded surface verdicts and critique scores are recorded above. Incorporation was verified for PR 373
+(`086766456c65c982fd3b807d1eb8ae16a1a5eb9e`) and PR 382
+(`a650f6b3e7b7784a8e0f00d05e1cb77f31b6f1c3`). Fresh independent acceptance review confirms the original task's
+verdict, demonstrated-rule repair/check and critique-score conditions, without adding unobserved widths or a combined
+build as new requirements. Task 996 has its own report; general resource budgets and continuous normal-speed movement
+remain unapproved here.

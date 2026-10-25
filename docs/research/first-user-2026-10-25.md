@@ -1,6 +1,6 @@
 # First-user round: 2026-10-25
 
-Status: bounded second pass and an empty-Projects discovery repair verified locally; integration and full task closure remain unverified. This is dated evidence, not a description of current Faber behavior.
+Status: task 996 acceptance reconciled after the empty-Projects repair was incorporated through PR 382 on 2026-10-25. Historical receipt exceptions and mixed evaluator outcomes remain recorded below. This is dated evidence, not approval of the whole current application.
 
 ## Scope and method
 
@@ -36,13 +36,13 @@ After repair, the same focused Projects goal was left unchanged:
 | Haiku, pt-BR | 720x480 | Done at step 5 | It explained adding a folder for Faber to work inside, while still expressing uncertainty about that phrase. |
 | Codex, English | 1280x800 | Done at step 6 | It explained folders as places where the AI can work. No folder creation was confirmed. |
 
-These are two done and two stuck evaluator outcomes, not four successes. The independently verified repair removes the observed missing purpose/action; it does not establish full task-996 closure or a successful native folder operation. No coaching was added to make the task pass.
+These are two done and two stuck evaluator outcomes, not four successes. Independent adjudication checked them against the unchanged goal, 'Abra a área de Projetos e descubra para que ela serve.' Both narrow evaluators explained that purpose before voluntarily trying Add. Their extra folder-selection attempts do not establish a remaining blocker of that goal. No coaching was added to make the task pass, and successful native folder operation remains unproven.
 
 ## Proof and independent review
 
 The focused check is `shell: empty Projects explains its purpose and exposes Add at 720 by 480`. Tests-only RED failed for the absent purpose. The first candidate still failed because Add protruded above the list viewport. The final empty-only header geometry passed the unchanged check: exact existing purpose, visible bounded Add, localized accessible name, programmatic focus and exactly one call to the existing mocked action, across en, pt-BR, es, fr and de. This is not a full Tab traversal or an actual folder-pick proof.
 
-The independent source review found no blocker and checked C005/C008/C011 with R168/R170. Five npm proofs, formatting and claims passed on the six repair files. The separate harness safeguards passed 26 unit tests; seven failed with tests alone before the corresponding safeguards were applied. Their continuation is saved and queued separately, not claimed incorporated here.
+The independent source review found no blocker and checked C005/C008/C011 with R168/R170. Five npm proofs, formatting and claims passed on the six repair files. The separate harness safeguards passed 26 unit tests; seven failed with tests alone before the corresponding safeguards were applied. Their continuation is saved and queued separately, not claimed incorporated here. It is not a dependency of the original newcomer goal or a newly discovered product blocker.
 
 The independent actual review verified all 89 post-repair frozen payloads and original hashes, six source bindings, all 28 original PNGs and controls, four reports and five-stage runtime identities. Narrow paired visual scores rose from 33/40 to 35/40 with no per-line drop; wide after scored 37/40. There is no paired before image at 1280 or standard 1920 collection, so wide non-regression and the full standard composition procedure remain unverified. This is target-specific empty-navigation evidence.
 
@@ -50,11 +50,13 @@ The application and fake CLI stayed unchanged across the four post-repair walks.
 
 ## Taste, resources and limits
 
-The remaining narrow-state visual losses are low polish: Add is quiet beside New conversation, Projects repeats as an area/group label, and the empty illustration/label extend below the short list viewport. The new purpose and action take priority. One short owner card asks whether to retain that priority or shrink the illustration to fit. No answer has been received and no further redesign is authorized by elapsed time.
+The remaining narrow-state visual losses are low polish: Add is quiet beside New conversation, Projects repeats as an area/group label, and the empty illustration/label extend below the short list viewport. The new purpose and action take priority. One short owner card asks whether to retain that priority or shrink the illustration to fit. The local request receipt records accepted submission, not independently certified delivery. No answer has been received and no further redesign is authorized by elapsed time.
 
 The repair adds one short paragraph and changes only empty-state header geometry; no timer, listener, resident process or dependency is added. Its runtime memory/CPU delta was not measured. Protected build-cache storage warnings are not application resource measurements. The queued native suites retain the existing resource limits.
 
-Task 996 remains unfinished: incorporation of the fixes and the native-folder boundary are not certified here, and two post-repair evaluators still declare stuck. Existing Demo-project reports cover recorded conversations only, with the receipt exceptions above. Live-account operation, creating a real project folder, editing project files, normal-speed feel, full keyboard traversal, persistence and the full standard wide photo procedure were not proven by this continuation.
+PR 382 was incorporated as `a650f6b3e7b7784a8e0f00d05e1cb77f31b6f1c3` on 2026-10-25. A fresh independent acceptance review reconciled the historical coverage, the unchanged Projects goal, the residual Appearance/Catalog observations and the recorded taste request. Controlled Appearance reachability and below-fold Catalog guidance do not establish another actionable blocker. The task's report, repair and second-pass conditions are satisfied within these documented bounds; repeating the matrix or proving an extra native-folder action is not required by the original task.
+
+Existing Demo-project reports cover recorded conversations only, with the receipt exceptions above. Live-account operation, creating a real project folder, editing project files, normal-speed feel, full keyboard traversal, persistence and the full standard wide photo procedure were not proven by this continuation. Task acceptance does not approve those capabilities or general stability.
 
 ## Evidence locator
 
