@@ -262,7 +262,7 @@ fn title(source: &str) -> Option<String> {
         fn process_token(&self, token: Token, _: u64) -> TokenSinkResult<()> {
             let mut title = self.0.borrow_mut();
             match token {
-                Token::TagToken(tag) if tag.name.as_ref() == "title" => {
+                Token::TagToken(tag) if &*tag.name == "title" => {
                     if tag.kind == TagKind::StartTag && !title.ended {
                         title.inside = true;
                         return TokenSinkResult::RawData(RawKind::Rcdata);
