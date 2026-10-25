@@ -159,6 +159,14 @@ impl Rig {
         self.skew.fetch_add(secs, Ordering::SeqCst);
     }
 
+    /// These cap scenarios advance 25 minutes; keep them in one local day regardless of the PC's clock.
+    fn at_midday(&self) -> i64 {
+        let now = real_secs() as i64 + self.skew.load(Ordering::SeqCst);
+        let offset = 12 * 3600 - now.rem_euclid(86_400);
+        self.engine.set_utc_offset(offset);
+        offset
+    }
+
     fn fail(&self, text: &str) {
         *self.runner.text.lock().unwrap() = text.into();
         self.runner.fails.store(true, Ordering::SeqCst);
@@ -212,7 +220,7 @@ impl Rig {
             }
             tokio::time::sleep(Duration::from_millis(20)).await;
         }
-        panic!("the check ran {} times, not {n}", self.runs());
+        panic!("the check ran {} times, expected {n}; running: {:?}; goal: {:?}", self.runs(), self.engine.state().running, self.view());
     }
 }
 
@@ -389,6 +397,7 @@ async fn a_goal_that_breaks_twice_starts_one_conversation_in_a_copy_and_the_same
 #[tokio::test]
 async fn the_daily_limit_stops_a_start_and_a_new_failure_after_the_fix_then_needs_the_person() {
     let r = rig(false).await;
+    r.at_midday();
     let mut agent = break_it(&r).await;
     finish(&mut agent, DAILY_CAP_USD + 0.5).await;
     until(|| r.view().spent_usd >= DAILY_CAP_USD).await;
@@ -398,6 +407,7 @@ async fn the_daily_limit_stops_a_start_and_a_new_failure_after_the_fix_then_need
     r.ran(3).await;
     assert_eq!(r.conversations().len(), 1, "a different failure only waits for a second run, even after a fix");
     r.advance(601);
+    assert!(r.view().spent_usd >= DAILY_CAP_USD, "the refusal is tested within the day that spent the cap");
     r.ran(4).await;
     assert_eq!((r.state(), r.view().goals[0].reason.as_deref()), ("needsYou", Some("reason.goal.cap")));
     assert_eq!(r.conversations().len(), 1, "no second conversation past the limit");
@@ -945,6 +955,7 @@ async fn a_fix_turn_with_tokens_but_no_known_price_counts_as_the_whole_days_mone
 #[tokio::test]
 async fn a_report_waiting_for_quota_does_not_resume_once_the_days_money_is_gone() {
     let r = rig(false).await;
+    let offset = r.at_midday();
     // Claude's plan is known not to fall back to paid use, so a window that is used up waits instead of ending a turn.
     let plan = Signals { billing: Some(faber_engine::budget::Billing::Subscription), paid_fallback: Some(false), ..Default::default() };
     r.engine.note_account_events(Vendor::Claude, vec![EngineEvent::Signals(plan)]);
@@ -974,7 +985,8 @@ async fn a_report_waiting_for_quota_does_not_resume_once_the_days_money_is_gone(
     until(|| r.view().spent_usd >= DAILY_CAP_USD).await;
     // Its time comes: the report is not sent, and the reply says why.
     r.advance(601);
-    r.engine.set_utc_offset(0);
+    assert!(r.view().spent_usd >= DAILY_CAP_USD, "the waiting report is tested within the day that spent the cap");
+    r.engine.set_utc_offset(offset);
     let m = until_reply(&r, &id).await;
     assert_eq!(m.error.as_deref(), Some("reason.goal.cap"));
     assert_eq!(user_lines(&agent), 1, "the fix's agent was sent nothing");
