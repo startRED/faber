@@ -1932,7 +1932,55 @@ fn engine_idle(dir: &Path, vendor: Vendor, spawn: Spawner, idle: Duration) -> (E
         runtime: tokio::runtime::Handle::current(),
         ask: None,
     };
-    (Engine::new(opts, Arc::new(move |e| drop(tx.send(e)))), rx)
+    (Engine::new(opts, Arc::new(move |e| drop(tx.send(e)))).unwrap(), rx)
+}
+
+#[cfg(windows)]
+#[tokio::test]
+async fn engine_startup_refuses_linked_data_before_store_or_background_work() {
+    let owned = tempfile::tempdir().unwrap();
+    let target = owned.path().join("target");
+    std::fs::create_dir(&target).unwrap();
+    let linked = owned.path().join("linked");
+    junction::create(&target, &linked).unwrap();
+    let fake = fake(vec![]);
+    for suffix in ["", "missing/data"] {
+        let engine = Engine::new(
+            EngineOptions {
+                data_dir: linked.join(suffix),
+                clis: BTreeMap::new(),
+                spawn: fake.spawn.clone(),
+                windows: false,
+                claude_env_billed: false,
+                max_warm: 0,
+                idle: Duration::from_secs(120),
+                runtime: tokio::runtime::Handle::current(),
+                ask: None,
+            },
+            Arc::new(|_| {}),
+        );
+        assert!(engine.is_err(), "a linked data folder must prevent engine construction");
+        drop(engine);
+        assert_eq!(std::fs::read_dir(&target).unwrap().count(), 0, "startup wrote through a data-folder junction");
+        assert!(fake.args.lock().unwrap().is_empty());
+    }
+    junction::delete(&linked).unwrap();
+}
+#[tokio::test]
+async fn engine_startup_creates_fresh_data_and_preserves_saved_settings_on_reopen() {
+    let owned = support::canonical_tempdir().unwrap();
+    let data = owned.path().join("nested/data");
+    let untouched = owned.path().join("keep.txt");
+    std::fs::write(&untouched, "unrelated work").unwrap();
+    let (first, _) = engine(&data, Vendor::Claude, fake(vec![]).spawn);
+    first.save_settings(Settings { permissions: Some(Permissions::Ask), ..Settings::default() }).unwrap();
+    first.shutdown();
+    drop(first);
+    let (reopened, _) = engine(&data, Vendor::Claude, fake(vec![]).spawn);
+    assert_eq!(reopened.settings().permissions(), Permissions::Ask);
+    assert_eq!(std::fs::read_to_string(&untouched).unwrap(), "unrelated work");
+    assert!(data.join("settings.json").is_file());
+    reopened.shutdown();
 }
 
 fn choice(vendor: &str, model: Option<&str>) -> Choice {
@@ -4390,7 +4438,7 @@ async fn the_first_launch_after_the_cli_is_downgraded_passes_none_of_the_newer_f
         runtime: tokio::runtime::Handle::current(),
         ask: None,
     };
-    let engine = Engine::new(opts, Arc::new(move |e| drop(tx.send(e))));
+    let engine = Engine::new(opts, Arc::new(move |e| drop(tx.send(e)))).unwrap();
     engine.detect_claude_flags();
     for _ in 0..300 {
         if engine.claude_flags() != Default::default() {
@@ -4599,7 +4647,7 @@ fn two_vendors(dir: &Path, spawn: Spawner) -> Engine {
         runtime: tokio::runtime::Handle::current(),
         ask: None,
     };
-    let engine = Engine::new(opts, Arc::new(move |e| drop(tx.send(e))));
+    let engine = Engine::new(opts, Arc::new(move |e| drop(tx.send(e)))).unwrap();
     // Faber calls a vendor on its own only on a known subscription.
     for vendor in engine.vendors() {
         let plan = faber_engine::signals::Signals { billing: Some(faber_engine::budget::Billing::Subscription), ..Default::default() };

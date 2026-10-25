@@ -1,0 +1,11 @@
+{
+  "notes": {
+    "fixed": {
+      "en": "Faber refuses invalid or redirected Windows data folders before saving data.",
+      "pt-BR": "O Faber recusa pastas de dados inválidas ou redirecionadas no Windows antes de salvar dados.",
+      "es": "Faber rechaza las carpetas de datos inválidas o redirigidas en Windows antes de guardar datos.",
+      "fr": "Sous Windows, Faber refuse les dossiers de données invalides ou redirigés avant d’enregistrer des données.",
+      "de": "Unter Windows lehnt Faber ungültige oder umgeleitete Datenordner ab, bevor es Daten speichert."
+    }
+  }
+}

@@ -583,7 +583,8 @@ mod tests {
                 ask: None,
             },
             Arc::new(|_| {}),
-        );
+        )
+        .unwrap();
         engine.with(|core| {
             core.synchronous_kit_checks = true;
             core.store.save_settings(&Settings { permissions: Some(Permissions::FullAccess), ..Default::default() }).unwrap();

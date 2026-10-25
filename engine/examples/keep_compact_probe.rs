@@ -96,7 +96,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             ask: None,
         },
         Arc::new(|_| {}),
-    );
+    )?;
     engine.save_settings(Settings { permissions: Some(Permissions::FullAccess), ..Default::default() })?;
     let project = engine.add_project(&repo.to_string_lossy())?;
     engine.check_plans(Duration::from_secs(30)).await;

@@ -146,7 +146,7 @@ fn start_with(dir: &Path, disk: &Shared, vendors: &[Vendor]) -> (Engine, Unbound
         runtime: tokio::runtime::Handle::current(),
         ask: None,
     };
-    (Engine::new(opts, Arc::new(move |e| drop(tx.send(e)))), rx)
+    (Engine::new(opts, Arc::new(move |e| drop(tx.send(e)))).unwrap(), rx)
 }
 
 fn choice(effort: Effort) -> Choice {

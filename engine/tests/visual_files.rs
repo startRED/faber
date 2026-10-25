@@ -93,7 +93,8 @@ async fn dispatched_cli_turn_captures_file_versions_in_the_checked_plain_working
                 Arc::new(move |event| {
                     let _ = tx.send(event);
                 }),
-            );
+            )
+            .unwrap();
             let (conversation_id, project_id) = match area {
                 Area::Chat => (Some(engine.chat_folder(None, Some(&plain)).unwrap().id), None),
                 Area::Project => (None, Some(engine.add_project(&plain.to_string_lossy()).unwrap().id)),

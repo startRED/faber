@@ -84,10 +84,12 @@ fn record_panic(dir: &Path, line: &Value, ends_the_run: bool) {
 
 /// Makes every panic of this process leave a line in `dir`, then go on to the hook that was there (the default one prints).
 /// A panic hook must not panic or hang: a failed write is dropped, and so is a line that cannot get the writer's lock.
-pub fn install_hook(dir: PathBuf, version: &str, commit: &str) {
+pub fn install_hook(dir: PathBuf, version: &str, commit: &str) -> std::io::Result<()> {
+    let data_directory = crate::workspace::DataDirectory::open(&dir)?;
     let (version, commit, home) = (version.to_string(), commit.to_string(), home());
     let previous = std::panic::take_hook();
     std::panic::set_hook(Box::new(move |info| {
+        let _held = &data_directory;
         let payload = info.payload();
         let message = payload.downcast_ref::<&str>().copied().or_else(|| payload.downcast_ref::<String>().map(String::as_str));
         let location = info.location().map(|l| format!("{}:{}:{}", l.file(), l.line(), l.column())).unwrap_or_default();
@@ -97,6 +99,7 @@ pub fn install_hook(dir: PathBuf, version: &str, commit: &str) {
         record_panic(&dir, &line, cfg!(panic = "abort") && STARTED.load(Ordering::Relaxed));
         previous(info);
     }));
+    Ok(())
 }
 
 /// The most of a crash file one look reads, from its end: the writer keeps the file near 100 KB, but another version's file or
@@ -290,11 +293,35 @@ mod tests {
         assert!(blocked.path().join(MARKER).exists());
     }
 
+    static HOOK_TEST: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+    #[cfg(windows)]
+    #[test]
+    fn startup_crash_hook_refuses_a_linked_data_folder_without_writing_through_it() {
+        let _hook = HOOK_TEST.lock().unwrap_or_else(|error| error.into_inner());
+        let owned = tempfile::tempdir().unwrap();
+        let target = owned.path().join("target");
+        std::fs::create_dir(&target).unwrap();
+        let linked = owned.path().join("linked");
+        junction::create(&target, &linked).unwrap();
+        let previous = std::panic::take_hook();
+        let result = install_hook(linked.clone(), "1", "synthetic");
+        let caught = std::panic::catch_unwind(|| panic!("synthetic startup failure"));
+        let installed = std::panic::take_hook();
+        std::panic::set_hook(previous);
+        drop(installed);
+        junction::delete(&linked).unwrap();
+        assert!(caught.is_err());
+        assert!(result.is_err(), "invalid crash data must refuse hook installation");
+        assert_eq!(std::fs::read_dir(&target).unwrap().count(), 0, "the crash hook wrote through rejected data");
+    }
+
     #[test]
     fn a_panic_anywhere_in_the_process_is_written_to_the_file_and_the_file_is_capped() {
+        let _hook = HOOK_TEST.lock().unwrap_or_else(|error| error.into_inner());
         let dir = tempfile::tempdir().unwrap();
         let before = std::panic::take_hook();
-        install_hook(dir.path().to_path_buf(), "9.9.9", "deadbeef");
+        install_hook(dir.path().to_path_buf(), "9.9.9", "deadbeef").unwrap();
         let thread = std::thread::Builder::new().name("worker-x".into()).spawn(|| panic!("boom {}", 42)).unwrap();
         assert!(thread.join().is_err());
         let _ = std::panic::take_hook();

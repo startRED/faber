@@ -27,6 +27,7 @@ fn engine(root: &Path, vendor: Vendor, spawn: Spawner) -> Engine {
         },
         Arc::new(|_| {}),
     )
+    .unwrap()
 }
 
 fn file(name: &str, bytes: &[u8]) -> Attachment {

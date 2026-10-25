@@ -106,7 +106,7 @@ fn rig_env(dir: &Path, vendors: &[Vendor], ask: Ask, claude_env_billed: bool) ->
         runtime: tokio::runtime::Handle::current(),
         ask: Some(ask),
     };
-    let engine = Engine::new(opts, Arc::new(move |e| drop(tx.send(e))));
+    let engine = Engine::new(opts, Arc::new(move |e| drop(tx.send(e)))).unwrap();
     engine.set_codex_models(vec!["gpt-6.1-sol".into(), "gpt-6-luna".into()], Some("gpt-6.1-sol".into()));
     let time: Time = Arc::new(AtomicU64::new(WHEN));
     let clock = time.clone();

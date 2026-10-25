@@ -56,6 +56,7 @@ fn engine_with_clis(dir: &Path, clis: BTreeMap<Vendor, Cli>) -> Engine {
         },
         Arc::new(|_| {}),
     )
+    .unwrap()
 }
 
 #[tokio::test]

@@ -544,7 +544,8 @@ mod tests {
                 ask: None,
             },
             Arc::new(|_| {}),
-        );
+        )
+        .unwrap();
         let project = engine.add_project(&data.path().to_string_lossy()).unwrap();
         engine.note_account_events(
             Vendor::Claude,

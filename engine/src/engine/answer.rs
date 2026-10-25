@@ -438,7 +438,7 @@ pub(super) mod tests {
             runtime: tokio::runtime::Handle::current(),
             ask: None,
         };
-        (Engine::new(opts, Arc::new(move |e| sink.lock().unwrap().push(e))), events)
+        (Engine::new(opts, Arc::new(move |e| sink.lock().unwrap().push(e))).unwrap(), events)
     }
 
     /// A chat whose replies are `turns`, each a message id with the (request id, tool) pairs it waits on. The last is

@@ -45,7 +45,7 @@ fn start(dir: &Path, spawn: Spawner, ask: Option<Ask>) -> (Engine, UnboundedRece
         runtime: tokio::runtime::Handle::current(),
         ask,
     };
-    let engine = Engine::new(opts, Arc::new(move |e| drop(tx.send(e))));
+    let engine = Engine::new(opts, Arc::new(move |e| drop(tx.send(e)))).unwrap();
     let clock = Arc::new(Ticking { base: AtomicU64::new(START), ticks: AtomicU64::new(0) });
     let c = clock.clone();
     engine.set_time_source(Arc::new(move || (c.base.load(Ordering::SeqCst) + c.ticks.fetch_add(1, Ordering::SeqCst)) as f64));

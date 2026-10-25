@@ -533,6 +533,7 @@ struct Core {
     follows: HashMap<String, pr_watch::Watch>,
     pr_reader: PrReader,
     rewind: rewind::State,
+    _data_directory: crate::workspace::DataDirectory,
 }
 
 /// How often Claude's plan is checked again.
@@ -546,7 +547,8 @@ pub struct Engine {
 }
 
 impl Engine {
-    pub fn new(opts: EngineOptions, emit: Emit) -> Engine {
+    pub fn new(opts: EngineOptions, emit: Emit) -> std::io::Result<Engine> {
+        let data_directory = crate::workspace::DataDirectory::open(&opts.data_dir)?;
         // Snapshot verification and cleanup run outside Core; an unready catalog never delays a session.
         let catalog_store = crate::tools::Store::new(&opts.data_dir);
         catalog_store.set_runtime(opts.runtime.clone());
@@ -671,12 +673,13 @@ impl Engine {
                 before: HashMap::new(),
                 git: None,
                 rewind,
+                _data_directory: data_directory,
             })
         });
         let _ = search.start();
         let engine = Engine { core, runtime };
         engine.recover_rewind();
-        engine
+        Ok(engine)
     }
 
     /// Clones the index handle under the lock, then does the search outside it, on a blocking worker.
@@ -4865,7 +4868,8 @@ mod tool_in_tests {
                     *emitted.lock().unwrap() += 1;
                 }
             }),
-        );
+        )
+        .unwrap();
         let id = engine.with(|core| {
             let id = core.blank(Area::Chat, None);
             let mut reply = Message::new("reply".into(), Role::Assistant, String::new(), 1);
@@ -4921,7 +4925,8 @@ mod tool_in_tests {
                 ask: None,
             },
             Arc::new(|_| {}),
-        );
+        )
+        .unwrap();
         let live = |id: &'static str| Live {
             tool_kit: Default::default(),
             kit_identity: None,
@@ -5000,7 +5005,8 @@ mod tool_in_tests {
                 ask: None,
             },
             Arc::new(|_| {}),
-        );
+        )
+        .unwrap();
         let (sent, mut received) = tokio::sync::mpsc::unbounded_channel();
         engine.with(|core| {
             for (id, vendor) in [("a", Vendor::Claude), ("b", Vendor::Codex)] {
@@ -5130,7 +5136,8 @@ mod tool_in_tests {
                 ask: None,
             },
             Arc::new(|_| {}),
-        );
+        )
+        .unwrap();
         let command = |name: &str| Command { name: name.into(), skill: true, note: None };
         let id = engine.with(|c| {
             c.commands.insert(Vendor::Claude, vec![command("latest")]);

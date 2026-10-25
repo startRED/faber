@@ -62,7 +62,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             ask: None,
         },
         Arc::new(|_| {}),
-    );
+    )?;
     engine.save_settings(Settings { permissions: Some(Permissions::FullAccess), ..Default::default() })?;
     let project = engine.add_project(&repo.to_string_lossy())?;
     // A fresh data folder does not know the plan yet, and Faber starts nothing on its own on an AI that may bill per use.

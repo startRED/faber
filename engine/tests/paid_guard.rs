@@ -38,7 +38,8 @@ async fn paid_notices_stop_an_unapproved_subscription_turn_and_clear_permissions
                 ask: Some(Arc::new(|_| Box::pin(async { Some(r#"{"kind":"chat","difficulty":"easy","confidence":0.95}"#.into()) }))),
             },
             Arc::new(|_| {}),
-        );
+        )
+        .unwrap();
         engine.note_account_events(
             Vendor::Claude,
             vec![EngineEvent::Signals(Signals { billing: Some(Billing::Subscription), credit_balance: Some(10.0), ..Signals::default() })],

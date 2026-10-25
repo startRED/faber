@@ -77,7 +77,8 @@ async fn conversation_export_keeps_all_piece_content_and_current_choices_after_r
                 ask: None,
             },
             Arc::new(|_| {}),
-        );
+        )
+        .unwrap();
         let (_, exported) = engine.export_conversation(&initial.id, &words()).unwrap();
         let snapshots = fences(&exported)
             .into_iter()

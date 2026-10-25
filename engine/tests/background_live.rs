@@ -46,7 +46,8 @@ async fn background_live_fixture_keeps_launches_open_and_reuses_follow_updates()
             ask: None,
         },
         Arc::new(move |event| drop(tx.send(event))),
-    );
+    )
+    .unwrap();
     let project = engine.add_project(&folder.path().to_string_lossy()).unwrap();
     let id = engine
         .send(SendRequest {

@@ -455,7 +455,8 @@ fn start(dir: &Path, spawn: Spawner) -> (Engine, Arc<AtomicU64>) {
             ask: None,
         },
         Arc::new(|_| {}),
-    );
+    )
+    .unwrap();
     let time = Arc::new(AtomicU64::new(WHEN));
     let clock = time.clone();
     engine.set_time_source(Arc::new(move || clock.load(Ordering::SeqCst) as f64));

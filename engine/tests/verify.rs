@@ -51,7 +51,7 @@ fn engine(dir: &Path, spawn: faber_engine::proc::Spawner) -> Engine {
         runtime: tokio::runtime::Handle::current(),
         ask: None,
     };
-    Engine::new(opts, Arc::new(move |e| drop(tx.send(e))))
+    Engine::new(opts, Arc::new(move |e| drop(tx.send(e)))).unwrap()
 }
 
 const AGENTS: &str = "# Rules\n\n## Proof commands\n\n```bash\nnpm run lint\ncargo fmt --all --check\n```\n";

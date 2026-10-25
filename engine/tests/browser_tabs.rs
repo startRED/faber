@@ -26,6 +26,7 @@ fn engine(dir: &Path) -> Engine {
         },
         Arc::new(|_| {}),
     )
+    .unwrap()
 }
 
 fn saved(dir: &Path) -> Conversation {
@@ -123,7 +124,8 @@ async fn the_agent_opens_and_acts_in_its_own_tab_never_on_the_page_the_person_is
             ask: None,
         },
         Arc::new(|_| {}),
-    );
+    )
+    .unwrap();
     let browser = Arc::new(Tabbed::default());
     app.set_browser(browser.clone());
     app.save_settings(Settings { permissions: Some(Permissions::FullAccess), ..Settings::default() }).unwrap();

@@ -32,7 +32,8 @@ fn engine_with(root: &Path, spawn: faber_engine::proc::Spawner) -> (Engine, Arc<
             ask: None,
         },
         Arc::new(move |event| heard.lock().unwrap().push(event)),
-    );
+    )
+    .unwrap();
     (app, events)
 }
 

@@ -258,7 +258,7 @@ async fn build(billed: bool, both: bool, crash: bool) -> Rig {
         // Auto's router answers nothing, so the everyday default answers and no second process starts.
         ask: Some(Arc::new(|_| Box::pin(async { None }))),
     };
-    let engine = Engine::new(opts, Arc::new(move |e| seen.lock().unwrap().push(e)));
+    let engine = Engine::new(opts, Arc::new(move |e| seen.lock().unwrap().push(e))).unwrap();
     engine.note_account_events(
         Vendor::Claude,
         vec![EngineEvent::Signals(Signals { billing: Some(faber_engine::budget::Billing::Subscription), ..Default::default() })],

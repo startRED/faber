@@ -38,6 +38,7 @@ mod tests {
             },
             Arc::new(|_| {}),
         )
+        .unwrap()
     }
 
     #[tokio::test]

@@ -23,7 +23,8 @@ fn engine(dir: &std::path::Path) -> Engine {
             ask: None,
         },
         Arc::new(|_| {}),
-    );
+    )
+    .unwrap();
     e.set_time_source(Arc::new(|| WHEN));
     e
 }

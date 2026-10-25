@@ -51,7 +51,8 @@ async fn moved_attachment_handover(long: bool) {
             ask: None,
         },
         Arc::new(|_| {}),
-    );
+    )
+    .unwrap();
     engine.set_time_source(Arc::new(|| WHEN as f64));
     engine.set_codex_models(vec!["gpt-6.1-sol".into(), "gpt-6-luna".into()], Some("gpt-6.1-sol".into()));
     for v in Vendor::ALL {
@@ -335,7 +336,8 @@ fn asking(dir: &Path, vendors: &[Vendor], claude: Fake, codex: Fake, verdict: &'
             ask: Some(Arc::new(move |_| Box::pin(async move { Some(verdict.into()) }))),
         },
         Arc::new(|_| {}),
-    );
+    )
+    .unwrap();
     let time = Arc::new(AtomicU64::new(WHEN));
     let clock = time.clone();
     engine.set_time_source(Arc::new(move || clock.load(Ordering::SeqCst) as f64));

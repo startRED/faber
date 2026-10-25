@@ -30,7 +30,7 @@ fn engine(dir: &Path, vendor: Vendor, spawn: Spawner, ask: Ask) -> (Engine, Unbo
         runtime: tokio::runtime::Handle::current(),
         ask: Some(ask),
     };
-    let engine = Engine::new(opts, Arc::new(move |e| drop(tx.send(e))));
+    let engine = Engine::new(opts, Arc::new(move |e| drop(tx.send(e)))).unwrap();
     for vendor in engine.vendors() {
         engine.note_account_events(
             vendor,
@@ -198,7 +198,7 @@ async fn with_only_claude_the_router_process_starts_while_the_user_types() {
         runtime: tokio::runtime::Handle::current(),
         ask: None,
     };
-    let engine = Engine::new(opts, Arc::new(move |e| drop(tx.send(e))));
+    let engine = Engine::new(opts, Arc::new(move |e| drop(tx.send(e)))).unwrap();
     for vendor in engine.vendors() {
         engine.note_account_events(
             vendor,
@@ -261,7 +261,7 @@ async fn r121_the_codex_router_starts_its_own_isolated_process_while_conversatio
         runtime: tokio::runtime::Handle::current(),
         ask: None,
     };
-    let engine = Engine::new(opts, Arc::new(move |e| drop(tx.send(e))));
+    let engine = Engine::new(opts, Arc::new(move |e| drop(tx.send(e)))).unwrap();
     engine.set_codex_models(vec!["gpt-6.1-sol".into(), "gpt-6-luna".into()], Some("gpt-6.1-sol".into()));
     engine.warm(WarmRequest {
         conversation_id: None,

@@ -11,3 +11,5 @@
 - Frozen proof artifacts are copied with verified hashes and their source/run receipts outside disposable build roots; preserve only required runtime files, never pin a whole cache or treat a rebuild as the original executable. [by AI]
 - Local build commands use a three-slot cache pool shared by Git worktrees, with per-invocation temporary folders and lease-aware cleanup at command boundaries; unknown system temporary folders are preserved. [by AI]
 - The task 998 offline publication boundary uses built-in Ed25519 verification with pinned public keys, a 1 MiB envelope limit and exact authenticated UTF-8 bytes; signature verification alone never authorizes installation. [by AI]
+
+- Engine construction returns a startup error before Store, catalog or background work when its data directory cannot be opened. Windows keeps its no-follow directory chain open through engine teardown; this entry check does not replace handle-relative I/O, a write sandbox or Chat-workspace relocation. [by AI]

@@ -38,7 +38,7 @@ fn new_engine_with(
         runtime: tokio::runtime::Handle::current(),
         ask: None,
     };
-    let engine = Engine::new(opts, Arc::new(move |e| drop(tx.send(e))));
+    let engine = Engine::new(opts, Arc::new(move |e| drop(tx.send(e)))).unwrap();
     // Faber goes on by itself only on a known subscription.
     let plan = faber_engine::signals::Signals { billing: Some(faber_engine::budget::Billing::Subscription), ..Default::default() };
     engine.note_account_events(Vendor::Claude, vec![faber_engine::events::EngineEvent::Signals(plan)]);
@@ -516,7 +516,7 @@ async fn codex_reports_its_context_compacts_on_request_and_continues_with_next()
         runtime: tokio::runtime::Handle::current(),
         ask: None,
     };
-    let engine = Engine::new(opts, Arc::new(move |e| drop(tx.send(e))));
+    let engine = Engine::new(opts, Arc::new(move |e| drop(tx.send(e)))).unwrap();
     let plan = faber_engine::signals::Signals { billing: Some(faber_engine::budget::Billing::Subscription), ..Default::default() };
     engine.note_account_events(Vendor::Codex, vec![faber_engine::events::EngineEvent::Signals(plan)]);
     let p = engine.add_project(&project.path().to_string_lossy()).unwrap();
@@ -561,7 +561,7 @@ fn codex_engine(dir: &Path, seen: Arc<Mutex<Vec<Value>>>) -> Engine {
         runtime: tokio::runtime::Handle::current(),
         ask: None,
     };
-    let engine = Engine::new(opts, Arc::new(|_| {}));
+    let engine = Engine::new(opts, Arc::new(|_| {})).unwrap();
     let plan = faber_engine::signals::Signals { billing: Some(faber_engine::budget::Billing::Subscription), ..Default::default() };
     engine.note_account_events(Vendor::Codex, vec![faber_engine::events::EngineEvent::Signals(plan)]);
     engine

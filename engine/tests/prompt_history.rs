@@ -18,7 +18,8 @@ fn engine(directory: &std::path::Path) -> (tokio::runtime::Runtime, Engine) {
             ask: None,
         },
         std::sync::Arc::new(|_| {}),
-    );
+    )
+    .unwrap();
     (runtime, engine)
 }
 

@@ -82,7 +82,8 @@ async fn retired_shared_server_closes_after_replacing_a_session_before_settings_
             ask: None,
         },
         Arc::new(|_| {}),
-    );
+    )
+    .unwrap();
     app.save_settings(Settings { permissions: Some(Permissions::Ask), ..Default::default() }).unwrap();
     let request = |id, effort| SendRequest {
         conversation_id: id,

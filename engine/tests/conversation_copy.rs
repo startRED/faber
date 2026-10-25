@@ -152,7 +152,7 @@ fn start_seen(
         runtime: tokio::runtime::Handle::current(),
         ask: None,
     };
-    let engine = Engine::new(opts, events);
+    let engine = Engine::new(opts, events).unwrap();
     engine.set_git(Arc::new(move || Some(Box::new(runner.clone()) as Box<dyn Executor + Send>)));
     engine
 }
@@ -263,7 +263,8 @@ async fn automatic_first_project_turn(asked: bool) {
             ask: None,
         },
         Arc::new(|_| {}),
-    );
+    )
+    .unwrap();
     engine.note_account_events(
         Vendor::Claude,
         vec![faber_engine::events::EngineEvent::Signals(faber_engine::signals::Signals {
@@ -687,7 +688,7 @@ async fn r_next_a_conversation_the_agent_starts_works_in_a_copy_of_its_own() {
         runtime: tokio::runtime::Handle::current(),
         ask: None,
     };
-    let engine = Engine::new(opts, Arc::new(move |e| drop(tx.send(e))));
+    let engine = Engine::new(opts, Arc::new(move |e| drop(tx.send(e)))).unwrap();
     // Faber starts a conversation on its own only on a known subscription.
     let plan = faber_engine::signals::Signals { billing: Some(faber_engine::budget::Billing::Subscription), ..Default::default() };
     engine.note_account_events(Vendor::Claude, vec![faber_engine::events::EngineEvent::Signals(plan)]);
