@@ -19,5 +19,7 @@
 - Additive documentation conflicts keep a complete added block once when it is already contained as whole lines in the other lane's additions; real edits remain refused. [by AI]
 - Before retrying a stale stacked pull request, compare all intended content with landed descendants and close a fully incorporated ancestor with retained evidence instead of reintroducing its old tree. [by AI]
 - Messages received from other AI conversations identify their agent origin and are delivered automatically, without appearing as the person's queued messages or requiring Send now. [by person]
+- Creative text comparisons reuse isolated internal sessions with no tools or history, opposite A/B order, distinct models, bounded output and durable full receipts; they do not replace code review or visual proof. [by AI]
+- Windows automatic worker admission adds FIFO memory checks to the existing count limits: measured private working sets below half physical RAM and at least 2 GiB available; one fresh sample per admission, no termination of active work. Unix keeps count limits until an identity-safe native sampler is implemented. [by AI]
 
 - The project agent settings tool accepts only web_search off/cached/live. It reuses the ordinary settings save, its own consent and audit, and existing full trust only for this bounded preference. The saved response is queued after durable persistence and before stricter settings stop replies; no delivery acknowledgement or stop exemption is introduced. [by AI]

@@ -1,7 +1,7 @@
 # Conversation
 
-How an open conversation reads: the answers with their bar, the person's own messages and the viewer, and the work log
-above an answer. The window widths, the sidebar and the running column are in [layout.md](layout.md); subagent rows are in
+Answers with their bar, the person's messages, the viewer and the work log above an answer. Window widths, the sidebar
+and the running column are in [layout.md](layout.md); helper rows, memory waits and creative comparisons are in
 [subagents.md](subagents.md).
 
 ## Answers

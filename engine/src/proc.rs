@@ -600,6 +600,36 @@ impl Retired {
 }
 
 impl OwnedTree {
+    /// Actual OS identities, including the root; this never reconstructs ownership from PIDs.
+    pub fn members(&self) -> io::Result<Vec<ProcessIdentity>> {
+        let members = self.tree.members()?;
+        #[cfg(unix)]
+        let members = {
+            let mut members = members;
+            members.extend(self.tree.external_descendants()?);
+            members
+        };
+        Ok(members)
+    }
+
+    pub(crate) fn same_tree(&self, other: &Self) -> bool {
+        Arc::ptr_eq(&self.tree, &other.tree)
+    }
+
+    pub(crate) fn is_retired(&self) -> bool {
+        self.tree.confirmed.load(Ordering::Acquire)
+    }
+
+    /// Confirm the whole owned container is empty without sending any termination signal.
+    #[cfg(any(windows, test))]
+    pub(crate) fn confirm_empty(&self) -> io::Result<bool> {
+        #[cfg(unix)]
+        if !self.tree.external_descendants()?.is_empty() {
+            return Ok(false);
+        }
+        self.tree.empty()
+    }
+
     pub fn descendants(&self) -> io::Result<Vec<ProcessIdentity>> {
         self.tree.descendants()
     }

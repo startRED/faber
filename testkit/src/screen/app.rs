@@ -13,6 +13,12 @@ const BUDGET_MB: f64 = 400.0;
 
 const QUESTION: &str = "In one sentence: why is the sky blue?";
 
+pub(super) const CREATIVE_WORKLOG: [&str; 3] = [
+    "creative comparisons: English private drafts stay out of the work log within the memory budget",
+    "creative comparisons: Portuguese private drafts stay out of the work log within the memory budget",
+    "creative comparisons: German private drafts stay out of the work log within the memory budget",
+];
+
 /// The six looks, as the screen lists them, with the effects each draws on the new conversation: the projector beam with
 /// its dust, the loom and the flow line. The loom needs a stage wider than 920 px and the flow line one wider than
 /// 1140 px, so that neither lies over the greeting; the stage is the window less the 288 px sidebar.
@@ -63,6 +69,9 @@ pub fn scenarios() -> Vec<Scenario> {
             run: thread_in_every_look,
         },
         Scenario { name: "a chat streams an answer with the model and the reason, and lands in the sidebar", run: streams_an_answer },
+        Scenario { name: CREATIVE_WORKLOG[0], run: |ctx| creative_worklog(ctx, "en") },
+        Scenario { name: CREATIVE_WORKLOG[1], run: |ctx| creative_worklog(ctx, "pt-BR") },
+        Scenario { name: CREATIVE_WORKLOG[2], run: |ctx| creative_worklog(ctx, "de") },
         Scenario {
             name: "with Auto, the answer names its model as soon as it starts, keeps the name to the end and after reopening",
             run: names_the_model_while_streaming,
@@ -261,6 +270,58 @@ fn recent_folders(ctx: &mut Ctx) -> Result {
     ctx.shot(&mut app, "recents-opened")?;
     let saved = std::fs::read_to_string(ctx.sb.data.join("projects.json")).map_err(|e| e.to_string())?;
     ensure(saved.contains("alpha"), || format!("the project was not saved: {saved}"))
+}
+
+fn creative_worklog(ctx: &mut Ctx, language: &str) -> Result {
+    const ID: &str = "creative-worklog";
+    const TITLE: &str = "Synthetic draft comparison";
+    const PRIVATE: [&str; 2] = ["SYNTHETIC_PRIVATE_FIRST_7e13", "SYNTHETIC_PRIVATE_SECOND_9b42"];
+    start_settings(ctx, language)?;
+    super::shell::seed_project(ctx, "Demo")?;
+    super::shell::seed(ctx, ID, TITLE, Some("demo"), 1_790_000_000_000)?;
+    let path = ctx.sb.data.join("conversations").join(format!("{ID}.json"));
+    let mut conversation: serde_json::Value =
+        serde_json::from_slice(&std::fs::read(&path).map_err(|e| e.to_string())?).map_err(|e| e.to_string())?;
+    conversation["messages"][1]["tools"] = json!([{
+        "id": "comparison", "name": "CreativeJudge", "ok": true,
+        "input": {"request": "Compare two synthetic headings", "rubric": "Clarity", "first": PRIVATE[0], "second": PRIVATE[1]},
+        "output": "Synthetic scores: 8 and 6. Receipt: synthetic-review."
+    }]);
+    ensure(faber_engine::creative::Request::parse(&conversation["messages"][1]["tools"][0]["input"]).is_some(), || {
+        "the synthetic comparison must have valid tool arguments".into()
+    })?;
+    let _: faber_engine::model::Conversation = serde_json::from_value(conversation.clone()).map_err(|e| e.to_string())?;
+    std::fs::write(&path, conversation.to_string()).map_err(|e| e.to_string())?;
+    let mut app = ctx.launch(no_cli())?;
+    let before = ctx.memory_mb(app.id)?.0;
+    let cpu = ctx.cpu_ms(app.id)?;
+    let projects = app.page.named("button", "area.projects")?;
+    app.page.click(&projects)?;
+    app.page.click(&css(".prow .item").has_text("Demo"))?;
+    app.page.click(&css(".proj-chats .item").has_text(TITLE))?;
+    app.page.wait_visible(&css("article.ai details.activity"))?;
+    app.page.click(&css("article.ai details.activity > summary"))?;
+    let label = app.page.text_of("tool.creativeJudge")?;
+    let mut peak = before;
+    for width in [720, 1028, 1280] {
+        super::shell::set_size(&mut app.page, width, 800)?;
+        app.page.wait_visible(&css("article.ai .tools").has_text(&label))?;
+        let text = app.page.inner_text(&css("article.ai"))?;
+        ensure(PRIVATE.iter().all(|draft| !text.contains(draft)), || format!("{language}/{width}: private draft shown in the answer"))?;
+        ensure(app.page.eval("document.documentElement.scrollWidth <= innerWidth")? == true, || {
+            format!("{language}/{width}: the page overflows")
+        })?;
+        let (mb, webview) = ctx.memory_mb(app.id)?;
+        ensure(webview, || "the cost reading must include WebView2".into())?;
+        peak = peak.max(mb);
+        ctx.shot(&mut app, &format!("creative-worklog-{language}-{width}"))?;
+    }
+    let used_cpu = ctx.cpu_ms(app.id)? - cpu;
+    ctx.notes.push(format!("Creative comparison record ({language}, synthetic saved history, no judge sessions): {before:.1} MB before opening, {peak:.1} MB largest sampled reading; open/resize/capture workflow {used_cpu:.0} ms CPU"));
+    ensure(peak <= BUDGET_MB, || format!("{language}: {peak:.1} MB exceeds {BUDGET_MB} MB"))?;
+    ensure(ctx.records()?.is_empty(), || "reading the saved comparison started a CLI".into())?;
+    ctx.close(app.id)?;
+    Ok(())
 }
 
 fn streams_an_answer(ctx: &mut Ctx) -> Result {

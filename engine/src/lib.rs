@@ -58,6 +58,7 @@ pub mod transcript;
 pub mod usage;
 pub mod verify;
 pub mod visual;
+pub mod worker_memory;
 pub mod workspace;
 
 pub use account::AccountStatus;

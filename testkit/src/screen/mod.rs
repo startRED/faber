@@ -118,6 +118,9 @@ impl Costs {
 /// When unsure, list it: a wrong entry costs a few seconds, a missing one costs a flaky run. A test fails when a name says
 /// "memory", "processor", "CPU", "MB", "budget", "frame", "focused", "quota" or "usage limits" and is not listed.
 pub const SOLO: &[(&str, &str)] = &[
+    (app::CREATIVE_WORKLOG[0], "processor, memory"),
+    (app::CREATIVE_WORKLOG[1], "processor, memory"),
+    (app::CREATIVE_WORKLOG[2], "processor, memory"),
     (performance::NAME, "processor, memory, scheduling and layout timing"),
     (agent_history::NAME, "subagent-history screen scenario samples process-tree memory and CPU"),
     #[cfg(windows)]

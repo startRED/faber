@@ -145,3 +145,7 @@ size with no picture keeps its place as a plain block of the second surface. Whe
 payment the card has one line in the conversation's other amber, with the 2 px edge of a stuck subagent's line: "Your
 turn: log in on this page", and no picture, since one could hold what the person typed; the agent cannot click or type
 there.
+
+Windows memory admission may hold new helpers while the current work and Stop remain available; see [resource limits](../product/architecture.md#architecture).
+
+Creative comparisons reuse the work log row, labelled as independent draft comparisons in every language. Draft bodies never appear in the row detail; the bounded result names scores, model identities, shown order, short reason previews and a durable receipt. Failure remains a failed tool result. There is no new panel, control or motion.

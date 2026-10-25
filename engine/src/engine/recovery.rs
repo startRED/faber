@@ -332,7 +332,7 @@ impl Core {
                     return Ok(());
                 };
                 let instructions = "Summarise the conversation in at most 600 words. Keep goals, decisions, file changes, tool effects and unfinished work. Do not execute tools or answer the user.";
-                let Some(spare) = self.open_aux(pick.vendor, model, effort, instructions, Purpose::Summary) else {
+                let Some(spare) = self.open_aux(pick.vendor, (model, effort), instructions, Purpose::Summary, None) else {
                     self.move_failed(id, &t.reply);
                     return Ok(());
                 };
