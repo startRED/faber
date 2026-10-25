@@ -43,7 +43,11 @@ async function removeTemp(target, name) {
 async function reap(target) {
   const lease = path.join(target, '.faber-lease');
   const lock = path.join(target, '.faber-reap');
-  try { await mkdir(lock); } catch (error) { if (error.code === 'EEXIST') return; throw error; }
+  try { await mkdir(lock); } catch (error) {
+    // An inaccessible reaper lock never authorizes touching an occupied cache.
+    if (['EEXIST', 'EPERM', 'EACCES', 'EBUSY'].includes(error.code)) return false;
+    throw error;
+  }
   try {
     const stat = await lstat(lease);
     if (!stat.isDirectory() || stat.isSymbolicLink() || Date.now() - stat.mtimeMs < DAY) return;
