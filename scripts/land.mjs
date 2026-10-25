@@ -83,7 +83,10 @@ export function insertions(text) {
       else sides[side].push(lines[i]);
     }
     if (i >= lines.length || side !== 2 || sides[1].length) return null;
-    out.push(...sides[0], ...sides[2]);
+    const blocks = sides.map((lines) => `\n${lines.join('\n')}\n`);
+    if (blocks[0].includes(blocks[2])) out.push(...sides[0]);
+    else if (blocks[2].includes(blocks[0])) out.push(...sides[2]);
+    else out.push(...sides[0], ...sides[2]);
   }
   return out.join('\n');
 }

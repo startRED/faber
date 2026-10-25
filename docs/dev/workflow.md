@@ -38,6 +38,11 @@ request and queued again with `land.mjs`; a push alone never lands, since the la
 `land.mjs` is the only way in (R186). A pull request's own run checks only `changes`, the title and the lints, since
 the queue checks the very commit that lands; the suites ran twice per change before, once on the pull request and
 once on its squash or its queue commit, and five landings at once left screen parts waiting up to 226 s for a runner.
+Before retrying an old stacked pull request, compare its intended changes with landed descendants. Squashing a
+descendant can incorporate every change without closing the ancestor's pull request. If all implementation, checks,
+notes and documentation are already present, close the obsolete request as incorporated instead of restoring its old
+tree. Keep the landing and comparison evidence; a remaining code or research change still needs its own review.
+
 So a pull request is never merged with the button or `gh pr merge`: its green says only that the lints passed. A
 Dependabot pull request still runs every suite on its own, until it lands through `land.mjs` too. Each push to a queue
 branch cancels the run before it, so a lane queues once, with its fix complete.
@@ -170,7 +175,9 @@ A pull request never lands with `gh pr merge` (R173 is amended): GitHub would sq
 The shared docs merge themselves too (R184). Two lanes that each add a row, a line or a paragraph at the same place of
 `docs/product-map.md`, a `docs/design/` page or any other `.md` file conflict in plain git, though both additions belong. So
 `land.mjs` squashes with `merge.conflictStyle=diff3` and settles each conflict in which neither side changed a line the
-base had: the base's new lines first, then the pull request's (`insertions` in `scripts/land.mjs`). Anything else stops
+base had: the base's new lines first, then the pull request's (`insertions` in `scripts/land.mjs`). When one complete
+added block is already contained in the other's whole lines, it is kept once with the surrounding additions intact.
+Anything else stops
 the landing with its files: a conflict in code, a file one side deleted, or a line both sides changed, which is a real
 disagreement for the lane to settle. The squash is checked like any other, `engine/tests/product_map.rs` included. A
 conflict that GitHub shows on a pull request in those files alone needs nothing: the landing settles it.

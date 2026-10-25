@@ -16,3 +16,5 @@
 - Side panes must close by sliding their real content away without a fade or a teleport; reduced motion closes them immediately. [by person]
 - Visible helper history is stored outside conversation JSON in bounded atomic pages and loaded in bounded windows only by the existing helper reader, preserving older-page selection during new work. [by AI]
 - Keep direct windows-core updates on 0.62 patch releases while WebView2 0.39 requires its COM types; lift the Dependabot version exclusion only with a coordinated WebView2/Tauri type migration. [by AI]
+- Additive documentation conflicts keep a complete added block once when it is already contained as whole lines in the other lane's additions; real edits remain refused. [by AI]
+- Before retrying a stale stacked pull request, compare all intended content with landed descendants and close a fully incorporated ancestor with retained evidence instead of reintroducing its old tree. [by AI]

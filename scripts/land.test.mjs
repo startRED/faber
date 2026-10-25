@@ -49,6 +49,18 @@ test('CRLF markers are read as markers and the lines keep their CRLF', () => {
   assert.equal(insertions(crlf), '| a |\r\n| z |\r\n| c |\r\nend\r\n');
 });
 
+test('an addition already included by another lane is kept once without losing later additions', () => {
+  const conflict = (left, right) => `before\n<<<<<<< base\n${left}\n||||||| old\n=======\n${right}\n>>>>>>> pr\nafter\n`;
+  const paragraph = 'The runner checks the invoked workspace.\nIts cached programs stay reusable.';
+  const combined = `${paragraph}\n\nRecorded sessions stay isolated.`;
+  assert.equal(insertions(conflict(combined, paragraph)), `before\n${combined}\nafter\n`);
+  assert.equal(insertions(conflict(paragraph, combined)), `before\n${combined}\nafter\n`);
+  assert.equal(insertions(conflict(paragraph, paragraph)), `before\n${paragraph}\nafter\n`);
+  assert.equal(insertions(conflict('A complete line.', 'complete line.')), 'before\nA complete line.\ncomplete line.\nafter\n', 'a substring is not a whole added line');
+  const crlf = conflict(combined, paragraph).replace(/\n/g, '\r\n');
+  assert.equal(insertions(crlf), `before\n${combined}\nafter\n`.replace(/\n/g, '\r\n'));
+});
+
 test('only content conflicts in files of words are settled; any other record refuses the landing', () => {
   const head = 'abc123\ndocs/a.md\n\n';
   const odd = `${head}Auto-merging docs/a.md\nCONFLICT (content): Merge conflict in docs/a.md\nCONFLICT (file location): docs/a.md added in pr inside a directory that was renamed\n`;

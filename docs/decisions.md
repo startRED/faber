@@ -453,3 +453,4 @@ One line per decision of the owner's decision ledger, newest wording. "Owner" me
 | R451 | 2026-10-24 | Visible helper history uses bounded atomic pages outside conversation JSON; the existing reader loads up to eight immutable pages and preserves an older selection during new work. Extends R161. | AI |
 | R450 | 2026-10-24 | Nested agent tasks stay independently navigable, with their own work and a return to the delegating task. Extends R161. | Owner |
 | R452 | 2026-10-24 | Side panes retain their real content through a slide-only exit; reduced or disabled motion closes immediately. Extends R161. | Owner |
+| R453 | 2026-10-25 | Additive documentation conflict settlement keeps a complete added block once when it is already contained as whole lines in the other side; real edits remain refused. | AI |

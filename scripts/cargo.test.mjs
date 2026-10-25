@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import childProcess from 'node:child_process';
+import fsPromises from 'node:fs/promises';
 import { EventEmitter } from 'node:events';
 import { existsSync, readFileSync } from 'node:fs';
 import { mkdtemp, mkdir, writeFile, readFile, readdir, rm, symlink, utimes, realpath } from 'node:fs/promises';
@@ -39,6 +40,36 @@ async function claim(root, index, owner) {
   await writeFile(path.join(lease, 'owner.json'), typeof owner === 'string' ? owner : JSON.stringify(owner));
   return slot;
 }
+
+test('a denied reaper lock preserves the occupied cache and uses another slot', async (t) => {
+  for (const code of ['EPERM', 'EACCES', 'EBUSY']) {
+    const root = await fixture(t);
+    const slot = await claim(root, 1, { pid: process.pid, childPid: null, createdAt: Date.now(), tempName: 'run-kept' });
+    const receipt = path.join(slot, '.faber-lease', 'owner.json');
+    const before = await readFile(receipt);
+    const temp = path.join(slot, '.faber-tmp', 'run-kept');
+    await mkdir(temp, { recursive: true });
+    await writeFile(path.join(temp, 'keep'), 'owned work');
+    const realMkdir = fsPromises.mkdir;
+    const denied = t.mock.method(fsPromises, 'mkdir', async (folder, ...args) => {
+      if (folder === path.join(slot, '.faber-reap')) throw Object.assign(new Error('simulated denied lock'), { code });
+      return realMkdir(folder, ...args);
+    });
+    syncBuiltinESMExports();
+    try {
+      const next = await launcher.acquireTarget(root, {});
+      try {
+        assert.equal(path.basename(next.target), 'build-2');
+        assert.deepEqual(await readFile(receipt), before);
+        assert.equal(await readFile(path.join(temp, 'keep'), 'utf8'), 'owned work');
+        assert.ok(!existsSync(path.join(slot, '.faber-reap')));
+      } finally { await next.release(); }
+    } finally {
+      denied.mock.restore();
+      syncBuiltinESMExports();
+    }
+  }
+});
 
 test('old live owners, live children and unreadable receipts keep their slots', async (t) => {
   const root = await fixture(t);
