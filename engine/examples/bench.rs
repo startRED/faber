@@ -1,7 +1,7 @@
 //! Faber's light benchmark (never part of `cargo t`: it talks to the real CLIs with the person's own sign-in and spends real
 //! quota). It runs the requests of `bench/requests/` twice, through Faber (the engine, with Auto, kits, the guide and the
 //! rules) and through the plain CLI, in new folders under the run folder, checks each result with its proof script, has a
-//! fresh session of the other available vendor judge the two replies blind (shown as "A" and "B", revealed after the vote) and writes the
+//! fresh session selected after answer authors are known judge the two replies blind (shown as "A" and "B", revealed after the vote) and writes the
 //! results and the report tables. Everything runs without a window: each child starts through the engine's own process
 //! start (no shell, no console window, its own job, below-normal priority). How to run it: `docs/dev/benchmark.md`.
 //!
@@ -47,7 +47,6 @@ struct Options {
     judge_model: String,
     judge_effort: String,
     judge_vendor: Vendor,
-    judge_weaker: bool,
     cap: Cap,
     per_run_usd: f64,
     dry_run: bool,
@@ -79,7 +78,6 @@ impl Options {
             judge_model: value("--judge-model").unwrap_or_default(),
             judge_effort: value("--judge-effort").unwrap_or_default(),
             judge_vendor: plain,
-            judge_weaker: true,
             cap: Cap { max_usd: number("--cap-usd", 8.0)?, max_fresh_tokens: number("--cap-tokens", 3_000_000.0)? as u64 },
             per_run_usd: number("--per-run-usd", 1.5)?,
             dry_run: args.iter().any(|a| a == "--dry-run"),
@@ -258,6 +256,7 @@ fn failed(side: Side, secs: f64, error: impl Into<String>) -> SideResult {
         usage_incomplete: true,
         cost_usd: None,
         models: vec![],
+        authors: pure::Authors::default(),
         reply: String::new(),
         folder: None,
         proof: None,
@@ -337,6 +336,7 @@ async fn run_plain(options: &Options, cli: &Cli, request: &Request, work: &Work,
         usage_incomplete: outcome.usage_incomplete,
         cost_usd: outcome.cost_usd,
         models,
+        authors: pure::Authors { vendors: vec![options.plain.name().into()], complete: true },
         reply: outcome.text,
         folder: (request.kind == Kind::Project).then(|| work.plain.to_string_lossy().into_owned()),
         proof: None,
@@ -530,7 +530,13 @@ async fn run_faber(clis: &BTreeMap<Vendor, Cli>, request: &Request, work: &Work,
                 if tail.trim().is_empty() { m.text.as_str() } else { tail }
             });
             let mut models: Vec<String> = Vec::new();
+            let mut authors = pure::Authors { vendors: Vec::new(), complete: !replies.is_empty() };
             for m in &replies {
+                let delegated = m.tools.iter().flatten().any(|t| {
+                    let name = t.name.to_ascii_lowercase();
+                    name.contains("helper") || name.contains("conversation")
+                });
+                authors.record(m.vendor.map(Vendor::name), delegated);
                 let name = format!(
                     "{}@{} ({})",
                     m.model.as_deref().unwrap_or("?"),
@@ -556,6 +562,7 @@ async fn run_faber(clis: &BTreeMap<Vendor, Cli>, request: &Request, work: &Work,
                 usage_incomplete: true,
                 cost_usd: None, // The complete ledger delta is taken after shutdown, including late usage.
                 models,
+                authors,
                 reply: reply.to_string(),
                 folder: (request.kind == Kind::Project)
                     .then(|| conversation.copy.as_ref().map_or_else(|| work.repo.clone(), |c| c.folder()).to_string_lossy().into_owned()),
@@ -637,17 +644,6 @@ struct Judged {
     note: Option<String>,
 }
 
-fn select_judge(plain: Vendor, mut find: impl FnMut(Vendor) -> Option<Cli>) -> Result<(Vendor, Cli, bool), String> {
-    let other = match plain {
-        Vendor::Claude => Vendor::Codex,
-        Vendor::Codex => Vendor::Claude,
-    };
-    find(other)
-        .map(|cli| (other, cli, false))
-        .or_else(|| find(plain).map(|cli| (plain, cli, true)))
-        .ok_or_else(|| "no judge CLI is installed".into())
-}
-
 fn strongest_judge(vendor: Vendor) -> faber_engine::route::Profile {
     faber_engine::route::PROFILES
         .iter()
@@ -660,20 +656,6 @@ fn strongest_judge(vendor: Vendor) -> faber_engine::route::Profile {
 #[cfg(test)]
 mod judge_tests {
     use super::*;
-
-    #[test]
-    fn fake_clis_cover_each_vendor_alone_and_both_without_requiring_the_missing_one() {
-        for (plain, available, expected, weak) in [
-            (Vendor::Claude, vec![Vendor::Claude], Vendor::Claude, true),
-            (Vendor::Codex, vec![Vendor::Codex], Vendor::Codex, true),
-            (Vendor::Claude, vec![Vendor::Claude, Vendor::Codex], Vendor::Codex, false),
-            (Vendor::Codex, vec![Vendor::Claude, Vendor::Codex], Vendor::Claude, false),
-        ] {
-            let (vendor, _, fallback) =
-                select_judge(plain, |v| available.contains(&v).then(|| Cli { command: v.name().into(), prefix: vec![] })).unwrap();
-            assert_eq!((vendor, fallback), (expected, weak));
-        }
-    }
 
     #[test]
     fn fake_judge_outputs_keep_verdicts_blind_and_count_both_vendors() {
@@ -831,27 +813,13 @@ fn write_results(run_dir: &Path, options: &Options, rows: &[Row], spent: &Spend)
         "runId": options.run_id,
         "plain": { "cli": options.plain.name(), "model": options.plain_model, "effort": options.plain_effort },
         "faberVendors": options.vendors.iter().map(|v| v.name()).collect::<Vec<_>>(),
-        "judge": { "vendor": options.judge_vendor.name(), "model": options.judge_model, "effort": options.judge_effort, "weakerSameVendor": options.judge_weaker },
+        "judgeOverrides": { "model": options.judge_model, "effort": options.judge_effort },
         "cap": { "usd": options.cap.max_usd, "freshTokens": options.cap.max_fresh_tokens, "perRunUsd": options.per_run_usd },
         "spent": spent,
         "rows": rows,
     });
     std::fs::write(run_dir.join("results.json"), serde_json::to_string_pretty(&value)?)?;
-    let coverage = if options.judge_weaker {
-        "Weaker review: only the plain vendor's CLI was found; a fresh same-vendor judge was used."
-    } else {
-        "The judge uses the other vendor than plain. Faber Auto may also use that vendor, so independence from every Faber author is not guaranteed."
-    };
-    std::fs::write(
-        run_dir.join("tables.md"),
-        format!(
-            "Judge: {} {} ({}). {coverage}\n\n{}",
-            options.judge_model,
-            options.judge_effort,
-            options.judge_vendor.name(),
-            pure::render_tables(rows, spent, &options.cap)
-        ),
-    )?;
+    std::fs::write(run_dir.join("tables.md"), pure::render_tables(rows, spent, &options.cap))?;
     Ok(())
 }
 
@@ -879,28 +847,22 @@ async fn main() -> Result<(), Failure> {
         return Ok(());
     }
     let node = find_cli("node").ok_or("node is not on the PATH (the fixtures and proofs are Node scripts)")?;
-    let (judge_vendor, judge_cli, weaker) = select_judge(options.plain, |v| find_cli(v.name()))?;
-    options.judge_vendor = judge_vendor;
-    options.judge_weaker = weaker;
-    if (options.plain == Vendor::Claude || options.vendors.contains(&Vendor::Claude) || judge_vendor == Vendor::Claude)
+    let judges: BTreeMap<_, _> = Vendor::ALL.into_iter().filter_map(|v| find_cli(v.name()).map(|cli| (v, cli))).collect();
+    if judges.is_empty() {
+        return Err("no judge CLI is installed".into());
+    }
+    let available: Vec<_> = judges.keys().map(|v| v.name()).collect();
+    // Existing overrides stay on the old default vendor; never send its model to another CLI.
+    let pinned = (!options.judge_model.is_empty() || !options.judge_effort.is_empty())
+        .then(|| pure::choose_judge(options.plain.name(), &pure::Authors::default(), &available, None).expect("a judge is installed"));
+    let (judge_model, judge_effort) = (options.judge_model.clone(), options.judge_effort.clone());
+    if (options.plain == Vendor::Claude
+        || options.vendors.contains(&Vendor::Claude)
+        || (judges.contains_key(&Vendor::Claude) && pinned != Some("codex")))
         && faber_engine::signals::claude_env_billed(std::env::vars_os().map(|(name, _)| name))
     {
         return Err("an environment variable would bill Claude Code per use; the benchmark runs on the subscription only".into());
     }
-    let strongest = strongest_judge(judge_vendor);
-    if options.judge_model.is_empty() {
-        options.judge_model = strongest.model.into();
-    }
-    if options.judge_effort.is_empty() {
-        options.judge_effort = strongest.effort.into();
-    }
-    println!(
-        "judge: {} {} ({}); {}",
-        options.judge_model,
-        options.judge_effort,
-        judge_vendor.name(),
-        if weaker { "weaker same-vendor review" } else { "other vendor than plain; Faber Auto can use either vendor" }
-    );
     let mut clis = BTreeMap::new();
     for vendor in &options.vendors {
         clis.insert(*vendor, find_cli(vendor.name()).ok_or_else(|| format!("{} is not installed", vendor.name()))?);
@@ -925,6 +887,7 @@ async fn main() -> Result<(), Failure> {
             plain: None,
             judge_cost_usd: None,
             judge_attempted: false,
+            judge: None,
             judge_usage: Usage::default(),
             skipped: None,
         };
@@ -956,9 +919,23 @@ async fn main() -> Result<(), Failure> {
             row.skipped = Some(format!("not judged, the cap was reached: {why}"));
         } else {
             let (first, second) = if a == Side::Faber { (&faber, &plain) } else { (&plain, &faber) };
+            let name = pure::choose_judge(options.plain.name(), &faber.authors, &available, pinned).expect("a judge is installed");
+            let vendor = *judges.keys().find(|v| v.name() == name).expect("selected an installed CLI");
+            let profile = strongest_judge(vendor);
+            options.judge_vendor = vendor;
+            options.judge_model = if judge_model.is_empty() { profile.model.into() } else { judge_model.clone() };
+            options.judge_effort = if judge_effort.is_empty() { profile.effort.into() } else { judge_effort.clone() };
+            row.judge = Some(pure::JudgeReview {
+                vendor: name.into(),
+                model: options.judge_model.clone(),
+                effort: options.judge_effort.clone(),
+                independent_plain: name != options.plain.name(),
+                independent_faber: faber.authors.independent_of(name),
+            });
             row.judge_attempted = true;
             let judged =
-                judge(&options, &judge_cli, request, first, second, &judge_dir, options.cap.allowance(&spent, options.per_run_usd)).await;
+                judge(&options, &judges[&vendor], request, first, second, &judge_dir, options.cap.allowance(&spent, options.per_run_usd))
+                    .await;
             spent.add(&judged.usage, judged.cost_usd);
             row.judge_cost_usd = judged.cost_usd;
             row.judge_usage = judged.usage;
@@ -977,6 +954,8 @@ async fn main() -> Result<(), Failure> {
         row.faber = Some(faber);
         row.plain = Some(plain);
         rows.push(row);
+        options.judge_model.clone_from(&judge_model);
+        options.judge_effort.clone_from(&judge_effort);
         write_results(&root, &options, &rows, &spent)?;
     }
     write_results(&root, &options, &rows, &spent)?;
