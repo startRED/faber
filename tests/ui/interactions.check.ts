@@ -9,7 +9,7 @@ import { check, equal, finished, ok } from './check.ts';
 
 const settle = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
-check('interaction: the running column slides and fades for 120ms while the thread width moves without a jump', async () => {
+check('interaction: the running column uses entrance and exit timing while the thread width moves without a jump', async () => {
   const root = document.createElement('div');
   root.style.cssText = 'position:fixed;left:0;top:0;width:1200px;height:600px';
   root.dataset.motion = 'full';
@@ -44,16 +44,17 @@ check('interaction: the running column slides and fades for 120ms while the thre
       await settle(20);
       const animation = main.getAnimations()[0];
       ok(animation, 'the actual stage has a FLIP animation');
-      ok(Number(animation.effect!.getComputedTiming().duration) >= 120);
+      const duration = opening ? 220 : 80;
+      equal(Number(animation.effect!.getComputedTiming().duration), duration, 'the stage uses the entrance or exit token');
       equal(shell.getAnimations().length, 0, 'no layout animation on the grid');
       animation.pause();
       animation.currentTime = 0;
       ok(Math.abs(thread.getBoundingClientRect().width - before) < 1, 'the first frame retains the previous thread width');
-      animation.currentTime = 60;
+      animation.currentTime = duration / 3;
       const early = thread.getBoundingClientRect().width;
-      animation.currentTime = 120;
+      animation.currentTime = duration * 2 / 3;
       const later = thread.getBoundingClientRect().width;
-      ok(opening ? later < early : later > early, 'the thread keeps moving through intermediate frames over 120ms');
+      ok(opening ? later < early : later > early, 'the thread keeps moving through intermediate frames within its duration');
       if (opening) {
         const entrance = column.getAnimations()[0]!;
         entrance.pause();
