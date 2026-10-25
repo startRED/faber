@@ -2169,6 +2169,8 @@ export const es: Messages = {
   'notes.264.fixed': 'La búsqueda mantiene visible el resultado actual y se cierra sin cambiar de tamaño.',
   'notes.265.new': 'La IA del proyecto puede comparar borradores de texto con dos evaluaciones independientes y notas guardadas.',
   'notes.266.better': 'En Windows, las nuevas tareas automáticas de IA esperan si falta memoria y Detener cancela las que aún no han empezado.',
+  'notes.267.fixed': 'Las filas y la columna de tareas en curso dejan de tardar en desaparecer al cerrarlas.',
+  'notes.268.fixed': 'La tarjeta de la pregunta se desvanece aunque respondas en cuanto aparece.',
   'update.checking': 'Buscando una actualización…',
   'update.downloading': 'Descargando actualización…',
   'update.downloadingPercent': 'Descargando actualización… {percent} %',

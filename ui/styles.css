@@ -1466,8 +1466,11 @@ html.away-win :is(.amb, .amb *) { animation-play-state: paused !important; }
 
 /* The assistant's own questions: a card in its message with a step per question, a tile per answer and a preview beside the tile
    it drew one for. The card folds away once answered (the Asks hold keeps it that long); reduced motion is switched off globally. */
-.ask.question { gap: 0; padding: 0; grid-template-rows: 1fr; container-type: inline-size; transition: grid-template-rows var(--dur-exit) var(--ease-in), opacity var(--dur-exit) var(--ease-in); }
-.ask.question.gone { grid-template-rows: 0fr; opacity: 0; }
+/* One reversible transition keeps an early answer from competing with the entrance keyframes. */
+.ask.question { gap: 0; padding: 0; grid-template-rows: 1fr; container-type: inline-size; animation: none; transition: grid-template-rows var(--dur-exit) var(--ease-in), opacity var(--dur-ui) var(--ease), transform var(--dur-ui) var(--ease); }
+.ask.question.gone { grid-template-rows: 0fr; opacity: 0; transition-duration: var(--dur-exit); transition-timing-function: var(--ease-in); }
+@starting-style { .ask.question:not(.ri *) { opacity: 0; transform: translateY(var(--arrive-y)); } }
+html:is(.hidden-win, .quiet-win) .ask.question { transition: none; }
 .ask .q-inner { min-height: 0; overflow: hidden; }
 .ask .q-body { display: grid; gap: 12px; padding: 12px 14px; }
 .ri .ask .q-body { padding: 0; }

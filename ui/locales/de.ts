@@ -2169,6 +2169,8 @@ export const de: Messages = {
   'notes.264.fixed': 'Die Suche hält den aktuellen Treffer sichtbar und schließt, ohne ihre Größe zu ändern.',
   'notes.265.new': 'Die Projekt-KI kann Textentwürfe mit zwei unabhängigen Bewertungen und gespeicherten Punkten vergleichen.',
   'notes.266.better': 'Unter Windows warten neue automatische KI-Aufgaben bei knappem Arbeitsspeicher; Stoppen bricht sie vor dem Start ab.',
+  'notes.267.fixed': 'Zeilen und die Spalte der laufenden Aufgaben verschwinden beim Schließen ohne unnötige Verzögerung.',
+  'notes.268.fixed': 'Fragekarten blenden sanft aus, auch wenn du sofort beim Erscheinen antwortest.',
   'update.checking': 'Suche nach einem Update…',
   'update.downloading': 'Update wird heruntergeladen…',
   'update.downloadingPercent': 'Update wird heruntergeladen… {percent} %',

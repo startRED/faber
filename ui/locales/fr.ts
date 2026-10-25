@@ -2169,6 +2169,8 @@ export const fr: Messages = {
   'notes.264.fixed': 'La recherche garde le résultat visible et se ferme sans changer de taille.',
   'notes.265.new': 'L’IA du projet peut comparer des textes avec deux évaluations indépendantes et des notes enregistrées.',
   'notes.266.better': 'Sous Windows, les nouvelles tâches automatiques des IA attendent si la mémoire manque, et Arrêter annule celles qui n’ont pas démarré.',
+  'notes.267.fixed': 'Les lignes et la colonne des tâches en cours disparaissent sans délai superflu à la fermeture.',
+  'notes.268.fixed': 'La carte de la question disparaît en douceur même si vous répondez dès son apparition.',
   'update.checking': 'Recherche d’une mise à jour…',
   'update.downloading': 'Téléchargement de la mise à jour…',
   'update.downloadingPercent': 'Téléchargement de la mise à jour… {percent} %',

@@ -2156,6 +2156,8 @@ export const ptBR: Messages = {
   'notes.264.fixed': 'A busca deixa o resultado visível e fecha sem mudar de tamanho.',
   'notes.265.new': 'A IA do projeto pode comparar rascunhos de texto com duas avaliações independentes e notas salvas.',
   'notes.266.better': 'No Windows, novas tarefas automáticas das IAs aguardam quando falta memória, e Parar cancela as que ainda não começaram.',
+  'notes.267.fixed': 'As linhas e a coluna de tarefas em andamento deixam de demorar pra desaparecer quando você as fecha.',
+  'notes.268.fixed': 'O cartão da pergunta desaparece suavemente mesmo quando você responde assim que ele aparece.',
   'update.checking': 'Procurando atualização…',
   'update.downloading': 'Baixando atualização…',
   'update.downloadingPercent': 'Baixando atualização… {percent}%',

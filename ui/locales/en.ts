@@ -2049,6 +2049,8 @@ export const en = {
   'notes.264.fixed': 'Find keeps the current match clear of its bar and closes without changing size.',
   'notes.265.new': 'Your project agent can compare text drafts with two independent evaluations and recorded scores.',
   'notes.266.better': 'On Windows, new automatic AI tasks wait when memory is tight, and Stop cancels them before they start.',
+  'notes.267.fixed': 'Rows and the running column no longer linger when you close them.',
+  'notes.268.fixed': 'Answered question cards fade away even when you answer as they appear.',
   'update.checking': 'Looking for an update…',
   'update.downloading': 'Downloading update…',
   'update.downloadingPercent': 'Downloading update… {percent}%',
