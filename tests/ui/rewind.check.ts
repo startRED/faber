@@ -416,7 +416,17 @@ check('rewind: the app reloads after undoing the first message and keeps the sav
       ok(t('error.rewind.deleteRecovery') !== 'error.rewind.deleteRecovery', `${language}: the refusal has plain words`);
       root.querySelector('.crow')!.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true, button: 2, clientX: 40, clientY: 40 }));
       await settle();
-      const remove = [...document.querySelectorAll<HTMLButtonElement>('.cmenu:not(.leaving) [role=menuitem]')].find((item) => item.textContent === t('menu.delete'))!;
+      const remove = [...document.querySelectorAll<HTMLButtonElement>('.cmenu:not(.leaving) [role=menuitem]')].find((item) => item.textContent === t('menu.delete'));
+      if (!remove) {
+        throw new Error(`recovery refusal menu is missing Delete: ${JSON.stringify({
+          language, currentLanguage: lang(), expected: t('menu.delete'), opened, refused,
+          rows: [...root.querySelectorAll('.crow')].map((row) => row.getAttribute('data-conversation-id')),
+          menus: [...document.querySelectorAll('.cmenu')].map((menu) => ({
+            leaving: menu.classList.contains('leaving'), items: [...menu.querySelectorAll('[role=menuitem]')].map((item) => item.textContent),
+          })),
+          focus: document.activeElement?.className, selection: getSelection()?.toString(),
+        })}`);
+      }
       remove.click(); await settle(560);
       remove.click();
       // The refusal reaches the screen through an engine call and a render: wait for it, not a fixed time (a slow macOS runner takes longer).
