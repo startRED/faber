@@ -52,6 +52,8 @@ How the Settings screen looks and behaves. The first run and the tutorial are in
   an old thread waiting for that shared server to close does not keep the current idle session alive.
   No new motion or restart prompt.
 - Projects contains only each project's own closed card: checks, separate copies and one switch, "Fix a broken goal by itself" (off by default; its short line always shows the daily limit and today's spending, US$2 a day per project, and its "?" says what runs and when). The goals themselves are on the project's page. Skills and tool servers are managed in the sidebar's [Catalog](catalog.md) tab; the old catalog cards are removed (R344 supersedes R247 placement).
+  Refreshing a project's saved data retains its open card, unsent check editor and keyboard focus by project identity;
+  removing an earlier project cannot transfer those controls to another project. Saved copy preferences still update.
 - R140 (Chat; the person's own project sessions take the same modes, and mission roles never do): the Permissions choice is a
   menu of five modes, each with one plain line and its long text behind the closed "?" of the row, which is not in the page
   while closed. The composer of Chat carries the same choice as a chip. Mode by CLI (the CLI that lacks a mode runs the

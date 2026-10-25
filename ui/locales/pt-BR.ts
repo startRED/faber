@@ -2144,6 +2144,8 @@ export const ptBR: Messages = {
   'notes.258.fixed': 'Ao fechar a barra lateral numa janela estreita, ela termina de deslizar em vez de sumir de repente.',
   'notes.259.fixed': 'Recados de outras IAs chegam automaticamente à sua IA e deixam de aparecer como mensagens que você precisa enviar.',
   'notes.260.fixed': 'Sua IA consegue identificar quando outra conversa não recebe um recado porque a caixa de entrada está cheia.',
+  'notes.261.fixed': 'Os controles do projeto preservam rascunhos e foco ao salvar, e o painel lateral fecha sem dar um salto durante o movimento.',
+  'notes.262.fixed': 'O botão de voltar ao fim do histórico do subagente fica no lugar ao clicar com movimento reduzido.',
   'update.checking': 'Procurando atualização…',
   'update.downloading': 'Baixando atualização…',
   'update.downloadingPercent': 'Baixando atualização… {percent}%',

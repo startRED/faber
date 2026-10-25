@@ -1,8 +1,29 @@
 import { createComponent, createSignal, Show } from 'solid-js';
 import { render } from 'solid-js/web';
 import themes from '../../src-tauri/src/themes.json';
-import { animateDetails, animateList } from '../../ui/motion.ts';
+import { animateDetails, animateList, leaveColumn } from '../../ui/motion.ts';
 import { check, equal, finished, frames, ok } from './check.ts';
+
+check('motion: the helper Latest action stays under the pointer when press feedback is neutral', () => {
+  const root = document.createElement('aside');
+  root.className = 'runcol';
+  root.dataset.motion = 'none';
+  root.style.cssText = 'position:fixed;left:0;top:0;width:360px;height:640px';
+  const button = document.createElement('button');
+  button.className = 'toend';
+  button.textContent = 'Jump to latest';
+  root.append(button);
+  document.body.append(root);
+  try {
+    const before = button.getBoundingClientRect();
+    // Reduced-motion press feedback clears transforms; that must never clear layout positioning.
+    button.style.transform = 'none';
+    const pressed = button.getBoundingClientRect();
+    ok(Math.abs(pressed.x + pressed.width / 2 - (before.x + before.width / 2)) < 1, 'a neutral press keeps Latest centered');
+  } finally {
+    root.remove();
+  }
+});
 
 // CI's machines ask Windows for reduced motion, and the stylesheet then cancels every transition and animation. The checks
 // page hides that (tests/ui/system-motion.ts) and must never see it: the motion checks would stand aside or fail
@@ -322,5 +343,55 @@ check('motion: the tutorial leaves with a fade of its own instead of vanishing',
   } finally {
     dispose();
     root.remove();
+  }
+});
+
+check('motion: closing a column freezes its visible box through interrupted width and parent reflow', async () => {
+  const root = document.createElement('div');
+  root.dataset.motion = 'full';
+  root.style.cssText = 'position:fixed;left:100px;top:40px;transform:translateX(60px);width:800px;height:400px;display:grid;grid-template-columns:1fr auto';
+  root.innerHTML = '<div></div><aside class="runcol" style="width:300px;height:400px;transition:width 1s linear"></aside>';
+  document.body.append(root);
+  const column = root.lastElementChild as HTMLElement;
+  let exit: Animation | undefined;
+  try {
+    await frames();
+    column.style.width = '600px';
+    await frames();
+    const width = column.getAnimations()[0];
+    ok(width, 'a real width transition is interrupted');
+    width.pause(); width.currentTime = 500;
+    const before = column.getBoundingClientRect();
+    exit = leaveColumn(column);
+    ok(exit, 'full motion starts the retained column exit');
+    exit.pause(); exit.currentTime = 0;
+    const initial = column.getBoundingClientRect();
+    ok(Math.abs(initial.x - before.x) < 1, 'closing starts at the currently painted position');
+    ok(Math.abs(initial.width - before.width) < 1, 'closing does not snap to the target width');
+    root.style.left = '20px';
+    root.style.transform = 'translateX(140px)';
+    equal(column.getBoundingClientRect().x, initial.x, 'parent reflow cannot move the departing column backwards');
+    exit.currentTime = 90;
+    ok(column.getBoundingClientRect().x > initial.x, 'the opaque column travels out to the right');
+    equal(getComputedStyle(column).opacity, '1');
+    // WebKit rejects the cancellation promise in another microtask; await that settlement, not one guessed turn.
+    const cancelled = exit.finished.catch(() => undefined);
+    exit.cancel();
+    await cancelled;
+    ok(!column.hasAttribute('popover'), 'cancellation removes the temporary top layer before painting');
+    equal(getComputedStyle(column).position, 'relative', 'cancelling restores normal layout without inline residue');
+    equal(column.style.position, '');
+    const focus = document.createElement('button');
+    root.firstElementChild!.append(focus); focus.focus();
+    exit = leaveColumn(column);
+    equal(document.activeElement, focus, 'promoting the departing pane does not steal keyboard focus');
+    await finished([exit!]);
+    await Promise.resolve();
+    ok(!column.hasAttribute('popover'), 'completion also removes the temporary top layer');
+    column.dataset.motion = 'reduced';
+    equal(leaveColumn(column), undefined, 'reduced motion closes without promotion');
+    ok(!column.hasAttribute('popover'));
+  } finally {
+    exit?.cancel(); root.remove();
   }
 });

@@ -1,10 +1,10 @@
-import { createComponent } from 'solid-js';
+import { createComponent, createSignal } from 'solid-js';
 import { render } from 'solid-js/web';
 import themes from '../../src-tauri/src/themes.json';
 import { api, type Project } from '../../ui/api.ts';
 import { useLanguage } from '../../ui/i18n.ts';
 import { ProjectsSection } from '../../ui/ProjectSettings.tsx';
-import { kept } from '../../ui/unsent.ts';
+import { keep, kept } from '../../ui/unsent.ts';
 import { check, equal, ok } from './check.ts';
 
 const demo: Project = { id: 'review-project', name: 'Review project', path: 'C:/fixture/review' };
@@ -16,6 +16,37 @@ const settle = (ms: number = 30) => new Promise((resolve) => setTimeout(resolve,
 const declared = ['npm run lint', 'cargo t'];
 const proofView = (confirmed: boolean, commands = declared) => ({ commands, declared, source: 'agents' as const, confirmed, changed: false, setup: ['npm ci', 'cargo fetch'] });
 const click = async (el: Element | null | undefined) => { ok(el, 'the element to click is on the screen'); (el as HTMLElement).click(); await settle(); };
+
+check('settings projects: refreshing a project keeps its open controls, draft and focus with its identity', async () => {
+  const original = api.projectProof;
+  api.projectProof = async () => proofView(true);
+  useLanguage('en');
+  const first: Project = { id: 'before-review', name: 'Before', path: 'C:/fixture/before' };
+  const [projects, setProjects] = createSignal([first, { ...demo }]);
+  const root = document.createElement('div');
+  root.dataset.motion = 'none';
+  document.body.append(root);
+  const dispose = render(() => createComponent(ProjectsSection, { get projects() { return projects(); } }), root);
+  try {
+    await click(root.querySelector('[data-project="review-project"] .pset-head'));
+    await click(root.querySelector('[data-project="review-project"] [data-testid="proof-edit"]'));
+    const draft = root.querySelector<HTMLTextAreaElement>('[data-testid="proof-draft"]')!;
+    draft.value = 'npm run unsent-review';
+    draft.dispatchEvent(new Event('input', { bubbles: true }));
+    draft.focus();
+    setProjects((all) => all.map((p) => ({ ...p, name: `${p.name} refreshed`, separateCopies: false })));
+    await settle();
+    equal(root.querySelector('[data-testid="proof-draft"]'), draft, 'saving a project keeps the actual open editor');
+    equal(document.activeElement, draft, 'refreshing project data retains keyboard focus');
+    equal(draft.value, 'npm run unsent-review', 'the unsent edit stays intact');
+    equal(root.querySelector<HTMLInputElement>('#pset-review-project-copies-switch')?.checked, false, 'kept controls still receive saved preference changes');
+    ok(root.querySelector('[data-project="review-project"] .pset-head')?.textContent?.includes('refreshed'), 'the existing row still receives updated project data');
+    setProjects((all) => all.filter((p) => p.id !== first.id));
+    await settle();
+    equal(root.querySelector('[data-testid="proof-draft"]'), draft, 'removing an earlier project does not move the editor to another record');
+    equal(root.querySelector('[data-project="before-review"]'), null, 'removed project is released');
+  } finally { dispose(); root.remove(); keep(`proof.${demo.id}`, ''); api.projectProof = original; }
+});
 
 // Settings, Projects: one closed entry per project; inside, one short line per option and the rest behind Learn more.
 async function withProjectSettings(mock: () => void, run: (root: HTMLElement) => Promise<void>) {

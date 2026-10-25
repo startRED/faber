@@ -128,8 +128,8 @@ puts the address back) and, once there is a page, a quiet icon button that opens
 and under it a box that fills the rest of the column, in the third surface with the hairline edge, over which the page
 itself is drawn by a second webview of the same window. The box is measured and the page placed again when it changes
 size, when the window does and once the column has slid in; when the box goes, the page moves out of the window, where
-it keeps drawing, and it closes after five minutes nobody used it. Opening a subagent closes the page and the other way
-round. A menu, dialog or toast covering its box temporarily parks the native page; it returns when the layer goes.
+it keeps drawing, and it closes after five minutes nobody used it. Opening a subagent parks the live page; reopening
+the browser replaces the subagent view. A menu, dialog or toast covering its box temporarily parks the native page; it returns when the layer goes.
 While it is on screen the page is the person's: they click and type in it, and the agent's call waits for them
 to go back. A page clicked through several times is one card, its latest. Under the box, once the agent did more than one thing in the
 browser during the reply, the log of its steps fills at most a third of the column, oldest first, one quiet row each in the

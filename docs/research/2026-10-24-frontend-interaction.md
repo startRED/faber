@@ -231,3 +231,45 @@ the unchanged 5 MB margin; frame references are empty and the retired renderer e
 passing full integration rerun. Full local commands pass six checks in verifier receipt 1792907343983-full; its
 shared-cache claims attempt was interrupted before a compiler child and is not a pass. The same claims command
 passes separately in claims-pane-final.log through the normally leased isolated cache (exit 0, 27.7 seconds).
+
+The complete numbered integration subsequently passes: Rust 2,296/0, UI 743/0 and native screen 144/0,
+with no skipped or unrun checks (`landing-pane-reopen-console.log`). Required remote gates pass and the
+change enters the base on 2026-10-25 at 06:16:34 UTC. This resolves the pending full-integration statements
+above, but establishes only the configured scenarios, not every possible control combination. A further
+proof is being prepared for closing the browser during an already active view-width transition; native
+screen-reader operation, participant research and production tray retention remain unverified.
+
+The supplemental interaction pass finds and fixes two additional causes: project-record refresh remounted
+an open settings entry, and cancelling a width transition let a departing column move backwards.
+Project controls now retain identity and accept fresh saved preferences. A column exits from its painted
+box in a temporary native manual top layer, preserving DOM ownership and isolating transformed ancestors.
+Two settings negative controls and the interrupted/transformed geometry negative controls fail before
+their corresponding fixes; seven settings and thirteen motion component cases pass afterwards.
+Native Settings reopen/restart passes 1/1; Catalog keyboard/search and live reading/draft/Stop pass 2/2.
+The final interrupted native-browser close passes at 1920, 1280 and 720 px with 75, 81 and 93 observations,
+respectively: opaque visible departure without reversal, native page retention, cleanup and reopening.
+These are driver observations, not an FPS benchmark. Final composition and integration evidence follows
+in the review/landing receipt; the previously listed research and assistive-technology limits still apply.
+
+The next integration's macOS UI run (40178693940) reports 743 passes and two failures; its Windows UI,
+Rust and native screen jobs pass. The motion failure is reproduced in isolated headless WebKit 27.2 on
+Windows before the test correction. WebKit's [animation cancellation implementation](https://github.com/WebKit/WebKit/blob/main/Source/WebCore/animation/WebAnimation.cpp)
+rejects the finished promise inside another microtask. The regression now captures that promise before
+cancelling and awaits its settlement instead of guessing one microtask; the same opaque geometry and
+cleanup assertions remain. Production animation code is unchanged, and the isolated WebKit case passes.
+The history failure has not reproduced in isolated Windows WebKit. A proposed later-frame setup assertion
+passed locally, but it narrows the same-task resize case and is not retained: the independent recovery
+lane already has direct macOS diagnostics for this shared failure. Its listener-free copies stay at the
+top while the original moves, so a production cause is still being isolated there. The existing same-task
+assertion remains unchanged. The broad exploratory WebKit prefix run lacks the native shell and has
+unrelated missing-shell failures, so it is not counted as a full-suite pass.
+
+### Interruption-driver qualification, 2026-10-25
+
+A later remote run timed out waiting to observe the short width transition, before sending the close
+pointer command. The native
+interruption check now observes before opening, confirms the native page visible, revalidates a real
+CSS transition and activates the actual Close control in that same renderer frame. This is explicitly
+programmatic, with no clock or motion-class change; ordinary pointer closing is covered separately.
+Without the geometry repair it detects a reversal from 1344.8 to 1275 px; restoring and rebuilding
+passes at 1920, 1280 and 720 px. Opacity, native retention, travel, cleanup and reopening assertions stay.

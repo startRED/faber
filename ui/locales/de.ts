@@ -2157,6 +2157,8 @@ export const de: Messages = {
   'notes.258.fixed': 'In schmalen Fenstern gleitet die Seitenleiste beim Schließen vollständig hinaus, statt plötzlich zu verschwinden.',
   'notes.259.fixed': 'Nachrichten anderer Agenten kommen automatisch bei deiner KI an, ohne dass du sie selbst senden musst.',
   'notes.260.fixed': 'Deine KI erkennt, wenn eine andere Unterhaltung ihre Nachricht wegen eines vollen Posteingangs nicht annehmen kann.',
+  'notes.261.fixed': 'Beim Speichern bleiben Entwurf und Tastaturfokus in den Projekteinstellungen erhalten, und bewegte Seitenleisten schließen ohne Sprung.',
+  'notes.262.fixed': 'Bei reduzierter Bewegung bleibt die Schaltfläche zum Ende des Unteragentenverlaufs beim Drücken an ihrem Platz.',
   'update.checking': 'Suche nach einem Update…',
   'update.downloading': 'Update wird heruntergeladen…',
   'update.downloadingPercent': 'Update wird heruntergeladen… {percent} %',

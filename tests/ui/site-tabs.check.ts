@@ -2,6 +2,7 @@ import { createComponent } from 'solid-js';
 import { render } from 'solid-js/web';
 import { api, type SiteTabs, type SiteTabStep } from '../../ui/api.ts';
 import { closeMenu, menu } from '../../ui/contextmenu.ts';
+import { ContextMenuHost } from '../../ui/ContextMenu.tsx';
 import { siteKeyOf } from '../../ui/keys.ts';
 import { Running } from '../../ui/Running.tsx';
 import { goesTo, openedSite, placeOf, showSite } from '../../ui/Site.tsx';
@@ -69,6 +70,7 @@ function pane(kept: SiteTabs, answers: Partial<Record<SiteTabStep, SiteTabs>> = 
   api.siteTab = async (id, step, tab) => {
     calls.push(`${step} ${tab ?? ''}`.trim());
     const tabs = answers[step] ?? { ...kept, front: tab ?? kept.front };
+    kept = tabs;
     return { tabs, tab: tab ?? tabs.front ?? null };
   };
   const front = kept.tabs.find((t) => t.id === kept.front)!;
@@ -118,6 +120,43 @@ const THREE: SiteTabs = {
   front: 't2',
   agent: 't4',
 };
+
+check('page in the browser: All tabs reaches a hidden tab and restores focus to the overflow control', async () => {
+  const tabs = Array.from({ length: 12 }, (_, i) => ({ id: `t${i}`, url: `https://example.org/${i}`, title: `Reference ${i}` }));
+  const p = pane({ tabs, front: 't11' });
+  const host = document.createElement('div');
+  document.body.append(host);
+  const dispose = render(() => createComponent(ContextMenuHost, {}), host);
+  try {
+    await frames(3);
+    const strip = p.root.querySelector<HTMLElement>('.site-tabs')!;
+    ok(strip.scrollWidth > strip.clientWidth, 'the real strip overflows with many tabs');
+    const all = p.root.querySelector<HTMLButtonElement>('[aria-label="All tabs"]');
+    ok(all, 'the overflow action is available');
+    ok(p.tab(0).getBoundingClientRect().right <= strip.getBoundingClientRect().left + 1, 'the chosen tab starts outside the visible strip');
+    all.focus();
+    all.click();
+    await frames();
+    // The page's first host renders the shared menu, including with the full checks bootstrap.
+    const items = [...document.querySelectorAll<HTMLButtonElement>('.cmenu:not(.leaving) [role="menuitem"]')];
+    equal(items.length, tabs.length, 'the menu includes every tab, including the hidden ones');
+    equal(items.at(-1)?.textContent, '✓ Reference 11', 'the menu identifies the current tab');
+    equal(document.activeElement, items[0], 'opening from the control focuses the first tab choice');
+    items[0]!.click();
+    await frames(3);
+    equal(p.calls.at(-1), 'bring t0', 'choosing the hidden tab uses the usual tab action');
+    equal(openedSite()?.url, tabs[0]!.url, 'the selected page becomes the browser page');
+    equal(p.tab(0).getAttribute('aria-current'), 'page', 'the strip marks the chosen tab current');
+    equal(menu(), undefined, 'choosing a tab closes the menu');
+    equal(document.activeElement, all, 'focus returns to the same overflow control');
+    const shown = p.tab(0).getBoundingClientRect(), bounds = strip.getBoundingClientRect();
+    ok(shown.left >= bounds.left - 1 && shown.right <= bounds.right + 1, 'the selected hidden tab is brought into the visible strip');
+  } finally {
+    p.done();
+    dispose();
+    host.remove();
+  }
+});
 
 check('page in the browser: tabs show their title or site, open, close by button, middle click and menu, and the last one closes the pane', async () => {
   const blank: SiteTabs = { tabs: [...THREE.tabs, { id: 't5', url: '' }], front: 't5', agent: 't4' };

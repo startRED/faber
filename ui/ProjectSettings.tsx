@@ -1,4 +1,4 @@
-import { createSignal, For, type JSX, onCleanup, onMount, Show } from 'solid-js';
+import { createEffect, createSignal, For, type JSX, onCleanup, onMount, Show } from 'solid-js';
 import { api, errorText, type GoalsView, type Project, type ProofView } from './api.ts';
 import { Collapse, Opt, Toggle } from './controls.tsx';
 import { Icon } from './Glyphs.tsx';
@@ -52,7 +52,9 @@ export function ProjectsSection(props: { projects: Project[] }) {
   return (
     <Show when={props.projects.length > 0} fallback={<p class="hint">{t('set.projects.none')}</p>}>
       <div class="psets" ref={animateList}>
-        <For each={props.projects}>{(p) => <Entry project={p} />}</For>
+        <For each={props.projects.map((p) => p.id)}>
+          {(id) => <Show when={props.projects.find((p) => p.id === id)}>{(project) => <Entry project={project()} />}</Show>}
+        </For>
       </div>
     </Show>
   );
@@ -133,6 +135,7 @@ function Body(props: { project: Project }) {
     });
   // Whether each new conversation works in a separate copy; the conversations that already have one keep it.
   const [separate, setSeparate] = createSignal(props.project.separateCopies !== false);
+  createEffect(() => setSeparate(props.project.separateCopies !== false));
   const copies = async (on: boolean) => {
     let saved = false;
     await run(async () => {

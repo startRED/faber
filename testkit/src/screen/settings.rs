@@ -13,6 +13,11 @@ const QUESTION: &str = "In one sentence: why is the sky blue?";
 
 pub fn scenarios() -> Vec<Scenario> {
     vec![
+        Scenario { name: "control journey: project preferences and edited checks survive reopening and restart", run: project_preferences },
+        Scenario {
+            name: "control journey: Catalog search, keyboard details and selection return without installation",
+            run: catalog_journey,
+        },
         Scenario { name: "system toggles persist independently and survive reopening Settings", run: system_toggles_persist },
         Scenario { name: "receive previews starts off, saves on its own and survives reopening Settings", run: previews_persist },
         Scenario { name: "autostart begins in the tray without creating a webview window", run: autostart_has_no_window },
@@ -436,5 +441,83 @@ fn system_toggles_persist(ctx: &mut Ctx) -> Result {
         same(page.is_checked(&awake)?, keep_awake, "keep-awake after reload")?;
         same(page.is_checked(&autostart)?, start, "autostart after reload")?;
     }
+    ctx.close(app.id)
+}
+fn project_preferences(ctx: &mut Ctx) -> Result {
+    start_settings(ctx, "en")?;
+    super::shell::seed_project(ctx, "Preferences fixture")?;
+    std::fs::write(ctx.sb.data.join("demo/AGENTS.md"), "# Synthetic project\n\n## Proof commands\n\n```bash\nnpm test\n```\n")
+        .map_err(|e| e.to_string())?;
+    let mut app = ctx.launch(super::no_cli())?;
+    let settings = app.page.named("button", "settings.open")?.exact();
+    app.page.click(&settings)?;
+    app.page.wait_visible(&css(".settings"))?;
+    open_section(&mut app.page, "set.projects")?;
+    app.page.click(&css(".pset-head"))?;
+    let copies = css("#pset-demo-copies-switch");
+    same(app.page.is_checked(&copies)?, true, "separate copies initially enabled")?;
+    app.page.press_on(&copies, "Space")?;
+    same(app.page.is_checked(&copies)?, false, "keyboard toggles this project's copies")?;
+    app.page.click(&css("[data-testid=proof-edit]"))?;
+    app.page.fill(&css("[data-testid=proof-draft]"), "npm run synthetic-proof")?;
+    app.page.press_on(&css("[data-testid=proof-save]"), "Enter")?;
+    app.page.wait_for(
+        "confirmed controls",
+        "!document.querySelector('[data-testid=proof-save]') && !document.querySelector('[data-testid=proof-confirm]')",
+    )?;
+    app.page.press("Escape")?;
+    app.page.wait_for("Settings removed", "!document.querySelector('.settings')")?;
+    let settings = app.page.named("button", "settings.open")?.exact();
+    app.page.click(&settings)?;
+    app.page.wait_visible(&css(".settings"))?;
+    open_section(&mut app.page, "set.projects")?;
+    app.page.click(&css(".pset-head"))?;
+    same(app.page.is_checked(&copies)?, false, "saved copies preference survives reopening")?;
+    ctx.close(app.id)?;
+    let mut app = ctx.launch(super::no_cli())?;
+    let settings = app.page.named("button", "settings.open")?.exact();
+    app.page.click(&settings)?;
+    app.page.wait_visible(&css(".settings"))?;
+    open_section(&mut app.page, "set.projects")?;
+    app.page.click(&css(".pset-head"))?;
+    same(app.page.is_checked(&copies)?, false, "saved copies preference survives a real restart")?;
+    app.page.click(&css("[data-testid=proof-edit]"))?;
+    same(
+        app.page.eval("document.querySelector('[data-testid=proof-draft]').value")?,
+        json!("npm run synthetic-proof"),
+        "confirmed commands survive a real restart",
+    )?;
+    ctx.shot(&mut app, "project-preferences-restarted")?;
+    ensure(ctx.records()?.is_empty(), || "editing preferences unexpectedly launched a CLI".into())?;
+    ctx.close(app.id)
+}
+
+fn catalog_journey(ctx: &mut Ctx) -> Result {
+    start_settings(ctx, "en")?;
+    let mut app = ctx.launch(super::no_cli())?;
+    app.page.click(&css("[data-catalog-tab]"))?;
+    let card = css(".catalog-tile").last().css("[data-catalog-card]");
+    app.page.wait_visible(&card)?;
+    let id = app.page.attr(&card, "data-catalog-card")?.ok_or("catalog card had no identity")?;
+    app.page.press_on(&card, "Enter")?;
+    app.page.wait_visible(&css(".catalog-detail"))?;
+    app.page.wait_for("detail heading has focus", "document.activeElement?.matches('.catalog-detail h1')")?;
+    app.page.press("Escape")?;
+    app.page
+        .wait_for("the original catalog card regains focus", &format!("document.activeElement?.dataset.catalogCard === {}", json!(id)))?;
+    app.page.press_on(&css(".catalog-tile").last().css(".catalog-pick"), "Space")?;
+    app.page.wait_visible(&css("[data-catalog-batch]"))?;
+    app.page.press("Escape")?;
+    app.page.wait_for(
+        "Escape clears the selected cards",
+        "!document.querySelector('[data-catalog-batch]') && !document.querySelector('.catalog-pick:checked')",
+    )?;
+    app.page.fill(&css(".catalog-search input"), "synthetic-no-such-catalog-entry-84729")?;
+    app.page.wait_visible(&css(".catalog-empty"))?;
+    same(app.page.count(&css("[data-catalog-card]"))?, 0, "unmatched search has no stale cards")?;
+    app.page.press_on(&css(".catalog-search input"), "Escape")?;
+    app.page.wait_visible(&card)?;
+    ctx.shot(&mut app, "catalog-keyboard-returned")?;
+    ensure(ctx.records()?.is_empty(), || "browsing catalog unexpectedly launched a CLI".into())?;
     ctx.close(app.id)
 }

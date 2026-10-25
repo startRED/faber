@@ -15,6 +15,8 @@ How conversation text reads and keeps its place, in Chat and Projects.
   This correction is instant at every motion level and uses the existing message window, not a second scrolling view.
 - "Jump to latest" first selects the conversation's newest message window, then scrolls to its end; it never stops at
   an intermediate loaded page. Reaching that tail removes the old reading position from storage.
+- In the helper column, centering uses layout translation independently of press feedback, so reducing motion never
+  moves "Jump to latest" out from under the pointer (`tests/ui/motion.check.ts`, "the helper Latest action").
 
 ## Streaming text
 

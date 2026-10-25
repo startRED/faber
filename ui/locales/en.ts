@@ -2037,6 +2037,8 @@ export const en = {
   'notes.258.fixed': 'The sidebar finishes sliding away when you close it in a narrow window, instead of disappearing abruptly.',
   'notes.259.fixed': 'Messages from other agents reach your AI automatically and no longer appear as messages you need to send.',
   'notes.260.fixed': 'Your AI can tell when another conversation cannot receive its message because its inbox is full.',
+  'notes.261.fixed': 'Project controls keep drafts and keyboard focus when saving, and closing a moving side panel no longer makes it jump.',
+  'notes.262.fixed': "The helper's Jump to latest button stays in place when pressed with reduced motion.",
   'update.checking': 'Looking for an update…',
   'update.downloading': 'Downloading update…',
   'update.downloadingPercent': 'Downloading update… {percent}%',

@@ -109,6 +109,7 @@ pub fn scenarios() -> Vec<Scenario> {
         Scenario { name: "after the six looks were applied in turn, Faber stays within its memory budget", run: memory_after_every_look },
         Scenario { name: "a conversation with a thousand messages opens quickly and stays within the budget", run: thousand_messages },
         Scenario { name: "a long answer streaming hundreds of steps keeps the screen's memory flat", run: long_streaming_answer },
+        Scenario { name: "control journey: reading and a draft survive pane toggles during live tool output", run: streaming_pane_reading },
         Scenario {
             name: "conversation changes: thirty 3990-line files stay within the memory budget while switching and after closing",
             run: changes_memory,
@@ -1978,6 +1979,59 @@ fn long_recording(ctx: &Ctx, steps: usize, output: usize) -> std::result::Result
     let path = ctx.sb.tmp.join("long-answer.jsonl");
     std::fs::write(&path, lines.join("\n")).map_err(|e| e.to_string())?;
     Ok(path)
+}
+
+fn streaming_pane_reading(ctx: &mut Ctx) -> Result {
+    start_settings(ctx, "en")?;
+    let recording = long_recording(ctx, 360, 2500)?;
+    let mut app = ctx.launch(Launch { recording: Some(recording), ..claude_chat(ctx) })?;
+    super::system_motion(&mut app.page, false)?;
+    let model = app.page.labelled("composer.model")?;
+    app.page.select_option(&model, "Claude Haiku")?;
+    ask(&mut app.page, QUESTION)?;
+    app.page
+        .wait_for("live tool output to fill the thread", "document.querySelectorAll('article.ai .activity .tools > span').length >= 25")?;
+    app.page.fill(&css(".composer textarea"), "Synthetic unsent draft")?;
+    let point = app.page.eval(
+        "(() => { const r=document.querySelector('.thread').getBoundingClientRect();return {x:r.x+r.width/2,y:r.y+r.height/2};})()",
+    )?;
+    app.page
+        .cdp
+        .call("Input.dispatchMouseEvent", json!({"type":"mouseWheel","x":point["x"],"y":point["y"],"deltaX":0,"deltaY":-100000}))?;
+    app.page.wait_for("the person to reach the old question", "document.querySelector('.thread').scrollTop < 2")?;
+    let before = app.page.eval("(() => {window.__streamQuestion=document.querySelector('.you'); const t=document.querySelector('.thread');return {offset:window.__streamQuestion.getBoundingClientRect().top-t.getBoundingClientRect().top,tools:document.querySelectorAll('article.ai .activity .tools > span').length};})()")?;
+    for reduced in [false, true] {
+        super::system_motion(&mut app.page, reduced)?;
+        for _ in 0..3 {
+            app.page.click(&css(".pane-aside"))?;
+            app.page.wait_visible(&css(".runcol"))?;
+            app.page.click(&css(".pane-aside"))?;
+            app.page.wait_for("the side chat to finish leaving", "!document.querySelector('.runcol')")?;
+            let state = app.page.eval("(() => {const t=document.querySelector('.thread'),q=document.querySelector('.you');return {same:q===window.__streamQuestion,offset:q.getBoundingClientRect().top-t.getBoundingClientRect().top,top:t.scrollTop,draft:document.querySelector('.composer textarea').value,tools:document.querySelectorAll('article.ai .activity .tools > span').length,finished:!!document.querySelector('article.ai .actions')};})()")?;
+            ensure(state["same"] == true && state["top"].as_f64().is_some_and(|n| n < 2.0), || {
+                format!("pane toggling replaced the old question or stole reading position: {state}")
+            })?;
+            ensure(state["offset"].as_f64().zip(before["offset"].as_f64()).is_some_and(|(now, old)| (now - old).abs() <= 2.0), || {
+                format!("the old question moved after closing the pane: {before} -> {state}")
+            })?;
+            same(state["draft"].clone(), json!("Synthetic unsent draft"), "the main draft survives pane toggles")?;
+            ensure(state["finished"] == false, || "the pane sequence did not overlap live output".into())?;
+        }
+    }
+    app.page.wait_for(
+        "more tool output after the reading probe",
+        &format!("document.querySelectorAll('article.ai .activity .tools > span').length > {}", before["tools"]),
+    )?;
+    ctx.shot(&mut app, "streaming-panes-reading-preserved")?;
+    let stop = app.page.named("button", "composer.stop")?;
+    app.page.click(&stop)?;
+    app.page.wait_gone(&stop)?;
+    same(
+        app.page.eval("document.querySelector('.composer textarea').value")?,
+        json!("Synthetic unsent draft"),
+        "stopping the live turn retains the unsent draft",
+    )?;
+    ctx.close(app.id)
 }
 
 /// While a long reply streams, the screen hears only the steps that changed (`src-tauri/src/feed.rs`). Sent whole, each

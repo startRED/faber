@@ -125,6 +125,8 @@ pub const SOLO: &[(&str, &str)] = &[
     #[cfg(windows)]
     (browser_pane::PREVIEW, "physical hidden-window resizing for native browser photographs"),
     #[cfg(windows)]
+    (browser_pane::INTERRUPT, "physical hidden-window resizing and active layout transition"),
+    #[cfg(windows)]
     (control_walk::WINDOW, "native window maximize, restore and close state"),
     ("reading: a real restart preserves an old reading point within the memory budget", "processor, memory"),
     (reading::PROJECT_NAME, "processor, memory"),

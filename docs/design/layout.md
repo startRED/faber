@@ -169,3 +169,5 @@ needs the person, it counts the work still running, not the work waiting or unre
 fails or conflicts is amber in the list while the line, which reads the latest reply only, stays neutral. It also carries the
 wait while Faber looks for changed files to check; full command names and results stay in the pane. Check endings retain their polite live announcement, in plain words in Projects,
 with amber text and edge on failure.
+
+When closing interrupts a column's width glide, the exit temporarily fixes its currently painted box in a manual native top layer, with no DOM reparenting. Ongoing parent grid reflow cannot pull the departing real content backwards; cancelling the exit restores ordinary layout without inline geometry.

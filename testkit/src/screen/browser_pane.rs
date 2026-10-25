@@ -13,6 +13,7 @@ use std::time::{Duration, Instant};
 
 pub const NAME: &str = "browser pane: native navigation and placement within the memory budget";
 pub const PREVIEW: &str = "browser pane: baseline-compatible native preview photographs";
+pub const INTERRUPT: &str = "browser pane: closing during a view-width transition keeps the page visible without reversing travel";
 const OPEN_FAILURE: &str = "browser pane: baseline-compatible opening failure photograph";
 const CONVERSATION: &str = "5f1c0000-0000-4000-8000-0000000000b1";
 const OTHER_CONVERSATION: &str = "5f1c0000-0000-4000-8000-0000000000b2";
@@ -21,11 +22,141 @@ pub fn scenarios() -> Vec<Scenario> {
     vec![
         Scenario { name: NAME, run: browser_pane },
         Scenario { name: PREVIEW, run: preview_photos },
+        Scenario { name: INTERRUPT, run: interrupt_width },
         Scenario { name: OPEN_FAILURE, run: failure_photo },
         Scenario { name: "control walk: native browser tabs switch, reopen, overflow and close", run: tabs },
         Scenario { name: "browser pane: German opening failure photograph", run: german_failure },
         Scenario { name: "browser pane: German native preview photograph", run: german_preview },
     ]
+}
+
+fn interrupt_width(ctx: &mut Ctx) -> Result {
+    let (mut app, fixture) = open_browser(ctx)?;
+    let page = &mut app.page;
+    super::system_motion(page, false)?;
+    enter(page, &fixture.url("/one"))?;
+    wait_page(page, &fixture, "one")?;
+    for width in [1920, 1280, 720] {
+        resize(page, width, 800)?;
+        page.eval("new Promise(resolve=>setTimeout(resolve,300))")?;
+        if width < 900 {
+            // The overlay makes its header inert; use the person's actual pane-switching shortcuts.
+            for kind in ["keyDown", "keyUp"] {
+                page.cdp.call(
+                    "Input.dispatchKeyEvent",
+                    json!({"type":kind,"key":";","code":"Semicolon","windowsVirtualKeyCode":186,"modifiers":2}),
+                )?;
+            }
+        } else {
+            page.click(&css(".pane-aside"))?;
+        }
+        // Close through the real control in the observed frame; protocol round trips can outlast the 220 ms transition.
+        // Pointer closing is covered separately; this programmatic interruption leaves the product's clock unchanged.
+        page.eval(r#"(() => {
+          const shell=document.querySelector('.shell');
+          const active=()=>shell.getAnimations({subtree:true}).filter(a=>a instanceof CSSTransition && ['width','grid-template-columns'].includes(a.transitionProperty) && a.playState==='running' && a.effect.getComputedTiming().progress>0 && a.effect.getComputedTiming().progress<1).map(a=>({property:a.transitionProperty,time:a.currentTime}));
+          window.__interruptPreparation={events:[]};
+          window.__interruptTrace=[];
+          window.__interruptClick=null;
+          let pending=false;
+          const observe=event=>{
+            if(!['width','grid-template-columns'].includes(event.propertyName))return;
+            window.__interruptPreparation.events.push({property:event.propertyName,t:performance.now()});
+            if(pending || window.__interruptClick)return;
+            pending=true;
+            const until=performance.now()+1000;
+            const close=async()=>{
+              const native=await window.__TAURI_INTERNALS__.invoke('test_site_probe',{capture:false});
+              window.__interruptPreparation.native={shown:native.shown,x:native.x,t:performance.now()};
+              const column=document.querySelector('.runcol');
+              const button=column?.querySelector('.site-head button[aria-label="Close the running list"]');
+              const moving=active(),rect=button?.getBoundingClientRect();
+              if(!native.shown || native.x<=-10000 || !moving.length || !button?.isConnected || button.disabled || button.closest('[inert]') || !rect?.width || !rect.height){
+                if(performance.now()<until)requestAnimationFrame(close);
+                return;
+              }
+              shell.removeEventListener('transitionrun',observe);
+              button.addEventListener('click',event=>{
+                window.__interruptClick={active:active(),trusted:event.isTrusted,glide:shell.classList.contains('glide'),native:window.__interruptPreparation.native,x:column.getBoundingClientRect().x,t:performance.now()};
+                const end=performance.now()+650;
+                const frame=async()=>{
+                  const el=document.querySelector('.runcol'),before=el?.getBoundingClientRect();
+                  const exiting=el?.dataset.exiting==='true',t=performance.now();
+                  const opacity=el?Number(getComputedStyle(el).opacity):null;
+                  const native=await window.__TAURI_INTERNALS__.invoke('test_site_probe',{capture:false});
+                  const after=document.querySelector('.runcol')?.getBoundingClientRect();
+                  window.__interruptTrace.push({x:before?.x,after:after?.x,opacity,nativeX:native.x,shown:native.shown,viewport:innerWidth,dpr:devicePixelRatio,exiting,t});
+                  if(performance.now()<end)requestAnimationFrame(frame);
+                };
+                requestAnimationFrame(frame);
+              },{once:true,capture:true});
+              button.click();
+            };
+            requestAnimationFrame(close);
+          };
+          shell.addEventListener('transitionrun',observe);
+        })()"#)?;
+        if width < 900 {
+            page.press("Control+Shift+B")?;
+        } else {
+            page.click(&css(".pane-site"))?;
+        }
+        if let Err(error) = page.wait_for("the browser to close in an observed intermediate width frame", "!!window.__interruptClick") {
+            let state = page.eval("({preparation:window.__interruptPreparation,click:window.__interruptClick,shell:document.querySelector('.shell')?.className,viewport:innerWidth})").unwrap_or(Value::Null);
+            return Err(format!("{error}; observed preparation: {state}"));
+        }
+        page.wait_for("the interrupted pane to release its actual content", "!document.querySelector('.site-address')")?;
+        let clicked = page.eval("window.__interruptClick")?;
+        ensure(
+            clicked["trusted"] == false
+                && clicked["glide"] == true
+                && clicked["native"]["shown"] == true
+                && clicked["active"].as_array().is_some_and(|a| !a.is_empty()),
+            || format!("the programmatic close missed an actual width transition: {clicked}"),
+        )?;
+        page.eval("new Promise(resolve=>setTimeout(resolve,700))")?;
+        let trace = page.eval("window.__interruptTrace")?;
+        let preparation = page.eval("window.__interruptPreparation")?;
+        std::fs::create_dir_all(&ctx.paths.shots).map_err(|e| e.to_string())?;
+        std::fs::write(
+            ctx.paths.shots.join(format!("browser-interrupted-close-{width}.json")),
+            json!({"preparation":preparation,"click":clicked,"samples":trace}).to_string(),
+        )
+        .map_err(|e| e.to_string())?;
+        let samples = trace.as_array().ok_or("the interrupted close omitted its samples")?;
+        let departing: Vec<_> = samples
+            .iter()
+            .filter(|s| {
+                s["exiting"] == true
+                    && s["t"].as_f64().zip(clicked["t"].as_f64()).is_some_and(|(sample, click)| sample >= click)
+                    && s["x"].as_f64().is_some_and(|x| x + 24.0 < f64::from(width))
+                    && s["after"].as_f64().is_some_and(|x| x + 24.0 < f64::from(width))
+            })
+            .collect();
+        ensure(departing.len() >= 2, || format!("fewer than two visible departing samples: {trace}"))?;
+        ensure(samples.iter().filter_map(|s| s["opacity"].as_f64()).all(|opacity| opacity >= 0.99), || {
+            format!("the pane faded during its interrupted close: {trace}")
+        })?;
+        ensure(departing.iter().all(|s| s["shown"] == true && s["nativeX"].as_f64().is_some_and(|x| x > -10000.0)), || {
+            format!("the native page disappeared while its moving column was visible: {trace}")
+        })?;
+        let mut previous = clicked["x"].as_f64().ok_or("the click omitted the column's position")?;
+        for sample in &departing {
+            let x = sample["x"].as_f64().ok_or("departing column omitted its position")?;
+            ensure(x >= previous - 2.0, || format!("the exiting pane reversed from {previous:.1}px to {x:.1}px: {trace}"))?;
+            previous = x;
+        }
+        page.wait_for(
+            "the interrupted native page to park",
+            "window.__TAURI_INTERNALS__.invoke('test_site_probe',{capture:false}).then(p=>!p.shown)",
+        )?;
+        std::fs::write(ctx.paths.target.join(format!("browser-interrupted-close-{width}.json")), trace.to_string())
+            .map_err(|e| e.to_string())?;
+        page.click(&css(".pane-site"))?;
+        wait_page(page, &fixture, "one")?;
+        ctx.notes.push(format!("programmatic close during an observed real view-width transition at {width}px: {} observations; native page retained while visible, opaque exit, cleanup and reopening checked; no clock or motion-class changes", samples.len()));
+    }
+    ctx.close(app.id)
 }
 
 fn failure_photo(ctx: &mut Ctx) -> Result {

@@ -658,7 +658,7 @@ details.thinking div { white-space: pre-wrap; padding: 6px 0 0 12px; border-left
 .agent[data-state='background'] .agent-mark .live { background: transparent; box-shadow: inset 0 0 0 1.5px var(--accent); }
 .agent-report { color: var(--ink-2); }
 .agent-pages { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-block-end: 12px; }
-.runcol .toend { position: absolute; inset-inline-start: 50%; bottom: 0; transform: translateX(-50%); max-width: calc(100% - 24px); }
+.runcol .toend { position: absolute; inset-inline-start: 50%; bottom: 0; translate: -50% 0; max-width: calc(100% - 24px); }
 .agent-output { white-space: pre-wrap; overflow-wrap: anywhere; color: var(--ink-2); font: var(--fs-sm) var(--font-mono); }
 /* Waiting for the person's answer and seeming stuck are the conversation's amber (R161 step 6): the dot, and for a stuck one
    the row's edge and one line under it with what the engine saw and two ways in. */

@@ -80,9 +80,20 @@ function play(el: HTMLElement, frames: Keyframe[], exit = false, delay = 0): Ani
 
 /** The real column leaves before its native page and reading state are released. */
 export function leaveColumn(el: HTMLElement): Animation | undefined {
-  const transform = getComputedStyle(el).transform;
+  const rect = el.getBoundingClientRect();
+  const style = getComputedStyle(el);
+  const box: Keyframe = { position: 'fixed', left: `${rect.left}px`, top: `${rect.top}px`, width: `${rect.width}px`, height: `${rect.height}px`, margin: '0', opacity: 1,
+    padding: style.padding, borderWidth: style.borderWidth, borderStyle: style.borderStyle, borderColor: style.borderColor, color: style.color };
   for (const animation of el.getAnimations()) animation.cancel();
-  return play(el, [{ transform, opacity: 1 }, { transform: 'translateX(calc(100% + 24px))', opacity: 1 }], true);
+  if (level(el) !== 'full' || !el.showPopover) return;
+  // The top layer keeps viewport geometry independent of transformed, still-moving ancestors without reparenting.
+  el.setAttribute('popover', 'manual');
+  el.showPopover();
+  const animation = play(el, [{ ...box, transform: 'translateX(0)' }, { ...box, transform: 'translateX(calc(100% + 24px))' }], true);
+  const restore = () => el.removeAttribute('popover');
+  if (animation) void animation.finished.then(restore, restore);
+  else restore();
+  return animation;
 }
 
 /**
