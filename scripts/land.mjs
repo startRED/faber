@@ -172,8 +172,16 @@ export const workflow = (files) => files.some((f) => f.startsWith('.github/workf
 export function stackOn(queued, files) {
   if (workflow(files)) return null;
   const mine = areas(files);
-  const fits = queued.filter((q) => !q.red && q.depth < BATCH && !workflow(q.files) && ![...areas(q.files)].some((a) => mine.has(a)));
+  const fits = queued.filter((q) => q.eligible !== false && !q.red && q.depth < BATCH && !workflow(q.files) && ![...areas(q.files)].some((a) => mine.has(a)));
   return fits.sort((a, b) => b.depth - a.depth)[0] ?? null;
+}
+
+/** A stacked queue commit is safe to build on only while every pull request still matches its queued squash. */
+export function eligibleStack(batch, pullRequests, queueHeads, redCommits) {
+  return batch.every(({ commit, pr, oid }) => {
+    const view = pullRequests[pr];
+    return view?.state === 'OPEN' && !refusal(view) && view.headRefOid === oid && queueHeads[pr] === commit && !redCommits.has(commit);
+  });
 }
 
 /**
@@ -482,11 +490,38 @@ function queuedOn(base, number) {
     .filter(([sha, ref]) => sha && ref && ref !== `refs/heads/queue/pr-${number}`);
   if (!refs.length) return [];
   git('fetch', '--quiet', 'origin', ...refs.map(([, ref]) => `+${ref}:refs/remotes/origin/${ref.slice('refs/heads/'.length)}`));
+  const queueHeads = Object.fromEntries(refs.map(([commit, ref]) => [ref.slice('refs/heads/queue/pr-'.length), commit]));
+  const pullRequests = new Map();
+  const gates = new Map();
+  const viewsFor = (pr) => {
+    if (!pullRequests.has(pr)) {
+      try {
+        pullRequests.set(pr, JSON.parse(run('gh', ['pr', 'view', pr, '--json', 'state,isDraft,baseRefName,isCrossRepository,headRefOid'])));
+      } catch {
+        pullRequests.set(pr, null);
+      }
+    }
+    return pullRequests.get(pr);
+  };
+  const redCommits = new Set();
+  const failedGate = (commit) => {
+    if (!gates.has(commit)) {
+      try {
+        gates.set(commit, gate(commit) === 'failure');
+      } catch {
+        gates.set(commit, true);
+      }
+    }
+    return gates.get(commit);
+  };
   return refs.flatMap(([commit]) => {
     if (!ancestor(base, commit)) return [];
     const batch = stacked(git('log', '--reverse', LOG, `${base}..${commit}`));
     if (!batch?.length) return [];
-    return [{ commit, files: names(base, commit), depth: batch.length, red: gate(commit) === 'failure' }];
+    const views = Object.fromEntries(batch.map((m) => [m.pr, viewsFor(m.pr)]));
+    const queued = Object.fromEntries(batch.map((m) => [m.pr, queueHeads[m.pr] ?? '']));
+    for (const m of batch) if (failedGate(m.commit)) redCommits.add(m.commit);
+    return [{ commit, files: names(base, commit), depth: batch.length, red: redCommits.has(commit), eligible: eligibleStack(batch, views, queued, redCommits) }];
   });
 }
 
