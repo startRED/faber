@@ -5037,6 +5037,9 @@ async fn a_conversation_the_agent_started_reports_back_when_it_finishes() {
     agent.say(json!({"type":"control_request","request_id":"r1","request":{"subtype":"mcp_message","server_name":"faber",
         "message":{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"conversation","arguments":input,"_meta":{"claudecode/toolUseId":"toolu_c"}}}}})).await;
     assert_eq!(mcp_answer(&agent, "r1").await["result"]["isError"], false);
+    // Keep a real step open: a report already handed to the CLI cannot be recalled by archiving.
+    agent.say(json!({"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","id":"toolu_hold","name":"Read","input":{"file_path":"synthetic.txt"}}]}})).await;
+    until(&engine, &parent, |c| c.messages.last().is_some_and(|m| m.tools.iter().flatten().any(|t| t.id == "toolu_hold"))).await;
     let mut child = next_pipe(&made).await;
     child.say(json!({"type":"system","subtype":"init","session_id":"s2","model":"claude-haiku-5-5"})).await;
     child.say(json!({"type":"stream_event","parent_tool_use_id":null,"event":{"type":"content_block_delta","delta":{"type":"text_delta","text":"Wrote the parser page."}}})).await;
