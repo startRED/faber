@@ -1,4 +1,46 @@
-import { check, deepEqual, doesNotMatch, equal, finished, frames, matches, notEqual, ok, runAll } from './check.ts';
+import { check, CHECK_LIMIT, deepEqual, doesNotMatch, equal, finished, frames, matches, notEqual, ok, runAll } from './check.ts';
+
+check('check: a timed-out body cannot overlap the next body or report it as passed', async () => {
+  const schedule = window.setTimeout;
+  let expire!: () => void;
+  let release!: () => void;
+  let settled!: () => void;
+  let next = 0;
+  const cleaned = new Promise<void>((resolve) => { settled = resolve; });
+  window.setTimeout = ((callback: () => void, delay?: number) => {
+    if (delay !== CHECK_LIMIT) throw new Error('expected the check deadline');
+    expire = callback;
+    window.setTimeout = schedule;
+    return 0;
+  }) as typeof window.setTimeout;
+  try {
+    const pending = runAll(undefined, undefined, [
+      { name: 'held', run: async () => { await new Promise<void>((resolve) => { release = resolve; }); settled(); } },
+      { name: 'later', run: () => { next++; } },
+    ]);
+    expire();
+    const results = await pending;
+    equal(next, 0, 'the unsettled body must not share the page with another check');
+    deepEqual(results.map(({ name, ok }) => ({ name, ok })), [{ name: 'held', ok: false }, { name: 'later', ok: false }]);
+    matches(results[0]!.message, /did not finish/);
+    matches(results[1]!.message, /not run.*held/);
+    equal(results[1]!.ms, 0, 'an unrun body has no execution time');
+  } finally {
+    window.setTimeout = schedule;
+    release();
+    await cleaned;
+  }
+});
+
+check('check: an ordinary failure still allows the next body to run', async () => {
+  let next = 0;
+  const results = await runAll(undefined, undefined, [
+    { name: 'throws', run: () => { throw new Error('expected failure'); } },
+    { name: 'later', run: () => { next++; } },
+  ]);
+  equal(next, 1);
+  deepEqual(results.map(({ ok }) => ok), [false, true]);
+});
 
 check('check: a name filter executes only matching bodies and no filter executes every body', async () => {
   let selected = 0, second = 0, other = 0;

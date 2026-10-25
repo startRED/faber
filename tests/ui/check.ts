@@ -13,8 +13,7 @@ export function check(name: string, run: () => void | Promise<void>): void {
   registry.push({ name, run });
 }
 
-/** One check never holds the run for more than this: a promise that never settles (a frame or an animation the webview
- * holds back) fails that check by name and the run goes on, instead of stopping everything until the runner gives up. */
+/** A timed-out body cannot be cancelled, so report it and leave later checks unrun instead of sharing its page. */
 export const CHECK_LIMIT = 60_000;
 
 /** Two frames, but never forever: a window the system holds back (a hidden one on macOS) can pause frames, and a frame
@@ -35,7 +34,12 @@ export const finished = (animations: Animation[], limit = 1500): Promise<unknown
 export async function runAll(onStart?: (index: number, total: number, name: string) => void, filter?: string, checks = registry): Promise<Result[]> {
   const results: Result[] = [];
   const selected = checks.filter(({ name }) => filter === undefined || name.includes(filter));
+  let timedOut: string | undefined;
   for (const [index, { name, run }] of selected.entries()) {
+    if (timedOut !== undefined) {
+      results.push({ name, ok: false, message: `not run because ${timedOut} timed out; its body may still be running`, ms: 0 });
+      continue;
+    }
     onStart?.(index, selected.length, name);
     // Every check starts in English: the language the system starts with (a Portuguese PC), or one a check before it left, must not decide which pass.
     useLanguage('en');
@@ -47,7 +51,10 @@ export async function runAll(onStart?: (index: number, total: number, name: stri
     try {
       await Promise.race([
         run(),
-        new Promise<never>((_, reject) => { timer = setTimeout(() => reject(new Error(`the check did not finish in ${CHECK_LIMIT / 1000} s`)), CHECK_LIMIT); }),
+        new Promise<never>((_, reject) => { timer = setTimeout(() => {
+          timedOut = name;
+          reject(new Error(`the check did not finish in ${CHECK_LIMIT / 1000} s`));
+        }, CHECK_LIMIT); }),
       ]);
       results.push({ name, ok: true, message: '', ms: performance.now() - started });
     } catch (error) {
