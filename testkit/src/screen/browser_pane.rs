@@ -132,7 +132,10 @@ fn failure_in(ctx: &mut Ctx, language: &str, width: u32) -> Result {
     )?;
     ctx.shot(&mut app, &format!("browser-open-error-{language}-{width}"))?;
     enter(&mut app.page, &fixture.url("/one"))?;
-    wait_page(&mut app.page, &fixture, "one")?;
+    if let Err(error) = wait_page(&mut app.page, &fixture, "one") {
+        let state = app.page.eval("window.__TAURI_INTERNALS__.invoke('test_site_probe',{capture:false}).then(native=>({native,address:document.querySelector('.site-address')?.value,alert:document.querySelector('#running [role=alert]')?.textContent,empty:!!document.querySelector('.site-empty')}))");
+        return Err(format!("{error}; retry state: {state:?}; fixture requests: {:?}; {}", fixture.requests(), ctx.stderr(app.id)));
+    }
     app.page.wait_gone(&css("#running [role=alert]"))?;
     ctx.notes.push("one native open was deliberately refused; the same address retried successfully without a second refusal".into());
     ctx.close(app.id)
