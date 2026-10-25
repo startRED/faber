@@ -54,12 +54,16 @@ page body: that would also reveal text below the viewport. It answers with one a
 number, select an option, type, a key, scroll, wait, done or stuck) and what confused it. A reachable native selector
 exposes its accessible option labels; selection requires an exact, unique enabled label in the observation and rechecks
 the same connected, reachable element and enabled option before dispatching input and change events. Wait uses the same fixed 1.2-second pause as
-other actions and counts toward the step limit; it cannot request an unlimited delay. The chat task follows sending
-until a response appears, rather than treating a loading screen as completion. The tasks are the first run, a first chat, Projects
+other actions and counts toward the step limit; it cannot request an unlimited delay. The default disconnected Chat
+task discovers what is needed to start; it never requests account connection or an unavailable response. The tasks are the first run, Chat, Projects
 and the language in Settings (`TASKS`), in one app, each starting where the last ended. The Catalog task comes after
 onboarding: find a debugging tool, read its purpose and automatic-use explanation, then return to the list. This task
 only browses; it does not test installation, removal or switches. `--task catalogo` runs this task alone, while an
 unknown task name fails before launching the app. Other task ids are in `TASKS`.
+
+`--task conversa` is a separate prepared Chat walk with the existing fake replay, without first run or a seeded project.
+The reviewer chooses Claude Haiku, sends the recording's exact sky question and follows the recorded response. Its
+report labels this prepared state; it is not first-opening, account-connection or project-conversation evidence.
 
 `--task conversa-projeto` is an opt-in controlled project walk, outside the default tasks. The driver seeds the existing
 isolated Demo repository and enables the fake chat replay (`--project-demo`, incompatible with `--first-run` or

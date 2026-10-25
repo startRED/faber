@@ -198,3 +198,29 @@ test('without a usable summary the report still lists every confusion and every 
     { task: 'primeira-abertura', tried: 'travou: sem saída', stuck: 'sem saída', shot: 'a-3.png' },
   ]);
 });
+
+test('focused Chat uses the existing replay instead of disabling AI', () => {
+  const tasks = firstUser.selectTasks(['--task', 'conversa']);
+  assert.deepEqual(firstUser.driverFlags(tasks, 'en', true), ['--lang', 'en', '--build']);
+  assert.deepEqual(firstUser.driverFlags(tasks, 'pt-BR', false), ['--lang', 'pt-BR']);
+  const input = JSON.parse(readFileSync(new URL('../tests/fixtures/claude/chat.jsonl', import.meta.url), 'utf8').split('\n')[0]);
+  assert.ok(tasks[0].goal.includes(input.msg.message.content));
+  assert.match(tasks[0].goal, /Claude Haiku/);
+});
+
+test('the default no-AI walk explores Chat without requesting an impossible response', () => {
+  const tasks = firstUser.selectTasks();
+  assert.deepEqual(tasks.map((task) => task.id), ['primeira-abertura', 'catalogo', 'conversa', 'projetos', 'configuracoes']);
+  assert.match(tasks.find((task) => task.id === 'conversa').goal, /nenhuma IA conectada/);
+  assert.doesNotMatch(tasks.find((task) => task.id === 'conversa').goal, /até aparecer uma resposta/);
+  assert.deepEqual(firstUser.driverFlags(tasks, 'pt-BR', false), ['--first-run', '--no-ai', '--lang', 'pt-BR']);
+});
+
+test('focused Chat report identifies prepared replay rather than claiming first-run evidence', () => {
+  const [task] = firstUser.selectTasks(['--task', 'conversa']);
+  const text = report({ date: '2026-10-24', agent: 'fixture', size: { width: 720, height: 480 }, lang: 'pt-BR',
+    findings: [], results: [{ task, steps: [], outcome: 'done' }], shots: 'fixture' });
+  assert.match(text, /Chat já preparado/);
+  assert.match(text, /resposta gravada/);
+  assert.doesNotMatch(text, /primeira abertura sem nenhuma IA/);
+});

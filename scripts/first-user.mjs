@@ -7,6 +7,7 @@
 //   node scripts/first-user.mjs --agent codex      (Codex gpt-6-luna instead)
 //   node scripts/first-user.mjs --size 1280x800 --steps 10 --no-build
 //   node scripts/first-user.mjs --task catalogo  (browse and read only; no installation task)
+//   node scripts/first-user.mjs --task conversa  (prepared Chat, fake recorded response)
 //   node scripts/first-user.mjs --task conversa-projeto  (seeded Demo project, fake recorded response)
 //
 // Faber runs as the hidden, sandboxed test build that `testkit/examples/ux_audit.rs` drives (C006: the window lives on a
@@ -46,10 +47,17 @@ export const TASKS = [
       'Pelo que a tela explica, descubra para que ela serve e quando a IA a usa. Depois volte à lista. ' +
       'Só explore e leia: não instale, remova, ative, desative ou troque ferramentas, nem abra páginas externas.',
   },
-  { id: 'conversa', goal: 'Comece uma conversa nova e mande uma pergunta simples, por exemplo "o que você sabe fazer?". Acompanhe até aparecer uma resposta.' },
+  { id: 'conversa', goal: 'Abra a área de Chat e descubra o que falta para começar uma conversa, com nenhuma IA conectada. Não conecte uma conta nem espere uma resposta nesta tarefa.' },
   { id: 'projetos', goal: 'Abra a área de Projetos e descubra para que ela serve.' },
   { id: 'configuracoes', goal: 'Encontre as Configurações do app e descubra onde se muda o idioma.' },
 ];
+
+const CHAT_TASK = {
+  id: 'conversa',
+  goal: 'O Chat já foi preparado para este teste, com uma IA de demonstração. Comece uma conversa nova, ' +
+    'escolha Claude Haiku no seletor de modelo e envie exatamente "In one sentence: why is the sky blue?". ' +
+    'Acompanhe até aparecer uma resposta. É uma resposta gravada: não avalie conexão de conta nem primeira abertura.',
+};
 
 const PROJECT_TASK = {
   id: 'conversa-projeto',
@@ -64,6 +72,7 @@ export function selectTasks(args = []) {
   if (at < 0) return TASKS;
   const id = args[at + 1];
   if (!id || id.startsWith('--')) throw new Error('missing task after --task');
+  if (id === CHAT_TASK.id) return [CHAT_TASK];
   const selected = [...TASKS, PROJECT_TASK].filter((task) => task.id === id);
   if (!selected.length) throw new Error(`unknown task: ${id}`);
   return selected;
@@ -72,7 +81,8 @@ export function selectTasks(args = []) {
 export function driverFlags(tasks, lang, build) {
   const project = tasks.some((task) => task.id === PROJECT_TASK.id);
   if (project && tasks.length !== 1) throw new Error('the seeded project needs one focused task');
-  return [...(project ? ['--project-demo'] : ['--first-run', '--no-ai']), '--lang', lang, ...(build ? ['--build'] : [])];
+  const chat = tasks.length === 1 && tasks[0].id === CHAT_TASK.id;
+  return [...(project ? ['--project-demo'] : chat ? [] : ['--first-run', '--no-ai']), '--lang', lang, ...(build ? ['--build'] : [])];
 }
 
 /** Runs in the page: controls a person can see and reach, numbered, with their centre; text comes from the screenshot. */
@@ -239,7 +249,9 @@ export function report({ date, agent, size, lang, findings, results, shots }) {
   const outcome = { done: 'conclusão declarada pela IA; precisa conferir as imagens', stuck: 'travou', steps: 'não terminou no limite de passos' };
   const context = results.some((r) => r.task.id === PROJECT_TASK.id)
     ? 'projeto Demo já preparado, com resposta gravada e sem uma IA real dentro do app'
-    : 'primeira abertura sem nenhuma IA conectada';
+    : results.length === 1 && results[0].task.id === CHAT_TASK.id
+      ? 'Chat já preparado, com resposta gravada e sem uma IA real dentro do app; não avalia conexão de conta nem primeira abertura'
+      : 'primeira abertura sem nenhuma IA conectada';
   const lines = [
     `# Primeiro usuário, ${date}`,
     '',
