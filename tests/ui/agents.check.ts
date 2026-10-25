@@ -34,14 +34,6 @@ check('subagent history: long sessions read one page and keep older pages steady
   root.className = 'runcol';
   root.style.cssText = 'position:fixed;left:0;top:0;width:360px;height:640px';
   document.body.append(root);
-  const motionTrace: Array<{ target: string; at: number }> = [];
-  let droppedMotionEvents = 0;
-  root.addEventListener('faber-motion', (event) => {
-    const target = event.target;
-    if (!(target instanceof HTMLElement)) return;
-    if (motionTrace.length === 24) { droppedMotionEvents++; return; }
-    motionTrace.push({ target: `${target.tagName}.${target.className}`, at: performance.now() });
-  });
   const [pages, setPages] = createSignal(12);
   const dispose = render(() => createComponent(AgentChat, {
     get step() { return agentSteps([{ ...AGENT, output: pages() === 0 ? FRAMED : undefined, transcript: { pages: pages(), failed: pages() === 0 } }])[0]!; },
@@ -78,100 +70,17 @@ check('subagent history: long sessions read one page and keep older pages steady
     equal(reads.at(-1), 13, 'only the newly appended immutable page is read');
     equal([...root.querySelectorAll('.side-said')].find((node) => node.textContent?.includes('Retained page 6.')), stable, 'new work keeps the existing text nodes in place');
     const heard = reads.length;
-    root.querySelector('.side-said')!.dispatchEvent(new WheelEvent('wheel', { deltaY: -60, bubbles: true }));
+    // Exercise page pinning without a native wheel scroll racing the explicit reset below.
+    const wheel = new WheelEvent('wheel', { deltaY: -60, bubbles: true, cancelable: true });
+    wheel.preventDefault();
+    root.querySelector('.side-said')!.dispatchEvent(wheel);
     setPages(15);
     await settle();
     equal(reads.length, heard, 'scrolling up pins the current window instead of evicting text being read');
-    const scrollWrites: Array<{ value: number; stack: string | undefined }> = [];
-    const resetAt = performance.now();
-    const scrollTop = Object.getOwnPropertyDescriptor(Element.prototype, 'scrollTop')!;
-    Object.defineProperty(body, 'scrollTop', {
-      configurable: true,
-      get() { return scrollTop.get!.call(this); },
-      set(value: number) {
-        scrollWrites.push({ value, stack: new Error().stack });
-        scrollTop.set!.call(this, value);
-      },
-    });
-    try {
-      body.scrollTop = 0; body.dispatchEvent(new Event('scroll'));
-      root.querySelector<HTMLElement>('.side-said')!.style.paddingBlockEnd = '320px';
-      await settle();
-    } finally {
-      Reflect.deleteProperty(body, 'scrollTop');
-    }
-    const pinnedTop = body.scrollTop;
-    const pinned = pinnedTop < 2;
-    let diagnostics = '';
-    if (!pinned) {
-      const motionAtFailure = { events: [...motionTrace], dropped: droppedMotionEvents };
-      const nodes: Array<[string, HTMLElement]> = [['runcol', root]];
-      for (const selector of ['.side', '.side-body', '.side-said', '.agent-pages', '.toend']) {
-        const node = root.querySelector<HTMLElement>(selector);
-        if (node) nodes.push([selector, node]);
-      }
-      for (const node of root.querySelectorAll<HTMLElement>('.side-body > *')) nodes.push([`direct:${node.tagName}.${node.className}`, node]);
-      const active = document.activeElement as HTMLElement | null;
-      const transforms = nodes.map(([name, node]) => ({ name, transform: getComputedStyle(node).transform, inline: node.style.transform }));
-      const activeAnimations = nodes.flatMap(([nodeName, node]) => node.getAnimations()
-        .filter((animation) => animation.playState !== 'finished' && animation.playState !== 'idle')
-        .map((animation) => ({
-          node: nodeName,
-          name: (animation as CSSAnimation).animationName ?? null,
-          property: (animation as CSSTransition).transitionProperty ?? null,
-          state: animation.playState,
-          time: animation.currentTime,
-        })));
-      const treeAnimations = root.getAnimations({ subtree: true }).slice(0, 12).map((animation) => {
-        const effect = animation.effect as KeyframeEffect | null;
-        const target = effect?.target;
-        return { target: target instanceof Element ? `${target.tagName}.${target.className}` : null,
-          state: animation.playState, time: animation.currentTime, timing: effect?.getComputedTiming(),
-          frames: effect?.getKeyframes().map(({ offset, transform, opacity }) => ({ offset, transform, opacity })) };
-      });
-      // Only after the original failure: replay the native scroll on listener-free copies.
-      const nativeCopies = [];
-      for (const variant of ['same-grid', 'grid-existing-button', 'grid-read-reset', 'block'] as const) {
-        const copy = root.cloneNode(true) as HTMLElement;
-        const scroller = copy.querySelector<HTMLElement>('.side-body')!;
-        const text = copy.querySelector<HTMLElement>('.side-said')!;
-        const button = copy.querySelector<HTMLElement>('.toend');
-        const buttonParent = button?.parentElement;
-        if (variant !== 'grid-existing-button') button?.remove();
-        if (variant === 'block') scroller.style.display = 'block';
-        copy.querySelectorAll('[id]').forEach((node) => node.removeAttribute('id'));
-        copy.style.left = '400px';
-        text.style.paddingBlockEnd = '160px';
-        document.body.append(copy);
-        try {
-          scroller.scrollTop = scroller.scrollHeight;
-          await settle();
-          const initial = scroller.scrollTop;
-          scroller.scrollTop = 0;
-          const reset = variant === 'grid-read-reset' ? scroller.scrollTop : undefined;
-          if (variant !== 'grid-existing-button' && button) buttonParent!.append(button);
-          text.style.paddingBlockEnd = '320px';
-          await settle();
-          nativeCopies.push({ variant, initial, reset, top: scroller.scrollTop, height: scroller.scrollHeight, client: scroller.clientHeight });
-        } finally {
-          copy.remove();
-        }
-      }
-      diagnostics = `; ${JSON.stringify({
-        scroll: { top: pinnedTop, height: body.scrollHeight, client: body.clientHeight, gap: body.scrollHeight - pinnedTop - body.clientHeight },
-        activeElement: active && { tag: active.tagName, id: active.id, class: String(active.className), label: active.getAttribute('aria-label') },
-        transforms,
-        activeAnimations,
-        treeAnimations,
-        motionAtFailure,
-        resetAt,
-        scrollWrites,
-        nativeCopies,
-        browser: { userAgent: navigator.userAgent, anchoring: CSS.supports('overflow-anchor', 'none') },
-        synthetic: { reads: [...reads], sections: root.querySelector('.agent-pages .side-meta')?.textContent ?? null, pageCount: pages() },
-      })}`;
-    }
-    ok(pinned, `a late resize never pulls a pinned reader back to the end (scrollTop=${pinnedTop})${diagnostics}`);
+    body.scrollTop = 0; body.dispatchEvent(new Event('scroll'));
+    root.querySelector<HTMLElement>('.side-said')!.style.paddingBlockEnd = '320px';
+    await settle();
+    ok(body.scrollTop < 2, 'a late resize never pulls a pinned reader back to the end');
     const latest = root.querySelector<HTMLButtonElement>('.toend')!;
     ok(latest, 'the usual Latest action remains available while reading up');
     const bounds = latest.getBoundingClientRect(), view = body.getBoundingClientRect();
@@ -200,6 +109,47 @@ check('subagent history: long sessions read one page and keep older pages steady
     ok(root.querySelector('[role="alert"]'), 'a failed first save explains that its history is incomplete');
   } finally {
     dispose(); root.remove(); port.childTranscript = before; showAgent(undefined);
+  }
+});
+
+check('subagent history: a paused arrival keeps Latest inside the reader viewport', async () => {
+  const before = api.childTranscript;
+  api.childTranscript = async (_id, _call, page) => [{ kind: 'text', text: `Synthetic page ${page}. ` + 'Retained history. '.repeat(500), at: 0 }];
+  const root = document.createElement('aside');
+  root.className = 'runcol';
+  root.dataset.motion = 'full';
+  root.style.cssText = 'position:fixed;left:0;top:0;width:360px;height:640px';
+  root.addEventListener('faber-motion', (event) => {
+    const target = event.target;
+    if (target instanceof HTMLElement && target.tagName === 'SECTION' && target.querySelector('.agent-pages')) {
+      // A hidden webview may hold an arrival indefinitely; the reader must stay usable during it.
+      for (const animation of target.getAnimations()) animation.pause();
+    }
+  });
+  document.body.append(root);
+  showAgent({ conversationId: 'synthetic-paused-reader', messageId: 'm1', callId: 'a1' });
+  const dispose = render(() => createComponent(AgentChat, {
+    step: agentSteps([{ ...AGENT, transcript: { pages: 12, failed: false } }])[0]!,
+    streaming: true, onBack: () => {}, onClose: () => {},
+  }), root);
+  const settle = () => new Promise((done) => setTimeout(done, 40));
+  try {
+    await settle();
+    const body = root.querySelector<HTMLElement>('.side-body')!;
+    const wheel = new WheelEvent('wheel', { deltaY: -60, bubbles: true, cancelable: true });
+    wheel.preventDefault();
+    root.querySelector('.side-said')!.dispatchEvent(wheel);
+    body.scrollTop = 0; body.dispatchEvent(new Event('scroll'));
+    await settle();
+    const latest = root.querySelector<HTMLButtonElement>('.toend');
+    ok(latest, 'Latest is available while reading retained history');
+    const bounds = latest.getBoundingClientRect(), view = body.getBoundingClientRect();
+    ok(bounds.top >= view.top && bounds.bottom <= view.bottom, 'a paused arrival never puts Latest below the retained history');
+    latest.click();
+    await settle();
+    ok(body.scrollHeight - body.scrollTop - body.clientHeight < 2, 'Latest still returns to the live tail');
+  } finally {
+    dispose(); root.remove(); api.childTranscript = before; showAgent(undefined);
   }
 });
 

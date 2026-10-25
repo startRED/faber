@@ -2151,6 +2151,7 @@ export const es: Messages = {
   'notes.252.fixed': 'Las respuestas de los subagentes se mantienen juntas mientras llegan, en vez de dividir cada palabra en una sección del historial.',
   'notes.253.fixed': 'Los paneles laterales se retiran sin desvanecerse ni perder contenido; reabrir cancela el cierre y el movimiento reducido los cierra al instante.',
   'notes.254.fixed': 'Cambiar de tema rápidamente ya no provoca un error de página al cancelar la animación.',
+  'notes.255.fixed': 'Ir al final sigue visible al abrir un historial largo de un ayudante.',
   'update.checking': 'Buscando una actualización…',
   'update.downloading': 'Descargando actualización…',
   'update.downloadingPercent': 'Descargando actualización… {percent} %',

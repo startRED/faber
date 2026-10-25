@@ -2031,6 +2031,7 @@ export const en = {
   'notes.252.fixed': 'Helper replies stay together while streaming instead of splitting into a separate history section for each word.',
   'notes.253.fixed': 'Side panes slide away without fading or losing their content; reopening cancels the close, and reduced motion closes them immediately.',
   'notes.254.fixed': 'Switching themes quickly no longer reports a cancelled animation as a page error.',
+  'notes.255.fixed': 'Jump to latest stays visible when you open a helper’s long history.',
   'update.checking': 'Looking for an update…',
   'update.downloading': 'Downloading update…',
   'update.downloadingPercent': 'Downloading update… {percent}%',

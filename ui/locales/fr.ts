@@ -2151,6 +2151,7 @@ export const fr: Messages = {
   'notes.252.fixed': 'Les réponses des sous-agents restent groupées pendant leur arrivée, au lieu de créer une partie de l’historique pour chaque mot.',
   'notes.253.fixed': 'Les panneaux sortent sans fondu ni perte de contenu ; les rouvrir annule la fermeture, immédiate avec les mouvements réduits.',
   'notes.254.fixed': 'Changer rapidement de thème ne provoque plus d’erreur de page lors de l’annulation de l’animation.',
+  'notes.255.fixed': 'Aller à la fin reste visible à l’ouverture d’un long historique d’assistant.',
   'update.checking': 'Recherche d’une mise à jour…',
   'update.downloading': 'Téléchargement de la mise à jour…',
   'update.downloadingPercent': 'Téléchargement de la mise à jour… {percent} %',

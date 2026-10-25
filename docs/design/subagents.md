@@ -25,6 +25,9 @@ The reader loads a bounded window of up to eight immutable pages at a time and o
 Later and Latest in the same pane or full-thread view. Selecting an older page, scrolling up or selecting text holds the window steady while new output arrives;
 Latest resumes following the newest saved page. The same floating Latest action remains reachable while reading up; late font loading and pane resizing keep the tail visible only while following it. Tool results wrap without horizontal overflow; the helper's final report
 uses the existing frame removal and Markdown. A background task's steps are resolved across the conversation's turns.
+The retained transcript itself does not animate: a transform on the long text would make the floating action belong to
+that text rather than the viewport. The column and its metadata keep their existing motion. The paused-arrival check in
+`tests/ui/agents.check.ts` holds an arrival and requires the same Latest action to remain inside the reader and work.
 Read failures remain inside the reader with a translated retry action. A failed save leaves a persistent incomplete-history
 notice; older discarded text cannot be recovered. Empty and legacy calls keep the existing preview behavior. The new pages
 follow a branch's retained calls and are removed with the owning conversation; rewind retains them for Redo. The existing

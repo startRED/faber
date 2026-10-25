@@ -2138,6 +2138,7 @@ export const ptBR: Messages = {
   'notes.252.fixed': 'As respostas dos subagentes ficam juntas enquanto chegam, em vez de dividir cada palavra numa parte do histórico.',
   'notes.253.fixed': 'Os painéis laterais saem sem fade nem perder o conteúdo; reabrir cancela o fechamento, e movimento reduzido fecha na hora.',
   'notes.254.fixed': 'Trocar de tema rapidamente não causa mais um erro de página ao cancelar a animação.',
+  'notes.255.fixed': 'Ir para o fim continua visível ao abrir um histórico longo de um ajudante.',
   'update.checking': 'Procurando atualização…',
   'update.downloading': 'Baixando atualização…',
   'update.downloadingPercent': 'Baixando atualização… {percent}%',

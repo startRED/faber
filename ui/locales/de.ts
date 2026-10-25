@@ -2151,6 +2151,7 @@ export const de: Messages = {
   'notes.252.fixed': 'Antworten der Helfer bleiben beim Schreiben zusammen, statt für jedes Wort einen eigenen Verlaufsabschnitt anzulegen.',
   'notes.253.fixed': 'Seitenbereiche gleiten mit ihrem Inhalt hinaus, ohne zu verblassen; erneutes Öffnen bricht das Schließen ab, reduzierte Bewegung schließt sofort.',
   'notes.254.fixed': 'Schnelle Themewechsel melden eine abgebrochene Animation nicht mehr als Seitenfehler.',
+  'notes.255.fixed': 'Zum Ende bleibt beim Öffnen eines langen Helferverlaufs sichtbar.',
   'update.checking': 'Suche nach einem Update…',
   'update.downloading': 'Update wird heruntergeladen…',
   'update.downloadingPercent': 'Update wird heruntergeladen… {percent} %',
