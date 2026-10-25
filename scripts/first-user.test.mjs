@@ -15,6 +15,110 @@ const controls = [
   { role: 'input', name: 'Escreva aqui', x: 20, y: 20, disabled: true },
 ];
 
+test('each captured step keeps the actual controls before the reviewer can fail', async () => {
+  assert.equal(typeof firstUser.captureObservation, 'function');
+  const folder = mkdtempSync(join(tmpdir(), 'faber-first-user-observation-'));
+  try {
+    const shot = join(folder, 'projetos-1.png');
+    const seen = { controls: [{ role: 'button', name: 'Fechar a barra lateral', x: 260, y: 64, disabled: false }] };
+    const calls = [];
+    const app = { op: async (op, value) => { calls.push([op, value]); return op === 'eval' ? seen : true; } };
+    const observed = await firstUser.captureObservation(app, shot);
+    assert.equal(observed, seen);
+    assert.deepEqual(calls, [['shot', shot], ['eval', firstUser.OBSERVE]]);
+    const evidence = join(folder, 'projetos-1.controls.json');
+    assert.deepEqual(JSON.parse(readFileSync(evidence, 'utf8')), seen);
+    await assert.rejects(firstUser.captureObservation(app, shot), { code: 'EEXIST' });
+    assert.deepEqual(JSON.parse(readFileSync(evidence, 'utf8')), seen);
+  } finally { rmSync(folder, { recursive: true, force: true }); }
+});
+
+test('the started app is closed when recording its ready identity fails', async () => {
+  const calls = [];
+  const app = {
+    ready: async () => { calls.push('ready'); },
+    quit: async () => { calls.push('quit'); },
+  };
+  await assert.rejects(firstUser.withApp(app, async () => {
+    calls.push('identity');
+    throw new Error('identity write failed');
+  }, async () => { calls.push('after-exit'); }), /identity write failed/);
+  assert.deepEqual(calls, ['ready', 'identity', 'quit', 'after-exit']);
+});
+
+test('the ready error is retained when quitting the app also fails', async () => {
+  const readyError = new Error('ready identity failed');
+  const quitError = new Error('quit failed');
+  const calls = [];
+  const app = {
+    ready: async () => { calls.push('ready'); throw readyError; },
+    quit: async () => { calls.push('quit'); throw quitError; },
+  };
+  let caught;
+  try { await firstUser.withApp(app, async () => {}, async () => { calls.push('after-exit'); }); }
+  catch (error) { caught = error; }
+  assert.ok(caught instanceof AggregateError);
+  assert.deepEqual(caught.errors, [readyError, quitError]);
+  assert.deepEqual(calls, ['ready', 'quit']);
+});
+
+test('the ready error is retained when recording exit also fails after the app quits', async () => {
+  const readyError = new Error('ready identity failed');
+  const exitError = new Error('exit identity failed');
+  const calls = [];
+  const app = {
+    ready: async () => { calls.push('ready'); throw readyError; },
+    quit: async () => { calls.push('quit'); },
+  };
+  let caught;
+  try { await firstUser.withApp(app, async () => {}, async () => { calls.push('after-exit'); throw exitError; }); }
+  catch (error) { caught = error; }
+  assert.ok(caught instanceof AggregateError);
+  assert.deepEqual(caught.errors, [readyError, exitError]);
+  assert.deepEqual(calls, ['ready', 'quit', 'after-exit']);
+});
+
+test('the command-line error output includes both aggregated failure reasons', () => {
+  const source = readFileSync(new URL('./first-user.mjs', import.meta.url), 'utf8');
+  const marker = 'main(process.argv.slice(2)).catch((e) => {';
+  const start = source.indexOf(marker);
+  const bodyStart = source.indexOf('{', start) + 1;
+  const bodyEnd = source.indexOf('\n  });', bodyStart);
+  assert.ok(start >= 0 && bodyEnd > bodyStart, 'exercise the actual command-line error handler');
+  const output = [];
+  const error = new AggregateError([new Error('ready identity failed'), new Error('quit failed')], 'app review or cleanup failed');
+  runInNewContext(`(() => { ${source.slice(bodyStart, bodyEnd)} })()`, {
+    AggregateError,
+    e: error,
+    console: { error: (message) => output.push(message) },
+    process: { exit: (code) => output.push(`exit ${code}`) },
+  });
+  assert.equal(output[0], 'app review or cleanup failed\nready identity failed\nquit failed');
+  assert.equal(output[1], 'exit 1');
+});
+
+test('artifact identities distinguish a missing app, a rebuilt driver and the previously recorded bytes', async () => {
+  const folder = mkdtempSync(join(tmpdir(), 'faber-first-user-identity-'));
+  try {
+    const paths = { driver: join(folder, 'driver'), app: join(folder, 'app') };
+    writeFileSync(paths.driver, 'a');
+    const before = await firstUser.artifactIdentity(paths);
+    assert.equal(before.driver.sha256, 'ca978112ca1bbdcafac231b39a23dc4da786eff8147c4e72b9807785afee48bb');
+    assert.equal(before.app.sha256, null);
+    writeFileSync(paths.driver, 'b');
+    writeFileSync(paths.app, 'a');
+    const after = await firstUser.artifactIdentity(paths);
+    assert.equal(after.driver.sha256, '3e23e8160039594a33894f6564e1b1348bbd7a0088d42c4acb73eeaed59c009d');
+    assert.equal(after.app.sha256, before.driver.sha256);
+    assert.notEqual(after.driver.sha256, before.driver.sha256);
+    assert.equal(before.app.sha256, null);
+    assert.equal(after.driver.path, paths.driver);
+    await assert.rejects(firstUser.artifactIdentity({ driver: folder }));
+  } finally {
+    rmSync(folder, { recursive: true, force: true });
+  }
+});
+
 test('native choices require an observed enabled selector and an exact enabled option', () => {
   const lists = [{ role: 'list', name: 'Modelo', disabled: false, options: [
     { label: 'Claude Haiku', value: 'haiku', disabled: false },
@@ -223,4 +327,27 @@ test('focused Chat report identifies prepared replay rather than claiming first-
   assert.match(text, /Chat já preparado/);
   assert.match(text, /resposta gravada/);
   assert.doesNotMatch(text, /primeira abertura sem nenhuma IA/);
+});
+
+test('the Haiku reviewer excludes customizations while retaining normal authentication and permission settings', async () => {
+  const source = readFileSync(new URL('./first-user.mjs', import.meta.url), 'utf8');
+  const start = source.indexOf('function reviewer(kind, home) {');
+  const end = source.indexOf('/** The hidden test build', start);
+  assert.ok(start >= 0 && end > start, 'exercise the actual reviewer constructor');
+  const invocations = [];
+  const ask = runInNewContext(source.slice(start, end) + '\nreviewer("claude", "/outside-review");', {
+    program: () => 'claude.exe', firstJson,
+    run: async (exe, args, options) => {
+      invocations.push({ exe, args: Array.from(args), cwd: options.cwd });
+      return '{"type":"result","result":"ok"}\n';
+    },
+  });
+  assert.equal(await ask('Read only the provided screen.'), 'ok');
+  assert.equal(invocations.length, 1);
+  const { args, cwd } = invocations[0];
+  assert.ok(args.includes('--safe-mode'));
+  assert.ok(!args.includes('--bare'));
+  assert.equal(args[args.indexOf('--tools') + 1], '');
+  for (const flag of ['--strict-mcp-config', '--disable-slash-commands', '--no-session-persistence']) assert.ok(args.includes(flag));
+  assert.equal(cwd, '/outside-review');
 });

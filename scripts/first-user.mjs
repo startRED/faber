@@ -15,8 +15,9 @@
 // its only cost. Builds run at idle priority. Findings go to `docs/research/first-user-<date>-<suffix>.md`, screenshots
 // to `<target>/faber-test/first-user/<date>-<suffix>/`. Each run keeps its own evidence. Nothing is fixed by the review.
 import { spawn, spawnSync } from 'node:child_process';
+import { createHash } from 'node:crypto';
 import { createInterface } from 'node:readline';
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { createReadStream, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir, setPriority, constants } from 'node:os';
 import { basename, delimiter, dirname, join, relative, resolve, isAbsolute } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -24,6 +25,22 @@ import { fileURLToPath } from 'node:url';
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const EXE = process.platform === 'win32' ? '.exe' : '';
 const TARGET = process.env.CARGO_TARGET_DIR ? resolve(ROOT, process.env.CARGO_TARGET_DIR) : join(ROOT, 'target');
+
+/** Missing artifacts are expected before a build; other read failures must not become missing evidence. */
+export async function artifactIdentity(paths) {
+  const files = {};
+  for (const [name, path] of Object.entries(paths)) {
+    const hash = createHash('sha256');
+    try {
+      for await (const chunk of createReadStream(path)) hash.update(chunk);
+      files[name] = { path, sha256: hash.digest('hex') };
+    } catch (error) {
+      if (error.code !== 'ENOENT') throw error;
+      files[name] = { path, sha256: null };
+    }
+  }
+  return files;
+}
 
 /** Every review keeps its own evidence, even when the same configuration runs twice in one day. */
 export function runPaths(root, target, date, output) {
@@ -118,6 +135,42 @@ export const OBSERVE = `(() => {
   }
   return { controls };
 })()`;
+
+export async function captureObservation(app, shot) {
+  await app.op('shot', shot);
+  const seen = await app.op('eval', OBSERVE);
+  writeFileSync(join(dirname(shot), `${basename(shot, '.png')}.controls.json`), JSON.stringify(seen, null, 2), { flag: 'wx' });
+  return seen;
+}
+
+/** Always close the started app, including when readiness or its first evidence write fails. */
+export async function withApp(app, run, afterExit) {
+  const failures = [];
+  let result;
+  try {
+    await app.ready();
+    result = await run();
+  } catch (error) {
+    failures.push(error);
+  }
+  let exited = false;
+  try {
+    await app.quit();
+    exited = true;
+  } catch (error) {
+    failures.push(error);
+  }
+  if (exited) {
+    try {
+      await afterExit();
+    } catch (error) {
+      failures.push(error);
+    }
+  }
+  if (failures.length === 1) throw failures[0];
+  if (failures.length > 1) throw new AggregateError(failures, 'app review or cleanup failed');
+  return result;
+}
 
 /** Is `path` the repository or inside it? The reviewer's folder must not be. */
 export function insideRepo(path, root = ROOT) {
@@ -318,7 +371,7 @@ function run(exe, args, { cwd, input, timeout = 300_000 }) {
 function reviewer(kind, home) {
   if (kind === 'claude') {
     const exe = program('claude');
-    const args = ['-p', '--model', 'haiku', '--tools', '', '--strict-mcp-config', '--disable-slash-commands',
+    const args = ['-p', '--safe-mode', '--model', 'haiku', '--tools', '', '--strict-mcp-config', '--disable-slash-commands',
       '--no-session-persistence', '--input-format', 'stream-json', '--output-format', 'stream-json', '--verbose'];
     return async (prompt, image) => {
       const content = [{ type: 'text', text: prompt }];
@@ -446,13 +499,27 @@ async function main(args) {
   } catch {
     // Not allowed here: build at the normal priority.
   }
+  const artifacts = {
+    driver: join(TARGET, `debug/examples/ux_audit${EXE}`),
+    app: join(TARGET, `faber-test/debug/faber${EXE}`),
+    fakeCli: join(TARGET, `debug/fake-cli${EXE}`),
+  };
+  const identities = [];
+  const recordIdentity = async (stage) => {
+    identities.push({ stage, at: new Date().toISOString(), files: await artifactIdentity(artifacts) });
+    writeFileSync(join(shots, 'execution-identities.json'), JSON.stringify(identities, null, 2));
+  };
+  await recordIdentity('before-driver-build');
+  // --no-build reuses the app; the driver is still built from this worktree before it starts.
   const built = spawnSync('cargo', ['build', '--quiet', '-p', 'faber-testkit', '--example', 'ux_audit'], { cwd: ROOT, stdio: 'inherit', windowsHide: true });
+  await recordIdentity('after-driver-build');
   if (built.status !== 0) throw new Error('the build of testkit/examples/ux_audit.rs failed');
   const flags = driverFlags(tasks, lang, !args.includes('--no-build'));
-  const app = driver(join(TARGET, `debug/examples/ux_audit${EXE}`), flags);
-  await app.ready();
+  await recordIdentity('before-driver-start');
+  const app = driver(artifacts.driver, flags);
   const results = [];
-  try {
+  await withApp(app, async () => {
+    await recordIdentity('app-ready');
     await app.op('call', 'Emulation.setDeviceMetricsOverride', { params: { width, height, deviceScaleFactor: 1, mobile: false } });
     await pause(1500);
     const actualLang = await app.op('eval', 'document.documentElement.lang');
@@ -465,8 +532,7 @@ async function main(args) {
       let outcome = 'steps';
       for (let n = 1; n <= maxSteps; n++) {
         const shot = join(shots, `${task.id}-${n}.png`);
-        await app.op('shot', shot);
-        const seen = await app.op('eval', OBSERVE);
+        const seen = await captureObservation(app, shot);
         const step = parseStep(await ask(stepPrompt(task, steps, seen, size, lang), shot), seen.controls);
         if (step.action.type === 'click') step.action.name = seen.controls[step.action.n - 1].name;
         steps.push({ ...step, shot: relative(ROOT, shot).replaceAll('\\', '/') });
@@ -479,9 +545,7 @@ async function main(args) {
       }
       results.push({ task, steps, outcome });
     }
-  } finally {
-    await app.quit();
-  }
+  }, () => recordIdentity('after-driver-exit'));
   const summary = firstJson(await ask(summaryPrompt(results)))?.findings;
   const findings = Array.isArray(summary) ? summary : fallback(results);
   const name = agent === 'claude' ? 'Claude Haiku, sem nenhuma ferramenta' : 'Codex gpt-6-luna, sem terminal nem apps';
@@ -492,7 +556,9 @@ async function main(args) {
 
 if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
   main(process.argv.slice(2)).catch((e) => {
-    console.error(e.message);
+    console.error(e instanceof AggregateError
+      ? `${e.message}\n${e.errors.map((error) => error?.message ?? String(error)).join('\n')}`
+      : e.message);
     process.exit(1);
   });
 }

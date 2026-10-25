@@ -75,8 +75,9 @@ source evidence.
 Before asking the reviewer, the driver checks the document's actual language against `--lang`; a mismatch saves an
 image and fails instead of writing a report under the wrong language.
 
-The reviewer never sees the code. The default is Haiku through `claude -p --tools ""` with no MCP server, which starts
-with no tool at all (its `init` line lists none); `--agent codex` is gpt-6-luna with its shell, apps, browser and
+The reviewer never sees the code. The default is Haiku through `claude -p --safe-mode --tools ""` with no MCP server, which starts
+with no tool at all (its `init` line lists none); safe mode disables customizations but keeps normal authentication, model selection
+and permissions. Managed settings policy still applies. `--agent codex` is gpt-6-luna with its shell, apps, browser and
 computer use switched off and a read-only sandbox. Either runs in an empty folder under the system temp folder, and the
 script refuses one inside the repository. Builds run at idle priority, the reviewer's processes have no window, and no
 CLI runs inside Faber, so its only cost is the reviewer's own calls (about 40 small Haiku turns).
@@ -84,7 +85,11 @@ CLI runs inside Faber, so its only cost is the reviewer's own calls (about 40 sm
 Each run gets a unique `<date>-<suffix>` name, including repeat runs with the same configuration. The findings go to
 `docs/research/first-user-<date>-<suffix>.md`, most serious first, each with what it tried, where it got stuck and the
 step's screenshot in `target/faber-test/first-user/<date>-<suffix>/` (local only). `--out` overrides only the report;
-screenshots still get their own folder. Nothing is fixed from it directly:
+screenshots still get their own folder. Each actual control list is saved beside its screenshot before the reviewer receives
+it, using exclusive creation so a previous step's evidence cannot be replaced. The run also records streamed SHA-256
+identities for the driver, app and fake CLI before and after the driver build and around the app launch. A binary that is
+absent before a build is recorded as null; other read errors stop the review. With `--no-build`, the app may be reused, so
+compare the recorded launch-boundary identities before treating it as built from current sources. Nothing is fixed from it directly:
 a person reads the list and turns what is real into tasks. A reviewer's `done` is labeled as its own claim, requiring
 image inspection; it is not verified completion. `scripts/first-user.test.mjs` keeps the answer parsing, the
 folder check and the report.
