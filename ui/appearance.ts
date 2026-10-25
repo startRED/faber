@@ -52,6 +52,8 @@ export function applyLook(look: Look, target: HTMLElement = document.documentEle
   };
   if (page && previous && previous.appearance.base !== look.appearance.base && motion() === 'full' && look.motion === 'full' && !systemReduces.matches && document.startViewTransition) {
     const transition = document.startViewTransition(write);
+    // Skipping the snapshot rejects readiness even when the look still applies.
+    void transition.ready.catch(() => {});
     snapshots++;
     target.dataset.themeTransition = '';
     fading = transition;

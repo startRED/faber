@@ -184,8 +184,11 @@ export function animateList(root: HTMLElement, subtree = false): void {
       for (const [el, savedRect] of before) {
         const closingSide = sidebarClosing && el === side;
         const rect = closingSide ? el.getBoundingClientRect() : savedRect;
-        if (el.matches('.main, .shell') || (!closingSide && (next.has(el) || el.isConnected)) || level(root) !== 'full' || exits >= 12 || rect.bottom <= 0 || rect.top >= innerHeight || rect.right <= 0 || rect.left >= innerWidth || !rect.width || !rect.height) continue;
+        if (el.matches('.main, .shell, .leaving') || (!closingSide && (next.has(el) || el.isConnected)) || level(root) !== 'full' || exits >= 12 || rect.bottom <= 0 || rect.top >= innerHeight || rect.right <= 0 || rect.left >= innerWidth || !rect.width || !rect.height) continue;
         const ghost = el.cloneNode(true) as HTMLElement;
+        // Native cloning keeps option defaults, not the select's current choice.
+        const selects = el.querySelectorAll('select');
+        ghost.querySelectorAll('select').forEach((select, index) => { select.selectedIndex = selects[index].selectedIndex; });
         ghost.removeAttribute('id');
         for (const child of ghost.querySelectorAll('[id]')) child.removeAttribute('id');
         for (const child of ghost.querySelectorAll('[autofocus]')) child.removeAttribute('autofocus');

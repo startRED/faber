@@ -1173,7 +1173,7 @@ impl Engine {
         // Keeping writes nothing to the project: the person's review is stored here, out of an agent's reach (R16).
         if let Some(hash) = crate::project::memory::apply(Path::new(&project.path), edit).map_err(str::to_string)? {
             self.with(|c| {
-                let live: Vec<_> = c.store.projects_checked().unwrap_or_default().into_iter().map(|p| p.id).collect();
+                let live: Vec<_> = c.store.projects_checked().map_err(|e| e.key().to_string())?.into_iter().map(|p| p.id).collect();
                 c.store.keep_decision(id, hash, &live).map_err(|e| e.key().to_string())
             })?;
         }

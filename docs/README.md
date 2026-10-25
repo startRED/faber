@@ -91,6 +91,8 @@ one is never touched again, and its boxes say nothing.
 | superpowers/specs/2026-10-22-own-work-method.md | Approved (R435), slices queued as tasks 991 to 994, nothing built yet: one work method Faber keeps in a project's `.faber/` (rules, decisions, taste, lessons, follow-ups), sized by risk, and the same one for Faber's own repo |
 | research/2026-10-21/catalog-list.md | Catalog step 2 curation completed locally; proof results and remaining native validation |
 | research/2026-10-22/benchmark-light.md | First run of the light benchmark: Faber against plain Claude Code on 5 requests; Codex rows wait for its quota |
+| research/settings-exit-snapshot-2026-10-24.md | Locally reproduced and corrected native-select exit snapshot; focused RED/GREEN and paired visual evidence, with integration and resource limits retained |
+| [research/motion-verdicts-2026-10-25.md](research/motion-verdicts-2026-10-25.md) | Unfinished motion walkthrough: eight bounded surface verdicts, preserved visual scores and remaining native observations |
 | research/ | Measurements, probes and reviews of the day in their name; model names and prices in them go stale fast. The UX, notification and screen-flake reviews of 2026-10-12 live here; their conclusions are in design/ and product/ |
 | superpowers/plans/2026-10-22-frontend-excellence.md | Completed selected changes: original frontend skills, reliability repairs and scoped proofs; initial 243-item audit and unverified criteria retained |
 

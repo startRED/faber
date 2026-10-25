@@ -118,9 +118,13 @@ impl Page {
     pub fn reload(&mut self) -> Result<(), String> {
         let deadline = Instant::now() + DEFAULT_WAIT;
         self.cdp.reload(deadline)?;
+        self.wait_ready(deadline)
+    }
+
+    pub(crate) fn wait_ready(&mut self, deadline: Instant) -> Result<(), String> {
         self.wait_for_within(
-            "the reloaded screen to render",
-            "!!document.querySelector('.app')",
+            "the screen and its test helpers to be ready",
+            "!!document.querySelector('.app') && typeof window.__faberText === 'function' && typeof window.__faberMojibake === 'function'",
             deadline.saturating_duration_since(Instant::now()),
         )
     }

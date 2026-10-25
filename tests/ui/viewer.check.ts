@@ -37,6 +37,47 @@ const leaveViewer = () => document.querySelector('.viewer')?.dispatchEvent(new K
 const mine = (extra: Partial<Message>): Message => ({ id: 'u', role: 'user', text: 'Look at these', at: 1_760_000_000_000, ...extra });
 const reply = (extra: Partial<Message> = {}): Message => ({ id: 'a', role: 'assistant', text: 'Done.', at: 1_760_000_010_000, status: 'done', vendor: 'claude', model: 'claude-sonnet-5-5', ...extra });
 
+check('thumbs: expanding many attachments finishes within 300ms and respects reduced motion', async () => {
+  const images = Array.from({ length: 30 }, () => ({ mediaType: 'image/png', base64: PNG }));
+  for (const motion of ['full', 'reduced', 'none']) {
+    const view = thread([mine({ images })], 760, motion);
+    try {
+      view.root.querySelector<HTMLButtonElement>('.thumb-more')!.click();
+      const slots = [...view.root.querySelectorAll<HTMLElement>('.thumb-slot.late')];
+      equal(slots.length, 26);
+      for (const slot of slots) {
+        const style = getComputedStyle(slot);
+        if (motion !== 'full') {
+          equal(style.animationName, 'none', `${motion} has no attachment animation`);
+        } else {
+          const total = (parseFloat(style.animationDuration) + parseFloat(style.animationDelay)) * 1000;
+          ok(total > 0 && total <= 300, `an attachment takes ${total}ms including its delay`);
+        }
+      }
+    } finally { view.close(); }
+  }
+});
+
+check('thumbs: frequent message actions only fade within 150ms', () => {
+  const view = thread([mine({}), reply()], 760, 'full');
+  try {
+    for (const el of view.root.querySelectorAll<HTMLElement>('.bar, .ai .actions > :not(.foot)')) {
+      const style = getComputedStyle(el);
+      equal(style.transform, 'none', 'message actions never travel on hover or focus');
+      equal(style.transitionProperty, 'opacity');
+      ok(parseFloat(style.transitionDuration) <= 0.15, 'frequent action feedback is at most 150ms');
+    }
+    const sheets = [...document.styleSheets].flatMap((sheet) => [...sheet.cssRules]);
+    const shows = sheets.filter((r): r is CSSStyleRule => r instanceof CSSStyleRule && r.selectorText.includes('.bar') && r.style.opacity === '1');
+    const hover = shows.find((r) => r.selectorText.includes(':hover') && r.selectorText.includes(':focus-within'))!;
+    ok(hover, 'pointer and keyboard keep the same feedback');
+    const probe = document.createElement('div');
+    view.root.append(probe);
+    probe.style.cssText = hover.style.cssText;
+    ok(parseFloat(getComputedStyle(probe).transitionDuration) <= 0.15, 'showing the actions also stays within 150ms');
+  } finally { view.close(); }
+});
+
 check('thumbs: seven pictures and two files are small rounded thumbnails above the text, with +N, not stacked full-width in the bubble', async () => {
   const images = Array.from({ length: 7 }, () => ({ mediaType: 'image/png', base64: PNG }));
   const view = thread([mine({ images, attachments: ['report.pdf', 'data.csv'] })]);

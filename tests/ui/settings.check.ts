@@ -14,7 +14,7 @@ import { fr } from '../../ui/locales/fr.ts';
 import { ptBR } from '../../ui/locales/pt-BR.ts';
 import { useLanguage } from '../../ui/i18n.ts';
 import { accountLine, seedQuotas, usageRows } from '../../ui/sidebar.ts';
-import { Settings } from '../../ui/Settings.tsx';
+import { forgetSection, Settings } from '../../ui/Settings.tsx';
 import { check, deepEqual, equal, frames, ok } from './check.ts';
 
 check('R107: Settings names Chat and Projects and discloses the shared default', () => {
@@ -671,6 +671,59 @@ check('settings: the chat working folder is one row, and only where its control 
   } finally { withFolder.stop(); without.stop(); }
 });
 
+check('settings: an exit copy preserves the language selected on the live native select', async () => {
+  forgetSection();
+  const preference = Object.getOwnPropertyDescriptor(MediaQueryList.prototype, 'matches')!;
+  Object.defineProperty(MediaQueryList.prototype, 'matches', { ...preference, get(this: MediaQueryList) {
+    return this.media === '(prefers-reduced-motion: reduce)' ? false : preference.get!.call(this);
+  } });
+  const was = document.documentElement.dataset.motion;
+  document.documentElement.dataset.motion = 'full';
+  useLanguage('pt-BR');
+  let saves = 0;
+  const view = mount(() => createComponent(Settings, {
+    look: look(), saved: { language: 'pt-BR' }, vendors: [], quotas: {}, now: 0,
+    onClose: () => {}, onOpenSetup: () => {}, onSave: async () => { saves++; return true; },
+  }));
+  const selected = (list: HTMLSelectElement) => ({
+    value: list.value, index: list.selectedIndex, label: list.selectedOptions[0]?.label,
+    options: [...list.options].map((option) => ({ value: option.value, selected: option.selected, defaultSelected: option.defaultSelected })),
+  });
+  try {
+    view.host.querySelector<HTMLElement>('.settings')!.style.cssText = 'position:fixed;left:0;top:0;width:720px;height:444px';
+    const live = view.host.querySelector<HTMLSelectElement>('select[aria-label="Idioma"]')!;
+    ok(live, 'the reproduction uses Settings\' real native language select');
+    await leave();
+    const before = selected(live);
+    equal(before.value, 'pt-BR');
+    ok(before.index > 0, 'a nondefault native option is selected before the section leaves');
+    equal(before.label, 'Português (Brasil)');
+    // Keep native cloning separate in failure evidence: the regression is the real animateList exit copy below.
+    const nativeClone = selected(live.cloneNode(true) as HTMLSelectElement);
+    const privacy = [...view.host.querySelectorAll<HTMLButtonElement>('.s-nav .item')]
+      .find((button) => button.querySelector('span')?.textContent === ptBR['set.privacy'])!;
+    privacy.click();
+    await tick();
+    equal(view.host.querySelectorAll('.facts').length, 1, 'Privacy is the new live section');
+    equal(view.host.querySelectorAll('.st-group').length, 0, 'General is only an exit copy');
+    equal(saves, 0, 'switching sections saved no setting');
+    const copy = [...document.querySelectorAll<HTMLElement>('.motion-exit')]
+      .flatMap((host) => [...(host.shadowRoot?.querySelectorAll<HTMLSelectElement>('select[aria-label="Idioma"]') ?? [])])[0];
+    ok(copy, 'the departing General section has a real native select in its shadow exit copy');
+    const observed = selected(copy);
+    const evidence = JSON.stringify({ before, nativeClone, detachedLive: selected(live), exitCopy: observed });
+    equal(observed.value, before.value, 'the exit copy must keep the live language: ' + evidence);
+    equal(observed.index, before.index, 'the exit copy keeps the actual selected index');
+    equal(observed.label, before.label, 'the visible departing label matches the live control');
+  } finally {
+    view.stop();
+    await leave();
+    Object.defineProperty(MediaQueryList.prototype, 'matches', preference);
+    if (was === undefined) delete document.documentElement.dataset.motion;
+    else document.documentElement.dataset.motion = was;
+    useLanguage('en');
+  }
+});
 check('settings: switching sections is a short cross-fade (the old one leaves as a copy, the new one arrives), instant when reduced, and the new section opens at its top', async () => {
   const preference = Object.getOwnPropertyDescriptor(MediaQueryList.prototype, 'matches')!;
   Object.defineProperty(MediaQueryList.prototype, 'matches', { ...preference, get(this: MediaQueryList) {
@@ -718,6 +771,71 @@ check('settings: switching sections is a short cross-fade (the old one leaves as
     if (was === undefined) delete document.documentElement.dataset.motion;
     else document.documentElement.dataset.motion = was;
     view.stop();
+  }
+});
+
+check('settings: reversing a section switch before its exit ends keeps the latest section and releases its copies', async () => {
+  const preference = Object.getOwnPropertyDescriptor(MediaQueryList.prototype, 'matches')!;
+  const was = document.documentElement.dataset.motion;
+  Object.defineProperty(MediaQueryList.prototype, 'matches', { ...preference, get(this: MediaQueryList) {
+    return this.media === '(prefers-reduced-motion: reduce)' ? false : preference.get!.call(this);
+  } });
+  useLanguage('en');
+  try {
+    for (const mode of ['full', 'reduced', 'none']) {
+      document.documentElement.dataset.motion = mode;
+      const view = mount(() => createComponent(Settings, {
+        look: look(), saved: {}, vendors: ['claude', 'codex'], quotas: {}, now: 0, start: 'general',
+        onClose: () => {}, onOpenSetup: () => {}, onSave: async () => true,
+      }));
+      try {
+        const settings = view.host.querySelector<HTMLElement>('.settings')!;
+        settings.style.cssText = 'position:fixed;left:0;top:0;width:1100px;height:240px';
+        await leave();
+        const main = view.host.querySelector<HTMLElement>('.s-main')!;
+        const rect = main.querySelector('.st-group')!.getBoundingClientRect();
+        ok(rect.width > 0 && rect.height > 0 && rect.bottom > 0 && rect.top < innerHeight && rect.right > 0 && rect.left < innerWidth,
+          `${mode}: General intersects the viewport before switching (${rect.x},${rect.y},${rect.width},${rect.height}; viewport ${innerWidth}x${innerHeight})`);
+        navButton(view.host, 'set.privacy').click();
+        await tick();
+        equal(main.querySelectorAll('.facts').length, 1, `${mode}: Privacy really opened`);
+        if (mode === 'full') {
+          const departing = document.querySelector('.motion-exit')?.shadowRoot?.querySelector<HTMLElement>('.st-group');
+          ok(departing, 'General has an actual departing copy before reversing');
+          ok(departing.getAnimations().some((animation) => animation.playState === 'running'), 'reverse while the first exit is still running');
+        }
+        const general = navButton(view.host, 'set.general');
+        general.focus();
+        general.click();
+        await tick();
+        ok(main.querySelector('.st-group'), `${mode}: the latest General section is live`);
+        equal(main.querySelectorAll('.facts').length, 0, `${mode}: Privacy is no longer live`);
+        equal(document.activeElement, general, `${mode}: exit copies do not take focus`);
+        const layer = document.querySelector<HTMLElement>('.motion-exit');
+        if (mode === 'full') {
+          ok(layer?.inert && layer.getAttribute('aria-hidden') === 'true', 'departing copies stay outside input and accessibility');
+          for (const copy of layer.shadowRoot!.querySelectorAll<HTMLElement>('.motion-exit')) {
+            ok(copy.inert && copy.getAttribute('aria-hidden') === 'true', 'each departing section is inert');
+          }
+        } else {
+          equal(layer, null, `${mode}: neither switch makes an exit copy`);
+          equal(main.getAnimations({ subtree: true }).length, 0, `${mode}: the returned section is immediate`);
+        }
+        for (const start = Date.now(); (document.querySelector('.motion-exit') || main.getAnimations({ subtree: true }).length > 0) && Date.now() - start < 3000; ) await frames(1);
+        equal(document.querySelector('.motion-exit'), null, `${mode}: interrupted exits release every copy`);
+        equal(main.getAnimations({ subtree: true }).length, 0, `${mode}: the returned section rests`);
+        ok(main.querySelector('.st-group'), `${mode}: General remains live after the exits finish`);
+        equal(main.querySelectorAll('.facts').length, 0, `${mode}: no late exit restores Privacy`);
+        equal(document.activeElement, general, `${mode}: finishing exits does not move focus`);
+      } finally {
+        view.stop();
+      }
+    }
+  } finally {
+    Object.defineProperty(MediaQueryList.prototype, 'matches', preference);
+    if (was === undefined) delete document.documentElement.dataset.motion;
+    else document.documentElement.dataset.motion = was;
+    forgetSection();
   }
 });
 
