@@ -51,8 +51,10 @@ check('appearance: theme cross-fades use native snapshots, suppress stale previe
     calls++;
     let resolve!: () => void;
     const done = new Promise<void>((r) => { resolve = r; });
+    let rejectReady!: () => void;
+    const ready = new Promise<void>((_, reject) => { rejectReady = () => reject(new DOMException('Transition was skipped. skipTransition() called', 'AbortError')); });
     update = () => { if (typeof callback === 'function') void callback(); resolve(); };
-    return { updateCallbackDone: done, finished: done, skipTransition: () => { skips++; } } as unknown as ViewTransition;
+    return { ready, updateCallbackDone: done, finished: done, skipTransition: () => { skips++; rejectReady(); } } as unknown as ViewTransition;
   };
   try {
     await applyLook(sala({ motion: 'none' }));
@@ -64,6 +66,7 @@ check('appearance: theme cross-fades use native snapshots, suppress stale previe
     equal(skips, 1);
     update();
     await pending;
+    await new Promise((resolve) => setTimeout(resolve, 0));
     equal(document.documentElement.dataset.base, 'sala', 'a snapshot from a closed preview never applies later');
     const before = calls;
     await applyLook({ ...warm, motion: 'reduced' });

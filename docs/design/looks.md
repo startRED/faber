@@ -92,6 +92,7 @@ own inks.
 
 ### Motion
 
+- Cancelling a theme snapshot keeps the latest look and releases the snapshot marker; a skipped animation is not a failed appearance change.
 - Chrome has one timing family (see "One grammar"): `--dur-fast` feedback, `--dur-ui` entrances and the theme
   cross-fade, `--dur-exit` exits, `--dur-move` and `--dur-arrive` for travel, with the curves `--ease` (a soft
   spring-like settle), `--ease-in` (exits) and `--ease-spring`. No chrome animation, including its stagger, exceeds
