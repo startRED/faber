@@ -203,6 +203,45 @@ check('subagent history: long sessions read one page and keep older pages steady
   }
 });
 
+check('subagent history: a paused arrival keeps Latest inside the reader viewport', async () => {
+  const before = api.childTranscript;
+  api.childTranscript = async (_id, _call, page) => [{ kind: 'text', text: `Synthetic page ${page}. ` + 'Retained history. '.repeat(500), at: 0 }];
+  const root = document.createElement('aside');
+  root.className = 'runcol';
+  root.dataset.motion = 'full';
+  root.style.cssText = 'position:fixed;left:0;top:0;width:360px;height:640px';
+  root.addEventListener('faber-motion', (event) => {
+    const target = event.target;
+    if (target instanceof HTMLElement && target.tagName === 'SECTION' && target.querySelector('.agent-pages')) {
+      // A hidden webview may hold an arrival indefinitely; the reader must stay usable during it.
+      for (const animation of target.getAnimations()) animation.pause();
+    }
+  });
+  document.body.append(root);
+  showAgent({ conversationId: 'synthetic-paused-reader', messageId: 'm1', callId: 'a1' });
+  const dispose = render(() => createComponent(AgentChat, {
+    step: agentSteps([{ ...AGENT, transcript: { pages: 12, failed: false } }])[0]!,
+    streaming: true, onBack: () => {}, onClose: () => {},
+  }), root);
+  const settle = () => new Promise((done) => setTimeout(done, 40));
+  try {
+    await settle();
+    const body = root.querySelector<HTMLElement>('.side-body')!;
+    root.querySelector('.side-said')!.dispatchEvent(new WheelEvent('wheel', { deltaY: -60, bubbles: true }));
+    body.scrollTop = 0; body.dispatchEvent(new Event('scroll'));
+    await settle();
+    const latest = root.querySelector<HTMLButtonElement>('.toend');
+    ok(latest, 'Latest is available while reading retained history');
+    const bounds = latest.getBoundingClientRect(), view = body.getBoundingClientRect();
+    ok(bounds.top >= view.top && bounds.bottom <= view.bottom, 'a paused arrival never puts Latest below the retained history');
+    latest.click();
+    await settle();
+    ok(body.scrollHeight - body.scrollTop - body.clientHeight < 2, 'Latest still returns to the live tail');
+  } finally {
+    dispose(); root.remove(); api.childTranscript = before; showAgent(undefined);
+  }
+});
+
 check('subagent history: new pages and save failures reach an already open reader', () => {
   const call = { ...AGENT, transcript: { pages: 1, failed: false } };
   equal(sameTools([call], [{ ...call, transcript: { pages: 2, failed: false } }]), false);

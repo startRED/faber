@@ -333,7 +333,8 @@ function Transcript(props: { step: AgentStep }) {
     sizes.observe(body);
     onCleanup(() => sizes.disconnect());
   });
-  return <section ref={section} aria-label={t('agent.history')}
+  // Transforming this long section would make it the floating Latest button's containing block.
+  return <section ref={section} data-motion="none" aria-label={t('agent.history')}
     onWheel={(event) => { if (event.deltaY < 0) select(page()); }}
     onPointerDown={(event) => { if (!(event.target as Element).closest('button')) select(page()); }}
     onKeyDown={(event) => { if (['ArrowUp', 'PageUp', 'Home'].includes(event.key)) select(page()); }}>

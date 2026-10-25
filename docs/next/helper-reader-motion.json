@@ -1,0 +1,11 @@
+{
+  "notes": {
+    "fixed": {
+      "en": "Jump to latest stays visible when you open a helper’s long history.",
+      "pt-BR": "Ir para o fim continua visível ao abrir um histórico longo de um ajudante.",
+      "de": "Zum Ende bleibt beim Öffnen eines langen Helferverlaufs sichtbar.",
+      "es": "Ir al final sigue visible al abrir un historial largo de un ayudante.",
+      "fr": "Aller à la fin reste visible à l’ouverture d’un long historique d’assistant."
+    }
+  }
+}
