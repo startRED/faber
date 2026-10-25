@@ -415,7 +415,7 @@ fn wait_page(page: &mut crate::page::Page, fixture: &Fixture, name: &str) -> Res
     page.wait_for(
         &format!("the child WebView2 to show {name}"),
         &format!(
-            "window.__TAURI_INTERNALS__.invoke('test_site_probe', {{capture:false}}).then(p => document.querySelector('.site-address')?.value === {} && !document.querySelector('.site-empty') && p.shown && p.page?.url === {} && p.page?.title === {} && p.page?.text.includes({})).catch(e=>{{if(String(e)==='the browser closed')return false;throw e;}})",
+            "window.__TAURI_INTERNALS__.invoke('test_site_probe', {{capture:false}}).then(p => document.querySelector('.site-address')?.value === {} && !document.querySelector('.site-empty') && p.shown && p.page?.url === {} && p.page?.title === {} && p.page?.text.includes({})).catch(e=>{{if(String(e)==='the browser closed'||String(e)==='the test browser closed')return false;throw e;}})",
             json!(expected_url), json!(expected_url), json!(format!("Native fixture {name}")), json!(format!("Native page {name}"))
         ),
     )?;
@@ -432,7 +432,7 @@ fn wait_page_load(page: &mut crate::page::Page, fixture: &Fixture, name: &str, c
     page.wait_for(
         &format!("the child WebView2 to display {name} response {count}"),
         &format!(
-            "window.__TAURI_INTERNALS__.invoke('test_site_probe',{{capture:false}}).then(p => document.querySelector('.site-address')?.value === {} && !document.querySelector('.site-empty') && p.shown && p.page?.url === {} && p.page?.title === {} && p.page?.text.includes({})).catch(e=>{{if(String(e)==='the browser closed')return false;throw e;}})",
+            "window.__TAURI_INTERNALS__.invoke('test_site_probe',{{capture:false}}).then(p => document.querySelector('.site-address')?.value === {} && !document.querySelector('.site-empty') && p.shown && p.page?.url === {} && p.page?.title === {} && p.page?.text.includes({})).catch(e=>{{if(String(e)==='the browser closed'||String(e)==='the test browser closed')return false;throw e;}})",
             json!(url), json!(url), json!(format!("Native fixture {name}")), json!(marker)
         ),
     )?;
@@ -445,7 +445,7 @@ fn wait_storage(page: &mut crate::page::Page, expected: &str) -> Result {
     page.wait_for(
         "the synthetic storage marker in the native page",
         &format!(
-            "window.__TAURI_INTERNALS__.invoke('test_site_probe',{{capture:false}}).then(p=>p.page?.text.includes({})).catch(e=>{{if(String(e)==='the browser closed')return false;throw e;}})",
+            "window.__TAURI_INTERNALS__.invoke('test_site_probe',{{capture:false}}).then(p=>p.page?.text.includes({})).catch(e=>{{if(String(e)==='the browser closed'||String(e)==='the test browser closed')return false;throw e;}})",
             json!(expected)
         ),
     )
