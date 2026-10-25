@@ -1181,13 +1181,19 @@ check('page in the browser: the pane opens again on the page it last showed, aft
           if (full) {
             equal(host.querySelector('.site-view'), page, 'the real page remains mounted during its exit');
             ok(pane.inert, 'a departing pane no longer accepts input');
-            await settle(70);
-            await frames();
+            const exit = pane.getAnimations().find((animation) =>
+              (animation.effect as KeyframeEffect | null)?.target === pane);
+            ok(exit, 'the real pane has an exit animation');
+            const duration = Number(exit.effect?.getTiming().duration);
+            ok(duration > 0, 'the real pane exit has a positive duration');
+            exit.pause();
+            exit.currentTime = duration / 2;
             ok(pane.getBoundingClientRect().left > x + 2, `the real pane slides out through an intermediate position: ${JSON.stringify({
               before: x, after: pane.getBoundingClientRect().left, motion: document.documentElement.dataset.motion, exitLevel,
               classes: document.documentElement.className, animations: pane.getAnimations().map((a) => ({ state: a.playState, time: a.currentTime })),
             })}`);
             equal(getComputedStyle(pane).opacity, '1', 'closing does not fade the browser');
+            exit.play();
             if (time === 'opened') {
               button.click();
               equal(host.querySelector('.site-view'), page, 'reopening cancels the exit without replacing the page');
