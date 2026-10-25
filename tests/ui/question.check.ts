@@ -482,16 +482,66 @@ check('question card: answering from Running during partial thread arrival start
 
     const initialOpacity = Number(getComputedStyle(threadCard).opacity);
     const continuous = Math.abs(initialOpacity - preClickOpacity) < 0.02;
+    const failedExit = continuous ? undefined : {
+      currentTime: exit!.currentTime, playState: exit!.playState,
+      effectTargetsCard: (exit!.effect as KeyframeEffect | null)?.target === threadCard,
+      timing: exit!.effect?.getComputedTiming(),
+      endpoints: (exit!.effect as KeyframeEffect | null)?.getKeyframes()
+        .filter((_, index, frames) => index === 0 || index === frames.length - 1)
+        .map(({ opacity, easing }) => ({ opacity, easing })),
+    };
+    let vanillaControl: unknown;
+    if (!continuous) {
+      // Diagnose the engine's clocks independently after freezing the original failed observation.
+      const host = document.createElement('div');
+      host.style.cssText = 'position:fixed;left:20px;top:20px;width:360px;z-index:10000';
+      host.innerHTML = '<div class="ask question"><div class="q-inner"><div class="q-body">Reversal clock control</div></div></div>';
+      const card = host.firstElementChild as HTMLElement;
+      const deadline = performance.now() + 1200;
+      try {
+        document.body.append(host);
+        let arrival: Animation | undefined;
+        while (await nextFrameBefore(deadline)) {
+          arrival = card.getAnimations().find((a) => a instanceof CSSTransition && a.transitionProperty === 'opacity');
+          if (!arrival) continue;
+          const opacity = Number(getComputedStyle(card).opacity);
+          const time = Number(arrival.currentTime);
+          const duration = Number(arrival.effect?.getComputedTiming().duration);
+          if (arrival.playState !== 'running' || !(time > 0 && time < duration && opacity > 0 && opacity < 1)) continue;
+          const rect = card.getBoundingClientRect();
+          const before = {
+            opacity, currentTime: time, timing: arrival.effect?.getComputedTiming(),
+            endpoints: (arrival.effect as KeyframeEffect).getKeyframes(),
+            width: rect.width, height: rect.height, background: getComputedStyle(card).backgroundColor,
+            configuredExit: millis(document.documentElement, '--dur-exit', 180),
+          };
+          card.classList.add('gone');
+          const reversed = card.getAnimations().find((a) => a instanceof CSSTransition && a.transitionProperty === 'opacity');
+          const initialOpacity = Number(getComputedStyle(card).opacity);
+          const initial = reversed ? {
+            opacity: initialOpacity, currentTime: reversed.currentTime, playState: reversed.playState,
+            timing: reversed.effect?.getComputedTiming(), endpoints: (reversed.effect as KeyframeEffect).getKeyframes(),
+          } : undefined;
+          const advanced = await nextFrameBefore(deadline);
+          vanillaControl = {
+            status: reversed && advanced && rect.width > 0 && rect.height > 0 ? 'OBSERVED' : 'PRECONDITION_FAILED',
+            before, initial,
+            firstExitFrame: advanced ? {
+              opacity: Number(getComputedStyle(card).opacity), currentTime: reversed?.currentTime,
+              timing: reversed?.effect?.getComputedTiming(), playState: reversed?.playState,
+            } : undefined,
+          };
+          break;
+        }
+        vanillaControl ??= { status: 'PRECONDITION_FAILED', reason: 'no natural partial opacity arrival within 1200 ms' };
+      } catch (error) {
+        vanillaControl = { status: 'ERROR', message: String(error) };
+      } finally {
+        host.remove();
+      }
+    }
     ok(continuous, `exit starts at the current opacity without a flash; diagnostic ${JSON.stringify({
-      preClickOpacity, initialOpacity, preClickTime,
-      exit: continuous ? undefined : {
-        currentTime: exit!.currentTime, playState: exit!.playState,
-        effectTargetsCard: (exit!.effect as KeyframeEffect | null)?.target === threadCard,
-        timing: exit!.effect?.getComputedTiming(),
-        endpoints: (exit!.effect as KeyframeEffect | null)?.getKeyframes()
-          .filter((_, index, frames) => index === 0 || index === frames.length - 1)
-          .map(({ opacity, easing }) => ({ opacity, easing })),
-      },
+      preClickOpacity, initialOpacity, preClickTime, exit: failedExit, vanillaControl,
     })}`);
     const endpoints = (exit!.effect as KeyframeEffect).getKeyframes();
     ok(Math.abs(Number(endpoints[0].opacity) - preClickOpacity) < 0.02, 'the real exit starts at the interrupted entrance');
