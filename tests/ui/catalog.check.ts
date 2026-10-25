@@ -324,6 +324,16 @@ check('catalog: the full curated list pages without duplicates and searches beyo
 
 check('catalog: return stays reachable after reading a small-window detail', async () => {
   const view = await panel({ vendors: [] });
+  const describe = (element: Element | null) => element ? { tag: element.tagName, id: element.id.slice(0, 80), class: element.getAttribute('class')?.slice(0, 80), detail: !!element.closest('.catalog-detail') } : null;
+  const events: Array<Record<string, unknown>> = [];
+  let passStarted = performance.now();
+  // Keep this scenario's last native events, without collecting text or input values.
+  const record = (event: Event) => {
+    if (!(event.target instanceof Element)) return;
+    if (events.length === 24) events.shift();
+    events.push({ type: event.type, at: performance.now() - passStarted, target: describe(event.target), active: describe(document.activeElement), connected: event.target.isConnected, trusted: event.isTrusted, ...(event.type === 'scroll' ? { scrollTop: event.target.scrollTop } : {}) });
+  };
+  for (const type of ['focus', 'focusin', 'scroll']) view.root.addEventListener(type, record, true);
   try {
     view.root.style.height = '480px';
     // This isolated component must sit above the running test app's caption.
@@ -333,12 +343,15 @@ check('catalog: return stays reachable after reading a small-window detail', asy
       for (const enlarged of [false, true]) {
         view.root.style.setProperty('--fs-sm', enlarged ? '24px' : themes.css.base['fs-sm']);
         view.root.style.setProperty('--fs-ui', enlarged ? '28px' : themes.css.base['fs-ui']);
+        events.length = 0; passStarted = performance.now();
+        const beforeOpen = { active: describe(document.activeElement), connected: view.root.isConnected };
         await tap(cards(view.root)[0]);
         const surface = view.root.querySelector<HTMLElement>('[data-catalog]')!;
         surface.scrollTop = surface.scrollHeight;
+        const afterSet = { at: performance.now() - passStarted, scrollTop: surface.scrollTop, active: describe(document.activeElement), connected: surface.isConnected };
         await tick();
         try { ok(surface.scrollTop > 0, 'the detail was scrolled'); } catch {
-          throw new Error(`the detail was scrolled (locale=${locale.code}, enlarged=${enlarged}, motion=${view.root.dataset.motion}, scrollTop=${surface.scrollTop}, clientHeight=${surface.clientHeight}, scrollHeight=${surface.scrollHeight})`);
+          throw new Error(`the detail was scrolled ${JSON.stringify({ locale: locale.code, enlarged, motion: view.root.dataset.motion, scrollTop: surface.scrollTop, clientHeight: surface.clientHeight, scrollHeight: surface.scrollHeight, at: performance.now() - passStarted, active: describe(document.activeElement), connected: surface.isConnected, focused: document.hasFocus(), visibility: document.visibilityState, beforeOpen, afterSet, events })}`);
         }
         const back = button(view.root, 'catalog.back');
         const bounds = back.getBoundingClientRect(), viewport = surface.getBoundingClientRect();
@@ -351,7 +364,10 @@ check('catalog: return stays reachable after reading a small-window detail', asy
         equal((document.activeElement as HTMLElement).dataset.catalogCard, 'systematic-debugging');
       }
     }
-  } finally { view.close(); }
+  } finally {
+    for (const type of ['focus', 'focusin', 'scroll']) view.root.removeEventListener(type, record, true);
+    view.close();
+  }
 });
 
 check('catalog: details open their original source in the system browser and install, switch, cancel removal and undo preserve state', async () => {
