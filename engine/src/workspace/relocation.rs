@@ -35,8 +35,8 @@ fn identity(parent: &MemoryDirectory, leaf: &str) -> io::Result<Option<String>> 
     }
 }
 
-/// Both parents must exist; only the final data leaf may be created, exclusively, through its held parent.
-/// Failed setup may leave that empty leaf. The caller protects Faber data from AI writes; engine paths are unchanged.
+/// The workspace parent must exist; missing data components are created exclusively through held parents.
+/// Failed setup may leave empty directories. The caller protects Faber data from AI writes; engine paths are unchanged.
 /// File flushing and an atomic rename cover process interruption, not a guarantee against power loss.
 pub fn relocate(data: &Path, workspace_parent: &Path, leaf: &str) -> io::Result<PathBuf> {
     relocate_staged(data, workspace_parent, leaf, |_| Ok(()))
@@ -53,15 +53,7 @@ fn relocate_staged(
         return Err(refused());
     }
     let parent = MemoryDirectory::open(workspace_parent, Path::new(""))?;
-    let data = match MemoryDirectory::open(data, Path::new("")) {
-        Ok(data) => data,
-        Err(error) if error.kind() == io::ErrorKind::NotFound => {
-            let name = data.file_name().and_then(|name| name.to_str()).ok_or_else(refused)?;
-            let parent = MemoryDirectory::open(data.parent().ok_or_else(refused)?, Path::new(""))?;
-            parent.create_under(name)?
-        }
-        Err(error) => return Err(error),
-    };
+    let data = MemoryDirectory::open_or_create(data)?;
     let protected = data.resolved_path()?;
     let destination = parent.resolved_path()?.join(leaf);
     if destination.starts_with(&protected) || protected.starts_with(&destination) {
@@ -165,6 +157,22 @@ mod tests {
     }
 
     #[test]
+    fn chat_relocation_creates_missing_data_ancestors_without_following_links() {
+        let owned = tempfile::tempdir().unwrap();
+        let root = owned.path().canonicalize().unwrap();
+        let work = root.join("work");
+        std::fs::create_dir(&work).unwrap();
+        let data = root.join("custom/nested/data");
+        let destination = relocate(&data, &work, "private").unwrap();
+        let record = std::fs::read(data.join(RECORD)).unwrap();
+        std::fs::write(destination.join("answer.txt"), b"preserved work").unwrap();
+        assert_eq!(relocate(&data, &work, "private").unwrap(), destination);
+        assert_eq!(std::fs::read(destination.join("answer.txt")).unwrap(), b"preserved work");
+        assert_eq!(std::fs::read(data.join(RECORD)).unwrap(), record);
+        assert!(!data.join("chat").exists());
+    }
+
+    #[test]
     fn chat_relocation_refuses_unsafe_fresh_data_paths_and_preserves_external_work() {
         let owned = tempfile::tempdir().unwrap();
         let root = owned.path().canonicalize().unwrap();
@@ -181,7 +189,13 @@ mod tests {
         assert!(relocate(&linked.join("data"), &work, "new-private").is_err());
         assert!(relocate(&linked, &work, "new-private").is_err());
         assert!(!work.join("data").exists());
-        assert!(relocate(&root.join("missing/data"), &work, "new-private").is_err());
+        std::fs::write(root.join("file"), b"not a directory").unwrap();
+        assert!(relocate(&root.join("file/data"), &work, "new-private").is_err());
+        assert_eq!(std::fs::read(root.join("file")).unwrap(), b"not a directory");
+        // Joining onto a verbatim Windows path would normalize away the parent component before this call.
+        let traversal = PathBuf::from(format!("{}\\missing\\..\\data", root.display()));
+        assert!(traversal.components().any(|part| part == Component::ParentDir));
+        assert!(relocate(&traversal, &work, "new-private").is_err());
         assert!(!root.join("missing").exists());
         assert!(relocate(Path::new("relative-data"), &work, "new-private").is_err());
         assert!(!work.join("new-private").exists());
@@ -189,6 +203,28 @@ mod tests {
         std::fs::create_dir(&same).unwrap();
         assert!(relocate(&same, &root, "mixeddata").is_err());
         assert!(!same.join(RECORD).exists());
+    }
+
+    #[test]
+    fn chat_relocation_pins_created_data_ancestors_until_the_move_finishes() {
+        let owned = tempfile::tempdir().unwrap();
+        let root = owned.path().canonicalize().unwrap();
+        let work = root.join("work");
+        std::fs::create_dir(&work).unwrap();
+        let data = root.join("custom/nested/data");
+        let mut checked = false;
+        let destination = relocate_staged(&data, &work, "private", |stage| {
+            if stage == Stage::BeforeRecord {
+                assert!(std::fs::rename(root.join("custom"), root.join("replaced")).is_err());
+                checked = true;
+            }
+            Ok(())
+        })
+        .unwrap();
+        assert!(checked);
+        assert!(data.join(RECORD).is_file());
+        assert!(destination.is_dir());
+        assert!(!root.join("replaced").exists());
     }
 
     #[test]

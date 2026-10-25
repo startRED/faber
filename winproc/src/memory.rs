@@ -106,10 +106,22 @@ pub struct MemoryDirectory {
 
 impl MemoryDirectory {
     pub fn open(root: &Path, relative: &Path) -> io::Result<Self> {
+        Self::walk(root, relative, false)
+    }
+
+    /// Create missing components exclusively through held parents; a concurrent creator is never adopted.
+    pub fn open_or_create(root: &Path) -> io::Result<Self> {
+        Self::walk(root, Path::new(""), true)
+    }
+
+    fn walk(root: &Path, relative: &Path, create: bool) -> io::Result<Self> {
         if !root.is_absolute() || relative.components().any(|c| !matches!(c, Component::Normal(_))) {
             return Err(denied());
         }
         let target = root.join(relative);
+        if create && target.components().any(|part| matches!(part, Component::ParentDir)) {
+            return Err(denied());
+        }
         let mut drive = PathBuf::new();
         let mut parents = Vec::new();
         for part in target.components() {
@@ -123,7 +135,13 @@ impl MemoryDirectory {
                         .push(std::fs::OpenOptions::new().read(true).share_mode(3).custom_flags(0x0020_0000 | 0x0200_0000).open(&drive)?);
                 }
                 Component::Normal(value) => {
-                    parents.push(child(parents.last().ok_or_else(denied)?, value.to_str().ok_or_else(denied)?, true, false, false)?)
+                    let parent = parents.last().ok_or_else(denied)?;
+                    let name = value.to_str().ok_or_else(denied)?;
+                    let opened = match child(parent, name, true, false, false) {
+                        Err(error) if create && error.kind() == io::ErrorKind::NotFound => child(parent, name, true, true, false),
+                        result => result,
+                    }?;
+                    parents.push(opened);
                 }
                 _ => return Err(denied()),
             }
