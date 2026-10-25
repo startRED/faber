@@ -21,7 +21,7 @@ as the change it governs.
 | A notice that is not an error | One calm line, details behind a link (C001) | Error styling or a block of technical text |
 | Quota and spend | Plain, calm words; alarm only near a real limit (C002); never behind reality (C010) | "Running out" at 30% |
 | Actions on a row or on text | A short Faber right-click menu (R123, C009) | The browser's menu |
-| What changed in a version | The what's-new screen, one entry per change a person notices, in every language (R142, not built yet) | Release notes only on GitHub |
+| What changed in a version | The what's-new screen, one entry per change a person notices, in every language (R142) | Release notes only on GitHub |
 | An empty or idle screen | The same quality as the Chat home, with quiet motion that stops when hidden or reduced (C005, C008) | A static grey card |
 
 Chat and Projects behave alike: a thing that exists in both areas looks and works the same in both, and the two homes
