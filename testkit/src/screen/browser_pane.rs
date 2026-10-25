@@ -279,7 +279,14 @@ fn failure_in(ctx: &mut Ctx, language: &str, width: u32) -> Result {
     // A failed native open is injected at the command boundary, not presented as a real network failure.
     app.page.eval("window.__TAURI_INTERNALS__.invoke('test_site_refuse_once')")?;
     enter(&mut app.page, &fixture.url("/one"))?;
-    app.page.wait_visible(&css("#running [role=alert]"))?;
+    let failed = app.page.text_of("site.openFailed")?;
+    app.page.wait_visible(&css("#running").role("alert", &failed).exact()).map_err(|error| {
+        format!(
+            "{error}; opening state: {:?}; address trace: {:?}",
+            app.page.eval("({address:document.querySelector('.site-address')?.value,alert:document.querySelector('#running [role=alert]')?.textContent})"),
+            app.page.eval("window.__browserRetryTrace")
+        )
+    })?;
     app.page.eval("document.fonts.ready.then(()=>true)")?;
     app.page.wait_for(
         "the error composition to stop moving",
