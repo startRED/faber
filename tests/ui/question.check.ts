@@ -449,6 +449,12 @@ check('question card: answering from Running during partial thread arrival start
     ok(arrival.playState === 'running' && preClickTime < before!.duration &&
       preClickOpacity > 0 && preClickOpacity < 1,
       'PRECONDITION FAILED: Thread opacity is no longer partial immediately before the real click');
+    const arrivalEndpoints = (arrival.effect as KeyframeEffect).getKeyframes();
+    deepEqual(arrivalEndpoints.map(({ opacity, computedOffset, easing }) => [Number(opacity), computedOffset, easing]),
+      [[0, 0, 'linear'], [1, 1, 'linear']], 'the actual opacity entrance has linear zero-to-one endpoints');
+    const preClickProgress = arrival.effect!.getComputedTiming().progress;
+    ok(typeof preClickProgress === 'number' && preClickProgress > 0 && preClickProgress < 1,
+      'PRECONDITION FAILED: the entrance effect has a resolved partial progress immediately before the click');
 
     // The stub clears the shared signal synchronously during this real click. Inspect immediately so the
     // short transition cannot be hidden by a settle delay.
@@ -481,7 +487,17 @@ check('question card: answering from Running during partial thread arrival start
     ok(exitDuration > 0, `the actual opacity exit has positive duration, got ${exitDuration}`);
 
     const initialOpacity = Number(getComputedStyle(threadCard).opacity);
-    const continuous = Math.abs(initialOpacity - preClickOpacity) < 0.02;
+    const endpoints = (exit!.effect as KeyframeEffect).getKeyframes();
+    ok(endpoints.length === 2 && endpoints.every(({ opacity, computedOffset, easing }, index) =>
+      Number.isFinite(Number(opacity)) && computedOffset === index && easing === 'linear'),
+    'the opacity exit has two numeric linear endpoints at offsets zero and one');
+    const exitProgress = exit!.effect!.getComputedTiming().progress;
+    ok(typeof exitProgress === 'number' && exitProgress >= 0 && exitProgress <= 1,
+      'the exit effect has resolved progress');
+    // Accelerated computed style may use a live clock; compare both effects on their shared animation clock.
+    const initialEffectOpacity = Number(endpoints[0].opacity) +
+      (Number(endpoints[1].opacity) - Number(endpoints[0].opacity)) * exitProgress!;
+    const continuous = Math.abs(initialEffectOpacity - preClickProgress!) < 0.02;
     const failedExit = continuous ? undefined : {
       currentTime: exit!.currentTime, playState: exit!.playState,
       effectTargetsCard: (exit!.effect as KeyframeEffect | null)?.target === threadCard,
@@ -540,11 +556,11 @@ check('question card: answering from Running during partial thread arrival start
         host.remove();
       }
     }
-    ok(continuous, `exit starts at the current opacity without a flash; diagnostic ${JSON.stringify({
-      preClickOpacity, initialOpacity, preClickTime, exit: failedExit, vanillaControl,
+    ok(continuous, `exit effect is continuous with the interrupted entrance; diagnostic ${JSON.stringify({
+      preClickOpacity, initialOpacity, preClickTime, preClickProgress, initialEffectOpacity, exitProgress,
+      exit: failedExit, vanillaControl,
     })}`);
-    const endpoints = (exit!.effect as KeyframeEffect).getKeyframes();
-    ok(Math.abs(Number(endpoints[0].opacity) - preClickOpacity) < 0.02, 'the real exit starts at the interrupted entrance');
+    ok(Math.abs(Number(endpoints[0].opacity) - preClickProgress!) < 0.02, 'the real exit starts at the interrupted entrance');
     equal(Number(endpoints.at(-1)!.opacity), 0, 'the real exit targets zero opacity');
     ok(!threadCard.getAnimations().some((a) => a instanceof CSSAnimation && a.animationName === 'arrive'),
       'no arrival keyframes compete with the exit');
