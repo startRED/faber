@@ -337,7 +337,9 @@ check('catalog: return stays reachable after reading a small-window detail', asy
         const surface = view.root.querySelector<HTMLElement>('[data-catalog]')!;
         surface.scrollTop = surface.scrollHeight;
         await tick();
-        ok(surface.scrollTop > 0, 'the detail was scrolled');
+        try { ok(surface.scrollTop > 0, 'the detail was scrolled'); } catch {
+          throw new Error(`the detail was scrolled (locale=${locale.code}, enlarged=${enlarged}, motion=${view.root.dataset.motion}, scrollTop=${surface.scrollTop}, clientHeight=${surface.clientHeight}, scrollHeight=${surface.scrollHeight})`);
+        }
         const back = button(view.root, 'catalog.back');
         const bounds = back.getBoundingClientRect(), viewport = surface.getBoundingClientRect();
         ok(bounds.top >= viewport.top && bounds.bottom <= viewport.bottom, `${locale.code}: return stays inside the reading viewport`);
