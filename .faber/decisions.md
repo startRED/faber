@@ -21,3 +21,4 @@
 - Messages received from other AI conversations identify their agent origin and are delivered automatically, without appearing as the person's queued messages or requiring Send now. [by person]
 
 - The project agent settings tool accepts only web_search off/cached/live. It reuses the ordinary settings save, its own consent and audit, and existing full trust only for this bounded preference. The saved response is queued after durable persistence and before stricter settings stop replies; no delivery acknowledgement or stop exemption is introduced. [by AI]
+- Nightly CLI candidate contracts run only in disposable runners without sign-in; passing help/schema checks remain explicitly unqualified and cannot publish metadata, promote releases or authorize installation. [by AI]
