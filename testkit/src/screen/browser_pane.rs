@@ -38,7 +38,51 @@ fn interrupt_width(ctx: &mut Ctx) -> Result {
     wait_page(page, &fixture, "one")?;
     for width in [1920, 1280, 720] {
         resize(page, width, 800)?;
-        page.eval("new Promise(resolve=>setTimeout(resolve,300))")?;
+        // Bounded metadata can perturb timing; it diagnoses preparation, not motion performance.
+        // Read computed layout only on failure; normal boundaries retain flags and inline width inputs.
+        page.eval(
+            r#"(() => {
+          window.__widthFinish?.(false);
+          const shell=document.querySelector('.shell'),root=document.documentElement;
+          const diagnostic=window.__widthDiagnostic={limit:48,dropped:0,records:[],perturbsTiming:true};
+          const record=(phase,extra={})=>{
+            if(diagnostic.records.length>=diagnostic.limit){diagnostic.dropped++;return;}
+            diagnostic.records.push({phase,t:performance.now(),root:root.className,motion:root.dataset.motion,
+              reduced:matchMedia('(prefers-reduced-motion: reduce)').matches,shell:shell?.className,
+              aside:document.querySelector('.pane-aside')?.getAttribute('aria-pressed'),
+              browser:document.querySelector('.pane-site')?.getAttribute('aria-pressed'),
+              widthInput:shell?.style.getPropertyValue('--run-w'),...extra});
+          };
+          const transitions=['transitionrun','transitionstart','transitioncancel','transitionend'];
+          const transition=event=>{
+            if(['width','grid-template-columns'].includes(event.propertyName))
+              record(event.type,{property:event.propertyName,target:event.target?.className});
+          };
+          const click=event=>record('click',{trusted:event.isTrusted,
+            subject:event.target?.closest?.('.pane-aside,.pane-site,.site-head button')?.className ?? null});
+          for(const type of transitions)shell?.addEventListener(type,transition);
+          document.addEventListener('click',click,true);
+          window.__widthRecord=record;
+          window.__widthFinish=failure=>{
+            if(failure){
+              if(diagnostic.records.length>=diagnostic.limit){diagnostic.records.pop();diagnostic.dropped++;}
+              record('failure');
+              const column=document.querySelector('.runcol'),style=shell && getComputedStyle(shell);
+              const colStyle=column && getComputedStyle(column);
+              diagnostic.final={grid:style?.gridTemplateColumns,property:style?.transitionProperty,duration:style?.transitionDuration,
+                columnWidth:colStyle?.width,columnProperty:colStyle?.transitionProperty,columnDuration:colStyle?.transitionDuration};
+            }
+            for(const type of transitions)shell?.removeEventListener(type,transition);
+            document.removeEventListener('click',click,true);
+            window.__widthStopClose?.();
+            delete window.__widthStopClose;
+            delete window.__widthRecord;
+            delete window.__widthFinish;
+            return diagnostic;
+          };
+          return new Promise(resolve=>setTimeout(()=>{record('after-resize');resolve();},300));
+        })()"#,
+        )?;
         if width < 900 {
             // The overlay makes its header inert; use the person's actual pane-switching shortcuts.
             for kind in ["keyDown", "keyUp"] {
@@ -54,6 +98,7 @@ fn interrupt_width(ctx: &mut Ctx) -> Result {
         // Pointer closing is covered separately; this programmatic interruption leaves the product's clock unchanged.
         page.eval(r#"(() => {
           const shell=document.querySelector('.shell');
+          window.__widthRecord('after-aside');
           const active=()=>shell.getAnimations({subtree:true}).filter(a=>a instanceof CSSTransition && ['width','grid-template-columns'].includes(a.transitionProperty) && a.playState==='running' && a.effect.getComputedTiming().progress>0 && a.effect.getComputedTiming().progress<1).map(a=>({property:a.transitionProperty,time:a.currentTime}));
           window.__interruptPreparation={events:[]};
           window.__interruptTrace=[];
@@ -71,6 +116,9 @@ fn interrupt_width(ctx: &mut Ctx) -> Result {
               const column=document.querySelector('.runcol');
               const button=column?.querySelector('.site-head button[aria-label="Close the running list"]');
               const moving=active(),rect=button?.getBoundingClientRect();
+              window.__widthRecord?.('close-subject',{moving,shown:native.shown,nativeX:native.x,
+                connected:!!button?.isConnected,disabled:button?.disabled,inert:!!button?.closest('[inert]'),
+                buttonWidth:rect?.width,buttonHeight:rect?.height});
               if(!native.shown || native.x<=-10000 || !moving.length || !button?.isConnected || button.disabled || button.closest('[inert]') || !rect?.width || !rect.height){
                 if(performance.now()<until)requestAnimationFrame(close);
                 return;
@@ -95,6 +143,9 @@ fn interrupt_width(ctx: &mut Ctx) -> Result {
             requestAnimationFrame(close);
           };
           shell.addEventListener('transitionrun',observe);
+          window.__widthStopClose=()=>shell.removeEventListener('transitionrun',observe);
+          window.__widthRecord('listener-installed');
+          window.__widthRecord('before-browser');
         })()"#)?;
         if width < 900 {
             page.press("Control+Shift+B")?;
@@ -102,7 +153,7 @@ fn interrupt_width(ctx: &mut Ctx) -> Result {
             page.click(&css(".pane-site"))?;
         }
         if let Err(error) = page.wait_for("the browser to close in an observed intermediate width frame", "!!window.__interruptClick") {
-            let state = page.eval("({preparation:window.__interruptPreparation,click:window.__interruptClick,shell:document.querySelector('.shell')?.className,viewport:innerWidth})").unwrap_or(Value::Null);
+            let state = page.eval("({preparation:window.__interruptPreparation,click:window.__interruptClick,shell:document.querySelector('.shell')?.className,viewport:innerWidth,widthDiagnostic:window.__widthFinish(true)})").unwrap_or(Value::Null);
             return Err(format!("{error}; observed preparation: {state}"));
         }
         page.wait_for("the interrupted pane to release its actual content", "!document.querySelector('.site-address')")?;
@@ -116,7 +167,7 @@ fn interrupt_width(ctx: &mut Ctx) -> Result {
         )?;
         page.eval("new Promise(resolve=>setTimeout(resolve,700))")?;
         let trace = page.eval("window.__interruptTrace")?;
-        let preparation = page.eval("window.__interruptPreparation")?;
+        let preparation = page.eval("({...window.__interruptPreparation,widthDiagnostic:window.__widthFinish(false)})")?;
         std::fs::create_dir_all(&ctx.paths.shots).map_err(|e| e.to_string())?;
         std::fs::write(
             ctx.paths.shots.join(format!("browser-interrupted-close-{width}.json")),
