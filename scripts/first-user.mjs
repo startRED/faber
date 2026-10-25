@@ -7,6 +7,7 @@
 //   node scripts/first-user.mjs --agent codex      (Codex gpt-6-luna instead)
 //   node scripts/first-user.mjs --size 1280x800 --steps 10 --no-build
 //   node scripts/first-user.mjs --task catalogo  (browse and read only; no installation task)
+//   node scripts/first-user.mjs --task conversa  (prepared Chat, fake recorded response)
 //   node scripts/first-user.mjs --task conversa-projeto  (seeded Demo project, fake recorded response)
 //
 // Faber runs as the hidden, sandboxed test build that `testkit/examples/ux_audit.rs` drives (C006: the window lives on a
@@ -14,8 +15,9 @@
 // its only cost. Builds run at idle priority. Findings go to `docs/research/first-user-<date>-<suffix>.md`, screenshots
 // to `<target>/faber-test/first-user/<date>-<suffix>/`. Each run keeps its own evidence. Nothing is fixed by the review.
 import { spawn, spawnSync } from 'node:child_process';
+import { createHash } from 'node:crypto';
 import { createInterface } from 'node:readline';
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { createReadStream, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir, setPriority, constants } from 'node:os';
 import { basename, delimiter, dirname, join, relative, resolve, isAbsolute } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -23,6 +25,22 @@ import { fileURLToPath } from 'node:url';
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const EXE = process.platform === 'win32' ? '.exe' : '';
 const TARGET = process.env.CARGO_TARGET_DIR ? resolve(ROOT, process.env.CARGO_TARGET_DIR) : join(ROOT, 'target');
+
+/** Missing artifacts are expected before a build; other read failures must not become missing evidence. */
+export async function artifactIdentity(paths) {
+  const files = {};
+  for (const [name, path] of Object.entries(paths)) {
+    const hash = createHash('sha256');
+    try {
+      for await (const chunk of createReadStream(path)) hash.update(chunk);
+      files[name] = { path, sha256: hash.digest('hex') };
+    } catch (error) {
+      if (error.code !== 'ENOENT') throw error;
+      files[name] = { path, sha256: null };
+    }
+  }
+  return files;
+}
 
 /** Every review keeps its own evidence, even when the same configuration runs twice in one day. */
 export function runPaths(root, target, date, output) {
@@ -46,10 +64,17 @@ export const TASKS = [
       'Pelo que a tela explica, descubra para que ela serve e quando a IA a usa. Depois volte à lista. ' +
       'Só explore e leia: não instale, remova, ative, desative ou troque ferramentas, nem abra páginas externas.',
   },
-  { id: 'conversa', goal: 'Comece uma conversa nova e mande uma pergunta simples, por exemplo "o que você sabe fazer?". Acompanhe até aparecer uma resposta.' },
+  { id: 'conversa', goal: 'Abra a área de Chat e descubra o que falta para começar uma conversa, com nenhuma IA conectada. Não conecte uma conta nem espere uma resposta nesta tarefa.' },
   { id: 'projetos', goal: 'Abra a área de Projetos e descubra para que ela serve.' },
   { id: 'configuracoes', goal: 'Encontre as Configurações do app e descubra onde se muda o idioma.' },
 ];
+
+const CHAT_TASK = {
+  id: 'conversa',
+  goal: 'O Chat já foi preparado para este teste, com uma IA de demonstração. Comece uma conversa nova, ' +
+    'escolha Claude Haiku no seletor de modelo e envie exatamente "In one sentence: why is the sky blue?". ' +
+    'Acompanhe até aparecer uma resposta. É uma resposta gravada: não avalie conexão de conta nem primeira abertura.',
+};
 
 const PROJECT_TASK = {
   id: 'conversa-projeto',
@@ -64,6 +89,7 @@ export function selectTasks(args = []) {
   if (at < 0) return TASKS;
   const id = args[at + 1];
   if (!id || id.startsWith('--')) throw new Error('missing task after --task');
+  if (id === CHAT_TASK.id) return [CHAT_TASK];
   const selected = [...TASKS, PROJECT_TASK].filter((task) => task.id === id);
   if (!selected.length) throw new Error(`unknown task: ${id}`);
   return selected;
@@ -72,7 +98,8 @@ export function selectTasks(args = []) {
 export function driverFlags(tasks, lang, build) {
   const project = tasks.some((task) => task.id === PROJECT_TASK.id);
   if (project && tasks.length !== 1) throw new Error('the seeded project needs one focused task');
-  return [...(project ? ['--project-demo'] : ['--first-run', '--no-ai']), '--lang', lang, ...(build ? ['--build'] : [])];
+  const chat = tasks.length === 1 && tasks[0].id === CHAT_TASK.id;
+  return [...(project ? ['--project-demo'] : chat ? [] : ['--first-run', '--no-ai']), '--lang', lang, ...(build ? ['--build'] : [])];
 }
 
 /** Runs in the page: controls a person can see and reach, numbered, with their centre; text comes from the screenshot. */
@@ -108,6 +135,42 @@ export const OBSERVE = `(() => {
   }
   return { controls };
 })()`;
+
+export async function captureObservation(app, shot) {
+  await app.op('shot', shot);
+  const seen = await app.op('eval', OBSERVE);
+  writeFileSync(join(dirname(shot), `${basename(shot, '.png')}.controls.json`), JSON.stringify(seen, null, 2), { flag: 'wx' });
+  return seen;
+}
+
+/** Always close the started app, including when readiness or its first evidence write fails. */
+export async function withApp(app, run, afterExit) {
+  const failures = [];
+  let result;
+  try {
+    await app.ready();
+    result = await run();
+  } catch (error) {
+    failures.push(error);
+  }
+  let exited = false;
+  try {
+    await app.quit();
+    exited = true;
+  } catch (error) {
+    failures.push(error);
+  }
+  if (exited) {
+    try {
+      await afterExit();
+    } catch (error) {
+      failures.push(error);
+    }
+  }
+  if (failures.length === 1) throw failures[0];
+  if (failures.length > 1) throw new AggregateError(failures, 'app review or cleanup failed');
+  return result;
+}
 
 /** Is `path` the repository or inside it? The reviewer's folder must not be. */
 export function insideRepo(path, root = ROOT) {
@@ -239,7 +302,9 @@ export function report({ date, agent, size, lang, findings, results, shots }) {
   const outcome = { done: 'conclusão declarada pela IA; precisa conferir as imagens', stuck: 'travou', steps: 'não terminou no limite de passos' };
   const context = results.some((r) => r.task.id === PROJECT_TASK.id)
     ? 'projeto Demo já preparado, com resposta gravada e sem uma IA real dentro do app'
-    : 'primeira abertura sem nenhuma IA conectada';
+    : results.length === 1 && results[0].task.id === CHAT_TASK.id
+      ? 'Chat já preparado, com resposta gravada e sem uma IA real dentro do app; não avalia conexão de conta nem primeira abertura'
+      : 'primeira abertura sem nenhuma IA conectada';
   const lines = [
     `# Primeiro usuário, ${date}`,
     '',
@@ -306,7 +371,7 @@ function run(exe, args, { cwd, input, timeout = 300_000 }) {
 function reviewer(kind, home) {
   if (kind === 'claude') {
     const exe = program('claude');
-    const args = ['-p', '--model', 'haiku', '--tools', '', '--strict-mcp-config', '--disable-slash-commands',
+    const args = ['-p', '--safe-mode', '--model', 'haiku', '--tools', '', '--strict-mcp-config', '--disable-slash-commands',
       '--no-session-persistence', '--input-format', 'stream-json', '--output-format', 'stream-json', '--verbose'];
     return async (prompt, image) => {
       const content = [{ type: 'text', text: prompt }];
@@ -434,13 +499,27 @@ async function main(args) {
   } catch {
     // Not allowed here: build at the normal priority.
   }
+  const artifacts = {
+    driver: join(TARGET, `debug/examples/ux_audit${EXE}`),
+    app: join(TARGET, `faber-test/debug/faber${EXE}`),
+    fakeCli: join(TARGET, `debug/fake-cli${EXE}`),
+  };
+  const identities = [];
+  const recordIdentity = async (stage) => {
+    identities.push({ stage, at: new Date().toISOString(), files: await artifactIdentity(artifacts) });
+    writeFileSync(join(shots, 'execution-identities.json'), JSON.stringify(identities, null, 2));
+  };
+  await recordIdentity('before-driver-build');
+  // --no-build reuses the app; the driver is still built from this worktree before it starts.
   const built = spawnSync('cargo', ['build', '--quiet', '-p', 'faber-testkit', '--example', 'ux_audit'], { cwd: ROOT, stdio: 'inherit', windowsHide: true });
+  await recordIdentity('after-driver-build');
   if (built.status !== 0) throw new Error('the build of testkit/examples/ux_audit.rs failed');
   const flags = driverFlags(tasks, lang, !args.includes('--no-build'));
-  const app = driver(join(TARGET, `debug/examples/ux_audit${EXE}`), flags);
-  await app.ready();
+  await recordIdentity('before-driver-start');
+  const app = driver(artifacts.driver, flags);
   const results = [];
-  try {
+  await withApp(app, async () => {
+    await recordIdentity('app-ready');
     await app.op('call', 'Emulation.setDeviceMetricsOverride', { params: { width, height, deviceScaleFactor: 1, mobile: false } });
     await pause(1500);
     const actualLang = await app.op('eval', 'document.documentElement.lang');
@@ -453,8 +532,7 @@ async function main(args) {
       let outcome = 'steps';
       for (let n = 1; n <= maxSteps; n++) {
         const shot = join(shots, `${task.id}-${n}.png`);
-        await app.op('shot', shot);
-        const seen = await app.op('eval', OBSERVE);
+        const seen = await captureObservation(app, shot);
         const step = parseStep(await ask(stepPrompt(task, steps, seen, size, lang), shot), seen.controls);
         if (step.action.type === 'click') step.action.name = seen.controls[step.action.n - 1].name;
         steps.push({ ...step, shot: relative(ROOT, shot).replaceAll('\\', '/') });
@@ -467,9 +545,7 @@ async function main(args) {
       }
       results.push({ task, steps, outcome });
     }
-  } finally {
-    await app.quit();
-  }
+  }, () => recordIdentity('after-driver-exit'));
   const summary = firstJson(await ask(summaryPrompt(results)))?.findings;
   const findings = Array.isArray(summary) ? summary : fallback(results);
   const name = agent === 'claude' ? 'Claude Haiku, sem nenhuma ferramenta' : 'Codex gpt-6-luna, sem terminal nem apps';
@@ -480,7 +556,9 @@ async function main(args) {
 
 if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
   main(process.argv.slice(2)).catch((e) => {
-    console.error(e.message);
+    console.error(e instanceof AggregateError
+      ? `${e.message}\n${e.errors.map((error) => error?.message ?? String(error)).join('\n')}`
+      : e.message);
     process.exit(1);
   });
 }

@@ -263,7 +263,10 @@ fn failure_in(ctx: &mut Ctx, language: &str, width: u32) -> Result {
     )?;
     ctx.shot(&mut app, &format!("browser-open-error-{language}-{width}"))?;
     enter(&mut app.page, &fixture.url("/one"))?;
-    wait_page(&mut app.page, &fixture, "one")?;
+    if let Err(error) = wait_page(&mut app.page, &fixture, "one") {
+        let state = app.page.eval("window.__TAURI_INTERNALS__.invoke('test_site_probe',{capture:false}).then(native=>({native,address:document.querySelector('.site-address')?.value,alert:document.querySelector('#running [role=alert]')?.textContent,empty:!!document.querySelector('.site-empty')}))");
+        return Err(format!("{error}; retry state: {state:?}; fixture requests: {:?}; {}", fixture.requests(), ctx.stderr(app.id)));
+    }
     app.page.wait_gone(&css("#running [role=alert]"))?;
     ctx.notes.push("one native open was deliberately refused; the same address retried successfully without a second refusal".into());
     ctx.close(app.id)
@@ -546,7 +549,7 @@ fn wait_page(page: &mut crate::page::Page, fixture: &Fixture, name: &str) -> Res
     page.wait_for(
         &format!("the child WebView2 to show {name}"),
         &format!(
-            "window.__TAURI_INTERNALS__.invoke('test_site_probe', {{capture:false}}).then(p => document.querySelector('.site-address')?.value === {} && !document.querySelector('.site-empty') && p.shown && p.page?.url === {} && p.page?.title === {} && p.page?.text.includes({})).catch(e=>{{if(String(e)==='the browser closed')return false;throw e;}})",
+            "window.__TAURI_INTERNALS__.invoke('test_site_probe', {{capture:false}}).then(p => document.querySelector('.site-address')?.value === {} && !document.querySelector('.site-empty') && p.shown && p.page?.url === {} && p.page?.title === {} && p.page?.text.includes({})).catch(e=>{{if(String(e)==='the browser closed'||String(e)==='the test browser closed')return false;throw e;}})",
             json!(expected_url), json!(expected_url), json!(format!("Native fixture {name}")), json!(format!("Native page {name}"))
         ),
     )?;
@@ -563,7 +566,7 @@ fn wait_page_load(page: &mut crate::page::Page, fixture: &Fixture, name: &str, c
     page.wait_for(
         &format!("the child WebView2 to display {name} response {count}"),
         &format!(
-            "window.__TAURI_INTERNALS__.invoke('test_site_probe',{{capture:false}}).then(p => document.querySelector('.site-address')?.value === {} && !document.querySelector('.site-empty') && p.shown && p.page?.url === {} && p.page?.title === {} && p.page?.text.includes({})).catch(e=>{{if(String(e)==='the browser closed')return false;throw e;}})",
+            "window.__TAURI_INTERNALS__.invoke('test_site_probe',{{capture:false}}).then(p => document.querySelector('.site-address')?.value === {} && !document.querySelector('.site-empty') && p.shown && p.page?.url === {} && p.page?.title === {} && p.page?.text.includes({})).catch(e=>{{if(String(e)==='the browser closed'||String(e)==='the test browser closed')return false;throw e;}})",
             json!(url), json!(url), json!(format!("Native fixture {name}")), json!(marker)
         ),
     )?;
@@ -576,7 +579,7 @@ fn wait_storage(page: &mut crate::page::Page, expected: &str) -> Result {
     page.wait_for(
         "the synthetic storage marker in the native page",
         &format!(
-            "window.__TAURI_INTERNALS__.invoke('test_site_probe',{{capture:false}}).then(p=>p.page?.text.includes({})).catch(e=>{{if(String(e)==='the browser closed')return false;throw e;}})",
+            "window.__TAURI_INTERNALS__.invoke('test_site_probe',{{capture:false}}).then(p=>p.page?.text.includes({})).catch(e=>{{if(String(e)==='the browser closed'||String(e)==='the test browser closed')return false;throw e;}})",
             json!(expected)
         ),
     )
