@@ -8,7 +8,7 @@ import { join } from 'node:path';
 import test from 'node:test';
 import { fileURLToPath } from 'node:url';
 import { covered, statusText, toCheck } from './ci-scope.mjs';
-import { areas, BATCH, conflicts, insertions, message, noCheck, refusal, settle, stacked, stackOn, WORDS, workflow } from './land.mjs';
+import { areas, BATCH, conflicts, eligibleStack, insertions, message, noCheck, refusal, settle, stacked, stackOn, WORDS, workflow } from './land.mjs';
 
 test('the commit is the title with its number, then the body without the template comments', () => {
   const body = '## What changed\n\n<!-- One or two sentences. -->\nFragments.   \n\n\n\n## Cost\n\n<!-- Memory.\n     More. -->\nNone.\n';
@@ -135,6 +135,28 @@ test('a change is checked on top of the deepest queued batch that touches other 
   assert.equal(stackOn([q('f', ['ui/A.tsx'], 1)], ['.github/workflows/ci.yml']), null, 'a workflow change lands from a PC, alone');
   assert.equal(stackOn([q('g', ['.github/workflows/ci.yml'], 1)], ['ui/B.tsx']), null, 'and nothing is built on one');
   assert.equal(stackOn([q('h', ['docs/a.md', 'ui/locales/en.ts'], 1)], ['ui/locales/en.ts', 'engine/src/a.rs'])?.commit, 'h', 'shared words do not keep two apart');
+});
+
+test('an already ineligible deeper batch is skipped while an active shallower batch remains usable', () => {
+  const queued = [
+    { commit: 'valid-shallow', files: ['engine/src/x.rs'], depth: 1, red: false, eligible: true },
+    { commit: 'closed-deep', files: ['engine/src/x.rs', 'ui/A.tsx'], depth: 2, red: false, eligible: false },
+  ];
+  assert.equal(stackOn(queued, ['scripts/land.mjs'])?.commit, 'valid-shallow');
+  assert.equal(stackOn([{ ...queued[0], eligible: false }], ['scripts/land.mjs']), null);
+});
+
+test('a stacked batch is eligible only while every parent is open, unchanged, queued and green', () => {
+  const batch = [{ commit: 'a', pr: '1', oid: 'head-a' }, { commit: 'b', pr: '2', oid: 'head-b' }];
+  const open = { state: 'OPEN', isDraft: false, baseRefName: 'phase-1-base', isCrossRepository: false };
+  const views = { 1: { ...open, headRefOid: 'head-a' }, 2: { ...open, headRefOid: 'head-b' } };
+  assert.equal(eligibleStack(batch, views, { 1: 'a', 2: 'b' }, new Set()), true);
+  assert.equal(eligibleStack(batch, { ...views, 2: { ...views[2], state: 'CLOSED' } }, { 1: 'a', 2: 'b' }, new Set()), false);
+  assert.equal(eligibleStack(batch, { ...views, 2: { ...views[2], headRefOid: 'pushed-again' } }, { 1: 'a', 2: 'b' }, new Set()), false);
+  assert.equal(eligibleStack(batch, views, { 1: 'a', 2: 'requeued' }, new Set()), false);
+  assert.equal(eligibleStack(batch, views, { 1: 'a', 2: 'b' }, new Set(['a'])), false);
+  assert.equal(eligibleStack(batch, { ...views, 2: null }, { 1: 'a', 2: 'b' }, new Set()), false, 'unknown remote state fails closed');
+  assert.equal(eligibleStack(batch, { ...views, 2: {} }, { 1: 'a', 2: 'b' }, new Set()), false, 'incomplete remote state fails closed');
 });
 
 test('a batch is read oldest first from the log, and a commit that is not a landed pull request stops it', () => {

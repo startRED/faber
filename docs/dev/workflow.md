@@ -52,6 +52,8 @@ yet (its first folders, leaving out the words, the locales and `docs/`, which ev
 numbered on top of that queue commit instead of the base, up to three deep and never with a workflow change. One run
 then checks them together, and when it is green the land job (`land.mjs --land`) moves every branch of the batch to
 its own commit and phase-1-base to the top one, so all of them show merged; the runs under it find themselves landed.
+Before selecting a queued batch, `land.mjs` skips it if any pull request under it is already closed, retargeted, pushed
+again, requeued, or red; the landing job checks again after the suites to catch changes made during the run.
 One under it that was queued again, closed, pushed again or turned red, or a base that moved, sends the top one back to
 be squashed alone. A red batch blames nobody yet: the report job (`land.mjs --split`) queues the top one again alone,
 and each side then answers for itself, so the one whose own run is red is the culprit and gets the red `queue` status.
