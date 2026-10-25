@@ -252,6 +252,30 @@ fn failure_in(ctx: &mut Ctx, language: &str, width: u32) -> Result {
     let (mut app, fixture) = open_browser_in(ctx, language)?;
     app.page.eval(&format!("window.__TAURI_INTERNALS__.invoke('test_host_size',{{width:{width},height:800}})"))?;
     app.page.wait_for("the native host width", &format!("innerWidth==={width} && innerHeight===800"))?;
+    // Trace only this synthetic fixture's address actions; keep the original commands, results and timing.
+    app.page.eval(
+        r#"(() => {
+        const trace = window.__browserRetryTrace = [];
+        const record = (entry) => { if (trace.length < 80) trace.push(entry); };
+        for (const type of ['input', 'keydown', 'keyup', 'focusin', 'focusout']) {
+            document.addEventListener(type, e => {
+                if (!e.target?.matches?.('.site-address')) return;
+                record({type, key:e.key, value:e.target.value, trusted:e.isTrusted,
+                    focused:document.activeElement===e.target});
+            }, true);
+        }
+        const internals = window.__TAURI_INTERNALS__, invoke = internals.invoke;
+        internals.invoke = function(command, args, ...rest) {
+            if (command !== 'site_go') return invoke.call(this, command, args, ...rest);
+            const entry = {type:'site_go', args};
+            record(entry);
+            const result = invoke.call(this, command, args, ...rest);
+            result.then(value => { entry.result=value; }, error => { entry.error=String(error); });
+            return result;
+        };
+        return true;
+    })()"#,
+    )?;
     // A failed native open is injected at the command boundary, not presented as a real network failure.
     app.page.eval("window.__TAURI_INTERNALS__.invoke('test_site_refuse_once')")?;
     enter(&mut app.page, &fixture.url("/one"))?;
@@ -265,9 +289,15 @@ fn failure_in(ctx: &mut Ctx, language: &str, width: u32) -> Result {
     enter(&mut app.page, &fixture.url("/one"))?;
     if let Err(error) = wait_page(&mut app.page, &fixture, "one") {
         let state = app.page.eval("window.__TAURI_INTERNALS__.invoke('test_site_probe',{capture:false}).then(native=>({native,address:document.querySelector('.site-address')?.value,alert:document.querySelector('#running [role=alert]')?.textContent,empty:!!document.querySelector('.site-empty')}))");
-        return Err(format!("{error}; retry state: {state:?}; fixture requests: {:?}; {}", fixture.requests(), ctx.stderr(app.id)));
+        let trace = app.page.eval("window.__browserRetryTrace");
+        return Err(format!(
+            "{error}; retry state: {state:?}; address trace: {trace:?}; fixture requests: {:?}; {}",
+            fixture.requests(),
+            ctx.stderr(app.id)
+        ));
     }
     app.page.wait_gone(&css("#running [role=alert]"))?;
+    ctx.notes.push(format!("synthetic browser retry address trace: {}", app.page.eval("window.__browserRetryTrace")?));
     ctx.notes.push("one native open was deliberately refused; the same address retried successfully without a second refusal".into());
     ctx.close(app.id)
 }
