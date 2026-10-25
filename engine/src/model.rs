@@ -921,6 +921,9 @@ pub struct Conversation {
     /// cannot start conversations of its own.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub started_by: Option<String>,
+    /// Its latest completion still needs a place in its parent's bounded inbox.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub pending_parent_report: bool,
     /// The project whose standing goal this conversation fixes, or whose goal fix started it: such a conversation is held to the
     /// project's day of money (`engine/goals.rs`) for as long as it lives, whatever becomes of the goal's own pointer.
     #[serde(default, skip_serializing_if = "Option::is_none")]

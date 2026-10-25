@@ -418,6 +418,8 @@ struct Core {
     me: Weak<Mutex<Core>>,
     /// Conversations in use, the source of truth while the app runs; every change is written through to disk.
     convs: HashMap<String, Conversation>,
+    /// Only the ids of durable child notices waiting for room, never another queue of report text.
+    parent_reports: HashMap<String, HashSet<String>>,
     /// Runs git for the copies of project conversations (R201), given by the shell; without it they work in the folder.
     git: Option<copies::GitRunner>,
     /// Faber's own browser (R161 step 7), given by the shell where it has one; without it the tool is not offered.
@@ -598,6 +600,7 @@ impl Engine {
         let runtime = opts.runtime.clone();
         let pr_reader = gh_reader(&opts.data_dir);
         let rewind = rewind::State::new(&opts.data_dir);
+        let parent_reports = Core::restore_parent_reports(&store);
         let core = Arc::new_cyclic(|me| {
             Mutex::new(Core {
                 catalog_store: Some(catalog_store),
@@ -615,6 +618,7 @@ impl Engine {
                 emit,
                 me: me.clone(),
                 convs: HashMap::new(),
+                parent_reports,
                 live: HashMap::new(),
                 installing: false,
                 compacts: HashMap::new(),
@@ -690,6 +694,11 @@ impl Engine {
         let _ = search.start();
         let engine = Engine { core, runtime };
         engine.recover_rewind();
+        engine.with(|c| {
+            for parent in c.parent_reports.keys().cloned().collect::<Vec<_>>() {
+                c.refill_parent_reports(&parent);
+            }
+        });
         engine
     }
 
@@ -3028,6 +3037,7 @@ impl Core {
     }
 
     fn emit_queue(&mut self, conv: &str) {
+        self.refill_parent_reports(conv);
         if let Some(c) = self.convs.get(conv) {
             (self.emit)(AppEvent::Queue { conversation_id: conv.to_string(), queued: c.queued.clone() });
         }
@@ -4247,6 +4257,7 @@ impl Core {
             allow_always_epochs: BTreeMap::new(),
             branch_of: None,
             started_by: None,
+            pending_parent_report: false,
             goal_fix: None,
             spent_usd: 0.0,
             estimate: None,

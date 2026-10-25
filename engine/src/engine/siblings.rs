@@ -36,6 +36,40 @@ fn state_of(busy: bool, c: &Conversation) -> State {
 }
 
 impl Core {
+    pub(super) fn restore_parent_reports(store: &Store) -> HashMap<String, HashSet<String>> {
+        let mut pending: HashMap<String, HashSet<String>> = HashMap::new();
+        for id in store.mentioning("\"pendingParentReport\"") {
+            if let Some(c) = store.get(&id).filter(|c| c.pending_parent_report)
+                && let Some(parent) = c.started_by
+            {
+                pending.entry(parent).or_default().insert(id);
+            }
+        }
+        pending
+    }
+
+    pub(super) fn refill_parent_reports(&mut self, parent: &str) {
+        if !self.parent_reports.contains_key(parent) {
+            return;
+        }
+        if self.load(parent).is_none_or(|c| c.queued.len() >= MAX_QUEUED) {
+            return;
+        }
+        // Remove the batch while sending: emit_queue can reenter here after each admitted report.
+        let pending = self.parent_reports.remove(parent).unwrap_or_default();
+        for child in pending {
+            if self.convs.get(parent).is_none_or(|c| c.queued.len() >= MAX_QUEUED) {
+                self.parent_reports.entry(parent.into()).or_default().insert(child);
+                continue;
+            }
+            self.load(&child);
+            self.tell_parent(&child);
+            if self.convs.get(&child).is_some_and(|c| c.pending_parent_report) {
+                self.parent_reports.entry(parent.into()).or_default().insert(child);
+            }
+        }
+    }
+
     /// The agent called the conversation tool. Every call is answered at once, with why when nothing was done.
     pub(super) fn conversation_call(&mut self, conv: &str, call: String, input: serde_json::Value) {
         let Some(sid) = self.live.get(conv).map(|l| l.sid) else { return };
@@ -229,14 +263,51 @@ impl Core {
         if c.keep_going.is_some() || state == State::Working || state == State::Waiting {
             return;
         }
-        let last = c.messages.iter().rev().find(|m| m.role == Role::Assistant).map(Message::said).unwrap_or_default();
+        let reply = c.messages.iter().rev().find(|m| m.role == Role::Assistant);
+        let report_id = format!("report-{conv}-{}", reply.map_or("empty", |m| m.id.as_str()));
+        let last = reply.map(Message::said).unwrap_or_default();
         let text = sibling::finished(&c.title, conv, state, &last);
         if self.load(&parent).is_none_or(|p| p.archived_at.is_some()) {
+            self.finish_parent_report(conv, &parent);
+            return;
+        }
+        let p = &self.convs[&parent];
+        if p.queued.iter().any(|q| q.id == report_id) || p.messages.iter().any(|m| m.id == report_id) {
+            if self.try_save(&parent).is_ok() {
+                self.finish_parent_report(conv, &parent);
+            }
+            return;
+        }
+        if p.queued.len() >= MAX_QUEUED {
+            self.convs.get_mut(conv).expect("child exists").pending_parent_report = true;
+            self.save(conv);
+            self.parent_reports.entry(parent).or_default().insert(conv.into());
             return;
         }
         // A report the day's money refuses is not lost without a word: the parent's latest reply says the limit is why.
-        if self.send_by_itself(&parent, text, Wake::of("wake.childDone")).is_err_and(|e| e == goals::CAP) {
+        if self.send_by_itself_with_id(&parent, text, Wake::of("wake.childDone"), report_id.clone()).is_err_and(|e| e == goals::CAP) {
             self.goal_capped(&parent);
+        }
+        if self
+            .convs
+            .get(&parent)
+            .is_some_and(|p| p.queued.iter().any(|q| q.id == report_id) || p.messages.iter().any(|m| m.id == report_id))
+            && self.try_save(&parent).is_ok()
+        {
+            self.finish_parent_report(conv, &parent);
+        }
+    }
+
+    fn finish_parent_report(&mut self, child: &str, parent: &str) {
+        if let Some(c) = self.convs.get_mut(child).filter(|c| c.pending_parent_report) {
+            c.pending_parent_report = false;
+            self.save(child);
+        }
+        if let Some(pending) = self.parent_reports.get_mut(parent) {
+            pending.remove(child);
+            if pending.is_empty() {
+                self.parent_reports.remove(parent);
+            }
         }
     }
 

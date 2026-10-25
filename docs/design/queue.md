@@ -5,7 +5,14 @@
   need no manual send. If work stopped or delivery was refused, the line keeps Remove and Send now so the person can
   discard or explicitly resume it. They join
   the running turn automatically when none of its tools is open, or at its next step boundary; Stop, queue order,
-  subscription and quota limits still apply. Other automatic continuations keep waiting for their own turn.
+  subscription and quota limits still apply. A message received after Stop stays here even when the conversation
+  is idle and its queue was empty; only an explicit resume can start it. A completion report refused before its turn can start stays in this
+  same queue with its origin and words intact. Refused questions still fail without leaving a duplicate retry.
+  A full inbox keeps a pending notice on the child instead of discarding its completion. When a slot opens,
+  the latest answer enters behind the messages already waiting; reopening Faber also retries notices with room.
+  A stable child/reply id prevents duplicate notices after an interrupted save. The inbox keeps its ten-message
+  limit, and a child has at most one pending notice while its full answers stay in its conversation.
+  Other automatic continuations keep waiting for their own turn.
 - A queued chip keeps its badge, words and attachments. Edit uses the same quiet text button as Remove and Send now;
   while editing, a small text box replaces only the words and Save and Cancel replace the actions. Enter saves,
   Shift+Enter adds a line and Escape cancels from any control in the editor form; composition input never saves or

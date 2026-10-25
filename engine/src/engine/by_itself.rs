@@ -10,6 +10,10 @@ impl Core {
     /// own messages wait, it joins the queue behind them. Agent coordination enters the running turn at a safe step;
     /// other continuations wait for their own turn. Otherwise it starts now, subject to subscription and quota.
     pub(super) fn send_by_itself(&mut self, conv: &str, text: String, wake: Wake) -> Result<(), String> {
+        self.send_by_itself_with_id(conv, text, wake, new_id())
+    }
+
+    pub(super) fn send_by_itself_with_id(&mut self, conv: &str, text: String, wake: Wake, id: String) -> Result<(), String> {
         self.load(conv).ok_or("error.conversationGone")?;
         // A goal's fix, or a conversation its agent started, does not go on by itself once the project's day is out of money
         // (the approval of a plan is the person's own, and goes on). The caller treats it like any refusal: the person decides.
@@ -20,9 +24,13 @@ impl Core {
         let c = self.load(conv).ok_or("error.conversationGone")?;
         let choice = c.choice.clone().unwrap_or(Choice { vendor: "auto".into(), model: None, effort: None });
         let coordination = matches!(wake.why.as_str(), "wake.asked" | "wake.childDone");
-        let item = QueuedTurn { id: new_id(), text, images: None, attachments: None, choice, at: now(), sending: false, wake: Some(wake) };
+        let item = QueuedTurn { id, text, images: None, attachments: None, choice, at: now(), sending: false, wake: Some(wake) };
         // Faber's checks of the last reply count as a turn that runs (`verifying.rs`).
-        if busy || !c.queued.is_empty() || verifying::checking(c) || c.messages.last().is_some_and(|m| m.status == Some(Status::Streaming))
+        if busy
+            || c.stopped
+            || !c.queued.is_empty()
+            || verifying::checking(c)
+            || c.messages.last().is_some_and(|m| m.status == Some(Status::Streaming))
         {
             if c.queued.len() >= MAX_QUEUED {
                 return Err("error.queueFull".into());
@@ -43,9 +51,11 @@ impl Core {
             return Ok(());
         }
         let id = item.id.clone();
+        let report = item.wake.as_ref().is_some_and(|w| w.why == "wake.childDone");
         let sent = self.dispatch_queued(conv, item);
-        // A message nobody could answer goes back to the queue; one Faber wrote is dropped instead of waiting there.
+        // A completion has no caller to retry it; other refused wakes are dropped so a caller's retry cannot duplicate them.
         if sent.is_err()
+            && !report
             && let Some(c) = self.convs.get_mut(conv)
             && c.queued.iter().any(|q| q.id == id)
         {
@@ -61,6 +71,195 @@ impl Core {
 mod tests {
     use super::*;
     use crate::events::{Session, SessionCommand};
+
+    #[tokio::test]
+    async fn a_child_report_retries_after_a_full_parent_inbox_has_room() {
+        let dir = tempfile::tempdir().unwrap();
+        let (engine, _) = super::super::answer::tests::engine(dir.path());
+        let parent = super::super::answer::tests::seed(&engine, Session::from_fn(|_| {}), &[("parent", &[])]);
+        let child = super::super::answer::tests::seed(&engine, Session::from_fn(|_| {}), &[("child", &[])]);
+        engine.with(|core| {
+            core.live.clear();
+            let c = core.convs.get_mut(&parent).unwrap();
+            c.stopped = true;
+            c.messages.last_mut().unwrap().status = Some(Status::Done);
+            for i in 0..MAX_QUEUED {
+                c.queued.push(QueuedTurn {
+                    id: format!("queued-{i}"),
+                    text: format!("Person's message {i}"),
+                    images: None,
+                    attachments: None,
+                    choice: Choice { vendor: "auto".into(), model: None, effort: None },
+                    at: now(),
+                    sending: false,
+                    wake: None,
+                });
+            }
+            core.save(&parent);
+            let c = core.convs.get_mut(&child).unwrap();
+            c.started_by = Some(parent.clone());
+            let reply = c.messages.last_mut().unwrap();
+            reply.status = Some(Status::Done);
+            reply.text = "The requested documentation is saved.".into();
+            core.save(&child);
+            core.tell_parent(&child);
+            assert_eq!(core.store.get(&parent).unwrap().queued.len(), MAX_QUEUED);
+            core.remove_queued(&parent, "queued-0");
+            let saved = core.store.get(&parent).unwrap();
+            assert_eq!(saved.queued.len(), MAX_QUEUED, "the deferred report must occupy the freed slot");
+            assert!(saved.queued.last().unwrap().text.contains("The requested documentation is saved."));
+            assert_eq!(saved.queued.last().unwrap().wake.as_ref().unwrap().why, "wake.childDone");
+            assert_eq!(saved.queued[0].id, "queued-1", "existing messages keep their order");
+            assert!(core.convs[&parent].stopped, "refilling the inbox must not resume stopped work");
+            assert!(!core.store.get(&child).unwrap().pending_parent_report);
+            // A crash after the parent save but before the child receipt save leaves this stale marker.
+            core.convs.get_mut(&child).unwrap().pending_parent_report = true;
+            core.save(&child);
+            core.convs.get_mut(&parent).unwrap().queued.remove(0);
+            core.save(&parent);
+        });
+        engine.shutdown();
+        drop(engine);
+        let (engine, _) = super::super::answer::tests::engine(dir.path());
+        engine.with(|core| {
+            let saved = core.store.get(&parent).unwrap();
+            assert_eq!(saved.queued.len(), MAX_QUEUED - 1, "startup must recognize the already saved report without duplication");
+            assert_eq!(saved.queued.iter().filter(|q| q.wake.as_ref().is_some_and(|w| w.why == "wake.childDone")).count(), 1);
+            assert!(!core.store.get(&child).unwrap().pending_parent_report);
+            // A crash after saving a free slot, before refilling it, must not need another queue event.
+            core.convs.get_mut(&child).unwrap().pending_parent_report = true;
+            core.save(&child);
+            core.convs.get_mut(&parent).unwrap().queued.retain(|q| q.wake.is_none());
+            core.save(&parent);
+        });
+        engine.shutdown();
+        drop(engine);
+        let (engine, _) = super::super::answer::tests::engine(dir.path());
+        engine.with(|core| {
+            let saved = core.store.get(&parent).unwrap();
+            assert_eq!(saved.queued.len(), MAX_QUEUED - 1, "startup must retry a pending report when a slot is already free");
+            assert!(saved.queued.last().unwrap().text.contains("The requested documentation is saved."));
+            assert!(!core.store.get(&child).unwrap().pending_parent_report);
+            core.tell_parent(&child);
+            assert_eq!(
+                core.store.get(&parent).unwrap().queued.len(),
+                saved.queued.len(),
+                "a repeated completion must not duplicate the notice"
+            );
+        });
+        engine.shutdown();
+    }
+
+    #[tokio::test]
+    async fn automatic_messages_hold_after_stop_even_when_the_conversation_is_idle() {
+        for (why, status) in [("wake.asked", Status::Done), ("wake.childDone", Status::Stopped), ("wake.keepGoing", Status::Error)] {
+            let dir = tempfile::tempdir().unwrap();
+            let (engine, _) = super::super::answer::tests::engine(dir.path());
+            let id = super::super::answer::tests::seed(&engine, Session::from_fn(|_| {}), &[("reply", &[])]);
+            engine.with(|core| {
+                core.live.clear();
+                core.opts.clis.insert(Vendor::Claude, Cli { command: "claude".into(), prefix: vec![] });
+                core.ledger.claude.billing = Billing::Subscription;
+                let c = core.convs.get_mut(&id).unwrap();
+                c.stopped = true;
+                c.messages.last_mut().unwrap().status = Some(status);
+                assert_eq!(core.send_by_itself(&id, "Synthetic held message".into(), Wake::of(why)), Ok(()));
+                core.drain(&id);
+                let saved = core.store.get(&id).unwrap();
+                assert!(core.convs[&id].stopped, "{why} must keep the live Stop state");
+                assert_eq!(saved.messages.len(), 2, "{why} must not start another turn after Stop");
+                assert_eq!(saved.queued.len(), 1, "{why} stays available for the person's explicit resume");
+                assert_eq!(saved.queued[0].text, "Synthetic held message");
+                assert_eq!(saved.queued[0].wake.as_ref().unwrap().why, why);
+                assert!(!saved.queued[0].sending);
+            });
+            engine.shutdown();
+        }
+    }
+
+    #[tokio::test]
+    async fn an_explicit_plan_approval_starts_once_after_stop_in_an_idle_conversation() {
+        let dir = tempfile::tempdir().unwrap();
+        let (engine, _) = super::super::answer::tests::engine(dir.path());
+        let id = super::super::answer::tests::seed(&engine, Session::from_fn(|_| {}), &[("reply", &[])]);
+        engine.with(|core| {
+            core.live.clear();
+            core.opts.clis.insert(Vendor::Claude, Cli { command: "claude".into(), prefix: vec![] });
+            core.ledger.claude.billing = Billing::Subscription;
+            let c = core.convs.get_mut(&id).unwrap();
+            c.stopped = true;
+            c.messages.last_mut().unwrap().status = Some(Status::Stopped);
+            core.send_by_itself(&id, "Go ahead with the plan.".into(), Wake::of("wake.approvedPlan")).unwrap();
+            core.drain(&id);
+            let saved = core.store.get(&id).unwrap();
+            assert!(!core.convs[&id].stopped);
+            assert!(saved.queued.is_empty());
+            assert_eq!(saved.messages.len(), 4, "the person's approval starts exactly one turn");
+            assert_eq!(saved.messages[2].wake.as_ref().unwrap().why, "wake.approvedPlan");
+        });
+        engine.shutdown();
+    }
+
+    #[tokio::test]
+    async fn refused_questions_and_continuations_do_not_leave_hidden_retries() {
+        for why in ["wake.asked", "wake.keepGoing", "wake.approvedPlan"] {
+            let dir = tempfile::tempdir().unwrap();
+            let (engine, _) = super::super::answer::tests::engine(dir.path());
+            let id = super::super::answer::tests::seed(&engine, Session::from_fn(|_| {}), &[("reply", &[])]);
+            engine.with(|core| {
+                core.live.clear();
+                core.convs.get_mut(&id).unwrap().messages.last_mut().unwrap().status = Some(Status::Done);
+                assert_eq!(core.send_by_itself(&id, "Synthetic refused message".into(), Wake::of(why)), Err("error.noSubscription".into()));
+                assert!(core.convs[&id].queued.is_empty(), "{why} must not retry after telling its caller it failed");
+                assert!(core.store.get(&id).unwrap().queued.is_empty());
+            });
+            engine.shutdown();
+        }
+    }
+
+    #[tokio::test]
+    async fn child_reports_survive_refused_dispatch_to_an_idle_parent() {
+        for installing in [false, true] {
+            let dir = tempfile::tempdir().unwrap();
+            let (engine, _) = super::super::answer::tests::engine(dir.path());
+            let parent = super::super::answer::tests::seed(&engine, Session::from_fn(|_| {}), &[("parent", &[])]);
+            let child = super::super::answer::tests::seed(&engine, Session::from_fn(|_| {}), &[("child", &[])]);
+            engine.with(|core| {
+                core.installing = installing;
+                core.live.clear();
+                core.convs.get_mut(&parent).unwrap().messages.last_mut().unwrap().status = Some(Status::Done);
+                let c = core.convs.get_mut(&child).unwrap();
+                c.started_by = Some(parent.clone());
+                let reply = c.messages.last_mut().unwrap();
+                reply.status = Some(Status::Done);
+                reply.text = "The requested documentation is saved.".into();
+                core.tell_parent(&child);
+                let saved = core.store.get(&parent).unwrap();
+                assert_eq!(saved.queued.len(), 1, "a refused start must not lose the completion report: installing={installing}");
+                let report = &saved.queued[0];
+                assert_eq!(report.wake.as_ref().unwrap().why, "wake.childDone");
+                assert!(report.text.contains("The requested documentation is saved."));
+                assert!(!report.sending);
+                assert_eq!(saved.messages.len(), 2, "a refused start creates no extra turn");
+                core.drain(&parent);
+                let retried = core.store.get(&parent).unwrap();
+                assert_eq!(retried.queued.len(), 1, "a still-refused retry keeps exactly one report");
+                assert_eq!(retried.queued[0].id, report.id);
+                core.installing = false;
+                core.opts.clis.insert(Vendor::Claude, Cli { command: "claude".into(), prefix: vec![] });
+                core.ledger.claude.billing = Billing::Subscription;
+                core.drain(&parent);
+                core.drain(&parent);
+                let resumed = core.store.get(&parent).unwrap();
+                assert!(resumed.queued.is_empty(), "an admitted retry consumes the saved report");
+                assert_eq!(resumed.messages.len(), 4, "the report starts exactly one turn");
+                assert_eq!(resumed.messages[2].id, report.id);
+                assert_eq!(resumed.messages[2].text, report.text);
+                assert_eq!(resumed.messages[2].wake.as_ref().unwrap().why, "wake.childDone");
+            });
+            engine.shutdown();
+        }
+    }
 
     #[tokio::test]
     async fn agent_messages_reach_the_running_turn_once_and_keep_their_origin() {
