@@ -1021,8 +1021,19 @@ export function Thread(props: Shared & { messages: Message[]; queued?: QueuedTur
       <Show when={props.conversationId} keyed>{(conversationId) =>
         <For each={queuedIds()}>{(id) => {
           const initial = props.queued!.find((q) => q.id === id)!;
-          return <Queued conversationId={conversationId} q={props.queued?.find((q) => q.id === id) ?? initial}
-            busy={props.busy ?? false} onRecovered={props.onQueuedRecovered} onError={props.onError} />;
+          const queued = () => props.queued?.find((q) => q.id === id) ?? initial;
+          const origin = () => ['wake.asked', 'wake.childDone'].includes(queued().wake?.why ?? '') ? queued().wake : undefined;
+          return <Show when={origin()} fallback={<Queued conversationId={conversationId} q={queued()}
+            busy={props.busy ?? false} onRecovered={props.onQueuedRecovered} onError={props.onError} />}>
+            {(wake) => <p class="woke"><Icon name="loop" small /><span>{fromEngine(wake().why)}</span>
+              <Show when={!queued().sending && !props.busy && props.messages.at(-1)?.status !== 'streaming'}>
+                <span class="actions">
+                  <button type="button" onClick={() => api.removeQueued(conversationId, id).catch((err) => props.onError?.(err))} aria-label={t('queue.removeLabel')}>{t('queue.remove')}</button>
+                  <button type="button" onClick={() => api.sendQueued(conversationId, id).catch((err) => props.onError?.(err))} aria-label={t('queue.sendNowLabel')}>{t('queue.sendNow')}</button>
+                </span>
+              </Show>
+            </p>}
+          </Show>;
         }}</For>
       }</Show>
       <Show when={shown() ? restore() : undefined} keyed>{(target) => <Rewind conversationId={props.conversationId} messageId={target.message.id} point={target.message.rewind} redo={target.redo} conversationNames={props.conversationNames} leaving={!open()} onClose={() => setOpen(false)} onChanged={async () => { await props.onRewind?.(); setRevision((n) => n + 1); }} />}</Show>

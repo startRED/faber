@@ -2155,6 +2155,8 @@ export const es: Messages = {
   'notes.256.better': 'La pantalla de conexión explica qué ocurre al elegir una IA y mantiene las opciones visibles en ventanas bajas.',
   'notes.257.fixed': 'Cuando Proyectos está vacío, la barra lateral explica para qué sirven las carpetas y muestra el botón para añadirlas.',
   'notes.258.fixed': 'Al cerrar la barra lateral en una ventana estrecha, termina de deslizarse en vez de desaparecer de golpe.',
+  'notes.259.fixed': 'Los mensajes de otros agentes llegan solos a tu IA y ya no aparecen como mensajes que tengas que enviar.',
+  'notes.260.fixed': 'Tu IA puede saber cuándo otra conversación no recibe su mensaje porque tiene la bandeja de entrada llena.',
   'update.checking': 'Buscando una actualización…',
   'update.downloading': 'Descargando actualización…',
   'update.downloadingPercent': 'Descargando actualización… {percent} %',

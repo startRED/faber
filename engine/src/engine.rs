@@ -3069,6 +3069,10 @@ impl Core {
     /// take it back. A live capture (Claude Code 2.1.307, Haiku) showed a line written right after a tool's result misses that
     /// step: the CLI reads it at its next step, or as a turn of its own when the answer ends there.
     fn hand_over_at_step(&mut self, conv: &str) {
+        self.hand_over_queue(conv, false);
+    }
+
+    fn hand_over_queue(&mut self, conv: &str, coordination_only: bool) {
         let Some(vendor) = self.live.get(conv).filter(|l| l.turn.is_some() && l.open_tools.is_empty()).map(|l| l.vendor.name()) else {
             return;
         };
@@ -3078,12 +3082,27 @@ impl Core {
             let finished = c.messages.last().is_some_and(|m| m.role == Role::Assistant && m.finished_at.is_some());
             let Some(pos) = c.queued.iter().position(|q| !q.sending) else { break };
             let next = &c.queued[pos];
-            // Steering waits behind nothing: one for the other AI, or one Faber wrote, keeps its place and those behind it.
+            // Agent coordination can join this turn; other continuations still need their own turn.
             if finished
                 || c.stopped
-                || next.wake.is_some()
+                || (coordination_only && next.wake.is_none())
+                || next.wake.as_ref().is_some_and(|w| !matches!(w.why.as_str(), "wake.asked" | "wake.childDone"))
                 || research::question(&next.text).is_some()
                 || ![vendor, "auto"].contains(&next.choice.vendor.as_str())
+            {
+                break;
+            }
+            if next.wake.is_some()
+                && (self.goal_out_of_money(conv)
+                    || self.live.get(conv).is_none_or(|l| {
+                        self.allows(
+                            l.vendor,
+                            l.running.as_deref().or(l.model.as_deref()).and_then(family_of),
+                            Purpose::UserTurn { by_hand: false },
+                            false,
+                        )
+                        .is_err()
+                    }))
             {
                 break;
             }
@@ -3156,6 +3175,7 @@ impl Core {
         let Some(c) = self.convs.get_mut(conv) else { return };
         let Some(pos) = c.queued.iter().position(|q| q.id == queued_id) else { return };
         let item = c.queued.remove(pos);
+        let unattended = item.wake.as_ref().is_some_and(|w| w.why != "wake.approvedPlan");
         // A reply the person stopped keeps saying so; Claude Code still answers the line it was handed (fixture `steer-stopped`).
         if let Some(m) = before.as_ref().and_then(|b| c.messages.iter_mut().find(|m| &m.id == b && m.status == Some(Status::Streaming))) {
             m.status = Some(Status::Done);
@@ -3185,12 +3205,19 @@ impl Core {
             l.answer_started = false;
             l.break_pending = false;
             l.settled = false;
+            if unattended {
+                l.by_hand = false;
+                l.approved = false;
+            }
         }
         self.listen(conv);
         // A plan limit now continues this reply, not the one the turn began in.
         if let Some(t) = self.transfers.get_mut(conv) {
             (t.reply, t.request, t.text, t.images) = (reply_id.clone(), text.clone(), text, item.images.unwrap_or_default());
             t.approved = None;
+            if unattended {
+                t.by_hand = false;
+            }
         }
         self.save(conv);
         self.list_changed();

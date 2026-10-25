@@ -2035,6 +2035,8 @@ export const en = {
   'notes.256.better': 'The connection screen explains what choosing an AI does and keeps its choices visible in short windows.',
   'notes.257.fixed': 'An empty Projects list explains how Faber uses folders and keeps Add project folder visible.',
   'notes.258.fixed': 'The sidebar finishes sliding away when you close it in a narrow window, instead of disappearing abruptly.',
+  'notes.259.fixed': 'Messages from other agents reach your AI automatically and no longer appear as messages you need to send.',
+  'notes.260.fixed': 'Your AI can tell when another conversation cannot receive its message because its inbox is full.',
   'update.checking': 'Looking for an update…',
   'update.downloading': 'Downloading update…',
   'update.downloadingPercent': 'Downloading update… {percent}%',

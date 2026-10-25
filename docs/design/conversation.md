@@ -107,6 +107,9 @@ above an answer. The window widths, the sidebar and the running column are in [l
   again. A tick that changed only the tools builds no text. Everything that reaches the page passes DOMPurify.
 
 - [Queued messages and editing](queue.md).
+- Agent-to-agent recados use that same queue with a quiet origin line while pending, never the person's message
+  bubble. During ordinary work it needs no manual send; held work keeps the queue's recovery controls. Once delivered,
+  the reply keeps the origin in its existing header mark.
 - [Branches and versions](branch.md).
 
 ## Go back before a message

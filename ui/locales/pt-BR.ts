@@ -2142,6 +2142,8 @@ export const ptBR: Messages = {
   'notes.256.better': 'A tela de conexão explica o que acontece ao escolher uma IA e mantém as opções visíveis em janelas baixas.',
   'notes.257.fixed': 'Projetos vazio deixa de esconder o próximo passo: a barra lateral explica o uso das pastas e mostra o botão pra adicionar.',
   'notes.258.fixed': 'Ao fechar a barra lateral numa janela estreita, ela termina de deslizar em vez de sumir de repente.',
+  'notes.259.fixed': 'Recados de outras IAs chegam automaticamente à sua IA e deixam de aparecer como mensagens que você precisa enviar.',
+  'notes.260.fixed': 'Sua IA consegue identificar quando outra conversa não recebe um recado porque a caixa de entrada está cheia.',
   'update.checking': 'Procurando atualização…',
   'update.downloading': 'Baixando atualização…',
   'update.downloadingPercent': 'Baixando atualização… {percent}%',

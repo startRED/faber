@@ -2155,6 +2155,8 @@ export const de: Messages = {
   'notes.256.better': 'Der Verbindungsbildschirm erklärt die KI-Auswahl und hält die Optionen auch in niedrigen Fenstern sichtbar.',
   'notes.257.fixed': 'Bei einer leeren Projektliste erklärt die Seitenleiste den Zweck der Ordner und zeigt die Schaltfläche zum Hinzufügen direkt an.',
   'notes.258.fixed': 'In schmalen Fenstern gleitet die Seitenleiste beim Schließen vollständig hinaus, statt plötzlich zu verschwinden.',
+  'notes.259.fixed': 'Nachrichten anderer Agenten kommen automatisch bei deiner KI an, ohne dass du sie selbst senden musst.',
+  'notes.260.fixed': 'Deine KI erkennt, wenn eine andere Unterhaltung ihre Nachricht wegen eines vollen Posteingangs nicht annehmen kann.',
   'update.checking': 'Suche nach einem Update…',
   'update.downloading': 'Update wird heruntergeladen…',
   'update.downloadingPercent': 'Update wird heruntergeladen… {percent} %',

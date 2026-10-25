@@ -852,8 +852,12 @@ async fn a_report_waiting_in_a_fixs_queue_is_dropped_with_a_reason_when_the_days
     let id = r.conversations().remove(0);
     let (refused, text) = tool(&mut agent, "c1", "conversation", json!({"title":"Docs","brief":"Write the docs."})).await;
     assert!(!refused, "{text}");
+    // Hold a step so the report is still unsent when the turn accounts for its cost.
+    agent.say(json!({"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","id":"toolu_hold","name":"Read","input":{"file_path":"synthetic.txt"}}]}})).await;
+    until(|| r.engine.open(&id).is_some_and(|c| c.messages.last().is_some_and(|m| m.tools.iter().flatten().any(|t| t.id == "toolu_hold"))))
+        .await;
     let mut child = support::next_pipe(&r.made).await;
-    // The child ends while the fix still works: its report waits behind the fix's turn.
+    // The child ends during that step: its report waits behind the fix's turn.
     finish(&mut child, 0.1).await;
     until(|| r.engine.open(&id).is_some_and(|c| c.queued.len() == 1)).await;
     finish(&mut agent, DAILY_CAP_USD + 0.5).await;
@@ -870,6 +874,10 @@ async fn what_the_person_queued_behind_a_dropped_report_still_goes_out() {
     let id = r.conversations().remove(0);
     let (refused, text) = tool(&mut agent, "c1", "conversation", json!({"title":"Docs","brief":"Write the docs."})).await;
     assert!(!refused, "{text}");
+    // Hold a step so neither the report nor the person's later input has been handed over.
+    agent.say(json!({"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","id":"toolu_hold","name":"Read","input":{"file_path":"synthetic.txt"}}]}})).await;
+    until(|| r.engine.open(&id).is_some_and(|c| c.messages.last().is_some_and(|m| m.tools.iter().flatten().any(|t| t.id == "toolu_hold"))))
+        .await;
     let mut child = support::next_pipe(&r.made).await;
     finish(&mut child, 0.1).await;
     until(|| r.engine.open(&id).is_some_and(|c| c.queued.len() == 1)).await;

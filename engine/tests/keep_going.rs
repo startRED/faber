@@ -1350,6 +1350,9 @@ async fn failed_turns_drain_sibling_questions_in_order_without_retrying_or_sendi
     let (engine, mut agent, id, made) = started_made(dir.path(), project.path(), &[Vendor::Claude]).await;
     let (said, error) = calls(&mut agent, "start", "conversation", json!({ "title": "Questions", "brief": "Check the docs." })).await;
     assert!(!error, "{said}");
+    // These checks exercise queued wakes after failure, not messages already handed into a safe step.
+    agent.say(json!({"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","id":"toolu_hold","name":"Read","input":{"file_path":"synthetic.txt"}}]}})).await;
+    until(&engine, &id, |c| c.messages.last().is_some_and(|m| m.tools.iter().flatten().any(|t| t.id == "toolu_hold"))).await;
     let mut sibling = next_pipe(&made).await;
     until_turns(&sibling, 1).await;
     sibling.say(json!({ "type": "system", "subtype": "init", "session_id": "questions", "model": "claude-haiku-5-5" })).await;
@@ -1481,6 +1484,9 @@ async fn wakes_that_cannot_start_fail_once_and_drain_the_remaining_wakes() {
     let (engine, mut agent, id, made) = started_made(dir.path(), project.path(), &[Vendor::Claude]).await;
     let (said, error) = calls(&mut agent, "start", "conversation", json!({ "title": "Questions", "brief": "Check the docs." })).await;
     assert!(!error, "{said}");
+    // The billing change must precede delivery, so keep the initial turn inside a step.
+    agent.say(json!({"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","id":"toolu_hold","name":"Read","input":{"file_path":"synthetic.txt"}}]}})).await;
+    until(&engine, &id, |c| c.messages.last().is_some_and(|m| m.tools.iter().flatten().any(|t| t.id == "toolu_hold"))).await;
     let mut sibling = next_pipe(&made).await;
     until_turns(&sibling, 1).await;
     sibling.say(json!({ "type": "system", "subtype": "init", "session_id": "questions", "model": "claude-haiku-5-5" })).await;
