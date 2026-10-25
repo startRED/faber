@@ -136,7 +136,9 @@ check('subagent history: a paused arrival keeps Latest inside the reader viewpor
   try {
     await settle();
     const body = root.querySelector<HTMLElement>('.side-body')!;
-    root.querySelector('.side-said')!.dispatchEvent(new WheelEvent('wheel', { deltaY: -60, bubbles: true }));
+    const wheel = new WheelEvent('wheel', { deltaY: -60, bubbles: true, cancelable: true });
+    wheel.preventDefault();
+    root.querySelector('.side-said')!.dispatchEvent(wheel);
     body.scrollTop = 0; body.dispatchEvent(new Event('scroll'));
     await settle();
     const latest = root.querySelector<HTMLButtonElement>('.toend');
