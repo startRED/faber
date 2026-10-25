@@ -143,6 +143,13 @@ fn natural_motion(ctx: &mut Ctx) -> Result {
     for _ in 0..2 {
         let samples = app.page.eval(r#"new Promise((resolve, reject) => {
           const thread = document.querySelector('.thread');
+          const main = document.querySelector('.main');
+          const opening = document.querySelector('.run-btn').getAttribute('aria-expanded') !== 'true';
+          const token = getComputedStyle(main).getPropertyValue(opening ? '--dur-ui' : '--dur-exit').trim();
+          const configured = parseFloat(token) * (token.endsWith('ms') ? 1 : token.endsWith('s') ? 1000 : 1);
+          if (!(configured > 0)) throw new Error('the column timing token must be positive');
+          const expected = Math.min(250, opening ? Math.max(150, configured) : configured);
+          let duration;
           const samples = [];
           const sample = now => {
             const view = thread.getBoundingClientRect();
@@ -154,13 +161,21 @@ fn natural_motion(ctx: &mut Ctx) -> Result {
             if (!paragraph) throw new Error('the probe must find an actually painted answer glyph');
             const range = document.createRange(); range.setStart(paragraph.firstChild, 0); range.setEnd(paragraph.firstChild, 1);
             samples.push([now, view.width, range.getBoundingClientRect().width]);
+            if (duration === undefined && Math.abs(view.width - samples[0][1]) > .01) {
+              const animation = main.getAnimations().find(a => a.effect?.getKeyframes().some(f => f.width !== undefined));
+              duration = animation?.effect.getComputedTiming().duration;
+            }
           };
           sample(performance.now()); document.querySelector('.run-btn').click();
           const started = performance.now();
-          const frame = now => { try { sample(now); if (now - started < 350) requestAnimationFrame(frame); else resolve(samples); } catch (error) { reject(error); } };
+          const frame = now => { try { sample(now); if (now - started < 350) requestAnimationFrame(frame); else resolve({samples, expected, duration, opening}); } catch (error) { reject(error); } };
           requestAnimationFrame(frame);
         })"#)?;
-        let frames = samples.as_array().ok_or("missing frame samples")?;
+        let frames = samples["samples"].as_array().ok_or("missing frame samples")?;
+        let expected = samples["expected"].as_f64().ok_or("missing column timing token")?;
+        ensure(samples["duration"].as_f64() == Some(expected), || {
+            format!("the width animation did not use its direction's timing token: {samples}")
+        })?;
         let first = frames[0][1].as_f64().unwrap();
         let last = frames.last().unwrap()[1].as_f64().unwrap();
         let glyph = frames[0][2].as_f64().unwrap();
@@ -171,22 +186,22 @@ fn natural_motion(ctx: &mut Ctx) -> Result {
             .collect();
         ctx.notes.push(format!("natural toggle: {} frames, {travel:.1}px travel", frames.len()));
         ensure(travel > 300.0 && intermediate.len() >= 4, || format!("no continuous width motion: {samples}"))?;
-        // How long the width took to travel: from the last frame still at the start to the first one at the end. A jump
-        // makes this one frame; a frame a busy runner drops at either end no longer shortens it, as timing the first and
-        // last in-between frames did.
+        let mut intervals: Vec<_> = frames.windows(2).map(|f| f[1][0].as_f64().unwrap() - f[0][0].as_f64().unwrap()).collect();
+        intervals.sort_by(f64::total_cmp);
+        let p95 = intervals[(intervals.len() as f64 * 0.95) as usize];
+        // Sampled boundaries can differ by one frame; the effect itself must still use its exact timing token above.
         let at = |f: &serde_json::Value| f[0].as_f64().unwrap();
         let left = frames.iter().rev().find(|f| (f[1].as_f64().unwrap() - first).abs() <= 0.01).map(at).unwrap();
         let arrived = frames.iter().find(|f| (f[1].as_f64().unwrap() - last).abs() <= 0.01).map(at).unwrap();
-        ensure(arrived - left >= 120.0, || format!("the width travelled in less than 120 ms: {samples}"))?;
+        ensure(arrived - left + p95 >= expected, || {
+            format!("the width travelled faster than its timing token within one sampled frame: {samples}")
+        })?;
         ensure(frames.iter().all(|f| (f[2].as_f64().unwrap() - glyph).abs() < 0.1), || {
             format!("text is horizontally stretched: {samples}")
         })?;
         ensure(frames.windows(2).all(|f| (f[1][1].as_f64().unwrap() - f[0][1].as_f64().unwrap()).abs() < travel * 0.5), || {
             format!("thread jumps between adjacent frames: {samples}")
         })?;
-        let mut intervals: Vec<_> = frames.windows(2).map(|f| f[1][0].as_f64().unwrap() - f[0][0].as_f64().unwrap()).collect();
-        intervals.sort_by(f64::total_cmp);
-        let p95 = intervals[(intervals.len() as f64 * 0.95) as usize];
         ctx.notes.push(format!("column p95 frame interval {p95:.1} ms"));
         ensure(p95 < 26.0, || format!("column motion missed the frame budget: {p95:.1} ms"))?;
     }
