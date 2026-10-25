@@ -1,5 +1,8 @@
 //! Each chat conversation has a private folder where the model runs code and creates files.
 
+#[cfg(windows)]
+pub mod relocation;
+
 use crate::model::FileInfo;
 use base64::Engine as _;
 use std::fs;

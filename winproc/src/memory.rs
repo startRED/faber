@@ -263,6 +263,15 @@ impl MemoryDirectory {
 
     /// Atomically replace the destination with this exact prepared file, even while the final reader holds it open.
     pub fn replace(&self, file: &File, target: &str) -> io::Result<()> {
+        self.rename_file(file, target, FILE_RENAME_REPLACE_IF_EXISTS | FILE_RENAME_POSIX_SEMANTICS)
+    }
+
+    /// Publish a prepared record only if its name is absent; existing authority must never be replaced.
+    pub fn publish(&self, file: &File, target: &str) -> io::Result<()> {
+        self.rename_file(file, target, 0)
+    }
+
+    fn rename_file(&self, file: &File, target: &str, flags: u32) -> io::Result<()> {
         let child = name(target)?;
         // Win32 rejects a non-null RootDirectory here. Query the verified directory handle for its volume-GUID
         // name; held ancestors pin its components, and a remapped drive letter cannot redirect the destination.
@@ -295,7 +304,7 @@ impl MemoryDirectory {
         let info = buffer.as_mut_ptr().cast::<FILE_RENAME_INFO>();
         // SAFETY: the aligned allocation holds the header and counted UTF-16 tail; both owned handles stay open.
         let success = unsafe {
-            (*info).Anonymous.Flags = FILE_RENAME_REPLACE_IF_EXISTS | FILE_RENAME_POSIX_SEMANTICS;
+            (*info).Anonymous.Flags = flags;
             (*info).RootDirectory = std::ptr::null_mut();
             (*info).FileNameLength = (wide.len() * 2) as u32;
             std::ptr::copy_nonoverlapping(wide.as_ptr(), (*info).FileName.as_mut_ptr(), wide.len());
@@ -324,6 +333,24 @@ impl MemoryDirectory {
 mod tests {
     use super::*;
     use std::io::Write;
+    #[test]
+    fn publishing_a_migration_record_never_replaces_existing_authority() {
+        let owned = tempfile::tempdir().unwrap();
+        let root = owned.path().canonicalize().unwrap();
+        let directory = MemoryDirectory::open(&root, Path::new("")).unwrap();
+        let mut first = directory.file("first.tmp", true).unwrap();
+        first.write_all(b"original authority").unwrap();
+        first.sync_all().unwrap();
+        directory.publish(&first, "record.json").unwrap();
+        drop(first);
+        let mut next = directory.file("next.tmp", true).unwrap();
+        next.write_all(b"competing authority").unwrap();
+        next.sync_all().unwrap();
+        assert!(directory.publish(&next, "record.json").is_err());
+        assert_eq!(std::fs::read(root.join("record.json")).unwrap(), b"original authority");
+        assert_eq!(std::fs::read(root.join("next.tmp")).unwrap(), b"competing authority");
+    }
+
     #[test]
     fn chat_directory_move_refuses_linked_sources_destinations_and_parents() {
         let owned = tempfile::tempdir().unwrap();
