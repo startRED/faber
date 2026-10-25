@@ -1105,6 +1105,21 @@ fn changes_memory(ctx: &mut Ctx) -> Result {
     ensure(peak <= BUDGET_MB && closed <= BUDGET_MB, || format!("{numbers}; over the {BUDGET_MB} MB budget"))
 }
 
+#[derive(Default)]
+struct VisualCloseObservation {
+    capture_on_success: bool,
+    closed: Option<f64>,
+    margin_only: bool,
+    snapshot: serde_json::Value,
+}
+
+fn preserve_visual_failure(error: String, save: impl FnOnce() -> std::io::Result<()>) -> Result {
+    if let Err(failure) = save() {
+        eprintln!("POST-FAILURE diagnostic could not be saved: {}", failure.to_string().chars().take(500).collect::<String>());
+    }
+    Err(error)
+}
+
 // Weak references prove DOM disposal; process identities and working sets show Chromium's delayed teardown separately.
 fn visual_frames_collected(
     ctx: &mut Ctx,
@@ -1113,6 +1128,18 @@ fn visual_frames_collected(
     margin_mb: f64,
     before: &[crate::proctree::ProcRow],
     what: &str,
+) -> Result<f64> {
+    visual_frames_observed(ctx, app, baseline, margin_mb, before, what, None)
+}
+
+fn visual_frames_observed(
+    ctx: &mut Ctx,
+    app: &mut Opened,
+    baseline: f64,
+    margin_mb: f64,
+    before: &[crate::proctree::ProcRow],
+    what: &str,
+    mut observation: Option<&mut VisualCloseObservation>,
 ) -> Result<f64> {
     let started = Instant::now();
     let mut closed;
@@ -1152,7 +1179,7 @@ fn visual_frames_collected(
     );
     ctx.notes.push(numbers.clone());
     let failed = !extra.is_empty() || retained != json!([]) || closed > baseline + margin_mb;
-    if failed {
+    if failed || observation.as_ref().is_some_and(|out| out.capture_on_success) {
         // These observations follow the captured failure; diagnostic errors cannot change its result.
         let capture_started = Instant::now();
         let processes = crate::proctree::private_processes(app.pid);
@@ -1161,9 +1188,28 @@ fn visual_frames_collected(
         app.page.cdp.set_deadline(previous_deadline);
         let roles = app.page.cdp.process_roles();
         ctx.notes.push(format!("POST-FAILURE ONLY: capture ended {:.3}s after predicate; owned process memory {processes:?}; heap {heap:?}; process roles {roles:?}", capture_started.elapsed().as_secs_f64()));
+        if let Some(out) = observation.as_deref_mut() {
+            let processes = match &processes {
+                Ok(rows) => {
+                    json!({ "truncated": rows.len() > 16, "rows": rows.iter().take(16).map(|(row, mb)| json!({ "pid": row.pid, "parent": row.parent, "born": row.born, "name": row.name.chars().take(80).collect::<String>(), "privateBytes": mb * 1024.0 * 1024.0 })).collect::<Vec<_>>() })
+                }
+                Err(error) => json!({ "error": error.chars().take(500).collect::<String>() }),
+            };
+            let heap = match &heap {
+                Ok(heap) => {
+                    json!({ "usedSize": heap["usedSize"], "totalSize": heap["totalSize"], "embedderHeapUsedSize": heap["embedderHeapUsedSize"], "backingStorageSize": heap["backingStorageSize"] })
+                }
+                Err(error) => json!({ "error": error.chars().take(500).collect::<String>() }),
+            };
+            out.snapshot = json!({ "closedBytes": closed * 1024.0 * 1024.0, "framesClear": retained == json!([]), "extraProcessesClear": extra.is_empty(), "processes": processes, "heap": heap });
+        }
     }
     ensure(extra.is_empty(), || format!("{numbers}; extra WebView2 processes still alive: {extra:?}\n{}", ctx.notes.join("\n")))?;
     ensure(retained == json!([]), || format!("{numbers}; retired frames must be collectible\n{}", ctx.notes.join("\n")))?;
+    if let Some(out) = observation {
+        out.closed = Some(closed);
+        out.margin_only = closed > baseline + margin_mb;
+    }
     ensure(closed <= baseline + margin_mb, || {
         format!("{numbers}; exceeds the {margin_mb} MB post-close margin after collection\n{}", ctx.notes.join("\n"))
     })?;
@@ -1416,77 +1462,124 @@ fn visual_answers_memory(ctx: &mut Ctx) -> Result {
     peak = peak.max(resized);
     same(app.page.count(&css("iframe"))?, 0, "the narrow baseline has no open visual frame")?;
     let mut previous_closed = resized;
-    for cycle in 1..=2 {
-        app.page.eval("delete document.body.dataset.visualReadyVersion;delete document.body.dataset.visualFocused;delete document.body.dataset.visualCounter;delete document.body.dataset.visualTyped;delete document.body.dataset.visualMenuBlocked")?;
-        app.page.click(&css(".visual-card .visual-open").last())?;
-        app.page.wait_visible(&css(".visual-frame"))?;
-        app.page.eval("window.__visualFrames.push(new WeakRef(document.querySelector('.visual-frame')));void 0")?;
-        // Visible belongs to the outer iframe, not its asynchronous document or that document's input listeners.
-        loads += 1;
-        app.page.wait_for(
-            "the reopened visual document to load and install its input handlers",
-            &format!("window.__visualLoads==={loads} && document.body.dataset.visualReadyVersion==='2'"),
-        )?;
-        same(app.page.eval("document.querySelector('#running').getAttribute('aria-modal')")?, json!("true"), "the 720 px pane is modal")?;
-        app.page.click(&css(".visual-frame"))?;
-        app.page.wait_for("the reopened page input to receive real mouse focus", "document.body.dataset.visualFocused==='2:INPUT'")?;
-        app.page.eval("delete document.body.dataset.visualReadyVersion;delete document.body.dataset.visualFocused;delete document.body.dataset.visualCounter;delete document.body.dataset.visualTyped")?;
-        app.page.press_on(&css(".visual-prev"), "ArrowLeft")?;
-        loads += 1;
-        app.page.wait_for(
-            "the keyboard-selected version to load its own input handlers",
-            &format!("window.__visualLoads==={loads} && document.body.dataset.visualReadyVersion==='1'"),
-        )?;
-        same(
-            app.page.eval("document.querySelector('.visual-frame')===window.__visualFrames.at(-1).deref()")?,
-            json!(true),
-            "the keyboard version switch reuses the reopened frame",
-        )?;
-        // Repeat the twenty-switch workload on the warmed browser so the 5 MB margin below also bounds retention per switch.
-        for _ in 0..10 {
-            for (control, version) in [(".visual-next", 2), (".visual-prev", 1)] {
-                loads += 1;
-                app.page.click(&css(control))?;
-                app.page.wait_for(
-                    "the warmed visual version to load in the same frame",
-                    &format!("window.__visualLoads==={loads} && document.body.dataset.visualReadyVersion==='{version}'"),
-                )?;
+    let mut first_error = None;
+    let mut post_failure = Vec::new();
+    let result = (|| -> Result {
+        for cycle in 1..=2 {
+            app.page.eval("delete document.body.dataset.visualReadyVersion;delete document.body.dataset.visualFocused;delete document.body.dataset.visualCounter;delete document.body.dataset.visualTyped;delete document.body.dataset.visualMenuBlocked")?;
+            app.page.click(&css(".visual-card .visual-open").last())?;
+            app.page.wait_visible(&css(".visual-frame"))?;
+            app.page.eval("window.__visualFrames.push(new WeakRef(document.querySelector('.visual-frame')));void 0")?;
+            // Visible belongs to the outer iframe, not its asynchronous document or that document's input listeners.
+            loads += 1;
+            app.page.wait_for(
+                "the reopened visual document to load and install its input handlers",
+                &format!("window.__visualLoads==={loads} && document.body.dataset.visualReadyVersion==='2'"),
+            )?;
+            same(
+                app.page.eval("document.querySelector('#running').getAttribute('aria-modal')")?,
+                json!("true"),
+                "the 720 px pane is modal",
+            )?;
+            app.page.click(&css(".visual-frame"))?;
+            app.page.wait_for("the reopened page input to receive real mouse focus", "document.body.dataset.visualFocused==='2:INPUT'")?;
+            app.page.eval("delete document.body.dataset.visualReadyVersion;delete document.body.dataset.visualFocused;delete document.body.dataset.visualCounter;delete document.body.dataset.visualTyped")?;
+            app.page.press_on(&css(".visual-prev"), "ArrowLeft")?;
+            loads += 1;
+            app.page.wait_for(
+                "the keyboard-selected version to load its own input handlers",
+                &format!("window.__visualLoads==={loads} && document.body.dataset.visualReadyVersion==='1'"),
+            )?;
+            same(
+                app.page.eval("document.querySelector('.visual-frame')===window.__visualFrames.at(-1).deref()")?,
+                json!(true),
+                "the keyboard version switch reuses the reopened frame",
+            )?;
+            // Repeat the twenty-switch workload on the warmed browser so the 5 MB margin below also bounds retention per switch.
+            for _ in 0..10 {
+                for (control, version) in [(".visual-next", 2), (".visual-prev", 1)] {
+                    loads += 1;
+                    app.page.click(&css(control))?;
+                    app.page.wait_for(
+                        "the warmed visual version to load in the same frame",
+                        &format!("window.__visualLoads==={loads} && document.body.dataset.visualReadyVersion==='{version}'"),
+                    )?;
+                }
             }
+            same(app.page.count(&css("iframe"))?, 1, "the warmed switches keep only one frame mounted")?;
+            app.page.press_on(&css(".visual-next"), "Tab")?;
+            // The page's counter precedes its input in DOM order, even though the input covers it in this pointer fixture.
+            app.page.wait_for("Tab to enter the new version at its first control", "document.body.dataset.visualFocused==='1:BUTTON'")?;
+            app.page.press("Enter")?;
+            app.page.wait_for("Enter to activate the new version's counter", "document.body.dataset.visualCounter==='1:1'")?;
+            app.page.press("Tab")?;
+            app.page.wait_for("the next Tab to reach the new version's input", "document.body.dataset.visualFocused==='1:INPUT'")?;
+            app.page.press("Space")?;
+            app.page.wait_for("the new document to receive the Space key as text", "document.body.dataset.visualTyped==='1: '")?;
+            app.page.eval("delete document.body.dataset.visualMenuBlocked")?;
+            app.page.right_click(&css(".visual-frame"))?;
+            app.page.wait_for(
+                "the real native context menu to be canceled inside the visual frame",
+                "document.body.dataset.visualMenuBlocked==='yes'",
+            )?;
+            app.page.press("Escape")?;
+            app.page.wait_count(&css(".visual-pane"), 0)?;
+            same(app.page.count(&css("iframe"))?, 0, "Escape from the page input removes the frame at 720 px")?;
+            let margin = 5.0_f64.min(baseline + 25.0 - previous_closed);
+            let mut observation = VisualCloseObservation { capture_on_success: first_error.is_some(), ..Default::default() };
+            let collected = visual_frames_observed(
+                ctx,
+                &mut app,
+                previous_closed,
+                margin,
+                &before_processes,
+                &format!("visual answer after Escape at 720 px cycle {cycle}"),
+                Some(&mut observation),
+            );
+            let continue_after_margin =
+                cycle == 1 && observation.margin_only && observation.closed.is_some_and(|value| value <= baseline + 25.0);
+            if first_error.is_some() || (continue_after_margin && collected.is_err()) {
+                post_failure.push(json!({ "cycle": cycle, "closedObservationComplete": observation.closed.is_some(), "fromOriginalBaselineBytes": observation.closed.map(|value| (value - resized) * 1024.0 * 1024.0), "snapshot": observation.snapshot }));
+            }
+            match collected {
+                Ok(value) => previous_closed = value,
+                Err(error) if continue_after_margin => {
+                    first_error = Some(error);
+                    // Keep the failed comparison's original baseline; cycle 2 cannot redeem this error.
+                    peak = peak.max(observation.closed.unwrap_or(peak));
+                    continue;
+                }
+                Err(error) => return Err(error),
+            }
+            peak = peak.max(previous_closed);
+            ensure(previous_closed <= baseline + 25.0, || {
+                format!("the complete narrow cycle {cycle} retains {:.1} MB over the cold reading; limit 25 MB", previous_closed - baseline)
+            })?;
         }
-        same(app.page.count(&css("iframe"))?, 1, "the warmed switches keep only one frame mounted")?;
-        app.page.press_on(&css(".visual-next"), "Tab")?;
-        // The page's counter precedes its input in DOM order, even though the input covers it in this pointer fixture.
-        app.page.wait_for("Tab to enter the new version at its first control", "document.body.dataset.visualFocused==='1:BUTTON'")?;
-        app.page.press("Enter")?;
-        app.page.wait_for("Enter to activate the new version's counter", "document.body.dataset.visualCounter==='1:1'")?;
-        app.page.press("Tab")?;
-        app.page.wait_for("the next Tab to reach the new version's input", "document.body.dataset.visualFocused==='1:INPUT'")?;
-        app.page.press("Space")?;
-        app.page.wait_for("the new document to receive the Space key as text", "document.body.dataset.visualTyped==='1: '")?;
-        app.page.eval("delete document.body.dataset.visualMenuBlocked")?;
-        app.page.right_click(&css(".visual-frame"))?;
-        app.page.wait_for(
-            "the real native context menu to be canceled inside the visual frame",
-            "document.body.dataset.visualMenuBlocked==='yes'",
-        )?;
-        app.page.press("Escape")?;
-        app.page.wait_count(&css(".visual-pane"), 0)?;
-        same(app.page.count(&css("iframe"))?, 0, "Escape from the page input removes the frame at 720 px")?;
-        let margin = 5.0_f64.min(baseline + 25.0 - previous_closed);
-        previous_closed = visual_frames_collected(
-            ctx,
-            &mut app,
-            previous_closed,
-            margin,
-            &before_processes,
-            &format!("visual answer after Escape at 720 px cycle {cycle}"),
-        )?;
-        peak = peak.max(previous_closed);
-        ensure(previous_closed <= baseline + 25.0, || {
-            format!("the complete narrow cycle {cycle} retains {:.1} MB over the cold reading; limit 25 MB", previous_closed - baseline)
-        })?;
+        ensure(peak <= BUDGET_MB && closed <= BUDGET_MB, || format!("{numbers}; over the {BUDGET_MB} MB budget"))
+    })();
+    if let Some(error) = first_error {
+        let increment = post_failure
+            .first()
+            .and_then(|first| first["snapshot"]["closedBytes"].as_f64())
+            .zip(
+                post_failure
+                    .get(1)
+                    .filter(|second| second["closedObservationComplete"] == true)
+                    .and_then(|second| second["snapshot"]["closedBytes"].as_f64()),
+            )
+            .map(|(first, second)| second - first);
+        let report = json!({ "diagnosticOnly": true, "preCycleHeapAvailable": false, "originalBaselineBytes": resized * 1024.0 * 1024.0, "coldBaselineBytes": baseline * 1024.0 * 1024.0, "incrementFromFirstBytes": increment, "stages": post_failure, "continuationReturnedOk": result.is_ok(), "secondaryError": result.err().map(|error| error.chars().take(500).collect::<String>()) });
+        return preserve_visual_failure(error, || {
+            let bytes = report.to_string();
+            if bytes.len() > 24 * 1024 {
+                return Err(std::io::Error::other("visual post-failure diagnostic exceeds 24 KiB"));
+            }
+            std::fs::create_dir_all(&ctx.paths.shots)?;
+            std::fs::write(ctx.paths.shots.join("visual-memory-post-failure.json"), bytes)
+        });
     }
-    ensure(peak <= BUDGET_MB && closed <= BUDGET_MB, || format!("{numbers}; over the {BUDGET_MB} MB budget"))
+    result
 }
 
 /// Parity P2: a reply names `src/app.ts:240` and links a file outside the conversation's folder. The first opens read only in
@@ -2085,6 +2178,17 @@ fn long_streaming_answer(ctx: &mut Ctx) -> Result {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn visual_diagnostic_write_failure_preserves_the_original_error() {
+        for write_fails in [false, true] {
+            let error = "the immutable original memory failure".to_string();
+            assert_eq!(
+                preserve_visual_failure(error.clone(), || if write_fails { Err(std::io::Error::other("write denied")) } else { Ok(()) }),
+                Err(error)
+            );
+        }
+    }
 
     // Port completeness: the nine tests of `tests/e2e/app.e2e.ts` are all still here, under their old names.
     #[test]
