@@ -4,7 +4,7 @@ import themes from '../../src-tauri/src/themes.json';
 import { App } from '../../ui/App.tsx';
 import { api, type AppState, type Conversation, type Message, type RewindPoint, type RewindPreview, type RewindRequest, type RewindResult } from '../../ui/api.ts';
 import { ContextMenuHost } from '../../ui/ContextMenu.tsx';
-import { installContextMenu } from '../../ui/contextmenu.ts';
+import { installContextMenu, menu } from '../../ui/contextmenu.ts';
 import { lang, t, useLanguage } from '../../ui/i18n.ts';
 import { Rewind } from '../../ui/Rewind.tsx';
 import { Thread } from '../../ui/Thread.tsx';
@@ -431,9 +431,30 @@ check('rewind: the app reloads after undoing the first message and keeps the sav
       refusalCheckpoints.length = 0;
       useLanguage(language);
       ok(t('error.rewind.deleteRecovery') !== 'error.rewind.deleteRecovery', `${language}: the refusal has plain words`);
-      root.querySelector('.crow')!.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true, button: 2, clientX: 40, clientY: 40 }));
-      await settle();
-      const remove = [...document.querySelectorAll<HTMLButtonElement>('.cmenu:not(.leaving) [role=menuitem]')].find((item) => item.textContent === t('menu.delete'))!;
+      const events: Array<{ type: string; target: string }> = [];
+      const record = (event: Event) => {
+        if (events.length < 8) events.push({ type: event.type, target: event.target instanceof Element ? `${event.target.tagName}.${event.target.classList.value}` : event.target === window ? 'window' : 'document' });
+      };
+      const dismissals = ['blur', 'resize', 'scroll', 'pointerdown'] as const;
+      for (const type of dismissals) window.addEventListener(type, record, true);
+      try {
+        root.querySelector('.crow')!.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true, button: 2, clientX: 40, clientY: 40 }));
+        await settle();
+      } finally {
+        for (const type of dismissals) window.removeEventListener(type, record, true);
+      }
+      const remove = [...document.querySelectorAll<HTMLButtonElement>('.cmenu:not(.leaving) [role=menuitem]')].find((item) => item.textContent === t('menu.delete'));
+      if (!remove) {
+        throw new Error(`recovery refusal menu is missing Delete: ${JSON.stringify({
+          language, currentLanguage: lang(), expected: t('menu.delete'), opened, refused,
+          events, openItems: menu()?.items.map((item) => item.id),
+          rows: [...root.querySelectorAll('.crow')].map((row) => row.getAttribute('data-conversation-id')),
+          menus: [...document.querySelectorAll('.cmenu')].map((menu) => ({
+            leaving: menu.classList.contains('leaving'), items: [...menu.querySelectorAll('[role=menuitem]')].map((item) => item.textContent),
+          })),
+          focus: document.activeElement?.className, selection: getSelection()?.toString(),
+        })}`);
+      }
       remove.click();
       captureRefusal('after-first-click', remove, language);
       await settle(560);

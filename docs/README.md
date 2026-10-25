@@ -49,6 +49,7 @@ points nowhere; a page that grows past the limit splits by topic, and its row he
 | [design/first-run.md](design/first-run.md) | The first run and the tutorial |
 | [design/projects.md](design/projects.md) | The Projects screens, what a project stores, and how its checks run |
 | [dev/testing.md](dev/testing.md) | Tests: `cargo t`, screen tests, build folder and slots, what a run prints |
+| [dev/cli-qualification.md](dev/cli-qualification.md) | Nightly unauthenticated CLI candidate contracts, bounded metadata receipts and missing compatibility evidence |
 | [dev/build-folders.md](dev/build-folders.md) | Build-cache cleanup, disk budget and preserving exact proof artifacts |
 | [dev/fair-bench.md](dev/fair-bench.md) | The fair benchmark against TL-ADE: the meter, the suite and real-work tiers, the notes |
 | [dev/benchmark.md](dev/benchmark.md) | Running the light benchmark: the one command, what a run measures, what it leaves out |
@@ -70,6 +71,7 @@ one is never touched again, and its boxes say nothing.
 | :--- | :--- |
 | [superpowers/specs/2026-10-22-faber-framework/README.md](superpowers/specs/2026-10-22-faber-framework/README.md) | Proposal revision 3, nothing built: company/community research, Faber context audit, adaptive composition, twelve capability candidates, BMAD/Core/Pi audit, evidence-backed progress and fair qualification; companion pages linked from its README |
 | [superpowers/specs/2026-10-24-cli-tools-live-manifest.md](superpowers/specs/2026-10-24-cli-tools-live-manifest.md) | In progress locally: offline signature boundary checked and independently reviewed; publication, schema, compatibility and executable delivery remain unbuilt |
+| [superpowers/specs/2026-10-24-cli-nightly-qualification.md](superpowers/specs/2026-10-24-cli-nightly-qualification.md) | In progress: nightly candidate interface checks; authenticated compatibility and production publication remain unfinished |
 | superpowers/specs/2026-10-11-faber-redesign-design.md | Absorbed into product/ and design/ |
 | superpowers/specs/2026-10-11-auto-quota-pacing-design.md, plans/2026-10-11-auto-quota-pacing.md, auto-quota-pacing-report.md | Shipped |
 | superpowers/plans/2026-10-11-b2 … b9 (test runner, looks, running engine, layout, tray, first run, Settings, download) | Shipped |
