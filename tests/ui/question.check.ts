@@ -481,7 +481,18 @@ check('question card: answering from Running during partial thread arrival start
     ok(exitDuration > 0, `the actual opacity exit has positive duration, got ${exitDuration}`);
 
     const initialOpacity = Number(getComputedStyle(threadCard).opacity);
-    ok(Math.abs(initialOpacity - preClickOpacity) < 0.02, `exit starts at the current opacity without a flash; diagnostic ${JSON.stringify({ preClickOpacity, initialOpacity, preClickTime })}`);
+    const continuous = Math.abs(initialOpacity - preClickOpacity) < 0.02;
+    ok(continuous, `exit starts at the current opacity without a flash; diagnostic ${JSON.stringify({
+      preClickOpacity, initialOpacity, preClickTime,
+      exit: continuous ? undefined : {
+        currentTime: exit!.currentTime, playState: exit!.playState,
+        effectTargetsCard: (exit!.effect as KeyframeEffect | null)?.target === threadCard,
+        timing: exit!.effect?.getComputedTiming(),
+        endpoints: (exit!.effect as KeyframeEffect | null)?.getKeyframes()
+          .filter((_, index, frames) => index === 0 || index === frames.length - 1)
+          .map(({ opacity, easing }) => ({ opacity, easing })),
+      },
+    })}`);
     const endpoints = (exit!.effect as KeyframeEffect).getKeyframes();
     ok(Math.abs(Number(endpoints[0].opacity) - preClickOpacity) < 0.02, 'the real exit starts at the interrupted entrance');
     equal(Number(endpoints.at(-1)!.opacity), 0, 'the real exit targets zero opacity');
