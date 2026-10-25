@@ -59,6 +59,9 @@ Each row shows the source, relative file and original line, then literal Markdow
 An empty list and a failed read are distinct, and Refresh retries. A partial scan says it is partial.
 For Codex, each folder shows only the first nonempty instruction file it reads: `AGENTS.override.md`, then `AGENTS.md`.
 
+Keeping another decision preserves every older approval of a live project. If approval records or the current project
+list cannot be read safely, Keep reports the existing save error and leaves the approval records untouched.
+
 In `.faber/decisions.md` an entry that ends with its author mark shows it as a quiet word after the file and line ("AI, not reviewed", "AI, kept", "You") and the text without the mark. A `[by person]` mark that Faber has no record of (an agent can write any mark) reads "AI, not reviewed" until the person keeps it, and then "You". Only a decision not yet reviewed has Keep, first among the row's actions; it is a plain ghost button like Edit and needs no confirmation, since it writes nothing to the project and Edit can still change the words. Keep records, in Faber's data folder, that the person kept those words, so the flag reads "not reviewed" again if the words change. Pressing it leaves the list as long as it was, moves focus to that row's Edit and says "Decision kept." to screen readers in a polite status line. Editing the words of an AI decision leaves it the AI's and not reviewed: ending the text with `[by person]` makes it the person's, recorded like a Keep. Only "AI, not reviewed" takes the darker ink, because it is the one that asks for something. An entry with no mark shows neither.
 
 Edit opens a labelled textarea in place, focused on opening, with Save and Cancel. Escape from anywhere in the form

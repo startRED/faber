@@ -2118,6 +2118,7 @@ export const de: Messages = {
   'notes.229.better': 'In kleinen Fenstern bleibt das Menü beim Wechsel zwischen Chat und Projekten offen, damit du auswählen kannst, wo du weiterarbeitest.',
   'notes.230.fixed': 'Bei Leistungsfragen zum Browser wird das installierte Browserwerkzeug ausgewählt, auch wenn du seinen Namen nicht nennst.',
   'notes.231.fixed': 'Esc schließt eine offene Auswahlliste, ohne die Einstellungen zu verlassen.',
+  'notes.232.fixed': 'Eine weitere Entscheidung zu behalten löscht keine älteren Bestätigungen mehr; beschädigte Bestätigungsdaten bleiben erhalten.',
   'update.checking': 'Suche nach einem Update…',
   'update.downloading': 'Update wird heruntergeladen…',
   'update.downloadingPercent': 'Update wird heruntergeladen… {percent} %',

@@ -589,14 +589,13 @@ impl Store {
         move || read::<BTreeMap<String, Vec<String>>>(&path).unwrap_or_default().remove(&project).unwrap_or_default()
     }
 
-    /// Adds one kept decision. The newest 500 per project stay, and projects that are gone (not in `live`) are dropped.
+    /// Adds one kept decision without discarding older approvals. Projects that are gone (not in `live`) are dropped.
     pub fn keep_decision(&self, project: &str, hash: String, live: &[String]) -> Result<(), Fault> {
-        let mut all = read::<BTreeMap<String, Vec<String>>>(&self.decisions_kept).unwrap_or_default();
+        let mut all = read_checked::<BTreeMap<String, Vec<String>>>(&self.decisions_kept)?.unwrap_or_default();
         all.retain(|id, _| live.contains(id));
         let kept = all.entry(project.into()).or_default();
         kept.retain(|h| *h != hash);
         kept.push(hash);
-        kept.drain(..kept.len().saturating_sub(500));
         self.write(&self.decisions_kept, &all)
     }
 
@@ -667,6 +666,29 @@ impl Store {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn keeping_a_decision_refuses_corrupt_approvals_without_overwriting_them() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = Store::new(dir.path());
+        let corrupt = b"{\"project\":[\"existing approval\"],";
+        fs::write(&store.decisions_kept, corrupt).unwrap();
+        assert_eq!(store.keep_decision("project", "new approval".into(), &["project".into()]), Err(Fault::Corrupt));
+        assert_eq!(fs::read(&store.decisions_kept).unwrap(), corrupt);
+    }
+
+    #[test]
+    fn keeping_a_decision_preserves_more_than_500_existing_approvals() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = Store::new(dir.path());
+        let records: Vec<_> = (0..501).map(|i| format!("{i:032x}")).collect();
+        store.write(&store.decisions_kept, &BTreeMap::from([("project", &records)])).unwrap();
+        store.keep_decision("project", "new approval".into(), &["project".into()]).unwrap();
+        let kept = Store::new(dir.path()).kept_decisions("project");
+        assert_eq!(kept.len(), 502, "a new approval must not discard older approvals");
+        assert_eq!(&kept[..501], records);
+        assert_eq!(kept.last().map(String::as_str), Some("new approval"));
+    }
 
     #[test]
     fn a_failed_rename_returns_the_error_and_removes_the_temp_file() {

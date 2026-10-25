@@ -2118,6 +2118,7 @@ export const fr: Messages = {
   'notes.229.better': 'Dans une petite fenêtre, le menu reste ouvert quand vous passez de Chat à Projets pour choisir où continuer.',
   'notes.230.fixed': 'Pour mesurer les performances du navigateur, l’outil installé est choisi même si tu ne le nommes pas.',
   'notes.231.fixed': 'Échap ferme la liste d’options ouverte sans quitter les Paramètres.',
+  'notes.232.fixed': 'Garder une autre décision ne supprime plus les anciennes approbations ; les registres endommagés sont préservés.',
   'update.checking': 'Recherche d’une mise à jour…',
   'update.downloading': 'Téléchargement de la mise à jour…',
   'update.downloadingPercent': 'Téléchargement de la mise à jour… {percent} %',

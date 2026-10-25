@@ -1998,6 +1998,7 @@ export const en = {
   'notes.229.better': 'In small windows, switching between Chat and Projects keeps the menu open so you can choose where to continue.',
   'notes.230.fixed': 'Browser performance requests now pick the installed browser tool without needing to name it.',
   'notes.231.fixed': 'Esc closes an open options list without taking you out of Settings.',
+  'notes.232.fixed': 'Keeping another decision no longer drops older approvals; damaged approval records stay untouched.',
   'update.checking': 'Looking for an update…',
   'update.downloading': 'Downloading update…',
   'update.downloadingPercent': 'Downloading update… {percent}%',

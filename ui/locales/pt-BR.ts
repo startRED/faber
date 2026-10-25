@@ -2105,6 +2105,7 @@ export const ptBR: Messages = {
   'notes.229.better': 'Em janelas pequenas, trocar entre Chat e Projetos mantém o menu aberto pra você escolher onde continuar.',
   'notes.230.fixed': 'Pedidos para medir o desempenho no navegador passam a selecionar a ferramenta instalada, mesmo sem citar seu nome.',
   'notes.231.fixed': 'Esc fecha a lista de opções aberta sem sair das Configurações.',
+  'notes.232.fixed': 'Guardar outra decisão não apaga mais aprovações antigas; registros de aprovação danificados ficam preservados.',
   'update.checking': 'Procurando atualização…',
   'update.downloading': 'Baixando atualização…',
   'update.downloadingPercent': 'Baixando atualização… {percent}%',
