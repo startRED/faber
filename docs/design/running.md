@@ -57,7 +57,7 @@ rest of the shell are in [layout.md](layout.md).
   ring. A preview the agent drew sits beside the tiles (below in a narrow card) in a quiet monospace box that fades when
   the tile in focus changes. Another answer is one quiet button that opens its field. The footer holds "n of m answered",
   Skip and Send answers (amber, enabled once every question has an answer; the card of the offer of a bigger version opens with its first tile, the request as asked, already chosen, so it is enabled at once). Once answered the card, in the thread and in the column alike, folds away over the
-  exit time while the thread closes up under it. Tiles and steps change colour over the fast time and the mark scales in
+  exit time while the thread closes up under it. Opacity reverses from its current value if answered during arrival; no entrance animation masks the exit, and the layout fold keeps the full exit time. Tiles and steps change colour over the fast time and the mark scales in
   from half size; under reduced motion everything is instant and the state is still carried by the filled mark, the ring
   and the tick.
 - Plan approval uses the same card in the thread and column: "Ready to run this plan?", the composer's native permission
