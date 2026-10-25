@@ -20,7 +20,10 @@ const AGENT: ToolUse = { id: 'a1', name: 'Agent', input: { description: 'Find fi
 const GREP: ToolUse = { id: 'g1', name: 'Grep', input: { pattern: 'load_config' }, parent: 'a1' };
 const OWN: ToolUse = { id: 'b1', name: 'Bash', input: { command: 'cargo check' }, ok: true };
 
-check('subagent history: long sessions read one page and keep older pages steady while new work arrives', async () => {
+check('subagent history: long sessions read one page and keep older pages steady while new work arrives', () => retainedHistory());
+check('subagent history diagnostic: native reset readbacks', () => retainedHistory(true));
+
+async function retainedHistory(readbacks = false) {
   const port = api;
   const before = port.childTranscript;
   const reads: number[] = [];
@@ -83,6 +86,17 @@ check('subagent history: long sessions read one page and keep older pages steady
     await settle();
     equal(reads.length, heard, 'scrolling up pins the current window instead of evicting text being read');
     const scrollWrites: Array<{ value: number; stack: string | undefined }> = [];
+    const scrollPositions: Array<{ phase: string; top: number; at: number }> = [];
+    const scrollEvents: Array<{ at: number; trusted: boolean }> = [];
+    let droppedScrollEvents = 0;
+    const sampleScroll = (phase: string) => {
+      if (readbacks) scrollPositions.push({ phase, top: body.scrollTop, at: performance.now() });
+    };
+    const scrollEvent = (event: Event) => {
+      if (scrollEvents.length < 16) scrollEvents.push({ at: performance.now(), trusted: event.isTrusted });
+      else droppedScrollEvents++;
+    };
+    body.addEventListener('scroll', scrollEvent);
     const resetAt = performance.now();
     const scrollTop = Object.getOwnPropertyDescriptor(Element.prototype, 'scrollTop')!;
     Object.defineProperty(body, 'scrollTop', {
@@ -94,10 +108,17 @@ check('subagent history: long sessions read one page and keep older pages steady
       },
     });
     try {
-      body.scrollTop = 0; body.dispatchEvent(new Event('scroll'));
+      sampleScroll('before-reset');
+      body.scrollTop = 0;
+      sampleScroll('after-reset');
+      body.dispatchEvent(new Event('scroll'));
+      sampleScroll('after-synthetic-scroll');
       root.querySelector<HTMLElement>('.side-said')!.style.paddingBlockEnd = '320px';
+      sampleScroll('after-padding');
       await settle();
+      sampleScroll('after-settle');
     } finally {
+      body.removeEventListener('scroll', scrollEvent);
       Reflect.deleteProperty(body, 'scrollTop');
     }
     const pinnedTop = body.scrollTop;
@@ -166,6 +187,9 @@ check('subagent history: long sessions read one page and keep older pages steady
         motionAtFailure,
         resetAt,
         scrollWrites,
+        scrollPositions,
+        scrollEvents,
+        droppedScrollEvents,
         nativeCopies,
         browser: { userAgent: navigator.userAgent, anchoring: CSS.supports('overflow-anchor', 'none') },
         synthetic: { reads: [...reads], sections: root.querySelector('.agent-pages .side-meta')?.textContent ?? null, pageCount: pages() },
@@ -201,7 +225,7 @@ check('subagent history: long sessions read one page and keep older pages steady
   } finally {
     dispose(); root.remove(); port.childTranscript = before; showAgent(undefined);
   }
-});
+}
 
 check('subagent history: a paused arrival keeps Latest inside the reader viewport', async () => {
   const before = api.childTranscript;
