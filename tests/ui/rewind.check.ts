@@ -411,17 +411,40 @@ check('rewind: the app reloads after undoing the first message and keeps the sav
     await settle();
     const mine = root.querySelector<HTMLElement>('.mine')!;
     ok(mine, 'the saved conversation opened');
+    let refusalStarted = performance.now();
+    const refusalCheckpoints: Array<Record<string, unknown>> = [];
+    const menuIds = new WeakMap<Element, number>();
+    let nextMenuId = 1;
+    const captureRefusal = (phase: string, remove: HTMLButtonElement, language: string) => {
+      if (refusalCheckpoints.length >= 4) return;
+      const menus = [...document.querySelectorAll<HTMLElement>('.cmenu')].slice(0, 4).map((menu) => {
+        let id = menuIds.get(menu);
+        if (id === undefined) { id = nextMenuId++; menuIds.set(menu, id); }
+        const items = [...menu.querySelectorAll<HTMLButtonElement>('[role=menuitem]')].slice(0, 8).map((item) => ({ text: item.textContent?.slice(0, 120) ?? '', connected: item.isConnected, armed: item.classList.contains('armed'), disabled: item.disabled }));
+        return { id, connected: menu.isConnected, className: menu.className.slice(0, 80), text: menu.textContent?.slice(0, 160) ?? '', items, itemCount: menu.querySelectorAll('[role=menuitem]').length };
+      });
+      const alerts = [...document.querySelectorAll<HTMLElement>('[role=alert]')].slice(0, 12).map((alert) => ({ text: alert.textContent?.slice(0, 200) ?? '', connected: alert.isConnected }));
+      refusalCheckpoints.push({ phase, language, elapsedMs: Math.round(performance.now() - refusalStarted), refused, button: { connected: remove.isConnected, text: remove.textContent?.slice(0, 120) ?? '', armed: remove.classList.contains('armed'), disabled: remove.disabled, focused: document.activeElement === remove, menuId: remove.closest('.cmenu') ? menuIds.get(remove.closest('.cmenu')!) ?? null : null }, activeElement: document.activeElement instanceof HTMLElement ? { tag: document.activeElement.tagName, className: document.activeElement.className.toString().slice(0, 80), text: document.activeElement.textContent?.slice(0, 120) ?? '' } : null, menus, menuCount: document.querySelectorAll('.cmenu').length, alerts, alertCount: document.querySelectorAll('[role=alert]').length });
+    };
     for (const language of ['en', 'pt-BR', 'es', 'fr', 'de'] as const) {
+      refusalStarted = performance.now();
+      refusalCheckpoints.length = 0;
       useLanguage(language);
       ok(t('error.rewind.deleteRecovery') !== 'error.rewind.deleteRecovery', `${language}: the refusal has plain words`);
       root.querySelector('.crow')!.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true, button: 2, clientX: 40, clientY: 40 }));
       await settle();
       const remove = [...document.querySelectorAll<HTMLButtonElement>('.cmenu:not(.leaving) [role=menuitem]')].find((item) => item.textContent === t('menu.delete'))!;
-      remove.click(); await settle(560);
       remove.click();
+      captureRefusal('after-first-click', remove, language);
+      await settle(560);
+      captureRefusal('after-560ms', remove, language);
+      remove.click();
+      captureRefusal('after-second-click', remove, language);
       // The refusal reaches the screen through an engine call and a render: wait for it, not a fixed time (a slow macOS runner takes longer).
       for (const start = Date.now(); !root.querySelector('[role=alert]')?.textContent?.includes(t('error.rewind.deleteRecovery')) && Date.now() - start < 3000; ) await settle(50);
-      ok(root.querySelector('[role=alert]')?.textContent?.includes(t('error.rewind.deleteRecovery')), `${language}: recovery refusal uses the existing error display`);
+      captureRefusal('after-existing-3s-wait', remove, language);
+      const refusalShown = root.querySelector('[role=alert]')?.textContent?.includes(t('error.rewind.deleteRecovery'));
+      ok(refusalShown, `${language}: recovery refusal uses the existing error display${refusalShown ? '' : `; diagnostics=${JSON.stringify({ language, elapsedMs: Math.round(performance.now() - refusalStarted), refused, checkpoints: refusalCheckpoints })}`}`);
       ok(root.querySelector('.crow'), 'a refused deletion keeps the conversation listed');
       ok(root.querySelector('.mine'), 'a refused deletion keeps the current conversation open');
     }
