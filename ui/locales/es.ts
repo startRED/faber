@@ -2159,6 +2159,7 @@ export const es: Messages = {
   'notes.260.fixed': 'Tu IA puede saber cuándo otra conversación no recibe su mensaje porque tiene la bandeja de entrada llena.',
   'notes.261.fixed': 'Los controles del proyecto conservan el borrador y el foco al guardar, y el panel lateral se cierra sin saltos durante el movimiento.',
   'notes.262.fixed': 'El botón para ir al final del historial del subagente se mantiene en su sitio al pulsarlo con movimiento reducido.',
+  'notes.263.fixed': 'Las filas y la columna de tareas en curso dejan de tardar en desaparecer al cerrarlas.',
   'update.checking': 'Buscando una actualización…',
   'update.downloading': 'Descargando actualización…',
   'update.downloadingPercent': 'Descargando actualización… {percent} %',

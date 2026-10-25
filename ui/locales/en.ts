@@ -2039,6 +2039,7 @@ export const en = {
   'notes.260.fixed': 'Your AI can tell when another conversation cannot receive its message because its inbox is full.',
   'notes.261.fixed': 'Project controls keep drafts and keyboard focus when saving, and closing a moving side panel no longer makes it jump.',
   'notes.262.fixed': "The helper's Jump to latest button stays in place when pressed with reduced motion.",
+  'notes.263.fixed': 'Rows and the running column no longer linger when you close them.',
   'update.checking': 'Looking for an update…',
   'update.downloading': 'Downloading update…',
   'update.downloadingPercent': 'Downloading update… {percent}%',

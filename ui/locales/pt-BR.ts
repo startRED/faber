@@ -2146,6 +2146,7 @@ export const ptBR: Messages = {
   'notes.260.fixed': 'Sua IA consegue identificar quando outra conversa não recebe um recado porque a caixa de entrada está cheia.',
   'notes.261.fixed': 'Os controles do projeto preservam rascunhos e foco ao salvar, e o painel lateral fecha sem dar um salto durante o movimento.',
   'notes.262.fixed': 'O botão de voltar ao fim do histórico do subagente fica no lugar ao clicar com movimento reduzido.',
+  'notes.263.fixed': 'As linhas e a coluna de tarefas em andamento deixam de demorar pra desaparecer quando você as fecha.',
   'update.checking': 'Procurando atualização…',
   'update.downloading': 'Baixando atualização…',
   'update.downloadingPercent': 'Baixando atualização… {percent}%',

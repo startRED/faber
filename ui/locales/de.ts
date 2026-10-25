@@ -2159,6 +2159,7 @@ export const de: Messages = {
   'notes.260.fixed': 'Deine KI erkennt, wenn eine andere Unterhaltung ihre Nachricht wegen eines vollen Posteingangs nicht annehmen kann.',
   'notes.261.fixed': 'Beim Speichern bleiben Entwurf und Tastaturfokus in den Projekteinstellungen erhalten, und bewegte Seitenleisten schließen ohne Sprung.',
   'notes.262.fixed': 'Bei reduzierter Bewegung bleibt die Schaltfläche zum Ende des Unteragentenverlaufs beim Drücken an ihrem Platz.',
+  'notes.263.fixed': 'Zeilen und die Spalte der laufenden Aufgaben verschwinden beim Schließen ohne unnötige Verzögerung.',
   'update.checking': 'Suche nach einem Update…',
   'update.downloading': 'Update wird heruntergeladen…',
   'update.downloadingPercent': 'Update wird heruntergeladen… {percent} %',

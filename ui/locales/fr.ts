@@ -2159,6 +2159,7 @@ export const fr: Messages = {
   'notes.260.fixed': 'Votre IA sait quand une autre conversation ne peut pas recevoir son message parce que sa boîte de réception est pleine.',
   'notes.261.fixed': 'Les réglages du projet conservent le brouillon et le focus à l’enregistrement, et le panneau latéral se ferme sans saut pendant son déplacement.',
   'notes.262.fixed': 'Le bouton pour revenir à la fin de l’historique du sous-agent reste en place au clic lorsque les mouvements sont réduits.',
+  'notes.263.fixed': 'Les lignes et la colonne des tâches en cours disparaissent sans délai superflu à la fermeture.',
   'update.checking': 'Recherche d’une mise à jour…',
   'update.downloading': 'Téléchargement de la mise à jour…',
   'update.downloadingPercent': 'Téléchargement de la mise à jour… {percent} %',
