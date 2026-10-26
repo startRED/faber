@@ -52,13 +52,17 @@ This is conservative evidence of no **observed** account movement between stages
 
 Each run needs a new run folder: an existing `--run-id` is rejected before saving anything, so earlier results cannot be overwritten. Completed sides, proofs and known spending are saved before the next admission. To cancel during a pause, create an empty file named `CANCEL` in the run folder printed by the harness. Cancellation starts no new paid work and preserves those checkpoints; an in-flight status read may take up to 45 seconds to finish. It does not resume a cancelled run or recover an invocation interrupted before its result was collected. The quiet policy and cancellation/checkpoint paths have fake-clock or local checks; real-account behavior remains unverified until a manual qualification run.
 
+## Request coverage
+
+The eight-request sample has five Projects (organize files, build a to-do app, fix an invoice bug, migrate preferences without data loss, and summarize a CSV export) and three Chat requests. The three maintenance/data proofs run local Node programs with independent fresh inputs, invalid-input checks and source-preservation checks. They use no network or AI calls. Their own regression checks are in `scripts/bench/practical.test.mjs`. They measure executable contracts; the blind judge still assesses the answer and regression-test quality. This is a sample, not the full first-public qualification set.
+
 ## What it does not do yet
 
 - Codex: the harness runs plain Codex (`--plain codex`) and lets Faber use it (`--vendors claude,codex`), but its event reader was written from the documented format and has not met a live account.
 - Judge availability means an installed CLI on PATH, not a verified sign-in or spare quota. A failed judge is reported without retrying another vendor or starting an unbudgeted call. Independence describes recorded answer vendors, not external services invoked by arbitrary commands or user-installed MCP tools. Native subagents use their CLI vendor; Faber helper/conversation calls lack persisted contributor vendors, so such rows are conservatively unqualified. All verdicts remain visible, with separate qualified totals.
 - One judging pass per request, without the swapped second pass that removes the leaning toward the first answer; the alternating deal spreads it.
 - Routing and auxiliary tokens are unavailable in the public ledger; reports mark Faber token counts as partial. Their ledger costs are counted.
-- The plain side is unguarded: it runs with bypassPermissions (or danger-full-access) and without the secret-path deny list Faber passes in its settings, and it loads this PC's hooks, instructions and MCP servers. The five prompts are benign.
+- The plain side is unguarded: it runs with bypassPermissions (or danger-full-access) and without the secret-path deny list Faber passes in its settings, and it loads this PC's hooks, instructions and MCP servers. The eight prompts are benign.
 - `spawns.log` writes each argument, except the values of `--settings`, `--mcp-config` and the system-prompt flags, which are logged as their length.
 - The proofs run the agent's code on this PC, as the agent itself already did.
 - The research proof checks at most 20 distinct cited links; extra links make coverage incomplete and the proof fails. Reachability (including 401, 403 and 429) does not verify the cited facts, official authorship or page contents. A passing link check alone does not qualify research accuracy.
