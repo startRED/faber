@@ -23,3 +23,4 @@
 - Windows automatic worker admission adds FIFO memory checks to the existing count limits: measured private working sets below half physical RAM and at least 2 GiB available; one fresh sample per admission, no termination of active work. Unix keeps count limits until an identity-safe native sampler is implemented. [by AI]
 
 - The project agent settings tool accepts only web_search off/cached/live. It reuses the ordinary settings save, its own consent and audit, and existing full trust only for this bounded preference. The saved response is queued after durable persistence and before stricter settings stop replies; no delivery acknowledgement or stop exemption is introduced. [by AI]
+- Nightly CLI candidate contracts run only in disposable runners without sign-in; passing help/schema checks remain explicitly unqualified and cannot publish metadata, promote releases or authorize installation. [by AI]
