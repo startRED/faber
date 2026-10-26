@@ -394,8 +394,11 @@ pub struct Proof {
 }
 
 /// A proof script prints its result as the last JSON line: `{"pass":true,"checks":[{"name":"..","ok":true,"detail":".."}]}`.
-/// `pass` is true only when every check is, whatever the script claims.
-pub fn parse_proof(stdout: &str) -> Option<Proof> {
+/// Only a successful process exit can supply a result; `pass` requires every check, whatever the script claims.
+pub fn parse_proof(stdout: &str, code: Option<i32>) -> Option<Proof> {
+    if code != Some(0) {
+        return None;
+    }
     let v: Value = stdout.lines().rev().filter(|l| l.trim_start().starts_with('{')).find_map(|l| serde_json::from_str(l).ok())?;
     let checks: Vec<Check> = v
         .get("checks")?
@@ -907,11 +910,20 @@ mod tests {
     #[test]
     fn a_proof_passes_only_when_every_check_does() {
         let out = "log line\n{\"pass\":true,\"checks\":[{\"name\":\"a\",\"ok\":true},{\"name\":\"b\",\"ok\":false,\"detail\":\"d\"}]}\n";
-        let p = parse_proof(out).unwrap();
+        let p = parse_proof(out, Some(0)).unwrap();
         assert!(!p.pass);
         assert_eq!((p.checks.len(), p.checks[1].detail.as_str()), (2, "d"));
-        assert!(parse_proof("{\"pass\":true,\"checks\":[]}").is_none() && parse_proof("nothing").is_none());
-        assert!(parse_proof("{\"checks\":[{\"name\":\"a\",\"ok\":true}]}").unwrap().pass);
+        assert!(parse_proof("{\"pass\":true,\"checks\":[]}", Some(0)).is_none() && parse_proof("nothing", Some(0)).is_none());
+        assert!(parse_proof("{\"checks\":[{\"name\":\"a\",\"ok\":true}]}", Some(0)).unwrap().pass);
+    }
+
+    #[test]
+    fn a_failed_or_interrupted_proof_cannot_pass_from_its_stdout() {
+        let out = "{\"pass\":true,\"checks\":[{\"name\":\"files preserved\",\"ok\":true}]}\n";
+        assert!(parse_proof(out, Some(0)).unwrap().pass);
+        for code in [Some(1), Some(101), None] {
+            assert!(parse_proof(out, code).is_none(), "failed proof accepted with exit {code:?}");
+        }
     }
 
     #[test]

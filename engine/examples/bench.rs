@@ -592,7 +592,7 @@ async fn prove(node: &Cli, request: &Request, work: &Work, side: &mut SideResult
     let script = repo_root().join("bench/proofs").join(format!("{name}.mjs"));
     let call = args(&[&script.to_string_lossy(), &folder.to_string_lossy(), &work.pristine.to_string_lossy(), &answer.to_string_lossy()]);
     side.proof = match run_cli(node, &call, run_dir, "", PROOF_LIMIT).await {
-        Ok(run) => pure::parse_proof(&run.stdout).or_else(|| {
+        Ok(run) => pure::parse_proof(&run.stdout, run.code).or_else(|| {
             Some(pure::Proof {
                 pass: false,
                 checks: vec![pure::Check {
