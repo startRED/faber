@@ -820,12 +820,27 @@ check('settings: switching sections is a short cross-fade (the old one leaves as
 check('settings: reversing a section switch before its exit ends keeps the latest section and releases its copies', async () => {
   const preference = Object.getOwnPropertyDescriptor(MediaQueryList.prototype, 'matches')!;
   const was = document.documentElement.dataset.motion;
+  const rectDescriptor = Object.getOwnPropertyDescriptor(Element.prototype, 'getBoundingClientRect')!;
+  const geometry: unknown[] = [];
+  let phase = 'mount';
   Object.defineProperty(MediaQueryList.prototype, 'matches', { ...preference, get(this: MediaQueryList) {
     return this.media === '(prefers-reduced-motion: reduce)' ? false : preference.get!.call(this);
   } });
   useLanguage('en');
+  // Observe the rectangles already requested by the real list, without another layout read.
+  Object.defineProperty(Element.prototype, 'getBoundingClientRect', { ...rectDescriptor, value(this: Element) {
+    const rect = rectDescriptor.value.call(this) as DOMRect;
+    if (this.matches('.s-main > .st-group, .s-main > .st-card')) {
+      if (geometry.length === 24) geometry.shift();
+      geometry.push({ at: performance.now(), phase, class: this.className, connected: this.isConnected,
+        x: rect.x, y: rect.y, width: rect.width, height: rect.height,
+        top: rect.top, right: rect.right, bottom: rect.bottom, left: rect.left });
+    }
+    return rect;
+  } });
   try {
     for (const mode of ['full', 'reduced', 'none']) {
+      phase = `${mode}:mount`;
       document.documentElement.dataset.motion = mode;
       const view = mount(() => createComponent(Settings, {
         look: look(), saved: {}, vendors: ['claude', 'codex'], quotas: {}, now: 0, start: 'general',
@@ -839,12 +854,25 @@ check('settings: reversing a section switch before its exit ends keeps the lates
         const rect = main.querySelector('.st-group')!.getBoundingClientRect();
         ok(rect.width > 0 && rect.height > 0 && rect.bottom > 0 && rect.top < innerHeight && rect.right > 0 && rect.left < innerWidth,
           `${mode}: General intersects the viewport before switching (${rect.x},${rect.y},${rect.width},${rect.height}; viewport ${innerWidth}x${innerHeight})`);
+        phase = `${mode}:switch`;
         navButton(view.host, 'set.privacy').click();
         await tick();
         equal(main.querySelectorAll('.facts').length, 1, `${mode}: Privacy really opened`);
         if (mode === 'full') {
           const departing = document.querySelector('.motion-exit')?.shadowRoot?.querySelector<HTMLElement>('.st-group');
-          ok(departing, 'General has an actual departing copy before reversing');
+          ok(departing, `General has an actual departing copy before reversing${departing ? '' : `; diagnostic ${JSON.stringify({
+            at: performance.now(), phase, effectiveLevel: level(main),
+            root: { class: document.documentElement.className, data: { ...document.documentElement.dataset } },
+            viewport: { width: innerWidth, height: innerHeight, visibility: document.visibilityState },
+            exitDuration: getComputedStyle(main).getPropertyValue('--dur-exit'), geometry,
+            layers: [...document.querySelectorAll('.motion-exit')].map((layer) => ({
+              copies: [...(layer.shadowRoot?.querySelectorAll('.motion-exit') ?? [])].map((copy) => ({
+                class: copy.className, animations: copy.getAnimations().map((animation) => ({
+                  state: animation.playState, time: animation.currentTime, timing: animation.effect?.getComputedTiming(),
+                })),
+              })),
+            })),
+          })}`}`);
           ok(departing.getAnimations().some((animation) => animation.playState === 'running'), 'reverse while the first exit is still running');
         }
         const general = navButton(view.host, 'set.general');
@@ -875,6 +903,7 @@ check('settings: reversing a section switch before its exit ends keeps the lates
       }
     }
   } finally {
+    Object.defineProperty(Element.prototype, 'getBoundingClientRect', rectDescriptor);
     Object.defineProperty(MediaQueryList.prototype, 'matches', preference);
     if (was === undefined) delete document.documentElement.dataset.motion;
     else document.documentElement.dataset.motion = was;
