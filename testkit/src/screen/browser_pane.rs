@@ -39,7 +39,7 @@ fn interrupt_width(ctx: &mut Ctx) -> Result {
     for width in [1920, 1280, 720] {
         resize(page, width, 800)?;
         // Bounded metadata can perturb timing; it diagnoses preparation, not motion performance.
-        // Read computed layout only on failure; normal boundaries retain flags and inline width inputs.
+        // Proposal: the first post-click frame reads layout too; it may perturb the failure and is not a motion proof.
         page.eval(
             r#"(() => {
           window.__widthFinish?.(false);
@@ -58,12 +58,32 @@ fn interrupt_width(ctx: &mut Ctx) -> Result {
             if(['width','grid-template-columns'].includes(event.propertyName))
               record(event.type,{property:event.propertyName,target:event.target?.className});
           };
-          const click=event=>record('click',{trusted:event.isTrusted,
-            subject:event.target?.closest?.('.pane-aside,.pane-site,.site-head button')?.className ?? null});
+          let postClickFrame=0,finished=false;
+          const click=event=>{
+            const subject=event.target?.closest?.('.pane-aside,.pane-site,.site-head button');
+            record('click',{trusted:event.isTrusted,subject:subject?.className ?? null});
+            if(!subject?.matches('.pane-site'))return;
+            cancelAnimationFrame(postClickFrame);
+            postClickFrame=requestAnimationFrame(()=>{
+              if(finished)return;
+              const column=document.querySelector('.runcol'),style=shell && getComputedStyle(shell);
+              const colStyle=column && getComputedStyle(column);
+              const animations=shell?.getAnimations({subtree:true})
+                .filter(a=>a instanceof CSSTransition && ['width','grid-template-columns'].includes(a.transitionProperty))
+                .slice(0,4).map(a=>({property:a.transitionProperty,state:a.playState,time:a.currentTime,
+                  progress:a.effect?.getComputedTiming().progress}));
+              record('browser-click-frame',{durationInput:root.style.getPropertyValue('--dur-ui'),
+                easingInput:root.style.getPropertyValue('--ease'),grid:style?.gridTemplateColumns,property:style?.transitionProperty,
+                duration:style?.transitionDuration,columnWidth:colStyle?.width,
+                columnProperty:colStyle?.transitionProperty,columnDuration:colStyle?.transitionDuration,animations});
+            });
+          };
           for(const type of transitions)shell?.addEventListener(type,transition);
           document.addEventListener('click',click,true);
           window.__widthRecord=record;
           window.__widthFinish=failure=>{
+            finished=true;
+            cancelAnimationFrame(postClickFrame);
             if(failure){
               if(diagnostic.records.length>=diagnostic.limit){diagnostic.records.pop();diagnostic.dropped++;}
               record('failure');
