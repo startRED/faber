@@ -1215,6 +1215,30 @@ check('page in the browser: the pane opens again on the page it last showed, aft
         if (full) {
           button.click();
           await settle();
+          host.querySelector<HTMLButtonElement>('.pane-aside')!.click();
+          await settle(500);
+          const shell = host.querySelector<HTMLElement>('.shell')!;
+          ok(!shell.classList.contains('glide'), 'the earlier view switch has settled');
+          const openSite = api.siteOpen;
+          let release!: (opened: boolean) => void;
+          try {
+            api.siteOpen = () => new Promise((resolve) => { release = resolve; });
+            button.click();
+            await settle();
+            ok(release, 'returning to the saved page reaches its asynchronous native open');
+            release(true);
+            await frames();
+            ok(host.querySelector('.site-view'), 'the saved page mounts again');
+            const transitions = shell.getAnimations({ subtree: true }).filter((animation) =>
+              animation instanceof CSSTransition
+              && ['width', 'grid-template-columns'].includes(animation.transitionProperty)
+              && animation.playState === 'running');
+            ok(transitions.length, 'returning to a saved page glides its actual width after the earlier switch settled');
+          } finally { api.siteOpen = openSite; }
+          button.click();
+          await settle(250);
+          button.click();
+          await settle();
           button.click();
           showFile('example.txt');
           await settle(350);

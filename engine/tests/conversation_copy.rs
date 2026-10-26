@@ -629,6 +629,9 @@ async fn r_next_at_start_merged_copies_and_those_of_deleted_conversations_go() {
     let kept = sent(&s.engine, ask(&s.project, "Keep working")).await;
     let merged = sent(&s.engine, ask(&s.project, "Finished work")).await;
     let (kept_copy, merged_copy) = (s.engine.open(&kept).unwrap().copy.unwrap(), s.engine.open(&merged).unwrap().copy.unwrap());
+    // The startup sweep needs idle folders, including the off-lock history capture that follows attachment.
+    agent_started_in(&s.cwds, Path::new(&kept_copy.path)).await;
+    agent_started_in(&s.cwds, Path::new(&merged_copy.path)).await;
     s.engine.shutdown();
     // A folder no conversation names any more (its delete could not remove it then).
     let orphan = s.data.path().join("copies").join("00000000-0000-4000-8000-000000000000");

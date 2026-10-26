@@ -347,7 +347,11 @@ fn failure_in(ctx: &mut Ctx, language: &str, width: u32) -> Result {
     })()"#,
     )?;
     app.page.eval(&format!("window.__TAURI_INTERNALS__.invoke('test_host_size',{{width:{width},height:800}})"))?;
-    app.page.wait_for("the native host width", &format!("innerWidth==={width} && innerHeight===800"))?;
+    // Native dimensions can change before resize remounts the column and its address field.
+    app.page.wait_for(
+        "the host resize event and its new address field",
+        &format!("innerWidth==={width} && innerHeight===800 && window.__browserRetryTrace.some(e=>e.type==='resize' && e.width==={width})"),
+    )?;
     // A failed native open is injected at the command boundary, not presented as a real network failure.
     app.page.eval("window.__TAURI_INTERNALS__.invoke('test_site_refuse_once')")?;
     enter(&mut app.page, &fixture.url("/one"))?;

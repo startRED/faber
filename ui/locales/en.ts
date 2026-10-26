@@ -2054,6 +2054,7 @@ export const en = {
   'notes.269.fixed': 'Messages from another AI no longer restart a conversation you stopped, even after all work has ended.',
   'notes.270.fixed': 'Rows and the running column no longer linger when you close them.',
   'notes.271.fixed': 'Answered question cards fade away even when you answer as they appear.',
+  'notes.272.fixed': 'Returning to a saved browser page changes the side panel width smoothly after a delayed opening.',
   'update.checking': 'Looking for an update…',
   'update.downloading': 'Downloading update…',
   'update.downloadingPercent': 'Downloading update… {percent}%',

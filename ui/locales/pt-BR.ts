@@ -2161,6 +2161,7 @@ export const ptBR: Messages = {
   'notes.269.fixed': 'Recados de outra IA deixam de reiniciar uma conversa que você parou, mesmo depois que todo o trabalho terminou.',
   'notes.270.fixed': 'As linhas e a coluna de tarefas em andamento deixam de demorar pra desaparecer quando você as fecha.',
   'notes.271.fixed': 'O cartão da pergunta desaparece suavemente mesmo quando você responde assim que ele aparece.',
+  'notes.272.fixed': 'Ao voltar pra uma página salva, o painel do navegador muda de largura suavemente mesmo quando a abertura demora.',
   'update.checking': 'Procurando atualização…',
   'update.downloading': 'Baixando atualização…',
   'update.downloadingPercent': 'Baixando atualização… {percent}%',

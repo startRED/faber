@@ -2174,6 +2174,7 @@ export const de: Messages = {
   'notes.269.fixed': 'Nachrichten einer anderen KI starten ein von dir gestopptes Gespräch nicht mehr neu, auch wenn alle Arbeiten beendet sind.',
   'notes.270.fixed': 'Zeilen und die Spalte der laufenden Aufgaben verschwinden beim Schließen ohne unnötige Verzögerung.',
   'notes.271.fixed': 'Fragekarten blenden sanft aus, auch wenn du sofort beim Erscheinen antwortest.',
+  'notes.272.fixed': 'Beim Zurückkehren zu einer gespeicherten Seite passt sich die Breite des Browserbereichs auch nach verzögertem Öffnen fließend an.',
   'update.checking': 'Suche nach einem Update…',
   'update.downloading': 'Update wird heruntergeladen…',
   'update.downloadingPercent': 'Update wird heruntergeladen… {percent} %',

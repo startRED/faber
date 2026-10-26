@@ -1,5 +1,5 @@
 import { ChatGroup } from './ChatGroup.tsx';
-import { createEffect, createMemo, createResource, createSignal, Match, on, onCleanup, onMount, Show, Switch } from 'solid-js';
+import { createComputed, createEffect, createMemo, createResource, createSignal, Match, on, onCleanup, onMount, Show, Switch } from 'solid-js';
 import { Ambient } from './Ambient.tsx';
 import { Hole } from './Hole.tsx';
 import {
@@ -540,17 +540,6 @@ export function App(props: { initial: AppState; update?: UpdateStatus; inbox: { 
   // reduced motion); opening and closing it are the list's own move.
   const [glide, setGlide] = createSignal(false);
   let glideTimer: ReturnType<typeof setTimeout> | undefined;
-  createEffect(on([paneKind, colShown], ([kind, shown], previous) => {
-    if (!previous || !previous[1] || !shown) {
-      clearTimeout(glideTimer);
-      setGlide(false);
-      return;
-    }
-    if (previous[0] === kind) return;
-    setGlide(true);
-    clearTimeout(glideTimer);
-    glideTimer = setTimeout(() => setGlide(false), 450);
-  }, { defer: true }));
   onCleanup(() => clearTimeout(glideTimer));
   // The sidebar that folds away takes its focus with it: the column's first control gets it, as when focus mode steps aside.
   createEffect(on(folded, (away) => {
@@ -709,6 +698,18 @@ export function App(props: { initial: AppState; update?: UpdateStatus; inbox: { 
     const id = current()?.id;
     return open && id ? { conversationId: id, at: open.ref, open } : undefined;
   }, undefined, { equals: (a, b) => a?.open === b?.open && a?.conversationId === b?.conversationId });
+  // Enable the transition before a newly mounted page measures its final width.
+  createComputed(on([paneKind, colShown], ([kind, shown], previous) => {
+    if (!previous || !previous[1] || !shown) {
+      clearTimeout(glideTimer);
+      setGlide(false);
+      return;
+    }
+    if (previous[0] === kind) return;
+    setGlide(true);
+    clearTimeout(glideTimer);
+    glideTimer = setTimeout(() => setGlide(false), 450);
+  }, { defer: true }));
   createEffect(on(openedAgent, (open) => open && (showSite(undefined), showVisual(undefined), showAside(undefined), showFile(undefined), setChangesOpen(undefined), setBackgroundOpen(false), showDetails(undefined)), { defer: true }));
   createEffect(on(openedSite, (open) => open && (showAgent(undefined), showVisual(undefined), showAside(undefined), showFile(undefined), setChangesOpen(undefined), setBackgroundOpen(false), showDetails(undefined)), { defer: true }));
   createEffect(on(openedAside, (open) => open && (showAgent(undefined), showSite(undefined), showVisual(undefined), showFile(undefined), setChangesOpen(undefined), setBackgroundOpen(false), showDetails(undefined)), { defer: true }));
