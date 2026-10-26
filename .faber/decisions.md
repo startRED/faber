@@ -24,3 +24,4 @@
 
 - The project agent settings tool accepts only web_search off/cached/live. It reuses the ordinary settings save, its own consent and audit, and existing full trust only for this bounded preference. The saved response is queued after durable persistence and before stricter settings stop replies; no delivery acknowledgement or stop exemption is introduced. [by AI]
 - Manual benchmark admission requires fresh unchanged quota readings between paid stages, after the existing reporting lag for its own work. Missing evidence pauses admission; this is observed quiet, not proof of who used an account. Completed sides are checkpointed before admission and a run-local CANCEL file ends a pause. [by AI]
+- Nightly CLI candidate contracts run only in disposable runners without sign-in; passing help/schema checks remain explicitly unqualified and cannot publish metadata, promote releases or authorize installation. [by AI]
