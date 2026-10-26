@@ -149,3 +149,12 @@ A mission keeps a project as coherent as the agents that build Faber keep Faber 
   by the rules of [product-rules.md](../product-rules.md) (R147): an empty review is a pass, only a break for a person, for
   data, for security or for a written rule blocks, a fix needs a failing test or a repro, and each round gets the
   findings already decided so the loop ends.
+
+## Independent plan review and delivery checks
+
+Roadmap direction requested by the owner; not implemented. Phase 4 starts with a measured Faber pilot, then expands
+only if the evidence supports it. Extend the existing project conversation, helpers, contracts and verifier rather
+than introducing a separate workflow screen or bundling a third-party plugin. Read the
+[implementation proposal](../superpowers/specs/2026-10-26-independent-plan-review.md) for the sequence, prerequisites,
+review independence, incremental project knowledge, delivery-to-plan checks and acceptance evidence. Its technical
+choices remain AI proposals; scheduling the work does not approve every detail or claim a measured benefit.
