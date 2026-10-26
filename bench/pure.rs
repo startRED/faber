@@ -617,7 +617,21 @@ pub fn render_tables(rows: &[Row], spent: &Spend, cap: &Cap) -> String {
     let qualified_count = rows.iter().filter(qualified).count();
     let qualified_wins = |side| rows.iter().filter(qualified).filter(|r| r.winner == Some(side)).count();
     let qualified_ties = rows.iter().filter(qualified).filter(|r| r.winner.is_none()).count();
-    out.push_str(&format!("\nCross-vendor qualified verdicts: {qualified_count} (Faber wins {}, plain wins {}, ties {qualified_ties}). All other verdicts are weaker evidence, excluded from the cross-vendor quality target.\n", qualified_wins(Side::Faber), qualified_wins(Side::Plain)));
+    out.push_str(&format!("\nCross-vendor qualified verdicts: {qualified_count} (Faber wins {}, plain wins {}, ties {qualified_ties}). These describe independent opinions; they alone do not prove the quality targets.\n", qualified_wins(Side::Faber), qualified_wins(Side::Plain)));
+    let projects = rows.iter().filter(|r| r.kind == Kind::Project).count();
+    let proven = rows
+        .iter()
+        .filter(|r| {
+            r.kind == Kind::Project
+                && r.skipped.is_none()
+                && qualified(r)
+                && r.winner != Some(Side::Plain)
+                && r.faber
+                    .as_ref()
+                    .is_some_and(|s| s.ok && s.error.is_none() && !s.stopped_by_cap && s.proof.as_ref().is_some_and(|p| p.pass))
+        })
+        .count();
+    out.push_str(&format!("\nProjects: {proven}/{projects} Faber wins or ties with independent review and executable proof (target 9/10). The denominator includes every recorded Project request, including failures and skips. This is not full-version qualification; Chat source accuracy and coverage of the full request set remain separate.\n"));
     let side_total = |pick: fn(&Row) -> &Option<SideResult>| {
         let mut usage = Usage::default();
         let (mut usd, mut secs) = (Some(0.0), 0.0);
@@ -957,6 +971,71 @@ mod tests {
             folder: None,
             proof: pass.map(|p| Proof { pass: p, checks: vec![Check { name: "c".into(), ok: p, detail: String::new() }] }),
             stopped_by_cap: false,
+        }
+    }
+
+    #[test]
+    fn project_quality_needs_a_completed_proven_result_and_an_independent_win_or_tie() {
+        let row = Row {
+            request: "project".into(),
+            title: "t".into(),
+            kind: Kind::Project,
+            a: Side::Faber,
+            verdict: Some(Verdict { pick: Pick::A, score_a: None, score_b: None, reason: String::new() }),
+            winner: Some(Side::Faber),
+            faber: Some(side(Side::Faber, 0.2, Some(true))),
+            plain: Some(side(Side::Plain, 0.4, Some(false))),
+            judge_cost_usd: Some(0.3),
+            judge_attempted: true,
+            judge: Some(JudgeReview {
+                vendor: "codex".into(),
+                model: "fixture".into(),
+                effort: "high".into(),
+                independent_plain: true,
+                independent_faber: true,
+            }),
+            judge_usage: Usage::default(),
+            skipped: None,
+        };
+        let cap = Cap { max_usd: 8.0, max_fresh_tokens: 3_000_000 };
+        let summary = |rows: &[Row], successes| {
+            let text = render_tables(rows, &Spend::default(), &cap);
+            assert!(
+                text.contains(&format!("Projects: {successes}/2 Faber wins or ties with independent review and executable proof")),
+                "{text}"
+            );
+        };
+        let mut skipped = row.clone();
+        skipped.verdict = None;
+        skipped.faber = None;
+        skipped.skipped = Some("cap reached".into());
+        let mut chat = row.clone();
+        chat.kind = Kind::Chat;
+        let mut rows = vec![row, skipped, chat];
+        summary(&rows, 1);
+        rows[0].winner = None;
+        summary(&rows, 1);
+        rows[0].winner = Some(Side::Plain);
+        summary(&rows, 0);
+        rows[0].winner = Some(Side::Faber);
+        let valid = rows[0].clone();
+        for case in 0..11 {
+            rows[0] = valid.clone();
+            match case {
+                0 => rows[0].faber.as_mut().unwrap().proof = None,
+                1 => rows[0].faber.as_mut().unwrap().proof.as_mut().unwrap().pass = false,
+                2 => rows[0].faber.as_mut().unwrap().ok = false,
+                3 => rows[0].faber.as_mut().unwrap().error = Some("failed".into()),
+                4 => rows[0].faber.as_mut().unwrap().stopped_by_cap = true,
+                5 => rows[0].judge.as_mut().unwrap().independent_faber = false,
+                6 => rows[0].judge.as_mut().unwrap().independent_plain = false,
+                7 => rows[0].verdict = None,
+                8 => rows[0].judge = None,
+                9 => rows[0].faber = None,
+                10 => rows[0].skipped = Some("not run".into()),
+                _ => unreachable!(),
+            }
+            summary(&rows, 0);
         }
     }
 
