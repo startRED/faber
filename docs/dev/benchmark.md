@@ -24,6 +24,13 @@ Start it by hand at below-normal priority so a game in front keeps the processor
 
 ## What a run does
 
+Before any account reading or model work, a real run copies `bench/requests/`, `bench/fixtures/` and `bench/proofs/`
+into its new `inputs/` folder. Requests, starting folders and both sides' checks use that snapshot, so later edits
+in the source checkout cannot change a running comparison. The exact request files and scripts stay beside the
+results; `results.json` records the input folder and the `--only` selection. `--dry-run` only reads the source files
+and creates no folder. Copy failures stop before account use. This is a snapshot, not protection against agents
+with full filesystem access; copying is not atomic against edits made while the snapshot itself is being taken.
+
 For each request in `bench/requests/` (a header and the prompt exactly as a person would type it):
 
 1. Builds the starting folder (`bench/fixtures/<name>.mjs`, or a README) under the run folder, never in the repository or in the person's projects.

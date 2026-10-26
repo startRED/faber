@@ -14,6 +14,8 @@
 
 #[path = "../../bench/account_quiet.rs"]
 mod bench_quiet;
+#[path = "../../bench/inputs.rs"]
+mod inputs;
 #[path = "../../bench/pure.rs"]
 mod pure;
 
@@ -22,6 +24,7 @@ use faber_engine::model::{Area, Conversation, Message, Permissions, Role, Settin
 use faber_engine::proc::{self, Proc};
 use faber_engine::router::Choice;
 use faber_engine::{Engine, EngineOptions, SendRequest};
+use inputs::copy_tree;
 use pure::{Cap, Kind, Outcome, Request, Row, Side, SideResult, Spend, Usage};
 use serde_json::json;
 use std::collections::BTreeMap;
@@ -91,8 +94,8 @@ fn repo_root() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).parent().expect("the engine sits in the repository").to_path_buf()
 }
 
-fn load_requests(only: &[String]) -> Result<Vec<Request>, Failure> {
-    let mut files: Vec<PathBuf> = std::fs::read_dir(repo_root().join("bench/requests"))?
+fn load_requests(inputs: &Path, only: &[String]) -> Result<Vec<Request>, Failure> {
+    let mut files: Vec<PathBuf> = std::fs::read_dir(inputs.join("requests"))?
         .filter_map(|e| e.ok().map(|e| e.path()))
         .filter(|p| p.extension().is_some_and(|x| x == "md"))
         .collect();
@@ -190,20 +193,6 @@ fn git(dir: &Path, args: &[&str]) -> Result<(), Failure> {
     if out.status.success() { Ok(()) } else { Err(format!("git {args:?} failed: {}", String::from_utf8_lossy(&out.stderr)).into()) }
 }
 
-fn copy_tree(from: &Path, to: &Path) -> std::io::Result<()> {
-    std::fs::create_dir_all(to)?;
-    for entry in std::fs::read_dir(from)? {
-        let entry = entry?;
-        let target = to.join(entry.file_name());
-        if entry.file_type()?.is_dir() {
-            copy_tree(&entry.path(), &target)?;
-        } else {
-            std::fs::copy(entry.path(), target)?;
-        }
-    }
-    Ok(())
-}
-
 fn args(list: &[&str]) -> Vec<String> {
     list.iter().map(|s| s.to_string()).collect()
 }
@@ -219,7 +208,7 @@ struct Work {
     repo: PathBuf,
 }
 
-fn prepare(request: &Request, root: &Path, node: &str) -> Result<Work, Failure> {
+fn prepare(request: &Request, root: &Path, node: &str, inputs: &Path) -> Result<Work, Failure> {
     let base = root.join(&request.id);
     let work = Work { pristine: base.join("pristine"), plain: base.join("plain"), repo: base.join("faber").join("repo") };
     for dir in [&work.pristine, &work.plain, &work.repo] {
@@ -230,7 +219,7 @@ fn prepare(request: &Request, root: &Path, node: &str) -> Result<Work, Failure> 
     }
     match &request.fixture {
         Some(name) => {
-            let script = repo_root().join("bench/fixtures").join(format!("{name}.mjs"));
+            let script = inputs.join("fixtures").join(format!("{name}.mjs"));
             let out = hidden(node).arg(&script).arg(&work.pristine).output()?;
             if !out.status.success() {
                 return Err(format!("fixture {name} failed: {}", String::from_utf8_lossy(&out.stderr)).into());
@@ -582,14 +571,14 @@ async fn run_faber(clis: &BTreeMap<Vendor, Cli>, request: &Request, work: &Work,
 
 // --- Proofs and the judge ------------------------------------------------------------------------------------------
 
-async fn prove(node: &Cli, request: &Request, work: &Work, side: &mut SideResult, run_dir: &Path) {
+async fn prove(node: &Cli, request: &Request, work: &Work, side: &mut SideResult, run_dir: &Path, inputs: &Path) {
     let Some(name) = &request.proof else { return };
     let answer = run_dir.join(&request.id).join(format!("answer-{:?}.txt", side.side).to_lowercase());
     if std::fs::write(&answer, &side.reply).is_err() {
         return;
     }
     let folder = side.folder.clone().map(PathBuf::from).unwrap_or_else(|| work.plain.clone());
-    let script = repo_root().join("bench/proofs").join(format!("{name}.mjs"));
+    let script = inputs.join("proofs").join(format!("{name}.mjs"));
     let call = args(&[&script.to_string_lossy(), &folder.to_string_lossy(), &work.pristine.to_string_lossy(), &answer.to_string_lossy()]);
     side.proof = match run_cli(node, &call, run_dir, "", PROOF_LIMIT).await {
         Ok(run) => pure::parse_proof(&run.stdout, run.code).or_else(|| {
@@ -813,6 +802,8 @@ fn judge_result(vendor: Vendor, model: &str, run: &Finished) -> Judged {
 fn write_results(run_dir: &Path, options: &Options, rows: &[Row], spent: &Spend) -> Result<(), Failure> {
     let value = json!({
         "runId": options.run_id,
+        "inputs": "inputs",
+        "only": options.only,
         "plain": { "cli": options.plain.name(), "model": options.plain_model, "effort": options.plain_effort },
         "faberVendors": options.vendors.iter().map(|v| v.name()).collect::<Vec<_>>(),
         "judgeOverrides": { "model": options.judge_model, "effort": options.judge_effort },
@@ -834,7 +825,15 @@ fn write_checkpoint(run_dir: &Path, options: &Options, rows: &[Row], row: &Row, 
 #[tokio::main]
 async fn main() -> Result<(), Failure> {
     let mut options = Options::read()?;
-    let requests = load_requests(&options.only)?;
+    let root = std::path::absolute(options.dir.join(&options.run_id))?;
+    let inputs = if options.dry_run {
+        repo_root().join("bench")
+    } else {
+        std::fs::create_dir_all(&options.dir)?;
+        std::fs::create_dir(&root)?;
+        inputs::snapshot(&repo_root().join("bench"), &root)?
+    };
+    let requests = load_requests(&inputs, &options.only)?;
     println!(
         "run {}: {} request(s), Faber on {:?} (Auto) against plain {} ({} {}), judge {} {} (automatic vendor selection), cap US${} or {} first-time tokens",
         options.run_id,
@@ -876,9 +875,6 @@ async fn main() -> Result<(), Failure> {
         clis.insert(*vendor, find_cli(vendor.name()).ok_or_else(|| format!("{} is not installed", vendor.name()))?);
     }
     let plain_cli = find_cli(options.plain.name()).ok_or_else(|| format!("{} is not installed", options.plain.name()))?;
-    let root = options.dir.join(&options.run_id);
-    std::fs::create_dir_all(&options.dir)?;
-    std::fs::create_dir(&root)?;
     let judge_dir = root.join("judge");
     std::fs::create_dir_all(&judge_dir)?;
 
@@ -909,7 +905,7 @@ async fn main() -> Result<(), Failure> {
             continue;
         }
         println!("[{}/{}] {}", index + 1, requests.len(), request.id);
-        let work = prepare(request, &root, &node.command)?;
+        let work = prepare(request, &root, &node.command, &inputs)?;
         if let Err(error) = accounts.wait(&judges, &[options.plain], &mut spent).await {
             write_checkpoint(&root, &options, &rows, &row, &spent)?;
             return Err(error.into());
@@ -934,8 +930,8 @@ async fn main() -> Result<(), Failure> {
         row.faber = Some(faber.clone());
         write_checkpoint(&root, &options, &rows, &row, &spent)?;
         println!("  faber: ok {}, {:.0}s, US${:?}, {}", faber.ok, faber.secs, faber.cost_usd, faber.error.as_deref().unwrap_or(""));
-        prove(&node, request, &work, &mut plain, &root).await;
-        prove(&node, request, &work, &mut faber, &root).await;
+        prove(&node, request, &work, &mut plain, &root, &inputs).await;
+        prove(&node, request, &work, &mut faber, &root, &inputs).await;
         row.plain = Some(plain.clone());
         row.faber = Some(faber.clone());
         write_checkpoint(&root, &options, &rows, &row, &spent)?;
