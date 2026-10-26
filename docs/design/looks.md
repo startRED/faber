@@ -128,6 +128,7 @@ own inks.
   size estimates. Panel content staggers by 18 ms, capped at 48 ms. Surviving list rows
   use FLIP. The composer and native disclosures retain short measured height changes; reduced motion is instant.
   Window resizing cancels travel and reflows instantly so content stays inside the new viewport.
+  List exits and closing-column survivors use the exit token without the entrance duration's minimum.
   Exit copies are inert, isolated in a shadow tree and removed when their animation finishes. At most 12 visible copies
   per list exit together; no component or process is kept alive for an exit. Native dropdown pickers animate where the
   webview supports customizable selects, with the usual native control as the fallback. Theme changes use native

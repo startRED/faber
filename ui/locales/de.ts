@@ -2172,6 +2172,8 @@ export const de: Messages = {
   'notes.267.fixed': 'Berichte anderer KIs bleiben erhalten, wenn ein Update oder ein nicht verfügbares Abonnement den Gesprächsstart verhindert.',
   'notes.268.fixed': 'Berichte anderer KIs warten jetzt auf Platz im vollen Posteingang und werden beim erneuten Öffnen von Faber ohne Duplikate wiederhergestellt.',
   'notes.269.fixed': 'Nachrichten einer anderen KI starten ein von dir gestopptes Gespräch nicht mehr neu, auch wenn alle Arbeiten beendet sind.',
+  'notes.270.fixed': 'Zeilen und die Spalte der laufenden Aufgaben verschwinden beim Schließen ohne unnötige Verzögerung.',
+  'notes.271.fixed': 'Fragekarten blenden sanft aus, auch wenn du sofort beim Erscheinen antwortest.',
   'update.checking': 'Suche nach einem Update…',
   'update.downloading': 'Update wird heruntergeladen…',
   'update.downloadingPercent': 'Update wird heruntergeladen… {percent} %',

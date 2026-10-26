@@ -13,6 +13,7 @@ import { es } from '../../ui/locales/es.ts';
 import { fr } from '../../ui/locales/fr.ts';
 import { ptBR } from '../../ui/locales/pt-BR.ts';
 import { useLanguage } from '../../ui/i18n.ts';
+import { level } from '../../ui/motion.ts';
 import { accountLine, seedQuotas, usageRows } from '../../ui/sidebar.ts';
 import { forgetSection, Settings } from '../../ui/Settings.tsx';
 import { check, deepEqual, equal, frames, ok } from './check.ts';
@@ -729,10 +730,30 @@ check('settings: switching sections is a short cross-fade (the old one leaves as
   Object.defineProperty(MediaQueryList.prototype, 'matches', { ...preference, get(this: MediaQueryList) {
     return this.media === '(prefers-reduced-motion: reduce)' ? false : preference.get!.call(this);
   } });
-  const view = mount(() => createComponent(Settings, {
-    look: look(), saved: {}, vendors: ['claude', 'codex'], quotas: {}, now: 0,
-    onClose: () => {}, onOpenSetup: () => {}, onSave: async () => true,
-  }));
+  const rectDescriptor = Object.getOwnPropertyDescriptor(Element.prototype, 'getBoundingClientRect')!;
+  const geometry: unknown[] = [];
+  let phase = 'mount';
+  // Retain only rectangles the real animation already requested; never add a layout read.
+  Object.defineProperty(Element.prototype, 'getBoundingClientRect', { ...rectDescriptor, value(this: Element) {
+    const rect = rectDescriptor.value.call(this) as DOMRect;
+    if (geometry.length < 24 && this.matches('.s-main > .st-group, .s-main > .st-card')) {
+      geometry.push({ at: performance.now(), phase, class: this.className, connected: this.isConnected,
+        x: rect.x, y: rect.y, width: rect.width, height: rect.height,
+        top: rect.top, right: rect.right, bottom: rect.bottom, left: rect.left });
+    }
+    return rect;
+  } });
+  let view: ReturnType<typeof mount>;
+  try {
+    view = mount(() => createComponent(Settings, {
+      look: look(), saved: {}, vendors: ['claude', 'codex'], quotas: {}, now: 0,
+      onClose: () => {}, onOpenSetup: () => {}, onSave: async () => true,
+    }));
+  } catch (error) {
+    Object.defineProperty(Element.prototype, 'getBoundingClientRect', rectDescriptor);
+    Object.defineProperty(MediaQueryList.prototype, 'matches', preference);
+    throw error;
+  }
   const was = document.documentElement.dataset.motion;
   document.documentElement.dataset.motion = 'full';
   try {
@@ -741,15 +762,36 @@ check('settings: switching sections is a short cross-fade (the old one leaves as
     const main = view.host.querySelector<HTMLElement>('.s-main')!;
     ok(main.hasAttribute('data-motion-list'), '.s-main is an animated list: the old section keeps an inert copy while it fades');
     ok(main.scrollHeight > main.clientHeight, 'General is taller than the window here');
+    phase = 'scrolled';
     main.scrollTop = 200;
     ok(main.scrollTop > 0, 'the section is scrolled down');
     await new Promise((resolve) => setTimeout(resolve, 400));
+    phase = 'switching';
     navButton(view.host, 'set.privacy').click();
     await tick();
+    phase = 'after tick';
     equal(main.scrollTop, 0, 'a section opens at its top');
     equal(view.host.querySelectorAll('.facts').length, 1, 'only the new section is in the page');
     equal(view.host.querySelectorAll('.st-group').length, 0, 'and none of General');
-    ok(document.querySelector('.motion-exit')?.shadowRoot?.querySelector('.st-group'), 'the old section leaves as an inert copy');
+    const departing = document.querySelector('.motion-exit')?.shadowRoot?.querySelector('.st-group');
+    ok(departing, `the old section leaves as an inert copy${departing ? '' : `; diagnostic ${JSON.stringify({
+      motion: document.documentElement.dataset.motion, effectiveLevel: level(main),
+      localMotion: main.closest<HTMLElement>('[data-motion]')?.dataset.motion,
+      root: { class: document.documentElement.className, data: { ...document.documentElement.dataset } },
+      viewport: { width: innerWidth, height: innerHeight, visibility: document.visibilityState },
+      fonts: [...document.fonts].map(({ family, status }) => ({ family, status })),
+      style: { font: getComputedStyle(main).font, exitDuration: getComputedStyle(main).getPropertyValue('--dur-exit') },
+      geometry,
+      layers: [...document.querySelectorAll('.motion-exit')].map((layer) => ({
+        class: layer.className, inert: (layer as HTMLElement).inert,
+        copies: [...(layer.shadowRoot?.querySelectorAll('.motion-exit') ?? [])].map((copy) => ({
+          class: copy.className, style: copy.getAttribute('style'),
+          animations: copy.getAnimations().map((animation) => ({
+            state: animation.playState, time: animation.currentTime, timing: animation.effect?.getComputedTiming(),
+          })),
+        })),
+      })),
+    })}`}`);
     ok(view.host.querySelector('.s-main > .st-card')!.getAnimations().length > 0, 'the new section arrives instead of appearing');
     // Waits for the fade to end rather than a fixed time: a slow runner (macOS CI) ends it later.
     for (const start = Date.now(); (document.querySelector('.motion-exit') || main.getAnimations({ subtree: true }).length > 0) && Date.now() - start < 3000; ) {
@@ -767,6 +809,7 @@ check('settings: switching sections is a short cross-fade (the old one leaves as
       equal(main.getAnimations({ subtree: true }).length, 0, `nothing on the stage animates (frame ${frame})`);
     }
   } finally {
+    Object.defineProperty(Element.prototype, 'getBoundingClientRect', rectDescriptor);
     Object.defineProperty(MediaQueryList.prototype, 'matches', preference);
     if (was === undefined) delete document.documentElement.dataset.motion;
     else document.documentElement.dataset.motion = was;

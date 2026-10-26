@@ -2052,6 +2052,8 @@ export const en = {
   'notes.267.fixed': 'Reports from other AIs no longer disappear when an update or unavailable subscription prevents the conversation from starting.',
   'notes.268.fixed': 'Reports from other AIs now wait for room in a full inbox and recover after reopening Faber without appearing twice.',
   'notes.269.fixed': 'Messages from another AI no longer restart a conversation you stopped, even after all work has ended.',
+  'notes.270.fixed': 'Rows and the running column no longer linger when you close them.',
+  'notes.271.fixed': 'Answered question cards fade away even when you answer as they appear.',
   'update.checking': 'Looking for an update…',
   'update.downloading': 'Downloading update…',
   'update.downloadingPercent': 'Downloading update… {percent}%',

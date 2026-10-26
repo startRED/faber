@@ -2172,6 +2172,8 @@ export const fr: Messages = {
   'notes.267.fixed': 'Les comptes rendus des autres IA restent disponibles si une mise à jour ou un abonnement indisponible empêche la conversation de démarrer.',
   'notes.268.fixed': 'Les rapports des autres IA attendent désormais une place dans la file pleine et sont récupérés à la réouverture de Faber, sans doublon.',
   'notes.269.fixed': 'Les messages d’une autre IA ne relancent plus une conversation que vous avez arrêtée, même une fois tout le travail terminé.',
+  'notes.270.fixed': 'Les lignes et la colonne des tâches en cours disparaissent sans délai superflu à la fermeture.',
+  'notes.271.fixed': 'La carte de la question disparaît en douceur même si vous répondez dès son apparition.',
   'update.checking': 'Recherche d’une mise à jour…',
   'update.downloading': 'Téléchargement de la mise à jour…',
   'update.downloadingPercent': 'Téléchargement de la mise à jour… {percent} %',

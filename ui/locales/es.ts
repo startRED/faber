@@ -2172,6 +2172,8 @@ export const es: Messages = {
   'notes.267.fixed': 'Los informes de otras IA ya no desaparecen cuando una actualización o una suscripción no disponible impide iniciar la conversación.',
   'notes.268.fixed': 'Los informes de otras IA ahora esperan un hueco en la bandeja llena y se recuperan al volver a abrir Faber, sin aparecer dos veces.',
   'notes.269.fixed': 'Los mensajes de otra IA ya no reinician una conversación que detuviste, aunque todo el trabajo haya terminado.',
+  'notes.270.fixed': 'Las filas y la columna de tareas en curso dejan de tardar en desaparecer al cerrarlas.',
+  'notes.271.fixed': 'La tarjeta de la pregunta se desvanece aunque respondas en cuanto aparece.',
   'update.checking': 'Buscando una actualización…',
   'update.downloading': 'Descargando actualización…',
   'update.downloadingPercent': 'Descargando actualización… {percent} %',
