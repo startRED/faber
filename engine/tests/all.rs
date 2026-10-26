@@ -158,6 +158,10 @@ mod workspace;
 #[path = "../../bench/pure.rs"]
 mod bench_pure;
 
+#[allow(dead_code)]
+#[path = "../../bench/inputs.rs"]
+mod bench_inputs;
+
 #[test]
 fn every_test_file_is_listed() {
     let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests");
