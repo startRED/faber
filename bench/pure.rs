@@ -6,6 +6,9 @@
 use serde::Serialize;
 use serde_json::Value;
 
+#[path = "quiet.rs"]
+pub mod quiet;
+
 // --- Requests -------------------------------------------------------------------------------------------------------
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
@@ -453,6 +456,56 @@ impl Cap {
     }
 }
 
+// --- Judge independence ----------------------------------------------------------------------------------------------
+
+#[derive(Debug, Clone, Default, Serialize)]
+pub struct Authors {
+    pub vendors: Vec<String>,
+    pub complete: bool,
+}
+
+impl Authors {
+    pub fn independent_of(&self, vendor: &str) -> bool {
+        self.complete && !self.vendors.is_empty() && !self.vendors.iter().any(|v| v == vendor)
+    }
+
+    pub fn record(&mut self, vendor: Option<&str>, untracked_delegation: bool) {
+        if let Some(vendor) = vendor {
+            if !self.vendors.iter().any(|v| v == vendor) {
+                self.vendors.push(vendor.into());
+            }
+        } else {
+            self.complete = false;
+        }
+        // Delegated sessions do not persist their vendors in the parent's tool rows.
+        self.complete &= !untracked_delegation;
+    }
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct JudgeReview {
+    pub vendor: String,
+    pub model: String,
+    pub effort: String,
+    pub independent_plain: bool,
+    pub independent_faber: bool,
+}
+
+impl JudgeReview {
+    pub fn qualified(&self) -> bool {
+        self.independent_plain && self.independent_faber
+    }
+}
+
+/// Prefer a non-author of Faber; break ties with independence from plain. Overrides pin their original vendor.
+pub fn choose_judge<'a>(plain: &str, authors: &Authors, available: &'a [&str], pinned: Option<&str>) -> Option<&'a str> {
+    available
+        .iter()
+        .copied()
+        .filter(|v| pinned.is_none_or(|p| p == *v))
+        .min_by_key(|v| (authors.vendors.iter().any(|a| a == v), *v == plain))
+}
+
 // --- The report -----------------------------------------------------------------------------------------------------
 
 #[derive(Debug, Clone, Serialize)]
@@ -470,6 +523,7 @@ pub struct SideResult {
     pub usage_incomplete: bool,
     pub cost_usd: Option<f64>,
     pub models: Vec<String>,
+    pub authors: Authors,
     pub reply: String,
     pub folder: Option<String>,
     pub proof: Option<Proof>,
@@ -488,6 +542,7 @@ pub struct Row {
     pub plain: Option<SideResult>,
     pub judge_cost_usd: Option<f64>,
     pub judge_attempted: bool,
+    pub judge: Option<JudgeReview>,
     pub judge_usage: Usage,
     pub skipped: Option<String>,
 }
@@ -544,6 +599,22 @@ pub fn render_tables(rows: &[Row], spent: &Spend, cap: &Cap) -> String {
             usd_word(r.plain.as_ref().and_then(|s| s.cost_usd)),
         ));
     }
+    out.push_str(
+        "\n| Request | Judge vendor/model/effort | Independent of plain | Independent of Faber |\n| :--- | :--- | :--- | :--- |\n",
+    );
+    for r in rows {
+        if let Some(j) = &r.judge {
+            out.push_str(&format!(
+                "| {} | {} / {} / {} | {} | {} |\n",
+                r.request, j.vendor, j.model, j.effort, j.independent_plain, j.independent_faber
+            ));
+        }
+    }
+    let qualified = |r: &&Row| r.verdict.is_some() && r.judge.as_ref().is_some_and(JudgeReview::qualified);
+    let qualified_count = rows.iter().filter(qualified).count();
+    let qualified_wins = |side| rows.iter().filter(qualified).filter(|r| r.winner == Some(side)).count();
+    let qualified_ties = rows.iter().filter(qualified).filter(|r| r.winner.is_none()).count();
+    out.push_str(&format!("\nCross-vendor qualified verdicts: {qualified_count} (Faber wins {}, plain wins {}, ties {qualified_ties}). All other verdicts are weaker evidence, excluded from the cross-vendor quality target.\n", qualified_wins(Side::Faber), qualified_wins(Side::Plain)));
     let side_total = |pick: fn(&Row) -> &Option<SideResult>| {
         let mut usage = Usage::default();
         let (mut usd, mut secs) = (Some(0.0), 0.0);
@@ -599,6 +670,52 @@ pub fn render_tables(rows: &[Row], spent: &Spend, cap: &Cap) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn judge_selection_follows_actual_authors_and_marks_fallbacks() {
+        let available = ["claude", "codex"];
+        for plain in available {
+            for author in available {
+                let authors = Authors { vendors: vec![author.into()], complete: true };
+                let selected = choose_judge(plain, &authors, &available, None).unwrap();
+                assert_ne!(selected, author, "Auto's author must not judge its own answer");
+                let review = JudgeReview {
+                    vendor: selected.into(),
+                    model: "fixture".into(),
+                    effort: "high".into(),
+                    independent_plain: selected != plain,
+                    independent_faber: selected != author,
+                };
+                assert_eq!(review.qualified(), plain == author);
+                assert_eq!(choose_judge(plain, &authors, &[author], None), Some(author));
+                assert_eq!(choose_judge(plain, &authors, &available, Some(author)), Some(author));
+            }
+            let authors = Authors { vendors: available.map(String::from).into(), complete: true };
+            assert_ne!(choose_judge(plain, &authors, &available, None), Some(plain));
+        }
+        assert_eq!(choose_judge("claude", &Authors::default(), &[], None), None);
+        assert_eq!(choose_judge("claude", &Authors::default(), &available, Some("missing")), None);
+    }
+
+    #[test]
+    fn unknown_authors_and_untracked_delegation_never_claim_complete_authorship() {
+        let mut authors = Authors { vendors: vec![], complete: true };
+        authors.record(Some("claude"), false);
+        authors.record(Some("claude"), false);
+        assert_eq!(authors.vendors, ["claude"]);
+        assert!(authors.complete);
+        assert!(authors.independent_of("codex"));
+        assert!(!authors.independent_of("claude"));
+        authors.record(None, false);
+        authors.record(Some("codex"), false);
+        assert!(!authors.complete);
+        assert!(!authors.independent_of("other"));
+        let mut delegated = Authors { vendors: vec![], complete: true };
+        delegated.record(Some("claude"), true);
+        assert!(!delegated.complete);
+        assert!(!delegated.independent_of("codex"));
+        assert!(!Authors::default().independent_of("codex"));
+    }
 
     const REQUEST: &str = "---\nid: organize-folder\ntitle: Organize a messy folder\nkind: project\nfixture: organize\nproof: organize\n---\n\nPlease organize this.\nKeep every file.\n";
 
@@ -752,6 +869,7 @@ mod tests {
             plain: Some(side(Side::Plain, 0.4, None)),
             judge_cost_usd: None,
             judge_attempted: false,
+            judge: None,
             judge_usage: Usage::default(),
             skipped: None,
         };
@@ -822,6 +940,7 @@ mod tests {
             usage_incomplete: false,
             cost_usd: Some(usd),
             models: vec![],
+            authors: Authors::default(),
             reply: String::new(),
             folder: None,
             proof: pass.map(|p| Proof { pass: p, checks: vec![Check { name: "c".into(), ok: p, detail: String::new() }] }),
@@ -844,6 +963,7 @@ mod tests {
                 plain: Some(side(Side::Plain, 0.4, Some(false))),
                 judge_cost_usd: Some(0.3),
                 judge_attempted: true,
+                judge: None,
                 judge_usage: Usage::default(),
                 skipped: None,
             },
@@ -858,6 +978,7 @@ mod tests {
                 plain: None,
                 judge_cost_usd: None,
                 judge_attempted: false,
+                judge: None,
                 judge_usage: Usage::default(),
                 skipped: Some("the cap was reached".into()),
             },
@@ -865,6 +986,7 @@ mod tests {
         let mut spent = Spend::default();
         spent.add(&Usage { input: 20, output: 40, cache_read: 1000, cache_write: 140 }, Some(0.9));
         let text = render_tables(&rows, &spent, &Cap { max_usd: 8.0, max_fresh_tokens: 3_000_000 });
+        assert!(text.contains("Cross-vendor qualified verdicts: 0"), "unqualified verdicts must not prove the quality target: {text}");
         assert!(text.contains("| organize-folder | Project | Faber | pass (1/1) | FAIL (0/1) | 90 | 90 | 100 (500 cached) | 100 (500 cached) | 0.200 | 0.400 |"), "{text}");
         assert!(
             text.contains("| Judge wins (ties 0) | 1 | 0 |") && text.contains("| Faber cost as a share of plain | 50% | 100% |"),
@@ -874,5 +996,20 @@ mod tests {
             text.contains("Not run: research (the cap was reached)") && text.contains("US$0.600 for the sides, US$0.300 for the judge"),
             "{text}"
         );
+        let mut rows = rows;
+        rows[0].judge = Some(JudgeReview {
+            vendor: "codex".into(),
+            model: "fixture".into(),
+            effort: "high".into(),
+            independent_plain: true,
+            independent_faber: true,
+        });
+        let cap = Cap { max_usd: 8.0, max_fresh_tokens: 3_000_000 };
+        assert!(render_tables(&rows, &spent, &cap).contains("Cross-vendor qualified verdicts: 1 (Faber wins 1, plain wins 0, ties 0)"));
+        rows[0].judge.as_mut().unwrap().independent_faber = false;
+        assert!(render_tables(&rows, &spent, &cap).contains("Cross-vendor qualified verdicts: 0"));
+        rows[0].judge.as_mut().unwrap().independent_faber = true;
+        rows[0].judge.as_mut().unwrap().independent_plain = false;
+        assert!(render_tables(&rows, &spent, &cap).contains("Cross-vendor qualified verdicts: 0"));
     }
 }
