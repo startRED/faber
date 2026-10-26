@@ -57,6 +57,7 @@ Each run needs a new run folder: an existing `--run-id` is rejected before savin
 - The plain side is unguarded: it runs with bypassPermissions (or danger-full-access) and without the secret-path deny list Faber passes in its settings, and it loads this PC's hooks, instructions and MCP servers. The five prompts are benign.
 - `spawns.log` writes each argument, except the values of `--settings`, `--mcp-config` and the system-prompt flags, which are logged as their length.
 - The proofs run the agent's code on this PC, as the agent itself already did.
+- The research proof checks at most 20 distinct cited links; extra links make coverage incomplete and the proof fails. Reachability (including 401, 403 and 429) does not verify the cited facts, official authorship or page contents. A passing link check alone does not qualify research accuracy.
 - The full ~40 requests, creative media (thumbnail, video, 3D, mod) and the goals that are not quality (speed to first token, precision, memory) are measured elsewhere or not yet.
 
 A dated report of a run lives in [research/](../research/) (the first: [2026-10-22/benchmark-light.md](../research/2026-10-22/benchmark-light.md)). Its pure parts (request files, the deal, the verdict, what a CLI reported, the cap, the tables) are `bench/pure.rs`, tested by `engine/tests/all.rs`; the runner is `engine/examples/bench.rs`.

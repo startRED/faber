@@ -1,5 +1,5 @@
 // Proof of "research-with-sources": node sources.mjs <folder> <pristine folder> <answer file>
-// Every link in the answer is fetched: a source that does not exist is an invented citation.
+// At most 20 distinct links are fetched; an answer with unchecked links cannot pass.
 import { readFileSync } from 'node:fs';
 
 const answer = readFileSync(process.argv[4], 'utf8');
@@ -20,8 +20,9 @@ async function reach(url) {
   }
 }
 const results = await Promise.all(urls.slice(0, 20).map(reach));
+check('every cited link was checked', results.length === urls.length, `${results.length} of ${urls.length} links checked`);
 const dead = results.filter((r) => !r.ok);
-check('every link exists (it opens, or the site keeps scripts out with 401, 403 or 429)', results.length > 0 && dead.length === 0, dead.map((r) => `${r.status} ${r.url}`).join('; '));
+check('checked links open or return 401, 403 or 429', results.length > 0 && dead.length === 0, dead.map((r) => `${r.status} ${r.url}`).join('; '));
 const placeholders = urls.filter((u) => /example\.(com|org)|yourdomain|placeholder/i.test(u));
 check('no placeholder links', placeholders.length === 0, placeholders.join(', '));
 
