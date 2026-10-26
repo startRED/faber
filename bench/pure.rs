@@ -661,7 +661,13 @@ pub fn render_tables(rows: &[Row], spent: &Spend, cap: &Cap) -> String {
         fu.cache_read,
         pu.cache_read,
     ));
-    if let Some((fusd, pusd)) = fusd.zip(pusd).filter(|(_, plain)| *plain > 0.0) {
+    let comparable = rows.iter().filter(|r| r.faber.is_some() || r.plain.is_some()).all(|r| {
+        r.faber
+            .as_ref()
+            .zip(r.plain.as_ref())
+            .is_some_and(|(f, p)| [f, p].into_iter().all(|s| s.ok && s.error.is_none() && !s.stopped_by_cap))
+    });
+    if let Some((fusd, pusd)) = fusd.zip(pusd).filter(|(_, plain)| comparable && *plain > 0.0) {
         out.push_str(&format!("| Faber cost as a share of plain | {:.0}% | 100% |\n", fusd * 100.0 / pusd));
     }
     out.push_str(&format!(
@@ -971,6 +977,55 @@ mod tests {
             folder: None,
             proof: pass.map(|p| Proof { pass: p, checks: vec![Check { name: "c".into(), ok: p, detail: String::new() }] }),
             stopped_by_cap: false,
+        }
+    }
+
+    #[test]
+    fn cost_comparison_needs_the_same_completed_requests_on_both_sides() {
+        let row = Row {
+            request: "invoice".into(),
+            title: "t".into(),
+            kind: Kind::Project,
+            a: Side::Faber,
+            verdict: None,
+            winner: None,
+            faber: Some(side(Side::Faber, 0.3, Some(true))),
+            plain: Some(side(Side::Plain, 1.0, Some(true))),
+            judge_cost_usd: None,
+            judge_attempted: false,
+            judge: None,
+            judge_usage: Usage::default(),
+            skipped: None,
+        };
+        let cap = Cap { max_usd: 8.0, max_fresh_tokens: 3_000_000 };
+        let ratio = "| Faber cost as a share of plain |";
+        let mut second = row.clone();
+        second.faber.as_mut().unwrap().cost_usd = Some(0.1);
+        let text = render_tables(&[row.clone(), second], &Spend::default(), &cap);
+        assert!(text.contains("| Faber cost as a share of plain | 20% | 100% |"), "{text}");
+        for which in [Side::Faber, Side::Plain] {
+            for case in 0..6 {
+                let mut incomplete = row.clone();
+                let target = if which == Side::Faber { &mut incomplete.faber } else { &mut incomplete.plain };
+                match case {
+                    0 => *target = None,
+                    1 => {
+                        let s = target.as_mut().unwrap();
+                        s.ok = false;
+                        s.error = Some("not run: cap reached".into());
+                        s.cost_usd = Some(0.0);
+                    }
+                    2 => target.as_mut().unwrap().ok = false,
+                    3 => target.as_mut().unwrap().error = Some("interrupted".into()),
+                    4 => target.as_mut().unwrap().stopped_by_cap = true,
+                    _ => target.as_mut().unwrap().cost_usd = None,
+                }
+                for rows in [vec![incomplete.clone()], vec![row.clone(), incomplete]] {
+                    let text = render_tables(&rows, &Spend::default(), &cap);
+                    assert!(!text.contains(ratio), "{which:?} case {case}: {text}");
+                    assert!(text.contains("| API-equivalent US$ |"), "actual spending stays visible: {text}");
+                }
+            }
         }
     }
 
