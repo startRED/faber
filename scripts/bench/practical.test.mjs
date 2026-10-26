@@ -85,6 +85,20 @@ test('settings proof rejects a migrator that discards unknown preferences', () =
   assert.equal(proof(), false);
 }));
 
+test('settings proof rejects presence validation that accepts non-string themes', () => workspace('settings', ({ folder, proof }) => {
+  complete('settings', folder);
+  assert.equal(proof(), true);
+  writeFileSync(join(folder, 'migrate.mjs'), valid.settings[1].replace("typeof value.theme !== 'string'", 'value.theme == null'));
+  assert.equal(proof(), false, 'numbers, booleans, arrays and objects are not string themes');
+}));
+
+test('settings proof requires empty strings to remain valid themes', () => workspace('settings', ({ folder, proof }) => {
+  complete('settings', folder);
+  assert.equal(proof(), true);
+  writeFileSync(join(folder, 'migrate.mjs'), valid.settings[1].replace("typeof value.theme !== 'string'", "typeof value.theme !== 'string' || value.theme.length === 0"));
+  assert.equal(proof(), false, 'the contract requires a string without a nonempty restriction');
+}));
+
 test('sales proof rejects a hardcoded fixture answer on fresh input', () => workspace('sales', ({ folder, proof }) => {
   complete('sales', folder);
   assert.equal(proof(), true);

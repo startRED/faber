@@ -31,10 +31,13 @@ try {
     writeFileSync(path, existing);
     assert.equal(migrate(path).status, 0);
     assert.equal(readFileSync(path, 'utf8'), existing);
+    writeFileSync(path, '{"version":1,"theme":""}');
+    assert.equal(migrate(path).status, 0);
+    assert.deepEqual(JSON.parse(readFileSync(path, 'utf8')), { version: 2, appearance: { theme: '' } });
   });
   check('invalid input fails without overwriting bytes', () => {
     const path = join(temp, 'invalid.json');
-    for (const text of ['{broken', '{"version":3}', '{"version":1}', '{"version":1,"theme":null}']) {
+    for (const text of ['{broken', '{"version":3}', '{"version":1}', ...[null, 42, true, [], {}].map(theme => JSON.stringify({ version: 1, theme }))]) {
       writeFileSync(path, text);
       const result = migrate(path);
       assert.ok(Number.isInteger(result.status) && result.status !== 0, 'must exit nonzero, not hang');
