@@ -1,5 +1,5 @@
 // Writes the messy folder of the "organize-folder" request: node organize.mjs <empty folder>.
-// Deterministic: every file has its own content, so a proof can tell each one by its hash.
+// Deterministic, including an existing backup whose matching content must survive as a separate file.
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 
@@ -44,5 +44,6 @@ const files = {
   'readme-first.txt': 'Things I keep meaning to sort out in here. Start with the invoices.\n',
 };
 
+files['meeting notes oct backup.txt'] = files['meeting notes oct.txt'];
 for (const [name, content] of Object.entries(files)) writeFileSync(join(dest, name), content);
 console.log(`wrote ${Object.keys(files).length} files to ${dest}`);
