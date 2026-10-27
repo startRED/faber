@@ -1,0 +1,26 @@
+[package]
+name = "webview"
+description = "A minimal example of webview inside the GPUI application."
+version = "0.8.1"
+publish = false
+edition.workspace = true
+
+[features]
+inspector = []
+
+[dependencies]
+# GPUI Fast lets the example's menu render above the page; `gpui-webview` follows the Kit.
+gpui-kit = { workspace = true }
+anyhow.workspace = true
+
+# WebView dependencies
+gpui-webview = { path = "../../crates/webview" }
+wry = { version = "0.53.3", package = "lb-wry" }
+
+[lints]
+workspace = true
+
+[target.'cfg(target_os = "windows")'.dependencies]
+windows = { version = "0.62", features = ["Win32_Foundation", "Win32_System_StationsAndDesktops", "Win32_System_Threading"] }
+
+

@@ -1,0 +1,23 @@
+[package]
+name = "gpui-chat-spike"
+version = "0.1.0"
+edition = "2024"
+
+[workspace]
+
+[dependencies]
+faber-engine = { path = "../../engine" }
+faber-testkit = { path = "../../testkit" }
+gpui = { package = "gpui-pre", version = "=0.3.10" }
+gpui-kit = "=0.8.1"
+gpui-component = { version = "=0.8.1", features = ["syntect"] }
+serde_json = "1"
+png = "0.18"
+windows = { version = "0.62", features = ["Win32_Foundation", "Win32_Graphics_Gdi", "Win32_Storage_Xps", "Win32_System_Com", "Win32_System_StationsAndDesktops", "Win32_System_Threading", "Win32_UI_Accessibility", "Win32_UI_WindowsAndMessaging"] }
+
+[profile.release]
+lto = "thin"
+
+
+
+
