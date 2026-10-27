@@ -10,11 +10,12 @@ use crate::model::{BranchOf, Conversation, Project, Settings, Summary};
 use crate::recents::Recents;
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashMap};
 use std::fs;
 use std::io::{self, Write};
 use std::path::{Path, PathBuf};
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
+use std::time::SystemTime;
 
 /// Keep typed deserialization, including duplicate-field rejection, while reading the removed setting.
 #[derive(Default, Deserialize)]
@@ -144,6 +145,35 @@ pub struct Store {
     /// The grants epoch started when the settings could not be read. It lives here, in memory, and is the epoch in force
     /// until a save writes it: a read that works again later never brings the epoch on disk back.
     recovery_epoch: std::sync::Mutex<Option<String>>,
+    /// The sidebar row of each conversation file, kept by the file's length and time, so a list reads only the files that
+    /// changed. Reading one decodes the whole conversation to take a few fields: 202 MB and 420 ms for 32 real ones
+    /// (2026-10-27), twice a turn. Every save writes a new file and renames it into place, so a changed file has a new
+    /// time; only a program that rewrites one in place with its old length and time would go unseen until the next save.
+    summaries: Mutex<HashMap<PathBuf, (Stamp, Summary)>>,
+}
+
+/// A file's length and last change: the same pair means the file was not written since.
+type Stamp = (u64, Option<SystemTime>);
+
+fn stamp(path: &Path) -> Option<Stamp> {
+    fs::metadata(path).ok().map(|m| (m.len(), m.modified().ok()))
+}
+
+/// The sidebar row of a conversation. Its done card is kept whole; whether it still shows is decided when listed.
+fn summary(c: &Conversation) -> Summary {
+    Summary {
+        keep_going: c.keep_going.is_some(),
+        archived: c.archived_at.is_some(),
+        pinned_at: c.pinned_at,
+        started_by: c.started_by.clone(),
+        ended: c.ended.clone(),
+        plan: c.plan.as_ref().map(crate::model::Plan::count),
+        id: c.id.clone(),
+        title: c.title.clone(),
+        area: c.area,
+        project_id: c.project_id.clone(),
+        updated_at: c.updated_at,
+    }
 }
 
 /// The conversation replacement commits the move; until then group membership must roll back after a crash.
@@ -187,6 +217,7 @@ impl Store {
             owner_required: false,
             recovery_epoch: std::sync::Mutex::new(None),
             cache_health: data_dir.join("cache-health.jsonl"),
+            summaries: Mutex::default(),
         }
     }
 
@@ -230,26 +261,43 @@ impl Store {
         Ok(id)
     }
 
+    /// Whether conversation `id`'s file is still the one Faber last listed or wrote: nothing else changed or removed it since.
+    pub(crate) fn unchanged(&self, id: &str) -> bool {
+        let path = self.file(id);
+        let known = self.summaries.lock().unwrap_or_else(std::sync::PoisonError::into_inner).get(&path).map(|(kept, _)| *kept);
+        known.is_some() && stamp(&path) == known
+    }
+
     pub fn list(&self) -> Vec<Summary> {
         let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_millis() as u64);
-        let mut list: Vec<Summary> = fs::read_dir(&self.conversations)
+        let paths: Vec<PathBuf> = fs::read_dir(&self.conversations)
             .into_iter()
             .flatten()
             .flatten()
-            .filter(|e| e.path().extension().is_some_and(|x| x == "json"))
-            .filter_map(|e| read::<Conversation>(&e.path()))
-            .map(|c| Summary {
-                keep_going: c.keep_going.is_some(),
-                archived: c.archived_at.is_some(),
-                pinned_at: c.pinned_at,
-                started_by: c.started_by,
-                ended: c.ended.filter(|e| e.current(now)),
-                plan: c.plan.as_ref().map(crate::model::Plan::count),
-                id: c.id,
-                title: c.title,
-                area: c.area,
-                project_id: c.project_id,
-                updated_at: c.updated_at,
+            .map(|e| e.path())
+            .filter(|p| p.extension().is_some_and(|x| x == "json"))
+            .collect();
+        let mut cache = self.summaries.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+        cache.retain(|path, _| paths.contains(path));
+        let mut list: Vec<Summary> = paths
+            .into_iter()
+            .filter_map(|path| {
+                let now_stamp = stamp(&path)?;
+                match cache.get(&path) {
+                    Some((kept, row)) if *kept == now_stamp => Some(row.clone()),
+                    // A file that cannot be read now (locked by a scanner, half copied) is tried again at the next list.
+                    _ => {
+                        let row = read::<Conversation>(&path).as_ref().map(summary);
+                        if let Some(row) = &row {
+                            cache.insert(path, (now_stamp, row.clone()));
+                        }
+                        row
+                    }
+                }
+            })
+            .map(|mut row| {
+                row.ended = row.ended.filter(|e| e.current(now));
+                row
             })
             .collect();
         list.sort_by_key(|c| std::cmp::Reverse(c.updated_at));
@@ -306,7 +354,14 @@ impl Store {
         if !id.chars().all(|c| c.is_ascii_alphanumeric() || c == '-') {
             return None;
         }
-        read(&self.file(id))
+        let path = self.file(id);
+        let before = stamp(&path);
+        let c: Conversation = read(&path)?;
+        // Known as read, unless it changed while it was being read: `unchanged` then says so.
+        if let Some(read_stamp) = before.filter(|b| stamp(&path).as_ref() == Some(b)) {
+            self.summaries.lock().unwrap_or_else(std::sync::PoisonError::into_inner).insert(path, (read_stamp, summary(&c)));
+        }
+        Some(c)
     }
 
     pub fn save(&self, conversation: &Conversation) {
@@ -326,9 +381,18 @@ impl Store {
         {
             self.recover_group_move()?;
         }
-        self.write_with(&self.file(&conversation.id), conversation, patient)?;
+        let path = self.file(&conversation.id);
+        self.write_with(&path, conversation, patient)?;
+        self.written(path, conversation);
         self.search.saved(conversation);
         Ok(())
+    }
+
+    /// The file just written is the conversation in hand, so the next list need not read it back, and `unchanged` knows it.
+    fn written(&self, path: PathBuf, conversation: &Conversation) {
+        if let Some(now_stamp) = stamp(&path) {
+            self.summaries.lock().unwrap_or_else(std::sync::PoisonError::into_inner).insert(path, (now_stamp, summary(conversation)));
+        }
     }
 
     pub fn remove(&self, id: &str) {
@@ -459,6 +523,7 @@ impl Store {
             let _ = self.recover_group_move();
             return Err(error);
         }
+        self.written(self.file(&conversation.id), conversation);
         // Area is now committed; recovery can only finish cleanup, never put this conversation back in its group.
         let _ = fs::remove_file(journal);
         self.search.saved(conversation);

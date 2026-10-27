@@ -2182,6 +2182,7 @@ export const es: Messages = {
   'notes.276.fixed': 'Los turnos con Seguir y los ayudantes en Windows ya no se quedan detenidos antes de empezar cuando hay herramientas adicionales activas.',
   'notes.277.fixed': 'Cuando Codex te pregunta algo en el modo Planificar, ahora aparece la tarjeta de pregunta para que respondas; antes la pregunta fallaba y seguía sin ti.',
   'notes.278.better': 'Actualización lista, reiniciar ahora funciona con un clic aunque haya algo en curso: Faber se cierra, se abre de nuevo y el trabajo sigue donde se quedó.',
+  'notes.279.fixed': 'Faber ya no guarda en memoria cada conversación que abres: abrir doce conversaciones grandes seguidas llega ahora como mucho a 337 MB, y antes pasaba de 400 MB ya en la novena.',
   'update.checking': 'Buscando una actualización…',
   'update.downloading': 'Descargando actualización…',
   'update.downloadingPercent': 'Descargando actualización… {percent} %',

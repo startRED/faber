@@ -2182,6 +2182,7 @@ export const fr: Messages = {
   'notes.276.fixed': 'Les tours avec Continuer et les assistants sous Windows ne restent plus bloqués avant de démarrer quand des outils supplémentaires sont actifs.',
   'notes.277.fixed': "Quand Codex vous pose une question en mode Planifier, la carte de question s'affiche pour que vous répondiez ; avant, la question échouait et il continuait sans vous.",
   'notes.278.better': 'Mise à jour prête, redémarrer marche maintenant d’un seul clic même quand quelque chose tourne : Faber se ferme, se rouvre et le travail reprend là où il s’était arrêté.',
+  'notes.279.fixed': "Faber ne garde plus en mémoire chaque conversation que vous ouvrez : ouvrir douze grandes conversations d'affilée monte désormais au plus à 337 Mo, alors qu'avant cela dépassait 400 Mo dès la neuvième.",
   'update.checking': 'Recherche d’une mise à jour…',
   'update.downloading': 'Téléchargement de la mise à jour…',
   'update.downloadingPercent': 'Téléchargement de la mise à jour… {percent} %',

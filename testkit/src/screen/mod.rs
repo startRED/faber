@@ -14,6 +14,7 @@ pub mod control_walk;
 pub mod draft_attachments;
 pub mod first_run;
 pub mod homes;
+pub mod long_session;
 pub mod mcp_servers;
 pub mod menus;
 pub mod performance;
@@ -66,6 +67,7 @@ pub fn all() -> Vec<Scenario> {
         .chain(chat_groups::scenarios())
         .chain(draft_attachments::scenarios())
         .chain(reading::scenarios())
+        .chain(long_session::scenarios())
         .chain(sentinel::scenarios());
     let all = all.chain(visual_network::scenarios());
     #[cfg(windows)]
@@ -118,6 +120,7 @@ impl Costs {
 /// When unsure, list it: a wrong entry costs a few seconds, a missing one costs a flaky run. A test fails when a name says
 /// "memory", "processor", "CPU", "MB", "budget", "frame", "focused", "quota" or "usage limits" and is not listed.
 pub const SOLO: &[(&str, &str)] = &[
+    (long_session::NAME, "memory"),
     (app::CREATIVE_WORKLOG[0], "processor, memory"),
     (app::CREATIVE_WORKLOG[1], "processor, memory"),
     (app::CREATIVE_WORKLOG[2], "processor, memory"),

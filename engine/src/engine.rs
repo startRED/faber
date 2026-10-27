@@ -41,6 +41,7 @@ mod compact;
 mod copies;
 mod creative_judges;
 mod ended;
+mod evict;
 pub use aside::Aside;
 pub use browse::TabStep;
 pub use copies::GitRunner;
@@ -467,6 +468,10 @@ struct Core {
     boundary: HashMap<String, u32>,
     /// A new conversation still being typed: its CLI starts before the first message is sent.
     draft: Option<String>,
+    /// The conversation the screen showed last: it stays in memory (`evict.rs`).
+    shown: Option<String>,
+    /// What a conversation that left memory knew only there, given back when it is read again (`evict.rs`).
+    evicted: HashMap<String, evict::Evicted>,
     /// Streaming text goes to the screen at most ~30 times a second; the message waiting per conversation.
     pending: HashMap<String, String>,
     next_sid: u64,
@@ -631,6 +636,8 @@ impl Engine {
                 links: None,
                 boundary: HashMap::new(),
                 draft: None,
+                shown: None,
+                evicted: HashMap::new(),
                 pending: HashMap::new(),
                 next_sid: 0,
                 creative_runs: Default::default(),
@@ -912,14 +919,7 @@ impl Engine {
         })
     }
     pub fn open(&self, id: &str) -> Option<Conversation> {
-        self.with(|core| {
-            let mut c = core.load(id)?.clone();
-            let needs = reply_needs_you(&c, core.live.get(id));
-            if let Some(reply) = c.messages.last_mut().filter(|m| m.role == Role::Assistant) {
-                reply.needs_you = needs;
-            }
-            Some(c)
-        })
+        self.with(|core| core.opened(id))
     }
     /// The catalog tools the conversation's agent has now, each with its job group (why it was picked): the kit saved for the
     /// session of the AI at work, else of the newest reply's AI. Read on request from what is in memory; nothing is prepared.
@@ -962,7 +962,12 @@ impl Engine {
         })
     }
     pub fn open_for_screen(&self, id: &str) -> Option<Conversation> {
-        self.open(id).map(Conversation::for_screen)
+        // One lock for both: an opening in between must not let this conversation leave memory before it is marked shown.
+        self.with(|core| {
+            let opened = core.opened(id)?;
+            core.shown(id);
+            Some(opened.for_screen())
+        })
     }
     pub fn visual_answers_for_screen(&self, id: &str, message_id: Option<&str>, block: Option<usize>) -> Vec<crate::visual::VisualAnswer> {
         self.with(|c| c.load(id).map(|conversation| crate::visual::list(&conversation.messages, message_id.zip(block))).unwrap_or_default())
@@ -1174,6 +1179,15 @@ impl Engine {
             store.set_runtime(c.opts.runtime.clone());
             c.test_items = items.into_iter().map(|item| &*Box::leak(Box::new(item))).collect();
             c.catalog_store = Some(store);
+        })
+    }
+    /// Tests: the ids of the conversations held in memory, sorted (`evict.rs`).
+    #[doc(hidden)]
+    pub fn in_memory(&self) -> Vec<String> {
+        self.with(|c| {
+            let mut ids: Vec<String> = c.convs.keys().cloned().collect();
+            ids.sort();
+            ids
         })
     }
     /// Tests: makes the install of a tool that needs Node answer as if this computer had none.
@@ -1743,6 +1757,16 @@ impl Core {
             .ok_or_else(|| "error.projectGone".to_string())
     }
 
+    /// A copy of conversation `id` as the screen reads it, its last reply saying whether it waits for the person.
+    fn opened(&mut self, id: &str) -> Option<Conversation> {
+        let mut c = self.load(id)?.clone();
+        let needs = reply_needs_you(&c, self.live.get(id));
+        if let Some(reply) = c.messages.last_mut().filter(|m| m.role == Role::Assistant) {
+            reply.needs_you = needs;
+        }
+        Some(c)
+    }
+
     fn load(&mut self, id: &str) -> Option<&mut Conversation> {
         if !self.convs.contains_key(id) {
             let mut c = self.store.get(id)?;
@@ -1753,6 +1777,7 @@ impl Core {
             });
             c.queued.iter_mut().for_each(|q| q.sending = false);
             self.restore_recovery(&mut c);
+            self.restore_evicted(&mut c);
             self.convs.insert(id.to_string(), c);
         }
         let c = self.convs.get_mut(id)?;
@@ -2975,6 +3000,7 @@ impl Core {
         if self.live.get(conv).is_some_and(|l| l.retiring) {
             if let Some(l) = self.retire(conv) {
                 l.session.close();
+                self.evict_idle();
             }
             return;
         }
@@ -2990,6 +3016,8 @@ impl Core {
                 && let Some(l) = core.retire(&conv)
             {
                 l.session.close();
+                // The closed session was the last thing using it, unless the screen still shows it.
+                core.evict_idle();
             }
         });
     }

@@ -2169,6 +2169,7 @@ export const ptBR: Messages = {
   'notes.276.fixed': 'Os turnos com Continuar e os ajudantes no Windows não ficam mais presos antes de começar quando há ferramentas extras ativas.',
   'notes.277.fixed': 'Quando o Codex te pergunta algo no modo Planejar, agora aparece o cartão de pergunta para você responder; antes a pergunta falhava e ele seguia sem você.',
   'notes.278.better': 'Atualização pronta, reiniciar agora funciona com um clique mesmo com algo rodando: o Faber fecha, abre de novo e o trabalho continua de onde parou.',
+  'notes.279.fixed': 'O Faber não guarda mais na memória toda conversa que você abre: abrir doze conversas grandes seguidas agora chega no máximo a 337 MB, e antes passava de 400 MB já na nona.',
   'update.checking': 'Procurando atualização…',
   'update.downloading': 'Baixando atualização…',
   'update.downloadingPercent': 'Baixando atualização… {percent}%',

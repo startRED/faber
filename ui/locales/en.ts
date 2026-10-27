@@ -2062,6 +2062,7 @@ export const en = {
   'notes.276.fixed': 'Keep going turns and helpers on Windows no longer get stuck before starting when extra tools are active.',
   'notes.277.fixed': 'When Codex asks you something in Plan mode, you now get the question card to answer; before, its question failed and it went on without you.',
   'notes.278.better': 'Update ready, restart now works with one press even while something runs: Faber closes, opens again and the work picks up where it stopped.',
+  'notes.279.fixed': 'Faber no longer keeps every conversation you open in memory: opening twelve big conversations in a row now peaks at 337 MB, where before it passed 400 MB by the ninth.',
   'update.checking': 'Looking for an update…',
   'update.downloading': 'Downloading update…',
   'update.downloadingPercent': 'Downloading update… {percent}%',

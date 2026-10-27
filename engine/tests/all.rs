@@ -50,6 +50,8 @@ mod compact;
 mod conversation_copy;
 #[path = "engine.rs"]
 mod engine;
+#[path = "evict.rs"]
+mod evict;
 #[path = "export.rs"]
 mod export;
 #[path = "failed_writes.rs"]
@@ -130,6 +132,8 @@ mod settings_change_retire;
 mod signals;
 #[path = "simulation.rs"]
 mod simulation;
+#[path = "store_summaries.rs"]
+mod store_summaries;
 #[path = "stuck.rs"]
 mod stuck;
 #[path = "toolbox.rs"]
