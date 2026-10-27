@@ -2,7 +2,7 @@ use crate::support;
 
 use faber_engine::codex::{
     CodexServer, CodexServerOptions, CodexThread, CodexTurnState, codex_args, codex_thread, list_codex_models, list_codex_threads,
-    parse_codex_notification, read_codex_limits, thread_params,
+    parse_codex_notification, question_answers, question_card, read_codex_limits, thread_params,
 };
 use faber_engine::events::{Delivery, EngineEvent, Session, UserTurn};
 use faber_engine::model::{Area, Permissions};
@@ -1392,6 +1392,96 @@ async fn r124b_a_command_run_inside_a_credential_folder_is_refused_without_a_car
     assert_eq!(mismatches, Vec::<String>::new());
     assert_eq!(asks.len(), 1, "only the second command is asked: {asks:?}");
     assert!(!asks[0].contains("auth.json"));
+}
+
+/// Codex asks the person in Plan mode (`item/tool/requestUserInput`, recorded with codex-cli 0.162.1): the same question card as
+/// Claude Code's `AskUserQuestion`, whose answer goes back under the question's id. Faber used to answer it with an error.
+#[tokio::test]
+async fn a_codex_question_is_the_question_card_and_its_answer_goes_back_by_id() {
+    let entries = fixture("codex", "question");
+    let first =
+        entries.iter().find(|e| e.msg["method"] == "turn/start").unwrap().msg["params"]["input"][0]["text"].as_str().unwrap().to_string();
+    let mut cards = Vec::new();
+    let (events, mismatches) = run(entries, &first, None, |e, s| {
+        if let EngineEvent::Permission { request_id, tool, input } = e {
+            cards.push((tool.clone(), input.clone()));
+            let question = input["questions"][0]["question"].as_str().unwrap();
+            drop(s.answer_with(request_id, true, Some(json!({ question: "Português" }))));
+        }
+        matches!(e, EngineEvent::Done { .. })
+    })
+    .await;
+    assert_eq!(mismatches, Vec::<String>::new());
+    assert_eq!(
+        cards,
+        [(
+            "AskUserQuestion".to_string(),
+            json!({ "questions": [{
+                "question": "Should the note be in English or Portuguese?", "header": "Idioma", "multiSelect": false,
+                "options": [
+                    { "label": "English", "description": "Write the note in English." },
+                    { "label": "Português", "description": "Escreva a nota em português." }
+                ]
+            }] })
+        )]
+    );
+    assert!(text_of(&events).contains("em português"));
+}
+
+/// Skip sends no answer for the question, and Codex goes on with its plan (recorded: it asks in words instead).
+#[tokio::test]
+async fn a_skipped_codex_question_goes_back_unanswered() {
+    let mut entries = fixture("codex", "question");
+    let at = entries.iter().position(|e| e.input && e.msg["result"]["answers"].is_object()).unwrap();
+    entries[at].msg["result"]["answers"] = json!({});
+    let first =
+        entries.iter().find(|e| e.msg["method"] == "turn/start").unwrap().msg["params"]["input"][0]["text"].as_str().unwrap().to_string();
+    let mut asked = 0;
+    let (_, mismatches) = run(entries, &first, None, |e, s| {
+        if let EngineEvent::Permission { request_id, .. } = e {
+            asked += 1;
+            drop(s.answer(request_id, false));
+        }
+        matches!(e, EngineEvent::Done { .. })
+    })
+    .await;
+    assert_eq!(mismatches, Vec::<String>::new());
+    assert_eq!(asked, 1);
+}
+
+/// Faber takes no passwords or keys: a secret question never becomes a card and goes back unanswered at once.
+#[tokio::test]
+async fn a_secret_codex_question_is_never_shown() {
+    let mut entries = fixture("codex", "question");
+    let ask = entries.iter().position(|e| e.msg["method"] == "item/tool/requestUserInput").unwrap();
+    entries[ask].msg["params"]["questions"][0]["isSecret"] = true.into();
+    entries[ask + 1].msg["result"]["answers"] = json!({});
+    let first =
+        entries.iter().find(|e| e.msg["method"] == "turn/start").unwrap().msg["params"]["input"][0]["text"].as_str().unwrap().to_string();
+    let mut asked = 0;
+    let (_, mismatches) = run(entries, &first, None, |e, _| {
+        asked += usize::from(matches!(e, EngineEvent::Permission { .. }));
+        matches!(e, EngineEvent::Done { .. })
+    })
+    .await;
+    assert_eq!(mismatches, Vec::<String>::new());
+    assert_eq!(asked, 0);
+}
+
+/// The card answers by question text: two questions with the same words stay two, each with its own answer under its own id.
+#[test]
+fn codex_questions_with_the_same_words_keep_their_own_answers() {
+    let params = json!({ "questions": [
+        { "id": "a", "header": "Env", "question": "Which environment?", "options": [{ "label": "Staging", "description": "" }] },
+        { "id": "b", "header": "Env", "question": "Which environment?", "options": [{ "label": "Production", "description": "" }] }
+    ] });
+    let (card, asked) = question_card(&params).unwrap();
+    assert_eq!(card["questions"][1]["question"], "Which environment? (2)");
+    let reply = json!({ "Which environment?": "Staging", "Which environment? (2)": "Production" });
+    assert_eq!(
+        question_answers(&asked, Some(&reply)),
+        json!({ "answers": { "a": { "answers": ["Staging"] }, "b": { "answers": ["Production"] } } })
+    );
 }
 
 /// R161: a Codex subagent (recorded with codex-cli 0.162.1, Ask mode) is the agent's `Agent` step. Its command runs under that

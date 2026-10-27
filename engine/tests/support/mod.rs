@@ -177,6 +177,10 @@ fn key(msg: &Value) -> String {
         return if id.is_null() { m.to_string() } else { format!("{m} {id}") };
     }
     if !id.is_null() {
+        // A question's answer (Codex `item/tool/requestUserInput`) is checked whole: which question got which answer.
+        if let Some(answers) = msg["result"].get("answers") {
+            return format!("answer {id} {answers}");
+        }
         return format!("answer {} {}", id, msg["result"]["decision"].as_str().unwrap_or(""));
     }
     match msg["type"].as_str().unwrap_or_default() {

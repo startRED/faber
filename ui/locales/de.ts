@@ -2179,6 +2179,7 @@ export const de: Messages = {
   'notes.274.better': 'Während der Agent arbeitet, sehen Sie den aktuellen Schritt und Gedanken unter der Antwort, und Weitermachen lässt die letzte Antwort offen.',
   'notes.275.better': 'Auto kann jetzt GPT-6.1 Terra wählen, wenn dein Codex-Konto es anbietet: mittlere Aufgaben verbrauchen etwa ein Viertel weniger Kontingent.',
   'notes.276.fixed': 'Durchgänge mit Weitermachen und Helfer unter Windows bleiben nicht mehr vor dem Start hängen, wenn zusätzliche Werkzeuge aktiv sind.',
+  'notes.277.fixed': 'Wenn Codex dich im Modus Planen etwas fragt, erscheint jetzt die Fragekarte zum Antworten; vorher schlug die Frage fehl und Codex machte ohne dich weiter.',
   'update.checking': 'Suche nach einem Update…',
   'update.downloading': 'Update wird heruntergeladen…',
   'update.downloadingPercent': 'Update wird heruntergeladen… {percent} %',

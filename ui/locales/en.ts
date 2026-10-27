@@ -2059,6 +2059,7 @@ export const en = {
   'notes.274.better': 'While the agent works, you see its current step and thinking under the reply, and Keep going keeps the latest answer open.',
   'notes.275.better': 'Auto can now pick GPT-6.1 Terra when your Codex account lists it: medium tasks use about a quarter less quota than before.',
   'notes.276.fixed': 'Keep going turns and helpers on Windows no longer get stuck before starting when extra tools are active.',
+  'notes.277.fixed': 'When Codex asks you something in Plan mode, you now get the question card to answer; before, its question failed and it went on without you.',
   'update.checking': 'Looking for an update…',
   'update.downloading': 'Downloading update…',
   'update.downloadingPercent': 'Downloading update… {percent}%',

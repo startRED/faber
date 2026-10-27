@@ -2166,6 +2166,7 @@ export const ptBR: Messages = {
   'notes.274.better': 'Enquanto o agente trabalha, você vê a etapa e o pensamento atuais abaixo da resposta, e o Continuar mantém a última conclusão aberta.',
   'notes.275.better': 'O Auto agora pode escolher o GPT-6.1 Terra quando sua conta do Codex o oferece: tarefas médias gastam cerca de um quarto a menos da cota.',
   'notes.276.fixed': 'Os turnos com Continuar e os ajudantes no Windows não ficam mais presos antes de começar quando há ferramentas extras ativas.',
+  'notes.277.fixed': 'Quando o Codex te pergunta algo no modo Planejar, agora aparece o cartão de pergunta para você responder; antes a pergunta falhava e ele seguia sem você.',
   'update.checking': 'Procurando atualização…',
   'update.downloading': 'Baixando atualização…',
   'update.downloadingPercent': 'Baixando atualização… {percent}%',

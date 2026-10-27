@@ -410,6 +410,50 @@ fn s(v: &Value) -> String {
     v.as_str().unwrap_or_default().to_string()
 }
 
+/// Codex's question to the person (`item/tool/requestUserInput`, which Plan mode offers; checked on 0.162.1) as the card
+/// Claude Code's `AskUserQuestion` makes, with each shown question's id and text for the answer. A secret question is left
+/// out: Faber takes no passwords or keys, so it goes back unanswered. The card answers by question text, so a text asked twice
+/// gets a number ("Which one? (2)") and each question keeps its own answer. `None` when nothing is left to show.
+pub fn question_card(params: &Value) -> Option<(Value, Vec<(String, String)>)> {
+    let mut asked = Vec::new();
+    let mut questions = Vec::new();
+    for q in params["questions"].as_array().into_iter().flatten() {
+        let (Some(id), Some(asked_text)) = (q["id"].as_str(), q["question"].as_str()) else { continue };
+        if q["isSecret"] == true {
+            continue;
+        }
+        let mut text = asked_text.to_string();
+        for n in 2.. {
+            if !asked.iter().any(|(_, t)| *t == text) {
+                break;
+            }
+            text = format!("{asked_text} ({n})");
+        }
+        let options: Vec<Value> = q["options"]
+            .as_array()
+            .into_iter()
+            .flatten()
+            .filter_map(|o| Some(json!({ "label": o["label"].as_str()?, "description": s(&o["description"]) })))
+            .collect();
+        questions.push(json!({ "question": text, "header": s(&q["header"]), "multiSelect": false, "options": options }));
+        asked.push((id.to_string(), text));
+    }
+    (!asked.is_empty()).then(|| (json!({ "questions": questions }), asked))
+}
+
+/// The answer Codex reads for a card from `question_card`: each question id to what the person chose or wrote, from the
+/// card's reply (question text to answer). Skip, or a question left empty, sends no answer for it, and Codex goes on.
+pub fn question_answers(asked: &[(String, String)], reply: Option<&Value>) -> Value {
+    let answers: Map<String, Value> = asked
+        .iter()
+        .filter_map(|(id, text)| {
+            let answer = reply?.get(text)?.as_str().filter(|a| !a.trim().is_empty())?;
+            Some((id.clone(), json!({ "answers": [answer] })))
+        })
+        .collect();
+    json!({ "answers": answers })
+}
+
 /// Turns one `codex app-server` notification into engine events.
 pub fn parse_codex_notification(msg: &Value, state: &mut CodexTurnState) -> Vec<EngineEvent> {
     // The thread's context after a request: what the last request held (`last.totalTokens`, which after a compaction is the
@@ -812,6 +856,8 @@ struct Thread {
     compact: bool,
     state: CodexTurnState,
     approvals: HashMap<String, Value>,
+    /// The approvals that are questions to the person (`question_card`): each shown question's id and text.
+    questions: HashMap<String, Vec<(String, String)>>,
     /// Helper calls (R161) waiting for their report: the tool call id to the id of Codex's request.
     helpers: HashMap<String, Value>,
     watch: proc::TurnWatch,
@@ -1786,6 +1832,27 @@ async fn serve(
                                 }
                                 (t.sink)(EngineEvent::Permission { request_id: key, tool, input });
                             }
+                            // A question to the person is a card in every mode, like Claude Code's `AskUserQuestion`; the
+                            // answer goes back once the person sends or skips it.
+                            (false, Some(t))
+                                if method == "item/tool/requestUserInput"
+                                    && t.params.instructions.is_none()
+                                    && !t.blocked
+                                    && !t.closing =>
+                            {
+                                let Some((card, asked)) = question_card(params) else {
+                                    let _ = proc::write_line(&mut *stdin, &json!({ "id": id, "result": question_answers(&[], None) })).await;
+                                    continue;
+                                };
+                                let key = match id { Value::String(s) => s.clone(), other => other.to_string() };
+                                t.approvals.insert(key.clone(), id.clone());
+                                t.questions.insert(key.clone(), asked);
+                                (t.sink)(EngineEvent::Permission { request_id: key, tool: "AskUserQuestion".into(), input: card });
+                            }
+                            // Nobody can answer it (a run with its own instructions, a reply that is over): it goes on unanswered.
+                            (false, _) if method == "item/tool/requestUserInput" => {
+                                let _ = proc::write_line(&mut *stdin, &json!({ "id": id, "result": question_answers(&[], None) })).await;
+                            }
                             // No live conversation or approvals disabled: fail closed without a card.
                             (true, _) => {
                                 let _ = proc::write_line(&mut *stdin, &json!({ "id": id, "result": { "decision": "decline" } })).await;
@@ -1871,8 +1938,12 @@ async fn serve(
                                     }
                                     // Only a subagent can still be waiting on an approval once the turn is over; its card goes with
                                     // the reply, so the request is refused instead of hanging unseen.
-                                    for (_, id) in t.approvals.drain() {
-                                        let _ = proc::write_line(&mut *stdin, &json!({ "id": id, "result": { "decision": "decline" } })).await;
+                                    for (key, id) in t.approvals.drain() {
+                                        let result = match t.questions.remove(&key) {
+                                            Some(_) => question_answers(&[], None),
+                                            None => json!({ "decision": "decline" }),
+                                        };
+                                        let _ = proc::write_line(&mut *stdin, &json!({ "id": id, "result": result })).await;
                                     }
                                     t.turn = None;
                                     t.watch.finish();
@@ -1914,7 +1985,7 @@ async fn serve(
             cmd = rx.recv(), if !stopping => match cmd {
                 Some(ServerCommand::Open { key, thread, sink, tools }) => {
                     let state = CodexTurnState::new(thread.resume.is_some());
-                    let t = Thread { sink, params: *thread, tools, id: None, turn: None, queued: vec![], compact: false, state, approvals: HashMap::new(), helpers: HashMap::new(), watch: proc::TurnWatch::default(), interrupt_pending: false, blocked: false, closing: false, stop_children: false, early_completion: vec![], commands: HashMap::new(), unconfirmed_commands: HashMap::new(), owns_server: !no_process, server_writers: false, native_commands: Default::default(), stop_reported: false };
+                    let t = Thread { sink, params: *thread, tools, id: None, turn: None, queued: vec![], compact: false, state, approvals: HashMap::new(), questions: HashMap::new(), helpers: HashMap::new(), watch: proc::TurnWatch::default(), interrupt_pending: false, blocked: false, closing: false, stop_children: false, early_completion: vec![], commands: HashMap::new(), unconfirmed_commands: HashMap::new(), owns_server: !no_process, server_writers: false, native_commands: Default::default(), stop_reported: false };
                     if ready {
                         open_thread!(key, &t);
                     } else {
@@ -1977,16 +2048,20 @@ async fn serve(
                             _ => (t.sink)(EngineEvent::SteerFailed { tag }),
                         }
                     }
-                    SessionCommand::Answer { request_id, allow, ack, .. } => {
+                    SessionCommand::Answer { request_id, allow, reply, ack } => {
                         // The approval stays pending until the write worked, so a failed write can be answered again.
                         let delivery = match threads.get(&key).and_then(|t| t.approvals.get(&request_id)).cloned() {
                             None => Delivery::Unknown,
                             Some(id) if threads.get(&key).is_some_and(|t| !t.blocked && !t.closing) => {
-                                let decision = if allow { "accept" } else { "decline" };
-                                match proc::write_line(&mut *stdin, &json!({ "id": id, "result": { "decision": decision } })).await {
+                                let result = match threads.get(&key).and_then(|t| t.questions.get(&request_id)) {
+                                    Some(asked) => question_answers(asked, reply.as_ref().filter(|_| allow)),
+                                    None => json!({ "decision": if allow { "accept" } else { "decline" } }),
+                                };
+                                match proc::write_line(&mut *stdin, &json!({ "id": id, "result": result })).await {
                                     Ok(()) => {
                                         if let Some(t) = threads.get_mut(&key) {
                                             t.approvals.remove(&request_id);
+                                            t.questions.remove(&request_id);
                                         }
                                         Delivery::Delivered
                                     }
@@ -2338,6 +2413,7 @@ mod rewind_tests {
             compact: false,
             state: Default::default(),
             approvals: HashMap::new(),
+            questions: HashMap::new(),
             helpers: HashMap::new(),
             watch: Default::default(),
             interrupt_pending: false,

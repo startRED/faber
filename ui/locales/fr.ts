@@ -2179,6 +2179,7 @@ export const fr: Messages = {
   'notes.274.better': "Pendant que l'agent travaille, vous voyez l'étape et la réflexion en cours sous la réponse, et Continuer garde la dernière réponse ouverte.",
   'notes.275.better': 'Auto peut maintenant choisir GPT-6.1 Terra quand votre compte Codex le propose : les tâches moyennes consomment environ un quart de quota en moins.',
   'notes.276.fixed': 'Les tours avec Continuer et les assistants sous Windows ne restent plus bloqués avant de démarrer quand des outils supplémentaires sont actifs.',
+  'notes.277.fixed': "Quand Codex vous pose une question en mode Planifier, la carte de question s'affiche pour que vous répondiez ; avant, la question échouait et il continuait sans vous.",
   'update.checking': 'Recherche d’une mise à jour…',
   'update.downloading': 'Téléchargement de la mise à jour…',
   'update.downloadingPercent': 'Téléchargement de la mise à jour… {percent} %',
