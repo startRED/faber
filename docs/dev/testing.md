@@ -59,6 +59,8 @@ audit's 15 s, so the cleanup ends that tree through the app's job and waits unti
 private memory) with one `NtQuerySystemInformation` call (`faber_winproc::processes`, the one crate allowed unsafe code),
 which takes a few milliseconds; the WMI query it replaced took 150-200 ms, and a scenario takes 9 to 49 of these lists.
 The tree is still followed by parent and start time, so a pid the system reused is never mistaken for one of the app's.
+Each per-process memory note includes exact private working-set bytes beside its rounded MB value. These rows are a
+separate later snapshot, not a breakdown of the largest of the three preceding whole-tree samples.
 After a visual-frame collection or post-close memory assertion fails, the runner records owned process memory,
 aggregate page heap and process roles from that fixture's own loopback browser. Browser queries have separate
 three-second deadlines; their errors and capture delay remain evidence, never a substitute for the original failure.

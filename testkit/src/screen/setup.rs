@@ -307,7 +307,16 @@ pub(super) fn measure(ctx: &mut Ctx, app: &Opened, what: &str) -> Result<f64> {
     let webviews = processes.iter().filter(|(row, _)| row.name.to_lowercase().contains("msedgewebview2")).count();
     let parts: Vec<_> = processes
         .iter()
-        .map(|(row, mb)| format!("{} pid={} parent={} born={}: {mb:.1} MB", row.name, row.pid, row.parent, row.born))
+        .map(|(row, mb)| {
+            format!(
+                "{} pid={} parent={} born={}: {mb:.1} MB ({:.0} private bytes)",
+                row.name,
+                row.pid,
+                row.parent,
+                row.born,
+                mb * 1024.0 * 1024.0
+            )
+        })
         .collect();
     ctx.notes.push(format!("{what}: {webviews} WebView2 processes; app and children [{}]", parts.join("; ")));
     ensure(most <= BUDGET_MB, || format!("{what}: {} MB; limit {BUDGET_MB} MB", shown.join(", ")))?;
