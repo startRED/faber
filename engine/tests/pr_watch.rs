@@ -132,7 +132,11 @@ async fn r_next_red_checks_wake_the_agent_once_and_merged_ends_with_no_turn() {
     let messages = until(&engine, &id, "a turn of Faber's own", |m| m.len() == 4).await;
     let wake = messages[2].wake.clone().expect("the message is marked as Faber's");
     assert_eq!((wake.why.as_str(), wake.pr, wake.checks.as_slice()), ("wake.checksFailed", Some(93), &["gate".to_string()][..]));
-    assert!(messages[2].text.contains("Checks failed on pull request #93") && messages[2].text.contains("actions/runs/7"));
+    assert!(
+        messages[2].text.contains("Checks failed on pull request #93")
+            && messages[2].text.contains("actions/runs/7")
+            && messages[2].text.contains("Reply in the language of the conversation.")
+    );
     assert!(messages[1].follow.is_none() && messages[3].follow.as_ref().is_some_and(|f| f.state == FollowState::Failing));
     tokio::time::sleep(Duration::from_millis(50)).await;
     assert!(sent_to_cli(&pipe).iter().any(|l| l.contains("Checks failed on pull request #93")), "the agent got it");

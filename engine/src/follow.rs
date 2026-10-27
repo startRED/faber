@@ -312,7 +312,7 @@ pub fn step(f: &mut Follow, look: &Look, now_ms: u64) -> (Next, bool) {
         PrState::Open if look.conflict => {
             f.state = FollowState::Conflict;
             let text = format!(
-                "[Faber] Pull request #{} ({}) now has a merge conflict with its base branch. Bring the branch up to date, settle the conflict, run the checks, push, and queue it again the way it was queued before. Keep your answer short.",
+                "[Faber] Pull request #{} ({}) now has a merge conflict with its base branch. Bring the branch up to date, settle the conflict, run the checks, push, and queue it again the way it was queued before. Keep your answer short. Reply in the language of the conversation.",
                 f.number, f.repo
             );
             Next::Wake { why: "wake.conflict", key: look.head.clone(), text }
@@ -331,7 +331,7 @@ pub fn step(f: &mut Follow, look: &Look, now_ms: u64) -> (Next, bool) {
                     })
                     .collect();
                 let text = format!(
-                    "[Faber] Checks failed on pull request #{} ({}) at commit {short}:\n{}\nRead why (for GitHub Actions, `gh run view <run id> --log-failed` shows the failing lines), fix it, run the checks, push, and queue it again the way it was queued before. Keep your answer short.",
+                    "[Faber] Checks failed on pull request #{} ({}) at commit {short}:\n{}\nRead why (for GitHub Actions, `gh run view <run id> --log-failed` shows the failing lines), fix it, run the checks, push, and queue it again the way it was queued before. Keep your answer short. Reply in the language of the conversation.",
                     f.number,
                     f.repo,
                     lines.join("\n")

@@ -2176,6 +2176,7 @@ export const es: Messages = {
   'notes.271.fixed': 'La tarjeta de la pregunta se desvanece aunque respondas en cuanto aparece.',
   'notes.272.fixed': 'Al volver a una página guardada, el panel del navegador cambia de ancho suavemente aunque tarde en abrirse.',
   'notes.273.better': 'Las IA auxiliares que no terminaron dejan de aparecer como activas al reiniciar Faber.',
+  'notes.274.better': 'Mientras el agente trabaja, ves su paso y pensamiento actuales bajo la respuesta, y Seguir mantiene abierta la última respuesta con contenido.',
   'update.checking': 'Buscando una actualización…',
   'update.downloading': 'Descargando actualización…',
   'update.downloadingPercent': 'Descargando actualización… {percent} %',

@@ -2056,6 +2056,7 @@ export const en = {
   'notes.271.fixed': 'Answered question cards fade away even when you answer as they appear.',
   'notes.272.fixed': 'Returning to a saved browser page changes the side panel width smoothly after a delayed opening.',
   'notes.273.better': 'Unfinished AI helpers no longer appear to be working after Faber restarts.',
+  'notes.274.better': 'While the agent works, you see its current step and thinking under the reply, and Keep going keeps the latest answer open.',
   'update.checking': 'Looking for an update…',
   'update.downloading': 'Downloading update…',
   'update.downloadingPercent': 'Downloading update… {percent}%',

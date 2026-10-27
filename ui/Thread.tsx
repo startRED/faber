@@ -387,7 +387,18 @@ function Answer(props: Shared & { m: Accessor<Message>; messages?: Message[]; pr
     // A running step shows at once (the caret never blinks over one); "Thinking…" waits until the words stop.
     const tool = runningStep();
     if (tool) return nowLine() || lineOf(tool);
-    return typing() ? '' : nowLine() || t('activity.thinkingNow');
+    if (typing()) return '';
+    const thought = middle(thinking().at(-1)?.text ?? '');
+    return nowLine() || (thought ? `${t('activity.thinkingNow')} · ${thought}` : t('activity.thinkingNow'));
+  };
+  const planNow = () => {
+    if (!working()) return undefined;
+    const shownAbove = ((steps() || agents().length) && !finalText().trim() ? latest() : '') || after();
+    const last = own().at(-1);
+    for (const line of [nowLine(), last ? lineOf(last) : '', middle(thinking().at(-1)?.text ?? '')]) {
+      if (line && line !== shownAbove) return line;
+    }
+    return undefined;
   };
   const [clock, setClock] = createSignal(Date.now());
   // A memo, so the timer is made again only when another step starts, not on every tick of the stream.
@@ -559,7 +570,7 @@ function Answer(props: Shared & { m: Accessor<Message>; messages?: Message[]; pr
       </Show>
       {/* The plan sits under the newest reply while the work goes on, and until every step is done. */}
       <Show when={props.last && props.plan?.steps.length && (working() || props.plan.steps.some((s) => s.state !== 'done')) ? props.plan : undefined}>
-        {(plan) => <PlanList plan={plan()} />}
+        {(plan) => <PlanList plan={plan()} now={planNow()} />}
       </Show>
       <Show when={m().files?.length}>
         <div class="files" aria-label={t('files.label')} ref={animateList}>
@@ -777,9 +788,9 @@ function Mine(props: {
 }
 
 /** A reply with nothing for the person: no words, no steps, nothing waiting on them. One that answered a message Faber sent by
- * itself is not drawn at all. */
+ * itself is not drawn at all, even if the model only thought to itself or updated its progress. */
 const empty = (m: Message) =>
-  !m.text.trim() && !m.tools?.length && !m.thinking && !m.error && !m.checks && !m.follow && !m.halt && !m.permissions?.length && !m.parked?.length && !m.files?.length;
+  !m.text.trim() && !m.tools?.some((t) => !isProgressCall(t)) && !m.wrapUp && !m.error && !m.checks && !m.follow && !m.halt && !m.permissions?.length && !m.parked?.length && !m.files?.length;
 
 // A message written while an answer was running. The person can take it back until it is sent; one already handed to the
 // running answer (`sending`) cannot be and says so, with no buttons, and one that waits can be sent by hand.
@@ -949,15 +960,23 @@ export function Thread(props: Shared & { messages: Message[]; queued?: QueuedTur
   const showRestore = (message: Message, redo?: RewindRedoInfo) => { setRestore({ message, redo }); setOpen(true); };
   const queuedIds = createMemo(() => (props.queued ?? []).map((q) => q.id));
   const prompt = (at: number) => (props.messages[at - 1]?.role === 'user' ? props.messages[at - 1] : undefined);
-  // Turns Faber sent by itself, one after another, read as one run (task 018): its earlier turns fold under one header.
-  const runs = createMemo(() => runsOf(props.messages));
-  const hidden = createMemo(() => folded(new Map([...runs()].filter(([last]) => last < (props.until ?? Infinity)))));
-  // The questions Faber answered in a run, on its newest reply.
+  const drawn = (m: Message, at: number) => !(prompt(at)?.wake && m.status !== 'streaming' && empty(m));
+  // Turns Faber sent by itself, one after another, read as one run (task 018): its earlier turns fold under one header,
+  // and if the newest turns had nothing for the person, the last turn of the run with content stays open below the header.
+  const runs = createMemo(() => runsOf(props.messages, drawn));
+  const hidden = createMemo(() => folded(new Map([...runs()].filter(([, run]) => run.replies.at(-1)! < (props.until ?? Infinity)))));
+  // The questions Faber answered in a run, on its shown reply.
   const answered = (at: number) => {
     const run = runs().get(at);
     return run ? answeredIn(run.replies.map((r) => props.messages[r]!)) : undefined;
   };
-  const drawn = (m: Message, at: number) => !(prompt(at)?.wake && m.status !== 'streaming' && empty(m));
+  const lastShown = createMemo(() => {
+    for (let at = props.messages.length - 1; at >= 0; at--) {
+      const m = props.messages[at]!;
+      if (m.role === 'assistant' && !hidden().has(at) && (drawn(m, at) || answered(at)?.length)) return at;
+    }
+    return props.messages.length - 1;
+  });
   const earlier = (at: number) => (
     <Show when={drawn(props.messages[at]!, at)}>
       <Answer {...props} pieceRevision={revision()} m={() => props.messages[at]!} prompt={prompt(at)} last={false} answered={[]} messageIndex={at} />
@@ -977,7 +996,7 @@ export function Thread(props: Shared & { messages: Message[]; queued?: QueuedTur
             fallback={
               <Show when={!hidden().has(props.from + i)}>
                 <Show when={runs().get(props.from + i)}>
-                  {(run) => <RunBlock messages={props.messages} run={run()} plan={props.plan} earlier={earlier} reveal={props.searchIndex} from={props.from} />}
+                  {(run) => <RunBlock messages={props.messages} run={run()} shown={props.from + i} plan={props.plan} earlier={earlier} reveal={props.searchIndex} from={props.from} />}
                 </Show>
                 {/* The newest turn of a run is drawn even with nothing of its own when it holds the run's answers. */}
                 <Show when={drawn(m(), props.from + i) || answered(props.from + i)?.length}>
@@ -986,7 +1005,7 @@ export function Thread(props: Shared & { messages: Message[]; queued?: QueuedTur
                     pieceRevision={revision()}
                     m={m}
                     prompt={prompt(props.from + i)}
-                    last={props.from + i === props.messages.length - 1}
+                    last={props.from + i === lastShown()}
                     answered={answered(props.from + i)}
                     messageIndex={props.from + i}
                   />

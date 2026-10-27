@@ -119,10 +119,11 @@ export function backgroundOf(messages: Message[], commands: BackgroundCommand[],
   for (const command of commands.filter((c) => c.conversationId === conversationId).toReversed()) {
     let named = cache.commands.get(command.id);
     if (!named) {
-      const calls = messages.filter((m) => m.role === 'assistant').flatMap((m) => (indexed(m, cache.tools).shells.get(command.command) ?? []).map((i) => ({ m, tool: m.tools![i]! })));
+      const detail = toolRow({ id: command.id, name: 'commandExecution', input: command.command }).detail || command.command;
+      const calls = messages.filter((m) => m.role === 'assistant').flatMap((m) => (indexed(m, cache.tools).shells.get(detail) ?? indexed(m, cache.tools).shells.get(command.command) ?? []).map((i) => ({ m, tool: m.tools![i]! })));
       const call = calls.length === 1 ? calls[0] : undefined;
       const description = (call?.tool.input as { description?: unknown } | undefined)?.description;
-      named = { title: typeof description === 'string' ? description : command.command, sources: calls.map((call) => `${call.m.id}:${call.tool.id}`) };
+      named = { title: typeof description === 'string' ? description : detail, sources: calls.map((call) => `${call.m.id}:${call.tool.id}`) };
       cache.commands.set(command.id, named);
     }
     for (const source of named.sources) sources.add(source);

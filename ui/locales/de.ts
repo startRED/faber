@@ -2176,6 +2176,7 @@ export const de: Messages = {
   'notes.271.fixed': 'Fragekarten blenden sanft aus, auch wenn du sofort beim Erscheinen antwortest.',
   'notes.272.fixed': 'Beim Zurückkehren zu einer gespeicherten Seite passt sich die Breite des Browserbereichs auch nach verzögertem Öffnen fließend an.',
   'notes.273.better': 'Nicht abgeschlossene KI-Helfer werden nach einem Neustart von Faber nicht mehr als aktiv angezeigt.',
+  'notes.274.better': 'Während der Agent arbeitet, sehen Sie den aktuellen Schritt und Gedanken unter der Antwort, und Weitermachen lässt die letzte Antwort offen.',
   'update.checking': 'Suche nach einem Update…',
   'update.downloading': 'Update wird heruntergeladen…',
   'update.downloadingPercent': 'Update wird heruntergeladen… {percent} %',

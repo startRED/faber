@@ -14,13 +14,16 @@ export interface Run {
 /** The reply a message Faber sent by itself was answered with. */
 const byFaber = (messages: Message[], at: number) => messages[at]?.role === 'assistant' && !!messages[at - 1]?.wake;
 
-/** The runs of a conversation by the index of their newest reply. Only two turns or more make a run: one turn Faber sent
- * reads as a reply like any other. */
-export function runsOf(messages: Message[]): Map<number, Run> {
+/** The runs of a conversation by the index of the reply they keep open (their newest with content, or newest). Only two turns
+ * or more make a run: one turn Faber sent reads as a reply like any other. */
+export function runsOf(messages: Message[], drawn?: (m: Message, at: number) => boolean): Map<number, Run> {
   const runs = new Map<number, Run>();
   let replies: number[] = [];
   const close = () => {
-    if (replies.length >= 2) runs.set(replies.at(-1)!, { replies });
+    if (replies.length >= 2) {
+      const shown = (drawn ? replies.findLast((r) => drawn(messages[r]!, r)) : undefined) ?? replies.at(-1)!;
+      runs.set(shown, { replies });
+    }
     replies = [];
   };
   for (let at = 0; at < messages.length; at++) {
@@ -35,9 +38,9 @@ export function runsOf(messages: Message[]): Map<number, Run> {
   return runs;
 }
 
-/** The reply indexes a run folds away (all but its newest). */
+/** The reply indexes a run folds away (all but the one it keeps open). */
 export function folded(runs: Map<number, Run>): Set<number> {
-  return new Set([...runs.values()].flatMap((run) => run.replies.slice(0, -1)));
+  return new Set([...runs.entries()].flatMap(([shown, run]) => run.replies.filter((r) => r !== shown)));
 }
 
 /** A question Faber answered for the person, with the choices they may change it to. */
@@ -152,12 +155,16 @@ function reasons(messages: Message[], run: Run): string {
 
 /** One header over a run: the loop icon, how long it worked on its own and how many turns, and the plan's progress on the
  * newest run, in the work log's disclosure. Opened, it shows the earlier turns, each with its work log folded; only the
- * newest turn stays open below it. The earlier turns are drawn only while shown, so a long run keeps a small screen. */
-export function RunBlock(props: { messages: Message[]; run: Run; plan?: Plan; earlier: (at: number) => JSX.Element; reveal?: number; from?: number }) {
+ * newest turn with content stays open below it. The earlier turns are drawn only while shown, so a long run keeps a small screen. */
+export function RunBlock(props: { messages: Message[]; run: Run; shown?: number; plan?: Plan; earlier: (at: number) => JSX.Element; reveal?: number; from?: number }) {
   const [open, setOpen] = createSignal(false);
   let details!: HTMLDetailsElement;
+  const foldedReplies = () => {
+    const keep = props.shown ?? props.run.replies.at(-1);
+    return props.run.replies.filter((at) => at !== keep);
+  };
   createEffect(on(() => props.reveal, (at) => {
-    if (at !== undefined && props.run.replies.slice(0, -1).includes(at)) {
+    if (at !== undefined && foldedReplies().includes(at)) {
       details.open = true;
       setOpen(true);
     }
@@ -185,7 +192,7 @@ export function RunBlock(props: { messages: Message[]; run: Run; plan?: Plan; ea
       </summary>
       <Show when={open()}>
         <div class="run-earlier">
-          <For each={props.run.replies.slice(0, -1).filter((at) => at >= (props.from ?? 0))}>{(at) => props.earlier(at)}</For>
+          <For each={foldedReplies().filter((at) => at >= (props.from ?? 0))}>{(at) => props.earlier(at)}</For>
         </div>
       </Show>
     </details>

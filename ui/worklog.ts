@@ -26,6 +26,12 @@ export function thinkingParts(text: string): ThinkingPart[] {
 
 const SHELLS: Record<string, string> = { powershell: 'PowerShell', pwsh: 'PowerShell', cmd: 'cmd', bash: 'Bash', zsh: 'Zsh' };
 const WRAPPED = /^\s*(?:"([^"]+)"|(\S+))\s+(?:-No\w+\s+)*(?:-Command|-c|-lc|\/c)\s+([\s\S]+)$/i;
+const BOILERPLATE = /^(?:\s*(?:\[Console\]::OutputEncoding\s*=\s*[^;]+|\$OutputEncoding\s*=\s*[^;]+|chcp(?:\.com)?\s+\d+(?:\s*>\s*\$null|\s*>\s*NUL)?|\$env:(?:RUSTUP_HOME|CARGO_HOME|PATH)\s*=\s*(?:'[^']*'|"[^"]*"|[^\s;]+)|export\s+(?:RUSTUP_HOME|CARGO_HOME|PATH)=(?:'[^']*'|"[^"]*"|[^\s;]+))\s*(?:;|&&)\s*)+/i;
+
+function stripBoilerplate(cmd: string): string {
+  const stripped = cmd.replace(BOILERPLATE, '').trim();
+  return stripped || cmd;
+}
 // Every step reads as what it does, in plain words: Codex names its item kinds in camelCase and Claude Code names its
 // tools, and both map to the same words. A tool missing here keeps its own name.
 const KINDS: Record<string, Key> = {
@@ -113,11 +119,13 @@ export function toolRow(tool: ToolUse): ToolRow {
     if (shell) {
       let rest = wrapped[3]!.trim();
       if (rest.length > 1 && rest.startsWith('"') && rest.endsWith('"')) rest = rest.slice(1, -1).replace(/\\"/g, '"');
-      return { label: shell, detail: rest };
+      else if (rest.length > 1 && rest.startsWith("'") && rest.endsWith("'")) rest = rest.slice(1, -1).replace(/''/g, "'");
+      return { label: shell, detail: stripBoilerplate(rest) };
     }
   }
   // The path of the program is the only part Codex escapes twice.
-  return { label, detail: raw.replace(/^"([^"]+)"/, (_, path: string) => `"${path.replace(/\\\\/g, '\\')}"`) };
+  const detail = raw.replace(/^"([^"]+)"/, (_, path: string) => `"${path.replace(/\\\\/g, '\\')}"`);
+  return { label, detail: KINDS[tool.name] === 'tool.command' ? stripBoilerplate(detail) : detail };
 }
 
 /** One line for a row or a status: newlines folded, the middle cut so the start and the end both stay readable. */

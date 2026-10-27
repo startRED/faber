@@ -1515,3 +1515,19 @@ async fn wakes_that_cannot_start_fail_once_and_drain_the_remaining_wakes() {
     assert_eq!(engine.open(&id).unwrap().messages.len(), 10, "no failed reply retries itself");
     engine.shutdown();
 }
+
+#[tokio::test]
+async fn two_silent_keep_going_turns_in_a_row_halt_on_the_last_reply_with_content() {
+    let (dir, project) = (tempfile::tempdir().unwrap(), support::work_folder());
+    let (engine, _rx, mut pipe, id) = started(dir.path(), project.path()).await;
+    engine.keep_going(&id, true).unwrap();
+    answers(&mut pipe, "All three items are waiting on your decision.", true).await;
+    until(&engine, &id, |c| c.messages.len() == 4).await;
+    answers(&mut pipe, "", true).await;
+    until(&engine, &id, |c| c.messages.len() == 6).await;
+    answers(&mut pipe, "", true).await;
+    let c = until(&engine, &id, |c| c.keep_going.is_none()).await;
+    assert_eq!(c.messages[1].halt.as_deref(), Some("reason.keepGoing.done"));
+    assert_eq!(c.messages.last().unwrap().halt, None);
+    engine.shutdown();
+}

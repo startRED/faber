@@ -133,3 +133,24 @@ check('run: a newest turn with nothing of its own still holds the run\'s answers
     root.remove();
   }
 });
+
+check('run: trailing wake turns with only thinking keep the last reply with content open below the header', async () => {
+  const root = document.createElement('div');
+  document.body.append(root);
+  const trailing: Message[] = [
+    ...messages,
+    { id: 'w6', role: 'user', text: 'Keep going on your own.', at: 1792007200000, wake: { why: 'wake.keepGoing' } },
+    { id: 'a6', role: 'assistant', text: '', thinking: '**Reviewing stopped question status**', at: 1792007201000, finishedAt: 1792007205000, status: 'done', vendor: 'claude', model: 'claude-sonnet-5-5' },
+  ];
+  const dispose = render(() => createComponent(Thread, { conversationId: long.id, messages: trailing, from: 0, options: [], onBranch: () => {}, plan }), root);
+  try {
+    await settle();
+    const shown = [...root.querySelectorAll(':scope > .ai')];
+    equal(shown.length, 2, 'only the first reply and the last reply with content are shown');
+    ok(shown[1]!.querySelector(':scope > .md')!.textContent!.includes('All the pages work.'), 'the conclusion stays visible');
+    ok(shown[1]!.querySelector('.plan'), 'the plan stays attached to the visible reply');
+  } finally {
+    dispose();
+    root.remove();
+  }
+});

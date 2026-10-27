@@ -349,3 +349,14 @@ check('restarted background work: interruption invalidates cached live status un
   const restored = { ...m, tools: m.tools!.map((tool) => ({ ...tool, interrupted: true })) };
   equal(backgroundOf([restored], [], 'restart', cache).filter((r) => workStatus(r).running).length, 0);
 });
+
+check('background: a wrapped PowerShell command matches its tool call and strips encoding boilerplate', () => {
+  const raw = 'C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe -NoProfile -Command \'[Console]::OutputEncoding = [System.Text.UTF8Encoding]::new($false); cargo t --suite ui\'';
+  const rows = backgroundOf(
+    [{ id: 'a1', role: 'assistant', text: '', at: 1, status: 'streaming', tools: [{ id: 't1', name: 'commandExecution', input: raw }] }],
+    [{ id: 'c1', conversationId: 'conv-1', vendor: 'codex', command: raw, state: 'running', output: '', started: 1, stoppable: false }],
+    'conv-1',
+  );
+  equal(rows.length, 1);
+  equal(rows[0]!.title, 'cargo t --suite ui');
+});

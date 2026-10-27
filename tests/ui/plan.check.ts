@@ -1,13 +1,14 @@
 import { createComponent, createSignal } from 'solid-js';
 import { render } from 'solid-js/web';
-import type { Plan, WrapUp } from '../../ui/api.ts';
+import type { Message, Plan, WrapUp } from '../../ui/api.ts';
 import { lang, t, useLanguage } from '../../ui/i18n.ts';
 import { PlanList, WrapUpBox } from '../../ui/Plan.tsx';
+import { Thread } from '../../ui/Thread.tsx';
 import { isProgressCall } from '../../ui/worklog.ts';
 import { check, deepEqual, equal, ok } from './check.ts';
 
 // Task 017: the agent's plan under the newest reply, and the closing box of a task.
-const settle = () => new Promise((resolve) => setTimeout(resolve, 30));
+const settle = (ms = 30) => new Promise((resolve) => setTimeout(resolve, ms));
 const mount = (view: () => unknown) => {
   const root = document.createElement('div');
   document.body.append(root);
@@ -107,4 +108,35 @@ check('closing box: the recap, one question, and buttons that reply for the pers
 check('plan: the calls that keep the plan, the now line and the box are never steps of the work log', () => {
   const call = (name: string) => ({ id: name, name, input: {} });
   deepEqual(['Plan', 'Status', 'WrapUp', 'Bash', 'Agent'].map((n) => isProgressCall(call(n))), [true, true, true, false, false]);
+});
+
+check('plan: a working reply shows the current thinking headline after its words and passes the active step detail to the plan', async () => {
+  const messages: Message[] = [
+    { id: 'u1', role: 'user', text: 'Ship the fix', at: 1 },
+    {
+      id: 'a1',
+      role: 'assistant',
+      text: 'Checking the test suite now.',
+      at: 2,
+      status: 'streaming',
+      thinking: '**Auditing failing assertions**',
+      tools: [{ id: 't1', name: 'Bash', input: { command: 'npm test' }, ok: true }],
+    },
+  ];
+  const plan: Plan = {
+    at: 2,
+    steps: [
+      { text: 'Read the logs', state: 'done' },
+      { text: 'Run the test suite', state: 'active' },
+    ],
+  };
+  const view = mount(() => createComponent(Thread, { conversationId: 'c1', messages, from: 0, options: [], onBranch: () => {}, plan }));
+  try {
+    await settle();
+    equal(view.root.querySelector('.plan li.active .now')!.textContent, ` · ${t('tool.command')} · npm test`);
+    await settle(1_600);
+    equal(view.root.querySelector('.activity-latest.after .step')!.textContent, `${t('activity.thinkingNow')} · Auditing failing assertions`);
+  } finally {
+    view.done();
+  }
 });

@@ -31,7 +31,7 @@ One run, one block (R251): two or more turns in a row Faber sent by itself, with
 under one header in the work log's disclosure: the loop icon, "Worked on its own · 2 h · 14 turns · plan 5 of 7" on one
 line with an ellipsis, its tooltip counting what Faber asked ("Faber asked it to keep going ×12"). Closed by default; open,
 it shows the earlier turns, a little dimmer, each with its own work log folded, and a turn with nothing in it is not
-drawn. The newest turn stays open under the header, with "While you were away" and the answers card at its top.
+drawn. The newest turn with content stays open under the header, with "While you were away" and the answers card at its top.
 The agent's own closing box (R248, [layout.md](layout.md)) ends Keep going when it says the request is done, checked
 once like the stop line. A box that asks the person something makes Keep going wait ten minutes, its row saying "waiting
 for your answer"; then Faber sends the first reply for them and the box says which. A conversation with a plan shows

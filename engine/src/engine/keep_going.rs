@@ -248,6 +248,19 @@ pub(super) fn unanswered_question(m: &Message) -> bool {
         || m.permissions.iter().flatten().any(|p| p.tool == "AskUserQuestion")
 }
 
+/// A reply to Keep going's own prompt that ended well with no words, no steps and no closing box.
+fn empty_keep_going_reply(c: &Conversation, at: usize) -> bool {
+    let Some(u) = at.checked_sub(1).and_then(|i| c.messages.get(i)) else { return false };
+    let Some(m) = c.messages.get(at) else { return false };
+    u.role == Role::User
+        && u.wake.as_ref().is_some_and(|w| w.why == "wake.keepGoing")
+        && m.role == Role::Assistant
+        && m.status == Some(Status::Done)
+        && m.text.trim().is_empty()
+        && m.tools.iter().flatten().next().is_none()
+        && m.wrap_up.is_none()
+}
+
 /// The first choice of every question of an `AskUserQuestion` call, the way the screen answers it (each question's text to the
 /// label picked), and what to write on the reply. None when a question has no choices: only the person can answer that one.
 fn first_choices(input: &serde_json::Value) -> Option<(serde_json::Value, Vec<AutoAnswer>)> {
@@ -411,6 +424,17 @@ impl Core {
             return None;
         }
         c.keep_going.as_ref()?;
+        let last_idx = c.messages.len().saturating_sub(1);
+        let silent_twice = last_idx >= 3 && empty_keep_going_reply(c, last_idx) && empty_keep_going_reply(c, last_idx - 2);
+        let halt_id = if silent_twice {
+            (0..=last_idx)
+                .rev()
+                .find(|&i| c.messages[i].role == Role::Assistant && !empty_keep_going_reply(c, i))
+                .map(|i| c.messages[i].id.clone())
+                .unwrap_or_else(|| reply_id.to_string())
+        } else {
+            reply_id.to_string()
+        };
         let m = c.messages.last_mut()?;
         let ok = m.status == Some(Status::Done);
         let error = m.error.clone().unwrap_or_else(|| "error.turnFailed".into());
@@ -439,8 +463,12 @@ impl Core {
             kg.work += 1;
         }
         let before = kg.clone();
-        self.note_away(conv, reply_id);
-        let decision = next(&before, Ended { asked, said_stop, boxed, idle }, self.room_next(conv));
+        self.note_away(conv, &halt_id);
+        let decision = if silent_twice {
+            Next::Halt("reason.keepGoing.done")
+        } else {
+            next(&before, Ended { asked, said_stop, boxed, idle }, self.room_next(conv))
+        };
         // The first stop is asked about once, by the check turn; whatever else follows asks nothing.
         if let Some(kg) = self.convs.get_mut(conv).and_then(|c| c.keep_going.as_mut()) {
             kg.checked = said_stop || (before.checked && !own);
@@ -450,7 +478,7 @@ impl Core {
         match decision {
             Next::Continue => Some(reply_id.to_string()),
             Next::Halt(why) => {
-                self.wait_for_room(conv, reply_id, why);
+                self.wait_for_room(conv, &halt_id, why);
                 None
             }
             Next::Wait { secs, why } => {

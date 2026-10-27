@@ -8,51 +8,51 @@ and the running column are in [layout.md](layout.md); helper rows, memory waits 
 
 - Native visual pieces, HTML/SVG cards and their web-access rules are in [visual-answers.md](visual-answers.md).
 - The header is the vendor's mark, the model's name and its effort in the quiet header ink ("· high effort"; the owner,
-  2026-10-17), nothing else (Auto shows its reason beside the name only while it is still choosing). Auto's reason is its
-  tooltip. The pace line stays (C002); it also says, in the same calm words, when Auto started a conversation one rung up because the person often retries that kind of task ("Auto chose a stronger model here because you often retry this kind of task"), only when that changed the pick. A wait for quota is told once,
+  2026-10-17), nothing else (Auto shows its reason beside the name only while choosing). Auto's reason is its
+  tooltip. The pace line stays (C002); it also says, in the same calm words, when Auto started one rung up because the person often retries that kind of task ("Auto chose a stronger model here because you often retry this kind of task"), only when that changed the pick. A wait for quota is told once,
   by the quota card, never also in the header or the red note.
 - Under the answer, one line that never wraps, at a 760 px column or a 720 px window: four icon buttons from
   `ui/Glyphs.tsx` (copy, read aloud, retry, open in terminal, each with a tooltip and an accessible name), a short
   "Retry stronger" when a step up is offered (or, on the newest answer after a fix, "Look around" in the same
-  style; never both), then the time it was sent, how long it took and the cost in the faint data
+  style; never both), then the time sent, how long it took and the cost in the faint data
   style. The tokens and how long the cache stays warm are the cost's tooltip; the whole date is the time's. There is no
   model select under an answer: a retry (and the right-click Redo, which names the model) uses the composer's current
   choice. Edit and Retry keep earlier generated-file cards usable for Save, Show and previews, including when a Chat
   conversation moved into a project; the new conversation keeps its own copy of the earlier default Chat folder.
   Every inherited project attachment is copied before the new conversation appears, even one from an earlier message;
   a failed copy refuses the edit rather than publishing broken references. Deleting the original leaves these copies intact.
-- That line is a hover bar (R264; the owner, 2026-10-17). It is in the layout the whole time, so nothing moves when it
-  shows, but it is transparent until the pointer is on the message or the keyboard is inside it, and it fades in and
+- That line is a hover bar (R264; the owner, 2026-10-17). It stays in the layout, so nothing moves when it
+  shows, and is transparent until the pointer is on the message or the keyboard is inside it; it fades in and
   slides down 4 px with `--dur-ui` and `--ease` (out with `--dur-exit` and `--ease-in`). The last answer is no
   exception. A screen with no hover (`@media (hover: none)`) shows it always; reduced and no motion show it without
   the slide. The person's own message has the same bar under its bubble, right-aligned: the time, copy, edit. An icon
-  that answers a press (copy turns into a check for 1.6 s, read aloud into a stop square while it speaks) cross-fades
-  with a small scale. Read aloud uses the browser's own voice for the screen language and skips code blocks.
+  that answers a press (copy turns into a check for 1.6 s, read aloud into a stop square while speaking) cross-fades
+  with a small scale. Read aloud uses the browser's voice for the screen language and skips code blocks.
 - The same line carries the reply's state (the owner, 2026-10-18: "you should have said you finished"), after the buttons, in the
   quiet ink and the small size, cut with an ellipsis before it pushes a button: "Working" while the agent writes or works,
   then "Done", "Done · 12 min of work" once the work took a minute or more, and on the newest reply "· updated 3 min ago"
-  ("just now" under a minute, none past a day). A reply that works shows only this text in the row, the buttons join it when
-  it is done, so the row does not grow. The agent is done when its last message ended and no tool call of the reply is open,
+  ("just now" under a minute, none past a day). A working reply shows only this text in the row; the buttons join it when
+  done, so the row does not grow. The agent is done when its last message ended and no tool call of the reply is open,
   though the CLI may close its turn up to a minute later (its Stop hooks): from then the work folds into
   its activity, the buttons appear, the running column and the topbar's count leave it out, and the composer reads Send,
   where a message waits in the queue. More words after that undo it. The age ticks once a minute on the newest reply only,
-  never while the window is hidden; older replies run no timer. A reply from before the times were kept, a stop and an error
+  never while the window is hidden; older replies run no timer. A reply from before times were kept, a stop and an error
   say nothing here. Nothing animates.
 - A reply that stopped on its own says why in one line under its words, and never beside "Stopped." (that word is only the
   person's own Stop, which says nothing more). A limit (`reason.turnLimit`, `reason.budget`) is told in the quiet note
-  style; a failure (`reason.failed`, and `reason.other` for an ending this version does not know) keeps the red note (C001).
-  A plan limit is the quota card's, and an ending the CLI itself reports as a stop says nothing. The line is a sentence from
+  style; a failure (`reason.failed`, and `reason.other` for an unknown ending) keeps the red note (C001).
+  A plan limit is the quota card's, and an ending the CLI reports as a stop says nothing. The line is a sentence from
   `ui/locales/`, never the CLI's own word.
-- In the work log, what the agent wrote between its steps shows its last two paragraphs; earlier ones wait under a quiet
+- In the work log, what the agent wrote between steps shows its last two paragraphs; earlier ones wait under a quiet
   "1 more" link in the third ink (R251). A code block keeps the narration whole. The answer itself never folds.
-- The caret blinks only while words arrive; a reply at work after its words shows its step under them, in the status
-  line's style. Faber's plumbing takes no row: its own message is a loop mark after the next reply's model (R241; the
+- The caret blinks only while words arrive; a reply at work after its words shows its step under them in the status
+  line's style, or "Thinking…" with its thinking headline once words stop. Faber's plumbing takes no row: its own message is a loop mark after the next reply's model (R241; the
   product map's Work log and Faber's own message say the rest).
 - A project agent's plan (R248) sits under the newest reply, above its files, while the agent works and until every step
   is done: a quiet head "Plan · 2 of 5" in the small size, then one line per step, a small square mark before it: a check
   and the third ink when done, an accent ring and the full ink on the current one (`aria-current`), plain when still to
   do; each state is said to a screen reader. What the agent says it is doing now (its `status`, 3 to 6 words) takes the
-  place of the newest step's words under the reply while it works. When the agent gave an estimate and the job went half over it (rule 7), one quiet line in the third ink and the small size closes the block, under the steps: no number, no icon, no colour, it wraps at 720 px. A reply the agent closed with `wrap_up` ends, above
+  place of the newest step's words under the reply while it works, and an active step shows its current action or thinking line under the steps when it adds to the line above. When the agent gave an estimate and the job went half over it (rule 7), one quiet line in the third ink and the small size closes the block, under the steps: no number, no icon, no colour, it wraps at 720 px. A reply the agent closed with `wrap_up` ends, above
   the actions row, with one box on a hairline: the recap, then at most one question in the semibold weight and its one
   or two replies as buttons, the recommendation the primary one. Only the newest reply, once it is done, offers the
   buttons; a click sends the button's words as the person's message. A question Faber answered while Keep going ran
@@ -62,11 +62,11 @@ and the running column are in [layout.md](layout.md); helper rows, memory waits 
   its run mode, and Keep planning. A closing box keeps its recap but no reply buttons while plan approval waits. The composer
   reads the shared Settings mode; the card says it applies to all conversations. Faber's work turn is one quiet line.
 - A message's pictures and files sit above its text, right-aligned, as one wrapped row of 72 px rounded thumbnails and
-  small file cards (icon, name, type), with "+N" as the fifth tile when there are more than five. The bubble has 17 px
+  small file cards (icon, name, type), with "+N" as the fifth tile past five. The bubble has 17 px
   of padding, a line height of 1.6 and at most 620 px. The same thumbnail is drawn in the message box at 56 px, where
   the × sits at its top right corner and shows on hover and focus. A picture opens the viewer: a dark layer, the picture
   growing out of its thumbnail and leaving the same way, arrows (and ← →) between the conversation's pictures, Esc and a
-  click outside to close, a count at the bottom, Tab kept inside. Its DOM exists only while it is open. Pictures inside
+  click outside to close, a count at the bottom, Tab kept inside. Its DOM exists only while open. Pictures inside
   an answer are thumbnails too (at most 280 × 200 px).
 - Reading width, text selection, scroll anchoring and the latest-message control are in [reading.md](reading.md).
 - There is no permission sentence over a conversation: the mode is a Settings matter.
@@ -107,12 +107,12 @@ and the running column are in [layout.md](layout.md); helper rows, memory waits 
   shared-server thread to close blocks rewind without keeping the current idle session alive. Stop leaves waiting messages in the queue without
   keeping a retired session alive; the person can send them later on a new session. Nothing moves, and no setting or first-run step comes with it.
 - While an answer streams the engine sends the whole message every 33 ms, so the text is drawn block by block
-  (`ui/markdown.tsx`): a block whose source did not change keeps its DOM and only the open one is parsed and sanitised
-  again. A tick that changed only the tools builds no text. Everything that reaches the page passes DOMPurify.
+  (`ui/markdown.tsx`): an unchanged block keeps its DOM and only the open one is parsed and sanitised
+  again. A tick that changed only tools builds no text. Everything that reaches the page passes DOMPurify.
 
 - [Queued messages and editing](queue.md).
 - Agent-to-agent recados use that same queue with a quiet origin line while pending, never the person's message
-  bubble. During ordinary work it needs no manual send; held work keeps the queue's recovery controls. Once delivered,
+  bubble. Ordinary work needs no manual send; held work keeps the queue's recovery controls. Once delivered,
   the reply keeps the origin in its existing header mark.
 - [Branches and versions](branch.md).
 

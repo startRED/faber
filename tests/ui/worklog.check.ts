@@ -349,4 +349,12 @@ check('settings_search: the settings operation reads as the changed choice witho
 check('settings_search: unknown choices never leak into the settings work log', () => {
   useLanguage('en');
   deepEqual(toolRow({ id: 'bad-settings-search', name: 'Settings', input: { web_search: '<script>not a choice</script>' } }), { label: t('tool.settingsWebSearch'), detail: '' });
+  deepEqual(
+    toolRow({
+      id: 'ps-wrapped',
+      name: 'commandExecution',
+      input: 'C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe -NoProfile -Command \'[Console]::OutputEncoding = [System.Text.UTF8Encoding]::new($false); $env:RUSTUP_HOME = "E:\\Apps\\rust\\rustup"; cargo t --suite ui\'',
+    }),
+    { label: 'PowerShell', detail: 'cargo t --suite ui' },
+  );
 });
