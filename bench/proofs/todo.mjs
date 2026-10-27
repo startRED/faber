@@ -34,7 +34,7 @@ check('exactly one task is left', list.length === 1, list.join(' | '));
 let saved = '';
 try { saved = readFileSync(join(copy, 'tasks.json'), 'utf8'); JSON.parse(saved); } catch { saved = ''; }
 check('tasks.json is valid JSON and holds the task', saved.includes('call mum'), saved.slice(0, 120));
-const bad = [['done', '99'], ['remove', 'x'], ['add'], ['frobnicate']].map((a) => run(['todo.js', ...a]));
+const bad = [['done', '99'], ['done', '0'], ['remove', 'x'], ['remove', '0'], ['add'], ['frobnicate']].map((a) => run(['todo.js', ...a]));
 check('a bad number, a missing text and an unknown command exit non-zero with a message', bad.every((r) => r.status !== 0 && (r.stdout + r.stderr).trim().length > 0), bad.map((r) => r.status).join(','));
 check('a README exists', ['README.md', 'readme.md', 'Readme.md'].some((n) => existsSync(join(copy, n)) && /usage/i.test(readFileSync(join(copy, n), 'utf8'))));
 
