@@ -400,6 +400,7 @@ impl Core {
 
     fn queue(&mut self, id: &str) -> Result<(), String> {
         let t = self.transfers.get(id).cloned().ok_or("error.permission.stale")?;
+        self.finish_worker_admission(&Self::turn_admission_key(id, &t.reply));
         let unattended = self.convs.get(id).is_some_and(|c| c.keep_going.is_some());
         let now = self.secs();
         let vendors: Vec<_> = self

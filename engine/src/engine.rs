@@ -3609,6 +3609,7 @@ impl Core {
 
     /// Ends a reply that never got a CLI: it shows the error and leaves the running list.
     pub(super) fn fail_reply(&mut self, id: &str, reply_id: &str, error: String) {
+        self.finish_worker_admission(&Self::turn_admission_key(id, reply_id));
         if let Some(t) = self.transfers.get_mut(id).filter(|t| t.reply == reply_id) {
             t.approved = None;
         }
@@ -3689,9 +3690,6 @@ impl Core {
         self.note_away(id, reply_id);
         let approved = self.transfers.get(id).is_some_and(|t| t.reply == reply_id && t.approved == Some(pick.vendor));
         self.gate_turn_approved(pick, by_hand, approved)?;
-        if self.defer_unattended(id, reply_id, pick, &text, &images, by_hand) {
-            return Ok(());
-        }
         if let Some(m) = self.convs.get_mut(id).and_then(|c| c.messages.iter_mut().find(|m| m.id == reply_id)) {
             m.vendor = Some(pick.vendor);
             m.model = pick.model.clone();
@@ -3708,6 +3706,9 @@ impl Core {
             m.status = Some(Status::Streaming);
             m.finished_at = None;
             m.permissions = None;
+        }
+        if self.defer_unattended(id, reply_id, pick, &text, &images, by_hand) {
+            return Ok(());
         }
         if let Some(held) = self.copying.get_mut(id) {
             held.reply = reply_id.to_string();
@@ -3753,6 +3754,7 @@ impl Core {
                             c.messages.last().is_none_or(|message| message.id != reply || message.status != Some(Status::Streaming))
                         })
                     {
+                        core.finish_worker_admission(&Self::turn_admission_key(&id, &reply));
                         core.kit_checks.remove(&id);
                         return;
                     }
@@ -3839,6 +3841,7 @@ impl Core {
             };
             l.session.send(UserTurn { text, images });
         }
+        self.finish_worker_admission(&Self::turn_admission_key(id, reply_id));
         self.listen(id);
         self.push(id, Some(reply_id), true);
         Ok(())

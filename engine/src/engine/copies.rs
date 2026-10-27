@@ -255,6 +255,7 @@ impl Core {
                 .and_then(|c| c.messages.iter().find(|m| m.id == reply))
                 .is_some_and(|m| m.status == Some(Status::Streaming));
         if !streaming {
+            self.finish_worker_admission(&Self::turn_admission_key(id, &reply));
             return stray;
         }
         match tail {

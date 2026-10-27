@@ -3352,4 +3352,44 @@ mod tests {
             engine.shutdown();
         }
     }
+
+    #[tokio::test]
+    async fn production_windows_unattended_turn_and_helper_keep_memory_admission_through_kit_check() {
+        let dir = tempfile::tempdir().unwrap();
+        let folder = dir.path().canonicalize().unwrap();
+        let (spawn, args, messages) = fake();
+        let engine = engine(&folder, spawn);
+        let project = engine.add_project(&folder.to_string_lossy()).unwrap();
+        let samples = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let sampled = samples.clone();
+        engine.with(|core| {
+            core.opts.windows = true;
+            core.synchronous_kit_checks = false;
+            core.worker_memory.probe = Some(Arc::new(move || {
+                sampled.fetch_add(1, std::sync::atomic::Ordering::AcqRel);
+                Ok(crate::worker_memory::Snapshot { used: 0, total: 16 << 30, available: 4 << 30 })
+            }));
+            conversation(core, Area::Project, Some(&project.id), &folder, "Debug the failure");
+            core.convs.get_mut("kit").unwrap().messages[0].wake = Some(Wake::of("wake.keepGoing"));
+            core.dispatch("kit", "reply", &pick(Vendor::Claude), "UNATTENDED_TURN_READY".into(), vec![], false).unwrap();
+        });
+        input_with(&messages, "UNATTENDED_TURN_READY").await;
+        assert_eq!(samples.load(std::sync::atomic::Ordering::Acquire), 1, "one memory admission covers rewind capture and kit check");
+        engine.with(|core| {
+            assert!(!core.workers_waiting());
+            assert!(core.worker_memory.admitted.is_empty());
+            assert!(core.kit_checks.is_empty());
+            core.start_helper("kit", "helper-call".into(), json!({"title":"Design", "brief":"Design a landing page"}));
+        });
+        input_with(&messages, "Design a landing page").await;
+        assert_eq!(samples.load(std::sync::atomic::Ordering::Acquire), 2, "helper passes memory admission and kit check in one cycle");
+        engine.with(|core| {
+            assert!(!core.workers_waiting());
+            assert!(core.worker_memory.admitted.is_empty());
+            assert!(core.kit_checks.is_empty());
+            assert!(core.helpers.contains_key("helper-call"));
+        });
+        assert_eq!(args.lock().unwrap().len(), 2, "both parent and helper CLI processes started");
+        engine.shutdown();
+    }
 }

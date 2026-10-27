@@ -2058,6 +2058,7 @@ export const en = {
   'notes.273.better': 'Unfinished AI helpers no longer appear to be working after Faber restarts.',
   'notes.274.better': 'While the agent works, you see its current step and thinking under the reply, and Keep going keeps the latest answer open.',
   'notes.275.better': 'Auto can now pick GPT-6.1 Terra when your Codex account lists it: medium tasks use about a quarter less quota than before.',
+  'notes.276.fixed': 'Keep going turns and helpers on Windows no longer get stuck before starting when extra tools are active.',
   'update.checking': 'Looking for an update…',
   'update.downloading': 'Downloading update…',
   'update.downloadingPercent': 'Downloading update… {percent}%',

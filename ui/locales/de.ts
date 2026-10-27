@@ -2178,6 +2178,7 @@ export const de: Messages = {
   'notes.273.better': 'Nicht abgeschlossene KI-Helfer werden nach einem Neustart von Faber nicht mehr als aktiv angezeigt.',
   'notes.274.better': 'Während der Agent arbeitet, sehen Sie den aktuellen Schritt und Gedanken unter der Antwort, und Weitermachen lässt die letzte Antwort offen.',
   'notes.275.better': 'Auto kann jetzt GPT-6.1 Terra wählen, wenn dein Codex-Konto es anbietet: mittlere Aufgaben verbrauchen etwa ein Viertel weniger Kontingent.',
+  'notes.276.fixed': 'Durchgänge mit Weitermachen und Helfer unter Windows bleiben nicht mehr vor dem Start hängen, wenn zusätzliche Werkzeuge aktiv sind.',
   'update.checking': 'Suche nach einem Update…',
   'update.downloading': 'Update wird heruntergeladen…',
   'update.downloadingPercent': 'Update wird heruntergeladen… {percent} %',

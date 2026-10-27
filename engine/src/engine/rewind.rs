@@ -908,6 +908,7 @@ impl Core {
                 c.stopped || c.messages.iter().find(|m| m.id == reply_id).is_none_or(|m| m.status != Some(Status::Streaming))
             });
             if stopped {
+                core.finish_worker_admission(&Self::turn_admission_key(&id, &reply_id));
                 if let Some(reply) = core.convs.get_mut(&id).and_then(|c| c.messages.iter_mut().find(|m| m.id == reply_id)) {
                     reply.status = Some(Status::Stopped);
                 }

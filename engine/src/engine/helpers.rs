@@ -70,8 +70,12 @@ impl Core {
                 return;
             }
             if why == super::mcp_servers::CHECK_PENDING {
-                let Some(sid) = self.live.get(conv).map(|live| live.sid) else { return };
+                let Some(sid) = self.live.get(conv).map(|live| live.sid) else {
+                    self.finish_worker_admission(&format!("helper:{call}"));
+                    return;
+                };
                 let (owner, key) = (conv.to_string(), format!("helper:{call}"));
+                let admitted_key = key.clone();
                 self.after_kit_check(&key, move |core| {
                     if !core.closing
                         && !core.installing
@@ -79,10 +83,13 @@ impl Core {
                         && core.convs.get(&owner).is_some_and(|conversation| !conversation.stopped)
                     {
                         core.start_helper(&owner, call, input);
+                    } else {
+                        core.finish_worker_admission(&admitted_key);
                     }
                 });
                 return;
             }
+            self.finish_worker_admission(&format!("helper:{call}"));
             self.kit_checks.remove(&format!("helper:{call}"));
             let (_, text) = helper::report(false, "", &[], Some(why));
             if let Some(l) = self.live.get(conv) {
@@ -142,15 +149,16 @@ impl Core {
         let project = self.convs.get(conv).and_then(|c| c.project_id.clone());
         let disabled = self.project_disabled_servers(project.as_deref());
         let raw = self.session_tools(vendor, Area::Project, permissions, project.as_deref(), &prompt, &cwd);
+        if !self.worker_admitted(&check_name, conv) {
+            return Err(super::worker_memory::PENDING);
+        }
         let (mut tools, _) = self
             .check_kit(&check_name, conv, vendor, Area::Project, permissions, &cwd, prompt.clone(), None, vec![], disabled, raw)
             .map_err(|_| super::mcp_servers::CHECK_PENDING)?;
+        self.finish_worker_admission(&check_name);
         let flags = if vendor == Vendor::Claude { self.claude_flags_for(&cli) } else { Default::default() };
         if vendor == Vendor::Claude && !flags.plugin_dir {
             tools.plugin = None;
-        }
-        if !self.worker_ready(&check_name) {
-            return Err(super::worker_memory::PENDING);
         }
         self.begin_unbounded(vendor).map_err(|_| "the other AI cannot start right now")?;
         let user_hooks = self.store.settings().user_hooks == Some(true) && permissions.guarded();
@@ -500,7 +508,7 @@ impl Core {
 
     /// The agent's turn stopped or ended: its helpers stop with it. An interrupted helper still reports what it had.
     pub(super) fn stop_helpers(&mut self, conv: &str, close: bool) {
-        self.cancel_workers(conv);
+        self.cancel_helper_workers(conv);
         self.kit_checks.retain(|name, check| !name.starts_with("helper:") || check.owner != conv);
         // The checks it was waiting for stop too (`verifying.rs`).
         self.stop_verify(conv);

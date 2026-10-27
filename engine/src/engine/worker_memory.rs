@@ -20,11 +20,16 @@ pub(super) struct State {
     pending: VecDeque<Waiting>,
     checking: bool,
     permitted: Option<String>,
+    pub(super) admitted: HashMap<String, String>,
     #[cfg(test)]
-    probe: Option<Arc<dyn Fn() -> std::io::Result<Snapshot> + Send + Sync>>,
+    pub(super) probe: Option<Arc<dyn Fn() -> std::io::Result<Snapshot> + Send + Sync>>,
 }
 
 impl Core {
+    pub(super) fn turn_admission_key(id: &str, reply: &str) -> String {
+        format!("{id}:{reply}")
+    }
+
     pub(super) fn worker_ready(&mut self, key: &str) -> bool {
         // shortcut: Unix keeps the existing worker-count limits until exact native memory samples are supported.
         if !self.opts.windows {
@@ -37,6 +42,21 @@ impl Core {
         false
     }
 
+    pub(super) fn worker_admitted(&mut self, key: &str, owner: &str) -> bool {
+        if !self.opts.windows || self.worker_memory.admitted.contains_key(key) {
+            return true;
+        }
+        if self.worker_ready(key) {
+            self.worker_memory.admitted.insert(key.to_string(), owner.to_string());
+            return true;
+        }
+        false
+    }
+
+    pub(super) fn finish_worker_admission(&mut self, key: &str) {
+        self.worker_memory.admitted.remove(key);
+    }
+
     pub(super) fn waiting_helpers(&self, conv: &str, except: &str) -> usize {
         self.worker_memory.pending.iter().filter(|wait| wait.owner == conv && wait.key.starts_with("helper:") && wait.key != except).count()
     }
@@ -47,6 +67,12 @@ impl Core {
 
     pub(super) fn cancel_workers(&mut self, owner: &str) {
         self.worker_memory.pending.retain(|wait| wait.owner != owner);
+        self.worker_memory.admitted.retain(|_, admitted_owner| admitted_owner != owner);
+    }
+
+    pub(super) fn cancel_helper_workers(&mut self, owner: &str) {
+        self.worker_memory.pending.retain(|wait| wait.owner != owner || !wait.key.starts_with("helper:"));
+        self.worker_memory.admitted.retain(|key, admitted_owner| admitted_owner != owner || !key.starts_with("helper:"));
     }
 
     pub(super) fn workers_waiting(&self) -> bool {
@@ -115,7 +141,16 @@ impl Core {
     }
 
     pub(super) fn defer_unattended(&mut self, id: &str, reply: &str, pick: &Pick, text: &str, images: &[Image], by_hand: bool) -> bool {
-        if !self.unattended_reply(id, reply) || self.worker_ready(id) {
+        if !self.unattended_reply(id, reply) {
+            return false;
+        }
+        let turn = Self::turn_admission_key(id, reply);
+        if !self.opts.windows || self.worker_memory.admitted.contains_key(&turn) {
+            return false;
+        }
+        if self.worker_ready(id) {
+            self.worker_memory.admitted.retain(|key, owner| owner != id || key.starts_with("helper:"));
+            self.worker_memory.admitted.insert(turn, id.to_string());
             return false;
         }
         let (id, reply, pick, text, images) = (id.to_string(), reply.to_string(), pick.clone(), text.to_string(), images.to_vec());

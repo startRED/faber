@@ -324,11 +324,12 @@ impl Core {
         let owner_sid = check.owner_sid;
         self.kit_checks.remove(name);
         if let Some(call) = name.strip_prefix("helper:") {
+            self.finish_worker_admission(name);
             if let Some(live) = self.live.get(&owner).filter(|live| Some(live.sid) == owner_sid) {
                 let (_, text) = crate::helper::report(false, "", &[], Some("the catalog files could not be checked"));
                 live.session.helper_reply(call, false, text);
             }
-        } else if self.compacts.remove(&owner).is_some() {
+        } else if self.convs.get(&owner).is_some_and(|conversation| conversation.compacting) && self.compacts.remove(&owner).is_some() {
             if let Some(conversation) = self.convs.get_mut(&owner) {
                 conversation.compacting = false;
             }
