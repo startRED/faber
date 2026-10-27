@@ -21,12 +21,17 @@ const hash = (path) => createHash('sha256').update(readFileSync(path)).digest('h
 
 const before = walk(pristine).map((p) => ({ name: relative(pristine, p), hash: hash(p) }));
 const after = walk(folder);
+const beforeHashes = new Map();
+for (const f of before) beforeHashes.set(f.hash, (beforeHashes.get(f.hash) ?? 0) + 1);
 const afterHashes = new Map();
-for (const p of after) afterHashes.set(hash(p), (afterHashes.get(hash(p)) ?? 0) + 1);
+for (const p of after) {
+  const content = hash(p);
+  afterHashes.set(content, (afterHashes.get(content) ?? 0) + 1);
+}
 
-const lost = before.filter((f) => !afterHashes.has(f.hash)).map((f) => f.name);
+const lost = before.filter((f) => (afterHashes.get(f.hash) ?? 0) < beforeHashes.get(f.hash)).map((f) => f.name);
 check('every original file is still there, content unchanged', lost.length === 0, lost.length ? `missing: ${lost.slice(0, 6).join(', ')}` : `${before.length} files`);
-const copies = before.filter((f) => afterHashes.get(f.hash) > 1).map((f) => f.name);
+const copies = before.filter((f) => afterHashes.get(f.hash) > beforeHashes.get(f.hash)).map((f) => f.name);
 check('no file was copied instead of moved', copies.length === 0, copies.slice(0, 6).join(', '));
 
 const top = readdirSync(folder).filter((n) => !n.startsWith('.'));
