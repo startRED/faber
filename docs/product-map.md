@@ -679,3 +679,5 @@ Say people want to turn off the cache-warm note.
 
 What not to do: a second control for something that already has one, like a model select under every answer next to the
 composer's model picker (R168 removed it). That is the mistake this page exists to prevent.
+
+Unfinished agent calls loaded without a live CLI, or copied into a new conversation, retain an optional `ToolUse.interrupted` marker. The existing Subagent step and background-work projection show them stopped and exclude them from the live-helper count, even under a completed reply; known results, briefs and history are preserved without replay or an invented end time (`engine/src/engine.rs`, `settling_a_reply_interrupts_unfinished_agents_without_inventing_results`; `tests/ui/agents.check.ts`, restarted agents).

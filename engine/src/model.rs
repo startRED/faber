@@ -124,6 +124,9 @@ pub struct ToolUse {
     pub input: Value,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub ok: Option<bool>,
+    /// No running CLI owns this unfinished agent call after restore or copy; no result or end time was observed.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub interrupted: bool,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub output: Option<String>,
     /// The user (or the CLI's own approval) refused the tool, so it never ran; `ok` is false but nothing failed.

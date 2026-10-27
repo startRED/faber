@@ -650,6 +650,7 @@ mod tests {
                 ok: Some(true),
                 output: Some("pushed".into()),
                 declined: false,
+                interrupted: false,
                 parent: None,
                 sign: None,
                 facts: None,

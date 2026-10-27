@@ -16,6 +16,13 @@ status from its ancestors, so ending the main reply does not falsely stop it. Ol
 16,000-character preview limit; new calls use the paged history below. The nested routing, direct-step ordering and background-state
 regressions live in `tests/ui/agents.check.ts`.
 
+## After restart or copying a conversation
+
+Calls without a known outcome are marked interrupted when no running CLI owns the restored or copied reply.
+The existing stopped label replaces the live mark, including nested background tasks under a completed answer.
+Known results, saved briefs and history remain intact; no completion time or result is invented, and no call is replayed.
+This reuses the same rows and reader in Chat and Projects, without a new control, timer or process.
+
 ## Retained visible history
 
 New calls retain visible text, steps and full tool results in atomic pages outside the conversation JSON. The engine never

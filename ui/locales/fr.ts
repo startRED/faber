@@ -2175,6 +2175,7 @@ export const fr: Messages = {
   'notes.270.fixed': 'Les lignes et la colonne des tâches en cours disparaissent sans délai superflu à la fermeture.',
   'notes.271.fixed': 'La carte de la question disparaît en douceur même si vous répondez dès son apparition.',
   'notes.272.fixed': 'Le panneau du navigateur change de largeur en douceur quand une page enregistrée met du temps à se rouvrir.',
+  'notes.273.better': 'Les IA auxiliaires interrompues ne restent plus affichées comme actives après le redémarrage de Faber.',
   'update.checking': 'Recherche d’une mise à jour…',
   'update.downloading': 'Téléchargement de la mise à jour…',
   'update.downloadingPercent': 'Téléchargement de la mise à jour… {percent} %',

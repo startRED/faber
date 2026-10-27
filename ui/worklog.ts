@@ -254,6 +254,7 @@ export type AgentState = 'running' | 'background' | 'waiting' | 'stuck' | 'stopp
 export function agentState(step: AgentStep, streaming: boolean): AgentState {
   const { ok, declined, sign } = step.call;
   if (ok === undefined) {
+    if (step.call.interrupted) return 'stopped';
     if (!streaming) return step.background ? 'background' : 'stopped';
     if (sign) return sign === 'waiting' ? 'waiting' : 'stuck';
     return step.background ? 'background' : 'running';
@@ -279,7 +280,7 @@ export function helpersAtWork(messages: Message[] = []): number {
   // Only agent calls: a long conversation's other steps are never walked. A subagent's own steps land in the reply under
   // way, so its parent may sit in an earlier one; a subagent's parent is an agent call.
   const calls = replies.flatMap((m) => (m.tools ?? []).filter(agent).map((tool) => ({ tool, streaming: m.status === 'streaming' })));
-  const open = calls.filter((c) => c.tool.ok === undefined);
+  const open = calls.filter((c) => c.tool.ok === undefined && !c.tool.interrupted);
   if (!open.length) return 0;
   const byId = new Map(calls.map((c) => [c.tool.id, c.tool]));
   return open.filter((c) => c.streaming || agentBackground(c.tool, byId)).length;
@@ -288,7 +289,7 @@ export function helpersAtWork(messages: Message[] = []): number {
 /** Whether two lists hold the same tools in the same state, so a message that only grew in text leaves the rows of its tools
  * alone while it streams. A tool is the same while its id, name, outcome, sign and output length are. */
 export function sameTools(a: ToolUse[], b: ToolUse[]): boolean {
-  return a.length === b.length && a.every((tool, i) => tool.id === b[i]!.id && tool.name === b[i]!.name && tool.ok === b[i]!.ok && tool.sign === b[i]!.sign && tool.wordsChars === b[i]!.wordsChars && tool.transcript?.pages === b[i]!.transcript?.pages && tool.transcript?.failed === b[i]!.transcript?.failed && (tool.output?.length ?? 0) === (b[i]!.output?.length ?? 0));
+  return a.length === b.length && a.every((tool, i) => tool.id === b[i]!.id && tool.name === b[i]!.name && tool.ok === b[i]!.ok && tool.sign === b[i]!.sign && tool.interrupted === b[i]!.interrupted && tool.wordsChars === b[i]!.wordsChars && tool.transcript?.pages === b[i]!.transcript?.pages && tool.transcript?.failed === b[i]!.transcript?.failed && (tool.output?.length ?? 0) === (b[i]!.output?.length ?? 0));
 }
 
 /** Each subagent, including nested ones, with its own tools. The parent keeps the handoff, the child keeps its work. */

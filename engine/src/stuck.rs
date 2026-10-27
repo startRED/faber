@@ -140,6 +140,7 @@ mod tests {
             ok: None,
             output: None,
             declined: false,
+            interrupted: false,
             parent: Some("call".into()),
             sign: None,
             facts: None,

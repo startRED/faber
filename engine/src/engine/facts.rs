@@ -82,6 +82,7 @@ mod tests {
             ok,
             output: None,
             declined: false,
+            interrupted: false,
             parent: parent.map(String::from),
             sign: None,
             facts: None,

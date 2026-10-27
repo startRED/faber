@@ -95,7 +95,7 @@ export function backgroundCalls(m: Message, index: ToolIndex) {
   const old = index.projected;
   if (old && index.language === lang() && index.background.every((i, n) => {
     const call = m.tools![i]!, before = old[n]!.agent?.call ?? old[n]!.tool!;
-    return call.ok === before.ok && call.declined === before.declined && call.sign === before.sign && call.output === before.output;
+    return call.ok === before.ok && call.declined === before.declined && call.sign === before.sign && call.interrupted === before.interrupted && call.output === before.output;
   })) return old;
   index.language = lang();
   return index.projected = index.background.map((i) => {

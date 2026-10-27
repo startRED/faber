@@ -7,7 +7,7 @@ import { t, useLanguage } from '../../ui/i18n.ts';
 import { AgentChat, openedAgent, showAgent } from '../../ui/AgentChat.tsx';
 import { Running } from '../../ui/Running.tsx';
 import { Thread } from '../../ui/Thread.tsx';
-import { agentReport, agentState, agentSteps, sameTools } from '../../ui/worklog.ts';
+import { agentReport, agentState, agentSteps, helpersAtWork, sameTools } from '../../ui/worklog.ts';
 import { check, deepEqual, equal, ok } from './check.ts';
 
 // The subagents the agent starts show as steps in its reply (R161; docs/product-map.md, "Subagent step").
@@ -328,6 +328,10 @@ check('subagent step: a running helper is its own row in the reply, apart from t
     setMessage({ ...message(), tools: [{ ...AGENT, input: { ...(AGENT.input as object), run_in_background: true } }] });
     equal(row().dataset.state, 'background');
     ok(row().querySelector('.live'), 'a background helper still shows the live mark');
+    setMessage({ ...message(), status: 'done', tools: [{ ...AGENT, input: { ...(AGENT.input as object), run_in_background: true }, interrupted: true }] });
+    equal(row().dataset.state, 'stopped', 'a restored background helper has no live owner');
+    equal(row().querySelector('.live'), null);
+    equal(row().querySelector('.agent-now'), null);
   } finally {
     dispose();
     root.remove();
@@ -745,4 +749,19 @@ check('helper in the column: a box that writes to it, its messages, and Continue
     dispose();
     root.remove();
   }
+});
+
+check('restarted agents: a persisted interruption stops background and nested work without replacing known results', () => {
+  const calls = [
+    { id: 'restart-root', name: 'Agent', input: { run_in_background: true }, interrupted: true },
+    { id: 'restart-child', name: 'Task', input: {}, parent: 'restart-root', interrupted: true },
+  ] as ToolUse[];
+  const steps = agentSteps(calls);
+  for (const step of steps) equal(agentState(step, false), 'stopped');
+  equal(helpersAtWork([{ id: 'restart', role: 'assistant', at: 1, text: '', status: 'done', tools: calls }]), 0);
+  equal(sameTools([{ ...calls[0]!, interrupted: false } as ToolUse], [calls[0]!]), false, 'the saved status refreshes a reused row');
+  const done = agentSteps([{ ...calls[0]!, ok: true }])[0]!;
+  equal(agentState(done, false), 'done');
+  const live = calls.map(({ ...call }) => ({ ...call, interrupted: false }));
+  equal(helpersAtWork([{ id: 'live', role: 'assistant', at: 1, text: '', status: 'done', tools: live }]), 2, 'a live session still owns background work');
 });

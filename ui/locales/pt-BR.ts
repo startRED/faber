@@ -2162,6 +2162,7 @@ export const ptBR: Messages = {
   'notes.270.fixed': 'As linhas e a coluna de tarefas em andamento deixam de demorar pra desaparecer quando você as fecha.',
   'notes.271.fixed': 'O cartão da pergunta desaparece suavemente mesmo quando você responde assim que ele aparece.',
   'notes.272.fixed': 'Ao voltar pra uma página salva, o painel do navegador muda de largura suavemente mesmo quando a abertura demora.',
+  'notes.273.better': 'As IAs auxiliares que não terminaram deixam de aparecer como ativas depois de reiniciar o Faber.',
   'update.checking': 'Procurando atualização…',
   'update.downloading': 'Baixando atualização…',
   'update.downloadingPercent': 'Baixando atualização… {percent}%',

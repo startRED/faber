@@ -339,3 +339,13 @@ check('background review 5: a link closing a sentence keeps its chip, and an unr
     equal(view.host.querySelector('.reply-references'), null);
   } finally { view.close(); }
 });
+
+check('restarted background work: interruption invalidates cached live status under a completed reply', () => {
+  const cache = createBackgroundCache();
+  const m: Message = { id: 'restart', role: 'assistant', at: 1, text: '', status: 'done', tools: [
+    { id: 'agent', name: 'Agent', input: { run_in_background: true, description: 'Saved task' } },
+  ] };
+  equal(backgroundOf([m], [], 'restart', cache).filter((r) => workStatus(r).running).length, 1);
+  const restored = { ...m, tools: m.tools!.map((tool) => ({ ...tool, interrupted: true })) };
+  equal(backgroundOf([restored], [], 'restart', cache).filter((r) => workStatus(r).running).length, 0);
+});

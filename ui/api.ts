@@ -65,6 +65,8 @@ export interface ToolUse {
   name: string;
   input: unknown;
   ok?: boolean;
+  /** No running CLI owns this unfinished agent call after restore or copy. */
+  interrupted?: boolean;
   output?: string;
   /** The agent call that started the subagent which ran this tool; absent for the agent's own tools. */
   parent?: string;

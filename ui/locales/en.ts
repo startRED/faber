@@ -2055,6 +2055,7 @@ export const en = {
   'notes.270.fixed': 'Rows and the running column no longer linger when you close them.',
   'notes.271.fixed': 'Answered question cards fade away even when you answer as they appear.',
   'notes.272.fixed': 'Returning to a saved browser page changes the side panel width smoothly after a delayed opening.',
+  'notes.273.better': 'Unfinished AI helpers no longer appear to be working after Faber restarts.',
   'update.checking': 'Looking for an update…',
   'update.downloading': 'Downloading update…',
   'update.downloadingPercent': 'Downloading update… {percent}%',

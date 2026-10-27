@@ -249,6 +249,7 @@ mod tests {
             ok,
             output: None,
             declined: false,
+            interrupted: false,
             parent: None,
             sign: None,
             facts: None,

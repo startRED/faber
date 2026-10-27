@@ -2175,6 +2175,7 @@ export const es: Messages = {
   'notes.270.fixed': 'Las filas y la columna de tareas en curso dejan de tardar en desaparecer al cerrarlas.',
   'notes.271.fixed': 'La tarjeta de la pregunta se desvanece aunque respondas en cuanto aparece.',
   'notes.272.fixed': 'Al volver a una página guardada, el panel del navegador cambia de ancho suavemente aunque tarde en abrirse.',
+  'notes.273.better': 'Las IA auxiliares que no terminaron dejan de aparecer como activas al reiniciar Faber.',
   'update.checking': 'Buscando una actualización…',
   'update.downloading': 'Descargando actualización…',
   'update.downloadingPercent': 'Descargando actualización… {percent} %',

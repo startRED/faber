@@ -388,8 +388,14 @@ fn new_id() -> String {
     Uuid::new_v4().to_string()
 }
 
-/// A message no running CLI owns: streaming stops and native requests go. A completed Codex plan remains a decision.
+/// A message no running CLI owns: streaming and unfinished agents stop, and native requests go. A completed Codex plan remains a decision.
 fn settle(m: &mut Message) {
+    for tool in m.tools.iter_mut().flatten() {
+        if tool.ok.is_none() && matches!(tool.name.as_str(), "Agent" | "Task" | "Helper") {
+            tool.interrupted = true;
+            tool.sign = None;
+        }
+    }
     if m.vendor == Some(Vendor::Codex) && m.status == Some(Status::Done) {
         if let Some(waiting) = m.permissions.as_mut() {
             waiting.retain(|p| p.tool == "ExitPlanMode");
@@ -2388,6 +2394,7 @@ impl Core {
                         ok: None,
                         output: None,
                         declined: false,
+                        interrupted: false,
                         parent,
                         sign: None,
                         facts: None,
@@ -5327,6 +5334,39 @@ mod tool_in_tests {
             c.convs.remove(&id);
         });
         assert_eq!(engine.commands(Some(&id), Some(Vendor::Claude))[0].command.name, "latest");
+    }
+
+    #[test]
+    fn settling_a_reply_interrupts_unfinished_agents_without_inventing_results() {
+        for status in [Status::Done, Status::Streaming, Status::Stopped, Status::Error] {
+            let mut message = Message::new("restart".into(), Role::Assistant, "Saved answer".into(), 1);
+            message.status = Some(status);
+            message.tools = serde_json::from_value(json!([
+                {"id":"background","name":"Agent","input":{"run_in_background":true,"prompt":"Keep the brief"},"started":10,"words":[{"at":0,"text":"Saved progress"}]},
+                {"id":"nested","name":"Task","parent":"background","input":{}},
+                {"id":"helper","name":"Helper","input":{"brief":"Keep the helper brief"}},
+                {"id":"finished","name":"Agent","input":{},"ok":true,"ended":20},
+                {"id":"failed","name":"Agent","input":{},"ok":false,"ended":21},
+                {"id":"command","name":"Bash","input":{}}
+            ])).unwrap();
+            settle(&mut message);
+            let saved = serde_json::to_value(&message).unwrap();
+            for tool in &saved["tools"].as_array().unwrap()[..3] {
+                assert_eq!(tool["interrupted"], true, "a call without its process cannot remain live");
+                assert!(tool.get("ok").is_none());
+                assert!(tool.get("ended").is_none(), "restart did not observe when the call ended");
+            }
+            for tool in &saved["tools"].as_array().unwrap()[3..] {
+                assert!(tool.get("interrupted").is_none(), "known outcomes and other tools are unchanged");
+            }
+            assert_eq!(saved["tools"][0]["input"]["prompt"], "Keep the brief");
+            assert_eq!(saved["tools"][0]["words"][0]["text"], "Saved progress");
+            assert_eq!(message.status, Some(if status == Status::Streaming { Status::Stopped } else { status }));
+            let once = serde_json::to_value(&message).unwrap();
+            let mut loaded: Message = serde_json::from_value(once.clone()).unwrap();
+            settle(&mut loaded);
+            assert_eq!(serde_json::to_value(loaded).unwrap(), once, "settling is durable and idempotent");
+        }
     }
 
     fn reply(id: &str, tools: &[&str]) -> Message {
