@@ -1,7 +1,9 @@
 import { createComponent, createSignal } from 'solid-js';
 import { render } from 'solid-js/web';
 import type { UpdateStatus } from '../../ui/api.ts';
-import { t } from '../../ui/i18n.ts';
+import { t, useLanguage } from '../../ui/i18n.ts';
+import { en } from '../../ui/locales/en.ts';
+import { Sidebar } from '../../ui/Sidebar.tsx';
 import { UpdateLine, UpdateStage, updateText } from '../../ui/UpdateStage.tsx';
 import { check, equal, ok } from './check.ts';
 
@@ -96,3 +98,25 @@ check('update: the opening screen covers the window below the title bar and the 
     ok(rect.width >= innerWidth - 1 && rect.height >= innerHeight - 1, 'it covers the whole window');
     equal(getComputedStyle(host.querySelector('.ubar > span')!).transitionProperty, 'transform', 'only transform moves');
   }));
+
+check('update: "Update ready, restart" is one press, never greyed out, and says the work picks up again', () => {
+  useLanguage('en');
+  const host = document.createElement('div');
+  document.body.append(host);
+  let restarts = 0;
+  const dispose = render(() => createComponent(Sidebar, {
+    conversations: [], projects: [], vendors: ['codex'], version: 'test', place: { area: 'chat' }, running: [], quotas: {}, now: 0,
+    onNew: () => {}, onArea: () => {}, onProject: () => {}, onNewIn: () => {}, onAddProject: () => {},
+    onOpen: () => {}, onRemove: () => {}, onSettings: () => {},
+    update: { phase: 'ready' }, onRestart: () => void restarts++,
+  }), host);
+  try {
+    const button = host.querySelector<HTMLButtonElement>('.upd.act')!;
+    ok(button, 'the control is there');
+    equal(button.disabled, false, 'nothing greys it out: work that runs is cut and picks up again after');
+    equal(button.title, en['update.readyHint']);
+    equal(button.textContent, en['update.ready']);
+    button.click();
+    equal(restarts, 1, 'one press restarts, with no question');
+  } finally { dispose(); host.remove(); }
+});

@@ -1688,7 +1688,6 @@ export function App(props: { initial: AppState; update?: UpdateStatus; inbox: { 
                 vendors={state().vendors}
                 version={state().version}
                 update={update()}
-                updateBlocked={every().length > 0}
                 onRestart={restartForUpdate}
                 userName={state().settings.userName}
                 // A Skip on the account cards means "later": with one AI connected, the sidebar offers the other until the cards

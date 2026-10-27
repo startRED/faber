@@ -238,7 +238,7 @@ enum Who {
     Start,
     /// The idle install, once an update is kept.
     Later,
-    /// "Update ready, restart": the person's own choice.
+    /// "Update ready, restart": the person's own choice. Work that runs does not hold it back: it is cut and goes on after.
     Owner,
 }
 
@@ -587,6 +587,10 @@ impl Release for Live {
             || {
                 // The engine's own admission closes first (it refuses when an answer runs, and every new one after), then
                 // whether it is still working is read. A CLI install is a `SetupRunning` and is read by the gate itself.
+                // The person's own restart is held back only by an install the agent makes.
+                if who == Who::Owner {
+                    return faber.engine.install_admission_stopping().ok();
+                }
                 let closed = faber.engine.install_admission().ok()?;
                 (!faber.engine.is_working()).then_some(closed)
             },
@@ -724,7 +728,8 @@ fn install_when_idle(app: &AppHandle, install_dir: &OsString) {
     idle_install(idle, || live.reserve(Who::Later), || live.shut_down(), || live.install(), || live.relaunch());
 }
 
-/// "Update ready, restart": installs the kept update now, with the window as it is. Refused while an answer runs.
+/// "Update ready, restart": installs the kept update now, with the window as it is. Work that runs is cut, noted first so
+/// it goes on after the restart.
 pub(crate) async fn restart_now(app: AppHandle) -> Result<(), String> {
     if !cfg!(windows) || lock(&app.state::<Faber>().update).is_none() {
         return Err("error.update.none".into());
@@ -738,7 +743,11 @@ pub(crate) async fn restart_now(app: AppHandle) -> Result<(), String> {
     }
     // The person chose this, so a version tried a day ago does not stop it.
     live.stage(Phase::Installing);
-    match idle_install(|| true, || live.reserve(Who::Owner), || live.shut_down(), || live.install(), || live.relaunch()) {
+    let shut_down = || {
+        app.state::<Faber>().engine.note_resume();
+        live.shut_down();
+    };
+    match idle_install(|| true, || live.reserve(Who::Owner), shut_down, || live.install(), || live.relaunch()) {
         Idle::Installed => Ok(()),
         Idle::Waited => {
             live.stage(Phase::None);

@@ -85,8 +85,6 @@ interface Props {
   version: string;
   /** The shell's view of the update (`update.rs`): a download or an install, or one kept for a restart. */
   update?: UpdateStatus;
-  /** An answer is running, so the restart waits. */
-  updateBlocked?: boolean;
   onRestart?: () => void;
   /** The name the person gave, shown above the connected accounts. */
   userName?: string;
@@ -640,8 +638,7 @@ export function Sidebar(props: Props) {
           <button
             type="button"
             class="upd act"
-            disabled={props.updateBlocked}
-            title={props.updateBlocked ? t('update.busyHint') : t('update.readyHint')}
+            title={t('update.readyHint')}
             onClick={() => props.onRestart?.()}
           >
             {t('update.ready')}

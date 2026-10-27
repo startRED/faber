@@ -1611,7 +1611,7 @@ fn update_status(app: AppHandle) -> update::Status {
     update::status(&app)
 }
 
-/// "Update ready, restart": installs the kept update now. Refused while an answer runs.
+/// "Update ready, restart": installs the kept update now. Work that runs is cut and goes on after the restart.
 #[tauri::command]
 async fn update_restart(app: AppHandle) -> Res<()> {
     update::restart_now(app).await
@@ -2081,6 +2081,8 @@ fn main() {
             app.state::<Faber>().engine.detect_claude_flags();
             // Work that went on by itself when Faber last closed goes on again, once the accounts have had a moment to be read.
             app.state::<Faber>().engine.resume_keep_going();
+            // And what the restart for an update cut, from a conversation not on Keep going.
+            app.state::<Faber>().engine.resume_after_update();
             if let Some(codex) = clis.get(&Vendor::Codex) {
                 load_models(app.handle(), codex.clone(), data_dir.clone());
             }
