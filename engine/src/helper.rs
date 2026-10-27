@@ -356,7 +356,7 @@ mod tests {
         assert_eq!(profile(&all, Vendor::Codex, false).map(|p| (p.model, p.effort)), Some(("gpt-6.1-sol", "medium")));
         // Economy mode (rule 7) lowers the bar, so support work runs one rung cheaper; Haiku and luna stay out.
         assert_eq!(profile(&all, Vendor::Claude, true).map(|p| (p.model, p.effort)), Some(("claude-sonnet-5-5", "medium")));
-        assert_eq!(profile(&all, Vendor::Codex, true).map(|p| (p.model, p.effort)), Some(("gpt-6.1-sol", "low")));
+        assert_eq!(profile(&all, Vendor::Codex, true).map(|p| (p.model, p.effort)), Some(("gpt-6.1-terra", "medium")));
         let only_luna: Vec<_> = all.into_iter().filter(|p| p.model == "gpt-6-luna").collect();
         assert_eq!(profile(&only_luna, Vendor::Codex, false).map(|p| p.model), Some("gpt-6-luna"));
         assert_eq!(profile(&only_luna, Vendor::Claude, false), None);

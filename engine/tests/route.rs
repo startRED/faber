@@ -41,6 +41,17 @@ fn each_task_goes_to_the_cheapest_model_that_clears_its_bar() {
 }
 
 #[test]
+fn an_account_that_lists_terra_sends_it_the_medium_work_sol_low_had() {
+    let models = ["gpt-6.1-sol", "gpt-6.1-terra", "gpt-6-luna"].map(String::from);
+    let all = candidates(&BOTH, &models);
+    assert_eq!(picked("writing", "medium", 0.9, &all), ("gpt-6.1-terra", "medium"));
+    assert_eq!(picked("code", "medium", 0.9, &all), ("gpt-6.1-terra", "medium"));
+    assert_eq!(picked("code", "hard", 0.9, &all), ("gpt-6.1-sol", "medium"));
+    let codex = candidates(&[Vendor::Codex], &models);
+    assert_eq!(picked("code", "easy", 0.9, &codex), ("gpt-6.1-terra", "low"));
+}
+
+#[test]
 fn an_unsure_verdict_gets_the_next_level() {
     assert_eq!(picked("chat", "easy", 0.3, &all()), ("gpt-6.1-sol", "low"));
     assert_eq!(picked("code", "medium", 0.3, &all()), ("gpt-6.1-sol", "medium"));

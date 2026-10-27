@@ -2177,6 +2177,7 @@ export const es: Messages = {
   'notes.272.fixed': 'Al volver a una página guardada, el panel del navegador cambia de ancho suavemente aunque tarde en abrirse.',
   'notes.273.better': 'Las IA auxiliares que no terminaron dejan de aparecer como activas al reiniciar Faber.',
   'notes.274.better': 'Mientras el agente trabaja, ves su paso y pensamiento actuales bajo la respuesta, y Seguir mantiene abierta la última respuesta con contenido.',
+  'notes.275.better': 'Auto ahora puede elegir GPT-6.1 Terra cuando tu cuenta de Codex lo ofrece: las tareas medianas gastan cerca de un cuarto menos de cuota.',
   'update.checking': 'Buscando una actualización…',
   'update.downloading': 'Descargando actualización…',
   'update.downloadingPercent': 'Descargando actualización… {percent} %',

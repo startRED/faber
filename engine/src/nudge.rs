@@ -261,13 +261,15 @@ mod tests {
         assert_eq!(rung(Vendor::Claude, "claude-sonnet-5-5", "medium"), to("claude-sonnet-5-5", "high"));
         assert_eq!(rung(Vendor::Claude, "claude-opus-5-5", "medium"), to("claude-opus-5-5", "high"));
         assert_eq!(rung(Vendor::Codex, "gpt-6.1-sol", "low"), to("gpt-6.1-sol", "medium"));
+        assert_eq!(rung(Vendor::Codex, "gpt-6.1-terra", "medium"), to("gpt-6.1-terra", "high"));
     }
 
     #[test]
     fn a_model_at_its_top_effort_moves_to_the_next_model_at_medium() {
         assert_eq!(rung(Vendor::Claude, "claude-sonnet-5-5", "high"), to("claude-opus-5-5", "medium"));
         assert_eq!(rung(Vendor::Claude, "claude-haiku-5-5", "medium"), to("claude-sonnet-5-5", "medium"));
-        assert_eq!(rung(Vendor::Codex, "gpt-6-luna", "medium"), to("gpt-6.1-sol", "medium"));
+        assert_eq!(rung(Vendor::Codex, "gpt-6-luna", "medium"), to("gpt-6.1-terra", "medium"));
+        assert_eq!(rung(Vendor::Codex, "gpt-6.1-terra", "high"), to("gpt-6.1-sol", "medium"));
     }
 
     #[test]

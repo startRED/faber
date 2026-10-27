@@ -2057,6 +2057,7 @@ export const en = {
   'notes.272.fixed': 'Returning to a saved browser page changes the side panel width smoothly after a delayed opening.',
   'notes.273.better': 'Unfinished AI helpers no longer appear to be working after Faber restarts.',
   'notes.274.better': 'While the agent works, you see its current step and thinking under the reply, and Keep going keeps the latest answer open.',
+  'notes.275.better': 'Auto can now pick GPT-6.1 Terra when your Codex account lists it: medium tasks use about a quarter less quota than before.',
   'update.checking': 'Looking for an update…',
   'update.downloading': 'Downloading update…',
   'update.downloadingPercent': 'Downloading update… {percent}%',

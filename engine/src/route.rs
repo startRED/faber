@@ -11,7 +11,7 @@ use crate::router::Pick;
 use serde::Deserialize;
 
 /// One way to run a model. Numbers from Artificial Analysis (artificialanalysis.ai/models/<model>-<effort>), read
-/// between 22/09 and 08/10/2026: `iq` is the Intelligence Index, `agent` Terminal-Bench (multi-step coding and terminal
+/// between 22/09 and 08/10/2026 (GPT-6.1 Terra on 27/10/2026): `iq` is the Intelligence Index, `agent` Terminal-Bench (multi-step coding and terminal
 /// work, %), `secs` a typical whole answer, `cost` US$ to run the index, which is how much a task weighs on the quota.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct Profile {
@@ -30,7 +30,7 @@ const fn p(vendor: Vendor, model: &'static str, effort: &'static str, iq: u8, ag
 
 // No maximum effort (minutes per answer at two to three times the cost) and no model another one here beats on every
 // number. ponytail: compiled in; it moves to the live manifest (roadmap phase 4) so a new model joins without a release.
-pub const PROFILES: [Profile; 9] = [
+pub const PROFILES: [Profile; 12] = [
     p(Vendor::Claude, "claude-opus-5-5", "high", 54, 57, 44.2, 1.82),
     p(Vendor::Claude, "claude-opus-5-5", "medium", 51, 53, 27.9, 1.34),
     p(Vendor::Claude, "claude-sonnet-5-5", "high", 47, 44, 17.5, 0.88),
@@ -39,6 +39,9 @@ pub const PROFILES: [Profile; 9] = [
     p(Vendor::Codex, "gpt-6.1-sol", "high", 50, 52, 64.8, 0.32),
     p(Vendor::Codex, "gpt-6.1-sol", "medium", 48, 48, 13.4, 0.21),
     p(Vendor::Codex, "gpt-6.1-sol", "low", 42, 31, 8.6, 0.13),
+    p(Vendor::Codex, "gpt-6.1-terra", "high", 44, 42, 14.6, 0.134),
+    p(Vendor::Codex, "gpt-6.1-terra", "medium", 41, 32, 7.2, 0.095),
+    p(Vendor::Codex, "gpt-6.1-terra", "low", 36, 15, 7.2, 0.055),
     p(Vendor::Codex, "gpt-6-luna", "medium", 30, 3, 8.8, 0.02),
 ];
 

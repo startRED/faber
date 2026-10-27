@@ -2177,6 +2177,7 @@ export const fr: Messages = {
   'notes.272.fixed': 'Le panneau du navigateur change de largeur en douceur quand une page enregistrée met du temps à se rouvrir.',
   'notes.273.better': 'Les IA auxiliaires interrompues ne restent plus affichées comme actives après le redémarrage de Faber.',
   'notes.274.better': "Pendant que l'agent travaille, vous voyez l'étape et la réflexion en cours sous la réponse, et Continuer garde la dernière réponse ouverte.",
+  'notes.275.better': 'Auto peut maintenant choisir GPT-6.1 Terra quand votre compte Codex le propose : les tâches moyennes consomment environ un quart de quota en moins.',
   'update.checking': 'Recherche d’une mise à jour…',
   'update.downloading': 'Téléchargement de la mise à jour…',
   'update.downloadingPercent': 'Téléchargement de la mise à jour… {percent} %',

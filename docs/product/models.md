@@ -30,7 +30,8 @@ name. Auto aims to pick a model that does the task well, without waste and quick
 - Measured on 10/10/2026 with the real router on 22 requests, run twice: 81 of 88 picks right, half the routes under
   2.8 s and nine in ten under 3.9 s. An earlier design that let the router choose among anonymous, shuffled profiles
   got 76 of 88, spent more and was slower: the router judges requests well, the table weighs price against quality.
-- Profiles start from public benchmarks (Artificial Analysis, read 22/09 to 08/10/2026, compiled in for now) and move
+- Profiles start from public benchmarks (Artificial Analysis, read 22/09 to 08/10/2026 and GPT-6.1 Terra on
+  27/10/2026, compiled in for now) and move
   to Faber's own scoreboard as it fills: which answers users kept, redid or rejected. Later they ship in the live
   manifest, so a new model joins without an app release.
 - No local model and no hosted classifier: routing spends only the subscriptions the user already has.

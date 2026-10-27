@@ -130,6 +130,7 @@ pub fn api_price_for_prompt(model: &str, input: u64, output: u64, read: u64, wri
     let (mut base, mut hit, mut creation, mut hour, mut answer) = match model {
         m if m.starts_with("gpt-6-astra") => (10.0, 1.0, 12.5, 12.5, 50.0),
         m if m.starts_with("gpt-6.1-sol") => (2.0, 0.1, 2.5, 2.5, 10.0),
+        m if m.starts_with("gpt-6.1-terra") => (1.0, 0.05, 1.25, 1.25, 5.0),
         m if m.starts_with("gpt-6-luna") => (0.1, 0.01, 0.125, 0.125, 0.5),
         m if m.starts_with("claude-opus-5-5") => (4.0, 0.2, 5.0, 8.0, 20.0),
         m if m.starts_with("claude-sonnet-5-5") => (2.0, 0.1, 2.5, 4.0, 10.0),
@@ -193,6 +194,8 @@ mod price_tests {
         assert!((sol - 3.42).abs() < 1e-9);
         let short = api_price("gpt-6.1-sol", 100_000, 10_000, 60_000, 20_000, 0).unwrap();
         assert!((short - 0.196).abs() < 1e-9);
+        let terra = api_price("gpt-6.1-terra", 1_000_000, 100_000, 600_000, 200_000, 0).unwrap();
+        assert!((terra - 1.71).abs() < 1e-9);
         let haiku = api_price("claude-haiku-5-5", 3120, 73, 535, 2583, 2583).unwrap();
         assert!((haiku - 0.00055865).abs() < 1e-9);
         assert_eq!(api_price("unknown", 100, 10, 0, 0, 0), None);
