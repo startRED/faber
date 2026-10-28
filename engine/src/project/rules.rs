@@ -325,7 +325,7 @@ fn package_names(raw: Option<&RawValue>, dependencies: bool) -> std::collections
 }
 
 // Facts never inspect array elements. Keep one scalar so table/declaration validation still sees an array value.
-// shortcut: only decimal integers and single-line strings without escapes are compacted; other values keep full validation.
+// shortcut: only decimal integers and single-line strings are compacted; other values keep full validation.
 fn scalar_array(content: &str, start: usize) -> Option<(usize, std::ops::Range<usize>)> {
     let bytes = content.as_bytes();
     let mut at = start;
@@ -355,15 +355,34 @@ fn scalar_array(content: &str, start: usize) -> Option<(usize, std::ops::Range<u
             }
             quote @ (b'"' | b'\'') if expect_value => {
                 let begin = at;
+                let mut escaped = false;
                 at += 1;
                 while *bytes.get(at)? != quote {
                     let byte = bytes[at];
-                    if byte < b' ' && byte != b'\t' || byte == 0x7f || quote == b'"' && byte == b'\\' {
+                    if byte < b' ' && byte != b'\t' || byte == 0x7f {
                         return None;
+                    }
+                    if quote == b'"' && byte == b'\\' {
+                        escaped = true;
+                        at += 1;
+                        bytes.get(at)?;
                     }
                     at += 1;
                 }
                 at += 1;
+                if escaped {
+                    // The scanner found both ASCII quote boundaries; the decoder validates all intervening escapes.
+                    let raw = toml_parser::Raw::new_unchecked(
+                        &content[begin..at],
+                        Some(toml_parser::decoder::Encoding::BasicString),
+                        toml_parser::Span::new_unchecked(0, at - begin),
+                    );
+                    let mut error = None;
+                    let _ = raw.decode_scalar(&mut (), &mut error);
+                    if error.is_some() {
+                        return None;
+                    }
+                }
                 count += 1;
                 if count == 1 {
                     first = begin..at;
@@ -687,6 +706,43 @@ mod tests {
         }
         assert_eq!(compact_scalar_arrays(r#"x=["x","y"]"#), r#"x=["x"]"#);
         assert_eq!(compact_scalar_arrays("x=['x','y']"), "x=['x']");
+    }
+
+    #[test]
+    fn rules_escaped_string_arrays_preserve_official_validation() {
+        for array in [
+            r#"["\b","\t","\n","\f","\r","\"","\\"]"#,
+            r#"["\u0000","\u00E9","\U0001F600"]"#,
+            r#"["\uD7FF","\uE000","\U0010FFFF"]"#,
+            r#"["\uD800","x"]"#,
+            r#"["\uDFFF","x"]"#,
+            r#"["\U00110000","x"]"#,
+            r#"["\u123","x"]"#,
+            r#"["\uZZZZ","x"]"#,
+            r#"["\q","x"]"#,
+            r#"["ends\\","x"]"#,
+            r#"["embedded\"quote","x"]"#,
+            r#"["é\t😀","x"]"#,
+            r#"["bad\é","x"]"#,
+            r#"["\t" "x"]"#,
+            r#"["\t",,"x"]"#,
+            r#"["\t","unterminated]"#,
+            "[\"bad\\\nline\",\"x\"]",
+            "[\"bad\\\r\nline\",\"x\"]",
+            "[\"\"\"multi\\\nline\"\"\",\"x\"]",
+            r#"["\t",["nested","x"]]"#,
+        ] {
+            for suffix in ["", "\nx=3", "\n[x]", "\n[[x]]", "\nx.y=2"] {
+                let source = format!("x={array}{suffix}\n[dependencies]\nbevy='0.17'\n[package]\ndescription='fixture'\n");
+                let expected = toml::from_str::<toml::Value>(&source).is_ok();
+                let compact = compact_scalar_arrays(&source);
+                assert_eq!(toml::from_str::<toml::Value>(&compact).is_ok(), expected, "{source:?} -> {compact:?}");
+                let (facts, _) = manifest_facts(&[("Cargo.toml".into(), source)]);
+                assert_eq!(facts.stacks.contains(&"bevy"), expected);
+                assert_eq!(facts.description.as_deref(), expected.then_some("fixture"));
+            }
+        }
+        assert_eq!(compact_scalar_arrays(r#"x=["\t","x"]"#), r#"x=["\t"]"#);
     }
 
     fn write(dir: &Path, name: &str, text: &str) {

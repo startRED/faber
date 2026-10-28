@@ -1,0 +1,11 @@
+{
+  "notes": {
+    "better": {
+      "en": "Project tools also use less memory when long text lists contain special characters.",
+      "pt-BR": "As ferramentas do projeto também usam menos memória quando listas longas de texto têm caracteres especiais.",
+      "es": "Las herramientas del proyecto también usan menos memoria cuando las listas largas de texto contienen caracteres especiales.",
+      "fr": "Les outils du projet utilisent aussi moins de mémoire lorsque de longues listes de textes contiennent des caractères spéciaux.",
+      "de": "Projektwerkzeuge brauchen auch dann weniger Arbeitsspeicher, wenn lange Textlisten Sonderzeichen enthalten."
+    }
+  }
+}

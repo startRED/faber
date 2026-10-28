@@ -150,3 +150,26 @@ fn project_facts_toml_string_cost_rejects_observed_growth_above_two_mib() {
     let growth = measure(folder.path(), "toml_max_unknown_string_array");
     assert!(growth <= 2 * 1024 * 1024, "the observed peak already exceeds 2 MiB: {growth} bytes");
 }
+
+#[test]
+fn project_facts_toml_escaped_string_cost_rejects_observed_growth_above_two_mib() {
+    let _measurement = MEASUREMENT.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+    let folder = tempfile::tempdir().unwrap();
+    let prefix = "data=[";
+    let suffix = "]\n[dependencies]\nbevy='0.17'\n";
+    let value = r#""\t""#;
+    let item = format!("{value},");
+    let count = (MAX_BYTES - prefix.len() - suffix.len()) / item.len();
+    let mut manifest = format!("{prefix}{}{value}{suffix}", item.repeat(count - 1));
+    manifest.extend(std::iter::repeat_n(' ', MAX_BYTES - manifest.len()));
+    assert_eq!(manifest.len(), MAX_BYTES);
+    std::fs::write(folder.path().join("Cargo.toml"), manifest).unwrap();
+    let package = r#"{"dependencies":{"stripe":"1"},"description":"fixture"}"#;
+    std::fs::write(folder.path().join("package.json"), package).unwrap();
+    let control = tempfile::tempdir().unwrap();
+    std::fs::write(control.path().join("Cargo.toml"), "data=[]\n[dependencies]\nbevy='0.17'\n").unwrap();
+    std::fs::write(control.path().join("package.json"), package).unwrap();
+    let _control_growth = measure(control.path(), "toml_escaped_string_minimal_control");
+    let growth = measure(folder.path(), "toml_max_unknown_escaped_string_array");
+    assert!(growth <= 2 * 1024 * 1024, "the observed peak already exceeds 2 MiB: {growth} bytes");
+}
