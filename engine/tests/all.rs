@@ -165,8 +165,16 @@ fn every_test_file_is_listed() {
     let mut missing = Vec::new();
     for entry in std::fs::read_dir(&dir).unwrap() {
         let name = entry.unwrap().file_name().into_string().unwrap();
-        let alone = ["all.rs", "install_memory.rs", "rewind_cost.rs", "background_cost.rs", "verify_cost.rs", "adopted_read_cost.rs"]
-            .contains(&name.as_str());
+        let alone = [
+            "all.rs",
+            "install_memory.rs",
+            "rewind_cost.rs",
+            "background_cost.rs",
+            "verify_cost.rs",
+            "adopted_read_cost.rs",
+            "project_facts_cost.rs",
+        ]
+        .contains(&name.as_str());
         if name.ends_with(".rs") && !alone && !this.contains(&format!("#[path = \"{name}\"]")) {
             missing.push(name);
         }

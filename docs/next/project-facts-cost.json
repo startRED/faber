@@ -1,0 +1,11 @@
+{
+  "notes": {
+    "better": {
+      "en": "Project tools use less memory for unused lists: about 4 MiB less in our measured example.",
+      "pt-BR": "As ferramentas do projeto usam menos memória para listas que não usam: cerca de 4 MiB a menos no caso medido.",
+      "es": "Las herramientas del proyecto usan menos memoria para listas que no necesitan: unos 4 MiB menos en el caso medido.",
+      "fr": "Les outils du projet utilisent moins de mémoire pour les listes inutilisées : environ 4 Mio de moins dans notre exemple mesuré.",
+      "de": "Projektwerkzeuge brauchen für ungenutzte Listen weniger Arbeitsspeicher: in unserem gemessenen Beispiel etwa 4 MiB weniger."
+    }
+  }
+}

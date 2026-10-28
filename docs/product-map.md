@@ -556,6 +556,10 @@ selects and verifies the kit outside the conversation lock, including an empty s
 Chat keeps its ready-only path. Ready picks and shortlists share the same stack evidence; an edit is read again
 at the next session boundary. The `project_facts_` regressions cover dependency evidence and prose refusal,
 working-copy first launch, empty catalogs and Chat prepared-session reuse.
+Package JSON validates every value while retaining only the useful fields, without a tree of unused lists.
+The `package_fields_` checks preserve malformed-input rejection, duplicate fields and the original depth boundary.
+The separate `project_facts_cost` probe records warm-file timing and sampled process memory; it can reject an
+observed excess but does not certify the true peak or the whole resource gate.
 
 Codex preserves native context when skills change, including trusted content updates, unrelated catalog switches and
 terminal/pre-update sessions with no kit metadata. Projects also receives a bounded lazy index of every enabled skill,

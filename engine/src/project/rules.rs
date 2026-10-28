@@ -2,6 +2,9 @@
 //! shape, never from the repository's prose (own work method, slice 1). The one free line is the manifest's description,
 //! cut to 160 characters; it stays in the file and out of the start card. Rebuilt at every turn start of a project's
 //! conversation and written only when it differs, so an edit by anyone else is replaced on the next turn.
+use serde::Deserializer as _;
+use serde::de::{MapAccess, SeqAccess, Visitor};
+use serde_json::value::RawValue;
 use std::path::Path;
 
 /// Each field's limits: a description line, a command, and how many commands and scripts a part lists.
@@ -212,6 +215,115 @@ fn dependency_stack(manifest: &str, name: &str) -> Option<&'static str> {
     }
 }
 
+// Keep Value's string, number and depth validation without retaining its tree of unused fields.
+struct JsonShape;
+
+impl<'de> serde::Deserialize<'de> for JsonShape {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        struct Shape;
+        impl<'de> Visitor<'de> for Shape {
+            type Value = JsonShape;
+
+            fn expecting(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+                formatter.write_str("a JSON value")
+            }
+
+            fn visit_bool<E: serde::de::Error>(self, _: bool) -> Result<JsonShape, E> {
+                Ok(JsonShape)
+            }
+            fn visit_i64<E: serde::de::Error>(self, _: i64) -> Result<JsonShape, E> {
+                Ok(JsonShape)
+            }
+            fn visit_u64<E: serde::de::Error>(self, _: u64) -> Result<JsonShape, E> {
+                Ok(JsonShape)
+            }
+            fn visit_f64<E: serde::de::Error>(self, _: f64) -> Result<JsonShape, E> {
+                Ok(JsonShape)
+            }
+            fn visit_str<E: serde::de::Error>(self, _: &str) -> Result<JsonShape, E> {
+                Ok(JsonShape)
+            }
+            fn visit_unit<E: serde::de::Error>(self) -> Result<JsonShape, E> {
+                Ok(JsonShape)
+            }
+
+            fn visit_seq<A: SeqAccess<'de>>(self, mut sequence: A) -> Result<JsonShape, A::Error> {
+                while sequence.next_element::<JsonShape>()?.is_some() {}
+                Ok(JsonShape)
+            }
+
+            fn visit_map<A: MapAccess<'de>>(self, mut map: A) -> Result<JsonShape, A::Error> {
+                while map.next_entry::<JsonShape, JsonShape>()?.is_some() {}
+                Ok(JsonShape)
+            }
+        }
+        deserializer.deserialize_any(Shape)
+    }
+}
+
+// Borrow only the six useful fields; even a valid unknown value must not build an in-memory JSON tree.
+struct PackageFields<'a>([Option<&'a RawValue>; 6]);
+
+impl<'de> serde::Deserialize<'de> for PackageFields<'de> {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        struct Fields;
+        impl<'de> Visitor<'de> for Fields {
+            type Value = PackageFields<'de>;
+
+            fn expecting(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+                formatter.write_str("a package manifest object")
+            }
+
+            fn visit_map<A: MapAccess<'de>>(self, mut map: A) -> Result<Self::Value, A::Error> {
+                let names = ["description", "scripts", "dependencies", "devDependencies", "optionalDependencies", "peerDependencies"];
+                let mut fields = [None; 6];
+                while let Some(name) = map.next_key::<String>()? {
+                    if let Some(index) = names.iter().position(|field| *field == name) {
+                        let value: &'de RawValue = map.next_value()?;
+                        // The wrapper counts this root object's level when validating the borrowed subtree.
+                        serde_json::from_str::<JsonShape>(&format!("[{}]", value.get())).map_err(serde::de::Error::custom)?;
+                        // Match JSON object behavior: the last duplicate field wins.
+                        fields[index] = Some(value);
+                    } else {
+                        map.next_value::<JsonShape>()?;
+                    }
+                }
+                Ok(PackageFields(fields))
+            }
+        }
+        deserializer.deserialize_map(Fields)
+    }
+}
+
+fn package_names(raw: Option<&RawValue>, dependencies: bool) -> std::collections::BTreeMap<String, bool> {
+    struct Names(bool);
+    impl<'de> Visitor<'de> for Names {
+        type Value = std::collections::BTreeMap<String, bool>;
+
+        fn expecting(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+            formatter.write_str("a package name map")
+        }
+
+        fn visit_map<A: MapAccess<'de>>(self, mut map: A) -> Result<Self::Value, A::Error> {
+            let mut names = std::collections::BTreeMap::new();
+            while let Some(name) = map.next_key::<String>()? {
+                let value: &'de RawValue = map.next_value()?;
+                let known = if self.0 {
+                    dependency_stack("package.json", &name).is_some()
+                } else {
+                    script_name(&name) && CHECK_SCRIPTS.contains(&name.as_str())
+                };
+                if known {
+                    names.insert(name, !self.0 || value.get().trim_start().starts_with('"'));
+                }
+            }
+            Ok(names)
+        }
+    }
+    let Some(raw) = raw.filter(|raw| raw.get().trim_start().starts_with('{')) else { return Default::default() };
+    serde_json::Deserializer::from_str(raw.get()).deserialize_map(Names(dependencies)).unwrap_or_default()
+}
+
 fn manifest_facts(files: &[(String, String)]) -> (Facts, Vec<String>) {
     let text = |name: &str| files.iter().find(|(path, _)| path == name).map(|(_, text)| text.as_str());
     let mut facts = Facts::default();
@@ -224,24 +336,19 @@ fn manifest_facts(files: &[(String, String)]) -> (Facts, Vec<String>) {
             facts.languages.push(language);
         }
         let described = match manifest {
-            "package.json" => serde_json::from_str::<serde_json::Value>(content).ok().map(|json| {
-                for group in ["dependencies", "devDependencies", "optionalDependencies", "peerDependencies"] {
-                    if let Some(dependencies) = json[group].as_object() {
-                        for (name, value) in dependencies {
-                            if value.is_string()
-                                && let Some(stack) = dependency_stack(manifest, name)
-                                && !facts.stacks.contains(&stack)
-                            {
-                                facts.stacks.push(stack);
-                            }
+            "package.json" => serde_json::from_str::<PackageFields<'_>>(content).ok().map(|fields| {
+                for group in &fields.0[2..] {
+                    for (name, valid) in package_names(*group, true) {
+                        if valid
+                            && let Some(stack) = dependency_stack(manifest, &name)
+                            && !facts.stacks.contains(&stack)
+                        {
+                            facts.stacks.push(stack);
                         }
                     }
                 }
-                if let Some(map) = json["scripts"].as_object() {
-                    let names = map.keys().filter(|k| script_name(k) && CHECK_SCRIPTS.contains(&k.as_str()));
-                    scripts.extend(names.map(|k| format!("npm run {k}")));
-                }
-                json["description"].as_str().map(String::from)
+                scripts.extend(package_names(fields.0[1], false).into_keys().map(|name| format!("npm run {name}")));
+                fields.0[0].and_then(|raw| serde_json::from_str::<String>(raw.get()).ok())
             }),
             "Cargo.toml" => toml::from_str::<toml::Value>(content).ok().map(|t| {
                 for group in ["dependencies", "dev-dependencies", "build-dependencies"] {
@@ -372,6 +479,49 @@ pub fn refresh(project: &Path) -> Result<Facts, &'static str> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn package_fields_keep_the_original_depth_boundary_for_known_and_unknown_values() {
+        for name in ["unused", "description", "scripts", "dependencies", "devDependencies", "optionalDependencies", "peerDependencies"] {
+            for depth in [126, 127, 128, 129] {
+                let content = format!("{{\"{name}\":{}0{}}}", "[".repeat(depth), "]".repeat(depth));
+                assert_eq!(
+                    serde_json::from_str::<PackageFields<'_>>(&content).is_ok(),
+                    serde_json::from_str::<serde_json::Value>(&content).is_ok(),
+                    "{name}: {depth}",
+                );
+            }
+        }
+        for content in [
+            r#"{"dependencies":{"stripe":"\ud800"},"dependencies":{"stripe":"1"}}"#,
+            r#"{"description":"\ud800","description":"valid"}"#,
+            r#"{"unused":1e400,"unused":0}"#,
+        ] {
+            assert!(serde_json::from_str::<serde_json::Value>(content).is_err());
+            assert!(serde_json::from_str::<PackageFields<'_>>(content).is_err());
+        }
+    }
+
+    #[test]
+    fn package_fields_preserve_json_rejections_and_last_duplicate_values() {
+        for content in [
+            r#"{"dependencies":{"stripe":"\ud800"}}"#.to_owned(),
+            r#"{"dependencies":{"stripe":"1"},"unused":"\ud800"}"#.to_owned(),
+            r#"{"dependencies":{"stripe":"1"},"unused":1e400}"#.to_owned(),
+            format!("{{\"dependencies\":{{\"stripe\":\"1\"}},\"unused\":{}0{}}}", "[".repeat(130), "]".repeat(130)),
+        ] {
+            assert!(serde_json::from_str::<serde_json::Value>(&content).is_err());
+            let (found, scripts) = manifest_facts(&[("package.json".into(), content.clone())]);
+            assert!(found.stacks.is_empty() && scripts.is_empty() && found.description.is_none(), "{content}");
+        }
+        let (found, scripts) = manifest_facts(&[(
+            "package.json".into(),
+            r#"{"description":"old","description":"new","dependencies":{"stripe":"1"},"dependencies":{"str\u0069pe":"1","stripe":false,"three":"1"},"scripts":{"test":null,"test":false,"build":{},"deploy":"x"}}"#.into(),
+        )]);
+        assert_eq!(found.description.as_deref(), Some("new"));
+        assert_eq!(found.stacks, ["threejs"]);
+        assert_eq!(scripts, ["npm run build", "npm run test"]);
+    }
 
     fn write(dir: &Path, name: &str, text: &str) {
         let path = dir.join(name);
