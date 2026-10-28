@@ -7,7 +7,7 @@ import { App } from '../../ui/App.tsx';
 import { Catalog, forgetCatalogView } from '../../ui/Catalog.tsx';
 import { catalogName, LANGUAGES, lang, t, useLanguage } from '../../ui/i18n.ts';
 import type { Key } from '../../ui/locales/en.ts';
-import { check, deepEqual, equal, ok } from './check.ts';
+import { check, deepEqual, equal, frames, ok } from './check.ts';
 
 const tick = () => new Promise<void>((resolve) => setTimeout(resolve, 25));
 
@@ -346,6 +346,9 @@ check('catalog: return stays reachable after reading a small-window detail', asy
         events.length = 0; passStarted = performance.now();
         const beforeOpen = { active: describe(document.activeElement), connected: view.root.isConnected };
         await tap(cards(view.root)[0]);
+        // WebKit reveals the newly focused heading in a later rendering step; reading starts once it has (on macOS
+        // CI the reveal undid the scroll below on 2026-10-28, failing queues that never touched the catalog).
+        await frames();
         const surface = view.root.querySelector<HTMLElement>('[data-catalog]')!;
         surface.scrollTop = surface.scrollHeight;
         const afterSet = { at: performance.now() - passStarted, scrollTop: surface.scrollTop, active: describe(document.activeElement), connected: surface.isConnected };
