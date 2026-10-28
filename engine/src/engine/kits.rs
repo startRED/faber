@@ -656,14 +656,18 @@ mod tests {
         Pick { vendor, model: None, effort: "medium".into(), reason: "reason.manual".into(), pace: None }
     }
 
-    async fn checked_signal(signal: &std::sync::mpsc::Receiver<()>) {
+    async fn checked_signal<T>(signal: &std::sync::mpsc::Receiver<T>) -> T {
         tokio::time::timeout(Duration::from_secs(3), async {
-            while signal.try_recv().is_err() {
-                tokio::task::yield_now().await;
+            loop {
+                match signal.try_recv() {
+                    Ok(value) => return value,
+                    Err(std::sync::mpsc::TryRecvError::Empty) => tokio::task::yield_now().await,
+                    Err(std::sync::mpsc::TryRecvError::Disconnected) => panic!("the off-lock launch check disconnected"),
+                }
             }
         })
         .await
-        .expect("the off-lock launch check did not reach its gate");
+        .expect("the off-lock launch check did not reach its gate")
     }
 
     async fn input_with(messages: &Messages, needle: &str) {
@@ -901,6 +905,103 @@ mod tests {
         assert_eq!(std::fs::read_to_string(folder.join(".faber/decisions.md")).unwrap(), text);
         assert_eq!(engine.with(|core| core.store.kept_decisions(&project.id)), approval);
         engine.shutdown();
+    }
+
+    #[tokio::test]
+    async fn project_start_card_preparation_cost_measures_real_worker_and_rules_refresh() {
+        use crate::project::memory::Edit;
+        for vendor in [Vendor::Claude, Vendor::Codex] {
+            let dir = crate::workspace::TestRoot::new();
+            let work = tempfile::tempdir().unwrap();
+            let folder = work.path().canonicalize().unwrap();
+            std::fs::create_dir(folder.join(".faber")).unwrap();
+            std::fs::write(
+                folder.join("package.json"),
+                r#"{"name":"fixture","scripts":{"test":"node --test","build":"vite build"},"dependencies":{"solid-js":"1"}}"#,
+            )
+            .unwrap();
+            std::fs::write(
+                folder.join("Cargo.toml"),
+                "[package]\nname = \"fixture\"\nversion = \"0.1.0\"\n[dependencies]\ntokio = \"1\"\n",
+            )
+            .unwrap();
+            std::fs::write(folder.join("AGENTS.md"), "# Instructions\n\n## Proof commands\n\n```sh\nnpm test\n```\n").unwrap();
+            std::fs::write(folder.join(".faber/decisions.md"), "- COST_APPROVED_DECISION preserve public exports. [by AI]\n").unwrap();
+            let (spawn, args, messages) = fake();
+            let engine = engine(&dir, spawn);
+            let project = engine.add_project(&folder.to_string_lossy()).unwrap();
+            let list = engine.project_memory(&project.id).unwrap();
+            let file = list.files.iter().find(|file| file.path == ".faber/decisions.md").unwrap();
+            let entry = &file.entries[0];
+            engine
+                .edit_project_memory(
+                    &project.id,
+                    &Edit {
+                        path: file.path.clone(),
+                        revision: file.revision.clone(),
+                        start: entry.start,
+                        end: entry.end,
+                        text: None,
+                        keep: true,
+                    },
+                )
+                .unwrap();
+            // Exclude fixture setup and scheduling; include the real rules path's external record write.
+            let refresh = engine.with(|core| {
+                let mut samples = Vec::new();
+                for _ in 0..2 {
+                    let started = std::time::Instant::now();
+                    core.store.refresh_rules(&project.id, &folder).unwrap();
+                    samples.push(started.elapsed());
+                }
+                samples
+            });
+            let rules = std::fs::read_to_string(folder.join(".faber/rules.md")).unwrap();
+            assert!(rules.contains("npm test"));
+            let (started, entered) = std::sync::mpsc::channel();
+            let (finished, ended) = std::sync::mpsc::channel();
+            let gate = Arc::new(std::sync::Barrier::new(2));
+            engine.with(|core| {
+                conversation(core, Area::Project, Some(&project.id), &folder, "PREPARATION_COST_TURN");
+                core.synchronous_kit_checks = false;
+                core.kit_check_hook = Some((started, gate.clone(), finished));
+                core.rewind.captured_for_test("reply");
+                core.start("kit", "reply", &pick(vendor), "PREPARATION_COST_TURN".into(), vec![], true).unwrap();
+                assert!(!core.live.contains_key("kit"));
+            });
+            checked_signal(&entered).await;
+            gate.wait();
+            let worker = checked_signal(&ended).await;
+            input_with(&messages, "PREPARATION_COST_TURN").await;
+            let prompt = if vendor == Vendor::Claude {
+                args.lock()
+                    .unwrap()
+                    .iter()
+                    .find_map(|(_, argv)| argv.windows(2).find(|pair| pair[0] == "--append-system-prompt").map(|pair| pair[1].clone()))
+                    .unwrap()
+            } else {
+                messages
+                    .lock()
+                    .unwrap()
+                    .iter()
+                    .find_map(|(_, message)| {
+                        (message["method"] == "thread/start")
+                            .then(|| message["params"]["developerInstructions"].as_str().unwrap().to_string())
+                    })
+                    .unwrap()
+            };
+            assert!(prompt.contains("COST_APPROVED_DECISION"));
+            assert!(prompt.contains("```faber-start-card"));
+            assert!(prompt.contains("npm test"));
+            assert_eq!(std::fs::read_to_string(folder.join(".faber/rules.md")).unwrap(), rules);
+            eprintln!(
+                "project_start_card_preparation_cost {vendor:?}: rules_rebuild_ms={:.3} rules_unchanged_ms={:.3} worker_ms={:.3} (warm file cache; fixture catalog; excludes scheduling and provider latency; no peak-memory or adopted-content proof)",
+                refresh[0].as_secs_f64() * 1000.0,
+                refresh[1].as_secs_f64() * 1000.0,
+                worker.as_secs_f64() * 1000.0
+            );
+            engine.shutdown();
+        }
     }
 
     async fn project_start_card_captured(vendor: Vendor) {

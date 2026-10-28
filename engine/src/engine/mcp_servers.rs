@@ -301,6 +301,8 @@ impl Core {
                     let _ = started.send(());
                     gate.wait();
                 }
+                #[cfg(test)]
+                let started_at = std::time::Instant::now();
                 // Project selection reads bounded manifest facts only here, never under Core's lock.
                 let mut raw = if key.area == Area::Project {
                     let mut selected = store.kit_for(key.vendor, &key.request, Some(&key.cwd), key.area, key.permissions, &key.disabled);
@@ -318,7 +320,7 @@ impl Core {
                 let checked = verify_kit(store, key, raw);
                 #[cfg(test)]
                 if let Some((_, _, finished)) = hook {
-                    let _ = finished.send(());
+                    let _ = finished.send(started_at.elapsed());
                 }
                 checked
             })

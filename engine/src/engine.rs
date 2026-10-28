@@ -411,7 +411,7 @@ struct Core {
     #[cfg(test)]
     synchronous_kit_checks: bool,
     #[cfg(test)]
-    kit_check_hook: Option<(std::sync::mpsc::Sender<()>, Arc<std::sync::Barrier>, std::sync::mpsc::Sender<()>)>,
+    kit_check_hook: Option<(std::sync::mpsc::Sender<()>, Arc<std::sync::Barrier>, std::sync::mpsc::Sender<Duration>)>,
     background: crate::background::Commands,
     background_pending: bool,
     opts: EngineOptions,
