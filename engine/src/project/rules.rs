@@ -324,9 +324,9 @@ fn package_names(raw: Option<&RawValue>, dependencies: bool) -> std::collections
     serde_json::Deserializer::from_str(raw.get()).deserialize_map(Names(dependencies)).unwrap_or_default()
 }
 
-// Facts never inspect array elements. Keep one scalar so table/declaration validation still sees an array value.
-// shortcut: only decimal integers, plain decimal floats, booleans and strings are compacted; other values keep full validation.
-fn scalar_array(content: &str, start: usize) -> Option<(usize, std::ops::Range<usize>)> {
+// Facts never inspect array elements. Keep the first value, including its containers, for depth/declaration validation.
+// shortcut: only supported scalars and one level of scalar child arrays are compacted; other values keep full validation.
+fn scalar_array(content: &str, start: usize, allow_nested: bool) -> Option<(usize, std::ops::Range<usize>)> {
     let bytes = content.as_bytes();
     let mut at = start;
     let mut first = start..start;
@@ -352,6 +352,19 @@ fn scalar_array(content: &str, start: usize) -> Option<(usize, std::ops::Range<u
             b',' if !expect_value => {
                 at += 1;
                 expect_value = true;
+            }
+            b'[' if expect_value && allow_nested => {
+                if count > 0 && bytes[first.start] != b'[' {
+                    return None;
+                }
+                let begin = at;
+                let (end, _) = scalar_array(content, at + 1, false)?;
+                at = end + 1;
+                count += 1;
+                if count == 1 {
+                    first = begin..at;
+                }
+                expect_value = false;
             }
             quote @ (b'"' | b'\'') if expect_value && bytes.get(at..at + 3) == Some(&[quote; 3]) => {
                 let source = toml_parser::Source::new(&content[at..]);
@@ -468,7 +481,7 @@ fn compact_scalar_arrays(content: &str) -> std::borrow::Cow<'_, str> {
             K::Whitespace | K::Comment | K::Newline => continue,
             K::LeftSquareBracket if after_equals => {
                 let start = offset + token.span().end();
-                if let Some((end, first)) = scalar_array(content, start) {
+                if let Some((end, first)) = scalar_array(content, start, true) {
                     out.push_str(&content[copied..start]);
                     out.push_str(&content[first]);
                     copied = end;
@@ -907,6 +920,56 @@ mod tests {
             }
         }
         assert_eq!(compact_scalar_arrays("x=[1.0,2.0]"), "x=[1.0]");
+    }
+
+    #[test]
+    fn rules_nested_arrays_preserve_validation_and_depth() {
+        for array in [
+            "[[true,false],[false,true]]",
+            "[[1,2],[3,4],]",
+            "[[1,2],true,'x']",
+            "[true,[false,true]]",
+            "[[true,false]]",
+            "[[],[true,false]]",
+            "[[1],[2,3]]",
+            "[[[1,2],[3,4]],[[5,6],[7,8]]]",
+            "[[1,2],[3 4]]",
+            "[[1,2],[3,,4]]",
+            "[[1,2],[3,4]",
+            "[[1,2],[3,4]]extra",
+            "[[1,2], # ok\n [3,4]]",
+            "[[1,2], # bad\u{1}\n [3,4]]",
+            "[[1,2],\r[3,4]]",
+            "[[1,2],\r\n[3,4]]",
+            "[[1,2],[01,2]]",
+            "[[1,2],['x','y']]",
+            "[[1,2],[\"\\q\",\"y\"]]",
+            "[[1,2],[{a=1,a=2},3]]",
+            "[[1,2],{a=1,a=2}]",
+            "[[1,2],[3,4],,]",
+        ] {
+            for suffix in ["", "\nx=3", "\n[x]", "\n[[x]]", "\nx.y=2"] {
+                let source = format!("x={array}{suffix}\n[dependencies]\nbevy='0.17'\n[package]\ndescription='fixture'\n");
+                let expected = toml::from_str::<toml::Value>(&source).is_ok();
+                let compact = compact_scalar_arrays(&source);
+                assert_eq!(toml::from_str::<toml::Value>(&compact).is_ok(), expected, "{source:?} -> {compact:?}");
+                let (facts, _) = manifest_facts(&[("Cargo.toml".into(), source)]);
+                assert_eq!(facts.stacks.contains(&"bevy"), expected);
+                assert_eq!(facts.description.as_deref(), expected.then_some("fixture"));
+            }
+        }
+        for depth in [78, 79, 80, 81] {
+            for array in ["[[true,false],[false,true]]", "[true,[false,true]]"] {
+                let source = format!("x={}{array}{}", "{a=".repeat(depth - 1), "}".repeat(depth - 1));
+                // Include an inline table at every outer level, without silently dropping nested depth.
+                let original = toml::from_str::<toml::Value>(&source).is_ok();
+                assert_eq!(original, depth < 80, "official depth contract: {depth}");
+                let compact = compact_scalar_arrays(&source);
+                assert_eq!(toml::from_str::<toml::Value>(&compact).is_ok(), original, "depth={depth}: {source:?}");
+            }
+        }
+        assert_eq!(compact_scalar_arrays("x=[[true,false],[false,true]]"), "x=[[true,false]]");
+        assert_eq!(compact_scalar_arrays("x=[true,[false,true]]"), "x=[true,[false,true]]");
     }
 
     fn write(dir: &Path, name: &str, text: &str) {

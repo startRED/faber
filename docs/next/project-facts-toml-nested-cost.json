@@ -1,0 +1,11 @@
+{
+  "notes": {
+    "better": {
+      "en": "Project tools use less memory when project files contain long lists of smaller lists.",
+      "pt-BR": "As ferramentas do projeto usam menos memória quando os arquivos do projeto contêm listas longas de listas menores.",
+      "es": "Las herramientas del proyecto usan menos memoria cuando los archivos del proyecto contienen listas largas de listas más pequeñas.",
+      "fr": "Les outils du projet utilisent moins de mémoire lorsque les fichiers du projet contiennent de longues listes de listes plus petites.",
+      "de": "Projektwerkzeuge brauchen weniger Arbeitsspeicher, wenn Projektdateien lange Listen mit kleineren Listen enthalten."
+    }
+  }
+}
