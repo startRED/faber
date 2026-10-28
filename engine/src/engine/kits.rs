@@ -154,6 +154,11 @@ pub(super) fn first_input(text: String, resources: &mut Option<String>, guide: &
 
 pub(super) fn record_native_kit(conversation: &mut Conversation, native: String, live: Option<&Live>, store: Option<&crate::tools::Store>) {
     let Some(live) = live else { return };
+    if let Some(card) = &live.start_card {
+        conversation.session_start_cards.insert(live.vendor, (native.clone(), card.clone()));
+    } else {
+        conversation.session_start_cards.remove(&live.vendor);
+    }
     let mut ids = live.tool_kit.ids.clone();
     if live.vendor == Vendor::Codex
         && let Some((_, old_ids, _)) = conversation.session_kits.get(&live.vendor)
@@ -254,6 +259,23 @@ pub(super) enum SessionStart {
     Compact,
 }
 
+/// Native resumes can retain their original instructions. Changed context starts a fresh native session with Faber's history.
+pub(super) fn session_card(
+    current: Option<String>,
+    saved: Option<&(String, String)>,
+    native: Option<&String>,
+    mode: SessionStart,
+) -> (Option<String>, bool) {
+    let previous = saved.filter(|(id, card)| {
+        Some(id) == native && card.len() <= 6 * 1024 && card.starts_with("```faber-start-card\n") && card.ends_with("```")
+    });
+    if mode == SessionStart::Compact {
+        return (previous.map(|(_, card)| card.clone()), false);
+    }
+    let reset = native.is_some() && current.is_some() && previous.map(|(_, card)| card) != current.as_ref();
+    (current, reset)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -261,6 +283,23 @@ mod tests {
     use serde_json::{Value, json};
     use std::io::Write;
     use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
+
+    #[test]
+    fn project_start_card_resume_binds_the_native_id_and_compaction_never_adopts_new_words() {
+        let old = "```faber-start-card\nOLD\n```".to_string();
+        let new = "```faber-start-card\nNEW\n```".to_string();
+        let native = "native".to_string();
+        let saved = (native.clone(), old.clone());
+        for mode in [SessionStart::Prepare, SessionStart::Turn] {
+            assert_eq!(session_card(Some(old.clone()), Some(&saved), Some(&native), mode), (Some(old.clone()), false));
+            assert_eq!(session_card(Some(new.clone()), Some(&saved), Some(&native), mode), (Some(new.clone()), true));
+            for unknown in [None, Some(&("other-native".into(), old.clone())), Some(&(native.clone(), "x".repeat(6145)))] {
+                assert!(session_card(Some(old.clone()), unknown, Some(&native), mode).1);
+            }
+        }
+        assert_eq!(session_card(Some(new), Some(&saved), Some(&native), SessionStart::Compact), (Some(old), false));
+        assert_eq!(session_card(None, None, Some(&native), SessionStart::Compact), (None, false));
+    }
 
     type Arguments = Arc<Mutex<Vec<(String, Vec<String>)>>>;
     type Messages = Arc<Mutex<Vec<(String, Value)>>>;
@@ -683,6 +722,219 @@ mod tests {
             assert_eq!(core.live["kit"].tool_kit.ids, ["debug"]);
         });
         engine.shutdown();
+    }
+
+    #[tokio::test]
+    async fn project_start_card_isolated_driver_path_excludes_internal_questions() {
+        const CARD: &str = "```faber-start-card\nISOLATED_APPROVED_CARD\n```";
+        for aside in [false, true] {
+            let dir = crate::workspace::TestRoot::new();
+            let folder = dir.path().canonicalize().unwrap();
+            let (spawn, _, messages) = fake();
+            let engine = engine(&dir, spawn);
+            let delivery = crate::tools::Delivery { start_card: Some(CARD.into()), ..Default::default() };
+            let instructions = aside.then(|| "Internal question only".to_string());
+            let launch = ClaudeLaunch {
+                helper: Default::default(),
+                browse: false,
+                conversations: false,
+                verify: false,
+                progress: false,
+                area: Area::Project,
+                model: None,
+                effort: None,
+                resume: None,
+                user_hooks: false,
+                permissions: Permissions::Isolated,
+                instructions: instructions.clone(),
+                research: None,
+                group_instructions: None,
+                user_name: None,
+                flags: Default::default(),
+                tuning: Default::default(),
+                tools: delivery.clone(),
+            };
+            let argv = crate::claude::claude_args(&launch);
+            assert_eq!(argv.iter().any(|arg| arg.contains(CARD)), !aside);
+            let session = engine.with(|core| {
+                let cli = core.opts.clis[&Vendor::Codex].clone();
+                core.codex_server(Area::Project, false, Permissions::Isolated, &cli).open_with_tools(
+                    CodexThread {
+                        helper: Default::default(),
+                        browse: false,
+                        conversations: false,
+                        verify: false,
+                        progress: false,
+                        cwd: folder.clone(),
+                        model: None,
+                        effort: None,
+                        resume: None,
+                        instructions,
+                        research: None,
+                        user_name: None,
+                        group_instructions: None,
+                        permissions: Permissions::Isolated,
+                        leave_plan: false,
+                        tuning: Default::default(),
+                    },
+                    Arc::new(|_| {}),
+                    delivery,
+                )
+            });
+            session.send(UserTurn::text("ISOLATED_CARD_TURN"));
+            input_with(&messages, "ISOLATED_CARD_TURN").await;
+            let seen = messages.lock().unwrap();
+            assert!(seen.iter().any(|(_, message)| message["method"] == "config/read"));
+            let opened = seen.iter().find(|(_, message)| message["method"] == "thread/start").unwrap();
+            assert_eq!(opened.1["params"]["developerInstructions"].as_str().is_some_and(|words| words.contains(CARD)), !aside);
+            drop(seen);
+            session.close();
+            engine.shutdown();
+        }
+    }
+
+    #[tokio::test]
+    async fn project_start_card_selects_latest_beyond_memory_listing_window() {
+        use crate::project::memory::KeptDecision;
+        let dir = crate::workspace::TestRoot::new();
+        let work = tempfile::tempdir().unwrap();
+        let folder = work.path().canonicalize().unwrap();
+        std::fs::create_dir(folder.join(".faber")).unwrap();
+        let approved = "- NEWEST_PERSON_KEEP";
+        let mut text = (0..4097).map(|n| format!("- Earlier {n}. [by AI]\n")).collect::<String>();
+        text.push_str(&format!("{approved} [by person]\n"));
+        assert!(text.len() < crate::project::memory::MAX_BYTES);
+        std::fs::write(folder.join(".faber/decisions.md"), text).unwrap();
+        let display = crate::project::memory::list_faber(&folder).unwrap();
+        assert!(display.incomplete);
+        assert_eq!(display.files[0].entries.len(), 4096, "the Memory display window remains bounded");
+        let (spawn, args, messages) = fake();
+        let engine = engine(&dir, spawn);
+        let project = engine.add_project(&folder.to_string_lossy()).unwrap();
+        engine.with(|core| {
+            core.store.keep_decision(&project.id, KeptDecision::of(approved), std::slice::from_ref(&project.id)).unwrap();
+            conversation(core, Area::Project, Some(&project.id), &folder, "CARD_NEWEST_TURN");
+            core.synchronous_kit_checks = false;
+            core.rewind.captured_for_test("reply");
+            core.start("kit", "reply", &pick(Vendor::Claude), "CARD_NEWEST_TURN".into(), vec![], true).unwrap();
+        });
+        input_with(&messages, "CARD_NEWEST_TURN").await;
+        let observed = args.lock().unwrap();
+        let prompt = observed.iter().flat_map(|(_, argv)| argv.windows(2)).find(|pair| pair[0] == "--append-system-prompt").unwrap();
+        assert!(prompt[1].contains("NEWEST_PERSON_KEEP"), "the newest kept decision must not be hidden by Memory's display window");
+        drop(observed);
+        engine.shutdown();
+    }
+
+    async fn project_start_card_captured(vendor: Vendor) {
+        use crate::project::memory::KeptDecision;
+        let mut previous_card = None::<String>;
+        for state in ["fresh", "matching", "legacy", "changed", "wrong-native", "revoked"] {
+            let resumed = state != "fresh";
+            let dir = crate::workspace::TestRoot::new();
+            let work = tempfile::tempdir().unwrap();
+            let folder = work.path().canonicalize().unwrap();
+            std::fs::create_dir(folder.join(".faber")).unwrap();
+            std::fs::write(folder.join("package.json"), r#"{"description":"UNTRUSTED_DESCRIPTION","scripts":{"test":"node --test"}}"#)
+                .unwrap();
+            let approved = "- Preserve public exports.";
+            std::fs::write(
+                folder.join(".faber/decisions.md"),
+                format!("{approved} [by person]\n- FORGED_PERSON [by person]\n- UNREVIEWED_AI [by AI]\n"),
+            )
+            .unwrap();
+            std::fs::write(folder.join(".faber/taste.md"), "UNAPPROVED_TASTE [by person]\n").unwrap();
+            let (spawn, args, messages) = fake();
+            let engine = engine(&dir, spawn);
+            let project = engine.add_project(&folder.to_string_lossy()).unwrap();
+            engine.with(|core| {
+                core.store.keep_decision(&project.id, KeptDecision::of(approved), std::slice::from_ref(&project.id)).unwrap();
+                conversation(core, Area::Project, Some(&project.id), &folder, "CARD_CAPTURE_TURN");
+                if resumed {
+                    let c = core.convs.get_mut("kit").unwrap();
+                    c.sessions.insert(vendor, "native-history".into());
+                    if state != "legacy" {
+                        let id = if state == "wrong-native" { "another-native" } else { "native-history" };
+                        let card =
+                            if state == "changed" { "```faber-start-card\nOLD_CARD\n```".into() } else { previous_card.clone().unwrap() };
+                        c.session_start_cards.insert(vendor, (id.into(), card));
+                    }
+                    let old_user = Message::new("earlier-user".into(), Role::User, "VERBATIM_OLD_REQUEST".into(), 0);
+                    let old_reply = Message::new("earlier-reply".into(), Role::Assistant, "Earlier answer".into(), 0);
+                    c.messages.splice(0..0, [old_user, old_reply]);
+                }
+                if state == "revoked" {
+                    std::fs::write(
+                        folder.join(".faber/decisions.md"),
+                        "- Preserve public exports.\n  But remove the public API. [by person]\n",
+                    )
+                    .unwrap();
+                }
+                core.synchronous_kit_checks = false;
+                core.rewind.captured_for_test("reply");
+                core.start("kit", "reply", &pick(vendor), "CARD_CAPTURE_TURN".into(), vec![], true).unwrap();
+                assert!(!core.live.contains_key("kit"), "source reads must precede spawning outside Core");
+            });
+            input_with(&messages, "CARD_CAPTURE_TURN").await;
+            let prompt = if vendor == Vendor::Claude {
+                args.lock()
+                    .unwrap()
+                    .iter()
+                    .find_map(|(_, argv)| argv.windows(2).find(|p| p[0] == "--append-system-prompt").map(|p| p[1].clone()))
+                    .expect("the project persona is sent")
+            } else {
+                messages
+                    .lock()
+                    .unwrap()
+                    .iter()
+                    .find_map(|(_, message)| {
+                        (message["method"] == if state == "matching" { "thread/resume" } else { "thread/start" })
+                            .then(|| message["params"]["developerInstructions"].as_str().unwrap_or_default().to_string())
+                    })
+                    .expect("the project thread is opened")
+            };
+            if resumed && state != "matching" {
+                assert!(!args.lock().unwrap().iter().any(|(_, argv)| argv.iter().any(|arg| arg == "--resume")));
+                assert!(
+                    !messages.lock().unwrap().iter().any(|(_, message)| message["method"] == "thread/resume"),
+                    "a legacy native session without a saved card starts fresh with history"
+                );
+            }
+            let card = prompt.split_once("```faber-start-card\n").expect("the real driver sends the project start card").1;
+            assert_eq!(card.contains("Preserve public exports."), state != "revoked", "exact current approved content only: {state}");
+            for denied in ["UNTRUSTED_DESCRIPTION", "FORGED_PERSON", "UNREVIEWED_AI", "UNAPPROVED_TASTE"] {
+                assert!(!prompt.contains(denied), "unapproved repository prose must stay out: {denied}");
+            }
+            assert_eq!(prompt.matches("```faber-start-card\n").count(), 1);
+            assert!(card.split_once("```").unwrap().0.len() + "```faber-start-card\n```".len() <= 6 * 1024);
+            let sent = format!("```faber-start-card\n{}```", card.split_once("```").unwrap().0);
+            if resumed && state != "matching" {
+                assert!(
+                    messages.lock().unwrap().iter().any(|(_, message)| message.to_string().contains("VERBATIM_OLD_REQUEST")),
+                    "native restart preserves Faber's previous requests: {state}"
+                );
+            }
+            engine.with(|core| {
+                let sid = core.live["kit"].sid;
+                core.handle("kit", sid, EngineEvent::Started { session_id: "native-history".into(), model: "fixture".into() });
+                core.handle("kit", sid, EngineEvent::TurnStarted);
+                assert_eq!(core.convs["kit"].session_start_cards.get(&vendor), Some(&("native-history".into(), sent.clone())));
+            });
+            engine.shutdown();
+            if state == "fresh" {
+                previous_card = Some(sent);
+            }
+        }
+    }
+
+    #[tokio::test]
+    async fn project_start_card_claude_actual_start_and_resume() {
+        project_start_card_captured(Vendor::Claude).await;
+    }
+
+    #[tokio::test]
+    async fn project_start_card_codex_actual_start_and_resume() {
+        project_start_card_captured(Vendor::Codex).await;
     }
 
     #[tokio::test]
@@ -1577,6 +1829,7 @@ mod tests {
                 core.launch("kit", &pick(Vendor::Claude)).unwrap();
                 let sid = core.live["kit"].sid;
                 core.handle("kit", sid, EngineEvent::Started { session_id: "native-history".into(), model: "fixture".into() });
+                core.handle("kit", sid, EngineEvent::TurnStarted);
                 core.close_when_idle("kit");
             });
             tokio::task::yield_now().await;

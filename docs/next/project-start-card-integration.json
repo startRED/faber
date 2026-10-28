@@ -1,0 +1,11 @@
+{
+  "notes": {
+    "better": {
+      "en": "Project agents receive your kept decisions when starting; changed approvals refresh their context while preserving the conversation history.",
+      "pt-BR": "As IAs do projeto recebem suas decisões guardadas ao começar; mudanças nas aprovações renovam o contexto, preservando o histórico da conversa.",
+      "es": "Las IA del proyecto reciben tus decisiones guardadas al empezar; los cambios de aprobación renuevan el contexto sin perder la conversación.",
+      "fr": "Les IA du projet reçoivent vos décisions conservées au démarrage ; les changements dans vos décisions approuvées renouvellent leur contexte sans perdre la conversation.",
+      "de": "Projekt-KIs erhalten beim Start deine gespeicherten Entscheidungen; geänderte Freigaben erneuern ihren Kontext und bewahren den Gesprächsverlauf."
+    }
+  }
+}

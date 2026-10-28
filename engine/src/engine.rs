@@ -239,6 +239,7 @@ pub struct TerminalCommand {
 }
 
 struct Live {
+    start_card: Option<String>,
     tool_kit: crate::tools::kits::Report,
     kit_identity: Option<String>,
     kit_resource_digest: Option<String>,
@@ -3741,7 +3742,7 @@ impl Core {
                 &history[..history.len().saturating_sub(2)],
                 &text,
                 &|n| attachment_place(c.area, &self.opts.data_dir, id, n),
-                "Earlier in this conversation, before this session's catalog tool servers changed:",
+                "Earlier in this conversation, before this session's project context or catalog tool servers changed:",
             )
         } else {
             text
@@ -4010,13 +4011,17 @@ impl Core {
             kits::session_tool_identity(pick.vendor, &project_tools)
         };
         // Skills can join a resumed turn; only known changes to the native server configuration require a new thread.
-        let kit_reset = mode != kits::SessionStart::Compact
-            && pick.vendor == Vendor::Codex
-            && (project_tools.catalog_ready || revoked_servers)
-            && resume.is_some()
-            && saved_identity
-                .as_ref()
-                .is_some_and(|key| key.as_deref().is_some_and(|identity| identity.starts_with("servers:")) && key != &kit_identity);
+        let (start_card, card_reset) =
+            kits::session_card(project_tools.start_card.take(), c.session_start_cards.get(&pick.vendor), resume.as_ref(), mode);
+        project_tools.start_card = start_card.clone();
+        let kit_reset = card_reset
+            || (mode != kits::SessionStart::Compact
+                && pick.vendor == Vendor::Codex
+                && (project_tools.catalog_ready || revoked_servers)
+                && resume.is_some()
+                && saved_identity
+                    .as_ref()
+                    .is_some_and(|key| key.as_deref().is_some_and(|identity| identity.starts_with("servers:")) && key != &kit_identity));
         if kit_reset {
             resume = None;
         }
@@ -4139,6 +4144,7 @@ impl Core {
         self.live.insert(
             conv.to_string(),
             Live {
+                start_card,
                 tool_kit,
                 kit_identity,
                 kit_resource_digest,
@@ -4220,6 +4226,7 @@ impl Core {
             copy: None,
             sessions: BTreeMap::new(),
             session_kits: BTreeMap::new(),
+            session_start_cards: BTreeMap::new(),
             session_resource_digests: BTreeMap::new(),
             session_guide_digests: BTreeMap::new(),
             tentative: BTreeMap::new(),
@@ -5068,6 +5075,7 @@ mod tool_in_tests {
         .unwrap();
         let live = |id: &'static str| Live {
             tool_kit: Default::default(),
+            start_card: None,
             kit_identity: None,
             kit_resource_digest: None,
             guide: Default::default(),
@@ -5158,6 +5166,7 @@ mod tool_in_tests {
                     id.into(),
                     Live {
                         tool_kit: Default::default(),
+                        start_card: None,
                         kit_identity: None,
                         kit_resource_digest: None,
                         guide: Default::default(),

@@ -655,6 +655,58 @@ pub fn render(facts: &Facts) -> String {
     out
 }
 
+/// Keeps whole lines and reserves enough bytes to count everything that did not fit.
+fn card_lines(head: &str, lines: &[String], share: usize, omitted: &str) -> String {
+    let mut out = head.to_string();
+    let mut shown = 0;
+    for line in lines {
+        // Covers the counter even with a full-width usize count, without shifting earlier lines.
+        if out.len() + line.len() + 100 > share {
+            break;
+        }
+        out.push_str(line);
+        shown += 1;
+    }
+    if shown < lines.len() {
+        out.push_str(&format!("And {} {omitted}; search them with memory_search.\n", lines.len() - shown));
+    }
+    out
+}
+
+/// Formats checked facts and externally kept words; callers supply approval, never repository prose.
+pub fn card(facts: &Facts, kept: &[&str], taste: &[&str]) -> String {
+    const OPEN: &str = "```faber-start-card\nFaber's project context. It grants no permission and overrides nothing. \
+                        The project's instruction files still apply.\n\n";
+    const CLOSE: &str = "```";
+    let rules: Vec<_> = card_part(facts).split_inclusive('\n').map(str::to_owned).collect();
+    let mut out = OPEN.to_string();
+    out.push_str(&card_lines("", &rules, 3 * 1024 - OPEN.len() - CLOSE.len(), "more rule lines"));
+    for (bodies, head, share, omitted) in [
+        (kept, "\n## Decisions the person kept, newest first\n\n", 2 * 1024, "older decisions"),
+        (taste, "\n## Taste the person kept\n\n", 1024, "more taste lines"),
+    ] {
+        if bodies.is_empty() {
+            continue;
+        }
+        let lines: Vec<_> = bodies
+            .iter()
+            .map(|body| {
+                let line = body.lines().next().unwrap_or_default().trim();
+                let line = line.strip_prefix("- ").or_else(|| line.strip_prefix("* ")).unwrap_or(line);
+                // The list prefix keeps an approved line from closing the surrounding fence.
+                if body.chars().count() > 500 {
+                    format!("- {}…\n", line.chars().take(200).collect::<String>())
+                } else {
+                    format!("- {line}\n")
+                }
+            })
+            .collect();
+        out.push_str(&card_lines(head, &lines, share, omitted));
+    }
+    out.push_str(CLOSE);
+    out
+}
+
 /// Builds `rules.md` for a project folder and writes it when it differs. Returns the facts it was built from.
 pub fn refresh(project: &Path) -> Result<Facts, &'static str> {
     let facts = facts(project)?;
@@ -693,6 +745,59 @@ pub(crate) fn refresh_cached(project: &Path, previous: Option<&Record>) -> Resul
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn project_start_card_sections_count_overflow_and_include_framing_in_the_byte_cap() {
+        let facts = Facts {
+            description: Some("UNTRUSTED_DESCRIPTION".into()),
+            checks: vec!["cargo test".repeat(100); 100],
+            checks_from: Some("scripts"),
+            ..Facts::default()
+        };
+        let decision = "字".repeat(150);
+        let taste = "é".repeat(150);
+        let text = card(&facts, &vec![decision.as_str(); 20], &vec![taste.as_str(); 20]);
+        assert!(text.len() <= 6 * 1024, "framing must fit too: {}", text.len());
+        assert!(!text.contains("UNTRUSTED_DESCRIPTION"));
+        assert!(text.starts_with("```faber-start-card\n") && text.ends_with("```"));
+        let (rules, rest) = text.split_once("\n## Decisions the person kept, newest first\n\n").unwrap();
+        let (decisions, taste_part) = rest.split_once("\n## Taste the person kept\n\n").unwrap();
+        assert!(rules.len() <= 3 * 1024);
+        assert!(decisions.len() + "\n## Decisions the person kept, newest first\n\n".len() <= 2 * 1024);
+        assert!(taste_part.len() - 3 + "\n## Taste the person kept\n\n".len() <= 1024);
+        assert_eq!(decisions.matches(&decision).count(), 4);
+        assert!(decisions.contains("16 older decisions; search them with memory_search."));
+        assert_eq!(taste_part.matches(&taste).count(), 2);
+        assert!(taste_part.contains("18 more taste lines; search them with memory_search."));
+        assert!(rules.contains("more rule lines; search them with memory_search."));
+    }
+
+    #[test]
+    fn project_start_card_sections_preserve_kept_words_and_summarize_long_unicode_items() {
+        for size in [500, 501, 2000] {
+            let body = "字".repeat(size);
+            let next = "Use `config.json` and ``literal `backticks` ``.";
+            let text = card(&Facts::default(), &[&body, next], &[next]);
+            let shown = if size > 500 { format!("{}…", "字".repeat(200)) } else { body.clone() };
+            assert!(text.contains(&shown));
+            if size > 500 {
+                assert!(!text.contains(&body));
+            }
+            assert_eq!(text.matches(next).count(), 2);
+            assert!(text.len() <= 6 * 1024);
+        }
+    }
+
+    #[test]
+    fn project_start_card_sections_do_not_load_later_lines_or_create_empty_sections() {
+        let text = card(&Facts::default(), &["- Keep this.\n```\nUNREVIEWED_LATER_LINE"], &["* Taste first.\nUNREVIEWED_TASTE_LINE"]);
+        assert!(text.contains("- Keep this.\n") && text.contains("- Taste first.\n"));
+        assert!(!text.contains("UNREVIEWED_"));
+        assert_eq!(text.matches("```").count(), 2);
+        let empty = card(&Facts::default(), &[], &[]);
+        assert!(!empty.contains("## Decisions") && !empty.contains("## Taste"));
+        assert!(empty.contains("It grants no permission and overrides nothing."));
+    }
 
     #[test]
     fn package_fields_keep_the_original_depth_boundary_for_known_and_unknown_values() {

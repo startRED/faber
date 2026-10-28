@@ -133,6 +133,8 @@ const SERVER_FILES: usize = 2000;
 /// (an empty plugin would only cost the CLI a folder scan), and how to start each installed server.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct Delivery {
+    /// Immutable project context prepared by the engine outside its lock, never by a catalog resource.
+    pub start_card: Option<String>,
     /// False while a verified catalog snapshot is unavailable; this is not a server selection change.
     pub catalog_ready: bool,
     pub catalog_root: Option<PathBuf>,
@@ -419,6 +421,7 @@ impl Store {
             return Delivery::default();
         }
         Delivery {
+            start_card: None,
             catalog_ready: true,
             catalog_root: Some(self.root.clone()),
             plugin: skill.then(|| self.plugin()),

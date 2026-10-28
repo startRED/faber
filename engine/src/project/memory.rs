@@ -747,7 +747,7 @@ pub fn mark_kept(list: &mut MemoryList, kept: &[KeptDecision]) {
     }
 }
 
-fn entries(text: &str) -> Vec<Entry> {
+fn entries(text: &str, limit: usize) -> Vec<Entry> {
     let mut depth = 0;
     let mut item = None;
     let mut paragraph = None;
@@ -780,7 +780,7 @@ fn entries(text: &str) -> Vec<Entry> {
                 {
                     ranges.push(start..range.end);
                 }
-                if ranges.len() > MAX_ENTRIES {
+                if ranges.len() > limit {
                     break;
                 }
             }
@@ -809,7 +809,7 @@ fn entries(text: &str) -> Vec<Entry> {
         .collect()
 }
 
-fn read_file(dir: &Directory, name: &str, path: String, source: &'static str) -> Result<MemoryFile, &'static str> {
+fn read_file(dir: &Directory, name: &str, path: String, source: &'static str, entry_limit: usize) -> Result<MemoryFile, &'static str> {
     let file = dir.file(name).map_err(|_| REFUSED)?;
     let mut bytes = Vec::new();
     if file.metadata().map_err(|_| READ)?.len() <= MAX_BYTES as u64 {
@@ -818,7 +818,7 @@ fn read_file(dir: &Directory, name: &str, path: String, source: &'static str) ->
         return Ok(MemoryFile { path, source, revision: String::new(), too_large: true, entries: vec![] });
     }
     let too_large = bytes.len() > MAX_BYTES;
-    let mut entries = if too_large { vec![] } else { entries(std::str::from_utf8(&bytes).map_err(|_| READ)?) };
+    let mut entries = if too_large { vec![] } else { entries(std::str::from_utf8(&bytes).map_err(|_| READ)?, entry_limit) };
     if decisions(&path) {
         for entry in &mut entries {
             if let Some(m) = mark(&entry.text) {
@@ -837,6 +837,34 @@ pub fn list(project: &Path) -> Result<MemoryList, &'static str> {
 /// `CLAUDE.md` or `AGENTS.md` is read, and a note that cannot be read is skipped (the list says it may be incomplete).
 pub fn list_faber(project: &Path) -> Result<MemoryList, &'static str> {
     scan(project, &private_roots(), true)
+}
+
+/// The card needs the newest decisions, not Memory's truncated display window or its other note files.
+pub(crate) fn kept_for_card(project: &Path, kept: &[KeptDecision]) -> Result<Vec<String>, &'static str> {
+    if kept.is_empty() {
+        return Ok(vec![]);
+    }
+    let protected = resolved_private(&private_roots());
+    let (root, directory) = project_directory(project, &protected)?;
+    if private(&root.join(".faber/decisions.md"), &protected) {
+        return Err(REFUSED);
+    }
+    let notes = directory.under(Path::new(".faber")).map_err(|_| REFUSED)?;
+    // Each entry owns at least one source byte, so this includes every entry in the byte-capped file.
+    let file = read_file(&notes, "decisions.md", ".faber/decisions.md".into(), "faber", MAX_BYTES)?;
+    if file.too_large {
+        return Err(READ);
+    }
+    Ok(file
+        .entries
+        .into_iter()
+        .rev()
+        .filter_map(|entry| entry.body)
+        .filter(|body| {
+            let item = KeptDecision::of(body);
+            kept.iter().any(|record| record.matches(&item))
+        })
+        .collect())
 }
 
 fn list_with_private(project: &Path, protected: &[String]) -> Result<MemoryList, &'static str> {
@@ -892,7 +920,7 @@ fn scan(project: &Path, protected: &[String], faber_only: bool) -> Result<Memory
                 if source == "codex" && Some(name.as_str()) != codex {
                     continue;
                 }
-                let mut file = match read_file(&dir, &name, path, source) {
+                let mut file = match read_file(&dir, &name, path, source, MAX_ENTRIES) {
                     Ok(file) => file,
                     Err(_) if faber_only => {
                         skipped = true;
@@ -991,7 +1019,7 @@ fn edit_with_private(project: &Path, edit: &Edit, protected: &[String]) -> Resul
         return Err(CHANGED);
     }
     let original = std::str::from_utf8(&bytes).map_err(|_| READ)?;
-    let entry = entries(original).into_iter().find(|e| e.start == edit.start && e.end == edit.end).ok_or(REFUSED)?;
+    let entry = entries(original, MAX_ENTRIES).into_iter().find(|e| e.start == edit.start && e.end == edit.end).ok_or(REFUSED)?;
     let mut replacement = String::new();
     if edit.keep {
         let text = &original[entry.start..entry.end];

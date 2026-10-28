@@ -2973,6 +2973,7 @@ async fn the_catalog_s_skill_root_is_set_once_before_the_first_thread_opens_and_
 /// A store's delivery with one server and, when given, a skill root.
 fn tools(skills: Option<&str>) -> faber_engine::tools::Delivery {
     faber_engine::tools::Delivery {
+        start_card: None,
         catalog_ready: true,
         lease: None,
         prepared: None,

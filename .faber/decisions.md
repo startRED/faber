@@ -18,3 +18,4 @@
 - Side panes must close by sliding their real content away without a fade or a teleport; reduced motion closes them immediately. [by person]
 - Visible helper history is stored outside conversation JSON in bounded atomic pages and loaded in bounded windows only by the existing helper reader, preserving older-page selection during new work. [by AI]
 - Keep direct windows-core updates on 0.62 patch releases while WebView2 0.39 requires its COM types; lift the Dependabot version exclusion only with a coordinated WebView2/Tauri type migration. [by AI]
+- Bind each saved project start card to its native session id and exact sent text; changed or unknown context starts a fresh native session with the existing conversation history, while compaction keeps its original card. [by AI]

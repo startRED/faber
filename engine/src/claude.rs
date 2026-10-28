@@ -421,6 +421,12 @@ pub fn claude_args(launch: &ClaudeLaunch) -> Vec<String> {
     if launch.instructions.is_none() && !aside {
         args.push("--append-system-prompt".into());
         let mut words = persona(&PersonaInput { name: launch.user_name.as_deref(), tuning: &launch.tuning, research: launch.research });
+        if launch.area == Area::Project
+            && let Some(card) = &tools.start_card
+        {
+            words.push_str("\n\n");
+            words.push_str(card);
+        }
         if launch.area == Area::Project {
             words.push_str(crate::persona::PROJECT_DETAILS);
             if launch.progress {
