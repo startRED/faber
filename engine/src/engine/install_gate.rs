@@ -6,7 +6,10 @@ use super::*;
 pub struct InstallGuard(Engine);
 impl Drop for InstallGuard {
     fn drop(&mut self) {
-        self.0.with(|c| c.installing = false);
+        self.0.with(|c| {
+            c.installing = false;
+            c.retry_reports();
+        });
     }
 }
 

@@ -2190,6 +2190,7 @@ export const es: Messages = {
   'notes.280.fixed': 'Un ayudante que parece atascado ahora dice que sigue trabajando y qué puedes hacer, y su fila en Te necesita abre su conversación.',
   'notes.281.fixed': 'La memoria del proyecto deja fuera los archivos privados de Gemini al leer y editar.',
   'notes.282.fixed': 'Cuando otra IA retoma un trabajo interrumpido, recibe el encargo guardado de los ayudantes que no terminaron.',
+  'notes.283.fixed': 'El informe de un ayudante que no se pudo entregar mientras ninguna IA estaba disponible ahora sale solo cuando vuelve una.',
   'update.checking': 'Buscando una actualización…',
   'update.downloading': 'Descargando actualización…',
   'update.downloadingPercent': 'Descargando actualización… {percent} %',

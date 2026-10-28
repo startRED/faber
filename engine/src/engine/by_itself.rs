@@ -262,6 +262,63 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn a_refused_child_report_goes_out_by_itself_once_an_ai_can_answer_again() {
+        // Each way an AI comes back unlocks the report on its own: the install ends, the CLI is found.
+        for back in ["install", "clis"] {
+            let dir = tempfile::tempdir().unwrap();
+            let (engine, _) = super::super::answer::tests::engine(dir.path());
+            let parent = super::super::answer::tests::seed(&engine, Session::from_fn(|_| {}), &[("parent", &[])]);
+            let child = super::super::answer::tests::seed(&engine, Session::from_fn(|_| {}), &[("child", &[])]);
+            let held = super::super::answer::tests::seed(&engine, Session::from_fn(|_| {}), &[("held", &[])]);
+            let claude = Cli { command: "claude".into(), prefix: vec![] };
+            let guard = (back == "install").then(|| engine.install_admission_stopping().unwrap());
+            engine.with(|core| {
+                core.live.clear();
+                if back != "clis" {
+                    core.opts.clis.insert(Vendor::Claude, claude.clone());
+                }
+                core.ledger.claude.billing = Billing::Subscription;
+                for id in [&parent, &held] {
+                    core.convs.get_mut(id).unwrap().messages.last_mut().unwrap().status = Some(Status::Done);
+                }
+                // A message the person queued in a conversation nothing runs in stays theirs to send.
+                let mine = QueuedTurn {
+                    id: "mine".into(),
+                    text: "Person's own message".into(),
+                    images: None,
+                    attachments: None,
+                    choice: Choice { vendor: "auto".into(), model: None, effort: None },
+                    at: now(),
+                    sending: false,
+                    wake: None,
+                };
+                core.convs.get_mut(&held).unwrap().queued.push(mine);
+                core.save(&held);
+                let c = core.convs.get_mut(&child).unwrap();
+                c.started_by = Some(parent.clone());
+                let reply = c.messages.last_mut().unwrap();
+                reply.status = Some(Status::Done);
+                reply.text = "The requested documentation is saved.".into();
+                core.tell_parent(&child);
+                assert_eq!(core.store.get(&parent).unwrap().queued.len(), 1, "the refused report waits: {back}");
+            });
+            drop(guard);
+            engine.with(|core| {
+                if back == "clis" {
+                    let mut found = core.opts.clis.clone();
+                    found.insert(Vendor::Claude, claude.clone());
+                    core.replace_clis(found);
+                }
+                let resumed = core.store.get(&parent).unwrap();
+                assert!(resumed.queued.is_empty(), "the report went out with no turn ending first: {back}");
+                assert_eq!(resumed.messages[2].wake.as_ref().unwrap().why, "wake.childDone");
+                assert_eq!(core.store.get(&held).unwrap().queued.len(), 1, "the person's own message is not sent for them");
+            });
+            engine.shutdown();
+        }
+    }
+
+    #[tokio::test]
     async fn agent_messages_reach_the_running_turn_once_and_keep_their_origin() {
         for why in ["wake.asked", "wake.childDone"] {
             for tools_open in [false, true] {

@@ -2190,6 +2190,7 @@ export const fr: Messages = {
   'notes.280.fixed': 'Un assistant qui semble bloqué dit maintenant qu’il continue de travailler et ce que vous pouvez faire, et sa ligne sous « A besoin de vous » ouvre sa conversation.',
   'notes.281.fixed': 'La mémoire du projet exclut les fichiers privés de Gemini de la lecture et de la modification.',
   'notes.282.fixed': 'Quand une autre IA reprend un travail interrompu, elle reçoit la consigne enregistrée des assistants encore au travail.',
+  'notes.283.fixed': "Le rapport d'un assistant qui n'a pas pu être remis faute d'IA disponible part maintenant tout seul dès qu'une revient.",
   'update.checking': 'Recherche d’une mise à jour…',
   'update.downloading': 'Téléchargement de la mise à jour…',
   'update.downloadingPercent': 'Téléchargement de la mise à jour… {percent} %',

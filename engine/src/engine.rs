@@ -354,6 +354,15 @@ pub(crate) fn attachment_place(area: Area, data_dir: &Path, conversation: &str, 
 }
 
 /// This vendor already answered in the conversation, yet has no session to continue: the session was lost.
+/// The queued item `drain` sends next: the head after a finished reply, the oldest wake after a failed one without Keep going.
+fn next_queued(c: &Conversation) -> Option<usize> {
+    match c.messages.last().and_then(|m| m.status) {
+        Some(Status::Done) => (!c.queued.is_empty()).then_some(0),
+        Some(Status::Error) if c.keep_going.is_none() => c.queued.iter().position(|q| q.wake.is_some()),
+        _ => None,
+    }
+}
+
 fn session_was_lost(c: &Conversation, vendor: Vendor) -> bool {
     c.resumable(vendor).is_none() && c.context_messages().iter().any(|m| m.role == Role::Assistant && m.vendor == Some(vendor))
 }
@@ -1699,6 +1708,7 @@ impl Core {
             }
         }
         self.opts.clis = clis;
+        self.retry_reports();
     }
 
     fn scratch_of(&self, id: &str) -> PathBuf {
@@ -3334,12 +3344,7 @@ impl Core {
         }
         let idle = !self.live.get(conv).is_some_and(|l| l.turn.is_some());
         let Some(c) = self.convs.get(conv) else { return };
-        let next = match c.messages.last().and_then(|m| m.status) {
-            Some(Status::Done) => (!c.queued.is_empty()).then_some(0),
-            Some(Status::Error) if c.keep_going.is_none() => c.queued.iter().position(|q| q.wake.is_some()),
-            _ => None,
-        };
-        let Some(next) = next else { return };
+        let Some(next) = next_queued(c) else { return };
         if self.preparing_rewind_steer(&c.queued[next].id) {
             return;
         }
@@ -3358,6 +3363,20 @@ impl Core {
         // What the person queued behind the dropped message goes out now; the queue is shorter each time, so this ends.
         if capped {
             self.drain(conv);
+        }
+    }
+
+    /// A child's report a refused start left waiting (no CLI found, an install deciding) goes out once an AI may answer
+    /// again. Only a queue whose next item is such a report drains, so nothing the person queued goes out by itself.
+    pub(super) fn retry_reports(&mut self) {
+        let due: Vec<String> = self
+            .convs
+            .iter()
+            .filter(|(_, c)| next_queued(c).and_then(|i| c.queued[i].wake.as_ref()).is_some_and(|w| w.why == "wake.childDone"))
+            .map(|(id, _)| id.clone())
+            .collect();
+        for id in due {
+            self.drain(&id);
         }
     }
 

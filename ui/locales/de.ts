@@ -2190,6 +2190,7 @@ export const de: Messages = {
   'notes.280.fixed': 'Ein Helfer, der festzuhängen scheint, sagt jetzt, dass er weiterarbeitet und was du tun kannst, und seine Zeile unter „Braucht dich“ öffnet sein Gespräch.',
   'notes.281.fixed': 'Der Projektspeicher lässt Geminis private Dateien beim Lesen und Bearbeiten aus.',
   'notes.282.fixed': 'Wenn eine andere KI unterbrochene Arbeit übernimmt, erhält sie den gespeicherten Auftrag der noch nicht fertigen Helfer.',
+  'notes.283.fixed': 'Der Bericht eines Helfers, der nicht zugestellt werden konnte, solange keine KI verfügbar war, geht jetzt von selbst raus, sobald eine zurück ist.',
   'update.checking': 'Suche nach einem Update…',
   'update.downloading': 'Update wird heruntergeladen…',
   'update.downloadingPercent': 'Update wird heruntergeladen… {percent} %',
