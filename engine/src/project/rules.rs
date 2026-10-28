@@ -325,7 +325,7 @@ fn package_names(raw: Option<&RawValue>, dependencies: bool) -> std::collections
 }
 
 // Facts never inspect array elements. Keep one scalar so table/declaration validation still sees an array value.
-// shortcut: only decimal integers, booleans and strings are compacted; other values keep full validation.
+// shortcut: only decimal integers, plain decimal floats, booleans and strings are compacted; other values keep full validation.
 fn scalar_array(content: &str, start: usize) -> Option<(usize, std::ops::Range<usize>)> {
     let bytes = content.as_bytes();
     let mut at = start;
@@ -430,7 +430,19 @@ fn scalar_array(content: &str, start: usize) -> Option<(usize, std::ops::Range<u
                 while bytes.get(at).is_some_and(u8::is_ascii_digit) {
                     at += 1;
                 }
-                if at == digits || at - digits > 1 && bytes[digits] == b'0' || content[begin..at].parse::<i64>().is_err() {
+                if at == digits || at - digits > 1 && bytes[digits] == b'0' {
+                    return None;
+                }
+                if bytes.get(at) == Some(&b'.') {
+                    at += 1;
+                    let fraction = at;
+                    while bytes.get(at).is_some_and(u8::is_ascii_digit) {
+                        at += 1;
+                    }
+                    if at == fraction || content[begin..at].parse::<f64>().ok().is_none_or(|value| !value.is_finite()) {
+                        return None;
+                    }
+                } else if content[begin..at].parse::<i64>().is_err() {
                     return None;
                 }
                 count += 1;
@@ -850,6 +862,51 @@ mod tests {
         }
         assert_eq!(compact_scalar_arrays("x=[true,false]"), "x=[true]");
         assert_eq!(compact_scalar_arrays("x=[false,true]"), "x=[false]");
+    }
+
+    #[test]
+    fn rules_decimal_float_arrays_preserve_official_validation() {
+        for array in [
+            "[1.0,2.0]",
+            "[-0.0,+1.5,]",
+            "[1e2,2E-3]",
+            "[1_0.2_5,3.0]",
+            "[inf,-inf,+inf,nan,-nan,+nan]",
+            "[true,1.0,'x']",
+            "[1.0]",
+            "[]",
+            "[01.0,2.0]",
+            "[1.,2.0]",
+            "[.1,2.0]",
+            "[1e,2.0]",
+            "[1_e2,2.0]",
+            "[1.0foo,2.0]",
+            "[1.0é,2.0]",
+            "[1.0 2.0]",
+            "[1.0,,2.0]",
+            "[1.0,2.0",
+            "[1.0, # comment\n2.0]",
+            "[1.0,\r\n2.0]",
+            "[1.0,\r2.0]",
+            "[1.0, # bad\u{1}\n2.0]",
+            "[[1.0,2.0],[3.0]]",
+            "[1.0,{x=1,x=2}]",
+            "[1e9999,2.0]",
+            "[0x10,2.0]",
+            "[2026-10-28,1.0]",
+            "[99999999999999999999999.0,2.0]",
+        ] {
+            for suffix in ["", "\nx=3", "\n[x]", "\n[[x]]", "\nx.y=2"] {
+                let source = format!("x={array}{suffix}\n[dependencies]\nbevy='0.17'\n[package]\ndescription='fixture'\n");
+                let expected = toml::from_str::<toml::Value>(&source).is_ok();
+                let compact = compact_scalar_arrays(&source);
+                assert_eq!(toml::from_str::<toml::Value>(&compact).is_ok(), expected, "{source:?} -> {compact:?}");
+                let (facts, _) = manifest_facts(&[("Cargo.toml".into(), source)]);
+                assert_eq!(facts.stacks.contains(&"bevy"), expected);
+                assert_eq!(facts.description.as_deref(), expected.then_some("fixture"));
+            }
+        }
+        assert_eq!(compact_scalar_arrays("x=[1.0,2.0]"), "x=[1.0]");
     }
 
     fn write(dir: &Path, name: &str, text: &str) {
