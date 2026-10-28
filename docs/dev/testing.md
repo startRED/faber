@@ -143,7 +143,8 @@ only the runner, takes no slot and checks the claims and the red base (R183). Be
 (`testkit/src/slots.rs`): a locked file `target/.faber-slots/slot-<n>` of the main checkout, held until the run ends,
 crash included. With all three taken it prints one waiting line and waits. `FABER_BUILD_SLOTS` sets another count for
 another PC (R129, E3). Idle priority gives the processor away but not the memory, so before its slot a run also waits
-while a full-screen app is in front (a game, a presentation; a borderless window is not seen) or while less memory is free
+while a full-screen app is in front and the keyboard or mouse was used in the last ten minutes (a game, a
+presentation; a borderless window is not seen; the lock screen of a PC left alone reads as full-screen, R464) or while less memory is free
 than one run takes (8 GB), at most ten minutes for memory, with one `Waiting:` line per reason (R440). On 2026-10-22 three runs left 2.2 GB of 36 free
 under a game. CI never waits.
 

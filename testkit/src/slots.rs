@@ -30,10 +30,15 @@ pub const RUN_PEAK: u64 = 8 << 30;
 /// a game in front holds for as long as it stays there.
 pub const MEMORY_WAIT: Duration = Duration::from_secs(10 * 60);
 
-/// Why a new run waits before its slot, after `waited`: a full-screen app in front (a game, a presentation), or less free
-/// memory than one run takes. Idle priority already gives the processor away, but not the memory, the bus or the heat.
-pub fn hold_reason(full_screen: bool, free: u64, waited: Duration) -> Option<&'static str> {
-    if full_screen {
+/// A full-screen app nobody touched the keyboard or mouse of for this long is not a game being played: the lock screen
+/// reads as one, and on 2026-10-28 it held every lane's local runs all night while the owner slept.
+pub const PLAYING: Duration = Duration::from_secs(10 * 60);
+
+/// Why a new run waits before its slot, after `waited`: a full-screen app in front (a game, a presentation) while the
+/// person used the PC in the last `PLAYING`, or less free memory than one run takes. Idle priority already gives the
+/// processor away, but not the memory, the bus or the heat.
+pub fn hold_reason(full_screen: bool, idle: Duration, free: u64, waited: Duration) -> Option<&'static str> {
+    if full_screen && idle < PLAYING {
         return Some("a full-screen app is in front");
     }
     (free < RUN_PEAK && waited < MEMORY_WAIT).then_some("less memory is free than a run takes (8 GB); waiting at most 10 minutes")
@@ -44,10 +49,19 @@ fn hold(waited: Duration) -> Option<&'static str> {
     #[cfg(windows)]
     if !crate::plan::on_ci() {
         let free = winsafe::GlobalMemoryStatusEx().map_or(u64::MAX, |m| m.ullAvailPhys);
-        return hold_reason(faber_winproc::full_screen_in_front(), free, waited);
+        return hold_reason(faber_winproc::full_screen_in_front(), idle(), free, waited);
     }
     let _ = waited;
     None
+}
+
+/// How long since the last keyboard or mouse input; none known counts as input now.
+#[cfg(windows)]
+fn idle() -> Duration {
+    let Ok(info) = winsafe::GetLastInputInfo() else { return Duration::ZERO };
+    // The input time is the low 32 bits of the tick count.
+    let now = winsafe::GetTickCount64() & 0xFFFF_FFFF;
+    Duration::from_millis(now.wrapping_sub(u64::from(info.dwTime)) & 0xFFFF_FFFF)
 }
 
 /// Waits for a slot, saying so once per reason. A folder that cannot be made gives no slot and no wait: the run goes on.
@@ -85,12 +99,14 @@ mod tests {
     }
 
     #[test]
-    fn a_new_run_holds_while_a_full_screen_app_is_in_front_or_memory_is_short_of_one_run() {
-        let (now, late) = (Duration::ZERO, MEMORY_WAIT);
-        assert_eq!(hold_reason(true, u64::MAX, late), Some("a full-screen app is in front"), "a game holds however long");
-        assert!(hold_reason(false, 2 << 30, now).is_some_and(|why| why.starts_with("less memory")));
-        assert_eq!(hold_reason(false, 2 << 30, late), None, "short memory holds ten minutes at most");
-        assert_eq!(hold_reason(false, RUN_PEAK, now), None);
+    fn a_new_run_holds_while_a_full_screen_app_is_played_or_memory_is_short_of_one_run() {
+        let (now, late, used) = (Duration::ZERO, MEMORY_WAIT, Duration::from_secs(5));
+        assert_eq!(hold_reason(true, used, u64::MAX, late), Some("a full-screen app is in front"), "a game holds however long");
+        assert_eq!(hold_reason(true, PLAYING, u64::MAX, now), None, "a full-screen app nobody touched for ten minutes is no game");
+        assert!(hold_reason(true, PLAYING, 2 << 30, now).is_some_and(|why| why.starts_with("less memory")));
+        assert!(hold_reason(false, used, 2 << 30, now).is_some_and(|why| why.starts_with("less memory")));
+        assert_eq!(hold_reason(false, used, 2 << 30, late), None, "short memory holds ten minutes at most");
+        assert_eq!(hold_reason(false, used, RUN_PEAK, now), None);
     }
 
     #[test]
