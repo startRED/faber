@@ -665,7 +665,7 @@ impl Store {
     ) -> (Delivery, Report) {
         let empty = || Delivery { catalog_root: Some(self.root.clone()), ..Default::default() };
         let (jobs, explicit) = labels(request, cwd);
-        let stacks = stack_labels(request, cwd);
+        let stacks = if area == Area::Project { stack_labels(request, cwd) } else { matching::request_stack_labels(request, cwd) };
         let mut report = Report { jobs: jobs.into_iter().collect(), method: "code".into(), ..Default::default() };
         let Ok(data) = self.ready.data.try_lock() else { return (empty(), report) };
         if permissions == Permissions::Isolated {
@@ -1187,7 +1187,7 @@ impl Store {
         let Some(selection) = self.resource_selection() else { return Choice::default() };
         let installed = self.installed_resources();
         let (jobs, _) = labels(request, cwd);
-        let stacks = stack_labels(request, cwd);
+        let stacks = if area == Area::Project { stack_labels(request, cwd) } else { matching::request_stack_labels(request, cwd) };
         let mut items: Vec<_> = self
             .resource_catalog()
             .iter()

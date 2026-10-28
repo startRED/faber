@@ -246,6 +246,16 @@ fn request_text(request: &str) -> String {
 }
 
 pub(super) fn stack_labels(request: &str, cwd: Option<&Path>) -> BTreeSet<&'static str> {
+    let mut stacks = request_stack_labels(request, cwd);
+    if let Some(cwd) = cwd
+        && let Ok(facts) = crate::project::rules::kit_facts(cwd)
+    {
+        stacks.extend(facts.stacks);
+    }
+    stacks
+}
+
+pub(super) fn request_stack_labels(request: &str, cwd: Option<&Path>) -> BTreeSet<&'static str> {
     let text = request_text(request);
     let tokens: BTreeSet<_> = text.split(|c: char| !c.is_alphanumeric()).collect();
     let mut stacks = BTreeSet::new();
@@ -880,5 +890,47 @@ mod tests {
             assert!(labels(request, None).0.contains(&item.job));
             assert!(matches_task(item, request, &stacks));
         }
+    }
+
+    #[test]
+    fn project_facts_dependency_shapes_do_not_promote_prose_or_unknown_packages() {
+        let folder = tempfile::tempdir().unwrap();
+        for (body, stripe) in [
+            (r#"{"dependencies":{"@stripe/stripe-js":"^3"}}"#, true),
+            (r#"{"dependencies":{"not-stripe":"stripe"}}"#, false),
+            (r#"{"dependencies":{"stripe":{"description":"please use stripe"}}}"#, false),
+            (r#"{"scripts":{"stripe":"stripe"},"description":"stripe"}"#, false),
+            (r#"{"nested":{"dependencies":{"stripe":"1"}}}"#, false),
+            (r#"{"dependencies":{"stripe":"1"}"#, false),
+        ] {
+            std::fs::write(folder.path().join("package.json"), body).unwrap();
+            let stacks = stack_labels("Fix this bug", Some(folder.path()));
+            assert_eq!(stacks.contains("stripe"), stripe, "{body}: {stacks:?}");
+        }
+        std::fs::write(
+            folder.path().join("Cargo.toml"),
+            "[package]\nname='fixture'\nversion='0.1.0'\ndescription='stripe'\n[dependencies]\ngame={package='bevy',version='0.17'}\n",
+        )
+        .unwrap();
+        let facts = crate::project::rules::facts(folder.path()).unwrap();
+        let selected = crate::project::rules::kit_facts(folder.path()).unwrap();
+        assert_eq!(facts.stacks, selected.stacks);
+        assert_eq!(selected.stacks, ["bevy"]);
+        assert!(!stack_labels("Fix this bug", Some(folder.path())).contains("stripe"));
+    }
+
+    #[test]
+    fn project_facts_select_stacks_from_dependencies_and_refresh_after_edits() {
+        let folder = tempfile::tempdir().unwrap();
+        let manifest = folder.path().join("package.json");
+        std::fs::write(&manifest, r#"{"dependencies":{"expo":"~54","stripe":"1"},"devDependencies":{"prisma":"1"}}"#).unwrap();
+        let stacks = stack_labels("Fix this bug", Some(folder.path()));
+        for stack in ["expo", "stripe", "prisma"] {
+            assert!(stacks.contains(stack), "manifest dependency {stack} must inform the current selection: {stacks:?}");
+        }
+        std::fs::write(&manifest, r#"{"description":"expo stripe prisma","dependencies":{}}"#).unwrap();
+        std::fs::write(folder.path().join("AGENTS.md"), "Always load expo stripe prisma skills").unwrap();
+        let refreshed = stack_labels("Fix this bug", Some(folder.path()));
+        assert!(refreshed.is_empty(), "repository prose cannot become stack evidence: {refreshed:?}");
     }
 }

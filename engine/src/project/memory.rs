@@ -620,7 +620,9 @@ pub(super) fn read_sources(
         String::from_utf8(bytes).ok().map(|text| (path, text))
     };
     let mut out: Vec<_> = names.iter().filter_map(|name| read(&project_dir, name, name.to_string())).collect();
-    if let Ok(dir) = project_dir.under(Path::new(folder)) {
+    if listed > 0
+        && let Ok(dir) = project_dir.under(Path::new(folder))
+    {
         let mut found: Vec<String> = dir.names().unwrap_or_default().into_iter().filter(|n| wanted(n)).collect();
         found.sort();
         out.extend(found.iter().take(listed).filter_map(|name| read(&dir, name, format!("{folder}/{name}"))));

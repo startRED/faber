@@ -67,6 +67,8 @@ pub struct Facts {
     pub languages: Vec<&'static str>,
     pub manifests: Vec<&'static str>,
     pub instructions: Vec<&'static str>,
+    /// Known dependency identities only; repository prose never supplies stack tags.
+    pub stacks: Vec<&'static str>,
     /// The commands that check work, and where they came from.
     pub checks: Vec<String>,
     pub checks_from: Option<&'static str>,
@@ -192,12 +194,25 @@ fn push_unique(list: &mut Vec<String>, items: impl IntoIterator<Item = String>) 
     }
 }
 
-/// The facts of a project folder, from the files of `MANIFESTS`, `INSTRUCTIONS`, `tsconfig.json` and `.github/workflows`.
-pub fn facts(project: &Path) -> Result<Facts, &'static str> {
-    let names: Vec<&str> = MANIFESTS.iter().map(|(m, _)| *m).chain(INSTRUCTIONS).chain(["tsconfig.json"]).collect();
-    let workflow = |name: &str| name.ends_with(".yml") || name.ends_with(".yaml");
-    let files = super::memory::read_sources(project, &names, ".github/workflows", &workflow, 16)?;
-    let workflows = files.iter().filter(|(path, _)| path.starts_with(".github/"));
+fn dependency_stack(manifest: &str, name: &str) -> Option<&'static str> {
+    match (manifest, name) {
+        ("Cargo.toml", "bevy") => Some("bevy"),
+        ("package.json", "expo" | "expo-router") => Some("expo"),
+        ("package.json", "react-native") => Some("react-native"),
+        ("package.json", "prisma" | "@prisma/client") => Some("prisma"),
+        ("package.json", "firebase" | "firebase-admin" | "@google-cloud/firestore") => Some("firestore"),
+        ("package.json", "pg" | "postgres" | "@supabase/supabase-js") => Some("postgres"),
+        ("package.json", "stripe" | "@stripe/stripe-js" | "@stripe/react-stripe-js") => Some("stripe"),
+        ("package.json", "wrangler" | "@cloudflare/workers-types") => Some("cloudflare"),
+        ("package.json", "auth0" | "@auth0/auth0-react" | "@auth0/nextjs-auth0" | "@auth0/auth0-spa-js") => Some("auth0"),
+        ("package.json", "phaser") => Some("phaser"),
+        ("package.json", "pixi.js" | "@pixi/react") => Some("pixijs"),
+        ("package.json", "three" | "@react-three/fiber") => Some("threejs"),
+        _ => None,
+    }
+}
+
+fn manifest_facts(files: &[(String, String)]) -> (Facts, Vec<String>) {
     let text = |name: &str| files.iter().find(|(path, _)| path == name).map(|(_, text)| text.as_str());
     let mut facts = Facts::default();
     let mut scripts = Vec::new();
@@ -210,15 +225,40 @@ pub fn facts(project: &Path) -> Result<Facts, &'static str> {
         }
         let described = match manifest {
             "package.json" => serde_json::from_str::<serde_json::Value>(content).ok().map(|json| {
+                for group in ["dependencies", "devDependencies", "optionalDependencies", "peerDependencies"] {
+                    if let Some(dependencies) = json[group].as_object() {
+                        for (name, value) in dependencies {
+                            if value.is_string()
+                                && let Some(stack) = dependency_stack(manifest, name)
+                                && !facts.stacks.contains(&stack)
+                            {
+                                facts.stacks.push(stack);
+                            }
+                        }
+                    }
+                }
                 if let Some(map) = json["scripts"].as_object() {
                     let names = map.keys().filter(|k| script_name(k) && CHECK_SCRIPTS.contains(&k.as_str()));
                     scripts.extend(names.map(|k| format!("npm run {k}")));
                 }
                 json["description"].as_str().map(String::from)
             }),
-            "Cargo.toml" => toml::from_str::<toml::Value>(content)
-                .ok()
-                .map(|t| t.get("package").and_then(|p| p.get("description")).and_then(|d| d.as_str()).map(String::from)),
+            "Cargo.toml" => toml::from_str::<toml::Value>(content).ok().map(|t| {
+                for group in ["dependencies", "dev-dependencies", "build-dependencies"] {
+                    if let Some(dependencies) = t.get(group).and_then(toml::Value::as_table) {
+                        for (name, value) in dependencies {
+                            let name = value.get("package").and_then(toml::Value::as_str).unwrap_or(name);
+                            if (value.is_str() || value.is_table())
+                                && let Some(stack) = dependency_stack(manifest, name)
+                                && !facts.stacks.contains(&stack)
+                            {
+                                facts.stacks.push(stack);
+                            }
+                        }
+                    }
+                }
+                t.get("package").and_then(|p| p.get("description")).and_then(|d| d.as_str()).map(String::from)
+            }),
             "pyproject.toml" => toml::from_str::<toml::Value>(content)
                 .ok()
                 .map(|t| t.get("project").and_then(|p| p.get("description")).and_then(|d| d.as_str()).map(String::from)),
@@ -228,6 +268,23 @@ pub fn facts(project: &Path) -> Result<Facts, &'static str> {
             facts.description = described.flatten().as_deref().and_then(description);
         }
     }
+    (facts, scripts)
+}
+
+/// Selection needs manifest identities, not instruction prose or workflow bodies.
+pub(crate) fn kit_facts(project: &Path) -> Result<Facts, &'static str> {
+    let files = super::memory::read_sources(project, &["package.json", "Cargo.toml"], "", &|_| false, 0)?;
+    Ok(manifest_facts(&files).0)
+}
+
+/// The facts of a project folder, from the files of `MANIFESTS`, `INSTRUCTIONS`, `tsconfig.json` and `.github/workflows`.
+pub fn facts(project: &Path) -> Result<Facts, &'static str> {
+    let names: Vec<&str> = MANIFESTS.iter().map(|(m, _)| *m).chain(INSTRUCTIONS).chain(["tsconfig.json"]).collect();
+    let workflow = |name: &str| name.ends_with(".yml") || name.ends_with(".yaml");
+    let files = super::memory::read_sources(project, &names, ".github/workflows", &workflow, 16)?;
+    let workflows = files.iter().filter(|(path, _)| path.starts_with(".github/"));
+    let text = |name: &str| files.iter().find(|(path, _)| path == name).map(|(_, text)| text.as_str());
+    let (mut facts, scripts) = manifest_facts(&files);
     facts.instructions = INSTRUCTIONS.into_iter().filter(|name| text(name).is_some()).collect();
     for name in &facts.instructions {
         push_unique(&mut facts.checks, proof_commands(text(name).unwrap_or_default()));

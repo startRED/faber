@@ -143,6 +143,12 @@ impl Core {
         request: &str,
         cwd: &Path,
     ) -> (crate::tools::Delivery, crate::tools::kits::Report) {
+        let deferred = area == Area::Project;
+        #[cfg(test)]
+        let deferred = deferred && !self.synchronous_kit_checks;
+        if deferred {
+            return Default::default();
+        }
         let disabled = self.project_disabled_servers(project_id);
         let store = self.catalog_store();
         // Chat consumes bounded instructions directly; it never discovers files through a plugin.
@@ -244,7 +250,7 @@ impl Core {
                 raw.1.error = check.ready.as_ref().and_then(|(_, report)| report.error.clone());
             }
         }
-        if raw.0.lease.is_none() && raw.0.servers.is_empty() {
+        if area != Area::Project && raw.0.lease.is_none() && raw.0.servers.is_empty() {
             self.kit_checks.remove(name);
             return Ok(raw);
         }
@@ -291,6 +297,14 @@ impl Core {
                     let _ = started.send(());
                     gate.wait();
                 }
+                // Project selection reads bounded manifest facts only here, never under Core's lock.
+                let raw = if key.area == Area::Project {
+                    let mut selected = store.kit_for(key.vendor, &key.request, Some(&key.cwd), key.area, key.permissions, &key.disabled);
+                    selected.0.guide = raw.0.guide;
+                    selected
+                } else {
+                    raw
+                };
                 let checked = verify_kit(store, key, raw);
                 #[cfg(test)]
                 if let Some((_, _, finished)) = hook {

@@ -686,6 +686,89 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn project_facts_current_working_copy_selects_kit_before_first_spawn() {
+        let dir = crate::workspace::TestRoot::new();
+        let original = tempfile::tempdir().unwrap();
+        let working = tempfile::tempdir().unwrap();
+        std::fs::write(original.path().join("package.json"), r#"{"dependencies":{"expo":"1"}}"#).unwrap();
+        std::fs::write(working.path().join("package.json"), r#"{"dependencies":{"stripe":"1"}}"#).unwrap();
+        let folder = working.path().canonicalize().unwrap();
+        let (spawn, args, messages) = fake();
+        let engine = engine(&dir, spawn);
+        let project = engine.add_project(&original.path().to_string_lossy()).unwrap();
+        engine.with(|core| {
+            core.catalog_store = Some(catalog_items(dir.path(), "", &[("stripe-best-practices", "payments"), ("debug", "debugging")]));
+            conversation(core, Area::Project, Some(&project.id), &folder, "Fix the checkout payment bug");
+            core.convs.get_mut("kit").unwrap().copy = Some(crate::project::copy::WorkCopy {
+                path: folder.to_string_lossy().into_owned(),
+                branch: "fixture".into(),
+                root: original.path().to_string_lossy().into_owned(),
+                sub: String::new(),
+                base: None,
+            });
+            core.synchronous_kit_checks = false;
+            core.rewind.captured_for_test("reply");
+            core.start("kit", "reply", &pick(Vendor::Codex), "FACTS_KIT_TURN".into(), vec![], true).unwrap();
+            assert!(!core.live.contains_key("kit"));
+        });
+        assert!(args.lock().unwrap().is_empty(), "selection must finish before spawning the session");
+        input_with(&messages, "FACTS_KIT_TURN").await;
+        engine.with(|core| {
+            assert!(
+                core.live["kit"].tool_kit.ids.contains(&"stripe-best-practices".into()),
+                "the actual working copy supplies dependency evidence on the first launch"
+            );
+            assert!(core.live["kit"].tool_kit.ids.contains(&"debug".into()), "unconstrained matching resources remain eligible");
+            assert!(core.kit_checks.is_empty());
+        });
+        engine.shutdown();
+    }
+
+    #[tokio::test]
+    async fn project_facts_empty_kit_still_selects_outside_the_core_lock() {
+        let dir = crate::workspace::TestRoot::new();
+        let folder = dir.path().canonicalize().unwrap();
+        let (spawn, _, _) = fake();
+        let engine = engine(&dir, spawn);
+        let project = engine.add_project(&folder.to_string_lossy()).unwrap();
+        engine.with(|core| {
+            conversation(core, Area::Project, Some(&project.id), &folder, "What is two plus two?");
+            core.catalog_store = Some(ToolStore::with_catalog(&folder, vec![]));
+            core.synchronous_kit_checks = false;
+            let result = core.checked_session_tools("kit", Vendor::Codex, Permissions::FullAccess, &folder);
+            assert!(
+                matches!(result, Err(ref error) if error == mcp_servers::CHECK_PENDING),
+                "even an empty selection needs the off-lock project facts check"
+            );
+        });
+        engine.shutdown();
+    }
+
+    #[tokio::test]
+    async fn project_facts_leave_chat_warming_unchanged() {
+        let dir = crate::workspace::TestRoot::new();
+        let folder = dir.path().canonicalize().unwrap();
+        let (spawn, args, messages) = fake();
+        let engine = engine(&dir, spawn);
+        let sid = engine.with(|core| {
+            conversation(core, Area::Chat, None, &folder, "Debug this failure");
+            core.convs.get_mut("kit").unwrap().working_folder = None;
+            core.warm_launch("kit", &pick(Vendor::Claude));
+            assert!(core.live["kit"].prepared);
+            core.live["kit"].sid
+        });
+        engine.with(|core| {
+            core.synchronous_kit_checks = false;
+            core.rewind.captured_for_test("reply");
+            core.start("kit", "reply", &pick(Vendor::Claude), "FACTS_WARM_TURN".into(), vec![], true).unwrap();
+        });
+        input_with(&messages, "FACTS_WARM_TURN").await;
+        engine.with(|core| assert_eq!(core.live["kit"].sid, sid, "Chat still reuses its prepared process"));
+        assert_eq!(args.lock().unwrap().len(), 1);
+        engine.shutdown();
+    }
+
+    #[tokio::test]
     async fn production_launch_check_cancels_stopped_turns_and_rejects_tampering_before_spawn() {
         for change in ["stop", "tamper", "switch"] {
             let dir = crate::workspace::TestRoot::new();

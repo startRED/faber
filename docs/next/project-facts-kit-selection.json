@@ -1,0 +1,11 @@
+{
+  "notes": {
+    "better": {
+      "en": "Project tools also match the dependencies your project declares.",
+      "pt-BR": "As ferramentas do projeto também consideram as dependências declaradas nele.",
+      "es": "Las herramientas del proyecto también tienen en cuenta sus dependencias declaradas.",
+      "fr": "Les outils du projet tiennent aussi compte des dépendances qu’il déclare.",
+      "de": "Die Werkzeuge für ein Projekt berücksichtigen auch seine angegebenen Abhängigkeiten."
+    }
+  }
+}

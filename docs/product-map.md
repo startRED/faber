@@ -549,6 +549,14 @@ spare router or process is added. A kit stays fixed during its turn; a helper ch
 CLI subagents inherit their session's capabilities. The kit a conversation has now, with each item's job group, is listed in
 the Context meter's panel (above) in both areas; the work log keeps its quiet line only where a session changed kit.
 
+Project session boundaries collect stack evidence from the actual working folder's bounded, held-handle
+`package.json` and `Cargo.toml` reads. Only known names in structured dependency maps add stack tags;
+descriptions, instruction prose and workflow bodies never do. The existing launch-check worker prepares,
+selects and verifies the kit outside the conversation lock, including an empty selection and project helpers.
+Chat keeps its ready-only path. Ready picks and shortlists share the same stack evidence; an edit is read again
+at the next session boundary. The `project_facts_` regressions cover dependency evidence and prose refusal,
+working-copy first launch, empty catalogs and Chat prepared-session reuse.
+
 Codex preserves native context when skills change, including trusted content updates, unrelated catalog switches and
 terminal/pre-update sessions with no kit metadata. Projects also receives a bounded lazy index of every enabled skill,
 including instruction bodies too large for the selected kit. Chat skips oversized bodies and takes the next matching
