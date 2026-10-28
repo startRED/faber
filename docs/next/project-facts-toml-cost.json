@@ -1,0 +1,11 @@
+{
+  "notes": {
+    "better": {
+      "en": "Project tools use less memory when a project file contains long lists of whole numbers.",
+      "pt-BR": "As ferramentas do projeto usam menos memória quando um arquivo do projeto tem listas longas de números inteiros.",
+      "es": "Las herramientas del proyecto usan menos memoria cuando un archivo del proyecto contiene listas largas de números enteros.",
+      "fr": "Les outils du projet utilisent moins de mémoire lorsqu’un fichier du projet contient de longues listes de nombres entiers.",
+      "de": "Projektwerkzeuge brauchen weniger Arbeitsspeicher, wenn eine Projektdatei lange Listen ganzer Zahlen enthält."
+    }
+  }
+}

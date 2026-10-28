@@ -4,11 +4,13 @@
 
 use faber_engine::project::{memory::MAX_BYTES, rules};
 use std::path::Path;
-use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Arc, Mutex};
 use std::thread::JoinHandle;
 use std::time::{Duration, Instant};
 use sysinfo::{Pid, ProcessRefreshKind, ProcessesToUpdate, System};
+
+static MEASUREMENT: Mutex<()> = Mutex::new(());
 
 fn usage(system: &mut System) -> (u64, u64) {
     let pid = Pid::from_u32(std::process::id());
@@ -78,11 +80,13 @@ fn measure(folder: &Path, label: &str) -> u64 {
         times[1..].iter().copied().fold(0.0, f64::max),
         cpu_after.saturating_sub(cpu_before),
     );
+    assert!(times.iter().all(|time| *time <= 20.0), "the measured reader exceeded 20 ms: {times:?}");
     growth
 }
 
 #[test]
 fn project_facts_cost_rejects_observed_growth_above_two_mib() {
+    let _measurement = MEASUREMENT.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
     let folder = tempfile::tempdir().unwrap();
     let prefix = r#"{"dependencies":{"stripe":"1"},"description":"fixture","data":["#;
     let suffix = "]}";
@@ -102,5 +106,26 @@ fn project_facts_cost_rejects_observed_growth_above_two_mib() {
     assert!(rules::facts(empty.path()).unwrap().stacks.is_empty());
     let _control_growth = measure(control.path(), "minimal_control");
     let growth = measure(folder.path(), "max_unknown_array");
+    assert!(growth <= 2 * 1024 * 1024, "the observed peak already exceeds 2 MiB: {growth} bytes");
+}
+
+#[test]
+fn project_facts_toml_cost_rejects_observed_growth_above_two_mib() {
+    let _measurement = MEASUREMENT.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+    let folder = tempfile::tempdir().unwrap();
+    let prefix = "data=[";
+    let suffix = "]\n[dependencies]\nbevy='0.17'\n";
+    let count = (MAX_BYTES - prefix.len() - suffix.len()) / 2;
+    let mut manifest = format!("{prefix}{}1{suffix}", "1,".repeat(count - 1));
+    manifest.extend(std::iter::repeat_n(' ', MAX_BYTES - manifest.len()));
+    assert_eq!(manifest.len(), MAX_BYTES);
+    std::fs::write(folder.path().join("Cargo.toml"), manifest).unwrap();
+    let package = r#"{"dependencies":{"stripe":"1"},"description":"fixture"}"#;
+    std::fs::write(folder.path().join("package.json"), package).unwrap();
+    let control = tempfile::tempdir().unwrap();
+    std::fs::write(control.path().join("Cargo.toml"), "data=[]\n[dependencies]\nbevy='0.17'\n").unwrap();
+    std::fs::write(control.path().join("package.json"), package).unwrap();
+    let _control_growth = measure(control.path(), "toml_minimal_control");
+    let growth = measure(folder.path(), "toml_max_unknown_array");
     assert!(growth <= 2 * 1024 * 1024, "the observed peak already exceeds 2 MiB: {growth} bytes");
 }

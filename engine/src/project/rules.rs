@@ -324,6 +324,89 @@ fn package_names(raw: Option<&RawValue>, dependencies: bool) -> std::collections
     serde_json::Deserializer::from_str(raw.get()).deserialize_map(Names(dependencies)).unwrap_or_default()
 }
 
+// Facts never inspect array elements. Keep one integer so table/declaration validation still sees an array value.
+// shortcut: only flat decimal-integer arrays are compacted; other values keep the official parser's full validation.
+fn integer_array(content: &str, start: usize) -> Option<(usize, std::ops::Range<usize>)> {
+    let bytes = content.as_bytes();
+    let mut at = start;
+    let mut first = start..start;
+    let mut count = 0;
+    let mut expect_value = true;
+    loop {
+        match *bytes.get(at)? {
+            b' ' | b'\t' | b'\n' => at += 1,
+            b'\r' if bytes.get(at + 1) == Some(&b'\n') => at += 2,
+            b'#' => {
+                at += 1;
+                while let Some(&byte) = bytes.get(at) {
+                    if byte == b'\r' || byte == b'\n' {
+                        break;
+                    }
+                    if byte < b' ' && byte != b'\t' || byte == 0x7f {
+                        return None;
+                    }
+                    at += 1;
+                }
+            }
+            b']' => return (count > 1).then_some((at, first)),
+            b',' if !expect_value => {
+                at += 1;
+                expect_value = true;
+            }
+            byte if expect_value && (byte.is_ascii_digit() || byte == b'+' || byte == b'-') => {
+                let begin = at;
+                if byte == b'+' || byte == b'-' {
+                    at += 1;
+                }
+                let digits = at;
+                while bytes.get(at).is_some_and(u8::is_ascii_digit) {
+                    at += 1;
+                }
+                if at == digits || at - digits > 1 && bytes[digits] == b'0' || content[begin..at].parse::<i64>().is_err() {
+                    return None;
+                }
+                count += 1;
+                if count == 1 {
+                    first = begin..at;
+                }
+                expect_value = false;
+            }
+            _ => return None,
+        }
+    }
+}
+
+fn compact_integer_arrays(content: &str) -> std::borrow::Cow<'_, str> {
+    use toml_parser::lexer::TokenKind as K;
+    let mut offset = 0;
+    let mut tokens = toml_parser::Source::new(content).lex();
+    let mut after_equals = false;
+    let mut copied = 0;
+    let mut out = String::new();
+    while let Some(token) = tokens.next() {
+        match token.kind() {
+            K::Whitespace | K::Comment | K::Newline => continue,
+            K::LeftSquareBracket if after_equals => {
+                let start = offset + token.span().end();
+                if let Some((end, first)) = integer_array(content, start) {
+                    out.push_str(&content[copied..start]);
+                    out.push_str(&content[first]);
+                    copied = end;
+                    offset = end;
+                    tokens = toml_parser::Source::new(&content[offset..]).lex();
+                }
+            }
+            _ => {}
+        }
+        after_equals = token.kind() == K::Equals;
+    }
+    if copied == 0 {
+        std::borrow::Cow::Borrowed(content)
+    } else {
+        out.push_str(&content[copied..]);
+        std::borrow::Cow::Owned(out)
+    }
+}
 fn manifest_facts(files: &[(String, String)]) -> (Facts, Vec<String>) {
     let text = |name: &str| files.iter().find(|(path, _)| path == name).map(|(_, text)| text.as_str());
     let mut facts = Facts::default();
@@ -350,7 +433,7 @@ fn manifest_facts(files: &[(String, String)]) -> (Facts, Vec<String>) {
                 scripts.extend(package_names(fields.0[1], false).into_keys().map(|name| format!("npm run {name}")));
                 fields.0[0].and_then(|raw| serde_json::from_str::<String>(raw.get()).ok())
             }),
-            "Cargo.toml" => toml::from_str::<toml::Value>(content).ok().map(|t| {
+            "Cargo.toml" => toml::from_str::<toml::Value>(&compact_integer_arrays(content)).ok().map(|t| {
                 for group in ["dependencies", "dev-dependencies", "build-dependencies"] {
                     if let Some(dependencies) = t.get(group).and_then(toml::Value::as_table) {
                         for (name, value) in dependencies {
@@ -366,7 +449,7 @@ fn manifest_facts(files: &[(String, String)]) -> (Facts, Vec<String>) {
                 }
                 t.get("package").and_then(|p| p.get("description")).and_then(|d| d.as_str()).map(String::from)
             }),
-            "pyproject.toml" => toml::from_str::<toml::Value>(content)
+            "pyproject.toml" => toml::from_str::<toml::Value>(&compact_integer_arrays(content))
                 .ok()
                 .map(|t| t.get("project").and_then(|p| p.get("description")).and_then(|d| d.as_str()).map(String::from)),
             _ => None,
@@ -523,10 +606,80 @@ mod tests {
         assert_eq!(scripts, ["npm run build", "npm run test"]);
     }
 
+    #[test]
+    fn rules_integer_array_reduction_preserves_multiple_fields_and_inline_tables() {
+        for prefix in [
+            "x=[1,2]\ny=[3,4]\n",
+            "x=[1,2.5]\ny=[3,4]\n",
+            "x=[[1,2],[3,4]]\ny=[5,6]\n",
+            "x={a=[1,2], b=[3,4]}\ny=[5,6]\n",
+            "x={a=[1,2], a=[3,4]}\ny=[5,6]\n",
+            "x={a=[1,2]}\nx.b=3\ny=[5,6]\n",
+            "x=[1,2]\nx=[3,4]\ny=[5,6]\n",
+            "'x.y'=[1,2]\nx.y=[3,4]\n",
+            "x=[1,2] # \u{1}\ny=[3,4]\n",
+            "x=[1,2]\ny=[3,4] trailing\n",
+            "x=[1,2]\ny=[3,4]\n[[x]]\n",
+            "x='''[1,2]\n[3,4]'''\ny=[5,6]\n",
+        ] {
+            let source = format!("{prefix}[dependencies]\nbevy='0.17'\n[package]\ndescription='fixture'\n");
+            let expected = toml::from_str::<toml::Value>(&source).is_ok();
+            let compact = compact_integer_arrays(&source);
+            assert_eq!(toml::from_str::<toml::Value>(&compact).is_ok(), expected, "{source:?} -> {compact:?}");
+            let (facts, _) = manifest_facts(&[("Cargo.toml".into(), source)]);
+            assert_eq!(facts.stacks.contains(&"bevy"), expected);
+            assert_eq!(facts.description.as_deref(), expected.then_some("fixture"));
+        }
+    }
     fn write(dir: &Path, name: &str, text: &str) {
         let path = dir.join(name);
         std::fs::create_dir_all(path.parent().unwrap()).unwrap();
         std::fs::write(path, text).unwrap();
+    }
+
+    #[test]
+    fn rules_compact_integer_arrays_without_accepting_invalid_toml() {
+        let arrays = [
+            "[1,2,3]",
+            "[+1,-2,0,]",
+            "[1, # valid comment\n2]",
+            "[1,\r\n2]",
+            "[]",
+            "[1]",
+            "[1 2]",
+            "[1,,2]",
+            "[1,2",
+            "[01,2]",
+            "[1,9223372036854775808]",
+            "[1,-9223372036854775809]",
+            "[2026-99-99,2]",
+            "[25:90:90,2]",
+            "[1.0,2.0]",
+            "[1, # invalid \u{7f}\n2]",
+            "[1, # invalid \u{1}\n2]",
+            "[1,\r2]",
+            "[1,\"unterminated]",
+            "[\"literal [1,2]\",2]",
+            "[{a=1,a=2},2]",
+            "[[1,2],[3,4]]",
+        ];
+        for array in arrays {
+            for suffix in ["", "\nx=3", "\nx=4", "\n[x]", "\n[[x]]", "\nx.y=2"] {
+                let source = format!("x={array}{suffix}\n[dependencies]\nbevy='0.17'\n[package]\ndescription='fixture'\n");
+                let original = toml::from_str::<toml::Value>(&source);
+                let compact = compact_integer_arrays(&source);
+                let reduced = toml::from_str::<toml::Value>(&compact);
+                assert_eq!(original.is_ok(), reduced.is_ok(), "{source:?} -> {compact:?}");
+                if original.is_ok() {
+                    let (facts, _) = manifest_facts(&[("Cargo.toml".into(), source)]);
+                    assert_eq!(facts.stacks, ["bevy"]);
+                    assert_eq!(facts.description.as_deref(), Some("fixture"));
+                }
+            }
+        }
+        assert_eq!(compact_integer_arrays("x=[1,2,3]"), "x=[1]");
+        assert_eq!(compact_integer_arrays("x='[1,2,3]'"), "x='[1,2,3]'");
+        assert_eq!(compact_integer_arrays("[package]\ndescription='[1,2,3]'"), "[package]\ndescription='[1,2,3]'");
     }
 
     #[test]
