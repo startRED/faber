@@ -2191,6 +2191,7 @@ export const de: Messages = {
   'notes.281.fixed': 'Der Projektspeicher lässt Geminis private Dateien beim Lesen und Bearbeiten aus.',
   'notes.282.fixed': 'Wenn eine andere KI unterbrochene Arbeit übernimmt, erhält sie den gespeicherten Auftrag der noch nicht fertigen Helfer.',
   'notes.283.fixed': 'Der Bericht eines Helfers, der nicht zugestellt werden konnte, solange keine KI verfügbar war, geht jetzt von selbst raus, sobald eine zurück ist.',
+  'notes.284.better': 'Auf Mac und Linux warten Helfer und Arbeit, die von selbst weiterläuft, jetzt, wenn der Arbeitsspeicher knapp ist, wie unter Windows, statt trotzdem zu starten.',
   'update.checking': 'Suche nach einem Update…',
   'update.downloading': 'Update wird heruntergeladen…',
   'update.downloadingPercent': 'Update wird heruntergeladen… {percent} %',

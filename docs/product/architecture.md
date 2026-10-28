@@ -50,7 +50,9 @@ Engine (Rust crate inside the app today; a separate process later, so work survi
   Shared processes count once, including their root and owned children, and Stop cancels queued starts. Active work
   is never killed. This is admission headroom, not a hard cap on later process growth or native CLI subagent starts.
   Internal text-comparison judges retain their separate bounded concurrency and do not wait on this admission queue.
-  Unix still uses the existing worker-count limits; native identity-safe memory sampling there remains unfinished.
+  The app measures the same way on macOS and Linux, from each owned process's resident bytes read between two checks of
+  its creation time; resident bytes may count a shared page once per process, so the reading errs high. Other Unix
+  systems keep the worker-count limits.
 - **Languages.** English, Portuguese (Brazil), Spanish, French and German from the start, following the system
   language unless the user picks one in Settings. Every text is written by hand, never machine-translated; a new
   language needs a native speaker to review it.

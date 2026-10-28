@@ -1384,6 +1384,12 @@ impl Engine {
     }
     /// Takes up the conversations "keep going" was on in when Faber last closed, once the shell has its CLIs and accounts: each
     /// goes on after a short wait, or when its saved wait ends. Call it once at start.
+    /// Makes new automatic work on macOS and Linux wait for measured memory too, as on Windows: the app calls it once at
+    /// start. Without it (tests, other systems) only the worker-count limits apply there.
+    pub fn measure_unix_worker_memory(&self) {
+        self.with(|c| c.worker_memory.native_unix = cfg!(any(target_os = "macos", target_os = "linux")));
+    }
+
     pub fn resume_keep_going(&self) {
         self.with(|c| c.resume_keep_going())
     }

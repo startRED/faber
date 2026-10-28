@@ -621,7 +621,7 @@ impl OwnedTree {
     }
 
     /// Confirm the whole owned container is empty without sending any termination signal.
-    #[cfg(any(windows, test))]
+    #[cfg(any(windows, target_os = "macos", target_os = "linux", test))]
     pub(crate) fn confirm_empty(&self) -> io::Result<bool> {
         #[cfg(unix)]
         if !self.tree.external_descendants()?.is_empty() {

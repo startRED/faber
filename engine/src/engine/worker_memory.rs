@@ -21,6 +21,9 @@ pub(super) struct State {
     checking: bool,
     permitted: Option<String>,
     pub(super) admitted: HashMap<String, String>,
+    /// The app measures its CLI trees on macOS and Linux too (`Engine::measure_unix_worker_memory`). Tests and other
+    /// Unix systems keep the worker-count limits alone.
+    pub(super) native_unix: bool,
     #[cfg(test)]
     pub(super) probe: Option<Arc<dyn Fn() -> std::io::Result<Snapshot> + Send + Sync>>,
 }
@@ -30,9 +33,13 @@ impl Core {
         format!("{id}:{reply}")
     }
 
+    /// Whether new automatic work waits for measured memory: on Windows, and on macOS and Linux once the app said so.
+    fn memory_gated(&self) -> bool {
+        self.opts.windows || self.worker_memory.native_unix
+    }
+
     pub(super) fn worker_ready(&mut self, key: &str) -> bool {
-        // shortcut: Unix keeps the existing worker-count limits until exact native memory samples are supported.
-        if !self.opts.windows {
+        if !self.memory_gated() {
             return true;
         }
         if self.worker_memory.permitted.as_deref() == Some(key) {
@@ -43,7 +50,7 @@ impl Core {
     }
 
     pub(super) fn worker_admitted(&mut self, key: &str, owner: &str) -> bool {
-        if !self.opts.windows || self.worker_memory.admitted.contains_key(key) {
+        if !self.memory_gated() || self.worker_memory.admitted.contains_key(key) {
             return true;
         }
         if self.worker_ready(key) {
@@ -145,7 +152,7 @@ impl Core {
             return false;
         }
         let turn = Self::turn_admission_key(id, reply);
-        if !self.opts.windows || self.worker_memory.admitted.contains_key(&turn) {
+        if !self.memory_gated() || self.worker_memory.admitted.contains_key(&turn) {
             return false;
         }
         if self.worker_ready(id) {
@@ -175,6 +182,22 @@ mod tests {
     use super::super::answer::tests::{engine, seed};
     use super::*;
     use std::sync::atomic::{AtomicBool, Ordering};
+
+    #[tokio::test]
+    async fn worker_memory_unix_requires_matching_single_use_permit_once_the_app_measures_it() {
+        let dir = tempfile::tempdir().unwrap();
+        let (app, _) = engine(dir.path());
+        app.with(|core| {
+            assert!(core.worker_ready("first"), "without the app's switch only the worker-count limits apply");
+            core.worker_memory.native_unix = true;
+            assert!(!core.worker_ready("first"));
+            core.worker_memory.permitted = Some("first".into());
+            assert!(!core.worker_ready("other"));
+            assert!(core.worker_ready("first"));
+            assert!(!core.worker_ready("first"), "a permit is used once");
+        });
+        app.shutdown();
+    }
 
     async fn observed(mut receive: tokio::sync::mpsc::UnboundedReceiver<String>, expected: &[&str]) {
         for expected in expected {

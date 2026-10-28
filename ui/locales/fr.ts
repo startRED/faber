@@ -2191,6 +2191,7 @@ export const fr: Messages = {
   'notes.281.fixed': 'La mémoire du projet exclut les fichiers privés de Gemini de la lecture et de la modification.',
   'notes.282.fixed': 'Quand une autre IA reprend un travail interrompu, elle reçoit la consigne enregistrée des assistants encore au travail.',
   'notes.283.fixed': "Le rapport d'un assistant qui n'a pas pu être remis faute d'IA disponible part maintenant tout seul dès qu'une revient.",
+  'notes.284.better': 'Sur Mac et Linux, les assistants et le travail qui continue seul attendent maintenant quand la mémoire de l’ordinateur manque, comme sur Windows, au lieu de démarrer quand même.',
   'update.checking': 'Recherche d’une mise à jour…',
   'update.downloading': 'Téléchargement de la mise à jour…',
   'update.downloadingPercent': 'Téléchargement de la mise à jour… {percent} %',

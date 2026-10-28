@@ -2028,6 +2028,7 @@ fn main() {
                 ask: None,
             };
             let engine = Engine::new(opts, emit);
+            engine.measure_unix_worker_memory();
             if let Some(dir) = installed_data_dir(hidden) {
                 engine.set_installed_data(dir);
             }

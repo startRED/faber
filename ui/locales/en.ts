@@ -2071,6 +2071,7 @@ export const en = {
   'notes.281.fixed': "Project memory keeps Gemini's private files out of reads and edits.",
   'notes.282.fixed': 'When another AI takes over interrupted work, it keeps the recorded request given to unfinished helpers.',
   'notes.283.fixed': "A helper's report that could not be delivered while no AI was available now goes out by itself once one is back.",
+  'notes.284.better': "On Mac and Linux, helpers and work that goes on by itself now wait when your computer's memory is short, as on Windows, instead of starting anyway.",
   'update.checking': 'Looking for an update…',
   'update.downloading': 'Downloading update…',
   'update.downloadingPercent': 'Downloading update… {percent}%',
