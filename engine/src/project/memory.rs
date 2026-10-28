@@ -630,6 +630,19 @@ pub(super) fn read_sources(
     Ok(out)
 }
 
+/// Hashes a bounded generated file through no-follow handles. Unsafe or missing output is never a cache hit.
+pub(super) fn faber_file_hash(project: &Path, name: &str) -> Result<String, &'static str> {
+    let protected = resolved_private(&private_roots());
+    let (_, project_dir) = project_directory(project, &protected)?;
+    let dir = project_dir.under(Path::new(".faber")).map_err(|_| REFUSED)?;
+    let mut bytes = Vec::new();
+    dir.file(name).map_err(|_| REFUSED)?.take(MAX_BYTES as u64 + 1).read_to_end(&mut bytes).map_err(|_| READ)?;
+    if bytes.len() > MAX_BYTES {
+        return Err(READ);
+    }
+    Ok(revision(&bytes))
+}
+
 /// Writes `.faber/<name>` in the project when its bytes differ, creating the folder and the file if needed, through the
 /// same no-follow handles and atomic replacement as an edit: a link planted in place of either is refused, never followed.
 /// Returns whether it wrote.

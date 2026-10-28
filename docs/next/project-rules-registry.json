@@ -1,0 +1,11 @@
+{
+  "notes": {
+    "better": {
+      "en": "Project rules now track their sources and skip rebuilding when the sources and generated file are unchanged.",
+      "pt-BR": "As regras do projeto agora acompanham suas fontes e evitam ser reconstruídas quando as fontes e o arquivo gerado continuam iguais.",
+      "es": "Las reglas del proyecto ahora registran sus fuentes y evitan reconstruirse cuando las fuentes y el archivo generado siguen iguales.",
+      "fr": "Les règles du projet suivent désormais leurs sources et ne sont pas reconstruites si les sources et le fichier généré restent identiques.",
+      "de": "Projektregeln erfassen jetzt ihre Quellen und werden bei unveränderten Quellen und unveränderter erzeugter Datei nicht neu aufgebaut."
+    }
+  }
+}

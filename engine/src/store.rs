@@ -135,6 +135,7 @@ pub struct Store {
     settings: PathBuf,
     recents: PathBuf,
     decisions_kept: PathBuf,
+    rules_sources: PathBuf,
     adoptions: PathBuf,
     budget: PathBuf,
     auto_learned: PathBuf,
@@ -191,6 +192,7 @@ impl Store {
             settings: data_dir.join("settings.json"),
             recents: data_dir.join("recents.json"),
             decisions_kept: data_dir.join("decisions-kept.json"),
+            rules_sources: data_dir.join("rules-sources.json"),
             adoptions: data_dir.join("faber-trust/adoptions.json"),
             budget: data_dir.join("budget.json"),
             auto_learned: data_dir.join("auto-learned.json"),
@@ -592,6 +594,17 @@ impl Store {
         self.write(&self.recents, recents)
     }
 
+    /// Called under the engine lock. Damaged derived records rebuild without touching approval records.
+    pub(crate) fn refresh_rules(&self, project: &str, folder: &Path) -> Result<(), &'static str> {
+        let mut all: BTreeMap<String, crate::project::rules::Record> = read(&self.rules_sources).unwrap_or_default();
+        let record = crate::project::rules::refresh_cached(folder, all.get(project))?;
+        if all.get(project) != Some(&record) {
+            all.insert(project.into(), record);
+            self.write(&self.rules_sources, &all).map_err(|e| e.key())?;
+        }
+        Ok(())
+    }
+
     fn adoptions_checked(&self) -> Result<Adoptions, Fault> {
         let all: Adoptions = read_checked(&self.adoptions)?.unwrap_or_default();
         if all.iter().any(|(id, kinds)| {
@@ -740,6 +753,129 @@ impl Store {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn rules_registry_preserves_other_projects_approvals_and_refuses_unsafe_output() {
+        let data = tempfile::tempdir().unwrap();
+        let first = tempfile::tempdir().unwrap();
+        let second = tempfile::tempdir().unwrap();
+        let other = tempfile::tempdir().unwrap();
+        let store = Store::new(data.path());
+        fs::write(&store.decisions_kept, b"approval bytes must stay untouched").unwrap();
+        store.refresh_rules("first", first.path()).unwrap();
+        store.refresh_rules("second", second.path()).unwrap();
+        let before: serde_json::Value = read(&store.rules_sources).unwrap();
+        fs::remove_file(first.path().join(".faber/rules.md")).unwrap();
+        store.refresh_rules("first", first.path()).unwrap();
+        assert_eq!(read::<serde_json::Value>(&store.rules_sources).unwrap(), before);
+        fs::write(first.path().join("package.json"), r#"{"scripts":{"test":"vitest"}}"#).unwrap();
+        store.refresh_rules("first", first.path()).unwrap();
+        let current: serde_json::Value = read(&store.rules_sources).unwrap();
+        assert_eq!(current["second"], before["second"]);
+        let registered = fs::read(&store.rules_sources).unwrap();
+        fs::write(first.path().join(".faber/rules.md"), vec![b'x'; 256 * 1024 + 1]).unwrap();
+        assert!(store.refresh_rules("first", first.path()).is_err());
+        assert_eq!(fs::read(&store.rules_sources).unwrap(), registered);
+        fs::remove_file(first.path().join(".faber/rules.md")).unwrap();
+        store.refresh_rules("first", first.path()).unwrap();
+        let generated = fs::read(first.path().join(".faber/rules.md")).unwrap();
+        fs::write(other.path().join("rules.md"), &generated).unwrap();
+        fs::remove_file(first.path().join(".faber/rules.md")).unwrap();
+        fs::hard_link(other.path().join("rules.md"), first.path().join(".faber/rules.md")).unwrap();
+        assert!(store.refresh_rules("first", first.path()).is_err());
+        assert_eq!(fs::read(&store.rules_sources).unwrap(), registered);
+        assert_eq!(fs::read(other.path().join("rules.md")).unwrap(), generated);
+        fs::remove_file(first.path().join(".faber/rules.md")).unwrap();
+        store.refresh_rules("first", first.path()).unwrap();
+        fs::rename(first.path().join(".faber"), first.path().join("original")).unwrap();
+        #[cfg(windows)]
+        junction::create(other.path(), first.path().join(".faber")).unwrap();
+        #[cfg(unix)]
+        std::os::unix::fs::symlink(other.path(), first.path().join(".faber")).unwrap();
+        assert!(store.refresh_rules("first", first.path()).is_err());
+        assert_eq!(fs::read(&store.rules_sources).unwrap(), registered);
+        assert_eq!(fs::read(other.path().join("rules.md")).unwrap(), generated);
+        assert_eq!(fs::read(&store.decisions_kept).unwrap(), b"approval bytes must stay untouched");
+    }
+    #[test]
+    fn rules_registry_failed_save_keeps_previous_record_and_approvals() {
+        struct NoReplace;
+        impl Disk for NoReplace {
+            fn write(&self, path: &Path, bytes: &[u8]) -> io::Result<()> {
+                RealDisk.write(path, bytes)
+            }
+            fn rename(&self, _: &Path, _: &Path) -> io::Result<()> {
+                Err(io::ErrorKind::StorageFull.into())
+            }
+        }
+        let data = tempfile::tempdir().unwrap();
+        let project = tempfile::tempdir().unwrap();
+        let store = Store::new(data.path());
+        store.refresh_rules("project", project.path()).unwrap();
+        let before = fs::read(&store.rules_sources).unwrap();
+        fs::write(&store.decisions_kept, b"existing decisions").unwrap();
+        fs::write(project.path().join("package.json"), r#"{"scripts":{"test":"vitest"}}"#).unwrap();
+        let failing = Store::with_disk(data.path(), Arc::new(NoReplace));
+        assert_eq!(failing.refresh_rules("project", project.path()), Err("error.store.full"));
+        assert_eq!(fs::read(&store.rules_sources).unwrap(), before);
+        assert_eq!(fs::read(&store.decisions_kept).unwrap(), b"existing decisions");
+        store.refresh_rules("project", project.path()).unwrap();
+        assert_ne!(fs::read(&store.rules_sources).unwrap(), before);
+    }
+
+    #[test]
+    fn rules_registry_tracks_sources_repairs_planted_output_and_recovers_derived_records() {
+        let data = tempfile::tempdir().unwrap();
+        let project = tempfile::tempdir().unwrap();
+        let store = Store::new(data.path());
+        let manifest = project.path().join("package.json");
+        let rules = project.path().join(".faber/rules.md");
+        fs::write(&manifest, r#"{"scripts":{"test":"vitest"}}"#).unwrap();
+        store.refresh_rules("project", project.path()).unwrap();
+        let generated = fs::read(&rules).unwrap();
+        let registered = fs::read(&store.rules_sources).unwrap();
+        let rules_time = fs::metadata(&rules).unwrap().modified().unwrap();
+        let record_time = fs::metadata(&store.rules_sources).unwrap().modified().unwrap();
+        store.refresh_rules("project", project.path()).unwrap();
+        assert_eq!(fs::metadata(&rules).unwrap().modified().unwrap(), rules_time);
+        assert_eq!(fs::metadata(&store.rules_sources).unwrap().modified().unwrap(), record_time);
+
+        // Unchanged sources do not make a planted output trustworthy.
+        fs::write(&rules, "PLANTED_SYSTEM_AUTHORITY").unwrap();
+        store.refresh_rules("project", project.path()).unwrap();
+        assert_eq!(fs::read(&rules).unwrap(), generated);
+        assert_eq!(fs::read(&store.rules_sources).unwrap(), registered);
+
+        fs::write(&manifest, r#"{"scripts":{"lint":"eslint"}}"#).unwrap();
+        store.refresh_rules("project", project.path()).unwrap();
+        assert!(fs::read_to_string(&rules).unwrap().contains("npm run lint"));
+        assert_ne!(fs::read(&store.rules_sources).unwrap(), registered);
+        fs::write(project.path().join("tsconfig.json"), "{}").unwrap();
+        store.refresh_rules("project", project.path()).unwrap();
+        assert!(fs::read_to_string(&rules).unwrap().contains("TypeScript"));
+        fs::remove_file(&manifest).unwrap();
+        store.refresh_rules("project", project.path()).unwrap();
+        let current: serde_json::Value = read(&store.rules_sources).unwrap();
+        assert!(current["project"]["sources"].get("package.json").is_none());
+        assert!(!fs::read_to_string(&rules).unwrap().contains("npm run lint"));
+
+        let mut obsolete = current.clone();
+        obsolete["project"]["version"] = 0.into();
+        fs::write(&store.rules_sources, serde_json::to_vec(&obsolete).unwrap()).unwrap();
+        store.refresh_rules("project", project.path()).unwrap();
+        assert_eq!(read::<serde_json::Value>(&store.rules_sources).unwrap(), current);
+
+        for damaged in ["{", "{}", r#"{"project":{"version":0,"sources":{},"hash":"old"}}"#] {
+            fs::write(&store.rules_sources, damaged).unwrap();
+            fs::write(&rules, "PLANTED_AGAIN").unwrap();
+            store.refresh_rules("project", project.path()).unwrap();
+            assert_eq!(read::<serde_json::Value>(&store.rules_sources).unwrap(), current);
+            assert!(!fs::read_to_string(&rules).unwrap().contains("PLANTED"));
+        }
+        fs::remove_file(&store.rules_sources).unwrap();
+        store.refresh_rules("project", project.path()).unwrap();
+        assert_eq!(read::<serde_json::Value>(&store.rules_sources).unwrap(), current);
+    }
 
     #[test]
     fn adopted_task_approvals_survive_reopen_without_trusting_repository_records() {

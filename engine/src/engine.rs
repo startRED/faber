@@ -1733,7 +1733,7 @@ impl Core {
     fn refresh_rules(&self, id: &str) {
         let Some(c) = self.convs.get(id).filter(|c| c.area == Area::Project) else { return };
         if let Some(project) = self.store.projects().into_iter().find(|p| Some(&p.id) == c.project_id.as_ref()) {
-            let _ = crate::project::rules::refresh(Path::new(&project.path));
+            let _ = self.store.refresh_rules(&project.id, Path::new(&project.path));
         }
     }
 

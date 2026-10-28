@@ -4,7 +4,10 @@
 //! conversation and written only when it differs, so an edit by anyone else is replaced on the next turn.
 use serde::Deserializer as _;
 use serde::de::{MapAccess, SeqAccess, Visitor};
+use serde::{Deserialize, Serialize};
 use serde_json::value::RawValue;
+use sha2::{Digest, Sha256};
+use std::collections::BTreeMap;
 use std::path::Path;
 
 /// Each field's limits: a description line, a command, and how many commands and scripts a part lists.
@@ -562,12 +565,19 @@ pub(crate) fn kit_facts(project: &Path) -> Result<Facts, &'static str> {
 
 /// The facts of a project folder, from the files of `MANIFESTS`, `INSTRUCTIONS`, `tsconfig.json` and `.github/workflows`.
 pub fn facts(project: &Path) -> Result<Facts, &'static str> {
+    Ok(facts_from_sources(&sources(project)?))
+}
+
+fn sources(project: &Path) -> Result<Vec<(String, String)>, &'static str> {
     let names: Vec<&str> = MANIFESTS.iter().map(|(m, _)| *m).chain(INSTRUCTIONS).chain(["tsconfig.json"]).collect();
     let workflow = |name: &str| name.ends_with(".yml") || name.ends_with(".yaml");
-    let files = super::memory::read_sources(project, &names, ".github/workflows", &workflow, 16)?;
+    super::memory::read_sources(project, &names, ".github/workflows", &workflow, 16)
+}
+
+fn facts_from_sources(files: &[(String, String)]) -> Facts {
     let workflows = files.iter().filter(|(path, _)| path.starts_with(".github/"));
     let text = |name: &str| files.iter().find(|(path, _)| path == name).map(|(_, text)| text.as_str());
-    let (mut facts, scripts) = manifest_facts(&files);
+    let (mut facts, scripts) = manifest_facts(files);
     facts.instructions = INSTRUCTIONS.into_iter().filter(|name| text(name).is_some()).collect();
     for name in &facts.instructions {
         push_unique(&mut facts.checks, proof_commands(text(name).unwrap_or_default()));
@@ -585,7 +595,7 @@ pub fn facts(project: &Path) -> Result<Facts, &'static str> {
             facts.checks_from = (!facts.checks.is_empty()).then_some("scripts");
         }
     }
-    Ok(facts)
+    facts
 }
 
 /// Markdown items of backticked names or commands.
@@ -650,6 +660,34 @@ pub fn refresh(project: &Path) -> Result<Facts, &'static str> {
     let facts = facts(project)?;
     super::memory::write_faber_file(project, "rules.md", render(&facts).as_bytes())?;
     Ok(facts)
+}
+
+// Bump when source collection, interpretation or rendering changes.
+const RULES_VERSION: u32 = 1;
+
+/// Derived bookkeeping only; never an approval or a source of start-card text.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub(crate) struct Record {
+    version: u32,
+    sources: BTreeMap<String, String>,
+    hash: String,
+}
+
+fn hash(bytes: &[u8]) -> String {
+    Sha256::digest(bytes).iter().map(|b| format!("{b:02x}")).collect()
+}
+
+pub(crate) fn refresh_cached(project: &Path, previous: Option<&Record>) -> Result<Record, &'static str> {
+    let files = sources(project)?;
+    let sources = files.iter().map(|(name, text)| (name.clone(), hash(text.as_bytes()))).collect();
+    if let Some(record) = previous.filter(|r| r.version == RULES_VERSION && r.sources == sources)
+        && super::memory::faber_file_hash(project, "rules.md").is_ok_and(|current| current == record.hash)
+    {
+        return Ok(record.clone());
+    }
+    let text = render(&facts_from_sources(&files));
+    super::memory::write_faber_file(project, "rules.md", text.as_bytes())?;
+    Ok(Record { version: RULES_VERSION, sources, hash: hash(text.as_bytes()) })
 }
 
 #[cfg(test)]
