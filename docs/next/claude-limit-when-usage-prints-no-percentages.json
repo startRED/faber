@@ -1,0 +1,10 @@
+{
+  "notes": { "fixed": {
+    "en": "The Claude share in the sidebar and in Settings no longer sticks at an old number: it follows your real weekly use again.",
+    "pt-BR": "A porcentagem do Claude na barra lateral e em Ajustes não fica mais presa num número antigo: ela volta a acompanhar o seu uso real da semana.",
+    "es": "El porcentaje de Claude en la barra lateral y en Ajustes ya no se queda en un número viejo: vuelve a seguir tu uso real de la semana.",
+    "fr": "La part de Claude dans la barre latérale et dans Réglages ne reste plus bloquée sur un ancien chiffre : elle suit de nouveau votre usage réel de la semaine.",
+    "de": "Der Claude-Anteil in der Seitenleiste und in den Einstellungen bleibt nicht mehr auf einer alten Zahl hängen: Er folgt wieder deiner echten Wochennutzung."
+  } },
+  "decisions": ["| R-next | 2026-10-30 | Claude Code 2.1.307 and later (2.1.312 checked on 2026-10-30) print no percentages in `/usage`, and its stream report has none either, so the two readings that cost no model tokens gave nothing and the sidebar kept a day-old number. When `/usage` answers cleanly without windows, the same scheduled reading (every 15 minutes, 5 minutes apart at least) sends one tiny request instead: cheapest model, no tools, no skills, one turn, about 500 cached tokens (US$0.0001 at list price); its rate-limit event gives both windows exactly. It runs only for a login `/usage` says is on its subscription, never while extra usage runs, and only when a turn or probe of the last hour said extra usage is off, so a request past the limit is refused, not charged (with nothing known it waits for a real turn), with a US$0.005 budget. A probe that failed or cost over US$0.01 is no reading. Its windows are never stamped as zero-turn evidence for R131 and is not metered as Faber's own spend. | AI (Erick delegou) |"]
+}
