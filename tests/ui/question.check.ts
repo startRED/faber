@@ -644,3 +644,22 @@ for (const level of ['reduced', 'none'] as const) {
     }
   });
 }
+
+// A row marked "Needs you" for a stuck helper has no card to answer, so it says what is wrong and offers the way to act.
+check('running column: a stuck helper says so and opens its conversation', () => {
+  useLanguage('en');
+  const opened: string[] = [];
+  const row: RunningItem = { conversationId: 'c9', turnId: 't9', title: 'Refactor', area: 'chat', state: 'needsYou', since: 0, permissions: [], stuck: ['toolu_1'] };
+  const root = document.createElement('div');
+  document.body.append(root);
+  const dispose = render(() => createComponent(Running, { items: [row], projects: [], onOpen: (item) => opened.push(item.conversationId), onClose: () => {}, modal: false, ref: () => {} }), root);
+  try {
+    equal(root.querySelector('.ask.stuck b')!.textContent, 'A helper seems stuck');
+    ok(root.querySelector('.ask.stuck .note')!.textContent!.includes('guide the agent or stop it'));
+    root.querySelector<HTMLButtonElement>('.ask.stuck .btn')!.click();
+    deepEqual(opened, ['c9']);
+  } finally {
+    dispose();
+    root.remove();
+  }
+});

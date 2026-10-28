@@ -209,6 +209,18 @@ export function Running(props: {
                               <Show when={item().parked?.length || item().parkedMore}>
                                 <Parkeds parked={item().parked ?? []} more={item().parkedMore} seen={() => api.parkedSeen(item().conversationId, item().turnId)} />
                               </Show>
+                              {/* Amber only because a helper seems stuck: no card to answer, so it says so and opens the conversation. */}
+                              <Show when={item().stuck?.length}>
+                                <div class="ask stuck" role="status">
+                                  <b>{t('run.stuck', { n: item().stuck?.length ?? 0 })}</b>
+                                  <span class="note">{t('run.stuckHint')}</span>
+                                  <div>
+                                    <button class="btn primary" onClick={() => props.onOpen(item())}>
+                                      {t('run.stuckOpen')}
+                                    </button>
+                                  </div>
+                                </div>
+                              </Show>
                               <Show when={item().held}>{(held) => <p class="run-held">{t('run.held', { pr: `#${held()[0]}` })}</p>}</Show>
                             </li>
                           )}

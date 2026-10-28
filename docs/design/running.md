@@ -48,6 +48,9 @@ rest of the shell are in [layout.md](layout.md).
   the time since the turn started.
 - An item that needs the user shows the permission card, and the user can answer in place with Allow, Always or Deny.
   A question the agent asks (`AskUserQuestion`) shows instead as a question card, in the thread and in the column alike.
+  A row amber only because a helper seems stuck has no card to answer: it shows "A helper seems stuck", one line on
+  where to look and act, and "Open conversation". The stuck line of the helper itself, in the thread and in its view, adds
+  that it is still working and that the person can tell the agent to try another way or press Stop.
   The same card handles turning an installed catalog tool on or off: its title names that explicit action, and its separate Always choice applies only to catalog switches in this conversation. Its own paragraph says the change reaches new conversations; a running conversation keeps its existing tools. Consent buttons wrap their full labels within a 360 px column. Removal uses the same card with its own Always choice, tells the person Undo stays in Catalog until restart, and keeps current conversation tools. No new setting or motion.
   When the agent asks to install a tool from the catalog, the permission card is Faber’s own: a title ("Install <name> into Faber?"), the tool’s one-line purpose and one line with its kind, version, source repository and licence, always above the buttons (a tool server, or a plugin that brings one, adds a second calm line that it runs code on this PC), then "Allow once", "Always allow installs in this conversation" and Deny. Every word is the screen’s (the Catalog’s names and purposes); the agent writes none of them. It has the permission card’s look and motion, nothing new.
   Several questions are steps: a strip of their header words (a number, a tick once answered), one question open at a

@@ -393,6 +393,7 @@ check('subagent step: waiting for you, and a stuck subagent is amber with Look a
     ok(row().querySelector('.agent-now')?.textContent?.includes('load_config'));
     const line = root.querySelector('.agent-stuck')!;
     equal(line.querySelector('.agent-why')!.textContent, 'The same check failed three times with nothing changed.');
+    equal(line.querySelector('.agent-hint')!.textContent, 'It is still working. If it stays like this, tell the agent to try another way, or press Stop.', 'it says what to do, and that nothing stopped');
     const [look, tell] = [...line.querySelectorAll('button')];
     deepEqual([look!.textContent, tell!.textContent], ['Look', 'Tell it…']);
     look!.click();
