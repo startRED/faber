@@ -35,7 +35,8 @@ fn identity(parent: &MemoryDirectory, leaf: &str) -> io::Result<Option<String>> 
     }
 }
 
-/// The caller supplies existing parents, with Faber data protected from AI writes. This does not change engine paths yet.
+/// Both parents must exist; only the final data leaf may be created, exclusively, through its held parent.
+/// Failed setup may leave that empty leaf. The caller protects Faber data from AI writes; engine paths are unchanged.
 /// File flushing and an atomic rename cover process interruption, not a guarantee against power loss.
 pub fn relocate(data: &Path, workspace_parent: &Path, leaf: &str) -> io::Result<PathBuf> {
     relocate_staged(data, workspace_parent, leaf, |_| Ok(()))
@@ -51,8 +52,16 @@ fn relocate_staged(
     if !matches!(parts.next(), Some(Component::Normal(_))) || parts.next().is_some() || leaf.contains(['/', '\\', ':']) {
         return Err(refused());
     }
-    let data = MemoryDirectory::open(data, Path::new(""))?;
     let parent = MemoryDirectory::open(workspace_parent, Path::new(""))?;
+    let data = match MemoryDirectory::open(data, Path::new("")) {
+        Ok(data) => data,
+        Err(error) if error.kind() == io::ErrorKind::NotFound => {
+            let name = data.file_name().and_then(|name| name.to_str()).ok_or_else(refused)?;
+            let parent = MemoryDirectory::open(data.parent().ok_or_else(refused)?, Path::new(""))?;
+            parent.create_under(name)?
+        }
+        Err(error) => return Err(error),
+    };
     let protected = data.resolved_path()?;
     let destination = parent.resolved_path()?.join(leaf);
     if destination.starts_with(&protected) || protected.starts_with(&destination) {
@@ -136,6 +145,50 @@ mod tests {
         std::fs::create_dir(data.join("chat")).unwrap();
         std::fs::write(data.join("chat/answer.txt"), b"saved work").unwrap();
         (owned, data, work)
+    }
+
+    #[test]
+    fn chat_relocation_creates_a_fresh_data_leaf_through_its_existing_parent() {
+        let owned = tempfile::tempdir().unwrap();
+        let root = owned.path().canonicalize().unwrap();
+        let data = root.join("data");
+        let work = root.join("work");
+        std::fs::create_dir(&work).unwrap();
+        let destination = relocate(&data, &work, "private").unwrap();
+        assert_eq!(destination.file_name().unwrap(), "private");
+        assert!(destination.is_dir());
+        assert!(data.join(RECORD).is_file());
+        assert!(!data.join("chat").exists());
+        std::fs::write(destination.join("answer.txt"), b"retained across reopen").unwrap();
+        assert_eq!(relocate(&data, &work, "private").unwrap(), destination);
+        assert_eq!(std::fs::read(destination.join("answer.txt")).unwrap(), b"retained across reopen");
+    }
+
+    #[test]
+    fn chat_relocation_refuses_unsafe_fresh_data_paths_and_preserves_external_work() {
+        let owned = tempfile::tempdir().unwrap();
+        let root = owned.path().canonicalize().unwrap();
+        let work = root.join("work");
+        std::fs::create_dir(&work).unwrap();
+        std::fs::create_dir(work.join("private")).unwrap();
+        std::fs::write(work.join("private/answer.txt"), b"unrelated work").unwrap();
+        assert!(relocate(&root.join("data"), &work, "private").is_err());
+        assert!(!root.join("data").join(RECORD).exists());
+        assert_eq!(std::fs::read(work.join("private/answer.txt")).unwrap(), b"unrelated work");
+
+        let linked = root.join("linked");
+        std::os::windows::fs::symlink_dir(&work, &linked).unwrap();
+        assert!(relocate(&linked.join("data"), &work, "new-private").is_err());
+        assert!(relocate(&linked, &work, "new-private").is_err());
+        assert!(!work.join("data").exists());
+        assert!(relocate(&root.join("missing/data"), &work, "new-private").is_err());
+        assert!(!root.join("missing").exists());
+        assert!(relocate(Path::new("relative-data"), &work, "new-private").is_err());
+        assert!(!work.join("new-private").exists());
+        let same = root.join("MixedData");
+        std::fs::create_dir(&same).unwrap();
+        assert!(relocate(&same, &root, "mixeddata").is_err());
+        assert!(!same.join(RECORD).exists());
     }
 
     #[test]
