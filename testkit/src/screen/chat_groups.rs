@@ -103,6 +103,10 @@ fn create_and_chat(ctx: &mut Ctx) -> Result {
     })?;
     app.page.click(&css("[data-action=new-group-chat]"))?;
     app.page.wait_gone(&css(".chat-group-page"))?;
+    app.page.wait_for(
+        "the synthetic chat subscription",
+        "window.__TAURI_INTERNALS__.invoke('state').then(s=>s.usage?.some(u=>u.vendor==='claude' && !u.billingUnknown && !u.billedPerUse))",
+    )?;
     ask(&mut app.page, QUESTION)?;
     app.page.wait_visible(&css(".chat-groups .crow .item").has_text(QUESTION))?;
     let answer = app.page.named("article", "answer.label")?;

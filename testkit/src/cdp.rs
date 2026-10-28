@@ -1040,11 +1040,9 @@ mod tests {
         let port = listener.local_addr().unwrap().port();
         std::thread::spawn(move || {
             let mut held = Vec::new();
-            for stream in listener.incoming().flatten() {
-                let mut head = [0u8; 16];
-                let n = stream.peek(&mut head).unwrap();
-                if head[..n].starts_with(b"GET /json/list") {
-                    let mut stream = stream;
+            for mut stream in listener.incoming().flatten() {
+                let head = mock_prefix(&mut stream);
+                if &head == b"GET /json/list" {
                     let mut sink = [0u8; 1024];
                     let _ = stream.read(&mut sink);
                     let body =
@@ -1054,6 +1052,7 @@ mod tests {
                     continue;
                 }
                 std::thread::spawn(move || {
+                    let stream = MockStream { head: io::Cursor::new(head), stream };
                     let mut socket = tungstenite::accept(stream).unwrap();
                     // The focus call at connect gets its answer; every call after it gets only events, every 5 ms.
                     let Ok(Message::Text(_)) = socket.read() else { return };
@@ -1080,11 +1079,9 @@ mod tests {
         let port = listener.local_addr().unwrap().port();
         std::thread::spawn(move || {
             let mut held = Vec::new();
-            for stream in listener.incoming().flatten() {
-                let mut head = [0u8; 16];
-                let n = stream.peek(&mut head).unwrap();
-                if head[..n].starts_with(b"GET /json/list") {
-                    let mut stream = stream;
+            for mut stream in listener.incoming().flatten() {
+                let head = mock_prefix(&mut stream);
+                if &head == b"GET /json/list" {
                     let mut sink = [0u8; 1024];
                     let _ = stream.read(&mut sink);
                     let body =
@@ -1094,6 +1091,7 @@ mod tests {
                     continue;
                 }
                 std::thread::spawn(move || {
+                    let stream = MockStream { head: io::Cursor::new(head), stream };
                     let mut socket = tungstenite::accept(stream).unwrap();
                     let Ok(Message::Text(_)) = socket.read() else { return };
                     socket.send(Message::text(json!({ "id": 1, "result": {} }).to_string())).unwrap();
