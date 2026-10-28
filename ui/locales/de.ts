@@ -2188,6 +2188,7 @@ export const de: Messages = {
   'notes.278.better': 'Update bereit, neu starten geht jetzt mit einem Klick, auch wenn etwas läuft: Faber schließt sich, öffnet sich wieder und die Arbeit geht dort weiter, wo sie stand.',
   'notes.279.fixed': 'Faber behält nicht mehr jede geöffnete Unterhaltung im Speicher: Zwölf große Unterhaltungen nacheinander zu öffnen braucht jetzt höchstens 337 MB, vorher waren es schon bei der neunten über 400 MB.',
   'notes.280.fixed': 'Ein Helfer, der festzuhängen scheint, sagt jetzt, dass er weiterarbeitet und was du tun kannst, und seine Zeile unter „Braucht dich“ öffnet sein Gespräch.',
+  'notes.281.fixed': 'Der Projektspeicher lässt Geminis private Dateien beim Lesen und Bearbeiten aus.',
   'update.checking': 'Suche nach einem Update…',
   'update.downloading': 'Update wird heruntergeladen…',
   'update.downloadingPercent': 'Update wird heruntergeladen… {percent} %',

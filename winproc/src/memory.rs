@@ -208,9 +208,22 @@ impl MemoryDirectory {
     }
 
     pub fn names(&self, limit: usize) -> io::Result<Vec<String>> {
+        self.list_names(limit, false).map(|(names, _)| names)
+    }
+
+    pub fn names_bounded(&self, limit: usize) -> io::Result<(Vec<String>, bool)> {
+        self.list_names(limit, true)
+    }
+
+    fn list_names(&self, limit: usize, bounded: bool) -> io::Result<(Vec<String>, bool)> {
         let mut buffer = vec![0usize; 64 * 1024 / std::mem::size_of::<usize>()];
         let mut names = Vec::new();
         let mut first = true;
+        let mut examined = 0;
+        let mut incomplete = false;
+        if bounded && limit == 0 {
+            return Ok((names, true));
+        }
         loop {
             // SAFETY: the pointer-aligned allocation holds 64 KiB and the directory is owned through this call.
             let success = unsafe {
@@ -224,7 +237,7 @@ impl MemoryDirectory {
             first = false;
             if success == 0 {
                 let error = io::Error::last_os_error();
-                return if error.raw_os_error() == Some(18) { Ok(names) } else { Err(error) };
+                return if error.raw_os_error() == Some(18) { Ok((names, incomplete)) } else { Err(error) };
             }
             let mut offset = 0;
             loop {
@@ -241,13 +254,22 @@ impl MemoryDirectory {
                 // SAFETY: the UTF-16 tail is in the checked allocation, aligned to at least two bytes.
                 let wide =
                     unsafe { std::slice::from_raw_parts(buffer.as_ptr().cast::<u8>().add(offset + header).cast::<u16>(), length / 2) };
-                if let Ok(name) = String::from_utf16(wide)
-                    && !matches!(name.as_str(), "." | "..")
-                {
-                    names.push(name);
+                match String::from_utf16(wide) {
+                    Ok(name) if !matches!(name.as_str(), "." | "..") => {
+                        examined += 1;
+                        names.push(name);
+                    }
+                    Err(_) => {
+                        examined += 1;
+                        incomplete = true;
+                    }
+                    _ => {}
                 }
-                if names.len() >= limit {
-                    return Ok(names);
+                if bounded && examined >= limit {
+                    return Ok((names, true));
+                }
+                if !bounded && names.len() >= limit {
+                    return Ok((names, incomplete));
                 }
                 if entry.NextEntryOffset == 0 {
                     break;
@@ -322,6 +344,33 @@ impl MemoryDirectory {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn adopted_task_folder_native_listing_reports_overflow_without_changing_legacy_listing() {
+        let owned = tempfile::tempdir().unwrap();
+        let root = owned.path().canonicalize().unwrap();
+        for index in 0..12 {
+            std::fs::write(root.join(format!("{index:02}.md")), "synthetic task").unwrap();
+        }
+        let directory = MemoryDirectory::open(&root, Path::new("")).unwrap();
+        let (names, incomplete) = directory.names_bounded(3).unwrap();
+        assert!(incomplete);
+        assert!(names.len() <= 3);
+        assert_eq!(directory.names(20).unwrap().len(), 12);
+    }
+
+    #[test]
+    fn adopted_task_folder_native_listing_reports_undecodable_entries() {
+        use std::os::windows::ffi::OsStringExt;
+        let owned = tempfile::tempdir().unwrap();
+        let root = owned.path().canonicalize().unwrap();
+        let invalid = std::ffi::OsString::from_wide(&[0xd800, b'.' as u16, b'm' as u16, b'd' as u16]);
+        std::fs::write(root.join(invalid), "synthetic invalid-name task").unwrap();
+        let directory = MemoryDirectory::open(&root, Path::new("")).unwrap();
+        let (names, incomplete) = directory.names_bounded(10).unwrap();
+        assert!(incomplete);
+        assert!(names.is_empty());
+    }
+
     use super::*;
     use std::io::Write;
     #[test]

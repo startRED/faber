@@ -395,13 +395,6 @@ pub fn touches_credentials(input: &Value, cwd: Option<&str>, var: &dyn Fn(&str) 
     let mut texts = Vec::new();
     strings(input, &mut texts);
     let moved: Vec<String> = relocated_credentials(var).into_iter().map(|(p, _)| normal(&p)).collect();
-    let credential_piece = |piece: &str| {
-        let piece = piece.trim_end_matches(['.', ' ']);
-        CREDENTIAL_FOLDERS.contains(&piece)
-            || CREDENTIAL_FILES.contains(&piece)
-            || piece.starts_with(".claude.json")
-            || piece.contains("updater.key")
-    };
     // A path is a credential when a piece of it is a credential name or it is inside a moved sign-in folder.
     let names_credential = |path: &str| inside_any(path, &moved) || path.split('/').any(credential_piece);
     let cwd = cwd.map(|c| normal(&std::fs::canonicalize(c).map_or_else(|_| c.to_string(), |p| p.to_string_lossy().into_owned())));
@@ -421,6 +414,15 @@ pub fn touches_credentials(input: &Value, cwd: Option<&str>, var: &dyn Fn(&str) 
                     .any(|token| names_credential(&resolve(cwd, token)))
             })
     })
+}
+
+/// A normalized path component that holds sign-ins or keys; shared with project-source readers before content I/O.
+pub(crate) fn credential_piece(piece: &str) -> bool {
+    let piece = piece.trim_end_matches(['.', ' ']);
+    CREDENTIAL_FOLDERS.contains(&piece)
+        || CREDENTIAL_FILES.contains(&piece)
+        || piece.starts_with(".claude.json")
+        || piece.contains("updater.key")
 }
 
 fn record_piece(piece: &str) -> bool {

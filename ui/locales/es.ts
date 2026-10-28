@@ -2188,6 +2188,7 @@ export const es: Messages = {
   'notes.278.better': 'Actualización lista, reiniciar ahora funciona con un clic aunque haya algo en curso: Faber se cierra, se abre de nuevo y el trabajo sigue donde se quedó.',
   'notes.279.fixed': 'Faber ya no guarda en memoria cada conversación que abres: abrir doce conversaciones grandes seguidas llega ahora como mucho a 337 MB, y antes pasaba de 400 MB ya en la novena.',
   'notes.280.fixed': 'Un ayudante que parece atascado ahora dice que sigue trabajando y qué puedes hacer, y su fila en Te necesita abre su conversación.',
+  'notes.281.fixed': 'La memoria del proyecto deja fuera los archivos privados de Gemini al leer y editar.',
   'update.checking': 'Buscando una actualización…',
   'update.downloading': 'Descargando actualización…',
   'update.downloadingPercent': 'Descargando actualización… {percent} %',
