@@ -157,6 +157,8 @@ jobs:
       fail-fast: false
       matrix: ${{ fromJSON(needs.changes.outputs.matrix) }}
     runs-on: ${{ matrix.os }}
+    # A stuck test fails its job instead of holding the queue for the six hours GitHub allows; a usual run takes under 15 minutes.
+    timeout-minutes: 45
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-node@v7
@@ -218,6 +220,7 @@ jobs:
     needs: changes
     if: needs.changes.outputs.app == 'true'
     runs-on: windows-latest
+    timeout-minutes: 45
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-node@v7
@@ -284,6 +287,7 @@ jobs:
       matrix:
         part: ${{ fromJSON(needs.changes.outputs.parts) }}
     runs-on: windows-latest
+    timeout-minutes: 45
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-node@v7
@@ -330,6 +334,7 @@ jobs:
           - { os: macos-latest, cache: rust }
           - { os: windows-latest, cache: app }
     runs-on: ${{ matrix.os }}
+    timeout-minutes: 60
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-node@v7
