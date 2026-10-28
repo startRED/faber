@@ -325,7 +325,7 @@ fn package_names(raw: Option<&RawValue>, dependencies: bool) -> std::collections
 }
 
 // Facts never inspect array elements. Keep one scalar so table/declaration validation still sees an array value.
-// shortcut: only decimal integers and strings are compacted; other values keep full validation.
+// shortcut: only decimal integers, booleans and strings are compacted; other values keep full validation.
 fn scalar_array(content: &str, start: usize) -> Option<(usize, std::ops::Range<usize>)> {
     let bytes = content.as_bytes();
     let mut at = start;
@@ -402,6 +402,19 @@ fn scalar_array(content: &str, start: usize) -> Option<(usize, std::ops::Range<u
                         return None;
                     }
                 }
+                count += 1;
+                if count == 1 {
+                    first = begin..at;
+                }
+                expect_value = false;
+            }
+            b't' | b'f' if expect_value => {
+                let begin = at;
+                let value = if bytes[at] == b't' { "true" } else { "false" };
+                if !content[at..].starts_with(value) {
+                    return None;
+                }
+                at += value.len();
                 count += 1;
                 if count == 1 {
                     first = begin..at;
@@ -800,6 +813,43 @@ mod tests {
         }
         assert_eq!(compact_scalar_arrays("x=['''x''','''y''']"), "x=['''x''']");
         assert_eq!(compact_scalar_arrays("x=[\"\"\"x\"\"\",\"\"\"y\"\"\"]"), "x=[\"\"\"x\"\"\"]");
+    }
+
+    #[test]
+    fn rules_boolean_arrays_preserve_validation_and_declarations() {
+        for array in [
+            "[true,false]",
+            "[false,true,]",
+            "[true, # comment\nfalse]",
+            "[true,\r\nfalse]",
+            "[true,1,'x',false]",
+            "[true]",
+            "[]",
+            "[True,false]",
+            "[FALSE,true]",
+            "[truefalse,false]",
+            "[true false]",
+            "[true,,false]",
+            "[false,true",
+            "[true,tru]",
+            "[false,falseé]",
+            "[true, # bad\u{1}\nfalse]",
+            "[true,\rfalse]",
+            "[[true,false],[false,true]]",
+            "[true,{x=1,x=2}]",
+        ] {
+            for suffix in ["", "\nx=3", "\n[x]", "\n[[x]]", "\nx.y=2"] {
+                let source = format!("x={array}{suffix}\n[dependencies]\nbevy='0.17'\n[package]\ndescription='fixture'\n");
+                let expected = toml::from_str::<toml::Value>(&source).is_ok();
+                let compact = compact_scalar_arrays(&source);
+                assert_eq!(toml::from_str::<toml::Value>(&compact).is_ok(), expected, "{source:?} -> {compact:?}");
+                let (facts, _) = manifest_facts(&[("Cargo.toml".into(), source)]);
+                assert_eq!(facts.stacks.contains(&"bevy"), expected);
+                assert_eq!(facts.description.as_deref(), expected.then_some("fixture"));
+            }
+        }
+        assert_eq!(compact_scalar_arrays("x=[true,false]"), "x=[true]");
+        assert_eq!(compact_scalar_arrays("x=[false,true]"), "x=[false]");
     }
 
     fn write(dir: &Path, name: &str, text: &str) {
