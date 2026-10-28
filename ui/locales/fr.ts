@@ -2189,6 +2189,7 @@ export const fr: Messages = {
   'notes.279.fixed': "Faber ne garde plus en mémoire chaque conversation que vous ouvrez : ouvrir douze grandes conversations d'affilée monte désormais au plus à 337 Mo, alors qu'avant cela dépassait 400 Mo dès la neuvième.",
   'notes.280.fixed': 'Un assistant qui semble bloqué dit maintenant qu’il continue de travailler et ce que vous pouvez faire, et sa ligne sous « A besoin de vous » ouvre sa conversation.',
   'notes.281.fixed': 'La mémoire du projet exclut les fichiers privés de Gemini de la lecture et de la modification.',
+  'notes.282.fixed': 'Quand une autre IA reprend un travail interrompu, elle reçoit la consigne enregistrée des assistants encore au travail.',
   'update.checking': 'Recherche d’une mise à jour…',
   'update.downloading': 'Téléchargement de la mise à jour…',
   'update.downloadingPercent': 'Téléchargement de la mise à jour… {percent} %',

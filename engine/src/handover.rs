@@ -1,7 +1,7 @@
 //! What a conversation carries to the other vendor when its own vendor cannot answer: the earlier messages as plain text, or
 //! a summary of them when they are too long, and, when a failed turn had already done work, a request to continue it.
 
-use crate::model::{Message, Role};
+use crate::model::{Message, Role, ToolUse};
 
 /// Up to this many characters of earlier messages go over whole.
 pub const FULL_LIMIT: usize = 24_000;
@@ -27,8 +27,7 @@ impl Partial {
 
     /// The partial answer of a reply that did not finish.
     pub fn of(reply: &Message) -> Partial {
-        let tools =
-            reply.tools.iter().flatten().map(|t| (t.name.clone(), cut(t.output.as_deref().unwrap_or_default(), TOOL_CUT))).collect();
+        let tools = reply.tools.iter().flatten().map(|t| (t.name.clone(), tool_result(t))).collect();
         Partial { text: reply.text.clone(), tools }
     }
 }
@@ -41,18 +40,30 @@ fn cut(text: &str, limit: usize) -> String {
     format!("{kept}...")
 }
 
+fn tool_result(tool: &ToolUse) -> String {
+    let output = cut(tool.output.as_deref().unwrap_or_default(), TOOL_CUT);
+    let field = match tool.name.as_str() {
+        "Helper" => "brief",
+        "Agent" | "Task" => "prompt",
+        _ => return output,
+    };
+    if tool.ok.is_none()
+        && let Some(brief) = tool.input.get(field).and_then(|value| value.as_str()).filter(|brief| !brief.is_empty())
+    {
+        // Like the partial reply text, the request keeps its requirements; only recorded output is shortened.
+        format!("unfinished (verify effects before repeating); recorded request:\n{brief}\nRecorded result: {output}")
+    } else {
+        output
+    }
+}
+
 /// Every message as `User: ...` / `Assistant: ...`, tool results shortened.
 pub fn transcript(history: &[Message]) -> String {
     history
         .iter()
         .map(|m| {
             let who = if m.role == Role::User { "User" } else { "Assistant" };
-            let tools: String = m
-                .tools
-                .iter()
-                .flatten()
-                .map(|t| format!("\n[{} -> {}]", t.name, cut(t.output.as_deref().unwrap_or_default(), TOOL_CUT)))
-                .collect();
+            let tools: String = m.tools.iter().flatten().map(|t| format!("\n[{} -> {}]", t.name, tool_result(t))).collect();
             format!("{who}: {}{tools}", m.said())
         })
         .collect::<Vec<_>>()

@@ -6,6 +6,48 @@ fn message(role: Role, text: &str) -> Message {
 }
 
 #[test]
+fn an_interrupted_helpers_brief_reaches_both_history_and_partial_handover() {
+    let brief = format!("Check the interrupted work. {} Preserve the final requirement.", "Read the original request. ".repeat(12));
+    for (name, field) in [("Helper", "brief"), ("Agent", "prompt"), ("Task", "prompt")] {
+        let mut reply = message(Role::Assistant, "Work started");
+        reply.tools = Some(vec![
+            serde_json::from_value(serde_json::json!({
+                "id": "worker", "name": name, "input": {field: brief, "unrelated": "private-input-must-stay-out"}
+            }))
+            .unwrap(),
+        ]);
+        let history = handover::transcript(std::slice::from_ref(&reply));
+        let partial = Partial::of(&reply);
+        let continued = handover::with_summary("Earlier work", "Continue", &partial);
+        for carried in [history, continued] {
+            assert!(carried.contains(&brief), "{name}: the submitted brief must survive, including its final requirement");
+            assert!(carried.contains("unfinished"), "{name}: the receiving AI must not mistake a brief for completed work");
+            assert!(!carried.contains("private-input-must-stay-out"), "only the brief is carried");
+        }
+    }
+}
+
+#[test]
+fn completed_helpers_and_other_tool_inputs_do_not_expand_the_handover() {
+    for (name, ok) in [("Helper", Some(true)), ("Agent", Some(false)), ("Write", None)] {
+        let mut reply = message(Role::Assistant, "Previous work");
+        reply.tools = Some(vec![
+            serde_json::from_value(serde_json::json!({
+                "id": "tool", "name": name, "ok": ok, "output": "recorded result",
+                "input": {"brief": "input-must-stay-out", "prompt": "input-must-stay-out"}
+            }))
+            .unwrap(),
+        ]);
+        let history = handover::transcript(std::slice::from_ref(&reply));
+        let partial = Partial::of(&reply);
+        for carried in [history, handover::with_full("Earlier work", "Continue", &partial)] {
+            assert!(carried.contains("recorded result"));
+            assert!(!carried.contains("input-must-stay-out"), "{name}: no completed brief or arbitrary tool input is needed");
+        }
+    }
+}
+
+#[test]
 fn short_history_goes_whole_and_long_history_keeps_the_first_and_last_turns() {
     let short = vec![message(Role::User, &"a".repeat(10_000))];
     let Plan::Full(all) = handover::plan(&short) else { panic!("short history was summarised") };
