@@ -2192,6 +2192,7 @@ export const de: Messages = {
   'notes.282.fixed': 'Wenn eine andere KI unterbrochene Arbeit übernimmt, erhält sie den gespeicherten Auftrag der noch nicht fertigen Helfer.',
   'notes.283.fixed': 'Der Bericht eines Helfers, der nicht zugestellt werden konnte, solange keine KI verfügbar war, geht jetzt von selbst raus, sobald eine zurück ist.',
   'notes.284.better': 'Auf Mac und Linux warten Helfer und Arbeit, die von selbst weiterläuft, jetzt, wenn der Arbeitsspeicher knapp ist, wie unter Windows, statt trotzdem zu starten.',
+  'notes.285.fixed': 'Beim Wechsel zwischen Versionen einer visuellen Antwort wächst der Browserverlauf nicht mehr mit jedem Wechsel.',
   'update.checking': 'Suche nach einem Update…',
   'update.downloading': 'Update wird heruntergeladen…',
   'update.downloadingPercent': 'Update wird heruntergeladen… {percent} %',

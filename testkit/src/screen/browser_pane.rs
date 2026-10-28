@@ -321,6 +321,12 @@ fn german_failure(ctx: &mut Ctx) -> Result {
 
 fn failure_in(ctx: &mut Ctx, language: &str, width: u32) -> Result {
     let (mut app, fixture) = open_browser_in(ctx, language)?;
+    // A no-op native size change emits no resize event.
+    if app.page.eval(&format!("innerWidth==={width} && innerHeight===800"))? == json!(true) {
+        let initial_width = if width == 720 { 1280 } else { 720 };
+        app.page.eval(&format!("window.__TAURI_INTERNALS__.invoke('test_host_size',{{width:{initial_width},height:800}})"))?;
+        app.page.wait_for("the initial host size before opening a page", &format!("innerWidth==={initial_width} && innerHeight===800"))?;
+    }
     // Observe this synthetic field across resizing without replacing the native bridge's read-only functions.
     app.page.eval(
         r#"(() => {
@@ -348,10 +354,14 @@ fn failure_in(ctx: &mut Ctx, language: &str, width: u32) -> Result {
     )?;
     app.page.eval(&format!("window.__TAURI_INTERNALS__.invoke('test_host_size',{{width:{width},height:800}})"))?;
     // Native dimensions can change before resize remounts the column and its address field.
-    app.page.wait_for(
-        "the host resize event and its new address field",
-        &format!("innerWidth==={width} && innerHeight===800 && window.__browserRetryTrace.some(e=>e.type==='resize' && e.width==={width})"),
-    )?;
+    app.page
+        .wait_for(
+            "the host resize event and its new address field",
+            &format!(
+                "innerWidth==={width} && innerHeight===800 && window.__browserRetryTrace.some(e=>e.type==='resize' && e.width==={width})"
+            ),
+        )
+        .map_err(|error| format!("{error}; resize trace: {:?}", app.page.eval("window.__browserRetryTrace")))?;
     // A failed native open is injected at the command boundary, not presented as a real network failure.
     app.page.eval("window.__TAURI_INTERNALS__.invoke('test_site_refuse_once')")?;
     enter(&mut app.page, &fixture.url("/one"))?;

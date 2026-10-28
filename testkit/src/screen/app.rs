@@ -329,6 +329,10 @@ fn streams_an_answer(ctx: &mut Ctx) -> Result {
     let launch = claude_chat(ctx);
     let mut app = ctx.launch(launch)?;
     let page = &mut app.page;
+    page.wait_for(
+        "the synthetic chat subscription",
+        "window.__TAURI_INTERNALS__.invoke('state').then(s=>s.usage?.some(u=>u.vendor==='claude' && !u.billingUnknown && !u.billedPerUse))",
+    )?;
     ask(page, QUESTION)?;
     let answer = page.named("article", "answer.label")?;
     page.wait_visible(&answer.clone().css(".actions"))?;
@@ -1222,6 +1226,12 @@ fn visual_frames_collected(
         app.page.cdp.set_deadline(previous_deadline);
         let roles = app.page.cdp.process_roles();
         ctx.notes.push(format!("POST-FAILURE ONLY: capture ended {:.3}s after predicate; owned process memory {processes:?}; heap {heap:?}; process roles {roles:?}", capture_started.elapsed().as_secs_f64()));
+        let previous_deadline = app.page.cdp.set_deadline(Some(Instant::now() + Duration::from_secs(3)));
+        let pressure = app.page.cdp.call("Memory.simulatePressureNotification", json!({ "level": "critical" }));
+        let pressure_heap = app.page.cdp.call("Runtime.getHeapUsage", json!({}));
+        app.page.cdp.set_deadline(previous_deadline);
+        let pressure_memory = crate::proctree::private_processes(app.pid);
+        ctx.notes.push(format!("POST-FAILURE ONLY: native cache pressure {pressure:?}; heap {pressure_heap:?}; owned process memory {pressure_memory:?}; captured predicate unchanged"));
     }
     ensure(extra.is_empty(), || format!("{numbers}; extra WebView2 processes still alive: {extra:?}\n{}", ctx.notes.join("\n")))?;
     ensure(retained == json!([]), || format!("{numbers}; retired frames must be collectible\n{}", ctx.notes.join("\n")))?;
@@ -1426,6 +1436,7 @@ fn visual_answers_memory(ctx: &mut Ctx) -> Result {
     app.page.wait_visible(&css(".visual-pane"))?;
     app.page.wait_count(&css(".visual-frame"), 1)?;
     app.page.wait_for("the first visual version to load", "window.__visualLoads===1")?;
+    let visual_history = app.page.eval("history.length")?;
     app.page.eval("window.__visualFrames=[new WeakRef(document.querySelector('.visual-frame'))];void 0")?;
     let before_open = ctx.cpu_ms(app.id)?;
     let open_started = Instant::now();
@@ -1444,6 +1455,7 @@ fn visual_answers_memory(ctx: &mut Ctx) -> Result {
                 "the chosen visual version to load in the same frame",
                 &format!("window.__visualLoads==={loads} && document.body.dataset.visualReadyVersion==='{version}'"),
             )?;
+            same(app.page.eval("history.length")?, visual_history.clone(), "version switches replace their browser history entry")?;
             same(app.page.count(&css("iframe"))?, 1, "switching versions keeps only one frame mounted")?;
             same(
                 app.page.eval("document.querySelector('.visual-frame')===window.__visualFrames[0].deref()")?,
@@ -1470,6 +1482,11 @@ fn visual_answers_memory(ctx: &mut Ctx) -> Result {
     super::shell::set_size(&mut app.page, 720, 600)?;
     app.page.cdp.call("HeapProfiler.collectGarbage", json!({}))?;
     let resized = super::setup::measure(ctx, &app, "visual versions closed after resize to 720 px")?;
+    let resized_heap = app.page.cdp.call("Runtime.getHeapUsage", json!({}))?;
+    let resized_dom = app.page.cdp.call("Memory.getDOMCounters", json!({}))?;
+    let resized_animations =
+        app.page.eval("document.getAnimations().map(a=>({state:a.playState,time:a.currentTime,timing:a.effect?.getComputedTiming()}))")?;
+    ctx.notes.push(format!("visual narrow baseline diagnostics: heap {resized_heap}; DOM {resized_dom}; animations {resized_animations}"));
     ctx.notes.push(format!(
         "visual resize-only delta before reopening: {:.1} MB; compare retention against this same-width closed state",
         resized - closed

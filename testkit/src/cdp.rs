@@ -687,6 +687,45 @@ mod tests {
         assert_eq!((name.as_str(), code.as_str(), virtual_key, text), (" ", "Space", 32, Some(" ")));
     }
 
+    fn mock_prefix(reader: &mut impl Read) -> [u8; 14] {
+        let mut head = [0; 14];
+        reader.read_exact(&mut head).unwrap();
+        head
+    }
+
+    struct MockStream {
+        head: io::Cursor<[u8; 14]>,
+        stream: TcpStream,
+    }
+
+    impl Read for MockStream {
+        fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
+            (&mut self.head).chain(&mut self.stream).read(buf)
+        }
+    }
+
+    impl Write for MockStream {
+        fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
+            self.stream.write(buf)
+        }
+
+        fn flush(&mut self) -> io::Result<()> {
+            self.stream.flush()
+        }
+    }
+
+    #[test]
+    fn mock_classification_reads_a_fragmented_http_prefix() {
+        let request = b"GET /json/list HTTP/1.1\r\n\r\n";
+        for split in 1..14 {
+            let mut reader = (&request[..split]).chain(&request[split..]);
+            assert_eq!(&mock_prefix(&mut reader), b"GET /json/list", "split at {split}");
+            let mut remainder = String::new();
+            reader.read_to_string(&mut remainder).unwrap();
+            assert_eq!(remainder, " HTTP/1.1\r\n\r\n");
+        }
+    }
+
     /// A stand-in for the app's DevTools port: the target list over HTTP and a scripted WebSocket.
     fn mock() -> (u16, Arc<Mutex<Vec<Value>>>) {
         let listener = TcpListener::bind((Ipv4Addr::LOCALHOST, 0)).unwrap();
@@ -696,11 +735,9 @@ mod tests {
         std::thread::spawn(move || {
             // WebView2 does not close the connection after it answers, so neither does this stand-in.
             let mut held = Vec::new();
-            for stream in listener.incoming().flatten() {
-                let mut head = [0u8; 16];
-                let n = stream.peek(&mut head).unwrap();
-                if head[..n].starts_with(b"GET /json/list") {
-                    let mut stream = stream;
+            for mut stream in listener.incoming().flatten() {
+                let head = mock_prefix(&mut stream);
+                if &head == b"GET /json/list" {
                     let mut sink = [0u8; 1024];
                     let _ = stream.read(&mut sink);
                     let targets = json!([
@@ -720,6 +757,8 @@ mod tests {
                 }
                 let log = log.clone();
                 std::thread::spawn(move || {
+                    // The handshake still needs the bytes consumed while choosing HTTP or WebSocket.
+                    let stream = MockStream { head: io::Cursor::new(head), stream };
                     #[allow(clippy::result_large_err)] // Tungstenite fixes the callback's error type.
                     let mut socket = tungstenite::accept_hdr(stream, |request: &tungstenite::handshake::server::Request, response| {
                         assert_eq!(request.uri().path(), "/devtools/page/P1", "never attach to the provisional blank target");
@@ -819,10 +858,11 @@ mod tests {
                             ] {
                                 socket.send(Message::text(event.to_string())).unwrap();
                             }
-                            socket.get_mut().set_read_timeout(Some(Duration::from_millis(100))).unwrap();
-                            let error = socket.get_mut().peek(&mut [0u8; 1]).expect_err("no evaluation before the new main document loads");
+                            socket.get_mut().stream.set_read_timeout(Some(Duration::from_millis(100))).unwrap();
+                            let error =
+                                socket.get_mut().stream.peek(&mut [0u8; 1]).expect_err("no evaluation before the new main document loads");
                             assert!(matches!(error.kind(), io::ErrorKind::WouldBlock | io::ErrorKind::TimedOut));
-                            socket.get_mut().set_read_timeout(None).unwrap();
+                            socket.get_mut().stream.set_read_timeout(None).unwrap();
                             socket.send(Message::text(json!({ "method": "Page.lifecycleEvent", "params": { "frameId": "main", "loaderId": "second", "name": "load" } }).to_string())).unwrap();
                         }
                     }

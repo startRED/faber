@@ -1,4 +1,4 @@
-import { createComponent, createSignal, Show } from 'solid-js';
+import { createComponent, createSignal, ErrorBoundary, Show } from 'solid-js';
 import { render } from 'solid-js/web';
 import { api, type AppState, type Conversation, type Message, type VisualAnswer } from '../../ui/api.ts';
 import { App } from '../../ui/App.tsx';
@@ -33,6 +33,21 @@ function check(name: string, run: () => void | Promise<void>) {
 }
 
 const settle = () => new Promise((resolve) => setTimeout(resolve, 30));
+function loadedVisual(host: HTMLElement) {
+  const probe = crypto.randomUUID();
+  let url: string | undefined;
+  const listen = (e: MessageEvent) => {
+    if (e.origin === 'null' && e.source === host.querySelector('iframe')?.contentWindow && e.data?.probe === probe && typeof e.data.url === 'string') url = e.data.url;
+  };
+  window.addEventListener('message', listen);
+  const report = `document.addEventListener('DOMContentLoaded',()=>parent.postMessage({probe:${JSON.stringify(probe)},url:location.href},'*'));`;
+  return {
+    source: (text: string) => text + `<script>${report}</script>`,
+    prepared: (text: string) => text + `<script type="application/faber-script" data-faber-script="text/javascript">${report}</script>`,
+    url: () => url,
+    stop: () => window.removeEventListener('message', listen),
+  };
+}
 async function until(test: () => unknown, what = 'the visual answer appeared before the deadline') {
   const end = performance.now() + 4000;
   while (!test() && performance.now() < end) await settle();
@@ -61,6 +76,8 @@ check('visual answers: web changes apply on the next opened version, keep one fr
   const saved = api.visualPage;
   api.visualPage = async (id, revision, document) => { calls++; return saved(id, revision, document); };
   const a = answer();
+  const loaded = loadedVisual(host);
+  a.versions = a.versions.map((v) => ({ ...v, source: loaded.source(v.source) }));
   const dispose = render(() => createComponent(VisualPane, { answer: a, open: { conversationId: 'policy', answerId: a.id }, onBack: () => {}, onClose: () => {} }), host);
   try {
     await until(() => host.querySelector('iframe'));
@@ -74,16 +91,16 @@ check('visual answers: web changes apply on the next opened version, keep one fr
     equal(frame.src, offline, 'saving the setting leaves current page state intact');
     equal(calls, 1);
     host.querySelector<HTMLButtonElement>('.visual-prev')!.click();
-    await until(() => frame.src !== offline && prepared.get(frame.src)?.live === live);
+    await until(() => loaded.url() !== offline && prepared.get(loaded.url() ?? '')?.live === live);
     equal(host.querySelector('iframe'), frame);
     equal(frame.getAttribute('sandbox'), 'allow-scripts');
     equal(host.querySelector('.side-meta')!.textContent, t(live ? 'visual.live' : 'visual.offline'));
     await api.saveSettings({ webSearch: 'off' });
     host.querySelector<HTMLButtonElement>('.visual-next')!.click();
-    await until(() => prepared.get(frame.src)?.live === false);
+    await until(() => prepared.get(loaded.url() ?? '')?.live === false);
     equal(host.querySelector('iframe'), frame);
     equal(calls, 3);
-  } finally { dispose(); host.remove(); }
+  } finally { dispose(); host.remove(); loaded.stop(); }
   equal(host.querySelector('iframe'), null);
 });
 
@@ -138,15 +155,16 @@ check('visual files: cards retain exact versions and show the self-contained lim
 });
 
 check('visual files: discovery has no source and opening code or a version reads only that saved version', async () => {
+  const host = document.createElement('div'); document.body.append(host);
+  const loaded = loadedVisual(host);
   const a = answer();
   a.versions = a.versions.map((v) => ({ ...v, file: 'page.html', start: 0, end: 0, source: '' }));
   const saved = api.visualAnswers;
   const requests: [string, string | undefined, number | undefined][] = [];
   api.visualAnswers = async (id, messageId, block) => {
     requests.push([id, messageId, block]);
-    return [{ ...a, versions: a.versions.map((v) => ({ ...v, source: v.messageId === messageId && v.block === block ? source(messageId === 'v1' ? 1 : 2) : '' })) }];
+    return [{ ...a, versions: a.versions.map((v) => ({ ...v, source: v.messageId === messageId && v.block === block ? loaded.source(source(messageId === 'v1' ? 1 : 2)) : '' })) }];
   };
-  const host = document.createElement('div'); document.body.append(host);
   let dispose = render(() => createComponent(VisualFiles, { answers: [a], messageId: 'v1', conversationId: 'lazy-files' }), host);
   try {
     equal(requests.length, 0);
@@ -162,10 +180,31 @@ check('visual files: discovery has no source and opening code or a version reads
     const frame = host.querySelector('iframe')!;
     ok(prepared.get(frame.src)!.document.includes('Version 2'));
     host.querySelector<HTMLButtonElement>('.visual-prev')!.click();
-    await until(() => prepared.get(frame.src)?.document.includes('Version 1'));
+    await until(() => prepared.get(loaded.url() ?? '')?.document.includes('Version 1'));
     deepEqual(requests, [['lazy-files', 'v1', 0], ['lazy-files', 'v2', 0], ['lazy-files', 'v1', 0]]);
     ok(a.versions.every((v) => !v.source), 'discovery never becomes a second source store');
-  } finally { dispose(); host.remove(); api.visualAnswers = saved; }
+  } finally { dispose(); host.remove(); api.visualAnswers = saved; loaded.stop(); }
+});
+
+check('visual answers: a missing navigation window shows the existing failure and another version recovers', async () => {
+  const host = document.createElement('div'); document.body.append(host);
+  const loaded = loadedVisual(host);
+  const a = answer();
+  a.versions = a.versions.map((v) => ({ ...v, source: loaded.source(v.source) }));
+  const dispose = render(() => createComponent(ErrorBoundary, { fallback: () => { const error = document.createElement('p'); error.dataset.navigationCrash = ''; return error; }, get children() { return createComponent(VisualPane, { answer: a, open: { conversationId: 'navigation-failure', answerId: a.id }, onBack: () => {}, onClose: () => {} }); } }), host);
+  try {
+    await until(() => loaded.url());
+    const first = loaded.url();
+    Object.defineProperty(host.querySelector('iframe')!, 'contentWindow', { configurable: true, get: () => null });
+    host.querySelector<HTMLButtonElement>('.visual-prev')!.click();
+    await until(() => host.querySelector('[role="alert"], [data-navigation-crash]'));
+    equal(host.querySelector('[data-navigation-crash]'), null, 'navigation failures stay inside the pane');
+    equal(host.querySelector('[role="alert"]')!.textContent, t('visual.failed'));
+    equal(host.querySelector('iframe'), null);
+    host.querySelector<HTMLButtonElement>('.visual-next')!.click();
+    await until(() => loaded.url() !== first && host.querySelector('iframe'));
+    equal(host.querySelector('[role="alert"]'), null);
+  } finally { dispose(); host.remove(); loaded.stop(); }
 });
 
 check('Mermaid: source cannot escape into markup, the lazy library is pinned and its code fallback stays offline', () => {
@@ -769,6 +808,8 @@ check('visual answers: Chat and Projects at 720 px reuse the resizable running p
       const host = document.createElement('div');
       host.style.cssText = 'position:fixed;top:0;left:0;width:720px;height:800px';
       document.body.append(host);
+      const loaded = loadedVisual(host);
+      api.visualPage = (id, revision, document) => before.visualPage(id, revision, loaded.prepared(document));
       const visual = answer();
       const replies = messages();
       if (form === 'file') {
@@ -823,9 +864,9 @@ check('visual answers: Chat and Projects at 720 px reuse the resizable running p
         equal(host.querySelector('iframe'), newest, 'a version switch reuses the frame');
         equal(newest.contentWindow, browsingContext, 'versions keep one browsing context');
         equal(newest.isConnected, true);
-        await until(() => prepared.get(newest.src)?.document.includes('data-version="1"'));
+        await until(() => prepared.get(loaded.url() ?? '')?.document.includes('data-version="1"'));
         host.querySelector<HTMLButtonElement>('.visual-next')!.click();
-        await until(() => prepared.get(newest.src)?.document.includes('data-version="2"'));
+        await until(() => prepared.get(loaded.url() ?? '')?.document.includes('data-version="2"'));
         const grip = host.querySelector<HTMLElement>('#running [role="separator"]')!;
         const oldWidth = Number(grip.getAttribute('aria-valuenow'));
         grip.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowLeft', bubbles: true }));
@@ -896,7 +937,7 @@ check('visual answers: Chat and Projects at 720 px reuse the resizable running p
         equal(closing.src, 'about:blank', 'closing navigates away from the opaque page');
         equal(closing.getAttribute('sandbox'), 'allow-scripts', 'the empty disposal document keeps the sandbox');
         equal(closing.contentWindow, null, 'closing destroys the browsing context');
-      } finally { dispose(); host.remove(); showVisual(undefined); showSite(undefined); showFile(undefined); }
+      } finally { dispose(); host.remove(); loaded.stop(); showVisual(undefined); showSite(undefined); showFile(undefined); }
     }
   } finally {
     Object.assign(api, before);

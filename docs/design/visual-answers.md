@@ -16,7 +16,7 @@ controls; these rules extend the large-page and drawing viewer, never add anothe
   and on each version switch; saving Settings leaves an open page and its input alone. There is no second switch or prompt.
   The isolated frame permits scripts but no access to Faber, its storage or commands. Only one
   frame exists while this pane is open. Versions navigate that same frame to a single-use URL on Faber's visual-page
-  origin, with a fresh page state. Only the document the screen just prepared is served, at most 8 MiB and once; its
+  origin, replacing its session-history entry with a fresh page state. A failed navigation removes the frame and shows the existing page-opening failure; choosing another version can recover. Only the document the screen just prepared is served, at most 8 MiB and once; its
   bytes leave the native pending slot on delivery. Fetch Metadata can be absent in native callbacks; supplied
   non-frame destinations are refused, and exact single-use URLs, no CORS grant and the sandbox protect the bytes. Closing invalidates the pane's lease (late preparations are refused),
   drops its reference, sets src to about:blank and removes the frame, including its scripts. Every version keeps the

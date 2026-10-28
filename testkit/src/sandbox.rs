@@ -153,13 +153,16 @@ impl Sandbox {
     /// Removes every folder. A webview may hold a file for a moment after it exits, so this retries. It fails if the
     /// folder is still there after that.
     pub fn dispose(&self) -> Result<(), String> {
+        let mut last_error = None;
         for _ in 0..10 {
-            if remove_tree(&self.root).is_ok() || !self.root.exists() {
+            let removed = remove_tree(&self.root);
+            if removed.is_ok() || !self.root.exists() {
                 return Ok(());
             }
+            last_error = removed.err();
             std::thread::sleep(Duration::from_millis(100));
         }
-        Err(format!("the sandbox {} could not be removed", self.root.display()))
+        Err(format!("the sandbox {} could not be removed: {:?}", self.root.display(), last_error))
     }
 }
 
@@ -247,6 +250,8 @@ pub fn child_env(parent: &[(String, String)], sb: &Sandbox, launch: &Launch, fak
     }
     set("CODEX_HOME", path(&sb.profile.join("fake-home")));
     set("WEBVIEW2_USER_DATA_FOLDER", path(&sb.webview));
+    // Component downloads can outlive the browser job and hold the synthetic TEMP folder open.
+    set("WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS", "--disable-component-update".into());
     set("FABER_HIDDEN", "1".into());
     if launch.software_rendering {
         set("FABER_SOFTWARE_RENDERING", "1".into());
@@ -409,9 +414,12 @@ mod tests {
         let software = child_env(&real, &sb, &Launch { software_rendering: true, ..launch.clone() }, Path::new("fake-cli.exe"));
         assert_eq!(software.get("FABER_SOFTWARE_RENDERING").map(String::as_str), Some("1"));
         assert!(
-            env.keys().filter(|k| k.to_ascii_uppercase().starts_with("WEBVIEW2_")).all(|k| k == "WEBVIEW2_USER_DATA_FOLDER"),
+            env.keys()
+                .filter(|k| k.to_ascii_uppercase().starts_with("WEBVIEW2_"))
+                .all(|k| matches!(k.as_str(), "WEBVIEW2_USER_DATA_FOLDER" | "WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS")),
             "{env:?}"
         );
+        assert_eq!(env["WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS"], "--disable-component-update");
         for name in [
             "HOME",
             "USERPROFILE",

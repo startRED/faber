@@ -411,6 +411,22 @@ impl Ctx {
             }
             for row in outside {
                 if !same_process(&row, &live.escaped) {
+                    #[cfg(windows)]
+                    {
+                        // Capture the image while this identity is alive; the audit still rejects every escape.
+                        let image = (|| -> Result<String, String> {
+                            let process = winsafe::HPROCESS::OpenProcess(winsafe::co::PROCESS::QUERY_LIMITED_INFORMATION, false, row.pid)
+                                .map_err(|e| e.to_string())?;
+                            let (created, _, _, _) = process.GetProcessTimes().map_err(|e| e.to_string())?;
+                            let ticks = (u64::from(created.dwHighDateTime) << 32) | u64::from(created.dwLowDateTime);
+                            let born = (ticks / 10).saturating_sub(11_644_473_600_000_000);
+                            if born != row.born {
+                                return Err(format!("process identity changed: {} != {born}", row.born));
+                            }
+                            process.QueryFullProcessImageName(winsafe::co::PROCESS_NAME::WIN32).map_err(|e| e.to_string())
+                        })();
+                        eprintln!("escaped process image: {}#{} born {}: {image:?}", row.name, row.pid, row.born);
+                    }
                     live.escaped.push(row);
                 }
             }

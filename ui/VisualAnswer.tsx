@@ -1,4 +1,4 @@
-import { createEffect, createMemo, createResource, createSignal, For, Index, on, onCleanup, Show } from 'solid-js';
+import { createEffect, createMemo, createResource, createSignal, For, Index, on, onCleanup, Show, untrack } from 'solid-js';
 import { api, type VisualAnswer, type VisualVersion } from './api.ts';
 import { closeMenu } from './contextmenu.ts';
 import { Icon } from './Glyphs.tsx';
@@ -252,6 +252,8 @@ export function visualDocument(source: string, live = false): string {
 /** One frame navigates between versions; the column's lifecycle releases it on back, close or navigation. */
 export function VisualPane(props: { answer: VisualAnswer; open: OpenVisual; onBack: () => void; onClose: () => void }) {
   let frame: HTMLIFrameElement | undefined;
+  let currentUrl: string | undefined;
+  const [navigationFailed, setNavigationFailed] = createSignal(false);
   const retire = () => {
     const old = frame; frame = undefined;
     if (old) { old.src = 'about:blank'; old.remove(); }
@@ -288,6 +290,22 @@ export function VisualPane(props: { answer: VisualAnswer; open: OpenVisual; onBa
     return api.visualPage(id, requested, visualDocument(version.kind === 'mermaid' ? mermaidDocument(source, t('visual.mermaidWeb')) : source, true));
   });
   createEffect(() => { if (page.error) retire(); });
+  createEffect(() => {
+    if (page.error) return;
+    const next = page();
+    if (!next || next.url === currentUrl) return;
+    setNavigationFailed(false);
+    if (!frame) return;
+    currentUrl = next.url;
+    try {
+      const target = frame.contentWindow;
+      if (!target) throw new Error('missing visual frame');
+      target.location.replace(next.url);
+    } catch {
+      retire();
+      setNavigationFailed(true);
+    }
+  });
   const move = (by: number) => setPicked(Math.max(0, Math.min(at() + by, props.answer.versions.length - 1)));
   return <div class="visual-pane">
     <div class="rc-head side-head">
@@ -302,10 +320,10 @@ export function VisualPane(props: { answer: VisualAnswer; open: OpenVisual; onBa
       <button class="iconbtn visual-prev" aria-label={t('visual.previous')} title={t('visual.previous')} disabled={at() === 0} onClick={() => move(-1)}><Icon name="left" /></button>
       <span class="visual-version num" aria-live="polite">{t('visual.version', { at: at() + 1, count: props.answer.versions.length })}</span>
       <button class="iconbtn visual-next" aria-label={t('visual.next')} title={t('visual.next')} disabled={at() === props.answer.versions.length - 1} onClick={() => move(1)}><Icon name="right" /></button>
-      <span class="side-meta">{t(!page.error && page()?.live ? 'visual.live' : 'visual.offline')}</span>
+      <span class="side-meta">{t(!page.error && !navigationFailed() && page()?.live ? 'visual.live' : 'visual.offline')}</span>
     </div>
-    <Show when={!page.error} fallback={<p class="side-meta" role="alert">{t('visual.failed')}</p>}>
-      <Show when={page()}><iframe ref={(el) => (frame = el)} class="visual-frame" title={visualName(props.answer)} sandbox="allow-scripts" referrerPolicy="no-referrer" src={page()!.url} /></Show>
+    <Show when={!page.error && !navigationFailed()} fallback={<p class="side-meta" role="alert">{t('visual.failed')}</p>}>
+      <Show when={page()}><iframe ref={(el) => { frame = el; currentUrl = page()!.url; }} class="visual-frame" title={visualName(props.answer)} sandbox="allow-scripts" referrerPolicy="no-referrer" src={untrack(() => page()!.url)} /></Show>
     </Show>
   </div>;
 }

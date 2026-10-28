@@ -74,7 +74,7 @@ fn report(page: &mut Page, count: usize, version: u32, live: bool) -> Result {
         "the parser's data image event is captured and delivered ahead of the delayed external classic",
     )?;
     same(actual["cssImport"].clone(), json!(live), "CSS imports follow the same saved web permission")?;
-    same(actual["cssUrlBlocked"].clone(), json!(true), "a CSS url cannot reach Faber's IPC origin even with Live")?;
+    same(actual["cssUrlBlocked"].clone(), json!(true), &format!("a CSS url cannot reach Faber's IPC origin even with Live: {actual}"))?;
     same(actual["webSocket"].clone(), json!("blocked"), "a private WSS constructor is denied before it can start a handshake")?;
     same(
         actual["webSocketStream"].clone(),
@@ -181,12 +181,19 @@ document.addEventListener('DOMContentLoaded', async () => {{
     const descriptor=Object.getOwnPropertyDescriptor(window,name);
     result[name]=window[name]===undefined && descriptor?.configurable===false && descriptor?.writable===false;
   }}
-  document.addEventListener('securitypolicyviolation',e=>result.blockedUris.push(e.blockedURI));
+  let cssBlocked;
+  const blocked=new Promise(resolve=>{{cssBlocked=resolve;}}), blockedTimer=setTimeout(cssBlocked,1000);
+  document.addEventListener('securitypolicyviolation',e=>{{
+    result.blockedUris.push(e.blockedURI);
+    if(e.blockedURI.endsWith('/visual-css-probe'))cssBlocked();
+  }});
   const css=document.createElement('style');
   const styled=new Promise(resolve=>{{css.addEventListener('load',resolve,{{once:true}});css.addEventListener('error',resolve,{{once:true}});setTimeout(resolve,1000);}});
   css.textContent='@import url("{HTTPS_FIXTURE_ORIGIN}/import.css");#cssProbe{{background-image:url("http://ipc.localhost/visual-css-probe")}}';document.head.append(css);
   await styled;
   result.cssImport=getComputedStyle(document.getElementById('cssProbe')).getPropertyValue('--visual-import').trim()==='Ready';
+  await blocked;
+  clearTimeout(blockedTimer);
   try {{result.parent=!!parent.document;}} catch {{}}
   try {{result.storage=!!localStorage;}} catch {{}}
   try {{result.cookies=typeof document.cookie==='string';}} catch {{}}
