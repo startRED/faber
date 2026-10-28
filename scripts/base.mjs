@@ -13,6 +13,7 @@ import { execFileSync } from 'node:child_process';
 import { readFileSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { GREP, placeholdersIn, SKIP } from './numbers.mjs';
+import { check as owedHere, message as owedMessage, onlyOwed } from './owed.mjs';
 
 const BASE = 'phase-1-base';
 const KEEP_MS = 3 * 60 * 1000;
@@ -133,10 +134,18 @@ function prePush() {
     }
   }
   const red = status();
-  if (!red) return 0;
-  console.error(red);
-  if (shas.length === 0 || process.env.FABER_PUSH_ON_RED === '1') return 0;
-  console.error(`Push refused. If this push is the fix, push it with FABER_PUSH_ON_RED=1.`);
+  if (red) {
+    console.error(red);
+    if (shas.length > 0 && process.env.FABER_PUSH_ON_RED !== '1') {
+      console.error(`Push refused. If this push is the fix, push it with FABER_PUSH_ON_RED=1.`);
+      return 1;
+    }
+  }
+  // A lane pushes only the fixes of what it queued while one is red or left unqueued (docs/dev/workflow.md#owed-work).
+  const owed = owedHere();
+  if (owed.length === 0 || onlyOwed(stdin, owed)) return 0;
+  console.error(owedMessage(owed));
+  console.error('Push refused: it is not one of those. FABER_IGNORE_OWED=1 pushes it anyway, for work those wait on.');
   return 1;
 }
 
@@ -146,5 +155,7 @@ if (process.argv[1] && resolve(process.argv[1]) === resolve(join(import.meta.dir
   } else {
     const text = status();
     if (text) console.log(text);
+    const owed = owedHere();
+    if (owed.length) console.log(owedMessage(owed));
   }
 }

@@ -208,10 +208,20 @@ async function land(number, dry, given, args) {
   // never overwrites the commit a newer run queued meanwhile.
   const queue = `refs/heads/queue/pr-${number}`;
   const queued = git('ls-remote', 'origin', queue).split(/\s/)[0];
-  const pr = JSON.parse(run('gh', ['pr', 'view', number, '--json', 'number,title,body,state,isDraft,baseRefName,isCrossRepository,headRefOid']));
+  const pr = JSON.parse(run('gh', ['pr', 'view', number, '--json', 'number,title,body,state,isDraft,baseRefName,isCrossRepository,headRefOid,headRefName']));
   const refused = refusal(pr);
   if (refused) {
     console.error(`#${pr.number} cannot land: ${refused}.`);
+    return 1;
+  }
+  // A lane lands what it queued before something new (docs/dev/workflow.md#owed-work); the runs on CI record nothing.
+  // Loaded only here: CI runs a copy of this file alone, without the files beside it.
+  const lane = !given && process.env.GITHUB_ACTIONS !== 'true' ? await import('./owed.mjs') : null;
+  // Any owed pull request may be queued again: each one's fix is what the guard waits for.
+  const owed = lane ? lane.check() : [];
+  if (owed.length && !owed.some((other) => other.number === pr.number)) {
+    console.error(lane.message(owed));
+    console.error(`#${pr.number} was not queued. FABER_IGNORE_OWED=1 queues it anyway, for work those wait on.`);
     return 1;
   }
   if (given && given !== pr.headRefOid) {
@@ -302,6 +312,7 @@ async function land(number, dry, given, args) {
       // The queue branch holds the commit now; a branch left behind costs nothing.
     }
   }
+  lane?.remember(pr.number, pr.headRefName);
   console.log(`#${pr.number} is queued as ${commit.slice(0, 9)} on queue/pr-${pr.number}. CI checks it, lands it and marks the pull request merged.`);
   return 0;
 }

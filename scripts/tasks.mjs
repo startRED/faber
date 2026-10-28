@@ -13,6 +13,7 @@
 
 import { execFileSync } from 'node:child_process';
 import { resolve, join } from 'node:path';
+import { check, message } from './owed.mjs';
 
 const BASE = 'origin/phase-1-base';
 export const TASKS = 'docs/tasks';
@@ -100,6 +101,12 @@ function claim(base, name, who, old) {
 }
 
 function next(who) {
+  const owed = check();
+  if (owed.length) {
+    console.log(message(owed));
+    console.log('No new task until they are fixed. FABER_IGNORE_OWED=1 takes one anyway, for work those wait on.');
+    return 1;
+  }
   const { base, files, claims } = state();
   for (const name of finished(files, claims)) {
     // Finished only if this list is at least as new as the base the claim was made on: a task added after this run's

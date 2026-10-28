@@ -127,6 +127,19 @@ pixels measures the glyphs (`Range.getBoundingClientRect()`), never the box that
 `document.fonts.ready`, and keeps a margin wide enough for the other system's font rendering; the bound and the worst
 value seen on Windows go in its comment.
 
+## Owed work
+
+A lane fixes what it queued before it starts something new (R466). On 2026-10-28 one lane had six pull requests whose
+queue runs had failed since 2026-10-25 (a macOS compile error, a broken test, lints) and kept building new work on top
+of them for three days, so none of it could land; the red `queue` status had woken it, and nothing held it. Each
+`land.mjs` run on a PC records the pull request in the worktree's own git folder (`faber-queued.json`, beside its
+`HEAD`). A recorded pull request that is still open is owed while its `queue` status is red, or missing because it was
+pushed after queueing and not queued again; one that landed or was closed is forgotten. While one is owed, `cargo t`
+prints it, `node scripts/tasks.mjs next` gives no task, `land.mjs` queues no other pull request, and the `pre-push`
+hook refuses a push of any branch but the owed pull requests' own (deleting a branch always goes through).
+`FABER_IGNORE_OWED=1` goes past it for work an owed pull request waits on. Like the red base, offline or without `gh`
+it refuses nothing (`scripts/owed.mjs`).
+
 ## Numbers
 
 Decision numbers (`docs/decisions.md`) and what's-new ids (`notes.<id>.<kind>`) are given when a change lands, never in
