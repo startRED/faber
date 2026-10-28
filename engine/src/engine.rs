@@ -1222,7 +1222,12 @@ impl Engine {
     pub fn project_memory(&self, id: &str) -> Result<crate::project::memory::MemoryList, String> {
         let project = self.project(id)?;
         let mut list = crate::project::memory::list(Path::new(&project.path)).map_err(str::to_string)?;
-        crate::project::memory::mark_kept(&mut list, &self.with(|c| c.store.kept_decisions(id)));
+        let kept = self.with(|c| c.store.kept_decisions(id));
+        let upgraded = crate::project::memory::upgrade_kept(&list, &kept);
+        if upgraded != kept {
+            self.with(|c| c.store.migrate_kept_decisions(id, &kept, &upgraded).map_err(|e| e.key().to_string()))?;
+        }
+        crate::project::memory::mark_kept(&mut list, &kept);
         Ok(list)
     }
     pub fn edit_project_memory(&self, id: &str, edit: &crate::project::memory::Edit) -> Result<(), String> {

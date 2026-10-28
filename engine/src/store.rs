@@ -7,7 +7,7 @@
 
 use crate::ledger::Ledger;
 use crate::model::{BranchOf, Conversation, Project, Settings, Summary};
-use crate::project::memory::AdoptedKind;
+use crate::project::memory::{AdoptedKind, KeptDecision};
 use crate::recents::Recents;
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
@@ -663,26 +663,40 @@ impl Store {
         crate::project::memory::read_adopted_tasks(root, &record.target).map(Some)
     }
 
-    /// The AI decisions the person kept in a project's decision list (R16), as hashes of their words. They live here and
+    /// The decisions the person kept (R16), as item identities and content hashes, or legacy body-only hashes. They live here and
     /// not in the project, so no agent can write a review. A missing or damaged file keeps nothing: decisions read "not
     /// reviewed" again.
-    pub fn kept_decisions(&self, project: &str) -> Vec<String> {
+    pub fn kept_decisions(&self, project: &str) -> Vec<KeptDecision> {
         self.kept_decisions_reader(project)()
     }
 
     /// `kept_decisions` for a worker: the file is read when the closure is called, away from the engine lock.
-    pub fn kept_decisions_reader(&self, project: &str) -> impl FnOnce() -> Vec<String> + Send + 'static {
+    pub fn kept_decisions_reader(&self, project: &str) -> impl FnOnce() -> Vec<KeptDecision> + Send + 'static {
         let (path, project) = (self.decisions_kept.clone(), project.to_string());
-        move || read::<BTreeMap<String, Vec<String>>>(&path).unwrap_or_default().remove(&project).unwrap_or_default()
+        move || read::<BTreeMap<String, Vec<KeptDecision>>>(&path).unwrap_or_default().remove(&project).unwrap_or_default()
+    }
+
+    /// Called under the engine lock: a stale listing must never overwrite a newer Keep.
+    pub(crate) fn migrate_kept_decisions(
+        &self,
+        project: &str,
+        expected: &[KeptDecision],
+        upgraded: &[KeptDecision],
+    ) -> Result<bool, Fault> {
+        let mut all: BTreeMap<String, Vec<KeptDecision>> = read_checked(&self.decisions_kept)?.unwrap_or_default();
+        let Some(current) = all.get_mut(project).filter(|current| current.as_slice() == expected) else { return Ok(false) };
+        *current = upgraded.to_vec();
+        self.write(&self.decisions_kept, &all)?;
+        Ok(true)
     }
 
     /// Adds one kept decision without discarding older approvals. Projects that are gone (not in `live`) are dropped.
-    pub fn keep_decision(&self, project: &str, hash: String, live: &[String]) -> Result<(), Fault> {
-        let mut all = read_checked::<BTreeMap<String, Vec<String>>>(&self.decisions_kept)?.unwrap_or_default();
+    pub fn keep_decision(&self, project: &str, record: KeptDecision, live: &[String]) -> Result<(), Fault> {
+        let mut all = read_checked::<BTreeMap<String, Vec<KeptDecision>>>(&self.decisions_kept)?.unwrap_or_default();
         all.retain(|id, _| live.contains(id));
         let kept = all.entry(project.into()).or_default();
-        kept.retain(|h| *h != hash);
-        kept.push(hash);
+        kept.retain(|older| !older.matches(&record));
+        kept.push(record);
         self.write(&self.decisions_kept, &all)
     }
 
@@ -1127,12 +1141,73 @@ mod tests {
     }
 
     #[test]
+    fn kept_item_records_upgrade_without_losing_concurrent_or_other_project_approvals() {
+        use crate::project::memory::{self, KeptDecision};
+        let dir = tempfile::tempdir().unwrap();
+        let project = tempfile::tempdir().unwrap();
+        fs::create_dir(project.path().join(".faber")).unwrap();
+        fs::write(project.path().join(".faber/decisions.md"), "- Keep exports. [by AI]\n").unwrap();
+        let store = Store::new(dir.path());
+        let item = KeptDecision::of("- Keep exports.");
+        let encoded = serde_json::to_value(&item).unwrap();
+        let old = encoded["hash"].as_str().unwrap()[..32].to_string();
+        let initial = serde_json::json!({"project": [old, "unmatched legacy"], "other": ["other approval"]});
+        store.write(&store.decisions_kept, &initial).unwrap();
+        let expected = store.kept_decisions("project");
+        let list = memory::list(project.path()).unwrap();
+        let upgraded = memory::upgrade_kept(&list, &expected);
+        assert_eq!(upgraded, vec![item.clone(), KeptDecision::Legacy("unmatched legacy".into())]);
+        assert!(store.migrate_kept_decisions("project", &expected, &upgraded).unwrap());
+        assert_eq!(Store::new(dir.path()).kept_decisions("project"), upgraded);
+        assert_eq!(store.kept_decisions("other"), vec![KeptDecision::Legacy("other approval".into())]);
+        let before = fs::read(&store.decisions_kept).unwrap();
+        assert!(!store.migrate_kept_decisions("project", &expected, &upgraded).unwrap());
+        assert_eq!(fs::read(&store.decisions_kept).unwrap(), before);
+        let second = KeptDecision::of("- Keep exports.\n  Also keep older formats.");
+        store.keep_decision("project", second.clone(), &["project".into(), "other".into()]).unwrap();
+        assert!(!store.migrate_kept_decisions("project", &upgraded, &expected).unwrap());
+        let after = store.kept_decisions("project");
+        assert!(after.contains(&item) && after.contains(&second), "same heading cannot delete a distinct approval");
+        assert_eq!(store.kept_decisions("other"), vec![KeptDecision::Legacy("other approval".into())]);
+    }
+
+    #[test]
+    fn kept_item_records_refuse_unknown_records_and_preserve_failed_migrations() {
+        use crate::project::memory::KeptDecision;
+        struct NoReplace;
+        impl Disk for NoReplace {
+            fn write(&self, path: &Path, bytes: &[u8]) -> io::Result<()> {
+                RealDisk.write(path, bytes)
+            }
+            fn rename(&self, _: &Path, _: &Path) -> io::Result<()> {
+                Err(io::ErrorKind::StorageFull.into())
+            }
+        }
+        let dir = tempfile::tempdir().unwrap();
+        let store = Store::new(dir.path());
+        let item = KeptDecision::of("- Keep exports.");
+        for corrupt in [r#"{"project":[{"id":"id","hash":"hash","authority":true}]}"#, r#"{"project":[null]}"#] {
+            fs::write(&store.decisions_kept, corrupt).unwrap();
+            assert!(store.kept_decisions("project").is_empty());
+            assert_eq!(store.keep_decision("project", item.clone(), &["project".into()]), Err(Fault::Corrupt));
+            assert_eq!(store.migrate_kept_decisions("project", &[], &[]), Err(Fault::Corrupt));
+            assert_eq!(fs::read_to_string(&store.decisions_kept).unwrap(), corrupt);
+        }
+        let old = KeptDecision::Legacy("old".into());
+        store.write(&store.decisions_kept, &BTreeMap::from([("project", vec![old.clone()])])).unwrap();
+        let before = fs::read(&store.decisions_kept).unwrap();
+        let failed = Store::with_disk(dir.path(), Arc::new(NoReplace));
+        assert!(failed.migrate_kept_decisions("project", &[old], &[item]).is_err());
+        assert_eq!(fs::read(&store.decisions_kept).unwrap(), before);
+    }
+
+    #[test]
     fn keeping_a_decision_refuses_corrupt_approvals_without_overwriting_them() {
         let dir = tempfile::tempdir().unwrap();
         let store = Store::new(dir.path());
         let corrupt = b"{\"project\":[\"existing approval\"],";
         fs::write(&store.decisions_kept, corrupt).unwrap();
-        assert_eq!(store.keep_decision("project", "new approval".into(), &["project".into()]), Err(Fault::Corrupt));
+        assert_eq!(store.keep_decision("project", KeptDecision::Legacy("new approval".into()), &["project".into()]), Err(Fault::Corrupt));
         assert_eq!(fs::read(&store.decisions_kept).unwrap(), corrupt);
     }
 
@@ -1142,11 +1217,11 @@ mod tests {
         let store = Store::new(dir.path());
         let records: Vec<_> = (0..501).map(|i| format!("{i:032x}")).collect();
         store.write(&store.decisions_kept, &BTreeMap::from([("project", &records)])).unwrap();
-        store.keep_decision("project", "new approval".into(), &["project".into()]).unwrap();
+        store.keep_decision("project", KeptDecision::Legacy("new approval".into()), &["project".into()]).unwrap();
         let kept = Store::new(dir.path()).kept_decisions("project");
         assert_eq!(kept.len(), 502, "a new approval must not discard older approvals");
-        assert_eq!(&kept[..501], records);
-        assert_eq!(kept.last().map(String::as_str), Some("new approval"));
+        assert_eq!(&kept[..501], records.into_iter().map(KeptDecision::Legacy).collect::<Vec<_>>());
+        assert_eq!(kept.last(), Some(&KeptDecision::Legacy("new approval".into())));
     }
 
     #[test]

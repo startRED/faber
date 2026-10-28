@@ -1,0 +1,11 @@
+{
+  "notes": {
+    "better": {
+      "en": "Kept project decisions now record both their identity and approved words while preserving older approvals.",
+      "pt-BR": "As decisões guardadas do projeto agora registram sua identidade e as palavras aprovadas, preservando as aprovações antigas.",
+      "es": "Las decisiones guardadas del proyecto registran su identidad y las palabras aprobadas, conservando las aprobaciones anteriores.",
+      "fr": "Les décisions conservées du projet enregistrent leur identité et les mots approuvés, tout en préservant les approbations anciennes.",
+      "de": "Gespeicherte Projektentscheidungen erfassen ihre Identität und den genehmigten Wortlaut; ältere Freigaben bleiben erhalten."
+    }
+  }
+}

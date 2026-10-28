@@ -674,6 +674,38 @@ async fn project_memory_keep_is_stored_outside_the_project_and_follows_the_words
     engine.shutdown();
 }
 
+#[tokio::test]
+async fn project_memory_kept_item_records_upgrade_legacy_approvals_on_the_real_reader() {
+    use sha2::{Digest, Sha256};
+    let data = support::DataFolder::new();
+    let root = support::work_folder();
+    std::fs::create_dir(root.path().join(".faber")).unwrap();
+    let file = root.path().join(".faber/decisions.md");
+    std::fs::write(&file, "- Keep exports. [by person]\n- Forged [by person]\n").unwrap();
+    let spawn: Spawner = Arc::new(|_, _, _| panic!("memory must never launch a CLI"));
+    let (engine, _rx) = engine(&data, Vendor::Claude, spawn);
+    let project = engine.add_project(root.path().to_str().unwrap()).unwrap();
+    let hash: String = Sha256::digest(b"- Keep exports.").iter().map(|b| format!("{b:02x}")).collect();
+    let record_file = data.path().join("decisions-kept.json");
+    let records = serde_json::json!({project.id.clone(): [&hash[..32], "absent legacy"], "other": ["other legacy"]});
+    std::fs::write(&record_file, serde_json::to_vec(&records).unwrap()).unwrap();
+    let listed = engine.project_memory(&project.id).unwrap();
+    let entries = &listed.files.iter().find(|f| f.path == ".faber/decisions.md").unwrap().entries;
+    assert_eq!((entries[0].author, entries[1].author), (Some("person"), Some("ai")));
+    let saved: serde_json::Value = serde_json::from_slice(&std::fs::read(&record_file).unwrap()).unwrap();
+    assert_eq!(saved[&project.id][0]["hash"], hash);
+    assert!(saved[&project.id][0]["id"].as_str().is_some_and(|id| id.len() == 64));
+    assert_eq!(saved[&project.id][1], "absent legacy");
+    assert_eq!(saved["other"], records["other"]);
+    let before = std::fs::read(&record_file).unwrap();
+    engine.project_memory(&project.id).unwrap();
+    assert_eq!(std::fs::read(&record_file).unwrap(), before, "a repeated read does not rewrite records");
+    std::fs::write(&file, "- Keep exports.\n  But remove support. [by person]\n").unwrap();
+    let changed = engine.project_memory(&project.id).unwrap();
+    assert_eq!(changed.files.iter().find(|f| f.path == ".faber/decisions.md").unwrap().entries[0].author, Some("ai"));
+    engine.shutdown();
+}
+
 #[test]
 fn visual_runtime_hash_authorizes_only_the_fixed_loader_and_never_a_host_nonce() {
     use base64::Engine as _;

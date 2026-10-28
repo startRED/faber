@@ -24,6 +24,30 @@ pub enum AdoptedKind {
     Tasks,
 }
 
+/// Authority lives outside the repository; body-only records from older versions remain readable.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(untagged, deny_unknown_fields)]
+pub enum KeptDecision {
+    Item { id: String, hash: String },
+    Legacy(String),
+}
+
+impl KeptDecision {
+    pub(crate) fn of(body: &str) -> Self {
+        let line = body.lines().next().unwrap_or_default().trim();
+        let line = line.strip_prefix("- ").or_else(|| line.strip_prefix("* ")).or_else(|| line.strip_prefix("+ ")).unwrap_or(line);
+        let normal = line.split_whitespace().collect::<Vec<_>>().join(" ");
+        Self::Item { id: revision(normal.as_bytes()), hash: revision(body.trim().as_bytes()) }
+    }
+
+    pub(crate) fn matches(&self, record: &Self) -> bool {
+        match (self, record) {
+            (Self::Legacy(old), Self::Item { hash, .. }) => hash.get(..32) == Some(old.as_str()),
+            _ => self == record,
+        }
+    }
+}
+
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct MemoryFile {
@@ -65,7 +89,7 @@ pub struct Edit {
     pub end: usize,
     /// None deletes the entry; Some replaces its text.
     pub text: Option<String>,
-    /// Keeps an AI decision: nothing is written to the project, `apply` returns the hash of its words to store (`digest`).
+    /// Keeps an AI decision: nothing is written to the project, `apply` returns its identity and content hash to store.
     #[serde(default)]
     pub keep: bool,
 }
@@ -697,16 +721,25 @@ fn revision(bytes: &[u8]) -> String {
     Sha256::digest(bytes).iter().map(|b| format!("{b:02x}")).collect()
 }
 
-/// What Faber stores when the person keeps an AI decision: a short hash of its words, so reworded words are not kept.
-fn digest(body: &str) -> String {
-    revision(body.trim().as_bytes())[..32].into()
+/// Upgrade only legacy approvals whose exact body is still present; absent approved words are never discarded.
+pub(crate) fn upgrade_kept(list: &MemoryList, kept: &[KeptDecision]) -> Vec<KeptDecision> {
+    let items: Vec<_> = list.files.iter().flat_map(|f| &f.entries).filter_map(|e| e.body.as_deref()).map(KeptDecision::of).collect();
+    kept.iter()
+        .map(|old| match old {
+            KeptDecision::Legacy(_) => items.iter().find(|item| old.matches(item)).unwrap_or(old).clone(),
+            _ => old.clone(),
+        })
+        .collect()
 }
 
 /// Marks the decisions the person kept or wrote (`kept` is what Faber stored outside the project). A `[by person]` mark
 /// with no record is an agent's claim, so it reads as an AI decision not yet reviewed, whatever the file says.
-pub fn mark_kept(list: &mut MemoryList, kept: &[String]) {
+pub fn mark_kept(list: &mut MemoryList, kept: &[KeptDecision]) {
     for entry in list.files.iter_mut().flat_map(|f| &mut f.entries) {
-        let recorded = entry.body.as_deref().is_some_and(|b| kept.contains(&digest(b)));
+        let recorded = entry.body.as_deref().is_some_and(|b| {
+            let item = KeptDecision::of(b);
+            kept.iter().any(|record| record.matches(&item))
+        });
         if entry.author == Some("person") && !recorded {
             entry.author = Some("ai");
         }
@@ -922,15 +955,15 @@ pub fn edit(project: &Path, edit: &Edit) -> Result<(), &'static str> {
     apply(project, edit).map(drop)
 }
 
-/// Like `edit`, and for `keep` returns the hash of the kept words instead of writing anything.
-pub fn apply(project: &Path, edit: &Edit) -> Result<Option<String>, &'static str> {
+/// Like `edit`, and for `keep` returns the identity and content hash instead of writing anything.
+pub fn apply(project: &Path, edit: &Edit) -> Result<Option<KeptDecision>, &'static str> {
     edit_with_private(project, edit, &private_roots())
 }
 
 /// One writer at a time for the notes and `rules.md`.
 static WRITES: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
-fn edit_with_private(project: &Path, edit: &Edit, protected: &[String]) -> Result<Option<String>, &'static str> {
+fn edit_with_private(project: &Path, edit: &Edit, protected: &[String]) -> Result<Option<KeptDecision>, &'static str> {
     let _write = WRITES.lock().map_err(|_| "error.memory.write")?;
     let source = source(&edit.path).ok_or(REFUSED)?;
     let protected = resolved_private(protected);
@@ -963,7 +996,7 @@ fn edit_with_private(project: &Path, edit: &Edit, protected: &[String]) -> Resul
     if edit.keep {
         let text = &original[entry.start..entry.end];
         let kept = decisions(&edit.path).then(|| mark(text)).flatten().ok_or(REFUSED)?;
-        return Ok(Some(digest(&text[..kept.open])));
+        return Ok(Some(KeptDecision::of(&text[..kept.open])));
     }
     if let Some(text) = &edit.text {
         if text.trim().is_empty() || text.contains('\0') || text.len() > MAX_BYTES {
@@ -989,7 +1022,7 @@ fn edit_with_private(project: &Path, edit: &Edit, protected: &[String]) -> Resul
         .map_err(|error| if error.kind() == std::io::ErrorKind::AlreadyExists { CHANGED } else { "error.memory.write" })?;
     // Words the person wrote themselves in Memory and marked theirs are recorded as theirs, like a Keep.
     let written = edit.text.as_deref().filter(|_| decisions(&edit.path)).map(str::trim_end);
-    Ok(written.and_then(|text| mark(text).filter(|m| m.author == "person").map(|m| digest(&text[..m.open]))))
+    Ok(written.and_then(|text| mark(text).filter(|m| m.author == "person").map(|m| KeptDecision::of(&text[..m.open]))))
 }
 
 #[cfg(test)]
@@ -1480,7 +1513,7 @@ mod tests {
 
     const DECISIONS: &str = "- Use SQLite for the cache. [by AI]\n- Keep the old export, it is\n  what customers use. [By Person]\n- Ship on Fridays\n- Drop the beta flag [by AI, reviewed]\n- Mixed [by robot]\n- Use [by AI] marks mid-line\n- Odd [by person, reviewed]\n";
 
-    fn listed(project: &Path, path: &str, kept: &[String]) -> MemoryFile {
+    fn listed(project: &Path, path: &str, kept: &[KeptDecision]) -> MemoryFile {
         let mut list = list(project).unwrap();
         mark_kept(&mut list, kept);
         list.files.into_iter().find(|f| f.path == path).unwrap()
@@ -1495,7 +1528,7 @@ mod tests {
         (project, file)
     }
 
-    fn keep(project: &Path, file: &MemoryFile, i: usize) -> Result<Option<String>, &'static str> {
+    fn keep(project: &Path, file: &MemoryFile, i: usize) -> Result<Option<KeptDecision>, &'static str> {
         apply(
             project,
             &Edit {
@@ -1507,6 +1540,25 @@ mod tests {
                 keep: true,
             },
         )
+    }
+
+    #[test]
+    fn project_memory_kept_item_records_bind_identity_and_full_content() {
+        let (project, file) = decisions_file("- Keep exports\n  for older customers. [by AI]\n");
+        let record = keep(project.path(), &file, 0).unwrap().unwrap();
+        let value = serde_json::to_value(&record).unwrap();
+        assert_eq!(value["id"], revision(b"Keep exports"));
+        assert_eq!(value["hash"], revision(b"- Keep exports\n  for older customers."));
+        assert_eq!(
+            KeptDecision::of("*  Keep\t exports"),
+            KeptDecision::Item { id: revision(b"Keep exports"), hash: revision(b"*  Keep\t exports") }
+        );
+        let wrong_id = KeptDecision::Item { id: revision(b"another item"), hash: value["hash"].as_str().unwrap().into() };
+        assert!(!listed(project.path(), ".faber/decisions.md", &[wrong_id]).entries[0].reviewed);
+        assert!(listed(project.path(), ".faber/decisions.md", std::slice::from_ref(&record)).entries[0].reviewed);
+        std::fs::write(project.path().join(".faber/decisions.md"), "- Keep exports\n  but remove old customers. [by person]\n").unwrap();
+        let changed = listed(project.path(), ".faber/decisions.md", &[record]);
+        assert_eq!((changed.entries[0].author, changed.entries[0].reviewed), (Some("ai"), false));
     }
 
     #[test]
