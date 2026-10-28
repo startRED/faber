@@ -28,7 +28,12 @@ pub enum AdoptedKind {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(untagged, deny_unknown_fields)]
 pub enum KeptDecision {
-    Item { id: String, hash: String },
+    Item {
+        id: String,
+        hash: String,
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        files: Vec<String>,
+    },
     Legacy(String),
 }
 
@@ -37,12 +42,13 @@ impl KeptDecision {
         let line = body.lines().next().unwrap_or_default().trim();
         let line = line.strip_prefix("- ").or_else(|| line.strip_prefix("* ")).or_else(|| line.strip_prefix("+ ")).unwrap_or(line);
         let normal = line.split_whitespace().collect::<Vec<_>>().join(" ");
-        Self::Item { id: revision(normal.as_bytes()), hash: revision(body.trim().as_bytes()) }
+        Self::Item { id: revision(normal.as_bytes()), hash: revision(body.trim().as_bytes()), files: vec![] }
     }
 
     pub(crate) fn matches(&self, record: &Self) -> bool {
         match (self, record) {
             (Self::Legacy(old), Self::Item { hash, .. }) => hash.get(..32) == Some(old.as_str()),
+            (Self::Item { id, hash, .. }, Self::Item { id: other_id, hash: other_hash, .. }) => id == other_id && hash == other_hash,
             _ => self == record,
         }
     }
@@ -839,6 +845,34 @@ pub fn list_faber(project: &Path) -> Result<MemoryList, &'static str> {
     scan(project, &private_roots(), true)
 }
 
+fn reference_exists(directory: &Directory, root: &Path, name: &str, protected: &[String]) -> bool {
+    let Ok(path) = adopted_relative(name) else { return false };
+    if private(&root.join(path), protected) {
+        return false;
+    }
+    let Some(parent) = path.parent() else { return false };
+    let Some(name) = path.file_name().and_then(|name| name.to_str()) else { return false };
+    let Ok(file) = directory.under(parent).and_then(|dir| dir.file(name)) else { return false };
+    #[cfg(windows)]
+    let Some(opened) = faber_winproc::rewind::resolved_path(&file).ok().flatten() else { return false };
+    #[cfg(unix)]
+    let (Ok(root), Ok(opened)) = (adopted_open_path(&directory.fd), adopted_open_path(&file)) else { return false };
+    #[cfg(unix)]
+    let root = root.as_path();
+    adopted_opened_path(root, &opened, protected).is_ok()
+}
+
+/// Only explicit consent records existing file references; reading old approvals never invents them.
+fn kept_item(body: &str, directory: &Directory, root: &Path, protected: &[String]) -> KeptDecision {
+    let mut record = KeptDecision::of(body);
+    let names: std::collections::BTreeSet<_> =
+        Parser::new(body).filter_map(|event| if let Event::Code(name) = event { Some(name.replace('\\', "/")) } else { None }).collect();
+    if let KeptDecision::Item { files, .. } = &mut record {
+        files.extend(names.into_iter().filter(|name| reference_exists(directory, root, name, protected)));
+    }
+    record
+}
+
 /// The card needs the newest decisions, not Memory's truncated display window or its other note files.
 pub(crate) fn kept_for_card(project: &Path, kept: &[KeptDecision]) -> Result<Vec<String>, &'static str> {
     if kept.is_empty() {
@@ -862,7 +896,12 @@ pub(crate) fn kept_for_card(project: &Path, kept: &[KeptDecision]) -> Result<Vec
         .filter_map(|entry| entry.body)
         .filter(|body| {
             let item = KeptDecision::of(body);
-            kept.iter().any(|record| record.matches(&item))
+            let mut matching = kept.iter().filter(|record| record.matches(&item)).peekable();
+            matching.peek().is_some()
+                && matching.all(|record| match record {
+                    KeptDecision::Item { files, .. } => files.iter().all(|name| reference_exists(&directory, &root, name, &protected)),
+                    KeptDecision::Legacy(_) => true,
+                })
         })
         .collect())
 }
@@ -1024,7 +1063,7 @@ fn edit_with_private(project: &Path, edit: &Edit, protected: &[String]) -> Resul
     if edit.keep {
         let text = &original[entry.start..entry.end];
         let kept = decisions(&edit.path).then(|| mark(text)).flatten().ok_or(REFUSED)?;
-        return Ok(Some(KeptDecision::of(&text[..kept.open])));
+        return Ok(Some(kept_item(&text[..kept.open], &project_dir, &root, &protected)));
     }
     if let Some(text) = &edit.text {
         if text.trim().is_empty() || text.contains('\0') || text.len() > MAX_BYTES {
@@ -1049,8 +1088,9 @@ fn edit_with_private(project: &Path, edit: &Edit, protected: &[String]) -> Resul
     dir.replace(name, &next, permissions, expected)
         .map_err(|error| if error.kind() == std::io::ErrorKind::AlreadyExists { CHANGED } else { "error.memory.write" })?;
     // Words the person wrote themselves in Memory and marked theirs are recorded as theirs, like a Keep.
-    let written = edit.text.as_deref().filter(|_| decisions(&edit.path)).map(str::trim_end);
-    Ok(written.and_then(|text| mark(text).filter(|m| m.author == "person").map(|m| KeptDecision::of(&text[..m.open]))))
+    let written = decisions(&edit.path).then(|| replacement.trim_end());
+    Ok(written
+        .and_then(|text| mark(text).filter(|m| m.author == "person").map(|m| kept_item(&text[..m.open], &project_dir, &root, &protected))))
 }
 
 #[cfg(test)]
@@ -1579,14 +1619,86 @@ mod tests {
         assert_eq!(value["hash"], revision(b"- Keep exports\n  for older customers."));
         assert_eq!(
             KeptDecision::of("*  Keep\t exports"),
-            KeptDecision::Item { id: revision(b"Keep exports"), hash: revision(b"*  Keep\t exports") }
+            KeptDecision::Item { id: revision(b"Keep exports"), hash: revision(b"*  Keep\t exports"), files: vec![] }
         );
-        let wrong_id = KeptDecision::Item { id: revision(b"another item"), hash: value["hash"].as_str().unwrap().into() };
+        let wrong_id = KeptDecision::Item { id: revision(b"another item"), hash: value["hash"].as_str().unwrap().into(), files: vec![] };
         assert!(!listed(project.path(), ".faber/decisions.md", &[wrong_id]).entries[0].reviewed);
         assert!(listed(project.path(), ".faber/decisions.md", std::slice::from_ref(&record)).entries[0].reviewed);
         std::fs::write(project.path().join(".faber/decisions.md"), "- Keep exports\n  but remove old customers. [by person]\n").unwrap();
         let changed = listed(project.path(), ".faber/decisions.md", &[record]);
         assert_eq!((changed.entries[0].author, changed.entries[0].reviewed), (Some("ai"), false));
+    }
+
+    #[test]
+    fn project_memory_kept_file_references_preserve_old_records_and_validate_every_recorded_path() {
+        let body = "- Preserve `src/lib.rs`, `src\\lib.rs`, `cargo test`, `setting.name` and `.env`.";
+        let (project, file) = decisions_file(&format!("{body} [by AI]\n"));
+        std::fs::create_dir(project.path().join("src")).unwrap();
+        std::fs::write(project.path().join("src/lib.rs"), "public API").unwrap();
+        std::fs::write(project.path().join(".env"), "synthetic fixture, never read").unwrap();
+        let record = keep(project.path(), &file, 0).unwrap().unwrap();
+        let json = serde_json::to_value(&record).unwrap();
+        assert_eq!(json["files"], serde_json::json!(["src/lib.rs"]));
+        let old = KeptDecision::of(body);
+        assert!(record.matches(&old));
+        assert_ne!(record, old, "CAS compares metadata too");
+        assert!(listed(project.path(), ".faber/decisions.md", std::slice::from_ref(&record)).entries[0].reviewed);
+        assert_eq!(kept_for_card(project.path(), std::slice::from_ref(&record)).unwrap(), [body]);
+        for path in ["../outside", "src/../src/lib.rs", ".env", "C:/outside", "/outside", "src/lib.rs:stream"] {
+            let mut corrupt = json.clone();
+            corrupt["files"] = serde_json::json!([path]);
+            let corrupt: KeptDecision = serde_json::from_value(corrupt).unwrap();
+            assert!(kept_for_card(project.path(), &[old.clone(), corrupt]).unwrap().is_empty(), "{path}");
+        }
+        let legacy = KeptDecision::Legacy(revision(body.as_bytes())[..32].into());
+        std::fs::remove_file(project.path().join("src/lib.rs")).unwrap();
+        assert!(kept_for_card(project.path(), &[legacy.clone(), record.clone()]).unwrap().is_empty());
+        assert_eq!(kept_for_card(project.path(), &[old.clone(), legacy.clone()]).unwrap(), [body]);
+        assert_eq!(upgrade_kept(&list(project.path()).unwrap(), &[legacy]), [old]);
+        let roundtrip: KeptDecision = serde_json::from_value(json).unwrap();
+        assert_eq!(roundtrip, record);
+    }
+
+    #[test]
+    fn project_memory_kept_file_references_bind_person_edits_to_saved_crlf_words() {
+        let (project, file) = decisions_file("- Old decision. [by AI]\r\n");
+        std::fs::create_dir(project.path().join("src")).unwrap();
+        std::fs::write(project.path().join("src/lib.rs"), "public API").unwrap();
+        let entry = &file.entries[0];
+        let record = apply(
+            project.path(),
+            &Edit {
+                path: file.path.clone(),
+                revision: file.revision.clone(),
+                start: entry.start,
+                end: entry.end,
+                text: Some("- Preserve `src/lib.rs`\n  and the public API. [by person]".into()),
+                keep: false,
+            },
+        )
+        .unwrap()
+        .unwrap();
+        let body = "- Preserve `src/lib.rs`\r\n  and the public API.";
+        assert_eq!(kept_for_card(project.path(), std::slice::from_ref(&record)).unwrap(), [body]);
+        assert_eq!(serde_json::to_value(&record).unwrap()["files"], serde_json::json!(["src/lib.rs"]));
+        std::fs::remove_file(project.path().join("src/lib.rs")).unwrap();
+        assert!(kept_for_card(project.path(), &[record]).unwrap().is_empty());
+    }
+
+    #[test]
+    fn project_memory_kept_file_references_refuse_hardlinks_without_reading_contents() {
+        let body = "- Preserve `src/lib.rs`.";
+        let (project, file) = decisions_file(&format!("{body} [by AI]\n"));
+        std::fs::create_dir(project.path().join("src")).unwrap();
+        std::fs::write(project.path().join("src/lib.rs"), "original fixture").unwrap();
+        let record = keep(project.path(), &file, 0).unwrap().unwrap();
+        let outside = folder();
+        std::fs::write(outside.path().join("private"), "synthetic fixture, never read").unwrap();
+        std::fs::remove_file(project.path().join("src/lib.rs")).unwrap();
+        std::fs::hard_link(outside.path().join("private"), project.path().join("src/lib.rs")).unwrap();
+        assert!(kept_for_card(project.path(), &[record]).unwrap().is_empty());
+        let recaptured = keep(project.path(), &file, 0).unwrap().unwrap();
+        assert!(serde_json::to_value(recaptured).unwrap().get("files").is_none());
     }
 
     #[test]

@@ -19,3 +19,4 @@
 - Visible helper history is stored outside conversation JSON in bounded atomic pages and loaded in bounded windows only by the existing helper reader, preserving older-page selection during new work. [by AI]
 - Keep direct windows-core updates on 0.62 patch releases while WebView2 0.39 requires its COM types; lift the Dependabot version exclusion only with a coordinated WebView2/Tauri type migration. [by AI]
 - Bind each saved project start card to its native session id and exact sent text; changed or unknown context starts a fresh native session with the existing conversation history, while compaction keeps its original card. [by AI]
+- Capture existing contained inline-code file references only at explicit decision consent; recheck their safe existence for each new start card without rewriting approvals or inferring references in older records. [by AI]

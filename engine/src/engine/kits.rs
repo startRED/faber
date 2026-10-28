@@ -826,6 +826,83 @@ mod tests {
         engine.shutdown();
     }
 
+    #[tokio::test]
+    async fn project_start_card_stale_file_reference_leaves_the_card_without_losing_approval() {
+        project_start_card_stale_file_reference_captured(Vendor::Claude).await;
+    }
+
+    #[tokio::test]
+    async fn project_start_card_stale_file_reference_codex_preserves_approval() {
+        project_start_card_stale_file_reference_captured(Vendor::Codex).await;
+    }
+
+    async fn project_start_card_stale_file_reference_captured(vendor: Vendor) {
+        use crate::project::memory::Edit;
+        let dir = crate::workspace::TestRoot::new();
+        let work = tempfile::tempdir().unwrap();
+        let folder = work.path().canonicalize().unwrap();
+        std::fs::create_dir(folder.join(".faber")).unwrap();
+        std::fs::create_dir(folder.join("src")).unwrap();
+        std::fs::write(folder.join("src/lib.rs"), "pub fn public_api() {}\n").unwrap();
+        let text =
+            "- STALE_FILE_DECISION preserve `src/lib.rs`. [by AI]\n- KEEP_COMMAND_TEXT use `cargo test` and `setting.name`. [by AI]\n";
+        std::fs::write(folder.join(".faber/decisions.md"), text).unwrap();
+        let (spawn, args, messages) = fake();
+        let engine = engine(&dir, spawn);
+        let project = engine.add_project(&folder.to_string_lossy()).unwrap();
+        let list = engine.project_memory(&project.id).unwrap();
+        let file = list.files.iter().find(|file| file.path == ".faber/decisions.md").unwrap();
+        for entry in &file.entries {
+            engine
+                .edit_project_memory(
+                    &project.id,
+                    &Edit {
+                        path: file.path.clone(),
+                        revision: file.revision.clone(),
+                        start: entry.start,
+                        end: entry.end,
+                        text: None,
+                        keep: true,
+                    },
+                )
+                .unwrap();
+        }
+        let approval = engine.with(|core| core.store.kept_decisions(&project.id));
+        assert_eq!(approval.len(), 2);
+        std::fs::remove_file(folder.join("src/lib.rs")).unwrap();
+        engine.with(|core| {
+            conversation(core, Area::Project, Some(&project.id), &folder, "STALE_REFERENCE_TURN");
+            core.synchronous_kit_checks = false;
+            core.rewind.captured_for_test("reply");
+            core.start("kit", "reply", &pick(vendor), "STALE_REFERENCE_TURN".into(), vec![], true).unwrap();
+        });
+        input_with(&messages, "STALE_REFERENCE_TURN").await;
+        let prompt = if vendor == Vendor::Claude {
+            args.lock()
+                .unwrap()
+                .iter()
+                .find_map(|(_, argv)| argv.windows(2).find(|pair| pair[0] == "--append-system-prompt").map(|pair| pair[1].clone()))
+                .unwrap()
+        } else {
+            messages
+                .lock()
+                .unwrap()
+                .iter()
+                .find_map(|(_, message)| {
+                    (message["method"] == "thread/start").then(|| message["params"]["developerInstructions"].as_str().unwrap().to_string())
+                })
+                .unwrap()
+        };
+        assert!(
+            !prompt.contains("STALE_FILE_DECISION"),
+            "a kept decision whose recorded file disappeared must leave the actual driver card"
+        );
+        assert!(prompt.contains("KEEP_COMMAND_TEXT"), "commands and settings are never guessed to be missing files");
+        assert_eq!(std::fs::read_to_string(folder.join(".faber/decisions.md")).unwrap(), text);
+        assert_eq!(engine.with(|core| core.store.kept_decisions(&project.id)), approval);
+        engine.shutdown();
+    }
+
     async fn project_start_card_captured(vendor: Vendor) {
         use crate::project::memory::KeptDecision;
         let mut previous_card = None::<String>;

@@ -1,0 +1,11 @@
+{
+  "notes": {
+    "better": {
+      "en": "For decisions kept from this update onward, new project sessions skip those citing files removed since approval, while preserving your notes and approvals.",
+      "pt-BR": "Nas decisões guardadas a partir desta atualização, novas sessões do projeto deixam de usar as que citam arquivos removidos após a aprovação, preservando suas notas e aprovações.",
+      "es": "Para las decisiones guardadas a partir de esta actualización, las nuevas sesiones del proyecto omiten las que citan archivos eliminados después de aprobarlas, sin borrar tus notas ni aprobaciones.",
+      "fr": "Pour les décisions conservées à partir de cette mise à jour, les nouvelles sessions du projet écartent celles qui citent des fichiers supprimés après leur approbation, sans effacer vos notes ni vos approbations.",
+      "de": "Bei Entscheidungen, die du ab diesem Update speicherst, lassen neue Projektsitzungen jene aus, deren genannte Dateien seit der Freigabe entfernt wurden. Deine Notizen und Freigaben bleiben erhalten."
+    }
+  }
+}

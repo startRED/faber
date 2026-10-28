@@ -1172,6 +1172,32 @@ mod tests {
     }
 
     #[test]
+    fn kept_file_reference_records_preserve_mixed_approvals_and_metadata_cas() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = Store::new(dir.path());
+        let old = KeptDecision::of("- Keep exports.");
+        let mut value = serde_json::to_value(&old).unwrap();
+        value["files"] = serde_json::json!(["src/lib.rs"]);
+        let enriched: KeptDecision = serde_json::from_value(value.clone()).unwrap();
+        let live = vec!["project".into(), "other".into()];
+        store.keep_decision("other", KeptDecision::Legacy("other approval".into()), &live).unwrap();
+        store.keep_decision("project", KeptDecision::Legacy("unmatched legacy".into()), &live).unwrap();
+        store.keep_decision("project", old, &live).unwrap();
+        let expected = store.kept_decisions("project");
+        store.keep_decision("project", enriched.clone(), &live).unwrap();
+        let before = fs::read(&store.decisions_kept).unwrap();
+        assert!(!store.migrate_kept_decisions("project", &expected, &expected).unwrap());
+        assert_eq!(fs::read(&store.decisions_kept).unwrap(), before);
+        assert_eq!(Store::new(dir.path()).kept_decisions("project"), [KeptDecision::Legacy("unmatched legacy".into()), enriched]);
+        assert_eq!(store.kept_decisions("other"), [KeptDecision::Legacy("other approval".into())]);
+        value["files"] = serde_json::json!("not an array");
+        let corrupt = serde_json::to_vec(&serde_json::json!({"project": [value]})).unwrap();
+        fs::write(&store.decisions_kept, &corrupt).unwrap();
+        assert!(store.keep_decision("project", KeptDecision::of("- Another."), &live).is_err());
+        assert_eq!(fs::read(&store.decisions_kept).unwrap(), corrupt);
+    }
+
+    #[test]
     fn kept_item_records_refuse_unknown_records_and_preserve_failed_migrations() {
         use crate::project::memory::KeptDecision;
         struct NoReplace;
