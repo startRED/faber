@@ -9,6 +9,26 @@ use std::fs;
 use std::path::{Component, Path, PathBuf};
 use std::time::UNIX_EPOCH;
 
+/// Keeps the Windows data-directory chain open through startup and engine shutdown.
+/// This rejects existing links; it does not replace handle-relative I/O or a write sandbox.
+pub struct DataDirectory {
+    #[cfg(windows)]
+    _directory: faber_winproc::MemoryDirectory,
+}
+
+impl DataDirectory {
+    pub fn open(path: &Path) -> std::io::Result<Self> {
+        #[cfg(windows)]
+        let directory = faber_winproc::MemoryDirectory::open_or_create(path)?;
+        #[cfg(not(windows))]
+        fs::create_dir_all(path)?;
+        Ok(Self {
+            #[cfg(windows)]
+            _directory: directory,
+        })
+    }
+}
+
 /// A file the user attached, as it comes from the screen.
 #[derive(Debug, Clone, serde::Deserialize)]
 pub struct Attachment {

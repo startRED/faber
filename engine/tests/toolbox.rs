@@ -25,7 +25,8 @@ fn engine(dir: &std::path::Path, vendor: Vendor, spawn: faber_engine::proc::Spaw
             ask: None,
         },
         Arc::new(|_| {}),
-    );
+    )
+    .unwrap();
     let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_secs_f64();
     let signals = faber_engine::signals::Signals { billing: Some(faber_engine::budget::Billing::Subscription), ..Default::default() };
     let windows = [("five_hour", 0.31, 2.0 * 3600.0), ("seven_day", 0.30, 5.0 * 86_400.0)];

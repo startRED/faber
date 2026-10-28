@@ -38,7 +38,8 @@ async fn background_cost_at_thirty_two_full_output_caps() {
             ask: None,
         },
         Arc::new(move |event| drop(tx.send(event))),
-    );
+    )
+    .unwrap();
     engine
         .send(SendRequest {
             conversation_id: None,

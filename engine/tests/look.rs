@@ -26,7 +26,7 @@ fn engine(dir: &Path, spawn: faber_engine::proc::Spawner) -> Engine {
         runtime: tokio::runtime::Handle::current(),
         ask: None,
     };
-    Engine::new(opts, Arc::new(|_: AppEvent| {}))
+    Engine::new(opts, Arc::new(|_: AppEvent| {})).unwrap()
 }
 
 fn send(engine: &Engine, text: &str) -> String {

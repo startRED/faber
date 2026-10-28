@@ -450,7 +450,7 @@ fn logging_spawner(log: PathBuf) -> proc::Spawner {
 async fn run_faber(clis: &BTreeMap<Vendor, Cli>, request: &Request, work: &Work, root: &Path, allowance: f64, billed: bool) -> SideResult {
     let started = Instant::now();
     let state = root.join(&request.id).join("faber").join("state");
-    let engine = Engine::new(
+    let engine = match Engine::new(
         EngineOptions {
             data_dir: state,
             clis: clis.clone(),
@@ -463,7 +463,10 @@ async fn run_faber(clis: &BTreeMap<Vendor, Cli>, request: &Request, work: &Work,
             ask: None,
         },
         Arc::new(|_| {}),
-    );
+    ) {
+        Ok(engine) => engine,
+        Err(error) => return failed(Side::Faber, started.elapsed().as_secs_f64(), error.to_string()),
+    };
     let baseline = ledger_snapshot(&engine.ledger());
     // What the app's shell gives the engine: the native git for separate copies, and the verifier for the checks.
     engine.set_git(Arc::new(|| {

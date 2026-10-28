@@ -47,7 +47,7 @@ fn boot(dir: &Path, conversations: &[Value]) -> Engine {
         runtime: tokio::runtime::Handle::current(),
         ask: None,
     };
-    Engine::new(opts, Arc::new(|_| {}))
+    Engine::new(opts, Arc::new(|_| {})).unwrap()
 }
 
 const HOUR: u64 = 3600 * 1000;

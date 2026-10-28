@@ -238,24 +238,24 @@ fn tabs(ctx: &mut Ctx) -> Result {
     let (mut app, fixture) = open_browser(ctx)?;
     let page = &mut app.page;
     enter(page, &fixture.url("/one"))?;
-    wait_page(page, &fixture, "one")?;
+    wait_page(page, &fixture, "one").map_err(|e| format!("initial tab: {e}"))?;
     page.click(&css(".site-new"))?;
     wait_tabs(page, 2)?;
     enter(page, &fixture.url("/two"))?;
     wait_page(page, &fixture, "two")?;
     page.click(&css(".site-tab:first-child .site-tab-go"))?;
-    wait_page(page, &fixture, "one")?;
+    wait_page(page, &fixture, "one").map_err(|e| format!("click first tab: {e}"))?;
     page.press_on(&css(".site-address"), "Control+Tab")?;
     wait_page(page, &fixture, "two")?;
     page.click(&css(".site-tab.front .site-tab-close"))?;
     wait_tabs(page, 1)?;
-    wait_page(page, &fixture, "one")?;
+    wait_page(page, &fixture, "one").map_err(|e| format!("close second tab: {e}"))?;
     page.press_on(&css(".site-address"), "Control+t")?;
     wait_tabs(page, 2)?;
     enter(page, &fixture.url("/two"))?;
     wait_page(page, &fixture, "two")?;
     page.press_on(&css(".site-address"), "Control+Shift+Tab")?;
-    wait_page(page, &fixture, "one")?;
+    wait_page(page, &fixture, "one").map_err(|e| format!("previous tab shortcut: {e}"))?;
     page.press_on(&css(".site-address"), "Control+Tab")?;
     wait_page(page, &fixture, "two")?;
     page.right_click(&css(".site-tab.front .site-tab-go"))?;
@@ -266,13 +266,13 @@ fn tabs(ctx: &mut Ctx) -> Result {
     page.press_on(&css(".site-address"), "Control+t")?;
     wait_tabs(page, 2)?;
     enter(page, &fixture.url("/one"))?;
-    wait_page(page, &fixture, "one")?;
+    wait_page(page, &fixture, "one").map_err(|e| format!("navigate new tab: {e}"))?;
     page.press_on(&css(".site-address"), "Control+w")?;
     wait_tabs(page, 1)?;
     wait_page(page, &fixture, "two")?;
     page.press_on(&css(".site-address"), "Control+Shift+t")?;
     wait_tabs(page, 2)?;
-    wait_page(page, &fixture, "one")?;
+    wait_page(page, &fixture, "one").map_err(|e| format!("restore closed tab: {e}"))?;
     page.wait_visible(&css(".site-tab.front .site-tab-go"))?;
     let at = page.eval("(() => { const r=document.querySelector('.site-tab.front .site-tab-go').getBoundingClientRect(); return {x:r.x+r.width/2,y:r.y+r.height/2}; })()")?;
     for kind in ["mousePressed", "mouseReleased"] {
@@ -669,13 +669,19 @@ fn enter(page: &mut crate::page::Page, url: &str) -> Result {
 
 fn wait_page(page: &mut crate::page::Page, fixture: &Fixture, name: &str) -> Result {
     let expected_url = fixture.url(&format!("/{name}"));
-    page.wait_for(
+    let loaded = page.wait_for(
         &format!("the child WebView2 to show {name}"),
         &format!(
             "window.__TAURI_INTERNALS__.invoke('test_site_probe', {{capture:false}}).then(p => document.querySelector('.site-address')?.value === {} && !document.querySelector('.site-empty') && p.shown && p.page?.url === {} && p.page?.title === {} && p.page?.text.includes({})).catch(e=>{{if(String(e)==='the browser closed'||String(e)==='the test browser closed')return false;throw e;}})",
             json!(expected_url), json!(expected_url), json!(format!("Native fixture {name}")), json!(format!("Native page {name}"))
         ),
-    )?;
+    );
+    if let Err(error) = loaded {
+        let previous = page.cdp.set_deadline(Some(Instant::now() + Duration::from_secs(3)));
+        let state = page.eval("window.__TAURI_INTERNALS__.invoke('test_site_probe',{capture:false}).then(native=>({native,address:document.querySelector('.site-address')?.value,strip:[...document.querySelectorAll('.site-tab')].map(t=>({text:t.textContent,front:t.classList.contains('front')}))}))");
+        page.cdp.set_deadline(previous);
+        return Err(format!("{error}; native page failure snapshot: {state:?}; fixture requests: {:?}", fixture.requests()));
+    }
     let p = probe(page, false)?;
     same(p["page"]["title"].clone(), json!(format!("Native fixture {name}")), "native child document title")?;
     ensure(p["page"]["text"].as_str().is_some_and(|text| text.contains(&format!("Native page {name}"))), || {

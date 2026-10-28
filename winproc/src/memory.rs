@@ -54,7 +54,8 @@ fn child_access(parent: &File, name_text: &str, directory: bool, create: bool, r
     };
     let mut handle = std::ptr::null_mut();
     let mut ios = IO_STATUS_BLOCK::default();
-    let access = access | 0x8000_0000 | if create { 0x4001_0000 } else { 0 };
+    // DELETE access on a retained new directory would block a second shared guard from opening it.
+    let access = access | 0x8000_0000 | if create { if directory { 0x4000_0000 } else { 0x4001_0000 } } else { 0 };
     let options =
         FILE_OPEN_REPARSE_POINT | FILE_SYNCHRONOUS_IO_NONALERT | if directory { FILE_DIRECTORY_FILE } else { FILE_NON_DIRECTORY_FILE };
     // SAFETY: the counted UTF-16 name and attributes live through this synchronous call. RootDirectory is an owned
@@ -371,6 +372,23 @@ impl MemoryDirectory {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn newly_created_data_directory_reopens_while_its_first_guard_pins_it() {
+        let owned = tempfile::tempdir().unwrap();
+        let root = owned.path().canonicalize().unwrap();
+        let path = root.join("new/nested/data");
+        let first = MemoryDirectory::open_or_create(&path).unwrap();
+        let reopened = MemoryDirectory::open_or_create(&path).unwrap();
+        assert_eq!(first.identity().unwrap(), reopened.identity().unwrap());
+        let mut file = reopened.file("kept.txt", true).unwrap();
+        file.write_all(b"preserved work").unwrap();
+        drop(file);
+        assert!(std::fs::rename(&path, path.with_extension("moved")).is_err());
+        drop(first);
+        assert_eq!(std::fs::read(path.join("kept.txt")).unwrap(), b"preserved work");
+        assert!(std::fs::rename(&path, path.with_extension("moved")).is_err());
+    }
+
     #[test]
     fn adopted_task_folder_native_listing_reports_overflow_without_changing_legacy_listing() {
         let owned = tempfile::tempdir().unwrap();

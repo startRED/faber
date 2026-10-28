@@ -2073,6 +2073,7 @@ export const en = {
   'notes.283.fixed': "A helper's report that could not be delivered while no AI was available now goes out by itself once one is back.",
   'notes.284.better': "On Mac and Linux, helpers and work that goes on by itself now wait when your computer's memory is short, as on Windows, instead of starting anyway.",
   'notes.285.fixed': 'Switching a visual answer’s versions no longer adds a browser history entry for every switch.',
+  'notes.286.fixed': 'Faber refuses invalid or redirected Windows data folders before saving data.',
   'update.checking': 'Looking for an update…',
   'update.downloading': 'Downloading update…',
   'update.downloadingPercent': 'Downloading update… {percent}%',

@@ -89,7 +89,7 @@ fn engine(dir: &Path, clis: BTreeMap<Vendor, Cli>, spawn: Spawner) -> (Engine, U
         runtime: tokio::runtime::Handle::current(),
         ask: None,
     };
-    (Engine::new(opts, Arc::new(move |e| drop(tx.send(e)))), rx)
+    (Engine::new(opts, Arc::new(move |e| drop(tx.send(e)))).unwrap(), rx)
 }
 
 fn native_cli() -> Cli {

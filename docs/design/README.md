@@ -15,6 +15,8 @@ The visual direction lives in this folder, one page per part ([docs/README.md](.
 
 ## First frame and update progress (R157)
 
+- On Windows, an invalid or already linked data folder stops setup before settings and the engine are opened. The existing startup-error path reports the failure; no work screen or new control is added.
+
 - `ui/index.html` paints a static first frame before any script runs: the frame colour of Dark Room, or of the light
   theme when the system asks for light, with the mark centred at half strength. No text (so no language is needed) and
   no animation, reduced motion or not. Its rules sit at the top of `ui/styles.css`, never in an inline `<style>`: the

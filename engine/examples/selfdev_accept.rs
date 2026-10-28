@@ -369,7 +369,7 @@ async fn attempt(scenario: Scenario, model: &str, options: &Options, base: &Path
             ask: None,
         },
         Arc::new(|_| {}),
-    );
+    )?;
     // The shell gives the engine the native git for separate copies and the verifier for the checks
     // (src-tauri/src/main.rs); without them every project conversation works in the project folder and has no checks.
     engine.set_git(Arc::new(|| {

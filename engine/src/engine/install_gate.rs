@@ -136,7 +136,8 @@ mod tests {
                 ask: None,
             },
             Arc::new(|_| {}),
-        );
+        )
+        .unwrap();
         let request = || SendRequest {
             conversation_id: None,
             area: Area::Chat,

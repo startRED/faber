@@ -35,7 +35,7 @@ fn engine_with(dir: &Path, spawn: faber_engine::proc::Spawner, vendors: &[Vendor
         runtime: tokio::runtime::Handle::current(),
         ask: None,
     };
-    let engine = Engine::new(opts, Arc::new(move |e| drop(tx.send(e))));
+    let engine = Engine::new(opts, Arc::new(move |e| drop(tx.send(e)))).unwrap();
     engine.set_keep_going_pace(0.001);
     // Faber goes on by itself only on a known subscription.
     for vendor in vendors {

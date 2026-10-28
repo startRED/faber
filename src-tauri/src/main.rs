@@ -1765,9 +1765,12 @@ fn main() {
     let autostart_launch = !creates_window(std::env::args());
     let hidden = std::env::var("FABER_HIDDEN").is_ok_and(|v| v == "1");
     let is_test = cfg!(feature = "test-hooks") || hidden || std::env::var_os("FABER_DATA_DIR").is_some();
-    // From the first line on, so a panic before the app is set up is written too.
-    if let Some(dir) = crash_record_dir(is_test) {
-        faber_engine::crash::install_hook(dir, env!("CARGO_PKG_VERSION"), env!("FABER_COMMIT"));
+    // A refused destination must not install a writer that a later startup panic could call.
+    if let Some(dir) = crash_record_dir(is_test)
+        && let Err(error) = faber_engine::crash::install_hook(dir, env!("CARGO_PKG_VERSION"), env!("FABER_COMMIT"))
+    {
+        eprintln!("Faber failed to start: {error}");
+        std::process::exit(1);
     }
     // Before any HTTPS client, the updater's included: reqwest is built without a crypto provider of its own.
     faber_engine::tls::install();
@@ -1958,7 +1961,7 @@ fn main() {
         .setup(move |app| {
             app.manage(visual_page::Pages::default());
             let data_dir = data_dir(app.handle())?;
-            std::fs::create_dir_all(&data_dir)?;
+            let _data_directory = faber_engine::workspace::DataDirectory::open(&data_dir)?;
             app.manage(tray::Tray::default());
             let clis = detect_clis();
             let handle = app.handle().clone();
@@ -2027,7 +2030,7 @@ fn main() {
                 runtime: tauri::async_runtime::handle().inner().clone(),
                 ask: None,
             };
-            let engine = Engine::new(opts, emit);
+            let engine = Engine::new(opts, emit)?;
             engine.measure_unix_worker_memory();
             if let Some(dir) = installed_data_dir(hidden) {
                 engine.set_installed_data(dir);
@@ -2152,7 +2155,10 @@ mod crash_record_wiring_tests {
         assert_eq!(crash_record_dir(false).and_then(|dir| dir.file_name().map(|n| n.to_owned())), Some("Faber".into()));
         // The three places that act on it: the hook at the top of main, the marker at the setup, and the end of the run.
         let main = body_of("fn main() {");
-        assert!(main.contains("ifletSome(dir)=crash_record_dir(is_test){faber_engine::crash::install_hook(dir,"), "the hook is gated");
+        assert!(
+            main.contains("ifletSome(dir)=crash_record_dir(is_test)&&letErr(error)=faber_engine::crash::install_hook(dir,"),
+            "the hook is gated"
+        );
         assert!(main.contains("ifcrash_record_dir(is_test).is_some(){faber_engine::crash::start_run("), "the marker is gated");
     }
 

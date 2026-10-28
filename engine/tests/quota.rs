@@ -35,7 +35,7 @@ fn start(dir: &Path, vendor: Vendor, spawn: Spawner) -> (Engine, UnboundedReceiv
         runtime: tokio::runtime::Handle::current(),
         ask: None,
     };
-    let engine = Engine::new(opts, Arc::new(move |e| drop(tx.send(e))));
+    let engine = Engine::new(opts, Arc::new(move |e| drop(tx.send(e)))).unwrap();
     engine.set_time_source(Arc::new(|| WHEN));
     (engine, rx)
 }

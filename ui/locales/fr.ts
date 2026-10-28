@@ -2193,6 +2193,7 @@ export const fr: Messages = {
   'notes.283.fixed': "Le rapport d'un assistant qui n'a pas pu être remis faute d'IA disponible part maintenant tout seul dès qu'une revient.",
   'notes.284.better': 'Sur Mac et Linux, les assistants et le travail qui continue seul attendent maintenant quand la mémoire de l’ordinateur manque, comme sur Windows, au lieu de démarrer quand même.',
   'notes.285.fixed': 'Changer de version d’une réponse visuelle n’ajoute plus une entrée à chaque fois dans l’historique du navigateur.',
+  'notes.286.fixed': 'Sous Windows, Faber refuse les dossiers de données invalides ou redirigés avant d’enregistrer des données.',
   'update.checking': 'Recherche d’une mise à jour…',
   'update.downloading': 'Téléchargement de la mise à jour…',
   'update.downloadingPercent': 'Téléchargement de la mise à jour… {percent} %',

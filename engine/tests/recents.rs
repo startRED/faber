@@ -20,7 +20,7 @@ fn engine(dir: &Path) -> Engine {
         runtime: tokio::runtime::Handle::current(),
         ask: None,
     };
-    Engine::new(opts, Arc::new(|_| {}))
+    Engine::new(opts, Arc::new(|_| {})).unwrap()
 }
 
 fn folders(n: usize) -> (tempfile::TempDir, Vec<String>) {

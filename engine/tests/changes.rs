@@ -398,7 +398,8 @@ async fn a_conversation_without_a_copy_has_no_changes_and_git_runs_off_the_engin
             ask: None,
         },
         Arc::new(|_| {}),
-    );
+    )
+    .unwrap();
     let git = Git::default();
     let runner = git.clone();
     engine.set_git(Arc::new(move || Some(Box::new(runner.clone()))));
@@ -423,7 +424,8 @@ async fn a_conversation_without_a_copy_has_no_changes_and_git_runs_off_the_engin
             ask: None,
         },
         Arc::new(|_| {}),
-    );
+    )
+    .unwrap();
     let runner = git.clone();
     engine.set_git(Arc::new(move || Some(Box::new(runner.clone()))));
     git.0.lock().unwrap().stats = b"1\t2\ta.txt\0".to_vec();

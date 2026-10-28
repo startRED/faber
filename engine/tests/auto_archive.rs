@@ -36,7 +36,7 @@ fn boot(dir: &Path, spawn: Spawner) -> (Engine, Reads) {
         runtime: tokio::runtime::Handle::current(),
         ask: None,
     };
-    let engine = Engine::new(opts, Arc::new(|_| {}));
+    let engine = Engine::new(opts, Arc::new(|_| {})).unwrap();
     let reads: Reads = Arc::default();
     let fake = reads.clone();
     engine.set_pr_reader(Arc::new(move |_, _| fake.lock().unwrap().pop_front().ok_or("reason.remote.unreachable")));

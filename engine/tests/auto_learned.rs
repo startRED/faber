@@ -41,7 +41,7 @@ fn engine(dir: &Path, spawn: faber_engine::proc::Spawner, ask: Ask) -> (Engine, 
         runtime: tokio::runtime::Handle::current(),
         ask: Some(ask),
     };
-    let engine = Engine::new(opts, Arc::new(move |e| drop(tx.send(e))));
+    let engine = Engine::new(opts, Arc::new(move |e| drop(tx.send(e)))).unwrap();
     engine.note_account_events(
         Vendor::Claude,
         vec![EngineEvent::Signals(Signals { billing: Some(Billing::Subscription), ..Default::default() })],

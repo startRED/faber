@@ -23,7 +23,7 @@ fn engine(path: &std::path::Path, vendor: Vendor, spawn: faber_engine::proc::Spa
         runtime: tokio::runtime::Handle::current(),
         ask: None,
     };
-    (Engine::new(options, Arc::new(move |event| drop(tx.send(event)))), rx)
+    (Engine::new(options, Arc::new(move |event| drop(tx.send(event)))).unwrap(), rx)
 }
 
 fn request(vendor: &str) -> SendRequest {

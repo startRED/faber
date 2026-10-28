@@ -2180,6 +2180,7 @@ export const ptBR: Messages = {
   'notes.283.fixed': 'O relatório de um auxiliar que não pôde ser entregue enquanto nenhuma IA estava disponível agora sai sozinho quando uma volta.',
   'notes.284.better': 'No Mac e no Linux, ajudantes e trabalho que segue sozinho agora esperam quando falta memória no computador, como no Windows, em vez de começar mesmo assim.',
   'notes.285.fixed': 'Trocar a versão de uma resposta visual não acumula mais entradas no histórico do navegador.',
+  'notes.286.fixed': 'O Faber recusa pastas de dados inválidas ou redirecionadas no Windows antes de salvar dados.',
   'update.checking': 'Procurando atualização…',
   'update.downloading': 'Baixando atualização…',
   'update.downloadingPercent': 'Baixando atualização… {percent}%',

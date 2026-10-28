@@ -31,7 +31,7 @@ fn engine(dir: &Path, vendor: Vendor, spawn: Spawner) -> (Engine, UnboundedRecei
         runtime: tokio::runtime::Handle::current(),
         ask: None,
     };
-    let engine = Engine::new(opts, Arc::new(move |e| drop(tx.send(e))));
+    let engine = Engine::new(opts, Arc::new(move |e| drop(tx.send(e)))).unwrap();
     engine.save_settings(Settings { permissions: Some(Permissions::Ask), ..Settings::default() }).unwrap();
     (engine, rx)
 }

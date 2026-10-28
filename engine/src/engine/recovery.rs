@@ -544,7 +544,7 @@ mod tests {
             runtime: tokio::runtime::Handle::current(),
             ask: None,
         };
-        let engine = Engine::new(opts, Arc::new(|_| {}));
+        let engine = Engine::new(opts, Arc::new(|_| {})).unwrap();
         let reply = engine.with(|c| {
             let id = c.blank(Area::Chat, None);
             let conv = c.convs.get_mut(&id).unwrap();

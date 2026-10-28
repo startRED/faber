@@ -28,6 +28,7 @@ fn engine(dir: &Path, vendor: Vendor, spawn: Spawner) -> Engine {
         },
         Arc::new(|_| {}),
     )
+    .unwrap()
 }
 
 fn choice(vendor: &str) -> Choice {

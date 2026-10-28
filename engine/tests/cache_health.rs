@@ -26,7 +26,7 @@ fn engine(dir: &Path, entries: Vec<Entry>) -> (Engine, UnboundedReceiver<AppEven
         runtime: tokio::runtime::Handle::current(),
         ask: None,
     };
-    (Engine::new(opts, Arc::new(move |e| drop(tx.send(e)))), rx)
+    (Engine::new(opts, Arc::new(move |e| drop(tx.send(e)))).unwrap(), rx)
 }
 
 fn user(text: &str) -> Entry {

@@ -51,7 +51,7 @@ fn engine(dir: &Path, spawn: faber_engine::proc::Spawner) -> Engine {
         runtime: tokio::runtime::Handle::current(),
         ask: None,
     };
-    Engine::new(opts, Arc::new(move |e| drop(tx.send(e))))
+    Engine::new(opts, Arc::new(move |e| drop(tx.send(e)))).unwrap()
 }
 
 const AGENTS: &str = "# Rules\n\n## Proof commands\n\n```bash\nnpm run lint\ncargo fmt --all --check\n```\n";
@@ -612,8 +612,8 @@ mod processes {
 
     /// A check that runs `script` with Node, from a file: a check's command is plain words, with no quotes.
     fn node(folder: &Path, script: &str) -> String {
-        std::fs::write(folder.join("check.js"), script).unwrap();
-        "node check.js".into()
+        std::fs::write(folder.join("check.cjs"), script).unwrap();
+        "node check.cjs".into()
     }
 
     fn request(folder: &Path, command: String, level: Level) -> Request {

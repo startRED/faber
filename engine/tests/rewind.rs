@@ -680,7 +680,8 @@ async fn rewind_recovery_can_be_retried_after_the_working_folder_returns() {
             ask: None,
         },
         Arc::new(|_| {}),
-    );
+    )
+    .unwrap();
     // Missing folders pass the folder policy; recovery fails when it tries to reopen the saved root.
     assert_eq!(engine.rewind_recover(CONVERSATION).unwrap_err(), "error.rewind.recovery");
     let pending = engine.rewind_redos(CONVERSATION).unwrap();
@@ -737,7 +738,8 @@ async fn rewind_startup_cleans_empty_project_quarantines_without_a_pending_journ
             ask: None,
         },
         Arc::new(move |event| drop(sent.send(event))),
-    );
+    )
+    .unwrap();
     assert_eq!(
         History::open(s.data.path(), at).unwrap().list(CONVERSATION).len(),
         1,
@@ -794,7 +796,8 @@ async fn rewind_unreadable_history_keeps_recovery_reachable_from_an_empty_conver
             ask: None,
         },
         Arc::new(|_| {}),
-    );
+    )
+    .unwrap();
     let infos = engine.rewind_redos(CONVERSATION).unwrap();
     assert_eq!(infos.len(), 1);
     assert!(infos[0].recovery && infos[0].id.is_empty() && infos[0].message_id.is_empty());
@@ -903,7 +906,8 @@ async fn rewind_recorded_turns_capture_before_cli_start_and_redo_never_spawns_or
             Arc::new(move |event| {
                 let _ = tx.send(event);
             }),
-        );
+        )
+        .unwrap();
         let git = s.git.clone();
         engine.set_git(Arc::new(move || Some(Box::new(git.clone()))));
         engine.warm(WarmRequest {
@@ -1016,7 +1020,8 @@ async fn rewind_overlap_refuses_restore_without_interrupting_another_conversatio
             ask: None,
         },
         Arc::new(|_| {}),
-    );
+    )
+    .unwrap();
     let git = s.git.clone();
     engine.set_git(Arc::new(move || Some(Box::new(git.clone()))));
     engine.open(&a.id).unwrap();
@@ -1356,7 +1361,8 @@ async fn rewind_stopped_checks_seal_only_after_confirmed_completion_and_release_
             ask: None,
         },
         Arc::new(|_| {}),
-    );
+    )
+    .unwrap();
     let mut project = engine.add_project(&s.folder.path().to_string_lossy()).unwrap();
     let before = project.clone();
     project.separate_copies = false;

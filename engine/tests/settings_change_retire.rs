@@ -27,7 +27,8 @@ fn engine(dir: &Path, vendor: Vendor, spawn: Spawner) -> Engine {
             ask: None,
         },
         Arc::new(|_| {}),
-    );
+    )
+    .unwrap();
     billing(&app, vendor, faber_engine::budget::Billing::Subscription);
     app
 }

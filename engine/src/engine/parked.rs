@@ -239,7 +239,7 @@ mod tests {
             runtime: tokio::runtime::Handle::current(),
             ask: None,
         };
-        Engine::new(opts, Arc::new(|_| {}))
+        Engine::new(opts, Arc::new(|_| {})).unwrap()
     }
 
     /// A chat with one streaming reply on a live full-access session that counts every answer it is given.

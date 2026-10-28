@@ -2193,6 +2193,7 @@ export const es: Messages = {
   'notes.283.fixed': 'El informe de un ayudante que no se pudo entregar mientras ninguna IA estaba disponible ahora sale solo cuando vuelve una.',
   'notes.284.better': 'En Mac y Linux, los ayudantes y el trabajo que sigue por su cuenta ahora esperan cuando falta memoria en tu equipo, como en Windows, en vez de empezar igual.',
   'notes.285.fixed': 'Cambiar de versión en una respuesta visual ya no acumula entradas en el historial del navegador.',
+  'notes.286.fixed': 'Faber rechaza las carpetas de datos inválidas o redirigidas en Windows antes de guardar datos.',
   'update.checking': 'Buscando una actualización…',
   'update.downloading': 'Descargando actualización…',
   'update.downloadingPercent': 'Descargando actualización… {percent} %',

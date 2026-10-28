@@ -1040,7 +1040,8 @@ mod tests {
                 ask: None,
             },
             Arc::new(|_| {}),
-        );
+        )
+        .unwrap();
         let project = engine.add_project(&folder.path().to_string_lossy()).unwrap();
         let (id, other) = engine.with(|core| {
             let id = core.blank(Area::Chat, None);
@@ -1083,7 +1084,8 @@ mod tests {
                 ask: None,
             },
             Arc::new(|_| {}),
-        );
+        )
+        .unwrap();
         let project = engine.add_project(&destination.path().to_string_lossy()).unwrap();
         let id = engine.with(|core| {
             let id = core.blank(Area::Chat, None);
@@ -1134,7 +1136,8 @@ mod tests {
                 ask: None,
             },
             Arc::new(|_| {}),
-        );
+        )
+        .unwrap();
         let project = engine.add_project(&folder.path().to_string_lossy()).unwrap();
         let id = engine.with(|core| {
             let id = core.blank(Area::Project, Some(project.id));
@@ -1183,7 +1186,8 @@ mod tests {
                     ask: None,
                 },
                 Arc::new(|_| {}),
-            );
+            )
+            .unwrap();
             let project = engine.add_project(&folder.path().to_string_lossy()).unwrap();
             let (capturing, capture_started) = tokio::sync::oneshot::channel();
             let capturing = Mutex::new(Some(capturing));
@@ -1296,7 +1300,8 @@ mod tests {
                 ask: None,
             },
             Arc::new(|_| {}),
-        );
+        )
+        .unwrap();
         let project = engine.add_project(&shared.path().to_string_lossy()).unwrap();
         let unrelated = engine.add_project(&other.path().to_string_lossy()).unwrap();
         let (a, b, c) = engine.with(|core| {
@@ -1429,7 +1434,8 @@ mod tests {
                 ask: None,
             },
             Arc::new(|_| {}),
-        );
+        )
+        .unwrap();
         let removed = engine.add_project(&removed_folder.path().to_string_lossy()).unwrap();
         let other = engine.add_project(&other_folder.path().to_string_lossy()).unwrap();
         let (old, current) =

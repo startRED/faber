@@ -27,3 +27,5 @@
 - Manual benchmark admission requires fresh unchanged quota readings between paid stages, after the existing reporting lag for its own work. Missing evidence pauses admission; this is observed quiet, not proof of who used an account. Completed sides are checkpointed before admission and a run-local CANCEL file ends a pause. [by AI]
 - Nightly CLI candidate contracts run only in disposable runners without sign-in; passing help/schema checks remain explicitly unqualified and cannot publish metadata, promote releases or authorize installation. [by AI]
 - Roadmap direction: schedule the discussed EGM-inspired project knowledge, independent plan review and delivery-to-plan checks; implementation details remain proposals. Owner's request, verbatim: "Coloque no plano/roadmap para implementar isso do melhor jeito possivel". [by person]
+
+- Engine construction returns a startup error before Store, catalog or background work when its data directory cannot be opened. Windows keeps its no-follow directory chain open through engine teardown; this entry check does not replace handle-relative I/O, a write sandbox or Chat-workspace relocation. [by AI]
