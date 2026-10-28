@@ -77,3 +77,7 @@ path = "tests/background_cost.rs"
 [[test]]
 name = "verify_cost"
 path = "tests/verify_cost.rs"
+
+[[test]]
+name = "adopted_read_cost"
+path = "tests/adopted_read_cost.rs"
