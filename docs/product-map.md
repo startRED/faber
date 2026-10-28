@@ -557,10 +557,12 @@ Chat keeps its ready-only path. Ready picks and shortlists share the same stack 
 at the next session boundary. The `project_facts_` regressions cover dependency evidence and prose refusal,
 working-copy first launch, empty catalogs and Chat prepared-session reuse.
 Package JSON validates every value while retaining only the useful fields, without a tree of unused lists.
-TOML facts compact flat decimal-integer arrays to one validated element before the official parse, since facts
-never use array elements. The streaming lexer keeps strings, table declarations and keys intact; other value
+TOML facts compact flat arrays of decimal integers and plain single-line strings to one validated element before the official parse, since facts
+never use array elements. Escaped basic strings, multiline strings and nested values retain full parsing.
+The streaming lexer keeps table declarations and keys intact; other value
 shapes stay with the official parser. Syntax, duplicate-key and table-conflict rejection remain unchanged
-(`rules_compact_integer_arrays_without_accepting_invalid_toml`, `rules_integer_array_reduction_preserves_multiple_fields_and_inline_tables`).
+(`rules_compact_integer_arrays_without_accepting_invalid_toml`, `rules_integer_array_reduction_preserves_multiple_fields_and_inline_tables`,
+`rules_plain_string_arrays_preserve_validation_and_declarations`).
 
 The `package_fields_` checks preserve malformed-input rejection, duplicate fields and the original depth boundary.
 The separate `project_facts_cost` probe records warm-file timing and sampled process memory; it can reject an

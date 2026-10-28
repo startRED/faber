@@ -1,0 +1,11 @@
+{
+  "notes": {
+    "better": {
+      "en": "Project tools use less memory when a project file contains long lists of simple text values.",
+      "pt-BR": "As ferramentas do projeto usam menos memória quando um arquivo do projeto tem listas longas de textos simples.",
+      "es": "Las herramientas del proyecto usan menos memoria cuando un archivo del proyecto contiene listas largas de textos simples.",
+      "fr": "Les outils du projet utilisent moins de mémoire lorsqu’un fichier du projet contient de longues listes de textes simples.",
+      "de": "Projektwerkzeuge brauchen weniger Arbeitsspeicher, wenn eine Projektdatei lange Listen einfacher Texte enthält."
+    }
+  }
+}
