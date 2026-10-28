@@ -1,10 +1,11 @@
 //! Keeping the quota readings fresh without asking a model anything. Claude Code answers `/usage` itself; Codex's server
-//! answers `account/rateLimits/read`. Both are short-lived hidden processes that Faber starts on the schedule in
+//! answers `account/rateLimits/read`. (A Claude Code whose `/usage` prints no percentages is read by one tiny request instead,
+//! `account::claude_probe`.) Both are short-lived hidden processes that Faber starts on the schedule in
 //! `cadence.rs`: at start, on a timer, after a request ends, on focus and on wake. Readings that arrive during a request
 //! (Claude's rate-limit events, Codex's rate-limit updates) go through the same `note_quota`.
 
 use super::*;
-use crate::account::{UsageRead, claude_usage};
+use crate::account::{UsageRead, claude_probe, claude_usage};
 
 const CLAUDE_TIMEOUT: Duration = Duration::from_secs(45);
 const CODEX_TIMEOUT: Duration = Duration::from_secs(20);
@@ -42,7 +43,11 @@ impl Core {
                 let _in_flight = InFlight { core: me.clone(), vendor };
                 match vendor {
                     Vendor::Claude => {
-                        let read = claude_usage(&cli, &spawn, &cwd, CLAUDE_TIMEOUT, now, offset).await;
+                        let mut read = claude_usage(&cli, &spawn, &cwd, CLAUDE_TIMEOUT, now, offset).await;
+                        // A Claude Code whose `/usage` prints no percentages is read by its smallest real request instead.
+                        if read == UsageRead::NoWindows {
+                            read = UsageRead::Windows(claude_probe(&cli, &spawn, &cwd, CLAUDE_TIMEOUT).await);
+                        }
                         let Some(core) = me.upgrade() else { return };
                         let mut c = core.lock().unwrap_or_else(|e| e.into_inner());
                         match read {
@@ -50,7 +55,7 @@ impl Core {
                                 found.into_iter().for_each(|(window, used, resets_at)| c.note_quota(vendor, window, used, resets_at))
                             }
                             UsageRead::Spent => c.usage_command_spent = true,
-                            UsageRead::Failed => {}
+                            UsageRead::NoWindows | UsageRead::Failed => {}
                         }
                     }
                     Vendor::Codex => {

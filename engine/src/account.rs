@@ -261,6 +261,9 @@ pub enum UsageRead {
     Windows(Vec<(&'static str, f64, f64)>),
     /// The CLI did not take `/usage` as a local command and asked a model: it is never used for readings again.
     Spent,
+    /// A clean local answer that prints no window at all: newer Claude Code versions list what contributes to the limits but no
+    /// percentages, so only a real request tells them (`claude_probe`).
+    NoWindows,
     Failed,
 }
 
@@ -305,7 +308,72 @@ fn usage_from(out: &str, code: Option<i32>, now: f64, offset: i64) -> UsageRead 
         return UsageRead::Failed;
     }
     let windows = crate::signals::claude_usage_windows(v["result"].as_str().unwrap_or_default(), now, offset);
-    if windows.is_empty() { UsageRead::Failed } else { UsageRead::Windows(windows) }
+    if windows.is_empty() { UsageRead::NoWindows } else { UsageRead::Windows(windows) }
+}
+
+/// A probe that cost more than this (US$, list price) did more than it was asked to, and is no reading.
+const PROBE_COST_LIMIT: f64 = 0.01;
+
+/// The smallest real request Claude Code can answer: no tools, no skills, a one-line system prompt and the cheapest model. Its
+/// `rate_limit_event` carries both vendor-wide windows exactly, which is all `/usage` used to print. It costs about 500 cached
+/// tokens (US$0.0001 at list price), and runs only when `/usage` says nothing, at most once per reading of the schedule in
+/// `cadence.rs`.
+pub async fn claude_probe(cli: &Cli, spawn: &Spawner, cwd: &Path, timeout: Duration) -> Vec<(&'static str, f64, f64)> {
+    let args = [
+        "-p",
+        "ok",
+        "--output-format",
+        "stream-json",
+        "--verbose",
+        "--model",
+        "claude-haiku-5-5",
+        "--effort",
+        "low",
+        "--max-turns",
+        "1",
+        "--system-prompt",
+        "Reply ok.",
+        "--disable-slash-commands",
+        "--safe-mode",
+        "--strict-mcp-config",
+        "--setting-sources",
+        "",
+        "--settings",
+        r#"{"disableAllHooks":true}"#,
+        "--no-session-persistence",
+        "--tools",
+        "",
+    ];
+    let Some(ran) = run_args(cli, args.map(String::from).to_vec(), spawn, cwd, timeout).await else { return vec![] };
+    probe_windows(&ran.out, if ran.replayed { Some(0) } else { ran.code })
+}
+
+/// The windows in a finished probe: its stream must end in a successful result that cost next to nothing, and carry a
+/// `rate_limit_event` whose two windows are fractions with a reset time. Anything else is no reading.
+fn probe_windows(out: &str, code: Option<i32>) -> Vec<(&'static str, f64, f64)> {
+    let mut windows = vec![];
+    let mut finished = false;
+    for line in out.lines() {
+        let Ok(msg) = serde_json::from_str::<serde_json::Value>(line) else { continue };
+        match msg["type"].as_str() {
+            Some("rate_limit_event") => {
+                for name in ["five_hour", "seven_day"] {
+                    let w = &msg["rate_limit_info"]["unifiedWindows"][name];
+                    if let (Some(used), Some(resets)) = (w["utilization"].as_f64(), w["resetsAt"].as_f64())
+                        && (0.0..=1.0).contains(&used)
+                    {
+                        windows.retain(|(n, _, _)| *n != name);
+                        windows.push((name, used, resets));
+                    }
+                }
+            }
+            Some("result") => {
+                finished = msg["is_error"] == false && msg["total_cost_usd"].as_f64().is_some_and(|c| (0.0..PROBE_COST_LIMIT).contains(&c))
+            }
+            _ => {}
+        }
+    }
+    if code == Some(0) && finished { windows } else { vec![] }
 }
 
 async fn read_all(stream: Option<Box<dyn AsyncRead + Send + Unpin>>) -> Option<String> {
@@ -402,6 +470,57 @@ mod tests {
         }]}},"message":{"content":[{"type":"text","text":"Showing last-known usage from 20 minutes ago"}]}});
         let terminal = serde_json::json!({"local_command":"usage","total_cost_usd":0,"modelUsage":{}});
         assert!(usage_events(&report, &terminal).is_none());
+    }
+
+    fn stream(event: serde_json::Value, result: serde_json::Value) -> String {
+        format!("{{\"type\":\"system\"}}\n{event}\nnot json\n{result}\n")
+    }
+
+    fn event() -> serde_json::Value {
+        serde_json::json!({"type":"rate_limit_event","rate_limit_info":{"unifiedWindows":{
+            "five_hour":{"utilization":0,"resetsAt":1793233200},
+            "seven_day":{"utilization":0.15,"resetsAt":1793692800}}}})
+    }
+
+    fn result() -> serde_json::Value {
+        serde_json::json!({"type":"result","is_error":false,"total_cost_usd":0.0001})
+    }
+
+    #[test]
+    fn a_probe_gives_the_two_windows_from_its_rate_limit_event() {
+        let got = probe_windows(&stream(event(), result()), Some(0));
+        assert_eq!(got, vec![("five_hour", 0.0, 1793233200.0), ("seven_day", 0.15, 1793692800.0)]);
+    }
+
+    #[test]
+    fn a_probe_that_failed_or_cost_too_much_is_no_reading() {
+        let mut errored = result();
+        errored["is_error"] = true.into();
+        let mut costly = result();
+        costly["total_cost_usd"] = 0.5.into();
+        let mut no_cost = result();
+        no_cost.as_object_mut().unwrap().remove("total_cost_usd");
+        for bad in [errored, costly, no_cost] {
+            assert!(probe_windows(&stream(event(), bad), Some(0)).is_empty());
+        }
+        assert!(probe_windows(&stream(event(), result()), Some(1)).is_empty(), "a non-zero exit");
+        assert!(probe_windows(&stream(event(), result()), None).is_empty(), "killed, no exit code");
+        assert!(probe_windows(&format!("{}\n", result()), Some(0)).is_empty(), "no rate-limit event");
+    }
+
+    #[test]
+    fn a_probe_window_that_cannot_be_real_is_skipped() {
+        let mut e = event();
+        e["rate_limit_info"]["unifiedWindows"]["five_hour"]["utilization"] = 7.into();
+        e["rate_limit_info"]["unifiedWindows"]["seven_day"].as_object_mut().unwrap().remove("resetsAt");
+        assert!(probe_windows(&stream(e, result()), Some(0)).is_empty());
+    }
+
+    #[test]
+    fn a_usage_command_with_no_percentages_asks_for_the_probe() {
+        let mut v = clean();
+        v["result"] = "What's contributing to your limits usage?\nLast 24h · 655 requests".into();
+        assert_eq!(read(&v, Some(0)), UsageRead::NoWindows);
     }
 
     const TEXT: &str = "Current session: 10% used · resets Oct 14, 11:29pm (X/Y)

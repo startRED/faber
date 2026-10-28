@@ -518,6 +518,42 @@ async fn a_usage_command_that_turns_out_to_ask_a_model_is_never_run_again() {
 }
 
 #[tokio::test]
+async fn a_usage_command_that_prints_no_percentages_is_read_by_one_tiny_request() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut local: serde_json::Value = serde_json::from_str(&usage_json(0)).unwrap();
+    local["result"] = "What's contributing to your limits usage?\n\nLast 24h · 655 requests".into();
+    let event = json!({"type":"rate_limit_event","rate_limit_info":{"unifiedWindows":{
+        "five_hour":{"utilization":0,"resetsAt":WHEN + 7_000},
+        "seven_day":{"utilization":0.15,"resetsAt":WHEN + 400_000}}}});
+    let result = json!({"type":"result","is_error":false,"num_turns":1,"total_cost_usd":0.0001});
+    let (stream, asked) = (format!("{event}\n{result}\n"), Calls::default());
+    let seen = asked.clone();
+    let tiny: Spawner = Arc::new(move |_, args, _| {
+        seen.lock().unwrap().push(args.to_vec());
+        Ok(printing(stream.clone()))
+    });
+    let (engine, _) = start(dir.path(), Probe::saying(local.to_string()).spawner(Some(tiny)));
+    engine.set_utc_offset(-10_800);
+    engine.watch_accounts();
+    until("both windows read", || engine.ledger().claude.readings.len() == 2).await;
+    let l = engine.ledger().claude;
+    assert_eq!((l.readings["five_hour"].used, l.readings["seven_day"].used), (0.0, 0.15));
+    assert_eq!(l.readings["seven_day"].resets_at, (WHEN + 400_000) as f64);
+    let asked = asked.lock().unwrap().clone();
+    assert_eq!(asked.len(), 1);
+    let args = &asked[0];
+    // The smallest request there is: one turn on the cheapest model, no tools, no skills, nothing saved.
+    for flag in ["--max-turns", "--disable-slash-commands", "--no-session-persistence", "--tools"] {
+        assert!(args.iter().any(|a| a == flag), "{flag} in {args:?}");
+    }
+    assert!(args.windows(2).any(|w| w[0] == "--model" && w[1] == "claude-haiku-5-5"));
+    assert!(!args.iter().any(|a| a == "--resume"));
+    support::assert_no_user_customizations(args);
+    assert!(l.spans.is_empty() && l.own_spend.is_empty(), "a reading is never metered as a request");
+    engine.shutdown();
+}
+
+#[tokio::test]
 async fn focus_and_the_end_of_a_turn_read_again_after_the_debounce_and_a_hidden_window_does_not() {
     let dir = tempfile::tempdir().unwrap();
     let chat = fake(fixture("claude", "chat"));
