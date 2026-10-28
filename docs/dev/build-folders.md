@@ -22,10 +22,10 @@ Stopping a command first stops its process tree. If that cannot be confirmed, it
 reserved rather than being reused under potentially live descendants.
 
 Before each local command, a small standard-library Rust helper sweeps output at most once an hour. The executable is
-reused by source digest, without compiling the app or its dependencies. The runner uses the same sweep. The 60 GB
-budget includes the main checkout's `target` and Cargo-tagged `target` folders of all registered worktrees, including
-nested ones. Old outputs replaced by newer builds go first; then idle caches go in least-recently-used order. Caches
-used within six hours, the caller's explicit cache, and the main checkout's own profiles stay. This is a soft budget:
+reused by source digest, without compiling the app or its dependencies. The runner uses the same sweep. The 12 GB
+budget (the owner, 2026-10-25: all of Faber's builds on one PC under 15 GB) includes the main checkout's `target` and Cargo-tagged `target` folders of all registered worktrees, including
+nested ones. A cache nothing used for two hours is cleared, whether its worktree is alive or gone; builds replaced
+more than two hours ago go; then idle caches go in least-recently-used order. Caches used within half an hour, the caller's explicit cache, and the main checkout's own profiles stay. This is a soft budget:
 if protected builds exceed it, maintenance reports that rather than interrupting work.
 
 The sweep and launcher acquire the same `.faber-lease` directory atomically. Cargo profile locks stay held during
@@ -37,7 +37,7 @@ command ends. One short-lived Node process supervises a command; the helper stre
 artifacts into memory. No desktop-app process or idle timer is added. Rust maintenance tests live in
 `testkit/src/sweep.rs`; launcher checks run with `npm run test:scripts`.
 
-The legacy `%TEMP%\faber-target` root remains covered by the same hourly sweep and its existing separate 60 GB cap.
+The legacy `%TEMP%\faber-target` root remains covered by the same hourly sweep and its own separate 12 GB cap.
 
 Build folders are disposable, including a benchmark's executable after its run. Before calling an artifact frozen,
 copy the exact executable and any required runtime files to an evidence folder outside both `target` and

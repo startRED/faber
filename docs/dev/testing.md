@@ -200,6 +200,6 @@ The program is `faber-test`, run as `cargo t`.
    How it is measured: [the fair benchmark](fair-bench.md).
 7. **The build folder has a budget** (R106). Every worktree builds into a folder of the main checkout's `target`, and
    Cargo never deletes anything there, so it grew to 123 GB and once filled the disk. `cargo t` sweeps it at start, at
-   most once an hour: folders of removed worktrees and builds replaced more than a day ago go, and above 60 GB
-   the least recently used worktree folders go too. A folder in use is never touched
+   most once an hour: a build folder nothing used for two hours and builds replaced more than two hours ago go,
+   and above 12 GB the least recently used folders go too. A folder in use is never touched
    ([design](#build-folder-budget)).

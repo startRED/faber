@@ -45,7 +45,7 @@ fn run() -> Result<(), String> {
         let report = if target == shared {
             sweep::sweep_worktrees(&target, &own, &worktrees, now, sweep::CAP)
         } else {
-            sweep::sweep(&target, &own, &worktrees, now, sweep::CAP)
+            sweep::sweep(&target, &own, now, sweep::CAP)
         };
         let gb = |bytes: u64| bytes as f64 / (1u64 << 30) as f64;
         if report.after < report.before {

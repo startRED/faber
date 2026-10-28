@@ -1,11 +1,12 @@
 //! The build folder budget (R106). Local commands reuse a leased cache pool in the main checkout's `target`. Maintenance
 //! also accounts for legacy worktree-local targets and sweeps at command boundaries, at most once an hour:
 //!
-//! 1. A worktree's cache whose worktree is gone, idle for a day, has its build output removed.
+//! 1. A build cache nothing used for two hours, in the shared `target` or a worktree's own, has its build output
+//!    removed, whether its worktree is alive or gone: sccache makes the rebuild cheap, and an idle cache holds 3 to 30 GB.
 //! 2. In every build profile (`debug`, `release`, nested ones), an artifact in `deps/` or an `incremental/` folder that
-//!    a newer build of the same crate replaced more than a day ago is removed. A crate's newest build always stays.
-//! 3. If build output is still above the cap, idle caches are cleared, the least recently used first. A folder built in
-//!    the last six hours belongs to a lane still at work and stays: a cold rebuild costs it ten minutes or more.
+//!    a newer build of the same crate replaced more than two hours ago is removed. A crate's newest build always stays.
+//! 3. If build output is still above the cap (12 GB, so all of Faber's builds on one PC stay under 15 GB), idle caches
+//!    are cleared, the least recently used first. A folder used in the last half hour belongs to a lane at work and stays.
 //!
 //! A folder is never touched while Cargo holds its lock or one of its programs runs, and the main checkout's own
 //! folders (`debug`, `release`, `faber-test`) are only ever swept, never cleared. Lock files and ownership records stay.
@@ -15,14 +16,16 @@ use std::fs::{self, File, OpenOptions};
 use std::path::{Path, PathBuf};
 use std::time::{Duration, SystemTime};
 
-/// Above this, whole worktree folders are removed. Each worktree needs about 5 to 15 GB once swept.
-pub const CAP: u64 = 60 << 30;
-const DAY: Duration = Duration::from_secs(24 * 60 * 60);
+/// Above this, idle caches are cleared, so all of Faber's builds on one PC stay under 15 GB with `debug` (the owner,
+/// 2026-10-25).
+pub const CAP: u64 = 12 << 30;
+/// A cache nothing used for this long is cleared, and a replaced build this old leaves its profile.
+const IDLE: Duration = Duration::from_secs(2 * 60 * 60);
 /// How long a replaced build stays, so a build that just moved on can still go back cheaply.
-const STALE: Duration = DAY;
+const STALE: Duration = IDLE;
 const EVERY: Duration = Duration::from_secs(60 * 60);
 /// Over the cap, a folder used more recently than this is a lane still at work, never evicted.
-const ACTIVE: Duration = Duration::from_secs(6 * 60 * 60);
+const ACTIVE: Duration = Duration::from_secs(30 * 60);
 const STAMP: &str = ".faber-sweep";
 /// The main checkout's own build folders that carry a `CACHEDIR.TAG` of their own.
 const MAIN_FOLDERS: [&str; 1] = ["faber-test"];
@@ -44,12 +47,6 @@ pub fn loose_root() -> PathBuf {
 /// The worktree paths in `git worktree list --porcelain`, the main checkout first.
 pub fn worktrees(porcelain: &str) -> Vec<PathBuf> {
     porcelain.lines().filter_map(|l| l.strip_prefix("worktree ")).map(PathBuf::from).collect()
-}
-
-/// Whether the folder `target/<name>` belongs to a live worktree: one named `<name>` or `<anything>-<name>`.
-pub fn owned(name: &str, worktrees: &[PathBuf]) -> bool {
-    let suffix = format!("-{name}");
-    worktrees.iter().filter_map(|w| w.file_name()?.to_str()).any(|w| w == name || w.ends_with(&suffix))
 }
 
 /// `libserde-0123456789abcdef.rlib` → (`libserde`, `rlib`). Files without Cargo's 16-digit hash give `None`.
@@ -275,7 +272,7 @@ pub fn sweep_profile(profile: &Path, cutoff: SystemTime) -> u64 {
 }
 
 /// Sweeps the shared `target` of the main checkout. `own` is this run's build folder, never removed whole.
-pub fn sweep(target: &Path, own: &Path, worktrees: &[PathBuf], now: SystemTime, cap: u64) -> Report {
+pub fn sweep(target: &Path, own: &Path, now: SystemTime, cap: u64) -> Report {
     let before = size(target);
     let mut report = Report { before, after: before, removed: Vec::new() };
     let worktree_folders = |report: &Report| -> Vec<(String, PathBuf)> {
@@ -287,7 +284,7 @@ pub fn sweep(target: &Path, own: &Path, worktrees: &[PathBuf], now: SystemTime, 
             .collect()
     };
     for (name, dir) in worktree_folders(&report) {
-        if !owned(&name, worktrees) && last_used(&dir) + DAY < now && !busy(&dir) {
+        if last_used(&dir) + IDLE < now && !busy(&dir) {
             let freed = remove_cache(&dir);
             report.after -= freed.min(report.after);
             if freed > 0 {
@@ -328,7 +325,7 @@ pub fn due(target: &Path, now: SystemTime) -> bool {
 
 /// Sweeps Cargo output belonging to all registered checkouts under one budget.
 pub fn sweep_worktrees(target: &Path, own: &Path, worktrees: &[PathBuf], now: SystemTime, cap: u64) -> Report {
-    let mut report = sweep(target, own, worktrees, now, u64::MAX);
+    let mut report = sweep(target, own, now, u64::MAX);
     let mut local = Vec::new();
     for worktree in worktrees.iter().skip(1) {
         let dir = worktree.join("target");
@@ -339,6 +336,14 @@ pub fn sweep_worktrees(target: &Path, own: &Path, worktrees: &[PathBuf], now: Sy
         let before = size(&dir);
         report.before += before;
         report.after += before;
+        if dir != own && !own.starts_with(&dir) && last_used(&dir) + IDLE < now && !busy(&dir) {
+            let freed = remove_cache(&dir);
+            report.after -= freed.min(report.after);
+            if freed > 0 {
+                report.removed.push(dir.to_string_lossy().into_owned());
+                continue;
+            }
+        }
         for profile in profiles(&dir) {
             report.after -= sweep_profile(&profile, now - STALE).min(report.after);
         }
@@ -382,6 +387,7 @@ mod tests {
     use super::*;
 
     const GB: u64 = 1 << 30;
+    const DAY: Duration = Duration::from_secs(24 * 60 * 60);
 
     fn fixture() -> tempfile::TempDir {
         // The command's TEMP is inside a live cache lease; simulated caches must be outside that lease.
@@ -395,14 +401,10 @@ mod tests {
     }
 
     #[test]
-    fn porcelain_lists_every_worktree_and_a_folder_belongs_to_one_by_its_last_name_part() {
+    fn porcelain_lists_every_worktree_the_main_checkout_first() {
         let list =
             worktrees("worktree E:/p/faber\nHEAD eb53a93\nbranch refs/heads/main\n\nworktree E:/p/faber-wt-projhome\nHEAD 1\ndetached\n");
         assert_eq!(list, [PathBuf::from("E:/p/faber"), PathBuf::from("E:/p/faber-wt-projhome")]);
-        assert!(owned("projhome", &list));
-        assert!(owned("faber", &list));
-        assert!(!owned("rightclick", &list), "its worktree was removed");
-        assert!(!owned("home", &list), "only a whole name after a dash counts");
     }
 
     #[test]
@@ -473,7 +475,7 @@ mod tests {
     }
 
     #[test]
-    fn the_sweep_removes_gone_worktrees_then_keeps_the_main_folders_and_this_run_s_own_under_any_cap() {
+    fn the_sweep_clears_idle_caches_alive_or_gone_and_keeps_the_main_folders_and_this_run_s_own_under_any_cap() {
         let temp = fixture();
         let target = temp.path().join("target");
         let folder = |name: &str, bytes| {
@@ -487,21 +489,23 @@ mod tests {
         folder("faber-test", 100);
         write(&target.join("debug/.fingerprint/x"), 0, Duration::ZERO);
         write(&target.join("debug/faber.exe"), 100, Duration::ZERO);
-        let worktrees = [temp.path().join("faber"), temp.path().join("faber-wt-live"), temp.path().join("faber-wt-mine")];
+        let now = SystemTime::now();
 
-        let today = sweep(&target, &target.join("mine"), &worktrees, SystemTime::now(), u64::MAX);
-        assert!(today.removed.is_empty(), "a folder whose worktree is gone keeps a day of grace");
-        let active = sweep(&target, &target.join("mine"), &worktrees, SystemTime::now(), 0);
-        assert!(active.removed.is_empty(), "over the cap, a folder built in the last hours belongs to a lane at work");
+        let today = sweep(&target, &target.join("mine"), now, u64::MAX);
+        assert!(today.removed.is_empty(), "nothing is idle yet");
+        let active = sweep(&target, &target.join("mine"), now, 0);
+        assert!(active.removed.is_empty(), "over the cap, a folder used in the last half hour belongs to a lane at work");
 
-        let later = SystemTime::now() + DAY * 2;
-        let report = sweep(&target, &target.join("mine"), &worktrees, later, u64::MAX);
-        assert_eq!(report.removed, ["gone"]);
-        assert_eq!((report.before, report.after), (500, 400));
-
-        let report = sweep(&target, &target.join("mine"), &worktrees, later, 0);
-        assert_eq!(report.removed, ["live"], "over the cap, only other worktrees' folders go");
-        assert!(target.join("debug/faber.exe").exists() && target.join("faber-test").exists() && target.join("mine").exists());
+        let later = now + IDLE + Duration::from_secs(60);
+        let mut report = sweep(&target, &target.join("mine"), later, u64::MAX);
+        report.removed.sort();
+        assert_eq!(report.removed, ["gone", "live"], "two idle hours clear a cache whether its worktree is alive or gone");
+        assert_eq!((report.before, report.after), (500, 300));
+        assert!(
+            target.join("debug/faber.exe").exists()
+                && target.join("faber-test/debug/faber.pdb").exists()
+                && target.join("mine/debug/faber.pdb").exists()
+        );
     }
 
     #[test]
@@ -551,7 +555,7 @@ mod tests {
         write(&parent.join("CACHEDIR.TAG"), 0, Duration::ZERO);
         write(&parent.join("debug/.fingerprint/x"), 0, Duration::ZERO);
         write(&own.join("keep"), 100, Duration::ZERO);
-        sweep(&target, &own, &[], SystemTime::now() + DAY * 2, 0);
+        sweep(&target, &own, SystemTime::now() + DAY * 2, 0);
         assert!(own.join("keep").exists());
     }
 

@@ -228,7 +228,7 @@ fn sweep_root(target: &Path, own: &Path, worktrees: &[PathBuf], now: std::time::
     let report = if worktrees.first().is_some_and(|main| target == main.join("target").as_path()) {
         sweep::sweep_worktrees(target, own, worktrees, now, sweep::CAP)
     } else {
-        sweep::sweep(target, own, worktrees, now, sweep::CAP)
+        sweep::sweep(target, own, now, sweep::CAP)
     };
     let gb = |bytes: u64| bytes as f64 / (1u64 << 30) as f64;
     let at = target.display();
