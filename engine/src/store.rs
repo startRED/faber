@@ -7,6 +7,7 @@
 
 use crate::ledger::Ledger;
 use crate::model::{BranchOf, Conversation, Project, Settings, Summary};
+use crate::project::memory::AdoptedKind;
 use crate::recents::Recents;
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
@@ -134,6 +135,7 @@ pub struct Store {
     settings: PathBuf,
     recents: PathBuf,
     decisions_kept: PathBuf,
+    adoptions: PathBuf,
     budget: PathBuf,
     auto_learned: PathBuf,
     cache_health: PathBuf,
@@ -152,6 +154,17 @@ struct GroupMove {
     conversation_id: String,
     groups: Vec<crate::engine::ChatGroup>,
 }
+
+/// Approving a location never approves its words or permits an adapter to write them.
+#[derive(Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct AdoptedFile {
+    version: u8,
+    root: PathBuf,
+    target: String,
+}
+
+type Adoptions = BTreeMap<String, BTreeMap<AdoptedKind, AdoptedFile>>;
 
 impl Drop for Store {
     fn drop(&mut self) {
@@ -178,6 +191,7 @@ impl Store {
             settings: data_dir.join("settings.json"),
             recents: data_dir.join("recents.json"),
             decisions_kept: data_dir.join("decisions-kept.json"),
+            adoptions: data_dir.join("faber-trust/adoptions.json"),
             budget: data_dir.join("budget.json"),
             auto_learned: data_dir.join("auto-learned.json"),
             disk,
@@ -578,6 +592,64 @@ impl Store {
         self.write(&self.recents, recents)
     }
 
+    fn adoptions_checked(&self) -> Result<Adoptions, Fault> {
+        let all: Adoptions = read_checked(&self.adoptions)?.unwrap_or_default();
+        if all.iter().any(|(id, kinds)| {
+            !crate::project::valid_id(id) || kinds.values().any(|record| record.version != 1 || !record.root.is_absolute())
+        }) {
+            return Err(Fault::Corrupt);
+        }
+        Ok(all)
+    }
+
+    /// Person-only approval, called under the engine lock; never exposed as an agent tool. No project file is written.
+    pub fn approve_adopted_file(&self, project: &str, root: &Path, kind: AdoptedKind, target: &str) -> Result<(), &'static str> {
+        if kind == AdoptedKind::Tasks || !crate::project::valid_id(project) || !root.is_absolute() {
+            return Err("error.memory.refused");
+        }
+        crate::project::memory::read_adopted_source(root, target)?;
+        self.save_adoption(project, root, kind, target)
+    }
+
+    /// Person-only location approval; repository content grants no authority over the folder's words.
+    pub fn approve_adopted_tasks(&self, project: &str, root: &Path, target: &str) -> Result<(), &'static str> {
+        if !crate::project::valid_id(project) || !root.is_absolute() {
+            return Err("error.memory.refused");
+        }
+        crate::project::memory::read_adopted_tasks(root, target)?;
+        self.save_adoption(project, root, AdoptedKind::Tasks, target)
+    }
+
+    fn save_adoption(&self, project: &str, root: &Path, kind: AdoptedKind, target: &str) -> Result<(), &'static str> {
+        let mut all = self.adoptions_checked().map_err(Fault::key)?;
+        all.entry(project.into()).or_default().insert(kind, AdoptedFile { version: 1, root: root.into(), target: target.into() });
+        fs::create_dir_all(self.adoptions.parent().expect("fixed record parent")).map_err(|e| Fault::of_write(&e).key())?;
+        self.write(&self.adoptions, &all).map_err(Fault::key)
+    }
+
+    /// Reopen the approved location on every read; neither repository text nor another project can redirect it.
+    pub fn read_adopted_file(&self, project: &str, root: &Path, kind: AdoptedKind) -> Result<Option<String>, &'static str> {
+        if kind == AdoptedKind::Tasks {
+            return Err("error.memory.refused");
+        }
+        let all = self.adoptions_checked().map_err(Fault::key)?;
+        let Some(record) = all.get(project).and_then(|kinds| kinds.get(&kind)) else { return Ok(None) };
+        if record.root != root {
+            return Err("error.memory.refused");
+        }
+        crate::project::memory::read_adopted_source(root, &record.target).map(Some)
+    }
+
+    /// Revalidate the approved task folder and every opened file on each read.
+    pub fn read_adopted_tasks(&self, project: &str, root: &Path) -> Result<Option<crate::project::memory::AdoptedTasks>, &'static str> {
+        let all = self.adoptions_checked().map_err(Fault::key)?;
+        let Some(record) = all.get(project).and_then(|kinds| kinds.get(&AdoptedKind::Tasks)) else { return Ok(None) };
+        if record.root != root {
+            return Err("error.memory.refused");
+        }
+        crate::project::memory::read_adopted_tasks(root, &record.target).map(Some)
+    }
+
     /// The AI decisions the person kept in a project's decision list (R16), as hashes of their words. They live here and
     /// not in the project, so no agent can write a review. A missing or damaged file keeps nothing: decisions read "not
     /// reviewed" again.
@@ -668,6 +740,255 @@ impl Store {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn adopted_task_approvals_survive_reopen_without_trusting_repository_records() {
+        let data = tempfile::tempdir().unwrap();
+        let project = tempfile::tempdir().unwrap();
+        let other = tempfile::tempdir().unwrap();
+        let store = Store::new(data.path());
+        fs::create_dir(project.path().join("tasks")).unwrap();
+        fs::write(project.path().join("tasks/b.md"), "second").unwrap();
+        fs::write(project.path().join("tasks/a.md"), "first [by person]").unwrap();
+        fs::write(project.path().join("decisions.md"), "existing decisions").unwrap();
+        fs::write(project.path().join("taste.md"), "existing taste").unwrap();
+        fs::write(project.path().join("adoptions.json"), r#"{"project":{"tasks":{"target":"tasks"}}}"#).unwrap();
+        assert!(store.read_adopted_tasks("project", project.path()).unwrap().is_none());
+        store.approve_adopted_file("project", project.path(), AdoptedKind::Decisions, "decisions.md").unwrap();
+        store.approve_adopted_file("other", project.path(), AdoptedKind::Taste, "taste.md").unwrap();
+        store.approve_adopted_tasks("project", project.path(), "tasks").unwrap();
+        let reopened = Store::new(data.path());
+        let tasks = reopened.read_adopted_tasks("project", project.path()).unwrap().unwrap();
+        assert_eq!(tasks.files, [("a.md".into(), "first [by person]".into()), ("b.md".into(), "second".into())]);
+        assert!(!tasks.incomplete);
+        assert!(reopened.read_adopted_tasks("other", other.path()).unwrap().is_none());
+        assert!(reopened.read_adopted_tasks("project", other.path()).is_err());
+        assert_eq!(
+            reopened.read_adopted_file("project", project.path(), AdoptedKind::Decisions).unwrap().as_deref(),
+            Some("existing decisions")
+        );
+        assert_eq!(reopened.read_adopted_file("other", project.path(), AdoptedKind::Taste).unwrap().as_deref(), Some("existing taste"));
+        assert_eq!(fs::read_to_string(project.path().join("tasks/a.md")).unwrap(), "first [by person]");
+        assert!(!project.path().join(".faber").exists());
+        assert!(!data.path().join("decisions-kept.json").exists());
+    }
+
+    #[test]
+    fn adopted_task_approvals_refuse_file_kind_confusion_and_preserve_damaged_records() {
+        let data = tempfile::tempdir().unwrap();
+        let project = tempfile::tempdir().unwrap();
+        let store = Store::new(data.path());
+        fs::create_dir(project.path().join("tasks")).unwrap();
+        fs::write(project.path().join("tasks/a.md"), "original").unwrap();
+        fs::write(project.path().join("ordinary.md"), "not a folder").unwrap();
+        store.approve_adopted_tasks("project", project.path(), "tasks").unwrap();
+        let before = fs::read(&store.adoptions).unwrap();
+        assert!(store.approve_adopted_file("project", project.path(), AdoptedKind::Tasks, "ordinary.md").is_err());
+        assert!(store.read_adopted_file("project", project.path(), AdoptedKind::Tasks).is_err());
+        assert!(store.approve_adopted_tasks("project", project.path(), "ordinary.md").is_err());
+        assert!(store.approve_adopted_tasks("project", project.path(), "../tasks").is_err());
+        assert_eq!(fs::read(&store.adoptions).unwrap(), before);
+        for damaged in [
+            b"{broken".as_slice(),
+            br#"{"project":{"unknown":{}}}"#,
+            br#"{"project":{"tasks":{"version":99,"root":"/","target":"tasks"}}}"#,
+        ] {
+            fs::write(&store.adoptions, damaged).unwrap();
+            assert!(store.read_adopted_tasks("project", project.path()).is_err());
+            assert!(store.approve_adopted_tasks("project", project.path(), "tasks").is_err());
+            assert_eq!(fs::read(&store.adoptions).unwrap(), damaged);
+        }
+    }
+
+    #[test]
+    fn adopted_task_approvals_recheck_replaced_folders_without_overwriting_the_record() {
+        let data = tempfile::tempdir().unwrap();
+        let project = tempfile::tempdir().unwrap();
+        let outside = tempfile::tempdir().unwrap();
+        let store = Store::new(data.path());
+        fs::create_dir(project.path().join("tasks")).unwrap();
+        fs::write(project.path().join("tasks/a.md"), "inside").unwrap();
+        fs::write(outside.path().join("a.md"), "outside").unwrap();
+        store.approve_adopted_tasks("project", project.path(), "tasks").unwrap();
+        let before = fs::read(&store.adoptions).unwrap();
+        fs::rename(project.path().join("tasks"), project.path().join("original-tasks")).unwrap();
+        #[cfg(windows)]
+        junction::create(outside.path(), project.path().join("tasks")).unwrap();
+        #[cfg(unix)]
+        std::os::unix::fs::symlink(outside.path(), project.path().join("tasks")).unwrap();
+        assert!(store.read_adopted_tasks("project", project.path()).is_err());
+        assert!(store.approve_adopted_tasks("project", project.path(), "tasks").is_err());
+        assert_eq!(fs::read(&store.adoptions).unwrap(), before);
+        assert_eq!(fs::read_to_string(outside.path().join("a.md")).unwrap(), "outside");
+        #[cfg(windows)]
+        junction::delete(project.path().join("tasks")).unwrap();
+        #[cfg(unix)]
+        fs::remove_file(project.path().join("tasks")).unwrap();
+        assert_eq!(fs::read_to_string(project.path().join("original-tasks/a.md")).unwrap(), "inside");
+    }
+
+    #[test]
+    fn adopted_task_approvals_failed_save_preserves_the_previous_folder() {
+        struct NoReplace;
+        impl Disk for NoReplace {
+            fn write(&self, path: &Path, bytes: &[u8]) -> io::Result<()> {
+                RealDisk.write(path, bytes)
+            }
+            fn rename(&self, _: &Path, _: &Path) -> io::Result<()> {
+                Err(io::ErrorKind::StorageFull.into())
+            }
+        }
+        let data = tempfile::tempdir().unwrap();
+        let project = tempfile::tempdir().unwrap();
+        for folder in ["tasks", "replacement"] {
+            fs::create_dir(project.path().join(folder)).unwrap();
+            fs::write(project.path().join(folder).join("a.md"), folder).unwrap();
+        }
+        let store = Store::new(data.path());
+        store.approve_adopted_tasks("project", project.path(), "tasks").unwrap();
+        let before = fs::read(&store.adoptions).unwrap();
+        let failing = Store::with_disk(data.path(), Arc::new(NoReplace));
+        assert_eq!(failing.approve_adopted_tasks("project", project.path(), "replacement"), Err("error.store.full"));
+        assert_eq!(fs::read(&store.adoptions).unwrap(), before);
+        assert_eq!(store.read_adopted_tasks("project", project.path()).unwrap().unwrap().files, [("a.md".into(), "tasks".into())]);
+        assert!(!store.adoptions.with_file_name("adoptions.json.tmp").exists());
+    }
+
+    #[test]
+    fn adopted_private_files_cannot_replace_an_approved_source() {
+        let data = tempfile::tempdir().unwrap();
+        let project = tempfile::tempdir().unwrap();
+        let store = Store::new(data.path());
+        fs::write(project.path().join("decisions.md"), "approved decisions").unwrap();
+        store.approve_adopted_file("project", project.path(), AdoptedKind::Decisions, "decisions.md").unwrap();
+        let saved = fs::read(&store.adoptions).unwrap();
+        for name in [".npmrc", "auth.json", "credentials.json", ".env", "private.pem", "private.key", "private.p12", "private.pfx"] {
+            fs::write(project.path().join(name), "synthetic private record, never a real credential").unwrap();
+            assert!(store.approve_adopted_file("project", project.path(), AdoptedKind::Decisions, name).is_err(), "{name}");
+            assert_eq!(fs::read(&store.adoptions).unwrap(), saved);
+        }
+    }
+
+    #[test]
+    fn adopted_files_need_external_approval_and_recheck_the_selected_project() {
+        use crate::project::memory::AdoptedKind;
+        let data = tempfile::tempdir().unwrap();
+        let project = tempfile::tempdir().unwrap();
+        let other = tempfile::tempdir().unwrap();
+        let store = Store::new(data.path());
+        fs::write(project.path().join("decisions.md"), "original decisions").unwrap();
+        fs::write(other.path().join("decisions.md"), "other project").unwrap();
+        fs::write(project.path().join("adoptions.json"), r#"{"project":{"decisions":{"target":"decisions.md"}}}"#).unwrap();
+        assert_eq!(store.read_adopted_file("project", project.path(), AdoptedKind::Decisions).unwrap(), None);
+        store.approve_adopted_file("project", project.path(), AdoptedKind::Decisions, "decisions.md").unwrap();
+        let reopened = Store::new(data.path());
+        assert_eq!(
+            reopened.read_adopted_file("project", project.path(), AdoptedKind::Decisions).unwrap().as_deref(),
+            Some("original decisions")
+        );
+        assert!(reopened.read_adopted_file("project", other.path(), AdoptedKind::Decisions).is_err());
+        assert_eq!(reopened.read_adopted_file("other", other.path(), AdoptedKind::Decisions).unwrap(), None);
+        let saved = fs::read(data.path().join("faber-trust/adoptions.json")).unwrap();
+        fs::remove_file(project.path().join("decisions.md")).unwrap();
+        assert!(reopened.read_adopted_file("project", project.path(), AdoptedKind::Decisions).is_err());
+        assert!(reopened.approve_adopted_file("project", project.path(), AdoptedKind::Taste, "../outside.md").is_err());
+        assert_eq!(fs::read(data.path().join("faber-trust/adoptions.json")).unwrap(), saved);
+        assert_eq!(fs::read_to_string(other.path().join("decisions.md")).unwrap(), "other project");
+    }
+
+    #[test]
+    fn adopted_files_preserve_other_approvals_and_refuse_damaged_records() {
+        use crate::project::memory::AdoptedKind;
+        let data = tempfile::tempdir().unwrap();
+        let project = tempfile::tempdir().unwrap();
+        let store = Store::new(data.path());
+        fs::write(project.path().join("decisions.md"), "decisions").unwrap();
+        fs::write(project.path().join("taste.md"), "taste").unwrap();
+        store.approve_adopted_file("project", project.path(), AdoptedKind::Decisions, "decisions.md").unwrap();
+        store.approve_adopted_file("other", project.path(), AdoptedKind::Taste, "taste.md").unwrap();
+        assert_eq!(store.read_adopted_file("project", project.path(), AdoptedKind::Decisions).unwrap().as_deref(), Some("decisions"));
+        assert_eq!(store.read_adopted_file("other", project.path(), AdoptedKind::Taste).unwrap().as_deref(), Some("taste"));
+        let path = data.path().join("faber-trust/adoptions.json");
+        for damaged in [b"{broken".as_slice(), br#"{"project":{"decisions":{"version":99,"root":"/","target":"decisions.md"}}}"#] {
+            fs::write(&path, damaged).unwrap();
+            assert!(store.read_adopted_file("project", project.path(), AdoptedKind::Decisions).is_err());
+            assert!(store.approve_adopted_file("project", project.path(), AdoptedKind::Decisions, "decisions.md").is_err());
+            assert_eq!(fs::read(&path).unwrap(), damaged);
+        }
+    }
+
+    #[test]
+    fn adopted_files_recheck_approved_targets_after_a_directory_is_replaced() {
+        let data = tempfile::tempdir().unwrap();
+        let project = tempfile::tempdir().unwrap();
+        let outside = tempfile::tempdir().unwrap();
+        let store = Store::new(data.path());
+        fs::create_dir(project.path().join("docs")).unwrap();
+        fs::write(project.path().join("docs/decisions.md"), "inside").unwrap();
+        fs::write(outside.path().join("decisions.md"), "outside").unwrap();
+        store.approve_adopted_file("project", project.path(), AdoptedKind::Decisions, "docs/decisions.md").unwrap();
+        let approval = fs::read(&store.adoptions).unwrap();
+        fs::rename(project.path().join("docs"), project.path().join("original-docs")).unwrap();
+        #[cfg(windows)]
+        junction::create(outside.path(), project.path().join("docs")).unwrap();
+        #[cfg(unix)]
+        std::os::unix::fs::symlink(outside.path(), project.path().join("docs")).unwrap();
+        assert!(store.read_adopted_file("project", project.path(), AdoptedKind::Decisions).is_err());
+        assert!(store.approve_adopted_file("project", project.path(), AdoptedKind::Taste, "docs/decisions.md").is_err());
+        assert_eq!(fs::read(&store.adoptions).unwrap(), approval);
+        assert_eq!(fs::read_to_string(outside.path().join("decisions.md")).unwrap(), "outside");
+        #[cfg(windows)]
+        junction::delete(project.path().join("docs")).unwrap();
+        #[cfg(unix)]
+        fs::remove_file(project.path().join("docs")).unwrap();
+    }
+
+    #[test]
+    fn adopted_files_failed_replacement_keeps_the_previous_approval() {
+        struct NoReplace;
+        impl Disk for NoReplace {
+            fn write(&self, path: &Path, bytes: &[u8]) -> io::Result<()> {
+                RealDisk.write(path, bytes)
+            }
+            fn rename(&self, _: &Path, _: &Path) -> io::Result<()> {
+                Err(io::ErrorKind::StorageFull.into())
+            }
+        }
+        let data = tempfile::tempdir().unwrap();
+        let project = tempfile::tempdir().unwrap();
+        fs::write(project.path().join("original.md"), "original").unwrap();
+        fs::write(project.path().join("replacement.md"), "replacement").unwrap();
+        let store = Store::new(data.path());
+        store.approve_adopted_file("project", project.path(), AdoptedKind::Decisions, "original.md").unwrap();
+        let before = fs::read(&store.adoptions).unwrap();
+        let failing = Store::with_disk(data.path(), Arc::new(NoReplace));
+        assert_eq!(
+            failing.approve_adopted_file("project", project.path(), AdoptedKind::Decisions, "replacement.md"),
+            Err("error.store.full")
+        );
+        assert_eq!(fs::read(&store.adoptions).unwrap(), before);
+        assert_eq!(store.read_adopted_file("project", project.path(), AdoptedKind::Decisions).unwrap().as_deref(), Some("original"));
+        assert!(!store.adoptions.with_file_name("adoptions.json.tmp").exists());
+    }
+
+    #[test]
+    fn adopted_files_support_the_reference_decision_log_without_removing_the_size_bound() {
+        let data = tempfile::tempdir().unwrap();
+        let project = tempfile::tempdir().unwrap();
+        let store = Store::new(data.path());
+        // The approved benchmark uses Faber's decision log, now larger than Memory's 256 KiB file cap.
+        let reference = "x".repeat(270_492);
+        fs::write(project.path().join("decisions.md"), &reference).unwrap();
+        store.approve_adopted_file("project", project.path(), AdoptedKind::Decisions, "decisions.md").unwrap();
+        assert_eq!(
+            store.read_adopted_file("project", project.path(), AdoptedKind::Decisions).unwrap().as_deref(),
+            Some(reference.as_str())
+        );
+        let saved = fs::read(&store.adoptions).unwrap();
+        fs::write(project.path().join("oversize.md"), vec![b'x'; 512 * 1024 + 1]).unwrap();
+        assert!(store.approve_adopted_file("project", project.path(), AdoptedKind::Taste, "oversize.md").is_err());
+        assert_eq!(fs::read(&store.adoptions).unwrap(), saved);
+    }
 
     #[test]
     fn keeping_a_decision_refuses_corrupt_approvals_without_overwriting_them() {

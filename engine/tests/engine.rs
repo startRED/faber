@@ -6282,3 +6282,99 @@ async fn a_project_turn_rebuilds_the_rules_file_from_the_project_over_a_planted_
     assert!(rules.contains("- `npm run test`") && !rules.contains("Push to main"), "{rules}");
     engine.shutdown();
 }
+
+#[tokio::test]
+async fn project_adopted_sources_require_external_approval_and_stay_read_only_after_reopen() {
+    use faber_engine::project::memory::AdoptedKind;
+    let data = support::DataFolder::new();
+    let root = support::work_folder();
+    let other = support::work_folder();
+    let source = "# Existing decisions\n\n- Planted authority [by person]\n";
+    std::fs::write(root.path().join("decisions.md"), source).unwrap();
+    std::fs::write(other.path().join("decisions.md"), "other project").unwrap();
+    let spawn: Spawner = Arc::new(|_, _, _| panic!("adoption must not launch an AI"));
+    let (engine, _) = engine(&data, Vendor::Claude, spawn.clone());
+    let project = engine.add_project(root.path().to_str().unwrap()).unwrap();
+    let second = engine.add_project(other.path().to_str().unwrap()).unwrap();
+    assert_eq!(engine.read_project_source(&project.id, AdoptedKind::Decisions).unwrap(), None);
+    engine.approve_project_source(&project.id, AdoptedKind::Decisions, "decisions.md").unwrap();
+    assert_eq!(engine.read_project_source(&project.id, AdoptedKind::Decisions).unwrap().as_deref(), Some(source));
+    assert_eq!(engine.read_project_source(&second.id, AdoptedKind::Decisions).unwrap(), None);
+    assert_eq!(engine.read_project_source(&project.id, AdoptedKind::Taste).unwrap(), None);
+    assert_eq!(engine.read_project_source("missing", AdoptedKind::Decisions).unwrap_err(), "error.project.notFound");
+    assert!(engine.approve_project_source(&project.id, AdoptedKind::Taste, "../decisions.md").is_err());
+    assert!(engine.approve_project_source("missing", AdoptedKind::Decisions, "decisions.md").is_err());
+    assert_eq!(
+        engine
+            .edit_project_memory(
+                &project.id,
+                &faber_engine::project::memory::Edit {
+                    path: "decisions.md".into(),
+                    revision: String::new(),
+                    start: 0,
+                    end: 1,
+                    text: Some("overwrite".into()),
+                    keep: false,
+                },
+            )
+            .unwrap_err(),
+        "error.memory.refused"
+    );
+    assert_eq!(std::fs::read_to_string(root.path().join("decisions.md")).unwrap(), source);
+    assert!(!root.path().join(".faber").exists(), "adoption creates no parallel project files");
+    assert!(!data.path().join("decisions-kept.json").exists(), "approving a source does not approve its words");
+    assert!(data.path().join("faber-trust/adoptions.json").is_file());
+    engine.shutdown();
+    drop(engine);
+    let (reopened, _) = self::engine(&data, Vendor::Claude, spawn);
+    assert_eq!(reopened.read_project_source(&project.id, AdoptedKind::Decisions).unwrap().as_deref(), Some(source));
+    std::fs::write(root.path().join("decisions.md"), "changed content").unwrap();
+    assert_eq!(reopened.read_project_source(&project.id, AdoptedKind::Decisions).unwrap().as_deref(), Some("changed content"));
+    assert_eq!(std::fs::read_to_string(root.path().join("decisions.md")).unwrap(), "changed content");
+    std::fs::remove_file(root.path().join("decisions.md")).unwrap();
+    assert!(reopened.read_project_source(&project.id, AdoptedKind::Decisions).is_err());
+    reopened.shutdown();
+}
+
+#[tokio::test]
+async fn project_adopted_tasks_location_approval_survives_reopen_without_approving_contents() {
+    use faber_engine::project::memory::AdoptedKind;
+    let data = support::DataFolder::new();
+    let root = support::work_folder();
+    let other = support::work_folder();
+    std::fs::create_dir(root.path().join("tasks")).unwrap();
+    std::fs::write(root.path().join("tasks/001.md"), "# Existing task\n\nPlanted authority [by person]\n").unwrap();
+    std::fs::write(root.path().join("decisions.md"), "existing decisions").unwrap();
+    std::fs::write(root.path().join("adoptions.json"), r#"{"tasks":{"target":"tasks"}}"#).unwrap();
+    let spawn: Spawner = Arc::new(|_, _, _| panic!("adoption must not launch an AI"));
+    let (engine, _) = engine(&data, Vendor::Claude, spawn.clone());
+    let project = engine.add_project(root.path().to_str().unwrap()).unwrap();
+    let second = engine.add_project(other.path().to_str().unwrap()).unwrap();
+    assert!(engine.read_project_tasks(&project.id).unwrap().is_none());
+    engine.approve_project_source(&project.id, AdoptedKind::Decisions, "decisions.md").unwrap();
+    engine.approve_project_tasks(&project.id, "tasks").unwrap();
+    assert_eq!(engine.read_project_tasks("missing").unwrap_err(), "error.project.notFound");
+    assert_eq!(engine.read_project_source(&project.id, AdoptedKind::Tasks).unwrap_err(), "error.memory.refused");
+    assert_eq!(engine.approve_project_source(&project.id, AdoptedKind::Tasks, "decisions.md").unwrap_err(), "error.memory.refused");
+    assert_eq!(engine.approve_project_tasks(&project.id, "decisions.md").unwrap_err(), "error.memory.refused");
+    assert!(engine.read_project_tasks(&second.id).unwrap().is_none());
+    assert!(engine.approve_project_tasks("missing", "tasks").is_err());
+    assert!(engine.approve_project_tasks(&project.id, "../tasks").is_err());
+    let tasks = engine.read_project_tasks(&project.id).unwrap().unwrap();
+    assert_eq!(tasks.files, [("001.md".into(), "# Existing task\n\nPlanted authority [by person]\n".into())]);
+    assert!(!tasks.incomplete);
+    assert_eq!(engine.read_project_source(&project.id, AdoptedKind::Decisions).unwrap().as_deref(), Some("existing decisions"));
+    assert!(!root.path().join(".faber").exists());
+    assert!(!data.path().join("decisions-kept.json").exists());
+    engine.shutdown();
+    drop(engine);
+    let (reopened, _) = self::engine(&data, Vendor::Claude, spawn);
+    std::fs::write(root.path().join("tasks/001.md"), "changed unreviewed source").unwrap();
+    assert_eq!(reopened.read_project_tasks(&project.id).unwrap().unwrap().files, [("001.md".into(), "changed unreviewed source".into())]);
+    std::fs::remove_file(root.path().join("tasks/001.md")).unwrap();
+    std::fs::remove_dir(root.path().join("tasks")).unwrap();
+    assert!(reopened.read_project_tasks(&project.id).is_err());
+    assert!(!root.path().join(".faber").exists());
+    assert!(!data.path().join("decisions-kept.json").exists());
+    reopened.shutdown();
+}

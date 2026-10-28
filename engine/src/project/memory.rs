@@ -8,10 +8,21 @@ use std::ops::Range;
 use std::path::{Component, Path, PathBuf};
 
 pub const MAX_BYTES: usize = 256 * 1024;
+// Adopted logs include the reference decision table, which exceeds Memory's ordinary file cap.
+const ADOPTED_MAX_BYTES: usize = 512 * 1024;
 const MAX_ENTRIES: usize = 4096;
 const READ: &str = "error.memory.read";
 const CHANGED: &str = "error.memory.changed";
 const REFUSED: &str = "error.memory.refused";
+
+/// Read-only sources approved by location; task folders use their bounded directory reader.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum AdoptedKind {
+    Decisions,
+    Taste,
+    Tasks,
+}
 
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -125,7 +136,7 @@ fn private_roots() -> Vec<String> {
     let protected = homes
         .into_iter()
         .flatten()
-        .flat_map(|home| [".claude", ".claude.json", ".codex"].map(|name| normal(&PathBuf::from(&home).join(name))));
+        .flat_map(|home| [".claude", ".claude.json", ".codex", ".gemini"].map(|name| normal(&PathBuf::from(&home).join(name))));
     let relocated =
         crate::permissions::relocated_credentials(&|key| std::env::var(key).ok()).into_iter().map(|(p, _)| normal(Path::new(&p)));
     protected.chain(relocated).collect()
@@ -283,6 +294,36 @@ impl Directory {
         }
     }
 
+    fn names_bounded(&self, limit: usize) -> std::io::Result<(Vec<String>, bool)> {
+        #[cfg(windows)]
+        return self.dir.names_bounded(limit);
+        #[cfg(unix)]
+        {
+            let mut names = Vec::new();
+            let mut incomplete = false;
+            let mut examined = 0;
+            if limit == 0 {
+                return Ok((names, true));
+            }
+            for entry in rustix::fs::Dir::read_from(&self.fd)? {
+                let entry = entry?;
+                let bytes = entry.file_name().to_bytes();
+                if bytes == b"." || bytes == b".." {
+                    continue;
+                }
+                examined += 1;
+                match std::str::from_utf8(bytes) {
+                    Ok(name) => names.push(name.to_string()),
+                    Err(_) => incomplete = true,
+                }
+                if examined >= limit {
+                    return Ok((names, true));
+                }
+            }
+            Ok((names, incomplete))
+        }
+    }
+
     fn file(&self, name: &str) -> std::io::Result<File> {
         #[cfg(windows)]
         return self.dir.file(name, false);
@@ -408,6 +449,151 @@ impl Directory {
         }
         drop(file);
         result
+    }
+}
+
+fn adopted_private_name(part: &str) -> bool {
+    part.eq_ignore_ascii_case(".git") || crate::permissions::credential_piece(&part.to_ascii_lowercase())
+}
+
+fn adopted_relative(relative: &str) -> Result<&Path, &'static str> {
+    if relative.contains(['\\', ':', '\0'])
+        || relative.split('/').any(|part| part.is_empty() || matches!(part, "." | "..") || adopted_private_name(part))
+    {
+        return Err(REFUSED);
+    }
+    let path = Path::new(relative);
+    if path.components().any(|part| !matches!(part, Component::Normal(_))) || crate::permissions::secret(path, true) {
+        return Err(REFUSED);
+    }
+    Ok(path)
+}
+
+fn adopted_opened_path(root: &Path, opened: &Path, protected: &[String]) -> Result<(), &'static str> {
+    opened.strip_prefix(root).map_err(|_| REFUSED)?;
+    // Resolve aliases through the already-open file, before reading any bytes. Case folding is conservative on macOS.
+    let key = |path: &Path| {
+        let path = normal(path);
+        if cfg!(target_os = "macos") { path.to_lowercase() } else { path }
+    };
+    let opened_key = key(opened);
+    if crate::permissions::secret(opened, true)
+        || opened.components().any(|part| part.as_os_str().to_str().is_none_or(adopted_private_name))
+        || protected.iter().any(|path| {
+            let path = key(Path::new(path));
+            opened_key == path || opened_key.strip_prefix(&path).is_some_and(|tail| tail.starts_with('/'))
+        })
+    {
+        return Err(REFUSED);
+    }
+    Ok(())
+}
+
+/// A bounded read-only snapshot of direct Markdown children; this contains no approval authority.
+#[derive(Debug)]
+pub struct AdoptedTasks {
+    pub files: Vec<(String, String)>,
+    pub incomplete: bool,
+}
+
+/// Read only through the approved folder's held handles; source text is never trusted instructions.
+pub fn read_adopted_tasks(project: &Path, relative: &str) -> Result<AdoptedTasks, &'static str> {
+    let path = adopted_relative(relative)?;
+    let protected = resolved_private(&private_roots());
+    let (root, project_dir) = project_directory(project, &protected)?;
+    let dir = project_dir.under(path).map_err(|_| REFUSED)?;
+    #[cfg(windows)]
+    let opened = dir.dir.resolved_path().map_err(|_| REFUSED)?;
+    #[cfg(unix)]
+    let (root, opened) = (adopted_open_path(&project_dir.fd).map_err(|_| REFUSED)?, adopted_open_path(&dir.fd).map_err(|_| REFUSED)?);
+    adopted_opened_path(&root, &opened, &protected)?;
+    let (mut names, mut incomplete) = dir.names_bounded(257).map_err(|_| READ)?;
+    names.sort();
+    names.truncate(256);
+    let mut files = Vec::new();
+    let mut consumed = 0;
+    for name in names {
+        if !name.ends_with(".md") {
+            continue;
+        }
+        if consumed >= ADOPTED_MAX_BYTES {
+            incomplete = true;
+            break;
+        }
+        let mut read = || -> Result<String, &'static str> {
+            adopted_relative(&name)?;
+            let file = dir.file(&name).map_err(|_| REFUSED)?;
+            #[cfg(windows)]
+            let opened = faber_winproc::rewind::resolved_path(&file).map_err(|_| REFUSED)?.ok_or(REFUSED)?;
+            #[cfg(unix)]
+            let (root, opened) = (adopted_open_path(&project_dir.fd).map_err(|_| REFUSED)?, adopted_open_path(&file).map_err(|_| REFUSED)?);
+            adopted_opened_path(&root, &opened, &protected)?;
+            let remaining = ADOPTED_MAX_BYTES - consumed;
+            if file.metadata().map_err(|_| READ)?.len() > remaining as u64 {
+                return Err(READ);
+            }
+            let mut bytes = Vec::new();
+            let result = file.take(remaining as u64 + 1).read_to_end(&mut bytes);
+            consumed += bytes.len();
+            result.map_err(|_| READ)?;
+            if bytes.len() > remaining {
+                return Err(READ);
+            }
+            String::from_utf8(bytes).map_err(|_| READ)
+        };
+        match read() {
+            Ok(text) => {
+                files.push((name, text));
+            }
+            Err(_) => incomplete = true,
+        }
+    }
+    Ok(AdoptedTasks { files, incomplete })
+}
+
+/// Read an externally approved relative file through held no-follow project handles. This supplies no approval authority.
+/// Adopted formats stay read-only until their adapters exist; source bytes never become trusted instructions here.
+/// Private CLI and VCS directories are refused even when selected as the project.
+pub fn read_adopted_source(project: &Path, relative: &str) -> Result<String, &'static str> {
+    let path = adopted_relative(relative)?;
+    let protected = resolved_private(&private_roots());
+    let (root, project_dir) = project_directory(project, &protected)?;
+    if private(&root.join(path), &protected) {
+        return Err(REFUSED);
+    }
+    let parent = path.parent().ok_or(REFUSED)?;
+    let name = path.file_name().and_then(|name| name.to_str()).ok_or(REFUSED)?;
+    let dir = project_dir.under(parent).map_err(|_| REFUSED)?;
+    let file = dir.file(name).map_err(|_| REFUSED)?;
+    #[cfg(windows)]
+    let opened = faber_winproc::rewind::resolved_path(&file).map_err(|_| REFUSED)?.ok_or(REFUSED)?;
+    #[cfg(unix)]
+    let (root, opened) = (adopted_open_path(&project_dir.fd).map_err(|_| REFUSED)?, adopted_open_path(&file).map_err(|_| REFUSED)?);
+    adopted_opened_path(&root, &opened, &protected)?;
+    let mut bytes = Vec::new();
+    file.take(ADOPTED_MAX_BYTES as u64 + 1).read_to_end(&mut bytes).map_err(|_| READ)?;
+    if bytes.len() > ADOPTED_MAX_BYTES {
+        return Err(READ);
+    }
+    String::from_utf8(bytes).map_err(|_| READ)
+}
+
+#[cfg(unix)]
+fn adopted_open_path(file: &impl std::os::fd::AsFd) -> std::io::Result<PathBuf> {
+    #[cfg(target_os = "macos")]
+    {
+        use std::os::unix::ffi::OsStringExt;
+        return rustix::fs::getpath(file).map(|path| std::ffi::OsString::from_vec(path.into_bytes()).into()).map_err(Into::into);
+    }
+    #[cfg(target_os = "linux")]
+    {
+        use std::os::fd::AsRawFd;
+        return std::fs::read_link(format!("/proc/self/fd/{}", file.as_fd().as_raw_fd()));
+    }
+    #[cfg(not(any(target_os = "macos", target_os = "linux")))]
+    {
+        let _ = file;
+        Err(std::io::ErrorKind::Unsupported.into())
     }
 }
 
@@ -797,6 +983,221 @@ mod tests {
 
     fn folder() -> tempfile::TempDir {
         tempfile::tempdir_in(std::env::temp_dir().canonicalize().unwrap()).unwrap()
+    }
+
+    #[test]
+    fn adopted_private_folders_and_files_are_never_read() {
+        let project = folder();
+        for relative in [
+            ".ssh/id_ed25519",
+            ".aws/credentials",
+            ".docker/config.json",
+            ".azure/session.json",
+            ".kube/config",
+            ".credentials.json",
+            "auth.json",
+            "credentials.json",
+            ".env",
+            ".env.local",
+            "private.pem",
+            "private.key",
+            "private.p12",
+            "private.pfx",
+            ".npmrc",
+            ".git-credentials",
+            "hosts.yml",
+            "update/updater.key",
+        ] {
+            let file = project.path().join(relative);
+            std::fs::create_dir_all(file.parent().unwrap()).unwrap();
+            std::fs::write(&file, "synthetic private record, never a real credential").unwrap();
+            assert!(read_adopted_source(project.path(), relative).is_err(), "private source accepted: {relative}");
+        }
+        let ordinary = "notes about .ssh.md";
+        std::fs::write(project.path().join(ordinary), "ordinary project notes").unwrap();
+        assert_eq!(read_adopted_source(project.path(), ordinary).unwrap(), "ordinary project notes");
+        for example in [".env.example", ".env.sample", ".env.template", ".env.dist"] {
+            std::fs::write(project.path().join(example), "ordinary project example").unwrap();
+            assert_eq!(read_adopted_source(project.path(), example).unwrap(), "ordinary project example");
+        }
+    }
+
+    #[test]
+    fn adopted_task_folder_reads_sorted_direct_markdown_without_changing_the_project() {
+        let project = folder();
+        let tasks = project.path().join("docs/tasks");
+        std::fs::create_dir_all(tasks.join("nested")).unwrap();
+        std::fs::write(tasks.join("020-second.md"), "# Second\n\nKeep this format.\n").unwrap();
+        std::fs::write(tasks.join("010-first.md"), "# First\n").unwrap();
+        std::fs::write(tasks.join("queue.txt"), "Not a Markdown task.").unwrap();
+        std::fs::write(tasks.join("nested/hidden.md"), "Not a direct child.").unwrap();
+        let loaded = read_adopted_tasks(project.path(), "docs/tasks").unwrap();
+        assert_eq!(
+            loaded.files,
+            vec![
+                ("010-first.md".to_string(), "# First\n".to_string()),
+                ("020-second.md".to_string(), "# Second\n\nKeep this format.\n".to_string())
+            ]
+        );
+        assert!(!loaded.incomplete);
+        assert_eq!(std::fs::read_to_string(tasks.join("020-second.md")).unwrap(), "# Second\n\nKeep this format.\n");
+        assert!(!project.path().join(".faber").exists());
+        for target in ["", ".", "../outside", "docs/../docs/tasks", "docs\\tasks"] {
+            assert!(read_adopted_tasks(project.path(), target).is_err(), "{target:?}");
+        }
+        assert!(read_adopted_tasks(project.path(), tasks.to_str().unwrap()).is_err());
+    }
+
+    #[test]
+    fn adopted_task_folder_reports_refused_candidates_without_reading_outside_bytes() {
+        let owned = folder();
+        let project = owned.path().join("project");
+        let tasks = project.join("tasks");
+        std::fs::create_dir_all(&tasks).unwrap();
+        let outside = owned.path().join("outside.md");
+        std::fs::write(&outside, "SYNTHETIC OUTSIDE BYTES MUST NOT BE READ").unwrap();
+        std::fs::hard_link(&outside, tasks.join("linked.md")).unwrap();
+        std::fs::write(tasks.join("safe.md"), "# Keep this task\n").unwrap();
+        std::fs::write(tasks.join(".env.md"), "synthetic private record").unwrap();
+        std::fs::write(tasks.join("invalid.md"), [0xff, 0xfe]).unwrap();
+        let loaded = read_adopted_tasks(&project, "tasks").unwrap();
+        assert!(loaded.incomplete);
+        assert_eq!(loaded.files, vec![("safe.md".to_string(), "# Keep this task\n".to_string())]);
+        assert_eq!(std::fs::read_to_string(outside).unwrap(), "SYNTHETIC OUTSIDE BYTES MUST NOT BE READ");
+    }
+
+    #[test]
+    fn adopted_task_folder_bounds_total_payload_and_reports_truncation() {
+        let project = folder();
+        let tasks = project.path().join("tasks");
+        std::fs::create_dir(&tasks).unwrap();
+        std::fs::write(tasks.join("010-large.md"), "a".repeat(300 * 1024)).unwrap();
+        std::fs::write(tasks.join("020-large.md"), "b".repeat(300 * 1024)).unwrap();
+        std::fs::write(tasks.join("030-small.md"), "# Small\n").unwrap();
+        let loaded = read_adopted_tasks(project.path(), "tasks").unwrap();
+        assert!(loaded.incomplete);
+        assert_eq!(loaded.files.iter().map(|(name, _)| name.as_str()).collect::<Vec<_>>(), ["010-large.md", "030-small.md"]);
+        assert!(loaded.files.iter().map(|(_, text)| text.len()).sum::<usize>() <= 512 * 1024);
+        assert_eq!(std::fs::metadata(tasks.join("020-large.md")).unwrap().len(), 300 * 1024);
+    }
+
+    #[test]
+    fn adopted_task_folder_bounds_enumeration_even_when_entries_are_not_tasks() {
+        let project = folder();
+        let tasks = project.path().join("tasks");
+        std::fs::create_dir(&tasks).unwrap();
+        for index in 0..270 {
+            std::fs::write(tasks.join(format!("{index:03}.txt")), "ignored").unwrap();
+        }
+        let loaded = read_adopted_tasks(project.path(), "tasks").unwrap();
+        assert!(loaded.incomplete);
+        assert!(loaded.files.is_empty());
+        assert_eq!(std::fs::read_dir(&tasks).unwrap().count(), 270);
+    }
+
+    #[test]
+    fn adopted_task_folder_refuses_private_directories_before_enumeration() {
+        let project = folder();
+        for relative in [".git/tasks", ".claude/tasks", ".codex/tasks", ".gemini/tasks", ".env"] {
+            let tasks = project.path().join(relative);
+            std::fs::create_dir_all(&tasks).unwrap();
+            std::fs::write(tasks.join("task.md"), "synthetic private task").unwrap();
+            assert!(read_adopted_tasks(project.path(), relative).is_err(), "{relative}");
+        }
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn adopted_task_folder_refuses_a_private_folder_selected_by_short_name() {
+        let project = folder();
+        let private = project.path().join(".claude");
+        std::fs::create_dir(&private).unwrap();
+        std::fs::write(private.join("task.md"), "synthetic private task").unwrap();
+        let alias = project.path().join("CLAUDE~1");
+        if alias.canonicalize().ok() != Some(private.canonicalize().unwrap()) {
+            eprintln!("8.3 names unavailable; alias condition not exercised");
+            return;
+        }
+        assert!(read_adopted_tasks(project.path(), "CLAUDE~1").is_err());
+    }
+
+    #[test]
+    fn adopted_task_folder_counts_discarded_bytes_against_its_read_budget() {
+        let project = folder();
+        let tasks = project.path().join("tasks");
+        std::fs::create_dir(&tasks).unwrap();
+        std::fs::write(tasks.join("010-invalid.md"), vec![0xff; 512 * 1024]).unwrap();
+        std::fs::write(tasks.join("020-later.md"), "must not be read after the budget is consumed").unwrap();
+        let loaded = read_adopted_tasks(project.path(), "tasks").unwrap();
+        assert!(loaded.incomplete);
+        assert!(loaded.files.is_empty(), "invalid source bytes consume the same read budget as valid source bytes");
+        assert_eq!(std::fs::metadata(tasks.join("010-invalid.md")).unwrap().len(), 512 * 1024);
+    }
+
+    #[test]
+    fn adopted_source_reads_existing_project_files_without_changing_them() {
+        let project = folder();
+        let target = project.path().join("docs/decisions.md");
+        std::fs::create_dir(target.parent().unwrap()).unwrap();
+        std::fs::write(&target, "# Existing decisions\n\nKeep the original format.\n").unwrap();
+        let before = std::fs::read(&target).unwrap();
+        assert_eq!(read_adopted_source(project.path(), "docs/decisions.md").unwrap().as_bytes(), before);
+        assert_eq!(std::fs::read(&target).unwrap(), before);
+        for refused in ["", ".", "../outside.md", "docs/../decisions.md", "docs\\decisions.md", "docs/missing.md"] {
+            assert!(read_adopted_source(project.path(), refused).is_err(), "{refused:?}");
+        }
+        assert!(read_adopted_source(project.path(), target.to_str().unwrap()).is_err());
+        for directory in [".claude", ".codex", ".gemini", ".git"] {
+            std::fs::create_dir(project.path().join(directory)).unwrap();
+            std::fs::write(project.path().join(directory).join("private.json"), "synthetic private data").unwrap();
+            assert!(read_adopted_source(project.path(), &format!("{directory}/private.json")).is_err());
+            assert!(read_adopted_source(&project.path().join(directory), "private.json").is_err(), "private project root: {directory}");
+        }
+    }
+
+    #[test]
+    fn adopted_source_rechecks_replaced_directories_and_refuses_unbounded_or_linked_files() {
+        let owned = folder();
+        let project = owned.path().join("project");
+        let outside = owned.path().join("outside");
+        std::fs::create_dir_all(project.join("docs")).unwrap();
+        std::fs::create_dir(&outside).unwrap();
+        std::fs::write(project.join("docs/decisions.md"), "inside").unwrap();
+        std::fs::write(outside.join("decisions.md"), "outside").unwrap();
+        assert_eq!(read_adopted_source(&project, "docs/decisions.md").unwrap(), "inside");
+        std::fs::rename(project.join("docs"), project.join("original-docs")).unwrap();
+        #[cfg(windows)]
+        junction::create(&outside, project.join("docs")).unwrap();
+        #[cfg(unix)]
+        std::os::unix::fs::symlink(&outside, project.join("docs")).unwrap();
+        assert!(read_adopted_source(&project, "docs/decisions.md").is_err());
+        #[cfg(windows)]
+        junction::delete(project.join("docs")).unwrap();
+        #[cfg(unix)]
+        std::fs::remove_file(project.join("docs")).unwrap();
+        assert_eq!(std::fs::read_to_string(outside.join("decisions.md")).unwrap(), "outside");
+        std::fs::hard_link(outside.join("decisions.md"), project.join("linked.md")).unwrap();
+        assert!(read_adopted_source(&project, "linked.md").is_err());
+        std::fs::write(project.join("large.md"), vec![b'x'; ADOPTED_MAX_BYTES + 1]).unwrap();
+        assert!(read_adopted_source(&project, "large.md").is_err());
+        std::fs::write(project.join("invalid.md"), [0xff]).unwrap();
+        assert!(read_adopted_source(&project, "invalid.md").is_err());
+        assert!(read_adopted_source(&project, "original-docs").is_err());
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn adopted_source_refuses_a_private_folder_opened_by_its_short_name() {
+        let project = folder();
+        let private = project.path().join(".claude");
+        std::fs::create_dir(&private).unwrap();
+        std::fs::write(private.join("private.json"), "synthetic private data").unwrap();
+        let alias = project.path().join("CLAUDE~1");
+        if alias.canonicalize().ok() != Some(private.canonicalize().unwrap()) {
+            eprintln!("8.3 names are unavailable for this temporary folder; alias case not exercised");
+            return;
+        }
+        assert!(read_adopted_source(project.path(), "CLAUDE~1/private.json").is_err());
     }
 
     #[cfg(windows)]

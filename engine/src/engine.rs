@@ -1201,6 +1201,24 @@ impl Engine {
     pub fn projects_checked(&self) -> Result<Vec<Project>, String> {
         self.with(|c| c.store.projects_checked().map_err(|e| e.key().to_string()))
     }
+    /// Person-only location approval; never registered as an agent tool or a review of the source's words.
+    pub fn approve_project_source(&self, id: &str, kind: crate::project::memory::AdoptedKind, target: &str) -> Result<(), String> {
+        let project = self.project(id)?;
+        self.with(|c| c.store.approve_adopted_file(id, Path::new(&project.path), kind, target).map_err(str::to_string))
+    }
+    pub fn read_project_source(&self, id: &str, kind: crate::project::memory::AdoptedKind) -> Result<Option<String>, String> {
+        let project = self.project(id)?;
+        self.with(|c| c.store.read_adopted_file(id, Path::new(&project.path), kind).map_err(str::to_string))
+    }
+    /// Approves only the task folder's location, not the authority of its contents.
+    pub fn approve_project_tasks(&self, id: &str, target: &str) -> Result<(), String> {
+        let project = self.project(id)?;
+        self.with(|c| c.store.approve_adopted_tasks(id, Path::new(&project.path), target).map_err(str::to_string))
+    }
+    pub fn read_project_tasks(&self, id: &str) -> Result<Option<crate::project::memory::AdoptedTasks>, String> {
+        let project = self.project(id)?;
+        self.with(|c| c.store.read_adopted_tasks(id, Path::new(&project.path)).map_err(str::to_string))
+    }
     pub fn project_memory(&self, id: &str) -> Result<crate::project::memory::MemoryList, String> {
         let project = self.project(id)?;
         let mut list = crate::project::memory::list(Path::new(&project.path)).map_err(str::to_string)?;
