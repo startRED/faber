@@ -1,0 +1,11 @@
+{
+  "notes": {
+    "better": {
+      "en": "Project tools use less memory when long text lists include several lines.",
+      "pt-BR": "As ferramentas do projeto usam menos memória quando listas longas de texto incluem várias linhas.",
+      "es": "Las herramientas del proyecto usan menos memoria cuando las listas largas de texto incluyen varias líneas.",
+      "fr": "Les outils du projet utilisent moins de mémoire lorsque de longues listes de textes contiennent plusieurs lignes.",
+      "de": "Projektwerkzeuge brauchen weniger Arbeitsspeicher, wenn lange Textlisten mehrere Zeilen enthalten."
+    }
+  }
+}

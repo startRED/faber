@@ -325,7 +325,7 @@ fn package_names(raw: Option<&RawValue>, dependencies: bool) -> std::collections
 }
 
 // Facts never inspect array elements. Keep one scalar so table/declaration validation still sees an array value.
-// shortcut: only decimal integers and single-line strings are compacted; other values keep full validation.
+// shortcut: only decimal integers and strings are compacted; other values keep full validation.
 fn scalar_array(content: &str, start: usize) -> Option<(usize, std::ops::Range<usize>)> {
     let bytes = content.as_bytes();
     let mut at = start;
@@ -352,6 +352,25 @@ fn scalar_array(content: &str, start: usize) -> Option<(usize, std::ops::Range<u
             b',' if !expect_value => {
                 at += 1;
                 expect_value = true;
+            }
+            quote @ (b'"' | b'\'') if expect_value && bytes.get(at..at + 3) == Some(&[quote; 3]) => {
+                let source = toml_parser::Source::new(&content[at..]);
+                let token = source.lex().next()?;
+                if !matches!(token.kind(), toml_parser::lexer::TokenKind::MlBasicString | toml_parser::lexer::TokenKind::MlLiteralString) {
+                    return None;
+                }
+                let mut error = None;
+                let kind = source.get(token)?.decode_scalar(&mut (), &mut error);
+                if error.is_some() || kind != toml_parser::decoder::ScalarKind::String {
+                    return None;
+                }
+                let begin = at;
+                at += token.span().end();
+                count += 1;
+                if count == 1 {
+                    first = begin..at;
+                }
+                expect_value = false;
             }
             quote @ (b'"' | b'\'') if expect_value => {
                 let begin = at;
@@ -743,6 +762,44 @@ mod tests {
             }
         }
         assert_eq!(compact_scalar_arrays(r#"x=["\t","x"]"#), r#"x=["\t"]"#);
+    }
+
+    #[test]
+    fn rules_multiline_arrays_preserve_official_validation() {
+        for array in [
+            "[\"\"\"x\"\"\",\"\"\"y\"\"\"]",
+            "['''x''','''y''']",
+            "[\"\"\"\nline\nnext\"\"\",'''other''']",
+            "['''\r\nline\r\nnext''',1]",
+            "[\"\"\"é😀,]#\"\"\",'''x''']",
+            "[\"\"\"x\"\"\"\",\"\"\"y\"\"\"\"\"]",
+            "['''x'''','''y''''']",
+            "[\"\"\"x\\\n  next\"\"\",'''y''']",
+            "[\"\"\"x\\\r\n  next\"\"\",'''y''']",
+            "[\"\"\"\\u00E9\\U0001F600\"\"\",'''y''']",
+            "[\"\"\"\\q\"\"\",'''y''']",
+            "[\"\"\"\\uD800\"\"\",'''y''']",
+            "[\"\"\"\\U00110000\"\"\",'''y''']",
+            "['''bad\u{1}''','''y''']",
+            "[\"\"\"bad\rline\"\"\",'''y''']",
+            "[\"\"\"x\"\"\" '''y''']",
+            "['''x''',,'''y''']",
+            "['''x''','''unterminated]",
+            "[\"\"\"x\"\"\"\"\"\",'''y''']",
+            "['''x''',[1,2]]",
+        ] {
+            for suffix in ["", "\nx=3", "\n[x]", "\n[[x]]", "\nx.y=2"] {
+                let source = format!("x={array}{suffix}\n[dependencies]\nbevy='0.17'\n[package]\ndescription='fixture'\n");
+                let expected = toml::from_str::<toml::Value>(&source).is_ok();
+                let compact = compact_scalar_arrays(&source);
+                assert_eq!(toml::from_str::<toml::Value>(&compact).is_ok(), expected, "{source:?} -> {compact:?}");
+                let (facts, _) = manifest_facts(&[("Cargo.toml".into(), source)]);
+                assert_eq!(facts.stacks.contains(&"bevy"), expected);
+                assert_eq!(facts.description.as_deref(), expected.then_some("fixture"));
+            }
+        }
+        assert_eq!(compact_scalar_arrays("x=['''x''','''y''']"), "x=['''x''']");
+        assert_eq!(compact_scalar_arrays("x=[\"\"\"x\"\"\",\"\"\"y\"\"\"]"), "x=[\"\"\"x\"\"\"]");
     }
 
     fn write(dir: &Path, name: &str, text: &str) {
