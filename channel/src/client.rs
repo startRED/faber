@@ -12,13 +12,18 @@ use std::sync::{Arc, Mutex};
 use tokio::io::{AsyncRead, AsyncWrite, AsyncWriteExt, BufReader};
 use tokio::sync::{mpsc, oneshot};
 
-type Pending = Arc<Mutex<HashMap<u64, oneshot::Sender<Result<Value, String>>>>>;
+/// The requests waiting for their answer; `None` once Faber closed the channel, so a later request fails at once.
+type Pending = Arc<Mutex<Option<HashMap<u64, oneshot::Sender<Result<Value, String>>>>>>;
+
+/// Events kept for a slow reader, such as `faber mcp` between two chats. Past this many, newer ones are dropped and the
+/// reader is told it lagged, as Faber tells a slow connection.
+pub const EVENTS_KEPT: usize = 256;
 
 pub struct Client {
     tx: mpsc::Sender<String>,
     pending: Pending,
     next: AtomicU64,
-    events: Mutex<Option<mpsc::UnboundedReceiver<Value>>>,
+    events: Mutex<Option<mpsc::Receiver<Value>>>,
     /// What Faber answered to `hello`: its version, protocol and command table.
     pub offer: Value,
 }
@@ -47,27 +52,38 @@ impl Client {
                 }
             }
         });
-        let pending: Pending = Arc::default();
-        let (events_tx, events_rx) = mpsc::unbounded_channel();
+        let pending: Pending = Arc::new(Mutex::new(Some(HashMap::new())));
+        let (events_tx, events_rx) = mpsc::channel(EVENTS_KEPT);
         let waiting = pending.clone();
         tokio::spawn(async move {
             let mut reader = BufReader::new(read);
             let mut buffer = Vec::new();
+            let mut skipped = 0u64;
             while let Ok(Some(line)) = wire::read_line(&mut reader, &mut buffer).await {
                 match wire::parse_from_faber(&line) {
                     Some(FromFaber::Reply { id, result }) => {
-                        if let Some(asker) = waiting.lock().unwrap_or_else(|e| e.into_inner()).remove(&id) {
+                        let asker = waiting.lock().unwrap_or_else(|e| e.into_inner()).as_mut().and_then(|w| w.remove(&id));
+                        if let Some(asker) = asker {
                             let _ = asker.send(result);
                         }
                     }
                     Some(FromFaber::Event(event)) => {
-                        let _ = events_tx.send(event);
+                        // One place stays free for the lag notice, so the reader always learns what it missed.
+                        if skipped > 0 && events_tx.capacity() >= 2 {
+                            let _ = events_tx.try_send(serde_json::json!({ "type": "lagged", "skipped": skipped }));
+                            skipped = 0;
+                        }
+                        if skipped > 0 || events_tx.capacity() < 2 {
+                            skipped += 1;
+                        } else {
+                            let _ = events_tx.try_send(event);
+                        }
                     }
                     None => {}
                 }
             }
-            // Every request still waiting learns that Faber is gone.
-            waiting.lock().unwrap_or_else(|e| e.into_inner()).clear();
+            // Every request still waiting, and every one sent from now on, learns that Faber is gone.
+            waiting.lock().unwrap_or_else(|e| e.into_inner()).take();
         });
         let mut client = Client { tx, pending, next: AtomicU64::new(1), events: Mutex::new(Some(events_rx)), offer: Value::Null };
         let hello = serde_json::to_value(hello).map_err(io::Error::other)?;
@@ -79,13 +95,13 @@ impl Client {
     pub async fn call(&self, cmd: &str, args: Value) -> io::Result<Result<Value, String>> {
         let id = self.next.fetch_add(1, Ordering::Relaxed);
         let (asker, answer) = oneshot::channel();
-        self.pending.lock().unwrap_or_else(|e| e.into_inner()).insert(id, asker);
+        self.pending.lock().unwrap_or_else(|e| e.into_inner()).as_mut().ok_or_else(closed)?.insert(id, asker);
         self.tx.send(wire::request(id, cmd, args)).await.map_err(|_| closed())?;
         answer.await.map_err(|_| closed())
     }
 
     /// Starts the events on this connection; they arrive in order until Faber closes it. Only the first call has them.
-    pub async fn subscribe(&self) -> io::Result<mpsc::UnboundedReceiver<Value>> {
+    pub async fn subscribe(&self) -> io::Result<mpsc::Receiver<Value>> {
         let events = self.events.lock().unwrap_or_else(|e| e.into_inner()).take();
         let events = events.ok_or_else(|| io::Error::new(io::ErrorKind::AlreadyExists, "already subscribed"))?;
         self.call("subscribe", Value::Null).await?.map_err(io::Error::other)?;

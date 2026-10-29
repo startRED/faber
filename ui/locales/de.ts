@@ -315,6 +315,7 @@ export const de: Messages = {
   'error.channel.hello': "Faber hat zuerst eine Begrüßung erwartet. Aktualisiere die Befehlszeile.",
   'error.channel.agentDepth': "Eine KI, die eine andere KI gestartet hat, kann Faber lesen, aber keine Unterhaltung beginnen.",
   'error.channel.agentTurns': "Eine KI in Faber hat schon zwei laufende Antworten oder in dieser Stunde 20 begonnen. Warte, bis eine fertig ist.",
+  'error.channel.personOnly': "Das kannst nur du in Faber tun: eine Karte beantworten, Guthaben freigeben oder die Einstellungen ändern.",
   'error.groupGone': "Diese Gruppe existiert nicht mehr.",
   'error.groupName': "Gib der Gruppe einen Namen mit höchstens 120 Zeichen.",
   'error.groupInstructions': "Die Anweisungen dürfen höchstens 8.000 Zeichen lang sein.",

@@ -44,7 +44,7 @@ fn tools() -> Value {
         },
         {
             "name": "faber_chat",
-            "description": "Sends a message in Faber (a new chat, or an existing conversation) and waits for the answer. If the AI asks the person something, returns the waiting card instead; answer it with faber_call (answer, answer_question or approve_plan) and call faber_chat with the same id and no text to keep following.",
+            "description": "Sends a message in Faber (a new chat, or an existing conversation) and waits for the answer. If the AI asks the person something, returns the waiting card instead: only the person answers it, in Faber. Call faber_chat with the same id and no text to keep following once they have.",
             "inputSchema": { "type": "object", "properties": {
                 "text": text("The message. Empty to follow the turn already running in `id`."),
                 "id": text("The conversation to continue; none starts a new chat."),
@@ -56,7 +56,7 @@ fn tools() -> Value {
         },
         {
             "name": "faber_commands",
-            "description": "Every command Faber's screen can call, with its arguments and kind (Read, Write, StartsTurn, Window).",
+            "description": "Every command Faber's screen can call, with its arguments and kind (read, write, startsTurn, window).",
             "inputSchema": { "type": "object", "properties": {} }
         },
         {
@@ -83,7 +83,7 @@ pub async fn run(args: &Args) -> i32 {
         Ok(events) => Arc::new(tokio::sync::Mutex::new(events)),
         Err(_) => return UNREACHED,
     };
-    let (tx, mut rx) = mpsc::unbounded_channel::<String>();
+    let (tx, mut rx) = mpsc::channel::<String>(64);
     let writer = tokio::spawn(async move {
         let mut stdout = tokio::io::stdout();
         while let Some(line) = rx.recv().await {
@@ -97,6 +97,8 @@ pub async fn run(args: &Args) -> i32 {
     let mut buffer = Vec::new();
     let mut running = tokio::task::JoinSet::new();
     while let Ok(Some(line)) = wire::read_line(&mut reader, &mut buffer).await {
+        // Answers already written leave the set, so a long session keeps only what is in flight.
+        while running.try_join_next().is_some() {}
         let Ok(message) = serde_json::from_str::<Value>(&line) else { continue };
         let Some(id) = message.get("id").cloned() else { continue };
         let method = message["method"].as_str().unwrap_or("").to_string();
@@ -118,7 +120,7 @@ pub async fn run(args: &Args) -> i32 {
                 Ok(result) => json!({ "jsonrpc": "2.0", "id": id, "result": result }),
                 Err(error) => json!({ "jsonrpc": "2.0", "id": id, "error": error }),
             };
-            let _ = tx.send(line.to_string());
+            let _ = tx.send(line.to_string()).await;
         });
     }
     while running.join_next().await.is_some() {}
@@ -135,7 +137,7 @@ fn text_result(value: &Value, error: bool) -> Value {
     json!({ "content": [{ "type": "text", "text": text }], "isError": error })
 }
 
-type Events = Arc<tokio::sync::Mutex<mpsc::UnboundedReceiver<Value>>>;
+type Events = Arc<tokio::sync::Mutex<mpsc::Receiver<Value>>>;
 
 async fn ask(client: &Client, cmd: &str, args: Value) -> Result<Value, Value> {
     match client.call(cmd, args).await {
@@ -255,8 +257,12 @@ async fn chat(client: &Client, events: &Events, args: &Value) -> Result<Value, V
         let sent = ask(client, "send", json!({ "req": req })).await?;
         sent.as_str().map(str::to_string).or(id).unwrap_or_default()
     };
-    let mut thread = Thread::from_conversation(&ask(client, "open", json!({ "id": conversation })).await?);
+    let mut thread = Thread::default();
     let since = if text.is_empty() { 0 } else { since };
+    // A turn that already ended or already waits, before or while this call began, is answered from what Faber holds.
+    if let Some(done) = look(client, &conversation, &mut thread, since).await? {
+        return Ok(done);
+    }
     let deadline = tokio::time::Instant::now() + CHAT_WAIT;
     loop {
         let event = match tokio::time::timeout_at(deadline, events.recv()).await {
@@ -277,35 +283,58 @@ async fn chat(client: &Client, events: &Events, args: &Value) -> Result<Value, V
                         continue;
                     }
                 };
-                let fresh = whole["at"].as_u64().unwrap_or(0) + 2000 >= since;
-                if whole["role"] == "assistant" && fresh && whole["status"].as_str().is_some_and(|s| s != "streaming") {
-                    return Ok(json!({
-                        "conversationId": conversation,
-                        "status": whole["status"],
-                        "error": whole["error"],
-                        "text": whole["text"],
-                        "steps": whole["tools"].as_array().into_iter().flatten().map(thread::step_line).collect::<Vec<_>>(),
-                        "vendor": whole["vendor"],
-                        "model": whole["model"],
-                    }));
+                if let Some(done) = finished(&conversation, &whole, since) {
+                    return Ok(done);
                 }
             }
             Some("running") => {
-                let waiting = event["items"].as_array().into_iter().flatten().find(|i| {
-                    i["conversationId"].as_str() == Some(&conversation) && i["permissions"].as_array().is_some_and(|p| !p.is_empty())
-                });
-                if let Some(item) = waiting {
-                    return Ok(json!({
-                        "conversationId": conversation,
-                        "status": "needsYou",
-                        "turnId": item["turnId"],
-                        "cards": item["permissions"],
-                    }));
+                if let Some(waiting) = needs_you(&conversation, event["items"].as_array().map_or(&[][..], Vec::as_slice)) {
+                    return Ok(waiting);
+                }
+            }
+            // Events were dropped while this call was slow: the end of the turn or a card may be among them.
+            Some("lagged") => {
+                if let Some(done) = look(client, &conversation, &mut thread, since).await? {
+                    return Ok(done);
                 }
             }
             _ => {}
         }
     }
+}
+
+/// Reads the conversation and what runs again; the answer when the turn already ended or waits for the person.
+async fn look(client: &Client, conversation: &str, thread: &mut Thread, since: u64) -> Result<Option<Value>, Value> {
+    *thread = Thread::from_conversation(&ask(client, "open", json!({ "id": conversation })).await?);
+    if let Some(done) = thread.last().and_then(|last| finished(conversation, last, since)) {
+        return Ok(Some(done));
+    }
+    let state = inner(ask(client, "state", Value::Null).await?);
+    Ok(needs_you(conversation, state["running"]["items"].as_array().map_or(&[][..], Vec::as_slice)))
+}
+
+/// The result of an answer that ended since `since`.
+fn finished(conversation: &str, whole: &Value, since: u64) -> Option<Value> {
+    let fresh = whole["at"].as_u64().unwrap_or(0) + 2000 >= since;
+    (whole["role"] == "assistant" && fresh && whole["status"].as_str().is_some_and(|s| s != "streaming")).then(|| {
+        json!({
+            "conversationId": conversation,
+            "status": whole["status"],
+            "error": whole["error"],
+            "text": whole["text"],
+            "steps": whole["tools"].as_array().into_iter().flatten().map(thread::step_line).collect::<Vec<_>>(),
+            "vendor": whole["vendor"],
+            "model": whole["model"],
+        })
+    })
+}
+
+/// The cards of this conversation waiting for the person, among what runs.
+fn needs_you(conversation: &str, items: &[Value]) -> Option<Value> {
+    let item = items
+        .iter()
+        .find(|i| i["conversationId"].as_str() == Some(conversation) && i["permissions"].as_array().is_some_and(|p| !p.is_empty()))?;
+    Some(json!({ "conversationId": conversation, "status": "needsYou", "turnId": item["turnId"], "cards": item["permissions"] }))
 }
 
 #[cfg(test)]

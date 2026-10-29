@@ -17,7 +17,7 @@ impl Backend for Fake {
         "9.9.9".into()
     }
     fn commands(&self) -> Value {
-        json!([{ "name": "send", "args": [["req", "SendRequest"]], "kind": "StartsTurn" }])
+        json!([{ "name": "send", "args": [["req", "SendRequest"]], "kind": "startsTurn" }])
     }
     fn starts_turn(&self, cmd: &str) -> bool {
         cmd == "send"
@@ -122,6 +122,18 @@ async fn an_ai_inside_faber_runs_two_turns_at_once_and_a_person_any_number() {
     tokio::spawn(connection(theirs, backend.clone(), guard.clone()));
     let person = Client::over(ours, Hello { client: "person".into(), agent_depth: 0 }).await.unwrap();
     assert!(person.call("send", json!({"req": {"conversationId": "c4"}})).await.unwrap().is_ok());
+}
+
+#[tokio::test]
+async fn an_ai_inside_faber_never_answers_the_person_s_cards_pays_or_changes_settings() {
+    let (backend, _) = fake();
+    let agent = client(backend.clone(), 1).await;
+    for decision in faber_channel::guard::PERSON_ONLY {
+        assert_eq!(agent.call(decision, json!({})).await.unwrap(), Err("error.channel.personOnly".into()), "{decision}");
+    }
+    assert!(agent.call("rename", json!({"id": "c1", "title": "t"})).await.unwrap().is_ok(), "the rest it may drive");
+    let person = client(backend, 0).await;
+    assert!(person.call("answer", json!({})).await.unwrap().is_ok());
 }
 
 #[tokio::test]

@@ -476,6 +476,7 @@ export const es: Messages = {
   'error.channel.hello': "Faber esperaba un saludo primero. Actualiza la línea de comandos.",
   'error.channel.agentDepth': "Una IA iniciada por otra IA puede leer Faber, pero no puede empezar conversaciones.",
   'error.channel.agentTurns': "Una IA dentro de Faber ya tiene dos respuestas en curso o empezó 20 en esta hora. Espera a que termine una.",
+  'error.channel.personOnly': "Solo tú puedes hacer esto en Faber: responder una tarjeta, aprobar créditos o cambiar los Ajustes.",
   'error.groupGone': "Este grupo ya no existe.",
   'error.groupName': "Ponle al grupo un nombre de hasta 120 caracteres.",
   'error.groupInstructions': "Las instrucciones admiten hasta 8.000 caracteres.",

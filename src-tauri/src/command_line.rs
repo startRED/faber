@@ -1,5 +1,6 @@
 //! Faber's command line (`faber`, in `cli/`), as the app sees it: the installer puts it at `bin\faber.exe` beside the app
 //! (`src-tauri/tauri.cli.conf.json`), and the app puts that folder on the person's PATH, so a new terminal finds `faber`.
+//! It reaches the host's command table over the local channel (`channel/src/host.rs`), served from `main.rs`.
 
 use std::path::{Path, PathBuf};
 
