@@ -1,7 +1,7 @@
 //! Faber's side of the channel. Each connection says `hello` first, then sends commands from the command table; a
 //! `subscribe` starts the events on that connection. The answers run at once and come back as they finish, in any order.
 
-use crate::guard::Guard;
+use crate::guard::{Guard, PERSON_ONLY};
 use crate::place::Address;
 use crate::wire::{self, Request};
 use serde::{Deserialize, Serialize};
@@ -12,7 +12,7 @@ use std::path::Path;
 use std::pin::Pin;
 use std::sync::Arc;
 use tokio::io::{AsyncRead, AsyncWrite, AsyncWriteExt, BufReader};
-use tokio::sync::{broadcast, mpsc};
+use tokio::sync::{Semaphore, broadcast, mpsc};
 
 pub type Answer = Pin<Box<dyn Future<Output = Result<Value, String>> + Send>>;
 
@@ -44,6 +44,9 @@ pub struct Hello {
 /// From this depth up, a client may read but starts no new turn.
 pub const MAX_AGENT_DEPTH: u32 = 2;
 
+/// Requests one connection may have in flight; the next waits for one to be answered before it is read.
+pub const MAX_IN_FLIGHT: usize = 64;
+
 /// Serves the channel of the Faber whose data is in `data` until the listener fails. A channel already served (another
 /// Faber on the same data) is an error at once.
 pub async fn serve(data: &Path, backend: Arc<dyn Backend>) -> io::Result<()> {
@@ -59,7 +62,13 @@ async fn serve_pipe(name: &str, backend: Arc<dyn Backend>, guard: Arc<Guard>) ->
     let mut waiting = faber_winproc::user_pipe(name, true)?;
     loop {
         let connected = waiting.connect().await;
-        let next = faber_winproc::user_pipe(name, false)?;
+        // A passing failure, or every instance taken, is no reason to stop serving for good.
+        let next = loop {
+            match faber_winproc::user_pipe(name, false) {
+                Ok(next) => break next,
+                Err(_) => tokio::time::sleep(std::time::Duration::from_millis(500)).await,
+            }
+        };
         let pipe = std::mem::replace(&mut waiting, next);
         // A client that left before the connection finished is no reason to stop serving the others.
         if connected.is_ok() && faber_winproc::pipe_peer_is_user(&pipe, true).unwrap_or(false) {
@@ -120,6 +129,7 @@ pub async fn connection<S: AsyncRead + AsyncWrite + Send + 'static>(stream: S, b
     let mut buffer = Vec::new();
     let mut hello: Option<Hello> = None;
     let mut events: Option<tokio::task::JoinHandle<()>> = None;
+    let in_flight = Arc::new(Semaphore::new(MAX_IN_FLIGHT));
     while let Ok(Some(line)) = wire::read_line(&mut reader, &mut buffer).await {
         // A line that is not a request has no id to answer: the client broke the wire, so the connection ends.
         let Ok(Request { id, cmd, args }) = serde_json::from_str::<Request>(&line) else { break };
@@ -141,27 +151,32 @@ pub async fn connection<S: AsyncRead + AsyncWrite + Send + 'static>(stream: S, b
                 }
                 let _ = tx.send(answer(Ok(Value::Bool(true)))).await;
             }
+            (_, Some(depth)) if depth > 0 && PERSON_ONLY.contains(&cmd.as_str()) => {
+                let _ = tx.send(answer(Err("error.channel.personOnly".into()))).await;
+            }
             (_, Some(depth)) if depth >= MAX_AGENT_DEPTH && backend.starts_turn(&cmd) => {
                 let _ = tx.send(answer(Err("error.channel.agentDepth".into()))).await;
             }
-            (_, Some(depth)) if depth > 0 && backend.starts_turn(&cmd) => {
-                if let Err(key) = guard.admit(std::time::Instant::now()) {
+            (_, Some(depth)) => {
+                // The writer is gone: nobody reads the answers, so no more work is taken.
+                if tx.is_closed() {
+                    break;
+                }
+                let Ok(place) = in_flight.clone().acquire_owned().await else { break };
+                let limited = depth > 0 && backend.starts_turn(&cmd);
+                if limited && let Err(key) = guard.admit(std::time::Instant::now()) {
                     let _ = tx.send(answer(Err(key.into()))).await;
                     continue;
                 }
-                let (tx, guard, asked, run) = (tx.clone(), guard.clone(), args.clone(), backend.dispatch(cmd, args));
+                let (tx, guard, asked) = (tx.clone(), guard.clone(), limited.then(|| args.clone()));
+                let run = backend.dispatch(cmd, args);
                 tokio::spawn(async move {
                     let result = run.await;
-                    if let Ok(answer) = &result {
-                        guard.started(&asked, answer);
+                    if let Some(asked) = asked {
+                        guard.answered(&asked, result.as_ref().ok());
                     }
                     let _ = tx.send(wire::reply(id, &result)).await;
-                });
-            }
-            (_, Some(_)) => {
-                let (tx, run) = (tx.clone(), backend.dispatch(cmd, args));
-                tokio::spawn(async move {
-                    let _ = tx.send(wire::reply(id, &run.await)).await;
+                    drop(place);
                 });
             }
         }

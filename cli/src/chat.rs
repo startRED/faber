@@ -169,6 +169,12 @@ impl Follow {
             Some("lagged") => {
                 let opened = session.ask("open", json!({ "id": self.conversation })).await?;
                 self.thread = Thread::from_conversation(&opened);
+                // The reply may have begun and ended among the dropped events: the newest answer since the message is it.
+                if self.reply.is_none() {
+                    let fresh =
+                        self.thread.last().filter(|m| m["role"] == "assistant" && m["at"].as_u64().unwrap_or(0) + 2000 >= self.since);
+                    self.reply = fresh.and_then(|m| m["id"].as_str()).map(str::to_string);
+                }
                 if let Some(whole) = self.reply.as_ref().and_then(|id| self.thread.get(id)).cloned() {
                     self.show(&session.out, &whole);
                     if whole["status"].as_str().is_some_and(|s| s != "streaming") {

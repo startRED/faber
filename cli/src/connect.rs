@@ -50,8 +50,9 @@ pub async fn connect(args: &Args, client: &str) -> Result<Client, Unreached> {
     let data = data_dir(args).ok_or(Unreached::NoData)?;
     match Client::connect(&data, hello(client)).await {
         Ok(client) => return Ok(client),
-        Err(e) if e.kind() != io::ErrorKind::NotFound => return Err(Unreached::Broken),
-        Err(_) if args.on("no-start") => return Err(Unreached::NotRunning),
+        Err(e) if !absent(&e) => return Err(Unreached::Broken),
+        // An AI inside Faber reaches the Faber that started it, or none: it never starts one with its own environment.
+        Err(_) if args.on("no-start") || agent_depth() > 0 => return Err(Unreached::NotRunning),
         Err(_) => {}
     }
     start_hidden(&data).map_err(|_| Unreached::NotRunning)?;
@@ -60,11 +61,16 @@ pub async fn connect(args: &Args, client: &str) -> Result<Client, Unreached> {
         tokio::time::sleep(Duration::from_millis(150)).await;
         match Client::connect(&data, hello(client)).await {
             Ok(client) => return Ok(client),
-            Err(e) if e.kind() != io::ErrorKind::NotFound => return Err(Unreached::Broken),
+            Err(e) if !absent(&e) => return Err(Unreached::Broken),
             Err(_) => {}
         }
     }
     Err(Unreached::NotRunning)
+}
+
+/// Nothing listens: no pipe or socket, or (on macOS and Linux) a socket a crash left behind, which Faber clears when it starts.
+fn absent(e: &io::Error) -> bool {
+    e.kind() == io::ErrorKind::NotFound || (cfg!(unix) && e.kind() == io::ErrorKind::ConnectionRefused)
 }
 
 /// The app beside this program: `bin\faber.exe` ships in the app's folder, so the app is one folder up. `FABER_APP` names

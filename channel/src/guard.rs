@@ -13,8 +13,14 @@ pub const MAX_RUNNING: usize = 2;
 pub const MAX_PER_HOUR: usize = 20;
 const HOUR: Duration = Duration::from_secs(3600);
 
+/// What only the person decides, so an AI client never sends it: answering a card (its own or another conversation's),
+/// paying for credits and changing Settings, where the permission mode lives (`error.channel.personOnly`).
+pub const PERSON_ONLY: &[&str] = &["answer", "answer_question", "approve_plan", "answer_plan", "approve_credits", "save_settings"];
+
 #[derive(Default)]
 struct Seen {
+    /// Turns admitted whose answer has not come yet: they count as running, so requests sent together cannot pass the limit.
+    admitted: usize,
     /// The conversations an AI client started a turn in.
     started: HashSet<String>,
     /// When each of those turns started, within the last hour.
@@ -65,17 +71,21 @@ impl Guard {
         while seen.starts.front().is_some_and(|at| now.duration_since(*at) >= HOUR) {
             seen.starts.pop_front();
         }
-        let running = seen.started.intersection(&seen.running).count();
+        let running = seen.started.intersection(&seen.running).count() + seen.admitted;
         if running >= MAX_RUNNING || seen.starts.len() >= MAX_PER_HOUR {
             return Err("error.channel.agentTurns");
         }
         seen.starts.push_back(now);
+        seen.admitted += 1;
         Ok(())
     }
 
-    /// Notes the conversation an admitted turn went to, from its arguments or its answer, and counts it as running at once:
-    /// the next `running` event may come after the next request.
-    pub fn started(&self, args: &Value, answer: &Value) {
+    /// An admitted turn was answered. When it started (`answer` is its reply), notes the conversation it went to, from its
+    /// answer or its arguments, and counts it as running at once: the next `running` event may come after the next request.
+    pub fn answered(&self, args: &Value, answer: Option<&Value>) {
+        let mut seen = self.lock();
+        seen.admitted = seen.admitted.saturating_sub(1);
+        let Some(answer) = answer else { return };
         let found = [
             answer.as_str(),
             answer["id"].as_str(),
@@ -87,7 +97,6 @@ impl Guard {
         .flatten()
         .next();
         if let Some(id) = found {
-            let mut seen = self.lock();
             seen.started.insert(id.to_string());
             seen.running.insert(id.to_string());
         }
@@ -104,12 +113,23 @@ mod tests {
         let guard = Guard::default();
         let now = Instant::now();
         guard.admit(now).unwrap();
-        guard.started(&json!({ "req": {} }), &json!("c1"));
+        guard.answered(&json!({ "req": {} }), Some(&json!("c1")));
         guard.admit(now).unwrap();
-        guard.started(&json!({ "id": "c2" }), &json!(null));
+        guard.answered(&json!({ "id": "c2" }), Some(&json!(null)));
         assert_eq!(guard.admit(now), Err("error.channel.agentTurns"));
         guard.running(&json!({ "items": [{ "conversationId": "c2" }, { "conversationId": "person" }] }));
         assert!(guard.admit(now).is_ok(), "c1 ended, and the person's own turn does not count");
+    }
+
+    #[test]
+    fn turns_sent_together_count_before_their_answers_and_a_refused_one_frees_its_place() {
+        let guard = Guard::default();
+        let now = Instant::now();
+        guard.admit(now).unwrap();
+        guard.admit(now).unwrap();
+        assert_eq!(guard.admit(now), Err("error.channel.agentTurns"), "two still waiting for their answer");
+        guard.answered(&json!({}), None);
+        assert!(guard.admit(now).is_ok(), "the refused one no longer counts");
     }
 
     #[test]
@@ -118,6 +138,7 @@ mod tests {
         let start = Instant::now();
         for _ in 0..MAX_PER_HOUR {
             guard.admit(start).unwrap();
+            guard.answered(&json!({}), None);
         }
         assert!(guard.admit(start + Duration::from_secs(60)).is_err());
         assert!(guard.admit(start + HOUR).is_ok(), "the hour has passed");

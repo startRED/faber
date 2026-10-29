@@ -41,7 +41,7 @@ impl Backend for Fake {
         "9.9.9".into()
     }
     fn commands(&self) -> Value {
-        json!([{ "name": "send", "args": [["req", "SendRequest"]], "kind": "StartsTurn" }, { "name": "state", "args": [], "kind": "Read" }])
+        json!([{ "name": "send", "args": [["req", "SendRequest"]], "kind": "startsTurn" }, { "name": "state", "args": [], "kind": "read" }])
     }
     fn starts_turn(&self, cmd: &str) -> bool {
         cmd == "send"

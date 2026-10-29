@@ -919,6 +919,13 @@ fn main() {
             if !is_test {
                 tauri::async_runtime::spawn_blocking(command_line::put_on_path);
             }
+            // The command line reaches the same table over the local channel, for as long as Faber runs.
+            let (channel_data, channel_host) = (data_dir.clone(), host.clone());
+            tauri::async_runtime::spawn(async move {
+                if let Err(error) = faber_channel::host::serve(&channel_data, channel_host).await {
+                    eprintln!("faber: the command line's channel could not open: {error}");
+                }
+            });
             app.manage(Faber {
                 engine: host.engine.clone(),
                 host,

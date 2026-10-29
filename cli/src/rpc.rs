@@ -19,7 +19,7 @@ pub async fn run(args: &Args) -> i32 {
             return UNREACHED;
         }
     };
-    let (tx, mut rx) = mpsc::unbounded_channel::<String>();
+    let (tx, mut rx) = mpsc::channel::<String>(faber_channel::client::EVENTS_KEPT);
     let writer = tokio::spawn(async move {
         let mut stdout = tokio::io::stdout();
         while let Some(line) = rx.recv().await {
@@ -35,6 +35,8 @@ pub async fn run(args: &Args) -> i32 {
     let mut events_task: Option<tokio::task::JoinHandle<()>> = None;
     let mut code = DONE;
     while let Ok(Some(line)) = wire::read_line(&mut reader, &mut buffer).await {
+        // Answers already written leave the set, so a long session keeps only what is in flight.
+        while running.try_join_next().is_some() {}
         if line.trim().is_empty() {
             continue;
         }
@@ -46,29 +48,31 @@ pub async fn run(args: &Args) -> i32 {
         let (client, tx) = (client.clone(), tx.clone());
         match cmd.as_str() {
             "hello" => {
-                let _ = tx.send(wire::reply(id, &Ok(client.offer.clone())));
+                let _ = tx.send(wire::reply(id, &Ok(client.offer.clone()))).await;
             }
             "subscribe" => {
                 events_task.get_or_insert(tokio::spawn(async move {
                     match client.subscribe().await {
                         Ok(mut events) => {
-                            let _ = tx.send(wire::reply(id, &Ok(Value::Bool(true))));
+                            let _ = tx.send(wire::reply(id, &Ok(Value::Bool(true)))).await;
                             while let Some(event) = events.recv().await {
-                                if tx.send(wire::event(&event)).is_err() {
+                                if tx.send(wire::event(&event)).await.is_err() {
                                     break;
                                 }
                             }
                         }
                         Err(e) => {
-                            let _ = tx.send(wire::reply(
-                                id,
-                                &Err(if e.kind() == std::io::ErrorKind::AlreadyExists {
-                                    "cli.error.subscribed"
-                                } else {
-                                    "cli.error.channel"
-                                }
-                                .into()),
-                            ));
+                            let _ = tx
+                                .send(wire::reply(
+                                    id,
+                                    &Err(if e.kind() == std::io::ErrorKind::AlreadyExists {
+                                        "cli.error.subscribed"
+                                    } else {
+                                        "cli.error.channel"
+                                    }
+                                    .into()),
+                                ))
+                                .await;
                         }
                     }
                 }));
@@ -76,7 +80,7 @@ pub async fn run(args: &Args) -> i32 {
             _ => {
                 running.spawn(async move {
                     let result = client.call(&cmd, args).await.unwrap_or_else(|_| Err("cli.error.channel".into()));
-                    let _ = tx.send(wire::reply(id, &result));
+                    let _ = tx.send(wire::reply(id, &result)).await;
                 });
             }
         }
