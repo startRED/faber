@@ -102,6 +102,125 @@ test('only a day-old claim with both processes dead reaps its own temp', async (
   await lease.release();
 });
 
+test('a killed launcher frees its cache after ten minutes but keeps its temp until the day rule', async (t) => {
+  const root = await fixture(t);
+  const ago = Date.now() - 11 * 60000;
+  const slot = await claim(root, 1, { pid: 2147483647, childPid: 2147483646, createdAt: ago, tempName: 'run-killed', token: 't' });
+  await mkdir(path.join(slot, '.faber-tmp', 'run-killed'), { recursive: true });
+  await writeFile(path.join(slot, '.faber-tmp', 'run-killed', 'keep'), 'x');
+  await utimes(path.join(slot, '.faber-lease'), new Date(ago), new Date(ago));
+  const lease = await launcher.acquireTarget(root, {});
+  assert.equal(lease.target, slot);
+  assert.equal(await readFile(path.join(slot, '.faber-tmp', 'run-killed', 'keep'), 'utf8'), 'x');
+  const orphan = JSON.parse(await readFile(path.join(slot, '.faber-tmp', 'run-killed.owner.json'), 'utf8'));
+  assert.equal(orphan.tempName, 'run-killed');
+  await lease.release();
+  // A day later the next holder of the cache removes that temp and its receipt.
+  await writeFile(path.join(slot, '.faber-tmp', 'run-killed.owner.json'), JSON.stringify({ ...orphan, createdAt: Date.now() - 2 * 86400000 }));
+  const later = await launcher.acquireTarget(root, {});
+  assert.deepEqual((await readdir(path.join(slot, '.faber-tmp'))).filter((name) => name.startsWith('run-killed')), []);
+  await later.release();
+});
+
+test('a reservation with no receipt frees its cache after an hour, since nothing ever started there', async (t) => {
+  const root = await fixture(t);
+  const empty = path.join(root, 'target', 'build-1', '.faber-lease');
+  await mkdir(empty, { recursive: true });
+  const fresh = await launcher.acquireTarget(root, {});
+  assert.equal(path.basename(fresh.target), 'build-2');
+  await fresh.release();
+  const ten = new Date(Date.now() - 11 * 60000);
+  await utimes(empty, ten, ten);
+  const paused = await launcher.acquireTarget(root, {});
+  assert.equal(path.basename(paused.target), 'build-2', 'a launcher may only be paused before writing its receipt');
+  await paused.release();
+  const old = new Date(Date.now() - 61 * 60000);
+  await utimes(empty, old, old);
+  const lease = await launcher.acquireTarget(root, {});
+  assert.equal(path.basename(lease.target), 'build-1');
+  await lease.release();
+});
+
+test('a live launcher keeps its cache however old, and a busy pool says it waits', async (t) => {
+  const root = await fixture(t);
+  const ago = Date.now() - 2 * 86400000;
+  for (let i = 1; i <= 3; i++) {
+    const slot = await claim(root, i, { pid: process.pid, childPid: null, createdAt: ago, tempName: `run-live-${i}` });
+    await utimes(path.join(slot, '.faber-lease'), new Date(ago), new Date(ago));
+  }
+  const said = t.mock.method(console, 'error', () => {});
+  const controller = new AbortController();
+  const waiting = launcher.acquireTarget(root, {}, controller.signal);
+  await new Promise((resolve) => setTimeout(resolve, 700));
+  controller.abort();
+  await assert.rejects(waiting);
+  assert.match(String(said.mock.calls[0]?.arguments[0]), /All 3 build folders are in use/);
+  assert.equal(said.mock.calls.length, 1);
+});
+
+test('an uncertain child or an old receipt with no child keeps its cache once its launcher is gone', async (t) => {
+  const root = await fixture(t);
+  const ago = Date.now() - 2 * 86400000;
+  const uncertain = await claim(root, 1, { pid: 2147483647, childPid: null, uncertain: true, createdAt: ago, tempName: 'run-uncertain', token: 't' });
+  const legacy = await claim(root, 2, { pid: 2147483647, childPid: null, createdAt: ago, tempName: 'run-legacy' });
+  for (const slot of [uncertain, legacy]) await utimes(path.join(slot, '.faber-lease'), new Date(ago), new Date(ago));
+  const lease = await launcher.acquireTarget(root, {});
+  assert.equal(path.basename(lease.target), 'build-3');
+  await lease.release();
+  for (const slot of [uncertain, legacy]) assert.ok(await readFile(path.join(slot, '.faber-lease', 'owner.json')));
+});
+
+test('a launcher that lost its reservation neither writes to nor releases the new one', async (t) => {
+  const root = await fixture(t);
+  const lost = await launcher.acquireTarget(root, {});
+  const receipt = path.join(lost.target, '.faber-lease', 'owner.json');
+  const taken = { ...JSON.parse(await readFile(receipt, 'utf8')), token: 'someone-else' };
+  await writeFile(receipt, JSON.stringify(taken));
+  await assert.rejects(lost.child(1), /taken over/);
+  await lost.release();
+  assert.equal(JSON.parse(await readFile(receipt, 'utf8')).token, 'someone-else');
+});
+
+test('a launcher paused before its first receipt gives the slot up to the owner that reaped it', async (t) => {
+  const root = await fixture(t);
+  const realMkdir = fsPromises.mkdir;
+  let planted = false;
+  const mocked = t.mock.method(fsPromises, 'mkdir', async (folder, ...rest) => {
+    const made = await realMkdir(folder, ...rest);
+    if (!planted && folder === path.join(root, 'target', 'build-1', '.faber-lease')) {
+      planted = true;
+      await writeFile(path.join(folder, 'owner.json'), JSON.stringify({ pid: process.pid, childPid: null, createdAt: Date.now(), tempName: 'run-next', token: 'next' }));
+    }
+    return made;
+  });
+  syncBuiltinESMExports();
+  try {
+    const lease = await launcher.acquireTarget(root, {});
+    assert.equal(path.basename(lease.target), 'build-2');
+    assert.equal(JSON.parse(await readFile(path.join(root, 'target', 'build-1', '.faber-lease', 'owner.json'), 'utf8')).token, 'next');
+    await lease.release();
+  } finally {
+    mocked.mock.restore();
+    syncBuiltinESMExports();
+  }
+});
+
+test('a linked orphan receipt is refused and its destination untouched', { skip: process.platform === 'win32' && 'file links need elevation on Windows' }, async (t) => {
+  const root = await fixture(t);
+  const outside = await fixture(t);
+  await writeFile(path.join(outside, 'keep'), 'safe');
+  const ago = Date.now() - 11 * 60000;
+  const slot = await claim(root, 1, { pid: 2147483647, childPid: 2147483646, createdAt: ago, tempName: 'run-linked', token: 't' });
+  await mkdir(path.join(slot, '.faber-tmp'), { recursive: true });
+  await symlink(path.join(outside, 'keep'), path.join(slot, '.faber-tmp', 'run-linked.owner.json'));
+  await utimes(path.join(slot, '.faber-lease'), new Date(ago), new Date(ago));
+  t.mock.method(console, 'error', () => {});
+  const lease = await launcher.acquireTarget(root, {});
+  assert.equal(path.basename(lease.target), 'build-2');
+  assert.equal(await readFile(path.join(outside, 'keep'), 'utf8'), 'safe');
+  await lease.release();
+});
+
 test('fresh or incomplete claims are not reclaimed', async (t) => {
   const root = await fixture(t);
   await claim(root, 1, { pid: 2147483647, childPid: 2147483646, createdAt: Date.now(), tempName: 'run-fresh' });
@@ -223,6 +342,7 @@ test('maintenance claims its compiler temp before spawn and cleans it after a mi
     assert.equal(observed.command, 'rustc');
     assert.equal(observed.owner.pid, process.pid);
     assert.equal(observed.owner.childPid, null);
+    assert.equal(observed.owner.uncertain, true, 'a launcher killed before it records the child leaves an uncertain reservation');
     assert.equal(observed.env.CARGO_TARGET_DIR, tools);
     assert.equal(observed.env.TEMP, path.join(tools, '.faber-tmp', observed.owner.tempName));
     assert.equal(observed.tempExists, true);
