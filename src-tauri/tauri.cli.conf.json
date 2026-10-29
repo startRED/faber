@@ -1,0 +1,11 @@
+{
+  "$schema": "../node_modules/@tauri-apps/cli/config.schema.json",
+  "build": {
+    "beforeBuildCommand": "npm run build && node scripts/cli-bin.mjs"
+  },
+  "bundle": {
+    "resources": {
+      "binaries/faber.exe": "bin/faber.exe"
+    }
+  }
+}
