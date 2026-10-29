@@ -55,6 +55,7 @@ fn send(engine: &Engine, vendor: &str, model: &str, text: &str) -> String {
 fn signs(rx: &mut UnboundedReceiver<AppEvent>, seen: &mut Vec<Sign>) {
     while let Ok(event) = rx.try_recv() {
         if let AppEvent::Message { message, .. } = event {
+            assert_eq!(message.stall, None, "no recorded turn signs the agent itself (task 110)");
             for sign in message.tools.iter().flatten().filter_map(|t| t.sign) {
                 if seen.last() != Some(&sign) {
                     seen.push(sign);
@@ -232,5 +233,136 @@ async fn r161_a_subagent_that_repeats_one_step_is_stuck_until_it_does_another() 
     reply_until(&engine, &id, "a loop", |m| call_sign(m) == Some(Sign::Repeat)).await;
     pipe.say(step("g", "Grep", json!({ "pattern": "port" }), Some("call"))).await;
     reply_until(&engine, &id, "another step", |m| m.tools.as_ref().is_some_and(|t| t.len() == 8) && call_sign(m).is_none()).await;
+    engine.shutdown();
+}
+
+fn running_item(engine: &Engine, id: &str) -> faber_engine::model::RunningItem {
+    engine.state().running.items.into_iter().find(|i| i.conversation_id == id).unwrap()
+}
+
+fn sign_of(m: &Message, call: &str) -> Option<Sign> {
+    m.tools.iter().flatten().find(|t| t.id == call).and_then(|t| t.sign)
+}
+
+/// Task 110: a question one helper asked used to start every helper's clock again and clear its sign, so a sibling that hung
+/// meanwhile was never flagged. Only the helper that asked waits now.
+#[tokio::test]
+async fn task110_a_question_pauses_only_the_helper_that_asked_it() {
+    let dir = tempfile::tempdir().unwrap();
+    let (spawn, made) = pipes();
+    let (engine, _rx) = engine(dir.path(), Vendor::Claude, spawn);
+    let clock = Arc::new(AtomicU64::new(1_000_000));
+    let time = clock.clone();
+    engine.set_time_source(Arc::new(move || time.load(Ordering::SeqCst) as f64));
+    let id = send(&engine, "claude", "haiku", "two helpers");
+    let mut pipe = next_pipe(&made).await;
+    pipe.say(json!({ "type": "system", "subtype": "init", "session_id": "s", "model": "haiku" })).await;
+    pipe.say(step("asker", "Agent", json!({ "description": "Install", "prompt": "install the deps" }), None)).await;
+    pipe.say(step("other", "Agent", json!({ "description": "Read", "prompt": "read the docs" }), None)).await;
+    let install = json!({ "command": "npm install" });
+    pipe.say(step("i1", "Bash", install.clone(), Some("asker"))).await;
+    pipe.say(json!({ "type": "control_request", "request_id": "q1", "request": { "subtype": "can_use_tool", "tool_name": "Bash", "input": install } })).await;
+    reply_until(&engine, &id, "the asker waits", |m| sign_of(m, "asker") == Some(Sign::Waiting)).await;
+    clock.fetch_add(QUIET as u64 + 1, Ordering::SeqCst);
+    engine.weigh_subagents();
+    let reply = reply_until(&engine, &id, "the other is quiet", |m| sign_of(m, "other") == Some(Sign::Silent)).await;
+    assert_eq!(sign_of(&reply, "asker"), Some(Sign::Waiting), "the one that asked still waits for the person");
+    assert_eq!(running_item(&engine, &id).stuck, vec!["other".to_string()]);
+    engine.shutdown();
+}
+
+/// Task 110: a helper sent to the background answers its call at once and was never followed; it gets the same signs now
+/// while the reply that sent it runs.
+#[tokio::test]
+async fn task110_a_background_helper_gets_the_same_signs() {
+    let dir = tempfile::tempdir().unwrap();
+    let (spawn, made) = pipes();
+    let (engine, _rx) = engine(dir.path(), Vendor::Claude, spawn);
+    let id = send(&engine, "claude", "haiku", "audit in the background");
+    let mut pipe = next_pipe(&made).await;
+    pipe.say(json!({ "type": "system", "subtype": "init", "session_id": "s", "model": "haiku" })).await;
+    let brief = json!({ "description": "Audit", "prompt": "audit the docs", "run_in_background": true });
+    pipe.say(step("bg", "Agent", brief, None)).await;
+    pipe.say(result("bg", true, None)).await;
+    for n in 1..=6 {
+        pipe.say(step(&format!("r{n}"), "Read", json!({ "file_path": "docs/a.md" }), Some("bg"))).await;
+        pipe.say(result(&format!("r{n}"), true, Some("bg"))).await;
+    }
+    reply_until(&engine, &id, "a loop in the background", |m| sign_of(m, "bg") == Some(Sign::Repeat)).await;
+    assert_eq!(running_item(&engine, &id).stuck, vec!["bg".to_string()]);
+    engine.shutdown();
+}
+
+/// Task 110: the main agent ran one failing command 18 and 19 times in the owner's conversations, which only a helper's watch
+/// could see. The same command failing three times with nothing changed, or the same step ten times, now signs the reply
+/// like a helper's row, needs the person, and stops nothing.
+#[tokio::test]
+async fn task110_the_main_agent_repeating_a_failing_step_shows_a_sign_and_keeps_working() {
+    use faber_engine::model::StallKind;
+    let dir = tempfile::tempdir().unwrap();
+    let (spawn, made) = pipes();
+    let (engine, _rx) = engine(dir.path(), Vendor::Claude, spawn);
+    let id = send(&engine, "claude", "haiku", "make the tests pass");
+    let mut pipe = next_pipe(&made).await;
+    pipe.say(json!({ "type": "system", "subtype": "init", "session_id": "s", "model": "haiku" })).await;
+    let stall = |m: &Message| m.stall.map(|s| s.kind);
+    let test = json!({ "command": "npm test" });
+    for n in 1..=2 {
+        pipe.say(step(&format!("t{n}"), "Bash", test.clone(), None)).await;
+        pipe.say(result(&format!("t{n}"), false, None)).await;
+    }
+    let reply = reply_until(&engine, &id, "two failures", |m| m.tools.as_ref().is_some_and(|t| t.len() == 2 && t[1].ok.is_some())).await;
+    assert_eq!(stall(&reply), None, "a failure and its retry are the work going on");
+    pipe.say(step("t3", "Bash", test.clone(), None)).await;
+    pipe.say(result("t3", false, None)).await;
+    reply_until(&engine, &id, "the third failure", |m| stall(m) == Some(StallKind::Failing)).await;
+    let item = running_item(&engine, &id);
+    assert_eq!((item.state, item.stall.map(|s| s.kind)), (RunState::NeedsYou, Some(StallKind::Failing)));
+    pipe.say(step("e1", "Edit", json!({ "file_path": "src/lib.rs", "old_string": "a", "new_string": "b" }), None)).await;
+    pipe.say(result("e1", true, None)).await;
+    reply_until(&engine, &id, "an edit is work", |m| {
+        m.tools.as_ref().is_some_and(|t| t.len() == 4 && t[3].ok.is_some()) && stall(m).is_none()
+    })
+    .await;
+    for n in 1..=10 {
+        pipe.say(step(&format!("r{n}"), "Read", json!({ "file_path": "src/lib.rs" }), None)).await;
+        pipe.say(result(&format!("r{n}"), true, None)).await;
+        pipe.say(step(&format!("g{n}"), "Grep", json!({ "pattern": format!("fn {n}") }), None)).await;
+        pipe.say(result(&format!("g{n}"), true, None)).await;
+    }
+    reply_until(&engine, &id, "ten reads of one file", |m| stall(m) == Some(StallKind::Repeat)).await;
+    // Nothing was stopped: the turn ends when the agent ends it, and no sign outlives it.
+    pipe.say(json!({ "type": "result", "subtype": "success", "is_error": false, "total_cost_usd": 0.0, "usage": {} })).await;
+    let reply = reply_until(&engine, &id, "the end", |m| m.status == Some(faber_engine::model::Status::Done)).await;
+    assert_eq!(reply.stall, None);
+    engine.shutdown();
+}
+
+/// A file a helper changed is a change for the main agent too: its next failure of the same step is a new try.
+#[tokio::test]
+async fn task110_a_helper_that_changes_a_file_resets_the_main_agents_count() {
+    use faber_engine::model::StallKind;
+    let dir = tempfile::tempdir().unwrap();
+    let (spawn, made) = pipes();
+    let (engine, _rx) = engine(dir.path(), Vendor::Claude, spawn);
+    let id = send(&engine, "claude", "haiku", "make the tests pass");
+    let mut pipe = next_pipe(&made).await;
+    pipe.say(json!({ "type": "system", "subtype": "init", "session_id": "s", "model": "haiku" })).await;
+    let test = json!({ "command": "npm test" });
+    for n in 1..=2 {
+        pipe.say(step(&format!("t{n}"), "Bash", test.clone(), None)).await;
+        pipe.say(result(&format!("t{n}"), false, None)).await;
+    }
+    pipe.say(step("h", "Agent", json!({ "description": "fix the test", "prompt": "fix it" }), None)).await;
+    pipe.say(step("he", "Edit", json!({ "file_path": "src/lib.rs", "old_string": "a", "new_string": "b" }), Some("h"))).await;
+    pipe.say(result("he", true, Some("h"))).await;
+    pipe.say(result("h", true, None)).await;
+    pipe.say(step("t3", "Bash", test.clone(), None)).await;
+    pipe.say(result("t3", false, None)).await;
+    let reply = reply_until(&engine, &id, "the try after the helper", |m| {
+        m.tools.as_ref().is_some_and(|t| t.iter().any(|s| s.id == "t3" && s.ok.is_some()))
+    })
+    .await;
+    assert_ne!(reply.stall.map(|s| s.kind), Some(StallKind::Failing), "the helper's edit is a change between the failures");
     engine.shutdown();
 }

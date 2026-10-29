@@ -1,0 +1,21 @@
+{
+  "notes": {
+    "better": {
+      "en": "When a step, a long compaction or the agent itself seems stuck, the reply says so with Stop. The work keeps going until you decide.",
+      "pt-BR": "Quando uma etapa, uma compactação longa ou o próprio agente parece travado, a resposta avisa e mostra Parar. O trabalho continua até você decidir.",
+      "es": "Cuando un paso, una compactación larga o el propio agente parece atascado, la respuesta lo dice y muestra Detener. El trabajo sigue hasta que decidas.",
+      "fr": "Quand une étape, une longue compaction ou l’agent lui-même semble bloqué, la réponse le dit et propose Arrêter. Le travail continue jusqu’à votre décision.",
+      "de": "Wenn ein Schritt, ein langes Verdichten oder der Agent selbst festzuhängen scheint, sagt die Antwort es und zeigt Stoppen. Die Arbeit läuft weiter, bis du entscheidest."
+    },
+    "fixed": {
+      "en": "Keep going no longer runs for hours on repeated or empty answers: it stops, says why, and never claims the work is done.",
+      "pt-BR": "Continuar sozinho não roda mais por horas com respostas repetidas ou vazias: ele para, diz o motivo e não afirma que o trabalho terminou.",
+      "es": "Seguir solo ya no corre durante horas con respuestas repetidas o vacías: se detiene, dice por qué y no afirma que el trabajo terminó.",
+      "fr": "Continuer seul ne tourne plus pendant des heures sur des réponses répétées ou vides : il s’arrête, dit pourquoi et n’affirme pas que le travail est fini.",
+      "de": "Selbst weitermachen läuft nicht mehr stundenlang mit wiederholten oder leeren Antworten: Es hört auf, sagt warum und behauptet nicht, die Arbeit sei fertig."
+    }
+  },
+  "decisions": [
+    "| R-next | 2026-10-29 | Faber never waits or loops without telling the person (task 110). A step of the agent's own that says nothing past 10 minutes (30 while a command runs), and a compaction past 5 minutes, are said on the reply with Stop; silence alone never stops a step whose end Faber cannot see, and a compaction is stopped as a failed one at 15 minutes (context and queue kept). The main agent starting the same step 10 times, or the same step failing 3 times, with no file changed between, signs the reply like a stuck helper's row and stops nothing. A pending question pauses only the helper that asked it, and helpers sent to the background get the same signs. Keep going stops on the same answer twice in a row, two answers alternating, or 4 turns in a row that only waited, each with its own reason (`reason.keepGoing.repeated`, `.idle`), and two empty answers stop with `reason.keepGoing.silent` instead of `.done`. | AI |"
+  ]
+}

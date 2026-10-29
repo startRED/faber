@@ -14,6 +14,7 @@ import { t } from './i18n.ts';
 import { Peek } from './Mark.tsx';
 import { planWords } from './Plan.tsx';
 import { QuickQuestion } from './QuickQuestion.tsx';
+import { stallText } from './StallNote.tsx';
 import type { Option } from './models.ts';
 import { SitePane, type OpenSite } from './Site.tsx';
 import { VisualPane, type OpenVisual } from './VisualAnswer.tsx';
@@ -220,6 +221,19 @@ export function Running(props: {
                                     </button>
                                   </div>
                                 </div>
+                              </Show>
+                              {/* The agent itself seems stuck: the same words as under its reply, and the way to it. */}
+                              <Show when={item().stall}>
+                                {(stall) => (
+                                  <div class="ask stuck" role="status">
+                                    <b>{stallText(stall())}</b>
+                                    <div>
+                                      <button class="btn primary" onClick={() => props.onOpen(item())}>
+                                        {t('run.stuckOpen')}
+                                      </button>
+                                    </div>
+                                  </div>
+                                )}
                               </Show>
                               <Show when={item().held}>{(held) => <p class="run-held">{t('run.held', { pr: `#${held()[0]}` })}</p>}</Show>
                             </li>

@@ -470,6 +470,8 @@ struct Core {
     installing: bool,
     /// Compactions the agents asked for, done once their turn ends (`compact.rs`).
     compacts: HashMap<String, compact::Plan>,
+    /// Compactions the CLI is running, watched for their time (`compact.rs`, task 110).
+    compactions: HashMap<String, compact::Timed>,
     /// Which conversation branched from which (`versions.rs`), read at the first look.
     links: Option<Vec<(String, String)>>,
     /// The Keep going turn at which Faber last compacted a conversation by itself, so a compaction that failed is not
@@ -644,6 +646,7 @@ impl Engine {
                 live: HashMap::new(),
                 installing: false,
                 compacts: HashMap::new(),
+                compactions: HashMap::new(),
                 links: None,
                 boundary: HashMap::new(),
                 draft: None,
@@ -4956,6 +4959,9 @@ fn running_item(c: &Conversation, live: Option<&Live>) -> Option<RunningItem> {
     let parked_more = reply.parked_more.filter(|_| !seen).unwrap_or(0);
     let stuck: Vec<String> =
         reply.tools.iter().flatten().filter(|t| t.sign.is_some_and(crate::stuck::Sign::stuck)).map(|t| t.id.clone()).collect();
+    // The agent's own sign (a step with no news, a compaction that takes long, the same step again and again) needs the person
+    // like a stuck subagent's, but only while its work goes on.
+    let stall = reply.stall.filter(|_| reply.status == Some(Status::Streaming) || c.compacting);
     let held = reply.follow.as_ref().filter(|f| f.held && f.state.open()).map(|f| (f.number, f.head.clone().unwrap_or_default()));
     let checks = reply.checks.as_ref().map(|k| k.state);
     let checks_need = checks == Some(ChecksState::NeedsYou);
@@ -4984,7 +4990,14 @@ fn running_item(c: &Conversation, live: Option<&Live>) -> Option<RunningItem> {
     {
         return None;
     }
-    let state = if permissions.is_empty() && parked.is_empty() && parked_more == 0 && stuck.is_empty() && held.is_none() && !checks_need {
+    let state = if permissions.is_empty()
+        && parked.is_empty()
+        && parked_more == 0
+        && stuck.is_empty()
+        && stall.is_none()
+        && held.is_none()
+        && !checks_need
+    {
         RunState::Working
     } else {
         RunState::NeedsYou
@@ -5014,6 +5027,7 @@ fn running_item(c: &Conversation, live: Option<&Live>) -> Option<RunningItem> {
         parked,
         parked_more,
         stuck,
+        stall,
         wait_until: reply.wait_until.filter(|_| reply.status == Some(Status::Streaming)).or(kg_wait),
         held,
         keep_going: c.keep_going.is_some(),

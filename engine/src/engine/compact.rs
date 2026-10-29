@@ -17,6 +17,10 @@
 //! the next turn starts a new one, which costs nothing and carries no summary. That turn is a message Faber writes
 //! (`wake.cleared`) with the person's own requests, word for word, and the agent's handoff note; no CLI is ever given what
 //! came before it again (`Conversation::fresh_after`). The person still sees the whole conversation.
+//!
+//! A compaction says nothing until it ends, so its time is watched (task 110): past `NOTICE` the reply it follows says
+//! so, with Stop; at `DEADLINE` Faber stops it like a compaction that failed, so the context stays as it was, and what
+//! waited in the queue and Keep going go on. Cost: one map entry and one task that sleeps `EVERY` while a compaction runs.
 use super::*;
 use crate::model::ContextFill;
 use crate::sibling;
@@ -36,6 +40,22 @@ const TASK_END_SHARE: u64 = 4;
 const FLOOR: u64 = 80_000;
 /// At any other turn Keep going sends, from three fifths of the window.
 const ANY_TURN_SHARE: (u64, u64) = (3, 5);
+
+/// A compaction that runs longer than this is told on the reply it follows. The longest in the recordings took seconds;
+/// summarizing a full window is one long answer of the model, a few minutes at most.
+const NOTICE: f64 = 300.0;
+/// One that runs this long is stopped: as long as a silent reply is given (`silence::BOUND`).
+const DEADLINE: f64 = silence::BOUND;
+/// How often a running compaction is looked at.
+const EVERY: Duration = Duration::from_secs(30);
+
+/// A compaction the CLI is running: since when, the last look (a jump of the clock is the PC asleep, not the compaction's
+/// time), and whether Faber already stopped it.
+pub(super) struct Timed {
+    since: f64,
+    looked: f64,
+    cut: bool,
+}
 
 /// What Keep going knows before its next turn.
 #[derive(Clone, Copy)]
@@ -255,8 +275,69 @@ impl Core {
         c.compacting = true;
         self.rewind.bump(conv);
         l.session.compact();
+        self.time_compaction(conv);
         self.list_changed();
         true
+    }
+
+    /// The CLI started compacting: its time is looked at until it ends.
+    fn time_compaction(&mut self, conv: &str) {
+        let now = self.secs();
+        self.compactions.insert(conv.to_string(), Timed { since: now, looked: now, cut: false });
+        let (me, conv) = (self.me.clone(), conv.to_string());
+        self.opts.runtime.spawn(async move {
+            loop {
+                tokio::time::sleep(EVERY).await;
+                let Some(core) = me.upgrade() else { return };
+                let mut core = core.lock().unwrap_or_else(|e| e.into_inner());
+                if !core.look_at_compaction(&conv) {
+                    return;
+                }
+            }
+        });
+    }
+
+    /// Looks at a running compaction once: tells the person past `NOTICE`, stops it at `DEADLINE`. False once it is over.
+    pub(super) fn look_at_compaction(&mut self, conv: &str) -> bool {
+        let now = self.secs();
+        let compacting = self.convs.get(conv).is_some_and(|c| c.compacting);
+        let Some(t) = self.compactions.get_mut(conv).filter(|_| compacting) else {
+            self.end_compaction_watch(conv);
+            return false;
+        };
+        let gap = now - std::mem::replace(&mut t.looked, now);
+        if gap > 4.0 * EVERY.as_secs_f64() {
+            t.since += gap;
+        }
+        let took = now - t.since;
+        if took >= DEADLINE && !std::mem::replace(&mut t.cut, true) {
+            // Its plan stays: the end the CLI reports is a compaction that failed (`compaction_ended`), so the context is
+            // the one before, and the queue and Keep going go on from there.
+            if let Some(l) = self.live.get(conv) {
+                l.session.interrupt();
+            }
+        }
+        self.show_compaction(conv, (took >= NOTICE).then(|| (took / 60.0) as u32));
+        true
+    }
+
+    /// The compaction ended, one way or another: nothing is watched and its notice goes.
+    fn end_compaction_watch(&mut self, conv: &str) {
+        if self.compactions.remove(conv).is_some() {
+            self.show_compaction(conv, None);
+        }
+    }
+
+    /// The notice of a long compaction, on the reply it follows.
+    fn show_compaction(&mut self, conv: &str, minutes: Option<u32>) {
+        let stall = minutes.map(|minutes| Stall { kind: StallKind::Compacting, minutes: Some(minutes) });
+        let Some(m) = self.convs.get_mut(conv).and_then(|c| c.messages.last_mut()).filter(|m| m.role == Role::Assistant) else { return };
+        if m.stall == stall {
+            return;
+        }
+        m.stall = stall;
+        let id = m.id.clone();
+        self.push(conv, Some(&id), true);
     }
 
     /// Keep going is about to send its next turn after `reply_id`: when the context is large enough (`boundary_due`), Faber
@@ -376,6 +457,7 @@ impl Core {
                 if let Some(c) = self.convs.get_mut(conv) {
                     c.compacting = false;
                 }
+                self.end_compaction_watch(conv);
                 false
             }
             EngineEvent::Error { .. } => {
@@ -389,6 +471,7 @@ impl Core {
     /// The CLI finished compacting, or could not. The agent's `next` joins the queue after messages already waiting;
     /// then the queue, Keep going and the report to a parent go on as after any turn.
     fn compaction_ended(&mut self, conv: &str, ok: bool) {
+        self.end_compaction_watch(conv);
         let plan = self.compacts.remove(conv);
         let Some(c) = self.convs.get_mut(conv) else { return };
         c.compacting = false;
@@ -433,6 +516,18 @@ impl Core {
             // Nothing follows: a conversation an agent started reports to its parent now.
             None => self.tell_parent(conv),
         }
+    }
+}
+
+impl Engine {
+    /// Looks at every running compaction now, as its timer does every half minute; tests call it after moving the clock.
+    pub fn check_compactions(&self) {
+        self.with(|c| {
+            let convs: Vec<String> = c.compactions.keys().cloned().collect();
+            for conv in convs {
+                c.look_at_compaction(&conv);
+            }
+        })
     }
 }
 

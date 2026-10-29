@@ -17,7 +17,9 @@ use crate::model::{AutoAnswer, Away, KeepGoing, KeepWait, Wake, WrapUp};
 pub const CONTINUE: &str = "The person is away and asked you to keep going on your own until their whole request is done. \
 Continue with the next item of your plan, or take the next task from the project's task list as its instructions describe, do it, \
 and check it the way the project says. When the task you take next has nothing to do with what this conversation did so far, start it on a fresh context with your conversation tool's clear, when you have it. Do not stop to propose work or to ask for a go-ahead: decide what is yours to decide. \
-Waiting on CI, a queue, a build, a monitor or a review is never a reason to stop: check it again, or do the next item meanwhile. \
+Waiting on CI, a queue, a build, a monitor or a review is never a reason to stop, and never a reason to sleep or poll: start long \
+commands in the background and do the next item; you are woken when they end, and Faber follows the pull requests you open, queue or \
+push to, and continues this conversation when their checks fail or they conflict. \
 Stop only when the whole request is done and verified, or when only the person can decide something; in that case ask it with your \
 question tool when you have one, and say exactly what you need. When the whole request is done and verified, call your wrap_up tool \
 with done set to true; only if you have no wrap_up tool, say so in one short line and end your reply with this line alone: [keep going: stop]";
@@ -34,6 +36,11 @@ pub const STOP: &str = "[keep going: stop]";
 /// At most this many turns that did real work Faber sends by itself before it stops and lets the person look. A turn that
 /// only waited (a quick answer with no tool) does not count.
 pub const MAX_TURNS: u32 = 200;
+
+/// At most this many turns in a row that only waited (task 110): with the rests between them, a quarter of an hour in which
+/// nothing moved. The owner's conversations had 30 such turns over two hours, each a reworded "I need your answer" or
+/// nothing at all, which no repeat check sees.
+pub const MAX_IDLE: u32 = 4;
 
 /// Failures in a row (an error, or no AI Faber can reach) before it stops.
 pub const MAX_FAILED: u32 = 6;
@@ -92,6 +99,8 @@ pub struct Ended {
     pub boxed: bool,
     /// The turn only waited: under a minute, no tool.
     pub idle: bool,
+    /// The answer is one the agent gave just before, or the turns alternate between the same two (`repeats`).
+    pub repeated: bool,
 }
 
 /// How long it rests after `n` failures in a row.
@@ -132,6 +141,13 @@ pub fn next(kg: &KeepGoing, ended: Ended, room: Result<(), &'static str>) -> Nex
     }
     if kg.work >= MAX_TURNS {
         return Next::Halt("reason.keepGoing.cap");
+    }
+    // The same answer again cannot be progress: each turn would cost the same quota for nothing (task 110).
+    if ended.repeated && !ended.said_stop {
+        return Next::Halt("reason.keepGoing.repeated");
+    }
+    if ended.idle && !ended.said_stop && kg.idle >= MAX_IDLE {
+        return Next::Halt("reason.keepGoing.idle");
     }
     // The closing box's question waits for the person like a question card, then gets its first button.
     if ended.boxed && !ended.said_stop {
@@ -259,6 +275,29 @@ fn empty_keep_going_reply(c: &Conversation, at: usize) -> bool {
         && m.text.trim().is_empty()
         && m.tools.iter().flatten().next().is_none()
         && m.wrap_up.is_none()
+}
+
+/// The words of a reply, as far as telling two answers apart goes: its letters and digits in lower case, one space between
+/// words. Marks, line breaks and markdown never make two answers different.
+fn gist(text: &str) -> String {
+    text.split(|c: char| !c.is_alphanumeric()).filter(|w| !w.is_empty()).map(str::to_lowercase).collect::<Vec<_>>().join(" ")
+}
+
+/// Whether the agent answered Keep going's own prompt with the answer it gave to the one before (A A), or the last four
+/// turns go back and forth between the same two answers (A B A B; the owner's conversations: two answers alternating 19
+/// times each in four minutes). Only replies that ended well and say something count; `at` is the newest.
+fn repeats(c: &Conversation, at: usize) -> bool {
+    let said = |n: usize| -> Option<String> {
+        let i = at.checked_sub(2 * n)?;
+        let u = c.messages.get(i.checked_sub(1)?)?;
+        let m = c.messages.get(i)?;
+        let own = u.role == Role::User && u.wake.as_ref().is_some_and(|w| w.why == "wake.keepGoing");
+        let gist = gist(&m.text);
+        (own && m.role == Role::Assistant && m.status == Some(Status::Done) && !gist.is_empty()).then_some(gist)
+    };
+    let Some(last) = said(0) else { return false };
+    let Some(before) = said(1) else { return false };
+    last == before || (said(2).as_ref() == Some(&last) && said(3).as_ref() == Some(&before))
 }
 
 /// The first choice of every question of an `AskUserQuestion` call, the way the screen answers it (each question's text to the
@@ -425,7 +464,9 @@ impl Core {
         }
         c.keep_going.as_ref()?;
         let last_idx = c.messages.len().saturating_sub(1);
-        let silent_twice = last_idx >= 3 && empty_keep_going_reply(c, last_idx) && empty_keep_going_reply(c, last_idx - 2);
+        // A reply that was only the stop mark is a stop, not silence.
+        let silent_twice = !stripped && last_idx >= 3 && empty_keep_going_reply(c, last_idx) && empty_keep_going_reply(c, last_idx - 2);
+        let repeated = repeats(c, last_idx);
         let halt_id = if silent_twice {
             (0..=last_idx)
                 .rev()
@@ -464,10 +505,11 @@ impl Core {
         }
         let before = kg.clone();
         self.note_away(conv, &halt_id);
+        // Two empty answers prove nothing is left no more than that something is: they stop it with a reason of their own.
         let decision = if silent_twice {
-            Next::Halt("reason.keepGoing.done")
+            Next::Halt("reason.keepGoing.silent")
         } else {
-            next(&before, Ended { asked, said_stop, boxed, idle }, self.room_next(conv))
+            next(&before, Ended { asked, said_stop, boxed, idle, repeated }, self.room_next(conv))
         };
         // The first stop is asked about once, by the check turn; whatever else follows asks nothing.
         if let Some(kg) = self.convs.get_mut(conv).and_then(|c| c.keep_going.as_mut()) {
@@ -948,7 +990,7 @@ fn drop_own_turns(c: &mut Conversation) {
 mod tests {
     use super::*;
 
-    const DONE: Ended = Ended { asked: false, said_stop: false, boxed: false, idle: false };
+    const DONE: Ended = Ended { asked: false, said_stop: false, boxed: false, idle: false, repeated: false };
 
     fn wait(secs: f64, why: &'static str) -> Next {
         Next::Wait { secs, why }
@@ -996,8 +1038,57 @@ mod tests {
         let quick = Ended { idle: true, ..DONE };
         assert_eq!(next(&kg, quick, Ok(())), wait(120.0, "rest"));
         assert_eq!(next(&KeepGoing { idle: 3, ..kg.clone() }, quick, Ok(())), wait(300.0, "rest"));
-        assert_eq!(next(&KeepGoing { idle: 40, ..kg.clone() }, quick, Ok(())), wait(300.0, "rest"), "five minutes at most");
+        assert_eq!(next(&KeepGoing { idle: 2, ..kg.clone() }, quick, Ok(())), wait(240.0, "rest"));
         assert_eq!(next(&kg, Ended { said_stop: true, ..quick }, Ok(())), Next::Continue, "the check turn follows a first stop at once");
+    }
+
+    // Task 110: turns that only waited had no cap (the 200 count only work), so a run of quick answers never ended.
+    #[test]
+    fn turns_that_only_wait_stop_after_a_dozen_in_a_row_and_a_repeated_answer_stops_at_once() {
+        let quick = Ended { idle: true, ..DONE };
+        assert_eq!(next(&KeepGoing { idle: MAX_IDLE - 1, ..Default::default() }, quick, Ok(())), wait(300.0, "rest"));
+        assert_eq!(next(&KeepGoing { idle: MAX_IDLE, ..Default::default() }, quick, Ok(())), Next::Halt("reason.keepGoing.idle"));
+        assert_eq!(next(&KeepGoing::default(), Ended { repeated: true, ..DONE }, Ok(())), Next::Halt("reason.keepGoing.repeated"));
+        assert_eq!(
+            next(&KeepGoing::default(), Ended { repeated: true, said_stop: true, ..DONE }, Ok(())),
+            Next::Continue,
+            "a stop said twice is the check, not a loop"
+        );
+    }
+
+    fn talk(turns: &[&str]) -> Conversation {
+        let mut c: Conversation = serde_json::from_value(
+            serde_json::json!({ "id": "c", "title": "", "area": "project", "createdAt": 0, "updatedAt": 0, "messages": [] }),
+        )
+        .unwrap();
+        c.messages.push(Message::new("u0".into(), Role::User, "Fix it".into(), 0));
+        for (n, text) in turns.iter().enumerate() {
+            let mut prompt = Message::new(format!("p{n}"), Role::User, CONTINUE.into(), 0);
+            prompt.wake = Some(Wake::of("wake.keepGoing"));
+            let mut reply = Message::new(format!("r{n}"), Role::Assistant, (*text).into(), 0);
+            reply.status = Some(Status::Done);
+            c.messages.extend([prompt, reply]);
+        }
+        c
+    }
+
+    #[test]
+    fn the_same_answer_twice_or_two_answers_back_and_forth_are_a_loop_whatever_their_marks() {
+        let at = |turns: &[&str]| {
+            let c = talk(turns);
+            repeats(&c, c.messages.len() - 1)
+        };
+        assert!(at(&["Waiting for CI.", "**Waiting for CI**"]), "marks and case are not a new answer");
+        assert!(at(&["Checking the build.", "Build still red.", "Checking the build.", "Build still red."]));
+        assert!(!at(&["Waiting for CI.", "CI passed; merging now."]));
+        assert!(!at(&["Step 3 of 7 done.", "Step 4 of 7 done."]), "a number that moves is progress");
+        assert!(!at(&["A", "B", "A", "C"]));
+        assert!(!at(&["", ""]), "empty answers have a stop of their own");
+        assert!(!at(&["Waiting for CI."]));
+        // Only answers to Keep going's own prompt count: the person asking twice is not the agent looping.
+        let mut c = talk(&["Waiting for CI.", "Waiting for CI."]);
+        c.messages[3].wake = None;
+        assert!(!repeats(&c, c.messages.len() - 1));
     }
 
     #[test]

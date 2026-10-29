@@ -55,6 +55,9 @@ fn default_stopped() -> BTreeMap<String, String> {
         ("quota", "{title}: stopped keeping going until {ai} has quota again"),
         ("billed", "{title}: stopped keeping going, {ai} may be billed per use"),
         ("goal", "{title}: Faber could not fix this goal by itself"),
+        ("repeated", "{title}: stopped keeping going, the AI repeated the same answer"),
+        ("silent", "{title}: stopped keeping going, the AI did not answer twice"),
+        ("idle", "{title}: stopped keeping going, no progress in the last turns"),
     ]
     .into_iter()
     .map(|(k, v)| (k.to_string(), v.to_string()))
@@ -234,6 +237,13 @@ impl Watch {
                     notices.push(item.title.clone());
                 }
             }
+            // The agent itself seems stuck (task 110): once per turn and kind of sign, whatever its minutes say.
+            if let Some(stall) = &item.stall {
+                let key = (item.conversation_id.clone(), item.turn_id.clone(), format!("stall:{:?}", stall.kind));
+                if self.seen.insert(key) && !window_focused {
+                    notices.push(item.title.clone());
+                }
+            }
             // A followed pull request whose checks failed while the quota was tight needs the person (R200): once per commit.
             if let Some((pr, head)) = &item.held {
                 let key = (item.conversation_id.clone(), format!("pr:{pr}"), head.clone());
@@ -303,7 +313,7 @@ pub(super) fn notice_text(texts: &ShellTexts, title: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use faber_engine::model::{Area, Permission};
+    use faber_engine::model::{Area, Permission, Stall, StallKind};
     use serde_json::json;
 
     #[test]
@@ -418,6 +428,17 @@ mod tests {
     }
 
     #[test]
+    fn a_stuck_agent_notifies_once_per_turn_and_kind_of_sign() {
+        let mut watch = Watch::default();
+        let mut quiet = item("a", "t1", "Fix the tests", &[]);
+        quiet.state = RunState::NeedsYou;
+        quiet.stall = Some(Stall { kind: StallKind::Quiet, minutes: Some(10) });
+        assert_eq!(watch.take_at(1, std::slice::from_ref(&quiet), false, 0.0).unwrap().notices, vec!["Fix the tests".to_string()]);
+        quiet.stall = Some(Stall { kind: StallKind::Quiet, minutes: Some(11) });
+        assert!(watch.take_at(2, std::slice::from_ref(&quiet), false, 1.0).unwrap().notices.is_empty(), "a minute more is not news");
+    }
+
+    #[test]
     fn a_stuck_subagent_notifies_once_per_subagent_and_turn() {
         let mut watch = Watch::default();
         let mut stuck = item("a", "t1", "Fix the tests", &[]);
@@ -529,6 +550,7 @@ mod tests {
             parked: vec![],
             parked_more: 0,
             stuck: vec![],
+            stall: None,
             held: None,
             keep_going: false,
             keep_wait: None,

@@ -1527,7 +1527,68 @@ async fn two_silent_keep_going_turns_in_a_row_halt_on_the_last_reply_with_conten
     until(&engine, &id, |c| c.messages.len() == 6).await;
     answers(&mut pipe, "", true).await;
     let c = until(&engine, &id, |c| c.keep_going.is_none()).await;
-    assert_eq!(c.messages[1].halt.as_deref(), Some("reason.keepGoing.done"));
+    // Two empty answers prove nothing is done (task 110): the reason says so instead of "kept going until nothing was left".
+    assert_eq!(c.messages[1].halt.as_deref(), Some("reason.keepGoing.silent"));
     assert_eq!(c.messages.last().unwrap().halt, None);
+    engine.shutdown();
+}
+
+// Task 110 review: a reply that is only the stop line leaves no words, yet it is a stop, not silence. Two of them end Keep
+// going as done, never as two empty answers.
+#[tokio::test]
+async fn two_replies_that_are_only_the_stop_line_end_as_done() {
+    let (dir, project) = (tempfile::tempdir().unwrap(), support::work_folder());
+    let (engine, mut rx, mut pipe, id) = started(dir.path(), project.path()).await;
+    engine.keep_going(&id, true).unwrap();
+    answers_at(&mut pipe, "Started on the login page.", true, 0.1).await;
+    until_turns(&pipe, 2).await;
+    answers_at(&mut pipe, "[keep going: stop]", true, 0.1).await;
+    until_turns(&pipe, 3).await;
+    answers_at(&mut pipe, "[keep going: stop]", true, 0.1).await;
+    let c = until(&engine, &id, |c| idle(c) && c.keep_going.is_none()).await;
+    assert_eq!(c.messages.last().unwrap().halt.as_deref(), Some("reason.keepGoing.done"));
+    assert_eq!(halts(&mut rx), vec!["reason.keepGoing.done".to_string()]);
+    engine.shutdown();
+}
+
+// Task 110: two answers alternating 19 times each in four minutes went on for ever. The same answer again stops it at once,
+// says why on the reply and in the tray, and spends no more turns.
+#[tokio::test]
+async fn the_same_answer_again_stops_keep_going_and_says_why() {
+    let (dir, project) = (tempfile::tempdir().unwrap(), support::work_folder());
+    let (engine, mut rx, mut pipe, id) = started(dir.path(), project.path()).await;
+    engine.keep_going(&id, true).unwrap();
+    answers_at(&mut pipe, "Started on the login page.", true, 0.1).await;
+    until_turns(&pipe, 2).await;
+    answers_at(&mut pipe, "Waiting for the review.", true, 0.1).await;
+    until_turns(&pipe, 3).await;
+    answers_at(&mut pipe, "**Waiting for the review**", true, 0.1).await;
+    let c = until(&engine, &id, |c| idle(c) && c.keep_going.is_none()).await;
+    assert_eq!(c.messages.last().unwrap().halt.as_deref(), Some("reason.keepGoing.repeated"));
+    tokio::time::sleep(Duration::from_millis(300)).await;
+    assert_eq!(turns(&pipe).len(), 3, "no turn after the repeat");
+    assert_eq!(halts(&mut rx), vec!["reason.keepGoing.repeated".to_string()]);
+    engine.shutdown();
+}
+
+// Task 110: turns that only waited had no cap, so reworded "I need your answer" replies went on for two hours. A few in a
+// row stop it with a reason that claims nothing is done.
+#[tokio::test]
+async fn turns_that_only_wait_stop_keep_going_after_a_few_in_a_row() {
+    let (dir, project) = (tempfile::tempdir().unwrap(), support::work_folder());
+    let (engine, mut rx, mut pipe, id) = started(dir.path(), project.path()).await;
+    engine.keep_going(&id, true).unwrap();
+    let said = ["I need your answer on the open card.", "Still waiting for your decision.", "Please answer the card.", "Waiting on you."];
+    for (n, text) in said.iter().enumerate() {
+        answers_at(&mut pipe, text, true, 0.1).await;
+        if n + 1 < said.len() {
+            until_turns(&pipe, n + 2).await;
+        }
+    }
+    let c = until(&engine, &id, |c| idle(c) && c.keep_going.is_none()).await;
+    assert_eq!(c.messages.last().unwrap().halt.as_deref(), Some("reason.keepGoing.idle"));
+    tokio::time::sleep(Duration::from_millis(400)).await;
+    assert_eq!(turns(&pipe).len(), said.len());
+    assert_eq!(halts(&mut rx), vec!["reason.keepGoing.idle".to_string()]);
     engine.shutdown();
 }
