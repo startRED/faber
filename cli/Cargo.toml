@@ -1,0 +1,37 @@
+[package]
+name = "faber-cli"
+description = "Faber on the command line: a terminal screen for people and JSON for AI agents, talking to the running Faber."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+publish = false
+
+# Shipped as `bin\faber.exe` beside the app. Named `faber-cli` here because the app's own program is already `faber`.
+[[bin]]
+name = "faber-cli"
+path = "src/main.rs"
+
+[lints]
+workspace = true
+
+[dependencies]
+faber-channel = { path = "../channel" }
+# Colours that work in every terminal, Windows' own console included, and the keys of the terminal screen.
+crossterm = "0.29"
+# The terminal screen's widgets and cell-by-cell redraw, over the same crossterm. No default features: the macros and the
+# layout cache are not used.
+ratatui = { version = "0.30", default-features = false, features = ["crossterm_0_29"] }
+unicode-width = "0.2"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+tokio = { version = "1", features = ["io-std", "io-util", "macros", "rt", "signal", "sync", "time"] }
+
+[target.'cfg(windows)'.dependencies]
+# The user's language when Settings follows the system.
+faber-winproc = { path = "../winproc" }
+
+[dev-dependencies]
+tempfile = "3"
+# The end-to-end tests serve a fake Faber while the program runs.
+tokio = { version = "1", features = ["rt-multi-thread"] }

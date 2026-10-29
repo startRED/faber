@@ -6,6 +6,7 @@
 //! The test runner reads the system's process list here too (`processes`): one call, where WMI took 100 ms or more.
 //! The index worker also uses the safe background-priority wrapper, on Windows and macOS.
 //! Project memory uses handle-relative, no-follow file access through `MemoryDirectory` on Windows.
+//! The command line's named pipe is made here too, open only to the signed-in user (`pipe.rs`), with the user's language for its words (`locale.rs`).
 
 /// Puts this dedicated worker in macOS's background quality-of-service class until it exits.
 #[cfg(target_os = "macos")]
@@ -37,7 +38,15 @@ pub struct JobAccounting {
 }
 
 mod files;
+#[cfg(windows)]
+mod locale;
+#[cfg(windows)]
+pub use locale::user_language;
+#[cfg(windows)]
+mod pipe;
 pub use files::{open_catalog_file, open_plain_file};
+#[cfg(windows)]
+pub use pipe::{pipe_peer_is_user, user_pipe};
 #[cfg(windows)]
 mod memory;
 #[cfg(windows)]

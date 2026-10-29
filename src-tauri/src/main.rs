@@ -7,6 +7,7 @@
 #[cfg(all(feature = "test-hooks", not(debug_assertions)))]
 compile_error!("the `test-hooks` feature is for debug test builds only; it must not be enabled in a release build");
 
+mod command_line;
 #[cfg(windows)]
 mod pane;
 mod tray;
@@ -915,6 +916,9 @@ fn main() {
                 },
                 shell,
             )?;
+            if !is_test {
+                tauri::async_runtime::spawn_blocking(command_line::put_on_path);
+            }
             app.manage(Faber {
                 engine: host.engine.clone(),
                 host,
