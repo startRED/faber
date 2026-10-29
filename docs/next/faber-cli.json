@@ -1,0 +1,14 @@
+{
+  "notes": {
+    "new": {
+      "en": "On Windows, you can now use Faber from a terminal, yourself or through an AI: open a new terminal and type faber.",
+      "pt-BR": "No Windows, agora dá pra usar o Faber pelo terminal, você mesmo ou por uma IA: abra um terminal novo e digite faber.",
+      "es": "En Windows, ahora puedes usar Faber desde una terminal, tú mismo o a través de una IA: abre una terminal nueva y escribe faber.",
+      "fr": "Sous Windows, vous pouvez maintenant utiliser Faber depuis un terminal, vous-même ou par une IA : ouvrez un nouveau terminal et tapez faber.",
+      "de": "Unter Windows kannst du Faber jetzt im Terminal nutzen, selbst oder über eine KI: Öffne ein neues Terminal und tippe faber."
+    }
+  },
+  "decisions": [
+    "| R-next | 2026-10-29 | Faber has a command line, `faber`, for people and AI agents: a console program beside the app that talks to the running Faber over a channel only the signed-in user can open (a named pipe, or a Unix socket in the data folder; never a network port), and starts Faber hidden in the tray when it is closed. It offers the window's own command table with the same names and arguments, every word from `ui/locales/`, `--json` on every verb, `faber rpc` and `faber mcp` for programs, and a terminal screen for people. An AI inside Faber may drive it in full: every CLI Faber starts is marked (`FABER_AGENT_DEPTH=1`), and marked clients together run at most 2 of their turns at once and start at most 20 an hour. | Owner, details AI |"
+  ]
+}

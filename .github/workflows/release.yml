@@ -60,8 +60,9 @@ jobs:
       fail-fast: false
       matrix:
         include:
+          # Windows also ships the command line as bin\faber.exe (scripts/cli-bin.mjs).
           - os: windows-latest
-            args: ''
+            args: --config src-tauri/tauri.cli.conf.json
           # One build per chip.
           - os: macos-latest
             args: --target aarch64-apple-darwin

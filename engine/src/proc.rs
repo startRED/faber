@@ -194,13 +194,19 @@ pub(crate) async fn command_output(mut p: Proc, mut cancel: tokio::sync::oneshot
     }
 }
 
+/// Set to `1` on every CLI Faber starts, and so on everything that CLI runs: Faber's own command line (`faber`, in `cli/`)
+/// then knows an AI is driving it and holds it to the channel's limits on starting turns (`channel/src/guard.rs`).
+pub const AGENT_MARK: &str = "FABER_AGENT_DEPTH";
+
 /// Starts a real process with piped stdio, no shell and, on Windows, no console window.
 pub fn real_spawner() -> Spawner {
-    Arc::new(|bin, args, cwd| {
-        let mut cmd = Command::new(bin);
-        cmd.args(args).current_dir(cwd);
-        spawn_command(cmd)
-    })
+    Arc::new(|bin, args, cwd| spawn_command(marked(bin, args, cwd)))
+}
+
+fn marked(bin: &str, args: &[String], cwd: &Path) -> Command {
+    let mut cmd = Command::new(bin);
+    cmd.args(args).current_dir(cwd).env(AGENT_MARK, "1");
+    cmd
 }
 
 /// Starts `cmd` with piped stdio and, on Windows, inside its own job object. The process is created suspended, put in the job
@@ -809,6 +815,13 @@ mod lifecycle_tests {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn every_cli_faber_starts_is_marked_as_an_ai() {
+        let cmd = marked("cli", &["--x".into()], Path::new("."));
+        let marks: Vec<_> = cmd.as_std().get_envs().filter(|(name, _)| *name == AGENT_MARK).collect();
+        assert_eq!(marks, [(std::ffi::OsStr::new(AGENT_MARK), Some(std::ffi::OsStr::new("1")))]);
+    }
 
     #[test]
     fn rewind_member_observation_excludes_only_the_actual_cli_generation() {

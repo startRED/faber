@@ -6,6 +6,7 @@
 #[cfg(all(feature = "test-hooks", not(debug_assertions)))]
 compile_error!("the `test-hooks` feature is for debug test builds only; it must not be enabled in a release build");
 
+mod command_line;
 mod folder;
 mod look;
 #[cfg(windows)]
@@ -1920,6 +1921,9 @@ fn main() {
                 ask: None,
             };
             let engine = Engine::new(opts, wiring.emitter())?;
+            if !is_test {
+                tauri::async_runtime::spawn_blocking(command_line::put_on_path);
+            }
             engine.measure_unix_worker_memory();
             if let Some(dir) = installed_data_dir(hidden) {
                 engine.set_installed_data(dir);
