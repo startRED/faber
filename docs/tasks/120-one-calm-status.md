@@ -23,3 +23,10 @@ Build one derived state for the conversation's live work, shown once, near the a
 If the readable-turns task (fold and group sentences) landed first, extend it; this task owns the live state. Walk it at
 720 px, the longest language, reduced motion, light and dark. Visual critique before and after (`visual-critique`
 skill). Extends: product-map entries for the work log, the running column and keep-going. What's-new entry.
+
+Seen live on 2026-10-29 (task 125 lists the faults found in code): T3 Code shows one line, "Working for 26m 50s",
+whose time ticks every second, and under it one live line in plain words ("Patching the file", "Thinking"); finished
+work folds to "Worked for 10m 22s ›" and opens into one headline per step with commands grouped ("Ran 7 commands"). A
+helper is a card in the answer (title, state, its own timer) that opens its own page with a link back to the parent,
+and a line says "2 of 3 delegated tasks finished". When a request waits over 120 s it says so in a notice. Two photos
+of Faber 18 s apart showed nothing changed: something the person can see must move while work goes on.

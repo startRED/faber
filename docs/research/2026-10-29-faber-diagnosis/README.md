@@ -115,6 +115,28 @@ have none. What still leaks:
   that failed before and passes after, plus a normal-use control, several samples against the same model, graders
   unit-tested, paid runs kept out of CI. This is how Faber can prove a persona change makes answers plainer.
 
+## Live look (later the same day)
+
+The owner kept sending screenshots of faults a reading of the code had missed, and asked the sessions to find them
+alone. A session photographed the installed Faber after two hours of real work, T3 Code while it ran a helper, and the
+Codex desktop app (25 photos, two pairs 15 to 18 s apart), and three helpers of other vendors read them as a person who
+does not program and as a designer. Two helpers that read only the source of the same screens, the same day, found far
+less: they could not see counts that disagree, a still screen, or a menu over the heading. What the photos showed:
+
+- Under one working conversation, "1 rodando", "Rodando agora 1", "Comandos 2" and "2 coisas ainda rodando" at once,
+  each counting something else; "Pronto" over a line saying Faber was still checking; two summaries of the same night
+  with different hours and turn counts; a plan count of finished steps read as the current one.
+- Nothing visible changed in 18 s between two turns; T3's "Working for 26m 50s" ticks every second.
+- The running shell command in the main column, shown twice when its step is opened.
+- A quota sentence that reads "Sonnet is out of quota, went on in Claude"; Settings calling a working Claude account
+  "not connected"; the sidebar dropping its quota bar minutes later.
+- Faber's own handoff text as the title of its threads in the person's Codex app history (the app-server can name a
+  thread: `thread/name/set`).
+
+Each was found in the code; task `125-screen-faults-seen-live` holds them, and tasks 120, 140 and 150 gained what the
+photos added. The `visual-critique` skill now has this live look as its section 4, so the next session does it before
+asking the owner.
+
 ## Ranked fixes
 
 1. **Stop rewriting the whole conversation per helper step** (lag, memory): coalesce saves, keep tool output out of
@@ -122,7 +144,8 @@ have none. What still leaks:
 2. **Never wait or loop without telling the person**: the four waits and two loops above, plus repeated failing
    commands of the main agent. Task `110-never-stuck-silently`.
 3. **One calm status while work runs**: one live sentence at reading size, a helper list, raw commands only in details,
-   one line after. Task `120-one-calm-status`.
+   one line after. Task `120-one-calm-status`, with the faults the live look found in
+   task `125-screen-faults-seen-live`.
 4. **Helpers and answers in the person's words**, proven by a small behaviour evaluation. Task `130-plain-helpers-and-answers`.
 5. **Plain screen texts** from the locale audit. Task `140-plain-screen-texts`.
 6. **A header and sidebar that explain themselves**. Task `150-clear-header-and-sidebar`.

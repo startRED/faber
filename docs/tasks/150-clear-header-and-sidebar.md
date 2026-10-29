@@ -13,3 +13,9 @@ header icons have no visible label.
 - Header icons: visible short labels, or one labelled menu, at 720 px too.
 
 Check the product map for each of these first: extend, never a second way. Taste cards checked. What's-new entry.
+
+Seen live on 2026-10-29, next to T3 Code: the model menu is a flat list of 11 names with a scrollbar that opens upward
+over the headline; T3 groups models by vendor with icons, a search box, the four current models with shortcuts and the
+older ones folded under "Legacy models", and shows model and effort in one chip. On the project home half the window
+stays empty until the dotted art fades in, the box's hint changes while you read, "Metas permanentes", "Memória" and
+"Sessões do terminal" are bare grey rows, and conversation titles are raw links.

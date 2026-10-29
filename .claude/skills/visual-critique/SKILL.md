@@ -1,6 +1,6 @@
 ---
 name: visual-critique
-description: "Use when a change a person sees is ready for review, or when asked to critique Faber's screenshots: scores the screens the diff touches out of 40, before and after, against the taste cards and the composition checklist of faber-ui."
+description: "Use when a change a person sees is ready for review, or when asked to critique Faber's screenshots: scores the screens the diff touches out of 40, before and after, against the taste cards and the composition checklist of faber-ui; and before asking the owner to look at the installed app, photographs it next to the apps it is measured against."
 ---
 
 # Faber screen: visual critique
@@ -53,3 +53,24 @@ the line or card it breaks. A score with no rows is not a score.
   the rows.
 - A point lost that a check could catch (art under text, a repeated name, uneven columns) is the sentinel's job: if it
   passed green, say so, so the check gets better.
+
+## 4. Live look (the installed app, next to the apps it is measured against)
+
+The photos above come from a test build with short made-up conversations. Most of what the owner had to point out by
+hand only shows in the installed app after hours of real work: two counts of the same thing that disagree, a raw command
+in the main column, a screen that does not change for a minute, an English helper title, a menu over the heading. So
+before asking the owner to look, and after a change to how progress, helpers or status show, the session looks itself.
+
+1. Photograph the installed app with computer use, never sending a message or pressing Stop: the new-conversation
+   screen, its model and access menus, a conversation working alone, one with a helper, the moment between two turns, a
+   finished turn with its work opened, each right panel, and Settings. Photograph the same moments in the reference
+   apps the owner named (T3 Code, the Codex and Claude desktop apps).
+2. On every working screen take two photos 15 s apart. Something a person can see must change between them (a ticking
+   time, a new line); a still screen reads as stuck even when the work goes on.
+3. Hand the photos, and nothing of your own reading, to two fresh sessions of other vendors (R146). Each looks as a
+   person who does not program and as a designer, and answers the three questions a person has while the AI works: is
+   it working or stuck, what is it doing now, do I need to do anything.
+4. A still photo hides some faults, so check these by name: the same fact said twice, counts or times that disagree,
+   raw commands and file paths, English or technical words, meaning only on hover, text cut short, a menu covering what
+   you were reading, an icon that means something else (a stop square shown for "running").
+5. Find each fault in the code before it becomes a task or a fix, and say "seen" or "guess" for each.
