@@ -96,6 +96,7 @@ one is never touched again, and its boxes say nothing.
 | research/2026-10-21/catalog-list.md | Catalog step 2 curation completed locally; proof results and remaining native validation |
 | research/2026-10-22/benchmark-light.md | First run of the light benchmark: Faber against plain Claude Code on 5 requests; Codex rows wait for its quota |
 | research/settings-exit-snapshot-2026-10-24.md | Locally reproduced and corrected native-select exit snapshot; focused RED/GREEN and paired visual evidence, with integration and resource limits retained |
+| [research/2026-10-29-faber-diagnosis/README.md](research/2026-10-29-faber-diagnosis/README.md) | Diagnosis of 2026-10-29: lag from whole-conversation saves, silent waits and loops, the stacked status lines, English helper titles and leftover jargon, with what T3 Code, Claude and Grok do better; tasks 100 to 160 |
 | [research/first-user-2026-10-25.md](research/first-user-2026-10-25.md) | Accepted newcomer round and incorporated Projects repair; mixed outcomes and historical/native-picker limits preserved |
 | [research/first-user-2026-10-24-history.md](research/first-user-2026-10-24-history.md) | Historical first-user reports retained verbatim; scope, archived artifacts and evidentiary limits |
 | [research/motion-verdicts-2026-10-25.md](research/motion-verdicts-2026-10-25.md) | Accepted eight-surface motion critique and incorporated sidebar correction; bounded scores and observation limits preserved |
