@@ -266,6 +266,8 @@ export const ptBR: Messages = {
   'error.settings.saveFailed': 'O Faber não conseguiu salvar as configurações. Nada foi alterado.',
   'error.settings.autostartFailed': 'O Faber não conseguiu alterar a inicialização ao entrar no Windows. Suas configurações não foram alteradas.',
   'error.driverStopped': 'A sessão da CLI parou inesperadamente. Tente enviar sua mensagem novamente.',
+  'error.cli.interruptTimeout': 'Ele ficou dois minutos em silêncio e não reagiu ao Parar, então o Faber o encerrou. Os arquivos que ele já alterou ficam como estão.',
+  'error.cli.stopUnconfirmed': 'O Faber pediu que ele parasse e não recebeu resposta, então não vai recomeçar esta parte sozinho. Os arquivos que ele já alterou ficam como estão.',
   'error.sessionLost': 'A CLI não tem mais a sessão anterior desta conversa. Envie a mensagem de novo: ela começa uma sessão nova e recebe a conversa até aqui.',
   'note.historyResent': 'A sessão anterior se perdeu; o histórico foi reenviado sem imagens, sem as entradas das ferramentas e com as saídas resumidas.',
   'set.back': '← Voltar',

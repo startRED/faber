@@ -269,6 +269,8 @@ export const es: Messages = {
   'error.settings.saveFailed': 'Faber no pudo guardar los ajustes. No se cambió nada.',
   'error.settings.autostartFailed': 'Faber no pudo cambiar el inicio automático al iniciar sesión. No se cambiaron tus ajustes.',
   'error.driverStopped': 'La sesión de la CLI se detuvo inesperadamente. Intenta enviar tu mensaje de nuevo.',
+  'error.cli.interruptTimeout': 'Estuvo dos minutos en silencio y no reaccionó a Detener, así que Faber lo terminó. Los archivos que ya cambió quedan como están.',
+  'error.cli.stopUnconfirmed': 'Faber le pidió que se detuviera y no recibió respuesta, así que no volverá a empezar esta parte por sí solo. Los archivos que ya cambió quedan como están.',
   'error.sessionLost': 'La CLI ya no tiene la sesión anterior de esta conversación. Envía tu mensaje de nuevo: empieza una sesión nueva y recibe la conversación hasta ahora.',
   'note.historyResent': 'La sesión anterior se perdió; la conversación se reenvió como texto, sin imágenes, sin las entradas de las herramientas y con las salidas resumidas.',
   'set.back': '← Volver',

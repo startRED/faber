@@ -10,12 +10,12 @@ const LOCALES = { 'pt-BR': ptBR, es, fr, de };
 const slots = (text: string) => [...text.matchAll(/\{(\w+)\}/g)].map((m) => m[1]).sort();
 const forms = (entry: string | { one: string; other: string }) => (typeof entry === 'string' ? [entry] : [entry.one, entry.other]);
 
-check('i18n: permission failures are readable in every language', () => {
+check('i18n: permission and stop failures are readable in every language', () => {
   const before = lang();
   try {
     for (const { code, messages } of LANGUAGES) {
       useLanguage(code);
-      for (const key of ['error.permission.stale', 'error.permission.undelivered']) {
+      for (const key of ['error.permission.stale', 'error.permission.undelivered', 'error.cli.interruptTimeout', 'error.cli.stopUnconfirmed']) {
         ok(fromEngine(key) !== key, `${code} displays the raw engine key ${key}`);
         const entry: unknown = Object.getOwnPropertyDescriptor(messages, key)?.value;
         ok(typeof entry === 'string' && entry.trim(), `${code} has no text for ${key}`);

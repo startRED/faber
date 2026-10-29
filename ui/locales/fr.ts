@@ -269,6 +269,8 @@ export const fr: Messages = {
   'error.settings.saveFailed': 'Faber n’a pas pu enregistrer vos réglages. Rien n’a été modifié.',
   'error.settings.autostartFailed': 'Faber n’a pas pu modifier le lancement à l’ouverture de session. Tes réglages n’ont pas été modifiés.',
   'error.driverStopped': 'La session CLI s’est arrêtée de façon inattendue. Essaie de renvoyer ton message.',
+  'error.cli.interruptTimeout': 'Il est resté deux minutes sans rien dire et n’a pas réagi à Arrêter, alors Faber l’a terminé. Les fichiers qu’il a déjà modifiés restent tels quels.',
+  'error.cli.stopUnconfirmed': 'Faber lui a demandé de s’arrêter et n’a reçu aucune réponse, donc il ne reprendra pas cette partie tout seul. Les fichiers qu’il a déjà modifiés restent tels quels.',
   'error.sessionLost': 'La CLI n’a plus la session précédente de cette conversation. Renvoie ton message : il ouvre une nouvelle session et reçoit la conversation jusqu’ici.',
   'note.historyResent': 'La session précédente s’est perdue ; la conversation a été renvoyée en texte, sans images, sans les entrées des outils et avec leurs sorties abrégées.',
   'set.back': '← Retour',

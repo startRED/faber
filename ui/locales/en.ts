@@ -267,6 +267,8 @@ export const en = {
   'error.settings.saveFailed': 'Faber could not save your settings. Nothing was changed.',
   'error.settings.autostartFailed': 'Faber could not change startup at sign-in. Your settings were not changed.',
   'error.driverStopped': 'The CLI session stopped unexpectedly. Try sending your message again.',
+  'error.cli.interruptTimeout': 'It was silent for two minutes and did not react to Stop, so Faber ended it. Files it already changed stay as they are.',
+  'error.cli.stopUnconfirmed': 'Faber asked it to stop and got no answer, so it will not start this part again by itself. Files it already changed stay as they are.',
   'error.sessionLost': 'The CLI no longer has this conversation’s earlier session. Send your message again: it starts a new session and is given the conversation so far.',
   'note.historyResent': 'The earlier session was lost; the conversation was sent again as text, without images, without the tools’ inputs and with their outputs shortened.',
   'set.back': '← Back',

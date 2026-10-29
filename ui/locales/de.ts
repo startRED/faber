@@ -269,6 +269,8 @@ export const de: Messages = {
   'error.settings.saveFailed': 'Faber konnte die Einstellungen nicht speichern. Es wurde nichts geändert.',
   'error.settings.autostartFailed': 'Faber konnte den Start bei der Anmeldung nicht ändern. Deine Einstellungen wurden nicht geändert.',
   'error.driverStopped': 'Die CLI-Sitzung wurde unerwartet beendet. Versuche, deine Nachricht erneut zu senden.',
+  'error.cli.interruptTimeout': 'Es war zwei Minuten still und hat auf Stoppen nicht reagiert, deshalb hat Faber es beendet. Dateien, die es schon geändert hat, bleiben wie sie sind.',
+  'error.cli.stopUnconfirmed': 'Faber hat es zum Anhalten aufgefordert und keine Antwort bekommen, deshalb beginnt es diesen Teil nicht von selbst neu. Dateien, die es schon geändert hat, bleiben wie sie sind.',
   'error.sessionLost': 'Die CLI hat die frühere Sitzung dieser Unterhaltung nicht mehr. Sende deine Nachricht erneut: Sie startet eine neue Sitzung und bekommt die bisherige Unterhaltung mit.',
   'note.historyResent': 'Die frühere Sitzung ging verloren; die Unterhaltung wurde als Text erneut gesendet, ohne Bilder, ohne die Eingaben der Werkzeuge und mit gekürzten Ausgaben.',
   'set.back': '← Zurück',

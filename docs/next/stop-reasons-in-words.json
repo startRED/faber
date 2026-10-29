@@ -1,0 +1,10 @@
+{
+  "notes": { "fixed": {
+    "en": "When an automatic step is ended for staying silent, Faber now says so, instead of \"stopped for a reason it cannot describe yet\".",
+    "pt-BR": "Quando um passo automático é encerrado por ficar em silêncio, o Faber agora diz isso, em vez de \"parou por um motivo que ainda não sabe descrever\".",
+    "es": "Cuando un paso automático se termina por quedarse en silencio, Faber ahora lo dice, en vez de «se detuvo por un motivo que todavía no sabe describir».",
+    "fr": "Quand une étape automatique est terminée parce qu’elle reste muette, Faber le dit maintenant, au lieu de « s’est arrêté pour une raison qu’il ne sait pas encore décrire ».",
+    "de": "Wird ein automatischer Schritt beendet, weil er stumm bleibt, sagt Faber das jetzt, statt „aus einem Grund angehalten, den es noch nicht beschreiben kann“."
+  } },
+  "decisions": ["| R-next | 2026-10-29 | A step the watchdog ends (silent for two minutes and deaf to Stop, or a shared Codex process that did not confirm a stop) shows its own sentence instead of the generic \"cannot describe yet\" line. The watchdog, its times and the engine keys are unchanged. Not measured: five lines of text per language. | AI (Erick delegou) |"]
+}
