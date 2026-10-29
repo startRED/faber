@@ -112,7 +112,8 @@ pub struct Host {
 }
 
 impl Host {
-    /// Every event from now on, as the screen receives it.
+    /// Every event from now on, as the screen receives it. A reply already streaming arrives as its changed steps only
+    /// (`feed.rs`), so a subscriber reads `open` (or `state`) first, and again after it lags.
     pub fn subscribe(&self) -> broadcast::Receiver<Value> {
         self.events.subscribe()
     }
@@ -164,10 +165,14 @@ macro_rules! table {
             &[$( (stringify!($name), &[$( (stringify!($arg), stringify!($ty)) ),*], Kind::$kind) ),*];
 
         impl Host {
-            /// Runs one command. Arguments that do not fit are `error.host.badArgs`; a name not in the table,
-            /// `error.host.unknownCommand`.
+            /// Runs one command. Arguments are an object of named values, as the screen sends them; anything else, or
+            /// arguments that do not fit, is `error.host.badArgs`, and a name not in the table `error.host.unknownCommand`.
             pub async fn dispatch(&self, command: &str, args: Value) -> Res<Value> {
-                let args = if args.is_null() { Value::Object(Default::default()) } else { args };
+                let args = match args {
+                    Value::Null => Value::Object(Default::default()),
+                    Value::Object(_) => args,
+                    _ => return Err("error.host.badArgs".into()),
+                };
                 match command {
                     $( stringify!($name) => {
                         #[derive(serde::Deserialize)]
