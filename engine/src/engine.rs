@@ -436,6 +436,9 @@ struct Core {
     convs: HashMap<String, Conversation>,
     /// Only the ids of durable child notices waiting for room, never another queue of report text.
     parent_reports: HashMap<String, HashSet<String>>,
+    /// What each conversation last read of another one in its running turn (`siblings.rs`), so reading it again with nothing new
+    /// answers briefly. Never saved.
+    sibling_reads: HashMap<(String, String), siblings::SeenRead>,
     /// Runs git for the copies of project conversations (R201), given by the shell; without it they work in the folder.
     git: Option<copies::GitRunner>,
     /// Faber's own browser (R161 step 7), given by the shell where it has one; without it the tool is not offered.
@@ -641,6 +644,7 @@ impl Engine {
                 me: me.clone(),
                 convs: HashMap::new(),
                 parent_reports,
+                sibling_reads: HashMap::new(),
                 live: HashMap::new(),
                 installing: false,
                 compacts: HashMap::new(),

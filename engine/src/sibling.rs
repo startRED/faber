@@ -308,6 +308,11 @@ pub fn cleared_prompt(requests: &[&str], next: &str) -> String {
 /// The answer to an archive.
 pub const ARCHIVED: &str = "This conversation is archived: it left the sidebar, and the person can bring it back. End your turn now.";
 
+/// The answer to reading a conversation again in the same turn when its latest answer has not changed.
+pub fn read_again(title: &str, state: State) -> String {
+    format!("The conversation \"{title}\" {}. Its latest answer is the one you already read in this turn: nothing new since.", said(state))
+}
+
 /// The answer to a read: the state, then the conversation's latest answer, cut to a size the agent can take in.
 pub fn read(title: &str, state: State, latest: &str) -> String {
     let said = said(state);

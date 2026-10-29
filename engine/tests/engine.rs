@@ -5103,6 +5103,47 @@ async fn the_agent_starts_a_conversation_of_its_own_and_reads_where_it_stands() 
     engine.shutdown();
 }
 
+/// The owner's conversations read one other conversation 101 times, and 118 of 481 reads returned what the agent already
+/// had. Reading the same conversation again in one turn with nothing new answers briefly, so the answer is not piled into
+/// the agent's context again.
+#[tokio::test]
+async fn reading_a_conversation_again_in_one_turn_with_nothing_new_answers_briefly() {
+    let dir = tempfile::tempdir().unwrap();
+    let (spawn, made) = pipes();
+    let engine = two_vendors(dir.path(), spawn);
+    let project = engine.add_project(&dir.path().to_string_lossy()).unwrap();
+    engine.send(SendRequest { project_id: Some(project.id), ..ask(Area::Project, "split it", choice("claude", Some("haiku"))) }).unwrap();
+    let mut agent = next_pipe(&made).await;
+    agent.say(json!({"type":"system","subtype":"init","session_id":"s1","model":"claude-haiku-5-5"})).await;
+    let call = |rpc: u64, tool: &str, args: &serde_json::Value| {
+        json!({"type":"control_request","request_id":format!("r{rpc}"),"request":{"subtype":"mcp_message","server_name":"faber",
+        "message":{"jsonrpc":"2.0","id":rpc,"method":"tools/call","params":{"name":"conversation","arguments":args,"_meta":{"claudecode/toolUseId":tool}}}}})
+    };
+    agent.say(call(1, "toolu_c", &json!({"title":"Docs","brief":"Write the docs."}))).await;
+    assert_eq!(mcp_answer(&agent, "r1").await["result"]["isError"], false);
+    let docs = engine.state().conversations.into_iter().find(|c| c.title == "Docs").expect("the new conversation is listed").id;
+    let mut child = next_pipe(&made).await;
+    child.say(json!({"type":"system","subtype":"init","session_id":"s2","model":"claude-haiku-5-5"})).await;
+    child.say(json!({"type":"stream_event","parent_tool_use_id":null,"event":{"type":"content_block_delta","delta":{"type":"text_delta","text":"Wrote the parser page."}}})).await;
+    until(&engine, &docs, |c| c.messages.last().is_some_and(|m| m.text.contains("Wrote the parser page."))).await;
+
+    let text = |answer: serde_json::Value| answer["result"]["content"][0]["text"].as_str().unwrap().to_string();
+    agent.say(call(2, "toolu_r1", &json!({"id": docs}))).await;
+    let first = text(mcp_answer(&agent, "r2").await);
+    assert!(first.contains("Wrote the parser page."), "the first read carries the answer: {first}");
+    agent.say(call(3, "toolu_r2", &json!({"id": docs}))).await;
+    let again = text(mcp_answer(&agent, "r3").await);
+    assert!(again.contains("nothing new since") && !again.contains("Wrote the parser page."), "{again}");
+
+    // A longer answer is news: it reads in full again.
+    child.say(json!({"type":"stream_event","parent_tool_use_id":null,"event":{"type":"content_block_delta","delta":{"type":"text_delta","text":" Added examples."}}})).await;
+    until(&engine, &docs, |c| c.messages.last().is_some_and(|m| m.text.contains("Added examples."))).await;
+    agent.say(call(4, "toolu_r3", &json!({"id": docs}))).await;
+    let news = text(mcp_answer(&agent, "r4").await);
+    assert!(news.contains("Wrote the parser page. Added examples."), "{news}");
+    engine.shutdown();
+}
+
 /// A conversation an agent started reports back by itself once it stops working: its answer reaches the agent that started
 /// it as a message Faber writes, framed as data, so that agent never polls.
 #[tokio::test]

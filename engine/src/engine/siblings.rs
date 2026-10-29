@@ -8,6 +8,15 @@ use crate::sibling::{self, Request, State};
 
 /// Whether a conversation's agent gets the tool: every project conversation's. Only one no other agent started may start
 /// conversations, so one level only.
+/// One read of another conversation (`Core::sibling_reads`): the reader's turn, the answer it was given, and how full its
+/// context was then.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(super) struct SeenRead {
+    turn: String,
+    answer: String,
+    used: u64,
+}
+
 pub(super) fn offers(area: Area) -> bool {
     area == Area::Project
 }
@@ -213,12 +222,30 @@ impl Core {
         Ok(project)
     }
 
+    /// Reading the same conversation again in one turn with nothing new answers briefly: the owner's conversations read one
+    /// 101 times, 118 of 481 reads returned what the agent already had. A context that shrank since (compacted) reads in full.
     fn read_sibling(&mut self, conv: &str, id: &str) -> Result<String, &'static str> {
         self.same_project(conv, id)?;
+        let reader = self.convs.get(conv).map(|r| SeenRead {
+            turn: r.messages.last().map(|m| m.id.clone()).unwrap_or_default(),
+            answer: String::new(),
+            used: r.context.as_ref().map_or(0, |f| f.used),
+        });
         let busy = self.live.get(id).is_some_and(|l| l.turn.is_some());
         let c = self.convs.get(id).ok_or("the conversation is gone")?;
         let last = c.messages.iter().rev().find(|m| m.role == Role::Assistant);
-        Ok(sibling::read(&c.title, state_of(busy, c), &last.map(Message::said).unwrap_or_default()))
+        let latest = last.map(Message::said).unwrap_or_default();
+        let seen = reader.map(|r| SeenRead { answer: format!("{}:{}", last.map_or("", |m| m.id.as_str()), latest.len()), ..r });
+        let key = (conv.to_string(), id.to_string());
+        let again = seen.as_ref().zip(self.sibling_reads.get(&key)).is_some_and(|(now, before)| {
+            !latest.trim().is_empty() && now.turn == before.turn && now.answer == before.answer && now.used >= before.used
+        });
+        let text =
+            if again { sibling::read_again(&c.title, state_of(busy, c)) } else { sibling::read(&c.title, state_of(busy, c), &latest) };
+        if let Some(seen) = seen.filter(|_| !again) {
+            self.sibling_reads.insert(key, seen);
+        }
+        Ok(text)
     }
 
     /// The project's other conversations the person has not archived, the newest first. One never loaded since Faber
