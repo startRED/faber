@@ -477,6 +477,7 @@ export const ptBR: Messages = {
   'error.channel.hello': "O Faber esperava um olá primeiro. Atualize a linha de comando.",
   'error.channel.agentDepth': "Uma IA iniciada por outra IA pode ler o Faber, mas não pode começar conversas.",
   'error.channel.agentTurns': "Uma IA dentro do Faber já tem duas respostas rodando ou começou 20 nesta hora. Espere uma terminar.",
+  'error.channel.personOnly': "Só você pode fazer isso no Faber: responder um cartão, aprovar créditos ou mudar as Configurações.",
   'error.groupGone': "Este grupo não existe mais.",
   'error.groupName': "Dê um nome de até 120 caracteres ao grupo.",
   'error.groupInstructions': "As instruções podem ter até 8.000 caracteres.",

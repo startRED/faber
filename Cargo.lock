@@ -1172,6 +1172,7 @@ dependencies = [
  "base64 0.23.1",
  "block2",
  "dirs",
+ "faber-channel",
  "faber-engine",
  "faber-host",
  "junction",
@@ -1204,6 +1205,8 @@ dependencies = [
 name = "faber-channel"
 version = "0.1.0"
 dependencies = [
+ "faber-engine",
+ "faber-host",
  "faber-winproc",
  "rustix",
  "serde",

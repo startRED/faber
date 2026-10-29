@@ -21,6 +21,7 @@ tauri-build = { version = "2", features = [] }
 base64 = "0.23"
 # The config folder before the app exists, for the crash hook of the first line of main; Tauri reads the same call.
 dirs = "7"
+faber-channel = { path = "../channel", features = ["host"] }
 faber-engine = { path = "../engine" }
 faber-host = { path = "../host" }
 semver = "1"

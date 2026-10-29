@@ -478,6 +478,7 @@ export const en = {
   'error.channel.hello': "Faber expected a hello first. Update the command line.",
   'error.channel.agentDepth': "An AI started by another AI can read Faber but cannot start conversations.",
   'error.channel.agentTurns': "An AI inside Faber already has two answers running or started 20 this hour. Wait for one to end.",
+  'error.channel.personOnly': "Only you can do this in Faber: answer a card, approve credits or change Settings.",
   'error.groupGone': "This group no longer exists.",
   'error.groupName': "Give the group a name of up to 120 characters.",
   'error.groupInstructions': "Use at most 8,000 characters for the instructions.",

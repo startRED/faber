@@ -9,6 +9,8 @@
 
 pub mod client;
 pub mod guard;
+#[cfg(feature = "host")]
+pub mod host;
 pub mod place;
 pub mod server;
 pub mod wire;
