@@ -5,10 +5,10 @@
     { "prefixes": ["docs/"], "suffixes": [".md"], "suites": [] },
     { "prefixes": ["testkit/"], "suites": ["rust", "ui", "screen"] },
     { "prefixes": ["tests/ui/"], "suites": ["ui"] },
-    { "prefixes": [".cargo/"], "files": ["Cargo.toml", "Cargo.lock", "engine/Cargo.toml", "src-tauri/Cargo.toml"], "suites": ["rust", "ui", "screen"] },
+    { "prefixes": [".cargo/"], "files": ["Cargo.toml", "Cargo.lock", "engine/Cargo.toml", "host/Cargo.toml", "src-tauri/Cargo.toml"], "suites": ["rust", "ui", "screen"] },
     { "prefixes": ["engine/tests/", "src-tauri/tests/", "bench/"], "files": ["engine/examples/route_eval.rs", "engine/examples/security_probe.rs", "engine/examples/selfdev_probe.rs", "engine/examples/selfdev_accept.rs", "engine/examples/bench.rs"], "suites": ["rust"] },
     { "prefixes": ["tests/fixtures/", "engine/"], "suites": ["rust", "screen"] },
-    { "prefixes": ["src-tauri/"], "suites": ["rust", "ui", "screen"] },
+    { "prefixes": ["host/", "src-tauri/"], "suites": ["rust", "ui", "screen"] },
     { "files": ["ui/locales/en.ts"], "suites": ["rust", "ui", "screen"] },
     { "prefixes": ["ui/"], "files": ["vite.config.ts", "tsconfig.json", "package.json", "package-lock.json"], "suites": ["ui", "screen"] }
   ]

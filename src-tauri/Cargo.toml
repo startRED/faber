@@ -22,6 +22,7 @@ base64 = "0.23"
 # The config folder before the app exists, for the crash hook of the first line of main; Tauri reads the same call.
 dirs = "7"
 faber-engine = { path = "../engine" }
+faber-host = { path = "../host" }
 semver = "1"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"

@@ -1083,6 +1083,7 @@ dependencies = [
  "block2",
  "dirs",
  "faber-engine",
+ "faber-host",
  "junction",
  "notify-rust",
  "objc2",
@@ -1137,6 +1138,16 @@ dependencies = [
  "win32job",
  "winreg",
  "zip 9.0.5",
+]
+
+[[package]]
+name = "faber-host"
+version = "0.1.0"
+dependencies = [
+ "faber-engine",
+ "serde",
+ "serde_json",
+ "tokio",
 ]
 
 [[package]]

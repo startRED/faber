@@ -1,7 +1,11 @@
 # Electron shell with everything else in Rust
 
-Status: Decided by the owner (R459); plan proposed by AI, nothing built or measured yet. It replaces the Tauri shell
-(`src-tauri/`) and supersedes R31 ("Node never in the installer"). R125's memory limits stay.
+Status: Decided by the owner (R459); plan proposed by AI. Started 2026-10-29 (the shared command table, below). It
+replaces the Tauri shell (`src-tauri/`) and supersedes R31 ("Node never in the installer"). R125's memory limits stay.
+
+Owner, 2026-10-29, on the phase 1 stop gate: "Pode passar o ideal é só ser otimizado n precisa seguir um numero fixo só
+deixe tudo o mais otimizado que der sem memory leak cpu leak e nem nada assim". So no idle number stops the move; every
+phase measures, cuts what it can, and treats any memory or processor growth over time as a bug.
 
 ## Request and intended result
 
@@ -56,9 +60,15 @@ Electron main process (TypeScript, thin: windows, menus, IPC relay)
 - **Node is a relay only.** `electron/main.ts` creates the window, the tray and the pane, and forwards each command to
   the addon. A rule that decides anything lives in Rust and has a Rust test. The size target is under 800 lines of
   TypeScript in `electron/`.
-- **The screen keeps its command list.** `preload.ts` exposes exactly the commands `tauri::generate_handler!` lists
-  today (about 60, in `src-tauri/src/main.rs`). `ui/api.ts` swaps `invoke` for the bridge, and its types are generated
-  from Rust (`ts-rs` or `specta`) instead of written by hand.
+- **One command table for every front end.** The commands live in the `host/` crate (`faber-host`): one `table!`
+  list builds each command, `Host::dispatch(name, args JSON)` and `Host::commands()` (name, camelCase arguments, and a
+  kind: read, write, starts a turn, or needs a window), so they cannot drift. The Tauri shell relays every table command
+  to it before Electron exists, which proves the table on the screen suite first; then `preload.ts` exposes the same
+  `invoke(name, args)`, and the command line (`faber`, its own spec) calls it over a user-only pipe. Out of process the
+  table speaks newline-delimited JSON (`host/src/wire.rs`): `{"id","cmd","args"}`, `{"id","ok"}` or `{"id","err"}`,
+  and `{"event"}`. What only a window can do (the pane, dialogs, the tray) goes through the `Shell` trait each front end
+  implements. The screen reaches the shell in three places only (`invoke`, `listen`, the window buttons), so
+  `ui/api.ts` swaps one import.
 - **Security.** `contextIsolation`, `sandbox` and no `nodeIntegration` in the screen and the pane. The Electron fuses
   that turn off `ELECTRON_RUN_AS_NODE`, the Node options and the inspector arguments in a release build. The screen
   loads only `dist/` through a custom protocol, never `file://` or a remote page. A link opens outside the app. These
@@ -118,10 +128,10 @@ Each phase is its own pull request through `land.mjs`, with its measured memory 
    from the same baseline.
 1. **Skeleton and measurement.** `electron/` + `native/` (napi-rs) open the real screen with the engine, with no other
    feature. Measure private memory idle, with 1000 messages and in the tray, cold start and installer size on Windows
-   and macOS, addon against sidecar. **The owner decides with these numbers:** if idle is above 250 MB or the 1000-message
-   case is above 400 MB (R125), the move stops and the measurements stay in the spec.
-2. **Commands.** All shell commands move to napi-rs exports, `ui/api.ts` is generated from Rust, and the checks in
-   `tests/ui` pass in Electron.
+   and macOS, addon against sidecar. The numbers go in this spec and the pull request; no fixed number stops the move
+   (owner, 2026-10-29), but every cost found is cut before phase 2 ends.
+2. **Commands.** Every command moves into `host/` (started on Tauri, see above), the Electron front end relays them,
+   and the checks in `tests/ui` pass in Electron.
 3. **Runner.** `testkit` launches Electron on the hidden desktop with the same sandbox and audits, the screen suite runs
    on Windows, macOS and Linux, and trace, screenshot comparison and locators are added.
 4. **Tray, notifications, keep-awake, autostart, single instance, dialogs.**
