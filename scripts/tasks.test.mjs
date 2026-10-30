@@ -2,7 +2,7 @@
 
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { claimMessage, finished, parseName, parseTask, queue, readClaim, STALE_MS } from './tasks.mjs';
+import { claimMessage, finished, parseDepends, parseName, parseTask, queue, readClaim, STALE_MS } from './tasks.mjs';
 
 test('a task file is <order>-<name>.md; anything else in the folder is not a task', () => {
   assert.deepEqual(parseName('010-light-proofs.md'), { order: 10, name: 'light-proofs' });
@@ -35,4 +35,14 @@ test('tasks come lowest order first; a claimed one is skipped until its claim is
 test('a claim whose task left the list is finished', () => {
   const claims = new Map([['gone', {}], ['kept', {}]]);
   assert.deepEqual(finished(['010-kept.md', 'README.md'], claims), ['gone']);
+});
+
+test('a task waits while a task it depends on is still on the list', () => {
+  assert.deepEqual(parseDepends('# T\n\nArea: none\nDepends: a-one, b-two\n'), ['a-one', 'b-two']);
+  assert.deepEqual(parseDepends('# T\n\nDepends: none\n'), []);
+  assert.deepEqual(parseDepends('# T\n\nNo line.\n'), []);
+  const depends = new Map([['c', ['a', 'gone']], ['b', ['gone']]]);
+  const [a, b, c] = queue(['010-a.md', '020-b.md', '030-c.md'], new Map(), 0, depends);
+  assert.deepEqual([a.free, b.free, c.free], [true, true, false]);
+  assert.deepEqual(c.waits, ['a']);
 });

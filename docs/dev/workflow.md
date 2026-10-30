@@ -86,8 +86,8 @@ branch `claim/<name>` on GitHub. A push without force fails when that branch is 
 get the same task, whatever PC they run on. The claim is a commit of its own whose message says who holds it and since
 when; one older than a day is stale, and the next session takes it over (the same day as lane claims). The session
 works on a branch named after the task, and its pull request deletes the task's file, so the task is gone once it lands;
-the next `next` deletes the claims of tasks that left the list. `list` shows who holds what, `release <name>` gives a
-task back. CI never runs on `claim/` branches.
+the next `next` deletes the claims of tasks that left the list. A task whose `Depends:` line names a task still on
+the list waits: `next` skips it. `list` shows who holds what and what waits, `release <name>` gives a task back. CI never runs on `claim/` branches.
 
 A task is the size of one pull request: one idea, about 100 to 400 changed lines. A task that needs more than about
 1000 is split into tasks that land one after another, each one a working step on its own. Its file names the area, the

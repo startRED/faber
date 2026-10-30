@@ -9,7 +9,8 @@
 // A session claims one by creating the branch claim/<name> on GitHub: a push without force fails when the branch is
 // already there, so two sessions never get the same task. The claim is a commit of its own whose message says who and
 // when; one older than a day is stale and the next session takes it over. The pull request that finishes a task deletes
-// its file, so the task is gone once it lands, and the next `next` deletes its claim.
+// its file, so the task is gone once it lands, and the next `next` deletes its claim. A `Depends: a, b` line names tasks
+// that land first: `next` skips a task while one of them is still on the list.
 
 import { execFileSync } from 'node:child_process';
 import { resolve, join } from 'node:path';
@@ -43,18 +44,26 @@ export function readClaim(message) {
   return { who, since: Number.isNaN(since) ? 0 : since };
 }
 
+/** The task names on a `Depends:` line of a task file's text; `none` or no line is none. */
+export function parseDepends(text) {
+  const line = /^Depends:(.*)$/m.exec(text)?.[1] ?? '';
+  return line.split(',').map((d) => d.trim()).filter((d) => d && d !== 'none');
+}
+
 /**
  * The tasks in the order a session takes them, each with its claim: `files` are the names in docs/tasks, `claims` maps a
- * task name to `{ who, since }`. `free` is true for an unclaimed task and for one whose claim is stale at `now`.
+ * task name to `{ who, since }`, `depends` a task name to the names it waits on. `waits` are those still on the list;
+ * `free` is true for a task that waits on none and is unclaimed or claimed stale at `now`.
  */
-export function queue(files, claims, now) {
-  return files
-    .map(parseName)
-    .filter(Boolean)
+export function queue(files, claims, now, depends = new Map()) {
+  const tasks = files.map(parseName).filter(Boolean);
+  const listed = new Set(tasks.map((t) => t.name));
+  return tasks
     .sort((a, b) => a.order - b.order || a.name.localeCompare(b.name))
     .map((task) => {
       const claim = claims.get(task.name);
-      return { ...task, claim, free: !claim || now - claim.since > STALE_MS };
+      const waits = (depends.get(task.name) ?? []).filter((d) => listed.has(d));
+      return { ...task, claim, waits, free: !waits.length && (!claim || now - claim.since > STALE_MS) };
     });
 }
 
@@ -76,13 +85,26 @@ function state() {
   } catch {
     // No docs/tasks on the base yet: an empty list.
   }
+  // Every Depends line in one call: `<base>:docs/tasks/<file>:Depends: a, b`.
+  const depends = new Map();
+  let lines = '';
+  try {
+    lines = git('grep', '-e', '^Depends:', base, '--', TASKS);
+  } catch {
+    // No task names a dependency: git grep exits 1.
+  }
+  for (const line of lines.split('\n').filter(Boolean)) {
+    const [, path, ...text] = line.split(':');
+    const name = parseName(path.slice(TASKS.length + 1))?.name;
+    if (name) depends.set(name, parseDepends(text.join(':')));
+  }
   const claims = new Map();
   const refs = git('for-each-ref', '--format=%(refname:strip=4)%09%(objectname)', 'refs/remotes/origin/claim/');
   for (const line of refs.split('\n').filter(Boolean)) {
     const [name, oid] = line.split('\t');
     claims.set(name, { ...readClaim(git('log', '-1', '--format=%B', oid)), oid, from: git('log', '-1', '--format=%P', oid).trim() });
   }
-  return { base, files, claims };
+  return { base, files, claims, depends };
 }
 
 /** Pushes a claim of `name` for `who`: only where there was none, or over the stale one `old`. True when it is ours. */
@@ -107,7 +129,7 @@ function next(who) {
     console.log('No new task until they are fixed. FABER_IGNORE_OWED=1 takes one anyway, for work those wait on.');
     return 1;
   }
-  const { base, files, claims } = state();
+  const { base, files, claims, depends } = state();
   for (const name of finished(files, claims)) {
     // Finished only if this list is at least as new as the base the claim was made on: a task added after this run's
     // base, and claimed on it, is not missing from the list but newer than it.
@@ -118,7 +140,7 @@ function next(who) {
       // Someone else cleaned it up first.
     }
   }
-  for (const task of queue(files, claims, Date.now())) {
+  for (const task of queue(files, claims, Date.now(), depends)) {
     if (!task.free || !claim(base, task.name, who, task.claim?.oid)) continue;
     const file = files.find((f) => parseName(f)?.name === task.name);
     const { title, brief } = parseTask(git('show', `${base}:${TASKS}/${file}`));
@@ -141,10 +163,11 @@ function isAncestor(a, b) {
 }
 
 function list() {
-  const { files, claims } = state();
+  const { files, claims, depends } = state();
   const now = Date.now();
-  for (const task of queue(files, claims, now)) {
-    const held = task.claim ? `${task.free ? 'stale claim by' : 'claimed by'} ${task.claim.who}` : 'free';
+  for (const task of queue(files, claims, now, depends)) {
+    const fresh = task.claim && now - task.claim.since <= STALE_MS;
+    const held = fresh ? `claimed by ${task.claim.who}` : task.waits.length ? `waits on ${task.waits.join(', ')}` : task.claim ? `stale claim by ${task.claim.who}` : 'free';
     console.log(`${String(task.order).padStart(3, '0')} ${task.name}  ${held}`);
   }
   return 0;
