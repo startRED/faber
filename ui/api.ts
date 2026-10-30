@@ -1,5 +1,4 @@
-import { invoke } from '@tauri-apps/api/core';
-import { listen } from '@tauri-apps/api/event';
+import { invoke, listen } from './shell.ts';
 
 // The shapes the engine sends (engine/src/model.rs).
 export type Vendor = 'claude' | 'codex';

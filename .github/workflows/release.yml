@@ -13,6 +13,10 @@ on:
 permissions:
   contents: read
 
+# Electron (R459) is a dev dependency; no job here starts it yet, so npm ci skips its 100 MB binary.
+env:
+  ELECTRON_SKIP_BINARY_DOWNLOAD: '1'
+
 jobs:
   # One job creates the release so the build jobs upload to it instead of racing to create it. It starts as a draft:
   # a published release with no latest.json yet makes every Faber get "not found" and skip the update.
