@@ -485,6 +485,8 @@ pub struct Pipe {
     pub lines: Arc<Mutex<Vec<Value>>>,
     /// The driver closed the process's input (the end of a session).
     pub closed: Arc<std::sync::atomic::AtomicBool>,
+    /// The arguments the process was started with.
+    pub args: Vec<String>,
 }
 
 impl Pipe {
@@ -513,7 +515,7 @@ impl Pipe {
 pub fn pipes() -> (Spawner, Arc<Mutex<Vec<Pipe>>>) {
     let made: Arc<Mutex<Vec<Pipe>>> = Arc::default();
     let queue = made.clone();
-    let spawn: Spawner = Arc::new(move |_bin, _argv, _cwd| {
+    let spawn: Spawner = Arc::new(move |_bin, argv, _cwd| {
         let (driver_in, fake_in) = tokio::io::duplex(1 << 20);
         let (fake_out, driver_out) = tokio::io::duplex(1 << 20);
         let lines: Arc<Mutex<Vec<Value>>> = Arc::default();
@@ -528,7 +530,7 @@ pub fn pipes() -> (Spawner, Arc<Mutex<Vec<Pipe>>>) {
             }
             done.store(true, Ordering::SeqCst);
         });
-        queue.lock().unwrap().push(Pipe { out: fake_out, lines, closed });
+        queue.lock().unwrap().push(Pipe { out: fake_out, lines, closed, args: argv.to_vec() });
         Ok(Proc { stdin: Box::new(driver_in), stdout: Box::new(driver_out), stderr: None, child: None, contained: None })
     });
     (spawn, made)
