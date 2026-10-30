@@ -10,6 +10,8 @@
 
 #[macro_use]
 mod macros;
+pub mod autostart;
+pub mod awake;
 mod failure;
 mod feed;
 pub mod folder;
@@ -17,9 +19,11 @@ pub mod look;
 mod project_commands;
 mod queues;
 pub mod setup;
+pub mod sidecar;
 mod table;
 pub mod terminal;
 mod tools;
+pub mod tray;
 pub mod wire;
 
 pub use failure::Failure;

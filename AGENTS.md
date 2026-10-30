@@ -109,9 +109,11 @@ Read [docs/product-rules.md](docs/product-rules.md) and [docs/product-map.md](do
   about windows.
 - `host/`: the commands Faber answers, in one table every front end calls (R459): the window, the command line,
   tests; `faber-sidecar` runs it behind stdin and stdout for the Electron shell. What needs a window is a method of its
-  `Shell` trait.
+  `Shell` trait. What the shell shows (tray, notifications, keep-awake, start with the system) is decided here too
+  (`host/src/tray/`, `awake.rs`, `autostart.rs`) and the sidecar sends it as orders; a shell only carries them out.
 - `src-tauri/`: the Tauri 2 shell. One window, a tray icon, and the commands that need the window (the browser pane).
-- `winproc/`: the unsafe process calls (resuming a process created suspended, so it joins its job before it runs).
+- `winproc/`: the unsafe process calls (resuming a process created suspended, so it joins its job before it runs; what
+  Windows says about the window in front, which the tray's rules in `host/` read).
   The shell denies unsafe code except in its four Windows API files (`awake.rs`, `autostart.rs`, `tray/native.rs`,
   `pane/native.rs`);
   everything else forbids it.

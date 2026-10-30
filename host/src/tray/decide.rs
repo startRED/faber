@@ -1,14 +1,16 @@
 //! What the tray says and when it notifies: plain functions of the running list, the window's focus and the words the
-//! screen sent. Nothing here touches Tauri, so all of it is tested without a tray.
+//! screen sent. Nothing here touches a window system, so all of it is tested without a tray, and whichever shell draws
+//! the tray (Tauri, or Electron through the sidecar) gets the same answers.
 
 use faber_engine::model::{RunState, RunningItem, Settings, Vendor};
+use faber_winproc::front::Rect;
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, HashMap, HashSet};
 
 /// A text in two forms, as the screen sends it: `one` for a count of 1 and `other` for any other count. That is what
 /// `Intl.PluralRules` picks in all five languages for counts of 1 and more.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub(super) struct Plural {
+pub struct Plural {
     one: String,
     other: String,
 }
@@ -23,9 +25,9 @@ impl Plural {
 /// closed window still has them, and on disk, so a Faber started hidden has them too.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
-pub(crate) struct ShellTexts {
-    pub(super) open: String,
-    pub(super) quit: String,
+pub struct ShellTexts {
+    pub open: String,
+    pub quit: String,
     /// The tooltip while something runs, with `{n}` for the count: "Faber: {n} running".
     running: Plural,
     /// Added to it while something needs the user, with `{n}`: ", {n} needs you".
@@ -83,9 +85,9 @@ fn fill(template: &str, name: &str, value: &str) -> String {
 
 /// What the tray reports: every item of the running list, and those that wait for the user.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
-pub(super) struct Counts {
+pub struct Counts {
     running: usize,
-    pub(super) needs_you: usize,
+    pub needs_you: usize,
 }
 
 fn counts(items: &[RunningItem]) -> Counts {
@@ -94,7 +96,7 @@ fn counts(items: &[RunningItem]) -> Counts {
 
 /// "Faber" when nothing runs. Otherwise the count, and the words "needs you" next to it when something does: amber
 /// never stands for a number alone [tokens].
-pub(super) fn tooltip(texts: &ShellTexts, c: Counts) -> String {
+pub fn tooltip(texts: &ShellTexts, c: Counts) -> String {
     if c.running == 0 && c.needs_you == 0 {
         return "Faber".into();
     }
@@ -110,22 +112,20 @@ pub(super) fn tooltip(texts: &ShellTexts, c: Counts) -> String {
 type Question = (String, String, String);
 
 #[derive(Debug, PartialEq, Eq)]
-pub(super) struct Delivery {
-    pub(super) toast: bool,
-    pub(super) sound: bool,
+pub struct Delivery {
+    pub toast: bool,
+    pub sound: bool,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(super) enum Attention {
+pub enum Attention {
     Normal,
-    #[cfg(any(windows, test))]
     SoundOnly,
     Silent,
 }
 
 /// Windows enum values are pinned below against shellapi.h. Unknown states never permit a toast.
-#[cfg(any(windows, test))]
-pub(super) fn windows_attention(state: Option<i32>, full_screen: bool) -> Attention {
+pub fn windows_attention(state: Option<i32>, full_screen: bool) -> Attention {
     match state {
         Some(1 | 6) => Attention::Silent, // QUNS_NOT_PRESENT, QUNS_QUIET_TIME (initial login/upgrade, not DND).
         Some(5) if !full_screen => Attention::Normal, // QUNS_ACCEPTS_NOTIFICATIONS.
@@ -133,18 +133,8 @@ pub(super) fn windows_attention(state: Option<i32>, full_screen: bool) -> Attent
     }
 }
 
-#[cfg(any(windows, test))]
-#[derive(Clone, Copy, Default)]
-#[repr(C)]
-pub(super) struct Rect {
-    pub(super) left: i32,
-    pub(super) top: i32,
-    pub(super) right: i32,
-    pub(super) bottom: i32,
-}
-
-#[cfg(any(windows, test))]
-pub(super) fn covers_monitor(window: Rect, monitor: Rect) -> bool {
+/// Whether `window` covers the whole of `monitor`, borders and all.
+pub fn covers_monitor(window: Rect, monitor: Rect) -> bool {
     monitor.left < monitor.right
         && monitor.top < monitor.bottom
         && window.left <= monitor.left
@@ -154,18 +144,16 @@ pub(super) fn covers_monitor(window: Rect, monitor: Rect) -> bool {
 }
 
 /// The window in front, as Windows answered for it: Faber's own or not, and whether it covers its whole monitor.
-#[cfg(any(windows, test))]
 #[derive(Clone, Copy)]
-pub(super) struct Foreground {
-    pub(super) own: bool,
-    pub(super) covers: bool,
+pub struct Foreground {
+    pub own: bool,
+    pub covers: bool,
 }
 
 /// Whether a game or another full-screen app is in front, so the screen goes quiet (R191). Windows names a full-screen,
 /// Direct3D, presentation or store app (shellapi.h 2, 3, 4, 7); a borderless game shows only as another process's window
 /// that covers its monitor. Faber's own window is never one, and a locked screen or an unknown state is not one either.
-#[cfg(any(windows, test))]
-pub(super) fn game_in_front(state: Option<i32>, foreground: Option<Foreground>) -> bool {
+pub fn game_in_front(state: Option<i32>, foreground: Option<Foreground>) -> bool {
     match foreground {
         Some(Foreground { own: true, .. }) => false,
         Some(Foreground { covers: true, .. }) if state == Some(5) => true,
@@ -173,14 +161,14 @@ pub(super) fn game_in_front(state: Option<i32>, foreground: Option<Foreground>) 
     }
 }
 
-pub(super) fn delivery(focused: bool, attention: Attention, settings: &Settings) -> Delivery {
+pub fn delivery(focused: bool, attention: Attention, settings: &Settings) -> Delivery {
     let active = !focused && attention != Attention::Silent;
     Delivery { toast: active && attention == Attention::Normal && settings.notifications(), sound: active && settings.notification_sound() }
 }
 
 /// What the tray remembers between lists, to ignore old ones and to notify once per question.
 #[derive(Default)]
-pub(super) struct Watch {
+pub struct Watch {
     revision: Option<u64>,
     /// Every question seen since Faber started, answered or not: a key is notified once, ever (the turn id keeps a reused
     /// request id apart). ponytail: one small tuple per question, never pruned; prune by turn if a session ever asks millions.
@@ -195,19 +183,34 @@ pub(super) struct Watch {
 /// A notice about held-back requests waits this long after the last one (seconds).
 const PARKED_COOLDOWN: f64 = 60.0;
 
-/// What a list changes: the numbers to show, and the title of the conversation of each question to notify.
+/// A conversation that needs the person, for one notification: which one (the shell opens it when the notification is
+/// clicked) and its title, empty until it has one.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Notice {
+    pub conversation_id: String,
+    pub title: String,
+}
+
+/// A turn that had requests held back for want of an answer: how many, as a notice.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ParkedNotice {
+    pub notice: Notice,
+    pub n: usize,
+}
+
+/// What a list changes: the numbers to show, and the conversation of each question to notify.
 #[derive(Debug, PartialEq)]
-pub(super) struct Update {
-    pub(super) counts: Counts,
-    pub(super) notices: Vec<String>,
-    /// One per turn that had new requests held back: its title and how many. Already past the cooldown.
-    pub(super) parked_notices: Vec<(String, usize)>,
+pub struct Update {
+    pub counts: Counts,
+    pub notices: Vec<Notice>,
+    /// One per turn that had new requests held back: how many. Already past the cooldown.
+    pub parked_notices: Vec<ParkedNotice>,
 }
 
 impl Watch {
     /// None for a list that is not newer than the last one taken in: it changes nothing. A question the user could
     /// already see (the window was focused when it came) is never notified later, and a question never notifies twice.
-    pub(super) fn take(&mut self, revision: u64, items: &[RunningItem], window_focused: bool) -> Option<Update> {
+    pub fn take(&mut self, revision: u64, items: &[RunningItem], window_focused: bool) -> Option<Update> {
         let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0.0, |d| d.as_secs_f64());
         self.take_at(revision, items, window_focused, now)
     }
@@ -220,10 +223,11 @@ impl Watch {
         let mut notices = Vec::new();
         let mut parked_notices = Vec::new();
         for item in items {
+            let notice = || Notice { conversation_id: item.conversation_id.clone(), title: item.title.clone() };
             for p in &item.permissions {
                 let key = (item.conversation_id.clone(), item.turn_id.clone(), p.request_id.clone());
                 if self.seen.insert(key) && !window_focused {
-                    notices.push(item.title.clone());
+                    notices.push(notice());
                 }
             }
             // A subagent that seems stuck needs the person like a question does (R161 step 6): one notice per subagent and turn,
@@ -231,14 +235,14 @@ impl Watch {
             for call in &item.stuck {
                 let key = (item.conversation_id.clone(), item.turn_id.clone(), format!("stuck:{call}"));
                 if self.seen.insert(key) && !window_focused {
-                    notices.push(item.title.clone());
+                    notices.push(notice());
                 }
             }
             // A followed pull request whose checks failed while the quota was tight needs the person (R200): once per commit.
             if let Some((pr, head)) = &item.held {
                 let key = (item.conversation_id.clone(), format!("pr:{pr}"), head.clone());
                 if self.seen.insert(key) && !window_focused {
-                    notices.push(item.title.clone());
+                    notices.push(notice());
                 }
             }
             // Requests the CLI denied for want of anyone to answer them are blocked requests too (R92), named by their tool call.
@@ -253,7 +257,7 @@ impl Watch {
             let cooled = self.last_parked.is_none_or(|last| now - last >= PARKED_COOLDOWN);
             if fresh > 0 && !window_focused && cooled {
                 self.last_parked = Some(now);
-                parked_notices.push((item.title.clone(), fresh));
+                parked_notices.push(ParkedNotice { notice: notice(), n: fresh });
             }
         }
         // A turn that left the list is over, so what was counted for it is not needed again: the map stays as small as the list.
@@ -266,17 +270,17 @@ impl Watch {
 /// What the tray picture and tooltip last showed: the counts and the side of the tray picture. A scale change redraws
 /// even when the counts stay the same.
 #[derive(Default)]
-pub(super) struct Shown(Option<(Counts, u32)>);
+pub struct Shown(Option<(Counts, u32)>);
 
 impl Shown {
     /// True when `counts` at `side` differ from what was last shown; remembers them either way.
-    pub(super) fn changed(&mut self, counts: Counts, side: u32) -> bool {
+    pub fn changed(&mut self, counts: Counts, side: u32) -> bool {
         self.0.replace((counts, side)) != Some((counts, side))
     }
 }
 
 /// The text of one notification; a conversation without a title yet is called by the app's name.
-pub(super) fn parked_notice_text(texts: &ShellTexts, title: &str, n: usize) -> String {
+pub fn parked_notice_text(texts: &ShellTexts, title: &str, n: usize) -> String {
     if n <= 1 {
         return notice_text(texts, title);
     }
@@ -284,7 +288,7 @@ pub(super) fn parked_notice_text(texts: &ShellTexts, title: &str, n: usize) -> S
 }
 
 /// The notification when "keep going" stopped by itself (R199), in the words the screen sent, English when it sent none.
-pub(super) fn stopped_text(texts: &ShellTexts, title: &str, why: &str, ai: Option<Vendor>) -> String {
+pub fn stopped_text(texts: &ShellTexts, title: &str, why: &str, ai: Option<Vendor>) -> String {
     // A standing goal that needs the person tells through the same notice as a conversation that stopped by itself.
     let reason = why.strip_prefix("reason.keepGoing.").or((why == "reason.goal.needsYou").then_some("goal")).unwrap_or(why);
     let template = texts.stopped.get(reason).cloned().or_else(|| default_stopped().remove(reason)).unwrap_or_else(|| texts.notify.clone());
@@ -296,8 +300,31 @@ pub(super) fn stopped_text(texts: &ShellTexts, title: &str, why: &str, ai: Optio
     fill(&fill(&template, "title", if title.is_empty() { "Faber" } else { title }), "ai", ai)
 }
 
-pub(super) fn notice_text(texts: &ShellTexts, title: &str) -> String {
+pub fn notice_text(texts: &ShellTexts, title: &str) -> String {
     fill(&texts.notify, "title", if title.is_empty() { "Faber" } else { title })
+}
+
+/// One notification, worded: its text, and the conversation a click on it should open.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Spoken {
+    pub text: String,
+    pub conversation_id: Option<String>,
+}
+
+/// What the notifications of one update say: the needs-you titles, then the requests held back for want of an answer.
+pub fn spoken(texts: &ShellTexts, update: &Update) -> Vec<Spoken> {
+    let said = |text, notice: &Notice| Spoken { text, conversation_id: Some(notice.conversation_id.clone()) };
+    update
+        .notices
+        .iter()
+        .map(|notice| said(notice_text(texts, &notice.title), notice))
+        .chain(update.parked_notices.iter().map(|parked| said(parked_notice_text(texts, &parked.notice.title, parked.n), &parked.notice)))
+        .collect()
+}
+
+/// The notification when "keep going" stopped by itself in conversation `conversation_id` (R199).
+pub fn halted_notice(texts: &ShellTexts, conversation_id: &str, title: &str, why: &str, ai: Option<Vendor>) -> Spoken {
+    Spoken { text: stopped_text(texts, title, why, ai), conversation_id: Some(conversation_id.to_string()).filter(|id| !id.is_empty()) }
 }
 
 #[cfg(test)]
@@ -305,6 +332,41 @@ mod tests {
     use super::*;
     use faber_engine::model::{Area, Permission};
     use serde_json::json;
+
+    /// The titles of the questions an update notifies.
+    fn titles(update: &Update) -> Vec<&str> {
+        update.notices.iter().map(|notice| notice.title.as_str()).collect()
+    }
+
+    /// The title and count of each notice about held-back requests.
+    fn parked_counts(update: &Update) -> Vec<(&str, usize)> {
+        update.parked_notices.iter().map(|parked| (parked.notice.title.as_str(), parked.n)).collect()
+    }
+
+    #[test]
+    fn a_notification_names_the_conversation_a_click_opens() {
+        let texts = ShellTexts::default();
+        let mut watch = Watch::default();
+        let flood = {
+            let mut i = item("b", "t2", "Other", &[]);
+            i.state = RunState::NeedsYou;
+            i.parked_more = 3;
+            i
+        };
+        let update = watch.take_at(1, &[item("a", "t1", "Fix the build", &["0"]), flood], false, 0.0).unwrap();
+        assert_eq!(
+            spoken(&texts, &update),
+            [
+                Spoken { text: "Fix the build needs you".into(), conversation_id: Some("a".into()) },
+                Spoken { text: "Other: 3 requests need you".into(), conversation_id: Some("b".into()) },
+            ]
+        );
+        assert_eq!(
+            halted_notice(&texts, "c", "Fix login", "reason.keepGoing.done", None),
+            Spoken { text: "Fix login: kept going until nothing was left".into(), conversation_id: Some("c".into()) }
+        );
+        assert_eq!(halted_notice(&texts, "", "", "reason.keepGoing.done", None).conversation_id, None);
+    }
 
     #[test]
     fn a_store_app_does_not_allow_a_toast() {
@@ -411,7 +473,7 @@ mod tests {
         let mut asking = item("a", "t1", "Choose a direction", &[]);
         asking.state = RunState::NeedsYou;
         asking.permissions = vec![Permission { request_id: request_id.clone(), tool: tool.clone(), input: input.clone(), epoch: None }];
-        assert_eq!(watch.take(1, &[asking.clone()], false).unwrap().notices, ["Choose a direction"]);
+        assert_eq!(titles(&watch.take(1, &[asking.clone()], false).unwrap()), ["Choose a direction"]);
         assert!(watch.take(2, &[asking], false).unwrap().notices.is_empty());
         assert!(watch.take(3, &[item("a", "t1", "Working", &[])], false).unwrap().notices.is_empty());
         assert!(watch.take(4, &[], false).unwrap().notices.is_empty(), "finishing work is not an attention request");
@@ -424,7 +486,7 @@ mod tests {
         stuck.state = RunState::NeedsYou;
         stuck.stuck = vec!["call".into()];
         let first = watch.take_at(1, std::slice::from_ref(&stuck), false, 0.0).unwrap();
-        assert_eq!((first.notices, first.counts.needs_you), (vec!["Fix the tests".to_string()], 1));
+        assert_eq!((titles(&first), first.counts.needs_you), (vec!["Fix the tests"], 1));
         assert!(watch.take_at(2, &[item("a", "t1", "Fix the tests", &[])], false, 1.0).unwrap().notices.is_empty());
         assert!(watch.take_at(3, std::slice::from_ref(&stuck), false, 2.0).unwrap().notices.is_empty(), "stuck again is not news");
         assert!(Watch::default().take_at(1, &[stuck], true, 0.0).unwrap().notices.is_empty(), "never while the window is focused");
@@ -437,7 +499,7 @@ mod tests {
         held.state = RunState::NeedsYou;
         held.held = Some((93, "aaa".into()));
         let first = watch.take_at(1, std::slice::from_ref(&held), false, 0.0).unwrap();
-        assert_eq!((first.notices, first.counts.needs_you), (vec!["Ship the fix".to_string()], 1));
+        assert_eq!((titles(&first), first.counts.needs_you), (vec!["Ship the fix"], 1));
         assert!(watch.take_at(2, std::slice::from_ref(&held), false, 1.0).unwrap().notices.is_empty(), "the same commit is told once");
         held.held = Some((93, "bbb".into()));
         assert_eq!(watch.take_at(3, std::slice::from_ref(&held), false, 2.0).unwrap().notices.len(), 1, "a new commit that fails is news");
@@ -466,7 +528,7 @@ mod tests {
         let mut watch = Watch::default();
         let parked = parked_item("a", "t1", "Ship it", &["toolu_1"], 0);
         let first = watch.take_at(1, std::slice::from_ref(&parked), false, 0.0).unwrap();
-        assert_eq!((first.parked_notices, first.counts.needs_you), (vec![("Ship it".to_string(), 1)], 1));
+        assert_eq!((parked_counts(&first), first.counts.needs_you), (vec![("Ship it", 1)], 1));
         assert!(watch.take_at(2, std::slice::from_ref(&parked), false, 1000.0).unwrap().parked_notices.is_empty(), "once per request");
         assert!(Watch::default().take_at(1, &[parked], true, 0.0).unwrap().parked_notices.is_empty(), "never while the window is focused");
     }
@@ -479,7 +541,7 @@ mod tests {
         // A hundred denied in one turn (twenty kept, eighty counted): one notice, saying how many.
         let flood = parked_item("a", "t1", "Ship it", &ids, 80);
         let update = watch.take_at(1, std::slice::from_ref(&flood), false, 0.0).unwrap();
-        assert_eq!(update.parked_notices, [("Ship it".to_string(), 100)]);
+        assert_eq!(parked_counts(&update), [("Ship it", 100)]);
         assert!(update.notices.is_empty());
         // Another turn, 10 seconds later, is inside the cooldown: counted on the tray, no notice. Its requests never notify later.
         let second = parked_item("b", "t2", "Other", &["x1", "x2"], 0);
@@ -490,9 +552,9 @@ mod tests {
         // After the cooldown a new turn notifies again, and the counted overflow of a turn is added once, not again.
         let third = parked_item("c", "t3", "Third", &["y1", "y2", "y3"], 0);
         let update = watch.take_at(4, &[flood.clone(), third], false, 500.0).unwrap();
-        assert_eq!(update.parked_notices, [("Third".to_string(), 3)]);
+        assert_eq!(parked_counts(&update), [("Third", 3)]);
         let grown = parked_item("a", "t1", "Ship it", &ids, 85);
-        assert_eq!(watch.take_at(5, &[grown], false, 1000.0).unwrap().parked_notices, [("Ship it".to_string(), 5)]);
+        assert_eq!(parked_counts(&watch.take_at(5, &[grown], false, 1000.0).unwrap()), [("Ship it", 5)]);
         // One request reads as the plain notice; several are counted in words.
         let texts = ShellTexts::default();
         assert_eq!(parked_notice_text(&texts, "Ship it", 1), "Ship it needs you");
@@ -617,10 +679,10 @@ mod tests {
     fn a_question_notifies_once() {
         let mut w = Watch::default();
         let list = [item("a", "t1", "Fix the build", &["0"])];
-        assert_eq!(w.take(1, &list, false).unwrap().notices, ["Fix the build"]);
-        assert_eq!(w.take(2, &list, false).unwrap().notices, Vec::<String>::new(), "the same list again");
+        assert_eq!(titles(&w.take(1, &list, false).unwrap()), ["Fix the build"]);
+        assert_eq!(titles(&w.take(2, &list, false).unwrap()), Vec::<&str>::new(), "the same list again");
         let renamed = [item("a", "t1", "Fix the tests", &["0"])];
-        assert_eq!(w.take(3, &renamed, false).unwrap().notices, Vec::<String>::new(), "a new title is not a new question");
+        assert_eq!(titles(&w.take(3, &renamed, false).unwrap()), Vec::<&str>::new(), "a new title is not a new question");
     }
 
     #[test]
@@ -638,22 +700,22 @@ mod tests {
     fn a_key_twice_in_one_list_notifies_once() {
         let mut w = Watch::default();
         let twice = [item("a", "t1", "A", &["0"]), item("a", "t1", "A", &["0"])];
-        assert_eq!(w.take(1, &twice, false).unwrap().notices, ["A"]);
+        assert_eq!(titles(&w.take(1, &twice, false).unwrap()), ["A"]);
     }
 
     #[test]
     fn the_same_request_id_in_two_conversations_or_two_turns_is_two_questions() {
         let mut w = Watch::default();
         let two_conversations = [item("a", "t1", "A", &["0"]), item("b", "t1", "B", &["0"])];
-        assert_eq!(w.take(1, &two_conversations, false).unwrap().notices, ["A", "B"]);
+        assert_eq!(titles(&w.take(1, &two_conversations, false).unwrap()), ["A", "B"]);
         let next_turn = [item("a", "t2", "A", &["0"]), item("b", "t1", "B", &["0"])];
-        assert_eq!(w.take(2, &next_turn, false).unwrap().notices, ["A"], "only the new turn's question");
+        assert_eq!(titles(&w.take(2, &next_turn, false).unwrap()), ["A"], "only the new turn's question");
     }
 
     #[test]
     fn two_questions_of_one_conversation_notify_twice() {
         let mut w = Watch::default();
-        assert_eq!(w.take(1, &[item("a", "t1", "A", &["0", "1"])], false).unwrap().notices, ["A", "A"]);
+        assert_eq!(titles(&w.take(1, &[item("a", "t1", "A", &["0", "1"])], false).unwrap()), ["A", "A"]);
     }
 
     #[test]
