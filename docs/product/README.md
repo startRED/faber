@@ -24,8 +24,8 @@ Faber is a desktop app that runs the official Claude Code and Codex CLIs on the 
   and economy conflict, economy wins.
 - **Good at everything from day one.** The order of the phases decides which areas get specialized tools and benchmarks
   first. It never limits what Faber does. The floor is the unmodified CLI underneath, with nothing cut.
-- **Only Claude Code and Codex.** Sign-in always happens in the CLI's own flow. Faber never reads, copies or stores
-  credentials.
+- **Claude Code and Codex, and Gemini through Antigravity's CLI for Projects (R479).** Sign-in always happens in the
+  CLI's own flow. Faber never reads, copies or stores credentials.
 - **Every decision has an author.** The decision ledger records each decision as the owner's or the AI's. The owner's
   decisions outrank the AI's proposals. The AI asks the owner only about product direction, taste in visible identity,
   money, license, and anything that contradicts an earlier decision of the owner.
@@ -111,7 +111,7 @@ existing R435 work retains precedence and each candidate needs normal adoption a
 
 ### Non-goals
 
-- Vendors other than Claude Code and Codex: no Gemini, Copilot, Cursor, OpenCode or ACP drivers.
+- Vendors other than Claude Code, Codex and Gemini through Antigravity: no Copilot, Cursor, OpenCode or ACP drivers.
 - A path with no subscription, such as local models or Faber holding an API key.
 - Team, admin and permission features.
 - Driving a chat website or copying its login session, and using ChatGPT's connectors.

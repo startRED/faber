@@ -70,6 +70,8 @@ pub fn default_model(vendor: Vendor, recommended: Option<&str>, listed: &[String
             .or_else(|| table().next())
             .unwrap_or_default()
             .into(),
+        // Not yet: no model of it is known.
+        Vendor::Gemini => String::new(),
     }
 }
 

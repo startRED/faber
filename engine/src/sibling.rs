@@ -147,9 +147,9 @@ pub fn request(input: &Value) -> Result<Request, &'static str> {
             let ai = match text("ai").as_deref() {
                 None | Some("same") => Ai::Same,
                 Some("auto") => Ai::Auto,
-                Some(name) => {
-                    Ai::Named(Vendor::ALL.into_iter().find(|v| v.name() == name).ok_or("ai is not one of same, auto, claude or codex")?)
-                }
+                Some(name) => Ai::Named(
+                    Vendor::RUNNABLE.into_iter().find(|v| v.name() == name).ok_or("ai is not one of same, auto, claude or codex")?,
+                ),
             };
             Ok(Request::Start { title, brief, ai, keep_going: input["keep_going"].as_bool().unwrap_or(false) })
         }

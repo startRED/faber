@@ -6,7 +6,7 @@ export interface Option {
   choice: Choice;
 }
 
-const VENDOR_NAME: Record<Vendor, string> = { claude: 'Claude', codex: 'Codex' };
+const VENDOR_NAME: Record<Vendor, string> = { claude: 'Claude', codex: 'Codex', gemini: 'Gemini' };
 
 // Claude Code has no model list, so its aliases are fixed; ChatGPT's list comes from the account.
 export function modelOptions(vendors: Vendor[], codexModels: ModelInfo[] = []): Option[] {

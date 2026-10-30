@@ -96,7 +96,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
         real(bin, &args, cwd)
     });
-    for vendor in Vendor::ALL {
+    for vendor in Vendor::RUNNABLE {
         if args.get(3).is_some_and(|name| name != vendor.name()) {
             continue;
         }

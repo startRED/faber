@@ -212,6 +212,7 @@ fn vendor_name(vendor: Vendor) -> &'static str {
     match vendor {
         Vendor::Claude => "Claude Code",
         Vendor::Codex => "Codex",
+        Vendor::Gemini => "Gemini",
     }
 }
 

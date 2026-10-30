@@ -136,6 +136,7 @@ impl Core {
         });
         let effort = Some("low".to_string());
         let session = match vendor {
+            Vendor::Gemini => return Err("error.notConnected".into()),
             Vendor::Claude => start_claude(
                 ClaudeOptions {
                     bin: cli.command.clone(),
