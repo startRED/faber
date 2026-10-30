@@ -11,6 +11,11 @@ manifest; the product map lists both as not built). `scripts/live-manifest.mjs` 
 checks below remain unimplemented". This task writes the schema check on those bytes, offline, with no network, no
 filesystem and no app integration, and changes no install behavior.
 
+An earlier Rust version of this check (and of its signature, cache and protocol identities) sits unlanded on
+`queue/catalog-compiled-protocols` (2026-10-24, 1919 lines, red on one Clippy error at `live_manifest.rs:326`, no caller in
+the app). This task keeps the script: read that branch for test cases and edge cases only, and delete the four
+`queue/catalog-*` branches when this task lands.
+
 Build:
 
 - `parsePayload(bytes, now, appVersion)` in the same script: parse after the signature check, then require one schema

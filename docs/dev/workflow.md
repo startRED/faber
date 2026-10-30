@@ -94,6 +94,10 @@ A task is the size of one pull request: one idea, about 100 to 400 changed lines
 files, what done looks like and the tasks it depends on. Many small pull requests a day keep their quality the same way
 one does: the local proofs, the queue and a review by the other vendor.
 
+New task files go in through a pull request and `land.mjs`, which batches them on top of the pull requests already queued,
+never as a plain push to `queue/<name>`: each landing moves the base, and today every queued commit is then checked
+again from the start (task 000 changes that for moves of words only).
+
 A session asks the owner only what is the owner's to decide (direction, taste, money), in one short card, and takes the
 next task while the question waits. It stops when `next` says no task is free.
 

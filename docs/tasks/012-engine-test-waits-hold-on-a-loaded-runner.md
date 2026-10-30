@@ -13,8 +13,10 @@ that pass on an idle PC and fail on a busy runner: 1 s for a message on the fake
 question and for each event (lines 387 and 407), 5 s in `Fake::spawned` (line 375). A deadline only bounds a failure: a
 test that passes never waits for it, so a larger one costs nothing when the code is right.
 
-Build: one shared deadline in `support/mod.rs` (a `const`, measured with `std::time::Instant`, so it never depends on how
-long a tick lasts) of about 30 s, used by `next_pipe`, `Fake::spawned` and the three `timeout` calls. Each failure message
+Build: one shared deadline in `support/mod.rs`, and one helper beside it that polls a condition until that deadline (for
+example `until(what, || cond).await`, panicking with `what` and the time waited), for the follow-up tasks 013 to 016 to use.
+The deadline (a `const`, measured with `std::time::Instant`, so it never depends on how
+long a tick lasts) is about 30 s, used by `next_pipe`, `Fake::spawned` and the three `timeout` calls. Each failure message
 says how long it waited. Leave the tests that assert something must not happen in time (a short wait there is the check
 itself) as they are.
 
