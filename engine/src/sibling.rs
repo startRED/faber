@@ -13,8 +13,11 @@ pub const TOOL: &str = "Conversation";
 pub const NAME: &str = "conversation";
 /// The tool as Claude Code names it: `mcp__<server>__<tool>`.
 pub const CLAUDE_NAME: &str = "mcp__faber__conversation";
-/// Conversations agents started that may run at once in one project; each is a CLI process.
+/// Conversations agents started that may work at once in one project; one waiting for the person to answer it does not count.
 pub const MAX_RUNNING: usize = 3;
+/// Conversations agents started that may be open at once in one project, working or waiting for the person: a waiting one
+/// keeps its CLI process (about 300 MB each on 2026-10-30), so it frees a working place but not this one.
+pub const MAX_OPEN: usize = 5;
 /// The most of a conversation's latest answer a read returns.
 const MAX_READ: usize = 4000;
 

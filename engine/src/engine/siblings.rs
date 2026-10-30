@@ -137,22 +137,7 @@ impl Core {
         }
         let project = parent.project_id.clone().ok_or("this conversation has no project")?;
         let choice = parent.choice.clone().ok_or("this conversation has no model chosen")?;
-        // The cap is on what agents start: a conversation counts from the call on, its copy still being made, routing and
-        // waiting for quota included, not only once its CLI runs. A message the person sends to one is the person's own.
-        let running = self
-            .convs
-            .values()
-            .filter(|c| c.started_by.is_some() && c.project_id.as_deref() == Some(project.as_str()))
-            .filter(|c| {
-                self.live.get(&c.id).is_some_and(|l| l.turn.is_some())
-                    || !c.queued.is_empty()
-                    || c.messages.is_empty()
-                    || c.messages.last().is_some_and(|m| m.status == Some(Status::Streaming))
-            })
-            .count();
-        if running >= sibling::MAX_RUNNING {
-            return Err("three conversations started by agents are already working in this project; wait for one to finish");
-        }
+        self.sibling_room(&project)?;
         // A conversation an agent starts is never the person's own turn: the same quota rules as a helper hold.
         let ai = self.live.get(conv).map(|l| (l.vendor, l.model.as_deref().and_then(family_of).map(str::to_string)));
         self.sibling_allowed(&ai)?;
@@ -184,6 +169,33 @@ impl Core {
     }
 
     /// Whether the parent's AI may run work an agent started (a helper's rules); no live process means nothing to check.
+    /// Whether the project has room for one more conversation an agent starts. The cap is on what agents start: a conversation
+    /// counts from the call on, its copy still being made, routing and waiting for quota included, not only once its CLI runs.
+    /// One waiting for the person to answer it frees a working place, so the rest of the job goes on, but stays open. A message
+    /// the person sends to one is the person's own.
+    fn sibling_room(&self, project: &str) -> Result<(), &'static str> {
+        let (mut working, mut open) = (0, 0);
+        for c in self.convs.values().filter(|c| c.started_by.is_some() && c.project_id.as_deref() == Some(project)) {
+            let busy = self.live.get(&c.id).is_some_and(|l| l.turn.is_some());
+            if busy
+                || !c.queued.is_empty()
+                || c.messages.is_empty()
+                || c.messages.last().is_some_and(|m| m.status == Some(Status::Streaming))
+            {
+                open += 1;
+                working += usize::from(state_of(busy, c) != State::Waiting);
+            }
+        }
+        if working >= sibling::MAX_RUNNING {
+            return Err("three conversations started by agents are already working in this project; wait for one to finish");
+        }
+        if open >= sibling::MAX_OPEN {
+            return Err("five conversations started by agents are already open in this project, and some wait for the person to answer \
+                them; tell the person once with wrap_up, then wait for an answer or for one to finish");
+        }
+        Ok(())
+    }
+
     fn sibling_allowed(&self, ai: &Option<(Vendor, Option<String>)>) -> Result<(), &'static str> {
         let Some((vendor, family)) = ai else { return Ok(()) };
         self.allows(*vendor, family.as_deref(), Purpose::UserTurn { by_hand: false }, false).map_err(|why| match why {
@@ -366,5 +378,45 @@ impl Core {
             _ => "it could not take the message now",
         })?;
         Ok(sibling::asked(&title, id, busy))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::model::Permission;
+
+    /// `count` conversations the lead started in project `p`, each mid-reply; `asking` ones hold a question for the person.
+    fn started(core: &mut Core, count: usize, asking: bool) {
+        for _ in 0..count {
+            let id = core.blank(Area::Project, Some("p".into()));
+            let mut reply = Message::new(new_id(), Role::Assistant, String::new(), 0);
+            reply.status = Some(Status::Streaming);
+            if asking {
+                let question =
+                    Permission { request_id: "q".into(), tool: "AskUserQuestion".into(), input: serde_json::Value::Null, epoch: None };
+                reply.permissions = Some(vec![question]);
+            }
+            let c = core.convs.get_mut(&id).unwrap();
+            c.started_by = Some("lead".into());
+            c.messages.push(reply);
+        }
+    }
+
+    #[tokio::test]
+    async fn a_member_waiting_for_the_person_frees_a_working_place_but_stays_open() {
+        let dir = crate::workspace::TestRoot::new();
+        let (engine, _) = super::super::answer::tests::engine(&dir);
+        engine.with(|core| {
+            started(core, 3, true);
+            assert_eq!(core.sibling_room("p"), Ok(()), "three waiting for the person leave room to work");
+            started(core, 2, false);
+            let full = core.sibling_room("p").unwrap_err();
+            assert!(full.starts_with("five conversations") && full.contains("wrap_up"), "{full}");
+            assert_eq!(core.sibling_room("other"), Ok(()), "the limits are per project");
+            started(core, 1, false);
+            assert!(core.sibling_room("p").unwrap_err().starts_with("three conversations"), "three working is the first limit");
+        });
+        engine.shutdown();
     }
 }
