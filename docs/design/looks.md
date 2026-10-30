@@ -171,7 +171,7 @@ accident. `tests/ui/grammar.check.ts` reads the real stylesheet and fails on a b
 
 While a game or another full-screen app is in front of the shown window (R191), the screen acts as if its window were
 hidden. The shell answers `game_in_front` from the check the tray already makes before a notification
-(`src-tauri/src/tray/native.rs`, `decide::game_in_front`): Windows names a full-screen, Direct3D, presentation or store
+(`host/src/tray/front.rs`, `decide::game_in_front`): Windows names a full-screen, Direct3D, presentation or store
 app, or another process's window covers its whole monitor (a borderless game). Faber's own window never counts.
 
 - The screen asks (`ui/quiet.ts`, `watchGames`) only while its window is shown without the focus: once at the blur and

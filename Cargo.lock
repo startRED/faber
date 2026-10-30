@@ -1267,6 +1267,8 @@ dependencies = [
  "base64 0.23.1",
  "dirs",
  "faber-engine",
+ "faber-winproc",
+ "png",
  "serde",
  "serde_json",
  "tempfile",

@@ -1,5 +1,6 @@
 //! The sidecar process end to end: requests in on stdin are answered by id on stdout, the engine's events come as lines of
-//! their own, and closing stdin ends the process cleanly. It runs with no CLI and a data folder of its own, hidden.
+//! their own, the shell's orders are lines of their own too, and closing stdin ends the process cleanly. It runs with no CLI
+//! and a data folder of its own, hidden.
 
 use serde_json::{Value, json};
 use std::io::{BufRead, BufReader, Write};
@@ -56,9 +57,11 @@ fn the_sidecar_answers_by_id_streams_events_and_ends_cleanly_when_stdin_closes()
     while replies.len() < 5 || events.is_empty() {
         let line = heard.recv_timeout(Duration::from_secs(60)).expect("the sidecar went quiet");
         let value: Value = serde_json::from_str(&line).unwrap_or_else(|_| panic!("not one JSON object per line: {line}"));
-        match value.get("event") {
-            Some(event) => events.push(event.clone()),
-            None => {
+        match (value.get("event"), value.get("order")) {
+            (Some(event), _) => events.push(event.clone()),
+            // The shell's orders (the tray, ...) are lines of their own, and answer nothing.
+            (None, Some(_)) => {}
+            (None, None) => {
                 replies.insert(value["id"].as_u64().unwrap(), value);
             }
         }
@@ -98,6 +101,97 @@ fn the_sidecar_answers_by_id_streams_events_and_ends_cleanly_when_stdin_closes()
             break;
         }
     }
+
+    drop(stdin);
+    let status = child.wait().unwrap();
+    assert!(status.success(), "closing stdin is a clean end: {status}");
+    reader.join().unwrap();
+}
+
+/// Reads lines until `wanted` accepts one, failing if the sidecar goes quiet.
+fn read_until(heard: &mpsc::Receiver<String>, what: &str, mut wanted: impl FnMut(&Value) -> bool) -> Value {
+    loop {
+        let line = heard.recv_timeout(Duration::from_secs(60)).unwrap_or_else(|_| panic!("the sidecar went quiet before {what}"));
+        let value: Value = serde_json::from_str(&line).unwrap_or_else(|_| panic!("not one JSON object per line: {line}"));
+        if wanted(&value) {
+            return value;
+        }
+    }
+}
+
+#[test]
+fn the_sidecar_orders_the_tray_in_the_words_the_screen_sent_and_reports_what_the_shell_told_it() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut command = Command::new(env!("CARGO_BIN_EXE_faber-sidecar"));
+    command
+        .env("FABER_DATA_DIR", dir.path())
+        .env("FABER_HIDDEN", "1")
+        .env("FABER_CLI_CLAUDE", "")
+        .env("FABER_CLI_CODEX", "")
+        // What only the shell knows reaches the sidecar as environment variables.
+        .env("FABER_VERSION", "9.8.7")
+        .env("FABER_AUTOSTART", "1")
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null());
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        command.creation_flags(0x0800_0000);
+    }
+    let mut child = command.spawn().unwrap();
+    let mut stdin = child.stdin.take().unwrap();
+    let (lines, heard) = mpsc::channel::<String>();
+    let reader = std::thread::spawn({
+        let stdout = child.stdout.take().unwrap();
+        move || {
+            for line in BufReader::new(stdout).lines().map_while(Result::ok) {
+                if lines.send(line).is_err() {
+                    break;
+                }
+            }
+        }
+    });
+
+    // The tray is ordered once the engine is there, in English before any window has sent words.
+    let first = read_until(&heard, "the first tray order", |line| line["order"]["kind"] == "tray");
+    assert_eq!(first["order"]["tooltip"], "Faber");
+    assert_eq!(first["order"]["needsYou"], 0);
+    assert_eq!(first["order"]["menu"], json!({ "show": "Open Faber", "quit": "Quit Faber" }));
+    for picture in ["picture", "picture16"] {
+        let png = first["order"][picture].as_str().expect("a base64 picture");
+        assert!(png.starts_with("iVBORw0KGgo"), "{picture} is a PNG: {png}");
+    }
+
+    let words = json!({
+        "texts": {
+            "open": "Abrir", "quit": "Sair",
+            "running": { "one": "Faber: {n} em andamento", "other": "Faber: {n} em andamento" },
+            "needsYou": { "one": ", {n} precisa de você", "other": ", {n} precisam de você" },
+            "notify": "{title} precisa de você"
+        }
+    });
+    writeln!(stdin, r#"{{"id":1,"cmd":"set_shell_texts","args":{words}}}"#).unwrap();
+    writeln!(stdin, r#"{{"id":2,"cmd":"state"}}"#).unwrap();
+    stdin.flush().unwrap();
+    let (mut answered, mut state, mut menu) = (false, None, None);
+    while !(answered && state.is_some() && menu.is_some()) {
+        let line = read_until(&heard, "the answers and the tray order for the new words", |_| true);
+        if line["order"]["kind"] == "tray" {
+            menu = Some(line["order"]["menu"].clone());
+        } else if line["id"] == 1 {
+            assert_eq!(line["ok"], Value::Null, "{line}");
+            answered = true;
+        } else if line["id"] == 2 {
+            state = Some(line);
+        }
+    }
+    assert_eq!(menu.unwrap(), json!({ "show": "Abrir", "quit": "Sair" }));
+    let state = state.unwrap();
+    assert_eq!(state["ok"]["version"], "9.8.7", "the version is the shell's");
+    assert_eq!(state["ok"]["settings"]["autostart"], true, "the switch is the shell's registration");
+    let kept = std::fs::read_to_string(dir.path().join("shell-texts.json")).unwrap();
+    assert!(kept.contains("Abrir"), "the words are kept in the data folder: {kept}");
 
     drop(stdin);
     let status = child.wait().unwrap();
