@@ -575,6 +575,7 @@ fn seed(dir: &Path, long: bool) -> Conversation {
         working_folder: None,
         project_start_pending: false,
         copy: None,
+        earlier: 0,
         choice: None,
         id: "seeded".into(),
         title: "Existing chat".into(),
