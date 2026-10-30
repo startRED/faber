@@ -8,6 +8,7 @@ import { readFileSync, realpathSync, statSync } from 'node:fs';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { Sidecar } from './sidecar.ts';
+import { apply, release } from './orders.ts';
 
 const SCHEME = 'faber';
 const ORIGIN = `${SCHEME}://app`;
@@ -244,7 +245,7 @@ app.on('second-instance', (_event, argv) => {
   if (!argv.includes('--autostart')) show();
 });
 
-// Faber stays in the tray when its window closes; only Quit ends it (the tray arrives in phase 4).
+// Faber stays in the tray when its window closes; only Quit, on the tray's menu, ends it.
 app.on('window-all-closed', () => {});
 
 // Quitting waits for the host to save what it holds and stop; one that hangs is ended after a few seconds.
@@ -253,6 +254,7 @@ app.on('before-quit', (event) => {
   if (stopping || !host) return;
   stopping = true;
   event.preventDefault();
+  release();
   void host.stop(HOST_STOP_MS).finally(() => app.quit());
 });
 
@@ -263,11 +265,15 @@ void app.whenReady().then(() => {
   session.defaultSession.setDevicePermissionHandler(() => false);
   serveScreen();
   relay();
-  host = Sidecar.start((event) => {
-    // The host dropped events this screen never heard (it fell too far behind): the screen starts over from a fresh
-    // reading instead of drawing from a partial one. Rare; Tauri's direct events never lag.
-    if ((event as { type?: unknown } | null)?.type === 'lagged') win?.webContents.reload();
-    else win?.webContents.send('faber:event', event);
+  const window = { focused: () => win?.isFocused() ?? false, show, hidden };
+  host = Sidecar.start({
+    event: (event) => {
+      // The host dropped events this screen never heard (it fell too far behind): the screen starts over from a fresh
+      // reading instead of drawing from a partial one. Rare; Tauri's direct events never lag.
+      if ((event as { type?: unknown } | null)?.type === 'lagged') win?.webContents.reload();
+      else win?.webContents.send('faber:event', event);
+    },
+    order: (order) => apply(order, window),
   });
   if (!autostart) show();
 });
