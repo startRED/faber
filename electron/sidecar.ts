@@ -5,12 +5,20 @@ import { type ChildProcessByStdio, spawn } from 'node:child_process';
 import path from 'node:path';
 import { createInterface } from 'node:readline';
 import type { Readable, Writable } from 'node:stream';
+import { app } from 'electron';
 
 type Pending = { resolve: (value: unknown) => void; reject: (reason: Error) => void };
 
-/** Where the host program is: beside the app once installed, or the one `FABER_SIDECAR` names while developing. */
+/** The longest request line the host reads (`MAX_LINE` in `host/src/wire.rs`): a longer one is refused here, not there. */
+const MAX_LINE = 16 * 1024 * 1024;
+/** Calls waiting for an answer at once. The screen makes a handful; thousands mean a page gone wrong, refused here. */
+const MAX_PENDING = 1024;
+/** Bytes written to the host it has not read yet, past which new calls are refused instead of queued. */
+const MAX_UNREAD = 4 * MAX_LINE;
+
+/** Where the host program is: beside the app once installed, or, while developing only, the one `FABER_SIDECAR` names. */
 function program(): string {
-  if (process.env.FABER_SIDECAR) return process.env.FABER_SIDECAR;
+  if (!app.isPackaged && process.env.FABER_SIDECAR) return process.env.FABER_SIDECAR;
   const exe = process.platform === 'win32' ? 'faber-sidecar.exe' : 'faber-sidecar';
   return path.join(process.resourcesPath, exe);
 }
@@ -19,23 +27,29 @@ export class Sidecar {
   private next = 1;
   private alive = true;
   private readonly pending = new Map<number, Pending>();
-
   private readonly child: ChildProcessByStdio<Writable, Readable, null>;
+  private readonly exited: Promise<void>;
 
-  private constructor(child: ChildProcessByStdio<Writable, Readable, null>) {
+  private constructor(child: ChildProcessByStdio<Writable, Readable, null>, exited: Promise<void>) {
     this.child = child;
+    this.exited = exited;
   }
 
   static start(onEvent: (event: unknown) => void): Sidecar {
     // No shell, no console window: the host is a plain child of the app.
     const child = spawn(program(), [], { stdio: ['pipe', 'pipe', 'inherit'], windowsHide: true, shell: false });
-    const sidecar = new Sidecar(child);
-    const lines = createInterface({ input: child.stdout, crlfDelay: Infinity });
-    lines.on('line', (line) => sidecar.heard(line, onEvent));
+    let ended: () => void = () => {};
+    const sidecar = new Sidecar(
+      child,
+      new Promise((resolve) => {
+        ended = resolve;
+      }),
+    );
     const gone = () => {
       sidecar.alive = false;
       for (const { reject } of sidecar.pending.values()) reject(new Error('error.host.gone'));
       sidecar.pending.clear();
+      ended();
     };
     child.on('exit', gone);
     // A program that cannot start (missing, not allowed) emits `error` instead of `exit`; unheard, it would end the app.
@@ -45,20 +59,40 @@ export class Sidecar {
     });
     // Writing to a host that just ended fails here, not as an uncaught error; its calls were already answered above.
     child.stdin.on('error', () => {});
+    const lines = createInterface({ input: child.stdout, crlfDelay: Infinity });
+    lines.on('line', (line) => sidecar.heard(line, onEvent));
     return sidecar;
   }
 
   call(cmd: string, args: Record<string, unknown>): Promise<unknown> {
     if (!this.alive) return Promise.reject(new Error('error.host.gone'));
+    if (this.pending.size >= MAX_PENDING) return Promise.reject(new Error('error.host.busy'));
     const id = this.next++;
+    let line: string;
+    try {
+      line = `${JSON.stringify({ id, cmd, args })}\n`;
+    } catch {
+      return Promise.reject(new Error('error.host.badArgs'));
+    }
+    if (Buffer.byteLength(line) > MAX_LINE) return Promise.reject(new Error('error.host.badRequest'));
+    // A host that stopped reading does not make the app buffer without end.
+    if (this.child.stdin.writableLength > MAX_UNREAD) return Promise.reject(new Error('error.host.busy'));
     return new Promise((resolve, reject) => {
       this.pending.set(id, { resolve, reject });
-      this.child.stdin.write(`${JSON.stringify({ id, cmd, args })}\n`);
+      this.child.stdin.write(line);
     });
   }
 
-  async stop(): Promise<void> {
+  /** Closes the host's input, so it saves what it holds and exits; one still running after `patience` ms is ended. */
+  async stop(patience: number): Promise<void> {
+    if (!this.alive) return;
     this.child.stdin.end();
+    let timer: NodeJS.Timeout | undefined;
+    const late = new Promise<'late'>((resolve) => {
+      timer = setTimeout(() => resolve('late'), patience);
+    });
+    if ((await Promise.race([this.exited, late])) === 'late') this.child.kill();
+    clearTimeout(timer);
   }
 
   private heard(line: string, onEvent: (event: unknown) => void): void {
