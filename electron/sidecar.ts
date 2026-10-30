@@ -39,8 +39,16 @@ export class Sidecar {
   }
 
   static start(listen: Listeners): Sidecar {
+    // What only the app knows (`faber-sidecar`'s own doc): its version, its process (whose windows are Faber's) and
+    // whether it starts with the system.
+    const env = {
+      ...process.env,
+      FABER_VERSION: app.getVersion(),
+      FABER_SHELL_PID: String(process.pid),
+      FABER_AUTOSTART: app.isPackaged && app.getLoginItemSettings().openAtLogin ? '1' : '0',
+    };
     // No shell, no console window: the host is a plain child of the app.
-    const child = spawn(program(), [], { stdio: ['pipe', 'pipe', 'inherit'], windowsHide: true, shell: false });
+    const child = spawn(program(), [], { stdio: ['pipe', 'pipe', 'inherit'], windowsHide: true, shell: false, env });
     let ended: () => void = () => {};
     const sidecar = new Sidecar(
       child,
@@ -84,6 +92,11 @@ export class Sidecar {
       this.pending.set(id, { resolve, reject });
       this.child.stdin.write(line);
     });
+  }
+
+  /** Tells the host what only the app sees (`ShellNote` in `host/src/wire.rs`); it answers nothing. */
+  note(note: { kind: 'focus'; focused: boolean }): void {
+    if (this.alive && !this.child.stdin.writableEnded) this.child.stdin.write(`${JSON.stringify({ shell: note })}\n`);
   }
 
   /** Closes the host's input, so it saves what it holds and exits; one still running after `patience` ms is ended. */
