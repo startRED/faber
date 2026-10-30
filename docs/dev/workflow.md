@@ -47,6 +47,13 @@ So a pull request is never merged with the button or `gh pr merge`: its green sa
 Dependabot pull request still runs every suite on its own, until it lands through `land.mjs` too. Each push to a queue
 branch cancels the run before it, so a lane queues once, with its fix complete.
 
+A queued commit skips a suite only when the commit it builds on is green, which means a run checked that very commit.
+A green batch put on a base that moved by words only ([Numbers](#numbers)), or a plain `queue/<name>` branch rebased
+onto one, lands as new commits no run checked, so the next queued commit would run every suite. So each commit made
+that way carries a `faber/checked-as` status naming the commit whose run passed, and the `changes` job counts it green
+when that commit is green and the two trees differ by words only; it compares the trees itself, so the status proves
+nothing alone.
+
 Batches (R190 V3, R220). A pull request that touches other parts of the repository than one queued and not landed
 yet (its first folders, leaving out the words, the locales and `docs/`, which every landing writes) is squashed and
 numbered on top of that queue commit instead of the base, up to three deep and never with a workflow change. One run
@@ -184,6 +191,10 @@ that refuses puts the branch back; a later push, a close or another target stops
 landing, and `land.mjs` replaces a queued commit only when nothing newer was queued meanwhile. Two decision rows that
 share a placeholder stop the numbering. When `phase-1-base` moved during the checks, the land job runs
 `land.mjs --head` again on the new base instead of a rebase, whose numbers would collide, and the queue checks it again.
+One move is the exception: when the base moved by words only (no suite reads them, the rule CI skips every suite by;
+`docs/decisions.md` and `docs/next/` left out, since numbers are taken there), the green batch is put on the new base as it
+is and lands at once, provided every file that then differs from the tree CI checked is words too and the docs check
+passes. A task file landing meanwhile no longer sends every queued pull request back to the start.
 GitHub refuses the workflow's own token any push of a commit that changes a file in `.github/workflows`, so such a
 landing ends on the PC: once its gate is green, the land job fails with that reason, and `land.mjs <number> --finish`
 makes the same atomic push with the person's own sign-in, after checking the gate passed, the commit is still on top of
