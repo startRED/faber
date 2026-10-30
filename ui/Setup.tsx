@@ -212,7 +212,7 @@ export function Setup(props: SetupProps) {
                         <button
                           type="button"
                           class="btn"
-                          onClick={() => void api.openLink(OFFICIAL_PAGES[vendor])}
+                          onClick={() => { const page = OFFICIAL_PAGES[vendor]; if (page) void api.openLink(page); }}
                         >
                           {t('setup.officialPage')}
                         </button>

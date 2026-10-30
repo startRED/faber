@@ -1510,6 +1510,7 @@ mod tests {
                     );
                     let read = format!("Read({})", rule_path(&guide_file(&folder)));
                     match (vendor, area) {
+                        (Vendor::Gemini, _) => unreachable!("only Claude and Codex are walked"),
                         (Vendor::Claude, Area::Chat) => {
                             let text = claude_input(&messages).await;
                             let note = note.unwrap();

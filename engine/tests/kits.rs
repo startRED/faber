@@ -73,6 +73,7 @@ async fn replay(
     let sink = Arc::new(move |event| drop(tx.send(event)));
     let server;
     let session = match vendor {
+        Vendor::Gemini => unreachable!("the tests run Claude and Codex"),
         Vendor::Claude => {
             server = None;
             start_claude(
@@ -366,6 +367,7 @@ async fn the_kept_server_installs_and_reaches_both_native_sessions_until_switche
             assert_eq!(checked.servers.len(), usize::from(enabled));
             let (args, messages) = replay(vendor, Area::Project, Permissions::FullAccess, checked, dir.path(), false, task).await;
             let config = match vendor {
+                Vendor::Gemini => unreachable!("the tests run Claude and Codex"),
                 Vendor::Claude => args.windows(2).find(|pair| pair[0] == "--mcp-config")
                     .map(|pair| serde_json::from_str::<Value>(&pair[1]).unwrap()["mcpServers"]["faber-chrome-devtools"].clone())
                     .unwrap_or(Value::Null),

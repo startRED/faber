@@ -53,7 +53,7 @@ pub fn detect_clis() -> BTreeMap<Vendor, Cli> {
 }
 
 pub fn detect_clis_with(env: &dyn Fn(&str) -> Option<String>) -> BTreeMap<Vendor, Cli> {
-    Vendor::ALL
+    Vendor::RUNNABLE
         .into_iter()
         .filter_map(|v| {
             let cli = match env(&format!("FABER_CLI_{}", v.name().to_uppercase())) {

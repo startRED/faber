@@ -138,6 +138,8 @@ pub struct VendorLedger {
 pub struct Ledger {
     pub claude: VendorLedger,
     pub codex: VendorLedger,
+    /// Empty until Gemini runs; a file written before it existed reads as empty (task 055).
+    pub gemini: VendorLedger,
     /// Fields written by a newer Faber, kept as they were.
     #[serde(flatten)]
     pub extra: BTreeMap<String, serde_json::Value>,
@@ -149,6 +151,7 @@ impl Ledger {
     pub fn sanitize(&mut self) {
         self.claude.sanitize();
         self.codex.sanitize();
+        self.gemini.sanitize();
         self.claude.lag = LAG_CLAUDE;
         self.codex.lag = LAG_CODEX;
     }
@@ -157,6 +160,7 @@ impl Ledger {
         match vendor {
             Vendor::Claude => &self.claude,
             Vendor::Codex => &self.codex,
+            Vendor::Gemini => &self.gemini,
         }
     }
 
@@ -164,6 +168,7 @@ impl Ledger {
         match vendor {
             Vendor::Claude => &mut self.claude,
             Vendor::Codex => &mut self.codex,
+            Vendor::Gemini => &mut self.gemini,
         }
     }
 }

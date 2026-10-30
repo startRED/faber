@@ -418,6 +418,7 @@ impl Core {
         let (cwd, instructions) = (self.opts.data_dir.clone(), Some(instructions.to_string()));
         let (model, effort) = (Some(model.to_string()), Some(effort.to_string()));
         let session = match vendor {
+            Vendor::Gemini => return None,
             Vendor::Codex => self.codex_server(Area::Chat, false, Permissions::Isolated, &cli).open(
                 CodexThread {
                     leave_plan: false,

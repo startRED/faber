@@ -31,6 +31,8 @@ impl Core {
             }
             // The picker names Claude's models by family.
             Vendor::Claude => session.model.as_deref().and_then(crate::budget::family_of).map(String::from),
+            // Not yet: no CLI lists its sessions.
+            Vendor::Gemini => None,
         };
         let c = self.convs.get_mut(&id).expect("new conversation");
         c.title = session.title.chars().take(60).collect();
