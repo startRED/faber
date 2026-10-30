@@ -44,6 +44,17 @@ fn state_of(busy: bool, c: &Conversation) -> State {
     }
 }
 
+/// Where a plan step's conversation stands (task 040), in a subagent row's words.
+pub(super) fn member_state(busy: bool, c: &Conversation) -> MemberState {
+    match state_of(busy, c) {
+        State::Working => MemberState::Running,
+        State::Waiting => MemberState::Waiting,
+        State::Finished => MemberState::Done,
+        State::Failed => MemberState::Failed,
+        State::Stopped => MemberState::Stopped,
+    }
+}
+
 impl Core {
     pub(super) fn restore_parent_reports(store: &Store) -> HashMap<String, HashSet<String>> {
         let mut pending: HashMap<String, HashSet<String>> = HashMap::new();

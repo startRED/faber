@@ -244,6 +244,9 @@ interface Shared {
   plan?: Plan;
   /** A button of a closing box: its words go as the person's message. */
   onReply?: (text: string) => void;
+  conversationNames?: Record<string, string>;
+  /** Opens another conversation, as its sidebar row does: a plan step's link (task 040). */
+  onOpenConversation?: (id: string) => void;
 }
 
 function Answer(props: Shared & { m: Accessor<Message>; messages?: Message[]; prompt?: Message; last?: boolean; answered?: Answered[]; messageIndex?: number }) {
@@ -574,7 +577,7 @@ function Answer(props: Shared & { m: Accessor<Message>; messages?: Message[]; pr
       <StallNote conversationId={props.conversationId} m={m()} />
       {/* The plan sits under the newest reply while the work goes on, and until every step is done. */}
       <Show when={props.last && props.plan?.steps.length && (working() || props.plan.steps.some((s) => s.state !== 'done')) ? props.plan : undefined}>
-        {(plan) => <PlanList plan={plan()} now={planNow()} />}
+        {(plan) => <PlanList plan={plan()} now={planNow()} names={props.conversationNames} onOpen={props.onOpenConversation} />}
       </Show>
       <Show when={m().files?.length}>
         <div class="files" aria-label={t('files.label')} ref={animateList}>
@@ -951,7 +954,7 @@ function Narration(props: { text: string; conversationId: string; messageId: str
   );
 }
 
-export function Thread(props: Shared & { messages: Message[]; queued?: QueuedTurn[]; busy?: boolean; onError?: (err: unknown) => void; onQueuedRecovered?: (id: string, text: string) => void; from: number; until?: number; searchIndex?: number; rewindNotice?: string; conversationNames?: Record<string, string>; onRewind?: () => Promise<void> }) {
+export function Thread(props: Shared & { messages: Message[]; queued?: QueuedTurn[]; busy?: boolean; onError?: (err: unknown) => void; onQueuedRecovered?: (id: string, text: string) => void; from: number; until?: number; searchIndex?: number; rewindNotice?: string; onRewind?: () => Promise<void> }) {
   const [restore, setRestore] = createSignal<{ message: Message; redo?: RewindRedoInfo }>();
   const [open, setOpen] = createSignal(false);
   const shown = keepForExit(open);
