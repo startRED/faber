@@ -1,5 +1,5 @@
 import type { BackgroundCommand, Checks, Follow, Message, ToolUse } from './api.ts';
-import { agentState, agentSteps, isAgentCall, toolRow, type AgentStep } from './worklog.ts';
+import { agentState, agentSteps, agentWord, helperNumbers, isAgentCall, toolRow, type AgentStep } from './worklog.ts';
 import type { Key } from './locales/en.ts';
 import { lang } from './i18n.ts';
 
@@ -40,7 +40,7 @@ export function workStatus(row: Omit<BackgroundWork, 'id' | 'title' | 'state'>) 
   } else if (row.agent) {
     const agent = row.interrupted && row.agent.call.ok === undefined ? 'stopped' : agentState(row.agent, !!row.streaming);
     state = agent === 'done' ? 'passed' : agent === 'background' ? 'running' : agent === 'declined' ? 'stopped' : agent;
-    key = `agent.${agent === 'declined' ? 'stopped' : agent}`;
+    key = agent === 'declined' ? 'agent.stopped' : agent === 'done' ? agentWord(row.agent, true) : `agent.${agent}`;
     if (agent === 'stuck') reason = `agent.stuck.${row.agent.call.sign as 'repeat' | 'failing' | 'silent'}`;
   } else {
     state = row.tool?.ok === true ? 'passed' : row.tool?.ok === false ? 'failed' : row.interrupted ? 'stopped' : row.streaming ? 'running' : 'unreported';
@@ -98,9 +98,10 @@ export function backgroundCalls(m: Message, index: ToolIndex) {
     return call.ok === before.ok && call.declined === before.declined && call.sign === before.sign && call.interrupted === before.interrupted && call.output === before.output;
   })) return old;
   index.language = lang();
+  const numbers = helperNumbers(m.tools);
   return index.projected = index.background.map((i) => {
     const tool = { ...m.tools![i]! };
-    const agent = isAgentCall(tool) ? agentSteps([tool])[0] : undefined;
+    const agent = isAgentCall(tool) ? agentSteps([tool], '', numbers)[0] : undefined;
     const row = toolRow(tool);
     return { id: `${m.id}:${tool.id}`, messageId: m.id, agent, tool: agent ? undefined : tool,
       title: agent?.title || (row.detail ? `${row.label} · ${row.detail}` : row.label) };

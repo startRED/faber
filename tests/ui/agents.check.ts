@@ -4,10 +4,10 @@ import { api, type AppState, type Conversation, type ChildWords, type Message, t
 import { App } from '../../ui/App.tsx';
 import themes from '../../src-tauri/src/themes.json';
 import { t, useLanguage } from '../../ui/i18n.ts';
-import { AgentChat, openedAgent, showAgent } from '../../ui/AgentChat.tsx';
+import { AgentChat, dropHelperTarget, helperTarget, openedAgent, showAgent } from '../../ui/AgentChat.tsx';
 import { Running } from '../../ui/Running.tsx';
 import { Thread } from '../../ui/Thread.tsx';
-import { agentReport, agentState, agentSteps, helpersAtWork, sameTools } from '../../ui/worklog.ts';
+import { agentReport, agentState, agentSteps, helperNumbers, helpersAtWork, sameTools } from '../../ui/worklog.ts';
 import { check, deepEqual, equal, ok } from './check.ts';
 
 // The subagents the agent starts show as steps in its reply (R161; docs/product-map.md, "Subagent step").
@@ -214,11 +214,12 @@ check('subagent step: the report loses the hand-back frame and its indent, and a
   equal(agentReport(undefined), '');
 });
 
-check('subagent step: each agent call collects the tools its subagent ran, and the brief names it when no title was given', () => {
+check('subagent step: each agent call collects the tools its subagent ran, and one with no title is named by its place', () => {
+  useLanguage('en');
   const steps = agentSteps([OWN, AGENT, GREP, { id: 'a2', name: 'Task', input: { prompt: 'Review the diff for mistakes.' } }]);
-  deepEqual(steps.map((s) => [s.title, s.kind, s.tools.map((t) => t.id)]), [
-    ['Find file defining load_config', 'Explore', ['g1']],
-    ['Review the diff for mistakes.', '', []],
+  deepEqual(steps.map((s) => [s.title, s.named, s.kind, s.tools.map((t) => t.id)]), [
+    ['Find file defining load_config', 'Find file defining load_config', 'Explore', ['g1']],
+    ['Helper 2', '', '', []],
   ]);
   deepEqual(agentSteps(undefined), []);
   // Each nested agent owns its work; its parent retains the handoff without claiming the child's steps.
@@ -345,7 +346,7 @@ const HELPER_RUN: ToolUse = { id: 'c1', name: 'commandExecution', input: 'rg -n 
 check('helper step: a helper call collects the other AI’s commands, is named by its title, and its kind is the AI that ran it', () => {
   const steps = agentSteps([OWN, HELPER, HELPER_RUN], 'Codex');
   deepEqual(steps.map((s) => [s.title, s.kind, s.helper, s.tools.map((t) => t.id)]), [['Review the parser', 'Codex', true, ['c1']]]);
-  deepEqual(agentSteps([{ ...HELPER, input: { brief: 'Read parser.rs and list mistakes.' } }], 'Codex')[0].title, 'Read parser.rs and list mistakes.');
+  deepEqual(agentSteps([{ ...HELPER, input: { brief: 'Read parser.rs and list mistakes.' } }], 'Codex')[0].title, 'Helper 1');
   equal(agentSteps([AGENT], 'Codex')[0].helper, false);
 });
 
@@ -359,16 +360,83 @@ check('helper step: in a reply on Claude Code the helper row names Codex, and it
   try {
     const row = root.querySelector<HTMLButtonElement>('.agents .agent')!;
     equal(row.querySelector('b')!.textContent, 'Review the parser');
-    equal(row.querySelector('.agent-meta')!.textContent, 'Codex · done · 1 step');
+    equal(row.querySelector('.agent-meta')!.textContent, 'Codex · finished · 1 step', 'a helper that ran no check is finished, not done');
   } finally {
     dispose();
     root.remove();
   }
 });
 
+// Task 130: on a Portuguese screen an English or missing title gives way to "Ajudante 1, 2…" by its place in its reply, never
+// a guessed translation, and the helper's view keeps the AI's words; "pronto" only when the engine counted checks and none
+// failed; and talking to the main AI about one leaves the box empty, names the helper above it, and sends its words once.
+check('helper names: a Portuguese screen names helpers in Portuguese, says pronto only after checks, and talks about one with an empty box', async () => {
+  useLanguage('pt-BR');
+  const pt: ToolUse = { id: 'a4', name: 'Agent', input: { description: 'Conferir a gravação', subagent_type: 'Explore', prompt: 'Confira.' } };
+  const bare: ToolUse = { id: 'a5', name: 'Task', input: { prompt: 'Review the diff for mistakes.' } };
+  const steps = agentSteps([OWN, AGENT, GREP, pt, bare]);
+  deepEqual(steps.map((s) => [s.title, s.named]), [['Ajudante 1', 'Find file defining load_config'], ['Conferir a gravação', 'Conferir a gravação'], ['Ajudante 3', '']]);
+  // A view that reads several replies numbers a helper by its own reply, as the reply's rows do.
+  equal(agentSteps([pt, AGENT], '', helperNumbers([AGENT]))[1]!.title, 'Ajudante 1');
+  const conversation: Conversation = { id: 'helper-names', title: 'Ajudantes', area: 'chat', sessions: {}, createdAt: 0, updatedAt: 1,
+    messages: [{ id: 'm1', role: 'assistant', text: '', at: 0, status: 'streaming', vendor: 'claude',
+      tools: [{ ...AGENT, ok: true, facts: { checks: 2, failed: 0 } }, { ...pt, ok: true }, { ...AGENT, id: 'a6', sign: 'failing' }, { ...GREP, parent: 'a6', ok: false }] }] };
+  const effects = { ambient: false, texture: false, glow: false };
+  const initial: AppState = { vendors: ['claude'], models: [], quotas: [], projects: [], version: '0.0.0', running: { revision: 0, items: [] },
+    conversations: [{ id: conversation.id, title: conversation.title, area: 'chat', updatedAt: 1 }],
+    settings: { setup: 'done', tutorialDone: true, language: 'pt-BR', appearance: { base: 'sala' } },
+    look: { vars: themes.css.base, scheme: 'dark', motion: 'none', effects, checks: [], notices: [],
+      appearance: { base: 'sala', ground: 'sala', accent: '#f3f0e8', textFont: 'archivo', headingFont: 'narrow', textSize: 14, density: 1, corners: 1, motion: 'none', effects } } };
+  const before = { open: api.open, send: api.send, warm: api.warm, routeDraft: api.routeDraft, setClock: api.setClock, notesSeen: api.notesSeen };
+  const place = localStorage.getItem('faber.place');
+  const sent: string[] = [];
+  api.open = async () => conversation; api.setClock = async () => {}; api.notesSeen = async () => Number.MAX_SAFE_INTEGER;
+  api.warm = async () => {}; api.routeDraft = async () => {};
+  api.send = async (request) => { sent.push(request.text); return conversation.id; };
+  localStorage.setItem('faber.place', JSON.stringify({ area: 'chat', id: conversation.id }));
+  const root = document.createElement('div');
+  root.style.cssText = 'position:fixed;inset:0';
+  document.body.append(root);
+  const dispose = render(() => createComponent(App, { initial, inbox: { take: () => {} } }), root);
+  const settle = () => new Promise((done) => setTimeout(done, 50));
+  try {
+    await settle();
+    const rows = [...root.querySelectorAll<HTMLButtonElement>('.agents .agent')];
+    deepEqual(rows.map((row) => row.querySelector('b')!.textContent), ['Ajudante 1', 'Conferir a gravação', 'Ajudante 3']);
+    equal(rows[0]!.querySelector('.agent-meta')!.textContent, 'Explore · pronto e conferido · 0 etapas', 'its checks passed');
+    ok(rows[1]!.querySelector('.agent-meta')!.textContent!.includes('terminou'), 'it only ended: no check proves it is ready');
+    const talk = root.querySelector<HTMLButtonElement>('.agent-stuck button:last-child')!;
+    equal(talk.textContent, 'Falar com a IA principal sobre este ajudante');
+    talk.click();
+    await settle();
+    const field = root.querySelector<HTMLTextAreaElement>('.composer textarea')!;
+    equal(field.value, '', 'nothing looks written for the person');
+    equal(root.querySelector('.composer-about span')!.textContent, 'Para a IA principal, sobre Ajudante 3');
+    ok(field.getAttribute('aria-describedby')?.includes('composer-about'), 'a screen reader hears who receives it');
+    field.value = 'Tente outro caminho.';
+    field.dispatchEvent(new InputEvent('input', { bubbles: true }));
+    field.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
+    await settle();
+    deepEqual(sent, ['Sobre o ajudante “Find file defining load_config”: Tente outro caminho.'], 'the main AI hears the words it named the helper with, once');
+    equal(root.querySelector('.composer-about'), null, 'the line goes with the message');
+    talk.click();
+    await settle();
+    root.querySelector<HTMLButtonElement>('.composer-about button')!.click();
+    await settle();
+    equal(root.querySelector('.composer-about'), null, 'the person can drop it');
+    showAgent({ conversationId: conversation.id, messageId: 'm1', callId: 'a1' });
+    await settle();
+    ok([...root.querySelectorAll('.side-meta')].some((line) => line.textContent === 'Nome dado pela IA: Find file defining load_config'), 'its view keeps the AI’s words');
+  } finally {
+    showAgent(undefined); dropHelperTarget(); dispose(); root.remove(); Object.assign(api, before); useLanguage('en');
+    if (place === null) localStorage.removeItem('faber.place'); else localStorage.setItem('faber.place', place);
+  }
+});
+
 // R161 step 6: a subagent waiting on the person's answer says so, and one that seems stuck turns amber with what the engine
-// saw, "Look" (opens it in the running column) and "Tell it…" (starts a message in the conversation's box). Nothing of it outlives the reply.
-check('subagent step: waiting for you, and a stuck subagent is amber with Look and Tell it', () => {
+// saw, "Look" (opens it in the running column) and "Talk to the main AI about this helper" (the conversation's box, empty,
+// naming the helper; task 130). Nothing of it outlives the reply.
+check('subagent step: waiting for you, and a stuck subagent is amber with Look and Talk to the main AI', () => {
   useLanguage('en');
   const root = document.createElement('div');
   const box = document.createElement('div');
@@ -395,16 +463,18 @@ check('subagent step: waiting for you, and a stuck subagent is amber with Look a
     equal(line.querySelector('.agent-why')!.textContent, 'The same check failed three times with nothing changed.');
     equal(line.querySelector('.agent-hint')!.textContent, 'It is still working. If it stays like this, tell the agent to try another way, or press Stop.', 'it says what to do, and that nothing stopped');
     const [look, tell] = [...line.querySelectorAll('button')];
-    deepEqual([look!.textContent, tell!.textContent], ['Look', 'Tell it…']);
+    deepEqual([look!.textContent, tell!.textContent], ['Look', 'Talk to the main AI about this helper']);
     look!.click();
     deepEqual(openedAgent(), { conversationId: 'stuck', messageId: 'stuck', callId: 'a1' }, 'Look opens it in the running column');
     showAgent(undefined);
     tell!.click();
     const area = box.querySelector('textarea')!;
-    equal(area.value, 'About “Find file defining load_config”: ');
+    equal(area.value, '', 'the box stays empty: nothing looks written for the person');
+    deepEqual(helperTarget(), { conversationId: 'stuck', name: 'Find file defining load_config', about: 'Find file defining load_config' });
     equal(document.activeElement, area);
     tell!.click();
-    equal(area.value, 'About “Find file defining load_config”: ', 'a second click does not write it twice');
+    equal(area.value, '', 'a second click writes nothing either');
+    dropHelperTarget();
     setMessage({ ...message(), tools: [{ ...AGENT, sign: 'silent' }, GREP] });
     equal(root.querySelector('.agent-why')!.textContent, 'It has done nothing for a long while.');
     setMessage({ ...message(), status: 'stopped', tools: [{ ...AGENT, sign: 'silent' }, GREP] });
@@ -418,8 +488,9 @@ check('subagent step: waiting for you, and a stuck subagent is amber with Look a
 });
 
 // R161 step 3: an opened subagent is the running column's content, with the way back to the list: its brief word for word,
-// the steps it ran and its report without the hand-back frame; while it works, "Tell it…" says where the words go.
-check('subagent in the column: its brief, steps and report, back to the list, and Tell it only while it works', () => {
+// the steps it ran and its report without the hand-back frame; while it works, "Talk to the main AI about this helper" says
+// where the words go.
+check('subagent in the column: its brief, steps and report, back to the list, and Talk to the main AI only while it works', () => {
   useLanguage('en');
   const root = document.createElement('div');
   document.body.append(root);
@@ -452,8 +523,12 @@ check('subagent in the column: its brief, steps and report, back to the list, an
     equal(root.querySelector('.side-brief .you')!.textContent!.trim(), 'Search the folder.', 'the brief, word for word');
     equal(root.querySelectorAll('.side-body .tools > span').length, 1);
     equal(root.querySelector('.side-tell p')!.textContent, "A subagent can't be written to while it works, so what you say goes to the main agent.");
+    showAgent({ conversationId: 'column', messageId: 'm', callId: 'a1' });
     root.querySelector<HTMLButtonElement>('.side-tell .btn')!.click();
-    deepEqual(told, ['About “Find file defining load_config”: '], 'Tell it goes through the app, which makes way for the box');
+    deepEqual(told, [''], 'it goes through the app, which makes way for the box, and writes nothing in it');
+    deepEqual(helperTarget(), { conversationId: 'column', name: 'Find file defining load_config', about: 'Find file defining load_config' });
+    dropHelperTarget();
+    showAgent(undefined);
     setTools([{ ...AGENT, ok: true, output: FRAMED }, { ...GREP, ok: true }]);
     ok(root.querySelector('.agent-report')!.textContent!.startsWith('The definition is in one file'), 'the report shows without its frame');
     ok(!root.textContent!.includes('Subagent hand-back'));

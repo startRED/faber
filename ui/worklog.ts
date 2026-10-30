@@ -1,5 +1,6 @@
 import type { Message, ToolUse } from './api.ts';
-import { t } from './i18n.ts';
+import { lang, t } from './i18n.ts';
+import { readsIn } from './language.ts';
 import type { Key } from './locales/en.ts';
 
 // How a turn's work log reads on screen: reasoning summaries as separate short paragraphs and tool rows as a label plus
@@ -106,6 +107,8 @@ export function toolRow(tool: ToolUse): ToolRow {
   if (action === 'compact' || action === 'clear' || action === 'context') return { label: t(`tool.${action}`), detail: '' };
   // A conversation the agent starts reads as its title; one it reads back, as its id.
   const named = SUBAGENT.has(tool.name) ? input?.description : tool.name === 'Helper' ? input?.title : tool.name === 'Conversation' ? (input?.title ?? input?.id) : undefined;
+  // A helper's few words show only in the person's language (task 130); its own view keeps them.
+  if (isAgentCall(tool) && !(typeof named === 'string' && readsIn(named, lang()))) return { label: t(KINDS[tool.name]!), detail: '' };
   const raw = typeof named === 'string' ? named : detailOf(tool.input);
   const camel = /^[a-z]+[A-Z]/.test(tool.name);
   // An MCP tool (`mcp__server__tool`) reads as using a tool, with the server's name when the call names nothing else.
@@ -215,8 +218,11 @@ export interface AgentStep {
   call: ToolUse;
   /** The task that handed it work, when that task is in this reply. */
   parent?: { id: string; title: string };
-  /** The few words the agent gave the piece of work, else the start of its brief. */
+  /** Its name on screen: the few words it was given when they read in the person's language, else "Helper 1", "Helper 2"…
+   * by its place among the reply's helpers (task 130). Faber never guesses a translation. */
   title: string;
+  /** The few words the CLI or the agent gave it, as they came; empty when none. Its view shows them when `title` differs. */
+  named: string;
   /** The kind of subagent (`Explore`, `Plan`, a person's own agent), when the agent named one; for a helper, the AI that ran it. */
   kind: string;
   /** A helper from the other AI, not a subagent of the agent's own CLI. */
@@ -271,6 +277,14 @@ export function agentState(step: AgentStep, streaming: boolean): AgentState {
   return ok ? 'done' : 'failed';
 }
 
+/** The word for where a helper is. "Done" is kept for one whose checks all passed; one that only ended reads "finished",
+ * since its call returning proves nothing about its work (task 130). */
+export function agentWord(step: AgentStep, streaming: boolean): Key {
+  const state = agentState(step, streaming);
+  const facts = step.call.facts;
+  return state === 'done' && facts?.checks && !facts.failed ? 'agent.checked' : `agent.${state}`;
+}
+
 function agentBackground(tool: ToolUse, byId: Map<string, ToolUse>): boolean {
   for (let at: ToolUse | undefined = tool, hops = 0; at && hops <= byId.size; at = at.parent ? byId.get(at.parent) : undefined, hops++) {
     if ((at.input as { run_in_background?: unknown } | undefined)?.run_in_background === true) return true;
@@ -300,8 +314,14 @@ export function sameTools(a: ToolUse[], b: ToolUse[]): boolean {
   return a.length === b.length && a.every((tool, i) => tool.id === b[i]!.id && tool.name === b[i]!.name && tool.ok === b[i]!.ok && tool.sign === b[i]!.sign && tool.interrupted === b[i]!.interrupted && tool.wordsChars === b[i]!.wordsChars && tool.transcript?.pages === b[i]!.transcript?.pages && tool.transcript?.failed === b[i]!.transcript?.failed && (tool.output?.length ?? 0) === (b[i]!.output?.length ?? 0));
 }
 
+/** Each helper's place among the agent calls of one reply, from 1: what "Helper 1" counts. A view that reads the steps of
+ * several replies passes the numbers of the reply the helper belongs to, so it has the same name everywhere. */
+export function helperNumbers(tools: ToolUse[] = []): Map<string, number> {
+  return new Map(tools.filter(isAgentCall).map((call, i) => [call.id, i + 1]));
+}
+
 /** Each subagent, including nested ones, with its own tools. The parent keeps the handoff, the child keeps its work. */
-export function agentSteps(tools: ToolUse[] = [], helperKind = ''): AgentStep[] {
+export function agentSteps(tools: ToolUse[] = [], helperKind = '', numbers = helperNumbers(tools)): AgentStep[] {
   const text = (v: unknown) => (typeof v === 'string' ? v : '');
   const byId = new Map(tools.map((tool) => [tool.id, tool]));
   const parentOf = (tool: ToolUse) => {
@@ -313,10 +333,13 @@ export function agentSteps(tools: ToolUse[] = [], helperKind = ''): AgentStep[] 
     }
     return undefined;
   };
-  const titleOf = (call: ToolUse) => {
+  const namedOf = (call: ToolUse) => {
     const input = (call.input ?? {}) as Record<string, unknown>;
-    const helper = call.name === 'Helper';
-    return text(helper ? input.title : input.description).trim() || middle(text(helper ? input.brief : input.prompt), 80);
+    return text(call.name === 'Helper' ? input.title : input.description).trim();
+  };
+  const titleOf = (call: ToolUse) => {
+    const named = namedOf(call);
+    return named && readsIn(named, lang()) ? named : t('agent.numbered', { n: numbers.get(call.id) ?? 1 });
   };
   const own = new Map<string, ToolUse[]>();
   for (const tool of tools) {
@@ -334,6 +357,7 @@ export function agentSteps(tools: ToolUse[] = [], helperKind = ''): AgentStep[] 
       call,
       parent: parent ? { id: parent.id, title: titleOf(parent) } : undefined,
       title: titleOf(call),
+      named: namedOf(call),
       kind: helper ? helperKind : text(input.subagent_type),
       helper,
       brief: text(helper ? input.brief : input.prompt).trim(),

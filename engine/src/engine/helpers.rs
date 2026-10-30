@@ -110,7 +110,7 @@ impl Core {
             l.sid,
             helper::other(l.vendor),
             l.permissions,
-            Tuning { web: l.tuning.web, summary: l.tuning.summary, ..Default::default() },
+            Tuning { web: l.tuning.web, summary: l.tuning.summary, language: l.tuning.language.clone(), ..Default::default() },
             l.cwd.clone(),
         );
         if self.convs.get(conv).map(|c| c.area) != Some(Area::Project) {

@@ -49,6 +49,7 @@ points nowhere; a page that grows past the limit splits by topic, and its row he
 | [design/first-run.md](design/first-run.md) | The first run and the tutorial |
 | [design/projects.md](design/projects.md) | The Projects screens, what a project stores, and how its checks run |
 | [dev/testing.md](dev/testing.md) | Tests: `cargo t`, screen tests, build folder and slots, what a run prints |
+| [dev/evals.md](dev/evals.md) | Opt-in evaluations of what the AI writes with the real CLIs: the router, the persona |
 | [dev/cli-qualification.md](dev/cli-qualification.md) | Nightly unauthenticated CLI candidate contracts, bounded metadata receipts and missing compatibility evidence |
 | [dev/build-folders.md](dev/build-folders.md) | Build-cache cleanup, disk budget and preserving exact proof artifacts |
 | [dev/fair-bench.md](dev/fair-bench.md) | The fair benchmark against TL-ADE: the meter, the suite and real-work tiers, the notes |

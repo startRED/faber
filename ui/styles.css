@@ -835,6 +835,9 @@ details.thinking div { white-space: pre-wrap; padding: 6px 0 0 12px; border-left
 .thumb-more:hover { background: var(--s3); color: var(--ink); }
 .composer .attach-row { padding: 12px 14px 4px; }
 .attach-all { margin-left: 4px; }
+/* Who a message about a helper goes to (task 130): one quiet line above the empty field, never words in it. */
+.composer-about { display: flex; align-items: center; gap: 6px; min-width: 0; margin: 0; padding: 10px 10px 0 18px; color: var(--ink-2); font-size: var(--fs-ui); }
+.composer-about span { min-width: 0; overflow-wrap: anywhere; }
 .md img { max-width: min(100%, 280px); max-height: 200px; border-radius: var(--r-sm); cursor: zoom-in; vertical-align: middle; }
 
 /* A code block (markdown.tsx): the language it was written in, and a button that copies that block only. */

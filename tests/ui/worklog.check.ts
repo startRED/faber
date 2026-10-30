@@ -324,15 +324,15 @@ check('worklog: a subagent that ended says how long it took, and a quick or unfi
     const meta = () => root.querySelector('.agents .agent-meta')!.textContent;
     equal(meta(), 'Explore · working · 0 steps', 'a running subagent has no time');
     setMessage({ ...message(), tools: [agent({ ok: true, ended: 1_000_000 + 150_000 })] });
-    equal(meta(), 'Explore · done · 0 steps · 2 min');
+    equal(meta(), 'Explore · finished · 0 steps · 2 min');
     setMessage({ ...message(), tools: [agent({ ok: false, ended: 1_000_000 + 45_000 })] });
     equal(meta(), 'Explore · failed · 0 steps · 45 s');
     setMessage({ ...message(), tools: [agent({ ok: true, ended: 1_000_400 })] });
-    equal(meta(), 'Explore · done · 0 steps', 'under a second is no time worth saying');
+    equal(meta(), 'Explore · finished · 0 steps', 'under a second is no time worth saying');
     setMessage({ ...message(), tools: [agent({ ok: false, declined: true, ended: 1_000_000 + 45_000 })] });
     equal(meta(), 'Explore · declined · 0 steps', 'a refused one never ran');
     setMessage({ ...message(), tools: [{ id: 'ag', name: 'Agent', input: { description: 'Old', prompt: 'x' }, ok: true }] });
-    equal(meta(), 'done · 0 steps', 'a subagent recorded before the stamps existed shows none');
+    equal(meta(), 'finished · 0 steps', 'a subagent recorded before the stamps existed shows none');
   } finally {
     dispose();
     root.remove();

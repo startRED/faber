@@ -1486,6 +1486,9 @@ pub struct Tuning {
     pub summary: ReasoningSummary,
     pub reply_style: ReplyStyle,
     pub reply_style_text: String,
+    /// The language chosen for Faber's screen ("en", "pt-BR"...), none when it follows the system: the replies' language when
+    /// the person's latest message has none of its own (task 130).
+    pub language: Option<String>,
 }
 
 impl Settings {
@@ -1496,6 +1499,7 @@ impl Settings {
             summary: self.reasoning_summary.unwrap_or_default(),
             reply_style: self.reply_style.unwrap_or_default(),
             reply_style_text: self.reply_style_text.as_deref().map(clean_reply_style_text).unwrap_or_default(),
+            language: self.language.clone(),
         }
     }
 }

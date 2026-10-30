@@ -7,7 +7,7 @@ import { Markdown, openLinks } from './markdown.tsx';
 import { animateList } from './motion.ts';
 import { elapsed } from './running.ts';
 import { keep, kept, release, useDraft } from './unsent.ts';
-import { agentKind, agentReport, agentState, changeOf, isAgentCall, middle, toolRow, type AgentStep, type Change, type Sources } from './worklog.ts';
+import { agentKind, agentReport, agentState, agentWord, changeOf, isAgentCall, middle, toolRow, type AgentStep, type Change, type Sources } from './worklog.ts';
 
 // A subagent opened in the running column (R161 step 3): its brief word for word, the steps it ran and its report, drawn
 // with the conversation's own parts. The column is the one place on the right, so this replaces its list until "back".
@@ -124,14 +124,33 @@ export function SourceList(props: { sources: Sources }) {
   );
 }
 
-/** "Tell it…": the conversation's own box, started with the step's name. A CLI subagent cannot be written to while it runs,
- * so the message goes to the main agent: while Codex works it goes into its turn; Claude Code takes it after the turn, or at
- * once with "Send now". */
-export const tellAbout = (title: string) => startMessage(t('agent.tellAbout', { title }));
+/** The helper a message in the conversation's box is about (task 130): the box stays empty and shows who receives it and
+ * about what, and the message carries the helper's own words once, when it is sent. */
+export interface HelperTarget {
+  conversationId: string;
+  /** Its name on screen ("Helper 1" or its title). */
+  name: string;
+  /** What the main agent knows it by: the words it gave it, else the start of its brief. */
+  about: string;
+}
+const [target, setTarget] = createSignal<HelperTarget>();
+export const helperTarget = target;
+export const dropHelperTarget = () => setTarget(undefined);
+export const aimAt = (conversationId: string, step: AgentStep) =>
+  setTarget({ conversationId, name: step.title || t('agent.untitled'), about: step.named || middle(step.brief, 80) || step.title });
+
+/** "Talk to the main AI about this helper": a CLI subagent cannot be written to while it runs, so the message goes to the main
+ * agent: while Codex works it goes into its turn; Claude Code takes it after the turn, or at once with "Send now". */
+export function talkAbout(conversationId: string, step: AgentStep) {
+  aimAt(conversationId, step);
+  startMessage('');
+}
 
 /** Starts the conversation's box with `text`, ahead of anything already written there. "Continue with a helper" (R161
  * step 5) starts it the same way, asking the main agent to hand the rest of a piece of work to a helper from the other AI. */
 export function startMessage(text: string) {
+  // Words of another request ("Continue with a helper", a quick question's answer) are not about the helper named before.
+  if (text) setTarget(undefined);
   const box = document.querySelector<HTMLTextAreaElement>('.composer textarea');
   if (!box) return;
   box.focus();
@@ -148,7 +167,7 @@ export function startMessage(text: string) {
 export function agentMeta(step: AgentStep, streaming: boolean): string {
   const { started, ended, declined } = step.call;
   const took = started !== undefined && ended !== undefined && ended - started >= 1000 && !declined ? elapsed(started, ended) : undefined;
-  return [agentKind(step.kind), t(`agent.${agentState(step, streaming)}`), t('activity.steps', { n: step.tools.length }), took && t(took.key, { n: took.n })].filter(Boolean).join(' · ');
+  return [agentKind(step.kind), t(agentWord(step, streaming)), t('activity.steps', { n: step.tools.length }), took && t(took.key, { n: took.n })].filter(Boolean).join(' · ');
 }
 
 /** Keep the last observed step between tools, marked with its result; never invent work or retain it after the helper ends. */
@@ -454,6 +473,9 @@ export function AgentChat(props: {
       <div class="rc-body side-body" data-state={state()} ref={animateList}>
         <Show when={props.step.parent}>{(parent) => <p class="side-meta agent-parent">{parent().title || t('agent.untitled')} › {title()}</p>}</Show>
         <p class="side-meta">{agentMeta(props.step, props.streaming)}</p>
+        <Show when={props.step.named && props.step.named !== props.step.title}>
+          <p class="side-meta">{t('agent.named', { title: props.step.named })}</p>
+        </Show>
         <Show when={state() === 'stuck' && props.step.call.sign}>
           {(sign) => (
             <>
@@ -504,7 +526,11 @@ export function AgentChat(props: {
         <Show when={working() && !props.step.helper}>
           <div class="side-tell">
             <p>{t('agent.side.note')}</p>
-            <button type="button" class="btn" onClick={() => start(t('agent.tellAbout', { title: title() }))}>
+            <button type="button" class="btn" onClick={() => {
+              const open = openedAgent();
+              if (open) aimAt(open.conversationId, props.step);
+              start('');
+            }}>
               {t('agent.tell')}
             </button>
           </div>

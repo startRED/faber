@@ -25,7 +25,7 @@ import { html, openLinks, pressImage } from './markdown.tsx';
 import { PieceReply } from './VisualPiece.tsx';
 import { VisualFiles } from './VisualAnswer.tsx';
 import type { VisualAnswer } from './api.ts';
-import { agentActivity, agentMeta, ChangedLines, openedAgent, SourceList, showAgent, startMessage, tellAbout, ToolChip } from './AgentChat.tsx';
+import { agentActivity, agentMeta, ChangedLines, openedAgent, SourceList, showAgent, startMessage, talkAbout, ToolChip } from './AgentChat.tsx';
 import { untilReset } from './Sidebar.tsx';
 import { appsOf, AwayPage, awaySites, SiteCard, sitesOf, stepsOf } from './Site.tsx';
 import { Quote } from './Floating.tsx';
@@ -191,7 +191,7 @@ function AgentRow(props: { step: Accessor<AgentStep>; streaming: boolean; conver
             <span class="agent-why">{t(`agent.stuck.${sign() as 'repeat' | 'failing' | 'silent'}`)}</span>
             <span class="note agent-hint">{t('agent.stuck.hint')}</span>
             <button type="button" class="btn" onClick={open}>{t('agent.look')}</button>
-            <button type="button" class="btn" onClick={() => tellAbout(step().title || t('agent.untitled'))}>{t('agent.tell')}</button>
+            <button type="button" class="btn" onClick={() => talkAbout(props.conversationId, step())}>{t('agent.tell')}</button>
           </div>
         )}
       </Show>

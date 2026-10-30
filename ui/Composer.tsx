@@ -40,6 +40,9 @@ interface Props {
    * reduced motion and for readers of the screen. */
   hints?: string[];
   onSend: (draft: Draft) => void;
+  /** The helper the message will be about (task 130), named above the empty field; the screen adds its words on send. */
+  about?: string;
+  onDropAbout?: () => void;
   onStop: () => void;
   onWarm: () => void;
   /** The user stopped typing for a moment: Auto routes the draft before it is sent. */
@@ -624,9 +627,19 @@ export function Composer(props: Props) {
           </div>
         </div>
       </Show>
+      <Show when={props.about}>
+        {(name) => (
+          <p class="composer-about" id="composer-about">
+            <span>{t('composer.about', { name: name() })}</span>
+            <button type="button" class="iconbtn" onMouseDown={keepEditingFocus} aria-label={t('composer.aboutDrop')} title={t('composer.aboutDrop')} onClick={() => props.onDropAbout?.()}>
+              <Icon name="close" small />
+            </button>
+          </p>
+        )}
+      </Show>
       <textarea
         aria-label={t('composer.message')}
-        aria-describedby={attachmentError() ? draftNoticeId : undefined}
+        aria-describedby={[attachmentError() && draftNoticeId, props.about && 'composer-about'].filter(Boolean).join(' ') || undefined}
         rows={1}
         placeholder={historyMode() === 'search' ? t('composer.history') : props.placeholder}
         value={draft().text}

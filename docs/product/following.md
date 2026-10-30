@@ -95,7 +95,7 @@ frames) and checked against today's code. It fills the steps of R161 and never b
    then the child's messages, steps and results as they arrive, drawn with the conversation's own message parts and
    loaded only while open. A CLI subagent cannot be messaged while it runs, so its box writes to the main agent about
    that step and says so. Built (R176): the brief, the steps and the report; R416 adds a CLI subagent's words between
-   steps (16,000 characters at most, read on open); a helper of the other AI keeps only its report. "Tell it…" writes to it.
+   steps (16,000 characters at most, read on open); a helper of the other AI keeps only its report. Its button asks the main AI.
 4. **Facts, not a verdict.** When a child ends, its row shows what it was asked, what it did (files changed, checks run,
    steps) and anything it touched that the brief never named. The main agent grading its own helper is not trusted:
    each brief ends with a "done when" list, and the row ticks each line the report meets. Built (R180): the facts
@@ -109,7 +109,7 @@ frames) and checked against today's code. It fills the steps of R161 and never b
 6. **Stuck shows only when it matters.** The engine notices a child repeating the same action, failing the same check
    twice, or silent longer than its kind of work allows; a child waiting on a question is "waiting for you", never
    stuck. The main agent hears first and tries once to retry, narrow the piece or hand it to the other vendor. Only if
-   that fails does the row turn amber with "Look" and "Tell it…", and only then is the person notified. It ships once
+   that fails does the row turn amber with Look and a talk button, and only then is the person notified. It ships once
    the recorded fixtures show no false amber. Built (R174): neither CLI can be told about its subagent while the main agent waits for it, so
    the main agent's chance is the retry the thresholds leave (a check shows only after it failed three times).
 7. **Faber's own browser and app pane (R161 step 4, the largest piece).** Built (R195): Faber's own browser, a

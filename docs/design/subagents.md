@@ -65,12 +65,16 @@ once it ended, "What it did" (R161 step 4): a quiet block in the work log's surf
 in the data face, its checks and how many failed (a failed count gets the error note's 2 px edge), and the changed files
 its brief never named. These are counted by the engine from its steps (`engine/src/engine/facts.rs`), never taken from the
 main agent's word. Then its report as Markdown. While it works, a quiet line says a CLI subagent cannot be written to while it runs and
-"Tell it…" starts a message to the main agent. A helper from the other AI is a session of its own, so it gets a box
+"Talk to the main AI about this helper" readies a message to the main agent: the conversation's box stays empty, and one
+quiet line above its field in the second ink says "To the main AI, about <name>" with a small close button that drops it
+(the field's description, so a screen reader hears it too). On send, the words the AI named the helper with (else the start
+of its brief) go once in front of the message ("About the helper “…”: "), and the line goes with it. Nothing is written into
+the field, so nothing looks typed by the person (task 130). A helper from the other AI is a session of its own, so it gets a box
 instead (R196): a line saying the words go straight to it, a field and "Send" (Enter sends, Shift+Enter breaks the
 line). What the person wrote stays above the box in their own bubble, with a line in the third ink under it: sent, read,
 or never read because the helper had finished. Once a subagent ended, in a project with both AIs connected, a quiet line
 and "Continue with a helper" start the conversation's box asking the main agent to hand the rest to a helper. The row open there has the hover surface and a 2 px accent edge on its
-left (amber on a stuck row). In the column nothing is cut: the brief, its code and the files wrap, a tool line wraps to two lines and a click shows the rest, and a button in the head opens the whole view as a full thread over the work area (how the column sizes: [layout.md](layout.md#arranging-the-shell)). The tool line is a button (`aria-expanded`) and its tooltip always has the whole text; nothing scrolls sideways at any width or text size. The button (`expand` icon, "Open as a full thread") moves the column over the whole work area: its text keeps the 660 px reading width, the conversation under it is inert, the box stays below for "Tell it…" and the edge to drag is gone; the same button (`shrink` icon, "Back to the side column") returns it, focus stays on it, and closing the column ends the full thread. The column is drawn again where it sits, with its usual entrance and none in reduced or no motion. The column opens the way it always does; the content swaps without motion, since it is a
+left (amber on a stuck row). In the column nothing is cut: the brief, its code and the files wrap, a tool line wraps to two lines and a click shows the rest, and a button in the head opens the whole view as a full thread over the work area (how the column sizes: [layout.md](layout.md#arranging-the-shell)). The tool line is a button (`aria-expanded`) and its tooltip always has the whole text; nothing scrolls sideways at any width or text size. The button (`expand` icon, "Open as a full thread") moves the column over the whole work area: its text keeps the 660 px reading width, the conversation under it is inert, the box stays below for "Talk to the main AI about this helper" and the edge to drag is gone; the same button (`shrink` icon, "Back to the side column") returns it, focus stays on it, and closing the column ends the full thread. The column is drawn again where it sits, with its usual entrance and none in reduced or no motion. The column opens the way it always does; the content swaps without motion, since it is a
 click the person just made. Opening another conversation goes back to the list. Rows sit in a `minmax(0, 1fr)` grid, so a long
 tool line ellipsizes instead of widening the reply. A helper that never finished reads "stopped" once the reply has
 ended; one sent to the background keeps the live mark until its task notice arrives (a ring, never the square of a stop button); a refused one reads "declined" in
@@ -78,7 +82,13 @@ the third ink, never as a failure. Known limit: when a reply moves to another AI
 helpers included, read as working again with the new reply.
 
 A Codex subagent (`spawn_agent`, started only when the person asks for one) is the same row. Codex gives it a path instead of a description, so its title is the
-path's last part with spaces (`/root/read_docs` reads "read docs"), and it has no kind. Its approvals show on the
+path's last part with spaces (`/root/read_docs` reads "read docs"), and it has no kind.
+
+A helper's name is the few words the AI gave it only when they read in the screen's language (`ui/language.ts`: the
+language's own letters, small words and verb endings, never a guessed translation); otherwise, or with none, it is
+"Helper 1", "Helper 2"… by its place among its reply's helpers, the same in its row, its view and Technical details, and
+its view says "Named by the AI: …" under the meta line. Its state reads "done and checked" only when the engine counted
+checks on its steps and none failed; a helper whose call only returned reads "finished" (task 130). Its approvals show on the
 conversation's own card, since the person cannot open the subagent; one that arrives after the reply ended is refused,
 and Stop and closing the conversation reach the subagent too. With any subagent or helper at work, Stop asks first in place of
 its button: one line in the second ink saying how many it ends, then "Stop all" (the Stop look) and "Keep working" (the
@@ -91,8 +101,9 @@ subagent is still at work as it ends.
 A subagent waiting on the person's answer reads "waiting for you" with its live mark in amber; the card under the rows is
 that answer. One that seems stuck (R161 step 6, R174) is the conversation's other amber: the mark and the row's edge
 turn amber, its state reads "seems stuck", and one line under the row says in plain words what the engine saw, with
-"Look", which opens it in the running column, and "Tell it…", which focuses the conversation's box with "About “title”: " at
-its start (Codex takes it into the running turn; Claude Code after it, or at once with "Send now"). The line arrives with
+"Look", which opens it in the running column, and "Talk to the main AI about this helper", which focuses the conversation's
+empty box with the helper named above it (Codex takes the message into the running turn; Claude Code after it, or at once
+with "Send now"). The line arrives with
 the normal entrance (`--dur-arrive`, none in reduced motion) and goes when the subagent moves again or the reply ends; the
 words carry the meaning, the amber only repeats it. The signs are counted by the engine (`engine/src/stuck.rs`): the
 same step six times in a row, the same step failing three times with no file changed between (twice and its retry), or

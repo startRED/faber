@@ -52,12 +52,12 @@ import { Projects } from './Projects.tsx';
 import { createOpening, upsert, whole } from './opening.ts';
 import { Running } from './Running.tsx';
 import { openedDetails, showDetails } from './Details.tsx';
-import { agentWide, openedAgent, showAgent, startMessage, toggleAgentWide } from './AgentChat.tsx';
+import { agentWide, dropHelperTarget, helperTarget, openedAgent, showAgent, startMessage, toggleAgentWide } from './AgentChat.tsx';
 import { openedVisual, showVisual } from './VisualAnswer.tsx';
 import { openedSite, showSite, siteWide, sitesOf, toggleSiteWide } from './Site.tsx';
 import { openedFile, showFile } from './fileref.ts';
 import { answered, btw, heardAsides, openedAside, showAside } from './QuickQuestion.tsx';
-import { agentSteps, helpersAtWork } from './worklog.ts';
+import { agentSteps, helperNumbers, helpersAtWork } from './worklog.ts';
 import { createAutoOpen, doneCards, openPlace, type Place, placeOfRunning, shownRunning, stopOffered, store, waitingKeys } from './running.ts';
 import { type Keep, type Section, Settings } from './Settings.tsx';
 import { Setup } from './Setup.tsx';
@@ -652,7 +652,9 @@ export function App(props: { initial: AppState; update?: UpdateStatus; inbox: { 
     if (!open || conversation?.id !== open.conversationId) return undefined;
     const m = conversation.messages.find((message) => message.id === open.messageId);
     const helperKind = m?.vendor ? vendorName(m.vendor === 'claude' ? 'codex' : 'claude') : '';
-    const step = agentSteps(conversation.messages.flatMap((message) => message.tools ?? []), helperKind).find((s) => s.call.id === open.callId);
+    // Its steps, and a parent's, may sit in other replies; each name counts the helpers of its own reply, as the rows do.
+    const numbers = new Map(conversation.messages.flatMap((message) => [...helperNumbers(message.tools)]));
+    const step = agentSteps(conversation.messages.flatMap((message) => message.tools ?? []), helperKind, numbers).find((s) => s.call.id === open.callId);
     // A helper works only in a project whose agent can reach the other AI (both connected), as the engine offers it.
     const helpable = conversation.area === 'project' && state().vendors.length > 1;
     return step && { step, streaming: m?.status === 'streaming', helpable };
@@ -1143,6 +1145,10 @@ export function App(props: { initial: AppState; update?: UpdateStatus; inbox: { 
       if (!answered(current())) queueMicrotask(() => restore?.(draft));
       return;
     }
+    // A message about a helper (task 130) names it once, in front of the person's words.
+    const aim = helperTarget()?.conversationId === current()?.id ? helperTarget() : undefined;
+    // A failed send gives the box back the person's own words, the line above it still there.
+    const outgoing = aim ? { ...draft, text: t('agent.tellAbout', { title: aim.about }) + draft.text } : draft;
     // The place is taken once: the message, and the conversation it opens, belong to the place it was written in.
     const at = place();
     const chosen = picked();
@@ -1161,7 +1167,7 @@ export function App(props: { initial: AppState; update?: UpdateStatus; inbox: { 
         conversationId: current()?.id,
         area: at.area,
         projectId: at.area === 'project' ? at.projectId : undefined,
-        text: draft.text,
+        text: outgoing.text,
         images: draft.images,
         files: draft.files,
         choice: chosen,
@@ -1169,13 +1175,14 @@ export function App(props: { initial: AppState; update?: UpdateStatus; inbox: { 
       const key = `faber.choice.${id}`;
       remember(key, place() === at ? picked() : recall<Choice>(key, chosen));
       accepted = true;
-      if (ticket === sendTicket && !alongside) held.set(id, { draft });
+      if (aim && helperTarget() === aim) dropHelperTarget();
+      if (ticket === sendTicket && !alongside) held.set(id, { draft: outgoing });
       const moved = place() === at && id !== opening.id;
       if (moved) await go({ ...at, id });
       const sent = moved && current()?.id === id ? current() : await api.open(id);
       if (ticket === sendTicket && !alongside) {
         const reply = sent?.messages.at(-1);
-        const tracked = held.get(id) ?? { draft };
+        const tracked = held.get(id) ?? { draft: outgoing };
         tracked.reply = reply?.id;
         held.set(id, tracked);
         restoreRejected(id, reply);
@@ -1380,6 +1387,8 @@ export function App(props: { initial: AppState; update?: UpdateStatus; inbox: { 
         locked={loading()}
         placeholder={area() === 'project' ? t('composer.projectPlaceholder') : newChat() ? t('composer.chatPlaceholder') : t('composer.replyPlaceholder')}
         hints={newChat() ? homeHints(area() === 'project' ? 'project' : 'chat') : undefined}
+        about={helperTarget()?.conversationId === current()?.id ? helperTarget()?.name : undefined}
+        onDropAbout={dropHelperTarget}
         onSend={(d) => void send(d)}
         onStop={() => current() && void api.interrupt(current()!.id)}
         keepGoing={keepGoing()}

@@ -10,13 +10,48 @@ fn plain_words_keep_failures_unfinished_work_decisions_and_useful_file_locations
     assert!(!text.contains("saved for the next version"), "saving alone promises no release");
 }
 
+/// Task 130: the person's own words set the language, technical words only when the person really used or asked for them,
+/// what still runs said once, and the conclusion first. The words the evaluation (`scripts/persona-eval.mjs`) measured.
+#[test]
+fn persona_follows_the_persons_words_and_says_what_still_runs_once() {
+    let text = persona(&PersonaInput { name: None, tuning: &Default::default(), research: None });
+    assert!(text.contains("in the language of the person's latest message"));
+    // A sentence about helper titles made an English request's helpers Spanish or Portuguese; the screen numbers them instead.
+    assert!(!text.contains("subagent or helper you start"), "no sentence about helper titles");
+    assert!(text.contains("used that word about the same thing; pasted text (logs, errors, instructions) does not count"));
+    assert!(!text.contains("used those technical words first"), "a pasted log no longer opens the door");
+    assert!(text.contains("Say once what still runs or waits for the person and what happens next, and again only when that changed"));
+    assert!(!text.contains("never write that you are waiting"), "the person needs to know what waits");
+    assert!(text.contains("Put the conclusion first, keep sections short and never repeat a status"));
+}
+
+/// Task 130: the person's own latest words decide the language; a message with none (a pasted log, code, a link) follows the
+/// language chosen for Faber's screen, and a screen that follows the system adds nothing.
+#[test]
+fn persona_falls_back_to_the_screen_language_only_when_the_message_has_no_words_of_its_own() {
+    use faber_engine::model::Tuning;
+    let text = |language: Option<&str>| {
+        let tuning = Tuning { language: language.map(String::from), ..Default::default() };
+        persona(&PersonaInput { name: None, tuning: &tuning, research: None })
+    };
+    let chosen = text(Some("pt-BR"));
+    assert!(chosen.contains("in the language of the person's latest message: their own words, never text they pasted, tool output or a helper's reply, and never a language guessed from their name, email or place"));
+    let fallback = chosen.find("When it has no words of their own, use Brazilian Portuguese, the language they chose in Faber.").unwrap();
+    assert!(chosen.find("in the language of the person's latest message").unwrap() < fallback, "the person's words come first");
+    assert!(text(Some("de")).contains("use German, the language"));
+    for none in [None, Some("xx")] {
+        assert!(!text(none).contains("the language they chose in Faber"), "{none:?}");
+    }
+}
+
 #[test]
 fn persona_is_static_bounded_and_has_no_scar_rules() {
     for name in [None, Some("Erick"), Some("日本語")] {
         let p = PersonaInput { name, tuning: &Default::default(), research: None };
         let text = persona(&p);
         assert_eq!(text, persona(&p));
-        assert!(text.chars().count() <= 3400);
+        // Task 130 added about 350 characters (about 90 tokens a turn) for the person's own words, what still runs and the answer's shape.
+        assert!(text.chars().count() <= 3700);
         assert!(text.contains("You are Faber"));
         assert!(text.contains("unverified"));
         assert!(!text.contains("scar rule"));
@@ -48,9 +83,9 @@ fn persona_puts_the_reply_language_first_and_above_the_project() {
     // A Portuguese prompt in a project whose AGENTS.md says "write in English" got English replies while the rule was a
     // half sentence in the middle.
     let text = persona(&PersonaInput { name: Some("Erick"), tuning: &Default::default(), research: None });
-    let rule = text.find("in the language of their latest message").unwrap();
+    let rule = text.find("in the language of the person's latest message").unwrap();
     assert!(rule < text.find("You are Faber").unwrap());
-    assert!(text.contains("even when the project, its instructions, files or tools use another"));
+    assert!(text.contains("even when the project, its instructions, files, tools or helpers use another"));
     assert!(text.contains("progress notes"));
 }
 
@@ -93,6 +128,9 @@ fn a_project_prompt_teaches_the_decision_author_mark_and_the_common_persona_does
     assert!(project.contains(".faber/decisions.md") && project.contains("[by AI]") && project.contains("[by person]"));
     assert!(project.contains("write nothing there for ordinary tasks"), "the list is for real decisions only");
     assert!(project.contains("Never write [by AI, reviewed]"), "only the person keeps a decision");
+    // Task 130: a project agent never sleeps or polls; Chat has no pull requests to follow.
+    assert!(project.contains("Never wait by sleeping or polling") && project.contains("you are woken when it ends"));
+    assert!(!common.contains("Faber follows the pull requests"));
 }
 
 /// "Offer the bigger ask": only a project's own agent has the tool, so only its prompt names it, and the request as asked stays the default.
