@@ -7,8 +7,8 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import test from 'node:test';
 import { fileURLToPath } from 'node:url';
-import { covered, statusText, toCheck } from './ci-scope.mjs';
-import { areas, BATCH, conflicts, eligibleStack, insertions, message, noCheck, refusal, settle, stacked, stackOn, WORDS, workflow } from './land.mjs';
+import { covered, isWords, statusText, toCheck } from './ci-scope.mjs';
+import { BATCH, conflicts, eligibleStack, insertions, message, noCheck, refusal, settle, stacked, stackOn, WORDS, wordsOnly, workflow } from './land.mjs';
 
 test('the commit is the title with its number, then the body without the template comments', () => {
   const body = '## What changed\n\n<!-- One or two sentences. -->\nFragments.   \n\n\n\n## Cost\n\n<!-- Memory.\n     More. -->\nNone.\n';
@@ -119,22 +119,20 @@ test("CI's own run of land.mjs, copied alone, loads without the files beside it"
   }
 });
 
-test('the parts a change touches leave out the words, the locales and the docs every landing writes', () => {
-  assert.deepEqual([...areas(['engine/src/a.rs', 'engine/tests/b.rs', 'ui/Thread.tsx', 'ui/locales/en.ts', 'docs/next/x.json', 'AGENTS.md', 'Cargo.lock'])], ['engine', 'ui', 'Cargo.lock']);
+test('a workflow change is told apart from the files beside it', () => {
   assert.ok(workflow(['.github/workflows/ci.yml']) && !workflow(['.github/pull_request_template.md']));
 });
 
-test('a change is checked on top of the deepest queued batch that touches other parts, is not red and has room', () => {
+test('a change is checked on top of the deepest queued batch that is not red and has room, whatever parts it touches', () => {
   const q = (commit, files, depth, red = false) => ({ commit, files, depth, red });
   const queued = [q('a', ['engine/src/x.rs'], 1), q('b', ['engine/src/x.rs', 'ui/A.tsx'], 2), q('c', ['testkit/src/y.rs'], 1, true)];
   assert.equal(stackOn(queued, ['scripts/land.mjs'])?.commit, 'b', 'the deepest that fits');
-  assert.equal(stackOn(queued, ['ui/B.tsx'])?.commit, 'a', 'one that shares a part is passed over');
-  assert.equal(stackOn(queued, ['engine/src/z.rs', 'ui/B.tsx']), null, 'nothing fits: alone on the base');
+  assert.equal(stackOn(queued, ['engine/src/x.rs', 'ui/A.tsx'])?.commit, 'b', 'sharing its parts keeps nothing apart');
+  assert.equal(stackOn([q('a', ['ui/A.tsx'], BATCH), q('c', ['ui/A.tsx'], 1, true)], ['ui/B.tsx']), null, 'nothing fits: alone on the base');
   assert.equal(stackOn([q('d', ['ui/A.tsx'], 1, true)], ['engine/src/z.rs']), null, 'a red one is never built on');
   assert.equal(stackOn([q('e', ['ui/A.tsx'], BATCH)], ['engine/src/z.rs']), null, 'a full batch takes no more');
   assert.equal(stackOn([q('f', ['ui/A.tsx'], 1)], ['.github/workflows/ci.yml']), null, 'a workflow change lands from a PC, alone');
   assert.equal(stackOn([q('g', ['.github/workflows/ci.yml'], 1)], ['ui/B.tsx']), null, 'and nothing is built on one');
-  assert.equal(stackOn([q('h', ['docs/a.md', 'ui/locales/en.ts'], 1)], ['ui/locales/en.ts', 'engine/src/a.rs'])?.commit, 'h', 'shared words do not keep two apart');
 });
 
 test('an already ineligible deeper batch is skipped while an active shallower batch remains usable', () => {
@@ -172,4 +170,19 @@ test('a failed local proof names the suite and its exit status even when its out
   assert.equal(localProofFailure('ui', { status: null, signal: 'SIGTERM' }), 'Local ui proof failed (signal SIGTERM). Nothing was queued.');
   assert.equal(localProofFailure('screen', { code: 'ENOENT' }), 'Local screen proof failed (start error ENOENT). Nothing was queued.');
   assert.equal(localProofFailure('rust', {}), 'Local rust proof failed (no exit status). Nothing was queued.');
+});
+
+test('a green batch lands on a base moved by words only, and anything else sends it back to be checked again', () => {
+  const task = 'docs/tasks/030-a-task.md';
+  assert.equal(wordsOnly([task, 'docs/dev/workflow.md'], [task, 'docs/dev/workflow.md'], isWords), true);
+  // Code moved the base, or code differs from the tree checked: checked again.
+  assert.equal(wordsOnly([task, 'engine/src/engine.rs'], [task], isWords), false);
+  assert.equal(wordsOnly([task], [task, 'ui/App.tsx'], isWords), false);
+  // A page a test reads is code here, and a locale line moved by the numbering is too.
+  assert.equal(wordsOnly(['docs/product-map.md'], ['docs/product-map.md'], isWords), false);
+  assert.equal(wordsOnly([task], [task, 'ui/locales/en.ts'], isWords), false);
+  // Numbers taken on the base meanwhile could collide with the batch's own.
+  assert.equal(wordsOnly(['docs/decisions.md'], ['docs/decisions.md'], isWords), false);
+  assert.equal(wordsOnly(['docs/next/other-lane.json'], [], isWords), false);
+  assert.equal(wordsOnly([], [], isWords), false);
 });

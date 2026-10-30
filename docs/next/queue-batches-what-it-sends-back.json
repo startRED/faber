@@ -1,0 +1,5 @@
+{
+  "decisions": [
+    "| R-next | 2026-10-30 | The queue batches every pull request it can (R220 changed): one that touches the same parts as a queued one is squashed on top of it too, and one sent back because the base moved joins a batch on the new base instead of a run of its own. Side by side on one base, only the first to pass landed and every other went back for a whole new run, so on 2026-10-30 nine runs waited for runners to land one pull request. | AI (Erick delegated) |"
+  ]
+}
