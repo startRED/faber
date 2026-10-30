@@ -44,9 +44,10 @@ function workspace(name, run) {
     const answer = join(base, 'answer.md'); writeFileSync(answer, 'Completed.');
     const proof = () => {
       const started = Date.now();
-      // Above the sales proof's ten summarize runs at 5 s each (bench/proofs/sales.mjs): those bound a hang, this only a
-      // proof that never ends. At 15 s, ten Node starts on a loaded macOS runner met it (queue/pr-462, run 41071854644).
-      const result = spawnSync(process.execPath, [join(root, 'bench/proofs', `${name}.mjs`), folder, pristine, answer], { encoding: 'utf8', windowsHide: true, timeout: 60000 });
+      // Above the sales proof's ten summarize runs at 15 s each (bench/proofs/sales.mjs): those bound a hang, this only a
+      // proof that never ends. At 15 s, ten Node starts on a loaded macOS runner met it (queue/pr-462, run 41071854644),
+      // and at 5 s each, one start on a PC running three test builds met the inner limit.
+      const result = spawnSync(process.execPath, [join(root, 'bench/proofs', `${name}.mjs`), folder, pristine, answer], { encoding: 'utf8', windowsHide: true, timeout: 180000 });
       assert.equal(result.status, 0, result.signal ? `the proof was stopped by ${result.signal} after ${Date.now() - started} ms` : result.stderr);
       const parsed = JSON.parse(result.stdout);
       assert.ok(parsed.checks.length > 0);
@@ -110,8 +111,11 @@ test('sales proof rejects a hardcoded fixture answer on fresh input', () => work
 }));
 
 test('sales proof fails a summarize that hangs, within its own limits', () => workspace('sales', ({ folder, proof }) => {
-  writeFileSync(join(folder, 'summarize.mjs'), 'setTimeout(() => {}, 120000);');
-  assert.equal(proof(), false, 'each hanging run is stopped at 5 s and fails its check');
+  // It hangs on the invalid inputs only, so one run meets its 15 s limit, not every one.
+  complete('sales', folder);
+  writeFileSync(join(folder, 'summarize.mjs'), `if (process.argv[2].includes('invalid')) await new Promise(() => setTimeout(() => {}, 120000));
+${valid.sales[1]}`);
+  assert.equal(proof(), false, 'the hanging run is stopped and fails its check');
 }));
 
 test('invoice accepts a CommonJS regression test supported by node --test', () => workspace('invoice', ({ folder, proof }) => {

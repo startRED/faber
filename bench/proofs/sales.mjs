@@ -9,7 +9,7 @@ const check = (name, run) => {
   try { run(); checks.push({ name, ok: true }); }
   catch (error) { checks.push({ name, ok: false, detail: String(error.message).slice(0, 500) }); }
 };
-const summarize = path => spawnSync(process.execPath, [resolve(folder, 'summarize.mjs'), path], { cwd: folder, windowsHide: true, encoding: 'utf8', timeout: 5000 });
+const summarize = path => spawnSync(process.execPath, [resolve(folder, 'summarize.mjs'), path], { cwd: folder, windowsHide: true, encoding: 'utf8', timeout: 15000 });
 check('original CSV preserved and summarized', () => {
   const path = join(folder, 'sales.csv'), bytes = readFileSync(path);
   assert.deepEqual(bytes, readFileSync(join(pristine, 'sales.csv')));
