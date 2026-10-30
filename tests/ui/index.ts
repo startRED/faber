@@ -34,6 +34,7 @@ import './follow.check.ts';
 import './plumbing.check.ts';
 import './donecard.check.ts';
 import './foot.check.ts';
+import './livework.check.ts';
 import './checks.check.ts';
 import './changes.check.ts';
 import './project-memory.check.ts';
