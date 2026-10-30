@@ -3,7 +3,7 @@
 // the first such error into the report itself, so the failure names what broke. Loaded before the checks, so a failure
 // while the checks load is caught too.
 
-import { invoke } from '@tauri-apps/api/core';
+import { invoke } from '../../ui/shell.ts';
 import type { Result } from './check.ts';
 
 let reported = false;
@@ -33,7 +33,8 @@ export function progress(index: number, total: number, name: string): void {
 }
 
 export function crash(message: string): void {
-  report([{ name: 'page error', ok: false, message, ms: 0 }]);
+  // The check that was running names where the page broke.
+  report([{ name: 'page error', ok: false, message: note ? `${message} (during check ${note})` : message, ms: 0 }]);
 }
 
 if (new URLSearchParams(location.search).has('checks')) {

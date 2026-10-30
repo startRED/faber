@@ -9,6 +9,7 @@ import path from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { Sidecar } from './sidecar.ts';
 import { apply, type Picked, release } from './orders.ts';
+import * as testmode from './testmode.ts';
 
 const SCHEME = 'faber';
 const ORIGIN = `${SCHEME}://app`;
@@ -21,8 +22,8 @@ const HOST_STOP_MS = 5000;
 
 // Compiled into out/electron/, two folders below the repository.
 const root = path.resolve(import.meta.dirname, '..', '..');
-// The real folder, so a link inside it can never lead the screen's scheme outside.
-const dist = realpathSync(path.join(root, 'dist'));
+// The real folder, so a link inside it can never lead the screen's scheme outside. A test run serves its own build.
+const dist = realpathSync(testmode.screenFolder(path.join(root, 'dist')));
 const hidden = process.env.FABER_HIDDEN === '1';
 const autostart = process.argv.includes('--autostart');
 
@@ -32,13 +33,16 @@ app.enableSandbox();
 protocol.registerSchemesAsPrivileged([{ scheme: SCHEME, privileges: { standard: true, secure: true, supportFetchAPI: true } }]);
 
 // Features Faber does not use stay off; each one costs memory in every renderer.
-app.commandLine.appendSwitch('disable-features', 'SpareRendererForSitePerProcess,MediaRouter,Translate');
+app.commandLine.appendSwitch('disable-features', ['SpareRendererForSitePerProcess', 'MediaRouter', 'Translate', ...testmode.disabledFeatures].join(','));
 app.commandLine.appendSwitch('disable-spell-checking');
 // The screen fetches nothing from the network (its policy allows only its own scheme), so the network service runs
 // inside the main process instead of one of its own: about 10 MB private and 50 MB working set less, measured.
 app.commandLine.appendSwitch('enable-features', 'NetworkServiceInProcess2');
 // The GPU process is ended on purpose whenever the window closes (`releaseGpu`); that must not count as crashes.
 app.commandLine.appendSwitch('disable-gpu-process-crash-limit');
+
+// The screen test runner's switches, ignored by an installed Faber (testmode.ts).
+testmode.prepare();
 
 // A second Faber hands its arguments to the first and ends at once, before it starts a host of its own on the same data.
 if (!app.requestSingleInstanceLock()) app.exit(0);
@@ -130,6 +134,7 @@ function createWindow(): BrowserWindow {
     frame: process.platform === 'darwin',
     titleBarStyle: process.platform === 'darwin' ? 'hiddenInset' : undefined,
     backgroundColor: FRAME,
+    ...testmode.placement,
     webPreferences: {
       preload: path.join(import.meta.dirname, 'preload.cjs'),
       contextIsolation: true,
@@ -165,7 +170,13 @@ function createWindow(): BrowserWindow {
     releaseGpu();
     host?.call('quota_attention', { visible: false, focused: false }).catch(() => {});
   });
-  void window.loadURL(`${ORIGIN}/index.html`);
+  const load = () => window.loadURL(`${ORIGIN}/${testmode.startPage()}`);
+  if (testmode.testing) {
+    // A test run shows its window at once (offscreen, unfocused), as the Tauri test build does: a window never shown
+    // can be left unpainted by Chromium, and the screen would wait for its first frame.
+    window.showInactive();
+    void testmode.beforeLoad(window.webContents, root).then(load);
+  } else void load();
   return window;
 }
 
@@ -216,6 +227,7 @@ async function openLink({ url }: Record<string, unknown>): Promise<void> {
 
 /** Commands only a window can answer. The rest go to the host, whose command table is the list the screen may call. */
 const windowCommands = new Map<string, (args: Record<string, unknown>) => unknown>([
+  ...testmode.commands(() => win),
   [
     'screen_ready',
     () => {
@@ -273,8 +285,12 @@ app.on('before-quit', (event) => {
 
 void app.whenReady().then(() => {
   // The screen asks for nothing a browser grants: no camera, no notifications from the page, no geolocation, no devices.
-  session.defaultSession.setPermissionRequestHandler((_wc, _permission, callback) => callback(false));
-  session.defaultSession.setPermissionCheckHandler(() => false);
+  // The exceptions are the clipboard, which Copy and the right-click menu's Paste use (Tauri's window allowed it too).
+  const clipboard = (permission: string) => permission === 'clipboard-read' || permission === 'clipboard-sanitized-write';
+  session.defaultSession.setPermissionRequestHandler((wc, permission, callback, details) =>
+    callback(clipboard(permission) && wc === win?.webContents && details.requestingUrl.startsWith(`${ORIGIN}/`)),
+  );
+  session.defaultSession.setPermissionCheckHandler((wc, permission, origin) => clipboard(permission) && wc === win?.webContents && origin === ORIGIN);
   session.defaultSession.setDevicePermissionHandler(() => false);
   serveScreen();
   relay();

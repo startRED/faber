@@ -1,7 +1,7 @@
 //! Building the test app: the screen with Vite in test mode, then the shell with the Tauri CLI. Both are started as
 //! `node <script>`, never through `npm`, a `.cmd` shim or a shell. The production `dist/` is never touched.
 
-use crate::app::Paths;
+use crate::app::{Paths, Shell};
 use sha2::{Digest, Sha256};
 use std::io::{BufRead, BufReader, Read};
 use std::path::Path;
@@ -36,6 +36,21 @@ pub fn tauri_args(target_dir: &Path, jobs: usize) -> Vec<String> {
     args.push(target_dir.to_string_lossy().into_owned());
     args.extend(["-j".to_string(), jobs.to_string()]);
     args
+}
+
+/// The arguments of the build of the Electron shell's own code: the TypeScript compiler on `electron/`, into `out/electron/`.
+pub fn electron_args() -> Vec<String> {
+    ["node_modules/typescript/bin/tsc", "-p", "electron"].map(String::from).to_vec()
+}
+
+/// The arguments of the build of the Rust host the Electron shell starts, with the host's test hooks (the commands the
+/// screen's checks report through) switched on from here. It builds into the same target folder as the Tauri build would.
+pub fn sidecar_args(target_dir: &Path, jobs: usize) -> Vec<String> {
+    ["build", "--package", "faber-sidecar", "--features", "faber-host/test-hooks", "--target-dir"]
+        .map(String::from)
+        .into_iter()
+        .chain([target_dir.to_string_lossy().into_owned(), "-j".to_string(), jobs.to_string()])
+        .collect()
 }
 
 /// A fingerprint of a folder: every file's relative path, size and modification time. `absent` when it does not exist.
@@ -261,6 +276,9 @@ pub fn built_programs(paths: &Paths) -> Vec<std::path::PathBuf> {
     let suffix = std::env::consts::EXE_SUFFIX;
     let debug = paths.fake_cli.parent().map(Path::to_path_buf).unwrap_or_default();
     let mut list = vec![paths.app.clone(), paths.fake_cli.clone(), debug.join(format!("faber-test{suffix}"))];
+    if Shell::chosen() == Shell::Electron {
+        list.extend([paths.sidecar(), paths.root.join("out/electron/main.js")]);
+    }
     if cfg!(windows) {
         list.push(debug.join(format!("examples/cache_probe{suffix}")));
     }
@@ -291,16 +309,32 @@ pub fn build_for_run(paths: &Paths, jobs: usize) -> Result<(), String> {
     build_shell(paths, jobs, &production, &before)
 }
 
-/// The Tauri build of the shell, which embeds the test screen Vite left in `dist-test`.
+/// The build of the shell. Tauri's embeds the test screen Vite left in `dist-test`; Electron's is its compiled code and the
+/// Rust host beside it, and serves `dist-test` from the folder (`FABER_TEST_DIST`).
 fn build_shell(paths: &Paths, jobs: usize, production: &Path, before: &str) -> Result<(), String> {
-    let mut tauri = build_priority(without_run_env(Command::new("node")));
-    tauri.current_dir(&paths.root).args(tauri_args(&paths.target, jobs));
-    run("Tauri build", tauri)?;
+    match Shell::chosen() {
+        Shell::Tauri => {
+            let mut tauri = build_priority(without_run_env(Command::new("node")));
+            tauri.current_dir(&paths.root).args(tauri_args(&paths.target, jobs));
+            run("Tauri build", tauri)?;
+        }
+        Shell::Electron => {
+            let mut tsc = build_priority(without_run_env(Command::new("node")));
+            tsc.current_dir(&paths.root).args(electron_args());
+            run("Electron shell build", tsc)?;
+            let mut host = cargo_command();
+            host.current_dir(&paths.root).args(sidecar_args(&paths.target, jobs));
+            run("host build", host)?;
+        }
+    }
     if fingerprint(production) != before {
         return Err("the test build changed dist/, which only the production build may write".into());
     }
     if !paths.app.exists() {
         return Err(format!("the test build did not produce {}", paths.app.display()));
+    }
+    if Shell::chosen() == Shell::Electron && !paths.sidecar().exists() {
+        return Err(format!("the test build did not produce {}", paths.sidecar().display()));
     }
     Ok(())
 }
@@ -423,6 +457,14 @@ mod tests {
         assert_eq!(before_cargo[at("--config") + 1], "src-tauri/tauri.test.conf.json");
         let cargo_args = &args[args.iter().position(|a| a == "--").unwrap() + 1..];
         assert_eq!(cargo_args, ["--target-dir", "/work/target/faber-test", "-j", "4"]);
+    }
+
+    #[test]
+    fn the_electron_shell_builds_its_code_and_a_host_with_the_test_hooks_into_the_runs_own_folder() {
+        assert_eq!(electron_args(), ["node_modules/typescript/bin/tsc", "-p", "electron"], "node runs the compiler's own script");
+        let args = sidecar_args(Path::new("/work/target/faber-test"), 4);
+        assert_eq!(args[..5], ["build", "--package", "faber-sidecar", "--features", "faber-host/test-hooks"]);
+        assert_eq!(args[5..], ["--target-dir", "/work/target/faber-test", "-j", "4"]);
     }
 
     #[test]
