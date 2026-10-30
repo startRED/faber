@@ -2,7 +2,6 @@
 // Everything here is behind `app.isPackaged`: an installed Faber ignores every one of these variables, so no test switch
 // can reach a person's copy.
 //
-// - `FABER_DATA_DIR` with `FABER_HIDDEN=1`: the browser profile lives inside the run's own data folder.
 // - `FABER_CDP_PORT`: the DevTools port the runner drives the page through.
 // - `FABER_SOFTWARE_RENDERING=1`: no GPU, for the motion benchmark.
 // - `FABER_TEST_DIST`: the folder to serve in place of `dist/` (the Vite build in test mode).
@@ -20,9 +19,6 @@ const checksOut = env('FABER_CHECKS_OUT');
 
 /** Called before the app is ready, when Chromium still takes switches and paths. */
 export function prepare(): void {
-  const data = env('FABER_DATA_DIR');
-  // A hidden run never touches a real profile: its cookies, caches and crash dumps stay in the run's folder.
-  if (testing && data) app.setPath('userData', path.join(data, 'webview'));
   const port = env('FABER_CDP_PORT');
   if (port) app.commandLine.appendSwitch('remote-debugging-port', port);
   if (testing && env('FABER_SOFTWARE_RENDERING') === '1') app.disableHardwareAcceleration();
