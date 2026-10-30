@@ -38,7 +38,7 @@ async fn faber_s_own_table_answers_with_the_screen_s_names_and_keeps_its_refusal
         ask: None,
     };
     let engine = Engine::new(opts, wiring.emitter()).unwrap();
-    let host = Arc::new(wiring.host(engine));
+    let host = Arc::new(wiring.host(engine, data.path().into(), true, tokio::runtime::Handle::current()));
 
     let person = client(&host, 0).await;
     let answer = person.offer["commands"].as_array().unwrap().iter().find(|c| c["name"] == "answer").unwrap().clone();
