@@ -569,20 +569,21 @@ export function SitePane(props: { site: OpenSite; onClose: () => void; wide?: bo
   const blank = () => !props.site.url;
   const title = () => (blank() ? t('site.browser') : moved() ? hostOf(live()) : props.site.title || hostOf(props.site.url));
   // The address field shows where the page is until the person types; Enter loads what they typed, Esc puts it back.
+  // The conversation is kept as a plain value: a pane that goes reads no more of its closed `<Show>`'s props.
+  let mine = props.site.conversationId;
+  const owner = () => mine;
   const typed = () => drafts()[props.site.conversationId];
   const setTyped = (text?: string) =>
     setDrafts((all) => {
-      const id = props.site.conversationId;
-      if (all[id] === text) return all;
+      if (all[mine] === text) return all;
       const next = { ...all };
-      if (text === undefined) delete next[id];
-      else next[id] = text;
+      if (text === undefined) delete next[mine];
+      else next[mine] = text;
       return next;
     });
   const [focused, setFocused] = createSignal(false);
-  const owner = () => props.site.conversationId;
   panes.add(owner);
-  createEffect(on(owner, sweep, { defer: true }));
+  createEffect(on(() => props.site.conversationId, (now) => ((mine = now), sweep()), { defer: true }));
   // The other place's pane goes in the same update, before or after this one comes: both have run by the next microtask.
   onMount(() =>
     queueMicrotask(() => {
