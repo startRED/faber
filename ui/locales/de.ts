@@ -2195,6 +2195,7 @@ export const de: Messages = {
   'notes.285.fixed': 'Beim Wechsel zwischen Versionen einer visuellen Antwort wächst der Browserverlauf nicht mehr mit jedem Wechsel.',
   'notes.286.fixed': 'Unter Windows lehnt Faber ungültige oder umgeleitete Datenordner ab, bevor es Daten speichert.',
   'notes.287.fixed': 'Lange Unterhaltungen hängen nicht mehr, während Helfer arbeiten.',
+  'notes.288.fixed': 'Eine KI, bei der du angemeldet bist, zeigt in den Einstellungen jetzt auch auf einem ausgelasteten PC Verbunden statt „Prüfung nicht möglich“.',
   'update.checking': 'Suche nach einem Update…',
   'update.downloading': 'Update wird heruntergeladen…',
   'update.downloadingPercent': 'Update wird heruntergeladen… {percent} %',

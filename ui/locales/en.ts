@@ -2075,6 +2075,7 @@ export const en = {
   'notes.285.fixed': 'Switching a visual answer’s versions no longer adds a browser history entry for every switch.',
   'notes.286.fixed': 'Faber refuses invalid or redirected Windows data folders before saving data.',
   'notes.287.fixed': 'Long conversations no longer stall while helpers work.',
+  'notes.288.fixed': 'An AI you are signed in to now shows Connected in Settings even on a busy PC, instead of "Could not check".',
   'update.checking': 'Looking for an update…',
   'update.downloading': 'Downloading update…',
   'update.downloadingPercent': 'Downloading update… {percent}%',

@@ -2182,6 +2182,7 @@ export const ptBR: Messages = {
   'notes.285.fixed': 'Trocar a versão de uma resposta visual não acumula mais entradas no histórico do navegador.',
   'notes.286.fixed': 'O Faber recusa pastas de dados inválidas ou redirecionadas no Windows antes de salvar dados.',
   'notes.287.fixed': 'Conversas longas não travam mais enquanto os ajudantes trabalham.',
+  'notes.288.fixed': 'Uma IA em que você entrou agora aparece como Ligada nas Configurações mesmo com o PC ocupado, em vez de "Não deu para verificar".',
   'update.checking': 'Procurando atualização…',
   'update.downloading': 'Baixando atualização…',
   'update.downloadingPercent': 'Baixando atualização… {percent}%',

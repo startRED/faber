@@ -2195,6 +2195,7 @@ export const es: Messages = {
   'notes.285.fixed': 'Cambiar de versión en una respuesta visual ya no acumula entradas en el historial del navegador.',
   'notes.286.fixed': 'Faber rechaza las carpetas de datos inválidas o redirigidas en Windows antes de guardar datos.',
   'notes.287.fixed': 'Las conversaciones largas ya no se quedan bloqueadas mientras trabajan los ayudantes.',
+  'notes.288.fixed': 'Una IA en la que iniciaste sesión ahora aparece como Conectada en Ajustes aunque el PC esté ocupado, en lugar de "No se pudo comprobar".',
   'update.checking': 'Buscando una actualización…',
   'update.downloading': 'Descargando actualización…',
   'update.downloadingPercent': 'Descargando actualización… {percent} %',

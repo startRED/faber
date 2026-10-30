@@ -13,6 +13,10 @@ use tauri::{AppHandle, Emitter, State};
 
 type Res<T> = Result<T, String>;
 
+/// How long the sign-in check may take. The status commands run at idle priority, so a busy PC slows them: Codex's
+/// took 5.2 s on the maintainer's PC (2026-10-29), and the old 5 s limit read a signed-in account as unsure.
+const SIGN_IN_TIMEOUT: Duration = Duration::from_secs(20);
+
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct CheckResult {
@@ -91,12 +95,13 @@ pub async fn setup_check(app: AppHandle, faber: State<'_, Faber>, vendor: String
     let clis = detect_clis();
     let installed = clis.contains_key(&v);
     faber.engine.replace_clis(clis.clone());
-    let account = if installed { faber.engine.account_status(v, Duration::from_secs(5)).await } else { AccountStatus::Unknown };
+    let account = if installed { faber.engine.account_status(v, SIGN_IN_TIMEOUT).await } else { AccountStatus::Unknown };
 
     if account == AccountStatus::SignedIn {
         let updated = detect_clis();
         faber.engine.replace_clis(updated.clone());
         if faber.engine.ledger().of(v).billing == faber_engine::budget::Billing::Unknown {
+            // Short on purpose: the screen waits on this answer to show Connected, and a plan missed here is read again later.
             faber.engine.check_plans(Duration::from_secs(5)).await;
         }
         // The guide and the tutorial check again on every focus and step; the models are asked for only while Faber has none.
@@ -225,6 +230,12 @@ fn run_on_thread<T: Send + 'static>(job: impl std::future::Future<Output = std::
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_sign_in_check_outlasts_a_slow_status_command() {
+        // Codex's status took 5.2 s at idle priority on a real PC; the check must not give up before a busy one answers.
+        assert!(SIGN_IN_TIMEOUT >= Duration::from_secs(15));
+    }
 
     #[test]
     fn c3_1_login_uses_official_args_in_user_dir_and_refuses_shell_characters() {

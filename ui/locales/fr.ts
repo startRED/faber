@@ -2195,6 +2195,7 @@ export const fr: Messages = {
   'notes.285.fixed': 'Changer de version d’une réponse visuelle n’ajoute plus une entrée à chaque fois dans l’historique du navigateur.',
   'notes.286.fixed': 'Sous Windows, Faber refuse les dossiers de données invalides ou redirigés avant d’enregistrer des données.',
   'notes.287.fixed': 'Les longues conversations ne se bloquent plus pendant le travail des assistants.',
+  'notes.288.fixed': 'Une IA à laquelle vous êtes connecté s’affiche maintenant Connecté dans les réglages, même sur un PC occupé, au lieu de « Vérification impossible ».',
   'update.checking': 'Recherche d’une mise à jour…',
   'update.downloading': 'Téléchargement de la mise à jour…',
   'update.downloadingPercent': 'Téléchargement de la mise à jour… {percent} %',
