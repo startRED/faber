@@ -88,7 +88,7 @@ impl Kind {
 
     fn about(self) -> &'static str {
         match self {
-            Kind::Command => "commands the screen may call (Tauri)",
+            Kind::Command => "commands the screen may call",
             Kind::Setting => "fields of the stored settings",
             Kind::Text => "text keys of the English locale",
             Kind::Stored => "keys kept in browser storage",
@@ -282,6 +282,9 @@ fn rust(text: &str, push: &mut impl FnMut(Kind, String, usize)) {
         if let Some(at) = line.find("generate_handler![") {
             commands(&lines, i, at + "generate_handler![".len(), push);
         }
+        if line.starts_with("table! {") {
+            table(&lines, i, push);
+        }
     }
 }
 
@@ -337,6 +340,29 @@ fn commands(lines: &[&str], at: usize, start: usize, push: &mut impl FnMut(Kind,
         }
         if last {
             return;
+        }
+    }
+}
+
+/// The commands in the host's `table! { ... }` (`host/src/lib.rs`), one per `<Kind> fn name(` line, until the block's
+/// closing brace at the start of a line. One behind a test-only `#[cfg(...)]` is left out.
+fn table(lines: &[&str], at: usize, push: &mut impl FnMut(Kind, String, usize)) {
+    let mut test_only = false;
+    for (i, line) in lines.iter().enumerate().skip(at + 1) {
+        if line.starts_with('}') {
+            return;
+        }
+        let trimmed = line.trim();
+        if trimmed.starts_with("#[cfg(") {
+            test_only = trimmed.contains("test") && !trimmed.contains("not(");
+            continue;
+        }
+        let mut words = trimmed.splitn(3, ' ');
+        if let (Some("Read" | "Write" | "StartsTurn" | "Window"), Some("fn"), Some(rest)) = (words.next(), words.next(), words.next()) {
+            let name = ident(rest);
+            if !std::mem::take(&mut test_only) && !name.is_empty() {
+                push(Kind::Command, name.to_string(), i + 1);
+            }
         }
     }
 }
@@ -537,6 +563,8 @@ mod tests {
         assert_eq!((open.file.as_str(), open.line), ("src/main.rs", 8));
         let one_line = scan(tree(&[("lib.rs", "x(generate_handler![a, b::c]);\n")]).path());
         assert_eq!(names(&one_line, Kind::Command), ["a", "c"]);
+        let host = "table! {\n    /// Opens one.\n    Read fn open(h, id: String) -> X {\n        a()\n    }\n    #[cfg(feature = \"test-hooks\")]\n    Write fn probe(h) -> () {}\n    StartsTurn fn send(h, text: String) -> () {}\n}\nfn after() {}\n";
+        assert_eq!(names(&scan(tree(&[("lib.rs", host)]).path()), Kind::Command), ["open", "send"]);
     }
 
     #[test]
@@ -597,7 +625,7 @@ mod tests {
         let items = scan(dir.path());
         let (ok, index) = answer(&items, &json!({}));
         assert!(ok);
-        assert!(index.contains("- command (2): commands the screen may call (Tauri), in src/main.rs"), "{index}");
+        assert!(index.contains("- command (2): commands the screen may call, in src/main.rs"), "{index}");
         assert!(index.contains("- text (1)") && index.contains("- export (2)"), "{index}");
         assert!(!index.contains("setting"), "a kind with nothing is left out: {index}");
         let (_, found) = answer(&items, &json!({"kind": "command", "query": "OPEN"}));
