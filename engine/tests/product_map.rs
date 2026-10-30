@@ -43,8 +43,38 @@ fn settings_keys() -> Vec<String> {
     serde_json::to_value(every).unwrap().as_object().unwrap().keys().cloned().collect()
 }
 
-/// The commands the screen may call, from `generate_handler!` in the shell; test-only commands are left out.
+/// The commands the screen may call, from `generate_handler!` in the shell and the host's `table!`; test-only commands
+/// are left out.
 fn commands() -> Vec<String> {
+    let mut names = shell_commands();
+    names.extend(host_commands());
+    names
+}
+
+/// The host's `table! { ... }` in `host/src/lib.rs`: one `<Kind> fn name(` line per command.
+fn host_commands() -> Vec<String> {
+    let lib = read("host/src/lib.rs");
+    let table = lib.split("\ntable! {\n").nth(1).expect("table! in host/src/lib.rs");
+    let table = table.split("\n}\n").next().unwrap_or_default();
+    let mut names = Vec::new();
+    let mut test_only = false;
+    for line in table.lines().map(str::trim) {
+        if line.starts_with("#[cfg(") {
+            test_only = line.contains(r#"feature = "test-hooks""#) && !line.contains("not(");
+            continue;
+        }
+        let mut words = line.splitn(3, ' ');
+        if let (Some("Read" | "Write" | "StartsTurn" | "Window"), Some("fn"), Some(rest)) = (words.next(), words.next(), words.next()) {
+            let name: String = rest.chars().take_while(|c| c.is_ascii_alphanumeric() || *c == '_').collect();
+            if !std::mem::take(&mut test_only) {
+                names.push(name);
+            }
+        }
+    }
+    names
+}
+
+fn shell_commands() -> Vec<String> {
     let main = read("src-tauri/src/main.rs");
     let list = main.split("generate_handler![").nth(1).expect("generate_handler! in src-tauri/src/main.rs");
     let mut names = Vec::new();
@@ -120,7 +150,10 @@ fn the_product_map_names_every_setting_screen_command_and_stored_key() {
     let map = read("docs/product-map.md");
     let (files, keys) = screen_files_and_keys();
     let commands = commands();
-    assert!(commands.len() > 10 && commands.contains(&"setup_check".to_string()), "command list not found: {commands:?}");
+    assert!(
+        commands.len() > 10 && ["setup_check", "open"].iter().all(|c| commands.contains(&c.to_string())),
+        "command list not found: {commands:?}"
+    );
     let settings = settings_keys();
     let mut problems = Vec::new();
     if keys.iter().any(|key| key == "faber.") {
@@ -162,7 +195,7 @@ fn the_project_map_read_from_faber_s_code_finds_what_the_product_map_is_checked_
     };
     let set = |names: Vec<String>| names.into_iter().collect::<BTreeSet<String>>();
     let (files, keys) = screen_files_and_keys();
-    assert_eq!(of(Kind::Command, &|f| f == "src-tauri/src/main.rs"), set(commands()));
+    assert_eq!(of(Kind::Command, &|f| f == "src-tauri/src/main.rs" || f == "host/src/lib.rs"), set(commands()));
     assert_eq!(of(Kind::Setting, &|f| f.starts_with("engine/")), set(settings_keys()));
     assert_eq!(of(Kind::Screen, &|f| f.starts_with("ui/") && !f[3..].contains('/')), set(files));
     assert_eq!(of(Kind::Stored, &|f| f.starts_with("ui/")), set(keys));
