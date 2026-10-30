@@ -2124,6 +2124,7 @@ export const en = {
   'notes.311.better': "The quota lines in the sidebar now name each AI and say how much is used, and the ring at the top says it measures the conversation's context.",
   'notes.312.better': 'An answer cut off because Faber closed now says so, and you can press Continue to have the AI pick up where it stopped.',
   'notes.313.fixed': 'A pull request whose checks went green is still watched until it is merged, so a later failure still reaches the agent.',
+  'notes.314.better': 'The plan shows which conversation works on each step and whether it waits for you, and opens it with a click.',
   'update.checking': 'Looking for an update…',
   'update.downloading': 'Downloading update…',
   'update.downloadingPercent': 'Downloading update… {percent}%',

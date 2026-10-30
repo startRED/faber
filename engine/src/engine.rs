@@ -1017,7 +1017,8 @@ impl Engine {
         self.with(|core| {
             let opened = core.opened(id)?;
             core.shown(id);
-            Some(opened.for_screen())
+            let plan = core.shown_plan(id);
+            Some(Conversation { plan, ..opened.for_screen() })
         })
     }
     pub fn visual_answers_for_screen(&self, id: &str, message_id: Option<&str>, block: Option<usize>) -> Vec<crate::visual::VisualAnswer> {
@@ -3811,8 +3812,11 @@ impl Core {
             return;
         }
         self.mark_ended(&items);
+        // A conversation that started, ended or now waits for the person moves a step of the plan that names it.
+        let moved: HashSet<String> = self.running.items.iter().chain(&items).map(|i| i.conversation_id.clone()).collect();
         self.running = Running { revision: self.running.revision + 1, items: items.clone() };
         (self.emit)(AppEvent::Running { revision: self.running.revision, items });
+        self.plans_naming(&moved);
     }
 
     /// Ends a reply that never got a CLI: it shows the error and leaves the running list.

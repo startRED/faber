@@ -32,7 +32,8 @@ const PLAN_DESCRIPTION: &str = "Shows the person your plan for this request as a
 across turns. Send the whole list (at most 12 short imperative steps, each pending, in_progress or done, exactly one in_progress \
 while you work) with the first tool call of a task that has more than one step, in the same message, never in a message of its \
 own. Then send {\"advance\": true} together with the call that starts the next step: it finishes the current step and starts the \
-next pending one. Send the whole list again when the plan changes. Never repeat the plan as a list in your text. For big \
+next pending one. Send the whole list again when the plan changes. Never repeat the plan as a list in your text. When a \
+conversation you started does a step, give that step its id in conversation, so the person can open it from the plan. For big \
 work, also send estimate: what the whole job will cost in US dollars at API price, your honest guess; Faber then counts the \
 spend and, when the job has cost half as much again, tells you to keep to the plan and use cheaper helpers.";
 
@@ -60,7 +61,8 @@ fn plan_schema() -> Value {
                     "type": "object",
                     "properties": {
                         "text": { "type": "string", "description": "A short imperative step." },
-                        "state": { "type": "string", "enum": ["pending", "in_progress", "done"] }
+                        "state": { "type": "string", "enum": ["pending", "in_progress", "done"] },
+                        "conversation": { "type": "string", "description": "The id of the conversation you started that does this step, so the person can open it." }
                     },
                     "required": ["text", "state"],
                     "additionalProperties": false
@@ -152,6 +154,9 @@ fn text_of(v: &Value, most: usize) -> Option<String> {
     v.as_str().map(|t| line(t, most)).filter(|t| !t.is_empty())
 }
 
+/// The longest conversation id a step may name; Faber's ids are far shorter.
+const ID_CHARS: usize = 64;
+
 /// The most an estimate may say, in US dollars: above it the number is a mistake, not a job.
 const MAX_ESTIMATE_USD: f64 = 10_000.0;
 
@@ -200,7 +205,8 @@ pub fn plan(before: Option<&Plan>, input: &Value, at: u64) -> Result<Option<Plan
                         }
                         _ => StepState::Pending,
                     };
-                    Some(PlanStep { text, state })
+                    let conversation = text_of(&s["conversation"], ID_CHARS);
+                    Some(PlanStep { text, state, conversation, member: None })
                 })
                 .take(MAX_STEPS)
                 .collect();

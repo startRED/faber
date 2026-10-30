@@ -9,7 +9,7 @@ and the running column are in [layout.md](layout.md); helper rows, memory waits 
 - Native visual pieces, HTML/SVG cards and their web-access rules are in [visual-answers.md](visual-answers.md).
 - The header is the vendor's mark, the model's name and its effort in the quiet header ink ("· high effort"; the owner,
   2026-10-17), nothing else (Auto shows its reason beside the name only while choosing). Auto's reason is its
-  tooltip. The pace line stays (C002); it also says, in the same calm words, when Auto started one rung up because the person often retries that kind of task ("Auto chose a stronger model here because you often retry this kind of task"), only when that changed the pick. A wait for quota is told once,
+  tooltip. The pace line stays (C002); it also says, in the same calm words, when Auto started one rung up because the person often retries that kind of task, only when that changed the pick. A wait for quota is told once,
   by the quota card, never also in the header or the red note.
 - Under the answer, one line that never wraps, at a 760 px column or a 720 px window: four icon buttons from
   `ui/Glyphs.tsx` (copy, read aloud, retry, open in terminal, each with a tooltip and an accessible name), a short
@@ -54,8 +54,9 @@ and the running column are in [layout.md](layout.md); helper rows, memory waits 
 - A project agent's plan (R248) sits under the newest reply, above its files, while the agent works and until every step
   is done: a quiet head "Plan · 2 of 5" in the small size, then one line per step, a small square mark before it: a check
   and the third ink when done, an accent ring and the full ink on the current one (`aria-current`), plain when still to
-  do; each state is said to a screen reader. What the agent says it is doing now (its `status`, 3 to 6 words) takes the
-  place of the newest step's words under the reply while it works, and an active step shows its current action or thinking line under the steps when it adds to the line above. When the agent gave an estimate and the job went half over it (rule 7), one quiet line in the third ink and the small size closes the block, under the steps: no number, no icon, no colour, it wraps at 720 px. A reply the agent closed with `wrap_up` ends, above
+  do; each state is said to a screen reader. A step another conversation does shows that conversation's title under it as a
+  quiet link to open it, then its state in helper-row words (amber when waiting for you). What the agent says it is doing now (its `status`, 3 to 6 words) takes the
+  place of the newest step's words under the reply while it works, and an active step shows its current action or thinking under the steps when it adds to the line above. Past half over its estimate (rule 7), one quiet line in the third ink and the small size closes the block: no number, icon or colour. A reply the agent closed with `wrap_up` ends, above
   the actions row, with one box on a hairline: the recap, then at most one question in the semibold weight and its one
   or two replies as buttons, the recommendation the primary one. Only the newest reply, once it is done, offers the
   buttons; a click sends the button's words as the person's message. A question Faber answered while Keep going ran
