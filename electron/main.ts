@@ -8,7 +8,7 @@ import { readFileSync, realpathSync, statSync } from 'node:fs';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { Sidecar } from './sidecar.ts';
-import { apply, release } from './orders.ts';
+import { apply, type Picked, release } from './orders.ts';
 
 const SCHEME = 'faber';
 const ORIGIN = `${SCHEME}://app`;
@@ -269,7 +269,13 @@ void app.whenReady().then(() => {
   session.defaultSession.setDevicePermissionHandler(() => false);
   serveScreen();
   relay();
-  const window = { focused: () => win?.isFocused() ?? false, show, hidden };
+  const window = {
+    focused: () => win?.isFocused() ?? false,
+    show,
+    parent: () => win,
+    answer: (picked: Picked) => host?.note(picked),
+    hidden,
+  };
   host = Sidecar.start({
     event: (event) => {
       // The host dropped events this screen never heard (it fell too far behind): the screen starts over from a fresh

@@ -95,7 +95,7 @@ export class Sidecar {
   }
 
   /** Tells the host what only the app sees (`ShellNote` in `host/src/wire.rs`); it answers nothing. */
-  note(note: { kind: 'focus'; focused: boolean }): void {
+  note(note: { kind: 'focus'; focused: boolean } | { kind: 'picked'; id: number; path: string | null; noWindow: boolean }): void {
     if (this.alive && !this.child.stdin.writableEnded) this.child.stdin.write(`${JSON.stringify({ shell: note })}\n`);
   }
 
