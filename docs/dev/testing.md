@@ -79,8 +79,8 @@ file that is not words runs the lints. A push is compared with the commit before
 cannot tell runs everything (R165). A queue commit whose very tree carries the PC's green `faber/verify` leaves out
 the suites it covers, which `land.mjs` ran on this PC before queueing ([workflow](workflow.md#merge-on-green), R190 V2).
 Every suite still runs once a day on `main`, and on a commit before it becomes
-stable (`promote-stable.yml` starts the run and waits for it). The lints and the `rust` suite run on Windows and on macOS
-(macOS adds the `ui` suite to its lints). One Windows job builds the test app once (`cargo t --build-only`, the fake
+stable (`promote-stable.yml` starts the run and waits for it). The lints run on Windows and macOS; macOS's `rust` and `ui`
+suites run only nightly and before stable, and a red night opens a `nightly` issue (R468). One Windows job builds the test app once (`cargo t --build-only`, the fake
 CLI and the cache example at the same time in Cargo's own folder) and hands its programs (`built_programs` in
 `testkit/src/testbuild.rs`) to a `ui` part and eight `screen` parts, which build nothing
 (`--suite screen --shard 2/8 --prebuilt`) and use the Rust the runner image has. On CI the runner uses every core; on a

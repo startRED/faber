@@ -63,6 +63,12 @@ jobs:
           LIGHT: >-
             ${{ github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository &&
             github.event.pull_request.user.login != 'dependabot[bot]' }}
+          # macOS runs its ui and rust suites only in the nightly run and in a full run started by hand (promote-stable.yml);
+          # elsewhere it runs the lints alone, so the code still builds there and a macOS-only failure never holds the queue
+          # (R468). A queue branch the land job starts again by hand stays a queue run.
+          MAC: >-
+            ${{ github.event_name == 'schedule' ||
+            (github.event_name == 'workflow_dispatch' && !startsWith(github.ref, 'refs/heads/queue/')) }}
         shell: bash
         run: |
           set -uo pipefail
@@ -125,11 +131,12 @@ jobs:
           if [ "$lints" = true ]; then
             entries+=('{"os":"windows-latest","part":"lints","cache":"lints"}')
             # macOS has no screen suite; its job runs the ui suite next to the lints, so the test app is built there too.
-            if [ "$ui" = true ]; then part='lints ui'; else part=lints; fi
+            if [ "$ui" = true ] && [ "$MAC" = true ]; then part='lints ui'; else part=lints; fi
             entries+=("{\"os\":\"macos-latest\",\"part\":\"$part\",\"cache\":\"lints-ui\"}")
           fi
           if [ "$rust" = true ]; then
-            entries+=('{"os":"windows-latest","part":"rust","cache":"rust"}' '{"os":"macos-latest","part":"rust","cache":"rust"}')
+            entries+=('{"os":"windows-latest","part":"rust","cache":"rust"}')
+            if [ "$MAC" = true ]; then entries+=('{"os":"macos-latest","part":"rust","cache":"rust"}'); fi
           fi
           app=false
           if [ "$ui" = true ] || [ "$screen" = true ]; then app=true; fi
@@ -148,7 +155,7 @@ jobs:
             echo "parts=$(IFS=,; echo "[${parts[*]}]")"; echo "tested=$tested"; echo "warm=$warm"
           } >> "$GITHUB_OUTPUT"
 
-  # The lints and the Rust suite, each its own job, on Windows and macOS (R129, R163).
+  # The lints and the Rust suite, each its own job, on Windows and macOS (R129, R163); macOS's suites only at night (R468).
   check:
     needs: changes
     if: needs.changes.outputs.check == 'true'
@@ -555,3 +562,26 @@ jobs:
           gh api "repos/$GITHUB_REPOSITORY/statuses/$oid" -f state=failure -f context=queue -f target_url="$RUN" \
             -f description="Queued, but $FAILED. Fix, push, then: node scripts/land.mjs $pr"
           gh pr comment "$pr" --body "Queued as \`$GITHUB_SHA\`, but $FAILED: $RUN. Push the fix, then queue it again with \`node scripts/land.mjs $pr\`."
+
+  # The nightly run is the only one that runs macOS's suites (R468), and nobody waits on it, so a red one keeps one
+  # issue open, labelled `nightly`, with a comment per failed night; the fix closes it. It never blocks the queue.
+  nightly:
+    needs: gate
+    if: always() && github.event_name == 'schedule' && needs.gate.result == 'failure'
+    runs-on: ubuntu-latest
+    permissions:
+      issues: write
+    steps:
+      - env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
+          RUN: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          set -euo pipefail
+          gh label create nightly --color B60205 --description 'The nightly run (macOS suites included) failed' 2>/dev/null || true
+          open=$(gh issue list --label nightly --state open --limit 1 --json number --jq '.[0].number // empty')
+          if [ -n "$open" ]; then
+            gh issue comment "$open" --body "Failed again on \`$GITHUB_SHA\`: $RUN"
+          else
+            gh issue create --label nightly --title 'The nightly run failed' --body "The nightly run of \`main\` (every suite, macOS included) failed on \`$GITHUB_SHA\`: $RUN. Fix it with a queued commit that closes this issue."
+          fi
