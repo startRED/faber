@@ -2093,6 +2093,7 @@ export const en = {
   'notes.291.fixed': 'Answers now say once what is still running and what comes next, and a log you paste no longer fills them with technical words.',
   'notes.292.better': 'The “Running now” column waits until you finish clicking before opening automatically.',
   'notes.293.fixed': "On Windows, private chat files move outside Faber's data folder and stay available after reopening.",
+  'notes.294.fixed': 'On a Mac, a page or drawing in a reply that runs offline now finishes opening, even when it asks for a script from the web.',
   'update.checking': 'Looking for an update…',
   'update.downloading': 'Downloading update…',
   'update.downloadingPercent': 'Downloading update… {percent}%',

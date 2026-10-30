@@ -36,22 +36,39 @@ const settle = () => new Promise((resolve) => setTimeout(resolve, 30));
 function loadedVisual(host: HTMLElement) {
   const probe = crypto.randomUUID();
   let url: string | undefined;
+  // What reached the screen, for a failure message: reports from any frame, and the frames' own load events.
+  const seen = { reports: 0, otherSource: 0, otherOrigin: '', loads: 0, inserted: 0 };
+  const moves = new MutationObserver((records) => {
+    for (const r of records) for (const n of r.addedNodes) if (n instanceof Element && (n.localName === 'iframe' || n.querySelector('iframe'))) seen.inserted++;
+  });
+  moves.observe(host, { childList: true, subtree: true });
   const listen = (e: MessageEvent) => {
-    if (e.origin === 'null' && e.source === host.querySelector('iframe')?.contentWindow && e.data?.probe === probe && typeof e.data.url === 'string') url = e.data.url;
+    if (e.data?.probe !== probe) return;
+    seen.reports++;
+    if (e.origin !== 'null') seen.otherOrigin = e.origin;
+    else if (e.source !== host.querySelector('iframe')?.contentWindow) seen.otherSource++;
+    else if (typeof e.data.url === 'string') url = e.data.url;
   };
+  const load = (e: Event) => { if (e.target instanceof HTMLIFrameElement) seen.loads++; };
   window.addEventListener('message', listen);
+  host.addEventListener('load', load, true);
   const report = `document.addEventListener('DOMContentLoaded',()=>parent.postMessage({probe:${JSON.stringify(probe)},url:location.href},'*'));`;
   return {
     source: (text: string) => text + `<script>${report}</script>`,
-    prepared: (text: string) => text + `<script type="application/faber-script" data-faber-script="text/javascript">${report}</script>`,
+    prepared: (text: string) => {
+      const script = `<script type="application/faber-script" data-faber-script="text/javascript">${report}</script>`;
+      const end = text.lastIndexOf('</body>');
+      return end < 0 ? text + script : text.slice(0, end) + script + text.slice(end);
+    },
     url: () => url,
-    stop: () => window.removeEventListener('message', listen),
+    why: () => `reports ${seen.reports}, from another frame ${seen.otherSource}, other origin ${seen.otherOrigin || 'none'}, frame loads ${seen.loads}, frame insertions ${seen.inserted}, frame src ${host.querySelector('iframe')?.src ?? 'none'}`,
+    stop: () => { window.removeEventListener('message', listen); host.removeEventListener('load', load, true); moves.disconnect(); },
   };
 }
-async function until(test: () => unknown, what = 'the visual answer appeared before the deadline') {
+async function until(test: () => unknown, what: string | (() => string) = 'the visual answer appeared before the deadline') {
   const end = performance.now() + 15000;
   while (!test() && performance.now() < end) await settle();
-  ok(test(), what);
+  ok(test(), typeof what === 'string' ? what : what());
 }
 
 check('visual answers: live policy keeps the opaque sandbox, first policy and inert external scripts without a host nonce', () => {
@@ -864,9 +881,9 @@ check('visual answers: Chat and Projects at 720 px reuse the resizable running p
         equal(host.querySelector('iframe'), newest, 'a version switch reuses the frame');
         equal(newest.contentWindow, browsingContext, 'versions keep one browsing context');
         equal(newest.isConnected, true);
-        await until(() => prepared.get(loaded.url() ?? '')?.document.includes('data-version="1"'), `${area}/${form}: version 1 document`);
+        await until(() => prepared.get(loaded.url() ?? '')?.document.includes('data-version="1"'), () => `${area}/${form}: version 1 document (${loaded.why()})`);
         host.querySelector<HTMLButtonElement>('.visual-next')!.click();
-        await until(() => prepared.get(loaded.url() ?? '')?.document.includes('data-version="2"'), `${area}/${form}: version 2 document`);
+        await until(() => prepared.get(loaded.url() ?? '')?.document.includes('data-version="2"'), () => `${area}/${form}: version 2 document (${loaded.why()})`);
         const grip = host.querySelector<HTMLElement>('#running [role="separator"]')!;
         const oldWidth = Number(grip.getAttribute('aria-valuenow'));
         grip.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowLeft', bubbles: true }));

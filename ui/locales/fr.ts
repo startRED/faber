@@ -2213,6 +2213,7 @@ export const fr: Messages = {
   'notes.291.fixed': 'Les réponses disent maintenant une fois ce qui tourne encore et la suite, et un journal que vous collez ne les remplit plus de termes techniques.',
   'notes.292.better': 'La colonne « En cours » attend la fin de votre clic avant de s’ouvrir automatiquement.',
   'notes.293.fixed': 'Sous Windows, les fichiers privés des conversations sont conservés hors des données de Faber et restent disponibles à la réouverture.',
+  'notes.294.fixed': 'Sur Mac, une page ou un dessin d’une réponse qui fonctionne hors ligne finit maintenant de s’ouvrir, même quand il demande un script sur internet.',
   'update.checking': 'Recherche d’une mise à jour…',
   'update.downloading': 'Téléchargement de la mise à jour…',
   'update.downloadingPercent': 'Téléchargement de la mise à jour… {percent} %',

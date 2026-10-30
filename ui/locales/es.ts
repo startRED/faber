@@ -2213,6 +2213,7 @@ export const es: Messages = {
   'notes.291.fixed': 'Las respuestas ahora dicen una vez qué sigue en marcha y qué viene después, y un registro que pegas ya no las llena de términos técnicos.',
   'notes.292.better': 'La columna «En marcha ahora» espera a que termines de hacer clic antes de abrirse automáticamente.',
   'notes.293.fixed': 'En Windows, los archivos privados de los chats se guardan fuera de los datos de Faber y siguen disponibles al volver a abrirlo.',
+  'notes.294.fixed': 'En un Mac, una página o un dibujo de una respuesta que funciona sin internet ahora termina de abrirse, aunque pida un script de internet.',
   'update.checking': 'Buscando una actualización…',
   'update.downloading': 'Descargando actualización…',
   'update.downloadingPercent': 'Descargando actualización… {percent} %',

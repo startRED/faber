@@ -6,7 +6,7 @@ use tauri::http::{Request, Response};
 pub const OFFLINE: &str = "default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src data: blob:; font-src data:; media-src data: blob:; base-uri 'none'; form-action 'none'; frame-src 'none'; child-src 'none'; worker-src 'none'; object-src 'none'";
 pub const LIVE: &str = "default-src 'none'; connect-src https:; script-src 'unsafe-inline' https:; style-src 'unsafe-inline' https:; img-src data: blob: https:; font-src data: https:; media-src data: blob: https:; base-uri 'none'; form-action 'none'; frame-src 'none'; child-src 'none'; worker-src 'none'; object-src 'none'";
 // Independent from the screen's unchanged loader authorization. Both header policies must pass.
-const LOADER: &str = "script-src 'sha256-THVAIZwBzgCVsIldon5G2RmhMqd/u89imJA/c4WJido=' 'strict-dynamic'; sandbox allow-scripts; frame-ancestors tauri://localhost http://tauri.localhost";
+const LOADER: &str = "script-src 'sha256-0bC38SaDD0B+6jvfczkP7RXTEuwNXQv1ydsZ0yMX1lg=' 'strict-dynamic'; sandbox allow-scripts; frame-ancestors tauri://localhost http://tauri.localhost";
 const DEV_ANCESTOR: &str = if cfg!(debug_assertions) { " http://localhost:5173" } else { "" };
 const LIMIT: usize = 8 * 1024 * 1024;
 

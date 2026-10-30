@@ -15,6 +15,8 @@
   const stop = Event.prototype.stopImmediatePropagation;
   const target = Object.getOwnPropertyDescriptor(Event.prototype, 'target').get;
   const NativeEvent = Event;
+  const directive = typeof SecurityPolicyViolationEvent === 'function'
+    ? Object.getOwnPropertyDescriptor(SecurityPolicyViolationEvent.prototype, 'effectiveDirective').get : undefined;
   const NativePromise = Promise;
   const apply = Reflect.apply;
   const top = window === window.top;
@@ -87,8 +89,16 @@
       let external;
       if (entry.url !== null) {
         external = new NativePromise((resolve) => {
-          listen.call(script, 'load', resolve, { once: true });
-          listen.call(script, 'error', resolve, { once: true });
+          // WebKit reports a script its policy blocked (an offline page) only as a violation, never as an error.
+          const blocked = (event) => {
+            if (!event.isTrusted || !directive || !/^script-src/.test(apply(directive, event, []))) return;
+            apply(unlisten, document, ['securitypolicyviolation', blocked, true]);
+            resolve();
+          };
+          const done = () => { apply(unlisten, document, ['securitypolicyviolation', blocked, true]); resolve(); };
+          listen.call(script, 'load', done, { once: true });
+          listen.call(script, 'error', done, { once: true });
+          apply(listen, document, ['securitypolicyviolation', blocked, true]);
         });
         set.call(script, 'referrerpolicy', 'no-referrer');
         set.call(script, 'src', entry.url);

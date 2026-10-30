@@ -2213,6 +2213,7 @@ export const de: Messages = {
   'notes.291.fixed': 'Antworten sagen jetzt einmal, was noch läuft und was danach kommt, und ein eingefügtes Protokoll füllt sie nicht mehr mit Fachwörtern.',
   'notes.292.better': 'Die Spalte „Läuft gerade“ wartet mit dem automatischen Öffnen, bis du den Klick beendet hast.',
   'notes.293.fixed': 'Unter Windows liegen private Chatdateien außerhalb der Faber-Daten und bleiben beim erneuten Öffnen verfügbar.',
+  'notes.294.fixed': 'Auf dem Mac öffnet sich eine Seite oder Zeichnung aus einer Antwort, die offline funktioniert, jetzt vollständig, auch wenn sie ein Skript aus dem Internet anfordert.',
   'update.checking': 'Suche nach einem Update…',
   'update.downloading': 'Update wird heruntergeladen…',
   'update.downloadingPercent': 'Update wird heruntergeladen… {percent} %',

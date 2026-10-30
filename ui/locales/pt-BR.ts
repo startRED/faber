@@ -2200,6 +2200,7 @@ export const ptBR: Messages = {
   'notes.291.fixed': 'As respostas agora dizem uma vez o que ainda está rodando e o que vem depois, e um registro que você cola não as enche mais de termos técnicos.',
   'notes.292.better': 'A coluna “Rodando agora” espera você terminar o clique antes de abrir sozinha.',
   'notes.293.fixed': 'No Windows, os arquivos privados dos chats ficam fora dos dados do Faber e continuam disponíveis ao reabrir.',
+  'notes.294.fixed': 'No Mac, uma página ou desenho de uma resposta que funciona sem internet agora termina de abrir, mesmo quando pede um script da internet.',
   'update.checking': 'Procurando atualização…',
   'update.downloading': 'Baixando atualização…',
   'update.downloadingPercent': 'Baixando atualização… {percent}%',
