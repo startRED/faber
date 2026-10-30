@@ -19,10 +19,10 @@ folder; a sign-in state without a model call and without reading the CLI's files
 cheapest-model one-word turn only at the person's request if nothing else exists, and say so in the page); `login_args` for the
 terminal sign-in; Gemini as a third card in the first-run step and in Manage accounts, written like the others (a line naming the
 plan it runs on, "Connect"), hidden in the first run until `agy` is found so a newcomer's three-way choice does not grow
-(extending the existing step, not a new one). Install: the card shows where the official installer is, and Faber does not
-download or run it in this task (see the owner question in the report). Five languages by hand.
+(extending the existing step, not a new one). Installing `agy` is the next task
+(`agy-install`). Five languages by hand.
 
-Leave out: installing `agy` for the person, quota, routing, marks on the answers (their tasks).
+Leave out: installing `agy` (task `agy-install`), quota, routing, marks on the answers (their tasks).
 
 Done: Rust tests for discovery in the installer folder and for the status verdicts over recorded outputs; a screen check where the
 accounts step shows a Gemini card only when `agy` is found, in the longest language at 720 px; a newcomer walk (no AI connected,
