@@ -3,7 +3,8 @@
 // the window, serves the screen, and carries calls across.
 
 import { app, BrowserWindow, ipcMain, type IpcMainEvent, type IpcMainInvokeEvent, net, protocol, session, shell } from 'electron';
-import { realpathSync, statSync } from 'node:fs';
+import { createHash } from 'node:crypto';
+import { readFileSync, realpathSync, statSync } from 'node:fs';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { Sidecar } from './sidecar.ts';
@@ -38,10 +39,21 @@ if (!app.requestSingleInstanceLock()) app.quit();
 let win: BrowserWindow | null = null;
 let host: Sidecar | null = null;
 
+/**
+ * The hashes of the inline scripts dist/index.html ships: only the fixed loader that starts the screen's modules
+ * (vite.config.ts). The page may run that loader and what it loads ('strict-dynamic'), never another inline script.
+ */
+function loaderHashes(): string[] {
+  const page = readFileSync(path.join(dist, 'index.html'), 'utf8');
+  return [...page.matchAll(/<script>([\s\S]*?)<\/script>/g)].map(
+    ([, body]) => `'sha256-${createHash('sha256').update(body ?? '').digest('base64')}'`,
+  );
+}
+
 /** The same policy the Tauri shell gives the screen, with its own origin in place of Tauri's IPC. */
 const CSP = [
   "default-src 'self'",
-  "script-src 'self'",
+  `script-src 'self' ${loaderHashes().join(' ')} 'strict-dynamic'`,
   "style-src 'self' 'unsafe-inline'",
   "img-src 'self' data: blob:",
   "font-src 'self' data:",
@@ -85,9 +97,15 @@ function serveScreen(): void {
 
 /** Only the screen itself speaks to the shell: its window, its top frame, its own origin. */
 function fromScreen(event: IpcMainEvent | IpcMainInvokeEvent): boolean {
-  if (!win || event.sender !== win.webContents || event.senderFrame !== win.webContents.mainFrame) return false;
+  const frame = event.senderFrame;
+  if (!win || !frame || event.sender !== win.webContents) return false;
+  // Two handles on one frame are different objects: the frame is told by its process and routing ids.
+  const main = win.webContents.mainFrame;
+  if (frame.processId !== main.processId || frame.routingId !== main.routingId) return false;
   try {
-    return new URL(event.senderFrame.url).origin === ORIGIN;
+    // Node's URL gives a scheme it does not know the origin "null", so the scheme and host are compared instead.
+    const url = new URL(frame.url);
+    return url.protocol === `${SCHEME}:` && url.host === 'app';
   } catch {
     return false;
   }
@@ -223,6 +241,11 @@ void app.whenReady().then(() => {
   session.defaultSession.setDevicePermissionHandler(() => false);
   serveScreen();
   relay();
-  host = Sidecar.start((event) => win?.webContents.send('faber:event', event));
+  host = Sidecar.start((event) => {
+    // The host dropped events this screen never heard (it fell too far behind): the screen starts over from a fresh
+    // reading instead of drawing from a partial one. Rare; Tauri's direct events never lag.
+    if ((event as { type?: unknown } | null)?.type === 'lagged') win?.webContents.reload();
+    else win?.webContents.send('faber:event', event);
+  });
   if (!autostart) show();
 });
