@@ -63,9 +63,9 @@ remain usable from the keyboard in both areas.
   smallest size and the third ink. Opened, once its reply ends, the composer's place holds one card of the composer's
   width: the line "This conversation is archived…" in the second ink and a small Unarchive button at its right.
 - The footer is one row, the person's name when they gave one and Settings, then one thin line per connected vendor: its
-  shape, a 3 px bar and the used share of its weekly quota window (R177; a vendor that never reported one shows its tightest), in the
-  small size. Nothing on the line wraps. The window, the reset, the other windows with their shares (the five-hour one), how old the reading is, the not-yet-counted estimate and the vendor's name are its tooltip. While
-  use is still being counted the share reads "≥ 44%" (the real share can only be higher), with the words in the tooltip
+  shape and name, a 3 px bar and the used share of its weekly quota window in words, "24% used" (R177; a vendor that never reported one shows its tightest), in the
+  small size. Nothing on the line wraps: the bar gives way. The window, the reset, the other windows with their shares (the five-hour one), how old the reading is and the not-yet-counted estimate are its tooltip. While
+  use is still being counted the share reads "≥ 44% used" (the real share can only be higher), with the words in the tooltip
   (C010). The bar is amber only when the engine says the quota is nearly used. The line opens Settings > Accounts and limits.
   A vendor with no reading yet, or a weekly reading past its reset, shows "—". The version is not on the sidebar: it is the
   tooltip of the Settings button.

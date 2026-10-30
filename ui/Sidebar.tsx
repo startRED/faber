@@ -586,9 +586,9 @@ export function Sidebar(props: Props) {
             <span>{t('settings.open')}</span>
           </button>
         </div>
-        {/* One thin line per connected AI: its mark, how much of its weekly window is used (R177), the share. The window, the
-            reset, the other windows (the five-hour one), how old the reading is and "still counting" (C010) are in the
-            tooltip, so the line never wraps. */}
+        {/* One thin line per connected AI: its mark and name, how much of its weekly window is used (R177), the share in words
+            ("24% used"). The window, the reset, the other windows (the five-hour one), how old the reading is and "still
+            counting" (C010) are in the tooltip, so the line never wraps. */}
         <div class="usage" role="group" aria-label={t('quota.label')}>
           <For each={props.vendors}>
             {(v) => {
@@ -610,11 +610,14 @@ export function Sidebar(props: Props) {
               return (
                 <button class="vendor" classList={{ low: low() }} onClick={() => props.onSettings('usage')} title={[vendorName(v), ...details()].filter(Boolean).join(' · ')}>
                   <VendorMark vendor={v} />
-                  <span class="sr">{vendorName(v)}</span>
+                  <span class="name">{vendorName(v)}</span>
                   <span class="meter" aria-hidden="true">
                     <i style={{ 'clip-path': `inset(0 ${100 - Math.round(Math.min(1, Math.max(0, q()?.used ?? 0)) * 100)}% 0 0)` }} />
                   </span>
                   <span class="share num">{share()}</span>
+                  <Show when={q()}>
+                    <span class="used">{t('quota.used')}</span>
+                  </Show>
                   <Show when={q() && fresh().counting}>
                     <span class="sr">{t('quota.counting')}</span>
                   </Show>

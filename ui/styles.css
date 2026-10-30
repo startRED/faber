@@ -159,10 +159,13 @@ html.sizing :is(.shell, .shell > .main, .shell .work > .runcol) { transition: no
 .hit-snippet mark { background: transparent; color: inherit; font-weight: 580; text-decoration: underline; }
 .search-focus { outline: 2px solid var(--accent); outline-offset: 6px; }
 .side-foot { flex: none; border-top: 1px solid var(--line); padding-top: 10px; display: grid; gap: 4px; }
-/* The connected accounts, one thin line each: the vendor's mark, how much of its weekly quota window is used (R177), and the share. The
-   rest (window, reset, age, "still counting") is the tooltip. Amber only when the engine says the quota is nearly used. */
+/* The connected accounts, one thin line each: the vendor's mark and name, how much of its weekly quota window is used (R177), and the
+   share in words. The rest (window, reset, age, "still counting") is the tooltip; the bar gives way so the line never wraps. Amber only when the engine says the quota is nearly used. */
 .usage { display: grid; gap: 2px; padding: 0 4px; }
-.vendor { display: flex; align-items: center; gap: 8px; width: 100%; padding: 4px 6px; border-radius: var(--r-xs); color: var(--ink-3); font-size: var(--fs-xs); text-align: left; }
+.vendor { display: flex; align-items: center; gap: 8px; width: 100%; padding: 4px 6px; border-radius: var(--r-xs); color: var(--ink-3); font-size: var(--fs-xs); text-align: left; white-space: nowrap; }
+.vendor :is(.name, .used) { flex: none; }
+.vendor .name { color: var(--ink-2); }
+.vendor .share + .used { margin-left: -4px; }
 .vendor:hover { background: var(--s2); color: var(--ink); }
 .vendor .meter { flex: 1; min-width: 0; height: 3px; }
 .vendor .share { flex: none; min-width: 3.5ch; text-align: right; color: var(--ink-2); }
