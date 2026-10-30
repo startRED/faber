@@ -268,6 +268,8 @@ impl Engine {
             let mut failed = false;
             for id in ids {
                 c.keep_going_off(&id);
+                // Recovery rereads the file, so helper activity its record lacks is written first.
+                let _ = c.flush_transcript(&id);
                 let Some(mut conversation) = c.store.get(&id) else {
                     failed = true;
                     continue;

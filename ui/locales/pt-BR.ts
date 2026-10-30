@@ -2181,6 +2181,7 @@ export const ptBR: Messages = {
   'notes.284.better': 'No Mac e no Linux, ajudantes e trabalho que segue sozinho agora esperam quando falta memória no computador, como no Windows, em vez de começar mesmo assim.',
   'notes.285.fixed': 'Trocar a versão de uma resposta visual não acumula mais entradas no histórico do navegador.',
   'notes.286.fixed': 'O Faber recusa pastas de dados inválidas ou redirecionadas no Windows antes de salvar dados.',
+  'notes.287.fixed': 'Conversas longas não travam mais enquanto os ajudantes trabalham.',
   'update.checking': 'Procurando atualização…',
   'update.downloading': 'Baixando atualização…',
   'update.downloadingPercent': 'Baixando atualização… {percent}%',

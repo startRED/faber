@@ -2194,6 +2194,7 @@ export const fr: Messages = {
   'notes.284.better': 'Sur Mac et Linux, les assistants et le travail qui continue seul attendent maintenant quand la mémoire de l’ordinateur manque, comme sur Windows, au lieu de démarrer quand même.',
   'notes.285.fixed': 'Changer de version d’une réponse visuelle n’ajoute plus une entrée à chaque fois dans l’historique du navigateur.',
   'notes.286.fixed': 'Sous Windows, Faber refuse les dossiers de données invalides ou redirigés avant d’enregistrer des données.',
+  'notes.287.fixed': 'Les longues conversations ne se bloquent plus pendant le travail des assistants.',
   'update.checking': 'Recherche d’une mise à jour…',
   'update.downloading': 'Téléchargement de la mise à jour…',
   'update.downloadingPercent': 'Téléchargement de la mise à jour… {percent} %',

@@ -382,6 +382,11 @@ const WARM_MARGIN_MS: u64 = 5_000;
 /// How often the quota ledger is written while readings keep coming.
 const LEDGER_EVERY: f64 = 30.0;
 
+/// How long a conversation may hold helper transcript activity the record does not show yet. Each kept page is already on
+/// disk, so this only bounds how much a crash can leave out of the record; writing a long conversation whole for every
+/// helper step took most of a second under the engine lock (measured 2026-10-29: 102 MB, 280 ms to serialize, 510 ms to write).
+const TRANSCRIPT_SAVE_EVERY: Duration = Duration::from_secs(2);
+
 /// The readings the ledger remembers that have not reset yet, so Settings has numbers before the first answer.
 fn remembered(ledger: &Ledger, now: f64) -> HashMap<(Vendor, String), QuotaReading> {
     Vendor::ALL
@@ -432,8 +437,12 @@ struct Core {
     store: Store,
     emit: Emit,
     me: Weak<Mutex<Core>>,
-    /// Conversations in use, the source of truth while the app runs; every change is written through to disk.
+    /// Conversations in use, the source of truth while the app runs.
     convs: HashMap<String, Conversation>,
+    /// The conversations whose helper transcript activity is not in their record yet. Any successful save of a conversation,
+    /// or its leaving memory, takes it out; `transcript_timer` says a save is already waiting for them.
+    dirty_transcripts: Mutex<HashSet<String>>,
+    transcript_timer: bool,
     /// Only the ids of durable child notices waiting for room, never another queue of report text.
     parent_reports: HashMap<String, HashSet<String>>,
     /// What each conversation last read of another one in its running turn (`siblings.rs`), so reading it again with nothing new
@@ -643,6 +652,8 @@ impl Engine {
                 emit,
                 me: me.clone(),
                 convs: HashMap::new(),
+                dirty_transcripts: Mutex::new(HashSet::new()),
+                transcript_timer: false,
                 parent_reports,
                 sibling_reads: HashMap::new(),
                 live: HashMap::new(),
@@ -1031,6 +1042,8 @@ impl Engine {
         // Export a saved snapshot without retaining another conversation in the engine's live cache.
         let (conversation, folder) = self
             .with(|c| {
+                // The file is what is exported, so helper activity the record lacks is written first.
+                let _ = c.flush_transcript(id);
                 let conversation = c.store.get(id)?;
                 let folder = c.folder_of(&conversation).unwrap_or_default();
                 Some((conversation, folder))
@@ -1400,6 +1413,11 @@ impl Engine {
     pub fn resume_keep_going(&self) {
         self.with(|c| c.resume_keep_going())
     }
+    /// How many conversation records were written since Faber started; only tests count them.
+    #[doc(hidden)]
+    pub fn conversation_writes(&self) -> u64 {
+        self.with(|c| c.store.conversation_writes())
+    }
     /// Scales the fixed waits of "keep going" (a retry after an error, a rest, the question timer); only tests change it.
     #[doc(hidden)]
     pub fn set_keep_going_pace(&self, scale: f64) {
@@ -1426,6 +1444,7 @@ impl Engine {
                 server.retire();
             }
             c.close_spare();
+            c.save_dirty(true);
             // A conversation whose last save failed gets one more try before Faber closes, waiting for a busy file, for about
             // 3 s in all.
             let failed: Vec<String> = c.save_failed.lock().unwrap_or_else(|e| e.into_inner()).iter().cloned().collect();
@@ -1442,36 +1461,91 @@ impl Engine {
 
 impl Core {
     /// Store visible protocol events, never private reasoning. Only the small preview remains in the conversation.
+    ///
+    /// The page, and the files that place it again after a crash (`TranscriptStore::recover`), are written at once. The
+    /// conversation record is not: it is written at most every `TRANSCRIPT_SAVE_EVERY` and at every point that needs it.
     fn keep_child_event(&mut self, conv: &str, call: &str, kind: crate::transcript::TranscriptKind, tool: Option<&str>, text: &str) {
-        let Some((at, mut status)) = self.convs.get(conv).and_then(|conversation| {
+        let Some((message, at, mut status, root)) = self.convs.get(conv).and_then(|conversation| {
             conversation.messages.iter().rev().find_map(|message| {
                 let tools = message.tools.as_ref()?;
-                let status = tools.iter().find(|entry| entry.id == call)?.transcript.clone()?;
-                Some((tools.iter().filter(|entry| entry.parent.as_deref() == Some(call)).count(), status))
+                let entry = tools.iter().find(|entry| entry.id == call)?;
+                let status = entry.transcript.clone()?;
+                let at = tools.iter().filter(|entry| entry.parent.as_deref() == Some(call)).count();
+                Some((message.id.clone(), at, status, entry.parent.is_none()))
             })
         }) else {
             return;
         };
-        for piece in crate::transcript::split_text(text).chain(text.is_empty().then_some("")) {
-            let entry = crate::transcript::TranscriptEntry { at, kind, tool: tool.map(str::to_string), text: piece.to_string() };
-            match self.store.transcripts.append_page(conv, call, status.pages, &[entry]) {
-                Ok(()) => status.pages += 1,
-                Err(_) => {
-                    status.failed = true;
-                    break;
+        let was_failed = status.failed;
+        let find = |id: &str| self.convs.get(conv)?.messages.iter().rev().flat_map(|m| m.tools.iter().flatten()).find(|t| t.id == id);
+        // The first page of a call can reach disk before the record holds the call: the call goes beside it. A call a helper
+        // started is placed by the page of the helper that started it.
+        let mut journal_ok = true;
+        if status.pages == 0 && root {
+            journal_ok = find(call).is_some_and(|entry| self.store.transcripts.append_call(conv, &message, entry).is_ok());
+        }
+        if journal_ok && kind == crate::transcript::TranscriptKind::Tool {
+            journal_ok =
+                tool.and_then(find).is_some_and(|child| self.store.transcripts.append_tool(conv, call, status.pages, child).is_ok());
+        }
+        if journal_ok {
+            for piece in crate::transcript::split_text(text).chain(text.is_empty().then_some("")) {
+                let entry = crate::transcript::TranscriptEntry { at, kind, tool: tool.map(str::to_string), text: piece.to_string() };
+                match self.store.transcripts.append_page(conv, call, status.pages, &[entry]) {
+                    Ok(()) => status.pages += 1,
+                    Err(_) => {
+                        journal_ok = false;
+                        break;
+                    }
                 }
             }
         }
+        status.failed |= !journal_ok;
+        let failed = status.failed && !was_failed;
         if let Some(call) = self.tool_of(conv, call) {
             call.transcript = Some(status);
         }
-        self.save(conv);
-        let message = self
-            .convs
-            .get(conv)
-            .and_then(|c| c.messages.iter().rev().find(|m| m.tools.iter().flatten().any(|t| t.id == call)))
-            .map(|m| m.id.clone());
-        self.push(conv, message.as_deref(), false);
+        self.dirty_transcripts.lock().unwrap_or_else(|e| e.into_inner()).insert(conv.to_string());
+        if failed {
+            // The record must say the history is incomplete; later events of a call that already failed wait like the rest.
+            self.save(conv);
+        } else {
+            self.save_soon();
+        }
+        self.push(conv, Some(&message), false);
+    }
+
+    /// Writes the conversations with helper activity the record lacks, once `TRANSCRIPT_SAVE_EVERY` has passed since the first
+    /// of it. One timer at a time, and none while nothing is dirty: it ends after one save and the next event starts another.
+    fn save_soon(&mut self) {
+        if self.transcript_timer {
+            return;
+        }
+        self.transcript_timer = true;
+        let me = self.me.clone();
+        self.opts.runtime.spawn(async move {
+            tokio::time::sleep(TRANSCRIPT_SAVE_EVERY).await;
+            let Some(core) = me.upgrade() else { return };
+            let mut core = core.lock().unwrap_or_else(|e| e.into_inner());
+            core.transcript_timer = false;
+            // `shutdown` writes what is left itself.
+            if !core.closing {
+                core.save_dirty(false);
+                // A write that failed is tried again on the next tick, not left for an event that may never come.
+                if !core.dirty_transcripts.lock().unwrap_or_else(|e| e.into_inner()).is_empty() {
+                    core.save_soon();
+                }
+            }
+        });
+    }
+
+    /// Writes every conversation that holds helper activity its record lacks. A write that fails leaves it dirty, told like
+    /// any failed save, and the timer tries it again.
+    fn save_dirty(&self, patient: bool) {
+        let ids: Vec<_> = self.dirty_transcripts.lock().unwrap_or_else(|e| e.into_inner()).iter().cloned().collect();
+        for id in ids {
+            if patient { self.save_with(&id, true) } else { self.save(&id) }
+        }
     }
 
     fn child_owner(&self, conv: &str, id: &str) -> Option<String> {
@@ -1821,6 +1895,18 @@ impl Core {
         let _ = self.try_save(id);
     }
 
+    /// The record of `id` holds every page it counts, or the conversation is gone from memory: nothing waits for the timer.
+    pub(super) fn transcript_saved(&self, id: &str) {
+        self.dirty_transcripts.lock().unwrap_or_else(|e| e.into_inner()).remove(id);
+    }
+
+    /// Writes a conversation at once when helper activity is waiting for the timer: for a path that reads its file, or needs
+    /// the person to see a card that survives a crash. Costs nothing when nothing waits.
+    fn flush_transcript(&self, id: &str) -> Result<(), String> {
+        let dirty = self.dirty_transcripts.lock().unwrap_or_else(|e| e.into_inner()).contains(id);
+        if dirty { self.try_save(id) } else { Ok(()) }
+    }
+
     fn try_save(&self, id: &str) -> Result<(), String> {
         // A conversation that keeps failing does not make every save wait for a busy file again.
         let patient = !self.save_failed.lock().unwrap_or_else(|e| e.into_inner()).contains(id);
@@ -1834,9 +1920,13 @@ impl Core {
     fn save_result(&self, id: &str, patient: bool) -> Result<(), String> {
         // Nothing is written for a conversation that is not loaded, so that is neither a failure nor a success.
         if !self.convs.contains_key(id) {
+            self.transcript_saved(id);
             return Ok(());
         }
         let result = self.save_checked(id, patient);
+        if result.is_ok() {
+            self.transcript_saved(id);
+        }
         let first = {
             let mut failed = self.save_failed.lock().unwrap_or_else(|e| e.into_inner());
             // A conversation deleted, dropped or unloaded since it failed is not waited for: it must not hide the next one.
@@ -2634,6 +2724,7 @@ impl Core {
                 if let Some(m) = self.turn(conv) {
                     m.permissions.get_or_insert_default().push(Permission { request_id, tool, input, epoch });
                 }
+                let _ = self.flush_transcript(conv);
                 self.weigh(conv);
                 if let (Some(request), Some(turn)) = (asked, turn_id.as_deref()) {
                     self.watch_question(conv, turn, &request);
@@ -4860,6 +4951,7 @@ impl Core {
             self.rewind_forget(id);
             self.draft_routes.remove(id);
             self.convs.remove(id);
+            self.transcript_saved(id);
             self.try_seal_rewind(id);
             // Clearing leftovers is best-effort: the conversation is already gone and nothing reads these folders again.
             let _ = std::fs::remove_dir_all(self.scratch_of(id));

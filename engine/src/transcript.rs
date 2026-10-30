@@ -13,6 +13,7 @@ const MAX_ENTRIES_PER_PAGE: usize = 128;
 const MAX_CONVERSATION_ID_BYTES: usize = 128;
 const MAX_CALL_ID_BYTES: usize = 1024;
 const PAGE_VERSION: u8 = 1;
+const CALL_FILE: &str = "call.json";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
@@ -37,6 +38,13 @@ pub struct TranscriptEntry {
 struct Page {
     version: u8,
     entries: Vec<TranscriptEntry>,
+}
+
+/// A helper call written beside its pages: what is needed to place it again if the saved record never got that far.
+#[derive(Serialize, Deserialize)]
+struct CallRecord {
+    message: String,
+    tool: crate::model::ToolUse,
 }
 
 /// Uses immutable, atomic page files so a crash can lose the current buffer, never corrupt an earlier page.
@@ -85,6 +93,144 @@ impl TranscriptStore {
         let path = directory.join(page_component(page));
         let Some(bytes) = read_bounded(&path)? else { return Ok(None) };
         decode_page(&bytes).map(Some)
+    }
+
+    /// Keeps the child tool a `Tool` page describes beside that page. The conversation record is written at most every two
+    /// seconds, so after a crash the record may not hold the step yet, and the page alone only names it.
+    pub fn append_tool(&self, conversation: &str, call: &str, page: u64, tool: &crate::model::ToolUse) -> Result<(), Fault> {
+        self.append_json(conversation, call, &format!("{page:020}.tool.json"), tool)
+    }
+
+    /// Keeps a helper call that the saved record may not hold yet, with the message it belongs to, so its pages can be placed
+    /// again after a crash. Written once, with the call's first page.
+    pub fn append_call(&self, conversation: &str, message: &str, tool: &crate::model::ToolUse) -> Result<(), Fault> {
+        let record = CallRecord { message: message.to_string(), tool: tool.clone() };
+        self.append_json(conversation, &tool.id, CALL_FILE, &record)
+    }
+
+    fn append_json(&self, conversation: &str, call: &str, name: &str, value: &impl Serialize) -> Result<(), Fault> {
+        validate_conversation_id(conversation)?;
+        validate_call_id(call)?;
+        ensure_directory(&self.root)?;
+        let conversation_dir = self.root.join(conversation);
+        ensure_directory(&conversation_dir)?;
+        let directory = conversation_dir.join(call_component(call));
+        ensure_directory(&directory)?;
+        let path = directory.join(name);
+        reject_symlink(&path)?;
+        reject_symlink(&path.with_file_name(format!("{name}.tmp")))?;
+        let bytes = serde_json::to_vec(value).map_err(|_| Fault::Corrupt)?;
+        store::replace(self.disk.as_ref(), &path, &bytes)
+    }
+
+    fn read_tool(&self, conversation: &str, call: &str, page: u64) -> Result<Option<crate::model::ToolUse>, Fault> {
+        let Some(directory) = self.existing_call_dir(conversation, call)? else { return Ok(None) };
+        let path = directory.join(format!("{page:020}.tool.json"));
+        reject_symlink(&path)?;
+        store::read_checked(&path)
+    }
+
+    /// Brings a conversation read from disk up to what reached disk after its record was saved. Pages and the files beside them
+    /// are written before the record counts them, so after a crash they hold more than the record says: helper calls the record
+    /// never got, the contiguous pages after each call's saved count, and the child steps those pages describe. A page that
+    /// cannot be read back marks its call failed instead of hiding it. The normal case costs one directory listing for the
+    /// conversation and one missing-page check per helper call.
+    pub fn recover(&self, conversation: &str, messages: &mut [crate::model::Message]) {
+        // A conversation no helper ever kept a page for has nothing to find.
+        if matches!(existing_directory(&self.root), Ok(false)) || matches!(existing_directory(&self.root.join(conversation)), Ok(false)) {
+            return;
+        }
+        let mut recorded = std::collections::HashSet::new();
+        let mut helpers = false;
+        for tool in messages.iter().flat_map(|message| message.tools.iter().flatten()) {
+            helpers |= tool.transcript.is_some();
+            recorded.insert(call_component(&tool.id));
+        }
+        for (message, tool) in self.unrecorded_calls(conversation, &recorded) {
+            if let Some(message) = messages.iter_mut().find(|m| m.id == message) {
+                message.tools.get_or_insert_default().push(tool);
+                helpers = true;
+            }
+        }
+        if !helpers {
+            return;
+        }
+        for message in messages.iter_mut() {
+            let Some(tools) = &mut message.tools else { continue };
+            let mut index = 0;
+            while index < tools.len() {
+                let call = tools[index].id.clone();
+                if let Some(status) = tools[index].transcript.clone() {
+                    let (status, found) = self.pages_after(conversation, &call, status);
+                    for child in found {
+                        if !tools.iter().any(|tool| tool.id == child.id) {
+                            tools.push(child);
+                        }
+                    }
+                    tools[index].transcript = Some(status);
+                }
+                index += 1;
+            }
+        }
+    }
+
+    /// The helper calls with files on disk that the record does not hold, oldest first. One whose file cannot be read is left
+    /// out: nothing can place it.
+    fn unrecorded_calls(&self, conversation: &str, recorded: &std::collections::HashSet<String>) -> Vec<(String, crate::model::ToolUse)> {
+        if !valid_conversation_id(conversation) || !matches!(existing_directory(&self.root), Ok(true)) {
+            return vec![];
+        }
+        let directory = self.root.join(conversation);
+        if !matches!(existing_directory(&directory), Ok(true)) {
+            return vec![];
+        }
+        let Ok(entries) = fs::read_dir(&directory) else { return vec![] };
+        let mut found: Vec<_> = entries
+            .flatten()
+            .filter(|entry| !recorded.contains(entry.file_name().to_string_lossy().as_ref()))
+            .filter_map(|entry| {
+                let path = entry.path().join(CALL_FILE);
+                reject_symlink(&path).ok()?;
+                let record: CallRecord = store::read_checked(&path).ok()??;
+                (entry.file_name().to_string_lossy() == call_component(&record.tool.id)).then_some((record.message, record.tool))
+            })
+            .collect();
+        found.sort_by(|a, b| (a.1.started, &a.1.id).cmp(&(b.1.started, &b.1.id)));
+        found
+    }
+
+    /// Counts the contiguous pages written after `status.pages` and collects the child steps they describe.
+    fn pages_after(
+        &self,
+        conversation: &str,
+        call: &str,
+        mut status: crate::model::Transcript,
+    ) -> (crate::model::Transcript, Vec<crate::model::ToolUse>) {
+        let mut children = vec![];
+        loop {
+            match self.read_page(conversation, call, status.pages) {
+                Ok(Some(entries)) => {
+                    for entry in entries.iter().filter(|entry| entry.kind == TranscriptKind::Tool) {
+                        match self.read_tool(conversation, call, status.pages) {
+                            Ok(Some(child))
+                                if entry.tool.as_deref() == Some(child.id.as_str()) && child.parent.as_deref() == Some(call) =>
+                            {
+                                children.push(child)
+                            }
+                            Ok(None) => (), // Pages written before the separate tool file existed.
+                            _ => status.failed = true,
+                        }
+                    }
+                    status.pages += 1;
+                }
+                Ok(None) => break,
+                Err(_) => {
+                    status.failed = true;
+                    break;
+                }
+            }
+        }
+        (status, children)
     }
 
     /// Copies only the explicitly retained calls, one page in memory at a time.

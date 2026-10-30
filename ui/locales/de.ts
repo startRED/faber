@@ -2194,6 +2194,7 @@ export const de: Messages = {
   'notes.284.better': 'Auf Mac und Linux warten Helfer und Arbeit, die von selbst weiterläuft, jetzt, wenn der Arbeitsspeicher knapp ist, wie unter Windows, statt trotzdem zu starten.',
   'notes.285.fixed': 'Beim Wechsel zwischen Versionen einer visuellen Antwort wächst der Browserverlauf nicht mehr mit jedem Wechsel.',
   'notes.286.fixed': 'Unter Windows lehnt Faber ungültige oder umgeleitete Datenordner ab, bevor es Daten speichert.',
+  'notes.287.fixed': 'Lange Unterhaltungen hängen nicht mehr, während Helfer arbeiten.',
   'update.checking': 'Suche nach einem Update…',
   'update.downloading': 'Update wird heruntergeladen…',
   'update.downloadingPercent': 'Update wird heruntergeladen… {percent} %',

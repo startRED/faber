@@ -14,6 +14,81 @@ fn text(at: usize, value: impl Into<String>) -> TranscriptEntry {
     TranscriptEntry { at, kind: TranscriptKind::Text, tool: None, text: value.into() }
 }
 
+#[test]
+fn crash_window_recovers_pages_beyond_saved_count() {
+    let dir = tempdir();
+    let mut fixture: serde_json::Value = serde_json::from_str(include_str!("../../tests/fixtures/conversation-changes.json")).unwrap();
+    let conversation = &mut fixture["conversation"];
+    conversation["id"] = serde_json::json!("c1");
+    conversation["messages"][1]["tools"][0]["transcript"] = serde_json::json!({"pages": 0, "failed": false});
+    let store = faber_engine::store::Store::new(dir.path());
+    let conversation: faber_engine::model::Conversation = serde_json::from_value(conversation.clone()).unwrap();
+    store.save_checked(&conversation).unwrap();
+    TranscriptStore::new(dir.path().join("child-transcripts")).append_page("c1", "edit1", 0, &[text(0, "saved page")]).unwrap();
+    TranscriptStore::new(dir.path().join("child-transcripts")).append_page("c1", "edit1", 1, &[text(0, "another page")]).unwrap();
+    let reopened = faber_engine::store::Store::new(dir.path()).get("c1").unwrap();
+    assert_eq!(reopened.messages[1].tools.as_ref().unwrap()[0].transcript.as_ref().unwrap().pages, 2);
+}
+
+#[test]
+fn crash_window_recovers_the_tool_described_by_a_page() {
+    let dir = tempdir();
+    let mut fixture: serde_json::Value = serde_json::from_str(include_str!("../../tests/fixtures/conversation-changes.json")).unwrap();
+    let conversation = &mut fixture["conversation"];
+    conversation["id"] = serde_json::json!("c1");
+    conversation["messages"][1]["tools"][0]["transcript"] = serde_json::json!({"pages": 0, "failed": false});
+    let mut child = conversation["messages"][1]["tools"][1].clone();
+    child["parent"] = serde_json::json!("edit1");
+    conversation["messages"][1]["tools"].as_array_mut().unwrap().pop();
+    let store = faber_engine::store::Store::new(dir.path());
+    let conversation: faber_engine::model::Conversation = serde_json::from_value(conversation.clone()).unwrap();
+    store.save_checked(&conversation).unwrap();
+    let pages = TranscriptStore::new(dir.path().join("child-transcripts"));
+    let child: faber_engine::model::ToolUse = serde_json::from_value(child).unwrap();
+    pages.append_tool("c1", "edit1", 0, &child).unwrap();
+    pages.append_page("c1", "edit1", 0, &[tool(0, TranscriptKind::Tool, &child.id, "")]).unwrap();
+    let reopened = faber_engine::store::Store::new(dir.path()).get("c1").unwrap();
+    assert_eq!(reopened.messages[1].tools.as_ref().unwrap()[1], child);
+}
+
+#[test]
+fn crash_window_recovers_a_helper_call_the_record_never_got_and_what_it_ran() {
+    let dir = tempdir();
+    let mut fixture: serde_json::Value = serde_json::from_str(include_str!("../../tests/fixtures/conversation-changes.json")).unwrap();
+    let conversation = &mut fixture["conversation"];
+    conversation["id"] = serde_json::json!("c1");
+    let mut call = conversation["messages"][1]["tools"][0].clone();
+    call["id"] = serde_json::json!("agent1");
+    call["transcript"] = serde_json::json!({"pages": 0, "failed": false});
+    let mut step = conversation["messages"][1]["tools"][1].clone();
+    step["id"] = serde_json::json!("step1");
+    step["parent"] = serde_json::json!("agent1");
+    let store = faber_engine::store::Store::new(dir.path());
+    let saved: faber_engine::model::Conversation = serde_json::from_value(conversation.clone()).unwrap();
+    store.save_checked(&saved).unwrap();
+    let (call, step): (faber_engine::model::ToolUse, faber_engine::model::ToolUse) =
+        (serde_json::from_value(call).unwrap(), serde_json::from_value(step).unwrap());
+    let pages = TranscriptStore::new(dir.path().join("child-transcripts"));
+    pages.append_call("c1", "r1", &call).unwrap();
+    pages.append_page("c1", "agent1", 0, &[text(0, "first words")]).unwrap();
+    pages.append_tool("c1", "agent1", 1, &step).unwrap();
+    pages.append_page("c1", "agent1", 1, &[tool(0, TranscriptKind::Tool, "step1", "")]).unwrap();
+    // A call that no message holds is placed nowhere.
+    let mut lost = call.clone();
+    lost.id = "lost".into();
+    pages.append_call("c1", "no-such-message", &lost).unwrap();
+    pages.append_page("c1", "lost", 0, &[text(0, "nowhere")]).unwrap();
+    let reopened = faber_engine::store::Store::new(dir.path()).get("c1").unwrap();
+    let tools = reopened.messages[1].tools.as_ref().unwrap();
+    assert_eq!(tools.len(), saved.messages[1].tools.as_ref().unwrap().len() + 2);
+    let recovered = tools.iter().find(|t| t.id == "agent1").unwrap();
+    assert_eq!(recovered.transcript.as_ref().map(|t| (t.pages, t.failed)), Some((2, false)));
+    assert!(tools.iter().any(|t| t.id == "step1" && t.parent.as_deref() == Some("agent1")));
+    assert!(!tools.iter().any(|t| t.id == "lost"));
+    // Reading it again changes nothing: the call is in the record's place and not added twice.
+    assert_eq!(faber_engine::store::Store::new(dir.path()).get("c1").unwrap().messages[1].tools, reopened.messages[1].tools);
+}
+
 fn tool(at: usize, kind: TranscriptKind, id: &str, value: &str) -> TranscriptEntry {
     TranscriptEntry { at, kind, tool: Some(id.into()), text: value.into() }
 }

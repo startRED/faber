@@ -37,6 +37,8 @@ impl Core {
                 continue;
             }
             if let Some(c) = self.convs.remove(&id) {
+                // The save above wrote every page it counts.
+                self.transcript_saved(&id);
                 self.evicted.insert(id, Evicted { commands: c.commands, reported: c.reported });
             }
         }

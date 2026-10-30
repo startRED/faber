@@ -142,6 +142,8 @@ mod toolbox;
 mod tools;
 #[path = "transcript.rs"]
 mod transcript;
+#[path = "transcript_save.rs"]
+mod transcript_save;
 #[path = "turn_usage.rs"]
 mod turn_usage;
 #[path = "usage_view.rs"]

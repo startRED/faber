@@ -217,6 +217,7 @@ impl Core {
             }
             // The conversation needs the person now, not only once the turn ends.
             self.refresh_running();
+            let _ = self.flush_transcript(conv);
         }
     }
 }

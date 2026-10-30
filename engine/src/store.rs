@@ -152,6 +152,8 @@ pub struct Store {
     /// (2026-10-27), twice a turn. Every save writes a new file and renames it into place, so a changed file has a new
     /// time; only a program that rewrites one in place with its old length and time would go unseen until the next save.
     summaries: Mutex<HashMap<PathBuf, (Stamp, Summary)>>,
+    /// How many times a conversation record was written, so a test can tell one write from a hundred.
+    writes: std::sync::atomic::AtomicU64,
 }
 
 /// A file's length and last change: the same pair means the file was not written since.
@@ -232,7 +234,13 @@ impl Store {
             recovery_epoch: std::sync::Mutex::new(None),
             cache_health: data_dir.join("cache-health.jsonl"),
             summaries: Mutex::default(),
+            writes: std::sync::atomic::AtomicU64::new(0),
         }
+    }
+
+    /// How many conversation records this store wrote.
+    pub fn conversation_writes(&self) -> u64 {
+        self.writes.load(std::sync::atomic::Ordering::Relaxed)
     }
 
     /// Own the spending ledger for this engine's lifetime, including builds with a custom data folder.
@@ -370,7 +378,9 @@ impl Store {
         }
         let path = self.file(id);
         let before = stamp(&path);
-        let c: Conversation = read(&path)?;
+        let mut c: Conversation = read(&path)?;
+        // Pages and helper steps reach disk before the record counts them: see `TranscriptStore::recover`.
+        self.transcripts.recover(id, &mut c.messages);
         // Known as read, unless it changed while it was being read: `unchanged` then says so.
         if let Some(read_stamp) = before.filter(|b| stamp(&path).as_ref() == Some(b)) {
             self.summaries.lock().unwrap_or_else(std::sync::PoisonError::into_inner).insert(path, (read_stamp, summary(&c)));
@@ -397,6 +407,7 @@ impl Store {
         }
         let path = self.file(&conversation.id);
         self.write_with(&path, conversation, patient)?;
+        self.writes.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
         self.written(path, conversation);
         self.search.saved(conversation);
         Ok(())

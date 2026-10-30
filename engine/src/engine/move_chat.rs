@@ -40,6 +40,8 @@ impl Engine {
             moved.reported = (None, None);
             moved.command_gate = false;
             core.store.move_chat_to_project(&moved).map_err(|e| e.key())?;
+            // The moved record is the one in memory, so it holds every page the conversation counts.
+            core.transcript_saved(id);
             if let Some(live) = core.retire(id) {
                 live.session.close();
             }
