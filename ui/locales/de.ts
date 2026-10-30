@@ -2243,6 +2243,7 @@ export const de: Messages = {
   'notes.310.fixed': 'Bei geöffneten Schritten erscheint der Befehl, den die KI gerade ausführt, nur noch einmal, und ein langer Befehl bricht um, statt abgeschnitten zu werden.',
   'notes.311.better': 'Die Kontingent-Zeilen in der Seitenleiste nennen jetzt jede KI und sagen, wie viel verbraucht ist, und der Ring oben sagt, dass er den Kontext des Gesprächs misst.',
   'notes.312.better': 'Eine Antwort, die abbrach, weil Faber geschlossen wurde, sagt das jetzt, und mit Weitermachen macht die KI dort weiter, wo sie aufgehört hat.',
+  'notes.313.fixed': 'Ein Pull Request mit grünen Prüfungen wird weiter beobachtet, bis er zusammengeführt ist, sodass ein späterer Fehler den Agenten noch erreicht.',
   'update.checking': 'Suche nach einem Update…',
   'update.downloading': 'Update wird heruntergeladen…',
   'update.downloadingPercent': 'Update wird heruntergeladen… {percent} %',

@@ -549,6 +549,12 @@ impl FollowState {
     pub fn open(self) -> bool {
         matches!(self, FollowState::Pending | FollowState::Failing | FollowState::Conflict)
     }
+
+    /// Whether a timer still reads it: an open one, and a green pull request until it is merged or closed, since a queue
+    /// run may still turn it red (`follow.rs`).
+    pub fn watched(self) -> bool {
+        self.open() || self == FollowState::Passing
+    }
 }
 
 /// Why Faber sent a message by itself (`engine/src/engine/by_itself.rs`).
