@@ -96,6 +96,8 @@ pub async fn run(args: &Args) -> i32 {
     let mut reader = BufReader::new(tokio::io::stdin());
     let mut buffer = Vec::new();
     let mut running = tokio::task::JoinSet::new();
+    // Past this many requests in flight, stdin waits: a stalled stdout cannot pile up tasks without end.
+    let in_flight = Arc::new(tokio::sync::Semaphore::new(faber_channel::server::MAX_IN_FLIGHT));
     while let Ok(Some(line)) = wire::read_line(&mut reader, &mut buffer).await {
         // Answers already written leave the set, so a long session keeps only what is in flight.
         while running.try_join_next().is_some() {}
@@ -103,6 +105,7 @@ pub async fn run(args: &Args) -> i32 {
         let Some(id) = message.get("id").cloned() else { continue };
         let method = message["method"].as_str().unwrap_or("").to_string();
         let params = message["params"].clone();
+        let Ok(place) = in_flight.clone().acquire_owned().await else { break };
         let (client, events, tx) = (client.clone(), events.clone(), tx.clone());
         running.spawn(async move {
             let answer = match method.as_str() {
@@ -121,6 +124,7 @@ pub async fn run(args: &Args) -> i32 {
                 Err(error) => json!({ "jsonrpc": "2.0", "id": id, "error": error }),
             };
             let _ = tx.send(line.to_string()).await;
+            drop(place);
         });
     }
     while running.join_next().await.is_some() {}

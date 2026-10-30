@@ -58,7 +58,7 @@ impl Client {
         tokio::spawn(async move {
             let mut reader = BufReader::new(read);
             let mut buffer = Vec::new();
-            let mut skipped = 0u64;
+            let mut lagging = false;
             while let Ok(Some(line)) = wire::read_line(&mut reader, &mut buffer).await {
                 match wire::parse_from_faber(&line) {
                     Some(FromFaber::Reply { id, result }) => {
@@ -68,13 +68,17 @@ impl Client {
                         }
                     }
                     Some(FromFaber::Event(event)) => {
-                        // One place stays free for the lag notice, so the reader always learns what it missed.
-                        if skipped > 0 && events_tx.capacity() >= 2 {
-                            let _ = events_tx.try_send(serde_json::json!({ "type": "lagged", "skipped": skipped }));
-                            skipped = 0;
+                        // The last place goes to the lag notice at once, so the reader learns what it missed even when no
+                        // event follows. Until it reads further, newer events are dropped: the notice makes it read the state again.
+                        if lagging && events_tx.capacity() >= 2 {
+                            lagging = false;
                         }
-                        if skipped > 0 || events_tx.capacity() < 2 {
-                            skipped += 1;
+                        if lagging {
+                            continue;
+                        }
+                        if events_tx.capacity() < 2 {
+                            lagging = true;
+                            let _ = events_tx.try_send(serde_json::json!({ "type": "lagged" }));
                         } else {
                             let _ = events_tx.try_send(event);
                         }

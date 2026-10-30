@@ -1,5 +1,5 @@
 use faber_channel::guard::Guard;
-use faber_channel::server::{Answer, MAX_AGENT_DEPTH, connection};
+use faber_channel::server::{Answer, MAX_AGENT_DEPTH, connection, connection_at};
 use faber_channel::{Backend, Client, Hello, serve};
 use serde_json::{Value, json};
 use std::sync::Arc;
@@ -146,6 +146,64 @@ async fn events_arrive_in_order_and_a_slow_reader_is_told_what_it_missed() {
     assert_eq!(heard.recv().await.unwrap(), json!({"type": "list"}));
     assert_eq!(heard.recv().await.unwrap(), json!({"type": "catalog"}));
     assert!(client.subscribe().await.is_err(), "events go to the first subscription only");
+}
+
+#[tokio::test]
+async fn a_client_faber_knows_it_started_is_an_ai_whatever_it_says() {
+    let (backend, _) = fake();
+    let (ours, theirs) = tokio::io::duplex(1 << 16);
+    tokio::spawn(connection_at(theirs, backend.clone(), Guard::watching(backend.subscribe()), 1));
+    let liar = Client::over(ours, Hello { client: "agent".into(), agent_depth: 0 }).await.unwrap();
+    assert_eq!(liar.call("save_settings", json!({})).await.unwrap(), Err("error.channel.personOnly".into()));
+}
+
+#[tokio::test]
+async fn a_reader_that_falls_behind_hears_it_lagged_even_when_no_event_follows() {
+    let (ours, theirs) = tokio::io::duplex(1 << 20);
+    let (read, mut write) = tokio::io::split(theirs);
+    tokio::spawn(async move {
+        let mut lines = BufReader::new(read).lines();
+        while let Ok(Some(line)) = lines.next_line().await {
+            let asked: Value = serde_json::from_str(&line).unwrap();
+            write
+                .write_all(
+                    format!(
+                        "{}
+",
+                        json!({ "id": asked["id"], "ok": true })
+                    )
+                    .as_bytes(),
+                )
+                .await
+                .unwrap();
+            if asked["cmd"] == "subscribe" {
+                for n in 0..faber_channel::client::EVENTS_KEPT + 10 {
+                    write
+                        .write_all(
+                            format!(
+                                "{}
+",
+                                json!({ "event": { "type": "list", "n": n } })
+                            )
+                            .as_bytes(),
+                        )
+                        .await
+                        .unwrap();
+                }
+            }
+        }
+    });
+    let client = Client::over(ours, Hello { client: "test".into(), agent_depth: 0 }).await.unwrap();
+    let mut heard = client.subscribe().await.unwrap();
+    tokio::time::sleep(Duration::from_millis(200)).await;
+    let mut last = Value::Null;
+    let mut count = 0;
+    while let Ok(event) = heard.try_recv() {
+        last = event;
+        count += 1;
+    }
+    assert_eq!(count, faber_channel::client::EVENTS_KEPT);
+    assert_eq!(last, json!({ "type": "lagged" }));
 }
 
 #[tokio::test]
