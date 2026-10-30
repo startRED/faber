@@ -689,7 +689,7 @@ never copying it. "Owner" marks a choice of taste or direction that needs the ow
 one. Delete a line in the commit that fixes it. The weekly coherence pass (`testkit/coherence/weekly.md`) proposes new
 lines and the removal of fixed ones.
 
-6. (fixed by R160: a project opens a chat, not a mission start card.)
+None open now.
 
 ## Worked example: adding a setting
 
