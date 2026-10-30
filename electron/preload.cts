@@ -18,13 +18,10 @@ const EVENTS = new Set([
 
 contextBridge.exposeInMainWorld('faberShell', {
   invoke: async (command: string, args?: Record<string, unknown>) => {
-    try {
-      return await ipcRenderer.invoke('faber:invoke', command, args ?? {});
-    } catch (error) {
-      // Electron wraps a thrown error's message in its own sentence; the screen expects the bare key, as Tauri gives it.
-      const message = error instanceof Error ? error.message : String(error);
-      throw message.replace(/^Error invoking remote method 'faber:invoke': (Error: )?/, '');
-    }
+    // A failure is thrown as the host gave it (a key, or `{key, detail}`), as Tauri's `invoke` does.
+    const answer = (await ipcRenderer.invoke('faber:invoke', command, args ?? {})) as { ok?: unknown; err?: unknown };
+    if ('err' in answer) throw answer.err;
+    return answer.ok;
   },
   listen: (channel: string, listener: (payload: unknown) => void) => {
     // Only the events the shell sends the screen; any other name hears nothing.

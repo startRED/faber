@@ -10,7 +10,8 @@ import { app } from 'electron';
 /** What the host says on its own: events for the screen, and orders for the shell (`Order` in `host/src/wire.rs`). */
 export type Listeners = { event: (event: unknown) => void; order: (order: unknown) => void };
 
-type Pending = { resolve: (value: unknown) => void; reject: (reason: Error) => void };
+/** A failure crosses as the host sends it: an error key, or `{key, detail}` for the few that name a field. */
+type Pending = { resolve: (value: unknown) => void; reject: (failure: unknown) => void };
 
 /** The longest request line the host reads (`MAX_LINE` in `host/src/wire.rs`): a longer one is refused here, not there. */
 const MAX_LINE = 16 * 1024 * 1024;
@@ -112,7 +113,7 @@ export class Sidecar {
   }
 
   private heard(line: string, listen: Listeners): void {
-    let message: { id?: number; ok?: unknown; err?: string; event?: unknown; order?: unknown };
+    let message: { id?: number; ok?: unknown; err?: unknown; event?: unknown; order?: unknown };
     try {
       message = JSON.parse(line);
     } catch {
@@ -129,7 +130,7 @@ export class Sidecar {
     const waiting = message.id === undefined ? undefined : this.pending.get(message.id);
     if (!waiting || message.id === undefined) return;
     this.pending.delete(message.id);
-    if (message.err !== undefined) waiting.reject(new Error(message.err));
+    if (message.err !== undefined) waiting.reject(message.err);
     else waiting.resolve(message.ok ?? null);
   }
 }
