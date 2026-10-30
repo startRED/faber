@@ -20,8 +20,14 @@ app included. So each cache keeps the copy that last built in it (`.faber-copy`)
 launcher first removes the workspace crates' fingerprints in every profile, which rebuilds only those crates for it.
 
 Each command gets private `TEMP`, `TMP` and `TMPDIR` under its cache's `.faber-tmp/run-<id>`. Successful and failed
-commands remove their temporary tree. Later invocations retry abandoned cleanup only after a day and when both the
-recorded launcher and child are gone. Live processes, incomplete receipts and links are preserved. Unknown system-wide
+commands remove their temporary tree. A launcher killed from outside (a newer verify stopping an older one, a closed
+terminal) cannot release its cache, so a reservation whose recorded launcher and child are both gone frees its cache
+after ten minutes, and one with no receipt at all (stopped before it could start anything) frees it after an hour; Cargo's
+own lock still guards the folder. A child whose stop could not be confirmed keeps its cache, and each receipt carries a
+token so a command that lost its reservation never writes to or releases the next one. Before this, three killed commands held every cache for a day and later ones waited without a
+word (2026-10-29: `build-3` held empty since 2026-10-24). Its temporary tree stays: the next holder of the cache removes
+it only after a day and when both the recorded launcher and child are gone. Live processes, uncertain children and links
+are preserved. A command that waits for a cache says so once. Unknown system-wide
 `.tmp*` folders are never deleted: their names do not prove Faber owns them.
 Stopping a command first stops its process tree. If that cannot be confirmed, its cache and temporary files stay
 reserved rather than being reused under potentially live descendants.
