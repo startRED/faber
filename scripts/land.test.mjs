@@ -8,7 +8,7 @@ import { join } from 'node:path';
 import test from 'node:test';
 import { fileURLToPath } from 'node:url';
 import { covered, isWords, statusText, toCheck } from './ci-scope.mjs';
-import { areas, BATCH, conflicts, eligibleStack, insertions, message, noCheck, refusal, settle, stacked, stackOn, WORDS, wordsOnly, workflow } from './land.mjs';
+import { areas, BATCH, CHECKED_AS, checkedAs, conflicts, eligibleStack, insertions, message, noCheck, refusal, settle, stacked, stackOn, WORDS, wordsOnly, workflow } from './land.mjs';
 
 test('the commit is the title with its number, then the body without the template comments', () => {
   const body = '## What changed\n\n<!-- One or two sentences. -->\nFragments.   \n\n\n\n## Cost\n\n<!-- Memory.\n     More. -->\nNone.\n';
@@ -187,4 +187,11 @@ test('a green batch lands on a base moved by words only, and anything else sends
   assert.equal(wordsOnly(['docs/decisions.md'], ['docs/decisions.md'], isWords), false);
   assert.equal(wordsOnly(['docs/next/other-lane.json'], [], isWords), false);
   assert.equal(wordsOnly([], [], isWords), false);
+});
+
+test("a commit landed on a words-only move names the one whose run passed, in the status CI's green() reads", () => {
+  const [landed, checked] = ['a'.repeat(40), 'b'.repeat(40)];
+  assert.deepEqual(checkedAs(landed, checked), ['api', `repos/{owner}/{repo}/statuses/${landed}`, '-f', 'state=success', '-f', 'context=faber/checked-as', '-f', `description=${checked}`]);
+  const ci = readFileSync(fileURLToPath(new URL('../.github/workflows/ci.yml', import.meta.url)), 'utf8');
+  assert.ok(ci.includes(`select(.context == "${CHECKED_AS}")`), 'ci.yml green() reads the same status');
 });

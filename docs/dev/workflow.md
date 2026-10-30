@@ -47,6 +47,13 @@ So a pull request is never merged with the button or `gh pr merge`: its green sa
 Dependabot pull request still runs every suite on its own, until it lands through `land.mjs` too. Each push to a queue
 branch cancels the run before it, so a lane queues once, with its fix complete.
 
+A queued commit skips a suite only when the commit it builds on is green, which means a run checked that very commit.
+A green batch put on a base that moved by words only ([Numbers](#numbers)), or a plain `queue/<name>` branch rebased
+onto one, lands as new commits no run checked, so the next queued commit would run every suite. So each commit made
+that way carries a `faber/checked-as` status naming the commit whose run passed, and the `changes` job counts it green
+when that commit is green and the two trees differ by words only; it compares the trees itself, so the status proves
+nothing alone.
+
 Batches (R190 V3, R220). A pull request that touches other parts of the repository than one queued and not landed
 yet (its first folders, leaving out the words, the locales and `docs/`, which every landing writes) is squashed and
 numbered on top of that queue commit instead of the base, up to three deep and never with a workflow change. One run

@@ -171,6 +171,12 @@ export function wordsOnly(moved, differs, isWords) {
   return moved.length > 0 && moved.every((f) => isWords(f) && !numbered(f)) && differs.every(isWords);
 }
 
+/** The commit status a landing on a words-only move leaves on each commit it made, naming the commit whose run passed. */
+export const CHECKED_AS = 'faber/checked-as';
+
+/** The `gh` arguments that post it on `landed`, put again on the moved base from `checked`. */
+export const checkedAs = (landed, checked) => ['api', `repos/{owner}/{repo}/statuses/${landed}`, '-f', 'state=success', '-f', `context=${CHECKED_AS}`, '-f', `description=${checked}`];
+
 /** A change to a workflow lands only from a PC (`--finish`), so it is never batched. */
 export const workflow = (files) => files.some((f) => f.startsWith('.github/workflows/'));
 
@@ -640,6 +646,16 @@ async function landQueued(number, sha) {
       git('push', '--quiet', `--force-with-lease=refs/heads/${m.view.headRefName}:${m.oid}`, 'origin', `${m.landed}:refs/heads/${m.view.headRefName}`);
       moved.push(m);
     }
+    // The commits made on a words-only move had no run of their own, so the next queued commit built on one would run
+    // every suite: each names the one whose run passed, which CI's `green()` takes when the two trees differ by words.
+    // Posted before the base moves, so the next run already reads it; a refused post costs only that full run.
+    for (const m of words ? views : []) {
+      try {
+        run('gh', checkedAs(m.landed, m.commit));
+      } catch (error) {
+        console.error(String(error.stderr || error.message).trim());
+      }
+    }
     execFileSync(process.execPath, ['-e', 'setTimeout(() => {}, 5000)'], { windowsHide: true });
     git('push', '--quiet', 'origin', `${top}:refs/heads/${BASE}`);
   } catch (error) {
@@ -751,7 +767,15 @@ function finish(number) {
 if (process.argv[1] && realpathSync(process.argv[1]) === realpathSync(import.meta.filename)) {
   const args = process.argv.slice(2);
   const number = args.find((a) => /^\d+$/.test(a));
-  if (!number) {
+  if (args[0] === '--words') {
+    // ci.yml's landing of a plain queue branch at `args[1]`: its commits put on a base moved by words only, the new top
+    // printed last, or exit 1 when it has to be checked again.
+    const base = git('rev-parse', `origin/${BASE}`).trim();
+    const commits = git('rev-list', '--reverse', `${base}..${args[1]}`).split('\n').filter(Boolean);
+    const words = commits.length ? await onWords(base, args[1], commits.map((commit) => ({ commit }))) : null;
+    if (words) console.log(words.landing);
+    process.exitCode = words ? 0 : 1;
+  } else if (!number) {
     console.error('usage: node scripts/land.mjs <pull request> [--dry-run] [--no-verify] [--alone] [--head <commit>] | <pull request> --finish');
     process.exitCode = 2;
   } else if (args.includes('--finish')) {
