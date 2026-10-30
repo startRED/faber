@@ -7,6 +7,9 @@ import { createInterface } from 'node:readline';
 import type { Readable, Writable } from 'node:stream';
 import { app } from 'electron';
 
+/** What the host says on its own: events for the screen, and orders for the shell (`Order` in `host/src/wire.rs`). */
+export type Listeners = { event: (event: unknown) => void; order: (order: unknown) => void };
+
 type Pending = { resolve: (value: unknown) => void; reject: (reason: Error) => void };
 
 /** The longest request line the host reads (`MAX_LINE` in `host/src/wire.rs`): a longer one is refused here, not there. */
@@ -35,7 +38,7 @@ export class Sidecar {
     this.exited = exited;
   }
 
-  static start(onEvent: (event: unknown) => void): Sidecar {
+  static start(listen: Listeners): Sidecar {
     // No shell, no console window: the host is a plain child of the app.
     const child = spawn(program(), [], { stdio: ['pipe', 'pipe', 'inherit'], windowsHide: true, shell: false });
     let ended: () => void = () => {};
@@ -60,7 +63,7 @@ export class Sidecar {
     // Writing to a host that just ended fails here, not as an uncaught error; its calls were already answered above.
     child.stdin.on('error', () => {});
     const lines = createInterface({ input: child.stdout, crlfDelay: Infinity });
-    lines.on('line', (line) => sidecar.heard(line, onEvent));
+    lines.on('line', (line) => sidecar.heard(line, listen));
     return sidecar;
   }
 
@@ -95,15 +98,19 @@ export class Sidecar {
     clearTimeout(timer);
   }
 
-  private heard(line: string, onEvent: (event: unknown) => void): void {
-    let message: { id?: number; ok?: unknown; err?: string; event?: unknown };
+  private heard(line: string, listen: Listeners): void {
+    let message: { id?: number; ok?: unknown; err?: string; event?: unknown; order?: unknown };
     try {
       message = JSON.parse(line);
     } catch {
       return;
     }
     if ('event' in message) {
-      onEvent(message.event);
+      listen.event(message.event);
+      return;
+    }
+    if ('order' in message) {
+      listen.order(message.order);
       return;
     }
     const waiting = message.id === undefined ? undefined : this.pending.get(message.id);
