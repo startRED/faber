@@ -2231,6 +2231,7 @@ export const ptBR: Messages = {
   'notes.311.better': 'As linhas de cota na barra lateral agora dizem o nome de cada IA e quanto já foi usado, e o anel no topo diz que mede o contexto da conversa.',
   'notes.312.better': 'Uma resposta cortada porque o Faber fechou agora diz isso, e você pode apertar Continuar para a IA seguir de onde parou.',
   'notes.313.fixed': 'Um pull request com as verificações verdes continua acompanhado até ser incorporado, então uma falha depois ainda chega ao agente.',
+  'notes.314.fixed': 'Uma decisão que você manteve e depois apagou na Memória não volta como mantida quando um agente a escreve de novo: ela aparece como não revisada.',
   'update.checking': 'Procurando atualização…',
   'update.downloading': 'Baixando atualização…',
   'update.downloadingPercent': 'Baixando atualização… {percent}%',
