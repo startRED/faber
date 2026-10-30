@@ -89,6 +89,11 @@ works on a branch named after the task, and its pull request deletes the task's 
 the next `next` deletes the claims of tasks that left the list. `list` shows who holds what, `release <name>` gives a
 task back. CI never runs on `claim/` branches.
 
+A task is the size of one pull request: one idea, about 100 to 400 changed lines. A task that needs more than about
+1000 is split into tasks that land one after another, each one a working step on its own. Its file names the area, the
+files, what done looks like and the tasks it depends on. Many small pull requests a day keep their quality the same way
+one does: the local proofs, the queue and a review by the other vendor.
+
 A session asks the owner only what is the owner's to decide (direction, taste, money), in one short card, and takes the
 next task while the question waits. It stops when `next` says no task is free.
 
