@@ -1278,6 +1278,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "faber-sidecar"
+version = "0.1.0"
+dependencies = [
+ "faber-channel",
+ "faber-engine",
+ "faber-host",
+ "serde_json",
+ "tempfile",
+ "tokio",
+]
+
+[[package]]
 name = "faber-testkit"
 version = "0.1.0"
 dependencies = [
