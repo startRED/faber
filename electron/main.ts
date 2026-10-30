@@ -225,14 +225,20 @@ const windowCommands = new Map<string, (args: Record<string, unknown>) => unknow
 function relay(): void {
   ipcMain.handle('faber:invoke', async (event, command: unknown, args: unknown) => {
     // Any other page (a future browser pane, a frame) is refused before a command runs.
-    if (!fromScreen(event)) throw new Error('error.host.notScreen');
-    if (typeof command !== 'string') throw new Error('error.host.badRequest');
-    if (args !== undefined && (args === null || typeof args !== 'object' || Array.isArray(args))) throw new Error('error.host.badArgs');
+    if (!fromScreen(event)) return { err: 'error.host.notScreen' };
+    if (typeof command !== 'string') return { err: 'error.host.badRequest' };
+    if (args !== undefined && (args === null || typeof args !== 'object' || Array.isArray(args))) return { err: 'error.host.badArgs' };
     const given = (args ?? {}) as Record<string, unknown>;
-    const own = windowCommands.get(command);
-    if (own) return own(given);
-    if (!host) throw new Error('error.host.notReady');
-    return host.call(command, given);
+    // The answer travels as `{ok}` or `{err}`: a failure is an ordinary answer the screen reads (as Tauri's), not an
+    // error Electron would log with a stack for every refused call.
+    try {
+      const own = windowCommands.get(command);
+      if (own) return { ok: (await own(given)) ?? null };
+      if (!host) throw new Error('error.host.notReady');
+      return { ok: await host.call(command, given) };
+    } catch (failure) {
+      return { err: failure instanceof Error ? failure.message : failure };
+    }
   });
   ipcMain.on('faber:window', (event, action: unknown) => {
     if (!win || !fromScreen(event)) return;
