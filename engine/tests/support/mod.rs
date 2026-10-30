@@ -10,9 +10,22 @@ use std::pin::Pin;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 use std::task::{Context, Poll};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 use tokio::io::{AsyncBufReadExt, AsyncWrite, AsyncWriteExt, BufReader};
 use tokio::sync::mpsc::UnboundedReceiver;
+
+/// How long a shared wait gives what it waits for before it fails. A test that passes never waits it out, so it only bounds
+/// a failure, and it holds on a loaded runner, where a 10 ms sleep can take far longer. Real time, never counted in ticks.
+pub const DEADLINE: Duration = Duration::from_secs(30);
+
+/// Polls `done` every 10 ms until it holds, and fails with `what` and the time waited after `DEADLINE`.
+pub async fn until(what: &str, mut done: impl FnMut() -> bool) {
+    let start = Instant::now();
+    while !done() {
+        assert!(start.elapsed() < DEADLINE, "{what} (waited {:.1?})", start.elapsed());
+        tokio::time::sleep(Duration::from_millis(10)).await;
+    }
+}
 
 /// Broker fixtures begin at canonical roots, including macOS's /var system alias.
 pub fn canonical_tempdir() -> io::Result<tempfile::TempDir> {
@@ -54,7 +67,10 @@ pub fn controlled() -> (Spawner, BufReader<tokio::io::DuplexStream>, tokio::io::
 
 pub async fn read_message(input: &mut BufReader<tokio::io::DuplexStream>) -> Value {
     let mut line = String::new();
-    tokio::time::timeout(Duration::from_secs(1), input.read_line(&mut line)).await.expect("no message on fake wire").unwrap();
+    tokio::time::timeout(DEADLINE, input.read_line(&mut line))
+        .await
+        .unwrap_or_else(|_| panic!("no message on fake wire (waited {DEADLINE:?})"))
+        .unwrap();
     serde_json::from_str(&line).unwrap()
 }
 
@@ -372,19 +388,17 @@ pub fn fake(entries: Vec<Entry>) -> Fake {
 impl Fake {
     /// A project turn starts its CLI once its off-lock project check ends; waits until `count` CLIs have started.
     pub async fn spawned(&self, count: usize) {
-        let end = std::time::Instant::now() + Duration::from_secs(5);
-        while self.args.lock().unwrap().len() < count && std::time::Instant::now() < end {
-            tokio::time::sleep(Duration::from_millis(10)).await;
-        }
-        assert!(self.args.lock().unwrap().len() >= count, "the CLI started in time");
+        until(&format!("fewer than {count} CLIs started"), || self.args.lock().unwrap().len() >= count).await;
     }
 }
 
 /// The request id of the next permission question a session asks.
 pub async fn next_permission(rx: &mut UnboundedReceiver<EngineEvent>) -> String {
     loop {
-        let e =
-            tokio::time::timeout(Duration::from_secs(3), rx.recv()).await.expect("no permission question in time").expect("session ended");
+        let e = tokio::time::timeout(DEADLINE, rx.recv())
+            .await
+            .unwrap_or_else(|_| panic!("no permission question (waited {DEADLINE:?})"))
+            .expect("session ended");
         if let EngineEvent::Permission { request_id, .. } = e {
             return request_id;
         }
@@ -404,9 +418,9 @@ pub async fn drive(
     session.send(UserTurn::text(first));
     let mut events = Vec::new();
     loop {
-        let e = tokio::time::timeout(Duration::from_secs(3), rx.recv())
+        let e = tokio::time::timeout(DEADLINE, rx.recv())
             .await
-            .unwrap_or_else(|_| panic!("stalled after {:?}; {:?}", events.last(), fake.mismatches.lock().unwrap()))
+            .unwrap_or_else(|_| panic!("stalled after {:?} (waited {DEADLINE:?}); {:?}", events.last(), fake.mismatches.lock().unwrap()))
             .expect("session ended early");
         events.push(e.clone());
         if react(&e, &session) {
@@ -522,13 +536,14 @@ pub fn pipes() -> (Spawner, Arc<Mutex<Vec<Pipe>>>) {
 
 /// The first process a `pipes` spawner started, once it exists.
 pub async fn next_pipe(made: &Arc<Mutex<Vec<Pipe>>>) -> Pipe {
-    for _ in 0..300 {
-        if !made.lock().unwrap().is_empty() {
-            return made.lock().unwrap().remove(0);
-        }
-        tokio::time::sleep(Duration::from_millis(10)).await;
-    }
-    panic!("no process was started");
+    let mut pipe = None;
+    until("no process was started", || {
+        let mut made = made.lock().unwrap();
+        pipe = (!made.is_empty()).then(|| made.remove(0));
+        pipe.is_some()
+    })
+    .await;
+    pipe.unwrap()
 }
 
 /// What Faber's own Claude requests (the router, the pulse) must start with whatever mode the person chose: no hooks, no settings
