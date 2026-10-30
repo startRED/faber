@@ -21,8 +21,8 @@ fn available(core: &mut Core) {
 
 #[tokio::test]
 async fn send_admission_idle_failure_restores_existing_turn_and_can_retry_once() {
-    let dir = tempfile::tempdir().unwrap();
-    let (app, events) = engine(dir.path());
+    let dir = crate::workspace::TestRoot::new();
+    let (app, events) = engine(&dir);
     let id = seed(&app, Session::from_fn(|_| {}), &[("old", &[])]);
     app.with(|c| {
         available(c);
@@ -85,8 +85,8 @@ async fn send_admission_idle_failure_restores_existing_turn_and_can_retry_once()
 #[tokio::test]
 async fn send_admission_first_message_failure_keeps_the_same_empty_draft_for_retry() {
     for draft in [false, true] {
-        let dir = tempfile::tempdir().unwrap();
-        let (app, _) = engine(dir.path());
+        let dir = crate::workspace::TestRoot::new();
+        let (app, _) = engine(&dir);
         let prior = app.with(|c| {
             available(c);
             draft.then(|| {
@@ -118,8 +118,8 @@ async fn send_admission_first_message_failure_keeps_the_same_empty_draft_for_ret
 #[tokio::test]
 async fn send_admission_queue_failure_sends_nothing_and_retry_is_saved_before_steering() {
     for stopped in [false, true] {
-        let dir = tempfile::tempdir().unwrap();
-        let (app, _) = engine(dir.path());
+        let dir = crate::workspace::TestRoot::new();
+        let (app, _) = engine(&dir);
         let observed = Arc::new(Mutex::new(Vec::new()));
         let output = observed.clone();
         let root = dir.path().to_path_buf();
@@ -170,8 +170,8 @@ async fn send_admission_queue_failure_sends_nothing_and_retry_is_saved_before_st
 }
 
 async fn edited_queue_waits_for_durable_save(mode: &str) {
-    let dir = tempfile::tempdir().unwrap();
-    let (app, _) = engine(dir.path());
+    let dir = crate::workspace::TestRoot::new();
+    let (app, _) = engine(&dir);
     let commands = Arc::new(Mutex::new(Vec::new()));
     let output = commands.clone();
     let root = dir.path().to_path_buf();
@@ -282,8 +282,8 @@ async fn send_admission_send_now_does_not_steer_an_unsaved_queue_edit() {
 }
 
 async fn rejected_archived_send_keeps_its_archive(active: bool) {
-    let dir = tempfile::tempdir().unwrap();
-    let (app, events) = engine(dir.path());
+    let dir = crate::workspace::TestRoot::new();
+    let (app, events) = engine(&dir);
     let id = seed(&app, Session::from_fn(|_| {}), &[("old", &[])]);
     app.with(|c| {
         available(c);
@@ -332,8 +332,8 @@ async fn send_admission_archived_queue_refusal_preserves_archive_and_follow() {
 
 #[tokio::test]
 async fn send_admission_rejected_queue_keeps_its_draft_route_count() {
-    let dir = tempfile::tempdir().unwrap();
-    let (app, _) = engine(dir.path());
+    let dir = crate::workspace::TestRoot::new();
+    let (app, _) = engine(&dir);
     let id = seed(&app, Session::from_fn(|_| {}), &[("old", &[])]);
     app.with(|c| {
         available(c);
@@ -356,8 +356,8 @@ async fn send_admission_rejected_queue_keeps_its_draft_route_count() {
 
 #[tokio::test]
 async fn send_admission_research_refusal_does_not_change_mode_grants_or_other_sessions() {
-    let dir = tempfile::tempdir().unwrap();
-    let (app, _) = engine(dir.path());
+    let dir = crate::workspace::TestRoot::new();
+    let (app, _) = engine(&dir);
     let commands = Arc::new(Mutex::new(0));
     let output = commands.clone();
     let other = seed(
@@ -394,8 +394,8 @@ async fn send_admission_research_refusal_does_not_change_mode_grants_or_other_se
 
 #[tokio::test]
 async fn send_admission_research_settings_failure_keeps_the_durable_intent_accepted_once() {
-    let dir = tempfile::tempdir().unwrap();
-    let (app, _) = engine(dir.path());
+    let dir = crate::workspace::TestRoot::new();
+    let (app, _) = engine(&dir);
     let id = app.with(|c| {
         available(c);
         c.opts.spawn = Arc::new(|_, _, _| panic!("a settings failure starts no CLI"));
@@ -436,8 +436,8 @@ async fn send_admission_queued_settings_failure_halts_keep_going_without_retryin
 
 async fn settings_failure_halts_keep_going(queued: bool) {
     use std::sync::atomic::{AtomicUsize, Ordering};
-    let dir = tempfile::tempdir().unwrap();
-    let (app, _) = engine(dir.path());
+    let dir = crate::workspace::TestRoot::new();
+    let (app, _) = engine(&dir);
     let attempts = Arc::new(AtomicUsize::new(0));
     let attempted = attempts.clone();
     let id = app.with(|c| {

@@ -9,7 +9,6 @@ use faber_engine::proc::Spawner;
 use faber_engine::router::Choice;
 use faber_engine::{AppEvent, Engine, EngineOptions, SendRequest};
 use std::collections::BTreeMap;
-use std::path::Path;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::Duration;
@@ -24,11 +23,13 @@ const WAIT: Duration = Duration::from_secs(5);
 /// A running list as the engine emitted it: its revision and its rows.
 type List = (u64, Vec<RunningItem>);
 
-fn engine(dir: &Path, vendors: &[Vendor], spawn: Spawner, ask: Option<Ask>) -> (Engine, UnboundedReceiver<AppEvent>) {
+fn engine(dir: &crate::support::DataFolder, vendors: &[Vendor], spawn: Spawner, ask: Option<Ask>) -> (Engine, UnboundedReceiver<AppEvent>) {
     let (tx, rx) = tokio::sync::mpsc::unbounded_channel();
     let clis: BTreeMap<Vendor, Cli> = vendors.iter().map(|v| (*v, Cli { command: v.name().into(), prefix: vec![] })).collect();
     let opts = EngineOptions {
-        data_dir: dir.into(),
+        data_dir: dir.path().into(),
+        #[cfg(windows)]
+        chat_dir: dir.chat_path().into(),
         clis,
         spawn,
         windows: false,
@@ -121,9 +122,9 @@ fn router(delay: Option<Duration>) -> Ask {
 
 #[tokio::test]
 async fn a_turn_is_listed_as_working_a_permission_makes_it_needs_you_and_the_end_drops_it() {
-    let dir = tempfile::tempdir().unwrap();
+    let dir = crate::support::DataFolder::new();
     let f = fake(fixture("claude", "tools"));
-    let (engine, mut rx) = engine(dir.path(), &[Vendor::Claude], f.spawn.clone(), None);
+    let (engine, mut rx) = engine(&dir, &[Vendor::Claude], f.spawn.clone(), None);
     let id = engine.send(request(Area::Chat, None, TWO_WRITES, "claude")).unwrap();
     let reply = engine.open(&id).unwrap().messages[1].clone();
 
@@ -162,8 +163,8 @@ async fn a_turn_is_listed_as_working_a_permission_makes_it_needs_you_and_the_end
 
 #[tokio::test]
 async fn an_answer_emits_only_the_lists_that_differ_from_the_one_before() {
-    let dir = tempfile::tempdir().unwrap();
-    let (engine, mut rx) = engine(dir.path(), &[Vendor::Claude], fake(fixture("claude", "chat")).spawn, None);
+    let dir = crate::support::DataFolder::new();
+    let (engine, mut rx) = engine(&dir, &[Vendor::Claude], fake(fixture("claude", "chat")).spawn, None);
     engine.send(request(Area::Chat, None, SKY, "claude")).unwrap();
     let mut lists = Vec::new();
     let (mut messages, mut ended) = (0, false);
@@ -188,9 +189,9 @@ async fn an_answer_emits_only_the_lists_that_differ_from_the_one_before() {
 
 #[tokio::test]
 async fn a_reply_reads_as_finished_when_the_agent_stops_writing_not_when_the_cli_closes_its_turn() {
-    let dir = tempfile::tempdir().unwrap();
+    let dir = crate::support::DataFolder::new();
     // The recording holds back the CLI's `result` for 1.5 s (a loaded machine must not swallow the gap) after the last message ended with `end_turn`, as a Stop hook does.
-    let (engine, mut rx) = engine(dir.path(), &[Vendor::Claude], fake(fixture("claude", "chat-settled")).spawn, None);
+    let (engine, mut rx) = engine(&dir, &[Vendor::Claude], fake(fixture("claude", "chat-settled")).spawn, None);
     let id = engine.send(request(Area::Chat, None, SKY, "claude")).unwrap();
     let mut finished_at = None;
     let mut settled_row = None;
@@ -221,7 +222,7 @@ async fn a_reply_reads_as_finished_when_the_agent_stops_writing_not_when_the_cli
 
 #[tokio::test]
 async fn blocks_with_a_question_come_first_then_the_sidebar_order_with_chat_last_and_questions_lead_each_block() {
-    let dir = tempfile::tempdir().unwrap();
+    let dir = crate::support::DataFolder::new();
     let tools = fixture("claude", "tools");
     let calls = Arc::new(AtomicUsize::new(0));
     // The first two conversations never answer, so they are working; the next two stop at a question.
@@ -229,7 +230,7 @@ async fn blocks_with_a_question_come_first_then_the_sidebar_order_with_chat_last
         let entries = if calls.fetch_add(1, Ordering::SeqCst) < 2 { vec![] } else { tools.clone() };
         Ok(replay(entries, Mismatches::default()))
     });
-    let (engine, mut rx) = engine(dir.path(), &[Vendor::Claude], spawn, None);
+    let (engine, mut rx) = engine(&dir, &[Vendor::Claude], spawn, None);
     engine.save_settings(Settings { permissions: Some(Permissions::Ask), ..Settings::default() }).unwrap();
     let (one, two) = (tempfile::tempdir().unwrap(), tempfile::tempdir().unwrap());
     let first = engine.add_project(&one.path().to_string_lossy()).unwrap();
@@ -269,8 +270,8 @@ async fn blocks_with_a_question_come_first_then_the_sidebar_order_with_chat_last
 
 #[tokio::test]
 async fn renaming_a_running_conversation_emits_a_list_with_the_new_title() {
-    let dir = tempfile::tempdir().unwrap();
-    let (engine, mut rx) = engine(dir.path(), &[Vendor::Claude], fake(fixture("claude", "tools")).spawn, None);
+    let dir = crate::support::DataFolder::new();
+    let (engine, mut rx) = engine(&dir, &[Vendor::Claude], fake(fixture("claude", "tools")).spawn, None);
     let id = engine.send(request(Area::Chat, None, TWO_WRITES, "claude")).unwrap();
     let before = lists_until(&mut rx, WAIT, first_is(RunState::NeedsYou)).await;
     engine.rename(&id, "Quarterly report");
@@ -283,8 +284,8 @@ async fn renaming_a_running_conversation_emits_a_list_with_the_new_title() {
 
 #[tokio::test]
 async fn the_latest_quota_readings_are_kept_with_their_reset_times() {
-    let dir = tempfile::tempdir().unwrap();
-    let (engine, mut rx) = engine(dir.path(), &[Vendor::Claude], fake(fixture("claude", "chat")).spawn, None);
+    let dir = crate::support::DataFolder::new();
+    let (engine, mut rx) = engine(&dir, &[Vendor::Claude], fake(fixture("claude", "chat")).spawn, None);
     assert!(engine.state().quotas.is_empty());
     engine.send(request(Area::Chat, None, SKY, "claude")).unwrap();
     lists_until(&mut rx, WAIT, |items| items.is_empty()).await;
@@ -298,8 +299,8 @@ async fn the_latest_quota_readings_are_kept_with_their_reset_times() {
 
 #[tokio::test]
 async fn the_state_and_the_event_reach_the_screen_in_camel_case() {
-    let dir = tempfile::tempdir().unwrap();
-    let (engine, mut rx) = engine(dir.path(), &[Vendor::Claude], fake(fixture("claude", "tools")).spawn, None);
+    let dir = crate::support::DataFolder::new();
+    let (engine, mut rx) = engine(&dir, &[Vendor::Claude], fake(fixture("claude", "tools")).spawn, None);
     let state = serde_json::to_value(engine.state()).unwrap();
     assert_eq!(state["running"], serde_json::json!({ "revision": 0, "items": [] }));
     assert_eq!(state["quotas"], serde_json::json!([]));
@@ -325,9 +326,9 @@ async fn the_state_and_the_event_reach_the_screen_in_camel_case() {
 
 #[tokio::test]
 async fn an_auto_reply_is_listed_at_once_without_a_vendor_and_gets_one_when_the_pick_is_made() {
-    let dir = tempfile::tempdir().unwrap();
+    let dir = crate::support::DataFolder::new();
     let ask = router(Some(Duration::from_millis(300)));
-    let (engine, mut rx) = engine(dir.path(), &[Vendor::Codex], fake(fixture("codex", "chat")).spawn, Some(ask));
+    let (engine, mut rx) = engine(&dir, &[Vendor::Codex], fake(fixture("codex", "chat")).spawn, Some(ask));
     engine.send(request(Area::Chat, None, SKY, "auto")).unwrap();
     let at_once = engine.state().running;
     assert_eq!(at_once.items.len(), 1);
@@ -344,8 +345,8 @@ async fn an_auto_reply_is_listed_at_once_without_a_vendor_and_gets_one_when_the_
 
 #[tokio::test]
 async fn stopping_while_auto_still_chooses_drops_the_row() {
-    let dir = tempfile::tempdir().unwrap();
-    let (engine, mut rx) = engine(dir.path(), &[Vendor::Codex], fake(fixture("codex", "chat")).spawn, Some(router(None)));
+    let dir = crate::support::DataFolder::new();
+    let (engine, mut rx) = engine(&dir, &[Vendor::Codex], fake(fixture("codex", "chat")).spawn, Some(router(None)));
     let id = engine.send(request(Area::Chat, None, SKY, "auto")).unwrap();
     assert_eq!(engine.state().running.items.len(), 1);
     engine.interrupt(&id);
@@ -358,8 +359,8 @@ async fn stopping_while_auto_still_chooses_drops_the_row() {
 
 #[tokio::test(start_paused = true)]
 async fn a_route_that_never_arrives_falls_back_to_the_default_and_the_row_keeps_running() {
-    let dir = tempfile::tempdir().unwrap();
-    let (engine, mut rx) = engine(dir.path(), &[Vendor::Codex], fake(fixture("codex", "tools")).spawn, Some(router(None)));
+    let dir = crate::support::DataFolder::new();
+    let (engine, mut rx) = engine(&dir, &[Vendor::Codex], fake(fixture("codex", "tools")).spawn, Some(router(None)));
     engine.send(request(Area::Chat, None, TWO_FILES, "auto")).unwrap();
     // The clock is paused, so the 30 seconds the engine waits for the router pass at once.
     let picked = lists_until(&mut rx, Duration::from_secs(120), |items| items.first().is_some_and(|i| i.vendor.is_some())).await;
@@ -374,9 +375,9 @@ async fn a_route_that_never_arrives_falls_back_to_the_default_and_the_row_keeps_
 
 #[tokio::test]
 async fn a_start_that_fails_after_the_pick_ends_the_reply_with_an_error_and_drops_the_row() {
-    let dir = tempfile::tempdir().unwrap();
+    let dir = crate::support::DataFolder::new();
     let ask = router(Some(Duration::from_millis(200)));
-    let (engine, mut rx) = engine(dir.path(), &[Vendor::Codex], fake(fixture("codex", "chat")).spawn, Some(ask));
+    let (engine, mut rx) = engine(&dir, &[Vendor::Codex], fake(fixture("codex", "chat")).spawn, Some(ask));
     let project = engine.add_project(&dir.path().to_string_lossy()).unwrap();
     let id = engine.send(request(Area::Project, Some(&project.id), SKY, "auto")).unwrap();
     assert_eq!(engine.state().running.items.len(), 1);
@@ -392,8 +393,8 @@ async fn a_start_that_fails_after_the_pick_ends_the_reply_with_an_error_and_drop
 
 #[tokio::test]
 async fn a_send_that_cannot_start_ends_the_reply_with_an_error_instead_of_leaving_it_running() {
-    let dir = tempfile::tempdir().unwrap();
-    let (engine, _rx) = engine(dir.path(), &[Vendor::Claude], fake(fixture("claude", "chat")).spawn, None);
+    let dir = crate::support::DataFolder::new();
+    let (engine, _rx) = engine(&dir, &[Vendor::Claude], fake(fixture("claude", "chat")).spawn, None);
     let error = engine.send(request(Area::Project, Some("no-such-project"), SKY, "claude")).unwrap_err();
     assert_eq!(error, "error.projectGone");
     assert!(engine.state().running.items.is_empty(), "a reply that never started must not stay in the list");
@@ -424,10 +425,10 @@ fn asks(rows: &[RunningItem], conversation: &str, request_id: &str) -> bool {
 
 #[tokio::test]
 async fn request_ids_that_repeat_in_two_conversations_are_two_questions() {
-    let dir = tempfile::tempdir().unwrap();
+    let dir = crate::support::DataFolder::new();
     // A chat and a project use two Codex processes, and each numbers its approvals from 0.
     let f = fake(fixture("codex", "tools"));
-    let (engine, mut rx) = engine(dir.path(), &[Vendor::Codex], f.spawn.clone(), None);
+    let (engine, mut rx) = engine(&dir, &[Vendor::Codex], f.spawn.clone(), None);
     engine.save_settings(Settings { permissions: Some(Permissions::Ask), ..Settings::default() }).unwrap();
     let project = engine.add_project(&dir.path().to_string_lossy()).unwrap();
     let chat = engine.send(request(Area::Chat, None, TWO_FILES, "codex")).unwrap();
@@ -457,9 +458,9 @@ async fn request_ids_that_repeat_in_two_conversations_are_two_questions() {
 
 #[tokio::test]
 async fn a_second_answer_to_the_same_request_is_stale_and_the_cli_gets_one_line() {
-    let dir = tempfile::tempdir().unwrap();
+    let dir = crate::support::DataFolder::new();
     let f = fake(fixture("claude", "tools"));
-    let (engine, mut rx) = engine(dir.path(), &[Vendor::Claude], f.spawn.clone(), None);
+    let (engine, mut rx) = engine(&dir, &[Vendor::Claude], f.spawn.clone(), None);
     engine.send(request(Area::Chat, None, TWO_WRITES, "claude")).unwrap();
     let item = lists_until(&mut rx, WAIT, first_is(RunState::NeedsYou)).await.pop().unwrap().1.remove(0);
 
@@ -472,10 +473,10 @@ async fn a_second_answer_to_the_same_request_is_stale_and_the_cli_gets_one_line(
 
 #[tokio::test]
 async fn an_answer_that_names_the_previous_turn_is_stale_and_writes_nothing() {
-    let dir = tempfile::tempdir().unwrap();
+    let dir = crate::support::DataFolder::new();
     // Both turns ask for request `req-1`.
     let f = fake(support::claude_two_turns("req-1"));
-    let (engine, mut rx) = engine(dir.path(), &[Vendor::Claude], f.spawn.clone(), None);
+    let (engine, mut rx) = engine(&dir, &[Vendor::Claude], f.spawn.clone(), None);
     let id = engine.send(request(Area::Chat, None, "first", "claude")).unwrap();
     let one = lists_until(&mut rx, WAIT, first_is(RunState::NeedsYou)).await.pop().unwrap().1.remove(0);
     taken(answer(&engine, &one, true).await);
@@ -499,9 +500,9 @@ async fn an_answer_that_names_the_previous_turn_is_stale_and_writes_nothing() {
 
 #[tokio::test]
 async fn an_answer_the_cli_cannot_take_is_undelivered_and_the_same_card_can_be_answered_again() {
-    let dir = tempfile::tempdir().unwrap();
+    let dir = crate::support::DataFolder::new();
     let f = fake(fixture("claude", "tools"));
-    let (engine, mut rx) = engine(dir.path(), &[Vendor::Claude], f.spawn.clone(), None);
+    let (engine, mut rx) = engine(&dir, &[Vendor::Claude], f.spawn.clone(), None);
     engine.send(request(Area::Chat, None, TWO_WRITES, "claude")).unwrap();
     let rows = lists_until(&mut rx, WAIT, first_is(RunState::NeedsYou)).await.pop().unwrap();
 
@@ -518,8 +519,8 @@ async fn an_answer_the_cli_cannot_take_is_undelivered_and_the_same_card_can_be_a
 // Task 016: a run that ends leaves one mark on its conversation, the done card's and the sidebar dot's, until the person sees it.
 #[tokio::test]
 async fn a_run_that_ends_is_marked_until_the_person_sees_it() {
-    let dir = tempfile::tempdir().unwrap();
-    let (engine, mut rx) = engine(dir.path(), &[Vendor::Claude], fake(fixture("claude", "chat")).spawn, None);
+    let dir = crate::support::DataFolder::new();
+    let (engine, mut rx) = engine(&dir, &[Vendor::Claude], fake(fixture("claude", "chat")).spawn, None);
     let id = engine.send(request(Area::Chat, None, SKY, "claude")).unwrap();
     lists_until(&mut rx, WAIT, |rows| !rows.is_empty()).await;
     lists_until(&mut rx, WAIT, |rows| rows.is_empty()).await;
@@ -535,8 +536,8 @@ async fn a_run_that_ends_is_marked_until_the_person_sees_it() {
 
 #[tokio::test]
 async fn a_run_the_person_stopped_leaves_no_mark() {
-    let dir = tempfile::tempdir().unwrap();
-    let (engine, mut rx) = engine(dir.path(), &[Vendor::Claude], fake(fixture("claude", "interrupt")).spawn, None);
+    let dir = crate::support::DataFolder::new();
+    let (engine, mut rx) = engine(&dir, &[Vendor::Claude], fake(fixture("claude", "interrupt")).spawn, None);
     let id = engine.send(request(Area::Chat, None, "Write a 600-word essay about the history of bread.", "claude")).unwrap();
     lists_until(&mut rx, WAIT, |rows| !rows.is_empty()).await;
     engine.interrupt(&id);
@@ -551,9 +552,9 @@ async fn a_run_the_person_stopped_leaves_no_mark() {
 
 #[tokio::test]
 async fn interrupting_a_running_conversation_drops_its_row() {
-    let dir = tempfile::tempdir().unwrap();
+    let dir = crate::support::DataFolder::new();
     let f = fake(fixture("claude", "interrupt"));
-    let (engine, mut rx) = engine(dir.path(), &[Vendor::Claude], f.spawn.clone(), None);
+    let (engine, mut rx) = engine(&dir, &[Vendor::Claude], f.spawn.clone(), None);
     let id = engine.send(request(Area::Chat, None, "Write a 600-word essay about the history of bread.", "claude")).unwrap();
     lists_until(&mut rx, WAIT, |rows| !rows.is_empty()).await;
     engine.interrupt(&id);
@@ -564,9 +565,9 @@ async fn interrupting_a_running_conversation_drops_its_row() {
 
 #[tokio::test]
 async fn the_engine_is_working_from_the_first_row_until_the_last_one_leaves() {
-    let dir = tempfile::tempdir().unwrap();
+    let dir = crate::support::DataFolder::new();
     let f = fake(fixture("claude", "interrupt"));
-    let (engine, mut rx) = engine(dir.path(), &[Vendor::Claude], f.spawn.clone(), None);
+    let (engine, mut rx) = engine(&dir, &[Vendor::Claude], f.spawn.clone(), None);
     assert!(!engine.is_working(), "nothing has been sent");
     let id = engine.send(request(Area::Chat, None, "Write a 600-word essay about the history of bread.", "claude")).unwrap();
     lists_until(&mut rx, WAIT, |rows| !rows.is_empty()).await;
@@ -579,8 +580,8 @@ async fn the_engine_is_working_from_the_first_row_until_the_last_one_leaves() {
 
 #[tokio::test]
 async fn removing_a_running_conversation_drops_its_row() {
-    let dir = tempfile::tempdir().unwrap();
-    let (engine, mut rx) = engine(dir.path(), &[Vendor::Claude], fake(fixture("claude", "tools")).spawn, None);
+    let dir = crate::support::DataFolder::new();
+    let (engine, mut rx) = engine(&dir, &[Vendor::Claude], fake(fixture("claude", "tools")).spawn, None);
     let id = engine.send(request(Area::Chat, None, TWO_WRITES, "claude")).unwrap();
     lists_until(&mut rx, WAIT, first_is(RunState::NeedsYou)).await;
     engine.remove(&id);
@@ -620,8 +621,8 @@ async fn a_driver_panic_removes_only_its_run_from_overlapping_chat_and_project_w
                 contained: None,
             })
         });
-        let dir = tempfile::tempdir().unwrap();
-        let (engine, mut rx) = engine(dir.path(), &[vendor], spawn, None);
+        let dir = crate::support::DataFolder::new();
+        let (engine, mut rx) = engine(&dir, &[vendor], spawn, None);
         let project = engine.add_project(&dir.path().to_string_lossy()).unwrap();
         let chat = engine.send(request(Area::Chat, None, SKY, vendor.name())).unwrap();
         let work = engine.send(request(Area::Project, Some(&project.id), SKY, vendor.name())).unwrap();
@@ -640,8 +641,8 @@ async fn a_driver_panic_removes_only_its_run_from_overlapping_chat_and_project_w
 /// more: a project is removed whatever they hold, and neither is touched.
 #[tokio::test]
 async fn what_older_versions_left_for_missions_never_keeps_a_project_from_being_removed() {
-    let (data, repo) = (tempfile::tempdir().unwrap(), tempfile::tempdir().unwrap());
-    let (engine, _rx) = engine(data.path(), &[Vendor::Codex], fake(fixture("codex", "chat")).spawn, None);
+    let (data, repo) = (crate::support::DataFolder::new(), tempfile::tempdir().unwrap());
+    let (engine, _rx) = engine(&data, &[Vendor::Codex], fake(fixture("codex", "chat")).spawn, None);
     let project = engine.add_project(&repo.path().to_string_lossy()).unwrap();
     let journal = repo.path().join(".faber").join("missions").join("m1");
     std::fs::create_dir_all(&journal).unwrap();
@@ -657,9 +658,9 @@ async fn what_older_versions_left_for_missions_never_keeps_a_project_from_being_
 
 #[tokio::test]
 async fn a_renamed_conversation_never_keeps_control_or_invisible_characters() {
-    let dir = tempfile::tempdir().unwrap();
+    let dir = crate::support::DataFolder::new();
     let ask = router(Some(Duration::from_millis(200)));
-    let (engine, _rx) = engine(dir.path(), &[Vendor::Codex], fake(fixture("codex", "chat")).spawn, Some(ask));
+    let (engine, _rx) = engine(&dir, &[Vendor::Codex], fake(fixture("codex", "chat")).spawn, Some(ask));
     let id = engine.send(request(Area::Chat, None, SKY, "auto")).unwrap();
     let before = engine.open(&id).unwrap().title;
     engine.rename(&id, "  A\u{7}B\u{202e}C\u{200b}D\u{2028}E\n ");

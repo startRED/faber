@@ -7,7 +7,6 @@ use faber_engine::proc::Spawner;
 use faber_engine::router::Choice;
 use faber_engine::{AppEvent, Engine, EngineOptions, SendRequest, WarmRequest};
 use std::collections::BTreeMap;
-use std::path::Path;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 use support::{fake, fixture};
@@ -16,11 +15,13 @@ use tokio::sync::mpsc::UnboundedReceiver;
 const SKY: &str = "In one sentence: why is the sky blue?";
 type Calls = Arc<Mutex<Vec<String>>>;
 
-fn engine(dir: &Path, vendor: Vendor, spawn: Spawner, ask: Ask) -> (Engine, UnboundedReceiver<AppEvent>) {
+fn engine(dir: &crate::support::DataFolder, vendor: Vendor, spawn: Spawner, ask: Ask) -> (Engine, UnboundedReceiver<AppEvent>) {
     let (tx, rx) = tokio::sync::mpsc::unbounded_channel();
     let clis = BTreeMap::from([(vendor, Cli { command: vendor.name().into(), prefix: vec![] })]);
     let opts = EngineOptions {
-        data_dir: dir.into(),
+        data_dir: dir.path().into(),
+        #[cfg(windows)]
+        chat_dir: dir.chat_path().into(),
         clis,
         spawn,
         windows: false,
@@ -99,9 +100,9 @@ async fn finished(rx: &mut UnboundedReceiver<AppEvent>) -> Message {
 
 #[tokio::test]
 async fn auto_routes_the_first_message_blind_and_says_why() {
-    let dir = tempfile::tempdir().unwrap();
+    let dir = crate::support::DataFolder::new();
     let calls = Calls::default();
-    let (engine, mut rx) = engine(dir.path(), Vendor::Codex, fake(fixture("codex", "chat")).spawn, router("chat", "easy", calls.clone()));
+    let (engine, mut rx) = engine(&dir, Vendor::Codex, fake(fixture("codex", "chat")).spawn, router("chat", "easy", calls.clone()));
     engine.send(auto(SKY)).unwrap();
     let reply = finished(&mut rx).await;
     engine.shutdown();
@@ -113,9 +114,9 @@ async fn auto_routes_the_first_message_blind_and_says_why() {
 
 #[tokio::test]
 async fn a_router_without_an_answer_leaves_the_everyday_default() {
-    let dir = tempfile::tempdir().unwrap();
+    let dir = crate::support::DataFolder::new();
     let silent: Ask = Arc::new(|_| Box::pin(async { None }));
-    let (engine, mut rx) = engine(dir.path(), Vendor::Codex, fake(fixture("codex", "chat")).spawn, silent);
+    let (engine, mut rx) = engine(&dir, Vendor::Codex, fake(fixture("codex", "chat")).spawn, silent);
     engine.send(auto(SKY)).unwrap();
     let reply = finished(&mut rx).await;
     engine.shutdown();
@@ -125,9 +126,9 @@ async fn a_router_without_an_answer_leaves_the_everyday_default() {
 
 #[tokio::test]
 async fn a_draft_routed_while_typing_answers_without_asking_again() {
-    let dir = tempfile::tempdir().unwrap();
+    let dir = crate::support::DataFolder::new();
     let calls = Calls::default();
-    let (engine, mut rx) = engine(dir.path(), Vendor::Codex, fake(fixture("codex", "chat")).spawn, router("chat", "easy", calls.clone()));
+    let (engine, mut rx) = engine(&dir, Vendor::Codex, fake(fixture("codex", "chat")).spawn, router("chat", "easy", calls.clone()));
     let typing = WarmRequest {
         conversation_id: None,
         area: Area::Chat,
@@ -146,10 +147,10 @@ async fn a_draft_routed_while_typing_answers_without_asking_again() {
 
 #[tokio::test]
 async fn once_a_message_needs_more_than_an_easy_model_the_conversation_stays_with_it() {
-    let dir = tempfile::tempdir().unwrap();
+    let dir = crate::support::DataFolder::new();
     let calls = Calls::default();
     let f = fake(fixture("claude", "chat"));
-    let (engine, mut rx) = engine(dir.path(), Vendor::Claude, f.spawn.clone(), router("writing", "medium", calls.clone()));
+    let (engine, mut rx) = engine(&dir, Vendor::Claude, f.spawn.clone(), router("writing", "medium", calls.clone()));
     let id = engine.send(auto(SKY)).unwrap();
     let first = finished(&mut rx).await;
     engine.send(SendRequest { conversation_id: Some(id.clone()), ..auto("And at sunset?") }).unwrap();
@@ -163,11 +164,11 @@ async fn once_a_message_needs_more_than_an_easy_model_the_conversation_stays_wit
 
 #[tokio::test]
 async fn a_conversation_that_began_with_a_greeting_moves_up_when_the_work_does() {
-    let dir = tempfile::tempdir().unwrap();
+    let dir = crate::support::DataFolder::new();
     let calls = Calls::default();
     let f = fake(fixture("claude", "chat"));
     let ask = verdicts(vec![("chat", "easy"), ("code", "hard")], calls.clone());
-    let (engine, mut rx) = engine(dir.path(), Vendor::Claude, f.spawn.clone(), ask);
+    let (engine, mut rx) = engine(&dir, Vendor::Claude, f.spawn.clone(), ask);
     let id = engine.send(auto(SKY)).unwrap();
     finished(&mut rx).await;
     engine.send(SendRequest { conversation_id: Some(id.clone()), ..auto("Now refactor my billing service") }).unwrap();
@@ -183,12 +184,14 @@ async fn a_conversation_that_began_with_a_greeting_moves_up_when_the_work_does()
 
 #[tokio::test]
 async fn with_only_claude_the_router_process_starts_while_the_user_types() {
-    let dir = tempfile::tempdir().unwrap();
+    let dir = crate::support::DataFolder::new();
     let f = fake(fixture("claude", "chat"));
     let (tx, _rx) = tokio::sync::mpsc::unbounded_channel();
     let clis = BTreeMap::from([(Vendor::Claude, Cli { command: "claude".into(), prefix: vec![] })]);
     let opts = EngineOptions {
         data_dir: dir.path().into(),
+        #[cfg(windows)]
+        chat_dir: dir.chat_path().into(),
         clis,
         spawn: f.spawn.clone(),
         windows: false,
@@ -232,9 +235,9 @@ async fn with_only_claude_the_router_process_starts_while_the_user_types() {
 
 #[tokio::test]
 async fn stop_while_the_route_is_coming_stops_the_answer() {
-    let dir = tempfile::tempdir().unwrap();
+    let dir = crate::support::DataFolder::new();
     let never: Ask = Arc::new(|_| Box::pin(std::future::pending()));
-    let (engine, _rx) = engine(dir.path(), Vendor::Codex, fake(fixture("codex", "chat")).spawn, never);
+    let (engine, _rx) = engine(&dir, Vendor::Codex, fake(fixture("codex", "chat")).spawn, never);
     let id = engine.send(auto(SKY)).unwrap();
     assert_eq!(engine.open(&id).unwrap().messages[1].reason.as_deref(), Some("reason.routing"));
     engine.interrupt(&id);
@@ -247,11 +250,13 @@ async fn stop_while_the_route_is_coming_stops_the_answer() {
 /// process a conversation gets for the mode the person chose.
 #[tokio::test]
 async fn r121_the_codex_router_starts_its_own_isolated_process_while_conversations_follow_the_chosen_mode() {
-    let dir = tempfile::tempdir().unwrap();
+    let dir = crate::support::DataFolder::new();
     let f = fake(fixture("codex", "chat"));
     let (tx, _rx) = tokio::sync::mpsc::unbounded_channel();
     let opts = EngineOptions {
         data_dir: dir.path().into(),
+        #[cfg(windows)]
+        chat_dir: dir.chat_path().into(),
         clis: BTreeMap::from([(Vendor::Codex, Cli { command: "codex".into(), prefix: vec![] })]),
         spawn: f.spawn.clone(),
         windows: false,
@@ -287,9 +292,9 @@ async fn r121_the_codex_router_starts_its_own_isolated_process_while_conversatio
 /// Task 3 of the model rules: a draft is routed at most twice while the person types it, and sending starts the count again.
 #[tokio::test]
 async fn a_draft_is_routed_at_most_twice_while_typing_and_sending_starts_the_count_again() {
-    let dir = tempfile::tempdir().unwrap();
+    let dir = crate::support::DataFolder::new();
     let calls = Calls::default();
-    let (engine, mut rx) = engine(dir.path(), Vendor::Codex, fake(fixture("codex", "chat")).spawn, router("chat", "easy", calls.clone()));
+    let (engine, mut rx) = engine(&dir, Vendor::Codex, fake(fixture("codex", "chat")).spawn, router("chat", "easy", calls.clone()));
     let typing = |id: Option<&str>| WarmRequest {
         conversation_id: id.map(String::from),
         area: Area::Chat,
@@ -317,10 +322,10 @@ async fn a_draft_is_routed_at_most_twice_while_typing_and_sending_starts_the_cou
 /// Rule 3 of models.md: with nothing asked for, a conversation keeps its process, model and effort from one message to the next.
 #[tokio::test]
 async fn a_second_message_keeps_the_process_the_model_and_the_effort_of_the_first() {
-    let dir = tempfile::tempdir().unwrap();
+    let dir = crate::support::DataFolder::new();
     let calls = Calls::default();
     let f = fake(support::claude_two_turns("req"));
-    let (engine, _rx) = engine(dir.path(), Vendor::Claude, f.spawn.clone(), router("code", "medium", calls.clone()));
+    let (engine, _rx) = engine(&dir, Vendor::Claude, f.spawn.clone(), router("code", "medium", calls.clone()));
     // Each turn of the recording asks to write a file: answer it, then wait for the reply to end.
     let turn = |engine: &Engine, id: String, reply: usize| {
         let engine = engine.clone();

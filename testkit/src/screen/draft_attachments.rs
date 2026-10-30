@@ -98,7 +98,7 @@ fn sent(ctx: &Ctx) -> Option<Value> {
 fn refused_send(ctx: &mut Ctx) -> Result {
     start_settings(ctx, "en")?;
     let id = "5f1c0000-0000-4000-8000-0000000000ad";
-    let cwd = ctx.sb.data.join("chat").join(id);
+    let cwd = ctx.sb.data.with_file_name("data-chat-work").join(id);
     let at = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_err(|e| e.to_string())?.as_millis() as u64;
     let conversation = json!({
         "id": id, "title": "Blocked send fixture", "area": "chat", "sessions": {"claude": "synthetic-admission-session"},

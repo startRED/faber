@@ -147,9 +147,9 @@ mod tests {
     use serde_json::json;
 
     /// A running reply on a session that counts the interrupts it gets, and the clock the test moves.
-    fn running() -> (Engine, String, Arc<Mutex<u32>>, Arc<Mutex<f64>>, tempfile::TempDir) {
-        let dir = tempfile::tempdir().unwrap();
-        let (engine, _) = engine(dir.path());
+    fn running() -> (Engine, String, Arc<Mutex<u32>>, Arc<Mutex<f64>>, crate::workspace::TestRoot) {
+        let dir = crate::workspace::TestRoot::new();
+        let (engine, _) = engine(&dir);
         let stops = Arc::new(Mutex::new(0));
         let counted = stops.clone();
         let session = Session::from_fn(move |cmd| {

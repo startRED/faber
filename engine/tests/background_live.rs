@@ -30,12 +30,14 @@ async fn message(rx: &mut UnboundedReceiver<AppEvent>, accept: impl Fn(&Message)
 #[tokio::test]
 async fn background_live_fixture_keeps_launches_open_and_reuses_follow_updates() {
     let fixture: Value = serde_json::from_str(include_str!("../../tests/fixtures/background-live.json")).unwrap();
-    let folder = support::tempdir();
+    let folder = support::DataFolder::new();
     let (spawn, made) = support::pipes();
     let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
     let engine = Engine::new(
         EngineOptions {
-            data_dir: folder.path().join("data"),
+            data_dir: folder.path().into(),
+            #[cfg(windows)]
+            chat_dir: folder.chat_path().into(),
             clis: BTreeMap::from([(Vendor::Claude, Cli { command: "fake".into(), prefix: vec![] })]),
             spawn,
             windows: false,

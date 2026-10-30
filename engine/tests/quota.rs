@@ -11,7 +11,6 @@ use faber_engine::router::Choice;
 use faber_engine::{AppEvent, Engine, EngineOptions, SendRequest};
 use serde_json::json;
 use std::collections::BTreeMap;
-use std::path::Path;
 use std::sync::Arc;
 use std::time::Duration;
 use support::{Entry, fake, fixture};
@@ -22,10 +21,12 @@ const SKY: &str = "In one sentence: why is the sky blue?";
 /// 1791627000).
 const WHEN: f64 = 1_791_620_000.0;
 
-fn start(dir: &Path, vendor: Vendor, spawn: Spawner) -> (Engine, UnboundedReceiver<AppEvent>) {
+fn start(dir: &crate::support::DataFolder, vendor: Vendor, spawn: Spawner) -> (Engine, UnboundedReceiver<AppEvent>) {
     let (tx, rx) = tokio::sync::mpsc::unbounded_channel();
     let opts = EngineOptions {
-        data_dir: dir.into(),
+        data_dir: dir.path().into(),
+        #[cfg(windows)]
+        chat_dir: dir.chat_path().into(),
         clis: BTreeMap::from([(vendor, Cli { command: vendor.name().into(), prefix: vec![] })]),
         spawn,
         windows: false,
@@ -66,8 +67,8 @@ async fn finished(rx: &mut UnboundedReceiver<AppEvent>) -> Message {
 
 #[tokio::test]
 async fn a_claude_reading_reaches_the_ledger_is_saved_and_is_still_there_after_a_restart() {
-    let dir = tempfile::tempdir().unwrap();
-    let (engine, mut rx) = start(dir.path(), Vendor::Claude, fake(fixture("claude", "chat")).spawn);
+    let dir = support::DataFolder::new();
+    let (engine, mut rx) = start(&dir, Vendor::Claude, fake(fixture("claude", "chat")).spawn);
     engine.send(ask("claude")).unwrap();
     finished(&mut rx).await;
     let claude = engine.ledger().claude;
@@ -82,7 +83,7 @@ async fn a_claude_reading_reaches_the_ledger_is_saved_and_is_still_there_after_a
     assert_eq!(saved.claude.readings["five_hour"].used, 0.07);
     assert_eq!(saved.claude.billing, Billing::Unknown, "what is true only now is not written");
 
-    let (again, _rx) = start(dir.path(), Vendor::Claude, fake(fixture("claude", "chat")).spawn);
+    let (again, _rx) = start(&dir, Vendor::Claude, fake(fixture("claude", "chat")).spawn);
     let state = again.state();
     let windows: Vec<&str> = state.quotas.iter().map(|q| q.window.as_str()).collect();
     assert_eq!(windows, ["five_hour", "seven_day"], "Settings has numbers before the first answer");
@@ -90,8 +91,8 @@ async fn a_claude_reading_reaches_the_ledger_is_saved_and_is_still_there_after_a
 
 #[tokio::test]
 async fn a_codex_session_tells_the_ledger_the_plan_and_that_it_is_a_subscription() {
-    let dir = tempfile::tempdir().unwrap();
-    let (engine, mut rx) = start(dir.path(), Vendor::Codex, fake(fixture("codex", "chat")).spawn);
+    let dir = support::DataFolder::new();
+    let (engine, mut rx) = start(&dir, Vendor::Codex, fake(fixture("codex", "chat")).spawn);
     engine.send(ask("codex")).unwrap();
     finished(&mut rx).await;
     let codex = engine.ledger().codex;
@@ -116,9 +117,9 @@ async fn a_budget_file_that_is_damaged_old_or_odd_never_stops_the_app() {
                 "learned": {"mass": [1.0], "covered": 5.0}, "weights": {"w": {"a": 99.0}, "capacity": null}}}"#,
         ),
     ] {
-        let dir = tempfile::tempdir().unwrap();
+        let dir = support::DataFolder::new();
         std::fs::write(dir.path().join("budget.json"), content).unwrap();
-        let (engine, mut rx) = start(dir.path(), Vendor::Claude, fake(fixture("claude", "chat")).spawn);
+        let (engine, mut rx) = start(&dir, Vendor::Claude, fake(fixture("claude", "chat")).spawn);
         assert!(engine.ledger().claude.readings.is_empty(), "{name}: nothing believable to start from");
         assert!(engine.state().quotas.is_empty(), "{name}");
         engine.send(ask("claude")).unwrap();
@@ -130,8 +131,8 @@ async fn a_budget_file_that_is_damaged_old_or_odd_never_stops_the_app() {
 
 #[tokio::test]
 async fn a_reading_that_cannot_be_real_is_neither_shown_nor_remembered() {
-    let dir = tempfile::tempdir().unwrap();
-    let (engine, _rx) = start(dir.path(), Vendor::Claude, fake(vec![]).spawn);
+    let dir = support::DataFolder::new();
+    let (engine, _rx) = start(&dir, Vendor::Claude, fake(vec![]).spawn);
     let quota = |window: &str, used: f64, resets_at: f64| EngineEvent::Quota { window: window.into(), used, resets_at };
     engine.note_account_events(
         Vendor::Claude,
@@ -183,8 +184,8 @@ async fn limits_are_read_without_a_turn_and_the_account_is_not_kept() {
     assert_eq!(plan, Some(Billing::Subscription));
     assert!(!format!("{events:?}").contains("someone@example.com"), "the email is dropped unread");
 
-    let dir = tempfile::tempdir().unwrap();
-    let (engine, _rx) = start(dir.path(), Vendor::Codex, fake(vec![]).spawn);
+    let dir = support::DataFolder::new();
+    let (engine, _rx) = start(&dir, Vendor::Codex, fake(vec![]).spawn);
     engine.note_account_events(Vendor::Codex, events);
     let codex = engine.ledger().codex;
     assert_eq!((codex.plan.as_deref(), codex.billing), (Some("plus"), Billing::Subscription));
@@ -200,8 +201,8 @@ async fn a_cli_that_never_answers_gives_no_limits() {
 
 #[tokio::test]
 async fn an_account_update_with_no_billing_clears_an_earlier_subscription_verdict() {
-    let dir = tempfile::tempdir().unwrap();
-    let (engine, _rx) = start(dir.path(), Vendor::Codex, fake(fixture("codex", "chat")).spawn);
+    let dir = support::DataFolder::new();
+    let (engine, _rx) = start(&dir, Vendor::Codex, fake(fixture("codex", "chat")).spawn);
     let mut state = faber_engine::codex::CodexTurnState::default();
     for mode in [json!("chatgpt"), serde_json::Value::Null] {
         let events =
@@ -237,7 +238,7 @@ async fn a_limits_error_keeps_the_successful_account_verdict() {
         Entry { input: false, msg: json!({"id":3,"result":{"account":{"type":"chatgpt","planType":"pro"}}}) },
     ];
     let f = fake(entries);
-    let dir = tempfile::tempdir().unwrap();
+    let dir = support::DataFolder::new();
     let events = read_codex_limits("codex", dir.path(), false, f.spawn, Duration::from_secs(1)).await;
     assert!(events.iter().any(|e| matches!(e, EngineEvent::Signals(s) if s.billing == Some(Billing::Subscription))));
     assert!(!events.iter().any(|e| matches!(e, EngineEvent::Quota { .. })));

@@ -21,7 +21,6 @@ use faber_engine::router::Choice;
 use faber_engine::{AppEvent, Engine, EngineOptions, SendRequest, TerminalCommand, WarmRequest};
 use serde_json::{Value, json};
 use std::collections::BTreeMap;
-use std::path::Path;
 use std::pin::Pin;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
@@ -76,10 +75,12 @@ impl MissingDiscoveryApi for Cli {
     }
 }
 
-fn engine(dir: &Path, clis: BTreeMap<Vendor, Cli>, spawn: Spawner) -> (Engine, UnboundedReceiver<AppEvent>) {
+fn engine(dir: &crate::support::DataFolder, clis: BTreeMap<Vendor, Cli>, spawn: Spawner) -> (Engine, UnboundedReceiver<AppEvent>) {
     let (tx, rx) = tokio::sync::mpsc::unbounded_channel();
     let opts = EngineOptions {
-        data_dir: dir.into(),
+        data_dir: dir.path().into(),
+        #[cfg(windows)]
+        chat_dir: dir.chat_path().into(),
         clis,
         spawn,
         windows: true,
@@ -183,11 +184,11 @@ async fn c1_1_signed_in_uses_only_official_status_arguments_through_the_spawner(
         (Vendor::Claude, "{\"loggedIn\":true,\"authMethod\":\"claude.ai\",\"apiProvider\":\"firstParty\"}\n", "", vec!["auth", "login"]),
         (Vendor::Codex, "", "Logged in using ChatGPT\n", vec!["login"]),
     ] {
-        let dir = tempfile::tempdir().unwrap();
+        let dir = crate::support::DataFolder::new();
         let (spawn, calls) = status_spawner(stdout, stderr, false);
         // Prefix arguments are executable launch details, not a shell command.
         let cli = Cli { command: "C:\\Official tools\\node.exe".into(), prefix: vec!["C:\\Official tools\\entry.js".into()] };
-        let (engine, mut events) = engine(dir.path(), BTreeMap::from([(vendor, cli.clone())]), spawn);
+        let (engine, mut events) = engine(&dir, BTreeMap::from([(vendor, cli.clone())]), spawn);
         let status = serde_json::to_value(engine.account_status(vendor, Duration::from_millis(100)).await).unwrap();
         assert!(!status.is_null(), "C1.1: Engine::account_status is missing");
         assert_eq!(status, json!("signedIn"));
@@ -214,9 +215,9 @@ async fn c1_2_signed_out_and_unresponsive_accounts_finish_within_the_timeout() {
         (Vendor::Codex, "", "Not logged in\n"),
     ] {
         for (hangs, expected) in [(false, "signedOut"), (true, "unknown")] {
-            let dir = tempfile::tempdir().unwrap();
+            let dir = crate::support::DataFolder::new();
             let (spawn, calls) = status_spawner(if hangs { "" } else { stdout }, if hangs { "" } else { stderr }, hangs);
-            let (engine, _) = engine(dir.path(), BTreeMap::from([(vendor, native_cli())]), spawn);
+            let (engine, _) = engine(&dir, BTreeMap::from([(vendor, native_cli())]), spawn);
             let began = Instant::now();
             let result = tokio::time::timeout(Duration::from_millis(500), engine.account_status(vendor, Duration::from_millis(40))).await;
             assert!(result.is_ok(), "C1.2: account check ignored its 40 ms timeout");
@@ -236,9 +237,9 @@ async fn account_status_reads_a_complete_json_object_without_mixing_stderr_into_
         ("{\n  \"loggedIn\": true,\n  \"authMethod\": \"claude.ai\",\n  \"apiProvider\": \"firstParty\"\n}\n", "signedIn"),
         ("{\n  \"loggedIn\": false,\n  \"authMethod\": \"none\",\n  \"apiProvider\": \"firstParty\"\n}\n", "signedOut"),
     ] {
-        let dir = tempfile::tempdir().unwrap();
+        let dir = crate::support::DataFolder::new();
         let (spawn, _) = status_spawner(stdout, "Diagnostic on stderr\n", false);
-        let (engine, _) = engine(dir.path(), BTreeMap::from([(Vendor::Claude, native_cli())]), spawn);
+        let (engine, _) = engine(&dir, BTreeMap::from([(Vendor::Claude, native_cli())]), spawn);
         assert_eq!(serde_json::to_value(engine.account_status(Vendor::Claude, Duration::from_millis(100)).await).unwrap(), json!(expected));
         engine.shutdown();
     }
@@ -247,7 +248,7 @@ async fn account_status_reads_a_complete_json_object_without_mixing_stderr_into_
 #[tokio::test]
 async fn account_status_rejects_failed_or_oversized_output() {
     for failed in [true, false] {
-        let dir = tempfile::tempdir().unwrap();
+        let dir = crate::support::DataFolder::new();
         let spawn: Spawner = Arc::new(move |_, _, _| {
             let stdout: Box<dyn AsyncRead + Send + Unpin> = if failed {
                 Box::new(FailedStatusReader(false))
@@ -256,7 +257,7 @@ async fn account_status_rejects_failed_or_oversized_output() {
             };
             Ok(Proc { stdin: Box::new(tokio::io::sink()), stdout, stderr: None, child: None, contained: None })
         });
-        let (engine, _) = engine(dir.path(), BTreeMap::from([(Vendor::Codex, native_cli())]), spawn);
+        let (engine, _) = engine(&dir, BTreeMap::from([(Vendor::Codex, native_cli())]), spawn);
         assert_eq!(serde_json::to_value(engine.account_status(Vendor::Codex, Duration::from_millis(100)).await).unwrap(), json!("unknown"));
         engine.shutdown();
     }
@@ -264,7 +265,7 @@ async fn account_status_rejects_failed_or_oversized_output() {
 
 #[tokio::test]
 async fn replacing_an_active_shared_server_retires_it_as_soon_as_its_answer_finishes() {
-    let dir = tempfile::tempdir().unwrap();
+    let dir = crate::support::DataFolder::new();
     let mut entries: Vec<_> = support::fixture("codex", "chat").into_iter().take_while(|e| !(e.input && e.msg["id"] == 4)).collect();
     // Closing a thread asks the existing driver to interrupt its last known turn.
     entries.push(support::Entry {
@@ -286,7 +287,7 @@ async fn replacing_an_active_shared_server_retires_it_as_soon_as_its_answer_fini
             Ok(proc)
         })
     };
-    let (engine, mut events) = engine(dir.path(), BTreeMap::from([(Vendor::Codex, native_cli())]), spawn);
+    let (engine, mut events) = engine(&dir, BTreeMap::from([(Vendor::Codex, native_cli())]), spawn);
     engine
         .send(SendRequest {
             conversation_id: None,
@@ -362,7 +363,7 @@ fn c1_3_default_installations_outside_path_resolve_to_a_program_without_a_shell(
 
 #[tokio::test]
 async fn c1_4_replacing_clis_updates_state_warm_and_send_without_recreating_the_engine() {
-    let dir = tempfile::tempdir().unwrap();
+    let dir = crate::support::DataFolder::new();
     let replay = support::fake(support::fixture("claude", "chat"));
     let codex = support::fake(support::fixture("codex", "chat"));
     let old_dropped = Arc::new(AtomicBool::new(false));
@@ -385,7 +386,7 @@ async fn c1_4_replacing_clis_updates_state_warm_and_send_without_recreating_the_
             }
         })
     };
-    let (engine, mut events) = engine(dir.path(), BTreeMap::new(), spawn);
+    let (engine, mut events) = engine(&dir, BTreeMap::new(), spawn);
     assert!(engine.state().vendors.is_empty());
     engine.replace_clis(BTreeMap::from([(Vendor::Claude, native_cli())]));
     assert_eq!(engine.state().vendors, vec![Vendor::Claude], "C1.4: the existing engine still exposes the old CLI registry");
@@ -450,10 +451,10 @@ async fn c1_4_replacing_clis_updates_state_warm_and_send_without_recreating_the_
 
 #[tokio::test]
 async fn c1_5_saving_another_setting_preserves_skipped_setup_on_disk_and_in_app_state() {
-    let dir = tempfile::tempdir().unwrap();
+    let dir = crate::support::DataFolder::new();
     let settings_path = dir.path().join("settings.json");
     std::fs::write(&settings_path, json!({"setup":"skipped", "language":"en"}).to_string()).unwrap();
-    let (engine, _) = engine(dir.path(), BTreeMap::new(), Arc::new(|_, _, _| panic!("saving settings must not launch a CLI")));
+    let (engine, _) = engine(&dir, BTreeMap::new(), Arc::new(|_, _, _| panic!("saving settings must not launch a CLI")));
     let patch: Settings = serde_json::from_value(json!({"userHooks":true})).unwrap();
     let saved = serde_json::to_value(engine.save_settings(patch).unwrap()).unwrap();
     assert_eq!(saved["setup"], "skipped", "C1.5: save_settings discarded the existing setup decision");

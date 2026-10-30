@@ -12,16 +12,18 @@ use std::path::Path;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
-fn engine(root: &Path) -> (Engine, Arc<Mutex<Vec<AppEvent>>>) {
+fn engine(root: &crate::support::DataFolder) -> (Engine, Arc<Mutex<Vec<AppEvent>>>) {
     engine_with(root, support::fake(vec![]).spawn)
 }
 
-fn engine_with(root: &Path, spawn: faber_engine::proc::Spawner) -> (Engine, Arc<Mutex<Vec<AppEvent>>>) {
+fn engine_with(root: &crate::support::DataFolder, spawn: faber_engine::proc::Spawner) -> (Engine, Arc<Mutex<Vec<AppEvent>>>) {
     let events = Arc::new(Mutex::new(Vec::new()));
     let heard = events.clone();
     let app = Engine::new(
         EngineOptions {
-            data_dir: root.into(),
+            data_dir: root.path().into(),
+            #[cfg(windows)]
+            chat_dir: root.chat_path().into(),
             clis: BTreeMap::from([(Vendor::Claude, Cli { command: "claude".into(), prefix: vec![] })]),
             spawn,
             windows: false,
@@ -54,8 +56,8 @@ fn chat(app: &Engine, dir: &Path) -> (String, std::path::PathBuf) {
 
 #[tokio::test]
 async fn a_conversation_that_cannot_be_written_says_so_once_and_is_written_whole_by_the_next_save() {
-    let dir = support::tempdir();
-    let (app, events) = engine(dir.path());
+    let dir = support::DataFolder::new();
+    let (app, events) = engine(&dir);
     let (id, blocker) = chat(&app, dir.path());
     assert!(failures(&events).is_empty(), "nothing failed yet");
 
@@ -85,8 +87,8 @@ async fn a_conversation_that_cannot_be_written_says_so_once_and_is_written_whole
 
 #[tokio::test]
 async fn another_conversation_saving_fine_does_not_make_a_failing_one_tell_again() {
-    let dir = support::tempdir();
-    let (app, events) = engine(dir.path());
+    let dir = support::DataFolder::new();
+    let (app, events) = engine(&dir);
     let (a, blocker) = chat(&app, dir.path());
     let (b, _) = chat(&app, dir.path());
     failures(&events);
@@ -109,8 +111,8 @@ async fn another_conversation_saving_fine_does_not_make_a_failing_one_tell_again
 
 #[tokio::test]
 async fn closing_faber_writes_a_conversation_whose_last_save_failed() {
-    let dir = support::tempdir();
-    let (app, _) = engine(dir.path());
+    let dir = support::DataFolder::new();
+    let (app, _) = engine(&dir);
     let (id, blocker) = chat(&app, dir.path());
     std::fs::create_dir(&blocker).unwrap();
     app.rename(&id, "Typed while the disk failed");
@@ -123,8 +125,8 @@ async fn closing_faber_writes_a_conversation_whose_last_save_failed() {
 
 #[tokio::test]
 async fn deleting_a_chat_whose_group_cannot_be_updated_deletes_nothing() {
-    let dir = support::tempdir();
-    let (app, _) = engine(dir.path());
+    let dir = support::DataFolder::new();
+    let (app, _) = engine(&dir);
     let group = app.create_chat_group("Work").unwrap();
     let id = app.new_group_chat(&group.id).unwrap().id;
     let notes = dir.path().join("attachments").join(&id).join("notes.txt");
@@ -176,8 +178,8 @@ fn undeletable(path: &Path, readable: bool) -> Option<Box<dyn std::any::Any>> {
 
 #[tokio::test]
 async fn deleting_a_chat_whose_record_cannot_be_deleted_says_so_and_keeps_everything_of_it() {
-    let dir = support::tempdir();
-    let (app, _) = engine(dir.path());
+    let dir = support::DataFolder::new();
+    let (app, _) = engine(&dir);
     let group = app.create_chat_group("Work").unwrap();
     let id = app.new_group_chat(&group.id).unwrap().id;
     let record = dir.path().join("conversations").join(format!("{id}.json"));
@@ -207,8 +209,8 @@ async fn deleting_a_chat_whose_record_cannot_be_deleted_says_so_and_keeps_everyt
 
 #[tokio::test]
 async fn a_chat_that_stays_keeps_the_versions_that_branched_from_it() {
-    let dir = support::tempdir();
-    let (app, _) = engine(dir.path());
+    let dir = support::DataFolder::new();
+    let (app, _) = engine(&dir);
     let (parent, _) = chat(&app, dir.path());
     let first = app.open(&parent).unwrap();
     app.shutdown();
@@ -223,7 +225,7 @@ async fn a_chat_that_stays_keeps_the_versions_that_branched_from_it() {
             branch.id
         })
         .collect();
-    let (app, _) = engine(dir.path());
+    let (app, _) = engine(&dir);
     let record = dir.path().join("conversations").join(format!("{parent}.json"));
 
     let Some(held) = undeletable(&record, true) else { return };
@@ -241,13 +243,13 @@ async fn a_chat_that_stays_keeps_the_versions_that_branched_from_it() {
 
 #[tokio::test]
 async fn a_damaged_record_is_deleted_not_mistaken_for_one_that_is_gone() {
-    let dir = support::tempdir();
-    let (app, _) = engine(dir.path());
+    let dir = support::DataFolder::new();
+    let (app, _) = engine(&dir);
     let (id, _) = chat(&app, dir.path());
     app.shutdown();
     let record = dir.path().join("conversations").join(format!("{id}.json"));
     std::fs::write(&record, "{").unwrap();
-    let (app, _) = engine(dir.path());
+    let (app, _) = engine(&dir);
 
     app.remove_with(&id, false).unwrap();
     assert!(!record.exists(), "the file is gone, so it does not come back at the next start");
@@ -257,8 +259,8 @@ async fn a_damaged_record_is_deleted_not_mistaken_for_one_that_is_gone() {
 #[cfg(windows)]
 #[tokio::test]
 async fn a_record_nothing_can_read_is_not_reported_deleted() {
-    let dir = support::tempdir();
-    let (app, _) = engine(dir.path());
+    let dir = support::DataFolder::new();
+    let (app, _) = engine(&dir);
     let (id, _) = chat(&app, dir.path());
     let record = dir.path().join("conversations").join(format!("{id}.json"));
     let notes = dir.path().join("attachments").join(&id).join("notes.txt");
@@ -294,7 +296,7 @@ impl faber_engine::store::Disk for BusyOnce {
 #[cfg(windows)]
 #[test]
 fn a_rename_held_for_a_moment_is_tried_again_before_a_save_counts_as_failed() {
-    let dir = support::tempdir();
+    let dir = support::DataFolder::new();
     let file = dir.path().join("record.json");
     faber_engine::store::replace(&BusyOnce(Default::default()), &file, b"{}").unwrap();
     assert_eq!(std::fs::read(&file).unwrap(), b"{}");
@@ -318,8 +320,8 @@ impl faber_engine::store::Disk for Denied {
 #[cfg(windows)]
 #[tokio::test]
 async fn a_file_that_stays_denied_costs_the_wait_once_not_at_every_save() {
-    let dir = support::tempdir();
-    let (app, _) = engine(dir.path());
+    let dir = support::DataFolder::new();
+    let (app, _) = engine(&dir);
     let (id, _) = chat(&app, dir.path());
     let conversation = app.open(&id).unwrap();
     app.shutdown();
@@ -336,8 +338,8 @@ async fn a_file_that_stays_denied_costs_the_wait_once_not_at_every_save() {
 
 #[tokio::test]
 async fn a_chat_deleted_after_it_failed_does_not_hide_the_next_failure() {
-    let dir = support::tempdir();
-    let (app, events) = engine(dir.path());
+    let dir = support::DataFolder::new();
+    let (app, events) = engine(&dir);
     let (a, blocker_a) = chat(&app, dir.path());
     let (b, blocker_b) = chat(&app, dir.path());
     failures(&events);
@@ -354,9 +356,9 @@ async fn a_chat_deleted_after_it_failed_does_not_hide_the_next_failure() {
 
 #[tokio::test]
 async fn a_delete_that_stops_after_closing_a_live_answer_leaves_a_stopped_reply_not_a_typing_one() {
-    let dir = support::tempdir();
+    let dir = support::DataFolder::new();
     let (spawn, pipes) = support::pipes();
-    let (app, _) = engine_with(dir.path(), spawn);
+    let (app, _) = engine_with(&dir, spawn);
     let id = app
         .send(SendRequest {
             conversation_id: None,

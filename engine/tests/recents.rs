@@ -8,9 +8,11 @@ use std::path::Path;
 use std::sync::Arc;
 use std::time::Duration;
 
-fn engine(dir: &Path) -> Engine {
+fn engine(dir: &crate::support::DataFolder) -> Engine {
     let opts = EngineOptions {
-        data_dir: dir.into(),
+        data_dir: dir.path().into(),
+        #[cfg(windows)]
+        chat_dir: dir.chat_path().into(),
         clis: BTreeMap::<_, Cli>::new(),
         spawn: crate::support::fake(vec![]).spawn,
         windows: false,
@@ -37,9 +39,9 @@ fn folders(n: usize) -> (tempfile::TempDir, Vec<String>) {
 
 #[tokio::test]
 async fn opening_folders_fills_the_recents_and_survives_a_restart_in_the_file() {
-    let data = tempfile::tempdir().unwrap();
+    let data = crate::support::DataFolder::new();
     let (_root, f) = folders(3);
-    let e = engine(data.path());
+    let e = engine(&data);
     for p in &f {
         e.open_folder(p).unwrap();
     }
@@ -48,7 +50,7 @@ async fn opening_folders_fills_the_recents_and_survives_a_restart_in_the_file() 
     assert_eq!(names(&e), ["f0", "f2", "f1"]);
     assert_eq!(e.state().projects.len(), 3, "the same folder is one project");
     e.shutdown();
-    let again = engine(data.path());
+    let again = engine(&data);
     assert_eq!(names(&again), ["f0", "f2", "f1"]);
     assert!(!data.path().join("recents.json.tmp").exists(), "the temp file of the atomic write is gone");
     again.forget_recent(&f[2]).unwrap();
@@ -58,9 +60,9 @@ async fn opening_folders_fills_the_recents_and_survives_a_restart_in_the_file() 
 
 #[tokio::test]
 async fn a_refused_or_missing_folder_is_not_opened_and_not_remembered() {
-    let data = tempfile::tempdir().unwrap();
+    let data = crate::support::DataFolder::new();
     let (root, f) = folders(1);
-    let e = engine(data.path());
+    let e = engine(&data);
     let ssh = root.path().join(".ssh");
     std::fs::create_dir(&ssh).unwrap();
     assert_eq!(e.open_folder(&ssh.to_string_lossy()).unwrap_err(), "error.workingFolder");
@@ -74,9 +76,9 @@ async fn a_refused_or_missing_folder_is_not_opened_and_not_remembered() {
 
 #[tokio::test]
 async fn an_environment_opens_its_folders_first_one_most_recent_and_skips_the_ones_that_are_gone() {
-    let data = tempfile::tempdir().unwrap();
+    let data = crate::support::DataFolder::new();
     let (_root, f) = folders(3);
-    let e = engine(data.path());
+    let e = engine(&data);
     e.save_environment("Both", &f[..2]).unwrap();
     e.save_environment("Three", &f).unwrap();
     std::fs::remove_dir(&f[2]).unwrap();
@@ -99,9 +101,9 @@ fn alias(path: &str) -> String {
 
 #[tokio::test]
 async fn a_save_that_fails_is_reported_and_the_old_file_is_kept() {
-    let data = tempfile::tempdir().unwrap();
+    let data = crate::support::DataFolder::new();
     let (_root, f) = folders(2);
-    let e = engine(data.path());
+    let e = engine(&data);
     e.open_folder(&f[0]).unwrap();
     let before = std::fs::read_to_string(data.path().join("recents.json")).unwrap();
     // A directory where the temp file goes makes every write fail.
@@ -118,7 +120,7 @@ async fn a_save_that_fails_is_reported_and_the_old_file_is_kept() {
 
 #[tokio::test]
 async fn an_edited_file_cannot_show_more_than_the_limits() {
-    let data = tempfile::tempdir().unwrap();
+    let data = crate::support::DataFolder::new();
     let (_root, f) = folders(10);
     let many = |n: usize| f.iter().cycle().take(n).cloned().collect::<Vec<_>>();
     let envs: Vec<_> =
@@ -127,7 +129,7 @@ async fn an_edited_file_cannot_show_more_than_the_limits() {
     all.push(serde_json::json!({ "id": "blank", "name": "  ", "folders": many(2) }));
     all.push(serde_json::json!({ "id": "empty", "name": "empty", "folders": [] }));
     std::fs::write(data.path().join("recents.json"), serde_json::json!({ "folders": f, "environments": all }).to_string()).unwrap();
-    let e = engine(data.path());
+    let e = engine(&data);
     let view = e.recents();
     assert_eq!(view.folders.len(), 5);
     assert_eq!(view.environments.len(), 12);
@@ -138,10 +140,10 @@ async fn an_edited_file_cannot_show_more_than_the_limits() {
 
 #[tokio::test]
 async fn a_corrupt_file_is_an_empty_list_and_the_next_save_replaces_it() {
-    let data = tempfile::tempdir().unwrap();
+    let data = crate::support::DataFolder::new();
     let (_root, f) = folders(1);
     std::fs::write(data.path().join("recents.json"), "{ not json").unwrap();
-    let e = engine(data.path());
+    let e = engine(&data);
     assert!(e.recents().folders.is_empty());
     e.open_folder(&f[0]).unwrap();
     let text = std::fs::read_to_string(data.path().join("recents.json")).unwrap();
@@ -152,13 +154,13 @@ async fn a_corrupt_file_is_an_empty_list_and_the_next_save_replaces_it() {
 
 #[tokio::test]
 async fn another_spelling_of_a_stored_folder_is_the_same_recent_and_the_same_project() {
-    let data = tempfile::tempdir().unwrap();
+    let data = crate::support::DataFolder::new();
     let (_root, f) = folders(1);
     let other = alias(&f[0]);
     std::fs::write(data.path().join("recents.json"), serde_json::json!({ "folders": [other] }).to_string()).unwrap();
     std::fs::write(data.path().join("projects.json"), serde_json::json!([{ "id": "old", "name": "f0", "path": other }]).to_string())
         .unwrap();
-    let e = engine(data.path());
+    let e = engine(&data);
     let opened = e.open_folder(&f[0]).unwrap();
     assert_eq!(opened.id, "old", "the project that already holds this folder is reused");
     assert_eq!(e.state().projects.len(), 1);
@@ -168,9 +170,9 @@ async fn another_spelling_of_a_stored_folder_is_the_same_recent_and_the_same_pro
 
 #[tokio::test]
 async fn a_damaged_project_list_refuses_to_open_or_remove_and_keeps_every_byte() {
-    let data = tempfile::tempdir().unwrap();
+    let data = crate::support::DataFolder::new();
     let (_root, f) = folders(1);
-    let e = engine(data.path());
+    let e = engine(&data);
     let damaged = r#"[{"id":"p1","name":"kept","path":"C:/kept","grant":"#;
     std::fs::write(data.path().join("projects.json"), damaged).unwrap();
     assert_eq!(e.open_folder(&f[0]).unwrap_err(), "error.store.corrupt");

@@ -14,7 +14,6 @@ use faber_engine::signals::Signals;
 use faber_engine::{AppEvent, Engine, EngineOptions, SendRequest, WarmRequest};
 use serde_json::json;
 use std::collections::BTreeMap;
-use std::path::Path;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Duration;
@@ -32,10 +31,12 @@ struct Ticking {
     ticks: AtomicU64,
 }
 
-fn start(dir: &Path, spawn: Spawner, ask: Option<Ask>) -> (Engine, UnboundedReceiver<AppEvent>, Arc<Ticking>) {
+fn start(dir: &crate::support::DataFolder, spawn: Spawner, ask: Option<Ask>) -> (Engine, UnboundedReceiver<AppEvent>, Arc<Ticking>) {
     let (tx, rx) = tokio::sync::mpsc::unbounded_channel();
     let opts = EngineOptions {
-        data_dir: dir.into(),
+        data_dir: dir.path().into(),
+        #[cfg(windows)]
+        chat_dir: dir.chat_path().into(),
         clis: BTreeMap::from([(Vendor::Claude, Cli { command: "claude".into(), prefix: vec![] })]),
         spawn,
         windows: false,
@@ -82,8 +83,8 @@ fn reading(used: f64) -> EngineEvent {
 
 #[tokio::test]
 async fn a_user_turn_leaves_its_span_with_the_model_and_the_cost() {
-    let dir = tempfile::tempdir().unwrap();
-    let (engine, mut rx, _) = start(dir.path(), fake(fixture("claude", "chat")).spawn, None);
+    let dir = support::DataFolder::new();
+    let (engine, mut rx, _) = start(&dir, fake(fixture("claude", "chat")).spawn, None);
     engine.send(by_hand()).unwrap();
     let reply = finished(&mut rx).await;
     let spans = engine.ledger().claude.spans;
@@ -99,8 +100,8 @@ async fn a_user_turn_leaves_its_span_with_the_model_and_the_cost() {
 
 #[tokio::test]
 async fn eight_measured_turns_teach_the_weights_and_the_stretches_are_kept() {
-    let dir = tempfile::tempdir().unwrap();
-    let (engine, mut rx, clock) = start(dir.path(), fake(fixture("claude", "chat")).spawn, None);
+    let dir = support::DataFolder::new();
+    let (engine, mut rx, clock) = start(&dir, fake(fixture("claude", "chat")).spawn, None);
     for i in 0..8 {
         clock.base.store(START + i * 600, Ordering::SeqCst);
         clock.ticks.store(0, Ordering::SeqCst);
@@ -123,7 +124,7 @@ async fn eight_measured_turns_teach_the_weights_and_the_stretches_are_kept() {
 
 #[tokio::test]
 async fn a_router_question_is_a_span_too_and_has_its_own_cost() {
-    let dir = tempfile::tempdir().unwrap();
+    let dir = support::DataFolder::new();
     // The router's session is the Claude chat recording, with the question it will be asked as the recorded input.
     let text = "Plan a trip to Lisbon";
     let entries: Vec<Entry> = fixture("claude", "chat")
@@ -136,7 +137,7 @@ async fn a_router_question_is_a_span_too_and_has_its_own_cost() {
         })
         .collect();
     let f = fake(entries);
-    let (engine, _rx, _) = start(dir.path(), f.spawn.clone(), None);
+    let (engine, _rx, _) = start(&dir, f.spawn.clone(), None);
     // A fresh reading and a seen plan, so that no pulse is due and the gate lets the router ask.
     let plan = EngineEvent::Signals(Signals { plan: Some("max".into()), billing: Some(Billing::Subscription), ..Signals::default() });
     engine.note_account_events(Vendor::Claude, vec![reading(0.05), plan]);

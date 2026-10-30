@@ -15,7 +15,6 @@ use faber_engine::store::Store;
 use faber_engine::{Engine, EngineOptions, SendRequest};
 use serde_json::json;
 use std::collections::BTreeMap;
-use std::path::Path;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
@@ -441,10 +440,12 @@ fn spawner(text: String, other: Option<Spawner>) -> (Spawner, Calls) {
     (probe.spawner(other), probe.calls)
 }
 
-fn start(dir: &Path, spawn: Spawner) -> (Engine, Arc<AtomicU64>) {
+fn start(dir: &crate::support::DataFolder, spawn: Spawner) -> (Engine, Arc<AtomicU64>) {
     let engine = Engine::new(
         EngineOptions {
-            data_dir: dir.into(),
+            data_dir: dir.path().into(),
+            #[cfg(windows)]
+            chat_dir: dir.chat_path().into(),
             clis: BTreeMap::from([(Vendor::Claude, Cli { command: "claude".into(), prefix: vec![] })]),
             spawn,
             windows: false,
@@ -475,13 +476,13 @@ async fn until(what: &str, mut done: impl FnMut() -> bool) {
 
 #[tokio::test]
 async fn the_watcher_reads_claude_through_the_usage_command_and_asks_no_model() {
-    let dir = tempfile::tempdir().unwrap();
+    let dir = support::DataFolder::new();
     let probe = Probe::saying(usage_json(0));
     let calls = probe.calls.clone();
     let scheduled = probe.spawner(None);
     let status_background = probe.status_background.clone();
     let (engine, _) = start(
-        dir.path(),
+        &dir,
         Arc::new(move |bin, args, cwd| {
             if args.iter().any(|a| a == "status") {
                 status_background.lock().unwrap().push(faber_engine::proc::starting_in_background());
@@ -526,9 +527,9 @@ async fn the_watcher_reads_claude_through_the_usage_command_and_asks_no_model() 
 
 #[tokio::test]
 async fn a_usage_command_that_turns_out_to_ask_a_model_is_never_run_again() {
-    let dir = tempfile::tempdir().unwrap();
+    let dir = support::DataFolder::new();
     let (spawn, calls) = spawner(usage_json(1), None);
-    let (engine, time) = start(dir.path(), spawn);
+    let (engine, time) = start(&dir, spawn);
     engine.set_utc_offset(-10_800);
     engine.watch_accounts();
     until("one attempt", || calls.lock().unwrap().len() == 1).await;
@@ -543,10 +544,10 @@ async fn a_usage_command_that_turns_out_to_ask_a_model_is_never_run_again() {
 
 #[tokio::test]
 async fn focus_and_the_end_of_a_turn_read_again_after_the_debounce_and_a_hidden_window_does_not() {
-    let dir = tempfile::tempdir().unwrap();
+    let dir = support::DataFolder::new();
     let chat = fake(fixture("claude", "chat"));
     let (spawn, calls) = spawner(usage_json(0), Some(chat.spawn.clone()));
-    let (engine, time) = start(dir.path(), spawn);
+    let (engine, time) = start(&dir, spawn);
     engine.set_utc_offset(-10_800);
     engine.watch_accounts();
     until("first reading", || calls.lock().unwrap().len() == 1).await;
@@ -591,14 +592,14 @@ async fn focus_and_the_end_of_a_turn_read_again_after_the_debounce_and_a_hidden_
 
 #[tokio::test]
 async fn the_screen_is_told_how_old_the_reading_is_and_that_it_may_still_rise() {
-    let dir = tempfile::tempdir().unwrap();
+    let dir = support::DataFolder::new();
     let mut ledger = Ledger::default();
     let now = WHEN as f64;
     ledger.claude = calibrated(now - 300.0);
     ledger.claude.record("five_hour", 0.10, now + 10_000.0, now - 300.0, 0);
     work(&mut ledger.claude, now - 200.0, now - 100.0, "m", Some(0.5));
     Store::new(dir.path()).save_ledger(&ledger).unwrap();
-    let (engine, _) = start(dir.path(), spawner(usage_json(0), None).0);
+    let (engine, _) = start(&dir, spawner(usage_json(0), None).0);
     let u = engine.state().usage.remove(0);
     assert!(u.counting);
     let five = u.windows.iter().find(|w| w.name == "five_hour").unwrap();
@@ -611,7 +612,7 @@ async fn the_screen_is_told_how_old_the_reading_is_and_that_it_may_still_rise() 
 
 #[tokio::test]
 async fn codex_is_read_through_its_rate_limit_call_and_no_turn_is_started() {
-    let dir = tempfile::tempdir().unwrap();
+    let dir = support::DataFolder::new();
     let f = fake(vec![
         Entry { input: true, msg: json!({"id":1,"method":"initialize"}) },
         Entry { input: false, msg: json!({"id":1,"result":{}}) },
@@ -630,7 +631,7 @@ async fn codex_is_read_through_its_rate_limit_call_and_no_turn_is_started() {
         seen.lock().unwrap().push(faber_engine::proc::starting_in_background());
         inner(bin, args, cwd)
     });
-    let (engine, _) = start(dir.path(), spawn);
+    let (engine, _) = start(&dir, spawn);
     engine.replace_clis(BTreeMap::from([(Vendor::Codex, Cli { command: "codex".into(), prefix: vec![] })]));
     engine.set_utc_offset(-10_800);
     engine.watch_accounts();
@@ -648,10 +649,10 @@ async fn codex_is_read_through_its_rate_limit_call_and_no_turn_is_started() {
 
 #[tokio::test]
 async fn a_reading_still_under_way_is_not_started_a_second_time() {
-    let dir = tempfile::tempdir().unwrap();
+    let dir = support::DataFolder::new();
     let probe = Probe::saying(usage_json(0));
     probe.hold.store(true, Ordering::SeqCst);
-    let (engine, time) = start(dir.path(), probe.spawner(None));
+    let (engine, time) = start(&dir, probe.spawner(None));
     engine.set_utc_offset(-10_800);
     engine.watch_accounts();
     until("the first reading starts", || probe.calls.lock().unwrap().len() == 1).await;
@@ -670,9 +671,9 @@ async fn a_reading_still_under_way_is_not_started_a_second_time() {
 
 #[tokio::test]
 async fn a_reading_that_fails_does_not_leave_the_vendor_unread() {
-    let dir = tempfile::tempdir().unwrap();
+    let dir = support::DataFolder::new();
     let probe = Probe::saying("this is not json".into());
-    let (engine, time) = start(dir.path(), probe.spawner(None));
+    let (engine, time) = start(&dir, probe.spawner(None));
     engine.set_utc_offset(-10_800);
     engine.watch_accounts();
     until("the failing reading", || probe.calls.lock().unwrap().len() == 1).await;
@@ -688,14 +689,14 @@ async fn a_reading_that_fails_does_not_leave_the_vendor_unread() {
 
 #[tokio::test]
 async fn a_running_turn_takes_the_discount_away_for_every_decision() {
-    let dir = tempfile::tempdir().unwrap();
+    let dir = support::DataFolder::new();
     // The CLI that answers the turn starts and then says nothing: the turn stays running.
     let silent: Spawner = Arc::new(|_, _, _| {
         let (w, r) = tokio::io::duplex(1024);
         std::mem::forget(w);
         Ok(Proc { stdin: Box::new(tokio::io::sink()), stdout: Box::new(r), stderr: None, child: None, contained: None })
     });
-    let (engine, _) = start(dir.path(), spawner(usage_json(0), Some(silent)).0);
+    let (engine, _) = start(&dir, spawner(usage_json(0), Some(silent)).0);
     let quota = |window: &str, used: f64, secs: u64| EngineEvent::Quota { window: window.into(), used, resets_at: (WHEN + secs) as f64 };
     engine.note_account_events(
         Vendor::Claude,
@@ -728,14 +729,14 @@ async fn a_running_turn_takes_the_discount_away_for_every_decision() {
 
 #[tokio::test]
 async fn no_reading_starts_once_the_engine_is_shutting_down() {
-    let dir = tempfile::tempdir().unwrap();
+    let dir = support::DataFolder::new();
     let silent: Spawner = Arc::new(|_, _, _| {
         let (w, r) = tokio::io::duplex(1024);
         std::mem::forget(w);
         Ok(Proc { stdin: Box::new(tokio::io::sink()), stdout: Box::new(r), stderr: None, child: None, contained: None })
     });
     let probe = Probe::saying(usage_json(0));
-    let (engine, time) = start(dir.path(), probe.spawner(Some(silent)));
+    let (engine, time) = start(&dir, probe.spawner(Some(silent)));
     engine.set_utc_offset(-10_800);
     engine.watch_accounts();
     until("the first reading", || probe.calls.lock().unwrap().len() == 1).await;

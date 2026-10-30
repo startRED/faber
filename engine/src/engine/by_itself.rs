@@ -74,8 +74,8 @@ mod tests {
 
     #[tokio::test]
     async fn a_child_report_retries_after_a_full_parent_inbox_has_room() {
-        let dir = tempfile::tempdir().unwrap();
-        let (engine, _) = super::super::answer::tests::engine(dir.path());
+        let dir = crate::workspace::TestRoot::new();
+        let (engine, _) = super::super::answer::tests::engine(&dir);
         let parent = super::super::answer::tests::seed(&engine, Session::from_fn(|_| {}), &[("parent", &[])]);
         let child = super::super::answer::tests::seed(&engine, Session::from_fn(|_| {}), &[("child", &[])]);
         engine.with(|core| {
@@ -120,7 +120,7 @@ mod tests {
         });
         engine.shutdown();
         drop(engine);
-        let (engine, _) = super::super::answer::tests::engine(dir.path());
+        let (engine, _) = super::super::answer::tests::engine(&dir);
         engine.with(|core| {
             let saved = core.store.get(&parent).unwrap();
             assert_eq!(saved.queued.len(), MAX_QUEUED - 1, "startup must recognize the already saved report without duplication");
@@ -134,7 +134,7 @@ mod tests {
         });
         engine.shutdown();
         drop(engine);
-        let (engine, _) = super::super::answer::tests::engine(dir.path());
+        let (engine, _) = super::super::answer::tests::engine(&dir);
         engine.with(|core| {
             let saved = core.store.get(&parent).unwrap();
             assert_eq!(saved.queued.len(), MAX_QUEUED - 1, "startup must retry a pending report when a slot is already free");
@@ -153,8 +153,8 @@ mod tests {
     #[tokio::test]
     async fn automatic_messages_hold_after_stop_even_when_the_conversation_is_idle() {
         for (why, status) in [("wake.asked", Status::Done), ("wake.childDone", Status::Stopped), ("wake.keepGoing", Status::Error)] {
-            let dir = tempfile::tempdir().unwrap();
-            let (engine, _) = super::super::answer::tests::engine(dir.path());
+            let dir = crate::workspace::TestRoot::new();
+            let (engine, _) = super::super::answer::tests::engine(&dir);
             let id = super::super::answer::tests::seed(&engine, Session::from_fn(|_| {}), &[("reply", &[])]);
             engine.with(|core| {
                 core.live.clear();
@@ -179,8 +179,8 @@ mod tests {
 
     #[tokio::test]
     async fn an_explicit_plan_approval_starts_once_after_stop_in_an_idle_conversation() {
-        let dir = tempfile::tempdir().unwrap();
-        let (engine, _) = super::super::answer::tests::engine(dir.path());
+        let dir = crate::workspace::TestRoot::new();
+        let (engine, _) = super::super::answer::tests::engine(&dir);
         let id = super::super::answer::tests::seed(&engine, Session::from_fn(|_| {}), &[("reply", &[])]);
         engine.with(|core| {
             core.live.clear();
@@ -203,8 +203,8 @@ mod tests {
     #[tokio::test]
     async fn refused_questions_and_continuations_do_not_leave_hidden_retries() {
         for why in ["wake.asked", "wake.keepGoing", "wake.approvedPlan"] {
-            let dir = tempfile::tempdir().unwrap();
-            let (engine, _) = super::super::answer::tests::engine(dir.path());
+            let dir = crate::workspace::TestRoot::new();
+            let (engine, _) = super::super::answer::tests::engine(&dir);
             let id = super::super::answer::tests::seed(&engine, Session::from_fn(|_| {}), &[("reply", &[])]);
             engine.with(|core| {
                 core.live.clear();
@@ -220,8 +220,8 @@ mod tests {
     #[tokio::test]
     async fn child_reports_survive_refused_dispatch_to_an_idle_parent() {
         for installing in [false, true] {
-            let dir = tempfile::tempdir().unwrap();
-            let (engine, _) = super::super::answer::tests::engine(dir.path());
+            let dir = crate::workspace::TestRoot::new();
+            let (engine, _) = super::super::answer::tests::engine(&dir);
             let parent = super::super::answer::tests::seed(&engine, Session::from_fn(|_| {}), &[("parent", &[])]);
             let child = super::super::answer::tests::seed(&engine, Session::from_fn(|_| {}), &[("child", &[])]);
             engine.with(|core| {
@@ -265,8 +265,8 @@ mod tests {
     async fn a_refused_child_report_goes_out_by_itself_once_an_ai_can_answer_again() {
         // Each way an AI comes back unlocks the report on its own: the install ends, the CLI is found.
         for back in ["install", "clis"] {
-            let dir = tempfile::tempdir().unwrap();
-            let (engine, _) = super::super::answer::tests::engine(dir.path());
+            let dir = crate::workspace::TestRoot::new();
+            let (engine, _) = super::super::answer::tests::engine(&dir);
             let parent = super::super::answer::tests::seed(&engine, Session::from_fn(|_| {}), &[("parent", &[])]);
             let child = super::super::answer::tests::seed(&engine, Session::from_fn(|_| {}), &[("child", &[])]);
             let held = super::super::answer::tests::seed(&engine, Session::from_fn(|_| {}), &[("held", &[])]);
@@ -322,8 +322,8 @@ mod tests {
     async fn agent_messages_reach_the_running_turn_once_and_keep_their_origin() {
         for why in ["wake.asked", "wake.childDone"] {
             for tools_open in [false, true] {
-                let dir = tempfile::tempdir().unwrap();
-                let (engine, _) = super::super::answer::tests::engine(dir.path());
+                let dir = crate::workspace::TestRoot::new();
+                let (engine, _) = super::super::answer::tests::engine(&dir);
                 let delivered = Arc::new(Mutex::new(Vec::new()));
                 let sink = delivered.clone();
                 let stored = dir.path().to_path_buf();
@@ -373,8 +373,8 @@ mod tests {
     #[tokio::test]
     async fn agent_messages_preserve_stop_order_other_wakes_billing_quota_and_durable_input() {
         for blocked in ["stopped", "finished", "other-wake", "other-vendor", "older-wake", "unknown", "billed", "quota", "save", "goal"] {
-            let dir = tempfile::tempdir().unwrap();
-            let (engine, _) = super::super::answer::tests::engine(dir.path());
+            let dir = crate::workspace::TestRoot::new();
+            let (engine, _) = super::super::answer::tests::engine(&dir);
             let sent = Arc::new(Mutex::new(0));
             let output = sent.clone();
             let session = Session::from_fn(move |command| {
@@ -436,8 +436,8 @@ mod tests {
     async fn agent_messages_never_deliver_older_human_input_before_its_step_boundary() {
         for why in ["wake.asked", "wake.childDone", "wake.keepGoing"] {
             for older_agent in [false, true] {
-                let dir = tempfile::tempdir().unwrap();
-                let (engine, _) = super::super::answer::tests::engine(dir.path());
+                let dir = crate::workspace::TestRoot::new();
+                let (engine, _) = super::super::answer::tests::engine(&dir);
                 let delivered = Arc::new(Mutex::new(Vec::new()));
                 let sink = delivered.clone();
                 let session = Session::from_fn(move |command| {

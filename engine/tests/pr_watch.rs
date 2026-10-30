@@ -13,7 +13,6 @@ use faber_engine::signals::Signals;
 use faber_engine::{Engine, EngineOptions, SendRequest};
 use serde_json::{Value, json};
 use std::collections::{BTreeMap, VecDeque};
-use std::path::Path;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 use support::{next_pipe, pipes};
@@ -22,9 +21,11 @@ const URL: &str = "https://github.com/acme/app/pull/93";
 
 type Reads = Arc<Mutex<(VecDeque<Look>, Vec<(String, u64)>)>>;
 
-fn engine(dir: &Path, spawn: Spawner) -> (Engine, Reads) {
+fn engine(dir: &crate::support::DataFolder, spawn: Spawner) -> (Engine, Reads) {
     let opts = EngineOptions {
-        data_dir: dir.join("data"),
+        data_dir: dir.path().into(),
+        #[cfg(windows)]
+        chat_dir: dir.chat_path().into(),
         clis: BTreeMap::from([(Vendor::Claude, Cli { command: "claude".into(), prefix: vec![] })]),
         spawn,
         windows: false,
@@ -112,9 +113,9 @@ fn sent_to_cli(pipe: &support::Pipe) -> Vec<String> {
 
 #[tokio::test]
 async fn r_next_red_checks_wake_the_agent_once_and_merged_ends_with_no_turn() {
-    let dir = support::tempdir();
+    let dir = support::DataFolder::new();
     let (spawn, made) = pipes();
-    let (engine, reads) = engine(dir.path(), spawn);
+    let (engine, reads) = engine(&dir, spawn);
     let project = engine.add_project(&dir.path().to_string_lossy()).unwrap();
     let (id, mut pipe) = opened(&engine, &made, &project.id).await;
     let messages = engine.open(&id).unwrap().messages;
@@ -162,9 +163,9 @@ async fn r_next_red_checks_wake_the_agent_once_and_merged_ends_with_no_turn() {
 
 #[tokio::test]
 async fn r_next_a_tight_quota_tells_the_person_and_they_can_stop_following() {
-    let dir = support::tempdir();
+    let dir = support::DataFolder::new();
     let (spawn, made) = pipes();
-    let (engine, reads) = engine(dir.path(), spawn);
+    let (engine, reads) = engine(&dir, spawn);
     let project = engine.add_project(&dir.path().to_string_lossy()).unwrap();
     let (id, _pipe) = opened(&engine, &made, &project.id).await;
     let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_secs_f64();
@@ -192,9 +193,9 @@ async fn r_next_a_tight_quota_tells_the_person_and_they_can_stop_following() {
 /// An address only read (a file, a page) never lets `land.mjs`'s bare number bind another repository's pull request.
 #[tokio::test]
 async fn r_next_a_number_is_bound_only_to_an_address_the_conversation_opened() {
-    let dir = support::tempdir();
+    let dir = support::DataFolder::new();
     let (spawn, made) = pipes();
-    let (engine, _reads) = engine(dir.path(), spawn);
+    let (engine, _reads) = engine(&dir, spawn);
     let project = engine.add_project(&dir.path().to_string_lossy()).unwrap();
     let id = engine
         .send(SendRequest {
@@ -224,9 +225,9 @@ async fn r_next_a_number_is_bound_only_to_an_address_the_conversation_opened() {
 /// Faber's own flow: `land.mjs` prints only the number, which binds the pull request whose address the conversation showed.
 #[tokio::test]
 async fn r_next_a_queued_pull_request_is_followed_again_after_it_passed() {
-    let dir = support::tempdir();
+    let dir = support::DataFolder::new();
     let (spawn, made) = pipes();
-    let (engine, reads) = engine(dir.path(), spawn);
+    let (engine, reads) = engine(&dir, spawn);
     let project = engine.add_project(&dir.path().to_string_lossy()).unwrap();
     let (id, mut pipe) = opened(&engine, &made, &project.id).await;
     reads.lock().unwrap().0.push_back(look(PrState::Open, CiState::Passing, "aaa"));

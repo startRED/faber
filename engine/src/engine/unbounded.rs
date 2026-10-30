@@ -23,10 +23,12 @@ mod tests {
 
     const DAY: f64 = 86_400.0;
     const NOW: f64 = 2.0 * DAY + 3600.0;
-    fn new_engine(root: &Path) -> Engine {
+    fn new_engine(root: &crate::workspace::TestRoot) -> Engine {
         Engine::new(
             EngineOptions {
-                data_dir: root.into(),
+                data_dir: root.path().into(),
+                #[cfg(windows)]
+                chat_dir: root.work().into(),
                 clis: BTreeMap::from([(Vendor::Codex, Cli { command: "not-a-cli".into(), prefix: vec![] })]),
                 spawn: Arc::new(|_, _, _| Err(std::io::Error::other("no process in budget tests"))),
                 windows: false,
@@ -43,8 +45,8 @@ mod tests {
 
     #[tokio::test]
     async fn r131_only_the_no_model_account_check_stamps_zero_turn_evidence() {
-        let root = tempfile::tempdir().unwrap();
-        let e = new_engine(root.path());
+        let root = crate::workspace::TestRoot::new();
+        let e = new_engine(&root);
         e.set_time_source(Arc::new(|| NOW));
         let quota = EngineEvent::Quota { window: "seven_day".into(), used: 0.30, resets_at: 7.0 * DAY };
         e.note_account_events(
@@ -69,8 +71,8 @@ mod tests {
 
     #[tokio::test]
     async fn a_slow_quota_query_does_not_delay_the_completed_subscription_check() {
-        let root = tempfile::tempdir().unwrap();
-        let e = new_engine(root.path());
+        let root = crate::workspace::TestRoot::new();
+        let e = new_engine(&root);
         let (writer, reader) = tokio::io::duplex(64);
         let reader = Arc::new(Mutex::new(Some(reader)));
         let (started, ready) = tokio::sync::oneshot::channel();
@@ -103,7 +105,7 @@ mod tests {
         task.await.unwrap();
         e.shutdown();
     }
-    fn engine(root: &Path) -> Engine {
+    fn engine(root: &crate::workspace::TestRoot) -> Engine {
         let e = new_engine(root);
         e.set_time_source(Arc::new(|| NOW));
         e.with(|c| {
@@ -127,8 +129,8 @@ mod tests {
 
     #[tokio::test]
     async fn removing_a_live_chat_retires_its_running_counter_once() {
-        let dir = tempfile::tempdir().unwrap();
-        let e = engine(dir.path());
+        let dir = crate::workspace::TestRoot::new();
+        let e = engine(&dir);
         let closed = Arc::new(std::sync::atomic::AtomicUsize::new(0));
         let seen = closed.clone();
         let id = e.with(|c| {
@@ -197,8 +199,8 @@ mod tests {
     #[tokio::test]
     async fn a_damaged_spending_record_never_blocks_chat_or_gets_overwritten() {
         for failure in 0..3 {
-            let dir = tempfile::tempdir().unwrap();
-            let first = engine(dir.path());
+            let dir = crate::workspace::TestRoot::new();
+            let first = engine(&dir);
             first.with(|c| {
                 c.begin_unbounded(Vendor::Codex).unwrap();
                 c.note_span(Vendor::Codex, NOW, "gpt-6.1-sol", Some(0.01), false);
@@ -215,7 +217,7 @@ mod tests {
                 first.shutdown();
             }
             let before = std::fs::read(dir.path().join("budget.json")).unwrap();
-            let second = new_engine(dir.path());
+            let second = new_engine(&dir);
             second.set_time_source(Arc::new(|| NOW));
             second.with(|c| {
                 c.begin_unbounded(Vendor::Codex).unwrap();
@@ -236,8 +238,8 @@ mod tests {
 
     #[tokio::test]
     async fn a_failed_ledger_write_keeps_chat_available_and_is_tried_again() {
-        let dir = tempfile::tempdir().unwrap();
-        let e = engine(dir.path());
+        let dir = crate::workspace::TestRoot::new();
+        let e = engine(&dir);
         std::fs::create_dir(dir.path().join("budget.json.tmp")).unwrap();
         e.with(|c| {
             c.begin_unbounded(Vendor::Codex).unwrap();
@@ -254,8 +256,8 @@ mod tests {
 
     #[tokio::test]
     async fn unbounded_chat_and_auxiliary_usage_survive_restart() {
-        let dir = tempfile::tempdir().unwrap();
-        let e = engine(dir.path());
+        let dir = crate::workspace::TestRoot::new();
+        let e = engine(&dir);
         e.with(|c| c.begin_unbounded(Vendor::Codex)).unwrap();
         e.with(|c| c.note_span(Vendor::Codex, NOW, "gpt-6.1-sol", None, true));
         e.shutdown();
@@ -266,8 +268,8 @@ mod tests {
 
     #[tokio::test]
     async fn every_chat_path_remains_available_while_a_request_of_unknown_cost_runs() {
-        let dir = tempfile::tempdir().unwrap();
-        let e = engine(dir.path());
+        let dir = crate::workspace::TestRoot::new();
+        let e = engine(&dir);
         e.with(|c| c.begin_unbounded(Vendor::Codex)).unwrap();
         for purpose in [Purpose::UserTurn { by_hand: true }, Purpose::UserTurn { by_hand: false }, Purpose::Router, Purpose::Summary] {
             assert!(e.with(|c| c.allows(Vendor::Codex, None, purpose, false)).is_ok());

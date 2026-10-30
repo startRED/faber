@@ -38,6 +38,8 @@ fn boot(dir: &Path, conversations: &[Value]) -> Engine {
     }
     let opts = EngineOptions {
         data_dir: dir.join("data"),
+        #[cfg(windows)]
+        chat_dir: dir.join("work"),
         clis: BTreeMap::new(),
         spawn: support::pipes().0,
         windows: false,

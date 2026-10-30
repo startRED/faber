@@ -30,6 +30,7 @@ points nowhere; a page that grows past the limit splits by topic, and its row he
 | [design/looks.md](design/looks.md) | Themes, presets, colour, type, motion, the one grammar, idle cost, effects |
 | [design/brand.md](design/brand.md) | The mark, the app icon, empty states, brand rules |
 | [design/conversation.md](design/conversation.md) | An open conversation: the answers and their bar, your messages, the viewer, linked research reports and the work log |
+| [design/chat-workspace.md](design/chat-workspace.md) | Private Chat files, Windows startup recovery and ownership of selected folders |
 | [design/reading.md](design/reading.md) | Reading width, selections, durable scroll position and the latest-message control |
 | [design/visual-answers.md](design/visual-answers.md) | Native inline pieces, saved choices, generated HTML/SVG cards and their web-access rules |
 | [design/layout.md](design/layout.md) | Window widths, titlebar, the homes, the running column |

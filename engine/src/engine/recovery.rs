@@ -530,8 +530,11 @@ mod tests {
         use crate::events::EngineEvent;
         let spawned = Arc::new(Mutex::new(0));
         let counted = spawned.clone();
+        let root = crate::workspace::TestRoot::new();
         let opts = EngineOptions {
-            data_dir: tempfile::tempdir().unwrap().keep(),
+            data_dir: root.path().into(),
+            #[cfg(windows)]
+            chat_dir: root.work().into(),
             clis: BTreeMap::from([(Vendor::Codex, Cli { command: "codex".into(), prefix: vec![] })]),
             spawn: Arc::new(move |_, _, _| {
                 *counted.lock().unwrap() += 1;

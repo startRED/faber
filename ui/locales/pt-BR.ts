@@ -2198,6 +2198,8 @@ export const ptBR: Messages = {
   'notes.289.better': 'Quando uma resposta falha, a linha embaixo dela agora diz o porquê: serviço ocupado, conexão caída, login vencido ou conversa longa demais.',
   'notes.290.better': 'Os ajudantes agora têm nome no seu idioma, ou Ajudante 1, 2…, e só dizem pronto depois que as verificações passaram; senão dizem terminou.',
   'notes.291.fixed': 'As respostas agora dizem uma vez o que ainda está rodando e o que vem depois, e um registro que você cola não as enche mais de termos técnicos.',
+  'notes.292.better': 'A coluna “Rodando agora” espera você terminar o clique antes de abrir sozinha.',
+  'notes.293.fixed': 'No Windows, os arquivos privados dos chats ficam fora dos dados do Faber e continuam disponíveis ao reabrir.',
   'update.checking': 'Procurando atualização…',
   'update.downloading': 'Baixando atualização…',
   'update.downloadingPercent': 'Baixando atualização… {percent}%',

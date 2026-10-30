@@ -60,7 +60,7 @@ impl Executor for Git {
 
 struct Setup {
     folder: tempfile::TempDir,
-    data: tempfile::TempDir,
+    data: support::DataFolder,
     history: History,
     git: Git,
     conversation: Conversation,
@@ -69,7 +69,7 @@ struct Setup {
 impl Setup {
     fn new() -> Self {
         let folder = support::canonical_tempdir().unwrap();
-        let data = support::canonical_tempdir().unwrap();
+        let data = support::DataFolder::new();
         let history = History::open(data.path(), 1).expect("owner-only history must be usable by its owner");
         let conversation = serde_json::from_value(json!({
             "id": CONVERSATION, "title": "Rewind", "area": "project", "workingFolder": folder.path(),
@@ -670,6 +670,8 @@ async fn rewind_recovery_can_be_retried_after_the_working_folder_returns() {
     let engine = Engine::new(
         EngineOptions {
             data_dir: s.data.path().into(),
+            #[cfg(windows)]
+            chat_dir: s.data.chat_path().into(),
             clis: BTreeMap::new(),
             spawn,
             windows: false,
@@ -728,6 +730,8 @@ async fn rewind_startup_cleans_empty_project_quarantines_without_a_pending_journ
     let engine = Engine::new(
         EngineOptions {
             data_dir: s.data.path().into(),
+            #[cfg(windows)]
+            chat_dir: s.data.chat_path().into(),
             clis: Default::default(),
             spawn: Arc::new(|_, _, _| panic!("startup cleanup must not launch a process")),
             windows: false,
@@ -786,6 +790,8 @@ async fn rewind_unreadable_history_keeps_recovery_reachable_from_an_empty_conver
     let engine = Engine::new(
         EngineOptions {
             data_dir: s.data.path().into(),
+            #[cfg(windows)]
+            chat_dir: s.data.chat_path().into(),
             clis: BTreeMap::new(),
             spawn,
             windows: false,
@@ -894,6 +900,8 @@ async fn rewind_recorded_turns_capture_before_cli_start_and_redo_never_spawns_or
         let engine = Engine::new(
             EngineOptions {
                 data_dir: s.data.path().into(),
+                #[cfg(windows)]
+                chat_dir: s.data.chat_path().into(),
                 clis: BTreeMap::from([(vendor, Cli { command: "fake".into(), prefix: vec![] })]),
                 spawn,
                 windows: false,
@@ -1010,6 +1018,8 @@ async fn rewind_overlap_refuses_restore_without_interrupting_another_conversatio
     let engine = Engine::new(
         EngineOptions {
             data_dir: s.data.path().into(),
+            #[cfg(windows)]
+            chat_dir: s.data.chat_path().into(),
             clis: BTreeMap::from([(Vendor::Claude, Cli { command: "fake".into(), prefix: vec![] })]),
             spawn,
             windows: false,
@@ -1351,6 +1361,8 @@ async fn rewind_stopped_checks_seal_only_after_confirmed_completion_and_release_
     let engine = Engine::new(
         EngineOptions {
             data_dir: s.data.path().into(),
+            #[cfg(windows)]
+            chat_dir: s.data.chat_path().into(),
             clis: BTreeMap::from([(Vendor::Claude, Cli { command: "fake".into(), prefix: vec![] })]),
             spawn,
             windows: false,

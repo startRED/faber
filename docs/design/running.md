@@ -87,7 +87,11 @@ rest of the shell are in [layout.md](layout.md).
   the reason on the ended reply and starts no work. It shares the card's tokens, wraps at 720 px and adds no motion or idle process.
 - Clicking a row opens that conversation, setting the area, the project and the conversation together.
 - The column is closed when the window opens. It opens by itself once for each question it has not yet shown, 1.5 s
-  after the last keystroke in any text field, including questions already waiting at launch. If the user closes it
+  after the last keystroke in any text field, including questions already waiting at launch. A real held pointer also
+  postpones automatic opening: release, cancellation or window blur starts that same quiet period, so a permission
+  button cannot move between pressing and releasing it. Returning with no button held recovers a release outside the
+  window. Pointer movement alone does not postpone it, and the run button and shortcut still open it immediately.
+  If the user closes it
   while questions are waiting, those questions never reopen it. Only the button stays amber.
 - Items are grouped by project. Projects that have something needing the user come first, and inside a project the
   amber item comes first. The order is stable, so rows do not jump.

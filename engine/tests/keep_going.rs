@@ -15,17 +15,23 @@ use support::{Pipe, next_pipe, pipes};
 use tokio::io::AsyncWriteExt;
 use tokio::sync::mpsc::UnboundedReceiver;
 
-fn engine(dir: &Path, spawn: faber_engine::proc::Spawner) -> (Engine, UnboundedReceiver<AppEvent>) {
+fn engine(dir: &crate::support::DataFolder, spawn: faber_engine::proc::Spawner) -> (Engine, UnboundedReceiver<AppEvent>) {
     engine_with(dir, spawn, &[Vendor::Claude])
 }
 
 /// The engine with these AIs connected, all on a known subscription. Its fixed waits (a rest, a retry, the question timer)
 /// run a thousand times faster than they do for a person.
-fn engine_with(dir: &Path, spawn: faber_engine::proc::Spawner, vendors: &[Vendor]) -> (Engine, UnboundedReceiver<AppEvent>) {
+fn engine_with(
+    dir: &crate::support::DataFolder,
+    spawn: faber_engine::proc::Spawner,
+    vendors: &[Vendor],
+) -> (Engine, UnboundedReceiver<AppEvent>) {
     let (tx, rx) = tokio::sync::mpsc::unbounded_channel();
     let clis = vendors.iter().map(|v| (*v, Cli { command: v.name().into(), prefix: vec![] })).collect();
     let opts = EngineOptions {
-        data_dir: dir.into(),
+        data_dir: dir.path().into(),
+        #[cfg(windows)]
+        chat_dir: dir.chat_path().into(),
         clis,
         spawn,
         windows: false,
@@ -49,7 +55,7 @@ fn engine_with(dir: &Path, spawn: faber_engine::proc::Spawner, vendors: &[Vendor
 }
 
 /// A project conversation whose first turn runs on a hand-driven Claude process.
-async fn started(dir: &Path, folder: &Path) -> (Engine, UnboundedReceiver<AppEvent>, Pipe, String) {
+async fn started(dir: &crate::support::DataFolder, folder: &Path) -> (Engine, UnboundedReceiver<AppEvent>, Pipe, String) {
     let (engine, rx, pipe, id, _) = started_on(dir, folder, &[Vendor::Claude]).await;
     (engine, rx, pipe, id)
 }
@@ -58,13 +64,17 @@ async fn started(dir: &Path, folder: &Path) -> (Engine, UnboundedReceiver<AppEve
 type Bins = Arc<std::sync::Mutex<Vec<String>>>;
 
 /// Like [`started`] with these AIs connected; the first turn runs on Claude. Also says which CLIs the engine starts.
-async fn started_on(dir: &Path, folder: &Path, vendors: &[Vendor]) -> (Engine, UnboundedReceiver<AppEvent>, Pipe, String, Bins) {
+async fn started_on(
+    dir: &crate::support::DataFolder,
+    folder: &Path,
+    vendors: &[Vendor],
+) -> (Engine, UnboundedReceiver<AppEvent>, Pipe, String, Bins) {
     started_with(dir, folder, vendors, &|_| {}).await
 }
 
 /// Like [`started_on`], after `prepare` set the engine up (settings that a running process does not take up later).
 async fn started_with(
-    dir: &Path,
+    dir: &crate::support::DataFolder,
     folder: &Path,
     vendors: &[Vendor],
     prepare: &dyn Fn(&Engine),
@@ -176,8 +186,8 @@ fn halts(rx: &mut UnboundedReceiver<AppEvent>) -> Vec<String> {
 
 #[tokio::test]
 async fn keep_going_sends_the_next_turn_by_itself_until_the_agent_says_nothing_is_left() {
-    let (dir, project) = (tempfile::tempdir().unwrap(), support::work_folder());
-    let (engine, mut rx, mut pipe, id) = started(dir.path(), project.path()).await;
+    let (dir, project) = (support::DataFolder::new(), support::work_folder());
+    let (engine, mut rx, mut pipe, id) = started(&dir, project.path()).await;
     // Turned on while the person's own turn runs: it acts when that turn ends.
     engine.keep_going(&id, true).unwrap();
     assert!(engine.state().conversations.iter().any(|c| c.id == id && c.keep_going), "the list says it runs on its own");
@@ -217,8 +227,8 @@ async fn keep_going_sends_the_next_turn_by_itself_until_the_agent_says_nothing_i
 
 #[tokio::test]
 async fn keep_going_rests_after_a_failed_turn_and_stops_only_after_six_in_a_row() {
-    let (dir, project) = (tempfile::tempdir().unwrap(), support::work_folder());
-    let (engine, mut rx, mut pipe, id) = started(dir.path(), project.path()).await;
+    let (dir, project) = (support::DataFolder::new(), support::work_folder());
+    let (engine, mut rx, mut pipe, id) = started(&dir, project.path()).await;
     // Its rests (one, five, then fifteen minutes) run faster here: the first lasts 600 ms, so it can be seen.
     engine.set_keep_going_pace(0.01);
     answers_at(&mut pipe, "Started.", true, 0.1).await;
@@ -254,8 +264,8 @@ async fn keep_going_rests_after_a_failed_turn_and_stops_only_after_six_in_a_row(
 
 #[tokio::test]
 async fn a_turn_that_ends_well_after_failures_starts_the_count_again() {
-    let (dir, project) = (tempfile::tempdir().unwrap(), support::work_folder());
-    let (engine, _rx, mut pipe, id) = started(dir.path(), project.path()).await;
+    let (dir, project) = (support::DataFolder::new(), support::work_folder());
+    let (engine, _rx, mut pipe, id) = started(&dir, project.path()).await;
     engine.set_keep_going_pace(0.0005);
     answers_at(&mut pipe, "Started.", true, 0.1).await;
     until(&engine, &id, idle).await;
@@ -274,8 +284,8 @@ async fn a_turn_that_ends_well_after_failures_starts_the_count_again() {
 
 #[tokio::test]
 async fn the_persons_stop_ends_keep_going_without_a_notice() {
-    let (dir, project) = (tempfile::tempdir().unwrap(), support::work_folder());
-    let (engine, mut rx, mut pipe, id) = started(dir.path(), project.path()).await;
+    let (dir, project) = (support::DataFolder::new(), support::work_folder());
+    let (engine, mut rx, mut pipe, id) = started(&dir, project.path()).await;
     engine.keep_going(&id, true).unwrap();
     answers_at(&mut pipe, "One done.", true, 0.1).await;
     until_turns(&pipe, 2).await;
@@ -292,8 +302,8 @@ async fn the_persons_stop_ends_keep_going_without_a_notice() {
 
 #[tokio::test]
 async fn keep_going_stops_when_the_agent_asked_the_person_something() {
-    let (dir, project) = (tempfile::tempdir().unwrap(), support::work_folder());
-    let (engine, mut rx, mut pipe, id) = started(dir.path(), project.path()).await;
+    let (dir, project) = (support::DataFolder::new(), support::work_folder());
+    let (engine, mut rx, mut pipe, id) = started(&dir, project.path()).await;
     engine.keep_going(&id, true).unwrap();
     answers_at(&mut pipe, "One done.", true, 0.1).await;
     until_turns(&pipe, 2).await;
@@ -311,9 +321,9 @@ async fn keep_going_stops_when_the_agent_asked_the_person_something() {
 
 #[tokio::test]
 async fn keep_going_is_for_project_conversations() {
-    let dir = tempfile::tempdir().unwrap();
+    let dir = crate::support::DataFolder::new();
     let (spawn, made) = pipes();
-    let (engine, _rx) = engine(dir.path(), spawn);
+    let (engine, _rx) = engine(&dir, spawn);
     let choice = Choice { vendor: "claude".into(), model: Some("haiku".into()), effort: None };
     let id = engine
         .send(SendRequest {
@@ -333,8 +343,8 @@ async fn keep_going_is_for_project_conversations() {
 
 #[tokio::test]
 async fn keep_going_goes_on_when_auto_s_pacing_says_that_ai_spends_too_fast() {
-    let (dir, project) = (tempfile::tempdir().unwrap(), support::work_folder());
-    let (engine, mut rx, mut pipe, id) = started(dir.path(), project.path()).await;
+    let (dir, project) = (support::DataFolder::new(), support::work_folder());
+    let (engine, mut rx, mut pipe, id) = started(&dir, project.path()).await;
     engine.keep_going(&id, true).unwrap();
     // Most of the week spent with six of its seven days still ahead: Auto calls that spending fast, and still the person
     // who turned it on is trusting Faber to go on (R212).
@@ -347,15 +357,15 @@ async fn keep_going_goes_on_when_auto_s_pacing_says_that_ai_spends_too_fast() {
 
 #[tokio::test]
 async fn keep_going_survives_a_restart_and_goes_on_by_itself() {
-    let (dir, project) = (tempfile::tempdir().unwrap(), support::work_folder());
-    let (first, _rx, mut pipe, id) = started(dir.path(), project.path()).await;
+    let (dir, project) = (support::DataFolder::new(), support::work_folder());
+    let (first, _rx, mut pipe, id) = started(&dir, project.path()).await;
     first.keep_going(&id, true).unwrap();
     answers_at(&mut pipe, "One done.", true, 0.1).await;
     until_turns(&pipe, 2).await;
     first.shutdown();
     // Faber restarts in the middle of the night: the conversation is still on its own, and it goes on once the accounts are read.
     let (spawn, made) = pipes();
-    let (reopened, _rx) = engine(dir.path(), spawn);
+    let (reopened, _rx) = engine(&dir, spawn);
     assert!(reopened.state().conversations.iter().any(|s| s.id == id && s.keep_going), "the list agrees");
     reopened.resume_keep_going();
     let c = reopened.open(&id).unwrap();
@@ -370,8 +380,8 @@ async fn keep_going_survives_a_restart_and_goes_on_by_itself() {
 
 #[tokio::test]
 async fn an_account_not_read_yet_rests_again_each_time_and_goes_on_once_it_is_read() {
-    let (dir, project) = (tempfile::tempdir().unwrap(), support::work_folder());
-    let (engine, mut rx, mut pipe, id) = started(dir.path(), project.path()).await;
+    let (dir, project) = (support::DataFolder::new(), support::work_folder());
+    let (engine, mut rx, mut pipe, id) = started(&dir, project.path()).await;
     answers_at(&mut pipe, "One done.", true, 0.1).await;
     until(&engine, &id, idle).await;
     // After a restart the account is not read yet: no turn can go, and that is a rest like a failure, never an end.
@@ -391,8 +401,8 @@ async fn an_account_not_read_yet_rests_again_each_time_and_goes_on_once_it_is_re
 
 #[tokio::test]
 async fn a_rest_after_an_error_is_not_cut_short_by_a_restart() {
-    let (dir, project) = (tempfile::tempdir().unwrap(), support::work_folder());
-    let (first, _rx, mut pipe, id) = started(dir.path(), project.path()).await;
+    let (dir, project) = (support::DataFolder::new(), support::work_folder());
+    let (first, _rx, mut pipe, id) = started(&dir, project.path()).await;
     first.keep_going(&id, true).unwrap();
     // The turn fails and Faber rests a quarter of an hour (the scale is the real one here); then Faber closes and opens again.
     first.set_keep_going_pace(15.0);
@@ -402,7 +412,7 @@ async fn a_rest_after_an_error_is_not_cut_short_by_a_restart() {
     assert_eq!(saved.why, "retry");
     first.shutdown();
     let (spawn, _made) = pipes();
-    let (reopened, _rx) = engine(dir.path(), spawn);
+    let (reopened, _rx) = engine(&dir, spawn);
     reopened.resume_keep_going();
     let wait = reopened.open(&id).unwrap().keep_going.unwrap().waiting.unwrap();
     assert_eq!(wait.why, "retry", "it is still the same rest, not the short wait of a start");
@@ -412,8 +422,8 @@ async fn a_rest_after_an_error_is_not_cut_short_by_a_restart() {
 
 #[tokio::test]
 async fn a_rest_after_an_error_keeps_its_row_in_the_running_list_and_faber_working() {
-    let (dir, project) = (tempfile::tempdir().unwrap(), support::work_folder());
-    let (engine, _rx, mut pipe, id) = started(dir.path(), project.path()).await;
+    let (dir, project) = (support::DataFolder::new(), support::work_folder());
+    let (engine, _rx, mut pipe, id) = started(&dir, project.path()).await;
     engine.keep_going(&id, true).unwrap();
     // The turn fails and Faber rests before it tries again (here half as long), and the update must not install under it.
     engine.set_keep_going_pace(0.5);
@@ -440,8 +450,8 @@ fn unix_now() -> f64 {
 
 #[tokio::test]
 async fn a_message_the_person_queued_goes_first_and_the_stop_line_still_counts() {
-    let (dir, project) = (tempfile::tempdir().unwrap(), support::work_folder());
-    let (engine, mut rx, mut pipe, id) = started(dir.path(), project.path()).await;
+    let (dir, project) = (support::DataFolder::new(), support::work_folder());
+    let (engine, mut rx, mut pipe, id) = started(&dir, project.path()).await;
     engine.keep_going(&id, true).unwrap();
     let choice = Choice { vendor: "claude".into(), model: Some("haiku".into()), effort: None };
     let status = SendRequest {
@@ -478,8 +488,8 @@ async fn a_message_the_person_queued_goes_first_and_the_stop_line_still_counts()
 // ends it, whoever sent the turn, and the tray says so.
 #[tokio::test]
 async fn a_second_stop_in_the_persons_own_turn_ends_it_with_a_notice() {
-    let (dir, project) = (tempfile::tempdir().unwrap(), support::work_folder());
-    let (engine, mut rx, mut pipe, id) = started(dir.path(), project.path()).await;
+    let (dir, project) = (support::DataFolder::new(), support::work_folder());
+    let (engine, mut rx, mut pipe, id) = started(&dir, project.path()).await;
     engine.keep_going(&id, true).unwrap();
     let choice = Choice { vendor: "claude".into(), model: Some("haiku".into()), effort: None };
     let status = SendRequest {
@@ -523,8 +533,8 @@ async fn a_second_stop_in_the_persons_own_turn_ends_it_with_a_notice() {
 // before the answer to a hook.
 #[tokio::test]
 async fn the_stop_line_leaves_every_reply_wherever_it_is() {
-    let (dir, project) = (tempfile::tempdir().unwrap(), support::work_folder());
-    let (engine, mut rx, mut pipe, id) = started(dir.path(), project.path()).await;
+    let (dir, project) = (support::DataFolder::new(), support::work_folder());
+    let (engine, mut rx, mut pipe, id) = started(&dir, project.path()).await;
     answers_at(
         &mut pipe,
         "Checked it.
@@ -546,8 +556,8 @@ The hook said ok."
 
 #[tokio::test]
 async fn a_turn_cut_at_the_limit_waits_for_quota_and_a_reading_with_room_sends_the_next_turn() {
-    let (dir, project) = (tempfile::tempdir().unwrap(), support::work_folder());
-    let (engine, mut rx, mut pipe, id) = started(dir.path(), project.path()).await;
+    let (dir, project) = (support::DataFolder::new(), support::work_folder());
+    let (engine, mut rx, mut pipe, id) = started(&dir, project.path()).await;
     engine.set_keep_going_pace(1.0);
     engine.keep_going(&id, true).unwrap();
     // The model the person picked ran out of its plan, and the CLI did not say when it comes back: keep going does not
@@ -570,8 +580,8 @@ async fn a_turn_cut_at_the_limit_waits_for_quota_and_a_reading_with_room_sends_t
 
 #[tokio::test]
 async fn with_no_reset_known_it_tries_the_cli_again_after_the_wait_and_never_stops_by_itself() {
-    let (dir, project) = (tempfile::tempdir().unwrap(), support::work_folder());
-    let (engine, mut rx, mut pipe, id, bins) = started_on(dir.path(), project.path(), &[Vendor::Claude]).await;
+    let (dir, project) = (support::DataFolder::new(), support::work_folder());
+    let (engine, mut rx, mut pipe, id, bins) = started_on(&dir, project.path(), &[Vendor::Claude]).await;
     engine.keep_going(&id, true).unwrap();
     pipe.say(json!({ "type": "result", "subtype": "error_during_execution", "is_error": true,
         "errors": ["You've hit your usage limit"], "total_cost_usd": 0.0, "usage": {} }))
@@ -593,8 +603,8 @@ async fn with_no_reset_known_it_tries_the_cli_again_after_the_wait_and_never_sto
 
 #[tokio::test]
 async fn with_every_ai_out_it_waits_for_the_reset_and_then_goes_on() {
-    let (dir, project) = (tempfile::tempdir().unwrap(), support::work_folder());
-    let (engine, mut rx, mut pipe, id) = started(dir.path(), project.path()).await;
+    let (dir, project) = (support::DataFolder::new(), support::work_folder());
+    let (engine, mut rx, mut pipe, id) = started(&dir, project.path()).await;
     answers(&mut pipe, "One done.", true).await;
     until(&engine, &id, idle).await;
     // The window is out and says it is back in a second and a half.
@@ -614,8 +624,8 @@ async fn with_every_ai_out_it_waits_for_the_reset_and_then_goes_on() {
 
 #[tokio::test]
 async fn with_the_picked_ai_out_the_next_turn_goes_to_another_ai_that_has_room() {
-    let (dir, project) = (tempfile::tempdir().unwrap(), support::work_folder());
-    let (engine, mut rx, mut pipe, id, bins) = started_on(dir.path(), project.path(), &[Vendor::Claude, Vendor::Codex]).await;
+    let (dir, project) = (support::DataFolder::new(), support::work_folder());
+    let (engine, mut rx, mut pipe, id, bins) = started_on(&dir, project.path(), &[Vendor::Claude, Vendor::Codex]).await;
     answers(&mut pipe, "One done.", true).await;
     until(&engine, &id, idle).await;
     engine.note_account_events(
@@ -640,8 +650,8 @@ async fn with_the_picked_ai_out_the_next_turn_goes_to_another_ai_that_has_room()
 
 #[tokio::test]
 async fn an_ai_billed_per_use_is_never_the_one_it_moves_to() {
-    let (dir, project) = (tempfile::tempdir().unwrap(), support::work_folder());
-    let (engine, mut rx, mut pipe, id, bins) = started_on(dir.path(), project.path(), &[Vendor::Claude, Vendor::Codex]).await;
+    let (dir, project) = (support::DataFolder::new(), support::work_folder());
+    let (engine, mut rx, mut pipe, id, bins) = started_on(&dir, project.path(), &[Vendor::Claude, Vendor::Codex]).await;
     // Codex is billed per use here: unattended work is never spent on it.
     let billed = faber_engine::signals::Signals { billing: Some(faber_engine::budget::Billing::UsageBilled), ..Default::default() };
     engine.note_account_events(Vendor::Codex, vec![faber_engine::events::EngineEvent::Signals(billed)]);
@@ -662,8 +672,8 @@ async fn an_ai_billed_per_use_is_never_the_one_it_moves_to() {
 
 #[tokio::test]
 async fn a_first_turn_picked_by_hand_moves_to_the_other_ai_when_keep_going_is_on() {
-    let (dir, project) = (tempfile::tempdir().unwrap(), support::work_folder());
-    let (engine, _rx, mut pipe, id, bins) = started_on(dir.path(), project.path(), &[Vendor::Claude, Vendor::Codex]).await;
+    let (dir, project) = (support::DataFolder::new(), support::work_folder());
+    let (engine, _rx, mut pipe, id, bins) = started_on(&dir, project.path(), &[Vendor::Claude, Vendor::Codex]).await;
     engine.keep_going(&id, true).unwrap();
     // The first turn, picked by hand, hits the plan limit in the middle of its work.
     pipe.say(json!({ "type": "result", "subtype": "error_during_execution", "is_error": true,
@@ -682,8 +692,8 @@ async fn a_first_turn_picked_by_hand_moves_to_the_other_ai_when_keep_going_is_on
 
 #[tokio::test]
 async fn a_busy_faber_tries_the_turn_again_soon() {
-    let (dir, project) = (tempfile::tempdir().unwrap(), support::work_folder());
-    let (engine, mut rx, mut pipe, id) = started(dir.path(), project.path()).await;
+    let (dir, project) = (support::DataFolder::new(), support::work_folder());
+    let (engine, mut rx, mut pipe, id) = started(&dir, project.path()).await;
     answers_at(&mut pipe, "Started.", true, 0.1).await;
     until(&engine, &id, idle).await;
     // An update being installed holds Faber for a moment: the turn is refused with its key.
@@ -701,8 +711,8 @@ async fn a_busy_faber_tries_the_turn_again_soon() {
 
 #[tokio::test]
 async fn a_turn_that_only_waited_rests_before_the_next_and_does_not_count_toward_the_cap() {
-    let (dir, project) = (tempfile::tempdir().unwrap(), support::work_folder());
-    let (engine, _rx, mut pipe, id) = started(dir.path(), project.path()).await;
+    let (dir, project) = (support::DataFolder::new(), support::work_folder());
+    let (engine, _rx, mut pipe, id) = started(&dir, project.path()).await;
     engine.set_keep_going_pace(0.02);
     engine.keep_going(&id, true).unwrap();
     // A quick answer with no tool ("waiting for CI"): two to five minutes pass before Faber asks again (here 3.6 s).
@@ -729,8 +739,8 @@ async fn a_turn_that_only_waited_rests_before_the_next_and_does_not_count_toward
 
 #[tokio::test]
 async fn a_question_already_answered_does_not_stop_it() {
-    let (dir, project) = (tempfile::tempdir().unwrap(), support::work_folder());
-    let (engine, mut rx, mut pipe, id) = started(dir.path(), project.path()).await;
+    let (dir, project) = (support::DataFolder::new(), support::work_folder());
+    let (engine, mut rx, mut pipe, id) = started(&dir, project.path()).await;
     engine.keep_going(&id, true).unwrap();
     let question = json!({ "questions": [{ "question": "Which stack?", "header": "Stack", "multiSelect": false, "options": [] }] });
     pipe.say(json!({ "type": "assistant", "message": { "role": "assistant",
@@ -749,8 +759,8 @@ async fn a_question_already_answered_does_not_stop_it() {
 
 #[tokio::test]
 async fn a_question_nobody_answers_gets_its_first_choice_and_the_reply_says_so() {
-    let (dir, project) = (tempfile::tempdir().unwrap(), support::work_folder());
-    let (engine, mut rx, mut pipe, id) = started(dir.path(), project.path()).await;
+    let (dir, project) = (support::DataFolder::new(), support::work_folder());
+    let (engine, mut rx, mut pipe, id) = started(&dir, project.path()).await;
     engine.keep_going(&id, true).unwrap();
     let question = json!({ "questions": [{ "question": "Which stack?", "header": "Stack", "multiSelect": false,
         "options": [{ "label": "Rust", "description": "recommended" }, { "label": "Go", "description": "" }] }] });
@@ -778,8 +788,8 @@ async fn a_question_nobody_answers_gets_its_first_choice_and_the_reply_says_so()
 
 #[tokio::test]
 async fn a_bigger_offer_nobody_answers_gets_the_request_as_asked_and_the_reply_says_so() {
-    let (dir, project) = (tempfile::tempdir().unwrap(), support::work_folder());
-    let (engine, mut rx, mut pipe, id) = started(dir.path(), project.path()).await;
+    let (dir, project) = (support::DataFolder::new(), support::work_folder());
+    let (engine, mut rx, mut pipe, id) = started(&dir, project.path()).await;
     let offer = json!({ "question": "Keep the app free of crashes?", "asked": "Fix this crash", "bigger": "No more crashes" });
     pipe.say(json!({ "type": "control_request", "request_id": "rpc",
         "request": { "subtype": "mcp_message", "server_name": "faber", "message": { "jsonrpc": "2.0", "id": 7, "method": "tools/call",
@@ -810,12 +820,12 @@ async fn a_bigger_offer_nobody_answers_gets_the_request_as_asked_and_the_reply_s
 
 #[tokio::test]
 async fn a_permission_card_is_never_answered_by_keep_going() {
-    let (dir, project) = (tempfile::tempdir().unwrap(), support::work_folder());
+    let (dir, project) = (support::DataFolder::new(), support::work_folder());
     let ask = |engine: &Engine| {
         let settings = faber_engine::model::Settings { permissions: Some(faber_engine::model::Permissions::Ask), ..Default::default() };
         engine.save_settings(settings).unwrap();
     };
-    let (engine, _rx, mut pipe, id, _) = started_with(dir.path(), project.path(), &[Vendor::Claude], &ask).await;
+    let (engine, _rx, mut pipe, id, _) = started_with(&dir, project.path(), &[Vendor::Claude], &ask).await;
     engine.keep_going(&id, true).unwrap();
     pipe.say(json!({ "type": "control_request", "request_id": "write",
         "request": { "subtype": "can_use_tool", "tool_name": "Write", "input": { "file_path": "notes.txt", "content": "x" } } }))
@@ -828,8 +838,8 @@ async fn a_permission_card_is_never_answered_by_keep_going() {
 
 #[tokio::test]
 async fn after_a_failed_turn_the_message_the_person_left_is_the_next_one() {
-    let (dir, project) = (tempfile::tempdir().unwrap(), support::work_folder());
-    let (engine, mut rx, mut pipe, id) = started(dir.path(), project.path()).await;
+    let (dir, project) = (support::DataFolder::new(), support::work_folder());
+    let (engine, mut rx, mut pipe, id) = started(&dir, project.path()).await;
     engine.keep_going(&id, true).unwrap();
     let choice = Choice { vendor: "claude".into(), model: Some("haiku".into()), effort: None };
     let left = SendRequest {
@@ -861,8 +871,8 @@ async fn after_a_failed_turn_the_message_the_person_left_is_the_next_one() {
 
 #[tokio::test]
 async fn every_ai_out_of_quota_with_a_known_reset_waits_on_screen_instead_of_stopping() {
-    let (dir, project) = (tempfile::tempdir().unwrap(), support::work_folder());
-    let (engine, mut rx, mut pipe, id) = started(dir.path(), project.path()).await;
+    let (dir, project) = (support::DataFolder::new(), support::work_folder());
+    let (engine, mut rx, mut pipe, id) = started(&dir, project.path()).await;
     engine.keep_going(&id, true).unwrap();
     // The week is all but used up (past the share Faber still sends at) and resets in six days: the only AI is out, so
     // Faber waits for it rather than ending.
@@ -904,8 +914,8 @@ async fn calls(pipe: &mut Pipe, request: &str, tool: &str, input: Value) -> (Str
 /// The plan belongs to the conversation (and the list's row counts it); the now line and the box belong to the reply.
 #[tokio::test]
 async fn the_agent_keeps_a_plan_says_what_it_does_now_and_closes_with_a_box() {
-    let (dir, project) = (tempfile::tempdir().unwrap(), support::work_folder());
-    let (engine, mut rx, mut pipe, id) = started(dir.path(), project.path()).await;
+    let (dir, project) = (support::DataFolder::new(), support::work_folder());
+    let (engine, mut rx, mut pipe, id) = started(&dir, project.path()).await;
     let steps =
         json!({ "steps": [{ "text": "Fix the login page", "state": "in_progress" }, { "text": "Fix the rest", "state": "pending" }] });
     let (said, error) = calls(&mut pipe, "p1", "plan", steps).await;
@@ -958,8 +968,8 @@ async fn ends_costing(pipe: &mut Pipe, total: f64) {
 /// switches to economy mode (the plan's answer says so, no conversation starts), and a later turn over the limit says nothing more.
 #[tokio::test]
 async fn a_job_going_half_over_its_estimate_warns_once_and_switches_to_economy_mode() {
-    let (dir, project) = (tempfile::tempdir().unwrap(), support::work_folder());
-    let (engine, mut rx, mut pipe, id) = started(dir.path(), project.path()).await;
+    let (dir, project) = (support::DataFolder::new(), support::work_folder());
+    let (engine, mut rx, mut pipe, id) = started(&dir, project.path()).await;
     let steps =
         json!({ "steps": [{ "text": "Build it", "state": "in_progress" }, { "text": "Check it", "state": "pending" }], "estimate": 1.0 });
     let (said, error) = calls(&mut pipe, "p1", "plan", steps).await;
@@ -1005,7 +1015,7 @@ async fn a_job_going_half_over_its_estimate_warns_once_and_switches_to_economy_m
 type Made = Arc<std::sync::Mutex<Vec<Pipe>>>;
 
 /// Like [`started_on`], also giving the queue of the other processes the engine starts (a helper's, a conversation an agent starts).
-async fn started_made(dir: &Path, folder: &Path, vendors: &[Vendor]) -> (Engine, Pipe, String, Made) {
+async fn started_made(dir: &crate::support::DataFolder, folder: &Path, vendors: &[Vendor]) -> (Engine, Pipe, String, Made) {
     let (spawn, made) = pipes();
     let (engine, _rx) = engine_with(dir, spawn, vendors);
     let project = engine.add_project(&folder.to_string_lossy()).unwrap();
@@ -1038,8 +1048,8 @@ fn economy_on(c: &Conversation) -> bool {
 /// plan sent after that starts with none.
 #[tokio::test]
 async fn the_estimate_and_economy_mode_end_with_the_job() {
-    let (dir, project) = (tempfile::tempdir().unwrap(), support::work_folder());
-    let (engine, mut rx, mut pipe, id) = started(dir.path(), project.path()).await;
+    let (dir, project) = (support::DataFolder::new(), support::work_folder());
+    let (engine, mut rx, mut pipe, id) = started(&dir, project.path()).await;
     calls(&mut pipe, "p1", "plan", steps_with(1.0)).await;
     ends_costing(&mut pipe, 1.6).await;
     until(&engine, &id, economy_on).await;
@@ -1088,8 +1098,8 @@ async fn the_estimate_and_economy_mode_end_with_the_job() {
 /// Rule 7: the job's spend counts the conversations the agent started, not only the replies of its own.
 #[tokio::test]
 async fn the_spend_of_a_job_counts_the_conversations_the_agent_started() {
-    let (dir, project) = (tempfile::tempdir().unwrap(), support::work_folder());
-    let (engine, mut pipe, id, made) = started_made(dir.path(), project.path(), &[Vendor::Claude]).await;
+    let (dir, project) = (support::DataFolder::new(), support::work_folder());
+    let (engine, mut pipe, id, made) = started_made(&dir, project.path(), &[Vendor::Claude]).await;
     calls(&mut pipe, "p1", "plan", steps_with(1.0)).await;
     let (said, error) = calls(&mut pipe, "c1", "conversation", json!({ "title": "Docs", "brief": "Write the docs." })).await;
     assert!(!error, "{said}");
@@ -1149,8 +1159,8 @@ async fn helper_models(claude: &mut Pipe, made: &Made) -> (Option<String>, Optio
 /// Rule 7: a helper the agent calls in economy mode runs one rung cheaper than usual, on the other AI's own model list.
 #[tokio::test]
 async fn a_helper_started_in_economy_mode_runs_one_rung_cheaper() {
-    let (dir, project) = (tempfile::tempdir().unwrap(), support::work_folder());
-    let (engine, mut pipe, id, made) = started_made(dir.path(), project.path(), &[Vendor::Claude, Vendor::Codex]).await;
+    let (dir, project) = (support::DataFolder::new(), support::work_folder());
+    let (engine, mut pipe, id, made) = started_made(&dir, project.path(), &[Vendor::Claude, Vendor::Codex]).await;
     calls(&mut pipe, "p1", "plan", steps_with(1.0)).await;
     ends_costing(&mut pipe, 1.6).await;
     until(&engine, &id, economy_on).await;
@@ -1163,8 +1173,8 @@ async fn a_helper_started_in_economy_mode_runs_one_rung_cheaper() {
 /// economy mode.
 #[tokio::test]
 async fn a_helper_of_a_conversation_the_lead_started_follows_the_leads_economy_mode() {
-    let (dir, project) = (tempfile::tempdir().unwrap(), support::work_folder());
-    let (engine, mut pipe, id, made) = started_made(dir.path(), project.path(), &[Vendor::Claude, Vendor::Codex]).await;
+    let (dir, project) = (support::DataFolder::new(), support::work_folder());
+    let (engine, mut pipe, id, made) = started_made(&dir, project.path(), &[Vendor::Claude, Vendor::Codex]).await;
     calls(&mut pipe, "p1", "plan", steps_with(1.0)).await;
     let (said, error) = calls(&mut pipe, "c1", "conversation", json!({ "title": "Docs", "brief": "Write the docs." })).await;
     assert!(!error, "{said}");
@@ -1184,8 +1194,8 @@ async fn a_helper_of_a_conversation_the_lead_started_follows_the_leads_economy_m
 /// conversation the agent started, ended after the restart, is still added to the lead's total.
 #[tokio::test]
 async fn a_restart_mid_job_still_counts_the_conversations_the_agent_started() {
-    let (dir, project) = (tempfile::tempdir().unwrap(), support::work_folder());
-    let (engine, mut pipe, id, made) = started_made(dir.path(), project.path(), &[Vendor::Claude]).await;
+    let (dir, project) = (support::DataFolder::new(), support::work_folder());
+    let (engine, mut pipe, id, made) = started_made(&dir, project.path(), &[Vendor::Claude]).await;
     calls(&mut pipe, "p1", "plan", steps_with(1.0)).await;
     let (said, error) = calls(&mut pipe, "c1", "conversation", json!({ "title": "Docs", "brief": "Write the docs." })).await;
     assert!(!error, "{said}");
@@ -1200,7 +1210,7 @@ async fn a_restart_mid_job_still_counts_the_conversations_the_agent_started() {
 
     // A new engine reads everything from disk; the child goes on with a turn of the person's.
     let (spawn, made) = pipes();
-    let (again, _rx) = engine_with(dir.path(), spawn, &[Vendor::Claude]);
+    let (again, _rx) = engine_with(&dir, spawn, &[Vendor::Claude]);
     let choice = Choice { vendor: "claude".into(), model: Some("haiku".into()), effort: None };
     let more = SendRequest {
         conversation_id: Some(started.clone()),
@@ -1228,8 +1238,8 @@ async fn a_restart_mid_job_still_counts_the_conversations_the_agent_started() {
 /// Rule 7: a quick question on the side is no reply, yet its cost joins the job's spend and can tip it over the limit.
 #[tokio::test]
 async fn a_quick_question_on_the_side_tips_the_spend_of_the_job() {
-    let (dir, project) = (tempfile::tempdir().unwrap(), support::work_folder());
-    let (engine, mut pipe, id, made) = started_made(dir.path(), project.path(), &[Vendor::Claude]).await;
+    let (dir, project) = (support::DataFolder::new(), support::work_folder());
+    let (engine, mut pipe, id, made) = started_made(&dir, project.path(), &[Vendor::Claude]).await;
     calls(&mut pipe, "p1", "plan", steps_with(1.0)).await;
     pipe.say(json!({"type":"stream_event","parent_tool_use_id":null,"event":{"type":"content_block_delta","delta":{"type":"text_delta","text":"Reading."}}})).await;
     until(&engine, &id, |c| c.resumable(Vendor::Claude).is_some()).await;
@@ -1255,8 +1265,8 @@ async fn a_quick_question_on_the_side_tips_the_spend_of_the_job() {
 /// Rule 7: a conversation saved before estimates existed loads without one, and an estimate saved before economy mode loads with it off.
 #[tokio::test]
 async fn a_conversation_saved_before_the_estimate_loads_without_it() {
-    let (dir, project) = (tempfile::tempdir().unwrap(), support::work_folder());
-    let (engine, _rx, mut pipe, id) = started(dir.path(), project.path()).await;
+    let (dir, project) = (support::DataFolder::new(), support::work_folder());
+    let (engine, _rx, mut pipe, id) = started(&dir, project.path()).await;
     calls(&mut pipe, "p1", "plan", steps_with(1.0)).await;
     engine.shutdown();
     let file = dir.path().join("conversations").join(format!("{id}.json"));
@@ -1265,13 +1275,13 @@ async fn a_conversation_saved_before_the_estimate_loads_without_it() {
     let estimate = saved["estimate"].as_object_mut().expect("the estimate is saved on the conversation");
     assert!(estimate.remove("economy").is_some());
     std::fs::write(&file, saved.to_string()).unwrap();
-    let (again, _rx) = engine_with(dir.path(), pipes().0, &[Vendor::Claude]);
+    let (again, _rx) = engine_with(&dir, pipes().0, &[Vendor::Claude]);
     let e = again.open(&id).unwrap().estimate.expect("the estimate loads");
     assert_eq!((e.cents, e.base, e.economy), (100, 0, false), "an estimate with no economy flag has it off");
     again.shutdown();
     saved.as_object_mut().unwrap().remove("estimate");
     std::fs::write(&file, saved.to_string()).unwrap();
-    let (again, _rx) = engine_with(dir.path(), pipes().0, &[Vendor::Claude]);
+    let (again, _rx) = engine_with(&dir, pipes().0, &[Vendor::Claude]);
     let c = again.open(&id).unwrap();
     assert_eq!(
         (c.plan.expect("the plan loads").steps.len(), c.estimate, c.spent_usd),
@@ -1285,8 +1295,8 @@ async fn a_conversation_saved_before_the_estimate_loads_without_it() {
 /// (the first is checked against the original request).
 #[tokio::test]
 async fn keep_going_ends_when_the_closing_box_says_the_request_is_done() {
-    let (dir, project) = (tempfile::tempdir().unwrap(), support::work_folder());
-    let (engine, mut rx, mut pipe, id) = started(dir.path(), project.path()).await;
+    let (dir, project) = (support::DataFolder::new(), support::work_folder());
+    let (engine, mut rx, mut pipe, id) = started(&dir, project.path()).await;
     engine.keep_going(&id, true).unwrap();
     let done = json!({ "recap": "The login page and the rest are fixed. Both were checked.", "done": true });
     calls(&mut pipe, "d1", "wrap_up", done.clone()).await;
@@ -1307,8 +1317,8 @@ async fn keep_going_ends_when_the_closing_box_says_the_request_is_done() {
 /// recommended reply (the first button), says so to the agent, and the box shows which reply it chose.
 #[tokio::test]
 async fn keep_going_answers_a_closing_question_nobody_answered_with_its_first_reply() {
-    let (dir, project) = (tempfile::tempdir().unwrap(), support::work_folder());
-    let (engine, _rx, mut pipe, id) = started(dir.path(), project.path()).await;
+    let (dir, project) = (support::DataFolder::new(), support::work_folder());
+    let (engine, _rx, mut pipe, id) = started(&dir, project.path()).await;
     engine.keep_going(&id, true).unwrap();
     let ask = json!({ "recap": "The login page works. The docs are not written.", "ask": "Write the docs now?", "actions": ["Yes, write them", "Skip"] });
     calls(&mut pipe, "q1", "wrap_up", ask).await;
@@ -1329,8 +1339,8 @@ async fn keep_going_answers_a_closing_question_nobody_answered_with_its_first_re
 /// before Faber answers it for them.
 #[tokio::test]
 async fn keep_going_turned_on_after_a_closing_question_still_waits_before_answering_it() {
-    let (dir, project) = (tempfile::tempdir().unwrap(), support::work_folder());
-    let (engine, _rx, mut pipe, id) = started(dir.path(), project.path()).await;
+    let (dir, project) = (support::DataFolder::new(), support::work_folder());
+    let (engine, _rx, mut pipe, id) = started(&dir, project.path()).await;
     let ask = json!({ "recap": "The login page works.", "ask": "Write the docs now?", "actions": ["Yes", "Skip"] });
     calls(&mut pipe, "q1", "wrap_up", ask).await;
     answers_at(&mut pipe, "Login fixed.", true, 0.1).await;
@@ -1346,8 +1356,8 @@ async fn keep_going_turned_on_after_a_closing_question_still_waits_before_answer
 
 #[tokio::test]
 async fn failed_turns_drain_sibling_questions_in_order_without_retrying_or_sending_human_messages() {
-    let (dir, project) = (tempfile::tempdir().unwrap(), support::work_folder());
-    let (engine, mut agent, id, made) = started_made(dir.path(), project.path(), &[Vendor::Claude]).await;
+    let (dir, project) = (support::DataFolder::new(), support::work_folder());
+    let (engine, mut agent, id, made) = started_made(&dir, project.path(), &[Vendor::Claude]).await;
     let (said, error) = calls(&mut agent, "start", "conversation", json!({ "title": "Questions", "brief": "Check the docs." })).await;
     assert!(!error, "{said}");
     // These checks exercise queued wakes after failure, not messages already handed into a safe step.
@@ -1407,8 +1417,8 @@ async fn failed_turns_drain_sibling_questions_in_order_without_retrying_or_sendi
 
 #[tokio::test]
 async fn a_new_sibling_question_after_an_error_waits_behind_older_questions() {
-    let (dir, project) = (tempfile::tempdir().unwrap(), support::work_folder());
-    let (engine, mut agent, id, made) = started_made(dir.path(), project.path(), &[Vendor::Claude]).await;
+    let (dir, project) = (support::DataFolder::new(), support::work_folder());
+    let (engine, mut agent, id, made) = started_made(&dir, project.path(), &[Vendor::Claude]).await;
     let (said, error) = calls(&mut agent, "start", "conversation", json!({ "title": "Questions", "brief": "Check the docs." })).await;
     assert!(!error, "{said}");
     let mut sibling = next_pipe(&made).await;
@@ -1431,7 +1441,7 @@ async fn a_new_sibling_question_after_an_error_waits_behind_older_questions() {
     let file = dir.path().join("conversations").join(format!("{id}.json"));
     std::fs::write(file, serde_json::to_vec(&saved).unwrap()).unwrap();
     let (spawn, made) = pipes();
-    let (again, _rx) = engine_with(dir.path(), spawn, &[Vendor::Claude]);
+    let (again, _rx) = engine_with(&dir, spawn, &[Vendor::Claude]);
     again
         .send(SendRequest {
             conversation_id: None,
@@ -1480,8 +1490,8 @@ async fn a_new_sibling_question_after_an_error_waits_behind_older_questions() {
 
 #[tokio::test]
 async fn wakes_that_cannot_start_fail_once_and_drain_the_remaining_wakes() {
-    let (dir, project) = (tempfile::tempdir().unwrap(), support::work_folder());
-    let (engine, mut agent, id, made) = started_made(dir.path(), project.path(), &[Vendor::Claude]).await;
+    let (dir, project) = (support::DataFolder::new(), support::work_folder());
+    let (engine, mut agent, id, made) = started_made(&dir, project.path(), &[Vendor::Claude]).await;
     let (said, error) = calls(&mut agent, "start", "conversation", json!({ "title": "Questions", "brief": "Check the docs." })).await;
     assert!(!error, "{said}");
     // The billing change must precede delivery, so keep the initial turn inside a step.
@@ -1518,8 +1528,8 @@ async fn wakes_that_cannot_start_fail_once_and_drain_the_remaining_wakes() {
 
 #[tokio::test]
 async fn two_silent_keep_going_turns_in_a_row_halt_on_the_last_reply_with_content() {
-    let (dir, project) = (tempfile::tempdir().unwrap(), support::work_folder());
-    let (engine, _rx, mut pipe, id) = started(dir.path(), project.path()).await;
+    let (dir, project) = (support::DataFolder::new(), support::work_folder());
+    let (engine, _rx, mut pipe, id) = started(&dir, project.path()).await;
     engine.keep_going(&id, true).unwrap();
     answers(&mut pipe, "All three items are waiting on your decision.", true).await;
     until(&engine, &id, |c| c.messages.len() == 4).await;

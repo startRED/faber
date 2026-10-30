@@ -29,11 +29,12 @@ async fn move_chat_to_project_other_ai_keeps_attachment_locations_in_summarized_
 }
 
 async fn moved_attachment_handover(long: bool) {
-    let dir = support::work_folder();
+    let dir = support::DataFolder::new();
+    dir.initialize_chat();
     let folder = support::work_folder();
     let mut before = seed(dir.path(), long);
     before.messages[0].attachments = Some(vec!["notes.txt".into()]);
-    let attachments = dir.path().join("chat").join(&before.id).join("attachments");
+    let attachments = dir.scratch_path().join(&before.id).join("attachments");
     std::fs::create_dir_all(&attachments).unwrap();
     std::fs::write(attachments.join("notes.txt"), "Earlier decisions").unwrap();
     Store::new(dir.path()).save_checked(&before).unwrap();
@@ -41,6 +42,8 @@ async fn moved_attachment_handover(long: bool) {
     let engine = Engine::new(
         EngineOptions {
             data_dir: dir.path().into(),
+            #[cfg(windows)]
+            chat_dir: dir.chat_path().into(),
             clis: Vendor::ALL.into_iter().map(|v| (v, Cli { command: v.name().into(), prefix: vec![] })).collect(),
             spawn,
             windows: false,
@@ -111,7 +114,8 @@ async fn moved_attachment_handover(long: bool) {
 async fn move_chat_to_project_quota_wait_keeps_history_and_attachment_locations_for_each_cli() {
     for vendor in Vendor::ALL {
         for reopened in [false, true] {
-            let dir = support::work_folder();
+            let dir = support::DataFolder::new();
+            dir.initialize_chat();
             let folder = support::work_folder();
             let mut before: Conversation = serde_json::from_str(include_str!("../../tests/fixtures/conversation-export.json")).unwrap();
             before.working_folder = None;
@@ -119,7 +123,7 @@ async fn move_chat_to_project_quota_wait_keeps_history_and_attachment_locations_
                 m.attachments = None;
             }
             before.messages[0].attachments = Some(vec!["notes.txt".into()]);
-            let attachments = dir.path().join("chat").join(&before.id).join("attachments");
+            let attachments = dir.scratch_path().join(&before.id).join("attachments");
             std::fs::create_dir_all(&attachments).unwrap();
             std::fs::write(attachments.join("notes.txt"), "Earlier project decisions").unwrap();
             Store::new(dir.path()).save_checked(&before).unwrap();
@@ -135,7 +139,7 @@ async fn move_chat_to_project_quota_wait_keeps_history_and_attachment_locations_
                     e.msg["params"]["input"][0]["text"] = json!(expected);
                 }
             }
-            let make = || sources(dir.path(), &[vendor], fake(entries.clone()), fake(entries.clone()));
+            let make = || sources(&dir, &[vendor], fake(entries.clone()), fake(entries.clone()));
             let r = make();
             let project = r.engine.add_project(&folder.path().to_string_lossy()).unwrap();
             r.engine.move_to_project(&before.id, &project.id).unwrap();
@@ -176,9 +180,9 @@ async fn move_chat_to_project_quota_wait_keeps_history_and_attachment_locations_
 #[tokio::test]
 async fn move_chat_to_project_refuses_quota_recovery_until_stopped_including_after_restart() {
     for vendor in ["claude", "auto"] {
-        let dir = support::tempdir();
+        let dir = support::DataFolder::new();
         let folder = support::work_folder();
-        let r = rig(dir.path(), &[Vendor::Claude], fake(vec![]));
+        let r = rig(&dir, &[Vendor::Claude], fake(vec![]));
         let project = r.engine.add_project(&folder.path().to_string_lossy()).unwrap();
         r.engine.note_account_events(Vendor::Claude, vec![quota("seven_day", 7 * 3600, 1.0)]);
         let id = r.engine.send(request(None, vendor)).unwrap();
@@ -189,14 +193,14 @@ async fn move_chat_to_project_refuses_quota_recovery_until_stopped_including_aft
         assert_eq!(r.engine.open(&id).unwrap(), before);
         r.engine.shutdown();
         drop(r);
-        let back = rig(dir.path(), &[Vendor::Claude], fake(vec![]));
+        let back = rig(&dir, &[Vendor::Claude], fake(vec![]));
         back.engine.open(&id).unwrap();
         assert_eq!(back.engine.move_to_project(&id, &project.id), Err("error.moveChat.busy".into()), "reopened {vendor}");
         back.engine.interrupt(&id);
         assert_eq!(back.engine.open(&id).unwrap().messages.last().unwrap().status, Some(Status::Stopped));
         assert!(back.engine.wait_turn(&id, &blocked.id).is_err(), "stopping revokes the recovery");
         back.engine.shutdown();
-        let later = rig(dir.path(), &[Vendor::Claude], fake(vec![]));
+        let later = rig(&dir, &[Vendor::Claude], fake(vec![]));
         assert_eq!(later.engine.move_to_project(&id, &project.id).unwrap().area, Area::Project, "Stop survives reopening");
         assert!(later.engine.approve_credits(&id, &blocked.id, Vendor::Claude).is_err());
         assert!(later.claude.args.lock().unwrap().is_empty(), "no recovery starts in the destination");
@@ -206,15 +210,15 @@ async fn move_chat_to_project_refuses_quota_recovery_until_stopped_including_aft
 
 #[tokio::test]
 async fn restarting_cancels_a_queued_wait_instead_of_freezing_or_resending_it() {
-    let dir = tempfile::tempdir().unwrap();
-    let r = rig(dir.path(), &[Vendor::Claude], fake(vec![]));
+    let dir = support::DataFolder::new();
+    let r = rig(&dir, &[Vendor::Claude], fake(vec![]));
     r.engine.note_account_events(Vendor::Claude, vec![quota("five_hour", 600, 1.0)]);
     let id = r.engine.send(request(None, "auto")).unwrap();
     tokio::time::sleep(Duration::from_millis(40)).await;
     let m = reply(&r.engine, &id, Status::Streaming).await;
     assert!(m.wait_until.is_some());
     drop(r);
-    let back = rig(dir.path(), &[Vendor::Claude], fake(vec![]));
+    let back = rig(&dir, &[Vendor::Claude], fake(vec![]));
     let saved = back.engine.open(&id).unwrap();
     assert_eq!(saved.messages.last().unwrap().status, Some(Status::Stopped));
     back.time.store(WHEN + 601, Ordering::SeqCst);
@@ -229,8 +233,8 @@ async fn restarting_cancels_a_queued_wait_instead_of_freezing_or_resending_it() 
 async fn restarting_keeps_explicit_quota_recovery_available_for_the_saved_reply() {
     for effort in [None, Some(Effort::High)] {
         for legacy in [false, true] {
-            let dir = tempfile::tempdir().unwrap();
-            let r = rig(dir.path(), &[Vendor::Claude], fake(vec![]));
+            let dir = support::DataFolder::new();
+            let r = rig(&dir, &[Vendor::Claude], fake(vec![]));
             r.engine.note_account_events(Vendor::Claude, vec![quota("five_hour", 600, 1.0)]);
             let mut req = request(None, "claude");
             req.choice.model = Some("claude-haiku-5-5".into());
@@ -254,7 +258,7 @@ async fn restarting_keeps_explicit_quota_recovery_available_for_the_saved_reply(
                 {"type":"image","source":{"type":"base64","media_type":"image/png","data":"aW1hZ2U="}},
                 {"type":"text","text":format!("{}\n\nAttached files (in your working folder):\n- attachments/notes.txt",req.text)}
             ]);
-            let back = sources(dir.path(), &[Vendor::Claude], fake(entries), fake(vec![]));
+            let back = sources(&dir, &[Vendor::Claude], fake(entries), fake(vec![]));
             back.engine.open(&id).unwrap();
             back.engine.note_account_events(Vendor::Claude, vec![quota("five_hour", 600, 1.0)]);
             back.engine.wait_turn(&id, &m.id).unwrap();
@@ -286,8 +290,8 @@ struct Rig {
 async fn restarted_recovery_never_uses_a_billing_exception_for_a_scheduled_resend() {
     for legacy in [false, true] {
         for billing in [Billing::Unknown, Billing::UsageBilled] {
-            let dir = tempfile::tempdir().unwrap();
-            let r = rig(dir.path(), &[Vendor::Claude], fake(vec![]));
+            let dir = support::DataFolder::new();
+            let r = rig(&dir, &[Vendor::Claude], fake(vec![]));
             r.engine.note_account_events(Vendor::Claude, vec![quota("seven_day", 7 * 3600, 1.0)]);
             let id = r.engine.send(request(None, "auto")).unwrap();
             let m = reply(&r.engine, &id, Status::Error).await;
@@ -299,7 +303,7 @@ async fn restarted_recovery_never_uses_a_billing_exception_for_a_scheduled_resen
                 saved.messages.last_mut().unwrap().recovery = None;
                 store.save(&saved);
             }
-            let back = rig(dir.path(), &[Vendor::Claude], fake(vec![]));
+            let back = rig(&dir, &[Vendor::Claude], fake(vec![]));
             back.engine.open(&id).unwrap();
             back.time.store(WHEN + 7 * 3600 - 600, Ordering::SeqCst);
             back.engine.note_account_events(Vendor::Claude, vec![quota("seven_day", 7 * 3600, 1.0)]);
@@ -315,17 +319,19 @@ async fn restarted_recovery_never_uses_a_billing_exception_for_a_scheduled_resen
         }
     }
 }
-fn rig(dir: &Path, vendors: &[Vendor], codex: Fake) -> Rig {
+fn rig(dir: &support::DataFolder, vendors: &[Vendor], codex: Fake) -> Rig {
     sources(dir, vendors, fake(fixture("claude", "chat")), codex)
 }
-fn sources(dir: &Path, vendors: &[Vendor], claude: Fake, codex: Fake) -> Rig {
+fn sources(dir: &support::DataFolder, vendors: &[Vendor], claude: Fake, codex: Fake) -> Rig {
     asking(dir, vendors, claude, codex, r#"{"kind":"chat","difficulty":"easy","confidence":0.95}"#)
 }
-fn asking(dir: &Path, vendors: &[Vendor], claude: Fake, codex: Fake, verdict: &'static str) -> Rig {
+fn asking(dir: &support::DataFolder, vendors: &[Vendor], claude: Fake, codex: Fake, verdict: &'static str) -> Rig {
     let (c, x) = (claude.spawn.clone(), codex.spawn.clone());
     let engine = Engine::new(
         EngineOptions {
-            data_dir: dir.into(),
+            data_dir: dir.path().into(),
+            #[cfg(windows)]
+            chat_dir: dir.chat_path().into(),
             clis: vendors.iter().map(|v| (*v, Cli { command: v.name().into(), prefix: vec![] })).collect(),
             spawn: Arc::new(move |bin, args, cwd| if bin == "claude" { c(bin, args, cwd) } else { x(bin, args, cwd) }),
             windows: false,
@@ -356,7 +362,7 @@ async fn a_partial_plan_limit_continues_once_and_the_chat_stays_on_the_new_vendo
     use faber_engine::handover::{self, Partial};
     use support::Entry;
     for (narration, tool) in [("", true), ("Checking 🛠️.\n\n", true), ("", false)] {
-        let dir = tempfile::tempdir().unwrap();
+        let dir = support::DataFolder::new();
         let before = seed(dir.path(), false);
         let output = "x".repeat(500);
         let mut claude_entries = vec![
@@ -408,7 +414,7 @@ async fn a_partial_plan_limit_continues_once_and_the_chat_stays_on_the_new_vendo
                 .unwrap();
             entries.insert(at, Entry { input: false, msg: json!({"method":"item/started","params":{"item":{"type":"commandExecution","id":"resume-tool","command":"check"}}}) });
         }
-        let r = sources(dir.path(), &Vendor::ALL, claude, fake(entries));
+        let r = sources(&dir, &Vendor::ALL, claude, fake(entries));
         let id = r.engine.send(request(Some(&before.id), "auto")).unwrap();
         let m = reply(&r.engine, &id, Status::Done).await;
         assert_eq!(m.vendor, Some(Vendor::Codex));
@@ -438,9 +444,9 @@ async fn a_partial_plan_limit_continues_once_and_the_chat_stays_on_the_new_vendo
 
 #[tokio::test]
 async fn a_family_limit_resumes_on_another_family_of_the_same_vendor() {
-    let dir = tempfile::tempdir().unwrap();
+    let dir = support::DataFolder::new();
     let before = seed(dir.path(), false);
-    let r = rig(dir.path(), &Vendor::ALL, fake(vec![]));
+    let r = rig(&dir, &Vendor::ALL, fake(vec![]));
     r.engine.note_account_events(Vendor::Claude, vec![quota("seven_day_opus", 172800, 1.0)]);
     let id = r.engine.send(request(Some(&before.id), "auto")).unwrap();
     let m = reply(&r.engine, &id, Status::Done).await;
@@ -456,8 +462,8 @@ async fn a_family_limit_resumes_on_another_family_of_the_same_vendor() {
 
 #[tokio::test]
 async fn an_explicit_wait_uses_the_pinned_familys_reset() {
-    let dir = tempfile::tempdir().unwrap();
-    let r = rig(dir.path(), &[Vendor::Claude], fake(vec![]));
+    let dir = support::DataFolder::new();
+    let r = rig(&dir, &[Vendor::Claude], fake(vec![]));
     r.engine.note_account_events(Vendor::Claude, vec![quota("seven_day_opus", 600, 1.0)]);
     let req =
         SendRequest { choice: Choice { vendor: "claude".into(), model: Some("opus".into()), effort: None }, ..request(None, "claude") };
@@ -494,8 +500,8 @@ async fn reply(engine: &Engine, id: &str, status: Status) -> Message {
 }
 #[tokio::test]
 async fn a_message_for_a_vendor_that_resets_soon_waits_and_sends_itself() {
-    let dir = tempfile::tempdir().unwrap();
-    let r = rig(dir.path(), &[Vendor::Claude], fake(vec![]));
+    let dir = support::DataFolder::new();
+    let r = rig(&dir, &[Vendor::Claude], fake(vec![]));
     r.engine.note_account_events(Vendor::Claude, vec![quota("five_hour", 600, 1.0)]);
     let id = r.engine.send(request(None, "auto")).unwrap();
     tokio::time::sleep(Duration::from_millis(40)).await;
@@ -518,8 +524,8 @@ async fn a_message_for_a_vendor_that_resets_soon_waits_and_sends_itself() {
 }
 #[tokio::test]
 async fn a_wait_longer_than_six_hours_is_refused_and_the_original_text_is_kept() {
-    let dir = tempfile::tempdir().unwrap();
-    let r = rig(dir.path(), &[Vendor::Claude], fake(vec![]));
+    let dir = support::DataFolder::new();
+    let r = rig(&dir, &[Vendor::Claude], fake(vec![]));
     r.engine.note_account_events(Vendor::Claude, vec![quota("seven_day", 172800, 1.0)]);
     let id = r.engine.send(request(None, "auto")).unwrap();
     let m = reply(&r.engine, &id, Status::Error).await;
@@ -531,8 +537,8 @@ async fn a_wait_longer_than_six_hours_is_refused_and_the_original_text_is_kept()
 #[tokio::test]
 async fn closing_the_app_or_stopping_cancels_a_waiting_message() {
     for closing in [false, true] {
-        let dir = tempfile::tempdir().unwrap();
-        let r = rig(dir.path(), &[Vendor::Claude], fake(vec![]));
+        let dir = support::DataFolder::new();
+        let r = rig(&dir, &[Vendor::Claude], fake(vec![]));
         r.engine.note_account_events(Vendor::Claude, vec![quota("five_hour", 600, 1.0)]);
         let id = r.engine.send(request(None, "auto")).unwrap();
         tokio::time::sleep(Duration::from_millis(40)).await;
@@ -546,7 +552,7 @@ async fn closing_the_app_or_stopping_cancels_a_waiting_message() {
         r.engine.set_utc_offset(0);
         tokio::time::sleep(Duration::from_millis(30)).await;
         assert!(r.claude.args.lock().unwrap().is_empty());
-        let reopened = rig(dir.path(), &[Vendor::Claude], fake(vec![]));
+        let reopened = rig(&dir, &[Vendor::Claude], fake(vec![]));
         assert_eq!(reopened.engine.open(&id).unwrap().messages.last().unwrap().status, Some(Status::Stopped));
         assert_eq!(reopened.engine.open(&id).unwrap().messages[0].text, request(None, "auto").text);
         assert!(reopened.claude.args.lock().unwrap().is_empty());
@@ -618,7 +624,7 @@ fn seed(dir: &Path, long: bool) -> Conversation {
 }
 #[tokio::test]
 async fn a_failed_hand_over_ends_with_move_failed_and_keeps_the_conversation() {
-    let dir = tempfile::tempdir().unwrap();
+    let dir = support::DataFolder::new();
     let before = seed(dir.path(), true);
     let mut entries = fixture("codex", "chat");
     let at = entries.iter().position(|e| e.input && e.msg["method"] == "turn/start").unwrap();
@@ -626,7 +632,7 @@ async fn a_failed_hand_over_ends_with_move_failed_and_keeps_the_conversation() {
     entries[at].msg["params"]["input"][0]["text"] = json!(prompt);
     entries.truncate(at + 1);
     entries.push(support::Entry { input: false, msg: json!({"id":3,"error":{"code":-1,"message":"summary unavailable"}}) });
-    let r = rig(dir.path(), &Vendor::ALL, fake(entries));
+    let r = rig(&dir, &Vendor::ALL, fake(entries));
     r.engine.note_account_events(Vendor::Claude, vec![quota("seven_day", 172800, 1.0)]);
     let id = r.engine.send(request(Some(&before.id), "auto")).unwrap();
     let m = reply(&r.engine, &id, Status::Error).await;
@@ -639,8 +645,8 @@ async fn a_failed_hand_over_ends_with_move_failed_and_keeps_the_conversation() {
 }
 #[tokio::test]
 async fn recovery_uses_the_latest_block_and_never_queues_unknown_billing() {
-    let dir = tempfile::tempdir().unwrap();
-    let r = rig(dir.path(), &[Vendor::Claude], fake(vec![]));
+    let dir = support::DataFolder::new();
+    let r = rig(&dir, &[Vendor::Claude], fake(vec![]));
     r.engine.note_account_events(Vendor::Claude, vec![quota("five_hour", 600, 1.0), quota("seven_day", 172800, 0.985)]);
     let id = r.engine.send(request(None, "auto")).unwrap();
     assert_eq!(reply(&r.engine, &id, Status::Error).await.error.as_deref(), Some("error.quotaWait"));
@@ -653,8 +659,8 @@ async fn recovery_uses_the_latest_block_and_never_queues_unknown_billing() {
 }
 #[tokio::test]
 async fn paid_consent_is_bound_to_one_reply_and_is_consumed() {
-    let dir = tempfile::tempdir().unwrap();
-    let r = rig(dir.path(), &[Vendor::Claude], fake(vec![]));
+    let dir = support::DataFolder::new();
+    let r = rig(&dir, &[Vendor::Claude], fake(vec![]));
     r.engine.note_account_events(
         Vendor::Claude,
         vec![
@@ -683,7 +689,7 @@ async fn paid_consent_is_bound_to_one_reply_and_is_consumed() {
 
 #[tokio::test]
 async fn a_quota_recovery_keeps_the_blind_quality_floor_of_the_original_verdict() {
-    let dir = tempfile::tempdir().unwrap();
+    let dir = support::DataFolder::new();
     // Codex runs out of quota right after the turn starts.
     let mut codex = fixture("codex", "chat");
     let end = codex.iter().position(|e| e.msg["method"] == "turn/completed").unwrap();
@@ -694,7 +700,7 @@ async fn a_quota_recovery_keeps_the_blind_quality_floor_of_the_original_verdict(
     codex.truncate(start);
     codex.push(done);
     let r = asking(
-        dir.path(),
+        &dir,
         &Vendor::ALL,
         fake(fixture("claude", "chat")),
         fake(codex),
@@ -716,7 +722,7 @@ async fn a_quota_recovery_keeps_the_blind_quality_floor_of_the_original_verdict(
 
 #[tokio::test]
 async fn a_lifted_pick_that_runs_out_of_quota_is_re_picked_and_the_answer_no_longer_says_learned() {
-    let dir = tempfile::tempdir().unwrap();
+    let dir = support::DataFolder::new();
     std::fs::write(dir.path().join("auto-learned.json"), format!(r#"{{"kinds":{{"code":{{"marks":[],"lifted":true,"at":{WHEN}}}}}}}"#))
         .unwrap();
     // Codex runs out of quota right after the turn starts, so recovery moves the answer to Claude.
@@ -729,7 +735,7 @@ async fn a_lifted_pick_that_runs_out_of_quota_is_re_picked_and_the_answer_no_lon
     codex.truncate(start);
     codex.push(done);
     let r = asking(
-        dir.path(),
+        &dir,
         &Vendor::ALL,
         fake(fixture("claude", "chat")),
         fake(codex),

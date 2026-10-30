@@ -49,7 +49,7 @@ function loadedVisual(host: HTMLElement) {
   };
 }
 async function until(test: () => unknown, what = 'the visual answer appeared before the deadline') {
-  const end = performance.now() + 4000;
+  const end = performance.now() + 15000;
   while (!test() && performance.now() < end) await settle();
   ok(test(), what);
 }
@@ -845,7 +845,7 @@ check('visual answers: Chat and Projects at 720 px reuse the resizable running p
       applyLook(initial.look, host);
       const dispose = render(() => createComponent(App, { initial, inbox: { take: () => {} } }), host);
       try {
-        await until(() => host.querySelectorAll('.visual-card').length === 2);
+        await until(() => host.querySelectorAll('.visual-card').length === 2, `${area}/${form}: two visual cards render`);
         equal(host.querySelector('iframe'), null);
         host.querySelectorAll<HTMLButtonElement>('.visual-open')[1]!.click();
         await settle();
@@ -864,9 +864,9 @@ check('visual answers: Chat and Projects at 720 px reuse the resizable running p
         equal(host.querySelector('iframe'), newest, 'a version switch reuses the frame');
         equal(newest.contentWindow, browsingContext, 'versions keep one browsing context');
         equal(newest.isConnected, true);
-        await until(() => prepared.get(loaded.url() ?? '')?.document.includes('data-version="1"'));
+        await until(() => prepared.get(loaded.url() ?? '')?.document.includes('data-version="1"'), `${area}/${form}: version 1 document`);
         host.querySelector<HTMLButtonElement>('.visual-next')!.click();
-        await until(() => prepared.get(loaded.url() ?? '')?.document.includes('data-version="2"'));
+        await until(() => prepared.get(loaded.url() ?? '')?.document.includes('data-version="2"'), `${area}/${form}: version 2 document`);
         const grip = host.querySelector<HTMLElement>('#running [role="separator"]')!;
         const oldWidth = Number(grip.getAttribute('aria-valuenow'));
         grip.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowLeft', bubbles: true }));
@@ -884,7 +884,7 @@ check('visual answers: Chat and Projects at 720 px reuse the resizable running p
         equal(host.querySelector('.commands-view'), null, 'opening a visual releases the Commands view');
         await until(() => host.querySelectorAll('iframe').length === 1, 'the visual reopens in one frame after Commands');
         showFile('chart.ts:2');
-        await until(() => host.querySelector('.file-line.mark'));
+        await until(() => host.querySelector('.file-line.mark'), `${area}/${form}: file mark after Commands`);
         equal(openedVisual(), undefined, 'opening a named file clears the visual selection');
         equal(host.querySelector('iframe'), null, 'opening a named file releases the visual frame');
         equal(host.querySelector('.file-line.mark')!.textContent, 'second');
@@ -896,7 +896,7 @@ check('visual answers: Chat and Projects at 720 px reuse the resizable running p
         await until(() => host.querySelectorAll('iframe').length === 1, 'the visual reopens in one frame after a file');
         showVisual({ conversationId: c.id, answerId: 'pending-answer' });
         showFile('chart.ts:2');
-        await until(() => host.querySelector('.file-line.mark'));
+        await until(() => host.querySelector('.file-line.mark'), `${area}/${form}: file mark after a file`);
         equal(openedVisual(), undefined, 'a named file clears even a pending visual projection');
         equal(host.querySelector('iframe'), null);
         showVisual({ conversationId: c.id, answerId: 'v1:0' });

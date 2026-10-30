@@ -8,7 +8,6 @@ use faber_engine::router::{Choice, Effort};
 use faber_engine::{AppEvent, Engine, EngineOptions, SendRequest, WarmRequest};
 use serde_json::{Value, json};
 use std::collections::HashSet;
-use std::path::Path;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
@@ -127,16 +126,18 @@ fn codex(disk: Shared) -> Spawner {
     })
 }
 
-fn start(dir: &Path, disk: &Shared) -> (Engine, UnboundedReceiver<AppEvent>) {
+fn start(dir: &crate::support::DataFolder, disk: &Shared) -> (Engine, UnboundedReceiver<AppEvent>) {
     start_with(dir, disk, &[Vendor::Codex])
 }
 
 /// The same, with these CLIs installed; every one of them is the fake app-server, so a turn that reaches Claude Code never
 /// gets an answer.
-fn start_with(dir: &Path, disk: &Shared, vendors: &[Vendor]) -> (Engine, UnboundedReceiver<AppEvent>) {
+fn start_with(dir: &crate::support::DataFolder, disk: &Shared, vendors: &[Vendor]) -> (Engine, UnboundedReceiver<AppEvent>) {
     let (tx, rx) = tokio::sync::mpsc::unbounded_channel();
     let opts = EngineOptions {
-        data_dir: dir.into(),
+        data_dir: dir.path().into(),
+        #[cfg(windows)]
+        chat_dir: dir.chat_path().into(),
         clis: vendors.iter().map(|v| (*v, Cli { command: v.name().into(), prefix: vec![] })).collect(),
         spawn: codex(disk.clone()),
         windows: false,
@@ -188,7 +189,7 @@ async fn until(disk: &Shared, ready: impl Fn(&Disk) -> bool) {
 }
 
 /// A conversation with one finished Codex turn, left on disk the way a closed Faber leaves it.
-async fn after_one_turn(dir: &Path, disk: &Shared, text: &str) -> String {
+async fn after_one_turn(dir: &crate::support::DataFolder, disk: &Shared, text: &str) -> String {
     let (engine, mut rx) = start(dir, disk);
     let id = engine.send(send(None, text, Effort::High)).unwrap();
     finished(&mut rx).await;
@@ -197,18 +198,18 @@ async fn after_one_turn(dir: &Path, disk: &Shared, text: &str) -> String {
 }
 
 /// What an older Faber left after the bug: the only reply failed, and the conversation names a thread that never ran.
-fn leave_a_stale_thread(dir: &Path, id: &str, engine: &Engine) {
+fn leave_a_stale_thread(dir: &crate::support::DataFolder, id: &str, engine: &Engine) {
     let mut saved = engine.open(id).unwrap();
     saved.messages.clear();
     saved.sessions.insert(Vendor::Codex, "never-ran".into());
-    std::fs::write(dir.join("conversations").join(format!("{id}.json")), serde_json::to_vec(&saved).unwrap()).unwrap();
+    std::fs::write(dir.path().join("conversations").join(format!("{id}.json")), serde_json::to_vec(&saved).unwrap()).unwrap();
 }
 
 /// The first message after a warm-up, with a model or effort the warm-up did not use (Auto's choice), is the case the owner hit.
 #[tokio::test]
 async fn a_warmed_process_defers_its_thread_until_the_first_turn_even_when_effort_changes() {
-    let (dir, disk) = (tempfile::tempdir().unwrap(), Shared::default());
-    let (engine, mut rx) = start(dir.path(), &disk);
+    let (dir, disk) = (crate::support::DataFolder::new(), Shared::default());
+    let (engine, mut rx) = start(&dir, &disk);
     engine.warm(WarmRequest { conversation_id: None, area: Area::Chat, project_id: None, choice: choice(Effort::Low) });
     until(&disk, |d| d.initialized == 1).await;
     assert_eq!(disk.lock().unwrap().started, 0, "preparing a process does not freeze a native thread or kit");
@@ -225,12 +226,12 @@ async fn a_warmed_process_defers_its_thread_until_the_first_turn_even_when_effor
 
 #[tokio::test]
 async fn a_lost_thread_with_no_turns_starts_a_new_one_and_runs_the_message_once() {
-    let (dir, disk) = (tempfile::tempdir().unwrap(), Shared::default());
-    let id = after_one_turn(dir.path(), &disk, "first").await;
-    let (engine, _rx) = start(dir.path(), &disk);
-    leave_a_stale_thread(dir.path(), &id, &engine);
+    let (dir, disk) = (crate::support::DataFolder::new(), Shared::default());
+    let id = after_one_turn(&dir, &disk, "first").await;
+    let (engine, _rx) = start(&dir, &disk);
+    leave_a_stale_thread(&dir, &id, &engine);
     engine.shutdown();
-    let (engine, mut rx2) = start(dir.path(), &disk);
+    let (engine, mut rx2) = start(&dir, &disk);
     disk.lock().unwrap().turns.clear();
     disk.lock().unwrap().ran.clear();
     engine.send(send(Some(&id), "second", Effort::High)).unwrap();
@@ -246,12 +247,12 @@ async fn a_lost_thread_with_no_turns_starts_a_new_one_and_runs_the_message_once(
 
 #[tokio::test]
 async fn a_lost_thread_that_had_turns_shows_an_error_and_the_next_message_carries_the_whole_history() {
-    let (dir, disk) = (tempfile::tempdir().unwrap(), Shared::default());
+    let (dir, disk) = (crate::support::DataFolder::new(), Shared::default());
     // A first message longer than the 20,000 characters the history used to be cut to.
     let first = format!("START {}", "x".repeat(30_000));
-    let id = after_one_turn(dir.path(), &disk, &first).await;
+    let id = after_one_turn(&dir, &disk, &first).await;
     disk.lock().unwrap().ran.clear(); // Codex lost the rollout file
-    let (engine, mut rx) = start(dir.path(), &disk);
+    let (engine, mut rx) = start(&dir, &disk);
     engine.send(send(Some(&id), "second", Effort::High)).unwrap();
     let reply = finished(&mut rx).await;
     assert_eq!((reply.status, reply.error.as_deref()), (Some(Status::Error), Some("error.sessionLost")));
@@ -270,12 +271,12 @@ async fn a_lost_thread_that_had_turns_shows_an_error_and_the_next_message_carrie
 /// Work already done in the reply (here, partial text before the process died) is never replayed from the request.
 #[tokio::test]
 async fn a_reply_that_already_holds_work_is_never_replayed_on_a_new_thread() {
-    let (dir, disk) = (tempfile::tempdir().unwrap(), Shared::default());
-    let id = after_one_turn(dir.path(), &disk, "first").await;
-    let (engine, _rx) = start(dir.path(), &disk);
-    leave_a_stale_thread(dir.path(), &id, &engine);
+    let (dir, disk) = (crate::support::DataFolder::new(), Shared::default());
+    let id = after_one_turn(&dir, &disk, "first").await;
+    let (engine, _rx) = start(&dir, &disk);
+    leave_a_stale_thread(&dir, &id, &engine);
     engine.shutdown();
-    let (engine, mut rx) = start(dir.path(), &disk);
+    let (engine, mut rx) = start(&dir, &disk);
     {
         let mut d = disk.lock().unwrap();
         d.ran.insert("never-ran".into()); // the thread resumes; its turn streams "partial" and the process dies
@@ -296,9 +297,9 @@ async fn a_reply_that_already_holds_work_is_never_replayed_on_a_new_thread() {
 /// Codex accepted the turn and Faber died before any output: the thread is remembered apart from the resumable ones.
 #[tokio::test]
 async fn a_crash_after_codex_accepts_a_turn_resumes_that_thread_and_never_starts_a_blank_one() {
-    let (dir, disk) = (tempfile::tempdir().unwrap(), Shared::default());
+    let (dir, disk) = (crate::support::DataFolder::new(), Shared::default());
     disk.lock().unwrap().hang_turns = true;
-    let (engine, _rx) = start(dir.path(), &disk);
+    let (engine, _rx) = start(&dir, &disk);
     let id = engine.send(send(None, "first", Effort::High)).unwrap();
     until(&disk, |d| d.turns.len() == 1).await;
     tokio::time::sleep(Duration::from_millis(200)).await;
@@ -311,7 +312,7 @@ async fn a_crash_after_codex_accepts_a_turn_resumes_that_thread_and_never_starts
     engine.shutdown();
     // After the restart the same thread continues; its rollout exists because its turn started.
     disk.lock().unwrap().hang_turns = false;
-    let (engine, mut rx) = start(dir.path(), &disk);
+    let (engine, mut rx) = start(&dir, &disk);
     engine.send(send(Some(&id), "second", Effort::High)).unwrap();
     let reply = finished(&mut rx).await;
     assert_eq!((reply.status, reply.text.as_str()), (Some(Status::Done), "pong"), "{:?}", reply.error);
@@ -326,9 +327,9 @@ async fn a_crash_after_codex_accepts_a_turn_resumes_that_thread_and_never_starts
 
 #[tokio::test]
 async fn a_cut_off_thread_that_cannot_be_resumed_is_reported_not_replaced_silently() {
-    let (dir, disk) = (tempfile::tempdir().unwrap(), Shared::default());
+    let (dir, disk) = (crate::support::DataFolder::new(), Shared::default());
     disk.lock().unwrap().hang_turns = true;
-    let (engine, _rx) = start(dir.path(), &disk);
+    let (engine, _rx) = start(&dir, &disk);
     let id = engine.send(send(None, "first", Effort::High)).unwrap();
     until(&disk, |d| d.turns.len() == 1).await;
     tokio::time::sleep(Duration::from_millis(200)).await;
@@ -338,7 +339,7 @@ async fn a_cut_off_thread_that_cannot_be_resumed_is_reported_not_replaced_silent
         d.hang_turns = false;
         d.ran.clear(); // the rollout never reached the disk
     }
-    let (engine, mut rx) = start(dir.path(), &disk);
+    let (engine, mut rx) = start(&dir, &disk);
     engine.send(send(Some(&id), "second", Effort::High)).unwrap();
     let reply = finished(&mut rx).await;
     assert_eq!((reply.status, reply.error.as_deref()), (Some(Status::Error), Some("error.sessionLost")));
@@ -349,12 +350,12 @@ async fn a_cut_off_thread_that_cannot_be_resumed_is_reported_not_replaced_silent
 /// The fresh launch is tried once: when the same error comes back, the reply fails instead of looping.
 #[tokio::test]
 async fn the_fresh_launch_runs_at_most_once() {
-    let (dir, disk) = (tempfile::tempdir().unwrap(), Shared::default());
-    let id = after_one_turn(dir.path(), &disk, "first").await;
-    let (engine, _rx) = start(dir.path(), &disk);
-    leave_a_stale_thread(dir.path(), &id, &engine);
+    let (dir, disk) = (crate::support::DataFolder::new(), Shared::default());
+    let id = after_one_turn(&dir, &disk, "first").await;
+    let (engine, _rx) = start(&dir, &disk);
+    leave_a_stale_thread(&dir, &id, &engine);
     engine.shutdown();
-    let (engine, mut rx) = start(dir.path(), &disk);
+    let (engine, mut rx) = start(&dir, &disk);
     disk.lock().unwrap().fail_starts = true;
     engine.send(send(Some(&id), "second", Effort::High)).unwrap();
     let reply = finished(&mut rx).await;
@@ -367,9 +368,9 @@ async fn the_fresh_launch_runs_at_most_once() {
 /// The fresh launch can fail before it reaches the CLI (here, the project is gone): the reply must say so, not stay Streaming.
 #[tokio::test]
 async fn a_fresh_launch_that_fails_at_once_fails_the_reply() {
-    let (dir, disk) = (tempfile::tempdir().unwrap(), Shared::default());
+    let (dir, disk) = (crate::support::DataFolder::new(), Shared::default());
     let folder = crate::support::work_folder();
-    let (engine, mut rx) = start(dir.path(), &disk);
+    let (engine, mut rx) = start(&dir, &disk);
     let project = engine.add_project(&folder.path().to_string_lossy()).unwrap().id;
     let ask = |text: &str, id: Option<&str>| SendRequest {
         area: Area::Project,
@@ -378,9 +379,9 @@ async fn a_fresh_launch_that_fails_at_once_fails_the_reply() {
     };
     let id = engine.send(ask("first", None)).unwrap();
     finished(&mut rx).await;
-    leave_a_stale_thread(dir.path(), &id, &engine);
+    leave_a_stale_thread(&dir, &id, &engine);
     engine.shutdown();
-    let (engine, mut rx) = start(dir.path(), &disk);
+    let (engine, mut rx) = start(&dir, &disk);
     // The project leaves the list behind Faber's back: from the screen a busy project cannot be removed (error.project.busy).
     let list = dir.path().join("projects.json");
     disk.lock().unwrap().on_lost = Some(Arc::new(move || std::fs::write(&list, "[]").expect("the project leaves the list")));
@@ -393,8 +394,8 @@ async fn a_fresh_launch_that_fails_at_once_fails_the_reply() {
 /// Earlier images cannot go as text and files go by reference: the recovered reply says plainly that the history was resent.
 #[tokio::test]
 async fn recovery_carries_attachment_references_and_tells_the_user_that_images_were_left_out() {
-    let (dir, disk) = (tempfile::tempdir().unwrap(), Shared::default());
-    let (engine, mut rx) = start(dir.path(), &disk);
+    let (dir, disk) = (crate::support::DataFolder::new(), Shared::default());
+    let (engine, mut rx) = start(&dir, &disk);
     let first = SendRequest {
         images: vec![faber_engine::model::Image { media_type: "image/png".into(), base64: "AAAA".into() }],
         files: vec![faber_engine::workspace::Attachment { name: "notes.pdf".into(), base64: "JVBERi0xLjQ=".into() }],
@@ -404,7 +405,7 @@ async fn recovery_carries_attachment_references_and_tells_the_user_that_images_w
     assert_eq!(finished(&mut rx).await.note, None, "a normal turn carries no note");
     engine.shutdown();
     disk.lock().unwrap().ran.clear(); // Codex lost the rollout file
-    let (engine, mut rx) = start(dir.path(), &disk);
+    let (engine, mut rx) = start(&dir, &disk);
     engine.send(send(Some(&id), "second", Effort::High)).unwrap();
     assert_eq!(finished(&mut rx).await.error.as_deref(), Some("error.sessionLost"));
     engine.send(send(Some(&id), "third", Effort::High)).unwrap();
@@ -434,10 +435,10 @@ fn terminal_session(id: &str) -> CliSession {
 /// Parity F5: a session started in a terminal becomes a project conversation whose first message resumes that very thread.
 #[tokio::test]
 async fn a_terminal_session_picked_up_in_a_project_resumes_its_own_thread_and_is_picked_up_once() {
-    let (dir, disk) = (tempfile::tempdir().unwrap(), Shared::default());
+    let (dir, disk) = (crate::support::DataFolder::new(), Shared::default());
     let folder = tempfile::tempdir().unwrap();
     disk.lock().unwrap().ran.insert("term-1".into());
-    let (engine, mut rx) = start(dir.path(), &disk);
+    let (engine, mut rx) = start(&dir, &disk);
     engine.set_codex_models(vec!["gpt-6-luna".into()], Some("gpt-6-luna".into()));
     let project = engine.add_project(&folder.path().to_string_lossy()).unwrap();
     assert_eq!(engine.pick_up("no-such-project", terminal_session("term-1")), Err("error.projectGone".into()));
@@ -457,7 +458,7 @@ async fn a_terminal_session_picked_up_in_a_project_resumes_its_own_thread_and_is
     drop(d);
     engine.shutdown();
     // After a restart the conversation is found on disk, not made again, archived or not.
-    let (engine, _rx) = start(dir.path(), &disk);
+    let (engine, _rx) = start(&dir, &disk);
     assert_eq!(engine.pick_up(&project.id, terminal_session("term-1")).unwrap(), id);
     engine.archive(&id, true).unwrap();
     assert_eq!(engine.pick_up(&project.id, terminal_session("term-1")).unwrap(), id, "an archived one is made again");
@@ -471,10 +472,10 @@ async fn a_terminal_session_picked_up_in_a_project_resumes_its_own_thread_and_is
 /// With both CLIs and Auto in the box, the first message of a picked-up session still resumes it with Codex.
 #[tokio::test]
 async fn auto_sends_the_first_message_of_a_picked_up_session_to_its_own_cli() {
-    let (dir, disk) = (tempfile::tempdir().unwrap(), Shared::default());
+    let (dir, disk) = (crate::support::DataFolder::new(), Shared::default());
     let folder = tempfile::tempdir().unwrap();
     disk.lock().unwrap().ran.insert("term-1".into());
-    let (engine, mut rx) = start_with(dir.path(), &disk, &[Vendor::Claude, Vendor::Codex]);
+    let (engine, mut rx) = start_with(&dir, &disk, &[Vendor::Claude, Vendor::Codex]);
     let project = engine.add_project(&folder.path().to_string_lossy()).unwrap();
     let id = engine.pick_up(&project.id, terminal_session("term-1")).unwrap();
     let auto = Choice { vendor: "auto".into(), model: None, effort: None };
@@ -489,9 +490,9 @@ async fn auto_sends_the_first_message_of_a_picked_up_session_to_its_own_cli() {
 /// new thread.
 #[tokio::test]
 async fn a_picked_up_session_the_cli_no_longer_has_runs_the_message_once_in_a_new_thread() {
-    let (dir, disk) = (tempfile::tempdir().unwrap(), Shared::default());
+    let (dir, disk) = (crate::support::DataFolder::new(), Shared::default());
     let folder = tempfile::tempdir().unwrap();
-    let (engine, mut rx) = start(dir.path(), &disk);
+    let (engine, mut rx) = start(&dir, &disk);
     let project = engine.add_project(&folder.path().to_string_lossy()).unwrap();
     let id = engine.pick_up(&project.id, terminal_session("gone")).unwrap();
     engine.send(project_send(&id, &project.id, "go on")).unwrap();

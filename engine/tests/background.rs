@@ -10,10 +10,12 @@ use std::sync::Arc;
 use std::time::Duration;
 use tokio::sync::mpsc::UnboundedReceiver;
 
-fn engine(path: &std::path::Path, vendor: Vendor, spawn: faber_engine::proc::Spawner) -> (Engine, UnboundedReceiver<AppEvent>) {
+fn engine(path: &crate::support::DataFolder, vendor: Vendor, spawn: faber_engine::proc::Spawner) -> (Engine, UnboundedReceiver<AppEvent>) {
     let (tx, rx) = tokio::sync::mpsc::unbounded_channel();
     let options = EngineOptions {
-        data_dir: path.into(),
+        data_dir: path.path().into(),
+        #[cfg(windows)]
+        chat_dir: path.chat_path().into(),
         clis: BTreeMap::from([(vendor, Cli { command: "fake".into(), prefix: vec![] })]),
         spawn,
         windows: false,
@@ -72,8 +74,8 @@ fn fixture(vendor: &str) -> Vec<Value> {
 #[tokio::test]
 async fn background_codex_recording_starts_prints_finishes_and_never_saves_output() {
     let (spawn, mut input, mut output) = support::controlled();
-    let folder = support::tempdir();
-    let (engine, mut rx) = engine(folder.path(), Vendor::Codex, spawn);
+    let folder = support::DataFolder::new();
+    let (engine, mut rx) = engine(&folder, Vendor::Codex, spawn);
     let conversation = engine.send(request("codex")).unwrap();
     codex_start(&mut input, &mut output).await;
     let recorded = fixture("codex");
@@ -124,8 +126,8 @@ async fn claude_output(
 #[tokio::test]
 async fn background_claude_recording_reads_stops_without_a_message_and_ends_naturally() {
     let (spawn, mut input, mut output) = support::controlled();
-    let folder = support::tempdir();
-    let (engine, mut rx) = engine(folder.path(), Vendor::Claude, spawn);
+    let folder = support::DataFolder::new();
+    let (engine, mut rx) = engine(&folder, Vendor::Claude, spawn);
     let conversation = engine.send(request("claude")).unwrap();
     assert_eq!(support::read_message(&mut input).await["type"], "user");
     support::emit(&mut output, json!({"type":"system","subtype":"init","session_id":"background-session","model":"test"})).await;
@@ -177,8 +179,8 @@ async fn background_claude_recording_reads_stops_without_a_message_and_ends_natu
 async fn background_claude_late_task_start_keeps_its_bash_calls_original_turn() {
     for (owed_helper, next_turn) in [(false, false), (false, true), (true, false)] {
         let (spawn, mut input, mut output) = support::controlled();
-        let folder = support::tempdir();
-        let (engine, mut rx) = engine(folder.path(), Vendor::Claude, spawn);
+        let folder = support::DataFolder::new();
+        let (engine, mut rx) = engine(&folder, Vendor::Claude, spawn);
         let conversation = engine.send(request("claude")).unwrap();
         assert_eq!(support::read_message(&mut input).await["type"], "user");
         support::emit(&mut output, json!({"type":"system","subtype":"init","session_id":"late-task-session","model":"test"})).await;
@@ -249,9 +251,9 @@ async fn background_claude_late_task_start_keeps_its_bash_calls_original_turn() 
 #[tokio::test]
 async fn move_chat_to_project_refuses_background_writers_after_the_reply_until_the_command_finishes() {
     let (spawn, mut input, mut output) = support::controlled();
-    let folder = support::tempdir();
+    let folder = support::DataFolder::new();
     let destination = support::work_folder();
-    let (engine, mut rx) = engine(folder.path(), Vendor::Claude, spawn);
+    let (engine, mut rx) = engine(&folder, Vendor::Claude, spawn);
     let project = engine.add_project(&destination.path().to_string_lossy()).unwrap();
     let conversation = engine.send(request("claude")).unwrap();
     assert_eq!(support::read_message(&mut input).await["type"], "user");
@@ -303,8 +305,8 @@ async fn move_chat_to_project_refuses_background_writers_after_the_reply_until_t
 #[tokio::test]
 async fn background_claude_caps_output_and_commands_from_real_wire_events() {
     let (spawn, mut input, mut output) = support::controlled();
-    let folder = support::tempdir();
-    let (engine, mut rx) = engine(folder.path(), Vendor::Claude, spawn);
+    let folder = support::DataFolder::new();
+    let (engine, mut rx) = engine(&folder, Vendor::Claude, spawn);
     engine.send(request("claude")).unwrap();
     assert_eq!(support::read_message(&mut input).await["type"], "user");
     support::emit(&mut output, json!({"type":"system","subtype":"init","session_id":"cap-session","model":"test"})).await;
@@ -339,8 +341,8 @@ async fn background_claude_caps_output_and_commands_from_real_wire_events() {
 #[tokio::test]
 async fn background_claude_refreshes_once_when_progress_arrives_during_an_output_read() {
     let (spawn, mut input, mut output) = support::controlled();
-    let folder = support::tempdir();
-    let (engine, mut rx) = engine(folder.path(), Vendor::Claude, spawn);
+    let folder = support::DataFolder::new();
+    let (engine, mut rx) = engine(&folder, Vendor::Claude, spawn);
     engine.send(request("claude")).unwrap();
     assert_eq!(support::read_message(&mut input).await["type"], "user");
     support::emit(&mut output, json!({"type":"system","subtype":"init","session_id":"slow-read-session","model":"test"})).await;
@@ -372,8 +374,8 @@ async fn background_claude_refreshes_once_when_progress_arrives_during_an_output
 #[tokio::test]
 async fn background_codex_caps_output_and_commands_from_real_wire_events() {
     let (spawn, mut input, mut output) = support::controlled();
-    let folder = support::tempdir();
-    let (engine, mut rx) = engine(folder.path(), Vendor::Codex, spawn);
+    let folder = support::DataFolder::new();
+    let (engine, mut rx) = engine(&folder, Vendor::Codex, spawn);
     engine.send(request("codex")).unwrap();
     codex_start(&mut input, &mut output).await;
     for index in 0..=MAX_COMMANDS {
@@ -402,8 +404,8 @@ async fn background_codex_caps_output_and_commands_from_real_wire_events() {
 async fn background_codex_child_command_can_print_and_finish_after_its_parent_turn() {
     for (starts_after_end, next_turn) in [(false, false), (true, false), (true, true)] {
         let (spawn, mut input, mut output) = support::controlled();
-        let folder = support::tempdir();
-        let (engine, mut rx) = engine(folder.path(), Vendor::Codex, spawn);
+        let folder = support::DataFolder::new();
+        let (engine, mut rx) = engine(&folder, Vendor::Codex, spawn);
         let conversation = engine.send(request("codex")).unwrap();
         codex_start(&mut input, &mut output).await;
         support::emit(&mut output, json!({"method":"item/started","params":{"threadId":"background-thread","turnId":"background-turn","item":{"type":"subAgentActivity","kind":"started","id":"child-call","agentThreadId":"child-thread"}}})).await;

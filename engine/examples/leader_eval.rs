@@ -166,6 +166,8 @@ async fn measure(world: &Path, vendor: Vendor, cli: faber_engine::cli::Cli, requ
     let engine = Engine::new(
         EngineOptions {
             data_dir: world.join("state"),
+            #[cfg(windows)]
+            chat_dir: world.join("chat-work"),
             clis: BTreeMap::from([(vendor, cli)]),
             spawn: proc::real_spawner(),
             windows: cfg!(windows),

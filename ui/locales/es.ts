@@ -2211,6 +2211,8 @@ export const es: Messages = {
   'notes.289.better': 'Cuando una respuesta falla, la línea de abajo ahora dice por qué: servicio ocupado, conexión cortada, sesión caducada o conversación demasiado larga.',
   'notes.290.better': 'Los ayudantes ahora tienen nombre en tu idioma, o Ayudante 1, 2…, y solo dicen listo cuando pasaron sus comprobaciones; si no, dicen terminó.',
   'notes.291.fixed': 'Las respuestas ahora dicen una vez qué sigue en marcha y qué viene después, y un registro que pegas ya no las llena de términos técnicos.',
+  'notes.292.better': 'La columna «En marcha ahora» espera a que termines de hacer clic antes de abrirse automáticamente.',
+  'notes.293.fixed': 'En Windows, los archivos privados de los chats se guardan fuera de los datos de Faber y siguen disponibles al volver a abrirlo.',
   'update.checking': 'Buscando una actualización…',
   'update.downloading': 'Descargando actualización…',
   'update.downloadingPercent': 'Descargando actualización… {percent} %',

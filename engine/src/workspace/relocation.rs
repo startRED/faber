@@ -42,6 +42,16 @@ pub fn relocate(data: &Path, workspace_parent: &Path, leaf: &str) -> io::Result<
     relocate_staged(data, workspace_parent, leaf, |_| Ok(()))
 }
 
+/// Hold the recovered root, then check its protected identity again before any engine work starts.
+pub fn open(data: &Path, destination: &Path) -> io::Result<(PathBuf, MemoryDirectory)> {
+    let parent = destination.parent().ok_or_else(refused)?;
+    let leaf = destination.file_name().and_then(|leaf| leaf.to_str()).ok_or_else(refused)?;
+    let path = relocate(data, parent, leaf)?;
+    let held = MemoryDirectory::open(&path, Path::new(""))?;
+    relocate(data, parent, leaf)?;
+    Ok((path, held))
+}
+
 fn relocate_staged(
     data: &Path,
     workspace_parent: &Path,

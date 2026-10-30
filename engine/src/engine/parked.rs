@@ -228,9 +228,11 @@ mod tests {
     use crate::events::SessionCommand;
     use serde_json::json;
 
-    fn engine(dir: &Path) -> Engine {
+    fn engine(dir: &crate::workspace::TestRoot) -> Engine {
         let opts = EngineOptions {
-            data_dir: dir.into(),
+            data_dir: dir.path().into(),
+            #[cfg(windows)]
+            chat_dir: dir.work().into(),
             clis: BTreeMap::new(),
             spawn: Arc::new(|_, _, _| Err(std::io::Error::other("no process in this test"))),
             windows: false,
@@ -331,8 +333,8 @@ mod tests {
 
     #[tokio::test]
     async fn a_denied_request_is_parked_survives_the_end_of_the_turn_and_needs_the_person() {
-        let dir = tempfile::tempdir().unwrap();
-        let engine = engine(dir.path());
+        let dir = crate::workspace::TestRoot::new();
+        let engine = engine(&dir);
         let (id, commands) = seed(&engine);
         let note = json!({ "file_path": "/work/note.txt", "content": "hi" });
         engine.with(|c| {
@@ -355,8 +357,8 @@ mod tests {
 
     #[tokio::test]
     async fn got_it_takes_the_conversation_off_the_needs_you_list_until_another_request_is_held_back() {
-        let dir = tempfile::tempdir().unwrap();
-        let engine = engine(dir.path());
+        let dir = crate::workspace::TestRoot::new();
+        let engine = engine(&dir);
         let (id, _) = seed(&engine);
         assert_eq!(engine.parked_seen(&id, "reply").unwrap_err(), "error.permission.stale", "nothing held back yet");
         engine.with(|c| c.handle(&id, 1, parked("toolu_1", "Bash", json!({ "command": "rm -rf ./build" }))));
@@ -378,8 +380,8 @@ mod tests {
 
     #[tokio::test]
     async fn got_it_never_hides_a_question_still_waiting_and_works_on_a_count_alone() {
-        let dir = tempfile::tempdir().unwrap();
-        let engine = engine(dir.path());
+        let dir = crate::workspace::TestRoot::new();
+        let engine = engine(&dir);
         let (id, _) = seed(&engine);
         engine.with(|c| {
             c.handle(&id, 1, parked("toolu_1", "Bash", json!({ "command": "x" })));
@@ -443,8 +445,8 @@ mod tests {
 
     #[tokio::test]
     async fn the_next_message_takes_the_conversation_off_the_needs_you_list_but_keeps_the_note() {
-        let dir = tempfile::tempdir().unwrap();
-        let engine = engine(dir.path());
+        let dir = crate::workspace::TestRoot::new();
+        let engine = engine(&dir);
         let (id, _) = seed(&engine);
         engine.with(|c| {
             c.handle(&id, 1, parked("toolu_1", "Write", json!({ "file_path": "/work/a" })));
@@ -458,8 +460,8 @@ mod tests {
 
     #[tokio::test]
     async fn a_denied_request_on_a_credential_folder_is_never_parked() {
-        let dir = tempfile::tempdir().unwrap();
-        let engine = engine(dir.path());
+        let dir = crate::workspace::TestRoot::new();
+        let engine = engine(&dir);
         let (id, commands) = seed(&engine);
         engine.with(|c| {
             for (n, input) in [
@@ -482,8 +484,8 @@ mod tests {
 
     #[tokio::test]
     async fn the_cache_lifetime_counts_from_the_start_of_the_request_not_from_the_result() {
-        let dir = tempfile::tempdir().unwrap();
-        let engine = engine(dir.path());
+        let dir = crate::workspace::TestRoot::new();
+        let engine = engine(&dir);
         let until_of = |secs: u64, started_ms: Option<u64>| {
             let (id, _) = seed(&engine);
             engine.with(|c| {
@@ -508,8 +510,8 @@ mod tests {
 
     #[tokio::test]
     async fn a_parked_request_keeps_safe_metadata_never_the_command_or_any_input() {
-        let dir = tempfile::tempdir().unwrap();
-        let engine = engine(dir.path());
+        let dir = crate::workspace::TestRoot::new();
+        let engine = engine(&dir);
         let (id, _) = seed(&engine);
         engine.with(|c| {
             c.handle(
@@ -550,8 +552,8 @@ mod tests {
 
     #[tokio::test]
     async fn a_flood_of_denials_is_capped_in_count_and_size_and_the_rest_is_counted() {
-        let dir = tempfile::tempdir().unwrap();
-        let engine = engine(dir.path());
+        let dir = crate::workspace::TestRoot::new();
+        let engine = engine(&dir);
         let (id, _) = seed(&engine);
         let long = format!("/work/{}", "d".repeat(500));
         engine.with(|c| {
@@ -582,8 +584,8 @@ mod tests {
 
     #[tokio::test]
     async fn a_cli_that_refuses_a_flag_loses_the_newer_flags_at_once() {
-        let dir = tempfile::tempdir().unwrap();
-        let engine = engine(dir.path());
+        let dir = crate::workspace::TestRoot::new();
+        let engine = engine(&dir);
         let (id, _) = seed(&engine);
         let known = crate::claude::ClaudeFlags { autocompact: true, permission_prompts: true, auto_mode: true, plugin_dir: false };
         engine.with(|c| c.claude_flags = known);

@@ -11,17 +11,18 @@ use faber_engine::stuck::{QUIET, Sign};
 use faber_engine::{AppEvent, Engine, EngineOptions, SendRequest};
 use serde_json::{Value, json};
 use std::collections::BTreeMap;
-use std::path::Path;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Duration;
 use support::{fake, fixture, next_pipe, pipes};
 use tokio::sync::mpsc::UnboundedReceiver;
 
-fn engine(dir: &Path, vendor: Vendor, spawn: Spawner) -> (Engine, UnboundedReceiver<AppEvent>) {
+fn engine(dir: &crate::support::DataFolder, vendor: Vendor, spawn: Spawner) -> (Engine, UnboundedReceiver<AppEvent>) {
     let (tx, rx) = tokio::sync::mpsc::unbounded_channel();
     let opts = EngineOptions {
-        data_dir: dir.into(),
+        data_dir: dir.path().into(),
+        #[cfg(windows)]
+        chat_dir: dir.chat_path().into(),
         clis: BTreeMap::from([(vendor, Cli { command: vendor.name().into(), prefix: vec![] })]),
         spawn,
         windows: false,
@@ -90,10 +91,10 @@ async fn r161_no_recorded_subagent_turn_ever_looks_stuck() {
         ("codex", "subagent", "gpt-6-luna", CODEX),
     ];
     for (vendor, name, model, text) in cases {
-        let dir = tempfile::tempdir().unwrap();
+        let dir = crate::support::DataFolder::new();
         let f = fake(fixture(vendor, name));
         let v = if vendor == "claude" { Vendor::Claude } else { Vendor::Codex };
-        let (engine, mut rx) = engine(dir.path(), v, f.spawn.clone());
+        let (engine, mut rx) = engine(&dir, v, f.spawn.clone());
         let id = send(&engine, vendor, model, text);
         let (mut seen, mut answered) = (vec![], vec![]);
         for _ in 0..500 {
@@ -141,9 +142,9 @@ fn result(id: &str, ok: bool, parent: Option<&str>) -> Value {
 /// edit and a passing run are work again, its question makes it wait for the person, and the end of the reply clears it.
 #[tokio::test]
 async fn r161_a_stuck_subagent_shows_on_its_step_and_needs_the_person() {
-    let dir = tempfile::tempdir().unwrap();
+    let dir = crate::support::DataFolder::new();
     let (spawn, made) = pipes();
-    let (engine, _rx) = engine(dir.path(), Vendor::Claude, spawn);
+    let (engine, _rx) = engine(&dir, Vendor::Claude, spawn);
     let clock = Arc::new(AtomicU64::new(1_000_000));
     let time = clock.clone();
     engine.set_time_source(Arc::new(move || time.load(Ordering::SeqCst) as f64));
@@ -218,9 +219,9 @@ async fn r161_a_stuck_subagent_shows_on_its_step_and_needs_the_person() {
 /// The same step started six times in a row is a loop; the sign goes away when the subagent does something else.
 #[tokio::test]
 async fn r161_a_subagent_that_repeats_one_step_is_stuck_until_it_does_another() {
-    let dir = tempfile::tempdir().unwrap();
+    let dir = crate::support::DataFolder::new();
     let (spawn, made) = pipes();
-    let (engine, _rx) = engine(dir.path(), Vendor::Claude, spawn);
+    let (engine, _rx) = engine(&dir, Vendor::Claude, spawn);
     let id = send(&engine, "claude", "haiku", "look around with a subagent");
     let mut pipe = next_pipe(&made).await;
     pipe.say(json!({ "type": "system", "subtype": "init", "session_id": "s", "model": "haiku" })).await;

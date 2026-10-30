@@ -18,7 +18,7 @@ async fn dispatched_cli_turn_captures_file_versions_in_the_checked_plain_working
 
     for vendor in Vendor::ALL {
         for area in [Area::Chat, Area::Project] {
-            let data = support::tempdir();
+            let data = support::DataFolder::new();
             let folder = support::work_folder();
             let plain = faber_engine::permissions::checked_folder(folder.path()).unwrap();
             #[cfg(windows)]
@@ -81,6 +81,8 @@ async fn dispatched_cli_turn_captures_file_versions_in_the_checked_plain_working
             let engine = Engine::new(
                 EngineOptions {
                     data_dir: data.path().into(),
+                    #[cfg(windows)]
+                    chat_dir: data.chat_path().into(),
                     clis: BTreeMap::from([(vendor, Cli { command: vendor.name().into(), prefix: vec![] })]),
                     spawn,
                     windows: false,

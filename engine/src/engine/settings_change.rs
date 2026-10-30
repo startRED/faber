@@ -281,8 +281,8 @@ mod tests {
 
     async fn revoked_during_audit(trust: bool) {
         use super::super::answer::tests::{engine, seed};
-        let dir = tempfile::tempdir().unwrap();
-        let (app, _) = engine(dir.path());
+        let dir = crate::workspace::TestRoot::new();
+        let (app, _) = engine(&dir);
         let (reply, mut replies) = tokio::sync::mpsc::unbounded_channel();
         let session = Session::from_fn(move |command| {
             if let crate::events::SessionCommand::HelperReply { id, ok, text, .. } = command {
@@ -356,8 +356,8 @@ mod tests {
     #[tokio::test]
     async fn settings_search_lost_reply_receiver_keeps_durable_saved_outcome_and_strict_retirement() {
         use super::super::answer::tests::{engine, seed};
-        let dir = tempfile::tempdir().unwrap();
-        let (app, _) = engine(dir.path());
+        let dir = crate::workspace::TestRoot::new();
+        let (app, _) = engine(&dir);
         let (send, receive) = std::sync::mpsc::channel();
         drop(receive);
         let session = Session::from_fn(move |command| {

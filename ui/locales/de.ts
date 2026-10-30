@@ -2211,6 +2211,8 @@ export const de: Messages = {
   'notes.289.better': 'Wenn eine Antwort scheitert, sagt die Zeile darunter jetzt, warum: Dienst ausgelastet, Verbindung weg, Anmeldung abgelaufen oder Unterhaltung zu lang.',
   'notes.290.better': 'Helfer haben jetzt Namen in deiner Sprache oder heißen Helfer 1, 2…, und sagen erst fertig, wenn ihre Prüfungen bestanden sind; sonst beendet.',
   'notes.291.fixed': 'Antworten sagen jetzt einmal, was noch läuft und was danach kommt, und ein eingefügtes Protokoll füllt sie nicht mehr mit Fachwörtern.',
+  'notes.292.better': 'Die Spalte „Läuft gerade“ wartet mit dem automatischen Öffnen, bis du den Klick beendet hast.',
+  'notes.293.fixed': 'Unter Windows liegen private Chatdateien außerhalb der Faber-Daten und bleiben beim erneuten Öffnen verfügbar.',
   'update.checking': 'Suche nach einem Update…',
   'update.downloading': 'Update wird heruntergeladen…',
   'update.downloadingPercent': 'Update wird heruntergeladen… {percent} %',

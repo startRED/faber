@@ -11,10 +11,12 @@ use std::collections::BTreeMap;
 use std::sync::Arc;
 use std::time::Duration;
 
-fn engine(dir: &std::path::Path, vendor: Vendor, spawn: faber_engine::proc::Spawner) -> Engine {
+fn engine(dir: &crate::support::DataFolder, vendor: Vendor, spawn: faber_engine::proc::Spawner) -> Engine {
     let app = Engine::new(
         EngineOptions {
-            data_dir: dir.join("data"),
+            data_dir: dir.path().into(),
+            #[cfg(windows)]
+            chat_dir: dir.chat_path().into(),
             clis: BTreeMap::from([(vendor, Cli { command: vendor.name().into(), prefix: vec![] })]),
             spawn,
             windows: false,
@@ -91,10 +93,10 @@ fn names(list: &Value) -> Vec<String> {
     list["result"]["tools"].as_array().map(|t| t.iter().map(|t| t["name"].as_str().unwrap().to_string()).collect()).unwrap_or_default()
 }
 
-async fn claude_agent(area: Area) -> (Engine, Pipe, tempfile::TempDir, tempfile::TempDir) {
-    let (dir, folder) = (support::canonical_tempdir().unwrap(), support::work_folder());
+async fn claude_agent(area: Area) -> (Engine, Pipe, support::DataFolder, tempfile::TempDir) {
+    let (dir, folder) = (support::DataFolder::new(), support::work_folder());
     let (spawn, made) = pipes();
-    let app = engine(dir.path(), Vendor::Claude, spawn);
+    let app = engine(&dir, Vendor::Claude, spawn);
     let project = (area == Area::Project).then(|| app.add_project(&folder.path().to_string_lossy()).unwrap().id);
     app.send(request(Vendor::Claude, area, project)).unwrap();
     let mut pipe = next_pipe(&made).await;
@@ -107,9 +109,9 @@ async fn claude_agent(area: Area) -> (Engine, Pipe, tempfile::TempDir, tempfile:
 async fn claude_code_reads_the_limits_and_searches_the_catalog_in_any_permission_mode() {
     use faber_engine::model::Permissions as P;
     for mode in [P::Ask, P::FullAccess, P::Plan] {
-        let (dir, folder) = (support::canonical_tempdir().unwrap(), support::work_folder());
+        let (dir, folder) = (support::DataFolder::new(), support::work_folder());
         let (spawn, made) = pipes();
-        let app = engine(dir.path(), Vendor::Claude, spawn);
+        let app = engine(&dir, Vendor::Claude, spawn);
         app.save_settings(Settings { permissions: Some(mode), ..Settings::default() }).unwrap();
         let project = app.add_project(&folder.path().to_string_lossy()).unwrap().id;
         let id = app.send(request(Vendor::Claude, Area::Project, Some(project))).unwrap();
@@ -174,12 +176,12 @@ async fn claude_code_in_chat_is_not_offered_the_limits_or_the_catalog() {
 
 #[tokio::test]
 async fn creative_claude_tool_runs_two_distinct_isolated_judges_and_saves_their_scores() {
-    let (dir, folder) = (support::canonical_tempdir().unwrap(), support::work_folder());
+    let (dir, folder) = (support::DataFolder::new(), support::work_folder());
     let (spawn, made) = pipes();
     let launches = Arc::new(std::sync::Mutex::new(Vec::new()));
     let recorded = launches.clone();
     let app = engine(
-        dir.path(),
+        &dir,
         Vendor::Claude,
         Arc::new(move |bin, args, cwd| {
             recorded.lock().unwrap().push(args.to_vec());
@@ -217,7 +219,7 @@ async fn creative_claude_tool_runs_two_distinct_isolated_judges_and_saves_their_
     assert_eq!(result["judges"][0]["first"], 8);
     assert_eq!(result["judges"][1]["first"], 8);
     let receipt: Value = serde_json::from_slice(
-        &std::fs::read(dir.path().join("data/creative-reviews").join(format!("{}.json", result["receipt"].as_str().unwrap()))).unwrap(),
+        &std::fs::read(dir.path().join("creative-reviews").join(format!("{}.json", result["receipt"].as_str().unwrap()))).unwrap(),
     )
     .unwrap();
     assert_eq!(receipt["judges"][1]["score"]["reason"], "B is clearer.");
@@ -261,12 +263,12 @@ async fn codex_call(pipe: &mut Pipe, id: u64, tool: &str, arguments: Value) -> (
 
 #[tokio::test]
 async fn creative_codex_tool_uses_two_fresh_isolated_threads_without_dynamic_tools() {
-    let (dir, folder) = (support::canonical_tempdir().unwrap(), support::work_folder());
+    let (dir, folder) = (support::DataFolder::new(), support::work_folder());
     let (spawn, made) = pipes();
     let launches = Arc::new(std::sync::Mutex::new(Vec::new()));
     let recorded = launches.clone();
     let app = engine(
-        dir.path(),
+        &dir,
         Vendor::Codex,
         Arc::new(move |bin, args, cwd| {
             recorded.lock().unwrap().push(args.to_vec());
@@ -318,7 +320,7 @@ async fn creative_codex_tool_uses_two_fresh_isolated_threads_without_dynamic_too
     assert_eq!(response["result"]["success"], true, "{response}");
     let result: Value = serde_json::from_str(response["result"]["contentItems"][0]["text"].as_str().unwrap()).unwrap();
     assert_eq!(result["judges"][1]["first"], 8);
-    assert!(dir.path().join("data/creative-reviews").join(format!("{}.json", result["receipt"].as_str().unwrap())).is_file());
+    assert!(dir.path().join("creative-reviews").join(format!("{}.json", result["receipt"].as_str().unwrap())).is_file());
     let expected = faber_engine::codex::codex_args(Area::Chat, false, false, faber_engine::model::Permissions::Isolated);
     assert_eq!(launches.lock().unwrap()[1], expected);
     app.shutdown();
@@ -326,9 +328,9 @@ async fn creative_codex_tool_uses_two_fresh_isolated_threads_without_dynamic_too
 
 #[tokio::test]
 async fn codex_reads_the_limits_and_searches_the_catalog_through_its_dynamic_tools() {
-    let (dir, folder) = (support::canonical_tempdir().unwrap(), support::work_folder());
+    let (dir, folder) = (support::DataFolder::new(), support::work_folder());
     let (spawn, made) = pipes();
-    let app = engine(dir.path(), Vendor::Codex, spawn);
+    let app = engine(&dir, Vendor::Codex, spawn);
     let project = app.add_project(&folder.path().to_string_lossy()).unwrap().id;
     let id = app.send(request(Vendor::Codex, Area::Project, Some(project))).unwrap();
     let mut pipe = next_pipe(&made).await;
@@ -354,9 +356,9 @@ async fn codex_reads_the_limits_and_searches_the_catalog_through_its_dynamic_too
 
 #[tokio::test]
 async fn codex_in_chat_gets_neither_tool() {
-    let dir = support::canonical_tempdir().unwrap();
+    let dir = support::DataFolder::new();
     let (spawn, made) = pipes();
-    let app = engine(dir.path(), Vendor::Codex, spawn);
+    let app = engine(&dir, Vendor::Codex, spawn);
     app.send(request(Vendor::Codex, Area::Chat, None)).unwrap();
     let mut pipe = next_pipe(&made).await;
     let start = codex_boot(&mut pipe).await;
@@ -443,9 +445,9 @@ async fn claude_code_searches_only_this_projects_other_conversations_and_its_fab
     use faber_engine::model::Permissions as P;
     use faber_engine::project::memory::Edit;
     for mode in [P::Ask, P::FullAccess, P::Plan] {
-        let (dir, mine, theirs) = (support::canonical_tempdir().unwrap(), support::work_folder(), support::work_folder());
+        let (dir, mine, theirs) = (support::DataFolder::new(), support::work_folder(), support::work_folder());
         let (spawn, made) = pipes();
-        let app = engine(dir.path(), Vendor::Claude, spawn);
+        let app = engine(&dir, Vendor::Claude, spawn);
         app.save_settings(Settings { permissions: Some(mode), ..Settings::default() }).unwrap();
         let a = app.add_project(&mine.path().to_string_lossy()).unwrap().id;
         let b = app.add_project(&theirs.path().to_string_lossy()).unwrap().id;
@@ -516,9 +518,9 @@ async fn claude_code_searches_only_this_projects_other_conversations_and_its_fab
 
 #[tokio::test]
 async fn memory_search_cuts_long_notes_counts_the_rest_and_stays_within_four_thousand_characters() {
-    let (dir, folder) = (support::canonical_tempdir().unwrap(), support::work_folder());
+    let (dir, folder) = (support::DataFolder::new(), support::work_folder());
     let (spawn, made) = pipes();
-    let app = engine(dir.path(), Vendor::Claude, spawn);
+    let app = engine(&dir, Vendor::Claude, spawn);
     let project = app.add_project(&folder.path().to_string_lossy()).unwrap().id;
     let long: String = (1..=20).map(|i| format!("- Zebra decision {i} {} [by person]\n", "very long reasons ".repeat(40))).collect();
     write_notes(folder.path(), &[(".faber/decisions.md", &long)]);
@@ -537,9 +539,9 @@ async fn memory_search_cuts_long_notes_counts_the_rest_and_stays_within_four_tho
 
 #[tokio::test]
 async fn codex_searches_the_projects_notes_through_its_dynamic_tool_and_leaves_the_asking_conversation_out() {
-    let (dir, folder) = (support::canonical_tempdir().unwrap(), support::work_folder());
+    let (dir, folder) = (support::DataFolder::new(), support::work_folder());
     let (spawn, made) = pipes();
-    let app = engine(dir.path(), Vendor::Codex, spawn);
+    let app = engine(&dir, Vendor::Codex, spawn);
     let project = app.add_project(&folder.path().to_string_lossy()).unwrap().id;
     write_notes(folder.path(), &[(".faber/taste.md", "- Zebra stripes stay subtle\n")]);
     let asking = SendRequest { text: "Plan the week's stripes".into(), ..request(Vendor::Codex, Area::Project, Some(project)) };
@@ -558,9 +560,9 @@ async fn codex_searches_the_projects_notes_through_its_dynamic_tool_and_leaves_t
 
 #[tokio::test]
 async fn a_conversation_whose_project_was_removed_is_told_so_and_searches_nothing() {
-    let (dir, folder) = (support::canonical_tempdir().unwrap(), support::work_folder());
+    let (dir, folder) = (support::DataFolder::new(), support::work_folder());
     let (spawn, made) = pipes();
-    let app = engine(dir.path(), Vendor::Claude, spawn);
+    let app = engine(&dir, Vendor::Claude, spawn);
     let project = app.add_project(&folder.path().to_string_lossy()).unwrap().id;
     write_notes(folder.path(), &[(".faber/taste.md", "- Zebra stripes stay subtle\n")]);
     let (_, mut pipe) = begin(&app, &made, Area::Project, Some(&project), "zebra").await;
@@ -601,7 +603,7 @@ fn careful_zip() -> Vec<u8> {
 
 /// The one skill of the test catalog, pinned to the digest of `SKILL` (the shipped items are pinned to their real files).
 fn careful(commit: &str) -> faber_engine::tools::Item {
-    let dir = tempfile::tempdir().unwrap();
+    let dir = support::DataFolder::new();
     std::fs::write(dir.path().join("SKILL.md"), SKILL).unwrap();
     faber_engine::tools::Item {
         id: "careful".into(),
@@ -658,7 +660,7 @@ struct Agent {
     app: Engine,
     pipe: Pipe,
     id: String,
-    dir: tempfile::TempDir,
+    dir: support::DataFolder,
     _folder: tempfile::TempDir,
     serve: Serve,
     made: Arc<std::sync::Mutex<Vec<Pipe>>>,
@@ -680,7 +682,7 @@ async fn claude_project_with_web(
     items: Vec<faber_engine::tools::Item>,
     web: Option<faber_engine::model::WebSearch>,
 ) -> Agent {
-    let (dir, folder) = (support::canonical_tempdir().unwrap(), support::work_folder());
+    let (dir, folder) = (support::DataFolder::new(), support::work_folder());
     let (spawn, made) = pipes();
     let args: Arc<std::sync::Mutex<Vec<Vec<String>>>> = Arc::default();
     let record = args.clone();
@@ -688,7 +690,7 @@ async fn claude_project_with_web(
         record.lock().unwrap().push(argv.to_vec());
         spawn(binary, argv, cwd)
     });
-    let app = engine(dir.path(), Vendor::Claude, observed);
+    let app = engine(&dir, Vendor::Claude, observed);
     app.save_settings(Settings { permissions: Some(mode), web_search: web, ..Settings::default() }).unwrap();
     app.set_setup_source(&serve.server.origin);
     if !items.is_empty() {
@@ -759,7 +761,7 @@ impl Agent {
     }
 
     fn log_path(&self) -> std::path::PathBuf {
-        self.dir.path().join("data").join("self-changes.jsonl")
+        self.dir.path().join("self-changes.jsonl")
     }
 
     /// The decisions logged so far, one per line.
@@ -769,8 +771,8 @@ impl Agent {
 
     /// Nothing of the catalog is on the disk: no ledger line, no folder, no download left behind.
     fn store_untouched(&self) {
-        let data = self.dir.path().join("data");
-        assert!(faber_engine::tools::Store::new(&data).installed().is_empty(), "nothing is installed");
+        let data = self.dir.path();
+        assert!(faber_engine::tools::Store::new(data).installed().is_empty(), "nothing is installed");
         assert!(!data.join("tools").join("plugin").join("skills").join("ponytail").exists());
         let left: Vec<_> = std::fs::read_dir(data.join("tools")).into_iter().flatten().flatten().map(|e| e.file_name()).collect();
         assert!(!left.iter().any(|n| n.to_string_lossy().starts_with(".download")), "no download is left: {left:?}");
@@ -977,9 +979,9 @@ async fn an_answer_after_the_turn_ended_is_stale_and_installs_nothing() {
 
 #[tokio::test]
 async fn codex_asks_before_it_installs_through_its_dynamic_tool_too() {
-    let (dir, folder) = (support::canonical_tempdir().unwrap(), support::work_folder());
+    let (dir, folder) = (support::DataFolder::new(), support::work_folder());
     let (spawn, made) = pipes();
-    let app = engine(dir.path(), Vendor::Codex, spawn);
+    let app = engine(&dir, Vendor::Codex, spawn);
     app.save_settings(Settings { permissions: Some(Permissions::Ask), ..Settings::default() }).unwrap();
     let project = app.add_project(&folder.path().to_string_lossy()).unwrap().id;
     let id = app.send(request(Vendor::Codex, Area::Project, Some(project))).unwrap();
@@ -1004,21 +1006,21 @@ async fn codex_asks_before_it_installs_through_its_dynamic_tool_too() {
     app.answer(&id, &turn, "call-910", false, false).await.unwrap();
     let result = wire(&pipe, |m| m["id"] == 910 && m.get("result").is_some()).await["result"].clone();
     assert!(result["success"] != true && result["contentItems"][0]["text"].as_str().unwrap().contains("said no"), "{result}");
-    assert!(!dir.path().join("data").join("tools").join("plugin").exists());
+    assert!(!dir.path().join("tools").join("plugin").exists());
     app.shutdown();
 }
 
 #[tokio::test]
 async fn chat_cannot_install_even_when_it_calls_the_tool() {
-    let dir = support::canonical_tempdir().unwrap();
+    let dir = support::DataFolder::new();
     let (spawn, made) = pipes();
-    let app = engine(dir.path(), Vendor::Codex, spawn);
+    let app = engine(&dir, Vendor::Codex, spawn);
     app.send(request(Vendor::Codex, Area::Chat, None)).unwrap();
     let mut pipe = next_pipe(&made).await;
     codex_boot(&mut pipe).await;
     let (refused, failed) = codex_call(&mut pipe, 903, "catalog", json!({ "install": "ponytail" })).await;
     assert!(failed && refused.contains("not available"), "{refused}");
-    assert!(!dir.path().join("data").join("self-changes.jsonl").exists());
+    assert!(!dir.path().join("self-changes.jsonl").exists());
     app.shutdown();
 
     let (app, mut pipe, dir, _folder) = claude_agent(Area::Chat).await;
@@ -1028,7 +1030,7 @@ async fn chat_cannot_install_even_when_it_calls_the_tool() {
         .await;
     let answer = wire(&pipe, |m| m["response"]["request_id"] == "chat").await;
     assert!(answer["response"]["response"]["mcp_response"]["error"].is_object(), "{answer}");
-    assert!(!dir.path().join("data").join("self-changes.jsonl").exists());
+    assert!(!dir.path().join("self-changes.jsonl").exists());
     app.shutdown();
 }
 
@@ -1074,7 +1076,7 @@ fn seed(agent: &Agent, item: &Item) -> Store {
     let archive = tempfile::tempdir().unwrap();
     let zip = archive.path().join("careful.zip");
     std::fs::write(&zip, careful_zip()).unwrap();
-    let store = Store::with_catalog(&agent.dir.path().join("data"), vec![item.clone()]);
+    let store = Store::with_catalog(agent.dir.path(), vec![item.clone()]);
     store.install_from(item, &zip).unwrap();
     store
 }
@@ -1103,8 +1105,8 @@ async fn an_allowed_install_downloads_logs_the_decision_then_the_result_and_the_
     let log = agent.log();
     assert_eq!(steps(&log), [pair("once", "allowed"), pair("once", "installed")]);
     assert!(log.iter().all(|l| l["id"] == "careful" && l["to"] == "0123" && l["from"].is_null() && l["conv"] == agent.id.as_str()));
-    let data = agent.dir.path().join("data");
-    assert_eq!(Store::with_catalog(&data, vec![careful("0123")]).installed().get("careful").map(String::as_str), Some("0123"));
+    let data = agent.dir.path();
+    assert_eq!(Store::with_catalog(data, vec![careful("0123")]).installed().get("careful").map(String::as_str), Some("0123"));
     assert_eq!(std::fs::read(data.join("tools/plugin/skills/careful/SKILL.md")).unwrap(), SKILL);
     assert_eq!(agent.serve.hits(), 1);
 
@@ -1152,8 +1154,8 @@ async fn an_app_update_waits_for_an_install_the_agent_was_allowed_to_start_even_
     }
     assert!(admitted.is_some(), "the update is admitted once the install ended");
     assert!(!agent.app.is_working());
-    let data = agent.dir.path().join("data");
-    assert!(Store::with_catalog(&data, vec![careful("0123")]).installed().contains_key("careful"), "and the install had finished first");
+    let data = agent.dir.path();
+    assert!(Store::with_catalog(data, vec![careful("0123")]).installed().contains_key("careful"), "and the install had finished first");
     assert_eq!(steps(&agent.log()), [pair("once", "allowed"), pair("once", "installed")]);
     drop(admitted);
     agent.app.shutdown();
@@ -1177,7 +1179,7 @@ async fn the_agent_installs_only_what_faber_holds_nothing_of() {
             }
         };
         agent.app.set_catalog_items(vec![seen]);
-        let data = agent.dir.path().join("data");
+        let data = agent.dir.path().to_path_buf();
         let before = tree(&data);
         assert!(!before.is_empty());
         let mut agent = agent;
@@ -1204,7 +1206,7 @@ async fn stop_while_a_card_waits_makes_a_later_allow_stale_and_installs_nothing(
     assert!(err.contains("stale"), "{err}");
     tokio::time::sleep(Duration::from_millis(150)).await;
     assert_eq!((agent.serve.hits(), agent.cards().1.len()), (0, 0));
-    assert!(agent.log().is_empty() && tree(&agent.dir.path().join("data")).is_empty());
+    assert!(agent.log().is_empty() && tree(agent.dir.path()).is_empty());
     assert_eq!(agent.conversation().allow_always, None, "and an always on a stale card is not kept");
     agent.app.shutdown();
 }
@@ -1219,7 +1221,7 @@ async fn a_conversation_removed_while_its_card_waits_installs_nothing() {
     assert!(agent.app.answer(&agent.id, &turn, "toolu_i1", true, false).await.is_err());
     tokio::time::sleep(Duration::from_millis(150)).await;
     assert_eq!(agent.serve.hits(), 0);
-    assert!(agent.log().is_empty() && tree(&agent.dir.path().join("data")).is_empty());
+    assert!(agent.log().is_empty() && tree(agent.dir.path()).is_empty());
     agent.app.shutdown();
 }
 
@@ -1230,7 +1232,7 @@ async fn a_reloaded_engine_shows_no_install_card_and_an_answer_to_the_old_one_in
     let (turn, _) = agent.card().await;
     agent.app.shutdown();
     let (spawn, _made) = pipes();
-    let again = engine(agent.dir.path(), Vendor::Claude, spawn);
+    let again = engine(&agent.dir, Vendor::Claude, spawn);
     again.set_setup_source(&agent.serve.server.origin);
     again.set_catalog_items(vec![careful("0123")]);
     let shown = again.open(&agent.id).unwrap();
@@ -1249,7 +1251,7 @@ async fn a_reloaded_engine_shows_no_install_card_and_an_answer_to_the_old_one_in
     assert_eq!(cards, 0, "no card survives a restart");
     assert!(again.answer(&agent.id, &turn, "toolu_i1", true, false).await.is_err());
     tokio::time::sleep(Duration::from_millis(100)).await;
-    assert!(agent.serve.hits() == 0 && agent.log().is_empty() && tree(&agent.dir.path().join("data")).is_empty());
+    assert!(agent.serve.hits() == 0 && agent.log().is_empty() && tree(agent.dir.path()).is_empty());
     again.shutdown();
 }
 
@@ -1269,9 +1271,9 @@ async fn plan_refuses_an_install_with_no_card_even_with_full_trust() {
 
 #[tokio::test]
 async fn full_trust_installs_under_codex_without_a_card_and_logs_the_decision_and_the_result() {
-    let (dir, folder) = (support::canonical_tempdir().unwrap(), support::work_folder());
+    let (dir, folder) = (support::DataFolder::new(), support::work_folder());
     let (spawn, made) = pipes();
-    let app = engine(dir.path(), Vendor::Codex, spawn);
+    let app = engine(&dir, Vendor::Codex, spawn);
     app.save_settings(Settings { permissions: Some(Permissions::Ask), faber_trust: Some(true), ..Settings::default() }).unwrap();
     let serve = Serve::new(careful_zip(), false);
     app.set_setup_source(&serve.server.origin);
@@ -1284,13 +1286,10 @@ async fn full_trust_installs_under_codex_without_a_card_and_logs_the_decision_an
     assert!(!failed && text.starts_with("Installed careful (skill"), "{text}");
     let reply = app.open(&id).unwrap().messages.last().cloned().unwrap();
     assert!(!reply.permissions.iter().flatten().any(|p| p.tool == CARD), "trust skips the card");
-    let log: Vec<Value> = std::fs::read_to_string(dir.path().join("data").join("self-changes.jsonl"))
-        .unwrap()
-        .lines()
-        .map(|l| serde_json::from_str(l).unwrap())
-        .collect();
+    let log: Vec<Value> =
+        std::fs::read_to_string(dir.path().join("self-changes.jsonl")).unwrap().lines().map(|l| serde_json::from_str(l).unwrap()).collect();
     assert_eq!(steps(&log), [pair("trust", "allowed"), pair("trust", "installed")]);
-    assert!(Store::with_catalog(&dir.path().join("data"), vec![careful("0123")]).installed().contains_key("careful"));
+    assert!(Store::with_catalog(dir.path(), vec![careful("0123")]).installed().contains_key("careful"));
     assert_eq!(serve.hits(), 1);
     app.shutdown();
 }
@@ -1319,7 +1318,7 @@ async fn a_log_at_its_cap_still_records_the_decision_and_with_trust_a_log_that_c
     let (text, error) = agent.reply("rpc1").await;
     assert!(error && text == "Nothing was changed: Faber could not write its record of the install.", "{text}");
     assert_eq!(agent.serve.hits(), 0);
-    assert!(tree(&agent.dir.path().join("data")).is_empty());
+    assert!(tree(agent.dir.path()).is_empty());
     agent.app.shutdown();
 }
 
@@ -1369,7 +1368,7 @@ async fn an_allowed_once_whose_decision_cannot_be_written_installs_nothing() {
     let (text, error) = agent.reply("rpc1").await;
     assert!(error && text == "Nothing was changed: Faber could not write its record of the install.", "{text}");
     assert_eq!(agent.serve.hits(), 0);
-    assert!(tree(&agent.dir.path().join("data")).is_empty());
+    assert!(tree(agent.dir.path()).is_empty());
     agent.app.shutdown();
 }
 
@@ -1378,13 +1377,13 @@ async fn a_copy_removed_between_the_check_and_the_write_is_refused_and_its_undo_
     let agent = claude_project_with(Permissions::Ask, Serve::new(careful_zip(), false), vec![careful("0123")]).await;
     let store = seed(&agent, &careful("0123"));
     store.remove("careful").unwrap();
-    let before = tree(&agent.dir.path().join("data"));
+    let before = tree(agent.dir.path());
     // The download goes ahead as if the check had found nothing; the store lock's own check is what stops the write.
     let origin = agent.serve.server.origin.clone();
     let refused = faber_engine::tools::install_for_agent(&store, &careful("0123"), Some(&origin)).await;
     assert_eq!(refused, Err(faber_engine::tools::InstallError::Held("The person removed it; they can bring it back in Catalog.")));
     assert_eq!(agent.serve.hits(), 1);
-    assert_eq!(tree(&agent.dir.path().join("data")), before, "the Undo copy and the rest are as they were");
+    assert_eq!(tree(agent.dir.path()), before, "the Undo copy and the rest are as they were");
     agent.app.shutdown();
 }
 
@@ -1518,7 +1517,7 @@ async fn a_second_offer_is_refused_with_no_card_while_one_waits_after_it_is_answ
     // The count is stored: a reopened engine and a new process still refuse.
     agent.app.shutdown();
     let (spawn, made) = pipes();
-    let again = engine(agent.dir.path(), Vendor::Claude, spawn);
+    let again = engine(&agent.dir, Vendor::Claude, spawn);
     let stored = again.open(&agent.id).unwrap();
     assert!(stored.bigger_offered);
     let follow_up =
@@ -1642,9 +1641,9 @@ async fn an_offer_with_missing_words_or_another_card_waiting_or_the_person_away_
 
 #[tokio::test]
 async fn codex_offers_the_bigger_version_through_its_dynamic_tool_and_gets_the_answer_as_the_tool_result() {
-    let (dir, folder) = (support::canonical_tempdir().unwrap(), support::work_folder());
+    let (dir, folder) = (support::DataFolder::new(), support::work_folder());
     let (spawn, made) = pipes();
-    let app = engine(dir.path(), Vendor::Codex, spawn);
+    let app = engine(&dir, Vendor::Codex, spawn);
     app.save_settings(Settings { permissions: Some(Permissions::Ask), ..Settings::default() }).unwrap();
     let project = app.add_project(&folder.path().to_string_lossy()).unwrap().id;
     let id = app.send(request(Vendor::Codex, Area::Project, Some(project))).unwrap();
@@ -1709,22 +1708,22 @@ async fn catalog_switch_refuses_conflicting_arguments_read_only_modes_and_corrup
     for mode in [Permissions::Plan, Permissions::Ask] {
         let mut agent = claude_project_with(mode, Serve::new(vec![], false), vec![item.clone()]).await;
         let store = seed(&agent, &item);
-        let before = tree(&agent.dir.path().join("data"));
+        let before = tree(agent.dir.path());
         agent.call("both", "both", json!({ "install": "careful", "set_enabled": { "id": "careful", "enabled": false } })).await;
         assert!(agent.reply("both").await.1);
         if mode == Permissions::Ask {
             store.set_enabled("careful", false).unwrap();
-            let skill = agent.dir.path().join("data/tools/disabled/careful/SKILL.md");
+            let skill = agent.dir.path().join("tools/disabled/careful/SKILL.md");
             std::fs::write(&skill, "corrupt").unwrap();
-            let corrupt = tree(&agent.dir.path().join("data"));
+            let corrupt = tree(agent.dir.path());
             agent.call("switch", "switch", json!({ "set_enabled": { "id": "careful", "enabled": true } })).await;
             assert!(agent.reply("switch").await.1);
-            assert_eq!(tree(&agent.dir.path().join("data")), corrupt, "must not discard corrupt files");
+            assert_eq!(tree(agent.dir.path()), corrupt, "must not discard corrupt files");
         } else {
             agent.app.save_settings(Settings { permissions: Some(mode), faber_trust: Some(true), ..Settings::default() }).unwrap();
             agent.call("switch", "switch", json!({ "set_enabled": { "id": "careful", "enabled": false } })).await;
             assert!(agent.reply("switch").await.1);
-            assert_eq!(tree(&agent.dir.path().join("data")), before);
+            assert_eq!(tree(agent.dir.path()), before);
         }
         assert!(agent.log().is_empty());
         assert_eq!(agent.serve.hits(), 0);
@@ -1737,7 +1736,7 @@ async fn catalog_switch_deny_stale_answer_and_unwritable_log_preserve_the_store(
         let item = careful("0123");
         let mut agent = claude_project_with(Permissions::Ask, Serve::new(vec![], false), vec![item.clone()]).await;
         let store = seed(&agent, &item);
-        let before = tree(&agent.dir.path().join("data"));
+        let before = tree(agent.dir.path());
         agent.call("off", "off_call", json!({ "set_enabled": { "id": "careful", "enabled": false } })).await;
         let (turn, _) = agent.card().await;
         if action == "stale" || action == "stop" {
@@ -1764,7 +1763,7 @@ async fn catalog_switch_deny_stale_answer_and_unwritable_log_preserve_the_store(
             }
         }
         assert!(store.enabled("careful"));
-        assert_eq!(tree(&agent.dir.path().join("data")), before);
+        assert_eq!(tree(agent.dir.path()), before);
         assert_eq!(agent.serve.hits(), 0);
         agent.app.shutdown();
     }
@@ -1772,15 +1771,15 @@ async fn catalog_switch_deny_stale_answer_and_unwritable_log_preserve_the_store(
 
 #[tokio::test]
 async fn catalog_switch_codex_full_trust_uses_explicit_state_without_a_card_or_download() {
-    let (dir, folder) = (support::canonical_tempdir().unwrap(), support::work_folder());
+    let (dir, folder) = (support::DataFolder::new(), support::work_folder());
     let (spawn, made) = pipes();
-    let app = engine(dir.path(), Vendor::Codex, spawn);
+    let app = engine(&dir, Vendor::Codex, spawn);
     app.save_settings(Settings { permissions: Some(Permissions::Ask), faber_trust: Some(true), ..Settings::default() }).unwrap();
     let item = careful("0123");
     app.set_catalog_items(vec![item.clone()]);
     let source = Serve::new(vec![], false);
     app.set_setup_source(&source.server.origin);
-    let store = Store::with_catalog(&dir.path().join("data"), vec![item.clone()]);
+    let store = Store::with_catalog(dir.path(), vec![item.clone()]);
     let zip = dir.path().join("seed.zip");
     std::fs::write(&zip, careful_zip()).unwrap();
     store.install_from(&item, &zip).unwrap();
@@ -1792,11 +1791,8 @@ async fn catalog_switch_codex_full_trust_uses_explicit_state_without_a_card_or_d
     assert!(!failed && text.contains("new conversations"), "{text}");
     assert!(!store.enabled("careful"));
     assert!(app.open(&id).unwrap().messages.last().unwrap().permissions.iter().flatten().next().is_none());
-    let log: Vec<Value> = std::fs::read_to_string(dir.path().join("data/self-changes.jsonl"))
-        .unwrap()
-        .lines()
-        .map(|l| serde_json::from_str(l).unwrap())
-        .collect();
+    let log: Vec<Value> =
+        std::fs::read_to_string(dir.path().join("self-changes.jsonl")).unwrap().lines().map(|l| serde_json::from_str(l).unwrap()).collect();
     assert_eq!(steps(&log), [pair("trust", "allowed"), pair("trust", "disabled")]);
     assert_eq!(source.hits(), 0);
     app.shutdown();
@@ -1810,11 +1806,11 @@ async fn catalog_switch_rechecks_files_after_consent_without_discarding_the_copy
     store.set_enabled("careful", false).unwrap();
     agent.call("on", "on_call", json!({ "set_enabled": { "id": "careful", "enabled": true } })).await;
     let (turn, _) = agent.card().await;
-    std::fs::write(agent.dir.path().join("data/tools/disabled/careful/SKILL.md"), "changed while card waited").unwrap();
-    let changed = tree(&agent.dir.path().join("data"));
+    std::fs::write(agent.dir.path().join("tools/disabled/careful/SKILL.md"), "changed while card waited").unwrap();
+    let changed = tree(agent.dir.path());
     agent.app.answer(&agent.id, &turn, "on_call", true, false).await.unwrap();
     assert!(agent.reply("on").await.1);
-    assert_eq!(tree(&agent.dir.path().join("data")), changed);
+    assert_eq!(tree(agent.dir.path()), changed);
     assert!(!store.enabled("careful"));
     assert_eq!(agent.serve.hits(), 0);
     agent.app.shutdown();
@@ -1851,7 +1847,7 @@ async fn catalog_switch_restarted_and_forged_cards_cannot_authorize_a_change() {
     let item = careful("0123");
     let mut agent = claude_project_with(Permissions::Ask, Serve::new(vec![], false), vec![item.clone()]).await;
     seed(&agent, &item);
-    let before = tree(&agent.dir.path().join("data"));
+    let before = tree(agent.dir.path());
     agent
         .pipe
         .say(json!({ "type": "control_request", "request_id": "fake", "request": { "subtype": "can_use_tool",
@@ -1864,9 +1860,9 @@ async fn catalog_switch_restarted_and_forged_cards_cannot_authorize_a_change() {
     let (turn, _) = agent.card().await;
     agent.app.shutdown();
     let (spawn, _) = pipes();
-    let restarted = engine(agent.dir.path(), Vendor::Claude, spawn);
+    let restarted = engine(&agent.dir, Vendor::Claude, spawn);
     assert!(restarted.answer(&agent.id, &turn, "off_call", true, true).await.is_err());
-    assert_eq!(tree(&agent.dir.path().join("data")), before);
+    assert_eq!(tree(agent.dir.path()), before);
     assert!(agent.log().is_empty());
     restarted.shutdown();
 }
@@ -1918,14 +1914,14 @@ async fn catalog_remove_decline_log_failure_and_changed_copy_preserve_data() {
         let (turn, _) = agent.card().await;
         match action {
             "log" => std::fs::create_dir(agent.log_path()).unwrap(),
-            "changed" => std::fs::write(agent.dir.path().join("data/tools/plugin/skills/careful/SKILL.md"), "changed").unwrap(),
+            "changed" => std::fs::write(agent.dir.path().join("tools/plugin/skills/careful/SKILL.md"), "changed").unwrap(),
             "removed" => store.remove("careful").unwrap(),
             _ => (),
         }
-        let before = tree(&agent.dir.path().join("data"));
+        let before = tree(agent.dir.path());
         agent.app.answer(&agent.id, &turn, "remove_call", action != "deny", false).await.unwrap();
         assert!(agent.reply("remove").await.1);
-        assert_eq!(tree(&agent.dir.path().join("data")), before, "{action}");
+        assert_eq!(tree(agent.dir.path()), before, "{action}");
         assert_eq!(agent.serve.hits(), 0);
         agent.app.shutdown();
     }
@@ -1989,13 +1985,13 @@ async fn catalog_remove_stale_turn_and_parallel_calls_cannot_spend_consent() {
 
 #[tokio::test]
 async fn catalog_remove_codex_full_trust_keeps_local_undo() {
-    let (dir, folder) = (support::canonical_tempdir().unwrap(), support::work_folder());
+    let (dir, folder) = (support::DataFolder::new(), support::work_folder());
     let (spawn, made) = pipes();
-    let app = engine(dir.path(), Vendor::Codex, spawn);
+    let app = engine(&dir, Vendor::Codex, spawn);
     app.save_settings(Settings { permissions: Some(Permissions::Ask), faber_trust: Some(true), ..Settings::default() }).unwrap();
     let item = careful("0123");
     app.set_catalog_items(vec![item.clone()]);
-    let store = Store::with_catalog(&dir.path().join("data"), vec![item.clone()]);
+    let store = Store::with_catalog(dir.path(), vec![item.clone()]);
     let zip = dir.path().join("seed.zip");
     std::fs::write(&zip, careful_zip()).unwrap();
     store.install_from(&item, &zip).unwrap();
@@ -2016,8 +2012,8 @@ async fn catalog_remove_rejects_unknown_paths_mixed_actions_and_pending_receipts
     let item = careful("0123");
     let mut agent = claude_project_with(Permissions::Ask, Serve::new(vec![], false), vec![item.clone()]).await;
     seed(&agent, &item);
-    std::fs::create_dir_all(agent.dir.path().join("data/tools/removed/careful")).unwrap();
-    let before = tree(&agent.dir.path().join("data"));
+    std::fs::create_dir_all(agent.dir.path().join("tools/removed/careful")).unwrap();
+    let before = tree(agent.dir.path());
     for (n, input) in [
         json!({ "remove": "careful" }),
         json!({ "remove": "../careful" }),
@@ -2032,7 +2028,7 @@ async fn catalog_remove_rejects_unknown_paths_mixed_actions_and_pending_receipts
         agent.call(&call, &call, input).await;
         assert!(agent.reply(&call).await.1);
         assert!(agent.cards().1.is_empty());
-        assert_eq!(tree(&agent.dir.path().join("data")), before);
+        assert_eq!(tree(agent.dir.path()), before);
     }
     assert!(agent.log().is_empty());
     assert_eq!(agent.serve.hits(), 0);
@@ -2047,7 +2043,7 @@ async fn catalog_remove_keeps_changed_undo_files_for_the_person() {
     agent.app.save_settings(Settings { permissions: Some(Permissions::Ask), faber_trust: Some(true), ..Settings::default() }).unwrap();
     agent.call("remove", "remove_call", json!({ "remove": "careful" })).await;
     assert!(!agent.reply("remove").await.1);
-    let files = agent.dir.path().join("data/tools/removed/careful/files/SKILL.md");
+    let files = agent.dir.path().join("tools/removed/careful/files/SKILL.md");
     std::fs::write(&files, "a local change after removal").unwrap();
     store.clear_removed_for_catalog().unwrap();
     assert_eq!(
@@ -2068,9 +2064,9 @@ async fn catalog_remove_unreadable_receipt_cannot_be_cleaned_implicitly() {
     agent.app.save_settings(Settings { permissions: Some(Permissions::Ask), faber_trust: Some(true), ..Settings::default() }).unwrap();
     agent.call("remove", "remove_call", json!({ "remove": "careful" })).await;
     assert!(!agent.reply("remove").await.1);
-    std::fs::write(agent.dir.path().join("data/tools/removed/careful/state.json"), "broken receipt").unwrap();
+    std::fs::write(agent.dir.path().join("tools/removed/careful/state.json"), "broken receipt").unwrap();
     assert!(store.clear_removed_for_catalog().is_err(), "an unreadable receipt must be left for the person");
-    assert_eq!(std::fs::read(agent.dir.path().join("data/tools/removed/careful/files/SKILL.md")).unwrap(), SKILL);
+    assert_eq!(std::fs::read(agent.dir.path().join("tools/removed/careful/files/SKILL.md")).unwrap(), SKILL);
     agent.app.shutdown();
 }
 
@@ -2080,7 +2076,7 @@ async fn catalog_repair_needs_separate_consent_and_preserves_switched_off_copy()
     let mut agent = claude_project_with(Permissions::Ask, Serve::new(careful_zip(), false), vec![item.clone()]).await;
     let store = seed(&agent, &item);
     store.set_enabled("careful", false).unwrap();
-    let files = agent.dir.path().join("data/tools/disabled/careful/SKILL.md");
+    let files = agent.dir.path().join("tools/disabled/careful/SKILL.md");
     std::fs::write(&files, "local edits").unwrap();
     agent.call("repair", "repair_call", json!({ "repair": "careful" })).await;
     let (turn, card) = agent.card().await;
@@ -2105,12 +2101,12 @@ async fn catalog_repair_stale_bytes_and_decline_never_download_or_replace() {
         agent.call("repair", "repair_call", json!({ "repair": "careful" })).await;
         let (turn, _) = agent.card().await;
         if changed {
-            std::fs::write(agent.dir.path().join("data/tools/plugin/skills/careful/SKILL.md"), "new local edits").unwrap();
+            std::fs::write(agent.dir.path().join("tools/plugin/skills/careful/SKILL.md"), "new local edits").unwrap();
         }
-        let before = tree(&agent.dir.path().join("data/tools"));
+        let before = tree(&agent.dir.path().join("tools"));
         agent.app.answer(&agent.id, &turn, "repair_call", changed, false).await.unwrap();
         assert!(agent.reply("repair").await.1);
-        assert_eq!(tree(&agent.dir.path().join("data/tools")), before);
+        assert_eq!(tree(&agent.dir.path().join("tools")), before);
         assert_eq!(agent.serve.hits(), 0);
         agent.app.shutdown();
     }
@@ -2121,7 +2117,7 @@ async fn catalog_update_targets_only_shipped_pin_and_keeps_conversation_snapshot
     let item = careful("0123");
     let mut agent = claude_project_with(Permissions::Ask, Serve::new(careful_zip(), false), vec![item.clone()]).await;
     let old = careful("old-pin");
-    let old_store = Store::with_catalog(&agent.dir.path().join("data"), vec![old.clone()]);
+    let old_store = Store::with_catalog(agent.dir.path(), vec![old.clone()]);
     let zip = agent.dir.path().join("old.zip");
     std::fs::write(&zip, careful_zip()).unwrap();
     old_store.install_from(&old, &zip).unwrap();
@@ -2133,7 +2129,7 @@ async fn catalog_update_targets_only_shipped_pin_and_keeps_conversation_snapshot
     assert_eq!(card.input["from"], "old-pin");
     agent.app.answer(&agent.id, &turn, "update_call", true, false).await.unwrap();
     assert!(!agent.reply("update").await.1);
-    assert_eq!(Store::with_catalog(&agent.dir.path().join("data"), vec![item]).installed()["careful"], "0123");
+    assert_eq!(Store::with_catalog(agent.dir.path(), vec![item]).installed()["careful"], "0123");
     assert_eq!(std::fs::read(held_path).unwrap(), SKILL);
     assert!(agent.log().iter().all(|line| line["kind"] == "tools.update" && line["from"] == "old-pin" && line["to"] == "0123"));
     agent.app.shutdown();
@@ -2146,7 +2142,7 @@ async fn catalog_replacement_refuses_read_only_trust_mixed_actions_and_ended_tur
         let mut agent = claude_project_with(mode, Serve::new(careful_zip(), false), vec![item.clone()]).await;
         seed(&agent, &item);
         agent.app.save_settings(Settings { permissions: Some(mode), faber_trust: Some(true), ..Settings::default() }).unwrap();
-        let before = tree(&agent.dir.path().join("data/tools"));
+        let before = tree(&agent.dir.path().join("tools"));
         let inputs = if mode == Permissions::Plan {
             vec![json!({ "repair": "careful" }), json!({ "update": "careful" })]
         } else {
@@ -2165,7 +2161,7 @@ async fn catalog_replacement_refuses_read_only_trust_mixed_actions_and_ended_tur
             assert!(agent.reply(&id).await.1);
             assert!(agent.cards().1.is_empty());
         }
-        assert_eq!(tree(&agent.dir.path().join("data/tools")), before);
+        assert_eq!(tree(&agent.dir.path().join("tools")), before);
         assert_eq!(agent.serve.hits(), 0);
         agent.app.shutdown();
     }
@@ -2182,10 +2178,10 @@ async fn catalog_repair_log_failure_and_source_failure_preserve_original() {
         if log_blocked {
             std::fs::create_dir(agent.log_path()).unwrap();
         }
-        let before = tree(&agent.dir.path().join("data/tools"));
+        let before = tree(&agent.dir.path().join("tools"));
         agent.app.answer(&agent.id, &turn, "repair_call", true, false).await.unwrap();
         assert!(agent.reply("repair").await.1);
-        assert_eq!(tree(&agent.dir.path().join("data/tools")), before);
+        assert_eq!(tree(&agent.dir.path().join("tools")), before);
         assert_eq!(agent.serve.hits(), if log_blocked { 0 } else { 1 });
         agent.app.shutdown();
     }
@@ -2225,7 +2221,7 @@ async fn catalog_repair_ending_during_download_keeps_original_bytes() {
     let mut agent = claude_project_with(Permissions::Ask, Serve::new(careful_zip(), true), vec![item.clone()]).await;
     seed(&agent, &item);
     agent.app.save_settings(Settings { faber_trust: Some(true), ..Settings::default() }).unwrap();
-    let before = tree(&agent.dir.path().join("data/tools"));
+    let before = tree(&agent.dir.path().join("tools"));
     agent.call("repair", "repair_call", json!({ "repair": "careful" })).await;
     for _ in 0..500 {
         if agent.serve.hits() > 0 {
@@ -2244,7 +2240,7 @@ async fn catalog_repair_ending_during_download_keeps_original_bytes() {
     assert_eq!(agent.conversation().messages.last().unwrap().status, Some(Status::Done));
     agent.serve.open.store(true, SeqCst);
     assert!(agent.reply("repair").await.1);
-    assert_eq!(tree(&agent.dir.path().join("data/tools")), before);
+    assert_eq!(tree(&agent.dir.path().join("tools")), before);
     agent.app.shutdown();
 }
 
@@ -2271,7 +2267,7 @@ async fn catalog_repair_stop_before_cli_ack_revokes_a_downloaded_replacement() {
     let mut agent = claude_project_with(Permissions::Ask, Serve::new(careful_zip(), true), vec![item.clone()]).await;
     seed(&agent, &item);
     agent.app.save_settings(Settings { faber_trust: Some(true), ..Settings::default() }).unwrap();
-    let before = tree(&agent.dir.path().join("data/tools"));
+    let before = tree(&agent.dir.path().join("tools"));
     agent.call("repair", "repair_call", json!({ "repair": "careful" })).await;
     for _ in 0..500 {
         if agent.serve.hits() > 0 {
@@ -2284,7 +2280,7 @@ async fn catalog_repair_stop_before_cli_ack_revokes_a_downloaded_replacement() {
     agent.serve.open.store(true, SeqCst);
     let (text, failed) = agent.reply("repair").await;
     assert!(failed, "Stop must revoke the replacement even before the CLI acknowledges it: {text}");
-    assert_eq!(tree(&agent.dir.path().join("data/tools")), before);
+    assert_eq!(tree(&agent.dir.path().join("tools")), before);
     agent.call("late", "late_call", json!({ "repair": "careful" })).await;
     assert!(agent.reply("late").await.1, "a stopped CLI cannot request fresh replacement permission before acknowledging Stop");
     assert_eq!(agent.serve.hits(), 1);
@@ -2385,7 +2381,7 @@ async fn settings_search_failed_persistence_never_reports_success_or_interrupts(
     let mut agent = claude_project(Permissions::Ask).await;
     agent.web_call("web", "toolu_web", json!({"web_search":"off"})).await;
     agent.card().await;
-    let path = agent.dir.path().join("data/settings.json.tmp");
+    let path = agent.dir.path().join("settings.json.tmp");
     std::fs::create_dir(&path).unwrap();
     agent.answer("toolu_web", true, true).await.unwrap();
     let (text, error) = agent.reply("web").await;
@@ -2422,9 +2418,9 @@ async fn settings_search_plan_and_chat_refuse_even_full_trust() {
     assert!(agent.reply("web").await.1);
     assert!(agent.cards().1.is_empty() && agent.log().is_empty());
     agent.app.shutdown();
-    let dir = support::canonical_tempdir().unwrap();
+    let dir = support::DataFolder::new();
     let (spawn, made) = pipes();
-    let app = engine(dir.path(), Vendor::Codex, spawn);
+    let app = engine(&dir, Vendor::Codex, spawn);
     app.save_settings(Settings { faber_trust: Some(true), ..Settings::default() }).unwrap();
     app.send(request(Vendor::Codex, Area::Chat, None)).unwrap();
     let mut pipe = next_pipe(&made).await;
@@ -2436,9 +2432,9 @@ async fn settings_search_plan_and_chat_refuse_even_full_trust() {
 #[tokio::test]
 async fn settings_search_codex_saved_response_precedes_strict_interrupt() {
     use faber_engine::model::{Status, WebSearch};
-    let (dir, folder) = (support::canonical_tempdir().unwrap(), support::work_folder());
+    let (dir, folder) = (support::DataFolder::new(), support::work_folder());
     let (spawn, made) = pipes();
-    let app = engine(dir.path(), Vendor::Codex, spawn);
+    let app = engine(&dir, Vendor::Codex, spawn);
     app.save_settings(Settings { permissions: Some(Permissions::Ask), faber_trust: Some(true), ..Settings::default() }).unwrap();
     let project = app.add_project(&folder.path().to_string_lossy()).unwrap().id;
     let id = app.send(request(Vendor::Codex, Area::Project, Some(project))).unwrap();

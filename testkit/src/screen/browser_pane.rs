@@ -385,7 +385,7 @@ fn failure_in(ctx: &mut Ctx, language: &str, width: u32) -> Result {
         let trace = app.page.eval("window.__browserRetryTrace");
         return Err(format!(
             "{error}; retry state: {state:?}; address trace: {trace:?}; fixture requests: {:?}; {}",
-            fixture.requests(),
+            fixture.diagnostics(),
             ctx.stderr(app.id)
         ));
     }
@@ -680,7 +680,7 @@ fn wait_page(page: &mut crate::page::Page, fixture: &Fixture, name: &str) -> Res
         let previous = page.cdp.set_deadline(Some(Instant::now() + Duration::from_secs(3)));
         let state = page.eval("window.__TAURI_INTERNALS__.invoke('test_site_probe',{capture:false}).then(native=>({native,address:document.querySelector('.site-address')?.value,strip:[...document.querySelectorAll('.site-tab')].map(t=>({text:t.textContent,front:t.classList.contains('front')}))}))");
         page.cdp.set_deadline(previous);
-        return Err(format!("{error}; native page failure snapshot: {state:?}; fixture requests: {:?}", fixture.requests()));
+        return Err(format!("{error}; native page failure snapshot: {state:?}; fixture requests: {:?}", fixture.diagnostics()));
     }
     let p = probe(page, false)?;
     same(p["page"]["title"].clone(), json!(format!("Native fixture {name}")), "native child document title")?;
@@ -700,7 +700,7 @@ fn wait_page_load(page: &mut crate::page::Page, fixture: &Fixture, name: &str, c
         ),
     )?;
     ensure(fixture.request_count(&format!("/{name}")) >= count, || {
-        format!("fixture did not receive /{name} response {count}: {:?}", fixture.requests())
+        format!("fixture did not receive /{name} response {count}: {:?}", fixture.diagnostics())
     })
 }
 
@@ -738,6 +738,7 @@ fn save_picture(ctx: &Ctx, probe: &Value, name: &str) -> Result {
 struct Fixture {
     origin: String,
     requests: Arc<Mutex<Vec<String>>>,
+    events: Arc<Mutex<Vec<String>>>,
     stop: Arc<AtomicBool>,
     thread: Option<std::thread::JoinHandle<()>>,
 }
@@ -748,18 +749,28 @@ impl Fixture {
         listener.set_nonblocking(true).map_err(|e| e.to_string())?;
         let origin = format!("http://{}", listener.local_addr().map_err(|e| e.to_string())?);
         let requests = Arc::new(Mutex::new(Vec::new()));
+        let events = Arc::new(Mutex::new(Vec::new()));
         let stop = Arc::new(AtomicBool::new(false));
-        let (thread_requests, thread_stop) = (requests.clone(), stop.clone());
+        let (thread_requests, thread_events, thread_stop) = (requests.clone(), events.clone(), stop.clone());
         let thread = std::thread::spawn(move || {
+            let started = Instant::now();
+            let mut connection = 0;
             while !thread_stop.load(Ordering::Relaxed) {
                 match listener.accept() {
-                    Ok((stream, _)) => serve(stream, &thread_requests),
+                    Ok((stream, _)) => {
+                        connection += 1;
+                        fixture_event(&thread_events, started, connection, "accepted".into());
+                        serve(stream, &thread_requests, &thread_events, started, connection);
+                    }
                     Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => std::thread::sleep(Duration::from_millis(10)),
-                    Err(_) => break,
+                    Err(e) => {
+                        fixture_event(&thread_events, started, connection, format!("accept error {:?}/{:?}", e.kind(), e.raw_os_error()));
+                        break;
+                    }
                 }
             }
         });
-        Ok(Self { origin, requests, stop, thread: Some(thread) })
+        Ok(Self { origin, requests, events, stop, thread: Some(thread) })
     }
 
     fn url(&self, path: &str) -> String {
@@ -768,6 +779,10 @@ impl Fixture {
 
     fn requests(&self) -> Vec<String> {
         self.requests.lock().unwrap_or_else(|e| e.into_inner()).clone()
+    }
+
+    fn diagnostics(&self) -> String {
+        format!("requests {:?}; first 64 connection events {:?}", self.requests(), self.events.lock().unwrap_or_else(|e| e.into_inner()))
     }
 
     fn request_count(&self, path: &str) -> usize {
@@ -784,11 +799,27 @@ impl Drop for Fixture {
     }
 }
 
-fn serve(mut stream: TcpStream, requests: &Mutex<Vec<String>>) {
+fn fixture_event(events: &Mutex<Vec<String>>, started: Instant, connection: usize, event: String) {
+    let mut events = events.lock().unwrap_or_else(|e| e.into_inner());
+    if events.len() < 64 {
+        events.push(format!("+{}ms connection {connection}: {event}", started.elapsed().as_millis()));
+    }
+}
+
+fn serve(mut stream: TcpStream, requests: &Mutex<Vec<String>>, events: &Mutex<Vec<String>>, started: Instant, connection: usize) {
     let _ = stream.set_read_timeout(Some(Duration::from_secs(2)));
     let _ = stream.set_write_timeout(Some(Duration::from_secs(2)));
     let mut raw = [0u8; 4096];
-    let Ok(count) = stream.read(&mut raw) else { return };
+    let count = match stream.read(&mut raw) {
+        Ok(count) => {
+            fixture_event(events, started, connection, format!("read {count} bytes"));
+            count
+        }
+        Err(e) => {
+            fixture_event(events, started, connection, format!("read error {:?}/{:?}", e.kind(), e.raw_os_error()));
+            return;
+        }
+    };
     let request = String::from_utf8_lossy(&raw[..count]);
     let path = request.lines().next().and_then(|line| line.split_whitespace().nth(1)).unwrap_or("/");
     let mut log = requests.lock().unwrap_or_else(|e| e.into_inner());
@@ -810,6 +841,8 @@ fn serve(mut stream: TcpStream, requests: &Mutex<Vec<String>>) {
         "HTTP/1.1 {status}\r\nContent-Type: text/html; charset=utf-8\r\nContent-Length: {}\r\nCache-Control: no-store\r\nConnection: close\r\n\r\n{body}",
         body.len()
     );
-    let _ = stream.write_all(response.as_bytes());
-    let _ = stream.flush();
+    let written = stream.write_all(response.as_bytes());
+    fixture_event(events, started, connection, format!("response {} bytes: {written:?}", response.len()));
+    let flushed = stream.flush();
+    fixture_event(events, started, connection, format!("flush: {flushed:?}"));
 }

@@ -14,7 +14,6 @@ use faber_engine::signals::Signals;
 use faber_engine::{Engine, EngineOptions, SendRequest};
 use serde_json::{Value, json};
 use std::collections::{BTreeMap, VecDeque};
-use std::path::Path;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 use support::{next_pipe, pipes};
@@ -24,9 +23,11 @@ const DAY: u64 = 24 * 3600 * 1000;
 
 type Reads = Arc<Mutex<VecDeque<Look>>>;
 
-fn boot(dir: &Path, spawn: Spawner) -> (Engine, Reads) {
+fn boot(dir: &support::DataFolder, spawn: Spawner) -> (Engine, Reads) {
     let opts = EngineOptions {
-        data_dir: dir.join("data"),
+        data_dir: dir.path().into(),
+        #[cfg(windows)]
+        chat_dir: dir.chat_path().into(),
         clis: BTreeMap::from([(Vendor::Claude, Cli { command: "claude".into(), prefix: vec![] })]),
         spawn,
         windows: false,
@@ -125,9 +126,9 @@ fn archived(engine: &Engine, id: &str) -> bool {
 
 #[tokio::test]
 async fn auto_archive_spares_pinned_conversations_for_both_age_and_merged_pull_requests() {
-    let dir = support::tempdir();
+    let dir = support::DataFolder::new();
     let (spawn, made) = pipes();
-    let (engine, reads) = boot(dir.path(), spawn);
+    let (engine, reads) = boot(&dir, spawn);
     let project = engine.add_project(&dir.path().to_string_lossy()).unwrap();
     let (idle, _a) = answered(&engine, &made, ask(Area::Project, &project.id, None, "look around")).await;
     engine.pin(&idle, true).unwrap();
@@ -151,9 +152,9 @@ async fn auto_archive_spares_pinned_conversations_for_both_age_and_merged_pull_r
 
 #[tokio::test]
 async fn r_next_a_merged_or_closed_pull_request_archives_its_conversation_and_an_open_one_does_not() {
-    let dir = support::tempdir();
+    let dir = support::DataFolder::new();
     let (spawn, made) = pipes();
-    let (engine, reads) = boot(dir.path(), spawn);
+    let (engine, reads) = boot(&dir, spawn);
     let project = engine.add_project(&dir.path().to_string_lossy()).unwrap();
     let (merged, _a) = opened(&engine, &made, &project.id).await;
     reads.lock().unwrap().push_back(look(PrState::Open, CiState::Pending));
@@ -178,9 +179,9 @@ async fn r_next_a_merged_or_closed_pull_request_archives_its_conversation_and_an
 /// Faber's own flow ends following when the checks pass, before CI merges the pull request: the daily pass reads it once.
 #[tokio::test]
 async fn r_next_a_green_pull_request_is_read_once_more_by_the_daily_pass() {
-    let dir = support::tempdir();
+    let dir = support::DataFolder::new();
     let (spawn, made) = pipes();
-    let (engine, reads) = boot(dir.path(), spawn);
+    let (engine, reads) = boot(&dir, spawn);
     let project = engine.add_project(&dir.path().to_string_lossy()).unwrap();
     let (id, _pipe) = opened(&engine, &made, &project.id).await;
     reads.lock().unwrap().push_back(look(PrState::Open, CiState::Passing));
@@ -197,9 +198,9 @@ async fn r_next_a_green_pull_request_is_read_once_more_by_the_daily_pass() {
 
 #[tokio::test]
 async fn r_next_a_week_with_nothing_in_a_project_conversation_archives_it_but_never_a_chat() {
-    let dir = support::tempdir();
+    let dir = support::DataFolder::new();
     let (spawn, made) = pipes();
-    let (engine, _reads) = boot(dir.path(), spawn);
+    let (engine, _reads) = boot(&dir, spawn);
     let project = engine.add_project(&dir.path().to_string_lossy()).unwrap();
     let (id, _a) = answered(&engine, &made, ask(Area::Project, &project.id, None, "look around")).await;
     let (chat, _b) = answered(&engine, &made, ask(Area::Chat, "", None, "hello")).await;
@@ -220,9 +221,9 @@ async fn r_next_a_week_with_nothing_in_a_project_conversation_archives_it_but_ne
 
 #[tokio::test]
 async fn r_next_nothing_at_work_or_owed_to_the_person_is_archived() {
-    let dir = support::tempdir();
+    let dir = support::DataFolder::new();
     let (spawn, made) = pipes();
-    let (engine, _reads) = boot(dir.path(), spawn);
+    let (engine, _reads) = boot(&dir, spawn);
     let project = engine.add_project(&dir.path().to_string_lossy()).unwrap();
     let late = now() + 8 * DAY;
 
@@ -243,7 +244,7 @@ async fn r_next_nothing_at_work_or_owed_to_the_person_is_archived() {
 
     // Keep going on.
     let (spawn, made) = pipes();
-    let (engine, _reads) = boot(dir.path(), spawn);
+    let (engine, _reads) = boot(&dir, spawn);
     let (id, _pipe) = answered(&engine, &made, ask(Area::Project, &project.id, None, "work")).await;
     let plan = Signals { billing: Some(faber_engine::budget::Billing::Subscription), ..Default::default() };
     engine.note_account_events(Vendor::Claude, vec![EngineEvent::Signals(plan)]);
@@ -255,9 +256,9 @@ async fn r_next_nothing_at_work_or_owed_to_the_person_is_archived() {
 
 #[tokio::test]
 async fn r_next_a_pull_request_still_watched_and_a_conversation_written_to_since_are_not_archived() {
-    let dir = support::tempdir();
+    let dir = support::DataFolder::new();
     let (spawn, made) = pipes();
-    let (engine, reads) = boot(dir.path(), spawn);
+    let (engine, reads) = boot(&dir, spawn);
     let project = engine.add_project(&dir.path().to_string_lossy()).unwrap();
     let late = now() + 8 * DAY;
 
@@ -316,21 +317,21 @@ impl Executor for Scripted {
 /// A week quiet is not enough while the conversation's own copy holds work found nowhere else.
 #[tokio::test]
 async fn r_next_a_quiet_conversation_whose_copy_holds_unsaved_work_is_not_archived() {
-    let dir = support::tempdir();
+    let dir = support::DataFolder::new();
     let (spawn, made) = pipes();
-    let (first, _reads) = boot(dir.path(), spawn);
+    let (first, _reads) = boot(&dir, spawn);
     let project = first.add_project(&dir.path().to_string_lossy()).unwrap();
     let (id, _pipe) = answered(&first, &made, ask(Area::Project, &project.id, None, "change things")).await;
     first.shutdown();
     // The conversation gets a copy, as one made at its first message would be (the folder exists; the repository is the script).
-    let file = dir.path().join("data").join("conversations").join(format!("{id}.json"));
+    let file = dir.path().join("conversations").join(format!("{id}.json"));
     let mut saved: Value = serde_json::from_slice(&std::fs::read(&file).unwrap()).unwrap();
     let folder = dir.path().to_string_lossy().into_owned();
     saved["copy"] = json!({ "path": folder, "branch": "faber/x", "root": folder });
     std::fs::write(&file, serde_json::to_vec(&saved).unwrap()).unwrap();
 
     let (spawn, _made) = pipes();
-    let (engine, _reads) = boot(dir.path(), spawn);
+    let (engine, _reads) = boot(&dir, spawn);
     let repo = Arc::new(Mutex::new(Repo { dirty: true, held: false }));
     let script = Scripted(repo.clone());
     engine.set_git(Arc::new(move || Some(Box::new(script.clone()) as Box<dyn Executor + Send>)));

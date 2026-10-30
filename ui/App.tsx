@@ -558,6 +558,7 @@ export function App(props: { initial: AppState; update?: UpdateStatus; inbox: { 
   let retry: ReturnType<typeof setTimeout> | undefined;
   // An input method is composing text: the column waits for it to end.
   let composing = false;
+  const heldPointers = new Set<number>();
   let columnExit: Animation | undefined;
   let columnExitTimer: ReturnType<typeof setTimeout> | undefined;
   const cancelColumnExit = () => {
@@ -765,6 +766,7 @@ export function App(props: { initial: AppState; update?: UpdateStatus; inbox: { 
 
   const consider = () => {
     clearTimeout(retry);
+    if (heldPointers.size) return;
     if (composing) autoOpen.typed(Date.now());
     const verdict = autoOpen.check(waitingKeys(items()), Date.now());
     if (verdict.open) openColumn(false);
@@ -957,6 +959,22 @@ export function App(props: { initial: AppState; update?: UpdateStatus; inbox: { 
       if (e.type === 'compositionend') composing = false;
       autoOpen.typed(Date.now());
     };
+    const holdPointer = (e: PointerEvent) => {
+      if (!e.isTrusted) return;
+      heldPointers.add(e.pointerId);
+      clearTimeout(retry);
+    };
+    const releasePointer = (e: PointerEvent) => {
+      if (!e.isTrusted || (e.type === 'pointerover' && e.buttons !== 0) || !heldPointers.delete(e.pointerId)) return;
+      autoOpen.typed(Date.now());
+      consider();
+    };
+    const releasePointers = () => {
+      if (!heldPointers.size) return;
+      heldPointers.clear();
+      autoOpen.typed(Date.now());
+      consider();
+    };
     const focusComposer = () => document.querySelector<HTMLTextAreaElement>('.composer textarea')?.focus();
     const onKey = (e: KeyboardEvent) => {
       const ctrl = e.ctrlKey || e.metaKey;
@@ -1047,12 +1065,24 @@ export function App(props: { initial: AppState; update?: UpdateStatus; inbox: { 
     document.addEventListener('focusin', watchFocus);
     const typingEvents = ['keydown', 'input', 'compositionstart', 'compositionupdate', 'compositionend'];
     for (const type of typingEvents) window.addEventListener(type, typing, true);
+    window.addEventListener('pointerdown', holdPointer, true);
+    window.addEventListener('pointerup', releasePointer, true);
+    window.addEventListener('pointercancel', releasePointer, true);
+    // Returning without a held button clears a release that happened outside the window.
+    window.addEventListener('pointerover', releasePointer, true);
+    window.addEventListener('blur', releasePointers);
     window.addEventListener('keydown', onKey);
     onCleanup(() => {
       stopFollowing();
       props.inbox.take(undefined);
       clearTimeout(retry);
+      heldPointers.clear();
       for (const type of typingEvents) window.removeEventListener(type, typing, true);
+      window.removeEventListener('pointerdown', holdPointer, true);
+      window.removeEventListener('pointerup', releasePointer, true);
+      window.removeEventListener('pointercancel', releasePointer, true);
+      window.removeEventListener('pointerover', releasePointer, true);
+      window.removeEventListener('blur', releasePointers);
       window.removeEventListener('keydown', onKey);
       document.removeEventListener('focusin', watchFocus);
     });

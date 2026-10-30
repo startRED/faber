@@ -11,10 +11,12 @@ use std::path::Path;
 use std::sync::Arc;
 use std::time::Duration;
 
-fn engine(dir: &Path) -> Engine {
+fn engine(dir: &crate::support::DataFolder) -> Engine {
     Engine::new(
         EngineOptions {
-            data_dir: dir.into(),
+            data_dir: dir.path().into(),
+            #[cfg(windows)]
+            chat_dir: dir.chat_path().into(),
             clis: BTreeMap::<Vendor, Cli>::new(),
             spawn: support::fake(vec![]).spawn,
             windows: false,
@@ -39,9 +41,9 @@ fn saved(dir: &Path) -> Conversation {
 
 #[tokio::test]
 async fn the_last_page_of_a_conversation_comes_back_after_a_restart_and_never_in_its_export() {
-    let dir = support::tempdir();
+    let dir = support::DataFolder::new();
     let id = saved(dir.path()).id;
-    let first = engine(dir.path());
+    let first = engine(&dir);
     assert_eq!(first.browser_tabs(&id), None, "a conversation that never had a page has no tabs");
     first.browser_seen(&id, None, "https://docs.example.org/start?q=secret-word", None);
     first.browser_seen(&id, None, "https://docs.example.org/start?q=secret-word", Some("Getting started"));
@@ -50,7 +52,7 @@ async fn the_last_page_of_a_conversation_comes_back_after_a_restart_and_never_in
     first.browser_seen("gone", None, "https://example.org/", None);
     drop(first);
 
-    let again = engine(dir.path());
+    let again = engine(&dir);
     let tabs = again.browser_tabs(&id).expect("kept in the conversation's file");
     let front = tabs.front_tab().expect("a tab in front");
     assert_eq!((front.url.as_str(), front.title.as_str()), ("https://docs.example.org/start?q=secret-word", "Getting started"));
@@ -109,11 +111,13 @@ async fn browse(pipe: &mut support::Pipe, id: u64, arguments: serde_json::Value)
 #[tokio::test]
 async fn the_agent_opens_and_acts_in_its_own_tab_never_on_the_page_the_person_is_on() {
     use faber_engine::model::{Area, Permissions, Settings};
-    let (dir, folder) = (support::canonical_tempdir().unwrap(), support::work_folder());
+    let (dir, folder) = (support::DataFolder::new(), support::work_folder());
     let (spawn, made) = support::pipes();
     let app = Engine::new(
         EngineOptions {
-            data_dir: dir.path().join("data"),
+            data_dir: dir.path().into(),
+            #[cfg(windows)]
+            chat_dir: dir.chat_path().into(),
             clis: BTreeMap::from([(Vendor::Codex, Cli { command: "codex".into(), prefix: vec![] })]),
             spawn,
             windows: false,

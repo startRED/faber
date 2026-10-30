@@ -382,12 +382,14 @@ fn saved(dir: &Path, copy: Option<WorkCopy>) {
 
 #[tokio::test]
 async fn a_conversation_without_a_copy_has_no_changes_and_git_runs_off_the_engine_lock() {
-    let data = tempfile::tempdir().unwrap();
+    let data = support::DataFolder::new();
     let root = tempfile::tempdir().unwrap();
     saved(data.path(), None);
     let engine = Engine::new(
         EngineOptions {
             data_dir: data.path().into(),
+            #[cfg(windows)]
+            chat_dir: data.chat_path().into(),
             clis: BTreeMap::new(),
             spawn: support::fake(vec![]).spawn,
             windows: false,
@@ -414,6 +416,8 @@ async fn a_conversation_without_a_copy_has_no_changes_and_git_runs_off_the_engin
     let engine = Engine::new(
         EngineOptions {
             data_dir: data.path().into(),
+            #[cfg(windows)]
+            chat_dir: data.chat_path().into(),
             clis: BTreeMap::new(),
             spawn: support::fake(vec![]).spawn,
             windows: false,

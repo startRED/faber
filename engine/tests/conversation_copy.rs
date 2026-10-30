@@ -120,17 +120,17 @@ struct Setup {
     cwds: Arc<Mutex<Vec<PathBuf>>>,
     project: String,
     folder: tempfile::TempDir,
-    data: tempfile::TempDir,
+    data: support::DataFolder,
 }
 
 /// An engine on `data`, as the app starts one: the CLI is a silent fake that notes where it starts, git is `runner`.
-fn start(data: &Path, cwds: &Arc<Mutex<Vec<PathBuf>>>, runner: impl Executor + Clone + Send + Sync + 'static) -> Engine {
+fn start(data: &support::DataFolder, cwds: &Arc<Mutex<Vec<PathBuf>>>, runner: impl Executor + Clone + Send + Sync + 'static) -> Engine {
     start_seen(data, cwds, runner, Arc::new(|_| {}))
 }
 
 /// The same, with every event the engine emits handed to `events`.
 fn start_seen(
-    data: &Path,
+    data: &support::DataFolder,
     cwds: &Arc<Mutex<Vec<PathBuf>>>,
     runner: impl Executor + Clone + Send + Sync + 'static,
     events: Arc<dyn Fn(AppEvent) + Send + Sync>,
@@ -142,7 +142,9 @@ fn start_seen(
         inner(bin, argv, cwd)
     });
     let opts = EngineOptions {
-        data_dir: data.into(),
+        data_dir: data.path().into(),
+        #[cfg(windows)]
+        chat_dir: data.chat_path().into(),
         clis: BTreeMap::from([(Vendor::Claude, Cli { command: "claude".into(), prefix: vec![] })]),
         spawn,
         windows: false,
@@ -158,11 +160,11 @@ fn start_seen(
 }
 
 fn setup() -> Setup {
-    let data = support::canonical_tempdir().unwrap();
+    let data = support::DataFolder::new();
     let folder = support::canonical_tempdir().unwrap();
     let cwds: Arc<Mutex<Vec<PathBuf>>> = Arc::default();
     let git = Arc::new(Mutex::new(Repo { root: folder.path().into(), ..Repo::default() }));
-    let engine = start(data.path(), &cwds, Git(git.clone()));
+    let engine = start(&data, &cwds, Git(git.clone()));
     let project = engine.add_project(&folder.path().to_string_lossy()).unwrap().id;
     Setup { engine, git, cwds, project, folder, data }
 }
@@ -241,7 +243,7 @@ async fn move_chat_to_project_prepares_the_copy_for_another_conversations_ask() 
 }
 
 async fn automatic_first_project_turn(asked: bool) {
-    let data = support::work_folder();
+    let data = support::DataFolder::new();
     let folder = support::work_folder();
     let cwds: Arc<Mutex<Vec<PathBuf>>> = Arc::default();
     let seen = cwds.clone();
@@ -253,6 +255,8 @@ async fn automatic_first_project_turn(asked: bool) {
     let engine = Engine::new(
         EngineOptions {
             data_dir: data.path().into(),
+            #[cfg(windows)]
+            chat_dir: data.chat_path().into(),
             clis: BTreeMap::from([(Vendor::Claude, Cli { command: "claude".into(), prefix: vec![] })]),
             spawn,
             windows: false,
@@ -318,11 +322,11 @@ async fn automatic_first_project_turn(asked: bool) {
 #[tokio::test]
 async fn move_chat_to_project_resolves_a_stale_chat_send_before_copies_and_attachments() {
     for attached in [false, true] {
-        let data = support::work_folder();
+        let data = support::DataFolder::new();
         let folder = support::work_folder();
         let cwds: Arc<Mutex<Vec<PathBuf>>> = Arc::default();
         let git = Arc::new(Mutex::new(Repo { root: folder.path().into(), ..Repo::default() }));
-        let engine = start(data.path(), &cwds, Git(git));
+        let engine = start(&data, &cwds, Git(git));
         let project = engine.add_project(&folder.path().to_string_lossy()).unwrap();
         let mut record: faber_engine::model::Conversation =
             serde_json::from_str(include_str!("../../tests/fixtures/conversation-export.json")).unwrap();
@@ -382,7 +386,7 @@ async fn move_chat_to_project_uses_the_current_copy_rule_at_its_first_project_tu
         s.engine.shutdown();
         projects[0].separate_copies = !enabled_at_move;
         store.save_projects(&projects).unwrap();
-        let reopened = start(s.data.path(), &s.cwds, Git(s.git.clone()));
+        let reopened = start(&s.data, &s.cwds, Git(s.git.clone()));
         reopened.warm(WarmRequest {
             conversation_id: Some(id.clone()),
             area: Area::Project,
@@ -443,7 +447,7 @@ async fn move_chat_to_project_makes_its_separate_copy_only_at_the_next_turn_even
     });
     assert!(s.cwds.lock().unwrap().is_empty(), "warming never starts in the person's checkout");
     s.engine.shutdown();
-    let reopened = start(s.data.path(), &s.cwds, Git(s.git.clone()));
+    let reopened = start(&s.data, &s.cwds, Git(s.git.clone()));
     sent(&reopened, SendRequest { conversation_id: Some(id.clone()), ..ask(&s.project, "Continue the work") }).await;
     let copy = reopened.open(&id).unwrap().copy.unwrap();
     assert!(!copy.root.is_empty());
@@ -580,7 +584,7 @@ async fn r_next_a_copy_with_unsaved_work_is_deleted_only_when_the_person_says_so
     assert_eq!(s.engine.remove_with(&id, false), Err("error.copy.unsaved".into()));
     // Nothing runs there now, but a message starts the agent again while git looks: the look no longer holds, so it asks.
     s.engine.shutdown();
-    let engine = start(s.data.path(), &s.cwds, Git(s.git.clone()));
+    let engine = start(&s.data, &s.cwds, Git(s.git.clone()));
     let again = engine.clone();
     let more = SendRequest { conversation_id: Some(id.clone()), ..ask(&s.project, "One more change") };
     s.git.lock().unwrap().on_status = Some(Box::new(move || drop(again.send(more))));
@@ -588,14 +592,14 @@ async fn r_next_a_copy_with_unsaved_work_is_deleted_only_when_the_person_says_so
     assert!(engine.open(&id).is_some() && Path::new(&copy.path).is_dir());
     // Once nothing runs there, the delete needs no question.
     engine.shutdown();
-    let engine = start(s.data.path(), &s.cwds, Git(s.git.clone()));
+    let engine = start(&s.data, &s.cwds, Git(s.git.clone()));
     assert_eq!(engine.remove_with(&id, false), Ok(()));
     assert!(gone(Path::new(&copy.path)).await);
 
     // The agent left its branch and committed on a detached HEAD: that commit is on no branch, so it asks.
     let id = sent(&engine, ask(&s.project, "Detach")).await;
     engine.shutdown();
-    let engine = start(s.data.path(), &s.cwds, Git(s.git.clone()));
+    let engine = start(&s.data, &s.cwds, Git(s.git.clone()));
     s.git.lock().unwrap().detached = true;
     assert_eq!(engine.remove_with(&id, false), Err("error.copy.unsaved".into()));
     // Nor is a copy off its branch ever taken for merged at start.
@@ -640,7 +644,7 @@ async fn r_next_at_start_merged_copies_and_those_of_deleted_conversations_go() {
     std::fs::write(orphan.join(".branch"), "faber/old-0000").unwrap();
     // Both branches are in the person's branch, but `kept` still has uncommitted changes. Faber starts again and sweeps.
     s.git.lock().unwrap().merged = true;
-    let engine = start(s.data.path(), &s.cwds, DirtyIn(Git(s.git.clone()), PathBuf::from(&kept_copy.path)));
+    let engine = start(&s.data, &s.cwds, DirtyIn(Git(s.git.clone()), PathBuf::from(&kept_copy.path)));
     engine.sweep_copies();
     assert!(!orphan.exists(), "the orphan goes");
     assert!(!Path::new(&merged_copy.path).exists(), "a clean merged copy goes");
@@ -669,7 +673,7 @@ impl Executor for DirtyIn {
 /// its brief reaches it only there: three agents' pieces and the person's checkout never share a folder.
 #[tokio::test]
 async fn r_next_a_conversation_the_agent_starts_works_in_a_copy_of_its_own() {
-    let data = support::canonical_tempdir().unwrap();
+    let data = support::DataFolder::new();
     let folder = support::canonical_tempdir().unwrap();
     let cwds: Arc<Mutex<Vec<PathBuf>>> = Arc::default();
     let git = Arc::new(Mutex::new(Repo { root: folder.path().into(), ..Repo::default() }));
@@ -682,6 +686,8 @@ async fn r_next_a_conversation_the_agent_starts_works_in_a_copy_of_its_own() {
     let (tx, _rx) = tokio::sync::mpsc::unbounded_channel::<AppEvent>();
     let opts = EngineOptions {
         data_dir: data.path().into(),
+        #[cfg(windows)]
+        chat_dir: data.chat_path().into(),
         clis: BTreeMap::from([(Vendor::Claude, Cli { command: "claude".into(), prefix: vec![] })]),
         spawn,
         windows: false,
@@ -759,7 +765,7 @@ struct Slow {
 }
 
 fn slow() -> Slow {
-    let data = support::canonical_tempdir().unwrap();
+    let data = support::DataFolder::new();
     let folder = support::canonical_tempdir().unwrap();
     let cwds: Arc<Mutex<Vec<PathBuf>>> = Arc::default();
     let git = Arc::new(Mutex::new(Repo { root: folder.path().into(), ..Repo::default() }));
@@ -775,7 +781,7 @@ fn slow() -> Slow {
             note.lock().unwrap().push(home.join(conversation_id).exists());
         }
     });
-    let engine = start_seen(data.path(), &cwds, Git(git.clone()), events);
+    let engine = start_seen(&data, &cwds, Git(git.clone()), events);
     let project = engine.add_project(&folder.path().to_string_lossy()).unwrap().id;
     Slow { setup: Setup { engine, git, cwds, project, folder, data }, release, early }
 }
@@ -903,7 +909,7 @@ async fn r_next_a_stopped_first_message_does_not_start_its_agent_when_the_copy_c
     assert!(s.cwds.lock().unwrap().is_empty(), "stopped before its copy: no agent");
     // The copy is kept on the conversation's record, so after a restart the next message still goes on in it.
     s.engine.shutdown();
-    let engine = start(s.data.path(), &s.cwds, Git(s.git.clone()));
+    let engine = start(&s.data, &s.cwds, Git(s.git.clone()));
     assert!(engine.open(&id).unwrap().copy.is_some_and(|c| !c.root.is_empty()), "the made copy was saved");
     let again = SendRequest { conversation_id: Some(id.clone()), ..ask(&s.project, "Go on") };
     engine.send(again).unwrap();
@@ -952,12 +958,12 @@ impl Executor for NoAdd {
 
 #[tokio::test]
 async fn r_next_a_copy_that_cannot_be_made_ends_the_reply_and_the_next_message_tries_again() {
-    let data = support::canonical_tempdir().unwrap();
+    let data = support::DataFolder::new();
     let folder = support::canonical_tempdir().unwrap();
     let cwds: Arc<Mutex<Vec<PathBuf>>> = Arc::default();
     let repo = Arc::new(Mutex::new(Repo { root: folder.path().into(), ..Repo::default() }));
     let adds: Arc<std::sync::atomic::AtomicUsize> = Arc::default();
-    let engine = start(data.path(), &cwds, NoAdd(Git(repo.clone()), adds.clone()));
+    let engine = start(&data, &cwds, NoAdd(Git(repo.clone()), adds.clone()));
     let project = engine.add_project(&folder.path().to_string_lossy()).unwrap().id;
     let id = engine.send(ask(&project, "Fix the login page")).unwrap();
     let mut reply = engine.open(&id).unwrap().messages[1].clone();
@@ -1026,7 +1032,7 @@ async fn r_next_a_restart_before_the_copy_is_attached_still_works_in_the_copy_af
     let id = s.engine.send(ask(&s.project, "Fix the login page")).unwrap();
     // Faber closes while git is still making the copy; the next start finds the conversation with its copy named only.
     s.engine.shutdown();
-    let engine = start(s.data.path(), &s.cwds, Git(s.git.clone()));
+    let engine = start(&s.data, &s.cwds, Git(s.git.clone()));
     let named = engine.open(&id).unwrap().copy.expect("the copy was named before git started");
     assert!(named.root.is_empty(), "{named:?}");
     // Typing in it, or a message, never starts the agent in the project folder; the message makes the copy and runs there.

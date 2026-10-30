@@ -2211,6 +2211,8 @@ export const fr: Messages = {
   'notes.289.better': 'Quand une réponse échoue, la ligne en dessous dit maintenant pourquoi : service occupé, connexion coupée, connexion au compte expirée ou conversation trop longue.',
   'notes.290.better': 'Les assistants ont maintenant un nom dans votre langue, ou Assistant 1, 2…, et n’affichent « vérifié » qu’après des contrôles réussis.',
   'notes.291.fixed': 'Les réponses disent maintenant une fois ce qui tourne encore et la suite, et un journal que vous collez ne les remplit plus de termes techniques.',
+  'notes.292.better': 'La colonne « En cours » attend la fin de votre clic avant de s’ouvrir automatiquement.',
+  'notes.293.fixed': 'Sous Windows, les fichiers privés des conversations sont conservés hors des données de Faber et restent disponibles à la réouverture.',
   'update.checking': 'Recherche d’une mise à jour…',
   'update.downloading': 'Téléchargement de la mise à jour…',
   'update.downloadingPercent': 'Téléchargement de la mise à jour… {percent} %',

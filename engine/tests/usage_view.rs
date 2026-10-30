@@ -9,10 +9,12 @@ use std::sync::Arc;
 use std::time::Duration;
 
 const WHEN: f64 = 1_791_620_000.0;
-fn engine(dir: &std::path::Path) -> Engine {
+fn engine(dir: &crate::support::DataFolder) -> Engine {
     let e = Engine::new(
         EngineOptions {
-            data_dir: dir.into(),
+            data_dir: dir.path().into(),
+            #[cfg(windows)]
+            chat_dir: dir.chat_path().into(),
             clis: BTreeMap::from([(Vendor::Claude, Cli { command: "claude".into(), prefix: vec![] })]),
             spawn: Arc::new(|_, _, _| Err(std::io::Error::other("no process in this test"))),
             windows: false,
@@ -30,7 +32,7 @@ fn engine(dir: &std::path::Path) -> Engine {
 }
 #[tokio::test]
 async fn the_usage_view_separates_own_money_from_foreign_account_use() {
-    let dir = tempfile::tempdir().unwrap();
+    let dir = crate::support::DataFolder::new();
     let mut ledger = Ledger::default();
     let v = &mut ledger.claude;
     v.billing = Billing::Subscription;
@@ -40,7 +42,7 @@ async fn the_usage_view_separates_own_money_from_foreign_account_use() {
     v.record("five_hour", 0.35, WHEN + 9000.0, WHEN, 0);
     v.learned = Default::default();
     Store::new(dir.path()).save_ledger(&ledger).unwrap();
-    let e = engine(dir.path());
+    let e = engine(&dir);
     let u = e.state().usage.remove(0);
     assert_eq!(u.own_spend_usd, 1.25);
     assert!(u.foreign_use);
@@ -51,8 +53,8 @@ async fn the_usage_view_separates_own_money_from_foreign_account_use() {
 }
 #[tokio::test]
 async fn a_typed_plan_cannot_make_unknown_billing_eligible_or_hide_the_auth_hint() {
-    let dir = tempfile::tempdir().unwrap();
-    let e = engine(dir.path());
+    let dir = crate::support::DataFolder::new();
+    let e = engine(&dir);
     e.answer_plan(Vendor::Claude, "max20x");
     let u = e.state().usage.remove(0);
     assert_eq!(u.plan.as_deref(), Some("max20x"));

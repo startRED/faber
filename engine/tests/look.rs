@@ -14,9 +14,11 @@ use std::sync::Arc;
 use std::time::Duration;
 use support::{next_pipe, pipes};
 
-fn engine(dir: &Path, spawn: faber_engine::proc::Spawner) -> Engine {
+fn engine(dir: &crate::support::DataFolder, spawn: faber_engine::proc::Spawner) -> Engine {
     let opts = EngineOptions {
-        data_dir: dir.into(),
+        data_dir: dir.path().into(),
+        #[cfg(windows)]
+        chat_dir: dir.chat_path().into(),
         clis: BTreeMap::from([(Vendor::Claude, Cli { command: "claude".into(), prefix: vec![] })]),
         spawn,
         windows: false,
@@ -66,11 +68,11 @@ const BAD: &str = "let d = parse(s).unwrap();";
 /// other file that still holds the line the fix removed.
 #[tokio::test]
 async fn r369_a_fix_is_offered_and_the_offer_names_where_the_same_line_still_is() {
-    let dir = tempfile::tempdir().unwrap();
+    let dir = crate::support::DataFolder::new();
     let (spawn, made) = pipes();
-    let engine = engine(dir.path(), spawn);
+    let engine = engine(&dir, spawn);
     let id = send(&engine, "fix the date parsing");
-    let folder = dir.path().join("chat").join(&id);
+    let folder = dir.scratch_path().join(&id);
     write(&folder, "src/a.rs", "fn a() {\n    let d = parse(s)?;\n}\n");
     write(&folder, "src/b.rs", &format!("fn b() {{\n    {BAD}\n}}\n"));
     let mut pipe = next_pipe(&made).await;
@@ -93,11 +95,11 @@ async fn r369_a_fix_is_offered_and_the_offer_names_where_the_same_line_still_is(
 /// make an offer of their own. A change whose text is nowhere else offers nothing.
 #[tokio::test]
 async fn r369_text_a_change_removed_that_is_still_elsewhere_is_offered_on_its_own() {
-    let dir = tempfile::tempdir().unwrap();
+    let dir = crate::support::DataFolder::new();
     let (spawn, made) = pipes();
-    let engine = engine(dir.path(), spawn);
+    let engine = engine(&dir, spawn);
     let id = send(&engine, "fix the spelling in the intro");
-    let folder = dir.path().join("chat").join(&id);
+    let folder = dir.scratch_path().join(&id);
     write(&folder, "intro.md", "The color of the sky\n");
     write(&folder, "notes/later.md", "# Later\n\nThe colour of the sky changes at dusk.\n");
     let mut pipe = next_pipe(&made).await;
@@ -204,11 +206,11 @@ const ASK: &str = "Look for the same kind of mistake you just fixed in the other
 /// button writes is one more, for the sign that was offered.
 #[tokio::test]
 async fn an_offer_and_its_use_are_counted_in_the_local_log() {
-    let dir = tempfile::tempdir().unwrap();
+    let dir = crate::support::DataFolder::new();
     let (spawn, made) = pipes();
-    let engine = engine(dir.path(), spawn);
+    let engine = engine(&dir, spawn);
     let id = send(&engine, "fix the date parsing");
-    let folder = dir.path().join("chat").join(&id);
+    let folder = dir.scratch_path().join(&id);
     write(&folder, "src/b.rs", &format!("fn b() {{\n    {BAD}\n}}\n"));
     let mut pipe = next_pipe(&made).await;
     red_to_green(&mut pipe).await;
@@ -225,11 +227,11 @@ async fn an_offer_and_its_use_are_counted_in_the_local_log() {
 /// An offer made by the read alone (no check ran) is counted when the read makes it, under its own sign.
 #[tokio::test]
 async fn an_offer_made_by_the_read_is_counted_under_its_own_sign() {
-    let dir = tempfile::tempdir().unwrap();
+    let dir = crate::support::DataFolder::new();
     let (spawn, made) = pipes();
-    let engine = engine(dir.path(), spawn);
+    let engine = engine(&dir, spawn);
     let id = send(&engine, "fix the spelling in the intro");
-    let folder = dir.path().join("chat").join(&id);
+    let folder = dir.scratch_path().join(&id);
     write(&folder, "intro.md", "The color of the sky\n");
     write(&folder, "notes/later.md", "# Later\n\nThe colour of the sky changes at dusk.\n");
     let mut pipe = next_pipe(&made).await;
@@ -251,9 +253,9 @@ async fn an_offer_made_by_the_read_is_counted_under_its_own_sign() {
 /// A turn with no sign leaves no log, and the request sent after it is no use of anything.
 #[tokio::test]
 async fn nothing_is_written_without_a_sign() {
-    let dir = tempfile::tempdir().unwrap();
+    let dir = crate::support::DataFolder::new();
     let (spawn, made) = pipes();
-    let engine = engine(dir.path(), spawn);
+    let engine = engine(&dir, spawn);
     let id = send(&engine, "hello");
     let mut pipe = next_pipe(&made).await;
     pipe.say(json!({ "type": "system", "subtype": "init", "session_id": "s", "model": "haiku" })).await;

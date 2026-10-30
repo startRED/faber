@@ -359,6 +359,8 @@ async fn attempt(scenario: Scenario, model: &str, options: &Options, base: &Path
     let engine = Engine::new(
         EngineOptions {
             data_dir: world.join("state"),
+            #[cfg(windows)]
+            chat_dir: world.join("chat-work"),
             clis,
             spawn: proc::real_spawner(),
             windows: cfg!(windows),

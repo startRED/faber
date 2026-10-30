@@ -190,8 +190,8 @@ mod tests {
     #[tokio::test]
     async fn creative_runtime_reverses_labels_records_full_reasons_and_closes_both_sessions() {
         for second in [Some(r#"{"a":2,"b":8,"reason":"B is clearer."}"#), Some("invalid"), None] {
-            let dir = tempfile::tempdir().unwrap();
-            let (engine, _) = super::super::answer::tests::engine(dir.path());
+            let dir = crate::workspace::TestRoot::new();
+            let (engine, _) = super::super::answer::tests::engine(&dir);
             let (tx, rx) = oneshot::channel();
             let tx = Mutex::new(Some(tx));
             let session = Session::from_fn(move |command| {
@@ -235,8 +235,8 @@ mod tests {
 
     #[tokio::test]
     async fn creative_stop_with_ready_answers_never_records_or_returns_success() {
-        let dir = tempfile::tempdir().unwrap();
-        let (engine, _) = super::super::answer::tests::engine(dir.path());
+        let dir = crate::workspace::TestRoot::new();
+        let (engine, _) = super::super::answer::tests::engine(&dir);
         let replies = Arc::new(Mutex::new(Vec::new()));
         let got = replies.clone();
         let session = Session::from_fn(move |command| {
@@ -272,8 +272,8 @@ mod tests {
 
     #[tokio::test(start_paused = true)]
     async fn creative_timeout_closes_both_judges_and_releases_unknown_cost_counts() {
-        let dir = tempfile::tempdir().unwrap();
-        let (engine, _) = super::super::answer::tests::engine(dir.path());
+        let dir = crate::workspace::TestRoot::new();
+        let (engine, _) = super::super::answer::tests::engine(&dir);
         let (tx, rx) = oneshot::channel();
         let tx = Mutex::new(Some(tx));
         let session = Session::from_fn(move |command| {

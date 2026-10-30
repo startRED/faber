@@ -16,19 +16,21 @@ use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::sync::mpsc::UnboundedReceiver;
 
 // The hand-driven Claude project conversation of keep_going.rs, written again here so the two lanes touch different files.
-fn new_engine(dir: &Path, spawn: faber_engine::proc::Spawner) -> (Engine, UnboundedReceiver<AppEvent>) {
+fn new_engine(dir: &crate::support::DataFolder, spawn: faber_engine::proc::Spawner) -> (Engine, UnboundedReceiver<AppEvent>) {
     new_engine_with(dir, spawn, Duration::from_secs(120), 3)
 }
 
 fn new_engine_with(
-    dir: &Path,
+    dir: &crate::support::DataFolder,
     spawn: faber_engine::proc::Spawner,
     idle: Duration,
     max_warm: usize,
 ) -> (Engine, UnboundedReceiver<AppEvent>) {
     let (tx, rx) = tokio::sync::mpsc::unbounded_channel();
     let opts = EngineOptions {
-        data_dir: dir.into(),
+        data_dir: dir.path().into(),
+        #[cfg(windows)]
+        chat_dir: dir.chat_path().into(),
         clis: BTreeMap::from([(Vendor::Claude, Cli { command: "claude".into(), prefix: vec![] })]),
         spawn,
         windows: false,
@@ -45,7 +47,7 @@ fn new_engine_with(
     (engine, rx)
 }
 
-async fn started(dir: &Path, folder: &Path) -> (Engine, UnboundedReceiver<AppEvent>, Pipe, String) {
+async fn started(dir: &crate::support::DataFolder, folder: &Path) -> (Engine, UnboundedReceiver<AppEvent>, Pipe, String) {
     let (engine, rx, pipe, id, _made) = started_with(dir, folder, Duration::from_secs(120), 3).await;
     (engine, rx, pipe, id)
 }
@@ -53,7 +55,7 @@ async fn started(dir: &Path, folder: &Path) -> (Engine, UnboundedReceiver<AppEve
 type Made = Arc<Mutex<Vec<Pipe>>>;
 
 async fn started_with(
-    dir: &Path,
+    dir: &crate::support::DataFolder,
     folder: &Path,
     idle: Duration,
     max_warm: usize,
@@ -188,8 +190,8 @@ async fn compacts(agent: &mut Pipe, after: u64) {
 
 #[tokio::test]
 async fn the_meter_counts_the_main_agents_latest_prompt_against_its_models_window() {
-    let (dir, project) = (tempfile::tempdir().unwrap(), crate::support::work_folder());
-    let (engine, mut rx, mut agent, id) = started(dir.path(), project.path()).await;
+    let (dir, project) = (crate::support::DataFolder::new(), crate::support::work_folder());
+    let (engine, mut rx, mut agent, id) = started(&dir, project.path()).await;
     // Nothing is known before the CLI says it.
     assert_eq!(engine.open(&id).unwrap().context, None);
     agent.say(response(Value::Null, 2, 10_000, 5_000)).await;
@@ -211,7 +213,7 @@ async fn the_meter_counts_the_main_agents_latest_prompt_against_its_models_windo
     let (ok, text) = tool(&mut agent, 1, json!({ "action": "context" })).await;
     assert!(ok && text == "Your context holds 15002 of 1000000 tokens (1%).", "{text}");
     engine.shutdown();
-    let (again, _rx) = new_engine(dir.path(), pipes().0);
+    let (again, _rx) = new_engine(&dir, pipes().0);
     assert_eq!(again.open(&id).unwrap().context, Some(ContextFill { used: 15_002, window: 1_000_000 }));
 
     again.shutdown();
@@ -219,8 +221,8 @@ async fn the_meter_counts_the_main_agents_latest_prompt_against_its_models_windo
 
 #[tokio::test]
 async fn a_compaction_the_cli_reports_resets_the_meter_to_the_summary() {
-    let (dir, project) = (tempfile::tempdir().unwrap(), crate::support::work_folder());
-    let (engine, _rx, mut agent, id) = started(dir.path(), project.path()).await;
+    let (dir, project) = (crate::support::DataFolder::new(), crate::support::work_folder());
+    let (engine, _rx, mut agent, id) = started(&dir, project.path()).await;
     agent.say(response(Value::Null, 2, 200_000, 5_000)).await;
     agent.say(result(1_000_000)).await;
     until(&engine, &id, |c| idle(c) && c.context.is_some_and(|c| c.used == 205_002)).await;
@@ -231,8 +233,8 @@ async fn a_compaction_the_cli_reports_resets_the_meter_to_the_summary() {
 
 #[tokio::test]
 async fn the_agent_compacts_itself_when_its_turn_ends_and_gets_its_own_next_word_for_word() {
-    let (dir, project) = (tempfile::tempdir().unwrap(), crate::support::work_folder());
-    let (engine, _rx, mut agent, id) = started(dir.path(), project.path()).await;
+    let (dir, project) = (crate::support::DataFolder::new(), crate::support::work_folder());
+    let (engine, _rx, mut agent, id) = started(&dir, project.path()).await;
     agent.say(response(Value::Null, 2, 150_000, 5_000)).await;
     let (ok, text) = tool(&mut agent, 1, json!({ "action": "context" })).await;
     assert!(ok && text.contains("not known yet"), "the window comes with the first result: {text}");
@@ -289,8 +291,8 @@ async fn the_agent_compacts_itself_when_its_turn_ends_and_gets_its_own_next_word
 
 #[tokio::test]
 async fn a_compaction_without_next_sends_no_turn_and_a_failed_turn_compacts_nothing() {
-    let (dir, project) = (tempfile::tempdir().unwrap(), crate::support::work_folder());
-    let (engine, _rx, mut agent, id) = started(dir.path(), project.path()).await;
+    let (dir, project) = (crate::support::DataFolder::new(), crate::support::work_folder());
+    let (engine, _rx, mut agent, id) = started(&dir, project.path()).await;
     let (ok, _) = tool(&mut agent, 1, json!({ "action": "compact" })).await;
     assert!(ok);
     answers(&mut agent, "One topic is done.", true).await;
@@ -328,8 +330,8 @@ async fn a_compaction_without_next_sends_no_turn_and_a_failed_turn_compacts_noth
 /// may take its process away: its end would never be heard and the conversation would wait on it for good.
 #[tokio::test]
 async fn a_process_that_compacts_is_neither_closed_as_idle_nor_evicted_for_a_newer_conversation() {
-    let (dir, project) = (tempfile::tempdir().unwrap(), crate::support::work_folder());
-    let (engine, _rx, mut agent, _id, made) = started_with(dir.path(), project.path(), Duration::from_millis(150), 1).await;
+    let (dir, project) = (crate::support::DataFolder::new(), crate::support::work_folder());
+    let (engine, _rx, mut agent, _id, made) = started_with(&dir, project.path(), Duration::from_millis(150), 1).await;
     let (ok, _) = tool(&mut agent, 1, json!({ "action": "compact", "next": "Go on with the footer." })).await;
     assert!(ok);
     answers(&mut agent, "The header is done.", true).await;
@@ -365,8 +367,8 @@ async fn a_process_that_compacts_is_neither_closed_as_idle_nor_evicted_for_a_new
 /// A compaction is work: the running list has it (so an update waits and the screen offers Stop) until the CLI ends it.
 #[tokio::test]
 async fn a_compaction_is_work_in_the_running_list_until_the_cli_ends_it() {
-    let (dir, project) = (tempfile::tempdir().unwrap(), crate::support::work_folder());
-    let (engine, _rx, mut agent, id) = started(dir.path(), project.path()).await;
+    let (dir, project) = (crate::support::DataFolder::new(), crate::support::work_folder());
+    let (engine, _rx, mut agent, id) = started(&dir, project.path()).await;
     let (ok, _) = tool(&mut agent, 1, json!({ "action": "compact" })).await;
     assert!(ok);
     answers(&mut agent, "The header is done.", true).await;
@@ -385,8 +387,8 @@ async fn a_compaction_is_work_in_the_running_list_until_the_cli_ends_it() {
 /// after a Stop, as after a stopped turn.
 #[tokio::test]
 async fn stop_during_a_compaction_interrupts_it_and_nothing_goes_out_after_it() {
-    let (dir, project) = (tempfile::tempdir().unwrap(), crate::support::work_folder());
-    let (engine, _rx, mut agent, id) = started(dir.path(), project.path()).await;
+    let (dir, project) = (crate::support::DataFolder::new(), crate::support::work_folder());
+    let (engine, _rx, mut agent, id) = started(&dir, project.path()).await;
     let (ok, _) = tool(&mut agent, 1, json!({ "action": "compact", "next": "Go on with the footer." })).await;
     assert!(ok);
     answers(&mut agent, "The header is done.", true).await;
@@ -502,11 +504,13 @@ fn codex_with(seen: Arc<Mutex<Vec<Value>>>, asks: bool) -> Spawner {
 
 #[tokio::test]
 async fn codex_reports_its_context_compacts_on_request_and_continues_with_next() {
-    let (dir, project) = (tempfile::tempdir().unwrap(), crate::support::work_folder());
+    let (dir, project) = (crate::support::DataFolder::new(), crate::support::work_folder());
     let seen = Arc::new(Mutex::new(vec![]));
     let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
     let opts = EngineOptions {
         data_dir: dir.path().into(),
+        #[cfg(windows)]
+        chat_dir: dir.chat_path().into(),
         clis: BTreeMap::from([(Vendor::Codex, Cli { command: "codex".into(), prefix: vec![] })]),
         spawn: codex(seen.clone()),
         windows: false,
@@ -549,9 +553,11 @@ async fn codex_reports_its_context_compacts_on_request_and_continues_with_next()
     engine.shutdown();
 }
 
-fn codex_engine(dir: &Path, seen: Arc<Mutex<Vec<Value>>>) -> Engine {
+fn codex_engine(dir: &crate::support::DataFolder, seen: Arc<Mutex<Vec<Value>>>) -> Engine {
     let opts = EngineOptions {
-        data_dir: dir.into(),
+        data_dir: dir.path().into(),
+        #[cfg(windows)]
+        chat_dir: dir.chat_path().into(),
         clis: BTreeMap::from([(Vendor::Codex, Cli { command: "codex".into(), prefix: vec![] })]),
         spawn: codex_with(seen, false),
         windows: false,
@@ -571,8 +577,8 @@ fn codex_engine(dir: &Path, seen: Arc<Mutex<Vec<Value>>>) -> Engine {
 /// the person said nothing more.
 #[tokio::test]
 async fn compact_now_sends_claude_code_its_own_compact_and_nothing_after_it() {
-    let (dir, project) = (tempfile::tempdir().unwrap(), crate::support::work_folder());
-    let (engine, _rx, mut agent, id) = started(dir.path(), project.path()).await;
+    let (dir, project) = (crate::support::DataFolder::new(), crate::support::work_folder());
+    let (engine, _rx, mut agent, id) = started(&dir, project.path()).await;
     // While the agent works, it is not the moment: the compaction would cut its turn.
     assert_eq!(engine.compact_now(&id), Err("error.compact.busy".to_string()));
     answers(&mut agent, "The login page works.", true).await;
@@ -592,8 +598,8 @@ async fn compact_now_sends_claude_code_its_own_compact_and_nothing_after_it() {
 /// Claude Code closes an idle process: "Compact now" starts one on the conversation's own session for the compaction.
 #[tokio::test]
 async fn compact_now_starts_claude_code_again_when_its_idle_process_was_closed() {
-    let (dir, project) = (tempfile::tempdir().unwrap(), crate::support::work_folder());
-    let (engine, _rx, mut agent, id, made) = started_with(dir.path(), project.path(), Duration::from_millis(100), 3).await;
+    let (dir, project) = (crate::support::DataFolder::new(), crate::support::work_folder());
+    let (engine, _rx, mut agent, id, made) = started_with(&dir, project.path(), Duration::from_millis(100), 3).await;
     answers(&mut agent, "The login page works.", true).await;
     until(&engine, &id, idle).await;
     for _ in 0..300 {
@@ -627,8 +633,8 @@ async fn compact_now_starts_claude_code_again_when_its_idle_process_was_closed()
 /// Opening the meter asks Claude Code what fills the context, without a turn; the answer comes back in Faber's parts.
 #[tokio::test]
 async fn the_meter_asks_claude_code_what_fills_the_context_without_a_turn() {
-    let (dir, project) = (tempfile::tempdir().unwrap(), crate::support::work_folder());
-    let (engine, mut rx, mut agent, id) = started(dir.path(), project.path()).await;
+    let (dir, project) = (crate::support::DataFolder::new(), crate::support::work_folder());
+    let (engine, mut rx, mut agent, id) = started(&dir, project.path()).await;
     answers(&mut agent, "The login page works.", true).await;
     until(&engine, &id, idle).await;
     assert!(engine.context_parts(&id));
@@ -689,9 +695,9 @@ async fn the_meter_asks_claude_code_what_fills_the_context_without_a_turn() {
 /// opening when the person asks; and it counts no parts.
 #[tokio::test]
 async fn compact_now_sends_codex_its_own_request_also_while_its_thread_opens() {
-    let (dir, project) = (tempfile::tempdir().unwrap(), crate::support::work_folder());
+    let (dir, project) = (crate::support::DataFolder::new(), crate::support::work_folder());
     let seen = Arc::new(Mutex::new(vec![]));
-    let engine = codex_engine(dir.path(), seen.clone());
+    let engine = codex_engine(&dir, seen.clone());
     let p = engine.add_project(&project.path().to_string_lossy()).unwrap();
     let request = SendRequest {
         conversation_id: None,
@@ -708,7 +714,7 @@ async fn compact_now_sends_codex_its_own_request_also_while_its_thread_opens() {
     engine.shutdown();
 
     let seen = Arc::new(Mutex::new(vec![]));
-    let engine = codex_engine(dir.path(), seen.clone());
+    let engine = codex_engine(&dir, seen.clone());
     // The person opens it again after Faber started, and asks.
     engine.open(&id).unwrap();
     engine.compact_now(&id).unwrap();
@@ -752,8 +758,8 @@ async fn kept_turn(agent: &mut Pipe, n: usize, read: u64, closes: bool) {
 /// is not asked again before the next turn.
 #[tokio::test]
 async fn keep_going_compacts_a_large_context_between_tasks_before_its_next_turn() {
-    let (dir, project) = (tempfile::tempdir().unwrap(), crate::support::work_folder());
-    let (engine, _rx, mut agent, id) = started(dir.path(), project.path()).await;
+    let (dir, project) = (crate::support::DataFolder::new(), crate::support::work_folder());
+    let (engine, _rx, mut agent, id) = started(&dir, project.path()).await;
     engine.set_keep_going_pace(0.001);
     engine.keep_going(&id, true).unwrap();
     let keep_going = |t: &str| t.starts_with("The person is away");
@@ -788,8 +794,8 @@ async fn keep_going_compacts_a_large_context_between_tasks_before_its_next_turn(
 
 #[tokio::test]
 async fn the_agent_clears_its_context_and_a_new_session_starts_from_the_persons_requests_and_its_note() {
-    let (dir, project) = (tempfile::tempdir().unwrap(), crate::support::work_folder());
-    let (engine, mut rx, mut agent, id, made) = started_with(dir.path(), project.path(), Duration::from_secs(120), 3).await;
+    let (dir, project) = (crate::support::DataFolder::new(), crate::support::work_folder());
+    let (engine, mut rx, mut agent, id, made) = started_with(&dir, project.path(), Duration::from_secs(120), 3).await;
     agent.say(response(Value::Null, 2, 150_000, 5_000)).await;
     let (ok, text) = tool(&mut agent, 1, json!({ "action": "clear" })).await;
     assert!(!ok && text.contains("handoff note"), "a fresh context starts from the note alone, so one is needed: {text}");
@@ -823,8 +829,8 @@ async fn the_agent_clears_its_context_and_a_new_session_starts_from_the_persons_
 
 #[tokio::test]
 async fn a_failed_compaction_continues_after_messages_already_waiting() {
-    let (dir, project) = (tempfile::tempdir().unwrap(), crate::support::work_folder());
-    let (engine, _rx, mut agent, id) = started(dir.path(), project.path()).await;
+    let (dir, project) = (crate::support::DataFolder::new(), crate::support::work_folder());
+    let (engine, _rx, mut agent, id) = started(&dir, project.path()).await;
     let (ok, text) = tool(&mut agent, 1, json!({ "action": "compact", "next": "Finish the docs." })).await;
     assert!(ok, "{text}");
     answers(&mut agent, "Ready to compact.", true).await;
@@ -854,8 +860,8 @@ async fn a_failed_compaction_continues_after_messages_already_waiting() {
 
 #[tokio::test]
 async fn clearing_context_delivers_waiting_messages_before_the_handoff() {
-    let (dir, project) = (tempfile::tempdir().unwrap(), crate::support::work_folder());
-    let (engine, _rx, mut agent, id, made) = started_with(dir.path(), project.path(), Duration::from_secs(120), 3).await;
+    let (dir, project) = (crate::support::DataFolder::new(), crate::support::work_folder());
+    let (engine, _rx, mut agent, id, made) = started_with(&dir, project.path(), Duration::from_secs(120), 3).await;
     let (ok, text) = tool(&mut agent, 1, json!({ "action": "clear", "next": "Finish the docs." })).await;
     assert!(ok, "{text}");
     engine

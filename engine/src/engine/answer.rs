@@ -424,11 +424,13 @@ pub(super) mod tests {
         Stub { session, asked, held }
     }
 
-    pub(in crate::engine) fn engine(dir: &Path) -> (Engine, Arc<Mutex<Vec<AppEvent>>>) {
+    pub(in crate::engine) fn engine(dir: &crate::workspace::TestRoot) -> (Engine, Arc<Mutex<Vec<AppEvent>>>) {
         let events = Arc::new(Mutex::new(Vec::new()));
         let sink = events.clone();
         let opts = EngineOptions {
-            data_dir: dir.into(),
+            data_dir: dir.path().into(),
+            #[cfg(windows)]
+            chat_dir: dir.work().into(),
             clis: BTreeMap::new(),
             spawn: Arc::new(|_, _, _| Err(std::io::Error::other("no process in this test"))),
             windows: false,
@@ -527,8 +529,8 @@ pub(super) mod tests {
 
     #[tokio::test]
     async fn commit_receipts_require_success_and_survive_loading_an_older_conversation() {
-        let dir = tempfile::tempdir().unwrap();
-        let (engine, _) = engine(dir.path());
+        let dir = crate::workspace::TestRoot::new();
+        let (engine, _) = engine(&dir);
         let id = seed(&engine, stub(vec![]).session, &[("t1", &[])]);
         for (call, command, ok, declined) in [
             ("commit", "git -C 'a folder' commit -m fix", true, false),
@@ -562,8 +564,8 @@ pub(super) mod tests {
 
     #[tokio::test]
     async fn reply_attention_is_the_latest_running_or_done_state_in_open_and_message_events() {
-        let dir = tempfile::tempdir().unwrap();
-        let (engine, events) = engine(dir.path());
+        let dir = crate::workspace::TestRoot::new();
+        let (engine, events) = engine(&dir);
         let id = seed(&engine, stub(vec![]).session, &[("t1", &[])]);
         engine.with(|c| {
             c.turn(&id).unwrap().checks = Some(Checks { state: ChecksState::NeedsYou, passed: 0, failed: vec![] });
@@ -594,8 +596,8 @@ pub(super) mod tests {
 
     #[tokio::test]
     async fn a_commit_that_finishes_after_steering_stays_in_its_own_reply() {
-        let dir = tempfile::tempdir().unwrap();
-        let (engine, _) = engine(dir.path());
+        let dir = crate::workspace::TestRoot::new();
+        let (engine, _) = engine(&dir);
         let id = seed(&engine, stub(vec![]).session, &[("t1", &[])]);
         engine.with(|c| {
             c.handle(
@@ -624,8 +626,8 @@ pub(super) mod tests {
     #[tokio::test]
     async fn r160_review_plan_approval_names_the_clicked_request_and_refuses_a_stale_one() {
         for request in ["missing", "second"] {
-            let dir = tempfile::tempdir().unwrap();
-            let (engine, _) = engine(dir.path());
+            let dir = crate::workspace::TestRoot::new();
+            let (engine, _) = engine(&dir);
             engine.save_settings(Settings { permissions: Some(Permissions::Ask), ..Settings::default() }).unwrap();
             let s = stub(vec![]);
             let id = seed(&engine, s.session.clone(), &[("t1", &[("first", "ExitPlanMode"), ("second", "ExitPlanMode")])]);
@@ -644,8 +646,8 @@ pub(super) mod tests {
 
     #[tokio::test]
     async fn r160_plan_card_without_a_revision_cannot_approve_but_can_keep_planning() {
-        let dir = tempfile::tempdir().unwrap();
-        let (engine, _) = engine(dir.path());
+        let dir = crate::workspace::TestRoot::new();
+        let (engine, _) = engine(&dir);
         let session = stub(vec![]);
         let id = seed(&engine, session.session, &[("t1", &[("plan", "ExitPlanMode")])]);
         engine.with(|c| {
@@ -660,8 +662,8 @@ pub(super) mod tests {
 
     #[tokio::test]
     async fn r160_keep_planning_keeps_the_card_until_claude_confirms_delivery() {
-        let dir = tempfile::tempdir().unwrap();
-        let (engine, _) = engine(dir.path());
+        let dir = crate::workspace::TestRoot::new();
+        let (engine, _) = engine(&dir);
         let s = stub(vec![Reply::Say(Delivery::WriteFailed), Reply::Say(Delivery::Delivered)]);
         let id = seed(&engine, s.session, &[("plan-turn", &[("plan", "ExitPlanMode")])]);
         assert_eq!(engine.approve_plan(&id, "plan-turn", "plan", None).await, Err(UNDELIVERED.into()));
@@ -675,8 +677,8 @@ pub(super) mod tests {
 
     #[tokio::test]
     async fn r160_keep_planning_accepts_confirmed_delivery_without_draining_a_newer_plan() {
-        let dir = tempfile::tempdir().unwrap();
-        let (engine, _) = engine(dir.path());
+        let dir = crate::workspace::TestRoot::new();
+        let (engine, _) = engine(&dir);
         let s = stub(vec![Reply::Hold]);
         let id = seed(&engine, s.session, &[("plan-turn", &[("plan", "ExitPlanMode")])]);
         let release = async {
@@ -756,8 +758,8 @@ pub(super) mod tests {
 
     #[tokio::test]
     async fn r160_explicit_send_after_stop_never_steers_into_the_closing_turn() {
-        let dir = tempfile::tempdir().unwrap();
-        let (engine, _) = engine(dir.path());
+        let dir = crate::workspace::TestRoot::new();
+        let (engine, _) = engine(&dir);
         let steered = Arc::new(std::sync::atomic::AtomicUsize::new(0));
         let calls = steered.clone();
         let session = Session::from_fn(move |cmd| {
@@ -826,8 +828,8 @@ pub(super) mod tests {
     }
 
     async fn stop_then_approve(vendor: Vendor, closing: bool, stop_again: bool) {
-        let dir = tempfile::tempdir().unwrap();
-        let (engine, events) = engine(dir.path());
+        let dir = crate::workspace::TestRoot::new();
+        let (engine, events) = engine(&dir);
         let id = seed(&engine, stub(vec![]).session, &[("plan-turn", &[("plan", "ExitPlanMode")])]);
         let launched = Arc::new(std::sync::atomic::AtomicUsize::new(0));
         engine.with(|c| {
@@ -945,8 +947,8 @@ pub(super) mod tests {
     }
 
     async fn stop_holds_the_old_queue(vendor: Vendor, resume: Option<Resume>) {
-        let dir = tempfile::tempdir().unwrap();
-        let (engine, _) = engine(dir.path());
+        let dir = crate::workspace::TestRoot::new();
+        let (engine, _) = engine(&dir);
         let id = seed(&engine, stub(vec![]).session, &[("plan-turn", &[("plan", "ExitPlanMode")])]);
         let launched = Arc::new(std::sync::atomic::AtomicUsize::new(0));
         engine.with(|c| {
@@ -1052,8 +1054,8 @@ pub(super) mod tests {
 
     #[tokio::test]
     async fn r160_completed_plan_keeps_done_and_drains_work_if_its_closing_process_fails() {
-        let dir = tempfile::tempdir().unwrap();
-        let (engine, _) = engine(dir.path());
+        let dir = crate::workspace::TestRoot::new();
+        let (engine, _) = engine(&dir);
         let session = stub(vec![]);
         let id = seed(&engine, session.session, &[("t1", &[("plan", "ExitPlanMode")])]);
         engine.with(|c| {
@@ -1074,8 +1076,8 @@ pub(super) mod tests {
 
     #[tokio::test]
     async fn r160_codex_plan_exit_is_saved_when_the_work_turn_is_accepted_even_if_it_stops() {
-        let dir = tempfile::tempdir().unwrap();
-        let (engine, _) = engine(dir.path());
+        let dir = crate::workspace::TestRoot::new();
+        let (engine, _) = engine(&dir);
         let id = seed(&engine, stub(vec![]).session, &[("t1", &[])]);
         engine.with(|c| {
             c.convs.get_mut(&id).unwrap().codex_plan = true;
@@ -1111,8 +1113,8 @@ pub(super) mod tests {
     async fn r160_shared_plan_defaults_never_loosen_an_agent_entered_plan_and_consume_history() {
         for vendor in [Vendor::Claude, Vendor::Codex] {
             for current in [Permissions::Ask, Permissions::AcceptEdits, Permissions::Plan] {
-                let dir = tempfile::tempdir().unwrap();
-                let (engine, _) = engine(dir.path());
+                let dir = crate::workspace::TestRoot::new();
+                let (engine, _) = engine(&dir);
                 let id = seed(&engine, stub(vec![]).session, &[("before", &[]), ("t1", &[])]);
                 engine.with(|c| {
                     c.store
@@ -1158,8 +1160,8 @@ pub(super) mod tests {
     #[tokio::test]
     async fn r160_shared_the_card_omits_a_plan_already_carried_by_the_reply() {
         for vendor in [Vendor::Claude, Vendor::Codex] {
-            let dir = tempfile::tempdir().unwrap();
-            let (engine, _) = engine(dir.path());
+            let dir = crate::workspace::TestRoot::new();
+            let (engine, _) = engine(&dir);
             let id = seed(&engine, stub(vec![]).session, &[("t1", &[])]);
             engine.with(|c| {
                 let live = c.live.get_mut(&id).unwrap();
@@ -1185,8 +1187,8 @@ pub(super) mod tests {
 
     #[tokio::test]
     async fn r160_shared_a_later_mode_pick_clears_the_saved_plan_default() {
-        let dir = tempfile::tempdir().unwrap();
-        let (engine, _) = engine(dir.path());
+        let dir = crate::workspace::TestRoot::new();
+        let (engine, _) = engine(&dir);
         engine.save_settings(Settings { permissions: Some(Permissions::Ask), ..Settings::default() }).unwrap();
         engine.save_settings(Settings { permissions: Some(Permissions::Plan), ..Settings::default() }).unwrap();
         assert_eq!(engine.settings().before_plan, Some(Permissions::Ask));
@@ -1200,8 +1202,8 @@ pub(super) mod tests {
 
     #[tokio::test]
     async fn keep_going_enabled_after_a_codex_plan_waits_for_the_person() {
-        let dir = tempfile::tempdir().unwrap();
-        let (engine, _) = engine(dir.path());
+        let dir = crate::workspace::TestRoot::new();
+        let (engine, _) = engine(&dir);
         let s = stub(vec![]);
         let id = seed(&engine, s.session.clone(), &[("t1", &[("plan:item", "ExitPlanMode")])]);
         engine.with(|c| {
@@ -1230,8 +1232,8 @@ pub(super) mod tests {
 
     #[tokio::test]
     async fn a_delivered_answer_takes_the_question_off_the_list_and_the_row_goes_back_to_working() {
-        let dir = tempfile::tempdir().unwrap();
-        let (engine, events) = engine(dir.path());
+        let dir = crate::workspace::TestRoot::new();
+        let (engine, events) = engine(&dir);
         let s = stub(vec![]);
         let id = seed(&engine, s.session.clone(), &[("t1", &[("0", "Write")])]);
         assert_eq!(engine.state().running.items[0].state, RunState::NeedsYou);
@@ -1248,8 +1250,8 @@ pub(super) mod tests {
 
     #[tokio::test]
     async fn a_session_that_does_not_know_the_request_makes_it_stale_and_the_question_goes() {
-        let dir = tempfile::tempdir().unwrap();
-        let (engine, _) = engine(dir.path());
+        let dir = crate::workspace::TestRoot::new();
+        let (engine, _) = engine(&dir);
         let s = stub(vec![Reply::Say(Delivery::Unknown)]);
         let id = seed(&engine, s.session.clone(), &[("t1", &[("0", "Write")])]);
         assert_eq!(engine.answer(&id, "t1", "0", true, false).await, Err(STALE.to_string()));
@@ -1258,8 +1260,8 @@ pub(super) mod tests {
 
     #[tokio::test]
     async fn a_write_that_fails_keeps_the_question_and_the_revision_and_a_second_answer_can_land() {
-        let dir = tempfile::tempdir().unwrap();
-        let (engine, events) = engine(dir.path());
+        let dir = crate::workspace::TestRoot::new();
+        let (engine, events) = engine(&dir);
         let s = stub(vec![Reply::Say(Delivery::WriteFailed), Reply::Say(Delivery::Delivered)]);
         let id = seed(&engine, s.session.clone(), &[("t1", &[("0", "Write")])]);
         let before = (revision(&engine), running_events(&events));
@@ -1275,8 +1277,8 @@ pub(super) mod tests {
 
     #[tokio::test]
     async fn a_closed_queue_is_undelivered_and_the_question_stays() {
-        let dir = tempfile::tempdir().unwrap();
-        let (engine, _) = engine(dir.path());
+        let dir = crate::workspace::TestRoot::new();
+        let (engine, _) = engine(&dir);
         let s = stub(vec![Reply::Closed]);
         let id = seed(&engine, s.session.clone(), &[("t1", &[("0", "Write")])]);
         assert_eq!(engine.answer(&id, "t1", "0", true, false).await, Err(UNDELIVERED.to_string()));
@@ -1285,8 +1287,8 @@ pub(super) mod tests {
 
     #[tokio::test(start_paused = true)]
     async fn no_acknowledgement_in_five_seconds_is_undelivered_and_a_late_one_changes_nothing() {
-        let dir = tempfile::tempdir().unwrap();
-        let (engine, events) = engine(dir.path());
+        let dir = crate::workspace::TestRoot::new();
+        let (engine, events) = engine(&dir);
         let s = stub(vec![Reply::Hold]);
         let id = seed(&engine, s.session.clone(), &[("t1", &[("0", "Write")])]);
         let before = (revision(&engine), running_events(&events));
@@ -1303,8 +1305,8 @@ pub(super) mod tests {
 
     #[tokio::test]
     async fn the_turn_id_is_checked_so_a_late_answer_never_lands_on_the_next_turn() {
-        let dir = tempfile::tempdir().unwrap();
-        let (engine, _) = engine(dir.path());
+        let dir = crate::workspace::TestRoot::new();
+        let (engine, _) = engine(&dir);
         let s = stub(vec![]);
         // Turn 1 ended with request 0 still listed; turn 2 asks its own request 0.
         let id = seed(&engine, s.session.clone(), &[("t1", &[("0", "Write")]), ("t2", &[("0", "Write")])]);
@@ -1320,8 +1322,8 @@ pub(super) mod tests {
 
     #[tokio::test]
     async fn an_unknown_conversation_turn_or_request_is_stale() {
-        let dir = tempfile::tempdir().unwrap();
-        let (engine, _) = engine(dir.path());
+        let dir = crate::workspace::TestRoot::new();
+        let (engine, _) = engine(&dir);
         let s = stub(vec![]);
         let id = seed(&engine, s.session.clone(), &[("t1", &[("0", "Write")])]);
         for (conv, turn, request) in [("nope", "t1", "0"), (id.as_str(), "nope", "0"), (id.as_str(), "t1", "9")] {
@@ -1333,8 +1335,8 @@ pub(super) mod tests {
 
     #[tokio::test]
     async fn always_answers_the_other_waiting_requests_of_the_tool_and_each_has_its_own_acknowledgement() {
-        let dir = tempfile::tempdir().unwrap();
-        let (engine, _) = engine(dir.path());
+        let dir = crate::workspace::TestRoot::new();
+        let (engine, _) = engine(&dir);
         let s = stub(vec![Reply::Say(Delivery::Delivered), Reply::Say(Delivery::Unknown)]);
         let id = seed(&engine, s.session.clone(), &[("t1", &[("a", "Write"), ("b", "Bash"), ("c", "Write")])]);
 
@@ -1347,8 +1349,8 @@ pub(super) mod tests {
 
     #[tokio::test]
     async fn deny_with_always_answers_only_the_clicked_request_and_remembers_nothing() {
-        let dir = tempfile::tempdir().unwrap();
-        let (engine, _) = engine(dir.path());
+        let dir = crate::workspace::TestRoot::new();
+        let (engine, _) = engine(&dir);
         let s = stub(vec![]);
         let id = seed(&engine, s.session.clone(), &[("t1", &[("a", "Write"), ("c", "Write")])]);
         assert_eq!(engine.answer(&id, "t1", "a", false, true).await, Ok(()));
@@ -1359,8 +1361,8 @@ pub(super) mod tests {
 
     #[tokio::test]
     async fn an_always_that_was_not_delivered_does_not_join_the_allow_list() {
-        let dir = tempfile::tempdir().unwrap();
-        let (engine, _) = engine(dir.path());
+        let dir = crate::workspace::TestRoot::new();
+        let (engine, _) = engine(&dir);
         let s = stub(vec![Reply::Say(Delivery::WriteFailed)]);
         let id = seed(&engine, s.session.clone(), &[("t1", &[("a", "Write")])]);
         assert_eq!(engine.answer(&id, "t1", "a", true, true).await, Err(UNDELIVERED.to_string()));
@@ -1369,8 +1371,8 @@ pub(super) mod tests {
 
     #[tokio::test]
     async fn two_clicks_on_the_two_copies_of_a_card_give_one_ok_and_one_stale() {
-        let dir = tempfile::tempdir().unwrap();
-        let (engine, _) = engine(dir.path());
+        let dir = crate::workspace::TestRoot::new();
+        let (engine, _) = engine(&dir);
         // Both clicks pass the first check, because the lock is free while they wait. The session handles the commands in
         // order: the first is delivered, the second finds nothing.
         let s = stub(vec![Reply::Hold, Reply::Hold]);
@@ -1392,8 +1394,8 @@ pub(super) mod tests {
 
     #[tokio::test]
     async fn a_conversation_removed_while_the_engine_waits_makes_the_answer_stale_without_a_panic() {
-        let dir = tempfile::tempdir().unwrap();
-        let (engine, _) = engine(dir.path());
+        let dir = crate::workspace::TestRoot::new();
+        let (engine, _) = engine(&dir);
         let s = stub(vec![Reply::Hold]);
         let id = seed(&engine, s.session.clone(), &[("t1", &[("0", "Write")])]);
         let call = tokio::spawn({
@@ -1411,8 +1413,8 @@ pub(super) mod tests {
 
     #[tokio::test]
     async fn the_engine_is_not_blocked_while_it_waits_for_an_acknowledgement() {
-        let dir = tempfile::tempdir().unwrap();
-        let (engine, _) = engine(dir.path());
+        let dir = crate::workspace::TestRoot::new();
+        let (engine, _) = engine(&dir);
         let s = stub(vec![Reply::Hold]);
         let id = seed(&engine, s.session.clone(), &[("t1", &[("0", "Write")])]);
         let call = tokio::spawn({
@@ -1466,8 +1468,8 @@ pub(super) mod tests {
 
     #[tokio::test]
     async fn a_question_of_the_tool_that_comes_in_while_always_waits_is_answered_too() {
-        let dir = tempfile::tempdir().unwrap();
-        let (engine, _) = engine(dir.path());
+        let dir = crate::workspace::TestRoot::new();
+        let (engine, _) = engine(&dir);
         let s = stub(vec![Reply::Hold]);
         let id = seed(&engine, s.session.clone(), &[("t1", &[("0", "Write")])]);
         let call = waiting_call(&engine, &s, &id, true).await;
@@ -1483,8 +1485,8 @@ pub(super) mod tests {
 
     #[tokio::test]
     async fn an_automatic_approval_the_cli_did_not_take_becomes_a_question_again() {
-        let dir = tempfile::tempdir().unwrap();
-        let (engine, _) = engine(dir.path());
+        let dir = crate::workspace::TestRoot::new();
+        let (engine, _) = engine(&dir);
         for reply in [Reply::Say(Delivery::WriteFailed), Reply::Closed] {
             let s = stub(vec![reply]);
             let id = seed(&engine, s.session.clone(), &[("t1", &[])]);
@@ -1506,8 +1508,8 @@ pub(super) mod tests {
 
     #[tokio::test]
     async fn an_automatic_approval_the_cli_took_leaves_no_card() {
-        let dir = tempfile::tempdir().unwrap();
-        let (engine, _) = engine(dir.path());
+        let dir = crate::workspace::TestRoot::new();
+        let (engine, _) = engine(&dir);
         let s = stub(vec![]);
         let id = seed(&engine, s.session.clone(), &[("t1", &[])]);
         engine.with(|c| c.convs.get_mut(&id).unwrap().allow_always = Some(vec!["Write".into()]));
@@ -1521,8 +1523,8 @@ pub(super) mod tests {
 
     #[tokio::test]
     async fn a_turn_that_ended_during_the_wait_makes_the_answer_stale_and_remembers_nothing() {
-        let dir = tempfile::tempdir().unwrap();
-        let (engine, _) = engine(dir.path());
+        let dir = crate::workspace::TestRoot::new();
+        let (engine, _) = engine(&dir);
         let s = stub(vec![Reply::Hold]);
         let id = seed(&engine, s.session.clone(), &[("t1", &[("0", "Write")])]);
         let call = waiting_call(&engine, &s, &id, true).await;
@@ -1547,8 +1549,8 @@ pub(super) mod tests {
 
     #[tokio::test]
     async fn a_process_or_turn_that_replaced_the_one_answered_makes_the_answer_stale_and_remembers_nothing() {
-        let dir = tempfile::tempdir().unwrap();
-        let (engine, _) = engine(dir.path());
+        let dir = crate::workspace::TestRoot::new();
+        let (engine, _) = engine(&dir);
         for replace in [|l: &mut Live| l.sid = 2, |l: &mut Live| l.turn = Some("t2".into())] {
             let s = stub(vec![Reply::Hold]);
             let id = seed(&engine, s.session.clone(), &[("t1", &[("0", "Write")])]);
@@ -1564,8 +1566,8 @@ pub(super) mod tests {
 
     #[tokio::test]
     async fn r140_plan_takes_no_remembered_grant_and_remembers_none() {
-        let dir = tempfile::tempdir().unwrap();
-        let (engine, _) = engine(dir.path());
+        let dir = crate::workspace::TestRoot::new();
+        let (engine, _) = engine(&dir);
         // A grant made under Ask, still on the conversation: Plan ignores it and shows the card.
         let s = stub(vec![]);
         let id = seed(&engine, s.session.clone(), &[("t1", &[])]);
@@ -1600,8 +1602,8 @@ pub(super) mod tests {
 
     #[tokio::test]
     async fn r140_a_stricter_mode_forgets_every_always_allow_loaded_or_on_disk() {
-        let dir = tempfile::tempdir().unwrap();
-        let (engine, _) = engine(dir.path());
+        let dir = crate::workspace::TestRoot::new();
+        let (engine, _) = engine(&dir);
         // The default is Full access, so Ask is already a stricter step: move there before any grant exists.
         engine.save_settings(Settings { permissions: Some(Permissions::Ask), ..Settings::default() }).unwrap();
         let grant = |engine: &Engine| {
@@ -1640,8 +1642,8 @@ pub(super) mod tests {
 
     #[tokio::test]
     async fn r140_a_revocation_holds_after_a_conversation_write_that_failed_and_a_restart() {
-        let dir = tempfile::tempdir().unwrap();
-        let (first, _) = engine(dir.path());
+        let dir = crate::workspace::TestRoot::new();
+        let (first, _) = engine(&dir);
         first.save_settings(Settings { permissions: Some(Permissions::Auto), ..Settings::default() }).unwrap();
         let epoch = first.settings().grants_epoch.unwrap();
         let id = first.with(|c| {
@@ -1663,7 +1665,7 @@ pub(super) mod tests {
         // The write that failed left the old file, grant included, on disk.
         std::fs::write(&file, &saved).unwrap();
         first.shutdown();
-        let (restarted, _) = engine(dir.path());
+        let (restarted, _) = engine(&dir);
         assert!(!stands(&restarted, &id, "Bash"), "the grant belongs to the old epoch, so Ask asks");
         // A grant the person makes afterwards counts.
         restarted.with(|c| {
@@ -1683,8 +1685,8 @@ pub(super) mod tests {
 
     #[tokio::test]
     async fn r140_old_saved_grants_stand_until_the_first_revocation_and_the_card_shows_after_it() {
-        let dir = tempfile::tempdir().unwrap();
-        let (engine, _) = engine(dir.path());
+        let dir = crate::workspace::TestRoot::new();
+        let (engine, _) = engine(&dir);
         let s = stub(vec![]);
         let id = seed(&engine, s.session.clone(), &[("t1", &[])]);
         engine.with(|c| {
@@ -1719,8 +1721,8 @@ pub(super) mod tests {
 
     #[tokio::test]
     async fn r140_settings_that_cannot_be_read_and_the_next_save_never_revive_a_grant() {
-        let dir = tempfile::tempdir().unwrap();
-        let (engine, _) = engine(dir.path());
+        let dir = crate::workspace::TestRoot::new();
+        let (engine, _) = engine(&dir);
         let s = stub(vec![]);
         let id = seed(&engine, s.session.clone(), &[("t1", &[])]);
         engine.save_settings(Settings { permissions: Some(Permissions::Ask), ..Settings::default() }).unwrap();
@@ -1747,8 +1749,8 @@ pub(super) mod tests {
 
     #[tokio::test]
     async fn r140_a_read_failure_that_passes_never_brings_the_old_epoch_back() {
-        let dir = tempfile::tempdir().unwrap();
-        let (engine, _) = engine(dir.path());
+        let dir = crate::workspace::TestRoot::new();
+        let (engine, _) = engine(&dir);
         let file = dir.path().join("settings.json");
         engine.save_settings(Settings { permissions: Some(Permissions::Ask), ..Settings::default() }).unwrap();
         let old = engine.settings().grants_epoch.unwrap();
@@ -1773,8 +1775,8 @@ pub(super) mod tests {
 
     #[tokio::test]
     async fn r140_an_always_allow_whose_epoch_changed_while_the_card_waited_lets_that_request_through_and_remembers_nothing() {
-        let dir = tempfile::tempdir().unwrap();
-        let (engine, _) = engine(dir.path());
+        let dir = crate::workspace::TestRoot::new();
+        let (engine, _) = engine(&dir);
         let s = stub(vec![]);
         let id = seed(&engine, s.session.clone(), &[("t1", &[])]);
         let moved = |engine: &Engine| {
@@ -1864,8 +1866,8 @@ pub(super) mod tests {
 
     #[tokio::test]
     async fn a_reply_whose_last_message_ended_reads_as_finished_while_the_cli_still_closes_its_turn() {
-        let dir = tempfile::tempdir().unwrap();
-        let (engine, _) = engine(dir.path());
+        let dir = crate::workspace::TestRoot::new();
+        let (engine, _) = engine(&dir);
         let id = seed(&engine, stub(vec![]).session, &[("t1", &[])]);
         engine.with(|c| c.handle(&id, 1, EngineEvent::Text("All done.".into())));
         assert_eq!(settled(&engine, &id).await, (None, Some(false)), "still writing");
@@ -1893,8 +1895,8 @@ pub(super) mod tests {
 
     #[tokio::test]
     async fn a_tool_call_still_open_keeps_the_reply_from_reading_as_finished() {
-        let dir = tempfile::tempdir().unwrap();
-        let (engine, _) = engine(dir.path());
+        let dir = crate::workspace::TestRoot::new();
+        let (engine, _) = engine(&dir);
         let id = seed(&engine, stub(vec![]).session, &[("t1", &[])]);
         engine.with(|c| c.handle(&id, 1, tool("bg", None)));
         engine.with(|c| c.handle(&id, 1, EngineEvent::Settled));
@@ -1907,8 +1909,8 @@ pub(super) mod tests {
 
     #[tokio::test]
     async fn a_queued_message_or_keep_going_keeps_the_row_at_work_after_the_agent_finished() {
-        let dir = tempfile::tempdir().unwrap();
-        let (engine, _) = engine(dir.path());
+        let dir = crate::workspace::TestRoot::new();
+        let (engine, _) = engine(&dir);
         let id = seed(&engine, stub(vec![]).session, &[("t1", &[])]);
         engine.with(|c| c.handle(&id, 1, EngineEvent::Settled));
         assert_eq!(settled(&engine, &id).await.1, Some(true));
@@ -1930,8 +1932,8 @@ pub(super) mod tests {
 
     #[tokio::test]
     async fn a_message_sent_after_the_agent_finished_waits_for_the_turn_to_close_instead_of_joining_it() {
-        let dir = tempfile::tempdir().unwrap();
-        let (engine, _) = engine(dir.path());
+        let dir = crate::workspace::TestRoot::new();
+        let (engine, _) = engine(&dir);
         let id = seed(&engine, stub(vec![]).session, &[("t1", &[])]);
         engine.with(|c| c.handle(&id, 1, EngineEvent::Settled));
         assert_eq!(settled(&engine, &id).await.1, Some(true));
@@ -1954,8 +1956,8 @@ pub(super) mod tests {
 
     #[tokio::test]
     async fn a_turn_that_fails_after_the_agent_finished_is_not_done_so_a_wait_or_a_move_reads_as_work() {
-        let dir = tempfile::tempdir().unwrap();
-        let (engine, _) = engine(dir.path());
+        let dir = crate::workspace::TestRoot::new();
+        let (engine, _) = engine(&dir);
         let id = seed(&engine, stub(vec![]).session, &[("t1", &[])]);
         engine.with(|c| c.handle(&id, 1, EngineEvent::Settled));
         engine.with(|c| c.handle(&id, 1, failed()));
@@ -1988,8 +1990,8 @@ pub(super) mod tests {
 
     #[tokio::test]
     async fn a_message_written_while_tools_run_waits_until_the_last_of_them_returns() {
-        let dir = tempfile::tempdir().unwrap();
-        let (engine, _) = engine(dir.path());
+        let dir = crate::workspace::TestRoot::new();
+        let (engine, _) = engine(&dir);
         let id = seed(&engine, stub(vec![]).session, &[("t1", &[])]);
         engine.with(|c| {
             c.handle(&id, 1, bash("a"));
@@ -2007,8 +2009,8 @@ pub(super) mod tests {
 
     #[tokio::test]
     async fn only_an_idle_main_thread_takes_a_message_in_at_once() {
-        let dir = tempfile::tempdir().unwrap();
-        let (engine, _) = engine(dir.path());
+        let dir = crate::workspace::TestRoot::new();
+        let (engine, _) = engine(&dir);
         let id = seed(&engine, stub(vec![]).session, &[("t1", &[])]);
         engine.with(|c| c.handle(&id, 1, EngineEvent::MainIdle));
         engine.with(|c| c.handle(&id, 1, EngineEvent::Thinking("more".into())));

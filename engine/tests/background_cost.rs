@@ -23,11 +23,13 @@ fn reading(system: &mut System) -> (u64, u64) {
 #[tokio::test]
 async fn background_cost_at_thirty_two_full_output_caps() {
     let (spawn, mut input, mut output) = support::controlled();
-    let folder = support::tempdir();
+    let folder = support::DataFolder::new();
     let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
     let engine = Engine::new(
         EngineOptions {
             data_dir: folder.path().into(),
+            #[cfg(windows)]
+            chat_dir: folder.chat_path().into(),
             clis: BTreeMap::from([(Vendor::Codex, Cli { command: "fake".into(), prefix: vec![] })]),
             spawn,
             windows: false,

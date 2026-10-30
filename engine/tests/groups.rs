@@ -8,14 +8,15 @@ use faber_engine::workspace::Attachment;
 use faber_engine::{Engine, EngineOptions, SendRequest, WarmRequest};
 use serde_json::{Value, json};
 use std::collections::BTreeMap;
-use std::path::Path;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
-fn engine(root: &Path, vendor: Vendor, spawn: Spawner) -> Engine {
+fn engine(root: &crate::support::DataFolder, vendor: Vendor, spawn: Spawner) -> Engine {
     Engine::new(
         EngineOptions {
-            data_dir: root.into(),
+            data_dir: root.path().into(),
+            #[cfg(windows)]
+            chat_dir: root.chat_path().into(),
             clis: BTreeMap::from([(vendor, Cli { command: vendor.name().into(), prefix: vec![] })]),
             spawn,
             windows: false,
@@ -36,8 +37,8 @@ fn file(name: &str, bytes: &[u8]) -> Attachment {
 
 #[tokio::test]
 async fn chat_groups_keep_bounded_copies_membership_and_plain_instructions() {
-    let dir = support::tempdir();
-    let app = engine(dir.path(), Vendor::Claude, support::fake(vec![]).spawn);
+    let dir = support::DataFolder::new();
+    let app = engine(&dir, Vendor::Claude, support::fake(vec![]).spawn);
     let group = app.create_chat_group("Travel").unwrap();
     assert_eq!(app.create_chat_group(" ").unwrap_err(), "error.groupName");
     let instructions = "é".repeat(8000);
@@ -58,7 +59,7 @@ async fn chat_groups_keep_bounded_copies_membership_and_plain_instructions() {
     let after = app.remove_chat_group_file(&group.id, &group.files[0].id).unwrap();
     assert_eq!(after.files.len(), 9);
     app.shutdown();
-    let app = engine(dir.path(), Vendor::Claude, support::fake(vec![]).spawn);
+    let app = engine(&dir, Vendor::Claude, support::fake(vec![]).spawn);
     assert_eq!(app.state().groups[0].instructions, instructions);
     assert_eq!(app.state().groups[0].conversation_ids.as_slice(), std::slice::from_ref(&chat.id));
     app.remove_chat_group(&group.id).unwrap();
@@ -70,8 +71,8 @@ async fn chat_groups_keep_bounded_copies_membership_and_plain_instructions() {
 
 #[tokio::test]
 async fn chat_groups_enforce_the_file_count_below_the_byte_limit() {
-    let dir = support::tempdir();
-    let app = engine(dir.path(), Vendor::Claude, support::fake(vec![]).spawn);
+    let dir = support::DataFolder::new();
+    let app = engine(&dir, Vendor::Claude, support::fake(vec![]).spawn);
     let group = app.create_chat_group("Small files").unwrap();
     let ten = (0..10).map(|n| file(&format!("{n}.txt"), b"x")).collect::<Vec<_>>();
     let group = app.add_chat_group_files(&group.id, &ten).unwrap();
@@ -84,10 +85,10 @@ async fn chat_groups_enforce_the_file_count_below_the_byte_limit() {
 #[tokio::test]
 async fn move_chat_to_project_leaves_its_group_and_launches_without_group_context() {
     for vendor in [Vendor::Claude, Vendor::Codex] {
-        let dir = support::tempdir();
+        let dir = support::DataFolder::new();
         let folder = support::work_folder();
         let fake = support::fake(support::fixture(vendor.name(), "chat"));
-        let app = engine(dir.path(), vendor, fake.spawn);
+        let app = engine(&dir, vendor, fake.spawn);
         let group = app.create_chat_group("Glossary").unwrap();
         app.save_chat_group(&group.id, None, Some("Use the group glossary exactly.")).unwrap();
         let group = app.add_chat_group_files(&group.id, &[file("glossary.txt", b"group knowledge")]).unwrap();
@@ -129,9 +130,9 @@ async fn move_chat_to_project_leaves_its_group_and_launches_without_group_contex
 
 #[tokio::test]
 async fn move_chat_to_project_group_write_failure_keeps_the_chat_and_membership() {
-    let dir = support::tempdir();
+    let dir = support::DataFolder::new();
     let folder = support::work_folder();
-    let app = engine(dir.path(), Vendor::Claude, support::fake(vec![]).spawn);
+    let app = engine(&dir, Vendor::Claude, support::fake(vec![]).spawn);
     let group = app.create_chat_group("Work").unwrap();
     let chat = app.new_group_chat(&group.id).unwrap();
     let project = app.add_project(&folder.path().to_string_lossy()).unwrap();
@@ -153,9 +154,9 @@ async fn move_chat_to_project_group_write_failure_keeps_the_chat_and_membership(
 
 #[tokio::test]
 async fn move_chat_to_project_group_commit_recovers_after_interruption() {
-    let dir = support::tempdir();
+    let dir = support::DataFolder::new();
     let folder = support::work_folder();
-    let app = engine(dir.path(), Vendor::Claude, support::fake(vec![]).spawn);
+    let app = engine(&dir, Vendor::Claude, support::fake(vec![]).spawn);
     let group = app.create_chat_group("Work").unwrap();
     let chat = app.new_group_chat(&group.id).unwrap();
     let project = app.add_project(&folder.path().to_string_lossy()).unwrap();
@@ -181,7 +182,7 @@ async fn move_chat_to_project_group_commit_recovers_after_interruption() {
         if !committed {
             let blocker = dir.path().join("chat-groups.json.tmp");
             std::fs::create_dir_all(blocker.join("held")).unwrap();
-            let app = engine(dir.path(), Vendor::Claude, support::fake(vec![]).spawn);
+            let app = engine(&dir, Vendor::Claude, support::fake(vec![]).spawn);
             assert_eq!(app.state().groups, before, "a blocked rollback still publishes the journal's coherent membership");
             assert_eq!(app.open(&chat.id).unwrap().area, Area::Chat);
             app.rename(&chat.id, "Still in Work");
@@ -190,7 +191,7 @@ async fn move_chat_to_project_group_commit_recovers_after_interruption() {
             moved.area = Area::Project;
             assert_eq!(store.save_checked(&moved).unwrap_err(), faber_engine::store::Fault::Write);
             assert!(journal.is_file(), "area and membership mutations stay blocked until recovery can finish");
-            let attachment = dir.path().join("chat").join(&chat.id).join("attachments").join("notes.txt");
+            let attachment = dir.scratch_path().join(&chat.id).join("attachments").join("notes.txt");
             std::fs::create_dir_all(attachment.parent().unwrap()).unwrap();
             std::fs::write(&attachment, b"keep these notes").unwrap();
             assert_eq!(app.remove_with(&chat.id, false).unwrap_err(), "error.chat.deleteFailed");
@@ -208,8 +209,8 @@ async fn move_chat_to_project_group_commit_recovers_after_interruption() {
 
 #[tokio::test]
 async fn chat_groups_only_accept_shared_image_types_and_keep_svg_as_text() {
-    let dir = support::tempdir();
-    let app = engine(dir.path(), Vendor::Claude, support::fake(vec![]).spawn);
+    let dir = support::DataFolder::new();
+    let app = engine(&dir, Vendor::Claude, support::fake(vec![]).spawn);
     let group = app.create_chat_group("Pictures").unwrap();
     for extension in ["bmp", "avif"] {
         assert_eq!(
@@ -238,8 +239,8 @@ async fn chat_groups_only_accept_shared_image_types_and_keep_svg_as_text() {
 
 #[tokio::test]
 async fn chat_groups_reject_invalid_files_without_partial_storage() {
-    let dir = support::tempdir();
-    let app = engine(dir.path(), Vendor::Claude, support::fake(vec![]).spawn);
+    let dir = support::DataFolder::new();
+    let app = engine(&dir, Vendor::Claude, support::fake(vec![]).spawn);
     let group = app.create_chat_group("Work").unwrap();
     assert_eq!(
         app.add_chat_group_files(&group.id, &[file("a.txt", b"valid"), file("binary.bin", &[0xff])]).unwrap_err(),
@@ -253,8 +254,8 @@ async fn chat_groups_reject_invalid_files_without_partial_storage() {
 
 #[tokio::test]
 async fn chat_groups_failed_deletion_preserves_files_membership_and_instructions() {
-    let dir = support::tempdir();
-    let app = engine(dir.path(), Vendor::Claude, support::fake(vec![]).spawn);
+    let dir = support::DataFolder::new();
+    let app = engine(&dir, Vendor::Claude, support::fake(vec![]).spawn);
     let group = app.create_chat_group("Work").unwrap();
     app.save_chat_group(&group.id, None, Some("Keep the glossary")).unwrap();
     let group = app.add_chat_group_files(&group.id, &[file("glossary.txt", b"Keep these exact words")]).unwrap();
@@ -287,9 +288,9 @@ async fn chat_groups_failed_deletion_preserves_files_membership_and_instructions
 
 #[tokio::test]
 async fn chat_groups_edits_refresh_a_warm_chat_while_renaming_keeps_its_process() {
-    let dir = support::tempdir();
+    let dir = support::DataFolder::new();
     let fake = support::fake(vec![]);
-    let app = engine(dir.path(), Vendor::Claude, fake.spawn);
+    let app = engine(&dir, Vendor::Claude, fake.spawn);
     let group = app.create_chat_group("Work").unwrap();
     app.save_chat_group(&group.id, None, Some("First group words")).unwrap();
     let chat = app.new_group_chat(&group.id).unwrap();
@@ -321,7 +322,7 @@ async fn chat_groups_edits_refresh_a_warm_chat_while_renaming_keeps_its_process(
 }
 
 async fn launch_context(vendor: Vendor, grouped: bool, resumed: bool) {
-    let dir = support::tempdir();
+    let dir = support::DataFolder::new();
     let (spawn, mut input, mut output) = support::controlled();
     let args: Arc<Mutex<Vec<String>>> = Arc::default();
     let seen = args.clone();
@@ -329,7 +330,7 @@ async fn launch_context(vendor: Vendor, grouped: bool, resumed: bool) {
         *seen.lock().unwrap() = argv.to_vec();
         spawn(bin, argv, cwd)
     });
-    let app = engine(dir.path(), vendor, recorded.clone());
+    let app = engine(&dir, vendor, recorded.clone());
     let group = app.create_chat_group("Work").unwrap();
     app.save_chat_group(&group.id, None, Some("Old group words")).unwrap();
     let group = app
@@ -353,7 +354,7 @@ async fn launch_context(vendor: Vendor, grouped: bool, resumed: bool) {
         chat.sessions.insert(vendor, "91dcb98f-7a91-4324-a10a-bccfe07ab7a4".into());
         store.save(&chat);
     }
-    let app = engine(dir.path(), vendor, recorded);
+    let app = engine(&dir, vendor, recorded);
     app.send(SendRequest {
         conversation_id: id.clone(),
         area: Area::Chat,
@@ -395,16 +396,14 @@ async fn launch_context(vendor: Vendor, grouped: bool, resumed: bool) {
         // The original source is never needed again: launches read Faber's stored copy.
         assert!(dir.path().join("chat-groups").join(&group.id).join(&group.files[0].id).is_file());
         let copied = dir
-            .path()
-            .join("chat")
+            .scratch_path()
             .join(id.as_ref().unwrap())
             .join("attachments")
             .join(format!("group-{}", group.id))
             .join(format!("{}.txt", group.files[0].id));
         assert_eq!(std::fs::read_to_string(copied).unwrap(), "A widget is a small tool.");
         let svg = dir
-            .path()
-            .join("chat")
+            .scratch_path()
             .join(id.unwrap())
             .join("attachments")
             .join(format!("group-{}", group.id))

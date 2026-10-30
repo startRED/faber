@@ -62,11 +62,13 @@ async fn conversation_export_keeps_all_piece_content_and_current_choices_after_r
         for (block, value) in &choices {
             save_value(&mut initial, "answer", *block, value.clone()).unwrap();
         }
-        let dir = support::tempdir();
+        let dir = support::DataFolder::new();
         Store::new(dir.path()).save_checked(&initial).unwrap();
         let engine = Engine::new(
             EngineOptions {
                 data_dir: dir.path().into(),
+                #[cfg(windows)]
+                chat_dir: dir.chat_path().into(),
                 clis: BTreeMap::<Vendor, Cli>::new(),
                 spawn: support::fake(vec![]).spawn,
                 windows: false,

@@ -68,6 +68,14 @@ pub fn scenarios() -> Vec<Scenario> {
             name: "a chat thread with a tool card and a question card is readable and whole in each of the six looks",
             run: thread_in_every_look,
         },
+        Scenario {
+            name: "running column: a held permission click waits for release before automatic opening",
+            run: |ctx| held_permission_click(ctx, 1440, "en", false),
+        },
+        Scenario {
+            name: "running column: a held permission click works at 720 px in German with reduced motion",
+            run: |ctx| held_permission_click(ctx, 720, "de", true),
+        },
         Scenario { name: "a chat streams an answer with the model and the reason, and lands in the sidebar", run: streams_an_answer },
         Scenario { name: CREATIVE_WORKLOG[0], run: |ctx| creative_worklog(ctx, "en") },
         Scenario { name: CREATIVE_WORKLOG[1], run: |ctx| creative_worklog(ctx, "pt-BR") },
@@ -383,6 +391,10 @@ fn names_while_streaming(ctx: &mut Ctx, vendor: &str, first_words: &str, name: &
     };
     let mut app = ctx.launch(launch("chat-held"))?;
     let page = &mut app.page;
+    page.wait_for(
+        "the synthetic chat subscription",
+        &format!("window.__TAURI_INTERNALS__.invoke('state').then(s=>s.usage?.some(u=>u.vendor==='{vendor}' && !u.billingUnknown && !u.billedPerUse))"),
+    )?;
     ask(page, QUESTION)?;
     // With two vendors Auto first waits for its router (the recorded CLI never answers it, so the wait runs to the end of
     // the 30 s allowed) and the header says only that; with one vendor there is nothing to choose.
@@ -704,6 +716,55 @@ const THREAD: &str = r#"(() => {
   return { found, problems };
 })()"#;
 
+fn held_permission_click(ctx: &mut Ctx, width: u32, lang: &str, reduce: bool) -> Result {
+    start_settings(ctx, lang)?;
+    let launch = super::shell::two_writes(ctx)?;
+    let mut app = ctx.launch(launch)?;
+    let page = &mut app.page;
+    super::shell::set_size(page, width, 900)?;
+    system_motion(page, reduce)?;
+    let motion = if reduce { "reduced" } else { "full" };
+    page.wait_for("the requested motion mode", &format!("document.documentElement.dataset.motion === '{motion}'"))?;
+    same(page.eval("window.innerWidth")?, json!(width), "the held permission test uses its requested viewport")?;
+    super::shell::ask_two_writes(page)?;
+    let composer = page.labelled("composer.message")?;
+    page.press_on(&composer, "ArrowLeft")?;
+    same(page.count(&css(".runcol"))?, 0, "the permission click begins before automatic opening")?;
+    let allow = page.text_of("ask.allow")?;
+    let target = css("article .ask").has_text("a.txt").role("button", &allow).exact();
+    page.hover(&target)?;
+    page.hover(&target)?;
+    let at = page.eval_on(&target, "const r=el.getBoundingClientRect();return {x:r.x+r.width/2,y:r.y+r.height/2};")?;
+    let x = at["x"].as_f64().ok_or("permission click x missing")?;
+    let y = at["y"].as_f64().ok_or("permission click y missing")?;
+    let pressed = page.cdp.call(
+        "Input.dispatchMouseEvent",
+        json!({ "type": "mousePressed", "x": x, "y": y, "button": "left", "buttons": 1, "clickCount": 1 }),
+    );
+    let held = pressed.and_then(|_| {
+        // Cross the 1.5 s typing pause and the column's entry motion while the real button stays pressed.
+        pause(2.2);
+        page.count(&css(".runcol"))
+    });
+    let released = page.cdp.call(
+        "Input.dispatchMouseEvent",
+        json!({ "type": "mouseReleased", "x": x, "y": y, "button": "left", "buttons": 0, "clickCount": 1 }),
+    );
+    let columns = held?;
+    released?;
+    same(columns, 0, "automatic opening must not move a permission button during a held click")?;
+    page.wait_visible(&css("article .ask").has_text("b.txt"))?;
+    page.wait_visible(&css(".runcol .ask").has_text("b.txt"))?;
+    ctx.notes.push(format!(
+        "held permission: actual viewport {width}px, locale {lang}, motion {motion}; first answer delivered and automatic opening resumed"
+    ));
+    // The assertion above covers opening; capture the column after its existing entrance finishes.
+    pause(0.7);
+    let shot = ctx.shot(&mut app, &format!("held-permission-{width}-{lang}"));
+    app.page.cdp.call("Emulation.clearDeviceMetricsOverride", json!({}))?;
+    shot
+}
+
 fn thread_in_every_look(ctx: &mut Ctx) -> Result {
     start_settings(ctx, "en")?;
     let launch = super::shell::two_writes(ctx)?;
@@ -714,8 +775,8 @@ fn thread_in_every_look(ctx: &mut Ctx) -> Result {
     super::shell::ask_two_writes(page)?;
     // The first file is allowed, which leaves a tool card behind; the second waits as a question card.
     let allow = page.text_of("ask.allow")?;
-    page.click(&css("article .ask").has_text("a.txt").role("button", &allow).exact())?;
     let question = css("article .ask").has_text("b.txt");
+    page.click(&css("article .ask").has_text("a.txt").role("button", &allow).exact())?;
     page.wait_visible(&question)?;
     // Let the pending question open its column before measuring settled text contrast in each look.
     page.wait_visible(&css(".runcol"))?;

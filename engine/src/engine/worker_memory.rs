@@ -185,8 +185,8 @@ mod tests {
 
     #[tokio::test]
     async fn worker_memory_unix_requires_matching_single_use_permit_once_the_app_measures_it() {
-        let dir = tempfile::tempdir().unwrap();
-        let (app, _) = engine(dir.path());
+        let dir = crate::workspace::TestRoot::new();
+        let (app, _) = engine(&dir);
         app.with(|core| {
             assert!(core.worker_ready("first"), "without the app's switch only the worker-count limits apply");
             core.worker_memory.native_unix = true;
@@ -208,8 +208,8 @@ mod tests {
 
     #[tokio::test]
     async fn worker_memory_pressure_and_unknown_hold_fifo_until_capacity_returns() {
-        let dir = tempfile::tempdir().unwrap();
-        let (app, _) = engine(dir.path());
+        let dir = crate::workspace::TestRoot::new();
+        let (app, _) = engine(&dir);
         let room = Arc::new(AtomicBool::new(false));
         let readings = room.clone();
         let (sent, receive) = tokio::sync::mpsc::unbounded_channel();
@@ -239,8 +239,8 @@ mod tests {
 
     #[tokio::test]
     async fn worker_memory_stop_removes_waiting_work_and_keeps_other_owners() {
-        let dir = tempfile::tempdir().unwrap();
-        let (app, _) = engine(dir.path());
+        let dir = crate::workspace::TestRoot::new();
+        let (app, _) = engine(&dir);
         let owner = seed(&app, Session::from_fn(|_| {}), &[("reply", &[])]);
         let (sent, receive) = tokio::sync::mpsc::unbounded_channel();
         app.with(|core| {
@@ -259,8 +259,8 @@ mod tests {
 
     #[tokio::test]
     async fn worker_memory_automatic_origin_survives_recovery_without_gating_manual_auto() {
-        let dir = tempfile::tempdir().unwrap();
-        let (app, _) = engine(dir.path());
+        let dir = crate::workspace::TestRoot::new();
+        let (app, _) = engine(&dir);
         let id = seed(&app, Session::from_fn(|_| {}), &[("reply", &[])]);
         app.with(|core| {
             assert!(!core.unattended_reply(&id, "reply"), "manual Auto has no automatic wake");
@@ -281,8 +281,8 @@ mod tests {
 
     #[tokio::test]
     async fn worker_memory_replaced_reply_cannot_resume_and_pending_work_blocks_install() {
-        let dir = tempfile::tempdir().unwrap();
-        let (app, _) = engine(dir.path());
+        let dir = crate::workspace::TestRoot::new();
+        let (app, _) = engine(&dir);
         let session = Session::from_fn(|command| {
             assert!(!matches!(command, crate::events::SessionCommand::Send(_)), "stale work reached the CLI");
         });

@@ -2091,6 +2091,8 @@ export const en = {
   'notes.289.better': 'When an answer fails, the line under it now says why: a busy service, a lost connection, an expired sign-in or a conversation too long.',
   'notes.290.better': 'Helpers now have names in your language, or Helper 1, 2…, and say done only after their checks passed; otherwise they say finished.',
   'notes.291.fixed': 'Answers now say once what is still running and what comes next, and a log you paste no longer fills them with technical words.',
+  'notes.292.better': 'The “Running now” column waits until you finish clicking before opening automatically.',
+  'notes.293.fixed': "On Windows, private chat files move outside Faber's data folder and stay available after reopening.",
   'update.checking': 'Looking for an update…',
   'update.downloading': 'Downloading update…',
   'update.downloadingPercent': 'Downloading update… {percent}%',
