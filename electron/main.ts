@@ -152,9 +152,13 @@ function createWindow(): BrowserWindow {
   window.on('maximize', resized);
   window.on('unmaximize', resized);
   window.on('resize', resized);
+  // The host decides notices, and a question that comes while the person looks at Faber is never one.
+  window.on('focus', () => host?.note({ kind: 'focus', focused: true }));
+  window.on('blur', () => host?.note({ kind: 'focus', focused: false }));
   // Closing frees the screen (its renderer and its memory); the host keeps running answers in the background.
   window.on('closed', () => {
     if (win === window) win = null;
+    host?.note({ kind: 'focus', focused: false });
     releaseGpu();
     host?.call('quota_attention', { visible: false, focused: false }).catch(() => {});
   });
