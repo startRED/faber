@@ -43,8 +43,11 @@ function workspace(name, run) {
     for (const dest of [pristine, folder]) execFileSync(process.execPath, [join(root, 'bench/fixtures', `${name}.mjs`), dest], { windowsHide: true });
     const answer = join(base, 'answer.md'); writeFileSync(answer, 'Completed.');
     const proof = () => {
-      const result = spawnSync(process.execPath, [join(root, 'bench/proofs', `${name}.mjs`), folder, pristine, answer], { encoding: 'utf8', windowsHide: true, timeout: 15000 });
-      assert.equal(result.status, 0, result.stderr);
+      const started = Date.now();
+      // Above the sales proof's ten summarize runs at 5 s each (bench/proofs/sales.mjs): those bound a hang, this only a
+      // proof that never ends. At 15 s, ten Node starts on a loaded macOS runner met it (queue/pr-462, run 41071854644).
+      const result = spawnSync(process.execPath, [join(root, 'bench/proofs', `${name}.mjs`), folder, pristine, answer], { encoding: 'utf8', windowsHide: true, timeout: 60000 });
+      assert.equal(result.status, 0, result.signal ? `the proof was stopped by ${result.signal} after ${Date.now() - started} ms` : result.stderr);
       const parsed = JSON.parse(result.stdout);
       assert.ok(parsed.checks.length > 0);
       return parsed.pass;
@@ -104,6 +107,11 @@ test('sales proof rejects a hardcoded fixture answer on fresh input', () => work
   assert.equal(proof(), true);
   writeFileSync(join(folder, 'summarize.mjs'), `console.log(JSON.stringify({ Food: 1025, 'Office, supplies': 230, 'Client "A"': 100 }));`);
   assert.equal(proof(), false);
+}));
+
+test('sales proof fails a summarize that hangs, within its own limits', () => workspace('sales', ({ folder, proof }) => {
+  writeFileSync(join(folder, 'summarize.mjs'), 'setTimeout(() => {}, 120000);');
+  assert.equal(proof(), false, 'each hanging run is stopped at 5 s and fails its check');
 }));
 
 test('invoice accepts a CommonJS regression test supported by node --test', () => workspace('invoice', ({ folder, proof }) => {
