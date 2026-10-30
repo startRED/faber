@@ -1984,6 +1984,8 @@ fn main() {
             app.state::<Faber>().engine.resume_keep_going();
             // And what the restart for an update cut, from a conversation not on Keep going.
             app.state::<Faber>().engine.resume_after_update();
+            // And a team leader the close cut off with no member left to wake it.
+            app.state::<Faber>().engine.resume_cut_leaders();
             if let Some(codex) = clis.get(&Vendor::Codex) {
                 load_models(app.handle(), codex.clone(), data_dir.clone());
             }
