@@ -87,6 +87,9 @@ impl Dispatch {
 }
 
 pub fn run(env: &Env, args: &[String], stdin: &mut dyn BufRead, stdout: &mut dyn Write, stderr: &mut dyn Write) -> io::Result<i32> {
+    if env.recording.parent().and_then(Path::file_name).is_some_and(|name| name == "agy") {
+        return agy_print(&env.recording, stdout, stderr);
+    }
     if !env.recording.to_string_lossy().ends_with(".setup.json") {
         if args.iter().map(String::as_str).eq(["auth", "status"]) {
             writeln!(stdout, "{}", json!({ "loggedIn": true, "subscriptionType": "max", "authMethod": "claude.ai" }))?;
@@ -226,6 +229,25 @@ fn session(
     Ok(if strict && !mismatches.is_empty() { 1 } else { 0 })
 }
 
+/// An Antigravity CLI recording (`tests/fixtures/agy/`, docs/dev/antigravity-cli.md) replays as `agy -p` printed it: its
+/// output lines in order, then its exit code. Lines it read on stdin are not checked yet: no driver speaks to it.
+fn agy_print(recording: &Path, stdout: &mut dyn Write, stderr: &mut dyn Write) -> io::Result<i32> {
+    let text = std::fs::read_to_string(recording)?;
+    let mut code = 0;
+    for line in text.lines().filter(|l| !l.trim().is_empty()) {
+        let v: Value = serde_json::from_str(line).map_err(|e| io::Error::other(format!("{}: {e}", recording.display())))?;
+        match (v["dir"].as_str(), &v["msg"]) {
+            (Some("out"), msg) => writeln!(stdout, "{msg}")?,
+            (Some("stdout"), Value::String(text)) => writeln!(stdout, "{text}")?,
+            (Some("stderr"), Value::String(text)) => writeln!(stderr, "{text}")?,
+            (Some("exit"), msg) => code = msg.as_i64().unwrap_or(1) as i32,
+            _ => {}
+        }
+    }
+    stdout.flush()?;
+    Ok(code)
+}
+
 fn append(state: &Path, record: &Value) -> io::Result<()> {
     let mut file = OpenOptions::new().create(true).append(true).open(state.join("commands.jsonl"))?;
     // One write for the whole line: `writeln!` on a file writes it in pieces, and the runner reading meanwhile could see
@@ -276,6 +298,50 @@ mod tests {
             }
             assert!(found >= 5, "{vendor}: only {found} recordings found in {}", dir.display());
         }
+    }
+
+    // The Antigravity recordings (docs/dev/antigravity-cli.md) are what the next tasks build its driver from: each line is
+    // JSON, and together they hold every event kind the page describes.
+    #[test]
+    fn every_antigravity_recording_reads_as_json_lines_with_the_described_events() {
+        let mut kinds = std::collections::BTreeSet::new();
+        let mut steps = std::collections::BTreeSet::new();
+        let mut found = 0;
+        for file in std::fs::read_dir(fixtures().join("agy")).unwrap().map(|f| f.unwrap().path()) {
+            assert!(file.extension().is_some_and(|e| e == "jsonl"), "{}", file.display());
+            let text = std::fs::read_to_string(&file).unwrap();
+            for line in text.lines() {
+                let v: Value = serde_json::from_str(line).unwrap_or_else(|e| panic!("{}: {e}: {line}", file.display()));
+                assert!(matches!(v["dir"].as_str(), Some("in" | "out" | "stdout" | "stderr" | "exit")), "{}: {line}", file.display());
+                if v["dir"] == "out" {
+                    kinds.insert(v["msg"]["event"].as_str().unwrap().to_string());
+                    steps.extend(v["msg"]["step_update"]["step_type"].as_str().map(str::to_string));
+                }
+            }
+            found += 1;
+        }
+        assert!(found >= 10, "only {found} recordings");
+        assert_eq!(kinds.into_iter().collect::<Vec<_>>(), ["init", "result", "step_update"]);
+        assert_eq!(steps.into_iter().collect::<Vec<_>>(), ["agent_response", "system_message", "tool", "user_input"]);
+    }
+
+    #[test]
+    fn the_fake_prints_an_antigravity_recording_as_agy_did() {
+        let args = ["-p", "Say ok.", "--output-format", "stream-json"];
+        let (code, out, err) = drive(fixtures().join("agy/agy-plain.jsonl"), None, &args, "");
+        assert_eq!(code.unwrap(), 0);
+        let events: Vec<Value> = out.lines().map(|l| serde_json::from_str(l).unwrap()).collect();
+        assert_eq!(events.first().unwrap()["event"], "init");
+        assert_eq!(
+            events.last().unwrap()["result"]["response"],
+            "ok.
+"
+        );
+        assert!(err.is_empty(), "{err}");
+        let (code, out, err) = drive(fixtures().join("agy/agy-wrong-model.jsonl"), None, &["-p", "Say ok."], "");
+        assert_eq!(code.unwrap(), 1);
+        assert!(out.contains("\"status\":\"ERROR\""), "{out}");
+        assert!(err.contains("gemini-9-nope"), "{err}");
     }
 
     #[test]
