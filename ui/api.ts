@@ -174,6 +174,8 @@ export interface Message {
   follow?: Follow;
   /** A message Faber sent by itself, and why (`wake.keepGoing`, `wake.checksFailed`, `wake.conflict`): drawn as a quiet line, not as the person's words. */
   wake?: { why: string; pr?: number; checks?: string[] };
+  /** Faber was closed while this reply ran, so it was cut (set when the conversation loaded); "Continue" offers to go on. */
+  closed?: boolean;
   /** On a reply: "keep going" stopped after it, and why (a `reason.keepGoing.*` key). */
   halt?: string;
   /** On the latest reply while its work goes on: the agent itself seems stuck (task 110). */
@@ -951,6 +953,7 @@ export const api = {
   approvePlan: (id: string, turnId: string, requestId: string, mode?: PermissionMode) => invoke<void>('approve_plan', { id, turnId, requestId, mode: mode ?? null }),
   /** The person read the requests held back in a reply: it leaves the "needs you" list. */
   parkedSeen: (id: string, turnId: string) => invoke<void>('parked_seen', { id, turnId }),
+  continueClosed: (id: string, turnId: string) => invoke<void>('continue_closed', { id, turnId }),
   /** The choices for a question the assistant asked: each question's text to the label picked (several joined by a comma). */
   answerQuestion: (id: string, turnId: string, requestId: string, answers: Record<string, string>) =>
     invoke<void>('answer_question', { id, turnId, requestId, answers }),

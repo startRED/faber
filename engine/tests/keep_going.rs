@@ -69,7 +69,8 @@ async fn started_on(
     folder: &Path,
     vendors: &[Vendor],
 ) -> (Engine, UnboundedReceiver<AppEvent>, Pipe, String, Bins) {
-    started_with(dir, folder, vendors, &|_| {}).await
+    let (engine, rx, pipe, id, bins, _) = started_with(dir, folder, vendors, &|_| {}).await;
+    (engine, rx, pipe, id, bins)
 }
 
 /// Like [`started_on`], after `prepare` set the engine up (settings that a running process does not take up later).
@@ -78,7 +79,7 @@ async fn started_with(
     folder: &Path,
     vendors: &[Vendor],
     prepare: &dyn Fn(&Engine),
-) -> (Engine, UnboundedReceiver<AppEvent>, Pipe, String, Bins) {
+) -> (Engine, UnboundedReceiver<AppEvent>, Pipe, String, Bins, Arc<std::sync::Mutex<Vec<Pipe>>>) {
     let (inner, made) = pipes();
     let bins = Bins::default();
     let seen = bins.clone();
@@ -104,7 +105,7 @@ async fn started_with(
     // A real CLI says nothing before it has the turn; a line before it would be read as the end of an earlier turn.
     until_turns(&pipe, 1).await;
     pipe.say(json!({ "type": "system", "subtype": "init", "session_id": "s", "model": "claude-haiku-5-5" })).await;
-    (engine, rx, pipe, id, bins)
+    (engine, rx, pipe, id, bins, made)
 }
 
 /// The end of a turn on a subscription whose weekly window is `week` used, with six of its seven days still ahead.
@@ -825,7 +826,7 @@ async fn a_permission_card_is_never_answered_by_keep_going() {
         let settings = faber_engine::model::Settings { permissions: Some(faber_engine::model::Permissions::Ask), ..Default::default() };
         engine.save_settings(settings).unwrap();
     };
-    let (engine, _rx, mut pipe, id, _) = started_with(&dir, project.path(), &[Vendor::Claude], &ask).await;
+    let (engine, _rx, mut pipe, id, _, _) = started_with(&dir, project.path(), &[Vendor::Claude], &ask).await;
     engine.keep_going(&id, true).unwrap();
     pipe.say(json!({ "type": "control_request", "request_id": "write",
         "request": { "subtype": "can_use_tool", "tool_name": "Write", "input": { "file_path": "notes.txt", "content": "x" } } }))
@@ -1435,11 +1436,17 @@ async fn a_new_sibling_question_after_an_error_waits_behind_older_questions() {
         assert!(!error, "{said}");
     }
     let mut saved = engine.open(&id).unwrap();
+    let mut questions = engine.open(&titled(&engine, "Questions")).unwrap();
     engine.shutdown();
     // Reproduce an existing Error with older asks still saved, as in a conversation left by an earlier version.
     saved.messages.last_mut().unwrap().status = Some(Status::Error);
     let file = dir.path().join("conversations").join(format!("{id}.json"));
     std::fs::write(file, serde_json::to_vec(&saved).unwrap()).unwrap();
+    // Only the asks wait here: "Questions" is saved as finished, since the report a member cut off by the close owes
+    // (engine.rs, `a_team_member_cut_off_by_faber_closing_is_reported_to_its_leader_once`) would wake this one first.
+    questions.messages.last_mut().unwrap().status = Some(Status::Done);
+    let file = dir.path().join("conversations").join(format!("{}.json", questions.id));
+    std::fs::write(file, serde_json::to_vec(&questions).unwrap()).unwrap();
     let (spawn, made) = pipes();
     let (again, _rx) = engine_with(&dir, spawn, &[Vendor::Claude]);
     again
@@ -1539,5 +1546,89 @@ async fn two_silent_keep_going_turns_in_a_row_halt_on_the_last_reply_with_conten
     let c = until(&engine, &id, |c| c.keep_going.is_none()).await;
     assert_eq!(c.messages[1].halt.as_deref(), Some("reason.keepGoing.done"));
     assert_eq!(c.messages.last().unwrap().halt, None);
+    engine.shutdown();
+}
+
+/// The agent calls the conversation tool's `start` with these arguments; Faber's answer.
+async fn start_team_member(pipe: &mut Pipe, rpc: u64, args: Value) -> Value {
+    pipe.say(json!({"type":"control_request","request_id":format!("r{rpc}"),"request":{"subtype":"mcp_message","server_name":"faber",
+        "message":{"jsonrpc":"2.0","id":rpc,"method":"tools/call","params":{"name":"conversation","arguments":args,
+        "_meta":{"claudecode/toolUseId":format!("toolu_{rpc}")}}}}}))
+        .await;
+    for _ in 0..300 {
+        if let Some(m) = pipe.lines.lock().unwrap().iter().find(|m| m["response"]["request_id"] == format!("r{rpc}")) {
+            return m["response"]["response"]["mcp_response"]["result"].clone();
+        }
+        tokio::time::sleep(Duration::from_millis(10)).await;
+    }
+    panic!("r{rpc} was never answered");
+}
+
+fn said(result: &Value) -> String {
+    result["content"][0]["text"].as_str().unwrap_or_default().to_string()
+}
+
+fn titled(engine: &Engine, title: &str) -> String {
+    engine.state().conversations.into_iter().find(|c| c.title == title).expect("the new conversation is listed").id
+}
+
+/// A parent pinned to Claude spreads its team: a named AI runs the new conversation (the person's pin stays on the parent),
+/// "auto" leaves it to the router, and an AI that cannot run work nobody sent by hand is refused with the reason.
+#[tokio::test]
+async fn the_agent_picks_the_ai_of_a_team_conversation_and_one_that_cannot_run_is_refused() {
+    let (dir, project) = (support::DataFolder::new(), support::work_folder());
+    let (engine, _rx, mut pipe, parent, bins) = started_on(&dir, project.path(), &[Vendor::Claude, Vendor::Codex]).await;
+    let review = start_team_member(&mut pipe, 1, json!({"title":"Review","brief":"Review the login fix.","ai":"codex"})).await;
+    assert_eq!(review["isError"], false, "{}", said(&review));
+    let choice = |id: &str| engine.open(id).unwrap().choice.map(|c| c.vendor);
+    assert_eq!(choice(&titled(&engine, "Review")).as_deref(), Some("codex"));
+    assert_eq!(choice(&parent).as_deref(), Some("claude"), "never the conversation that asked");
+    for _ in 0..300 {
+        if bins.lock().unwrap().iter().any(|b| b == "codex") {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(10)).await;
+    }
+    assert!(bins.lock().unwrap().iter().any(|b| b == "codex"), "its first turn runs on Codex: {:?}", bins.lock().unwrap());
+    let docs = start_team_member(&mut pipe, 2, json!({"title":"Docs","brief":"Write the docs.","ai":"auto"})).await;
+    assert_eq!(docs["isError"], false, "{}", said(&docs));
+    assert_eq!(choice(&titled(&engine, "Docs")).as_deref(), Some("auto"), "the router picks, whatever the parent is pinned to");
+    let billed = faber_engine::signals::Signals { billing: Some(faber_engine::budget::Billing::UsageBilled), ..Default::default() };
+    engine.note_account_events(Vendor::Codex, vec![faber_engine::events::EngineEvent::Signals(billed)]);
+    let refused = start_team_member(&mut pipe, 3, json!({"title":"More","brief":"Do more.","ai":"codex"})).await;
+    assert!(refused["isError"] == true && said(&refused).contains("billed per use"), "{}", said(&refused));
+    assert!(engine.state().conversations.iter().all(|c| c.title != "More"), "a refused start leaves nothing behind");
+    engine.shutdown();
+
+    let (dir, project) = (support::DataFolder::new(), support::work_folder());
+    let (engine, _rx, mut pipe, _, _) = started_on(&dir, project.path(), &[Vendor::Claude]).await;
+    let refused = start_team_member(&mut pipe, 1, json!({"title":"Review","brief":"Review it.","ai":"codex"})).await;
+    assert!(said(&refused).contains("not connected"), "{}", said(&refused));
+    engine.shutdown();
+}
+
+/// A team member given an ordered list goes through it with Keep going, and its parent hears once, when the list ends.
+#[tokio::test]
+async fn a_team_member_given_a_list_goes_through_it_and_reports_once_when_it_ends() {
+    let (dir, project) = (support::DataFolder::new(), support::work_folder());
+    let (engine, _rx, mut pipe, parent, _, made) = started_with(&dir, project.path(), &[Vendor::Claude], &|_| {}).await;
+    let started = start_team_member(&mut pipe, 1, json!({"title":"List","brief":"1. Fix a. 2. Fix b. 3. Fix c.","keep_going":true})).await;
+    assert_eq!(started["isError"], false, "{}", said(&started));
+    let child = titled(&engine, "List");
+    let mut member = next_pipe(&made).await;
+    until_turns(&member, 1).await;
+    member.say(json!({ "type": "system", "subtype": "init", "session_id": "m", "model": "claude-haiku-5-5" })).await;
+    assert!(engine.open(&child).unwrap().keep_going.is_some(), "Keep going is on for it");
+    let reports = |c: &Conversation| c.queued.iter().filter(|q| q.wake.as_ref().is_some_and(|w| w.why == "wake.childDone")).count();
+    for (turn, text) in ["Fixed a.", "Fixed b.", "Fixed c.\n[keep going: stop]"].into_iter().enumerate() {
+        answers_at(&mut member, text, true, 0.1).await;
+        until_turns(&member, turn + 2).await;
+        assert_eq!(reports(&engine.open(&parent).unwrap()), 0, "no report while the list goes on");
+    }
+    answers_at(&mut member, "Nothing is left.\n[keep going: stop]", true, 0.1).await;
+    until(&engine, &child, |c| idle(c) && c.keep_going.is_none()).await;
+    until(&engine, &parent, |c| reports(c) == 1).await;
+    tokio::time::sleep(Duration::from_millis(60)).await;
+    assert_eq!(reports(&engine.open(&parent).unwrap()), 1, "one report, when the list ended");
     engine.shutdown();
 }

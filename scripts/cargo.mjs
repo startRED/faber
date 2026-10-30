@@ -95,6 +95,56 @@ async function overlapsLease(target) {
   return false;
 }
 
+// The workspace's own package names, read from the copy's Cargo.toml files. What this plain reading cannot follow (a
+// glob, a member without a name) throws, so a cache is never marked as adopted with a crate left out.
+async function workspaceCrates(copy) {
+  const members = (await readFile(path.join(copy, 'Cargo.toml'), 'utf8')).match(/^\s*members\s*=\s*\[([^\]]*)\]/m)?.[1] ?? '';
+  const names = [];
+  for (const [, member] of members.matchAll(/["']([^"']+)["']/g)) {
+    if (/[*?[]/.test(member)) throw new Error(`Cannot read the workspace member pattern ${member}`);
+    const manifest = await readFile(path.join(copy, member, 'Cargo.toml'), 'utf8');
+    const section = manifest.indexOf('[package]');
+    const name = section < 0 ? null : manifest.slice(section).match(/^\s*name\s*=\s*["']([^"']+)["']/m)?.[1];
+    if (!name) throw new Error(`Cannot read the package name of ${member}`);
+    names.push(name);
+  }
+  if (names.length === 0) throw new Error(`Cannot read the workspace members of ${copy}`);
+  return names;
+}
+
+// Every `.fingerprint` folder of a cache: a profile's (`debug`), a target triple's, or the test build's (`faber-test`).
+async function fingerprintFolders(folder, depth = 0, found = []) {
+  let entries;
+  try { entries = await readdir(folder, { withFileTypes: true }); } catch (error) { if (error.code === 'ENOENT') return found; throw error; }
+  for (const entry of entries) {
+    if (!entry.isDirectory()) continue;
+    if (entry.name === '.fingerprint') found.push(path.join(folder, entry.name));
+    else if (depth < 3 && !['deps', 'build', 'incremental', 'examples', '.faber-lease', '.faber-tmp'].includes(entry.name)) {
+      await fingerprintFolders(path.join(folder, entry.name), depth + 1, found);
+    }
+  }
+  return found;
+}
+
+// A cache moves between copies, and Cargo judges a workspace crate by the file times of its sources, named relative to
+// the copy: another copy's newer build would look fresh here and run its code. So a cache remembers the copy that
+// built in it last, and a different copy forgets the workspace crates' fingerprints first, which rebuilds only them.
+export async function adoptTarget(target, copy) {
+  const stamp = path.join(target, '.faber-copy');
+  const existing = await lstat(stamp).catch((error) => { if (error.code === 'ENOENT') return null; throw error; });
+  if (existing && !existing.isFile()) throw new Error(`Refusing a linked or unusual cache stamp: ${stamp}`);
+  if (existing && await readFile(stamp, 'utf8') === copy) return false;
+  const names = await workspaceCrates(copy);
+  const own = (entry) => names.some((name) => entry.startsWith(`${name}-`) && /^[0-9a-f]{16}$/.test(entry.slice(name.length + 1)));
+  for (const folder of await fingerprintFolders(target)) {
+    for (const entry of await readdir(folder, { withFileTypes: true })) {
+      if (entry.isDirectory() && own(entry.name)) await rm(path.join(folder, entry.name), { recursive: true, force: true });
+    }
+  }
+  await writeFile(stamp, copy);
+  return true;
+}
+
 export async function acquireTarget(root, env, signal) {
   const targets = env.CARGO_TARGET_DIR
     ? [path.resolve(root, env.CARGO_TARGET_DIR)]
@@ -208,7 +258,7 @@ function forwardSignals(controller, getChild, getLease, getReceipt) {
   };
 }
 
-export async function runChild(root, command, args, env, cwd = root) {
+export async function runChild(root, command, args, env, cwd = root, copy = null) {
   const controller = new AbortController();
   let child;
   let lease;
@@ -217,6 +267,7 @@ export async function runChild(root, command, args, env, cwd = root) {
   let finished = false;
   try {
     lease = await acquireTarget(root, env, controller.signal);
+    if (copy) await adoptTarget(lease.target, copy);
     controller.signal.throwIfAborted();
     child = spawn(command, args, { cwd, env: lease.env, stdio: 'inherit', shell: false, windowsHide: true, detached: process.platform !== 'win32' });
     const result = new Promise((resolve, reject) => {
@@ -313,6 +364,7 @@ async function main() {
   const common = execFileSync('git', ['rev-parse', '--path-format=absolute', '--git-common-dir'], { cwd, encoding: 'utf8', windowsHide: true }).trim();
   if (!path.isAbsolute(common) || path.basename(common) !== '.git') throw new Error('Cannot locate the main checkout safely');
   const root = path.dirname(await realpath(common));
+  const copy = await realpath(execFileSync('git', ['rev-parse', '--show-toplevel'], { cwd, encoding: 'utf8', windowsHide: true }).trim());
   if (!(await lstat(path.join(root, '.git'))).isDirectory()) throw new Error('Main checkout metadata is not a directory');
   const args = process.argv.slice(2);
   const tauri = args[0] === '--tauri';
@@ -322,7 +374,7 @@ async function main() {
   const env = { ...process.env };
   if (env.CARGO_TARGET_DIR) env.CARGO_TARGET_DIR = path.resolve(cwd, env.CARGO_TARGET_DIR);
   await maintainStorage(root, env.CARGO_TARGET_DIR ?? path.join(root, 'target'));
-  process.exitCode = await runChild(root, tauri ? process.execPath : 'cargo', tauri ? [path.join(cwd, 'node_modules', '@tauri-apps', 'cli', 'tauri.js'), ...args] : args, env, cwd);
+  process.exitCode = await runChild(root, tauri ? process.execPath : 'cargo', tauri ? [path.join(cwd, 'node_modules', '@tauri-apps', 'cli', 'tauri.js'), ...args] : args, env, cwd, copy);
 }
 
 if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {

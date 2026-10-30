@@ -222,6 +222,36 @@ async fn r_next_a_number_is_bound_only_to_an_address_the_conversation_opened() {
     engine.shutdown();
 }
 
+/// The pull request's own run goes green in minutes; the queue's status on the same commit can turn red half an hour later
+/// (`land.mjs` posts it). Green does not end the following while the pull request is open, so that red wakes the agent once.
+#[tokio::test]
+async fn r_next_a_red_queue_after_green_checks_wakes_the_agent_once() {
+    let dir = support::DataFolder::new();
+    let (spawn, made) = pipes();
+    let (engine, reads) = engine(&dir, spawn);
+    let project = engine.add_project(&dir.path().to_string_lossy()).unwrap();
+    let (id, mut pipe) = opened(&engine, &made, &project.id).await;
+    reads.lock().unwrap().0.push_back(look(PrState::Open, CiState::Passing, "aaa"));
+    engine.look_at_prs().await;
+    assert_eq!(follow_of(&engine.open(&id).unwrap().messages).map(|f| f.state), Some(FollowState::Passing));
+    let mut queue = look(PrState::Open, CiState::Failing, "aaa");
+    queue.failures = vec![Failure { name: "queue".into(), link: None, said: Some("Queued, but its checks failed.".into()) }];
+    reads.lock().unwrap().0.push_back(queue.clone());
+    engine.look_at_prs().await;
+    let messages = until(&engine, &id, "a turn of Faber's own", |m| m.len() == 4).await;
+    let wake = messages[2].wake.clone().expect("the message is marked as Faber's");
+    assert_eq!((wake.why.as_str(), wake.checks.as_slice()), ("wake.checksFailed", &["queue".to_string()][..]));
+    pipe.say(done()).await;
+    until(&engine, &id, "the fix turn ends", |m| m.last().is_some_and(|m| m.status == Some(Status::Done))).await;
+    reads.lock().unwrap().0.push_back(queue);
+    engine.look_at_prs().await;
+    assert_eq!(engine.open(&id).unwrap().messages.len(), 4, "once");
+    reads.lock().unwrap().0.push_back(look(PrState::Merged, CiState::Passing, "aaa"));
+    engine.look_at_prs().await;
+    assert_eq!(follow_of(&engine.open(&id).unwrap().messages).map(|f| f.state), Some(FollowState::Merged));
+    engine.shutdown();
+}
+
 /// Faber's own flow: `land.mjs` prints only the number, which binds the pull request whose address the conversation showed.
 #[tokio::test]
 async fn r_next_a_queued_pull_request_is_followed_again_after_it_passed() {
@@ -232,7 +262,7 @@ async fn r_next_a_queued_pull_request_is_followed_again_after_it_passed() {
     let (id, mut pipe) = opened(&engine, &made, &project.id).await;
     reads.lock().unwrap().0.push_back(look(PrState::Open, CiState::Passing, "aaa"));
     engine.look_at_prs().await;
-    assert_eq!(follow_of(&engine.open(&id).unwrap().messages).map(|f| f.state), Some(FollowState::Passing), "green ends quietly");
+    assert_eq!(follow_of(&engine.open(&id).unwrap().messages).map(|f| f.state), Some(FollowState::Passing), "green is told quietly");
 
     engine
         .send(SendRequest {

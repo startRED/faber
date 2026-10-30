@@ -37,6 +37,7 @@ mod auto_archive;
 mod browse;
 mod by_itself;
 mod changes;
+mod closed;
 mod compact;
 mod copies;
 mod creative_judges;
@@ -481,6 +482,8 @@ struct Core {
     /// What each conversation's folder held when its reply began, for Faber's checks (`verifying::Before`).
     before: HashMap<String, verifying::Before>,
     live: HashMap<String, Live>,
+    /// When each conversation was last continued after a restart cut its reply (`closed.rs`), the newest few, in memory.
+    closed_continues: HashMap<String, Vec<u64>>,
     worker_memory: worker_memory::State,
     /// Set while an install of Faber closes the engine's admission (`Engine::install_admission`): nothing new starts.
     installing: bool,
@@ -674,6 +677,7 @@ impl Engine {
                 parent_reports,
                 sibling_reads: HashMap::new(),
                 live: HashMap::new(),
+                closed_continues: HashMap::new(),
                 installing: false,
                 compacts: HashMap::new(),
                 compactions: HashMap::new(),
@@ -1476,6 +1480,15 @@ impl Engine {
             }
             let ids: Vec<_> = c.convs.keys().cloned().collect();
             for id in ids {
+                // Cut off by the close, not by the person's Stop: a team member owes its leader that report the next time
+                // Faber opens (`restore_parent_reports`), since no turn end will send it. With Keep going on it goes on by
+                // itself instead, and reports when its list ends.
+                if let Some(conv) = c.convs.get_mut(&id).filter(|conv| !conv.stopped)
+                    && let Some(m) = conv.messages.last_mut().filter(|m| m.status == Some(Status::Streaming))
+                {
+                    m.closed = true;
+                    conv.pending_parent_report |= conv.started_by.is_some() && conv.keep_going.is_none();
+                }
                 c.stop_waiting(&id, false);
             }
             c.transfers.clear();
@@ -1913,6 +1926,7 @@ impl Core {
             let mut c = self.store.get(id)?;
             // Read from disk, so no CLI runs it: an answer cut off by a crash shows as stopped, not typing forever.
             c.messages.iter_mut().for_each(|m| {
+                m.closed |= m.status == Some(Status::Streaming);
                 settle(m);
                 m.refresh_commits();
             });
@@ -4738,6 +4752,8 @@ impl Core {
             .cloned()
             .map(|mut m| {
                 settle(&mut m);
+                // A copy never ran, so nothing in it was cut by a close: only the source offers to continue.
+                m.closed = false;
                 // The pull request stays the source's to follow: two conversations never wake on the same one.
                 m.follow = None;
                 m

@@ -242,6 +242,10 @@ table! {
     Write fn wait_turn(h, id: String, turn_id: String) -> () {
         h.engine.wait_turn(&id, &turn_id)
     }
+    /// Go on with a reply Faber was closed under (R477): one fixed turn, refused once it is no longer the last.
+    Write fn continue_closed(h, id: String, turn_id: String) -> () {
+        h.engine.continue_closed(&id, &turn_id)
+    }
     Read fn warm(h, req: WarmRequest) -> () {
         h.engine.warm(req);
         Ok(())

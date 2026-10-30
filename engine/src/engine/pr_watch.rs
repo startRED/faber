@@ -127,10 +127,8 @@ impl Core {
     }
 
     fn pr_pushed(&mut self, conv: &str) {
-        let resumes = self
-            .followed(conv)
-            .and_then(|at| self.convs.get(conv)?.messages[at].follow.as_ref())
-            .is_some_and(|f| f.state.open() || f.state == FollowState::Passing);
+        let resumes =
+            self.followed(conv).and_then(|at| self.convs.get(conv)?.messages[at].follow.as_ref()).is_some_and(|f| f.state.watched());
         let Some(reply) = self.latest_reply(conv).filter(|_| resumes) else { return };
         let Some((from, mut f)) = self.take_follow(conv) else { return };
         (f.state, f.kept, f.since) = (FollowState::Pending, false, self.now_ms());
@@ -143,7 +141,7 @@ impl Core {
         self.follows.remove(conv);
         let Some(at) = self.followed(conv) else { return };
         let Some(m) = self.convs.get_mut(conv).and_then(|c| c.messages.get_mut(at)) else { return };
-        let Some(f) = m.follow.as_mut().filter(|f| f.state.open()) else { return };
+        let Some(f) = m.follow.as_mut().filter(|f| f.state.watched()) else { return };
         (f.state, f.held) = (FollowState::Stopped, false);
         let id = m.id.clone();
         self.save(conv);
@@ -171,7 +169,7 @@ impl Core {
         if ticker.is_some_and(|t| t != watch.ticker) || self.closing {
             return None;
         }
-        let f = self.convs.get(conv)?.messages.get(self.followed(conv)?)?.follow.as_ref().filter(|f| f.state.open())?;
+        let f = self.convs.get(conv)?.messages.get(self.followed(conv)?)?.follow.as_ref().filter(|f| f.state.watched())?;
         Some((f.repo.clone(), f.number))
     }
 
@@ -322,7 +320,7 @@ impl Engine {
                     .store
                     .get(&id)
                     .and_then(|conv| conv.messages.iter().rev().find_map(|m| m.follow.clone()))
-                    .is_some_and(|f| f.state.open());
+                    .is_some_and(|f| f.state.watched());
                 if open && c.load(&id).is_some() {
                     c.look_later(&id, follow::FIRST);
                 }

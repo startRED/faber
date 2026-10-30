@@ -356,6 +356,40 @@ check('thread: a held-back command says what it would have done, and Got it on t
   }
 });
 
+check('thread: a reply Faber was closed under says so, offers Continue on the newest one, and the person’s own Stop stays "Stopped."', async () => {
+  const user = { id: 'u', role: 'user', text: 'go', at: 1 } as Message;
+  const reply = (closed: boolean) => ({ id: 'reply', role: 'assistant', text: 'Partial', at: 2, status: 'stopped', vendor: 'claude', closed }) as Message;
+  const before = api.continueClosed;
+  const asked: string[][] = [];
+  api.continueClosed = async (id, turn) => { asked.push([id, turn]); };
+  try {
+    for (const area of ['chat', 'project'] as const) {
+      // Attached, so the click reaches Solid's delegated handler.
+      const host = document.createElement('div');
+      document.body.append(host);
+      const dispose = render(() => createComponent(Thread, { conversationId: 'c', area, messages: [user, reply(true)], from: 0, options: [], onBranch: () => {} }), host);
+      try {
+        ok(host.textContent!.includes(t('answer.closed')), area + ': the close is said');
+        ok(!host.textContent!.includes(t('answer.stopped')), area + ': in place of "Stopped."');
+        equal(host.textContent!.includes(t('answer.closedFiles')), area === 'project', area + ': the files line only in a project');
+        const button = [...host.querySelectorAll('button')].find((b) => b.textContent === t('answer.closedContinue'));
+        ok(button, area + ': the newest such reply offers Continue');
+        button!.click();
+      } finally { dispose(); host.remove(); }
+    }
+    deepEqual(asked, [['c', 'reply'], ['c', 'reply']], 'Continue names the conversation and the cut reply');
+    // An older cut reply says it, without the button; the person's own Stop says "Stopped." as before.
+    const later = [{ id: 'u2', role: 'user', text: 'more', at: 3 } as Message, { ...reply(false), id: 'reply2', at: 4 }];
+    const host = document.createElement('div');
+    const dispose = render(() => createComponent(Thread, { conversationId: 'c', messages: [user, reply(true), ...later], from: 0, options: [], onBranch: () => {} }), host);
+    try {
+      ok(host.textContent!.includes(t('answer.closed')));
+      ok(![...host.querySelectorAll('button')].some((b) => b.textContent === t('answer.closedContinue')), 'no Continue once the reply is not the newest');
+      ok(host.textContent!.includes(t('answer.stopped')), 'the person’s Stop is still said');
+    } finally { dispose(); }
+  } finally { api.continueClosed = before; }
+});
+
 check('thread: the answer area speaks plain words, never git, cache or CLI words', () => {
   // The engineering words each language used for these texts before (the locale audit of 2026-10-29).
   // Whole words only: "programa" holds "rama" and "cliquez" holds "cli".
