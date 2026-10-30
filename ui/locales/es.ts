@@ -2245,6 +2245,7 @@ export const es: Messages = {
   'notes.312.better': 'Una respuesta cortada porque Faber se cerró ahora lo dice, y puedes pulsar Continuar para que la IA siga donde se detuvo.',
   'notes.313.fixed': 'Un pull request con las comprobaciones en verde se sigue vigilando hasta que se fusiona, así que un fallo posterior aún llega al agente.',
   'notes.315.fixed': 'Después de “Actualización lista, reiniciar”, Faber ahora instala la actualización y se vuelve a abrir solo, en lugar de quedarse a veces cerrado sin instalar nada.',
+  'notes.316.fixed': 'Faber se abre mucho más rápido cuando tiene muchos puntos de deshacer guardados, y ya no se cierra solo justo después de abrirse.',
   'update.checking': 'Buscando una actualización…',
   'update.downloading': 'Descargando actualización…',
   'update.downloadingPercent': 'Descargando actualización… {percent} %',

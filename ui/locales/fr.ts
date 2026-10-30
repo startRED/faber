@@ -2245,6 +2245,7 @@ export const fr: Messages = {
   'notes.312.better': 'Une réponse coupée parce que Faber s’est fermé le dit maintenant, et vous pouvez appuyer sur Continuer pour que l’IA reprenne là où elle s’est arrêtée.',
   'notes.313.fixed': 'Une pull request dont les vérifications sont passées au vert reste suivie jusqu’à sa fusion, donc un échec plus tard parvient encore à l’agent.',
   'notes.315.fixed': 'Après « Mise à jour prête, redémarrer », Faber installe maintenant la mise à jour et se rouvre tout seul, au lieu de rester parfois fermé sans rien installer.',
+  'notes.316.fixed': 'Faber s’ouvre bien plus vite quand il garde beaucoup de points d’annulation, et ne se ferme plus tout seul juste après l’ouverture.',
   'update.checking': 'Recherche d’une mise à jour…',
   'update.downloading': 'Téléchargement de la mise à jour…',
   'update.downloadingPercent': 'Téléchargement de la mise à jour… {percent} %',

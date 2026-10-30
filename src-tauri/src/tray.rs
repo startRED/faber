@@ -235,7 +235,9 @@ fn deliver_notices(app: &AppHandle, settings: &faber_engine::model::Settings, wo
 /// A new running list from the engine. Lists can arrive out of order (each runs on its own thread), so the newest
 /// revision wins.
 pub(crate) fn on_running(app: &AppHandle, revision: u64, items: &[RunningItem]) {
-    let faber = app.state::<crate::Faber>();
+    // The engine can speak while Faber is still starting (a sweep of old copies, say), before its state and the tray
+    // exist: there is nothing to show yet, and reading the state then would end Faber.
+    let Some(faber) = app.try_state::<crate::Faber>() else { return };
     if faber.hidden {
         return;
     }
@@ -258,7 +260,9 @@ pub(crate) fn on_running(app: &AppHandle, revision: u64, items: &[RunningItem]) 
 
 /// "Keep going" stopped by itself in a conversation (R199): one notice that says why, under R92's rules.
 pub(crate) fn on_halted(app: &AppHandle, title: &str, why: &str, ai: Option<Vendor>) {
-    let faber = app.state::<crate::Faber>();
+    // The engine can speak while Faber is still starting (a sweep of old copies, say), before its state and the tray
+    // exist: there is nothing to show yet, and reading the state then would end Faber.
+    let Some(faber) = app.try_state::<crate::Faber>() else { return };
     if faber.hidden {
         return;
     }

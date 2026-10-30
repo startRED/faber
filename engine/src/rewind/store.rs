@@ -4,6 +4,7 @@ use faber_winproc::rewind::{allocated, private_dir};
 use flate2::{Compression, read::ZlibDecoder, write::ZlibEncoder};
 use sha2::{Digest, Sha256};
 use std::cell::{Cell, RefCell};
+use std::collections::HashMap;
 use std::io::{Seek, SeekFrom, Write};
 
 struct PendingBatch {
@@ -173,6 +174,9 @@ impl History {
     }
 
     fn load(&mut self) -> Result<(), String> {
+        // Points of one folder name the same files again and again (2026-10-30: 231,543 paths in 219 points, 15,086 of them
+        // different), and each check reads the disk: asked once per path, the start took 39 s before Faber's window.
+        let mut checked = Checked::new(allowed);
         for entry in std::fs::read_dir(&self.data).map_err(error)? {
             let entry = entry.map_err(error)?;
             let folder = entry.file_name().to_string_lossy().into_owned();
@@ -205,7 +209,7 @@ impl History {
                                 .keys()
                                 .chain(point.before.absent.iter())
                                 .chain(point.before.skipped.iter())
-                                .any(|p| !allowed(&point.root, p))
+                                .any(|p| !checked.allowed(&point.root, p))
                         {
                             return Err("error.rewind.path".into());
                         }
@@ -215,7 +219,7 @@ impl History {
                         if journal.folder != folder
                             || journal.id != id
                             || !uuid_name(&journal.conversation)
-                            || journal.operations.iter().any(|op| !allowed(&journal.root, &op.path))
+                            || journal.operations.iter().any(|op| !checked.allowed(&journal.root, &op.path))
                         {
                             return Err("error.rewind.path".into());
                         }
@@ -226,7 +230,28 @@ impl History {
         }
         Ok(())
     }
+}
 
+/// `allowed`, answered once per folder and path while the history loads (the answer depends only on them and the disk).
+/// The disk may change during the load, so a kept answer can be stale; that is safe because this check only drops a bad
+/// history early: every undo and redo asks `allowed` again, fresh, right before it touches a path.
+struct Checked<F: Fn(&Path, &str) -> bool> {
+    check: F,
+    answers: HashMap<(PathBuf, String), bool>,
+}
+
+impl<F: Fn(&Path, &str) -> bool> Checked<F> {
+    fn new(check: F) -> Self {
+        Self { check, answers: HashMap::new() }
+    }
+
+    fn allowed(&mut self, root: &Path, path: &str) -> bool {
+        let check = &self.check;
+        *self.answers.entry((root.to_path_buf(), path.to_string())).or_insert_with(|| check(root, path))
+    }
+}
+
+impl History {
     /// Account for every owned file, including staging and unfinished journals. Logical object sizes and allocation
     /// are both counted: compressible data and sparse metadata cannot buy extra history.
     fn measured(&self, name: &str) -> Result<u64, String> {
@@ -970,6 +995,22 @@ impl History {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn loading_asks_once_per_folder_and_path_and_keeps_each_answer() {
+        let asked = Cell::new(0);
+        let mut checked = Checked::new(|_: &Path, path: &str| {
+            asked.set(asked.get() + 1);
+            path != "secret.env"
+        });
+        let (a, b) = (Path::new("C:/a"), Path::new("C:/b"));
+        for _ in 0..50 {
+            assert!(checked.allowed(a, "src/main.rs"));
+            assert!(!checked.allowed(a, "secret.env"), "a refusal is kept too");
+        }
+        assert!(checked.allowed(b, "src/main.rs"), "another folder is its own question");
+        assert_eq!(asked.get(), 3);
+    }
 
     #[cfg(unix)]
     fn interrupted_cleanup(root: &Root, source: &str, receipt: bool) -> String {

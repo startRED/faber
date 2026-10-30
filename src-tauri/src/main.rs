@@ -1504,6 +1504,26 @@ static STARTED: std::sync::OnceLock<std::time::Instant> = std::sync::OnceLock::n
 static WINDOW_BUILT_MS: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
 /// Only the first window of a run is written down.
 static STARTUP_LOGGED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+/// The steps of the start and when each ended, in milliseconds from the start, for `startup.log`.
+static STARTUP_STEPS: Mutex<Vec<(&'static str, u64)>> = Mutex::new(Vec::new());
+
+/// The steps that took a quarter second or more, each with how long it took: the line stays short and names the slow one.
+fn slow_steps(steps: &[(&str, u64)]) -> String {
+    let mut before = 0;
+    let mut slow = Vec::new();
+    for (name, at) in steps {
+        if at.saturating_sub(before) >= 250 {
+            slow.push(format!("{name}+{}ms", at - before));
+        }
+        before = before.max(*at);
+    }
+    slow.join(" ")
+}
+
+/// A step of the start ended (`startup.log` names the slow one).
+fn startup_step(name: &'static str) {
+    lock(&STARTUP_STEPS).push((name, ms_since_start()));
+}
 
 fn ms_since_start() -> u64 {
     STARTED.get().map_or(0, |at| at.elapsed().as_millis().try_into().unwrap_or(u64::MAX))
@@ -1525,7 +1545,9 @@ fn reveal(app: &AppHandle, by: &str) {
     }
     if !STARTUP_LOGGED.swap(true, std::sync::atomic::Ordering::SeqCst) {
         let window = WINDOW_BUILT_MS.load(std::sync::atomic::Ordering::SeqCst);
-        update::log_to(&faber.data_dir, update::STARTUP_LOG, "shown", &format!("window={window}ms shown={}ms by={by}", ms_since_start()));
+        let steps = slow_steps(&lock(&STARTUP_STEPS));
+        let detail = format!("window={window}ms shown={}ms by={by} {steps}", ms_since_start());
+        update::log_to(&faber.data_dir, update::STARTUP_LOG, "shown", detail.trim_end());
     }
 }
 
@@ -1719,6 +1741,7 @@ fn main() {
     }
     // Before any HTTPS client, the updater's included: reqwest is built without a crypto provider of its own.
     faber_engine::tls::install();
+    startup_step("main");
     let mut builder = tauri::Builder::default();
     // A second launch brings the open window forward. Runs with their own data folder (tests) stay separate.
     if std::env::var_os("FABER_DATA_DIR").is_none() {
@@ -1897,11 +1920,13 @@ fn main() {
             }
         })
         .setup(move |app| {
+            startup_step("plugins");
             app.manage(visual_page::Pages::default());
             let data_dir = data_dir(app.handle())?;
             let _data_directory = faber_engine::workspace::DataDirectory::open(&data_dir)?;
             app.manage(tray::Tray::default());
             let clis = detect_clis();
+            startup_step("clis");
             let handle = app.handle().clone();
             // Only the first launch gets here (a second one ends in the single-instance plugin), so only it reads the marker.
             if crash_record_dir(is_test).is_some() {
@@ -1933,6 +1958,7 @@ fn main() {
             };
             let keep_awake = faber_engine::store::Store::new(&data_dir).settings().keep_awake();
             let awake = Arc::new(Mutex::new(CountedAwake::new(power, keep_awake)?));
+            startup_step("power");
             let wiring = Wiring::new(Arc::new(TauriShell {
                 handle: handle.clone(),
                 hidden,
@@ -1958,6 +1984,7 @@ fn main() {
                 ask: None,
             };
             let engine = Engine::new(opts, wiring.emitter())?;
+            startup_step("engine");
             engine.measure_unix_worker_memory();
             if let Some(dir) = installed_data_dir(hidden) {
                 engine.set_installed_data(dir);
@@ -2007,6 +2034,7 @@ fn main() {
                 app.state::<Faber>().engine.set_browser(Arc::new(pane::PaneBrowser(pane.clone())));
                 app.manage(pane);
             }
+            startup_step("browser");
             app.state::<Faber>().engine.watch_accounts();
             app.state::<Faber>().engine.follow_open_prs();
             app.state::<Faber>().engine.watch_archive();
@@ -2015,6 +2043,7 @@ fn main() {
             app.state::<Faber>().engine.resume_keep_going();
             // And what the restart for an update cut, from a conversation not on Keep going.
             app.state::<Faber>().engine.resume_after_update();
+            startup_step("resume");
             if let Some(codex) = clis.get(&Vendor::Codex) {
                 load_models(app.handle(), codex.clone(), data_dir.clone());
             }
@@ -2075,6 +2104,13 @@ mod crash_record_wiring_tests {
         let from = source.find(signature).expect("the function is in this file");
         let end = source[from..].find("\n}\n").expect("it ends at the left margin");
         source[from..from + end].split_whitespace().collect()
+    }
+
+    #[test]
+    fn the_startup_line_names_only_the_slow_steps_with_their_own_time() {
+        let steps = [("main", 2), ("plugins", 10), ("engine", 37_568), ("browser", 37_570), ("resume", 39_003)];
+        assert_eq!(super::slow_steps(&steps), "engine+37558ms resume+1433ms");
+        assert_eq!(super::slow_steps(&[]), "");
     }
 
     #[test]
